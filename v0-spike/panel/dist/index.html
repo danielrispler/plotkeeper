@@ -1,0 +1,66 @@
+<!doctype html><meta charset="utf-8">
+<style>
+  :root { --bg:#fff; --fg:#1d1d1f; --muted:#86868b; --code:#f5f5f7; --accent:#0a66d8; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#1e1e20; --fg:#f2f2f2; --muted:#98989d; --code:#2a2a2d; --accent:#5ea2ff; } }
+  html, body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.5 -apple-system, sans-serif; }
+  body { padding:16px 18px; direction:rtl; }
+  .ctx { direction:ltr; text-align:left; font:12px ui-monospace, Menlo, monospace; color:var(--muted);
+         white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  h1 { font-size:15px; font-weight:600; margin:6px 0 12px; }
+  textarea { width:100%; box-sizing:border-box; border:0; border-radius:8px; background:var(--code); color:var(--fg);
+             font:inherit; padding:8px 10px; resize:none; outline:none; }
+  .row { display:flex; justify-content:space-between; align-items:center; margin-top:10px; color:var(--muted); font-size:12px; }
+  button { border:0; background:none; color:var(--accent); font:inherit; font-size:13px; cursor:pointer; padding:0; }
+  pre { direction:ltr; margin:0; background:var(--code); border-radius:8px; padding:8px 10px; font:12px/1.7 ui-monospace, Menlo, monospace; overflow-x:auto; }
+  pre .l { display:flex; gap:12px; } pre .l span:first-child { white-space:pre; }
+  pre .lab { direction:rtl; color:var(--accent); font-family:-apple-system, sans-serif; white-space:nowrap; }
+  .yours { color:var(--muted); font-size:12px; margin-top:10px; }
+  .unchecked { color:var(--muted); font-size:12px; margin-top:6px; }
+  [hidden] { display:none !important; }
+</style>
+<body>
+<div id="idle" class="row">אין שלב לנחש כרגע.</div>
+<section id="ask" hidden>
+  <div class="ctx" id="ctx"></div>
+  <h1 id="q"></h1>
+  <textarea id="guess" rows="3" placeholder="הניחוש שלך…"></textarea>
+  <div class="row"><span>⌘↩ לשליחה · Esc להסתרה</span><button id="send">שליחה</button></div>
+</section>
+<section id="wait" hidden class="row">הניחוש נשמר. הכרטיס יופיע כשהשלב יסתיים.</section>
+<section id="card" hidden>
+  <h1 id="title"></h1>
+  <pre id="code"></pre>
+  <div class="yours" id="yours"></div>
+  <div class="unchecked" id="unchecked"></div>
+  <div class="row"><span></span><button id="done">סיום</button></div>
+</section>
+<script>
+  // the draft lives in page state; the panel is only ever hidden, never reloaded
+  const { invoke } = window.__TAURI__.core, { listen } = window.__TAURI__.event;
+  const $ = id => document.getElementById(id);
+  const only = id => ['idle', 'ask', 'wait', 'card'].forEach(s => $(s).hidden = s !== id);
+  let lastGuess = '';
+  listen('guess', ({ payload }) => {
+    $('ctx').textContent = payload.context; $('q').textContent = payload.question;
+    only('ask'); $('guess').focus();
+  });
+  listen('card', ({ payload }) => {
+    $('title').textContent = payload.title;
+    $('code').replaceChildren(...payload.code.map(({ line, label }) => {
+      const row = document.createElement('div'); row.className = 'l';
+      const c = document.createElement('span'); c.textContent = line;
+      const l = document.createElement('span'); l.className = 'lab'; l.textContent = label ? '← ' + label : '';
+      row.append(c, l); return row;
+    }));
+    $('yours').textContent = 'ניחשת: ' + lastGuess;
+    $('unchecked').textContent = payload.unchecked; only('card');
+  });
+  function send() {
+    lastGuess = $('guess').value.trim(); if (!lastGuess) return;
+    $('guess').value = ''; only('wait'); invoke('submit_guess', { guess: lastGuess });
+  }
+  $('send').onclick = send;
+  $('guess').onkeydown = e => { if (e.key === 'Enter' && e.metaKey) send(); };
+  $('done').onclick = () => { only('idle'); invoke('hide'); };
+  addEventListener('keydown', e => { if (e.key === 'Escape') invoke('hide'); });
+</script>

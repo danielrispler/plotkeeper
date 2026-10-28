@@ -1,0 +1,16 @@
+[package]
+name = "v0-panel-spike"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Throwaway spike for #315; kept out of the root workspace.
+[workspace]
+
+[dependencies]
+tauri = { version = "2", features = ["macos-private-api"] }
+tauri-nspanel = "2.1"
+serde_json = "1"
+
+[build-dependencies]
+tauri-build = "2"

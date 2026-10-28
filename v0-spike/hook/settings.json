@@ -1,0 +1,11 @@
+{ "hooks": {
+  "PreToolUse": [ { "hooks": [
+    { "type": "command", "async": true, "command": "/Users/danielrispler/work/Falinks/apps/studio/v0-spike/hook/log-hook.sh" },
+    { "type": "command", "async": true, "command": "/Users/danielrispler/work/Falinks/apps/studio/v0-spike/hook/event-hook.sh" } ] } ],
+  "PostToolUse": [ { "hooks": [ { "type": "command", "async": true, "command": "/Users/danielrispler/work/Falinks/apps/studio/v0-spike/hook/event-hook.sh" } ] } ],
+  "PostToolUseFailure": [ { "hooks": [ { "type": "command", "async": true, "command": "/Users/danielrispler/work/Falinks/apps/studio/v0-spike/hook/event-hook.sh" } ] } ],
+  "PermissionRequest": [ { "hooks": [ { "type": "command", "async": true, "command": "/Users/danielrispler/work/Falinks/apps/studio/v0-spike/hook/event-hook.sh" } ] } ],
+  "Notification": [ { "hooks": [ { "type": "command", "async": true, "command": "/Users/danielrispler/work/Falinks/apps/studio/v0-spike/hook/event-hook.sh" } ] } ],
+  "UserPromptSubmit": [ { "hooks": [ { "type": "command", "async": true, "command": "/Users/danielrispler/work/Falinks/apps/studio/v0-spike/hook/event-hook.sh" } ] } ],
+  "Stop": [ { "hooks": [ { "type": "command", "async": true, "command": "/Users/danielrispler/work/Falinks/apps/studio/v0-spike/hook/event-hook.sh" } ] } ]
+} }
