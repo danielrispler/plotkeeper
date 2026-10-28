@@ -9,7 +9,7 @@ These rules apply to work under `apps/studio`, the control room tracked by map #
 
 ## Implementation language
 
-Rust only does not bind the studio: a TypeScript frontend is allowed. The stack follows the form-factor decision on map #266.
+Rust only does not bind the studio. The stack is Tauri 2: a Rust shell with a TypeScript frontend ([scope decision](https://github.com/danielrispler/Falinks/issues/320#issuecomment-6465695482), "Stays as decided").
 
 ## Context
 
