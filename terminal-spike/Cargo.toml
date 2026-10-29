@@ -1,0 +1,18 @@
+[package]
+name = "studio-terminal-spike"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Throwaway spike for #322; kept out of the root workspace.
+[workspace]
+
+[dependencies]
+tauri = "2"
+portable-pty = "0.9"
+serde_json = "1"
+base64 = "0.22"
+libc = "0.2"
+
+[build-dependencies]
+tauri-build = "2"

@@ -1,0 +1,12 @@
+{
+  "productName": "studio-terminal-spike",
+  "version": "0.0.0",
+  "identifier": "dev.falinks.studio.terminalspike",
+  "build": { "frontendDist": "./dist" },
+  "app": {
+    "withGlobalTauri": true,
+    "security": { "csp": null },
+    "windows": [ { "label": "main", "title": "Terminal spike (#322)", "width": 1100, "height": 720 } ]
+  },
+  "bundle": { "active": false }
+}

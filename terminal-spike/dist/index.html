@@ -1,0 +1,184 @@
+<!doctype html>
+<!-- Spike for #322: xterm.js tabs over three survival backends. Throwaway; plain JS with no build step. -->
+<html>
+<head>
+<meta charset="utf-8">
+<title>Terminal spike (#322)</title>
+<link rel="stylesheet" href="vendor/xterm.css">
+<style>
+  body { margin: 0; height: 100vh; display: flex; flex-direction: column; background: #1e1e1e; color: #ccc; font: 12px -apple-system, sans-serif; }
+  #bar { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; align-items: center; border-bottom: 1px solid #333; }
+  #tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-left: 12px; }
+  #tabs button.on { background: #4a4a4a; color: #fff; }
+  #terms { flex: 1; position: relative; }
+  .term { position: absolute; inset: 0; padding: 4px; display: none; }
+  .term.on { display: block; }
+  #status { padding: 3px 6px; font: 11px Menlo, monospace; white-space: pre; border-top: 1px solid #333; max-height: 7em; overflow: auto; }
+</style>
+</head>
+<body>
+<div id="bar">
+  <button data-kind="daemon">+ daemon shell</button>
+  <button data-kind="claude">+ claude (daemon)</button>
+  <button data-kind="tmux">+ tmux shell</button>
+  <button data-kind="herdr">herdr</button>
+  <button data-kind="local">+ local shell (dies with the app)</button>
+  <span id="tabs"></span>
+</div>
+<div id="terms"></div>
+<div id="status"></div>
+<script src="vendor/xterm.js"></script>
+<script src="vendor/addon-fit.js"></script>
+<script src="vendor/addon-unicode11.js"></script>
+<script src="vendor/addon-webgl.js"></script>
+<script>
+const { invoke } = window.__TAURI__.core;
+const { listen } = window.__TAURI__.event;
+const TMUX = ['tmux', '-L', 'studio-spike'];
+const tabs = new Map(); // id -> { id, kind, term, fit, el, btn, title, osc, exited }
+let cfg, active = null;
+
+const enc = bytes => { let s = ''; for (const b of bytes) s += String.fromCharCode(b); return btoa(s); };
+const dec = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+const log = line => { const st = document.getElementById('status'); st.textContent += `${new Date().toLocaleTimeString()} ${line}\n`; st.scrollTop = 1e9; };
+
+// Daemon tabs go to the background process; the rest to a PTY inside the app.
+const remote = tab => tab.kind === 'daemon' || tab.kind === 'claude';
+const send = (tab, bytes) => remote(tab)
+  ? invoke('daemon_send', { msg: { op: 'input', id: tab.id, data: enc(bytes) } })
+  : invoke('local_input', { id: tab.id, data: enc(bytes) });
+
+function render() {
+  for (const t of tabs.values()) {
+    t.btn.textContent = `${t.id} · ${t.kind}${t.title ? ' · ' + t.title.slice(0, 30) : ''}${t.osc ? ' · 7501:' + t.osc.slice(0, 20) : ''}${t.exited ? ' · exited ' + t.exited : ''}`;
+    t.btn.className = t.id === active ? 'on' : '';
+    t.el.className = t.id === active ? 'term on' : 'term';
+  }
+}
+
+function show(id) {
+  active = id; render();
+  const t = tabs.get(id); t.fit.fit(); t.term.focus();
+}
+
+function makeTab(id, kind) {
+  const el = document.createElement('div');
+  document.getElementById('terms').append(el);
+  const term = new Terminal({ allowProposedApi: true, scrollback: 10000, fontFamily: 'Menlo, monospace', fontSize: 13, cursorBlink: true });
+  const fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.loadAddon(new Unicode11Addon.Unicode11Addon());
+  term.unicode.activeVersion = '11';
+  term.open(el);
+  try { term.loadAddon(new WebglAddon.WebglAddon()); } catch (e) { log(`webgl off: ${e}`); }
+  const btn = document.createElement('button');
+  btn.onclick = () => show(id);
+  btn.oncontextmenu = e => { e.preventDefault(); close(tab); };
+  document.getElementById('tabs').append(btn);
+  const tab = { id, kind, term, fit, el, btn, title: '', osc: '', exited: null };
+  tabs.set(id, tab);
+  // Shift+Enter sends ESC CR, as Claude Code's /terminal-setup does for VS Code, so it inserts a newline.
+  term.attachCustomKeyEventHandler(e => {
+    if (e.type === 'keydown' && e.key === 'Enter' && e.shiftKey) { send(tab, [27, 13]); return false; }
+    return true;
+  });
+  term.onData(d => send(tab, new TextEncoder().encode(d)));
+  term.onBinary(d => send(tab, Uint8Array.from(d, c => c.charCodeAt(0))));
+  term.onResize(({ cols, rows }) => remote(tab)
+    ? invoke('daemon_send', { msg: { op: 'resize', id, cols, rows } })
+    : invoke('local_resize', { id, cols, rows }));
+  term.onTitleChange(t => { tab.title = t; render(); });
+  // Claude Code's Program Status Protocol: does it reach us through each backend?
+  term.parser.registerOscHandler(7501, data => { tab.osc = data; log(`${id} OSC 7501 ${data}`); render(); return true; });
+  new ResizeObserver(() => id === active && fit.fit()).observe(el);
+  show(id);
+  return tab;
+}
+
+const tmuxArgv = id => [...TMUX, '-f', cfg.tmux_conf, 'new-session', '-A', '-s', id, '-e', `STUDIO_TERMINAL_ID=${id}`, '-c', cfg.cwd];
+const herdrArgv = () => ['herdr', '--session', 'studio-spike'];
+
+async function create(kind) {
+  if (kind === 'herdr' && tabs.has('herdr')) return show('herdr');
+  const id = kind === 'herdr' ? 'herdr' : kind[0] + Date.now().toString(36);
+  const tab = makeTab(id, kind);
+  const { cols, rows } = tab.term;
+  if (remote(tab)) {
+    const argv = kind === 'claude'
+      ? [cfg.shell, '-lc', `claude --plugin-dir '${cfg.plugin}'; exec ${cfg.shell} -l`]
+      : [cfg.shell, '-l'];
+    await invoke('daemon_send', { msg: { op: 'spawn', id, argv, cwd: cfg.cwd, cols, rows } });
+    await invoke('daemon_send', { msg: { op: 'attach', id } });
+  } else {
+    // tmux gets the id through -e, never through its client: the first client's environment becomes the server's.
+    const argv = kind === 'tmux' ? tmuxArgv(id) : kind === 'herdr' ? herdrArgv() : [cfg.shell, '-l'];
+    const env = kind === 'local' ? { STUDIO_TERMINAL_ID: id } : {};
+    await invoke('local_spawn', { id, argv, env, cwd: cfg.cwd, cols, rows });
+  }
+  log(`created ${id} (${kind})`);
+}
+
+function close(tab) {
+  if (remote(tab)) { invoke('daemon_send', { msg: { op: 'kill', id: tab.id } }); invoke('daemon_send', { msg: { op: 'forget', id: tab.id } }); }
+  else invoke('local_kill', { id: tab.id });
+  if (tab.kind === 'tmux') invoke('exec', { argv: [...TMUX, 'kill-session', '-t', tab.id] });
+  tab.term.dispose(); tab.el.remove(); tab.btn.remove(); tabs.delete(tab.id);
+  active = tabs.keys().next().value ?? null; if (active) show(active);
+}
+
+function exited(id, status) {
+  const tab = tabs.get(id); if (!tab) return;
+  tab.exited = status; render();
+  tab.term.write(`\r\n\x1b[2m[process exited: ${status}]\x1b[0m\r\n`);
+}
+
+function onEvent(m) {
+  const tab = tabs.get(m.id);
+  if (m.ev === 'output') tab?.term.write(dec(m.data));
+  else if (m.ev === 'exit') { log(`${m.id} exited: ${m.status}`); exited(m.id, m.status); }
+  else if (m.ev === 'replay' && tab) {
+    // Replay at the size the bytes were written for, then fit to the window, which redraws full-screen programs.
+    tab.term.resize(m.cols, m.rows);
+    const t0 = performance.now();
+    tab.term.write(dec(m.data), () => {
+      if (tab.id === active) tab.fit.fit();
+      if (m.exited) exited(m.id, m.exited);
+      log(`${m.id} replayed ${Math.round(m.data.length * 3 / 4 / 1024)} KB in ${Math.round(performance.now() - t0)} ms`);
+    });
+  } else if (m.ev === 'list') {
+    log(`daemon ${m.daemon_pid}: ${m.terms.map(t => `${t.id}[fg ${t.foreground ?? '-'}${t.exited ? ', exited ' + t.exited : ''}]`).join(' ') || 'no terminals'}`);
+    for (const t of m.terms) if (!tabs.has(t.id)) {
+      makeTab(t.id, t.argv.join(' ').includes('claude --plugin-dir') ? 'claude' : 'daemon');
+      invoke('daemon_send', { msg: { op: 'attach', id: t.id } });
+    }
+  } else if (m.ev === 'lost') log('daemon connection lost');
+}
+
+async function restore() {
+  await invoke('daemon_connect');
+  await invoke('daemon_send', { msg: { op: 'list' } });
+  const panes = await invoke('exec', { argv: [...TMUX, 'list-panes', '-a', '-F', '#{session_name}\t#{pane_dead}\t#{pane_dead_status}\t#{pane_current_command}'] });
+  for (const line of panes.split('\n').filter(l => l.includes('\t'))) {
+    const [id, dead, status, cmd] = line.split('\t');
+    log(`tmux ${id}: fg ${cmd}${dead === '1' ? ', exited code ' + status : ''}`);
+    if (tabs.has(id)) continue;
+    const tab = makeTab(id, 'tmux');
+    await invoke('local_spawn', { id, argv: tmuxArgv(id), env: {}, cwd: cfg.cwd, cols: tab.term.cols, rows: tab.term.rows });
+  }
+  const herdr = await invoke('exec', { argv: ['herdr', 'session', 'list'] });
+  if (/^studio-spike\s+running/m.test(herdr)) { log('herdr session studio-spike is running; reattaching'); create('herdr'); }
+}
+
+(async () => {
+  cfg = await invoke('config');
+  log(`app ${cfg.app_pid}, cwd ${cfg.cwd}. Right-click a tab to close it. Claude with the spike's hooks: claude --plugin-dir '${cfg.plugin}'`);
+  await listen('daemon', e => onEvent(e.payload));
+  await listen('local', e => onEvent(e.payload));
+  for (const b of document.querySelectorAll('#bar > button')) b.onclick = () => create(b.dataset.kind);
+  try { await restore(); } catch (e) { log(`restore failed: ${e}`); }
+  // For scripted checks: SPIKE_AUTOSPAWN=daemon,tmux,herdr creates each kind that has no tab yet.
+  for (const kind of cfg.autospawn.split(',').filter(Boolean)) if (![...tabs.values()].some(t => t.kind === kind)) await create(kind);
+})();
+</script>
+</body>
+</html>
