@@ -1,13 +1,44 @@
-:root { --bg: #fff; --fg: #1d1d1f; --muted: #6e6e73; --code: #f5f5f7; }
-@media (prefers-color-scheme: dark) { :root { --bg: #1e1e20; --fg: #f2f2f2; --muted: #a1a1a6; --code: #2a2a2d; } }
+:root { --bg: #fff; --fg: #1d1d1f; --muted: #6e6e73; --code: #f5f5f7; --needs-you: #c4400b; --needs-you-bg: #fdebe3; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #1e1e20; --fg: #f2f2f2; --muted: #a1a1a6; --code: #2a2a2d; --needs-you: #ff8a5c; --needs-you-bg: #3d2318; }
+}
 html, body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 -apple-system, sans-serif; }
 .pane { padding: 16px 18px; }
 h1 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 8px; }
 .session { font-size: 14px; color: var(--muted); margin: 0 0 6px; }
+/* Colour only on "needs you" (#328, module 3): "your turn" stays as neutral as "working". */
+.state { font-size: 14px; font-weight: 600; margin: 0 0 6px; }
+.state[data-state="needs_you"] { color: var(--needs-you); background: var(--needs-you-bg); border-radius: 6px;
+                                 padding: 2px 8px; display: inline-block; }
 .step { margin: 0; display: flex; gap: 8px; align-items: baseline; min-width: 0; }
 .tool { font-weight: 600; flex: none; }
 code { font: 13px ui-monospace, Menlo, monospace; background: var(--code); border-radius: 6px; padding: 2px 6px;
        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 code:empty { display: none; }
 .empty { color: var(--muted); margin: 0; }
+.cards-title { margin-top: 20px; }
+/* A card is Hebrew, right to left; its code is left to right. No text in it is smaller than 14px (v0's
+   secondary text was 12px). */
+.card { background: var(--code); border-radius: 8px; padding: 10px 12px; margin: 0 0 10px; font-size: 16px; }
+.card summary { font-weight: 600; cursor: pointer; }
+.card p { margin: 8px 0 0; overflow-wrap: anywhere; }
+.answer { white-space: pre-wrap; }
+.card code { font-size: 14px; background: var(--bg); padding: 1px 5px; white-space: normal; overflow-wrap: anywhere;
+             unicode-bidi: isolate; }
+.paths { display: flex; flex-wrap: wrap; gap: 6px; }
+.card pre { font: 14px/1.6 ui-monospace, Menlo, monospace; background: var(--bg); border-radius: 6px; padding: 8px 10px;
+            margin: 10px 0 0; overflow-x: auto; }
+.card h2 { font-size: 14px; font-weight: 600; color: var(--muted); margin: 12px 0 0; }
+.card h2 + p { margin-top: 2px; }
+.verdict { font-weight: 600; }
+/* "Will it pass?": two neutral taps, since colour is only for "needs you". */
+.guess { background: var(--code); border-radius: 8px; padding: 10px 12px; margin: 14px 0 0; font-size: 16px; }
+.guess p { margin: 0; }
+.guess code { background: var(--bg); unicode-bidi: isolate; }
+.guess .taps { display: flex; gap: 8px; margin-top: 8px; }
+.taps button { font: inherit; min-width: 64px; padding: 4px 14px; border-radius: 6px; border: 1px solid var(--muted);
+               background: var(--bg); color: var(--fg); cursor: pointer; }
+.taps button[aria-pressed="true"] { font-weight: 600; border: 2px solid var(--fg); }
+.taps button:disabled { cursor: default; }
+.taps button:disabled[aria-pressed="false"] { opacity: .45; }
 [hidden] { display: none !important; }

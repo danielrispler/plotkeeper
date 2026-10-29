@@ -10,8 +10,15 @@
   <main class="pane">
     <h1>Now</h1>
     <p id="session" class="session"></p>
+    <p id="state" class="state"></p>
     <p id="step" class="step"><span id="tool" class="tool"></span> <code id="detail"></code></p>
     <p id="empty" class="empty">No prompt yet.</p>
+    <section id="guess" class="guess" dir="rtl" lang="he" hidden>
+      <p>האם הבדיקה תעבור? <code id="guess-command" dir="ltr"></code></p>
+      <p class="taps"><button id="guess-yes" type="button">כן</button><button id="guess-no" type="button">לא</button></p>
+    </section>
+    <h1 id="cards-title" class="cards-title" hidden>Cards</h1>
+    <section id="cards"></section>
   </main>
 </body>
 </html>

@@ -1,0 +1,16 @@
+[package]
+name = "studio-understanding"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+similar = "3"
+studio-core = { path = "../core" }
+# The weekly command finds the card store beside the event log.
+studio-hook = { path = "../hook" }
+
+[dev-dependencies]
+tempfile = "3"

@@ -7,7 +7,9 @@ publish = false
 [dependencies]
 studio-core = { path = "../core" }
 studio-hook = { path = "../hook" }
+studio-understanding = { path = "../understanding" }
 tauri = { version = "2", features = [] }
+tauri-plugin-notification = "2"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
