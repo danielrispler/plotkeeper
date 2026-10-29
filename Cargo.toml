@@ -1,0 +1,7 @@
+# The studio's own workspace, kept apart from the engine's (#328, "Where the code lives").
+[workspace]
+members = ["core", "hook", "src-tauri"]
+# The shell embeds the built frontend (`dist/`) at compile time, so plain `cargo test` leaves it out;
+# `npm run tauri build` builds it.
+default-members = ["core", "hook"]
+resolver = "3"

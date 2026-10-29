@@ -1,0 +1,13 @@
+:root { --bg: #fff; --fg: #1d1d1f; --muted: #6e6e73; --code: #f5f5f7; }
+@media (prefers-color-scheme: dark) { :root { --bg: #1e1e20; --fg: #f2f2f2; --muted: #a1a1a6; --code: #2a2a2d; } }
+html, body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 -apple-system, sans-serif; }
+.pane { padding: 16px 18px; }
+h1 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 8px; }
+.session { font-size: 14px; color: var(--muted); margin: 0 0 6px; }
+.step { margin: 0; display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+.tool { font-weight: 600; flex: none; }
+code { font: 13px ui-monospace, Menlo, monospace; background: var(--code); border-radius: 6px; padding: 2px 6px;
+       white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+code:empty { display: none; }
+.empty { color: var(--muted); margin: 0; }
+[hidden] { display: none !important; }

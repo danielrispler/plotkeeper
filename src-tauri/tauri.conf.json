@@ -1,0 +1,21 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Studio",
+  "identifier": "dev.falinks.studio",
+  "build": {
+    "frontendDist": "../dist",
+    "beforeDevCommand": "npm run build",
+    "beforeBuildCommand": "npm run build && cargo build --release -p studio-hook"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [{ "title": "Studio", "width": 380, "height": 480 }],
+    "security": { "csp": "default-src 'self' ipc: http://ipc.localhost" }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app"],
+    "icon": ["icons/icon.png"],
+    "macOS": { "signingIdentity": "-" }
+  }
+}

@@ -1,0 +1,13 @@
+[package]
+name = "studio"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+studio-core = { path = "../core" }
+studio-hook = { path = "../hook" }
+tauri = { version = "2", features = [] }
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }

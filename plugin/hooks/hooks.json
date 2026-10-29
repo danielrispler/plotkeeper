@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/studio-hook", "async": true }] }],
+    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/studio-hook", "async": true }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/studio-hook", "async": true }] }],
+    "PreToolUse": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/studio-hook", "async": true }] }],
+    "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/studio-hook", "async": true }] }],
+    "PostToolUse": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/studio-hook", "async": true }] }],
+    "PostToolUseFailure": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/studio-hook", "async": true }] }],
+    "Notification": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/studio-hook", "async": true }] }],
+    "Elicitation": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/studio-hook", "async": true }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/studio-hook", "async": true }] }]
+  }
+}

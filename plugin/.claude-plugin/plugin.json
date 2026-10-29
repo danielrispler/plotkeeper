@@ -1,0 +1,6 @@
+{
+  "name": "falinks-studio",
+  "version": "0.0.0",
+  "description": "Appends Claude Code hook events to the Falinks studio's event log",
+  "author": { "name": "Daniel Rispler" }
+}
