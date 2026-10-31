@@ -9,6 +9,8 @@
     "PostToolUseFailure": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/studio-hook", "async": true }] }],
     "Notification": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/studio-hook", "async": true }] }],
     "Elicitation": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/studio-hook", "async": true }] }],
+    "SubagentStart": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/studio-hook", "async": true }] }],
+    "SubagentStop": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/studio-hook", "async": true }] }],
     "Stop": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/studio-hook", "async": true }] }]
   }
 }

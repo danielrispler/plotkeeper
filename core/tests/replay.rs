@@ -85,6 +85,28 @@ fn lines_that_are_not_hook_events_are_skipped() {
     assert_eq!(now.last_step, step("Bash", Some("ls does-not-exist")));
 }
 
+/// The two recorded logs (#370), scrubbed of their content: the checkpoint day's events, and the
+/// scripted session that spawns a worker and a helper (`record-subagent-run.sh`). Each line names a
+/// session, and the core holds every session named.
+#[test]
+fn the_recorded_logs_replay_through_the_core() {
+    for log in [
+        include_str!("fixtures/checkpoint-day.jsonl"),
+        include_str!("fixtures/subagent-run.jsonl"),
+    ] {
+        let studio = replay(log);
+
+        assert_ne!(log, "");
+        for line in log.lines() {
+            let event: serde_json::Value = serde_json::from_str(line).expect("a JSON line");
+            let id = event["session_id"]
+                .as_str()
+                .expect("an event names its session");
+            assert!(studio.session(id).is_some(), "session {id} was dropped");
+        }
+    }
+}
+
 #[test]
 fn a_log_without_prompts_has_no_session_to_follow() {
     let first_line = include_str!("fixtures/failing-bash.jsonl")

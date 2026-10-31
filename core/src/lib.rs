@@ -179,7 +179,7 @@ struct Event {
 
 /// Whether the turn's final message asks Daniel something: a sentence ending in `?`, after removing
 /// fenced code, inline code, blockquotes, headings and table rows (#321's evidence, "Transcripts").
-fn asks(message: &str) -> bool {
+pub fn asks(message: &str) -> bool {
     let mut in_fence = false;
     message.lines().any(|line| {
         let trimmed = line.trim_start();

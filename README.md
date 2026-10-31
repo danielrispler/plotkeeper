@@ -14,9 +14,9 @@ To run the app with a fake writer instead of `claude -p`:
 
 The pane also shows the session's state: working, your turn, or needs you, the only one in colour. When a session newly needs you and the window is not focused, macOS shows a notification. macOS asks once for permission to show them.
 
-- `plugin/`: the Claude Code plugin. On ten hook events it runs `studio-hook`.
+- `plugin/`: the Claude Code plugin. On twelve hook events, `SubagentStart` and `SubagentStop` among them, it runs `studio-hook`.
 - `hook/`: `studio-hook`, which appends each hook payload as one line to the event log, and the log's path.
-- `core/`: the studio core, plain Rust with no I/O. The app replays the whole log through it at start, then feeds it each new line live. Only live lines request cards and notifications.
+- `core/`: the studio core, plain Rust with no I/O, and `scrub`, which turns event log lines into test fixtures. The app replays the whole log through it at start, then feeds it each new line live. Only live lines request cards and notifications.
 - `understanding/`: the understanding layer's I/O: the card writer interface, the `claude -p` writer and a fake, the worktree fingerprint, the card store, and `weekly`, the command that prints the week's rates.
 - `src-tauri/`: the app's Rust shell. `ui/`: its TypeScript pane.
 
@@ -32,9 +32,9 @@ This builds `target/release/bundle/macos/Studio.app` with an ad-hoc signature (`
 
 `cargo test` runs:
 
-- `core/tests/`: hook events replayed through the core: what the pane shows (`replay`), needs you (`needs_you`), checks and guesses (`checks`), and Bash card steps (`bash_steps`);
+- `core/tests/`: hook events replayed through the core: what the pane shows and the two recorded logs (`replay`), needs you (`needs_you`), checks and guesses (`checks`), and Bash card steps (`bash_steps`);
 - `understanding/tests/`: the `claude -p` command, built but never run, the `claude` lookup with a stand-in shell, and the writer's replies (`writer`); the fingerprint against real `git` in temporary repositories (`fingerprint`); the card store (`store`); the weekly rates (`week`);
-- the unit tests of the event log's path (`hook`) and of the weekly rates' dates (`understanding`).
+- the unit tests of the event log's path (`hook`), of what `scrub` keeps (`studio-core`) and of the weekly rates' dates (`understanding`).
 
 It leaves out the shell, which needs `dist/` from `npm run build`.
 
@@ -58,6 +58,19 @@ The hooks run the `studio-hook` built in this checkout, so build before you star
 The hooks are async, so Claude Code never waits for them, and they append whether the app runs or not. Two events that fire within a few milliseconds can land in either order.
 
 The log is never rotated. It holds tool inputs and results, file contents included.
+
+## Recorded logs
+
+Two fixtures in `core/tests/fixtures/` are real event logs, scrubbed by `scrub` (`core/src/bin/scrub.rs`). Each event keeps its shape and loses its content: text becomes `…`, and lists and objects become empty, except for what stays. What stays: ids, event names, `cwd`, the permission mode, a session's start source and end reason, agent ids and types, the `description` of a spawn or a Bash command, `isolation`, the paths of the files a tool reads or writes, skill names, the types and statuses in tool results, background tasks without their commands, exit codes, numbers, flags and timings. An MCP tool keeps no text. Transcript and output paths become `…`. A prompt keeps only the markup Claude Code adds, with its ids and statuses, so a wake-up stays one; any other tag becomes `<…>`. A last message that asks Daniel something becomes `…?`.
+
+- `checkpoint-day.jsonl`: the events of 2026-10-30, the checkpoint day of #347. Some of its sessions were still open at midnight.
+- `subagent-run.jsonl`: a scripted session in a temporary repository that spawns a worktree worker and a read-only helper in the background, then stops the helper.
+
+Re-record the second when Claude Code's version changes. The script runs a nested `claude` on your subscription, so run it yourself, outside auto mode:
+
+    core/tests/record-subagent-run.sh
+
+Quit the studio app first: it would take the session as live and ask for cards. The script builds `studio-hook`, runs the session with this checkout's plugin, and scrubs the session's events from the event log into the fixture. Before you commit the new fixture, run `cargo test` and check that each text it keeps is a label, an id or a path.
 
 ## The card store
 

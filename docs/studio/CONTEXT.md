@@ -15,11 +15,14 @@ The part of the control room that keeps Daniel's understanding in step with the 
 The time Daniel waits on an agent: from his prompt until the agent ends its turn, or until his next prompt if he interrupts it. Answering a permission, a question or a plan inside it does not start a new wait.
 
 **Card**:
-A short explanation of one step an agent took, in the explanation language. It opens with a question and shows the answer when Daniel asks. A wait has at most one card.
+An explanation, in the explanation language, of what a prompt changed, or what a worker changed, since the previous card. It asks a multiple-choice question on the change's logic or design, and offers "explain more" and a rating.
 _Avoid_: Summary (read after the work, with no question first)
 
 **Guess**:
-Daniel's yes-or-no answer, before a check's result, to whether the check will pass. It is recorded but never shown as a score.
+Daniel's answer to a card's multiple-choice question. The card writer's key grades it, and the card shows right or wrong, with the reasons, as soon as he answers. It is never shown as a score.
+
+**Brief**:
+A rolling account of an agent session's or a worker's work so far, at the top of its view, so that Daniel can resume a session he lost track of. Each new card updates it.
 
 **Workbench**:
 The part of the control room where agent work happens: terminals, tasks and the board. It works without the understanding layer.
@@ -42,9 +45,28 @@ _Avoid_: Stuck (a session that is not progressing, which is a different state)
 The state of an agent session that finished its turn without asking Daniel anything. Unlike needs you, it does not interrupt him.
 _Avoid_: Done (the turn ended, not the task)
 
+**Idle**:
+The state of an agent session left at your turn with no events for 2 hours or more. Its next event brings it back.
+
 **Agent session**:
 One worker runtime session running one agent on a task, such as a Claude Code session in a terminal. The unit the control room watches.
 _Avoid_: Run (alone)
+
+**Subagent**:
+An agent that an agent session, or another subagent, spawned to do part of its work, such as a Claude Code `Agent` call. It runs inside its session, not as a session of its own, and it is either a worker or a helper.
+_Avoid_: Task (the workbench's unit of work)
+
+**Worker**:
+A subagent spawned with its own git worktree, or one that changes files. A helper becomes a worker at its first change. Daniel follows a worker like a session, with its own cards and brief. A worker is not a task.
+
+**Helper**:
+A subagent that is not a worker, such as a review or a search. It shows as one line under the agent that spawned it.
+
+**Wake-up**:
+A prompt that Claude Code sends, not Daniel, to wake an agent when a subagent or a background command it started returns. It names the returning task's id in markup. It never counts as Daniel's prompt.
+
+**Session list**:
+The list of every agent session, one row each, grouped by state with needs you first and idle sessions collapsed last. Each row says in one line what its session is doing, and subagents nest under the agent that spawned them. Only Daniel's click changes the session he looks at.
 
 **Falinks run**:
 Several agent sessions coordinated by the Falinks engine on one repository.
