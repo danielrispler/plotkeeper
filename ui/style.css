@@ -3,10 +3,25 @@
   :root { --bg: #1e1e20; --fg: #f2f2f2; --muted: #a1a1a6; --code: #2a2a2d; --needs-you: #ff8a5c; --needs-you-bg: #3d2318; }
 }
 html, body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 -apple-system, sans-serif; }
-.pane { padding: 16px 18px; }
+/* The session list on the left, the selected session on the right; each scrolls on its own. */
+.app { display: grid; grid-template-columns: 320px 1fr; height: 100vh; }
+.list { overflow-y: auto; padding: 12px 10px; border-right: 1px solid var(--code); }
+.pane { overflow-y: auto; padding: 16px 18px; }
+.list h1, .list summary { margin: 10px 8px 4px; }
+.list summary { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
+                cursor: pointer; }
+/* One line per row; what does not fit is cut. */
+.row { display: flex; gap: 6px; align-items: baseline; width: 100%; padding: 4px 8px; border: 0; border-radius: 6px;
+       background: none; color: var(--fg); font: 14px/1.5 -apple-system, sans-serif; text-align: left; cursor: pointer;
+       white-space: nowrap; overflow: hidden; }
+.row[aria-pressed="true"] { background: var(--code); }
+.row .name { font-weight: 600; flex: none; }
+.row .id, .row .row-state { color: var(--muted); flex: none; }
+.row .row-state[data-state="needs_you"] { color: var(--needs-you); font-weight: 600; }
+.row .row-step { color: var(--muted); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 h1 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 8px; }
 .session { font-size: 14px; color: var(--muted); margin: 0 0 6px; }
-/* Colour only on "needs you" (#328, module 3): "your turn" stays as neutral as "working". */
+/* Colour only on "needs you" (#328, module 3): "your turn" stays as neutral as "running". */
 .state { font-size: 14px; font-weight: 600; margin: 0 0 6px; }
 .state[data-state="needs_you"] { color: var(--needs-you); background: var(--needs-you-bg); border-radius: 6px;
                                  padding: 2px 8px; display: inline-block; }

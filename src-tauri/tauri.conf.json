@@ -9,7 +9,7 @@
   },
   "app": {
     "withGlobalTauri": true,
-    "windows": [{ "title": "Studio", "width": 380, "height": 480 }],
+    "windows": [{ "title": "Studio", "width": 960, "height": 640 }],
     "security": { "csp": "default-src 'self' ipc: http://ipc.localhost" }
   },
   "bundle": {

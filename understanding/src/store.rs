@@ -46,6 +46,18 @@ pub enum Outcome {
     NotCounted,
 }
 
+/// One session's cards in the session view's two groups (#369, decision 18), each oldest first.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct SessionCards {
+    /// The cards added in the last 30 minutes.
+    pub recent: Vec<StoredCard>,
+    /// The cards added before, or before the store kept the time.
+    pub older: Vec<StoredCard>,
+}
+
+/// The last 30 minutes (#369, decision 18).
+const RECENT_MS: u64 = 30 * 60 * 1000;
+
 /// Now, in Unix milliseconds, as the store's records keep time.
 pub fn millis() -> u64 {
     UNIX_EPOCH.elapsed().unwrap_or_default().as_millis() as u64
@@ -79,6 +91,19 @@ impl CardStore {
     /// The cards, oldest first.
     pub fn cards(&self) -> &[StoredCard] {
         &self.cards
+    }
+
+    /// Session `session_id`'s cards, split 30 minutes before `now`, the shell's tick.
+    pub fn session_cards(&self, session_id: &str, now: u64) -> SessionCards {
+        let cards = self
+            .cards
+            .iter()
+            .filter(|kept| kept.request.session_id == session_id);
+        let (recent, older) = cards.cloned().partition(|kept| {
+            kept.added_at
+                .is_some_and(|at| now.saturating_sub(at) < RECENT_MS)
+        });
+        SessionCards { recent, older }
     }
 
     /// Adds a new card at `at`, in Unix milliseconds, which shows its question first, and saves the

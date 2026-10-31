@@ -1,9 +1,9 @@
-// The side pane: the state and "now" line of the session Daniel prompted last, and its cards. The core
-// decides what it shows; this file only draws what the shell sends, on load and on each "now" or
-// "cards" event.
+// The window: on the left the session list, on the right the session Daniel selected, with its state,
+// "now" line and cards. The core decides what it shows; this file only draws what the shell sends, on
+// load and on each "sessions", "selected" or "cards" event.
 
 type Step = { tool: string; detail: string | null };
-type SessionState = "working" | "needs_you" | "your_turn";
+type SessionState = "needs_you" | "running" | "your_turn" | "idle" | "ended";
 type GuessPrompt = { session_id: string; tool_use_id: string; step: Step; guess: boolean | null };
 type Session = {
   id: string;
@@ -25,11 +25,15 @@ type Card = {
 // The store also records when the question showed and how the guess settled; the pane never shows
 // either, nor any rate.
 type StoredCard = { request: CardRequest; card: Card; revealed_at: number | null; passed: boolean | null };
+// The selected session's cards, split at 30 minutes by the shell's tick, each oldest first.
+type SessionCards = { recent: StoredCard[]; older: StoredCard[] };
 
 const stateLabels: Record<SessionState, string> = {
-  working: "Working",
   needs_you: "Needs you",
+  running: "Running",
   your_turn: "Your turn",
+  idle: "Idle",
+  ended: "Ended",
 };
 
 declare global {
@@ -69,15 +73,87 @@ for (const [id, willPass] of taps) {
   });
 }
 
+const folder = (session: Session) => session.cwd.split("/").pop() || session.cwd;
+
+// The session list, as the shell last sent it, and the row Daniel clicked last.
+let listed: Session[] = [];
+let selectedId: string | null = null;
+// The collapsed groups Daniel opened, which stay open when the list is drawn again.
+const collapsed: SessionState[] = ["idle", "ended"];
+const opened = new Set<SessionState>();
+
+function text(tag: string, content: string, className = ""): HTMLElement {
+  const node = document.createElement(tag);
+  node.className = className;
+  node.textContent = content;
+  return node;
+}
+
+// One line: the folder, the session's short id, its state and its last tool step.
+function row(session: Session): HTMLElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "row";
+  button.setAttribute("aria-pressed", String(session.id === selectedId));
+  const state = text("span", stateLabels[session.state], "row-state");
+  state.dataset.state = session.state;
+  const step = session.last_step;
+  button.append(
+    text("span", folder(session), "name"),
+    text("span", session.id.slice(0, 8), "id"),
+    state,
+    text("span", step ? `${step.tool} ${step.detail ?? ""}` : "No step yet", "row-step"),
+  );
+  button.addEventListener("click", () => select(session.id));
+  return button;
+}
+
+// The core sends the sessions grouped by state, so a group starts where the state changes. Idle and
+// ended sessions collapse at the bottom.
+function showSessions(sessions: Session[]) {
+  listed = sessions;
+  const groups: Session[][] = [];
+  for (const session of sessions) {
+    const last = groups[groups.length - 1];
+    if (last?.[0].state === session.state) last.push(session);
+    else groups.push([session]);
+  }
+  element("groups").replaceChildren(
+    ...groups.map((rows) => {
+      const state = rows[0].state;
+      const title = `${stateLabels[state]} · ${rows.length}`;
+      if (!collapsed.includes(state)) {
+        const group = document.createElement("section");
+        group.append(text("h1", title), ...rows.map(row));
+        return group;
+      }
+      const group = document.createElement("details");
+      group.open = opened.has(state);
+      group.addEventListener("toggle", () => (group.open ? opened.add(state) : opened.delete(state)));
+      group.append(text("summary", title), ...rows.map(row));
+      return group;
+    }),
+  );
+  element("no-sessions").hidden = sessions.length > 0;
+}
+
+// Only Daniel's click changes the selected session.
+async function select(id: string) {
+  await window.__TAURI__.core.invoke("select", { id });
+  show(await window.__TAURI__.core.invoke<Session | null>("selected"));
+  showCards(await window.__TAURI__.core.invoke<SessionCards>("cards"));
+}
+
 function show(session: Session | null) {
   showGuess(session?.guess ?? null);
   element("empty").hidden = session !== null;
-  element("session").hidden = session === null;
-  element("state").hidden = session === null;
-  element("step").hidden = session === null;
+  element("view").hidden = session === null;
+  if ((session?.id ?? null) !== selectedId) {
+    selectedId = session?.id ?? null;
+    showSessions(listed);
+  }
   if (session === null) return;
-  const folder = session.cwd.split("/").pop() || session.cwd;
-  element("session").textContent = `${folder} · ${session.id.slice(0, 8)}`;
+  element("session").textContent = `${folder(session)} · ${session.id.slice(0, 8)}`;
   element("state").textContent = stateLabels[session.state];
   element("state").dataset.state = session.state;
   element("tool").textContent = session.last_step?.tool ?? "No step yet";
@@ -157,30 +233,39 @@ function markShown() {
 document.addEventListener("visibilitychange", markShown);
 
 // Each card is a <details>: its question shows, and a tap reveals the rest. Cards already drawn are
-// kept, keyed by their step's tool_use_id, so one Daniel opened stays open on the next event.
-function showCards(cards: StoredCard[]) {
-  const list = element("cards");
-  const ids = new Set(cards.map(({ request }) => request.tool_use_id));
-  const drawn = new Set<string>();
-  for (const node of [...list.children] as HTMLElement[]) {
-    if (ids.has(node.dataset.id!)) drawn.add(node.dataset.id!);
-    else {
-      node.remove();
-      unshown.delete(node.dataset.id!);
-    }
+// kept, keyed by their step's tool_use_id, so one Daniel opened stays open on the next event and when
+// it moves to the older group.
+const drawn = new Map<string, HTMLElement>();
+
+function showCards({ recent, older }: SessionCards) {
+  const ids = new Set([...recent, ...older].map(({ request }) => request.tool_use_id));
+  for (const id of drawn.keys()) {
+    if (ids.has(id)) continue;
+    drawn.delete(id);
+    unshown.delete(id);
   }
-  for (const stored of cards) {
-    if (drawn.has(stored.request.tool_use_id)) continue;
-    list.prepend(cardElement(stored));
-    if (stored.revealed_at === null) unshown.add(stored.request.tool_use_id);
-  }
+  // The newest card first.
+  const nodes = (cards: StoredCard[]) =>
+    [...cards].reverse().map((stored) => {
+      const id = stored.request.tool_use_id;
+      if (!drawn.has(id)) {
+        drawn.set(id, cardElement(stored));
+        if (stored.revealed_at === null) unshown.add(id);
+      }
+      return drawn.get(id)!;
+    });
+  element("recent").replaceChildren(...nodes(recent));
+  element("older").replaceChildren(...nodes(older));
+  element("recent-title").hidden = recent.length === 0;
+  element("older-title").hidden = older.length === 0;
   markShown();
-  element("cards-title").hidden = cards.length === 0;
 }
 
-window.__TAURI__.event.listen<Session | null>("now", (event) => show(event.payload));
-window.__TAURI__.core.invoke<Session | null>("now").then(show);
-window.__TAURI__.event.listen<StoredCard[]>("cards", (event) => showCards(event.payload));
-window.__TAURI__.core.invoke<StoredCard[]>("cards").then(showCards);
+window.__TAURI__.event.listen<Session[]>("sessions", (event) => showSessions(event.payload));
+window.__TAURI__.core.invoke<Session[]>("sessions").then(showSessions);
+window.__TAURI__.event.listen<Session | null>("selected", (event) => show(event.payload));
+window.__TAURI__.core.invoke<Session | null>("selected").then(show);
+window.__TAURI__.event.listen<SessionCards>("cards", (event) => showCards(event.payload));
+window.__TAURI__.core.invoke<SessionCards>("cards").then(showCards);
 
 export {};

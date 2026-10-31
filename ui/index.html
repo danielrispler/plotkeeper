@@ -7,18 +7,27 @@
   <script type="module" src="main.js"></script>
 </head>
 <body>
-  <main class="pane">
-    <h1>Now</h1>
-    <p id="session" class="session"></p>
-    <p id="state" class="state"></p>
-    <p id="step" class="step"><span id="tool" class="tool"></span> <code id="detail"></code></p>
-    <p id="empty" class="empty">No prompt yet.</p>
-    <section id="guess" class="guess" dir="rtl" lang="he" hidden>
-      <p>האם הבדיקה תעבור? <code id="guess-command" dir="ltr"></code></p>
-      <p class="taps"><button id="guess-yes" type="button">כן</button><button id="guess-no" type="button">לא</button></p>
-    </section>
-    <h1 id="cards-title" class="cards-title" hidden>Cards</h1>
-    <section id="cards"></section>
-  </main>
+  <div class="app">
+    <nav class="list" aria-label="Sessions">
+      <p id="no-sessions" class="empty">No session yet.</p>
+      <div id="groups"></div>
+    </nav>
+    <main class="pane">
+      <p id="empty" class="empty">Pick a session on the left.</p>
+      <section id="view" hidden>
+        <p id="session" class="session"></p>
+        <p id="state" class="state"></p>
+        <p id="step" class="step"><span id="tool" class="tool"></span> <code id="detail"></code></p>
+        <section id="guess" class="guess" dir="rtl" lang="he" hidden>
+          <p>האם הבדיקה תעבור? <code id="guess-command" dir="ltr"></code></p>
+          <p class="taps"><button id="guess-yes" type="button">כן</button><button id="guess-no" type="button">לא</button></p>
+        </section>
+        <h1 id="recent-title" class="cards-title" hidden>Last 30 minutes</h1>
+        <section id="recent"></section>
+        <h1 id="older-title" class="cards-title" hidden>Older</h1>
+        <section id="older"></section>
+      </section>
+    </main>
+  </div>
 </body>
 </html>

@@ -5,12 +5,18 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
+use std::{
+    cmp::Reverse,
+    collections::{HashMap, HashSet},
+};
 
 #[derive(Default)]
 pub struct Studio {
     sessions: HashMap<String, Session>,
-    prompted_last: Option<String>,
+    /// The session Daniel clicked last, which the session view shows.
+    selected: Option<String>,
+    /// The shell's latest tick, in Unix milliseconds.
+    now: u64,
     /// Sessions in a wait that has not had its card step yet.
     awaiting_card: HashSet<String>,
     /// Steps that already have a card in the card store, by `tool_use_id`.
@@ -24,6 +30,12 @@ pub struct Session {
     pub cwd: String,
     pub last_step: Option<Step>,
     pub state: State,
+    /// When the hook received its first and its latest event (`studio_received_ms`), in Unix
+    /// milliseconds.
+    #[serde(skip)]
+    started_at: u64,
+    #[serde(skip)]
+    last_event_at: u64,
     /// The open guess prompt: its check started and its result has not arrived.
     pub guess: Option<GuessPrompt>,
     /// The tool calls whose `PreToolUse` landed and whose `PostToolUse` has not.
@@ -37,6 +49,8 @@ pub struct Session {
     asked: bool,
     #[serde(skip)]
     turn_ended: bool,
+    #[serde(skip)]
+    ended: bool,
 }
 
 impl Session {
@@ -80,14 +94,26 @@ fn waits_on(block: &Call, call: &Call) -> bool {
     }
 }
 
-/// Whether a session waits on Daniel (#328, module 3, "Needs you").
-#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+/// A session's state (#369, decision 4). Each has a named clearer: an event, or the tick for idle.
+/// The order is the session list's: needs you first, then the groups the list collapses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum State {
-    Working,
+    /// Blocked on Daniel (#328, module 3, "Needs you"), until the step that asks resolves, a prompt,
+    /// `Stop` or `SessionEnd`.
     NeedsYou,
+    /// In a turn, from a prompt until `Stop` or `SessionEnd`.
+    Running,
+    /// The turn ended, or the session started and has had no prompt yet, until a prompt.
     YourTurn,
+    /// At your turn with no events for `IDLE_AFTER_MS`, until any event.
+    Idle,
+    /// From `SessionEnd` until the session starts again under its id.
+    Ended,
 }
+
+/// 2 hours, a starting guess (#369, decision 4).
+const IDLE_AFTER_MS: u64 = 2 * 60 * 60 * 1000;
 
 /// A tool call the agent made, as the "now" line names it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -175,6 +201,11 @@ struct Event {
     last_assistant_message: String,
     #[serde(default)]
     notification_type: String,
+    /// The start of a session: `startup`, `resume`, `clear` or `compact`.
+    #[serde(default)]
+    source: String,
+    #[serde(default)]
+    studio_received_ms: u64,
 }
 
 /// Whether the turn's final message asks Daniel something: a sentence ending in `?`, after removing
@@ -401,13 +432,18 @@ impl Studio {
                 id: event.session_id.clone(),
                 cwd: String::new(),
                 last_step: None,
-                state: State::Working,
+                state: State::Running,
+                started_at: event.studio_received_ms,
+                last_event_at: 0,
                 guess: None,
                 running: Vec::new(),
                 blocks: Vec::new(),
                 asked: false,
                 turn_ended: false,
+                ended: false,
             });
+        // The hooks are async, so the latest event can land before an earlier one.
+        session.last_event_at = session.last_event_at.max(event.studio_received_ms);
         if !event.cwd.is_empty() {
             session.cwd.clone_from(&event.cwd);
         }
@@ -419,7 +455,6 @@ impl Studio {
             // A prompt opens a wait, also after an interrupt, which fires no `Stop`.
             "UserPromptSubmit" => {
                 self.awaiting_card.insert(event.session_id.clone());
-                self.prompted_last = Some(event.session_id.clone());
                 session.unblock();
                 session.turn_ended = false;
                 session.guess = None;
@@ -434,13 +469,17 @@ impl Studio {
                 blocked_before = false;
                 session.asked = asks(&event.last_assistant_message);
             }
-            // shortcut: a closed session shows "your turn"; drop closed sessions once the board
-            // lists sessions.
             "SessionEnd" => {
                 self.awaiting_card.remove(&event.session_id);
                 session.unblock();
                 session.turn_ended = true;
+                session.ended = true;
                 session.guess = None;
+            }
+            // A resumed session keeps its id; a compaction keeps the turn it happens in.
+            "SessionStart" => {
+                session.ended = false;
+                session.turn_ended |= event.source != "compact";
             }
             "PreToolUse" => {
                 let step = Step {
@@ -546,14 +585,16 @@ impl Studio {
             }
             _ => {}
         }
-        session.state = if session.needs_you() {
+        session.state = if session.ended {
+            State::Ended
+        } else if session.needs_you() {
             State::NeedsYou
         } else if session.turn_ended {
             State::YourTurn
         } else {
-            State::Working
+            State::Running
         };
-        if !blocked_before && session.needs_you() {
+        if !blocked_before && session.state == State::NeedsYou {
             outputs.push(Output::NeedsYou {
                 session_id: event.session_id,
             });
@@ -584,12 +625,45 @@ impl Studio {
         }
     }
 
+    /// The shell's clock, in Unix milliseconds, on each pass of its read loop, the first right after
+    /// the replay. Rules that fire with no event use it. Returns whether a session changed state.
+    pub fn tick(&mut self, now: u64) -> bool {
+        self.now = now;
+        let mut changed = false;
+        for session in self.sessions.values_mut() {
+            if session.state == State::YourTurn
+                && now.saturating_sub(session.last_event_at) >= IDLE_AFTER_MS
+            {
+                session.state = State::Idle;
+                changed = true;
+            }
+        }
+        changed
+    }
+
+    /// The latest tick, in Unix milliseconds.
+    pub fn now(&self) -> u64 {
+        self.now
+    }
+
     pub fn session(&self, id: &str) -> Option<&Session> {
         self.sessions.get(id)
     }
 
-    /// The session Daniel prompted last, which the pane follows before the workbench exists.
-    pub fn prompted_last(&self) -> Option<&Session> {
-        self.session(self.prompted_last.as_deref()?)
+    /// The session list: every session, grouped in `State` order, the newest first in each group.
+    pub fn sessions(&self) -> Vec<&Session> {
+        let mut sessions: Vec<&Session> = self.sessions.values().collect();
+        sessions.sort_by_key(|s| (s.state, Reverse(s.started_at), &s.id));
+        sessions
+    }
+
+    /// Daniel clicked session `id`'s row. Nothing else changes the selection.
+    pub fn select(&mut self, id: &str) {
+        self.selected = Some(id.into());
+    }
+
+    /// The session Daniel selected, which the session view shows; `None` until his first click.
+    pub fn selected(&self) -> Option<&Session> {
+        self.session(self.selected.as_deref()?)
     }
 }

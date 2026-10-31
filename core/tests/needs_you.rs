@@ -5,7 +5,7 @@
 
 use studio_core::{Output, State, Studio};
 
-use State::{NeedsYou, Working, YourTurn};
+use State::{Ended, NeedsYou, Running, YourTurn};
 
 /// The session's state after each line of the log, replayed.
 fn states(log: &str, session: &str) -> Vec<Option<State>> {
@@ -68,11 +68,11 @@ fn a_stop_clears_every_block_before_it_asks() {
 
     assert_eq!(
         states(&unasked, PROBE),
-        [Working, Working, NeedsYou, YourTurn].map(Some)
+        [Running, Running, NeedsYou, YourTurn].map(Some)
     );
     assert_eq!(
         states(&asked, PROBE),
-        [Working, Working, NeedsYou, NeedsYou].map(Some)
+        [Running, Running, NeedsYou, NeedsYou].map(Some)
     );
     // The Stop's question is a new reason to need Daniel, so it gives its own notice.
     assert_eq!(live(&asked), [notice(PROBE), notice(PROBE)]);
@@ -83,7 +83,7 @@ fn a_permission_prompt_needs_you_until_its_tool_runs() {
     let log = include_str!("fixtures/permission-write.jsonl");
 
     // UserPromptSubmit, PreToolUse, PermissionRequest, Notification, PostToolUse.
-    let expected = [Working, Working, NeedsYou, NeedsYou, Working].map(Some);
+    let expected = [Running, Running, NeedsYou, NeedsYou, Running].map(Some);
     assert_eq!(states(log, PROBE), expected);
 }
 
@@ -92,7 +92,7 @@ fn a_denied_permission_stops_needing_you_when_its_tool_fails() {
     let log = include_str!("fixtures/permission-denied.jsonl");
 
     // UserPromptSubmit, PreToolUse, PermissionRequest, PostToolUseFailure.
-    let expected = [Working, Working, NeedsYou, Working].map(Some);
+    let expected = [Running, Running, NeedsYou, Running].map(Some);
     assert_eq!(states(log, PROBE), expected);
 }
 
@@ -105,7 +105,7 @@ fn a_permission_prompt_that_lands_before_its_tool_call_still_ends_when_the_tool_
     let log = [lines[0], lines[2], lines[1], lines[3], lines[4]].join("\n");
 
     // UserPromptSubmit, PermissionRequest, PreToolUse, Notification, PostToolUse.
-    let expected = [Working, NeedsYou, NeedsYou, NeedsYou, Working].map(Some);
+    let expected = [Running, NeedsYou, NeedsYou, NeedsYou, Running].map(Some);
     assert_eq!(states(&log, PROBE), expected);
 }
 
@@ -117,7 +117,7 @@ fn a_permission_prompts_notification_that_lands_before_its_request_ends_with_the
     let log = [lines[0], lines[1], lines[3], lines[2], lines[4]].join("\n");
 
     // UserPromptSubmit, PreToolUse, Notification, PermissionRequest, PostToolUse.
-    let expected = [Working, Working, NeedsYou, NeedsYou, Working].map(Some);
+    let expected = [Running, Running, NeedsYou, NeedsYou, Running].map(Some);
     assert_eq!(states(&log, PROBE), expected);
     assert_eq!(live(&log), [notice(PROBE)]);
 }
@@ -142,7 +142,7 @@ fn a_command_that_never_reported_back_holds_no_block_in_the_next_turn() {
     ]
     .join("\n");
 
-    assert_eq!(states(&log, PROBE).last(), Some(&Some(Working)));
+    assert_eq!(states(&log, PROBE).last(), Some(&Some(Running)));
 }
 
 #[test]
@@ -151,13 +151,13 @@ fn a_background_agents_events_leave_the_main_agents_block_in_place() {
 
     let expected = [
         // UserPromptSubmit, a background Agent's PreToolUse and PostToolUse.
-        Working, Working, Working,
+        Running, Running, Running,
         // The main agent's Write: PreToolUse, PermissionRequest.
-        Working, NeedsYou,
+        Running, NeedsYou,
         // The background agent's Glob and failing Bash, each PreToolUse and its result.
         NeedsYou, NeedsYou, NeedsYou, NeedsYou,
         // Notification, then the Write's PostToolUse.
-        NeedsYou, Working,
+        NeedsYou, Running,
     ]
     .map(Some);
     assert_eq!(
@@ -172,7 +172,7 @@ fn a_sandboxed_commands_network_request_needs_you_until_the_command_ends() {
 
     // UserPromptSubmit, PreToolUse, Notification `permission_prompt` with no PermissionRequest,
     // PostToolUse, Stop.
-    let expected = [Working, Working, NeedsYou, Working, YourTurn].map(Some);
+    let expected = [Running, Running, NeedsYou, Running, YourTurn].map(Some);
     assert_eq!(states(log, PROBE), expected);
 }
 
@@ -181,7 +181,7 @@ fn an_mcp_servers_request_for_input_needs_you_until_its_tool_ends() {
     let log = include_str!("fixtures/elicitation.jsonl");
 
     // UserPromptSubmit, PreToolUse, Elicitation, PostToolUse, Stop.
-    let expected = [Working, Working, NeedsYou, Working, YourTurn].map(Some);
+    let expected = [Running, Running, NeedsYou, Running, YourTurn].map(Some);
     assert_eq!(states(log, PROBE), expected);
 }
 
@@ -200,7 +200,7 @@ fn a_request_that_lands_before_its_tool_call_still_ends_when_the_tool_ends() {
         let log = [lines[0], lines[2], lines[1], lines[3], lines[4]].join("\n");
 
         // UserPromptSubmit, the request, PreToolUse, PostToolUse, Stop.
-        let expected = [Working, NeedsYou, NeedsYou, Working, YourTurn].map(Some);
+        let expected = [Running, NeedsYou, NeedsYou, Running, YourTurn].map(Some);
         assert_eq!(states(&log, PROBE), expected, "{name}");
     }
 }
@@ -210,7 +210,7 @@ fn a_session_closed_at_a_plan_approval_stops_needing_you() {
     let log = include_str!("fixtures/closed-at-plan.jsonl");
 
     // UserPromptSubmit, PreToolUse, PermissionRequest, SessionEnd: no PostToolUse and no Stop.
-    let expected = [Working, NeedsYou, NeedsYou, YourTurn].map(Some);
+    let expected = [Running, NeedsYou, NeedsYou, Ended].map(Some);
     assert_eq!(
         states(log, "5b9e1c7a-2f4d-4a6b-8e0c-3d5f7a9b1c24"),
         expected
@@ -223,15 +223,15 @@ fn a_question_and_a_plan_need_you_until_answered_and_a_turn_ends_on_your_turn_or
 
     let expected = [
         // AskUserQuestion: UserPromptSubmit, PreToolUse, PermissionRequest, Notification, PostToolUse.
-        Working, NeedsYou, NeedsYou, NeedsYou, Working,
+        Running, NeedsYou, NeedsYou, NeedsYou, Running,
         // Stop: "Should I plan the fix first, or edit it directly?"
         NeedsYou,
         // UserPromptSubmit, then a Bash and a plan file, each PreToolUse and PostToolUse.
-        Working, Working, Working, Working, Working,
+        Running, Running, Running, Running, Running,
         // ExitPlanMode: PreToolUse, PermissionRequest, Notification, PostToolUse.
-        NeedsYou, NeedsYou, NeedsYou, Working,
+        NeedsYou, NeedsYou, NeedsYou, Running,
         // An Edit, then Stop: "Fixed the install line in `README.md`."
-        Working, Working, YourTurn,
+        Running, Running, YourTurn,
     ]
     .map(Some);
     assert_eq!(

@@ -12,7 +12,7 @@ mod fingerprint;
 mod store;
 mod week;
 pub use fingerprint::Fingerprints;
-pub use store::{CardStore, Outcome, StoredCard, millis};
+pub use store::{CardStore, Outcome, SessionCards, StoredCard, millis};
 pub use week::{Rate, Week, week};
 
 /// A card on one step, in Hebrew; code stays in English, and code inside the Hebrew text is in

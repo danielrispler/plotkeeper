@@ -41,12 +41,18 @@ The workbench view with one row per task and one per main checkout, showing the 
 The state of an agent session that is blocked on Daniel: waiting for his permission, his answer to a question, or his approval of a plan.
 _Avoid_: Stuck (a session that is not progressing, which is a different state)
 
+**Running**:
+The state of an agent session in a turn: from Daniel's prompt until the agent ends its turn or the session ends.
+
 **Your turn**:
-The state of an agent session that finished its turn without asking Daniel anything. Unlike needs you, it does not interrupt him.
+The state of an agent session that finished its turn without asking Daniel anything, or that started and has had no prompt yet. Unlike needs you, it does not interrupt him.
 _Avoid_: Done (the turn ended, not the task)
 
 **Idle**:
 The state of an agent session left at your turn with no events for 2 hours or more. Its next event brings it back.
+
+**Ended**:
+The state of an agent session from its own end event until it starts again under its id. The control room never guesses that a session is gone.
 
 **Agent session**:
 One worker runtime session running one agent on a task, such as a Claude Code session in a terminal. The unit the control room watches.
@@ -66,7 +72,7 @@ A subagent that is not a worker, such as a review or a search. It shows as one l
 A prompt that Claude Code sends, not Daniel, to wake an agent when a subagent or a background command it started returns. It names the returning task's id in markup. It never counts as Daniel's prompt.
 
 **Session list**:
-The list of every agent session, one row each, grouped by state with needs you first and idle sessions collapsed last. Each row says in one line what its session is doing, and subagents nest under the agent that spawned them. Only Daniel's click changes the session he looks at.
+The list of every agent session, one row each, grouped by state with needs you first and idle and ended sessions collapsed last. Each row says in one line what its session is doing, and subagents nest under the agent that spawned them. Only Daniel's click changes the session he looks at.
 
 **Falinks run**:
 Several agent sessions coordinated by the Falinks engine on one repository.

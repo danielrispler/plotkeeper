@@ -1,7 +1,7 @@
 //! The card store (#328, module 6): cards and their reveal state survive a restart.
 
-use studio_core::{CardRequest, Check, Step};
-use studio_understanding::{CardStore, CardWriter, FakeWriter, Outcome};
+use studio_core::{CardRequest, Check, Output, Step, Studio};
+use studio_understanding::{CardStore, CardWriter, FakeWriter, Outcome, StoredCard};
 
 fn edit(tool_use_id: &str, path: &str) -> CardRequest {
     CardRequest {
@@ -171,4 +171,105 @@ fn a_missing_store_starts_empty() {
     let store = CardStore::open(data.path().join("cards.json")).unwrap();
 
     assert_eq!(store.cards(), []);
+}
+
+const MINUTE: u64 = 60 * 1000;
+
+fn ids(cards: &[StoredCard]) -> Vec<&str> {
+    cards
+        .iter()
+        .map(|kept| kept.request.tool_use_id.as_str())
+        .collect()
+}
+
+#[test]
+fn a_sessions_cards_split_at_30_minutes_before_the_tick() {
+    let data = tempfile::tempdir().unwrap();
+    let mut store = CardStore::open(data.path().join("cards.json")).unwrap();
+    let start = 1_761_743_990_000;
+    for (i, request) in [
+        edit("toolu_01A", "src/lib.rs"),
+        edit("toolu_01B", "README.md"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let card = FakeWriter.write(&request).unwrap();
+        store
+            .add(request, card, start + i as u64 * 10 * MINUTE)
+            .unwrap();
+    }
+    let session = "5b9e3d71-0c2a-4f8e-b6d4-8a1c3e5f7092";
+
+    let before = store.session_cards(session, start + 30 * MINUTE - 1);
+    assert_eq!(ids(&before.recent), ["toolu_01A", "toolu_01B"]);
+    assert_eq!(ids(&before.older), [] as [&str; 0]);
+    let at = store.session_cards(session, start + 30 * MINUTE);
+    assert_eq!(ids(&at.recent), ["toolu_01B"]);
+    assert_eq!(ids(&at.older), ["toolu_01A"]);
+}
+
+#[test]
+fn a_card_from_before_its_time_was_kept_is_older() {
+    let data = tempfile::tempdir().unwrap();
+    let path = data.path().join("cards.json");
+    let request = edit("toolu_01A", "src/lib.rs");
+    let card = FakeWriter.write(&request).unwrap();
+    let kept = serde_json::json!([{ "request": request, "card": card }]);
+    std::fs::write(&path, kept.to_string()).unwrap();
+
+    let store = CardStore::open(path).unwrap();
+
+    let shown = store.session_cards("5b9e3d71-0c2a-4f8e-b6d4-8a1c3e5f7092", 1_761_743_990_000);
+    assert_eq!(ids(&shown.older), ["toolu_01A"]);
+}
+
+/// #347's checkpoint day (#370's fixture), live: each card request gets a card at its event's time.
+/// Before #371 the pane showed only the cards of the session prompted last, so the other session's
+/// cards seemed deleted (#347 note, "Cards were not deleted").
+#[test]
+fn every_session_of_the_day_shows_all_of_its_cards_whichever_was_prompted_last() {
+    let day = include_str!("../../core/tests/fixtures/checkpoint-day.jsonl");
+    let data = tempfile::tempdir().unwrap();
+    let mut store = CardStore::open(data.path().join("cards.json")).unwrap();
+    let mut studio = Studio::default();
+    for line in day.lines() {
+        let at = serde_json::from_str::<serde_json::Value>(line).unwrap()["studio_received_ms"]
+            .as_u64()
+            .unwrap();
+        studio.tick(at);
+        for output in studio.apply(line) {
+            if let Output::Card(request) = output {
+                let card = FakeWriter.write(&request).unwrap();
+                store.add(request, card, at).unwrap();
+            }
+        }
+    }
+    let sessions: Vec<String> = studio.sessions().iter().map(|s| s.id.clone()).collect();
+
+    let shown: Vec<(&str, usize)> = sessions
+        .iter()
+        .map(|id| {
+            studio.select(id);
+            let selected = studio.selected().unwrap();
+            let cards = store.session_cards(&selected.id, studio.now());
+            (&id[..8], cards.recent.len() + cards.older.len())
+        })
+        .collect();
+
+    // In list order; the two sessions with no prompt have no card.
+    assert_eq!(
+        shown,
+        [
+            ("0222b62d", 3),
+            ("596c28a1", 3),
+            ("2afc85f5", 2),
+            ("5bb84a4a", 1),
+            ("57e9c1ab", 0),
+            ("6641e809", 0),
+            ("1ac172be", 3),
+            ("5d7f69ab", 1),
+        ]
+    );
+    assert_eq!(store.cards().len(), 13);
 }
