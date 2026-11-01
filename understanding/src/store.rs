@@ -11,10 +11,11 @@ use std::{
 };
 use studio_core::CardRequest;
 
-/// A card in the store, with the step it explains and its record: when it was added, when its
-/// question showed, when Daniel first revealed its answer, his tap (`request.check`'s guess) and how
-/// the check settled. The card and its step go through serde whole, so fields added to them need no
-/// change here. Times are Unix milliseconds; stores from before a time existed load it as `None`.
+/// A card in the store, with the change it explains and its base, and its record: when it was added,
+/// when its question showed, when Daniel first revealed its answer, his tap (`request.check`'s
+/// guess) and how the check settled. The card and its request go through serde whole, so fields
+/// added to them need no change here. Times are Unix milliseconds; stores from before a time existed
+/// load it as `None`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StoredCard {
     pub request: CardRequest,
@@ -83,9 +84,18 @@ impl CardStore {
         Ok(CardStore { path, cards })
     }
 
-    /// Reads the store the app keeps beside the event log `log`, in the studio's data directory.
+    /// Reads the store the app keeps beside the event log `log`, in the studio's data directory. The
+    /// store from before cards covered a prompt's whole change (#369, decision 17) is moved aside to
+    /// `cards-v1.json` on first start, and never over one already there.
     pub fn open_beside(log: &Path) -> io::Result<Self> {
-        Self::open(log.with_file_name("cards.json"))
+        let (old, aside) = (
+            log.with_file_name("cards.json"),
+            log.with_file_name("cards-v1.json"),
+        );
+        if old.exists() && !aside.exists() {
+            fs::rename(old, aside)?;
+        }
+        Self::open(log.with_file_name("cards-v2.json"))
     }
 
     /// The cards, oldest first.
@@ -129,12 +139,12 @@ impl CardStore {
         self.save()
     }
 
-    /// Marks the question of the card on step `tool_use_id` shown at `at`, in Unix milliseconds, and
-    /// saves the store. A card keeps its first time, and one revealed before gets none, so a reveal
-    /// never comes before its question.
-    pub fn show(&mut self, tool_use_id: &str, at: u64) -> io::Result<()> {
+    /// Marks the question of card `id` shown at `at`, in Unix milliseconds, and saves the store. A
+    /// card keeps its first time, and one revealed before gets none, so a reveal never comes before
+    /// its question.
+    pub fn show(&mut self, id: &str, at: u64) -> io::Result<()> {
         let mut cards = self.cards.iter_mut();
-        if let Some(kept) = cards.find(|kept| kept.request.tool_use_id == tool_use_id)
+        if let Some(kept) = cards.find(|kept| kept.request.id == id)
             && kept.shown_at.is_none()
             && kept.revealed_at.is_none()
         {
@@ -144,11 +154,11 @@ impl CardStore {
         Ok(())
     }
 
-    /// Marks the card on step `tool_use_id` revealed at `at`, in Unix milliseconds, and saves the
-    /// store. A card revealed before keeps its first reveal.
-    pub fn reveal(&mut self, tool_use_id: &str, at: u64) -> io::Result<()> {
+    /// Marks card `id` revealed at `at`, in Unix milliseconds, and saves the store. A card revealed
+    /// before keeps its first reveal.
+    pub fn reveal(&mut self, id: &str, at: u64) -> io::Result<()> {
         let mut cards = self.cards.iter_mut();
-        if let Some(kept) = cards.find(|kept| kept.request.tool_use_id == tool_use_id)
+        if let Some(kept) = cards.find(|kept| kept.request.id == id)
             && kept.revealed_at.is_none()
         {
             kept.revealed_at = Some(at);

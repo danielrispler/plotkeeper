@@ -5,15 +5,20 @@
 type Step = { tool: string; detail: string | null };
 type SessionState = "needs_you" | "running" | "your_turn" | "idle" | "ended";
 type GuessPrompt = { session_id: string; tool_use_id: string; step: Step; guess: boolean | null };
+type Check = { guess: boolean | null; exit_passed: boolean | null };
+// A check that ran: a pass or fail line, oldest first.
+type CheckLine = { command: string; check: Check };
 type Session = {
   id: string;
   cwd: string;
   last_step: Step | null;
   state: SessionState;
   guess: GuessPrompt | null;
+  checks: CheckLine[];
 };
-type Check = { guess: boolean | null; exit_passed: boolean | null };
-type CardRequest = { session_id: string; tool_use_id: string; step: Step; change: string; check: Check | null };
+// A session's change since its last card, from its base: HEAD and the files git status listed then.
+type Base = { head: string | null; files: string[] };
+type CardRequest = { session_id: string; id: string; base: Base; change: string; check: Check | null };
 type Card = {
   question: string;
   answer: string;
@@ -158,6 +163,25 @@ function show(session: Session | null) {
   element("state").dataset.state = session.state;
   element("tool").textContent = session.last_step?.tool ?? "No step yet";
   element("detail").textContent = session.last_step?.detail ?? "";
+  showChecks(session.checks);
+}
+
+// Whether a check passed, from its exit code; with no colour, as colour is only for "needs you".
+function outcome(check: Check): string {
+  if (check.exit_passed === null) return "Ran";
+  return check.exit_passed ? "Passed" : "Failed";
+}
+
+// The checks that ran, newest first, one line each.
+function showChecks(checks: CheckLine[]) {
+  element("checks").replaceChildren(
+    ...[...checks].reverse().map((line) => {
+      const item = document.createElement("li");
+      item.append(text("span", outcome(line.check), "outcome"), code(line.command));
+      return item;
+    }),
+  );
+  element("checks-title").hidden = checks.length === 0;
 }
 
 // Code, left to right, in its own isolate.
@@ -190,10 +214,10 @@ function cardElement({ request, card, revealed_at, passed }: StoredCard): HTMLEl
   details.className = "card";
   details.dir = "rtl";
   details.lang = "he";
-  details.dataset.id = request.tool_use_id;
+  details.dataset.id = request.id;
   details.open = revealed_at !== null;
   details.addEventListener("toggle", () => {
-    if (details.open) window.__TAURI__.core.invoke("reveal", { toolUseId: request.tool_use_id });
+    if (details.open) window.__TAURI__.core.invoke("reveal", { id: request.id });
   });
   const answer = hebrew("p", card.answer);
   answer.className = "answer";
@@ -226,19 +250,19 @@ const unshown = new Set<string>();
 
 function markShown() {
   if (document.visibilityState !== "visible") return;
-  for (const toolUseId of unshown) window.__TAURI__.core.invoke("shown", { toolUseId });
+  for (const id of unshown) window.__TAURI__.core.invoke("shown", { id });
   unshown.clear();
 }
 
 document.addEventListener("visibilitychange", markShown);
 
 // Each card is a <details>: its question shows, and a tap reveals the rest. Cards already drawn are
-// kept, keyed by their step's tool_use_id, so one Daniel opened stays open on the next event and when
+// kept, keyed by their id, so one Daniel opened stays open on the next event and when
 // it moves to the older group.
 const drawn = new Map<string, HTMLElement>();
 
 function showCards({ recent, older }: SessionCards) {
-  const ids = new Set([...recent, ...older].map(({ request }) => request.tool_use_id));
+  const ids = new Set([...recent, ...older].map(({ request }) => request.id));
   for (const id of drawn.keys()) {
     if (ids.has(id)) continue;
     drawn.delete(id);
@@ -247,7 +271,7 @@ function showCards({ recent, older }: SessionCards) {
   // The newest card first.
   const nodes = (cards: StoredCard[]) =>
     [...cards].reverse().map((stored) => {
-      const id = stored.request.tool_use_id;
+      const id = stored.request.id;
       if (!drawn.has(id)) {
         drawn.set(id, cardElement(stored));
         if (stored.revealed_at === null) unshown.add(id);

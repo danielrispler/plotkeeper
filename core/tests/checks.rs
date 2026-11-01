@@ -1,8 +1,9 @@
 //! Seam 1 (#328, Testing Decisions) for checks and guesses (#343): replay hook events through the core
-//! and check the guess prompts and card requests. The fixture follows the real payload shapes of the
-//! other fixtures; a check that fails comes as `PostToolUseFailure` with its exit code in `error`.
+//! and check the guess prompts and the session's check lines (#369, decision 14). The fixture
+//! follows the real payload shapes of the other fixtures; a check that fails comes as
+//! `PostToolUseFailure` with its exit code in `error`.
 
-use studio_core::{CardRequest, Check, GuessPrompt, Output, Step, Studio};
+use studio_core::{Check, CheckLine, GuessPrompt, Output, Step, Studio};
 
 const CHECKS: &str = include_str!("fixtures/checks.jsonl");
 const SESSION: &str = "a3e6c9f2-1b4d-4e7a-8c0f-5d2b9e6a3c18";
@@ -26,8 +27,9 @@ fn prompt(tool_use_id: &str) -> GuessPrompt {
     }
 }
 
+/// Before #374 an edit before the check took the wait's card step, and with it the guess.
 #[test]
-fn a_check_as_the_waits_first_card_step_raises_the_guess_prompt_and_one_after_an_edit_does_not() {
+fn the_waits_first_check_raises_the_guess_prompt_even_after_an_edit() {
     let prompts: Vec<(usize, GuessPrompt)> = live(CHECKS)
         .into_iter()
         .enumerate()
@@ -38,89 +40,60 @@ fn a_check_as_the_waits_first_card_step_raises_the_guess_prompt_and_one_after_an
         })
         .collect();
 
-    // Line 2 and line 12 are the checks' `PreToolUse`; the second wait's check follows its Edit.
+    // Lines 2, 8 and 12 are the checks' `PreToolUse`; the second wait's check follows its Edit.
     assert_eq!(
         prompts,
         [
             (2, prompt("toolu_01Rt5Gb8Nc2Vk7Lp4Xs9Dq3W")),
+            (8, prompt("toolu_01Zp7Xc4Fr1Mg8Hn5Qw2Ej6T")),
             (12, prompt("toolu_01Uy4Ka9Lo3Pv6Bs1Dc8Fh5R")),
         ]
     );
 }
 
-fn cards(log: &str) -> Vec<CardRequest> {
-    let outputs = live(log).into_iter().flatten();
-    outputs
-        .filter_map(|output| match output {
-            Output::Card(request) => Some(request),
-            _ => None,
-        })
-        .collect()
+/// The session's check lines once `log` arrived live.
+fn lines(log: &str) -> Vec<CheckLine> {
+    let mut studio = Studio::default();
+    log.lines().for_each(|line| drop(studio.apply(line)));
+    studio
+        .session(SESSION)
+        .map_or_else(Vec::new, |s| s.checks.clone())
 }
 
 #[test]
-fn a_check_that_passes_or_fails_gets_a_card_on_its_command_and_result() {
-    let checks: Vec<(String, String, Option<Check>)> = cards(CHECKS)
-        .into_iter()
-        .map(|card| (card.tool_use_id, card.change, card.check))
-        .collect();
-
-    let passed = concat!(
-        "running 12 tests\n",
-        "test a_waits_first_edit_gets_a_card_and_its_later_edits_do_not ... ok\n\n",
-        "test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s\n",
-        "    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.31s",
-    );
-    let failed = concat!(
-        "Exit code 101\nrunning 12 tests\ntest a_check_gets_a_card ... FAILED\n\n",
-        "test result: FAILED. 11 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s\n\n",
-        "error: test failed, to rerun pass `-p studio-core --test checks`",
-    );
-    let edit = "@@ -34,1 +34,1 @@\n-.guess { font-size: 15px; }\n+.guess { font-size: 17px; }\n";
-    let untapped = |exit_passed| {
-        Some(Check {
+fn a_check_that_passes_or_fails_shows_as_a_line_and_gets_no_card() {
+    let line = |exit_passed| CheckLine {
+        command: COMMAND.into(),
+        check: Check {
             guess: None,
             exit_passed,
-        })
+        },
     };
+
     assert_eq!(
-        checks,
-        [
-            (
-                "toolu_01Rt5Gb8Nc2Vk7Lp4Xs9Dq3W".into(),
-                passed.into(),
-                untapped(Some(true))
-            ),
-            ("toolu_01Hm3Jd6Wq9Tf2Ks5Ly8Bv1N".into(), edit.into(), None),
-            (
-                "toolu_01Uy4Ka9Lo3Pv6Bs1Dc8Fh5R".into(),
-                failed.into(),
-                untapped(Some(false))
-            ),
-        ]
+        lines(CHECKS),
+        [line(Some(true)), line(Some(true)), line(Some(false))]
     );
+    let cards = live(CHECKS).into_iter().flatten();
+    assert_eq!(cards.filter(|o| matches!(o, Output::Card(_))).count(), 0);
 }
 
 #[test]
 fn a_tap_before_the_result_is_the_guess_and_none_is_recorded_without_one() {
     let check = "toolu_01Rt5Gb8Nc2Vk7Lp4Xs9Dq3W";
-    // Daniel taps yes after line `tap_after`, or never; the guess on the first check's card.
+    // Daniel taps yes after line `tap_after`, or never; the guess on the first check's line.
     let guess = |tap_after: Option<usize>| {
         let mut studio = Studio::default();
-        let mut cards = Vec::new();
         for (line, event) in CHECKS.lines().take(5).enumerate() {
-            cards.extend(studio.apply(event).into_iter().filter_map(|o| match o {
-                Output::Card(request) => request.check,
-                _ => None,
-            }));
+            studio.apply(event);
             if tap_after == Some(line) {
                 studio.guess(check, true);
             }
         }
-        let [card] = &cards[..] else {
-            panic!("one card");
+        let [line] = &studio.session(SESSION).unwrap().checks[..] else {
+            panic!("one check line");
         };
-        card.guess
+        line.check.guess
     };
 
     assert_eq!(guess(Some(2)), Some(true));
@@ -143,10 +116,11 @@ fn the_session_shows_the_prompt_and_its_tap_until_the_result_arrives() {
     let tapped = open(&studio).expect("still open");
     assert_eq!(tapped.guess, Some(false));
 
-    // A restart mid-check keeps the prompt; the result, live, closes it and still gets the card.
-    let outputs = studio.apply(lines[3]);
+    // A restart mid-check keeps the prompt; the result, live, closes it and keeps the tap.
+    studio.apply(lines[3]);
     assert_eq!(open(&studio), None);
-    assert!(matches!(&outputs[..], [Output::Card(_)]), "{outputs:?}");
+    let checks = &studio.session(SESSION).unwrap().checks;
+    assert_eq!(checks[0].check.guess, Some(false));
 }
 
 #[test]
@@ -170,10 +144,10 @@ fn first_wait(command: &str) -> String {
 #[test]
 fn the_exit_code_counts_only_when_nothing_after_the_check_can_mask_it() {
     let exit_passed = |command| {
-        let [card] = &cards(&first_wait(command))[..] else {
-            panic!("one card on `{command}`");
+        let [line] = &lines(&first_wait(command))[..] else {
+            panic!("one check line on `{command}`");
         };
-        card.check.as_ref().expect("a check").exit_passed
+        line.check.exit_passed
     };
 
     assert_eq!(exit_passed("cargo test"), Some(true));
@@ -216,38 +190,39 @@ fn first_wait_lines(result: impl Fn(&mut serde_json::Value)) -> Vec<String> {
 }
 
 #[test]
-fn a_check_that_did_not_run_gets_no_card_and_leaves_the_card_step_open() {
-    let lines = first_wait_lines(|post| {
+fn a_check_that_did_not_run_gets_no_line_and_leaves_the_guess_open() {
+    let wait = first_wait_lines(|post| {
         post["hook_event_name"] = "PostToolUseFailure".into();
         post["error"] = "The user doesn't want to proceed with this tool use.".into();
     });
     let passed = CHECKS.lines().nth(3).unwrap();
     // The prompt, the denied check, then the agent runs the same check again and it passes.
-    let [prompt, start, denied] = [&lines[1], &lines[2], &lines[3]].map(String::as_str);
+    let [prompt, start, denied] = [&wait[1], &wait[2], &wait[3]].map(String::as_str);
     let log = [prompt, start, denied, start, passed].join("\n");
     let outputs: Vec<Output> = live(&log).into_iter().flatten().collect();
 
-    let [Output::Guess(_), Output::Guess(_), Output::Card(card)] = &outputs[..] else {
-        panic!("two prompts, then one card: {outputs:?}");
+    let [Output::Guess(_), Output::Guess(_)] = &outputs[..] else {
+        panic!("two prompts: {outputs:?}");
     };
-    assert_eq!(card.check.as_ref().unwrap().exit_passed, Some(true));
+    let [line] = &lines(&log)[..] else {
+        panic!("one check line");
+    };
+    assert_eq!(line.check.exit_passed, Some(true));
 }
 
 #[test]
-fn a_check_whose_result_lands_before_its_start_gets_its_card_and_no_prompt() {
-    let lines: Vec<&str> = CHECKS.lines().collect();
+fn a_check_whose_result_lands_before_its_start_gets_its_line_and_no_prompt() {
+    let wait: Vec<&str> = CHECKS.lines().collect();
     // The hooks are async: the result, then the start.
-    let log = [lines[1], lines[3], lines[2], lines[4]].join("\n");
-    let outputs: Vec<Output> = live(&log).into_iter().flatten().collect();
+    let log = [wait[1], wait[3], wait[2], wait[4]].join("\n");
 
-    let [Output::Card(card)] = &outputs[..] else {
-        panic!("one card and no prompt: {outputs:?}");
-    };
+    assert_eq!(live(&log).concat(), []);
     let untapped = Check {
         guess: None,
         exit_passed: Some(true),
     };
-    assert_eq!(card.check, Some(untapped));
+    let checks: Vec<Check> = lines(&log).into_iter().map(|l| l.check).collect();
+    assert_eq!(checks, [untapped]);
 }
 
 #[test]
@@ -259,6 +234,7 @@ fn a_check_run_in_the_background_is_no_check() {
 
     assert_eq!(log.matches("run_in_background").count(), 2);
     assert_eq!(live(&log).concat(), []);
+    assert_eq!(lines(&log), []);
 }
 
 #[test]

@@ -1,6 +1,6 @@
 //! The weekly check on the questions (#328, module 6): the last 7 days' rates, from the card records.
 
-use studio_core::{CardRequest, Check, Step};
+use studio_core::{Base, CardRequest, Check};
 use studio_understanding::{Card, Outcome, Rate, StoredCard, week};
 
 /// 2025-10-29, 13:20 UTC.
@@ -24,11 +24,8 @@ fn record(
     StoredCard {
         request: CardRequest {
             session_id: "5b9e3d71-0c2a-4f8e-b6d4-8a1c3e5f7092".into(),
-            tool_use_id: format!("toolu_{days}"),
-            step: Step {
-                tool: "Bash".into(),
-                detail: Some("cargo test 2>&1 | tail -5".into()),
-            },
+            id: format!("toolu_{days}"),
+            base: Base::default(),
             change: String::new(),
             check: check.map(|(guess, _)| Check {
                 guess,

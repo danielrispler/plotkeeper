@@ -1,17 +1,19 @@
-//! The card store (#328, module 6): cards and their reveal state survive a restart.
+//! The card store (#328, module 6; #369, decision 17): cards, their base and their reveal state
+//! survive a restart.
 
-use studio_core::{CardRequest, Check, Output, Step, Studio};
+use studio_core::{Base, CardRequest, Change, Check, Output, Studio};
 use studio_understanding::{CardStore, CardWriter, FakeWriter, Outcome, StoredCard};
 
-fn edit(tool_use_id: &str, path: &str) -> CardRequest {
+/// The card on an edit of `path`, named `id`, from a base with `README.md` already edited.
+fn edit(id: &str, path: &str) -> CardRequest {
     CardRequest {
         session_id: "5b9e3d71-0c2a-4f8e-b6d4-8a1c3e5f7092".into(),
-        tool_use_id: tool_use_id.into(),
-        step: Step {
-            tool: "Edit".into(),
-            detail: Some(path.into()),
+        id: id.into(),
+        base: Base {
+            head: Some("5f0c1e2d9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d".into()),
+            files: vec!["README.md".into()],
         },
-        change: "@@ -1,1 +1,1 @@\n-old\n+new\n".into(),
+        change: format!("--- a/{path}\n+++ b/{path}\n@@ -1 +1 @@\n-old\n+new\n"),
         check: None,
     }
 }
@@ -37,7 +39,7 @@ fn a_reopened_store_keeps_the_cards_and_which_ones_daniel_revealed() {
     let revealed: Vec<(&str, Option<u64>)> = reopened
         .cards()
         .iter()
-        .map(|kept| (kept.request.tool_use_id.as_str(), kept.revealed_at))
+        .map(|kept| (kept.request.id.as_str(), kept.revealed_at))
         .collect();
     assert_eq!(
         revealed,
@@ -46,14 +48,12 @@ fn a_reopened_store_keeps_the_cards_and_which_ones_daniel_revealed() {
     assert_eq!(reopened.cards(), store.cards());
 }
 
+/// A check's card, as stores kept them before #374.
 fn check(guess: Option<bool>, exit_passed: Option<bool>) -> CardRequest {
     CardRequest {
         session_id: "a3e6c9f2-1b4d-4e7a-8c0f-5d2b9e6a3c18".into(),
-        tool_use_id: "toolu_01Uy4Ka9Lo3Pv6Bs1Dc8Fh5R".into(),
-        step: Step {
-            tool: "Bash".into(),
-            detail: Some("cargo test 2>&1 | tail -5".into()),
-        },
+        id: "toolu_01Uy4Ka9Lo3Pv6Bs1Dc8Fh5R".into(),
+        base: Base::default(),
         change: "test result: FAILED. 11 passed; 1 failed; 0 ignored".into(),
         check: Some(Check { guess, exit_passed }),
     }
@@ -141,27 +141,45 @@ fn each_card_records_when_it_was_added_when_its_question_showed_and_when_it_was_
     );
 }
 
+/// A store from before #374, with a card on one step.
+const STORE_V1: &str = r#"[{"request": {"session_id": "5b9e3d71-0c2a-4f8e-b6d4-8a1c3e5f7092",
+    "tool_use_id": "toolu_01A", "step": {"tool": "Edit", "detail": "src/lib.rs"},
+    "change": "-old\n+new\n"},
+    "card": {"question": "למה?", "answer": "כי.", "paths": ["src/lib.rs"], "code": "+new",
+    "why_it_matters": "", "not_checked": ""}, "revealed_at": 1761744000000}]"#;
+
 #[test]
-fn a_store_written_before_checks_existed_still_opens() {
+fn the_old_store_is_moved_aside_on_first_start_and_the_new_one_starts_empty() {
     let data = tempfile::tempdir().unwrap();
-    let path = data.path().join("cards.json");
-    let before = r#"[{"request": {"session_id": "5b9e3d71-0c2a-4f8e-b6d4-8a1c3e5f7092",
-        "tool_use_id": "toolu_01A", "step": {"tool": "Edit", "detail": "src/lib.rs"},
-        "change": "-old\n+new\n"},
-        "card": {"question": "למה?", "answer": "כי.", "paths": ["src/lib.rs"], "code": "+new",
-        "why_it_matters": "", "not_checked": ""}, "revealed_at": 1761744000000}]"#;
-    std::fs::write(&path, before).unwrap();
+    let log = data.path().join("events.jsonl");
+    std::fs::write(data.path().join("cards.json"), STORE_V1).unwrap();
 
-    let store = CardStore::open(path).unwrap();
+    let mut store = CardStore::open_beside(&log).unwrap();
 
-    let kept = &store.cards()[0];
-    assert_eq!(kept.request.check, None);
-    assert_eq!(
-        (kept.card.passed, kept.passed, kept.outcome),
-        (None, None, None)
-    );
-    assert_eq!(kept.revealed_at, Some(1_761_744_000_000));
-    assert_eq!((kept.added_at, kept.shown_at), (None, None));
+    assert_eq!(store.cards(), []);
+    let v1 = data.path().join("cards-v1.json");
+    assert_eq!(std::fs::read_to_string(&v1).unwrap(), STORE_V1);
+    assert!(!data.path().join("cards.json").exists());
+    // The next start keeps the new store, and the old one stays aside.
+    let request = edit("toolu_01A", "src/lib.rs");
+    let card = FakeWriter.write(&request).unwrap();
+    store.add(request, card, 1_761_743_990_000).unwrap();
+    assert_eq!(CardStore::open_beside(&log).unwrap().cards().len(), 1);
+    assert_eq!(std::fs::read_to_string(&v1).unwrap(), STORE_V1);
+}
+
+#[test]
+fn a_store_set_aside_before_is_never_overwritten() {
+    let data = tempfile::tempdir().unwrap();
+    let log = data.path().join("events.jsonl");
+    std::fs::write(data.path().join("cards-v1.json"), STORE_V1).unwrap();
+    // An older build of the app, run since, wrote a store of its own.
+    std::fs::write(data.path().join("cards.json"), "[]").unwrap();
+
+    CardStore::open_beside(&log).unwrap();
+
+    let v1 = data.path().join("cards-v1.json");
+    assert_eq!(std::fs::read_to_string(&v1).unwrap(), STORE_V1);
 }
 
 #[test]
@@ -176,10 +194,7 @@ fn a_missing_store_starts_empty() {
 const MINUTE: u64 = 60 * 1000;
 
 fn ids(cards: &[StoredCard]) -> Vec<&str> {
-    cards
-        .iter()
-        .map(|kept| kept.request.tool_use_id.as_str())
-        .collect()
+    cards.iter().map(|kept| kept.request.id.as_str()).collect()
 }
 
 #[test]
@@ -224,21 +239,27 @@ fn a_card_from_before_its_time_was_kept_is_older() {
     assert_eq!(ids(&shown.older), ["toolu_01A"]);
 }
 
-/// #347's checkpoint day (#370's fixture), live: each card request gets a card at its event's time.
-/// Before #371 the pane showed only the cards of the session prompted last, so the other session's
-/// cards seemed deleted (#347 note, "Cards were not deleted").
+/// #347's checkpoint day (#370's fixture), live, with a change at every fingerprint: each card
+/// request gets a card at its event's time. Before #371 the pane showed only the cards of the
+/// session prompted last, so the other session's cards seemed deleted (#347 note, "Cards were not
+/// deleted").
 #[test]
 fn every_session_of_the_day_shows_all_of_its_cards_whichever_was_prompted_last() {
     let day = include_str!("../../core/tests/fixtures/checkpoint-day.jsonl");
     let data = tempfile::tempdir().unwrap();
     let mut store = CardStore::open(data.path().join("cards.json")).unwrap();
     let mut studio = Studio::default();
+    let changed = Change {
+        base: Base::default(),
+        diff: "--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-old\n+new\n".into(),
+    };
     for line in day.lines() {
         let at = serde_json::from_str::<serde_json::Value>(line).unwrap()["studio_received_ms"]
             .as_u64()
             .unwrap();
         studio.tick(at);
-        for output in studio.apply(line) {
+        let change = studio.fingerprint_folder(line).and(Some(changed.clone()));
+        for output in studio.apply_with_change(line, change) {
             if let Output::Card(request) = output {
                 let card = FakeWriter.write(&request).unwrap();
                 store.add(request, card, at).unwrap();
@@ -257,19 +278,19 @@ fn every_session_of_the_day_shows_all_of_its_cards_whichever_was_prompted_last()
         })
         .collect();
 
-    // In list order; the two sessions with no prompt have no card.
+    // In list order, one card per `Stop`; the two sessions with no prompt have none.
     assert_eq!(
         shown,
         [
-            ("0222b62d", 3),
-            ("596c28a1", 3),
-            ("2afc85f5", 2),
-            ("5bb84a4a", 1),
+            ("0222b62d", 4),
+            ("596c28a1", 7),
+            ("2afc85f5", 14),
+            ("5bb84a4a", 4),
             ("57e9c1ab", 0),
             ("6641e809", 0),
-            ("1ac172be", 3),
-            ("5d7f69ab", 1),
+            ("1ac172be", 7),
+            ("5d7f69ab", 14),
         ]
     );
-    assert_eq!(store.cards().len(), 13);
+    assert_eq!(store.cards().len(), 50);
 }

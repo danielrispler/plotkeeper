@@ -2,7 +2,7 @@
 //! check what the pane would show. The fixtures follow the real v0 payload sequences
 //! (https://github.com/danielrispler/Falinks/issues/321#issuecomment-6492980442, "Hook payloads").
 
-use studio_core::{CardRequest, Output, Step, Studio};
+use studio_core::{Step, Studio};
 
 fn replay(log: &str) -> Studio {
     let mut studio = Studio::default();
@@ -127,94 +127,4 @@ fn nothing_is_selected_until_daniel_clicks() {
     studio.select(PROBE);
 
     assert_eq!(studio.selected().map(|s| s.id.as_str()), Some(PROBE));
-}
-
-/// The card requests the core makes when every line arrives live.
-fn live(log: &str) -> Vec<CardRequest> {
-    restart_after(log, 0)
-}
-
-#[test]
-fn a_waits_first_edit_gets_a_card_and_its_later_edits_do_not() {
-    let cards = live(include_str!("fixtures/first-edit.jsonl"));
-
-    assert_eq!(
-        cards,
-        [CardRequest {
-            session_id: "5b9e3d71-0c2a-4f8e-b6d4-8a1c3e5f7092".into(),
-            tool_use_id: "toolu_01Gw2Ec4Hs6Lj8Mx0Pz2Br4D".into(),
-            step: Step {
-                tool: "Edit".into(),
-                detail: Some("apps/studio/core/src/lib.rs".into()),
-            },
-            change: concat!(
-                "@@ -57,3 +57,3 @@\n",
-                "         return Some(relative.unwrap_or(path).into());\n",
-                "     }\n",
-                "-    [\"pattern\", \"url\", \"query\", \"description\"]\n",
-                "+    [\"pattern\", \"url\", \"query\", \"description\", \"prompt\"]\n",
-            )
-            .into(),
-            check: None,
-        }]
-    );
-}
-
-#[test]
-fn plan_files_plan_approvals_questions_and_read_only_commands_get_no_card() {
-    let log = include_str!("fixtures/ask-then-plan.jsonl");
-    let lines: Vec<&str> = log.lines().collect();
-    let before_the_edit = lines[..15].join("\n");
-
-    assert_eq!(live(&before_the_edit), []);
-    let steps: Vec<Step> = live(log).into_iter().map(|card| card.step).collect();
-    assert_eq!(steps, [step("Edit", Some("README.md")).unwrap()]);
-}
-
-#[test]
-fn answering_a_permission_keeps_the_wait_so_the_next_edit_gets_no_card() {
-    let cards = live(include_str!("fixtures/permission-write-then-edit.jsonl"));
-
-    let steps: Vec<(Step, String)> = cards.into_iter().map(|c| (c.step, c.change)).collect();
-    let new_file = (step("Write", Some("probe.txt")).unwrap(), "+probe\n".into());
-    assert_eq!(steps, [new_file]);
-}
-
-#[test]
-fn a_new_prompt_after_an_interrupt_opens_a_new_wait_with_its_own_card() {
-    let cards = live(include_str!("fixtures/interrupt-then-prompt.jsonl"));
-
-    let steps: Vec<Step> = cards.into_iter().map(|card| card.step).collect();
-    let lib = step("Edit", Some("apps/studio/core/src/lib.rs")).unwrap();
-    let tests = step("Edit", Some("apps/studio/core/tests/replay.rs")).unwrap();
-    assert_eq!(steps, [lib, tests]);
-}
-
-/// The card requests after an app start that replays the first `replayed` lines of the log and then
-/// gets the rest live.
-fn restart_after(log: &str, replayed: usize) -> Vec<CardRequest> {
-    let lines: Vec<&str> = log.lines().collect();
-    let mut studio = replay(&lines[..replayed].join("\n"));
-    lines[replayed..]
-        .iter()
-        .flat_map(|line| studio.apply(line))
-        .filter_map(|output| match output {
-            Output::Card(request) => Some(request),
-            _ => None,
-        })
-        .collect()
-}
-
-#[test]
-fn a_restart_mid_wait_gives_no_second_card_and_a_replay_gives_none() {
-    let log = include_str!("fixtures/first-edit.jsonl");
-    let edit = step("Edit", Some("apps/studio/core/src/lib.rs")).unwrap();
-    let carded = |replayed| -> Vec<Step> {
-        let cards = restart_after(log, replayed);
-        cards.into_iter().map(|card| card.step).collect()
-    };
-
-    assert_eq!(carded(log.lines().count()), []);
-    assert_eq!(carded(7), []);
-    assert_eq!(carded(5), [edit]);
 }

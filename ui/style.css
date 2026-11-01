@@ -46,6 +46,10 @@ code:empty { display: none; }
 .card h2 { font-size: 14px; font-weight: 600; color: var(--muted); margin: 12px 0 0; }
 .card h2 + p { margin-top: 2px; }
 .verdict { font-weight: 600; }
+/* A check line: its outcome, then its command. */
+.checks { list-style: none; margin: 0; padding: 0; }
+.checks li { display: flex; gap: 8px; align-items: baseline; min-width: 0; margin: 0 0 4px; }
+.checks .outcome { font-weight: 600; flex: none; min-width: 52px; }
 /* "Will it pass?": two neutral taps, since colour is only for "needs you". */
 .guess { background: var(--code); border-radius: 8px; padding: 10px 12px; margin: 14px 0 0; font-size: 16px; }
 .guess p { margin: 0; }

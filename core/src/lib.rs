@@ -17,10 +17,8 @@ pub struct Studio {
     selected: Option<String>,
     /// The shell's latest tick, in Unix milliseconds.
     now: u64,
-    /// Sessions in a wait that has not had its card step yet.
-    awaiting_card: HashSet<String>,
-    /// Steps that already have a card in the card store, by `tool_use_id`.
-    carded: HashSet<String>,
+    /// Sessions in a wait that has not raised its guess prompt yet.
+    unguessed: HashSet<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -38,6 +36,9 @@ pub struct Session {
     last_event_at: u64,
     /// The open guess prompt: its check started and its result has not arrived.
     pub guess: Option<GuessPrompt>,
+    /// The checks that ran, oldest first: pass or fail lines in the session's timeline (#369,
+    /// decision 14).
+    pub checks: Vec<CheckLine>,
     /// The tool calls whose `PreToolUse` landed and whose `PostToolUse` has not.
     #[serde(skip)]
     running: Vec<Call>,
@@ -125,16 +126,16 @@ pub struct Step {
 /// What the shell must act on after a live event.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub enum Output {
-    /// A card step finished; ask the card writer.
+    /// A session's worktree changed since its last card; ask the card writer.
     Card(CardRequest),
-    /// A check that is the wait's card step started: ask "Will it pass?".
+    /// The wait's first check started: ask "Will it pass?".
     Guess(GuessPrompt),
     /// A session newly needs Daniel.
     NeedsYou { session_id: String },
 }
 
-/// "Will it pass?" on a check that is the wait's card step (#328, module 3, "Guesses"). It is open
-/// from the check's `PreToolUse` until its result arrives.
+/// "Will it pass?" on the wait's first check (#328, module 3, "Guesses"). It is open from the
+/// check's `PreToolUse` until its result arrives.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct GuessPrompt {
     pub session_id: String,
@@ -145,20 +146,47 @@ pub struct GuessPrompt {
     pub guess: Option<bool>,
 }
 
-/// A finished card step, with what the card writer needs: the step's change, not the whole payload.
-/// The card store keeps it with its card.
+/// A session's change since its last card (#369, decision 10), with what the card writer needs: the
+/// diff, not the payloads. The card store keeps it with its card.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CardRequest {
     pub session_id: String,
-    /// The step's tool call, which names the card.
-    pub tool_use_id: String,
-    pub step: Step,
-    /// The diff lines of an edit, a new file's content as added lines, the diff of the files a Bash
-    /// step changed, or a check's output.
+    /// Names the card: its session, `@`, and when the hook received the `Stop` it was written at.
+    pub id: String,
+    pub base: Base,
+    /// The diff of each file that changed since the base, commits included.
     pub change: String,
-    /// What settles the guess on a check, with the card writer's verdict; `None` for other steps.
+    /// What settled a guess on a check's card. Checks are lines now, so it is `None`.
+    // shortcut: kept for the store's settling and `weekly` until #375 replaces the guess.
     #[serde(default)]
     pub check: Option<Check>,
+}
+
+/// A check that ran, shown as a pass or fail line.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct CheckLine {
+    /// The command's first line.
+    pub command: String,
+    /// Whether it passed, when its exit code tells, and Daniel's tap.
+    pub check: Check,
+}
+
+/// The worktree a card's change starts from (#369, decision 10): the session's previous card, or its
+/// prompt.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Base {
+    /// `HEAD`'s sha, or `None` before the first commit.
+    pub head: Option<String>,
+    /// The files `git status` listed, whose content the fingerprint kept in memory.
+    pub files: Vec<String>,
+}
+
+/// A worktree's change since its base, as the shell's fingerprint finds it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Change {
+    pub base: Base,
+    /// The diff of each file that changed, commits included.
+    pub diff: String,
 }
 
 /// A check's guess and exit code (#328, module 4, "Settling a guess").
@@ -192,8 +220,6 @@ struct Event {
     tool_input: Value,
     #[serde(default)]
     tool_use_id: String,
-    #[serde(default)]
-    tool_response: Value,
     /// A failed call's error, which for a command that ran holds its exit code and output.
     #[serde(default)]
     error: String,
@@ -258,29 +284,6 @@ fn step_detail(input: &Value, cwd: &str) -> Option<String> {
         .map(Into::into)
 }
 
-/// A card step's change, or `None` for any other step. The card steps this version knows: an Edit
-/// or Write outside the plan files (`~/.claude/plans/`), and a Bash command that does not start with
-/// `git` and changed the worktree, which the shell's fingerprint tells. A check is the card step from
-/// its `PreToolUse` instead (`is_check`).
-fn card_change(
-    tool: &str,
-    input: &Value,
-    response: &Value,
-    worktree_change: Option<String>,
-) -> Option<String> {
-    let plan_file = input["file_path"]
-        .as_str()
-        .is_some_and(|path| path.contains("/.claude/plans/"));
-    let git = input["command"]
-        .as_str()
-        .is_some_and(|command| command.split_whitespace().next() == Some("git"));
-    match tool {
-        "Edit" | "Write" if !plan_file => Some(change(response)),
-        "Bash" if !git => worktree_change,
-        _ => None,
-    }
-}
-
 /// A command that runs a check from the check list (#328, module 3): `cargo
 /// test|nextest|clippy|check|build`, `ci-checks`, `go test|vet`, with any flags or toolchain before
 /// the subcommand (`cargo +nightly test`). Quoted text is not run, so a PR body that names `cargo
@@ -328,39 +331,6 @@ fn runs_check(tool: &str, input: &Value) -> bool {
         && is_check(input["command"].as_str().unwrap_or_default())
 }
 
-/// An edit's change from its result: the patch's hunks, or a new file's content, which has none.
-fn change(response: &Value) -> String {
-    let hunks = response["structuredPatch"].as_array().into_iter().flatten();
-    let patch: String = hunks
-        .map(|hunk| {
-            let lines = hunk["lines"].as_array().into_iter().flatten();
-            let lines: String = lines
-                .map(|line| format!("{}\n", line.as_str().unwrap_or_default()))
-                .collect();
-            let (old, old_lines) = (&hunk["oldStart"], &hunk["oldLines"]);
-            let (new, new_lines) = (&hunk["newStart"], &hunk["newLines"]);
-            format!("@@ -{old},{old_lines} +{new},{new_lines} @@\n{lines}")
-        })
-        .collect();
-    if !patch.is_empty() {
-        return patch;
-    }
-    let content = response["content"].as_str().unwrap_or_default().lines();
-    content.map(|line| format!("+{line}\n")).collect()
-}
-
-/// A finished command's output, or its error when it failed.
-fn output(response: &Value, error: &str) -> String {
-    if !error.is_empty() {
-        return error.into();
-    }
-    let streams = [&response["stdout"], &response["stderr"]];
-    let streams = streams
-        .iter()
-        .filter_map(|s| s.as_str().filter(|s| !s.is_empty()));
-    streams.collect::<Vec<_>>().join("\n")
-}
-
 /// Whether a check's exit code says whether it passed (#328, module 4). A command exits with its
 /// last statement's code, so the check must be the last statement, and nothing in it may mask the
 /// code: `|| true` exits 0, `!` flips it, `&` runs the check in the background, and a pipe exits
@@ -385,27 +355,33 @@ fn exit_code_counts(command: &str) -> bool {
 }
 
 impl Studio {
-    /// The folder whose worktree the shell fingerprints (#328, module 5) before it applies this live
-    /// line, or `None`. It takes one at a prompt, so the wait's first step is compared with the
-    /// worktree as Daniel left it rather than with what he changed himself since the last wait, and
-    /// at each step's end while the wait has not had its card step, so a Bash step is compared with
-    /// the step before it.
-    pub fn fingerprint_folder(&self, line: &str) -> Option<String> {
+    /// The session, and the folder whose worktree the shell fingerprints for it (#328, module 5),
+    /// before it applies this live line, or `None` (#369, decision 10). At a prompt, the fingerprint
+    /// is the prompt's base, so what Daniel changed himself since the last card does not count. A
+    /// prompt inside a turn still open takes none: an interrupt fires no `Stop`, and a wake-up can
+    /// land mid-turn, so that turn's change stays in its card. At `Stop`, the fingerprint's change
+    /// since the base is the card's, and it is the next card's base.
+    pub fn fingerprint_folder(&self, line: &str) -> Option<(String, String)> {
         let event = serde_json::from_str::<Event>(line).ok()?;
         let at = match event.hook_event_name.as_str() {
-            "UserPromptSubmit" => true,
-            "PostToolUse" | "PostToolUseFailure" => self.awaiting_card.contains(&event.session_id),
+            "UserPromptSubmit" => !self.in_turn(&event.session_id),
+            "Stop" => true,
             _ => false,
         };
-        (at && !event.cwd.is_empty()).then_some(event.cwd)
+        (at && !event.cwd.is_empty()).then_some((event.session_id, event.cwd))
     }
 
-    /// The folders of the sessions in a wait that has not had its card step. After a replay the
-    /// shell fingerprints them once, so a restart mid-wait leaves the wait's next Bash step a record
-    /// to compare with.
-    pub fn waiting_folders(&self) -> impl Iterator<Item = &str> {
-        let waiting = self.awaiting_card.iter();
-        waiting.filter_map(|id| Some(self.sessions.get(id)?.cwd.as_str()))
+    /// Whether session `id` is in a turn: prompted, and neither stopped nor ended since.
+    fn in_turn(&self, id: &str) -> bool {
+        let session = self.sessions.get(id);
+        session.is_some_and(|s| !s.turn_ended && !s.ended)
+    }
+
+    /// The sessions in a turn, with their folders. After a replay the shell fingerprints them once,
+    /// so a restart mid-turn leaves the turn's `Stop` a base to compare with.
+    pub fn waiting_folders(&self) -> impl Iterator<Item = (&str, &str)> {
+        let waiting = self.sessions.values().filter(|s| self.in_turn(&s.id));
+        waiting.map(|s| (s.id.as_str(), s.cwd.as_str()))
     }
 
     /// Takes one live event log line that the shell took no fingerprint for, and returns what the
@@ -414,14 +390,10 @@ impl Studio {
         self.apply_with_change(line, None)
     }
 
-    /// Takes one live event log line, with what the shell's fingerprint after it found: the diff of
-    /// the files that changed since the previous fingerprint, or `None` when nothing changed or the
-    /// shell took none. Returns what the shell must do. A line that is not a hook event is skipped.
-    pub fn apply_with_change(
-        &mut self,
-        line: &str,
-        worktree_change: Option<String>,
-    ) -> Vec<Output> {
+    /// Takes one live event log line, with what the shell's fingerprint before it found: the
+    /// worktree's change since the session's base, or `None` when nothing changed or the shell took
+    /// none. Returns what the shell must do. A line that is not a hook event is skipped.
+    pub fn apply_with_change(&mut self, line: &str, change: Option<Change>) -> Vec<Output> {
         let Ok(event) = serde_json::from_str::<Event>(line) else {
             return Vec::new();
         };
@@ -436,6 +408,7 @@ impl Studio {
                 started_at: event.studio_received_ms,
                 last_event_at: 0,
                 guess: None,
+                checks: Vec::new(),
                 running: Vec::new(),
                 blocks: Vec::new(),
                 asked: false,
@@ -454,23 +427,32 @@ impl Studio {
         match event.hook_event_name.as_str() {
             // A prompt opens a wait, also after an interrupt, which fires no `Stop`.
             "UserPromptSubmit" => {
-                self.awaiting_card.insert(event.session_id.clone());
+                self.unguessed.insert(event.session_id.clone());
                 session.unblock();
                 session.turn_ended = false;
                 session.guess = None;
             }
             // A turn that ended ran all its calls, so a prompt still open lost its result.
             "Stop" => {
-                self.awaiting_card.remove(&event.session_id);
+                self.unguessed.remove(&event.session_id);
                 session.guess = None;
                 // The order on `Stop`: clear every block first, then ask if the message asks.
                 session.unblock();
                 session.turn_ended = true;
                 blocked_before = false;
                 session.asked = asks(&event.last_assistant_message);
+                if let Some(Change { base, diff }) = change {
+                    outputs.push(Output::Card(CardRequest {
+                        session_id: event.session_id.clone(),
+                        id: format!("{}@{}", event.session_id, event.studio_received_ms),
+                        base,
+                        change: diff,
+                        check: None,
+                    }));
+                }
             }
             "SessionEnd" => {
-                self.awaiting_card.remove(&event.session_id);
+                self.unguessed.remove(&event.session_id);
                 session.unblock();
                 session.turn_ended = true;
                 session.ended = true;
@@ -487,10 +469,8 @@ impl Studio {
                     detail: step_detail(&event.tool_input, &event.cwd),
                 };
                 session.last_step = Some(step.clone());
-                // A check is the wait's card step from its start, so its prompt comes before its
-                // result.
-                if runs_check(&tool, &event.tool_input)
-                    && self.awaiting_card.remove(&event.session_id)
+                // The prompt comes at the check's start, before its result.
+                if runs_check(&tool, &event.tool_input) && self.unguessed.remove(&event.session_id)
                 {
                     let prompt = GuessPrompt {
                         session_id: event.session_id.clone(),
@@ -546,41 +526,23 @@ impl Studio {
                 let guessed = session
                     .guess
                     .take_if(|p| p.tool_use_id == event.tool_use_id);
-                let card = if !ran {
-                    // A check that did not run leaves the wait's card step to a later step.
+                if !ran {
+                    // A check that did not run leaves the wait's guess to a later check.
                     if guessed.is_some() {
-                        self.awaiting_card.insert(event.session_id.clone());
+                        self.unguessed.insert(event.session_id.clone());
                     }
-                    None
-                // A check gets its card whether it passed or failed. The hooks are async, so a fast
-                // check's result can land before its start: it takes the card step with no guess.
-                } else if guessed.is_some()
-                    || (runs_check(&tool, input) && self.awaiting_card.remove(&event.session_id))
-                {
+                // A check gets its line whether it passed or failed. The hooks are async, so a fast
+                // check's result can land before its start: it takes the wait's guess with none.
+                } else if runs_check(&tool, input) {
+                    self.unguessed.remove(&event.session_id);
                     let command = input["command"].as_str().unwrap_or_default();
-                    let check = Check {
-                        guess: guessed.and_then(|prompt| prompt.guess),
-                        exit_passed: exit_code_counts(command).then_some(!failed),
-                    };
-                    Some((output(&event.tool_response, &event.error), Some(check)))
-                } else if let Some(change) =
-                    card_change(&tool, input, &event.tool_response, worktree_change)
-                        .or_else(|| self.carded.remove(&event.tool_use_id).then(String::new))
-                    && self.awaiting_card.remove(&event.session_id)
-                {
-                    Some((change, None))
-                } else {
-                    None
-                };
-                if let Some((change, check)) = card {
-                    let detail = step_detail(input, &event.cwd);
-                    outputs.push(Output::Card(CardRequest {
-                        session_id: event.session_id.clone(),
-                        tool_use_id: event.tool_use_id,
-                        step: Step { tool, detail },
-                        change,
-                        check,
-                    }));
+                    session.checks.push(CheckLine {
+                        command: command.lines().next().unwrap_or_default().into(),
+                        check: Check {
+                            guess: guessed.and_then(|prompt| prompt.guess),
+                            exit_passed: exit_code_counts(command).then_some(!failed),
+                        },
+                    });
                 }
             }
             _ => {}
@@ -603,16 +565,9 @@ impl Studio {
     }
 
     /// Takes one event log line replayed at app start. It updates state exactly like `apply` and
-    /// requests nothing, so steps that ran while the app was down get no cards and no notices.
+    /// requests nothing, so turns that ended while the app was down get no cards and no notices.
     pub fn replay(&mut self, line: &str) {
         self.apply(line);
-    }
-
-    /// The steps that already have a card in the card store, by `tool_use_id`, a fact from the shell
-    /// at start. A replayed Bash step gets no fingerprint, so this is how one that had its card still
-    /// takes its wait's card step, and a restart mid-wait gives no second card.
-    pub fn set_carded_steps(&mut self, tool_use_ids: impl IntoIterator<Item = String>) {
-        self.carded.extend(tool_use_ids);
     }
 
     /// Daniel's tap, yes or no, on the guess prompt of check `tool_use_id`, a fact from the shell. A

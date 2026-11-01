@@ -1,6 +1,5 @@
 //! The understanding layer's I/O, which the core leaves to the shell: the card writer (#328,
 //! module 4), the worktree fingerprint (module 5), and the card store and its weekly rates (module 6).
-
 use serde::{Deserialize, Serialize};
 use std::{
     path::{Path, PathBuf},
@@ -15,17 +14,17 @@ pub use fingerprint::Fingerprints;
 pub use store::{CardStore, Outcome, SessionCards, StoredCard, millis};
 pub use week::{Rate, Week, week};
 
-/// A card on one step, in Hebrew; code stays in English, and code inside the Hebrew text is in
+/// A card on a change, in Hebrew; code stays in English, and code inside the Hebrew text is in
 /// backticks. It opens with the question; the rest shows when Daniel taps.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Card {
     pub question: String,
     pub answer: String,
     // The fields below default to empty, so cards stored before they existed still load.
-    /// The files the step changed.
+    /// The files the change touched.
     #[serde(default)]
     pub paths: Vec<String>,
-    /// The step's real code: the lines of its change that matter most.
+    /// The change's real code: the lines that matter most.
     #[serde(default)]
     pub code: String,
     #[serde(default)]
@@ -57,24 +56,40 @@ impl Card {
     }
 }
 
-/// Writes the card on a finished card step.
+/// Writes the card on a session's change since its last card.
 pub trait CardWriter {
-    /// The card, or `None` when the writer's output does not parse.
-    fn write(&self, request: &CardRequest) -> Option<Card>;
+    /// The card, or one line for the log when the writer's output does not parse.
+    fn write(&self, request: &CardRequest) -> Result<Card, String>;
 }
 
-/// Writes a fixed Hebrew card that shows the step's change, so the app can run without `claude -p`.
+/// The card on `request` from `writer`, which is asked once more when it fails (#369, decision 12).
+/// When both fail, the error is one line for the shell's log.
+pub fn write_card(
+    writer: &(impl CardWriter + ?Sized),
+    request: &CardRequest,
+) -> Result<Card, String> {
+    let card = writer.write(request).or_else(|_| writer.write(request));
+    card.map_err(|line| format!("no card on {}: {line}", request.id))
+}
+
+/// Writes a fixed Hebrew card that shows the change, so the app can run without `claude -p`.
 pub struct FakeWriter;
 
 impl CardWriter for FakeWriter {
-    fn write(&self, request: &CardRequest) -> Option<Card> {
-        let what = request.step.detail.as_deref().unwrap_or(&request.step.tool);
-        Some(Card {
-            question: format!("למה הסוכן שינה את `{what}`?"),
+    fn write(&self, request: &CardRequest) -> Result<Card, String> {
+        let paths: Vec<String> = request
+            .change
+            .lines()
+            .filter_map(|line| line.strip_prefix("+++ b/"))
+            .map(Into::into)
+            .collect();
+        Ok(Card {
+            question: format!("למה הסוכן שינה את `{}`?", paths.join("`, `")),
             answer: "כרטיס לדוגמה של הכותב המזויף, שלא קורא את הקוד. השינוי עצמו למטה.".into(),
-            paths: request.step.detail.iter().cloned().collect(),
+            paths,
             code: request.change.clone(),
-            why_it_matters: "כאן יופיע למה הצעד חשוב, עם קוד בתוך הטקסט כמו `if a <= b {`.".into(),
+            why_it_matters: "כאן יופיע למה השינוי חשוב, עם קוד בתוך הטקסט כמו `if a <= b {`."
+                .into(),
             not_checked: "לא נבדק: כלום, זה כרטיס לדוגמה.".into(),
             passed: None,
         })
@@ -111,28 +126,18 @@ impl ClaudeWriter {
         Self { program, folder }
     }
 
-    /// The `claude -p` run for one step. Without the two variables and without `--bare`, `claude`
+    /// The `claude -p` run for one change. Without the two variables and without `--bare`, `claude`
     /// uses the subscription login (#320, "Fact"); the studio never reads that login itself. The
     /// change is untrusted text, so the run has no tools and no MCP servers, whatever Daniel's
     /// settings allow. It also runs without the studio plugin, so its session sends no hook events.
     pub fn command(&self, request: &CardRequest) -> Command {
-        let step = &request.step;
-        let detail = step.detail.as_deref().unwrap_or_default();
-        // A check's input is its command and its result, not a change.
-        let (check, input) = match request.check {
-            Some(_) => (CHECK, "Result"),
-            None => ("", "Change"),
-        };
         let change = &request.change;
         let kept = &change[..change.floor_char_boundary(MAX_CHANGE)];
         let cut = match change.len() - kept.len() {
             0 => String::new(),
             bytes => format!("\n[{bytes} more bytes cut]"),
         };
-        let prompt = format!(
-            "{PROMPT}{check}\nStep: {} {detail}\n{input}:\n{kept}{cut}",
-            step.tool
-        );
+        let prompt = format!("{PROMPT}\nChange:\n{kept}{cut}");
         let mut command = Command::new(&self.program);
         command
             // `--tools` takes several values, so an option must follow it.
@@ -146,43 +151,34 @@ impl ClaudeWriter {
 }
 
 impl CardWriter for ClaudeWriter {
-    /// Runs `claude -p`, which takes seconds, so the shell calls it off its log thread. A step with
-    /// no card logs one line on stderr.
+    /// Runs `claude -p`, which takes seconds, so the shell calls it off its log thread.
     // shortcut: no timeout, as in v0; add one if a stuck `claude -p` ever holds a card back.
-    fn write(&self, request: &CardRequest) -> Option<Card> {
-        let card = match self.command(request).output() {
+    fn write(&self, request: &CardRequest) -> Result<Card, String> {
+        match self.command(request).output() {
             Ok(output) => Card::from_reply(&String::from_utf8_lossy(&output.stdout)),
             Err(error) => Err(format!("`claude -p` did not start: {error}")),
-        };
-        card.inspect_err(|line| eprintln!("no card on {}: {line}", request.tool_use_id))
-            .ok()
+        }
     }
 }
 
-/// The most of a step's change the writer gets: 64 KiB. The lines that matter fit, a huge new file
-/// or log costs no more, and the prompt stays far under macOS's 1 MiB limit on a command's arguments.
+/// The most of a change the writer gets: 64 KiB. The lines that matter fit, a huge new file or log
+/// costs no more, and the prompt stays far under macOS's 1 MiB limit on a command's arguments.
 const MAX_CHANGE: usize = 64 << 10;
 
-/// The card writer's instructions. Its input is only the step and its change, not the whole payload
-/// (v0 note, proposal 8).
-const PROMPT: &str = r#"You write one card that teaches a developer about one step a coding agent took while he waited on it. The card opens with a question he tries to answer before he taps to see the answer.
+/// The card writer's instructions. Its input is only the change, not the payloads (v0 note,
+/// proposal 8).
+const PROMPT: &str = r#"You write one card that teaches a developer about the change a coding agent made to his code while he waited on it, since the previous card. The card opens with a question he tries to answer before he taps to see the answer.
 
-Ask why the agent took this step, and answer from the change below. Use only this input: do not use tools or read files.
+Ask why the agent made this change, and answer from the diff below. Use only this input: do not use tools or read files.
 
 Write question, answer, why_it_matters and not_checked in Hebrew, in plain words. Code, code terms, file paths and commands stay in English; inside Hebrew text, wrap each of them in backticks.
 
 Reply with one JSON object and nothing else:
 {"question": string, "answer": string, "paths": [string], "code": string, "why_it_matters": string, "not_checked": string}
-- question: why the agent took this step, in one sentence.
+- question: why the agent made this change, in one sentence.
 - answer: the reason, in at most three sentences.
-- paths: the files the step changed.
+- paths: the files the change touched.
 - code: the lines of the change that matter most, copied from it, at most 12.
-- why_it_matters: what the step changes for the code, in one or two sentences.
-- not_checked: one thing the step's result does not show.
-"#;
-
-/// What the card writer adds for a check: its verdict, which settles Daniel's guess (#328, module 4).
-const CHECK: &str = r#"
-This step is a check: a command that tests the code. The input below is its command and its output, not a change. For paths, give the files the output names; for code, the output lines that matter most.
-Add one more key, "passed": true if the output shows the check passed, false if it shows it failed, or "unknown" if it shows neither.
+- why_it_matters: what the change does for the code, in one or two sentences.
+- not_checked: one thing the diff does not show.
 "#;

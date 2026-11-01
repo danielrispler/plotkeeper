@@ -1,21 +1,20 @@
-//! The card writer (#328, Testing Decisions): the real `claude -p` command is checked without
-//! running it, and the cards come from its reply.
+//! The card writer (#328 and #369, Testing Decisions): the real `claude -p` command is checked
+//! without running it, the cards come from its reply, and a fake that fails is retried.
 
-use std::{ffi::OsStr, fs, os::unix::fs::PermissionsExt, path::Path};
-use studio_core::{CardRequest, Check, Step};
-use studio_understanding::{Card, ClaudeWriter, find_claude};
+use std::{cell::Cell, ffi::OsStr, fs, os::unix::fs::PermissionsExt, path::Path};
+use studio_core::{Base, CardRequest};
+use studio_understanding::{Card, CardWriter, ClaudeWriter, FakeWriter, find_claude, write_card};
 
 const CLAUDE: &str = "/opt/homebrew/bin/claude";
 
 fn edit() -> CardRequest {
     CardRequest {
         session_id: "2c7a9f14-6e3b-4d58-a1c9-0f8e2b7d4a63".into(),
-        tool_use_id: "toolu_01Hc4Xe7Lm2Qp9Rs5Tv8Wy3Z".into(),
-        step: Step {
-            tool: "Edit".into(),
-            detail: Some("apps/studio/ui/style.css".into()),
-        },
+        id: "2c7a9f14-6e3b-4d58-a1c9-0f8e2b7d4a63@1793263024310".into(),
+        base: Base::default(),
         change: concat!(
+            "--- a/apps/studio/ui/style.css\n",
+            "+++ b/apps/studio/ui/style.css\n",
             "@@ -9,1 +9,1 @@\n",
             "-.unchecked { font-size:12px; }\n",
             "+.unchecked { font-size:15px; }\n",
@@ -23,6 +22,47 @@ fn edit() -> CardRequest {
         .into(),
         check: None,
     }
+}
+
+/// A fake writer whose first `fails` calls fail, as a reply that does not parse.
+struct Failing {
+    fails: usize,
+    calls: Cell<usize>,
+}
+
+impl CardWriter for Failing {
+    fn write(&self, request: &CardRequest) -> Result<Card, String> {
+        self.calls.set(self.calls.get() + 1);
+        if self.calls.get() <= self.fails {
+            return Card::from_reply("Shall I read the file?");
+        }
+        FakeWriter.write(request)
+    }
+}
+
+#[test]
+fn a_writer_that_fails_once_gives_the_card_on_its_retry() {
+    let writer = Failing {
+        fails: 1,
+        calls: Cell::new(0),
+    };
+
+    assert!(write_card(&writer, &edit()).is_ok());
+    assert_eq!(writer.calls.get(), 2);
+}
+
+#[test]
+fn a_writer_that_fails_twice_gives_no_card_and_one_log_line() {
+    let writer = Failing {
+        fails: usize::MAX,
+        calls: Cell::new(0),
+    };
+
+    let line = write_card(&writer, &edit()).expect_err("no card");
+
+    assert_eq!(writer.calls.get(), 2);
+    assert_eq!(line.lines().count(), 1, "{line}");
+    assert!(line.contains(&edit().id), "{line}");
 }
 
 #[test]
@@ -51,9 +91,8 @@ fn the_real_writer_runs_claude_on_the_subscription_in_its_neutral_folder() {
     assert_eq!(args[..4], ["--tools", "", "--strict-mcp-config", "-p"]);
     assert!(!args.contains(&"--bare"));
     let prompt = args[4];
-    assert!(prompt.contains("why the agent took this step"));
-    assert!(prompt.contains("Edit apps/studio/ui/style.css"));
-    assert!(prompt.contains(&edit().change));
+    assert!(prompt.contains("why the agent made this change"));
+    assert!(prompt.ends_with(&format!("\nChange:\n{}", edit().change)));
     assert_eq!(command.get_current_dir(), Some(folder));
 }
 
@@ -125,35 +164,6 @@ fn a_reply_with_one_json_object_gives_the_card_even_in_a_code_fence() {
             passed: None,
         })
     );
-}
-
-fn check() -> CardRequest {
-    CardRequest {
-        session_id: "a3e6c9f2-1b4d-4e7a-8c0f-5d2b9e6a3c18".into(),
-        tool_use_id: "toolu_01Uy4Ka9Lo3Pv6Bs1Dc8Fh5R".into(),
-        step: Step {
-            tool: "Bash".into(),
-            detail: Some("cargo test 2>&1 | tail -5".into()),
-        },
-        change: "test result: FAILED. 11 passed; 1 failed; 0 ignored".into(),
-        check: Some(Check {
-            guess: Some(true),
-            exit_passed: None,
-        }),
-    }
-}
-
-#[test]
-fn a_checks_card_writer_gets_its_command_and_result_and_says_whether_it_passed() {
-    let folder = Path::new("/h/Library/Application Support/dev.falinks.studio/card-writer");
-    let command = ClaudeWriter::new(CLAUDE.into(), folder.into()).command(&check());
-
-    let prompt = command.get_args().last().unwrap().to_str().unwrap();
-    assert!(prompt.contains("Bash cargo test 2>&1 | tail -5\nResult:\n"));
-    assert!(prompt.contains(&check().change));
-    assert!(prompt.contains(r#""passed""#));
-    // Daniel's guess is never part of the writer's input.
-    assert!(!prompt.contains("guess"));
 }
 
 #[test]

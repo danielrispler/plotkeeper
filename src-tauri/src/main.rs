@@ -1,10 +1,11 @@
 //! The studio app's shell (#328, module 9). At start it replays the whole event log through the
 //! core, then feeds it each new line live and hands the core's card requests to the card writer. The
 //! window lists every session (#369, decision 18) and shows the one Daniel selected: its guess
-//! prompt on its check, and its cards, which the card store keeps on disk. A session that newly
-//! needs Daniel gets a macOS notification while the window is not focused.
+//! prompt on its check, its cards, which the card store keeps on disk, and its check lines. A
+//! session that newly needs Daniel gets a macOS notification while the window is not focused.
 
 use std::{
+    collections::HashMap,
     fs::{self, File},
     io::{self, BufRead, BufReader, Seek, SeekFrom},
     path::Path,
@@ -15,7 +16,7 @@ use std::{
 use studio_core::{Output, Session, Studio};
 use studio_understanding::{
     CardStore, CardWriter, ClaudeWriter, FakeWriter, Fingerprints, SessionCards, find_claude,
-    millis,
+    millis, write_card,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
@@ -60,16 +61,16 @@ fn cards(studio: State<Mutex<Studio>>, cards: State<Cards>) -> SessionCards {
     }
 }
 
-/// The pane drew the question of the card on step `tool_use_id` in a visible window.
+/// The pane drew the question of card `id` in a visible window.
 #[tauri::command]
-fn shown(tool_use_id: String, cards: State<Cards>) {
-    unsaved(cards.lock().unwrap().show(&tool_use_id, millis()));
+fn shown(id: String, cards: State<Cards>) {
+    unsaved(cards.lock().unwrap().show(&id, millis()));
 }
 
-/// Daniel revealed the answer of the card on step `tool_use_id`.
+/// Daniel revealed the answer of card `id`.
 #[tauri::command]
-fn reveal(tool_use_id: String, cards: State<Cards>) {
-    unsaved(cards.lock().unwrap().reveal(&tool_use_id, millis()));
+fn reveal(id: String, cards: State<Cards>) {
+    unsaved(cards.lock().unwrap().reveal(&id, millis()));
 }
 
 /// Logs a card store change that could not be saved; it stays in memory until the next save.
@@ -98,12 +99,7 @@ fn main() {
     // The card writer's neutral folder, beside the log.
     let folder = log.with_file_name("card-writer");
     fs::create_dir_all(&folder).expect("create the card writer's folder");
-    let mut studio = Studio::default();
-    let carded = store
-        .cards()
-        .iter()
-        .map(|kept| kept.request.tool_use_id.clone());
-    studio.set_carded_steps(carded);
+    let studio = Studio::default();
     let writer: Writer = match std::env::var("STUDIO_CARD_WRITER").as_deref() {
         Ok("fake") => Arc::new(FakeWriter),
         _ => {
@@ -136,7 +132,8 @@ fn main() {
 fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
     let mut read_to = 0;
     let mut live = false;
-    let mut fingerprints = Fingerprints::default();
+    // Each session's own, so another session's prompt in the same worktree moves no base.
+    let mut fingerprints = HashMap::<String, Fingerprints>::new();
     let mut drawn_cards = None;
     loop {
         let state = app.state::<Mutex<Studio>>();
@@ -154,28 +151,32 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                 read_to += line.len() as u64;
                 let text = String::from_utf8_lossy(&line);
                 if live {
-                    // shortcut: fingerprints when the line is read, up to one poll after the step, so
-                    // a step that starts in between counts toward this one; take the fingerprint in
-                    // the hook if a card ever explains the wrong step.
-                    let folder = state.lock().unwrap().fingerprint_folder(&text);
-                    let change = folder.and_then(|folder| fingerprints.take(Path::new(&folder)));
+                    // shortcut: fingerprints when the line is read, up to one poll after the prompt,
+                    // so an edit in between counts as Daniel's; take the fingerprint in the hook if a
+                    // card ever misses one.
+                    let found = state.lock().unwrap().fingerprint_folder(&text);
+                    let change = found.and_then(|(session, folder)| {
+                        let prints = fingerprints.entry(session).or_default();
+                        prints.take(Path::new(&folder))
+                    });
                     outputs.extend(state.lock().unwrap().apply_with_change(&text, change));
                 } else {
                     state.lock().unwrap().replay(&text);
                 }
                 line.clear();
             }
-            // A worktree's first fingerprint only records it, so the waits still open after the
-            // replay get theirs now, and their next Bash step has something to compare with.
+            // A worktree's first fingerprint only records it, so the turns still open after the
+            // replay get their base now, and their `Stop` has something to compare with.
             if !live {
-                let waiting: Vec<String> = state
+                let waiting: Vec<(String, String)> = state
                     .lock()
                     .unwrap()
                     .waiting_folders()
-                    .map(Into::into)
+                    .map(|(session, folder)| (session.into(), folder.into()))
                     .collect();
-                for folder in waiting {
-                    fingerprints.take(Path::new(&folder));
+                for (session, folder) in waiting {
+                    let prints = fingerprints.entry(session).or_default();
+                    prints.take(Path::new(&folder));
                 }
             }
             for output in outputs {
@@ -184,12 +185,12 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                     // loop below draws it once it is in the store.
                     Output::Card(request) => {
                         let (app, writer) = (app.clone(), writer.clone());
-                        thread::spawn(move || {
-                            let Some(card) = writer.write(&request) else {
-                                return;
-                            };
-                            let store = app.state::<Cards>();
-                            unsaved(store.lock().unwrap().add(request, card, millis()));
+                        thread::spawn(move || match write_card(&*writer, &request) {
+                            Ok(card) => {
+                                let store = app.state::<Cards>();
+                                unsaved(store.lock().unwrap().add(request, card, millis()));
+                            }
+                            Err(line) => eprintln!("studio: {line}"),
                         });
                     }
                     // The pane draws the open prompt from the session, which the "selected" event
