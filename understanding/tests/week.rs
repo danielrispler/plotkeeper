@@ -1,8 +1,8 @@
 //! The weekly check on the questions (#328, module 6; #369, decision 23): the last 7 days' rates,
-//! from Daniel's guesses on the cards' quizzes.
+//! from Daniel's guesses on the cards' quizzes, and his ratings by level and reason.
 
 use studio_core::{Base, CardRequest};
-use studio_understanding::{Card, Guess, Rate, StoredCard, week};
+use studio_understanding::{Card, Guess, Level, Rate, Rating, Reason, StoredCard, week};
 
 /// 2025-10-29, 13:20 UTC.
 const NOW: u64 = 1_761_744_000_000;
@@ -35,6 +35,8 @@ fn record(days: u64, shown: Option<u64>, answered: Option<(u64, bool)>) -> Store
             at: added_at + s * 1000,
         }),
         key_wrong: false,
+        more: None,
+        rating: None,
     }
 }
 
@@ -70,7 +72,47 @@ fn the_rates_count_answers_after_3_s_and_wrong_answers_of_the_last_7_days() {
         rates.to_string(),
         "The 7 days to 2025-10-29:\n\
          thinking rate: 67% (2 of 3 answers came 3 s or more after the question)\n\
-         surprise rate: 50% (2 of 4 answers were wrong)\n"
+         surprise rate: 50% (2 of 4 answers were wrong)\n\
+         ratings: 0 of 5 cards (good 0, fair 0, poor 0)\n\
+         reasons: unclear 0, wrong 0, too shallow 0, too easy 0, the key is wrong 0\n"
+    );
+}
+
+#[test]
+fn the_ratings_of_the_last_7_days_count_by_level_and_reason() {
+    let rated = |days, level: Option<Level>, reasons: &[Reason], key_wrong| StoredCard {
+        rating: level.map(|level| Rating {
+            level,
+            reasons: reasons.to_vec(),
+        }),
+        key_wrong,
+        ..record(days, None, None)
+    };
+    let cards = [
+        rated(
+            1,
+            Some(Level::Poor),
+            &[Reason::Unclear, Reason::TooShallow],
+            true,
+        ),
+        rated(2, Some(Level::Poor), &[Reason::Unclear], false),
+        rated(3, Some(Level::Good), &[Reason::TooEasy], false),
+        // Flagged from the quiz and never rated: the key is wrong all the same.
+        rated(4, None, &[], true),
+        rated(5, None, &[], false),
+        // Eight days ago: last week's.
+        rated(8, Some(Level::Fair), &[Reason::Wrong], true),
+    ];
+
+    let printed = week(&cards, NOW).to_string();
+
+    let ratings: Vec<&str> = printed.lines().skip(3).collect();
+    assert_eq!(
+        ratings,
+        [
+            "ratings: 3 of 5 cards (good 1, fair 0, poor 2)",
+            "reasons: unclear 2, wrong 0, too shallow 1, too easy 1, the key is wrong 2",
+        ]
     );
 }
 
@@ -80,6 +122,8 @@ fn an_empty_store_prints_no_rate() {
         week(&[], NOW).to_string(),
         "The 7 days to 2025-10-29:\n\
          thinking rate: n/a (0 of 0 answers came 3 s or more after the question)\n\
-         surprise rate: n/a (0 of 0 answers were wrong)\n"
+         surprise rate: n/a (0 of 0 answers were wrong)\n\
+         ratings: 0 of 0 cards (good 0, fair 0, poor 0)\n\
+         reasons: unclear 0, wrong 0, too shallow 0, too easy 0, the key is wrong 0\n"
     );
 }

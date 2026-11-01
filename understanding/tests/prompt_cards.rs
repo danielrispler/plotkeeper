@@ -15,6 +15,10 @@ impl CardWriter for Counting {
         self.0.set(self.0.get() + 1);
         FakeWriter.reply(request)
     }
+
+    fn more(&self, request: &CardRequest, card: &Card) -> Result<String, String> {
+        FakeWriter.more(request, card)
+    }
 }
 
 fn git(repo: &Path, args: &[&str]) {

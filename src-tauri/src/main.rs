@@ -1,10 +1,10 @@
 //! The studio app's shell (#328, module 9). At start it replays the whole event log through the
 //! core, then feeds it each new line live and hands the core's card requests to the card writer. The
 //! window lists every session (#369, decision 18) and shows the one Daniel selected: its cards, with
-//! their quizzes and his guesses, which the card store keeps on disk, and its check lines. A
-//! session that newly needs Daniel, a new card and a failed worker raise a macOS notification while
-//! the window is not focused, and the Dock badge counts the sessions that need him (#369, decision
-//! 22).
+//! their quizzes, his guesses, his ratings and the longer explanations he asked for, which the card
+//! store keeps on disk, and its check lines. A session that newly needs Daniel, a new card and a
+//! failed worker raise a macOS notification while the window is not focused, and the Dock badge
+//! counts the sessions that need him (#369, decision 22).
 
 use std::{
     collections::HashMap,
@@ -17,7 +17,7 @@ use std::{
 };
 use studio_core::{Notifications, Output, Session, State::NeedsYou, Studio};
 use studio_understanding::{
-    CardStore, CardWriter, ClaudeWriter, FakeWriter, Fingerprints, SessionCards, Versions,
+    CardStore, CardWriter, ClaudeWriter, FakeWriter, Fingerprints, Rating, SessionCards, Versions,
     find_claude, millis, write_card,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -90,6 +90,20 @@ fn key_wrong(id: String, cards: State<Cards>) {
     unsaved(cards.lock().unwrap().key_wrong(&id));
 }
 
+/// Daniel rated card `id`'s explanation.
+#[tauri::command]
+fn rate(id: String, rating: Rating, cards: State<Cards>) {
+    unsaved(cards.lock().unwrap().rate(&id, rating));
+}
+
+/// Daniel asked card `id` to explain more: the kept text, or the writer's, which takes seconds, so the
+/// command runs off the main thread. `None` when the writer gave none.
+#[tauri::command(async)]
+fn explain_more(id: String, cards: State<Cards>, writer: State<Writer>) -> Option<String> {
+    let log = |line: String| eprintln!("studio: {line}");
+    studio_understanding::explain_more(&cards, &**writer, &id, log)
+}
+
 /// Logs a card store change that could not be saved; it stays in memory until the next save.
 fn unsaved(saved: io::Result<()>) {
     if let Err(e) = saved {
@@ -121,8 +135,18 @@ fn main() {
         .manage(Mutex::new(studio))
         .manage(Cards::new(store))
         .manage(Notices::default())
+        .manage(writer.clone())
         .invoke_handler(tauri::generate_handler![
-            sessions, select, open, selected, cards, shown, guess, key_wrong
+            sessions,
+            select,
+            open,
+            selected,
+            cards,
+            shown,
+            guess,
+            key_wrong,
+            rate,
+            explain_more
         ])
         .setup(move |app| {
             let app = app.handle().clone();

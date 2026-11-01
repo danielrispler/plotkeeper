@@ -1,8 +1,12 @@
-//! The card store (#328, module 6; #369, decision 17): cards, their base, Daniel's guesses and his
-//! flags survive a restart.
+//! The card store (#328, module 6; #369, decisions 15 and 17): cards, their base, Daniel's guesses,
+//! his flags, his ratings and the longer explanations he asked for survive a restart.
 
+use std::{cell::Cell, sync::Mutex};
 use studio_core::{Base, CardRequest, Change, Output, Studio};
-use studio_understanding::{Card, CardStore, FakeWriter, Guess, StoredCard, write_card};
+use studio_understanding::{
+    Card, CardStore, CardWriter, FakeWriter, Guess, Level, Rating, Reason, StoredCard,
+    explain_more, write_card,
+};
 
 /// The card on an edit of `path`, named `id`, from a base with `README.md` already edited.
 fn edit(id: &str, path: &str) -> CardRequest {
@@ -100,6 +104,114 @@ fn the_key_is_wrong_is_recorded_on_the_card() {
     let reopened = CardStore::open(path).unwrap();
     let flags: Vec<bool> = reopened.cards().iter().map(|kept| kept.key_wrong).collect();
     assert_eq!(flags, [false, true]);
+}
+
+#[test]
+fn a_rating_with_its_reasons_survives_a_restart_beside_the_one_key_is_wrong_flag() {
+    let data = tempfile::tempdir().unwrap();
+    let path = data.path().join("cards.json");
+    let mut store = two_cards(&path);
+    // As the pane sends it.
+    let poor = r#"{"level": "poor", "reasons": ["unclear", "too_shallow"]}"#;
+    store
+        .rate("toolu_01A", serde_json::from_str(poor).unwrap())
+        .unwrap();
+    // "The key is wrong" in the rating is the quiz's flag.
+    store.key_wrong("toolu_01A").unwrap();
+    // Another level replaces the first.
+    let good = Rating {
+        level: Level::Good,
+        reasons: vec![],
+    };
+    store.rate("toolu_01B", good).unwrap();
+    let fair = Rating {
+        level: Level::Fair,
+        reasons: vec![Reason::TooEasy],
+    };
+    store.rate("toolu_01B", fair.clone()).unwrap();
+
+    let reopened = CardStore::open(path).unwrap();
+
+    let records: Vec<_> = reopened
+        .cards()
+        .iter()
+        .map(|kept| (kept.rating.clone(), kept.key_wrong))
+        .collect();
+    let poor = Rating {
+        level: Level::Poor,
+        reasons: vec![Reason::Unclear, Reason::TooShallow],
+    };
+    assert_eq!(records, [(Some(poor), true), (Some(fair), false)]);
+}
+
+/// The fake writer, counting its calls for "explain more".
+#[derive(Default)]
+struct Counting(Cell<usize>);
+
+impl CardWriter for Counting {
+    fn reply(&self, request: &CardRequest) -> Result<String, String> {
+        FakeWriter.reply(request)
+    }
+
+    fn more(&self, request: &CardRequest, card: &Card) -> Result<String, String> {
+        self.0.set(self.0.get() + 1);
+        FakeWriter.more(request, card)
+    }
+}
+
+#[test]
+fn explain_more_calls_the_writer_once_and_a_second_tap_shows_the_kept_text() {
+    let data = tempfile::tempdir().unwrap();
+    let path = data.path().join("cards.json");
+    let store = Mutex::new(two_cards(&path));
+    let writer = Counting::default();
+    let request = edit("toolu_01A", "src/lib.rs");
+    let expected = FakeWriter.more(&request, &card(&request)).unwrap();
+
+    let first = explain_more(&store, &writer, "toolu_01A", |line| panic!("{line}"));
+    let second = explain_more(&store, &writer, "toolu_01A", |line| panic!("{line}"));
+
+    assert_eq!(writer.0.get(), 1);
+    assert_eq!(first.as_ref(), Some(&expected));
+    assert_eq!(second.as_ref(), Some(&expected));
+    let reopened = CardStore::open(path).unwrap();
+    let more: Vec<_> = reopened
+        .cards()
+        .iter()
+        .map(|kept| kept.more.clone())
+        .collect();
+    assert_eq!(more, [Some(expected), None]);
+}
+
+/// A fake writer whose "explain more" replies with no text.
+struct Blank;
+
+impl CardWriter for Blank {
+    fn reply(&self, request: &CardRequest) -> Result<String, String> {
+        FakeWriter.reply(request)
+    }
+
+    fn more(&self, _: &CardRequest, _: &Card) -> Result<String, String> {
+        Ok("\n".into())
+    }
+}
+
+#[test]
+fn explain_more_with_no_text_logs_one_line_and_keeps_nothing() {
+    let data = tempfile::tempdir().unwrap();
+    let path = data.path().join("cards.json");
+    let store = Mutex::new(two_cards(&path));
+    let mut lines = Vec::new();
+
+    let more = explain_more(&store, &Blank, "toolu_01A", |line| lines.push(line));
+
+    assert_eq!(more, None);
+    let [line] = &lines[..] else {
+        panic!("one log line: {lines:?}");
+    };
+    assert!(line.contains("toolu_01A"), "{line}");
+    let reopened = CardStore::open(path).unwrap();
+    assert!(reopened.cards().iter().all(|kept| kept.more.is_none()));
 }
 
 #[test]

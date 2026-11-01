@@ -61,8 +61,21 @@ type Card = {
 };
 // Daniel's tap on a quiz, graded by the writer's key.
 type Guess = { option: number; right: boolean; at: number };
-// The store also records when the quiz showed; the pane never shows it, nor any rate.
-type StoredCard = { request: CardRequest; card: Card; guess: Guess | null; key_wrong: boolean };
+// Daniel's rating of a card's explanation. His fifth reason, "the key is wrong", is `key_wrong`, the
+// one record the quiz's flag also sets.
+type Level = "good" | "fair" | "poor";
+type Reason = "unclear" | "wrong" | "too_shallow" | "too_easy";
+type Rating = { level: Level; reasons: Reason[] };
+// The store also records when the quiz showed; the pane never shows it, nor any rate. `more` is the
+// longer explanation from "explain more".
+type StoredCard = {
+  request: CardRequest;
+  card: Card;
+  guess: Guess | null;
+  key_wrong: boolean;
+  more: string | null;
+  rating: Rating | null;
+};
 // The selected session's cards, split at 30 minutes by the shell's tick, each oldest first.
 type SessionCards = { recent: StoredCard[]; older: StoredCard[] };
 
@@ -348,8 +361,8 @@ function hebrew(tag: string, text: string): HTMLElement {
   return node;
 }
 
-// Records Daniel's tap, or his flag on the key, and draws the cards again at once.
-async function record(command: "guess" | "key_wrong", args: Record<string, unknown>) {
+// Records Daniel's tap, his flag on the key or his rating, and draws the cards again at once.
+async function record(command: "guess" | "key_wrong" | "rate", args: Record<string, unknown>) {
   await window.__TAURI__.core.invoke(command, args);
   showCards(await window.__TAURI__.core.invoke<SessionCards>("cards"));
 }
@@ -384,10 +397,11 @@ function quizElements(id: string, quiz: Quiz, guess: Guess | null): HTMLElement[
 }
 
 // A card in Hebrew, right to left: its quiz first, then, once Daniel taps an option, the
-// explanation, the file paths, the code left to right, why the change matters, what was not checked
-// and his flag on the key. A card with no quiz shows the explanation at once. The shell keeps each
-// tap in the card store, so after a restart a guessed card is drawn guessed.
-function cardElement({ request, card, guess, key_wrong }: StoredCard): HTMLElement {
+// explanation, the file paths, the code left to right, why the change matters, what was not checked,
+// his flag on the key, "explain more" and his rating. A card with no quiz shows the explanation at
+// once. The shell keeps each tap in the card store, so after a restart a guessed card is drawn
+// guessed and rated.
+function cardElement({ request, card, guess, key_wrong, more, rating }: StoredCard): HTMLElement {
   const node = document.createElement("article");
   node.className = "card";
   node.dir = "rtl";
@@ -412,14 +426,98 @@ function cardElement({ request, card, guess, key_wrong }: StoredCard): HTMLEleme
     hebrew("h2", "מה לא נבדק"),
     hebrew("p", card.not_checked),
   );
-  if (quiz) {
-    const flag = hebrew("button", key_wrong ? "סימנת שהמפתח שגוי" : "המפתח שגוי") as HTMLButtonElement;
-    flag.type = "button";
-    flag.className = "key-wrong";
-    flag.disabled = key_wrong;
-    flag.addEventListener("click", () => record("key_wrong", { id: request.id }));
-    node.append(flag);
-  }
+  if (quiz) node.append(keyWrongButton(request.id, key_wrong));
+  node.append(moreElement(request.id, more), ratingElement(request.id, rating, quiz ? key_wrong : null));
+  return node;
+}
+
+// "The key is wrong": one record, flagged from the quiz or from the rating, and never undone.
+function keyWrongButton(id: string, keyWrong: boolean): HTMLElement {
+  const flag = hebrew("button", keyWrong ? "סימנת שהמפתח שגוי" : "המפתח שגוי") as HTMLButtonElement;
+  flag.type = "button";
+  flag.className = "key-wrong";
+  flag.disabled = keyWrong;
+  flag.setAttribute("aria-pressed", String(keyWrong));
+  flag.addEventListener("click", () => record("key_wrong", { id }));
+  return flag;
+}
+
+// The cards whose longer explanation Daniel opened, and those whose writer call is running; both
+// outlast a card's drawing again.
+const moreOpen = new Set<string>();
+const asking = new Set<string>();
+
+// "Explain more": the writer's longer explanation, under the card. The first tap asks the writer;
+// later taps open and close the text the store keeps.
+function moreElement(id: string, more: string | null): HTMLElement {
+  const node = document.createElement("details");
+  node.className = "more";
+  node.open = moreOpen.has(id);
+  const text = hebrew("p", more ?? "כותב…");
+  text.className = "explanation";
+  node.append(hebrew("summary", "הסבר עוד"), text);
+  node.addEventListener("toggle", () => {
+    if (node.open) moreOpen.add(id);
+    else moreOpen.delete(id);
+    if (node.open && more === null && !asking.has(id)) explainMore(id);
+  });
+  return node;
+}
+
+// Asks the writer, for seconds, then draws the card again: with its text, or closed when the writer
+// gave none, so the next tap asks again.
+async function explainMore(id: string) {
+  asking.add(id);
+  const more = await window.__TAURI__.core.invoke<string | null>("explain_more", { id });
+  asking.delete(id);
+  if (more === null) moreOpen.delete(id);
+  drawn.delete(id);
+  showCards(await window.__TAURI__.core.invoke<SessionCards>("cards"));
+}
+
+const levels: [Level, string][] = [
+  ["good", "טוב"],
+  ["fair", "בינוני"],
+  ["poor", "חלש"],
+];
+const reasons: [Reason, string][] = [
+  ["unclear", "לא ברור"],
+  ["wrong", "שגוי"],
+  ["too_shallow", "שטחי מדי"],
+  ["too_easy", "קל מדי"],
+];
+
+// Daniel's rating of the explanation: a level, then, once he picked one, the reasons, each tap
+// toggling one. `keyWrong` is the quiz's flag, offered as a reason on a card with a quiz.
+function ratingElement(id: string, rating: Rating | null, keyWrong: boolean | null): HTMLElement {
+  const choice = (label: string, pressed: boolean, picked: Rating) => {
+    const button = hebrew("button", label) as HTMLButtonElement;
+    button.type = "button";
+    button.setAttribute("aria-pressed", String(pressed));
+    button.addEventListener("click", () => record("rate", { id, rating: picked }));
+    return button;
+  };
+  const node = document.createElement("div");
+  node.className = "rating";
+  const row = document.createElement("p");
+  row.append(
+    hebrew("span", "דירוג ההסבר:"),
+    ...levels.map(([level, label]) =>
+      choice(label, rating?.level === level, { level, reasons: rating?.reasons ?? [] }),
+    ),
+  );
+  node.append(row);
+  if (!rating) return node;
+  const why = document.createElement("p");
+  why.append(
+    ...reasons.map(([reason, label]) => {
+      const has = rating.reasons.includes(reason);
+      const toggled = has ? rating.reasons.filter((r) => r !== reason) : [...rating.reasons, reason];
+      return choice(label, has, { level: rating.level, reasons: toggled });
+    }),
+  );
+  if (keyWrong !== null) why.append(keyWrongButton(id, keyWrong));
+  node.append(why);
   return node;
 }
 

@@ -1,6 +1,6 @@
 //! The weekly check on the questions (#328, module 6): prints the last 7 days' thinking and surprise
-//! rates from the card store, then the drift in Claude Code (#369, decision 23): the unrecognised
-//! wake-ups in the event log and the version changes. Words after the command are Daniel's one-line
+//! rates and Daniel's ratings by level and reason from the card store, then the drift in Claude Code
+//! (#369, decision 23): the unrecognised wake-ups in the event log and the version changes. Words after the command are Daniel's one-line
 //! verdict, which it appends with the rest to `weekly.txt` beside the store.
 
 use std::{fs, fs::OpenOptions, io::Write};

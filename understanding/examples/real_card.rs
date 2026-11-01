@@ -1,6 +1,7 @@
 //! One real `claude -p` card on a fixture change (#375's check, #369's Testing Decisions): prints the
-//! writer's raw reply, then the card parsed from it. It runs the writer as the app does, in the app's
-//! neutral folder, and reads no credential file. Run it outside auto mode, from the repository root:
+//! writer's raw reply, then the card parsed from it, then its "explain more" (#376). It runs the
+//! writer as the app does, in the app's neutral folder, and reads no credential file. Run it outside
+//! auto mode, from the repository root:
 //!
 //! `cargo run -q --manifest-path apps/studio/Cargo.toml -p studio-understanding --example real_card`
 
@@ -52,6 +53,8 @@ fn main() {
             if let Some(problem) = problem {
                 println!("--- No quiz: {problem}");
             }
+            let more = writer.more(&request, &card).expect("run `claude -p`");
+            println!("--- Explain more\n{more}");
         }
         Err(line) => println!("--- No card: {line}"),
     }

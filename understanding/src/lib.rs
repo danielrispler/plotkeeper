@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     path::{Path, PathBuf},
     process::Command,
+    sync::Mutex,
 };
 use studio_core::CardRequest;
 
@@ -13,8 +14,8 @@ mod store;
 mod week;
 pub use drift::{Drift, Versions, drift};
 pub use fingerprint::Fingerprints;
-pub use store::{CardStore, Guess, SessionCards, StoredCard, millis};
-pub use week::{Rate, Week, week};
+pub use store::{CardStore, Guess, Level, Rating, Reason, SessionCards, StoredCard, millis};
+pub use week::{Rate, Ratings, Week, week};
 
 /// A card on a change, in Hebrew; code stays in English, and code inside the Hebrew text is in
 /// backticks. It opens with its quiz; the rest shows when Daniel taps an option.
@@ -98,6 +99,50 @@ impl Card {
 pub trait CardWriter {
     /// The writer's reply on `request`'s change, or one line for the log when it gave none.
     fn reply(&self, request: &CardRequest) -> Result<String, String>;
+
+    /// The writer's longer explanation of `card` on `request`'s change, for "explain more" (#369,
+    /// decision 15), or one line for the log when it gave none.
+    fn more(&self, request: &CardRequest, card: &Card) -> Result<String, String>;
+}
+
+/// The longer explanation of card `id` in `store`: the one kept, or else one more call to `writer`,
+/// whose text is kept with the card (#369, decision 15). The store is not locked while the writer
+/// runs, which takes seconds. A writer that gives no text logs one line to `log`, and nothing is kept.
+pub fn explain_more(
+    store: &Mutex<CardStore>,
+    writer: &(impl CardWriter + ?Sized),
+    id: &str,
+    mut log: impl FnMut(String),
+) -> Option<String> {
+    // The lock ends with the statement.
+    let kept = store
+        .lock()
+        .unwrap()
+        .cards()
+        .iter()
+        .find(|kept| kept.request.id == id)
+        .cloned()?;
+    if kept.more.is_some() {
+        return kept.more;
+    }
+    let more = writer
+        .more(&kept.request, &kept.card)
+        .and_then(|text| match text.trim() {
+            "" => Err("the writer's reply is empty".to_owned()),
+            text => Ok(text.to_owned()),
+        });
+    match more {
+        Ok(more) => {
+            if let Err(e) = store.lock().unwrap().more(id, more.clone()) {
+                log(format!("save the card store: {e}"));
+            }
+            Some(more)
+        }
+        Err(line) => {
+            log(format!("no longer explanation on {id}: {line}"));
+            None
+        }
+    }
 }
 
 /// The card on `request` from `writer`'s reply, which is asked once more when it gives no card
@@ -156,6 +201,10 @@ impl CardWriter for FakeWriter {
         });
         Ok(card.to_string())
     }
+
+    fn more(&self, _: &CardRequest, _: &Card) -> Result<String, String> {
+        Ok("הסבר ארוך יותר לדוגמה של הכותב המזויף, שלא קורא את הקוד. כאן יופיע איך הקוד שהשתנה עובד, צעד אחר צעד, ולמה נבחרה הדרך הזו, עם קוד כמו `if a <= b {`.".into())
+    }
 }
 
 /// Writes the card with `claude -p` on Daniel's subscription, in a neutral folder that holds none of
@@ -188,18 +237,29 @@ impl ClaudeWriter {
         Self { program, folder }
     }
 
-    /// The `claude -p` run for one change. Without the two variables and without `--bare`, `claude`
-    /// uses the subscription login (#320, "Fact"); the studio never reads that login itself. The
-    /// change is untrusted text, so the run has no tools and no MCP servers, whatever Daniel's
-    /// settings allow. It also runs without the studio plugin, so its session sends no hook events.
+    /// The `claude -p` run for one change's card.
     pub fn command(&self, request: &CardRequest) -> Command {
-        let change = &request.change;
+        self.claude(PROMPT, &request.change)
+    }
+
+    /// The `claude -p` run for "explain more" on `card`, which the writer reads with its change.
+    pub fn more_command(&self, request: &CardRequest, card: &Card) -> Command {
+        let head = format!("{MORE}\nThe card's explanation:\n{}\n", card.explanation);
+        self.claude(&head, &request.change)
+    }
+
+    /// The `claude -p` run on `head`, then `change`. Without the two variables and without
+    /// `--bare`, `claude` uses the subscription login (#320, "Fact"); the studio never reads that
+    /// login itself. The change is untrusted text, so the run has no tools and no MCP servers,
+    /// whatever Daniel's settings allow. It also runs without the studio plugin, so its session
+    /// sends no hook events.
+    fn claude(&self, head: &str, change: &str) -> Command {
         let kept = &change[..change.floor_char_boundary(MAX_CHANGE)];
         let cut = match change.len() - kept.len() {
             0 => String::new(),
             bytes => format!("\n[{bytes} more bytes cut]"),
         };
-        let prompt = format!("{PROMPT}\nChange:\n{kept}{cut}");
+        let prompt = format!("{head}\nChange:\n{kept}{cut}");
         let mut command = Command::new(&self.program);
         command
             // `--tools` takes several values, so an option must follow it.
@@ -216,10 +276,19 @@ impl CardWriter for ClaudeWriter {
     /// Runs `claude -p`, which takes seconds, so the shell calls it off its log thread.
     // shortcut: no timeout, as in v0; add one if a stuck `claude -p` ever holds a card back.
     fn reply(&self, request: &CardRequest) -> Result<String, String> {
-        match self.command(request).output() {
-            Ok(output) => Ok(String::from_utf8_lossy(&output.stdout).into()),
-            Err(error) => Err(format!("`claude -p` did not start: {error}")),
-        }
+        stdout(self.command(request))
+    }
+
+    fn more(&self, request: &CardRequest, card: &Card) -> Result<String, String> {
+        stdout(self.more_command(request, card))
+    }
+}
+
+/// What `command` printed, or one line when it did not start.
+fn stdout(mut command: Command) -> Result<String, String> {
+    match command.output() {
+        Ok(output) => Ok(String::from_utf8_lossy(&output.stdout).into()),
+        Err(error) => Err(format!("`claude -p` did not start: {error}")),
     }
 }
 
@@ -246,4 +315,15 @@ Reply with one JSON object and nothing else:
 - quiz.options: 3 or 4 options, the right one at a random place. Each wrong option is something the code could plausibly have done instead, of the right option's length and tone, so the wording gives nothing away.
 - quiz.options[].why: one line on why that option is right or wrong.
 - quiz.key: the place of the right option in quiz.options, counting from 0.
+"#;
+
+/// The writer's instructions for "explain more" (#369, decision 15): one more call on the card's
+/// change, which also reads the card's explanation, so it goes deeper instead of repeating it.
+const MORE: &str = r#"A developer read a card that explains a change a coding agent made to his code, and asked for more. Explain the change in more depth than the card: how the changed code works, step by step, and why it was done this way and not another. Do not repeat the card.
+
+Answer from the diff below. Use only this input: do not use tools or read files.
+
+Write in Hebrew, in plain words. Code, code terms, file paths and commands stay in English; inside Hebrew text, wrap each of them in backticks.
+
+Reply with the explanation only, in at most three short paragraphs: no JSON and no heading.
 "#;

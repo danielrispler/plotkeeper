@@ -1,8 +1,8 @@
 //! The weekly check on the questions (#328, module 6; resolution, "Understanding layer", point 7;
-//! #369, decision 23): whether the questions make Daniel think. Only the weekly command prints these;
-//! the app shows no rate. The thresholds are starting guesses.
+//! #369, decision 23): whether the questions make Daniel think, and how he rated the cards. Only the
+//! weekly command prints these; the app shows no rate. The thresholds are starting guesses.
 
-use crate::StoredCard;
+use crate::{Level, Reason, StoredCard};
 use std::fmt;
 
 pub(crate) const WEEK: u64 = 7 * DAY;
@@ -25,6 +25,23 @@ pub struct Week {
     pub thinking: Rate,
     /// Of the guesses, those that were wrong.
     pub surprise: Rate,
+    pub ratings: Ratings,
+}
+
+/// Daniel's ratings of the week's cards, by level and by reason (#369, decision 23).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Ratings {
+    /// The week's cards, rated or not.
+    pub cards: usize,
+    pub good: usize,
+    pub fair: usize,
+    pub poor: usize,
+    pub unclear: usize,
+    pub wrong: usize,
+    pub too_shallow: usize,
+    pub too_easy: usize,
+    /// The cards flagged "the key is wrong", from the quiz or from the rating.
+    pub key_wrong: usize,
 }
 
 /// The rates of the cards added in the 7 days to `now`. Cards with no added time, from a store
@@ -43,7 +60,35 @@ pub fn week(cards: &[StoredCard], now: u64) -> Week {
         to: now,
         thinking: rate(gaps, |gap| *gap >= THINKING),
         surprise: rate(guesses, |guess| !guess.right),
+        ratings: ratings(&cards),
     }
+}
+
+fn ratings(cards: &[&StoredCard]) -> Ratings {
+    let mut counts = Ratings {
+        cards: cards.len(),
+        ..Ratings::default()
+    };
+    for kept in cards {
+        counts.key_wrong += usize::from(kept.key_wrong);
+        let Some(rating) = &kept.rating else {
+            continue;
+        };
+        *match rating.level {
+            Level::Good => &mut counts.good,
+            Level::Fair => &mut counts.fair,
+            Level::Poor => &mut counts.poor,
+        } += 1;
+        for reason in &rating.reasons {
+            *match reason {
+                Reason::Unclear => &mut counts.unclear,
+                Reason::Wrong => &mut counts.wrong,
+                Reason::TooShallow => &mut counts.too_shallow,
+                Reason::TooEasy => &mut counts.too_easy,
+            } += 1;
+        }
+    }
+    counts
 }
 
 fn rate<T>(records: impl Iterator<Item = T>, counts: impl Fn(&T) -> bool) -> Rate {
@@ -72,6 +117,7 @@ impl fmt::Display for Week {
             to,
             thinking: t,
             surprise: s,
+            ratings: r,
         } = self;
         writeln!(f, "The 7 days to {}:", date(*to))?;
         writeln!(
@@ -83,6 +129,20 @@ impl fmt::Display for Week {
             f,
             "surprise rate: {s} ({} of {} answers were wrong)",
             s.count, s.of
+        )?;
+        writeln!(
+            f,
+            "ratings: {} of {} cards (good {}, fair {}, poor {})",
+            r.good + r.fair + r.poor,
+            r.cards,
+            r.good,
+            r.fair,
+            r.poor
+        )?;
+        writeln!(
+            f,
+            "reasons: unclear {}, wrong {}, too shallow {}, too easy {}, the key is wrong {}",
+            r.unclear, r.wrong, r.too_shallow, r.too_easy, r.key_wrong
         )
     }
 }

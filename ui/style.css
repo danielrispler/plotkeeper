@@ -55,6 +55,12 @@ code:empty { display: none; }
 .card button:disabled { cursor: default; }
 .options button:disabled[aria-pressed="false"] { opacity: .45; }
 .key-wrong { margin-top: 12px; font-size: 14px; }
+/* "Explain more" opens the writer's longer explanation under the card; the rating's levels and reasons
+   are small taps, marked by their border like the options. */
+.more summary { margin-top: 12px; font-size: 14px; font-weight: 600; color: var(--muted); cursor: pointer; }
+.rating p { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+.rating span { font-size: 14px; color: var(--muted); }
+.rating button { font-size: 14px; padding: 2px 10px; margin: 0; }
 .card code { font-size: 14px; background: var(--bg); padding: 1px 5px; white-space: normal; overflow-wrap: anywhere;
              unicode-bidi: isolate; }
 .paths { display: flex; flex-wrap: wrap; gap: 6px; }

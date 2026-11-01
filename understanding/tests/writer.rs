@@ -40,6 +40,10 @@ impl CardWriter for Failing {
         }
         FakeWriter.reply(request)
     }
+
+    fn more(&self, request: &CardRequest, card: &Card) -> Result<String, String> {
+        FakeWriter.more(request, card)
+    }
 }
 
 /// The card `writer` writes on `edit()`, and the lines it logs.
@@ -86,6 +90,10 @@ struct Replying(String);
 
 impl CardWriter for Replying {
     fn reply(&self, _: &CardRequest) -> Result<String, String> {
+        Ok(self.0.clone())
+    }
+
+    fn more(&self, _: &CardRequest, _: &Card) -> Result<String, String> {
         Ok(self.0.clone())
     }
 }
@@ -203,6 +211,26 @@ fn the_real_writer_runs_claude_on_the_subscription_in_its_neutral_folder() {
     assert!(prompt.contains("multiple-choice question on the change's logic or design"));
     assert!(prompt.ends_with(&format!("\nChange:\n{}", edit().change)));
     assert_eq!(command.get_current_dir(), Some(folder));
+}
+
+#[test]
+fn explain_more_runs_the_same_writer_on_the_cards_explanation_and_its_change() {
+    let folder = Path::new("/h/Library/Application Support/dev.falinks.studio/card-writer");
+    let writer = ClaudeWriter::new(CLAUDE.into(), folder.into());
+    let card = good_card();
+
+    let more = writer.more_command(&edit(), &card);
+
+    let card_run = writer.command(&edit());
+    assert_eq!(more.get_program(), card_run.get_program());
+    assert!(more.get_envs().eq(card_run.get_envs()));
+    assert_eq!(more.get_current_dir(), Some(folder));
+    let args: Vec<_> = more.get_args().map(|arg| arg.to_str().unwrap()).collect();
+    assert_eq!(args[..4], ["--tools", "", "--strict-mcp-config", "-p"]);
+    let prompt = args[4];
+    assert!(prompt.contains("in more depth than the card"), "{prompt}");
+    assert!(prompt.contains(&card.explanation), "{prompt}");
+    assert!(prompt.ends_with(&format!("\nChange:\n{}", edit().change)));
 }
 
 #[test]

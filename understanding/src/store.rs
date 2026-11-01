@@ -12,9 +12,9 @@ use std::{
 use studio_core::CardRequest;
 
 /// A card in the store, with the change it explains and its base, and its record: when it was added,
-/// when its quiz showed, Daniel's guess and his flag on the key. The card and its request go through
-/// serde whole, so fields added to them need no change here. Times are Unix milliseconds; stores from
-/// before a time existed load it as `None`.
+/// when its quiz showed, Daniel's guess, his flag on the key, his rating and the longer explanation he
+/// asked for. The card and its request go through serde whole, so fields added to them need no change here.
+/// Times are Unix milliseconds; stores from before a time existed load it as `None`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StoredCard {
     pub request: CardRequest,
@@ -28,9 +28,43 @@ pub struct StoredCard {
     /// Daniel's tap on the quiz; `None` while the card shows only its quiz.
     #[serde(default)]
     pub guess: Option<Guess>,
-    /// Daniel flagged that the writer's key is wrong (#369, decision 13).
+    /// Daniel flagged that the writer's key is wrong (#369, decision 13), from the quiz or from his
+    /// rating: one record.
     #[serde(default)]
     pub key_wrong: bool,
+    /// The writer's longer explanation, from Daniel's first "explain more" (#369, decision 15).
+    #[serde(default)]
+    pub more: Option<String>,
+    /// Daniel's rating of the explanation (#369, decision 15); `None` until he rates it.
+    #[serde(default)]
+    pub rating: Option<Rating>,
+}
+
+/// Daniel's rating of a card's explanation: a level and the reasons he picked. His fifth reason, "the
+/// key is wrong", is `StoredCard::key_wrong`, the one record the quiz's flag also sets.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Rating {
+    pub level: Level,
+    pub reasons: Vec<Reason>,
+}
+
+/// A rating's three levels.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Level {
+    Good,
+    Fair,
+    Poor,
+}
+
+/// A rating's short reasons, besides "the key is wrong".
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Reason {
+    Unclear,
+    Wrong,
+    TooShallow,
+    TooEasy,
 }
 
 /// Daniel's tap on a card's quiz, graded by the writer's key (#369, decision 13).
@@ -122,6 +156,8 @@ impl CardStore {
             shown_at: None,
             guess: None,
             key_wrong: false,
+            more: None,
+            rating: None,
         });
         self.save()
     }
@@ -165,6 +201,29 @@ impl CardStore {
             && !kept.key_wrong
         {
             kept.key_wrong = true;
+            return self.save();
+        }
+        Ok(())
+    }
+
+    /// Records Daniel's rating of card `id`, which replaces the one before, and saves the store.
+    pub fn rate(&mut self, id: &str, rating: Rating) -> io::Result<()> {
+        let mut cards = self.cards.iter_mut();
+        if let Some(kept) = cards.find(|kept| kept.request.id == id) {
+            kept.rating = Some(rating);
+            return self.save();
+        }
+        Ok(())
+    }
+
+    /// Keeps `more`, the writer's longer explanation of card `id`, unless it has one, and saves the
+    /// store.
+    pub(crate) fn more(&mut self, id: &str, more: String) -> io::Result<()> {
+        let mut cards = self.cards.iter_mut();
+        if let Some(kept) = cards.find(|kept| kept.request.id == id)
+            && kept.more.is_none()
+        {
+            kept.more = Some(more);
             return self.save();
         }
         Ok(())
