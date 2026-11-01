@@ -1,5 +1,7 @@
 //! The understanding layer's I/O, which the core leaves to the shell: the card writer (#328,
-//! module 4), the worktree fingerprint (module 5), and the card store and its weekly rates (module 6).
+//! module 4), which also writes the briefs (#369, decision 16), the worktree fingerprint (module 5),
+//! the card store with its briefs and its weekly rates (module 6), and the drift in Claude Code
+//! (#369, decisions 7, 9 and 23).
 use serde::{Deserialize, Serialize};
 use std::{
     path::{Path, PathBuf},
@@ -217,7 +219,7 @@ pub fn write_brief(
     let reply = workers
         .ok_or("its workers' cards are not in the store".to_owned())
         .and_then(|workers| writer.update(&brief.text, &workers));
-    match reply.and_then(|reply| brief_in(&reply).ok_or("the reply holds none".into())) {
+    match reply.and_then(|reply| brief_in(&reply).ok_or(HOLDS_NONE.into())) {
         Ok(updated) => {
             rebrief(
                 store,
@@ -316,7 +318,7 @@ fn rebrief(
             }
         };
         let rewritten = writer.rewrite(&prompts, &summaries, &diffstat);
-        match rewritten.and_then(|reply| brief_in(&reply).ok_or("the reply holds none".into())) {
+        match rewritten.and_then(|reply| brief_in(&reply).ok_or(HOLDS_NONE.into())) {
             Ok(brief) => updated = Some(brief),
             Err(line) => log(format!("no brief rewrite on {}: {line}", request.id)),
         }
@@ -333,6 +335,14 @@ fn object(reply: &str) -> &str {
     let object = reply.find('{').zip(reply.rfind('}'));
     let object = object.filter(|(start, end)| start < end);
     object.map_or("", |(start, end)| &reply[start..=end])
+}
+
+/// Why a reply gave no brief, for the log.
+const HOLDS_NONE: &str = "the reply holds none";
+
+/// A brief as the writer reads it: "none yet" before its first update.
+fn so_far(brief: &str) -> &str {
+    if brief.is_empty() { "none yet" } else { brief }
 }
 
 /// The brief in a writer's reply, when it holds one that is not empty.
@@ -403,7 +413,7 @@ pub fn write_card(
                 log(format!("no quiz on {}: {problem}", request.id));
             }
             if brief.is_none() {
-                log(format!("no brief on {}: the reply holds none", request.id));
+                log(format!("no brief on {}: {HOLDS_NONE}", request.id));
             }
             Some((card, brief))
         }
@@ -506,7 +516,7 @@ impl ClaudeWriter {
             [] => "none\n".into(),
             summaries => summaries.iter().map(|s| format!("- {s}\n")).collect(),
         };
-        let brief = if brief.is_empty() { "none yet" } else { brief };
+        let brief = so_far(brief);
         let head = format!(
             "{PROMPT}\nThe summaries of this prompt's earlier cards, oldest first:\n{earlier}\n\
              The brief so far:\n{brief}\n"
@@ -549,7 +559,7 @@ impl ClaudeWriter {
 
     /// The `claude -p` run that updates a session's `brief` from `workers`, what its workers did.
     pub fn update_command(&self, brief: &str, workers: &str) -> Command {
-        let brief = if brief.is_empty() { "none yet" } else { brief };
+        let brief = so_far(brief);
         self.run(&format!(
             "{UPDATE}\nThe brief so far:\n{brief}\n\n{workers}"
         ))
@@ -635,13 +645,25 @@ const NOT_STRUCTURAL: &str = "structural: none";
 /// limit on a command's arguments.
 const MAX_CHANGE: usize = 64 << 10;
 
+/// The explanation language, one paragraph in each of the writer's instructions below. A macro, as
+/// `concat!` takes literals and no `const`.
+macro_rules! hebrew {
+    () => {
+        "Write in Hebrew, in plain words. Code, code terms, file paths and commands stay in English; \
+         inside Hebrew text, wrap each of them in backticks."
+    };
+}
+
 /// The card writer's instructions. Its input is the change, the summaries of the prompt's earlier
 /// cards and the brief, not the payloads (v0 note, proposal 8).
-const PROMPT: &str = r#"You write one card that teaches a developer about the change a coding agent made to his code while he waited on it, since the previous card. The card opens with a multiple-choice question on the change's logic or design. He taps an option, and the card shows at once whether he was right, why each option is right or wrong, and the explanation. You also update the session's brief, which he reads to resume the session.
+const PROMPT: &str = concat!(
+    r#"You write one card that teaches a developer about the change a coding agent made to his code while he waited on it, since the previous card. The card opens with a multiple-choice question on the change's logic or design. He taps an option, and the card shows at once whether he was right, why each option is right or wrong, and the explanation. You also update the session's brief, which he reads to resume the session.
 
 Answer from the input below: the summaries of the earlier cards on the same prompt of his, the brief so far, and the diff. Use only this input: do not use tools or read files.
 
-Write every text field in Hebrew, in plain words. Code, code terms, file paths and commands stay in English; inside Hebrew text, wrap each of them in backticks.
+"#,
+    hebrew!(),
+    r#"
 
 Reply with one JSON object and nothing else:
 {"summary": string, "explanation": string, "paths": [string], "code": string, "why_it_matters": string, "not_checked": string, "architecture": string, "quiz": {"text": string, "options": [{"text": string, "why": string}], "key": number}, "brief": string}
@@ -659,38 +681,51 @@ Reply with one JSON object and nothing else:
 - brief: the brief so far, updated with this change: what the session set out to do, what it has done, oldest first, and what is still open, in a few short lines. Keep what still holds. Its last line says what this change did.
 
 When the change is not a diff but the agent's workers with the summaries of their cards, the agent changed nothing itself and handed the work to them: the card explains what it split up among them, what came back and what is still open, paths and code are empty, and the quiz is on how the work was split.
-"#;
+"#
+);
 
 /// The writer's instructions for a brief updated from a session's workers' cards when it changed
 /// nothing itself (#369, decision 11): no card, so a worker's return adds no thin card.
-const UPDATE: &str = r#"You update the brief of a coding agent's session, which the developer who runs it reads to resume the session: what the session set out to do, what it has done, oldest first, and what is still open, in a few short lines. Since the brief, the agent changed nothing itself; its workers did.
+const UPDATE: &str = concat!(
+    r#"You update the brief of a coding agent's session, which the developer who runs it reads to resume the session: what the session set out to do, what it has done, oldest first, and what is still open, in a few short lines. Since the brief, the agent changed nothing itself; its workers did.
 
 Answer from the input below: the brief so far, and the agent's workers, each with its status and the summaries of its cards since then. Use only this input: do not use tools or read files. Keep what still holds. Its last line says what came back.
 
-Write in Hebrew, in plain words. Code, code terms, file paths and commands stay in English; inside Hebrew text, wrap each of them in backticks.
+"#,
+    hebrew!(),
+    r#"
 
 Reply with one JSON object and nothing else: {"brief": string}
-"#;
+"#
+);
 
 /// The writer's instructions for a brief rewritten from scratch (#369, decision 16): from Daniel's
 /// prompts, the card summaries and the diffstat, never a diff, so errors in the rolling brief do not
 /// compound.
-const REWRITE: &str = r#"You rewrite from scratch the brief of a coding agent's session, which the developer who runs it reads to resume the session: what the session set out to do, what it has done, oldest first, and what is still open, in a few short lines. Its last line says what the latest change did.
+const REWRITE: &str = concat!(
+    r#"You rewrite from scratch the brief of a coding agent's session, which the developer who runs it reads to resume the session: what the session set out to do, what it has done, oldest first, and what is still open, in a few short lines. Its last line says what the latest change did.
 
 Answer from the input below: the developer's prompts, the one-line summaries of the session's cards, and `git diff --stat` since the session began. Use only this input: do not use tools or read files.
 
-Write in Hebrew, in plain words. Code, code terms, file paths and commands stay in English; inside Hebrew text, wrap each of them in backticks.
+"#,
+    hebrew!(),
+    r#"
 
 Reply with one JSON object and nothing else: {"brief": string}
-"#;
+"#
+);
 
 /// The writer's instructions for "explain more" (#369, decision 15): one more call on the card's
 /// change, which also reads the card's explanation, so it goes deeper instead of repeating it.
-const MORE: &str = r#"A developer read a card that explains a change a coding agent made to his code, and asked for more. Explain the change in more depth than the card: how the changed code works, step by step, and why it was done this way and not another. Do not repeat the card.
+const MORE: &str = concat!(
+    r#"A developer read a card that explains a change a coding agent made to his code, and asked for more. Explain the change in more depth than the card: how the changed code works, step by step, and why it was done this way and not another. Do not repeat the card.
 
 Answer from the diff below. Use only this input: do not use tools or read files.
 
-Write in Hebrew, in plain words. Code, code terms, file paths and commands stay in English; inside Hebrew text, wrap each of them in backticks.
+"#,
+    hebrew!(),
+    r#"
 
 Reply with the explanation only, in at most three short paragraphs: no JSON and no heading.
-"#;
+"#
+);

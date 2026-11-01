@@ -3,6 +3,7 @@
 //! passes in what changed; these tests play the shell's part.
 
 use serde_json::{Value, json};
+use std::collections::BTreeMap;
 use studio_core::{Base, CardRequest, Change, Fingerprint, Keep, Output, Stopped, Studio};
 
 const LOG: &str = include_str!("fixtures/bash-steps.jsonl");
@@ -22,14 +23,18 @@ fn found() -> Change {
     }
 }
 
+/// Takes `line` live, as the shell does when each fingerprint it takes before it finds `found`.
+fn apply(studio: &mut Studio, line: &str, found: Option<Change>) -> Vec<Output> {
+    let looks = studio.fingerprint_folders(line).into_iter();
+    let changes = looks.filter_map(|look| Some((look.key, found.clone()?)));
+    studio.apply_with_changes(line, changes.collect())
+}
+
 /// The card requests when every line of `log` arrives live and each fingerprint finds `found`.
 fn cards(log: &str, found: Option<Change>) -> Vec<CardRequest> {
     let mut studio = Studio::default();
     let lines = log.lines();
-    let outputs = lines.flat_map(|line| {
-        let change = studio.fingerprint_folder(line).and(found.clone());
-        studio.apply_with_change(line, change)
-    });
+    let outputs = lines.flat_map(|line| apply(&mut studio, line, found.clone()));
     let outputs: Vec<Output> = outputs.collect();
     outputs
         .into_iter()
@@ -66,8 +71,7 @@ fn a_stop_keeps_its_cards_id_and_the_first_line_of_its_message_until_the_next_pr
     let mut studio = Studio::default();
     let stopped = |studio: &Studio| studio.session(SESSION).unwrap().stopped.clone();
     for line in LOG.lines() {
-        let change = studio.fingerprint_folder(line).and(Some(found()));
-        studio.apply_with_change(line, change);
+        apply(&mut studio, line, Some(found()));
     }
     let card = format!("{SESSION}@1793265021380");
 
@@ -76,16 +80,16 @@ fn a_stop_keeps_its_cards_id_and_the_first_line_of_its_message_until_the_next_pr
         live,
         Some(Stopped {
             card: card.clone(),
-            asked: true,
+            requested: true,
             message: Some(LAST_MESSAGE.into()),
         })
     );
 
-    // Replayed, the same `Stop` asked for no card.
+    // Replayed, the same `Stop` requested no card.
     let mut replayed = Studio::default();
     LOG.lines().for_each(|line| replayed.replay(line));
     assert_eq!(
-        stopped(&replayed).map(|s| (s.card, s.asked)),
+        stopped(&replayed).map(|s| (s.card, s.requested)),
         Some((card, false))
     );
 
@@ -109,7 +113,7 @@ fn event(name: &str, at: u64, fields: Value) -> String {
 fn a_wake_ups_card_belongs_to_daniels_prompt_before_it() {
     let mut studio = Studio::default();
     let stop = |studio: &mut Studio, at| {
-        let outputs = studio.apply_with_change(&event("Stop", at, json!({})), Some(found()));
+        let outputs = apply(studio, &event("Stop", at, json!({})), Some(found()));
         outputs.into_iter().find_map(|output| match output {
             Output::Card(request) => request.prompt,
             _ => None,
@@ -159,7 +163,7 @@ fn fingerprinted(log: &str) -> Vec<usize> {
     let mut studio = Studio::default();
     let lines = log.lines().enumerate();
     let at = lines.filter(|(_, line)| {
-        let at = studio.fingerprint_folder(line).is_some();
+        let at = !studio.fingerprint_folders(line).is_empty();
         studio.apply(line);
         at
     });
@@ -170,12 +174,12 @@ fn fingerprinted(log: &str) -> Vec<usize> {
 fn the_shell_fingerprints_at_the_prompt_and_at_the_stop() {
     assert_eq!(fingerprinted(LOG), [0, 9]);
     assert_eq!(
-        Studio::default().fingerprint_folder(LOG.lines().next().unwrap()),
-        Some(Fingerprint {
+        Studio::default().fingerprint_folders(LOG.lines().next().unwrap()),
+        [Fingerprint {
             key: SESSION.into(),
             folder: WORKTREE.into(),
             keep: Keep::Always
-        })
+        }]
     );
 }
 
@@ -218,18 +222,21 @@ fn the_runs_worker_gets_a_card_at_its_commit_and_its_end_and_its_session_one_fro
     let mut looked = Vec::new();
     let mut requests = Vec::new();
     for (index, line) in RUN.lines().enumerate() {
-        let look = studio.fingerprint_folder(line);
         // The worker's worktree changed, with a commit, at each look but its first.
-        let change = look.as_ref().and_then(|look| {
+        let mut changes = BTreeMap::new();
+        for look in studio.fingerprint_folders(line) {
             let seen = looked.iter().any(|(_, key, _)| key == &look.key);
             looked.push((index + 1, look.key.clone(), look.keep));
-            (look.key == RUN_WORKER && seen).then(|| Change {
-                base: Base::default(),
-                diff: "--- a/hello.txt\n+++ b/hello.txt\n@@ -0,0 +1 @@\n+hello\n".into(),
-                head: Some("c0ffee".into()),
-            })
-        });
-        for output in studio.apply_with_change(line, change) {
+            if look.key == RUN_WORKER && seen {
+                let change = Change {
+                    base: Base::default(),
+                    diff: "--- a/hello.txt\n+++ b/hello.txt\n@@ -0,0 +1 @@\n+hello\n".into(),
+                    head: Some("c0ffee".into()),
+                };
+                changes.insert(look.key, change);
+            }
+        }
+        for output in studio.apply_with_changes(line, changes) {
             if let Output::Card(request) = output {
                 requests.push(request);
             }
@@ -246,7 +253,9 @@ fn the_runs_worker_gets_a_card_at_its_commit_and_its_end_and_its_session_one_fro
             (5, worker.clone(), Keep::Always),
             (8, helper.clone(), Keep::Always),
             (15, worker.clone(), Keep::OnCommit),
-            // The helper shares the session's worktree; its command could still make it a worker.
+            // The helper shares the session's worktree; a change across its command, from before it
+            // to after it, would still make it a worker.
+            (16, helper.clone(), Keep::Always),
             (17, helper, Keep::OnCommit),
             (18, worker, Keep::Always),
             (28, session, Keep::Always),

@@ -3,7 +3,7 @@
 //! the terminal.
 
 use serde_json::json;
-use studio_core::{Answer, State, Studio, Wait};
+use studio_core::{Answer, Asker, State, Studio};
 
 /// The studio after the log's first `upto` lines, replayed.
 fn replay_upto(log: &str, upto: usize) -> Studio {
@@ -72,12 +72,12 @@ fn a_childs_question_is_its_own_and_names_it_on_its_sessions_line() {
         (Some(HELPER), &Answer::Open)
     );
     assert_eq!(question.questions[0]["options"][1]["label"], "Usage");
-    let wait = Wait {
+    let wait = Asker {
         agent: Some(HELPER.into()),
         since: 1_793_490_009_000,
     };
     assert_eq!(
-        (session.state, &session.waiting),
+        (session.state, &session.asker),
         (State::NeedsYou, &Some(wait))
     );
 }
@@ -89,7 +89,7 @@ fn a_failed_question_is_not_answered_and_stops_needing_you() {
 
     let session = studio.session(CHILD_SESSION).expect("the session");
     assert_eq!(session.questions[0].answer, Answer::NotAnswered);
-    assert_eq!((session.state, &session.waiting), (State::YourTurn, &None));
+    assert_eq!((session.state, &session.asker), (State::YourTurn, &None));
 }
 
 #[test]

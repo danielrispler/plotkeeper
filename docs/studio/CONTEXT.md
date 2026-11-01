@@ -15,11 +15,15 @@ The part of the control room that keeps Daniel's understanding in step with the 
 The time Daniel waits on an agent: from his prompt until the agent ends its turn, or until his next prompt if he interrupts it. Answering a permission, a question or a plan inside it does not start a new wait.
 
 **Card**:
-An explanation, in the explanation language, of what a prompt changed, or what a worker changed, since the previous card. It asks a multiple-choice question on the change's logic or design, and offers "explain more" and a rating.
+An explanation, in the explanation language, of what a prompt changed, or what a worker changed, since the previous card. It opens with a quiz, and offers "explain more" and a rating.
 _Avoid_: Summary (read after the work, with no question first)
 
+**Quiz**:
+A card's multiple-choice question on the change's logic or design, with the card writer's key, which grades Daniel's guess.
+_Avoid_: Question (an agent's question to Daniel)
+
 **Guess**:
-Daniel's answer to a card's multiple-choice question. The card writer's key grades it, and the card shows right or wrong, with the reasons, as soon as he answers. It is never shown as a score.
+Daniel's answer to a card's quiz. The card writer's key grades it, and the card shows right or wrong, with the reasons, as soon as he answers. It is never shown as a score.
 
 **Brief**:
 A rolling account of an agent session's or a worker's work so far, at the top of its view, so that Daniel can resume a session he lost track of. Each new card updates it.

@@ -433,9 +433,12 @@ fn every_session_of_the_day_shows_all_of_its_cards_whichever_was_prompted_last()
         let at = event["studio_received_ms"].as_u64().unwrap();
         studio.tick(at);
         let stop = event["hook_event_name"] == "Stop";
-        let change = studio.fingerprint_folder(line).filter(|_| stop);
-        let change = change.and(Some(changed.clone()));
-        for output in studio.apply_with_change(line, change) {
+        let looks = studio
+            .fingerprint_folders(line)
+            .into_iter()
+            .filter(|_| stop);
+        let changes = looks.map(|look| (look.key, changed.clone())).collect();
+        for output in studio.apply_with_changes(line, changes) {
             if let Output::Card(request) = output {
                 let card = card(&request);
                 store.add(request, card, at).unwrap();

@@ -1,6 +1,7 @@
-// The window: on the left the session list with each session's subagents nested, on the right the session Daniel selected, with its state,
-// "now" line and cards. The core decides what it shows; this file only draws what the shell sends, on
-// load and on each "sessions", "selected" or "cards" event.
+// The window: on the left the session list with each session's subagents nested, on the right the
+// session Daniel selected, with its state, "now" line, brief, cards, questions and checks. The core
+// decides what it shows; this file only draws what the shell sends, on load and on each "sessions",
+// "selected", "cards" or "notice" event, and marks a quiz shown when the window becomes visible.
 
 type Step = { tool: string; detail: string | null };
 type SessionState = "needs_you" | "running" | "your_turn" | "idle" | "ended";
@@ -8,7 +9,7 @@ type SessionState = "needs_you" | "running" | "your_turn" | "idle" | "ended";
 type CheckLine = { command: string; passed: boolean | null };
 // Who spawned a subagent: the session's own agent, another subagent, or no known spawn.
 type Parent = "session" | "unattached" | { agent: string };
-type Agent = {
+type Subagent = {
   id: string;
   parent: Parent;
   kind: "worker" | "helper";
@@ -20,11 +21,14 @@ type Agent = {
   ended_at: number | null;
   last_step: Step | null;
   result: string | null;
+  // It ended with a status other than "completed", such as "killed": the core's one rule for failed.
+  failed: boolean;
   opened: boolean;
   faded: boolean;
 };
-// What a session that needs Daniel waits on: the subagent who asks, or null for its own agent.
-type Wait = { agent: string | null; since: number };
+// Who a session that needs Daniel waits on, and since when: the subagent who asks, or null for its
+// own agent.
+type Asker = { agent: string | null; since: number };
 // Who sent a prompt: Daniel, a wake-up naming the task that returned, or a known task id in markup
 // the studio does not know, which counts as Daniel's.
 type Sender = "daniel" | { wake_up: string } | { unrecognised: string };
@@ -41,8 +45,8 @@ type Session = {
   last_step: Step | null;
   state: SessionState;
   checks: CheckLine[];
-  agents: Agent[];
-  waiting: Wait | null;
+  agents: Subagent[];
+  asker: Asker | null;
   prompts: Prompt[];
   questions: Question[];
   // In the session list only: what its row says while its turn is over, from the card store.
@@ -162,7 +166,7 @@ function returned(session: Session): string | null {
 // the brief's latest line; in a turn, its last tool step or which worker returned; while it needs
 // Daniel, who asks and for how long, such as "a1191 · Implement #355 asks · 3m".
 function rowText(session: Session): string {
-  const wait = session.waiting;
+  const wait = session.asker;
   if (wait === null) return session.line ?? returned(session) ?? stepText(session.last_step);
   if (wait.agent === null) return `${stepText(session.last_step)} · ${age(wait.since)}`;
   const asker = session.agents.find((agent) => agent.id === wait.agent);
@@ -191,17 +195,16 @@ function row(session: Session): HTMLElement {
 // A subagent's line, indented under the agent that spawned it. A worker shows its task, status and
 // last step; a helper its task, type, status, duration and result. A failed child stands out until
 // Daniel opens it.
-function agentRow(session: Session, agent: Agent, depth: number): HTMLElement {
+function agentRow(session: Session, agent: Subagent, depth: number): HTMLElement {
   const button = document.createElement("button");
   button.type = "button";
   button.className = `row ${agent.kind}`;
   button.setAttribute("aria-pressed", String(agent.id === viewedAgent));
   button.style.paddingLeft = `${8 + 16 * depth}px`;
-  const asks = session.waiting?.agent === agent.id;
+  const asks = session.asker?.agent === agent.id;
   const state = text("span", asks ? stateLabels.needs_you : agent.status, "row-state");
   if (asks) state.dataset.state = "needs_you";
-  const failed = agent.status !== "running" && agent.status !== "completed";
-  state.classList.toggle("failed", failed && !agent.opened);
+  state.classList.toggle("failed", agent.failed && !agent.opened);
   const details =
     agent.kind === "worker"
       ? [stepText(agent.last_step)]
@@ -283,7 +286,7 @@ function show(session: Session | null) {
   if (session === null) return;
   // A subagent's view shows its own line, questions, brief and cards; the checks are its session's.
   const agent = session.agents.find((a) => a.id === viewedAgent) ?? null;
-  const asks = agent !== null && session.waiting?.agent === agent.id;
+  const asks = agent !== null && session.asker?.agent === agent.id;
   const [label, state] =
     agent === null
       ? [stateLabels[session.state], session.state]

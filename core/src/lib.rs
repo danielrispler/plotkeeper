@@ -43,20 +43,20 @@ pub struct Session {
     /// The tool calls blocked on Daniel.
     #[serde(skip)]
     blocks: Vec<Call>,
-    /// A block no tool call clears: a question in the turn's final message.
+    /// Its turn's final message asks Daniel something: a block no tool call clears.
     #[serde(skip)]
     asked: bool,
     #[serde(skip)]
     turn_ended: bool,
     #[serde(skip)]
     ended: bool,
-    /// Whether a `Stop` of it asked for Claude Code's version.
+    /// Whether a `Stop` of it requested Claude Code's version.
     #[serde(skip)]
     versioned: bool,
     /// Its subagents at any depth, in the order they were first seen (#369, decision 5).
-    pub agents: Vec<Agent>,
-    /// What it waits on while it needs Daniel.
-    pub waiting: Option<Wait>,
+    pub agents: Vec<Subagent>,
+    /// Who asks Daniel, and since when, while it needs him.
+    pub asker: Option<Asker>,
     /// Its prompts, oldest first, each marked with who sent it (#369, decision 7).
     pub prompts: Vec<Prompt>,
     /// The ids of its background tasks, commands included, from their responses and `Stop`'s
@@ -104,8 +104,8 @@ pub struct Prompt {
 pub struct Stopped {
     /// The id a card on it has (`CardRequest::id`).
     pub card: String,
-    /// Whether it asked for a card. Only a live `Stop` does.
-    pub asked: bool,
+    /// Whether it requested a card (`Output::Card`). Only a live `Stop` does.
+    pub requested: bool,
     /// The first line of the agent's last message.
     pub message: Option<String>,
 }
@@ -146,7 +146,7 @@ pub enum Answer {
 
 /// A subagent of a session (#369, decisions 5, 6 and 8).
 #[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct Agent {
+pub struct Subagent {
     /// Its `agent_id`.
     pub id: String,
     pub parent: Parent,
@@ -164,6 +164,8 @@ pub struct Agent {
     pub last_step: Option<Step>,
     /// The first line of its last message, from its `SubagentStop`.
     pub result: Option<String>,
+    /// It ended with a status other than `completed`, such as `killed`.
+    pub failed: bool,
     /// Daniel opened its line.
     pub opened: bool,
     /// A helper that succeeded, or one that failed and Daniel opened, folds into its parent's line
@@ -181,7 +183,7 @@ pub struct Agent {
     since: Since,
 }
 
-impl Agent {
+impl Subagent {
     /// Ends it at `at`, with its wake-up's `status`, or with none from any other signal. A wake-up's
     /// status overrides the others.
     fn end(&mut self, status: Option<&str>, at: u64) {
@@ -193,9 +195,13 @@ impl Agent {
         self.ended_at.get_or_insert(at);
     }
 
+    fn fails(&self) -> bool {
+        !["running", "completed"].contains(&self.status.as_str())
+    }
+
     fn fades(&self) -> bool {
         let succeeded = self.status == "completed";
-        self.kind == Kind::Helper && self.status != "running" && (succeeded || self.opened)
+        self.kind == Kind::Helper && (succeeded || self.failed && self.opened)
     }
 }
 
@@ -219,11 +225,11 @@ pub enum Kind {
 
 impl Session {
     /// Subagent `id`, added in "unattached" when this is the first event that names it.
-    fn agent(&mut self, id: &str, at: u64) -> &mut Agent {
+    fn agent(&mut self, id: &str, at: u64) -> &mut Subagent {
         let index = match self.agents.iter().position(|a| a.id == id) {
             Some(index) => index,
             None => {
-                self.agents.push(Agent {
+                self.agents.push(Subagent {
                     id: id.into(),
                     parent: Parent::Unattached,
                     kind: Kind::Helper,
@@ -234,6 +240,7 @@ impl Session {
                     ended_at: None,
                     last_step: None,
                     result: None,
+                    failed: false,
                     opened: false,
                     faded: false,
                     last_event_at: at,
@@ -317,11 +324,7 @@ impl Session {
             }
             // A wake-up names the task it reports on, and how it ended (#370 note).
             "UserPromptSubmit" => {
-                for notice in event.prompt.split("<task-notification>").skip(1) {
-                    let (Some(id), Some(status)) = (tag(notice, "task-id"), tag(notice, "status"))
-                    else {
-                        continue;
-                    };
+                for (id, status) in reported(&event.prompt) {
                     if let Some(agent) = self.agents.iter_mut().find(|a| a.id == id) {
                         agent.end(Some(status), at);
                     }
@@ -346,6 +349,7 @@ impl Session {
             _ => {}
         }
         for agent in &mut self.agents {
+            agent.failed = agent.fails();
             agent.faded = agent.fades();
         }
         // A subagent that ended waits on nobody.
@@ -428,7 +432,7 @@ impl Session {
         let (base, change) = change.map_or_default(|c| (c.base, c.diff));
         CardRequest {
             session_id: self.id.clone(),
-            id: format!("{}@{at}", owner.unwrap_or(&self.id)),
+            id: card_id(owner.unwrap_or(&self.id), at),
             base,
             change,
             prompt,
@@ -449,11 +453,9 @@ impl Session {
 
     /// Its workers that failed: they ended with a status other than `completed`, such as `killed`.
     fn failed_workers(&self) -> Vec<String> {
-        let failed =
-            |a: &&Agent| a.kind == Kind::Worker && !["running", "completed"].contains(&&*a.status);
         self.agents
             .iter()
-            .filter(failed)
+            .filter(|a| a.kind == Kind::Worker && a.failed)
             .map(|a| a.id.clone())
             .collect()
     }
@@ -476,9 +478,10 @@ impl Session {
         self.blocks.push(block);
     }
 
-    /// Clears the blocks of the session's own agent (#328, module 3, "Needs you": `UserPromptSubmit`,
-    /// `Stop`, `SessionEnd`). The turn's calls end with it, so a call that never reported back takes
-    /// no later block. Subagents run past their session's turn, so their blocks stay.
+    /// Clears the blocks of the session's own agent (#328, module 3, "Needs you": Daniel's
+    /// `UserPromptSubmit`, not a wake-up; `Stop`; `SessionEnd`). The turn's calls end with it, so a
+    /// call that never reported back takes no later block. Subagents run past their session's turn,
+    /// so their blocks stay.
     fn unblock(&mut self) {
         self.blocks.retain(|c| c.agent.is_some());
         self.running.retain(|c| c.agent.is_some());
@@ -504,8 +507,8 @@ fn waits_on(block: &Call, call: &Call) -> bool {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum State {
-    /// Blocked on Daniel (#328, module 3, "Needs you"), until the step that asks resolves, a prompt,
-    /// `Stop` or `SessionEnd`.
+    /// Blocked on Daniel (#328, module 3, "Needs you"), until the step that asks resolves, a prompt
+    /// of Daniel's, `Stop` or `SessionEnd`.
     NeedsYou,
     /// In a turn, from a prompt until `Stop` or `SessionEnd`.
     Running,
@@ -647,10 +650,10 @@ struct Call {
     at: u64,
 }
 
-/// What a session that needs Daniel waits on: its oldest block's asker, a subagent or `None` for the
+/// Who a session that needs Daniel waits on: its oldest block's asker, a subagent or `None` for the
 /// session's own agent, and since when, in Unix milliseconds (#369, decision 21).
 #[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct Wait {
+pub struct Asker {
     pub agent: Option<String>,
     pub since: u64,
 }
@@ -724,6 +727,13 @@ pub fn asks(message: &str) -> bool {
             && !prose.starts_with(['>', '|'])
             && prose.split_whitespace().any(|word| word.ends_with('?'))
     })
+}
+
+/// The tasks a wake-up reports on, each with how it ended: its `<task-id>` and its `<status>`
+/// (#370 note).
+fn reported(prompt: &str) -> impl Iterator<Item = (&str, &str)> {
+    let notices = prompt.split("<task-notification>").skip(1);
+    notices.filter_map(|notice| Some((tag(notice, "task-id")?, tag(notice, "status")?)))
 }
 
 /// The text of the first `<name>` element in `text`.
@@ -822,23 +832,52 @@ fn exit_code_counts(command: &str) -> bool {
 }
 
 impl Studio {
-    /// The worktree the shell fingerprints before it applies this live line (#328, module 5), or
-    /// `None` (#369, decisions 6, 10 and 11).
-    pub fn fingerprint_folder(&self, line: &str) -> Option<Fingerprint> {
-        self.look(&serde_json::from_str(line).ok()?)
+    /// The worktrees the shell fingerprints before it applies this live line (#328, module 5), each
+    /// with its own key: none, one, or at a wake-up also its workers' ends (#369, decisions 6, 8, 10
+    /// and 11).
+    pub fn fingerprint_folders(&self, line: &str) -> Vec<Fingerprint> {
+        let event = serde_json::from_str(line);
+        event.map_or_else(|_| Vec::new(), |event| self.looks(&event))
+    }
+
+    /// The fingerprints before `event`: its own (`look`), and at a wake-up, the end of each worker
+    /// with cards it reports on that no other signal ended, since a killed worker has no
+    /// `SubagentStop` (#369, decision 8).
+    fn looks(&self, event: &Event) -> Vec<Fingerprint> {
+        let mut looks: Vec<Fingerprint> = self.look(event).into_iter().collect();
+        let session = self.sessions.get(&event.session_id);
+        if event.hook_event_name == "UserPromptSubmit"
+            && let Some(session) = session
+        {
+            for (id, _) in reported(&event.prompt) {
+                let agent = session.agents.iter().find(|a| a.id == id);
+                let agent = agent.filter(|a| a.ended_at.is_none() && session.has_cards(id));
+                looks.extend(agent.and_then(|a| {
+                    Some(Fingerprint {
+                        key: id.into(),
+                        folder: a.folder.clone()?,
+                        keep: Keep::Always,
+                    })
+                }));
+            }
+        }
+        looks
     }
 
     /// The fingerprint before `event`. A session's own: at a prompt, the prompt's base, so what Daniel
     /// changed himself since the last card does not count; a prompt inside a turn still open takes
     /// none, since an interrupt fires no `Stop` and a wake-up can land mid-turn. At `Stop`, the change
-    /// since the base is the card's. A subagent's: its first event's, its base; its Bash steps', for
-    /// a commit or a change that makes it a worker; and a worker's end. On a step 20 minutes after
-    /// the last card of the worktree it is in, that worktree's, for the fallback card.
+    /// since the base is the card's. A subagent's: its first event's, its base; a helper's before and
+    /// after each Bash step, for a change across it that makes it a worker; a worker's after each
+    /// Bash step, for a commit; and a worker's end. On a step 20 minutes after the last card of the
+    /// worktree it is in, that worktree's, for the fallback card; a session's only in a turn.
     fn look(&self, event: &Event) -> Option<Fingerprint> {
         let name = event.hook_event_name.as_str();
         let step = matches!(name, "PostToolUse" | "PostToolUseFailure");
         let due = |since: &Since| step && event.studio_received_ms >= since.at + FALLBACK_MS;
         let session = self.sessions.get(&event.session_id);
+        // A session's own fallback is on a prompt's steps only, not between its turns.
+        let session_due = |s: &Session| s.in_turn() && due(&s.since);
         let look = |key: &str, folder: &str, keep| {
             let look = Fingerprint {
                 key: key.into(),
@@ -851,7 +890,7 @@ impl Studio {
             let at = match name {
                 "UserPromptSubmit" => !self.in_turn(&event.session_id),
                 "Stop" => true,
-                _ => session.is_some_and(|s| due(&s.since)),
+                _ => session.is_some_and(session_due),
             };
             return look(&event.session_id, &event.cwd, Keep::Always).filter(|_| at);
         };
@@ -860,8 +899,13 @@ impl Studio {
         let Some(folder) = agent.and_then(|a| a.folder.as_deref()) else {
             return look(id, &event.cwd, Keep::Always);
         };
-        let worker = |a: &Agent| a.kind == Kind::Worker;
-        let bash = step && event.tool_name.as_deref() == Some("Bash");
+        let worker = |a: &Subagent| a.kind == Kind::Worker;
+        let bash = event.tool_name.as_deref() == Some("Bash");
+        // A helper's base right before its command, so only a change across it promotes it.
+        if bash && name == "PreToolUse" && agent.is_some_and(|a| !worker(a)) {
+            return look(id, folder, Keep::Always);
+        }
+        let bash = step && bash;
         let owner = session.owner(id, folder);
         let owner = owner.and_then(|o| session.agents.iter().find(|a| a.id == o));
         match owner {
@@ -875,7 +919,7 @@ impl Studio {
             Some(above) if worker(above) && due(&above.since) => {
                 look(&above.id, above.folder.as_deref()?, Keep::Always)
             }
-            None if due(&session.since) => look(&session.id, &session.cwd, Keep::Always),
+            None if session_due(session) => look(&session.id, &session.cwd, Keep::Always),
             _ => look(id, folder, Keep::OnCommit)
                 .filter(|_| bash && agent.is_some_and(|a| !worker(a))),
         }
@@ -902,18 +946,22 @@ impl Studio {
     /// Takes one live event log line that the shell took no fingerprint for, and returns what the
     /// shell must do.
     pub fn apply(&mut self, line: &str) -> Vec<Output> {
-        self.apply_with_change(line, None)
+        self.apply_with_changes(line, BTreeMap::new())
     }
 
-    /// Takes one live event log line, with what the shell's fingerprint before it found: the change
-    /// in the worktree `fingerprint_folder` named since its base, or `None` when nothing changed or
-    /// the shell took none. Returns what the shell must do. A line that is not a hook event is
-    /// skipped.
-    pub fn apply_with_change(&mut self, line: &str, mut change: Option<Change>) -> Vec<Output> {
+    /// Takes one live event log line, with what the shell's fingerprints before it found: the change
+    /// in each worktree `fingerprint_folders` named since its base, by the fingerprint's key, with no
+    /// entry when nothing changed or the shell took none. Returns what the shell must do. A line that
+    /// is not a hook event is skipped.
+    pub fn apply_with_changes(
+        &mut self,
+        line: &str,
+        mut changes: BTreeMap<String, Change>,
+    ) -> Vec<Output> {
         let Ok(event) = serde_json::from_str::<Event>(line) else {
             return Vec::new();
         };
-        let look = self.look(&event);
+        let looks = self.looks(&event);
         let session = self
             .sessions
             .entry(event.session_id.clone())
@@ -932,7 +980,7 @@ impl Studio {
                 ended: false,
                 versioned: false,
                 agents: Vec::new(),
-                waiting: None,
+                asker: None,
                 prompts: Vec::new(),
                 tasks: BTreeSet::new(),
                 questions: Vec::new(),
@@ -946,9 +994,8 @@ impl Studio {
         // The hooks are async, so the latest event can land before an earlier one.
         session.last_event_at = session.last_event_at.max(event.studio_received_ms);
         let failed_before = session.failed_workers();
-        let key = look.as_ref().map(|look| look.key.as_str());
-        let its_own = key.is_some() && key == event.agent_id.as_deref();
-        session.track_agents(&event, its_own && change.is_some());
+        let its_own = |id: &String| changes.contains_key(id);
+        session.track_agents(&event, event.agent_id.as_ref().is_some_and(its_own));
         // A child's events still keep its session from going idle, but its folder and steps are its
         // own.
         let own = event.agent_id.is_none();
@@ -986,12 +1033,17 @@ impl Studio {
             }
         }
         // A worker's card at its commit, seen after its Bash step, or at its end, and any worktree's
-        // after 20 minutes: when its worktree changed since its last card (#369, decision 11).
-        if let Some(look) = &look
-            && !matches!(name, "UserPromptSubmit" | "Stop")
-            && let Some(found) =
-                change.take_if(|c| look.keep == Keep::Always || c.head != c.base.head)
-        {
+        // after 20 minutes: when its worktree changed since its last card (#369, decision 11). The
+        // session's own look at a prompt is its base, and at `Stop` its card's change, below.
+        for look in &looks {
+            if look.key == session.id && matches!(name, "UserPromptSubmit" | "Stop") {
+                continue;
+            }
+            let found = changes.remove(&look.key);
+            let Some(found) = found.filter(|c| look.keep == Keep::Always || c.head != c.base.head)
+            else {
+                continue;
+            };
             let owner = (look.key != session.id).then_some(look.key.as_str());
             if owner.is_none_or(|id| session.has_cards(id)) {
                 let request = session.card(owner, Some(found), at);
@@ -1008,7 +1060,7 @@ impl Studio {
                 let wake_up = matches!(sender, Sender::WakeUp(_));
                 session.woken = wake_up && (session.woken || !session.in_turn());
                 // A base for the prompt: what Daniel changed himself before it is no one's.
-                if look.is_some() {
+                if looks.iter().any(|look| look.key == session.id) {
                     session.since.at = at;
                     session.since.by.clear();
                 }
@@ -1026,7 +1078,10 @@ impl Studio {
                     sender,
                     text: event.prompt,
                 });
-                session.unblock();
+                // Daniel's prompt answers what asked him; a wake-up is not his, so it answers nothing.
+                if !wake_up {
+                    session.unblock();
+                }
                 session.turn_ended = false;
                 session.stopped = None;
             }
@@ -1046,7 +1101,7 @@ impl Studio {
                 // Its own change, else its workers' cards since its last card: a card, or only its
                 // brief when a wake-up opened the turn.
                 let workers = !session.since.cards.is_empty();
-                let output = match change {
+                let output = match changes.remove(&session.id) {
                     Some(change) => Some(Output::Card(session.card(None, Some(change), at))),
                     None if workers && session.woken => {
                         Some(Output::Brief(session.card(None, None, at)))
@@ -1057,8 +1112,8 @@ impl Studio {
                 session.since.by.clear();
                 let mut lines = event.last_assistant_message.lines().map(str::trim);
                 session.stopped = Some(Stopped {
-                    card: format!("{}@{at}", event.session_id),
-                    asked: matches!(output, Some(Output::Card(_))),
+                    card: card_id(&event.session_id, at),
+                    requested: matches!(output, Some(Output::Card(_))),
                     message: lines.find(|line| !line.is_empty()).map(Into::into),
                 });
                 outputs.extend(output);
@@ -1175,14 +1230,14 @@ impl Studio {
         } else {
             State::Running
         };
-        session.waiting = session.blocks.first().map(|block| Wait {
+        session.asker = session.blocks.first().map(|block| Asker {
             agent: block.agent.clone(),
             since: block.at,
         });
         if !blocked_before && session.state == State::NeedsYou {
             outputs.push(Output::NeedsYou {
                 session_id: event.session_id,
-                agent: session.waiting.as_ref().and_then(|w| w.agent.clone()),
+                agent: session.asker.as_ref().and_then(|w| w.agent.clone()),
             });
         }
         outputs
@@ -1267,6 +1322,11 @@ impl Studio {
         }
         body
     }
+}
+
+/// The id of `owner`'s card written at `at`, a worker's or else a session's (`CardRequest::id`).
+fn card_id(owner: &str, at: u64) -> String {
+    format!("{owner}@{at}")
 }
 
 /// The first `n` characters of an id.

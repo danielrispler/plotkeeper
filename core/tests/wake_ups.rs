@@ -2,7 +2,7 @@
 //! check which of a session's prompts Claude Code sent to wake it, and which are Daniel's.
 
 use serde_json::json;
-use studio_core::{Output, Sender, Studio};
+use studio_core::{Output, Sender, State, Studio};
 
 fn replay(log: &str) -> Studio {
     let mut studio = Studio::default();
@@ -169,4 +169,39 @@ fn a_known_id_under_a_tag_the_studio_does_not_know_is_drift_not_a_wake_up() {
         (attribute, element),
         (vec![drift(agent)], vec![drift(command)])
     );
+}
+
+/// The glossary: a wake-up never counts as Daniel's prompt, so the permission the session waits on
+/// still needs him until its step resolves (#369, story 12).
+#[test]
+fn a_wake_up_leaves_the_session_needing_daniel_until_the_step_that_asks_resolves() {
+    let mut studio = Studio::default();
+    let event = |name: &str, fields: serde_json::Value| {
+        let mut event = json!({ "session_id": "s1", "hook_event_name": name });
+        let fields = fields.as_object().unwrap().clone();
+        event.as_object_mut().unwrap().extend(fields);
+        event.to_string()
+    };
+    let push = json!({"tool_name": "Bash", "tool_input": {"command": "git push"},
+        "tool_use_id": "toolu_push"});
+    let state = |studio: &Studio| studio.session("s1").unwrap().state;
+    studio.apply(&event(
+        "UserPromptSubmit",
+        json!({ "prompt": "Implement #378" }),
+    ));
+    studio.apply(&event(
+        "PostToolUse",
+        json!({"tool_name": "Agent", "tool_input": {}, "tool_response": {"agentId": "a1"}}),
+    ));
+    studio.apply(&event("PreToolUse", push.clone()));
+    studio.apply(&event("PermissionRequest", push.clone()));
+    assert_eq!(state(&studio), State::NeedsYou);
+
+    let wake_up =
+        "<task-notification><task-id>a1</task-id><status>completed</status></task-notification>";
+    studio.apply(&event("UserPromptSubmit", json!({ "prompt": wake_up })));
+    assert_eq!(state(&studio), State::NeedsYou);
+
+    studio.apply(&event("PostToolUse", push));
+    assert_eq!(state(&studio), State::Running);
 }

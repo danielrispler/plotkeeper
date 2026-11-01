@@ -124,14 +124,14 @@ impl Shell {
             .unwrap()
             .extend(fields.as_object().unwrap().clone());
         let line = event.to_string();
-        let found = self.studio.fingerprint_folder(&line);
-        let change = found.and_then(|look| {
-            let prints = self.fingerprints.entry(look.key).or_default();
-            prints.look(Path::new(&look.folder), look.keep)
+        let looks = self.studio.fingerprint_folders(&line);
+        let changes = looks.into_iter().filter_map(|look| {
+            let prints = self.fingerprints.entry(look.key.clone()).or_default();
+            Some((look.key, prints.look(Path::new(&look.folder), look.keep)?))
         });
-        let outputs = self.studio.apply_with_change(&line, change);
-        let asked = |output: &Output| matches!(output, Output::Card(_) | Output::Brief(_));
-        outputs.into_iter().filter(asked).collect()
+        let outputs = self.studio.apply_with_changes(&line, changes.collect());
+        let requested = |output: &Output| matches!(output, Output::Card(_) | Output::Brief(_));
+        outputs.into_iter().filter(requested).collect()
     }
 
     /// Writes the card or the brief `output` asks for, as the shell's card thread does.
@@ -265,6 +265,29 @@ fn a_worker_gets_a_card_at_each_commit_in_its_worktree_and_at_its_end_with_its_o
     assert_eq!(store.brief("s1"), None);
 }
 
+/// #369, decisions 8 and 11: a killed worker has no `SubagentStop`; its end is read from its
+/// wake-up, which also opens the session's next turn and takes that turn's base.
+#[test]
+fn a_killed_worker_gets_its_end_card_at_the_wake_up_that_reports_it() {
+    let mut shell = Shell::new();
+    shell.take("UserPromptSubmit", json!({ "prompt": "Implement #378" }));
+    shell.take("PostToolUse", spawn_child("w1", "Implement #378", true));
+    let tree = shell.worktree("w1");
+    shell.child("w1", &tree, "SubagentStart", json!({}));
+    shell.take("Stop", json!({}));
+    fs::write(tree.join("a.rs"), "fn a1() {}\n").unwrap();
+    // Daniel's own edit before the wake-up is not the woken turn's.
+    fs::write(shell.repo.join("notes.txt"), "mine\n").unwrap();
+
+    let killed =
+        "<task-notification><task-id>w1</task-id><status>killed</status></task-notification>";
+    shell.take("UserPromptSubmit", json!({ "prompt": killed }));
+    shell.take("Stop", json!({}));
+
+    assert_eq!(shell.cards(), [(Some("w1".into()), summary("a.rs"))]);
+    assert_eq!(shell.writer.updates.borrow().len(), 1);
+}
+
 /// Worker `w1` in a worktree of its own writes `a.rs` and ends, with one card.
 fn worker_writes_and_ends(shell: &mut Shell) {
     shell.take("PostToolUse", spawn_child("w1", "Implement #378", true));
@@ -358,6 +381,28 @@ fn after_25_minutes_of_uncommitted_change_the_next_step_gets_a_card_and_one_with
     assert_eq!(shell.writer.cards.borrow().len(), 2);
 }
 
+/// #369, decision 11: the fallback is on a step of a worker or of a prompt; after the session's
+/// `Stop` there is no prompt, so Daniel's own edit is no one's card.
+#[test]
+fn a_background_helpers_step_after_the_stop_writes_no_card_for_the_session_after_25_minutes() {
+    let mut shell = Shell::new();
+    let repo = shell.repo.clone();
+    shell.take(
+        "UserPromptSubmit",
+        json!({ "prompt": "Review in the background" }),
+    );
+    shell.take("PostToolUse", spawn_child("h1", "Review", false));
+    shell.child("h1", &repo, "SubagentStart", json!({}));
+    shell.take("Stop", json!({}));
+
+    fs::write(repo.join("lib.rs"), "fn b() {}\n").unwrap();
+    shell.at += 25 * MINUTE;
+    let read = json!({"tool_name": "Read", "tool_input": {"file_path": "lib.rs"}});
+    shell.child("h1", &repo, "PostToolUse", read);
+
+    assert_eq!(shell.cards(), []);
+}
+
 #[test]
 fn a_helpers_edit_in_its_parents_worktree_shows_on_the_parents_card_tagged_with_the_helper() {
     let mut shell = Shell::new();
@@ -390,12 +435,32 @@ fn a_helper_whose_command_changes_its_worktree_becomes_a_worker() {
     shell.child("h1", &repo, "SubagentStart", json!({}));
     let kind = |shell: &Shell| shell.studio.session("s1").unwrap().agents[0].kind;
 
+    shell.child("h1", &repo, "PreToolUse", bash("cargo fmt --check"));
     shell.child("h1", &repo, "PostToolUse", bash("cargo fmt --check"));
     assert_eq!(kind(&shell), Kind::Helper);
+    shell.child("h1", &repo, "PreToolUse", bash("cargo fmt"));
     fs::write(repo.join("lib.rs"), "fn a() {}\n\n").unwrap();
     shell.child("h1", &repo, "PostToolUse", bash("cargo fmt"));
 
     assert_eq!(kind(&shell), Kind::Worker);
+}
+
+/// #369, decision 6: only a change across the helper's own Bash step counts, not what its parent or
+/// Daniel changed in the shared worktree before it.
+#[test]
+fn a_helper_whose_command_changes_nothing_stays_a_helper_after_others_change_its_worktree() {
+    let mut shell = Shell::new();
+    let repo = shell.repo.clone();
+    shell.take("UserPromptSubmit", json!({ "prompt": "Review the change" }));
+    shell.take("PostToolUse", spawn_child("h1", "Review", false));
+    shell.child("h1", &repo, "SubagentStart", json!({}));
+    let kind = |shell: &Shell| shell.studio.session("s1").unwrap().agents[0].kind;
+
+    fs::write(repo.join("lib.rs"), "fn b() {}\n").unwrap();
+    shell.child("h1", &repo, "PreToolUse", bash("cargo test"));
+    shell.child("h1", &repo, "PostToolUse", bash("cargo test"));
+
+    assert_eq!(kind(&shell), Kind::Helper);
 }
 
 const WAKE_UP: &str =

@@ -3,7 +3,8 @@
 //! and the waits they raise on their session.
 
 use serde_json::json;
-use studio_core::{Agent, Base, Change, Kind, Output, Parent, State, Step, Studio, Wait};
+use std::collections::BTreeMap;
+use studio_core::{Asker, Base, Change, Kind, Output, Parent, State, Step, Studio, Subagent};
 
 use Kind::{Helper, Worker};
 use State::{NeedsYou, Running, YourTurn};
@@ -62,7 +63,7 @@ const RUN_WORKER: &str = "add0c7bbaced40ed0";
 const RUN_HELPER: &str = "a551b1ece0a4430ce";
 
 /// A subagent of the session, by id.
-fn agent<'a>(studio: &'a Studio, session: &str, id: &str) -> &'a Agent {
+fn agent<'a>(studio: &'a Studio, session: &str, id: &str) -> &'a Subagent {
     let session = studio.session(session).expect("the session");
     session
         .agents
@@ -109,6 +110,8 @@ fn the_runs_worker_completes_with_its_last_message_and_its_killed_helper_stays_v
         ("killed", Some(1_793_471_842_241), None)
     );
     assert_eq!(helper.started_at, 1_793_471_818_599);
+    // The pane draws it as failed from the core's flag, not from its status.
+    assert!(helper.failed);
     assert!(!helper.faded, "a killed helper stays on its parent's line");
 
     studio.open(RUN_HELPER);
@@ -242,14 +245,14 @@ fn a_helper_whose_command_changed_its_worktree_is_a_worker_from_that_step() {
     .to_string();
 
     // The shell's fingerprint after the step: nothing changed, then a file changed.
-    studio.apply_with_change(&command, None);
+    studio.apply_with_changes(&command, BTreeMap::new());
     assert_eq!(agent(&studio, TREE_SESSION, TREE_REVIEW).kind, Helper);
     let change = Change {
         base: Base::default(),
         diff: "+fn element<'a>\n".into(),
         head: None,
     };
-    studio.apply_with_change(&command, Some(change));
+    studio.apply_with_changes(&command, BTreeMap::from([(TREE_REVIEW.into(), change)]));
     assert_eq!(agent(&studio, TREE_SESSION, TREE_REVIEW).kind, Worker);
 }
 
@@ -285,15 +288,15 @@ fn a_childs_check_adds_no_line_to_its_session() {
 
 #[test]
 fn a_childs_permission_request_makes_its_session_need_you_until_its_step_resolves() {
-    let states: Vec<(State, Option<Wait>)> = (1..=TREE.lines().count())
+    let states: Vec<(State, Option<Asker>)> = (1..=TREE.lines().count())
         .map(|upto| {
             let studio = tree_upto(upto);
             let session = studio.session(TREE_SESSION).expect("the session");
-            (session.state, session.waiting.clone())
+            (session.state, session.asker.clone())
         })
         .collect();
 
-    let explore = Some(Wait {
+    let explore = Some(Asker {
         agent: Some(TREE_EXPLORE.into()),
         since: 1_793_480_012_050,
     });
@@ -331,7 +334,7 @@ fn a_child_that_ends_while_it_waits_clears_its_wait() {
     let studio = replay(&log);
 
     let session = studio.session(TREE_SESSION).expect("the session");
-    assert_eq!((session.state, &session.waiting), (Running, &None));
+    assert_eq!((session.state, &session.asker), (Running, &None));
 }
 
 #[test]

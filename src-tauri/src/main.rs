@@ -201,12 +201,13 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                     // shortcut: fingerprints when the line is read, up to one poll after the prompt,
                     // so an edit in between counts as Daniel's; take the fingerprint in the hook if a
                     // card ever misses one.
-                    let found = state.lock().unwrap().fingerprint_folder(&text);
-                    let change = found.and_then(|look| {
-                        let prints = fingerprints.entry(look.key).or_default();
-                        prints.look(Path::new(&look.folder), look.keep)
+                    let looks = state.lock().unwrap().fingerprint_folders(&text);
+                    let changes = looks.into_iter().filter_map(|look| {
+                        let prints = fingerprints.entry(look.key.clone()).or_default();
+                        Some((look.key, prints.look(Path::new(&look.folder), look.keep)?))
                     });
-                    outputs.extend(state.lock().unwrap().apply_with_change(&text, change));
+                    let changes = changes.collect();
+                    outputs.extend(state.lock().unwrap().apply_with_changes(&text, changes));
                 } else {
                     state.lock().unwrap().replay(&text);
                 }

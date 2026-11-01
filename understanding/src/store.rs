@@ -187,7 +187,7 @@ impl CardStore {
 
     /// What `session`'s row says while its turn is over (#369, decision 19): the summary of the card
     /// on its `Stop`; the first line of the agent's last message until that card arrives; the brief's
-    /// latest line when the `Stop` asked for no card. `None` in a turn.
+    /// latest line when the `Stop` requested no card. `None` in a turn.
     pub fn line(&self, session: &Session) -> Option<String> {
         let stopped = session.stopped.as_ref()?;
         let card = self
@@ -196,7 +196,7 @@ impl CardStore {
             .find(|kept| kept.request.id == stopped.card);
         let summary = card.map(|kept| kept.card.summary.clone());
         let brief = self.brief(&session.id).and_then(|b| b.text.lines().last());
-        let pending = stopped.asked.then(|| stopped.message.clone()).flatten();
+        let pending = stopped.requested.then(|| stopped.message.clone()).flatten();
         let latest = pending.or(brief.map(Into::into));
         summary
             .filter(|s| !s.is_empty())
@@ -236,8 +236,7 @@ impl CardStore {
     /// keeps its first time, and one guessed before gets none, so a guess never comes before its
     /// quiz.
     pub fn show(&mut self, id: &str, at: u64) -> io::Result<()> {
-        let mut cards = self.cards.iter_mut();
-        if let Some(kept) = cards.find(|kept| kept.request.id == id)
+        if let Some(kept) = self.card_mut(id)
             && kept.shown_at.is_none()
             && kept.guess.is_none()
         {
@@ -251,8 +250,7 @@ impl CardStore {
     /// graded by its key, and saves the store. The first tap counts; a card with no quiz, or no such
     /// option, records none.
     pub fn guess(&mut self, id: &str, option: usize, at: u64) -> io::Result<()> {
-        let mut cards = self.cards.iter_mut();
-        if let Some(kept) = cards.find(|kept| kept.request.id == id)
+        if let Some(kept) = self.card_mut(id)
             && kept.guess.is_none()
             && let Some(quiz) = &kept.card.quiz
             && option < quiz.options.len()
@@ -266,8 +264,7 @@ impl CardStore {
 
     /// Records Daniel's flag that the key of card `id`'s quiz is wrong, and saves the store.
     pub fn key_wrong(&mut self, id: &str) -> io::Result<()> {
-        let mut cards = self.cards.iter_mut();
-        if let Some(kept) = cards.find(|kept| kept.request.id == id)
+        if let Some(kept) = self.card_mut(id)
             && !kept.key_wrong
         {
             kept.key_wrong = true;
@@ -278,8 +275,7 @@ impl CardStore {
 
     /// Records Daniel's rating of card `id`, which replaces the one before, and saves the store.
     pub fn rate(&mut self, id: &str, rating: Rating) -> io::Result<()> {
-        let mut cards = self.cards.iter_mut();
-        if let Some(kept) = cards.find(|kept| kept.request.id == id) {
+        if let Some(kept) = self.card_mut(id) {
             kept.rating = Some(rating);
             return self.save();
         }
@@ -289,14 +285,18 @@ impl CardStore {
     /// Keeps `more`, the writer's longer explanation of card `id`, unless it has one, and saves the
     /// store.
     pub(crate) fn more(&mut self, id: &str, more: String) -> io::Result<()> {
-        let mut cards = self.cards.iter_mut();
-        if let Some(kept) = cards.find(|kept| kept.request.id == id)
+        if let Some(kept) = self.card_mut(id)
             && kept.more.is_none()
         {
             kept.more = Some(more);
             return self.save();
         }
         Ok(())
+    }
+
+    /// Card `id`, to record on.
+    fn card_mut(&mut self, id: &str) -> Option<&mut StoredCard> {
+        self.cards.iter_mut().find(|kept| kept.request.id == id)
     }
 
     fn save(&self) -> io::Result<()> {
