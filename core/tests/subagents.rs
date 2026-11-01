@@ -253,7 +253,7 @@ fn a_helper_whose_command_changed_its_worktree_is_a_worker_from_that_step() {
 }
 
 #[test]
-fn a_childs_check_takes_no_guess_and_adds_no_line_to_its_session() {
+fn a_childs_check_adds_no_line_to_its_session() {
     // The prompt (line 2) opens the wait, then the worker runs a check in its worktree.
     let mut studio = tree_upto(2);
     let check = |hook: &str| {
@@ -279,7 +279,7 @@ fn a_childs_check_takes_no_guess_and_adds_no_line_to_its_session() {
 
     assert_eq!(outputs, [vec![], vec![]]);
     let session = studio.session(TREE_SESSION).expect("the session");
-    assert_eq!((&session.guess, session.checks.len()), (&None, 0));
+    assert_eq!(session.checks, []);
 }
 
 #[test]

@@ -1,8 +1,8 @@
-//! The card store (#328, module 6; #369, decision 17): cards, their base and their reveal state
-//! survive a restart.
+//! The card store (#328, module 6; #369, decision 17): cards, their base, Daniel's guesses and his
+//! flags survive a restart.
 
-use studio_core::{Base, CardRequest, Change, Check, Output, Studio};
-use studio_understanding::{CardStore, CardWriter, FakeWriter, Outcome, StoredCard};
+use studio_core::{Base, CardRequest, Change, Output, Studio};
+use studio_understanding::{Card, CardStore, FakeWriter, Guess, StoredCard, write_card};
 
 /// The card on an edit of `path`, named `id`, from a base with `README.md` already edited.
 fn edit(id: &str, path: &str) -> CardRequest {
@@ -14,111 +14,106 @@ fn edit(id: &str, path: &str) -> CardRequest {
             files: vec!["README.md".into()],
         },
         change: format!("--- a/{path}\n+++ b/{path}\n@@ -1 +1 @@\n-old\n+new\n"),
-        check: None,
     }
 }
 
-#[test]
-fn a_reopened_store_keeps_the_cards_and_which_ones_daniel_revealed() {
-    let data = tempfile::tempdir().unwrap();
-    let path = data.path().join("cards.json");
-    let mut store = CardStore::open(path.clone()).unwrap();
+/// The fake writer's card on `request`, whose quiz's key is its first option of three.
+fn card(request: &CardRequest) -> Card {
+    write_card(&FakeWriter, request, |line| panic!("{line}")).unwrap()
+}
+
+/// A store at `path` with a card on `src/lib.rs` and one on `README.md`.
+fn two_cards(path: &std::path::Path) -> CardStore {
+    let mut store = CardStore::open(path.into()).unwrap();
     for request in [
         edit("toolu_01A", "src/lib.rs"),
         edit("toolu_01B", "README.md"),
     ] {
-        let card = FakeWriter.write(&request).unwrap();
+        let card = card(&request);
         store.add(request, card, 1_761_743_990_000).unwrap();
     }
-    store.reveal("toolu_01A", 1_761_744_000_000).unwrap();
-    // Opening it again later keeps the first reveal.
-    store.reveal("toolu_01A", 1_761_744_009_000).unwrap();
+    store
+}
+
+#[test]
+fn a_tap_records_the_guess_and_its_verdict_and_only_the_first_counts() {
+    let data = tempfile::tempdir().unwrap();
+    let path = data.path().join("cards.json");
+    let mut store = two_cards(&path);
+    store.guess("toolu_01A", 2, 1_761_744_000_000).unwrap();
+    // A second tap, once the reasons show, changes nothing.
+    store.guess("toolu_01A", 0, 1_761_744_009_000).unwrap();
+    store.guess("toolu_01B", 0, 1_761_744_010_000).unwrap();
 
     let reopened = CardStore::open(path).unwrap();
 
-    let revealed: Vec<(&str, Option<u64>)> = reopened
-        .cards()
-        .iter()
-        .map(|kept| (kept.request.id.as_str(), kept.revealed_at))
-        .collect();
+    let guesses: Vec<Option<Guess>> = reopened.cards().iter().map(|kept| kept.guess).collect();
     assert_eq!(
-        revealed,
-        [("toolu_01A", Some(1_761_744_000_000)), ("toolu_01B", None)]
+        guesses,
+        [
+            Some(Guess {
+                option: 2,
+                right: false,
+                at: 1_761_744_000_000
+            }),
+            Some(Guess {
+                option: 0,
+                right: true,
+                at: 1_761_744_010_000
+            }),
+        ]
     );
     assert_eq!(reopened.cards(), store.cards());
 }
 
-/// A check's card, as stores kept them before #374.
-fn check(guess: Option<bool>, exit_passed: Option<bool>) -> CardRequest {
-    CardRequest {
-        session_id: "a3e6c9f2-1b4d-4e7a-8c0f-5d2b9e6a3c18".into(),
-        id: "toolu_01Uy4Ka9Lo3Pv6Bs1Dc8Fh5R".into(),
-        base: Base::default(),
-        change: "test result: FAILED. 11 passed; 1 failed; 0 ignored".into(),
-        check: Some(Check { guess, exit_passed }),
-    }
-}
-
-/// The stored card's verdict and outcome once the card writer says whether the check `passed`.
-fn settled(request: CardRequest, passed: Option<bool>) -> (Option<bool>, Option<Outcome>) {
-    let data = tempfile::tempdir().unwrap();
-    let mut store = CardStore::open(data.path().join("cards.json")).unwrap();
-    let mut card = FakeWriter.write(&request).unwrap();
-    card.passed = passed;
-    store.add(request, card, 1_761_743_990_000).unwrap();
-    let reopened = CardStore::open(data.path().join("cards.json")).unwrap();
-    (reopened.cards()[0].passed, reopened.cards()[0].outcome)
-}
-
 #[test]
-fn the_writers_passed_settles_a_yes_on_a_piped_check_as_right_wrong_or_not_counted() {
-    let yes = || check(Some(true), None);
-
-    assert_eq!(
-        settled(yes(), Some(true)),
-        (Some(true), Some(Outcome::Right))
-    );
-    assert_eq!(
-        settled(yes(), Some(false)),
-        (Some(false), Some(Outcome::Wrong))
-    );
-    assert_eq!(settled(yes(), None), (None, Some(Outcome::NotCounted)));
-}
-
-#[test]
-fn an_exit_code_that_counts_settles_the_guess_and_a_missing_tap_is_not_counted() {
-    let yes_but_exited_1 = check(Some(true), Some(false));
-    assert_eq!(
-        settled(yes_but_exited_1, Some(true)),
-        (Some(false), Some(Outcome::Wrong))
-    );
-    let untapped = check(None, Some(true));
-    assert_eq!(
-        settled(untapped, Some(true)),
-        (Some(true), Some(Outcome::NotCounted))
-    );
-    assert_eq!(settled(edit("toolu_01A", "src/lib.rs"), None), (None, None));
-}
-
-#[test]
-fn each_card_records_when_it_was_added_when_its_question_showed_and_when_it_was_revealed() {
+fn a_tap_on_no_option_of_the_quiz_records_nothing() {
     let data = tempfile::tempdir().unwrap();
     let path = data.path().join("cards.json");
     let mut store = CardStore::open(path.clone()).unwrap();
-    for request in [
-        edit("toolu_01A", "src/lib.rs"),
-        edit("toolu_01B", "README.md"),
-    ] {
-        let card = FakeWriter.write(&request).unwrap();
-        store.add(request, card, 1_761_743_990_000).unwrap();
-    }
+    let request = edit("toolu_01A", "src/lib.rs");
+    let no_quiz = Card {
+        quiz: None,
+        ..card(&request)
+    };
+    store.add(request, no_quiz, 1_761_743_990_000).unwrap();
+    let request = edit("toolu_01B", "README.md");
+    let card = card(&request);
+    store.add(request, card, 1_761_743_990_000).unwrap();
+
+    store.guess("toolu_01A", 0, 1_761_744_000_000).unwrap();
+    store.guess("toolu_01B", 3, 1_761_744_000_000).unwrap();
+
+    let reopened = CardStore::open(path).unwrap();
+    assert!(reopened.cards().iter().all(|kept| kept.guess.is_none()));
+}
+
+#[test]
+fn the_key_is_wrong_is_recorded_on_the_card() {
+    let data = tempfile::tempdir().unwrap();
+    let path = data.path().join("cards.json");
+    let mut store = two_cards(&path);
+    store.guess("toolu_01B", 1, 1_761_744_000_000).unwrap();
+
+    store.key_wrong("toolu_01B").unwrap();
+
+    let reopened = CardStore::open(path).unwrap();
+    let flags: Vec<bool> = reopened.cards().iter().map(|kept| kept.key_wrong).collect();
+    assert_eq!(flags, [false, true]);
+}
+
+#[test]
+fn each_card_records_when_it_was_added_when_its_quiz_showed_and_when_it_was_guessed() {
+    let data = tempfile::tempdir().unwrap();
+    let path = data.path().join("cards.json");
+    let mut store = two_cards(&path);
     store.show("toolu_01A", 1_761_744_000_000).unwrap();
     // The pane draws it again after a restart; the first time stays.
     store.show("toolu_01A", 1_761_744_050_000).unwrap();
-    store.reveal("toolu_01A", 1_761_744_004_000).unwrap();
-    // A card revealed before its question time was kept, as in a store from before this record,
-    // gets none, so a reveal never comes before its question.
-    store.reveal("toolu_01B", 1_761_744_060_000).unwrap();
+    store.guess("toolu_01A", 0, 1_761_744_004_000).unwrap();
+    // A card guessed before its quiz time was kept gets none, so a guess never comes
+    // before its quiz.
+    store.guess("toolu_01B", 0, 1_761_744_060_000).unwrap();
     store.show("toolu_01B", 1_761_744_070_000).unwrap();
 
     let reopened = CardStore::open(path).unwrap();
@@ -126,7 +121,7 @@ fn each_card_records_when_it_was_added_when_its_question_showed_and_when_it_was_
     let records: Vec<_> = reopened
         .cards()
         .iter()
-        .map(|kept| (kept.added_at, kept.shown_at, kept.revealed_at))
+        .map(|kept| (kept.added_at, kept.shown_at, kept.guess.map(|a| a.at)))
         .collect();
     assert_eq!(
         records,
@@ -139,6 +134,33 @@ fn each_card_records_when_it_was_added_when_its_question_showed_and_when_it_was_
             (Some(1_761_743_990_000), None, Some(1_761_744_060_000)),
         ]
     );
+}
+
+/// A store written by #374's build, before cards had a quiz.
+const STORE_374: &str = r#"[{"request": {"session_id": "5b9e3d71-0c2a-4f8e-b6d4-8a1c3e5f7092",
+    "id": "5b9e3d71-0c2a-4f8e-b6d4-8a1c3e5f7092@1761743990000",
+    "base": {"head": null, "files": []}, "change": "-old\n+new\n", "check": null},
+    "card": {"question": "למה?", "answer": "כי.", "paths": ["src/lib.rs"], "code": "+new",
+    "why_it_matters": "", "not_checked": "", "passed": null},
+    "added_at": 1761743990000, "shown_at": null, "revealed_at": 1761744000000,
+    "passed": null, "outcome": null}]"#;
+
+#[test]
+fn a_store_from_before_quizzes_opens_with_cards_that_ask_nothing() {
+    let data = tempfile::tempdir().unwrap();
+    let path = data.path().join("cards-v2.json");
+    std::fs::write(&path, STORE_374).unwrap();
+
+    let store = CardStore::open(path).unwrap();
+
+    let [kept] = store.cards() else {
+        panic!("one card");
+    };
+    assert_eq!(
+        (kept.card.explanation.as_str(), &kept.card.quiz),
+        ("כי.", &None)
+    );
+    assert_eq!(kept.guess, None);
 }
 
 /// A store from before #374, with a card on one step.
@@ -162,7 +184,7 @@ fn the_old_store_is_moved_aside_on_first_start_and_the_new_one_starts_empty() {
     assert!(!data.path().join("cards.json").exists());
     // The next start keeps the new store, and the old one stays aside.
     let request = edit("toolu_01A", "src/lib.rs");
-    let card = FakeWriter.write(&request).unwrap();
+    let card = card(&request);
     store.add(request, card, 1_761_743_990_000).unwrap();
     assert_eq!(CardStore::open_beside(&log).unwrap().cards().len(), 1);
     assert_eq!(std::fs::read_to_string(&v1).unwrap(), STORE_V1);
@@ -209,7 +231,7 @@ fn a_sessions_cards_split_at_30_minutes_before_the_tick() {
     .into_iter()
     .enumerate()
     {
-        let card = FakeWriter.write(&request).unwrap();
+        let card = card(&request);
         store
             .add(request, card, start + i as u64 * 10 * MINUTE)
             .unwrap();
@@ -229,7 +251,7 @@ fn a_card_from_before_its_time_was_kept_is_older() {
     let data = tempfile::tempdir().unwrap();
     let path = data.path().join("cards.json");
     let request = edit("toolu_01A", "src/lib.rs");
-    let card = FakeWriter.write(&request).unwrap();
+    let card = card(&request);
     let kept = serde_json::json!([{ "request": request, "card": card }]);
     std::fs::write(&path, kept.to_string()).unwrap();
 
@@ -261,7 +283,7 @@ fn every_session_of_the_day_shows_all_of_its_cards_whichever_was_prompted_last()
         let change = studio.fingerprint_folder(line).and(Some(changed.clone()));
         for output in studio.apply_with_change(line, change) {
             if let Output::Card(request) = output {
-                let card = FakeWriter.write(&request).unwrap();
+                let card = card(&request);
                 store.add(request, card, at).unwrap();
             }
         }

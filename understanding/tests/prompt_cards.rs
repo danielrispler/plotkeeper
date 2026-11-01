@@ -11,9 +11,9 @@ use studio_understanding::{Card, CardWriter, FakeWriter, Fingerprints, write_car
 struct Counting(Cell<usize>);
 
 impl CardWriter for Counting {
-    fn write(&self, request: &CardRequest) -> Result<Card, String> {
+    fn reply(&self, request: &CardRequest) -> Result<String, String> {
         self.0.set(self.0.get() + 1);
-        FakeWriter.write(request)
+        FakeWriter.reply(request)
     }
 }
 
@@ -52,7 +52,8 @@ impl Shell {
         });
         for output in self.studio.apply_with_change(&line, change) {
             if let Output::Card(request) = output {
-                self.cards.push(write_card(&self.writer, &request).unwrap());
+                let card = write_card(&self.writer, &request, |line| panic!("{line}"));
+                self.cards.push(card.unwrap());
             }
         }
     }

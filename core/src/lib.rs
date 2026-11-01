@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     cmp::Reverse,
-    collections::{BTreeSet, HashMap, HashSet},
+    collections::{BTreeSet, HashMap},
 };
 
 #[derive(Default)]
@@ -17,8 +17,6 @@ pub struct Studio {
     selected: Option<String>,
     /// The shell's latest tick, in Unix milliseconds.
     now: u64,
-    /// Sessions in a wait that has not raised its guess prompt yet.
-    unguessed: HashSet<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -34,8 +32,6 @@ pub struct Session {
     started_at: u64,
     #[serde(skip)]
     last_event_at: u64,
-    /// The open guess prompt: its check started and its result has not arrived.
-    pub guess: Option<GuessPrompt>,
     /// The checks that ran, oldest first: pass or fail lines in the session's timeline (#369,
     /// decision 14).
     pub checks: Vec<CheckLine>,
@@ -415,8 +411,6 @@ pub struct Step {
 pub enum Output {
     /// A session's worktree changed since its last card; ask the card writer.
     Card(CardRequest),
-    /// The wait's first check started: ask "Will it pass?".
-    Guess(GuessPrompt),
     /// A session newly needs Daniel: its own agent asks, or `agent`, a subagent at any depth, whose
     /// notice goes on its session's line (#369, decision 22).
     NeedsYou {
@@ -433,18 +427,6 @@ pub enum Output {
     Version { transcript_path: String },
 }
 
-/// "Will it pass?" on the wait's first check (#328, module 3, "Guesses"). It is open from the
-/// check's `PreToolUse` until its result arrives.
-#[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct GuessPrompt {
-    pub session_id: String,
-    pub tool_use_id: String,
-    /// The check's command, which the prompt shows.
-    pub step: Step,
-    /// Daniel's tap: whether he guessed the check will pass. `None` until he taps.
-    pub guess: Option<bool>,
-}
-
 /// A session's change since its last card (#369, decision 10), with what the card writer needs: the
 /// diff, not the payloads. The card store keeps it with its card.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -455,10 +437,6 @@ pub struct CardRequest {
     pub base: Base,
     /// The diff of each file that changed since the base, commits included.
     pub change: String,
-    /// What settled a guess on a check's card. Checks are lines now, so it is `None`.
-    // shortcut: kept for the store's settling and `weekly` until #375 replaces the guess.
-    #[serde(default)]
-    pub check: Option<Check>,
 }
 
 /// A check that ran, shown as a pass or fail line.
@@ -466,8 +444,9 @@ pub struct CardRequest {
 pub struct CheckLine {
     /// The command's first line.
     pub command: String,
-    /// Whether it passed, when its exit code tells, and Daniel's tap.
-    pub check: Check,
+    /// Whether the command exited 0, when that says whether the check passed: nothing in the
+    /// command masks the check's exit code (`exit_code_counts`). `None` otherwise.
+    pub passed: Option<bool>,
 }
 
 /// The worktree a card's change starts from (#369, decision 10): the session's previous card, or its
@@ -486,16 +465,6 @@ pub struct Change {
     pub base: Base,
     /// The diff of each file that changed, commits included.
     pub diff: String,
-}
-
-/// A check's guess and exit code (#328, module 4, "Settling a guess").
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Check {
-    /// Daniel's tap: whether he guessed it would pass. `None` when he did not tap before the result.
-    pub guess: Option<bool>,
-    /// Whether the command exited 0, when that says whether the check passed: nothing in the command
-    /// masks the check's exit code (`exit_code_counts`), and it ran. `None` otherwise.
-    pub exit_passed: Option<bool>,
 }
 
 /// One tool call: its `tool_use_id`, and its tool and input, which are all `PermissionRequest`
@@ -739,7 +708,6 @@ impl Studio {
                 state: State::Running,
                 started_at: event.studio_received_ms,
                 last_event_at: 0,
-                guess: None,
                 checks: Vec::new(),
                 running: Vec::new(),
                 blocks: Vec::new(),
@@ -789,15 +757,10 @@ impl Studio {
                     Sender::Daniel => {}
                 }
                 session.prompts.push(Prompt { at, sender });
-                self.unguessed.insert(event.session_id.clone());
                 session.unblock();
                 session.turn_ended = false;
-                session.guess = None;
             }
-            // A turn that ended ran all its calls, so a prompt still open lost its result.
             "Stop" => {
-                self.unguessed.remove(&event.session_id);
-                session.guess = None;
                 // The order on `Stop`: clear its own blocks first, then ask if the message asks.
                 session.unblock();
                 session.turn_ended = true;
@@ -816,19 +779,16 @@ impl Studio {
                         id: format!("{}@{}", event.session_id, event.studio_received_ms),
                         base,
                         change: diff,
-                        check: None,
                     }));
                 }
             }
             "SessionEnd" => {
-                self.unguessed.remove(&event.session_id);
                 session.unblock();
                 // Its subagents end with it.
                 session.blocks.clear();
                 session.running.clear();
                 session.turn_ended = true;
                 session.ended = true;
-                session.guess = None;
             }
             // A resumed session keeps its id; a compaction keeps the turn it happens in.
             "SessionStart" => {
@@ -836,27 +796,11 @@ impl Studio {
                 session.turn_ended |= event.source != "compact";
             }
             "PreToolUse" => {
-                let step = Step {
-                    tool: tool.clone(),
-                    detail: step_detail(&event.tool_input, &event.cwd),
-                };
                 if own {
-                    session.last_step = Some(step.clone());
-                }
-                // The prompt comes at the check's start, before its result. A child's checks are its
-                // own, so they take no guess and add no line.
-                if own
-                    && runs_check(&tool, &event.tool_input)
-                    && self.unguessed.remove(&event.session_id)
-                {
-                    let prompt = GuessPrompt {
-                        session_id: event.session_id.clone(),
-                        tool_use_id: event.tool_use_id.clone(),
-                        step,
-                        guess: None,
-                    };
-                    session.guess = Some(prompt.clone());
-                    outputs.push(Output::Guess(prompt));
+                    session.last_step = Some(Step {
+                        tool: tool.clone(),
+                        detail: step_detail(&event.tool_input, &event.cwd),
+                    });
                 }
                 let call = Call {
                     id,
@@ -918,25 +862,13 @@ impl Studio {
                 // A denied or interrupted call, or a failed Edit or Write, changed nothing: only a
                 // command that ran and failed has its exit code in its error.
                 let ran = !failed || event.error.starts_with("Exit code");
-                let guessed = session
-                    .guess
-                    .take_if(|p| p.tool_use_id == event.tool_use_id);
-                if !ran {
-                    // A check that did not run leaves the wait's guess to a later check.
-                    if guessed.is_some() {
-                        self.unguessed.insert(event.session_id.clone());
-                    }
-                // A check gets its line whether it passed or failed. The hooks are async, so a fast
-                // check's result can land before its start: it takes the wait's guess with none.
-                } else if own && runs_check(&tool, input) {
-                    self.unguessed.remove(&event.session_id);
+                // A check gets its line whether it passed or failed. A child's checks are its own,
+                // so they add no line.
+                if ran && own && runs_check(&tool, input) {
                     let command = input["command"].as_str().unwrap_or_default();
                     session.checks.push(CheckLine {
                         command: command.lines().next().unwrap_or_default().into(),
-                        check: Check {
-                            guess: guessed.and_then(|prompt| prompt.guess),
-                            exit_passed: exit_code_counts(command).then_some(!failed),
-                        },
+                        passed: exit_code_counts(command).then_some(!failed),
                     });
                 }
             }
@@ -979,16 +911,6 @@ impl Studio {
     /// requests nothing, so turns that ended while the app was down get no cards and no notices.
     pub fn replay(&mut self, line: &str) {
         self.apply(line);
-    }
-
-    /// Daniel's tap, yes or no, on the guess prompt of check `tool_use_id`, a fact from the shell. A
-    /// tap after the check's result arrived finds no open prompt, so that guess stays none. The
-    /// first tap counts.
-    pub fn guess(&mut self, tool_use_id: &str, will_pass: bool) {
-        let open = self.sessions.values_mut().filter_map(|s| s.guess.as_mut());
-        for prompt in open.filter(|p| p.tool_use_id == tool_use_id) {
-            prompt.guess.get_or_insert(will_pass);
-        }
     }
 
     /// The shell's clock, in Unix milliseconds, on each pass of its read loop, the first right after

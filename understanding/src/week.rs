@@ -1,13 +1,13 @@
-//! The weekly check on the questions (#328, module 6; resolution, "Understanding layer", point 7):
-//! whether the questions make Daniel think. Only the weekly command prints these; the app shows no
-//! rate. The thresholds are starting guesses.
+//! The weekly check on the questions (#328, module 6; resolution, "Understanding layer", point 7;
+//! #369, decision 23): whether the questions make Daniel think. Only the weekly command prints these;
+//! the app shows no rate. The thresholds are starting guesses.
 
-use crate::{Outcome, StoredCard};
+use crate::StoredCard;
 use std::fmt;
 
 pub(crate) const WEEK: u64 = 7 * DAY;
 const DAY: u64 = 86_400_000;
-/// A reveal this long after its question counts as thinking, in milliseconds.
+/// A guess this long after its quiz showed counts as thinking, in milliseconds.
 const THINKING: u64 = 3_000;
 
 /// `count` of `of` records.
@@ -21,12 +21,10 @@ pub struct Rate {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Week {
     pub to: u64,
-    /// Of the reveals of a question with a shown time, those 3 s or more after it.
+    /// Of the guesses on a quiz with a shown time, those 3 s or more after it.
     pub thinking: Rate,
-    /// Of the settled guesses, those that were wrong.
+    /// Of the guesses, those that were wrong.
     pub surprise: Rate,
-    /// Of the check cards, those whose `passed` was unknown.
-    pub unknown: Rate,
 }
 
 /// The rates of the cards added in the 7 days to `now`. Cards with no added time, from a store
@@ -37,19 +35,14 @@ pub fn week(cards: &[StoredCard], now: u64) -> Week {
         .filter(|kept| kept.added_at.is_some_and(|at| at + WEEK >= now))
         .collect();
     let gaps = cards.iter().filter_map(|kept| {
-        let (shown, revealed) = kept.shown_at.zip(kept.revealed_at)?;
-        Some(revealed.saturating_sub(shown))
+        let (shown, guess) = kept.shown_at.zip(kept.guess)?;
+        Some(guess.at.saturating_sub(shown))
     });
-    let settled = cards.iter().filter_map(|kept| match kept.outcome {
-        Some(Outcome::NotCounted) | None => None,
-        Some(outcome) => Some(outcome),
-    });
-    let checks = cards.iter().filter(|kept| kept.request.check.is_some());
+    let guesses = cards.iter().filter_map(|kept| kept.guess);
     Week {
         to: now,
         thinking: rate(gaps, |gap| *gap >= THINKING),
-        surprise: rate(settled, |outcome| *outcome == Outcome::Wrong),
-        unknown: rate(checks, |kept| kept.passed.is_none()),
+        surprise: rate(guesses, |guess| !guess.right),
     }
 }
 
@@ -79,23 +72,17 @@ impl fmt::Display for Week {
             to,
             thinking: t,
             surprise: s,
-            unknown: u,
         } = self;
         writeln!(f, "The 7 days to {}:", date(*to))?;
         writeln!(
             f,
-            "thinking rate: {t} ({} of {} reveals came 3 s or more after the question)",
+            "thinking rate: {t} ({} of {} answers came 3 s or more after the question)",
             t.count, t.of
         )?;
         writeln!(
             f,
-            "surprise rate: {s} ({} of {} settled guesses were wrong)",
+            "surprise rate: {s} ({} of {} answers were wrong)",
             s.count, s.of
-        )?;
-        writeln!(
-            f,
-            "unknown rate: {u} ({} of {} check cards had passed unknown)",
-            u.count, u.of
         )
     }
 }

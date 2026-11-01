@@ -4,10 +4,8 @@
 
 type Step = { tool: string; detail: string | null };
 type SessionState = "needs_you" | "running" | "your_turn" | "idle" | "ended";
-type GuessPrompt = { session_id: string; tool_use_id: string; step: Step; guess: boolean | null };
-type Check = { guess: boolean | null; exit_passed: boolean | null };
-// A check that ran: a pass or fail line, oldest first.
-type CheckLine = { command: string; check: Check };
+// A check that ran: a pass or fail line, oldest first. `passed` is null when its exit code is masked.
+type CheckLine = { command: string; passed: boolean | null };
 // Who spawned a subagent: the session's own agent, another subagent, or no known spawn.
 type Parent = "session" | "unattached" | { agent: string };
 type Agent = {
@@ -42,7 +40,6 @@ type Session = {
   cwd: string;
   last_step: Step | null;
   state: SessionState;
-  guess: GuessPrompt | null;
   checks: CheckLine[];
   agents: Agent[];
   waiting: Wait | null;
@@ -51,18 +48,21 @@ type Session = {
 };
 // A session's change since its last card, from its base: HEAD and the files git status listed then.
 type Base = { head: string | null; files: string[] };
-type CardRequest = { session_id: string; id: string; base: Base; change: string; check: Check | null };
+type CardRequest = { session_id: string; id: string; base: Base; change: string };
+// A card's multiple-choice question; `key` is the right option, counting from 0.
+type Quiz = { text: string; options: { text: string; why: string }[]; key: number };
 type Card = {
-  question: string;
-  answer: string;
+  explanation: string;
   paths: string[];
   code: string;
   why_it_matters: string;
   not_checked: string;
+  quiz: Quiz | null;
 };
-// The store also records when the question showed and how the guess settled; the pane never shows
-// either, nor any rate.
-type StoredCard = { request: CardRequest; card: Card; revealed_at: number | null; passed: boolean | null };
+// Daniel's tap on a quiz, graded by the writer's key.
+type Guess = { option: number; right: boolean; at: number };
+// The store also records when the quiz showed; the pane never shows it, nor any rate.
+type StoredCard = { request: CardRequest; card: Card; guess: Guess | null; key_wrong: boolean };
 // The selected session's cards, split at 30 minutes by the shell's tick, each oldest first.
 type SessionCards = { recent: StoredCard[]; older: StoredCard[] };
 
@@ -84,32 +84,6 @@ declare global {
 }
 
 const element = (id: string) => document.getElementById(id)!;
-
-// "Will it pass?" on the check that is the wait's card step, open until its result arrives. After a
-// tap it shows which answer Daniel gave, never whether he was right.
-let openGuess: GuessPrompt | null = null;
-const taps = [
-  ["guess-yes", true],
-  ["guess-no", false],
-] as const;
-
-function showGuess(prompt: GuessPrompt | null) {
-  openGuess = prompt;
-  element("guess").hidden = prompt === null;
-  if (prompt === null) return;
-  element("guess-command").textContent = prompt.step.detail ?? "";
-  for (const [id, willPass] of taps) {
-    const button = element(id) as HTMLButtonElement;
-    button.disabled = prompt.guess !== null;
-    button.setAttribute("aria-pressed", String(prompt.guess === willPass));
-  }
-}
-
-for (const [id, willPass] of taps) {
-  element(id).addEventListener("click", () => {
-    if (openGuess) window.__TAURI__.core.invoke("guess", { toolUseId: openGuess.tool_use_id, willPass });
-  });
-}
 
 const folder = (session: Session) => session.cwd.split("/").pop() || session.cwd;
 
@@ -273,7 +247,6 @@ async function openAgent(sessionId: string, agentId: string) {
 }
 
 function show(session: Session | null) {
-  showGuess(session?.guess ?? null);
   element("empty").hidden = session !== null;
   element("view").hidden = session === null;
   if ((session?.id ?? null) !== selectedId) {
@@ -281,7 +254,7 @@ function show(session: Session | null) {
     showSessions(listed);
   }
   if (session === null) return;
-  // A subagent's view shows its own line and questions; the guess, cards and checks are its session's.
+  // A subagent's view shows its own line and questions; the cards and checks are its session's.
   const agent = session.agents.find((a) => a.id === viewedAgent) ?? null;
   const asks = agent !== null && session.waiting?.agent === agent.id;
   const [label, state] =
@@ -342,9 +315,9 @@ function showQuestions(questions: Question[]) {
 }
 
 // Whether a check passed, from its exit code; with no colour, as colour is only for "needs you".
-function outcome(check: Check): string {
-  if (check.exit_passed === null) return "Ran";
-  return check.exit_passed ? "Passed" : "Failed";
+function outcome(passed: boolean | null): string {
+  if (passed === null) return "Ran";
+  return passed ? "Passed" : "Failed";
 }
 
 // The checks that ran, newest first, one line each.
@@ -352,7 +325,7 @@ function showChecks(checks: CheckLine[]) {
   element("checks").replaceChildren(
     ...[...checks].reverse().map((line) => {
       const item = document.createElement("li");
-      item.append(text("span", outcome(line.check), "outcome"), code(line.command));
+      item.append(text("span", outcome(line.passed), "outcome"), code(line.command));
       return item;
     }),
   );
@@ -375,39 +348,63 @@ function hebrew(tag: string, text: string): HTMLElement {
   return node;
 }
 
-// Whether a check passed, as settled from its exit code or the card writer's verdict.
-function verdict(passed: boolean | null): string {
-  if (passed === null) return "הפלט לא מראה אם הבדיקה עברה.";
-  return passed ? "הבדיקה עברה." : "הבדיקה נכשלה.";
+// Records Daniel's tap, or his flag on the key, and draws the cards again at once.
+async function record(command: "guess" | "key_wrong", args: Record<string, unknown>) {
+  await window.__TAURI__.core.invoke(command, args);
+  showCards(await window.__TAURI__.core.invoke<SessionCards>("cards"));
 }
 
-// A card in Hebrew, right to left: the question, then, on a tap, whether a check passed, the answer,
-// the file paths, the code left to right, why the step matters and what was not checked. The shell
-// keeps each reveal in the card store, so after a restart a revealed card is drawn open.
-function cardElement({ request, card, revealed_at, passed }: StoredCard): HTMLElement {
-  const details = document.createElement("details");
-  details.className = "card";
-  details.dir = "rtl";
-  details.lang = "he";
-  details.dataset.id = request.id;
-  details.open = revealed_at !== null;
-  details.addEventListener("toggle", () => {
-    if (details.open) window.__TAURI__.core.invoke("reveal", { id: request.id });
-  });
-  const answer = hebrew("p", card.answer);
-  answer.className = "answer";
+// A card's quiz and its options, one tap each. Once Daniel taps, it shows whether he was right and,
+// under each option, why it is right or wrong, with the right one named; a tapped option stays
+// marked, with no colour, as colour is only for "needs you".
+function quizElements(id: string, quiz: Quiz, guess: Guess | null): HTMLElement[] {
+  const options = document.createElement("ol");
+  options.className = "options";
+  options.append(
+    ...quiz.options.map((option, i) => {
+      const item = document.createElement("li");
+      const button = hebrew("button", option.text) as HTMLButtonElement;
+      button.type = "button";
+      button.disabled = guess !== null;
+      button.setAttribute("aria-pressed", String(guess?.option === i));
+      button.addEventListener("click", () => record("guess", { id, option: i }));
+      item.append(button);
+      if (guess) {
+        item.append(hebrew("p", `${i === quiz.key ? "התשובה הנכונה. " : ""}${option.why}`));
+      }
+      return item;
+    }),
+  );
+  const title = hebrew("p", quiz.text);
+  title.className = "quiz";
+  if (!guess) return [title, options];
+  const verdict = hebrew("p", guess.right ? "צדקת." : "לא צדקת.");
+  verdict.className = "verdict";
+  return [title, verdict, options];
+}
+
+// A card in Hebrew, right to left: its quiz first, then, once Daniel taps an option, the
+// explanation, the file paths, the code left to right, why the change matters, what was not checked
+// and his flag on the key. A card with no quiz shows the explanation at once. The shell keeps each
+// tap in the card store, so after a restart a guessed card is drawn guessed.
+function cardElement({ request, card, guess, key_wrong }: StoredCard): HTMLElement {
+  const node = document.createElement("article");
+  node.className = "card";
+  node.dir = "rtl";
+  node.lang = "he";
+  const quiz = card.quiz;
+  if (quiz) node.append(...quizElements(request.id, quiz, guess));
+  if (quiz && !guess) return node;
+  const explanation = hebrew("p", card.explanation);
+  explanation.className = "explanation";
   const paths = document.createElement("p");
   paths.className = "paths";
   paths.append(...card.paths.map(code));
   const source = document.createElement("pre");
   source.dir = "ltr";
   source.textContent = card.code;
-  const result = hebrew("p", verdict(passed));
-  result.className = "verdict";
-  details.append(
-    hebrew("summary", card.question),
-    ...(request.check ? [result] : []),
-    answer,
+  node.append(
+    explanation,
     paths,
     source,
     hebrew("h2", "למה זה חשוב"),
@@ -415,12 +412,20 @@ function cardElement({ request, card, revealed_at, passed }: StoredCard): HTMLEl
     hebrew("h2", "מה לא נבדק"),
     hebrew("p", card.not_checked),
   );
-  return details;
+  if (quiz) {
+    const flag = hebrew("button", key_wrong ? "סימנת שהמפתח שגוי" : "המפתח שגוי") as HTMLButtonElement;
+    flag.type = "button";
+    flag.className = "key-wrong";
+    flag.disabled = key_wrong;
+    flag.addEventListener("click", () => record("key_wrong", { id: request.id }));
+    node.append(flag);
+  }
+  return node;
 }
 
-// Closed cards whose question the pane drew while the window was hidden. A question counts as shown
-// when it is drawn in a visible window, or when the window next becomes visible; the store keeps the
-// first time, which the weekly rates measure reveals from.
+// Unguessed cards whose quiz the pane drew while the window was hidden. A quiz counts as shown when
+// it is drawn in a visible window, or when the window next becomes visible; the store keeps the first
+// time, which the weekly rates measure guesses from.
 const unshown = new Set<string>();
 
 function markShown() {
@@ -431,10 +436,9 @@ function markShown() {
 
 document.addEventListener("visibilitychange", markShown);
 
-// Each card is a <details>: its question shows, and a tap reveals the rest. Cards already drawn are
-// kept, keyed by their id, so one Daniel opened stays open on the next event and when
-// it moves to the older group.
-const drawn = new Map<string, HTMLElement>();
+// Cards already drawn, keyed by their id, with the record each was drawn from. A card is drawn again
+// only when its record changed, such as after a tap, and is moved whole to the older group.
+const drawn = new Map<string, { record: string; node: HTMLElement }>();
 
 function showCards({ recent, older }: SessionCards) {
   const ids = new Set([...recent, ...older].map(({ request }) => request.id));
@@ -447,11 +451,12 @@ function showCards({ recent, older }: SessionCards) {
   const nodes = (cards: StoredCard[]) =>
     [...cards].reverse().map((stored) => {
       const id = stored.request.id;
-      if (!drawn.has(id)) {
-        drawn.set(id, cardElement(stored));
-        if (stored.revealed_at === null) unshown.add(id);
+      const record = JSON.stringify(stored);
+      if (drawn.get(id)?.record !== record) {
+        if (!drawn.has(id) && stored.guess === null) unshown.add(id);
+        drawn.set(id, { record, node: cardElement(stored) });
       }
-      return drawn.get(id)!;
+      return drawn.get(id)!.node;
     });
   element("recent").replaceChildren(...nodes(recent));
   element("older").replaceChildren(...nodes(older));

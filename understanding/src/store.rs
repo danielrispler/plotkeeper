@@ -1,5 +1,5 @@
-//! The card store (#328, module 6): the cards, their reveal state and their records, on disk in the
-//! studio's data directory, so a restart neither loses nor re-shows them.
+//! The card store (#328, module 6): the cards, Daniel's guesses and their records, on disk in the
+//! studio's data directory, so a restart neither loses nor re-asks them.
 
 use crate::Card;
 use serde::{Deserialize, Serialize};
@@ -12,10 +12,9 @@ use std::{
 use studio_core::CardRequest;
 
 /// A card in the store, with the change it explains and its base, and its record: when it was added,
-/// when its question showed, when Daniel first revealed its answer, his tap (`request.check`'s
-/// guess) and how the check settled. The card and its request go through serde whole, so fields
-/// added to them need no change here. Times are Unix milliseconds; stores from before a time existed
-/// load it as `None`.
+/// when its quiz showed, Daniel's guess and his flag on the key. The card and its request go through
+/// serde whole, so fields added to them need no change here. Times are Unix milliseconds; stores from
+/// before a time existed load it as `None`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StoredCard {
     pub request: CardRequest,
@@ -23,28 +22,26 @@ pub struct StoredCard {
     /// When the card reached the store, which places it in a week.
     #[serde(default)]
     pub added_at: Option<u64>,
-    /// When the pane first drew its question in a visible window; `None` until then.
+    /// When the pane first drew its quiz in a visible window; `None` until then.
     #[serde(default)]
     pub shown_at: Option<u64>,
-    /// `None` while the card shows only its question.
+    /// Daniel's tap on the quiz; `None` while the card shows only its quiz.
     #[serde(default)]
-    pub revealed_at: Option<u64>,
-    /// For a check: whether it passed, as settled; `None` when unknown, and for other steps.
+    pub guess: Option<Guess>,
+    /// Daniel flagged that the writer's key is wrong (#369, decision 13).
     #[serde(default)]
-    pub passed: Option<bool>,
-    /// For a check: how Daniel's guess settled. Recorded, never shown.
-    #[serde(default)]
-    pub outcome: Option<Outcome>,
+    pub key_wrong: bool,
 }
 
-/// How a guess settled (#328, module 4, "Settling a guess").
+/// Daniel's tap on a card's quiz, graded by the writer's key (#369, decision 13).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Outcome {
-    Right,
-    Wrong,
-    /// No tap before the result, or a check whose verdict is unknown.
-    NotCounted,
+pub struct Guess {
+    /// The option he tapped, counting from 0.
+    pub option: usize,
+    /// Whether it is the key.
+    pub right: bool,
+    /// When, in Unix milliseconds.
+    pub at: u64,
 }
 
 /// One session's cards in the session view's two groups (#369, decision 18), each oldest first.
@@ -116,37 +113,27 @@ impl CardStore {
         SessionCards { recent, older }
     }
 
-    /// Adds a new card at `at`, in Unix milliseconds, which shows its question first, and saves the
-    /// store. A check's card settles its guess: the exit code says whether it passed when it counts,
-    /// and otherwise the card writer's `passed` does.
+    /// Adds a new card at `at`, in Unix milliseconds, which shows its quiz first, and saves the store.
     pub fn add(&mut self, request: CardRequest, card: Card, at: u64) -> io::Result<()> {
-        let check = request.check.as_ref();
-        let passed = check.and_then(|check| check.exit_passed.or(card.passed));
-        let outcome = check.map(|check| match (check.guess, passed) {
-            (Some(guess), Some(passed)) if guess == passed => Outcome::Right,
-            (Some(_), Some(_)) => Outcome::Wrong,
-            _ => Outcome::NotCounted,
-        });
         self.cards.push(StoredCard {
             request,
             card,
             added_at: Some(at),
             shown_at: None,
-            revealed_at: None,
-            passed,
-            outcome,
+            guess: None,
+            key_wrong: false,
         });
         self.save()
     }
 
-    /// Marks the question of card `id` shown at `at`, in Unix milliseconds, and saves the store. A
-    /// card keeps its first time, and one revealed before gets none, so a reveal never comes before
-    /// its question.
+    /// Marks the quiz of card `id` shown at `at`, in Unix milliseconds, and saves the store. A card
+    /// keeps its first time, and one guessed before gets none, so a guess never comes before its
+    /// quiz.
     pub fn show(&mut self, id: &str, at: u64) -> io::Result<()> {
         let mut cards = self.cards.iter_mut();
         if let Some(kept) = cards.find(|kept| kept.request.id == id)
             && kept.shown_at.is_none()
-            && kept.revealed_at.is_none()
+            && kept.guess.is_none()
         {
             kept.shown_at = Some(at);
             return self.save();
@@ -154,14 +141,30 @@ impl CardStore {
         Ok(())
     }
 
-    /// Marks card `id` revealed at `at`, in Unix milliseconds, and saves the store. A card revealed
-    /// before keeps its first reveal.
-    pub fn reveal(&mut self, id: &str, at: u64) -> io::Result<()> {
+    /// Records Daniel's tap on option `option` of card `id`'s quiz at `at`, in Unix milliseconds,
+    /// graded by its key, and saves the store. The first tap counts; a card with no quiz, or no such
+    /// option, records none.
+    pub fn guess(&mut self, id: &str, option: usize, at: u64) -> io::Result<()> {
         let mut cards = self.cards.iter_mut();
         if let Some(kept) = cards.find(|kept| kept.request.id == id)
-            && kept.revealed_at.is_none()
+            && kept.guess.is_none()
+            && let Some(quiz) = &kept.card.quiz
+            && option < quiz.options.len()
         {
-            kept.revealed_at = Some(at);
+            let right = option == quiz.key;
+            kept.guess = Some(Guess { option, right, at });
+            return self.save();
+        }
+        Ok(())
+    }
+
+    /// Records Daniel's flag that the key of card `id`'s quiz is wrong, and saves the store.
+    pub fn key_wrong(&mut self, id: &str) -> io::Result<()> {
+        let mut cards = self.cards.iter_mut();
+        if let Some(kept) = cards.find(|kept| kept.request.id == id)
+            && !kept.key_wrong
+        {
+            kept.key_wrong = true;
             return self.save();
         }
         Ok(())

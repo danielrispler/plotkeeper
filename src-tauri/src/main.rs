@@ -1,7 +1,7 @@
 //! The studio app's shell (#328, module 9). At start it replays the whole event log through the
 //! core, then feeds it each new line live and hands the core's card requests to the card writer. The
-//! window lists every session (#369, decision 18) and shows the one Daniel selected: its guess
-//! prompt on its check, its cards, which the card store keeps on disk, and its check lines. A
+//! window lists every session (#369, decision 18) and shows the one Daniel selected: its cards, with
+//! their quizzes and his guesses, which the card store keeps on disk, and its check lines. A
 //! session that newly needs Daniel, a new card and a failed worker raise a macOS notification while
 //! the window is not focused, and the Dock badge counts the sessions that need him (#369, decision
 //! 22).
@@ -23,7 +23,7 @@ use studio_understanding::{
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
 
-/// The card store, which the log thread adds to and the pane reveals in.
+/// The card store, which the log thread adds to and the pane records guesses in.
 type Cards = Mutex<CardStore>;
 
 /// The notices not shown yet, which the log thread and the card writer's threads add to.
@@ -72,16 +72,22 @@ fn cards(studio: State<Mutex<Studio>>, cards: State<Cards>) -> SessionCards {
     }
 }
 
-/// The pane drew the question of card `id` in a visible window.
+/// The pane drew the quiz of card `id` in a visible window.
 #[tauri::command]
 fn shown(id: String, cards: State<Cards>) {
     unsaved(cards.lock().unwrap().show(&id, millis()));
 }
 
-/// Daniel revealed the answer of card `id`.
+/// Daniel tapped option `option` of card `id`'s quiz.
 #[tauri::command]
-fn reveal(id: String, cards: State<Cards>) {
-    unsaved(cards.lock().unwrap().reveal(&id, millis()));
+fn guess(id: String, option: usize, cards: State<Cards>) {
+    unsaved(cards.lock().unwrap().guess(&id, option, millis()));
+}
+
+/// Daniel flagged that the key of card `id`'s quiz is wrong.
+#[tauri::command]
+fn key_wrong(id: String, cards: State<Cards>) {
+    unsaved(cards.lock().unwrap().key_wrong(&id));
 }
 
 /// Logs a card store change that could not be saved; it stays in memory until the next save.
@@ -89,14 +95,6 @@ fn unsaved(saved: io::Result<()>) {
     if let Err(e) = saved {
         eprintln!("studio: save the card store: {e}");
     }
-}
-
-/// Daniel tapped yes or no on "Will it pass?" for check `tool_use_id`.
-#[tauri::command]
-fn guess(tool_use_id: String, will_pass: bool, app: AppHandle) {
-    let studio = app.state::<Mutex<Studio>>();
-    studio.lock().unwrap().guess(&tool_use_id, will_pass);
-    let _ = app.emit("selected", selected(studio));
 }
 
 /// The card writer: `claude -p`, or the fake when `STUDIO_CARD_WRITER=fake`, for checks that must
@@ -124,7 +122,7 @@ fn main() {
         .manage(Cards::new(store))
         .manage(Notices::default())
         .invoke_handler(tauri::generate_handler![
-            sessions, select, open, selected, cards, shown, reveal, guess
+            sessions, select, open, selected, cards, shown, guess, key_wrong
         ])
         .setup(move |app| {
             let app = app.handle().clone();
@@ -199,19 +197,16 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                     // loop below draws it once it is in the store.
                     Output::Card(request) => {
                         let (app, writer) = (app.clone(), writer.clone());
-                        thread::spawn(move || match write_card(&*writer, &request) {
-                            Ok(card) => {
+                        thread::spawn(move || {
+                            let log = |line: String| eprintln!("studio: {line}");
+                            if let Some(card) = write_card(&*writer, &request, log) {
                                 let session_id = request.session_id.clone();
                                 let store = app.state::<Cards>();
                                 unsaved(store.lock().unwrap().add(request, card, millis()));
                                 tell(&app, "New card", &session_id, None);
                             }
-                            Err(line) => eprintln!("studio: {line}"),
                         });
                     }
-                    // The pane draws the open prompt from the session, which the "selected" event
-                    // below carries, so it also closes when the result arrives.
-                    Output::Guess(_) => {}
                     Output::NeedsYou { session_id, agent } => {
                         tell(app, "Needs you", &session_id, agent.as_deref());
                     }

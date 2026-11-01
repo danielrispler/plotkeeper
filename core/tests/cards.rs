@@ -47,7 +47,6 @@ fn a_prompt_whose_worktree_changed_gets_one_card_on_the_whole_change_at_its_stop
             id: format!("{SESSION}@1793265021380"),
             base: found().base,
             change: found().diff,
-            check: None,
         }]
     );
 }

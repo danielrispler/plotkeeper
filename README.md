@@ -1,6 +1,6 @@
 # Studio
 
-The control room's app (map #266, specs #328 and #369), for macOS. On the left, the session list: every Claude Code session, one line each with its folder, state and last step, grouped by state with "needs you" first. Idle and ended sessions collapse at the bottom. On the right, the session you clicked: its last step, live, its cards, the last 30 minutes' apart from older ones, and its checks. Only your click changes the session shown. At a session's `Stop`, when its worktree changed since its last card, one card explains that change, commits made during the prompt included. A turn that changed nothing gets no card. A check is a command from the Falinks check list: `cargo test|nextest|clippy|check|build`, `ci-checks`, `go test|vet`, run in the foreground; flags or a toolchain may come before the subcommand (`cargo +nightly test`). Each check that ran shows as one line: passed or failed when its exit code tells, ran when something in the command can mask it (see "The card store"). A check is never a card. At the wait's first check, the pane asks "Will it pass?" as soon as it starts; tap yes or no before its result arrives. Your guess is recorded, never shown as a score. A card shows its question; tap it for the answer. The card store keeps the cards, and which ones you opened, across restarts; turns that ended while the app was down get no cards.
+The control room's app (map #266, specs #328 and #369), for macOS. On the left, the session list: every Claude Code session, one line each with its folder, state and last step, grouped by state with "needs you" first. Idle and ended sessions collapse at the bottom. On the right, the session you clicked: its last step, live, its cards, the last 30 minutes' apart from older ones, and its checks. Only your click changes the session shown. At a session's `Stop`, when its worktree changed since its last card, one card explains that change, commits made during the prompt included. A turn that changed nothing gets no card. A check is a command from the Falinks check list: `cargo test|nextest|clippy|check|build`, `ci-checks`, `go test|vet`, run in the foreground; flags or a toolchain may come before the subcommand (`cargo +nightly test`). Each check that ran shows as one line: passed or failed when its exit code tells, ran when something in the command can mask it (see "The card store"). A check is never a card. A card opens with its quiz: a multiple-choice question on the change's logic or design (unlike an agent's question, which the session view shows apart). Tap an option: the card says at once whether you were right, shows under each option why it is right or wrong, then the explanation. If you think the writer's key is wrong, tap "the key is wrong" (המפתח שגוי); the flag is kept on the card. Your guesses are recorded, never shown as a score. When the writer's quiz is missing or does not parse, the card shows its explanation with no quiz, and the app logs one line on stderr. The card store keeps the cards, your guesses and your flags across restarts; turns that ended while the app was down get no cards.
 
 To tell what a prompt changed, the app fingerprints the session's git worktree at its prompt and at its `Stop`: `HEAD`, and the files `git status` lists, with their content. The card covers the difference: the files listed either time, and the files the commits in between changed. Each card's change is the next one's base, and each session keeps its own, so another session's prompt in the same worktree moves no base. A prompt that lands while the session's turn is still open, after an interrupt, takes no new base, so the interrupted prompt's change stays in the card. After a restart the app fingerprints the turns still open, so their `Stop` can be compared. Ignored files do not count, and a commit alone changes nothing. A file over 1 MiB is compared by its size and modification time, and the card writer gets one line that names it instead of its diff.
 
@@ -11,6 +11,10 @@ An app opened from Finder or `open` does not get your shell's `PATH`, so at star
 To run the app with a fake writer instead of `claude -p`:
 
     open --env STUDIO_CARD_WRITER=fake target/release/bundle/macos/Studio.app
+
+To run the real writer once on a fixture change and print its raw reply and the card parsed from it, run this from the repository root, outside auto mode:
+
+    cargo run -q --manifest-path apps/studio/Cargo.toml -p studio-understanding --example real_card
 
 A session is running from a prompt until its turn ends; needs you while it waits on your permission, answer or plan approval; your turn when its turn ended without asking you, or it started and has had no prompt yet; idle after 2 hours at your turn with no events, until its next event; ended from its `SessionEnd` until it starts again under its id. Only "needs you" is in colour. macOS shows a notification when a session newly needs you, a card arrives or a worker fails, only while the window is not focused. A subagent's wait, failure or card shows on its session's line and names the subagent; a failed helper raises none. Notices within 3 seconds of the first show as one notification. macOS asks once for permission to show them. The Dock badge counts the sessions that need you.
 
@@ -32,8 +36,8 @@ This builds `target/release/bundle/macos/Studio.app` with an ad-hoc signature (`
 
 `cargo test` runs:
 
-- `core/tests/`: hook events replayed through the core: what the pane shows and the two recorded logs (`replay`), the session list, its states and the selection on the recorded day (`sessions`), needs you (`needs_you`), notifications: their triggers, text and combining (`notices`), checks and guesses (`checks`), cards at `Stop` and where the shell fingerprints (`cards`), and wake-ups and the ask for Claude Code's version (`wake_ups`);
-- `understanding/tests/`: the `claude -p` command, built but never run, the `claude` lookup with a stand-in shell, the writer's replies and its retry (`writer`); the fingerprint against real `git` in temporary repositories (`fingerprint`); the core, the fingerprint and a fake writer joined as the shell joins them (`prompt_cards`); the card store, its move aside and its split at 30 minutes (`store`); the weekly rates (`week`); the version read from a transcript, its notice and `weekly`'s drift lines (`drift`);
+- `core/tests/`: hook events replayed through the core: what the pane shows and the two recorded logs (`replay`), the session list, its states and the selection on the recorded day (`sessions`), needs you (`needs_you`), notifications: their triggers, text and combining (`notices`), check lines (`checks`), cards at `Stop` and where the shell fingerprints (`cards`), and wake-ups and the ask for Claude Code's version (`wake_ups`);
+- `understanding/tests/`: the `claude -p` command, built but never run, the `claude` lookup with a stand-in shell, the writer's replies, their quizzes and its retry (`writer`); the fingerprint against real `git` in temporary repositories (`fingerprint`); the core, the fingerprint and a fake writer joined as the shell joins them (`prompt_cards`); the card store, your guesses and flags, its move aside and its split at 30 minutes (`store`); the weekly rates (`week`); the version read from a transcript, its notice and `weekly`'s drift lines (`drift`);
 - the unit tests of the event log's path (`hook`), of what `scrub` keeps (`studio-core`) and of the weekly rates' dates (`understanding`).
 
 It leaves out the shell, which needs `dist/` from `npm run build`.
@@ -80,9 +84,9 @@ When a subagent or a background command returns, Claude Code sends its parent a 
 
 ## The card store
 
-`cards-v2.json` beside the event log: each card with the change it explains, its base (`request.base`: the `HEAD` sha and the files `git status` listed) and its record, in Unix milliseconds: `added_at`, when the card arrived; `shown_at`, when the pane first drew its question while the window was visible; and `revealed_at`, when you first opened it. Each is `null` until then. A missing store starts empty. The app writes it whole to a temporary file and renames it into place, so a crash mid-write keeps the previous store. On the first start after cards came to cover a prompt's whole change (#374), the app moves the old store, `cards.json`, to `cards-v1.json`, never over one already there, and starts the new store empty; `weekly` does the same.
+`cards-v2.json` beside the event log: each card with the change it explains, its base (`request.base`: the `HEAD` sha and the files `git status` listed) and its record, in Unix milliseconds: `added_at`, when the card arrived; `shown_at`, when the pane first drew its quiz while the window was visible; and `guess`, your tap: the `option` you tapped (from 0), whether it was `right` by the writer's key, and `at`. Each is `null` until then. `key_wrong` is `true` once you flag the key. A missing store starts empty. Cards stored before quizzes (#375) load with no quiz. The app writes it whole to a temporary file and renames it into place, so a crash mid-write keeps the previous store. On the first start after cards came to cover a prompt's whole change (#374), the app moves the old store, `cards.json`, to `cards-v1.json`, never over one already there, and starts the new store empty; `weekly` does the same.
 
-A check's exit code says whether it passed when nothing in the command can mask it: the check is the command's last statement (after the last `;` or line break), with no `||`, no leading `!` and no `&` that sends it to the background, and a pipe only after a `set` that turns on `pipefail`. Check lines live in the event log, not in the store, so your taps on "Will it pass?" are not kept across a restart.
+A check's exit code says whether it passed when nothing in the command can mask it: the check is the command's last statement (after the last `;` or line break), with no `||`, no leading `!` and no `&` that sends it to the background, and a pipe only after a `set` that turns on `pipefail`. Check lines come from the event log, not the store.
 
 ## The weekly rates
 
@@ -91,16 +95,15 @@ The app shows no rate, score or tally. Once a week, print the rates of the cards
     cd apps/studio
     cargo run --bin weekly
 
-- thinking rate: of the cards you opened, the share you opened 3 s or more after their question showed;
-- surprise rate: of the guesses that settled, the share that were wrong; no tap and an unknown verdict do not settle;
-- unknown rate: of the check cards, the share whose `passed` was unknown. A high rate argues for a `pipefail` instruction to agents.
+- thinking rate: of the quizzes you answered, the share you answered 3 s or more after they showed;
+- surprise rate: of your guesses, the share that were wrong by the writer's key.
 
 Then the drift in Claude Code over the same 7 days, from the event log and `claude-versions.txt`:
 
 - unrecognised wake-ups: the prompts that named a known task id in markup the studio does not know (see "Wake-ups");
 - one line per version change, with its date.
 
-A rate with nothing to count prints `n/a`. Checks are no cards since #374, so the surprise and unknown rates print `n/a` until #375 replaces the guess. To record your one-line verdict on the questions, add it after `--`:
+A rate with nothing to count prints `n/a`. To record your one-line verdict on the questions, add it after `--`:
 
     cargo run --bin weekly -- the questions made me stop twice, the rest I clicked through
 

@@ -40,9 +40,21 @@ code:empty { display: none; }
 /* A card is Hebrew, right to left; its code is left to right. No text in it is smaller than 14px (v0's
    secondary text was 12px). */
 .card { background: var(--code); border-radius: 8px; padding: 10px 12px; margin: 0 0 10px; font-size: 16px; }
-.card summary { font-weight: 600; cursor: pointer; }
 .card p { margin: 8px 0 0; overflow-wrap: anywhere; }
-.answer { white-space: pre-wrap; }
+.quiz { font-weight: 600; margin: 0; }
+.explanation { white-space: pre-wrap; }
+/* The options: one tap each, neutral, since colour is only for "needs you". Each one's reason shows
+   under it after the tap. */
+.options { list-style: none; margin: 8px 0 0; padding: 0; }
+.options li { margin: 0 0 8px; }
+.options li p { margin: 2px 0 0; color: var(--muted); }
+.card button { font: inherit; padding: 4px 14px; border-radius: 6px; border: 1px solid var(--muted);
+               background: var(--bg); color: var(--fg); cursor: pointer; text-align: start; }
+.options button { width: 100%; }
+.card button[aria-pressed="true"] { font-weight: 600; border: 2px solid var(--fg); }
+.card button:disabled { cursor: default; }
+.options button:disabled[aria-pressed="false"] { opacity: .45; }
+.key-wrong { margin-top: 12px; font-size: 14px; }
 .card code { font-size: 14px; background: var(--bg); padding: 1px 5px; white-space: normal; overflow-wrap: anywhere;
              unicode-bidi: isolate; }
 .paths { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -55,16 +67,6 @@ code:empty { display: none; }
 .checks { list-style: none; margin: 0; padding: 0; }
 .checks li { display: flex; gap: 8px; align-items: baseline; min-width: 0; margin: 0 0 4px; }
 .checks .outcome { font-weight: 600; flex: none; min-width: 52px; }
-/* "Will it pass?": two neutral taps, since colour is only for "needs you". */
-.guess { background: var(--code); border-radius: 8px; padding: 10px 12px; margin: 14px 0 0; font-size: 16px; }
-.guess p { margin: 0; }
-.guess code { background: var(--bg); unicode-bidi: isolate; }
-.guess .taps { display: flex; gap: 8px; margin-top: 8px; }
-.taps button { font: inherit; min-width: 64px; padding: 4px 14px; border-radius: 6px; border: 1px solid var(--muted);
-               background: var(--bg); color: var(--fg); cursor: pointer; }
-.taps button[aria-pressed="true"] { font-weight: 600; border: 2px solid var(--fg); }
-.taps button:disabled { cursor: default; }
-.taps button:disabled[aria-pressed="false"] { opacity: .45; }
 /* An agent's question, laid out as its choices; the chosen one is marked by its border, since colour is
    only for "needs you". */
 .question { background: var(--code); border-radius: 8px; padding: 10px 12px; margin: 0 0 10px; }
@@ -78,6 +80,6 @@ code:empty { display: none; }
 .choices .label { font-weight: 600; flex: none; }
 .choices .description { color: var(--muted); }
 .choices .chosen { border-color: var(--fg); }
-/* A subagent's view: its session's guess, cards and checks are not its own. */
+/* A subagent's view: its session's cards and checks are not its own. */
 #view[data-agent] .own { display: none; }
 [hidden] { display: none !important; }

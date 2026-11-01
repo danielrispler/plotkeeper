@@ -1,9 +1,12 @@
 //! The card writer (#328 and #369, Testing Decisions): the real `claude -p` command is checked
-//! without running it, the cards come from its reply, and a fake that fails is retried.
+//! without running it, the cards and their quizzes come from its reply, and a fake that fails is
+//! retried.
 
 use std::{cell::Cell, ffi::OsStr, fs, os::unix::fs::PermissionsExt, path::Path};
 use studio_core::{Base, CardRequest};
-use studio_understanding::{Card, CardWriter, ClaudeWriter, FakeWriter, find_claude, write_card};
+use studio_understanding::{
+    Card, CardWriter, Choice, ClaudeWriter, FakeWriter, Quiz, find_claude, write_card,
+};
 
 const CLAUDE: &str = "/opt/homebrew/bin/claude";
 
@@ -20,24 +23,30 @@ fn edit() -> CardRequest {
             "+.unchecked { font-size:15px; }\n",
         )
         .into(),
-        check: None,
     }
 }
 
-/// A fake writer whose first `fails` calls fail, as a reply that does not parse.
+/// A fake writer whose first `fails` calls reply with no card.
 struct Failing {
     fails: usize,
     calls: Cell<usize>,
 }
 
 impl CardWriter for Failing {
-    fn write(&self, request: &CardRequest) -> Result<Card, String> {
+    fn reply(&self, request: &CardRequest) -> Result<String, String> {
         self.calls.set(self.calls.get() + 1);
         if self.calls.get() <= self.fails {
-            return Card::from_reply("Shall I read the file?");
+            return Ok("Shall I read the file?".into());
         }
-        FakeWriter.write(request)
+        FakeWriter.reply(request)
     }
+}
+
+/// The card `writer` writes on `edit()`, and the lines it logs.
+fn written(writer: &impl CardWriter) -> (Option<Card>, Vec<String>) {
+    let mut lines = Vec::new();
+    let card = write_card(writer, &edit(), |line| lines.push(line));
+    (card, lines)
 }
 
 #[test]
@@ -47,7 +56,10 @@ fn a_writer_that_fails_once_gives_the_card_on_its_retry() {
         calls: Cell::new(0),
     };
 
-    assert!(write_card(&writer, &edit()).is_ok());
+    let (card, lines) = written(&writer);
+
+    assert!(card.is_some());
+    assert_eq!(lines, [] as [String; 0]);
     assert_eq!(writer.calls.get(), 2);
 }
 
@@ -58,11 +70,108 @@ fn a_writer_that_fails_twice_gives_no_card_and_one_log_line() {
         calls: Cell::new(0),
     };
 
-    let line = write_card(&writer, &edit()).expect_err("no card");
+    let (card, lines) = written(&writer);
 
+    assert_eq!(card, None);
     assert_eq!(writer.calls.get(), 2);
+    let [line] = &lines[..] else {
+        panic!("one log line: {lines:?}");
+    };
     assert_eq!(line.lines().count(), 1, "{line}");
     assert!(line.contains(&edit().id), "{line}");
+}
+
+/// A fake writer that always gives `reply`.
+struct Replying(String);
+
+impl CardWriter for Replying {
+    fn reply(&self, _: &CardRequest) -> Result<String, String> {
+        Ok(self.0.clone())
+    }
+}
+
+/// A good reply on `edit()`, in a code fence: the explanation and a quiz on its design.
+const GOOD: &str = concat!(
+    "```json\n",
+    r#"{"explanation": "הסוכן הגדיל את `font-size` של `.unchecked` כדי שאפשר יהיה לקרוא את שורת „לא נבדק” בלי מאמץ.", "#,
+    r#""paths": ["apps/studio/ui/style.css"], "#,
+    r#""code": "-.unchecked { font-size:12px; }\n+.unchecked { font-size:15px; }", "#,
+    r#""why_it_matters": "טקסט משני ב־`12px` היה קטן מדי לקריאה בזמן המתנה.", "#,
+    r#""not_checked": "לא נבדק אם הכרטיס עדיין נכנס בחלונית צרה.", "#,
+    r#""quiz": {"text": "למה השינוי נוגע רק ב־`.unchecked`?", "options": ["#,
+    r#"{"text": "כי רק השורה הזו הייתה קטנה מדי לקריאה.", "why": "נכון: שאר הכרטיס כבר היה ב־`15px`."}, "#,
+    r#"{"text": "כי `.unchecked` קובע את גודל הגופן של כל הכרטיס.", "why": "לא: הכלל חל רק על השורה עצמה."}, "#,
+    r#"{"text": "כי גודל הגופן של הכרטיס בא מהגדרות המערכת.", "why": "לא: הגודל קבוע ב־`style.css`."}"#,
+    r#"], "key": 0}}"#,
+    "\n```\n",
+);
+
+fn good_card() -> Card {
+    let choice = |text: &str, why: &str| Choice {
+        text: text.into(),
+        why: why.into(),
+    };
+    Card {
+        explanation:
+            "הסוכן הגדיל את `font-size` של `.unchecked` כדי שאפשר יהיה לקרוא את שורת „לא נבדק” בלי מאמץ."
+                .into(),
+        paths: vec!["apps/studio/ui/style.css".into()],
+        code: "-.unchecked { font-size:12px; }\n+.unchecked { font-size:15px; }".into(),
+        why_it_matters: "טקסט משני ב־`12px` היה קטן מדי לקריאה בזמן המתנה.".into(),
+        not_checked: "לא נבדק אם הכרטיס עדיין נכנס בחלונית צרה.".into(),
+        quiz: Some(Quiz {
+            text: "למה השינוי נוגע רק ב־`.unchecked`?".into(),
+            options: vec![
+                choice(
+                    "כי רק השורה הזו הייתה קטנה מדי לקריאה.",
+                    "נכון: שאר הכרטיס כבר היה ב־`15px`.",
+                ),
+                choice(
+                    "כי `.unchecked` קובע את גודל הגופן של כל הכרטיס.",
+                    "לא: הכלל חל רק על השורה עצמה.",
+                ),
+                choice(
+                    "כי גודל הגופן של הכרטיס בא מהגדרות המערכת.",
+                    "לא: הגודל קבוע ב־`style.css`.",
+                ),
+            ],
+            key: 0,
+        }),
+    }
+}
+
+#[test]
+fn a_good_reply_gives_the_card_with_its_quiz_options_key_and_reasons() {
+    assert_eq!(written(&Replying(GOOD.into())), (Some(good_card()), vec![]));
+}
+
+#[test]
+fn a_quiz_with_no_key_or_one_that_does_not_parse_logs_one_line_and_the_card_has_no_quiz() {
+    let broken = [
+        GOOD.replace(r#", "key": 0"#, ""),
+        // Options with no reasons.
+        GOOD.replace(r#", "why": ""#, r#", "note": ""#),
+        // A key past the last option.
+        GOOD.replace(r#""key": 0"#, r#""key": 3"#),
+        GOOD.replace(r#""key": 0"#, r#""key": "א""#),
+        // No quiz at all.
+        GOOD.replace(r#""quiz": {"#, r#""other": {"#),
+    ];
+
+    for reply in broken {
+        let (card, lines) = written(&Replying(reply.clone()));
+
+        let no_quiz = Card {
+            quiz: None,
+            ..good_card()
+        };
+        assert_eq!(card, Some(no_quiz), "{reply}");
+        let [line] = &lines[..] else {
+            panic!("one log line on {reply}: {lines:?}");
+        };
+        assert_eq!(line.lines().count(), 1, "{line}");
+        assert!(line.contains(&edit().id), "{line}");
+    }
 }
 
 #[test]
@@ -91,7 +200,7 @@ fn the_real_writer_runs_claude_on_the_subscription_in_its_neutral_folder() {
     assert_eq!(args[..4], ["--tools", "", "--strict-mcp-config", "-p"]);
     assert!(!args.contains(&"--bare"));
     let prompt = args[4];
-    assert!(prompt.contains("why the agent made this change"));
+    assert!(prompt.contains("multiple-choice question on the change's logic or design"));
     assert!(prompt.ends_with(&format!("\nChange:\n{}", edit().change)));
     assert_eq!(command.get_current_dir(), Some(folder));
 }
@@ -139,52 +248,12 @@ fn the_login_shell_finds_claude_and_without_its_answer_the_path_does() {
 }
 
 #[test]
-fn a_reply_with_one_json_object_gives_the_card_even_in_a_code_fence() {
-    let reply = concat!(
-        "```json\n",
-        r#"{"question": "למה הסוכן הגדיל את `font-size` של `.unchecked`?", "#,
-        r#""answer": "כדי שאפשר יהיה לקרוא את שורת „לא נבדק” בלי מאמץ.", "#,
-        r#""paths": ["apps/studio/ui/style.css"], "#,
-        r#""code": "-.unchecked { font-size:12px; }\n+.unchecked { font-size:15px; }", "#,
-        r#""why_it_matters": "טקסט משני ב־`12px` היה קטן מדי לקריאה בזמן המתנה.", "#,
-        r#""not_checked": "לא נבדק אם הכרטיס עדיין נכנס בחלונית צרה."}"#,
-        "\n```\n",
-    );
-
-    assert_eq!(
-        Card::from_reply(reply),
-        Ok(Card {
-            question: "למה הסוכן הגדיל את `font-size` של `.unchecked`?".into(),
-            answer: "כדי שאפשר יהיה לקרוא את שורת „לא נבדק” בלי מאמץ.".into(),
-            paths: vec!["apps/studio/ui/style.css".into()],
-            code: "-.unchecked { font-size:12px; }\n+.unchecked { font-size:15px; }".into(),
-            why_it_matters: "טקסט משני ב־`12px` היה קטן מדי לקריאה בזמן המתנה.".into(),
-            not_checked: "לא נבדק אם הכרטיס עדיין נכנס בחלונית צרה.".into(),
-            // A reply without `passed`, like an edit's, still parses.
-            passed: None,
-        })
-    );
-}
-
-#[test]
-fn a_checks_card_says_passed_failed_or_unknown() {
-    let passed = |value: &str| {
-        let reply = format!(r#"{{"question": "למה?", "answer": "כי.", "passed": {value}}}"#);
-        Card::from_reply(&reply).expect(value).passed
-    };
-
-    assert_eq!(passed("true"), Some(true));
-    assert_eq!(passed("false"), Some(false));
-    assert_eq!(passed(r#""unknown""#), None);
-    assert_eq!(passed("null"), None);
-}
-
-#[test]
 fn a_reply_that_does_not_parse_gives_no_card_and_one_log_line() {
     let replies = [
         "",
         "I can't write a card without the file.\nShall I read it?",
-        r#"{"question": "למה?", "why_it_matters": "כי."}"#,
+        // No explanation.
+        r#"{"quiz": {"text": "למה?"}, "why_it_matters": "כי."}"#,
         // A `}` before the first `{`.
         "Sorry :} I need {more context",
     ];

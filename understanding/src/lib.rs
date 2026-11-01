@@ -13,15 +13,16 @@ mod store;
 mod week;
 pub use drift::{Drift, Versions, drift};
 pub use fingerprint::Fingerprints;
-pub use store::{CardStore, Outcome, SessionCards, StoredCard, millis};
+pub use store::{CardStore, Guess, SessionCards, StoredCard, millis};
 pub use week::{Rate, Week, week};
 
 /// A card on a change, in Hebrew; code stays in English, and code inside the Hebrew text is in
-/// backticks. It opens with the question; the rest shows when Daniel taps.
+/// backticks. It opens with its quiz; the rest shows when Daniel taps an option.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Card {
-    pub question: String,
-    pub answer: String,
+    /// What the change does and why. Cards stored before #375 call it `answer`.
+    #[serde(alias = "answer")]
+    pub explanation: String,
     // The fields below default to empty, so cards stored before they existed still load.
     /// The files the change touched.
     #[serde(default)]
@@ -33,68 +34,127 @@ pub struct Card {
     pub why_it_matters: String,
     #[serde(default)]
     pub not_checked: String,
-    /// For a check: whether its output shows it passed. `None` when the writer answers "unknown",
-    /// and for other steps.
-    #[serde(default, deserialize_with = "verdict")]
-    pub passed: Option<bool>,
+    /// `None` when the writer's quiz was missing or unusable, and in cards stored before #375.
+    #[serde(default)]
+    pub quiz: Option<Quiz>,
 }
 
-/// `true` or `false`; anything else, such as `"unknown"`, is no verdict.
-fn verdict<'de, D: serde::Deserializer<'de>>(value: D) -> Result<Option<bool>, D::Error> {
-    Ok(serde_json::Value::deserialize(value)?.as_bool())
+/// A card's multiple-choice question on the change's logic or design (#369, decision 13), named
+/// apart from an agent's question (`AskUserQuestion`). The writer's key grades Daniel's tap.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Quiz {
+    pub text: String,
+    pub options: Vec<Choice>,
+    /// The right option, counting from 0.
+    pub key: usize,
+}
+
+/// One of a quiz's options, with one line on why it is right or wrong.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Choice {
+    pub text: String,
+    pub why: String,
+}
+
+impl Quiz {
+    /// The quiz in `value`, or why it is unusable: it does not parse, or its key names none of two
+    /// or more options.
+    fn from_value(value: serde_json::Value) -> Result<Quiz, String> {
+        let quiz: Quiz = serde_json::from_value(value).map_err(|e| e.to_string())?;
+        let options = quiz.options.len();
+        if options < 2 || quiz.key >= options {
+            return Err(format!("key {} of {options} options", quiz.key));
+        }
+        Ok(quiz)
+    }
 }
 
 impl Card {
     /// The card in a writer's reply, which must hold one JSON object, perhaps in a code fence. When
-    /// it does not parse, the error is one line for the log.
-    pub fn from_reply(reply: &str) -> Result<Card, String> {
+    /// it does not parse, the error is one line for the log. A card whose quiz is missing or
+    /// unusable keeps its explanation, with one line on why it has no quiz.
+    pub fn from_reply(reply: &str) -> Result<(Card, Option<String>), String> {
         let object = reply.find('{').zip(reply.rfind('}'));
         let object = object.filter(|(start, end)| start < end);
         let object = object.map_or("", |(start, end)| &reply[start..=end]);
-        serde_json::from_str(object).map_err(|error| {
+        let fail = |error: serde_json::Error| {
             let head: String = reply.chars().take(300).collect();
             format!("the card writer's reply does not parse ({error}): {head:?}")
-        })
+        };
+        let mut value: serde_json::Value = serde_json::from_str(object).map_err(fail)?;
+        let quiz = value.get_mut("quiz").map(serde_json::Value::take);
+        let mut card: Card = serde_json::from_value(value).map_err(fail)?;
+        match Quiz::from_value(quiz.unwrap_or_default()) {
+            Ok(quiz) => {
+                card.quiz = Some(quiz);
+                Ok((card, None))
+            }
+            Err(error) => Ok((card, Some(format!("its quiz is unusable ({error})")))),
+        }
     }
 }
 
 /// Writes the card on a session's change since its last card.
 pub trait CardWriter {
-    /// The card, or one line for the log when the writer's output does not parse.
-    fn write(&self, request: &CardRequest) -> Result<Card, String>;
+    /// The writer's reply on `request`'s change, or one line for the log when it gave none.
+    fn reply(&self, request: &CardRequest) -> Result<String, String>;
 }
 
-/// The card on `request` from `writer`, which is asked once more when it fails (#369, decision 12).
-/// When both fail, the error is one line for the shell's log.
+/// The card on `request` from `writer`'s reply, which is asked once more when it gives no card
+/// (#369, decision 12). Each problem is one line for `log`: no card after the retry, or a card with
+/// no quiz, which is kept without asking again.
 pub fn write_card(
     writer: &(impl CardWriter + ?Sized),
     request: &CardRequest,
-) -> Result<Card, String> {
-    let card = writer.write(request).or_else(|_| writer.write(request));
-    card.map_err(|line| format!("no card on {}: {line}", request.id))
+    mut log: impl FnMut(String),
+) -> Option<Card> {
+    let card = || {
+        writer
+            .reply(request)
+            .and_then(|reply| Card::from_reply(&reply))
+    };
+    match card().or_else(|_| card()) {
+        Ok((card, problem)) => {
+            if let Some(problem) = problem {
+                log(format!("no quiz on {}: {problem}", request.id));
+            }
+            Some(card)
+        }
+        Err(line) => {
+            log(format!("no card on {}: {line}", request.id));
+            None
+        }
+    }
 }
 
 /// Writes a fixed Hebrew card that shows the change, so the app can run without `claude -p`.
 pub struct FakeWriter;
 
 impl CardWriter for FakeWriter {
-    fn write(&self, request: &CardRequest) -> Result<Card, String> {
-        let paths: Vec<String> = request
+    fn reply(&self, request: &CardRequest) -> Result<String, String> {
+        let paths: Vec<&str> = request
             .change
             .lines()
             .filter_map(|line| line.strip_prefix("+++ b/"))
-            .map(Into::into)
             .collect();
-        Ok(Card {
-            question: format!("למה הסוכן שינה את `{}`?", paths.join("`, `")),
-            answer: "כרטיס לדוגמה של הכותב המזויף, שלא קורא את הקוד. השינוי עצמו למטה.".into(),
-            paths,
-            code: request.change.clone(),
-            why_it_matters: "כאן יופיע למה השינוי חשוב, עם קוד בתוך הטקסט כמו `if a <= b {`."
-                .into(),
-            not_checked: "לא נבדק: כלום, זה כרטיס לדוגמה.".into(),
-            passed: None,
-        })
+        let option = |text: &str, why: &str| serde_json::json!({ "text": text, "why": why });
+        let card = serde_json::json!({
+            "explanation": "כרטיס לדוגמה של הכותב המזויף, שלא קורא את הקוד. השינוי עצמו למטה.",
+            "paths": paths,
+            "code": request.change,
+            "why_it_matters": "כאן יופיע למה השינוי חשוב, עם קוד בתוך הטקסט כמו `if a <= b {`.",
+            "not_checked": "לא נבדק: כלום, זה כרטיס לדוגמה.",
+            "quiz": {
+                "text": format!("מה הסוכן שינה ב־`{}`?", paths.join("`, `")),
+                "options": [
+                    option("את מה שמופיע בקוד למטה.", "נכון: הקוד למטה הוא השינוי עצמו."),
+                    option("רק את התיעוד, בלי לגעת בקוד.", "לא: הכותב המזויף לא יודע מה השתנה."),
+                    option("כלום, הוא רק הריץ בדיקות.", "לא: כרטיס נכתב רק על שינוי."),
+                ],
+                "key": 0,
+            },
+        });
+        Ok(card.to_string())
     }
 }
 
@@ -155,9 +215,9 @@ impl ClaudeWriter {
 impl CardWriter for ClaudeWriter {
     /// Runs `claude -p`, which takes seconds, so the shell calls it off its log thread.
     // shortcut: no timeout, as in v0; add one if a stuck `claude -p` ever holds a card back.
-    fn write(&self, request: &CardRequest) -> Result<Card, String> {
+    fn reply(&self, request: &CardRequest) -> Result<String, String> {
         match self.command(request).output() {
-            Ok(output) => Card::from_reply(&String::from_utf8_lossy(&output.stdout)),
+            Ok(output) => Ok(String::from_utf8_lossy(&output.stdout).into()),
             Err(error) => Err(format!("`claude -p` did not start: {error}")),
         }
     }
@@ -169,18 +229,21 @@ const MAX_CHANGE: usize = 64 << 10;
 
 /// The card writer's instructions. Its input is only the change, not the payloads (v0 note,
 /// proposal 8).
-const PROMPT: &str = r#"You write one card that teaches a developer about the change a coding agent made to his code while he waited on it, since the previous card. The card opens with a question he tries to answer before he taps to see the answer.
+const PROMPT: &str = r#"You write one card that teaches a developer about the change a coding agent made to his code while he waited on it, since the previous card. The card opens with a multiple-choice question on the change's logic or design. He taps an option, and the card shows at once whether he was right, why each option is right or wrong, and the explanation.
 
-Ask why the agent made this change, and answer from the diff below. Use only this input: do not use tools or read files.
+Answer from the diff below. Use only this input: do not use tools or read files.
 
-Write question, answer, why_it_matters and not_checked in Hebrew, in plain words. Code, code terms, file paths and commands stay in English; inside Hebrew text, wrap each of them in backticks.
+Write every text field in Hebrew, in plain words. Code, code terms, file paths and commands stay in English; inside Hebrew text, wrap each of them in backticks.
 
 Reply with one JSON object and nothing else:
-{"question": string, "answer": string, "paths": [string], "code": string, "why_it_matters": string, "not_checked": string}
-- question: why the agent made this change, in one sentence.
-- answer: the reason, in at most three sentences.
+{"explanation": string, "paths": [string], "code": string, "why_it_matters": string, "not_checked": string, "quiz": {"text": string, "options": [{"text": string, "why": string}], "key": number}}
+- explanation: what the change does and why, in at most three sentences.
 - paths: the files the change touched.
 - code: the lines of the change that matter most, copied from it, at most 12.
 - why_it_matters: what the change does for the code, in one or two sentences.
 - not_checked: one thing the diff does not show.
+- quiz.text: one question on the change's logic or design that the diff answers, such as why the code works this way, what a line does, or what would break without it. Never ask whether a command, test or check will pass.
+- quiz.options: 3 or 4 options, the right one at a random place. Each wrong option is something the code could plausibly have done instead, of the right option's length and tone, so the wording gives nothing away.
+- quiz.options[].why: one line on why that option is right or wrong.
+- quiz.key: the place of the right option in quiz.options, counting from 0.
 "#;
