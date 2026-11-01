@@ -88,7 +88,7 @@ pub struct Row {
     pub line: Option<String>,
 }
 
-/// A session's rolling brief (#369, decision 16).
+/// A session's or a worker's rolling brief (#369, decision 16).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Brief {
     pub text: String,
@@ -115,7 +115,7 @@ pub fn millis() -> u64 {
     UNIX_EPOCH.elapsed().unwrap_or_default().as_millis() as u64
 }
 
-/// The store's cards, and its briefs by session, kept in memory and written to their files on each
+/// The store's cards, and its briefs by session or worker, kept in memory and written to their files on each
 /// change: the briefs to `briefs.json` beside the cards (#369, decision 17).
 // shortcut: rewrites the whole file on each change, which suits a few cards a day; switch to
 // appended lines if it grows to thousands of cards.
@@ -166,17 +166,18 @@ impl CardStore {
         &self.cards
     }
 
-    /// Session `session_id`'s cards, split 30 minutes before `now`, the shell's tick.
-    pub fn session_cards(&self, session_id: &str, now: u64) -> SessionCards {
+    /// The cards and brief of `owner`, a session's id, or a worker's for its own (#369, decision 11),
+    /// split 30 minutes before `now`, the shell's tick.
+    pub fn session_cards(&self, owner: &str, now: u64) -> SessionCards {
         let cards = self
             .cards
             .iter()
-            .filter(|kept| kept.request.session_id == session_id);
+            .filter(|kept| kept.request.owner() == owner);
         let (recent, older) = cards.cloned().partition(|kept| {
             kept.added_at
                 .is_some_and(|at| now.saturating_sub(at) < RECENT_MS)
         });
-        let brief = self.brief(session_id).map(|brief| brief.text.clone());
+        let brief = self.brief(owner).map(|brief| brief.text.clone());
         SessionCards {
             brief,
             recent,
@@ -203,14 +204,14 @@ impl CardStore {
             .or_else(|| stopped.message.clone())
     }
 
-    /// Session `session_id`'s brief, `None` before its first update.
-    pub fn brief(&self, session_id: &str) -> Option<&Brief> {
-        self.briefs.get(session_id)
+    /// The brief of `owner`, a session's id or a worker's, `None` before its first update.
+    pub fn brief(&self, owner: &str) -> Option<&Brief> {
+        self.briefs.get(owner)
     }
 
-    /// Updates session `session_id`'s brief to `text`, and saves the briefs.
-    pub fn set_brief(&mut self, session_id: &str, text: String) -> io::Result<()> {
-        let brief = self.briefs.entry(session_id.into()).or_default();
+    /// Updates `owner`'s brief to `text`, and saves the briefs.
+    pub fn set_brief(&mut self, owner: &str, text: String) -> io::Result<()> {
+        let brief = self.briefs.entry(owner.into()).or_default();
         brief.text = text;
         brief.updates += 1;
         write(&self.path.with_file_name("briefs.json"), &self.briefs)

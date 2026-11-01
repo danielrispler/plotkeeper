@@ -19,6 +19,7 @@ fn record(days: u64, shown: Option<u64>, answered: Option<(u64, bool)>) -> Store
             base: Base::default(),
             change: String::new(),
             prompt: None,
+            ..CardRequest::default()
         },
         card: Card {
             summary: String::new(),

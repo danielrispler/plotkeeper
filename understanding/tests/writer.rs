@@ -24,6 +24,7 @@ fn edit() -> CardRequest {
         )
         .into(),
         prompt: None,
+        ..CardRequest::default()
     }
 }
 
@@ -58,6 +59,10 @@ impl CardWriter for Failing {
         diffstat: &str,
     ) -> Result<String, String> {
         FakeWriter.rewrite(prompts, summaries, diffstat)
+    }
+
+    fn update(&self, brief: &str, workers: &str) -> Result<String, String> {
+        FakeWriter.update(brief, workers)
     }
 }
 
@@ -114,6 +119,10 @@ impl CardWriter for Replying {
     }
 
     fn rewrite(&self, _: &[&str], _: &[String], _: &str) -> Result<String, String> {
+        Ok(self.0.clone())
+    }
+
+    fn update(&self, _: &str, _: &str) -> Result<String, String> {
         Ok(self.0.clone())
     }
 }

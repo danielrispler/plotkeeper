@@ -3,7 +3,7 @@
 //! passes in what changed; these tests play the shell's part.
 
 use serde_json::{Value, json};
-use studio_core::{Base, CardRequest, Change, Output, Stopped, Studio};
+use studio_core::{Base, CardRequest, Change, Fingerprint, Keep, Output, Stopped, Studio};
 
 const LOG: &str = include_str!("fixtures/bash-steps.jsonl");
 const SESSION: &str = "e4a7c2f9-3b6d-4e1a-8c5f-2d9b7e0a6c13";
@@ -18,6 +18,7 @@ fn found() -> Change {
         },
         diff: "--- a/apps/studio/NOTES.md\n+++ b/apps/studio/NOTES.md\n@@ -0,0 +1 @@\n+live\n"
             .into(),
+        head: Some("5f0c1e2d".into()),
     }
 }
 
@@ -49,6 +50,9 @@ fn a_prompt_whose_worktree_changed_gets_one_card_on_the_whole_change_at_its_stop
             base: found().base,
             change: found().diff,
             prompt: Some(1793265000140),
+            agent: None,
+            changed_by: Default::default(),
+            workers: vec![],
         }]
     );
 }
@@ -167,7 +171,11 @@ fn the_shell_fingerprints_at_the_prompt_and_at_the_stop() {
     assert_eq!(fingerprinted(LOG), [0, 9]);
     assert_eq!(
         Studio::default().fingerprint_folder(LOG.lines().next().unwrap()),
-        Some((SESSION.into(), WORKTREE.into()))
+        Some(Fingerprint {
+            key: SESSION.into(),
+            folder: WORKTREE.into(),
+            keep: Keep::Always
+        })
     );
 }
 
@@ -194,4 +202,73 @@ fn after_a_replay_the_shell_fingerprints_the_prompts_still_open() {
 
     assert_eq!(waiting(7), [(SESSION.into(), WORKTREE.into())]);
     assert_eq!(waiting(LOG.lines().count()), []);
+}
+
+/// The scripted run of `record-subagent-run.sh` (#370): its worktree worker writes `hello.txt`,
+/// commits it (line 15) and ends (line 18); the session's own worktree never changes.
+const RUN: &str = include_str!("fixtures/subagent-run.jsonl");
+const RUN_SESSION: &str = "40e8e6ef-9b2f-4467-9b55-87c2d053b616";
+const RUN_WORKER: &str = "add0c7bbaced40ed0";
+
+/// #369, decision 11: a worker's card at its commit and at its end, each on its own worktree, and a
+/// parent that changed nothing itself gets one card from its workers' cards, not their diffs.
+#[test]
+fn the_runs_worker_gets_a_card_at_its_commit_and_its_end_and_its_session_one_from_those_cards() {
+    let mut studio = Studio::default();
+    let mut looked = Vec::new();
+    let mut requests = Vec::new();
+    for (index, line) in RUN.lines().enumerate() {
+        let look = studio.fingerprint_folder(line);
+        // The worker's worktree changed, with a commit, at each look but its first.
+        let change = look.as_ref().and_then(|look| {
+            let seen = looked.iter().any(|(_, key, _)| key == &look.key);
+            looked.push((index + 1, look.key.clone(), look.keep));
+            (look.key == RUN_WORKER && seen).then(|| Change {
+                base: Base::default(),
+                diff: "--- a/hello.txt\n+++ b/hello.txt\n@@ -0,0 +1 @@\n+hello\n".into(),
+                head: Some("c0ffee".into()),
+            })
+        });
+        for output in studio.apply_with_change(line, change) {
+            if let Output::Card(request) = output {
+                requests.push(request);
+            }
+        }
+    }
+
+    let (worker, helper) = (RUN_WORKER.to_string(), "a551b1ece0a4430ce".to_string());
+    let session = RUN_SESSION.to_string();
+    assert_eq!(
+        looked,
+        [
+            (2, session.clone(), Keep::Always),
+            // The worker's first event, its commit's Bash step and its end.
+            (5, worker.clone(), Keep::Always),
+            (8, helper.clone(), Keep::Always),
+            (15, worker.clone(), Keep::OnCommit),
+            // The helper shares the session's worktree; its command could still make it a worker.
+            (17, helper, Keep::OnCommit),
+            (18, worker, Keep::Always),
+            (28, session, Keep::Always),
+        ]
+    );
+    let cards: Vec<(&str, Option<&str>, bool, &[String])> = requests
+        .iter()
+        .map(|r| (&*r.id, r.agent.as_deref(), r.change.is_empty(), &*r.workers))
+        .collect();
+    let commit = format!("{RUN_WORKER}@1793471824831");
+    let end = format!("{RUN_WORKER}@1793471826289");
+    let stop = format!("{RUN_SESSION}@1793471850661");
+    let both = [commit.clone(), end.clone()];
+    assert_eq!(
+        cards,
+        [
+            (&*commit, Some(RUN_WORKER), false, &[][..]),
+            (&*end, Some(RUN_WORKER), false, &[]),
+            (&*stop, None, true, &both),
+        ]
+    );
+    // A worker's cards belong to its task, from its spawn; its session's, to Daniel's prompt.
+    assert_eq!(requests[0].prompt, Some(1_793_471_817_301));
+    assert_eq!(requests[2].prompt, Some(1_793_471_812_760));
 }

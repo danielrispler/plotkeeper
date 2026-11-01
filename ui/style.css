@@ -90,6 +90,6 @@ code:empty { display: none; }
 .choices .label { font-weight: 600; flex: none; }
 .choices .description { color: var(--muted); }
 .choices .chosen { border-color: var(--fg); }
-/* A subagent's view: its session's cards and checks are not its own. */
+/* A subagent's view: its session's checks are not its own; its brief and cards are. */
 #view[data-agent] .own { display: none; }
 [hidden] { display: none !important; }

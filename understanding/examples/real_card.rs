@@ -2,7 +2,8 @@
 //! checks, #369's Testing Decisions): a structural change, then one that is not. For each it prints
 //! the writer's raw reply, then the card and the brief parsed from it; the second card updates the
 //! first one's brief. Then it prints a rewrite of the brief from the two prompts, the two summaries
-//! and a diffstat, and the second card's "explain more" (#376). It runs the writer as the app does, in
+//! and a diffstat, the second card's "explain more" (#376), and a parent's card and brief from its
+//! workers' card summaries, with no diff (#378). It runs the writer as the app does, in
 //! the app's neutral folder, and reads no credential file. Run it outside auto mode, from
 //! `apps/studio`:
 //!
@@ -121,7 +122,18 @@ impl CardWriter for Printing {
     ) -> Result<String, String> {
         Self::print(self.0.rewrite(prompts, summaries, diffstat))
     }
+
+    fn update(&self, brief: &str, workers: &str) -> Result<String, String> {
+        Self::print(self.0.update(brief, workers))
+    }
 }
+
+/// What two workers of a parent that changed nothing itself did, as the app gives it (#378).
+const WORKERS: &str = "No diff: the agent changed nothing itself since its last card. Its workers, \
+each with its status and the summaries of its cards since then:
+- `Implement #377` (completed): הבריף של הסשן נכתב מחדש בכל עדכון חמישי. החלק של המבנה עבר ל־`brief.rs`.
+- `Implement #378` (running): no card yet
+";
 
 fn request(change: &str, at: u64) -> CardRequest {
     CardRequest {
@@ -130,6 +142,7 @@ fn request(change: &str, at: u64) -> CardRequest {
         base: Base::default(),
         change: change.into(),
         prompt: Some(at),
+        ..CardRequest::default()
     }
 }
 
@@ -163,4 +176,10 @@ fn main() {
         println!("=== Explain more on the second card");
         let _ = writer.more(&request, &card);
     }
+    println!("=== A parent's card from its workers' cards");
+    if let Some((card, _)) = write_card(&writer, &request(WORKERS, 3), &[], &brief, log) {
+        println!("--- The card\n{card:#?}");
+    }
+    println!("=== The brief updated from its workers' cards");
+    let _ = writer.update(&brief, WORKERS);
 }

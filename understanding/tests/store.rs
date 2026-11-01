@@ -19,6 +19,7 @@ fn edit(id: &str, path: &str) -> CardRequest {
         },
         change: format!("--- a/{path}\n+++ b/{path}\n@@ -1 +1 @@\n-old\n+new\n"),
         prompt: None,
+        ..CardRequest::default()
     }
 }
 
@@ -174,6 +175,10 @@ impl CardWriter for Counting {
         self.0.set(self.0.get() + 1);
         FakeWriter.more(request, card)
     }
+
+    fn update(&self, brief: &str, workers: &str) -> Result<String, String> {
+        FakeWriter.update(brief, workers)
+    }
 }
 
 #[test]
@@ -224,6 +229,10 @@ impl CardWriter for Blank {
 
     fn more(&self, _: &CardRequest, _: &Card) -> Result<String, String> {
         Ok("\n".into())
+    }
+
+    fn update(&self, brief: &str, workers: &str) -> Result<String, String> {
+        FakeWriter.update(brief, workers)
     }
 }
 
@@ -404,8 +413,8 @@ fn a_card_from_before_its_time_was_kept_is_older() {
     assert_eq!(ids(&shown.older), ["toolu_01A"]);
 }
 
-/// #347's checkpoint day (#370's fixture), live, with a change at every fingerprint: each card
-/// request gets a card at its event's time. Before #371 the pane showed only the cards of the
+/// #347's checkpoint day (#370's fixture), live, with a change at every `Stop`'s fingerprint: each
+/// card request gets a card at its event's time. Before #371 the pane showed only the cards of the
 /// session prompted last, so the other session's cards seemed deleted (#347 note, "Cards were not
 /// deleted").
 #[test]
@@ -417,13 +426,15 @@ fn every_session_of_the_day_shows_all_of_its_cards_whichever_was_prompted_last()
     let changed = Change {
         base: Base::default(),
         diff: "--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-old\n+new\n".into(),
+        head: None,
     };
     for line in day.lines() {
-        let at = serde_json::from_str::<serde_json::Value>(line).unwrap()["studio_received_ms"]
-            .as_u64()
-            .unwrap();
+        let event = serde_json::from_str::<serde_json::Value>(line).unwrap();
+        let at = event["studio_received_ms"].as_u64().unwrap();
         studio.tick(at);
-        let change = studio.fingerprint_folder(line).and(Some(changed.clone()));
+        let stop = event["hook_event_name"] == "Stop";
+        let change = studio.fingerprint_folder(line).filter(|_| stop);
+        let change = change.and(Some(changed.clone()));
         for output in studio.apply_with_change(line, change) {
             if let Output::Card(request) = output {
                 let card = card(&request);

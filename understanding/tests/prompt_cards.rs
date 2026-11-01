@@ -5,24 +5,27 @@
 use serde_json::{Value, json};
 use std::{
     cell::RefCell,
-    collections::HashMap,
+    collections::{BTreeMap, BTreeSet, HashMap},
     fs,
     path::{Path, PathBuf},
     process::Command,
     sync::Mutex,
 };
-use studio_core::{CardRequest, Output, Studio};
-use studio_understanding::{Card, CardStore, CardWriter, FakeWriter, Fingerprints, write_stop};
+use studio_core::{CardRequest, Kind, Output, Studio};
+use studio_understanding::{
+    Card, CardStore, CardWriter, FakeWriter, Fingerprints, write_brief, write_stop,
+};
 
 /// What a rewrite read: the prompts, the summaries and the diffstat.
 type Rewrite = (Vec<String>, Vec<String>, String);
 
-/// The fake writer, keeping what each call read: a card's earlier summaries and brief, and each
-/// rewrite.
+/// The fake writer, keeping what each call read: a card's earlier summaries and brief, each
+/// rewrite, and each brief updated from workers' cards.
 #[derive(Default)]
 struct Recording {
     cards: RefCell<Vec<(Vec<String>, String)>>,
     rewrites: RefCell<Vec<Rewrite>>,
+    updates: RefCell<Vec<(String, String)>>,
 }
 
 impl CardWriter for Recording {
@@ -51,6 +54,13 @@ impl CardWriter for Recording {
             .borrow_mut()
             .push((read, summaries.into(), diffstat.into()));
         FakeWriter.rewrite(prompts, summaries, diffstat)
+    }
+
+    fn update(&self, brief: &str, workers: &str) -> Result<String, String> {
+        self.updates
+            .borrow_mut()
+            .push((brief.into(), workers.into()));
+        FakeWriter.update(brief, workers)
     }
 }
 
@@ -104,8 +114,8 @@ impl Shell {
         }
     }
 
-    /// Takes event `name`, with `fields` added, and returns the cards it asks for.
-    fn event(&mut self, name: &str, fields: Value) -> Vec<CardRequest> {
+    /// Takes event `name`, with `fields` added, and returns the cards and briefs it asks for.
+    fn event(&mut self, name: &str, fields: Value) -> Vec<Output> {
         self.at += 1;
         let mut event = json!({"session_id": "s1", "hook_event_name": name, "cwd": self.repo,
             "studio_received_ms": self.at});
@@ -115,37 +125,68 @@ impl Shell {
             .extend(fields.as_object().unwrap().clone());
         let line = event.to_string();
         let found = self.studio.fingerprint_folder(&line);
-        let change = found.and_then(|(session, folder)| {
-            let prints = self.fingerprints.entry(session).or_default();
-            prints.take(Path::new(&folder))
+        let change = found.and_then(|look| {
+            let prints = self.fingerprints.entry(look.key).or_default();
+            prints.look(Path::new(&look.folder), look.keep)
         });
         let outputs = self.studio.apply_with_change(&line, change);
-        let cards = outputs.into_iter().filter_map(|output| match output {
-            Output::Card(request) => Some(request),
-            _ => None,
-        });
-        cards.collect()
+        let asked = |output: &Output| matches!(output, Output::Card(_) | Output::Brief(_));
+        outputs.into_iter().filter(asked).collect()
     }
 
-    /// Writes the card on `request` and updates the brief, as the shell's card thread does.
-    fn write(&self, request: CardRequest) {
-        let prompts = &self.studio.session("s1").unwrap().prompts;
+    /// Writes the card or the brief `output` asks for, as the shell's card thread does.
+    fn write(&self, output: Output) {
+        let session = self.studio.session("s1").unwrap();
         let log = |line| panic!("{line}");
-        assert!(write_stop(
-            &self.store,
-            &self.writer,
-            request,
-            prompts,
-            &self.repo,
-            log
-        ));
+        match output {
+            Output::Card(request) => {
+                assert!(write_stop(&self.store, &self.writer, request, session, log))
+            }
+            Output::Brief(request) => {
+                assert!(write_brief(
+                    &self.store,
+                    &self.writer,
+                    request,
+                    session,
+                    log
+                ))
+            }
+            _ => {}
+        }
     }
 
-    /// Takes event `name`, with `fields` added, and writes the cards it asks for.
+    /// Takes event `name`, with `fields` added, and writes the cards and briefs it asks for.
     fn take(&mut self, name: &str, fields: Value) {
-        for request in self.event(name, fields) {
-            self.write(request);
+        for output in self.event(name, fields) {
+            self.write(output);
         }
+    }
+
+    /// Subagent `agent`'s event `name` in folder `cwd`, with `fields` added, written as `take` does.
+    fn child(&mut self, agent: &str, cwd: &Path, name: &str, fields: Value) {
+        let mut child = json!({ "agent_id": agent, "cwd": cwd });
+        let fields = fields.as_object().unwrap().clone();
+        child.as_object_mut().unwrap().extend(fields);
+        self.take(name, child);
+    }
+
+    /// A new worktree of the repository, outside it, on its own branch `name`.
+    fn worktree(&self, name: &str) -> PathBuf {
+        let tree = self._dirs[1].path().join(name);
+        git(
+            &self.repo,
+            &["worktree", "add", "-qb", name, tree.to_str().unwrap()],
+        );
+        tree
+    }
+
+    /// The cards in the store, oldest first: whose each is and its summary.
+    fn cards(&self) -> Vec<(Option<String>, String)> {
+        let store = self.store.lock().unwrap();
+        let cards = store.cards().iter();
+        cards
+            .map(|kept| (kept.request.agent.clone(), kept.card.summary.clone()))
+            .collect()
     }
 
     /// Daniel's prompt `text`, a new file `path`, committed, and the turn's `Stop`.
@@ -177,6 +218,184 @@ impl Shell {
 fn spawn() -> Value {
     json!({"tool_name": "Agent", "tool_input": {"description": "Implement #377"},
         "tool_response": {"agentId": "a1"}})
+}
+
+/// The spawn of subagent `id` with `description`, in a worktree of its own when `isolated`.
+fn spawn_child(id: &str, description: &str, isolated: bool) -> Value {
+    let isolation = if isolated { "worktree" } else { "" };
+    json!({"tool_name": "Agent", "tool_response": {"agentId": id},
+        "tool_input": {"description": description, "isolation": isolation, "prompt": "…"}})
+}
+
+/// A Bash step's result.
+fn bash(command: &str) -> Value {
+    json!({"tool_name": "Bash", "tool_input": {"command": command}})
+}
+
+/// The summary the fake writer gives a change to `path`.
+fn summary(path: &str) -> String {
+    format!("שינוי לדוגמה ב־`{path}`")
+}
+
+#[test]
+fn a_worker_gets_a_card_at_each_commit_in_its_worktree_and_at_its_end_with_its_own_brief() {
+    let mut shell = Shell::new();
+    shell.take("UserPromptSubmit", json!({ "prompt": "Implement #378" }));
+    shell.take("PostToolUse", spawn_child("w1", "Implement #378", true));
+    let tree = shell.worktree("w1");
+    shell.child("w1", &tree, "SubagentStart", json!({}));
+
+    fs::write(tree.join("a.rs"), "fn a1() {}\n").unwrap();
+    shell.child("w1", &tree, "PostToolUse", bash("cargo fmt"));
+    assert_eq!(shell.cards(), []);
+    git(&tree, &["add", "."]);
+    git(&tree, &["commit", "-qm", "Add a1"]);
+    shell.child("w1", &tree, "PostToolUse", bash("git commit -m 'Add a1'"));
+    fs::write(tree.join("b.rs"), "fn b1() {}\n").unwrap();
+    shell.child("w1", &tree, "SubagentStop", json!({}));
+
+    let w1 = Some("w1".to_string());
+    assert_eq!(
+        shell.cards(),
+        [(w1.clone(), summary("a.rs")), (w1, summary("b.rs"))]
+    );
+    let store = shell.store.lock().unwrap();
+    let brief = store.brief("w1").expect("the worker's brief");
+    assert!(brief.text.ends_with("`b.rs`."), "{}", brief.text);
+    assert_eq!(store.brief("s1"), None);
+}
+
+/// Worker `w1` in a worktree of its own writes `a.rs` and ends, with one card.
+fn worker_writes_and_ends(shell: &mut Shell) {
+    shell.take("PostToolUse", spawn_child("w1", "Implement #378", true));
+    let tree = shell.worktree("w1");
+    shell.child("w1", &tree, "SubagentStart", json!({}));
+    fs::write(tree.join("a.rs"), "fn a1() {}\n").unwrap();
+    shell.child("w1", &tree, "SubagentStop", json!({}));
+}
+
+#[test]
+fn a_parent_that_changed_nothing_itself_gets_one_card_from_its_workers_summaries_not_diffs() {
+    let mut shell = Shell::new();
+    shell.take("UserPromptSubmit", json!({ "prompt": "Implement #378" }));
+    worker_writes_and_ends(&mut shell);
+    shell.take("Stop", json!({}));
+
+    let store = shell.store.lock().unwrap();
+    let own: Vec<&CardRequest> = store.cards().iter().map(|kept| &kept.request).collect();
+    let [worker, own] = own[..] else {
+        panic!("a worker's card and its parent's: {own:?}");
+    };
+    assert_eq!(own.agent, None);
+    assert_eq!(own.workers, std::slice::from_ref(&worker.id));
+    let read = &own.change;
+    assert!(
+        read.contains(&format!(
+            "- `Implement #378` (completed): {}\n",
+            summary("a.rs")
+        )),
+        "{read}"
+    );
+    assert!(!read.contains("+++"), "{read}");
+}
+
+#[test]
+fn a_wake_up_turn_that_changed_nothing_itself_updates_the_brief_and_writes_no_card() {
+    let mut shell = Shell::new();
+    shell.take("UserPromptSubmit", json!({ "prompt": "Implement #378" }));
+    shell.take("Stop", json!({}));
+    worker_writes_and_ends(&mut shell);
+    let wake_up =
+        "<task-notification><task-id>w1</task-id><status>completed</status></task-notification>";
+    shell.take("UserPromptSubmit", json!({ "prompt": wake_up }));
+    shell.take("Stop", json!({ "last_assistant_message": "w1 is done." }));
+
+    assert_eq!(shell.cards(), [(Some("w1".into()), summary("a.rs"))]);
+    let updates = shell.writer.updates.borrow().clone();
+    let [(brief, workers)] = &updates[..] else {
+        panic!("one update: {updates:?}");
+    };
+    assert_eq!(brief, "");
+    assert!(workers.contains(&summary("a.rs")), "{workers}");
+    let updated = "העובדים חזרו, והסשן עצמו לא שינה דבר.";
+    assert_eq!(shell.brief(), updated);
+    assert_eq!(shell.line().as_deref(), Some(updated));
+}
+
+const MINUTE: u64 = 60 * 1000;
+
+/// #369, decision 11: no timer; a step 20 minutes or more after the last card checks its worktree.
+#[test]
+fn after_25_minutes_of_uncommitted_change_the_next_step_gets_a_card_and_one_with_no_change_none() {
+    let mut shell = Shell::new();
+    let repo = shell.repo.clone();
+    shell.take(
+        "UserPromptSubmit",
+        json!({ "prompt": "Implement #378 and #379" }),
+    );
+    shell.take("PostToolUse", spawn_child("w1", "Implement #378", true));
+    shell.take("PostToolUse", spawn_child("w2", "Implement #379", true));
+    let (one, two) = (shell.worktree("w1"), shell.worktree("w2"));
+    shell.child("w1", &one, "SubagentStart", json!({}));
+    shell.child("w2", &two, "SubagentStart", json!({}));
+    let read = json!({"tool_name": "Read", "tool_input": {"file_path": "lib.rs"}});
+
+    fs::write(one.join("a.rs"), "fn a1() {}\n").unwrap();
+    fs::write(repo.join("lib.rs"), "fn b() {}\n").unwrap();
+    shell.child("w1", &one, "PostToolUse", read.clone());
+    assert_eq!(shell.cards(), []);
+    shell.at += 25 * MINUTE;
+    shell.child("w1", &one, "PostToolUse", read.clone());
+    shell.child("w2", &two, "PostToolUse", read.clone());
+    // The session's own prompt too.
+    shell.take("PostToolUse", read);
+
+    let (w1, own) = (Some("w1".to_string()), None);
+    assert_eq!(
+        shell.cards(),
+        [(w1, summary("a.rs")), (own, summary("lib.rs"))]
+    );
+    assert_eq!(shell.writer.cards.borrow().len(), 2);
+}
+
+#[test]
+fn a_helpers_edit_in_its_parents_worktree_shows_on_the_parents_card_tagged_with_the_helper() {
+    let mut shell = Shell::new();
+    let repo = shell.repo.clone();
+    shell.take("UserPromptSubmit", json!({ "prompt": "Review and fix" }));
+    shell.take("PostToolUse", spawn_child("h1", "Review the diff", false));
+    shell.child("h1", &repo, "SubagentStart", json!({}));
+    fs::write(repo.join("lib.rs"), "fn a() { b() }\n").unwrap();
+    let edit = json!({"tool_name": "Edit", "tool_input": {"file_path": repo.join("lib.rs")}});
+    shell.child("h1", &repo, "PostToolUse", edit);
+    shell.take("Stop", json!({}));
+
+    let store = shell.store.lock().unwrap();
+    let [card] = store.cards() else {
+        panic!("one card: {:?}", store.cards());
+    };
+    assert_eq!(card.request.agent, None);
+    let tagged = BTreeMap::from([("h1".to_string(), BTreeSet::from(["lib.rs".to_string()]))]);
+    assert_eq!(card.request.changed_by, tagged);
+}
+
+/// #372's gap: the shell now fingerprints a helper's Bash step, so a command that changes its
+/// worktree makes it a worker live, not only in the core's test.
+#[test]
+fn a_helper_whose_command_changes_its_worktree_becomes_a_worker() {
+    let mut shell = Shell::new();
+    let repo = shell.repo.clone();
+    shell.take("UserPromptSubmit", json!({ "prompt": "Format the code" }));
+    shell.take("PostToolUse", spawn_child("h1", "Format", false));
+    shell.child("h1", &repo, "SubagentStart", json!({}));
+    let kind = |shell: &Shell| shell.studio.session("s1").unwrap().agents[0].kind;
+
+    shell.child("h1", &repo, "PostToolUse", bash("cargo fmt --check"));
+    assert_eq!(kind(&shell), Kind::Helper);
+    fs::write(repo.join("lib.rs"), "fn a() {}\n\n").unwrap();
+    shell.child("h1", &repo, "PostToolUse", bash("cargo fmt"));
+
+    assert_eq!(kind(&shell), Kind::Worker);
 }
 
 const WAKE_UP: &str =
@@ -275,10 +494,10 @@ fn a_stopped_row_shows_the_agents_first_line_then_the_cards_summary_then_the_bri
     assert_eq!(shell.line(), None);
 
     let message = "\nRenamed `a` to `b`.\n\nThe tests pass.";
-    let requests = shell.event("Stop", json!({ "last_assistant_message": message }));
+    let outputs = shell.event("Stop", json!({ "last_assistant_message": message }));
     assert_eq!(shell.line().as_deref(), Some("Renamed `a` to `b`."));
 
-    shell.write(requests.into_iter().next().unwrap());
+    shell.write(outputs.into_iter().next().unwrap());
     assert_eq!(shell.line().as_deref(), Some("שינוי לדוגמה ב־`lib.rs`"));
 
     // A turn that changed nothing gets no card: the row shows the brief's latest line.

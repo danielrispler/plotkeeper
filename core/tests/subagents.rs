@@ -247,6 +247,7 @@ fn a_helper_whose_command_changed_its_worktree_is_a_worker_from_that_step() {
     let change = Change {
         base: Base::default(),
         diff: "+fn element<'a>\n".into(),
+        head: None,
     };
     studio.apply_with_change(&command, Some(change));
     assert_eq!(agent(&studio, TREE_SESSION, TREE_REVIEW).kind, Worker);

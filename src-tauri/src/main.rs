@@ -11,14 +11,14 @@ use std::{
     fs::{self, File},
     io::{self, BufRead, BufReader, Seek, SeekFrom},
     path::Path,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, mpsc},
     thread,
     time::Duration,
 };
-use studio_core::{Notifications, Output, Session, State::NeedsYou, Studio};
+use studio_core::{CardRequest, Notifications, Output, Session, State::NeedsYou, Studio};
 use studio_understanding::{
     CardStore, CardWriter, ClaudeWriter, FakeWriter, Fingerprints, Rating, Row, SessionCards,
-    Versions, find_claude, millis, write_stop,
+    Versions, find_claude, millis, write_brief, write_stop,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
@@ -65,15 +65,16 @@ fn selected(studio: State<Mutex<Studio>>) -> Option<Session> {
     studio.lock().unwrap().selected().cloned()
 }
 
-/// The cards of the selected session, split at the latest tick.
+/// The brief and cards of the selected session, or of the worker of it Daniel opened, split at the
+/// latest tick.
 #[tauri::command]
 fn cards(studio: State<Mutex<Studio>>, cards: State<Cards>) -> SessionCards {
-    let (selected, now) = {
+    let (viewed, now) = {
         let studio = studio.lock().unwrap();
-        (studio.selected().map(|s| s.id.clone()), studio.now())
+        (studio.viewed().map(String::from), studio.now())
     };
-    match selected {
-        Some(id) => cards.lock().unwrap().session_cards(&id, now),
+    match viewed {
+        Some(owner) => cards.lock().unwrap().session_cards(&owner, now),
         None => SessionCards::default(),
     }
 }
@@ -172,8 +173,12 @@ fn main() {
 fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
     let mut read_to = 0;
     let mut live = false;
-    // Each session's own, so another session's prompt in the same worktree moves no base.
+    // Each session's and each subagent's own, so another's prompt or step in the same worktree moves
+    // no base.
     let mut fingerprints = HashMap::<String, Fingerprints>::new();
+    // Each session's card writer calls, one at a time and in order, so a parent's card or brief reads
+    // its workers' cards, and two cards never update one brief at once.
+    let mut queues = HashMap::<String, mpsc::Sender<Job>>::new();
     let versions = Versions::beside(log);
     let mut drawn_cards = None;
     let mut badge = None;
@@ -197,9 +202,9 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                     // so an edit in between counts as Daniel's; take the fingerprint in the hook if a
                     // card ever misses one.
                     let found = state.lock().unwrap().fingerprint_folder(&text);
-                    let change = found.and_then(|(session, folder)| {
-                        let prints = fingerprints.entry(session).or_default();
-                        prints.take(Path::new(&folder))
+                    let change = found.and_then(|look| {
+                        let prints = fingerprints.entry(look.key).or_default();
+                        prints.look(Path::new(&look.folder), look.keep)
                     });
                     outputs.extend(state.lock().unwrap().apply_with_change(&text, change));
                 } else {
@@ -216,32 +221,15 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                     .waiting_folders()
                     .map(|(session, folder)| (session.into(), folder.into()))
                     .collect();
-                for (session, folder) in waiting {
-                    let prints = fingerprints.entry(session).or_default();
+                for (key, folder) in waiting {
+                    let prints = fingerprints.entry(key).or_default();
                     prints.take(Path::new(&folder));
                 }
             }
             for output in outputs {
                 match output {
-                    // `claude -p` takes seconds, so each card and its brief are written on their own
-                    // thread, and the loop below draws the card once it is in the store. The row's
-                    // line changes with no line read, so the list is sent from here.
-                    Output::Card(request) => {
-                        let (app, writer) = (app.clone(), writer.clone());
-                        let session = state.lock().unwrap().session(&request.session_id).cloned();
-                        let (prompts, folder) =
-                            session.map_or_default(|session| (session.prompts, session.cwd));
-                        thread::spawn(move || {
-                            let log = |line: String| eprintln!("studio: {line}");
-                            let session_id = request.session_id.clone();
-                            let store = app.state::<Cards>();
-                            let folder = Path::new(&folder);
-                            if write_stop(&store, &*writer, request, &prompts, folder, log) {
-                                let _ = app.emit("sessions", sessions(app.state(), app.state()));
-                                tell(&app, "New card", &session_id, None);
-                            }
-                        });
-                    }
+                    Output::Card(request) => write(app, writer, &mut queues, request, true),
+                    Output::Brief(request) => write(app, writer, &mut queues, request, false),
                     Output::NeedsYou { session_id, agent } => {
                         tell(app, "Needs you", &session_id, agent.as_deref());
                     }
@@ -305,6 +293,53 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
         live = true;
         thread::sleep(Duration::from_millis(200));
     }
+}
+
+/// A card writer call, run on its session's queue.
+type Job = Box<dyn FnOnce() + Send>;
+
+/// Writes the card `request` asks for, or only the brief when `card` is false, on its session's
+/// queue in `queues`. `claude -p` takes seconds, so the read loop goes on and draws a card once it
+/// is in the store; the row's line changes with no line read, so the list is sent from here.
+fn write(
+    app: &AppHandle,
+    writer: &Writer,
+    queues: &mut HashMap<String, mpsc::Sender<Job>>,
+    request: CardRequest,
+    card: bool,
+) {
+    let (app, writer) = (app.clone(), writer.clone());
+    let id = request.session_id.clone();
+    let Some(session) = app
+        .state::<Mutex<Studio>>()
+        .lock()
+        .unwrap()
+        .session(&id)
+        .cloned()
+    else {
+        return;
+    };
+    let job = move || {
+        let log = |line: String| eprintln!("studio: {line}");
+        let store = app.state::<Cards>();
+        let agent = request.agent.clone();
+        let written = match card {
+            true => write_stop(&store, &*writer, request, &session, log),
+            false => write_brief(&store, &*writer, request, &session, log),
+        };
+        if written {
+            let _ = app.emit("sessions", sessions(app.state(), app.state()));
+        }
+        if written && card {
+            tell(&app, "New card", &session.id, agent.as_deref());
+        }
+    };
+    let queue = queues.entry(id).or_insert_with(|| {
+        let (queue, jobs) = mpsc::channel::<Job>();
+        thread::spawn(move || jobs.into_iter().for_each(|job| job()));
+        queue
+    });
+    let _ = queue.send(Box::new(job));
 }
 
 /// Adds a notice on session `session_id`'s line, naming its subagent `agent`, if any; the read loop

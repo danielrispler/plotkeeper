@@ -13,7 +13,7 @@ use std::{
     process::Command,
     time::SystemTime,
 };
-use studio_core::{Base, Change};
+use studio_core::{Base, Change, Keep};
 
 /// A worktree's `HEAD`, and the files `git status` listed, by path from the worktree's root, with
 /// their content: `None` for a file that is gone.
@@ -52,6 +52,11 @@ impl Fingerprints {
     /// which is the change's base. `None` when nothing changed, when this is the worktree's first
     /// record, or when `folder` is in no git worktree.
     pub fn take(&mut self, folder: &Path) -> Option<Change> {
+        self.look(folder, Keep::Always)
+    }
+
+    /// Like `take`, but the record becomes the next change's base only as `keep` says.
+    pub fn look(&mut self, folder: &Path, keep: Keep) -> Option<Change> {
         let root = git(folder, &["rev-parse", "--show-toplevel"])?;
         let root = PathBuf::from(String::from_utf8(root).ok()?.trim_end());
         let head = git(&root, &["rev-parse", "HEAD"]);
@@ -72,37 +77,46 @@ impl Fingerprints {
             })
             .collect();
         let record = Record { head, files };
+        let previous = self.records.get(&root);
+        if keep == Keep::OnCommit && previous.is_some_and(|p| p.head == record.head) {
+            return change(&root, previous?, &record);
+        }
         let previous = self.records.insert(root.clone(), record)?;
-        let record = &self.records[&root];
-        // A file edited and committed since lists in neither record.
-        let committed = match (&previous.head, &record.head) {
-            (Some(before), Some(now)) if before != now => {
-                let names = ["diff", "--name-only", "-z", "--no-renames", before, now];
-                git(&root, &names).map_or_else(Vec::new, |out| split_paths(&out, 0).collect())
-            }
-            _ => Vec::new(),
-        };
-        let listed = previous.files.keys().chain(record.files.keys());
-        let paths: BTreeSet<&String> = listed.chain(&committed).collect();
-        let diff: String = paths
-            .into_iter()
-            .filter_map(|path| {
-                // A file the previous record does not list was clean then: as its `HEAD` had it.
-                let before = previous.files.get(path).cloned().unwrap_or_else(|| {
-                    let head = previous.head.as_deref()?;
-                    git(&root, &["show", &format!("{head}:{path}")]).map(Content::Bytes)
-                });
-                let after = record.files.get(path).cloned();
-                let after = after.unwrap_or_else(|| read(&root.join(path)));
-                (before != after).then(|| unified(path, before, after))
-            })
-            .collect();
-        let base = Base {
-            head: previous.head,
-            files: previous.files.into_keys().collect(),
-        };
-        (!diff.is_empty()).then_some(Change { base, diff })
+        change(&root, &previous, &self.records[&root])
     }
+}
+
+/// The change in the worktree at `root` from record `previous`, its base, to `record`.
+fn change(root: &Path, previous: &Record, record: &Record) -> Option<Change> {
+    // A file edited and committed since lists in neither record.
+    let committed = match (&previous.head, &record.head) {
+        (Some(before), Some(now)) if before != now => {
+            let names = ["diff", "--name-only", "-z", "--no-renames", before, now];
+            git(root, &names).map_or_else(Vec::new, |out| split_paths(&out, 0).collect())
+        }
+        _ => Vec::new(),
+    };
+    let listed = previous.files.keys().chain(record.files.keys());
+    let paths: BTreeSet<&String> = listed.chain(&committed).collect();
+    let diff: String = paths
+        .into_iter()
+        .filter_map(|path| {
+            // A file the previous record does not list was clean then: as its `HEAD` had it.
+            let before = previous.files.get(path).cloned().unwrap_or_else(|| {
+                let head = previous.head.as_deref()?;
+                git(root, &["show", &format!("{head}:{path}")]).map(Content::Bytes)
+            });
+            let after = record.files.get(path).cloned();
+            let after = after.unwrap_or_else(|| read(&root.join(path)));
+            (before != after).then(|| unified(path, before, after))
+        })
+        .collect();
+    let base = Base {
+        head: previous.head.clone(),
+        files: previous.files.keys().cloned().collect(),
+    };
+    let head = record.head.clone();
+    (!diff.is_empty()).then_some(Change { base, diff, head })
 }
 
 /// `git diff --stat` in `folder`'s worktree from commit `since` to the files as they are now, for the

@@ -48,9 +48,18 @@ type Session = {
   // In the session list only: what its row says while its turn is over, from the card store.
   line?: string | null;
 };
-// A session's change since its last card, from its base: HEAD and the files git status listed then.
+// A session's or a worker's change since its last card, from its base: HEAD and the files git
+// status listed then. `agent` is the worker whose card it is; `changed_by` holds the files other
+// subagents edited in its worktree, by subagent.
 type Base = { head: string | null; files: string[] };
-type CardRequest = { session_id: string; id: string; base: Base; change: string };
+type CardRequest = {
+  session_id: string;
+  id: string;
+  base: Base;
+  change: string;
+  agent: string | null;
+  changed_by: Record<string, string[]>;
+};
 // A card's multiple-choice question; `key` is the right option, counting from 0.
 type Quiz = { text: string; options: { text: string; why: string }[]; key: number };
 // `architecture` is null when the change is not structural.
@@ -203,7 +212,7 @@ function agentRow(session: Session, agent: Agent, depth: number): HTMLElement {
     ...done(session, agent.id),
     text("span", details.filter(Boolean).join(" · "), "row-step"),
   );
-  button.addEventListener("click", () => openAgent(session.id, agent.id));
+  button.addEventListener("click", () => select(session.id, agent.id));
   return button;
 }
 
@@ -249,21 +258,19 @@ function showSessions(sessions: Session[]) {
   element("no-sessions").hidden = sessions.length > 0;
 }
 
-// Only Daniel's click changes the selected session, and the subagent of it whose view shows, if any.
+// Only Daniel's click changes the selected session, and the subagent of it whose view shows, if any:
+// its own line, questions, brief and cards. Opening a subagent's line also fades a failed helper.
 async function select(id: string, agent: string | null = null) {
   selectedId = id;
   viewedAgent = agent;
   showSessions(listed);
   await window.__TAURI__.core.invoke("select", { id });
+  if (agent !== null) {
+    await window.__TAURI__.core.invoke("open", { agentId: agent });
+    showSessions(await window.__TAURI__.core.invoke<Session[]>("sessions"));
+  }
   show(await window.__TAURI__.core.invoke<Session | null>("selected"));
   showCards(await window.__TAURI__.core.invoke<SessionCards>("cards"));
-}
-
-// Daniel opened a subagent's line: a failed helper then fades, and its view shows.
-async function openAgent(sessionId: string, agentId: string) {
-  await window.__TAURI__.core.invoke("open", { agentId });
-  listed = await window.__TAURI__.core.invoke<Session[]>("sessions");
-  await select(sessionId, agentId);
 }
 
 function show(session: Session | null) {
@@ -274,7 +281,7 @@ function show(session: Session | null) {
     showSessions(listed);
   }
   if (session === null) return;
-  // A subagent's view shows its own line and questions; the cards and checks are its session's.
+  // A subagent's view shows its own line, questions, brief and cards; the checks are its session's.
   const agent = session.agents.find((a) => a.id === viewedAgent) ?? null;
   const asks = agent !== null && session.waiting?.agent === agent.id;
   const [label, state] =
@@ -404,7 +411,7 @@ function quizElements(id: string, quiz: Quiz, guess: Guess | null): HTMLElement[
 }
 
 // A card in Hebrew, right to left: its quiz first, then, once Daniel taps an option, the
-// explanation, the file paths, the code left to right, the architecture section when the change is
+// explanation, the file paths, those other subagents changed, the code left to right, the architecture section when the change is
 // structural, why the change matters, what was not checked, his flag on the key, "explain more" and
 // his rating. A card with no quiz shows the explanation at once. The shell keeps each tap in the card
 // store, so after a restart a guessed card is drawn guessed and rated.
@@ -424,7 +431,7 @@ function cardElement({ request, card, guess, key_wrong, more, rating }: StoredCa
   const source = document.createElement("pre");
   source.dir = "ltr";
   source.textContent = card.code;
-  node.append(explanation, paths, source);
+  node.append(explanation, paths, ...changedBy(request), source);
   if (card.architecture) node.append(hebrew("h2", "ארכיטקטורה"), hebrew("p", card.architecture));
   node.append(
     hebrew("h2", "למה זה חשוב"),
@@ -435,6 +442,19 @@ function cardElement({ request, card, guess, key_wrong, more, rating }: StoredCa
   if (quiz) node.append(keyWrongButton(request.id, key_wrong));
   node.append(moreElement(request.id, more), ratingElement(request.id, rating, quiz ? key_wrong : null));
   return node;
+}
+
+// Who changed what: the files another subagent, such as a helper, edited in the card's worktree, one
+// line per subagent, named by its task or its short id.
+function changedBy({ session_id, changed_by }: CardRequest): HTMLElement[] {
+  const agents = listed.find((session) => session.id === session_id)?.agents ?? [];
+  return Object.entries(changed_by).map(([id, files]) => {
+    const name = agents.find((agent) => agent.id === id)?.description ?? id.slice(0, 5);
+    const line = document.createElement("p");
+    line.className = "paths";
+    line.append(text("span", `שונו בידי ${name}:`), ...files.map(code));
+    return line;
+  });
 }
 
 // "The key is wrong": one record, flagged from the quiz or from the rating, and never undone.

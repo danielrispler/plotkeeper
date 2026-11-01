@@ -6,7 +6,7 @@ use std::{
     process::Command,
     sync::Mutex,
 };
-use studio_core::{CardRequest, Prompt, Sender};
+use studio_core::{CardRequest, Kind, Sender, Session};
 
 mod drift;
 mod fingerprint;
@@ -131,71 +131,201 @@ pub trait CardWriter {
         summaries: &[String],
         diffstat: &str,
     ) -> Result<String, String>;
+
+    /// The writer's reply with `brief` updated from `workers`, what a session's workers did since its
+    /// last card, from their cards' summaries (#369, decision 11), or one line for the log when it
+    /// gave none.
+    fn update(&self, brief: &str, workers: &str) -> Result<String, String>;
 }
 
 /// Every 5th update of a brief rewrites it from scratch (#369, decision 16), a starting guess.
 const REWRITE_EVERY: u32 = 5;
 
-/// The card on a session's `Stop` and its brief (#369, decisions 12 and 16). `writer` writes the card
-/// on `request` with the summaries of the earlier cards of its prompt and the session's brief, which
-/// the same reply updates, and both go in `store`. Every 5th update then rewrites the brief from
-/// scratch from `prompts`, the session's with its wake-ups left out, all its card summaries and `git
-/// diff --stat` in `folder` since its first card's base: never the raw diff. A failed rewrite leaves
-/// the updated brief. The store is not locked while the writer runs, which takes seconds. Each problem
-/// is one line for `log`. Returns whether a card was added.
-// shortcut: two cards of one session written at once read the same brief, and the later one's
-// update wins; queue a session's cards if that loses a brief line.
+/// The card on a session's or a worker's change and its brief (#369, decisions 11, 12 and 16), from
+/// `session`'s state. `writer` writes the card on `request` with the summaries of the earlier cards
+/// of its prompt and the brief of its owner, the worker or else the session, which the same reply
+/// updates, and both go in `store`. A card with no change is a session's that changed nothing
+/// itself: it is written from its workers' card summaries instead (`workers`). Every 5th update then
+/// rewrites the brief from scratch (`rebrief`). The store is not locked while the writer runs,
+/// which takes seconds. Each problem is one line for `log`. Returns whether a card was added.
 pub fn write_stop(
     store: &Mutex<CardStore>,
     writer: &(impl CardWriter + ?Sized),
-    request: CardRequest,
-    prompts: &[Prompt],
-    folder: &Path,
+    mut request: CardRequest,
+    session: &Session,
     mut log: impl FnMut(String),
 ) -> bool {
-    let session = request.session_id.clone();
-    let of_session = |kept: &&StoredCard| kept.request.session_id == session;
+    let owner = request.owner().to_owned();
     let summary = |kept: &StoredCard| Some(kept.card.summary.clone()).filter(|s| !s.is_empty());
-    let (earlier, brief) = {
+    let (earlier, brief, workers) = {
         let store = store.lock().unwrap();
-        let cards = store.cards().iter().filter(of_session);
+        let cards = store
+            .cards()
+            .iter()
+            .filter(|kept| kept.request.owner() == owner);
         let same_prompt =
             cards.filter(|kept| request.prompt.is_some() && kept.request.prompt == request.prompt);
         let earlier: Vec<String> = same_prompt.filter_map(summary).collect();
-        (earlier, store.brief(&session).cloned().unwrap_or_default())
+        let brief = store.brief(&owner).cloned().unwrap_or_default();
+        (earlier, brief, workers(&store, &request, session))
     };
-    let Some((card, mut updated)) = write_card(writer, &request, &earlier, &brief.text, &mut log)
+    if request.change.is_empty() {
+        let Some(workers) = workers else {
+            log(format!(
+                "no card on {}: its workers' cards are not in the store",
+                request.id
+            ));
+            return false;
+        };
+        request.change = workers;
+    }
+    let Some((card, updated)) = write_card(writer, &request, &earlier, &brief.text, &mut log)
     else {
         return false;
     };
-    let id = request.id.clone();
-    if let Err(e) = store.lock().unwrap().add(request, card, millis()) {
+    if let Err(e) = store.lock().unwrap().add(request.clone(), card, millis()) {
         log(format!("save the card store: {e}"));
     }
-    if (brief.updates + 1) % REWRITE_EVERY == 0 {
+    rebrief(
+        store,
+        writer,
+        &request,
+        brief.updates,
+        updated,
+        session,
+        log,
+    );
+    true
+}
+
+/// A session's brief updated from its workers' cards since its last card, `request.workers`, when a
+/// turn a wake-up opened changed nothing itself: no card (#369, decision 11). Every 5th update
+/// rewrites it from scratch (`rebrief`). Each problem is one line for `log`. Returns whether the
+/// brief changed.
+pub fn write_brief(
+    store: &Mutex<CardStore>,
+    writer: &(impl CardWriter + ?Sized),
+    request: CardRequest,
+    session: &Session,
+    mut log: impl FnMut(String),
+) -> bool {
+    let (brief, workers) = {
+        let store = store.lock().unwrap();
+        let brief = store.brief(&session.id).cloned().unwrap_or_default();
+        (brief, workers(&store, &request, session))
+    };
+    let reply = workers
+        .ok_or("its workers' cards are not in the store".to_owned())
+        .and_then(|workers| writer.update(&brief.text, &workers));
+    match reply.and_then(|reply| brief_in(&reply).ok_or("the reply holds none".into())) {
+        Ok(updated) => {
+            rebrief(
+                store,
+                writer,
+                &request,
+                brief.updates,
+                Some(updated),
+                session,
+                log,
+            );
+            true
+        }
+        Err(line) => {
+            log(format!("no brief on {}: {line}", request.id));
+            false
+        }
+    }
+}
+
+/// What the workers of `session` did since its last card, for its card or its brief, from the
+/// summaries of their cards among `request.workers`, not their diffs: each worker that has one of
+/// those cards or still runs, with its task, its status and those summaries. `None` when none of
+/// those cards is in the store.
+fn workers(store: &CardStore, request: &CardRequest, session: &Session) -> Option<String> {
+    let cards: Vec<&StoredCard> = store
+        .cards()
+        .iter()
+        .filter(|kept| request.workers.contains(&kept.request.id))
+        .collect();
+    if cards.is_empty() {
+        return None;
+    }
+    let lines = session.agents.iter().filter_map(|agent| {
+        let of = cards.iter().filter(|kept| kept.request.owner() == agent.id);
+        let summaries: Vec<&str> = of.map(|kept| kept.card.summary.as_str()).collect();
+        let running = agent.status == "running" && agent.kind == Kind::Worker;
+        let name = agent.description.as_deref().unwrap_or(&agent.id);
+        let did = match &summaries[..] {
+            [] if running => "no card yet".into(),
+            [] => return None,
+            summaries => summaries.join(" "),
+        };
+        Some(format!("- `{name}` ({}): {did}\n", agent.status))
+    });
+    Some(format!("{WORKERS}{}", lines.collect::<String>()))
+}
+
+/// The head of a change built from workers' cards, which the writer's instructions name.
+const WORKERS: &str = "No diff: the agent changed nothing itself since its last card. Its workers, \
+                       each with its status and the summaries of its cards since then:\n";
+
+/// Sets the brief of `request`'s owner, its worker or else `session`, to `updated`, the brief after
+/// its `updates` updates so far updated once more. Every 5th update first rewrites it from scratch
+/// from the owner's prompts (a session's with its wake-ups left out, a worker's spawn), the
+/// summaries of its cards (a session's with its workers'), and `git diff --stat` in its folder since
+/// its first card's base: never the raw diff. A failed rewrite keeps `updated`.
+fn rebrief(
+    store: &Mutex<CardStore>,
+    writer: &(impl CardWriter + ?Sized),
+    request: &CardRequest,
+    updates: u32,
+    mut updated: Option<String>,
+    session: &Session,
+    mut log: impl FnMut(String),
+) {
+    let (owner, agent) = (request.owner(), request.agent.as_deref());
+    if (updates + 1).is_multiple_of(REWRITE_EVERY) {
+        let summary = |kept: &StoredCard| Some(kept.card.summary.clone()).filter(|s| !s.is_empty());
+        let read = |kept: &&StoredCard| match agent {
+            Some(_) => kept.request.agent.as_deref() == agent,
+            None => kept.request.session_id == session.id,
+        };
         let (summaries, since) = {
             let store = store.lock().unwrap();
-            let mut cards = store.cards().iter().filter(of_session).peekable();
-            let since = cards.peek().and_then(|kept| kept.request.base.head.clone());
-            (cards.filter_map(summary).collect::<Vec<_>>(), since)
+            let cards = store.cards().iter();
+            let summaries: Vec<String> = cards.clone().filter(read).filter_map(summary).collect();
+            let mut own = cards.filter(|kept| kept.request.owner() == owner);
+            (
+                summaries,
+                own.find_map(|kept| kept.request.base.head.clone()),
+            )
         };
-        let diffstat = since.map_or_else(String::new, |head| fingerprint::diff_stat(folder, &head));
-        let daniels = prompts
-            .iter()
-            .filter(|p| !matches!(p.sender, Sender::WakeUp(_)));
-        let daniels: Vec<&str> = daniels.map(|p| p.text.as_str()).collect();
-        let rewritten = writer.rewrite(&daniels, &summaries, &diffstat);
+        let worker = session.agents.iter().find(|a| Some(&*a.id) == agent);
+        let folder = worker
+            .and_then(|a| a.folder.as_deref())
+            .unwrap_or(&session.cwd);
+        let diffstat = since.map_or_else(String::new, |head| {
+            fingerprint::diff_stat(Path::new(folder), &head)
+        });
+        let prompts: Vec<&str> = match worker {
+            Some(worker) => vec![&worker.prompt],
+            None => {
+                let daniels = session.prompts.iter();
+                let daniels = daniels.filter(|p| !matches!(p.sender, Sender::WakeUp(_)));
+                daniels.map(|p| p.text.as_str()).collect()
+            }
+        };
+        let rewritten = writer.rewrite(&prompts, &summaries, &diffstat);
         match rewritten.and_then(|reply| brief_in(&reply).ok_or("the reply holds none".into())) {
             Ok(brief) => updated = Some(brief),
-            Err(line) => log(format!("no brief rewrite on {id}: {line}")),
+            Err(line) => log(format!("no brief rewrite on {}: {line}", request.id)),
         }
     }
     if let Some(text) = updated
-        && let Err(e) = store.lock().unwrap().set_brief(&session, text)
+        && let Err(e) = store.lock().unwrap().set_brief(owner, text)
     {
         log(format!("save the card store: {e}"));
     }
-    true
 }
 
 /// The JSON object in a writer's reply, perhaps in a code fence: from its first `{` to its last `}`.
@@ -332,6 +462,11 @@ impl CardWriter for FakeWriter {
         let brief = "תקציר לדוגמה של הכותב המזויף, שנכתב מחדש.\nהוא לא קורא את הסשן.";
         Ok(serde_json::json!({ "brief": brief }).to_string())
     }
+
+    fn update(&self, brief: &str, _: &str) -> Result<String, String> {
+        let brief = format!("{brief}\nהעובדים חזרו, והסשן עצמו לא שינה דבר.");
+        Ok(serde_json::json!({ "brief": brief }).to_string())
+    }
 }
 
 /// Writes the card with `claude -p` on Daniel's subscription, in a neutral folder that holds none of
@@ -412,6 +547,14 @@ impl ClaudeWriter {
         ))
     }
 
+    /// The `claude -p` run that updates a session's `brief` from `workers`, what its workers did.
+    pub fn update_command(&self, brief: &str, workers: &str) -> Command {
+        let brief = if brief.is_empty() { "none yet" } else { brief };
+        self.run(&format!(
+            "{UPDATE}\nThe brief so far:\n{brief}\n\n{workers}"
+        ))
+    }
+
     /// The `claude -p` run for "explain more" on `card`, which the writer reads with its change.
     pub fn more_command(&self, request: &CardRequest, card: &Card) -> Command {
         let head = format!("{MORE}\nThe card's explanation:\n{}\n", card.explanation);
@@ -470,6 +613,10 @@ impl CardWriter for ClaudeWriter {
     ) -> Result<String, String> {
         stdout(self.rewrite_command(prompts, summaries, diffstat))
     }
+
+    fn update(&self, brief: &str, workers: &str) -> Result<String, String> {
+        stdout(self.update_command(brief, workers))
+    }
 }
 
 /// What `command` printed, or one line when it did not start.
@@ -510,6 +657,19 @@ Reply with one JSON object and nothing else:
 - quiz.options[].why: one line on why that option is right or wrong.
 - quiz.key: the place of the right option in quiz.options, counting from 0.
 - brief: the brief so far, updated with this change: what the session set out to do, what it has done, oldest first, and what is still open, in a few short lines. Keep what still holds. Its last line says what this change did.
+
+When the change is not a diff but the agent's workers with the summaries of their cards, the agent changed nothing itself and handed the work to them: the card explains what it split up among them, what came back and what is still open, paths and code are empty, and the quiz is on how the work was split.
+"#;
+
+/// The writer's instructions for a brief updated from a session's workers' cards when it changed
+/// nothing itself (#369, decision 11): no card, so a worker's return adds no thin card.
+const UPDATE: &str = r#"You update the brief of a coding agent's session, which the developer who runs it reads to resume the session: what the session set out to do, what it has done, oldest first, and what is still open, in a few short lines. Since the brief, the agent changed nothing itself; its workers did.
+
+Answer from the input below: the brief so far, and the agent's workers, each with its status and the summaries of its cards since then. Use only this input: do not use tools or read files. Keep what still holds. Its last line says what came back.
+
+Write in Hebrew, in plain words. Code, code terms, file paths and commands stay in English; inside Hebrew text, wrap each of them in backticks.
+
+Reply with one JSON object and nothing else: {"brief": string}
 "#;
 
 /// The writer's instructions for a brief rewritten from scratch (#369, decision 16): from Daniel's
