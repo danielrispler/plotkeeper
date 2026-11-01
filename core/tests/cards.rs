@@ -2,7 +2,8 @@
 //! whole change, at its `Stop`. The shell fingerprints the worktree where the core asks it to and
 //! passes in what changed; these tests play the shell's part.
 
-use studio_core::{Base, CardRequest, Change, Output, Studio};
+use serde_json::{Value, json};
+use studio_core::{Base, CardRequest, Change, Output, Stopped, Studio};
 
 const LOG: &str = include_str!("fixtures/bash-steps.jsonl");
 const SESSION: &str = "e4a7c2f9-3b6d-4e1a-8c5f-2d9b7e0a6c13";
@@ -47,8 +48,101 @@ fn a_prompt_whose_worktree_changed_gets_one_card_on_the_whole_change_at_its_stop
             id: format!("{SESSION}@1793265021380"),
             base: found().base,
             change: found().diff,
+            prompt: Some(1793265000140),
         }]
     );
+}
+
+/// The `Stop`'s first line, and the rest of its last message.
+const LAST_MESSAGE: &str =
+    "Dropped the stray edit, formatted the core and wrote the note in `apps/studio/NOTES.md`.";
+
+#[test]
+fn a_stop_keeps_its_cards_id_and_the_first_line_of_its_message_until_the_next_prompt() {
+    let mut studio = Studio::default();
+    let stopped = |studio: &Studio| studio.session(SESSION).unwrap().stopped.clone();
+    for line in LOG.lines() {
+        let change = studio.fingerprint_folder(line).and(Some(found()));
+        studio.apply_with_change(line, change);
+    }
+    let card = format!("{SESSION}@1793265021380");
+
+    let live = stopped(&studio);
+    assert_eq!(
+        live,
+        Some(Stopped {
+            card: card.clone(),
+            asked: true,
+            message: Some(LAST_MESSAGE.into()),
+        })
+    );
+
+    // Replayed, the same `Stop` asked for no card.
+    let mut replayed = Studio::default();
+    LOG.lines().for_each(|line| replayed.replay(line));
+    assert_eq!(
+        stopped(&replayed).map(|s| (s.card, s.asked)),
+        Some((card, false))
+    );
+
+    replayed
+        .apply(&json!({"session_id": SESSION, "hook_event_name": "UserPromptSubmit"}).to_string());
+    assert_eq!(stopped(&replayed), None);
+}
+
+/// Session `s1`'s event `name` at `at`, with `fields` added.
+fn event(name: &str, at: u64, fields: Value) -> String {
+    let mut event =
+        json!({"session_id": "s1", "hook_event_name": name, "cwd": "/w", "studio_received_ms": at});
+    event
+        .as_object_mut()
+        .unwrap()
+        .extend(fields.as_object().unwrap().clone());
+    event.to_string()
+}
+
+#[test]
+fn a_wake_ups_card_belongs_to_daniels_prompt_before_it() {
+    let mut studio = Studio::default();
+    let stop = |studio: &mut Studio, at| {
+        let outputs = studio.apply_with_change(&event("Stop", at, json!({})), Some(found()));
+        outputs.into_iter().find_map(|output| match output {
+            Output::Card(request) => request.prompt,
+            _ => None,
+        })
+    };
+    studio.apply(&event(
+        "UserPromptSubmit",
+        100,
+        json!({"prompt": "Split the spec"}),
+    ));
+    let spawn = json!({"tool_name": "Agent", "tool_input": {}, "tool_response": {"agentId": "a1"}});
+    studio.apply(&event("PostToolUse", 110, spawn));
+    let first = stop(&mut studio, 120);
+    let wake_up =
+        "<task-notification><task-id>a1</task-id><status>completed</status></task-notification>";
+    studio.apply(&event(
+        "UserPromptSubmit",
+        200,
+        json!({ "prompt": wake_up }),
+    ));
+    let woken = stop(&mut studio, 220);
+    studio.apply(&event(
+        "UserPromptSubmit",
+        300,
+        json!({"prompt": "What did a1 do?"}),
+    ));
+    let asked = stop(&mut studio, 320);
+
+    assert_eq!((first, woken, asked), (Some(100), Some(100), Some(300)));
+    let texts: Vec<&str> = studio
+        .session("s1")
+        .unwrap()
+        .prompts
+        .iter()
+        .map(|p| p.text.as_str())
+        .collect();
+    assert_eq!(texts, ["Split the spec", wake_up, "What did a1 do?"]);
 }
 
 #[test]

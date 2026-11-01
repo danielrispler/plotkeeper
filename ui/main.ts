@@ -45,18 +45,23 @@ type Session = {
   waiting: Wait | null;
   prompts: Prompt[];
   questions: Question[];
+  // In the session list only: what its row says while its turn is over, from the card store.
+  line?: string | null;
 };
 // A session's change since its last card, from its base: HEAD and the files git status listed then.
 type Base = { head: string | null; files: string[] };
 type CardRequest = { session_id: string; id: string; base: Base; change: string };
 // A card's multiple-choice question; `key` is the right option, counting from 0.
 type Quiz = { text: string; options: { text: string; why: string }[]; key: number };
+// `architecture` is null when the change is not structural.
 type Card = {
+  summary: string;
   explanation: string;
   paths: string[];
   code: string;
   why_it_matters: string;
   not_checked: string;
+  architecture: string | null;
   quiz: Quiz | null;
 };
 // Daniel's tap on a quiz, graded by the writer's key.
@@ -76,8 +81,9 @@ type StoredCard = {
   more: string | null;
   rating: Rating | null;
 };
-// The selected session's cards, split at 30 minutes by the shell's tick, each oldest first.
-type SessionCards = { recent: StoredCard[]; older: StoredCard[] };
+// The selected session's brief, and its cards, split at 30 minutes by the shell's tick, each oldest
+// first.
+type SessionCards = { brief: string | null; recent: StoredCard[]; older: StoredCard[] };
 
 const stateLabels: Record<SessionState, string> = {
   needs_you: "Needs you",
@@ -143,11 +149,12 @@ function returned(session: Session): string | null {
   return `worker ${agent?.description ?? sender.wake_up.slice(0, 5)} returned`;
 }
 
-// What the session's line says: its last tool step, which worker returned, or while it needs Daniel,
-// who asks and for how long, such as "a1191 · Implement #355 asks · 3m".
+// What the session's line says: once its turn is over, its card's summary, the agent's first line or
+// the brief's latest line; in a turn, its last tool step or which worker returned; while it needs
+// Daniel, who asks and for how long, such as "a1191 · Implement #355 asks · 3m".
 function rowText(session: Session): string {
   const wait = session.waiting;
-  if (wait === null) return returned(session) ?? stepText(session.last_step);
+  if (wait === null) return session.line ?? returned(session) ?? stepText(session.last_step);
   if (wait.agent === null) return `${stepText(session.last_step)} · ${age(wait.since)}`;
   const asker = session.agents.find((agent) => agent.id === wait.agent);
   return `${wait.agent.slice(0, 5)} · ${asker?.description ?? ""} asks · ${age(wait.since)}`;
@@ -397,10 +404,10 @@ function quizElements(id: string, quiz: Quiz, guess: Guess | null): HTMLElement[
 }
 
 // A card in Hebrew, right to left: its quiz first, then, once Daniel taps an option, the
-// explanation, the file paths, the code left to right, why the change matters, what was not checked,
-// his flag on the key, "explain more" and his rating. A card with no quiz shows the explanation at
-// once. The shell keeps each tap in the card store, so after a restart a guessed card is drawn
-// guessed and rated.
+// explanation, the file paths, the code left to right, the architecture section when the change is
+// structural, why the change matters, what was not checked, his flag on the key, "explain more" and
+// his rating. A card with no quiz shows the explanation at once. The shell keeps each tap in the card
+// store, so after a restart a guessed card is drawn guessed and rated.
 function cardElement({ request, card, guess, key_wrong, more, rating }: StoredCard): HTMLElement {
   const node = document.createElement("article");
   node.className = "card";
@@ -417,10 +424,9 @@ function cardElement({ request, card, guess, key_wrong, more, rating }: StoredCa
   const source = document.createElement("pre");
   source.dir = "ltr";
   source.textContent = card.code;
+  node.append(explanation, paths, source);
+  if (card.architecture) node.append(hebrew("h2", "ארכיטקטורה"), hebrew("p", card.architecture));
   node.append(
-    explanation,
-    paths,
-    source,
     hebrew("h2", "למה זה חשוב"),
     hebrew("p", card.why_it_matters),
     hebrew("h2", "מה לא נבדק"),
@@ -538,7 +544,14 @@ document.addEventListener("visibilitychange", markShown);
 // only when its record changed, such as after a tap, and is moved whole to the older group.
 const drawn = new Map<string, { record: string; node: HTMLElement }>();
 
-function showCards({ recent, older }: SessionCards) {
+// The session's brief at the top of its view, in Hebrew, one paragraph per line.
+function showBrief(brief: string | null) {
+  element("brief").replaceChildren(...(brief ?? "").split("\n").map((line) => hebrew("p", line)));
+  element("brief").hidden = brief === null;
+}
+
+function showCards({ brief, recent, older }: SessionCards) {
+  showBrief(brief);
   const ids = new Set([...recent, ...older].map(({ request }) => request.id));
   for (const id of drawn.keys()) {
     if (ids.has(id)) continue;

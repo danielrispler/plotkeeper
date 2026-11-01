@@ -18,12 +18,15 @@ fn edit(id: &str, path: &str) -> CardRequest {
             files: vec!["README.md".into()],
         },
         change: format!("--- a/{path}\n+++ b/{path}\n@@ -1 +1 @@\n-old\n+new\n"),
+        prompt: None,
     }
 }
 
 /// The fake writer's card on `request`, whose quiz's key is its first option of three.
 fn card(request: &CardRequest) -> Card {
-    write_card(&FakeWriter, request, |line| panic!("{line}")).unwrap()
+    write_card(&FakeWriter, request, &[], "", |line| panic!("{line}"))
+        .unwrap()
+        .0
 }
 
 /// A store at `path` with a card on `src/lib.rs` and one on `README.md`.
@@ -149,8 +152,22 @@ fn a_rating_with_its_reasons_survives_a_restart_beside_the_one_key_is_wrong_flag
 struct Counting(Cell<usize>);
 
 impl CardWriter for Counting {
-    fn reply(&self, request: &CardRequest) -> Result<String, String> {
-        FakeWriter.reply(request)
+    fn reply(
+        &self,
+        request: &CardRequest,
+        earlier: &[String],
+        brief: &str,
+    ) -> Result<String, String> {
+        FakeWriter.reply(request, earlier, brief)
+    }
+
+    fn rewrite(
+        &self,
+        prompts: &[&str],
+        summaries: &[String],
+        diffstat: &str,
+    ) -> Result<String, String> {
+        FakeWriter.rewrite(prompts, summaries, diffstat)
     }
 
     fn more(&self, request: &CardRequest, card: &Card) -> Result<String, String> {
@@ -187,8 +204,22 @@ fn explain_more_calls_the_writer_once_and_a_second_tap_shows_the_kept_text() {
 struct Blank;
 
 impl CardWriter for Blank {
-    fn reply(&self, request: &CardRequest) -> Result<String, String> {
-        FakeWriter.reply(request)
+    fn reply(
+        &self,
+        request: &CardRequest,
+        earlier: &[String],
+        brief: &str,
+    ) -> Result<String, String> {
+        FakeWriter.reply(request, earlier, brief)
+    }
+
+    fn rewrite(
+        &self,
+        prompts: &[&str],
+        summaries: &[String],
+        diffstat: &str,
+    ) -> Result<String, String> {
+        FakeWriter.rewrite(prompts, summaries, diffstat)
     }
 
     fn more(&self, _: &CardRequest, _: &Card) -> Result<String, String> {
@@ -427,4 +458,24 @@ fn every_session_of_the_day_shows_all_of_its_cards_whichever_was_prompted_last()
         ]
     );
     assert_eq!(store.cards().len(), 50);
+}
+
+#[test]
+fn briefs_survive_a_restart_and_show_with_their_sessions_cards() {
+    let data = tempfile::tempdir().unwrap();
+    let path = data.path().join("cards.json");
+    let mut store = two_cards(&path);
+    let session = "5b9e3d71-0c2a-4f8e-b6d4-8a1c3e5f7092";
+    store.set_brief(session, "הסשן התחיל.".into()).unwrap();
+    let brief = "הסשן התחיל.\n`README.md` עודכן.";
+    store.set_brief(session, brief.into()).unwrap();
+    store.set_brief("another", "סשן אחר.".into()).unwrap();
+
+    let reopened = CardStore::open(path).unwrap();
+
+    let kept = reopened.brief(session).unwrap();
+    assert_eq!((kept.text.as_str(), kept.updates), (brief, 2));
+    let shown = reopened.session_cards(session, 1_761_743_990_000);
+    assert_eq!(shown.brief.as_deref(), Some(brief));
+    assert_eq!(reopened.session_cards("none", 0).brief, None);
 }

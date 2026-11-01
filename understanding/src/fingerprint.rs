@@ -105,6 +105,13 @@ impl Fingerprints {
     }
 }
 
+/// `git diff --stat` in `folder`'s worktree from commit `since` to the files as they are now, for the
+/// brief's rewrite (#369, decision 16); empty when `git` fails.
+pub(crate) fn diff_stat(folder: &Path, since: &str) -> String {
+    let stat = git(folder, &["diff", "--stat", since]).unwrap_or_default();
+    String::from_utf8_lossy(&stat).into()
+}
+
 /// The paths in `git`'s `-z` output, each after `skip` bytes.
 fn split_paths(out: &[u8], skip: usize) -> impl Iterator<Item = String> {
     let entries = out.split(|&byte| byte == 0);

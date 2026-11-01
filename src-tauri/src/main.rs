@@ -17,8 +17,8 @@ use std::{
 };
 use studio_core::{Notifications, Output, Session, State::NeedsYou, Studio};
 use studio_understanding::{
-    CardStore, CardWriter, ClaudeWriter, FakeWriter, Fingerprints, Rating, SessionCards, Versions,
-    find_claude, millis, write_card,
+    CardStore, CardWriter, ClaudeWriter, FakeWriter, Fingerprints, Rating, Row, SessionCards,
+    Versions, find_claude, millis, write_stop,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
@@ -31,14 +31,20 @@ type Notices = Mutex<Notifications>;
 
 /// The session list, in its order.
 #[tauri::command]
-fn sessions(studio: State<Mutex<Studio>>) -> Vec<Session> {
-    studio
+fn sessions(studio: State<Mutex<Studio>>, cards: State<Cards>) -> Vec<Row> {
+    let list: Vec<Session> = studio
         .lock()
         .unwrap()
         .sessions()
         .into_iter()
         .cloned()
-        .collect()
+        .collect();
+    let cards = cards.lock().unwrap();
+    let row = |session: Session| Row {
+        line: cards.line(&session),
+        session,
+    };
+    list.into_iter().map(row).collect()
 }
 
 /// Daniel clicked session `id`'s row.
@@ -217,16 +223,21 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
             }
             for output in outputs {
                 match output {
-                    // `claude -p` takes seconds, so each card is written on its own thread, and the
-                    // loop below draws it once it is in the store.
+                    // `claude -p` takes seconds, so each card and its brief are written on their own
+                    // thread, and the loop below draws the card once it is in the store. The row's
+                    // line changes with no line read, so the list is sent from here.
                     Output::Card(request) => {
                         let (app, writer) = (app.clone(), writer.clone());
+                        let session = state.lock().unwrap().session(&request.session_id).cloned();
+                        let (prompts, folder) =
+                            session.map_or_default(|session| (session.prompts, session.cwd));
                         thread::spawn(move || {
                             let log = |line: String| eprintln!("studio: {line}");
-                            if let Some(card) = write_card(&*writer, &request, log) {
-                                let session_id = request.session_id.clone();
-                                let store = app.state::<Cards>();
-                                unsaved(store.lock().unwrap().add(request, card, millis()));
+                            let session_id = request.session_id.clone();
+                            let store = app.state::<Cards>();
+                            let folder = Path::new(&folder);
+                            if write_stop(&store, &*writer, request, &prompts, folder, log) {
+                                let _ = app.emit("sessions", sessions(app.state(), app.state()));
                                 tell(&app, "New card", &session_id, None);
                             }
                         });
@@ -260,8 +271,8 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
             read = read_to > read_from;
         }
         if state.lock().unwrap().tick(millis()) || read {
-            let list = sessions(app.state());
-            let needing = list.iter().filter(|s| s.state == NeedsYou).count();
+            let list = sessions(app.state(), app.state());
+            let needing = list.iter().filter(|r| r.session.state == NeedsYou).count();
             // macOS shows `Some(0)` as a "0" badge.
             if badge != Some(needing)
                 && let Some(window) = app.get_webview_window("main")

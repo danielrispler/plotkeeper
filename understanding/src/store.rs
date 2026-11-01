@@ -1,15 +1,17 @@
-//! The card store (#328, module 6): the cards, Daniel's guesses and their records, on disk in the
-//! studio's data directory, so a restart neither loses nor re-asks them.
+//! The card store (#328, module 6): the cards, Daniel's guesses and their records, and each
+//! session's brief, on disk in the studio's data directory, so a restart neither loses nor re-asks
+//! them.
 
 use crate::Card;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::BTreeMap,
     fs::{self, File},
     io::{self, Write},
     path::{Path, PathBuf},
     time::UNIX_EPOCH,
 };
-use studio_core::CardRequest;
+use studio_core::{CardRequest, Session};
 
 /// A card in the store, with the change it explains and its base, and its record: when it was added,
 /// when its quiz showed, Daniel's guess, his flag on the key, his rating and the longer explanation he
@@ -78,9 +80,27 @@ pub struct Guess {
     pub at: u64,
 }
 
-/// One session's cards in the session view's two groups (#369, decision 18), each oldest first.
+/// A session list row: the session, and what its row says while its turn is over (`CardStore::line`).
+#[derive(Clone, Debug, Serialize)]
+pub struct Row {
+    #[serde(flatten)]
+    pub session: Session,
+    pub line: Option<String>,
+}
+
+/// A session's rolling brief (#369, decision 16).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Brief {
+    pub text: String,
+    /// How many times it was updated, so that every 5th update rewrites it.
+    pub updates: u32,
+}
+
+/// One session's brief and its cards in the session view's two groups (#369, decision 18), each
+/// oldest first.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct SessionCards {
+    pub brief: Option<String>,
     /// The cards added in the last 30 minutes.
     pub recent: Vec<StoredCard>,
     /// The cards added before, or before the store kept the time.
@@ -95,24 +115,36 @@ pub fn millis() -> u64 {
     UNIX_EPOCH.elapsed().unwrap_or_default().as_millis() as u64
 }
 
-/// The store's cards, kept in memory and written to its file on each change.
+/// The store's cards, and its briefs by session, kept in memory and written to their files on each
+/// change: the briefs to `briefs.json` beside the cards (#369, decision 17).
 // shortcut: rewrites the whole file on each change, which suits a few cards a day; switch to
 // appended lines if it grows to thousands of cards.
 pub struct CardStore {
     path: PathBuf,
     cards: Vec<StoredCard>,
+    briefs: BTreeMap<String, Brief>,
+}
+
+/// The JSON file at `path`, or the default when it is missing. One that does not parse is an
+/// error, so it is never overwritten.
+fn read<T: Default + for<'de> Deserialize<'de>>(path: &Path) -> io::Result<T> {
+    match fs::read(path) {
+        Ok(bytes) => Ok(serde_json::from_slice(&bytes)?),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(T::default()),
+        Err(e) => Err(e),
+    }
 }
 
 impl CardStore {
-    /// Reads the store at `path`. A missing store is empty. One that does not parse is an error, so
-    /// it is never overwritten.
+    /// Reads the store at `path`, and the briefs beside it. A missing store is empty.
     pub fn open(path: PathBuf) -> io::Result<Self> {
-        let cards = match fs::read(&path) {
-            Ok(bytes) => serde_json::from_slice(&bytes)?,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Vec::new(),
-            Err(e) => return Err(e),
-        };
-        Ok(CardStore { path, cards })
+        let cards = read(&path)?;
+        let briefs = read(&path.with_file_name("briefs.json"))?;
+        Ok(CardStore {
+            path,
+            cards,
+            briefs,
+        })
     }
 
     /// Reads the store the app keeps beside the event log `log`, in the studio's data directory. The
@@ -144,7 +176,44 @@ impl CardStore {
             kept.added_at
                 .is_some_and(|at| now.saturating_sub(at) < RECENT_MS)
         });
-        SessionCards { recent, older }
+        let brief = self.brief(session_id).map(|brief| brief.text.clone());
+        SessionCards {
+            brief,
+            recent,
+            older,
+        }
+    }
+
+    /// What `session`'s row says while its turn is over (#369, decision 19): the summary of the card
+    /// on its `Stop`; the first line of the agent's last message until that card arrives; the brief's
+    /// latest line when the `Stop` asked for no card. `None` in a turn.
+    pub fn line(&self, session: &Session) -> Option<String> {
+        let stopped = session.stopped.as_ref()?;
+        let card = self
+            .cards
+            .iter()
+            .find(|kept| kept.request.id == stopped.card);
+        let summary = card.map(|kept| kept.card.summary.clone());
+        let brief = self.brief(&session.id).and_then(|b| b.text.lines().last());
+        let pending = stopped.asked.then(|| stopped.message.clone()).flatten();
+        let latest = pending.or(brief.map(Into::into));
+        summary
+            .filter(|s| !s.is_empty())
+            .or(latest)
+            .or_else(|| stopped.message.clone())
+    }
+
+    /// Session `session_id`'s brief, `None` before its first update.
+    pub fn brief(&self, session_id: &str) -> Option<&Brief> {
+        self.briefs.get(session_id)
+    }
+
+    /// Updates session `session_id`'s brief to `text`, and saves the briefs.
+    pub fn set_brief(&mut self, session_id: &str, text: String) -> io::Result<()> {
+        let brief = self.briefs.entry(session_id.into()).or_default();
+        brief.text = text;
+        brief.updates += 1;
+        write(&self.path.with_file_name("briefs.json"), &self.briefs)
     }
 
     /// Adds a new card at `at`, in Unix milliseconds, which shows its quiz first, and saves the store.
@@ -229,13 +298,17 @@ impl CardStore {
         Ok(())
     }
 
-    /// Writes a file beside the store and renames it over the store, so an app that dies mid-write
-    /// leaves the previous store whole.
     fn save(&self) -> io::Result<()> {
-        let written = self.path.with_extension("json.tmp");
-        let mut file = File::create(&written)?;
-        file.write_all(&serde_json::to_vec(&self.cards)?)?;
-        file.sync_all()?;
-        fs::rename(written, &self.path)
+        write(&self.path, &self.cards)
     }
+}
+
+/// Writes `value` to a file beside `path` and renames it over `path`, so an app that dies mid-write
+/// leaves the previous file whole.
+fn write(path: &Path, value: &impl Serialize) -> io::Result<()> {
+    let written = path.with_extension("json.tmp");
+    let mut file = File::create(&written)?;
+    file.write_all(&serde_json::to_vec(value)?)?;
+    file.sync_all()?;
+    fs::rename(written, path)
 }

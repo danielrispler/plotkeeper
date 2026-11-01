@@ -37,6 +37,10 @@ code { font: 13px ui-monospace, Menlo, monospace; background: var(--code); borde
 code:empty { display: none; }
 .empty { color: var(--muted); margin: 0; }
 .cards-title { margin-top: 20px; }
+/* The session's brief, Hebrew, right to left, above its cards; its code wraps as a card's does. */
+.brief { margin: 14px 0 0; font-size: 16px; }
+.brief p { margin: 0 0 4px; overflow-wrap: anywhere; }
+.brief code { white-space: normal; overflow-wrap: anywhere; unicode-bidi: isolate; }
 /* A card is Hebrew, right to left; its code is left to right. No text in it is smaller than 14px (v0's
    secondary text was 12px). */
 .card { background: var(--code); border-radius: 8px; padding: 10px 12px; margin: 0 0 10px; font-size: 16px; }

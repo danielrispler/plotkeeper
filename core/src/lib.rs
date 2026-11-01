@@ -63,6 +63,8 @@ pub struct Session {
     tasks: BTreeSet<String>,
     /// The questions its agents asked, oldest first (#369, decision 21).
     pub questions: Vec<Question>,
+    /// Its latest `Stop`, until its next prompt (#369, decision 19).
+    pub stopped: Option<Stopped>,
 }
 
 /// A prompt of a session (#369, decision 7), received at `at`.
@@ -70,6 +72,20 @@ pub struct Session {
 pub struct Prompt {
     pub at: u64,
     pub sender: Sender,
+    /// What it says, which the brief's rewrite reads (#369, decision 16); the pane never shows it.
+    #[serde(skip)]
+    pub text: String,
+}
+
+/// A session's `Stop`, which its row tells about while its turn is over (#369, decision 19).
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Stopped {
+    /// The id a card on it has (`CardRequest::id`).
+    pub card: String,
+    /// Whether it asked for a card. Only a live `Stop` does.
+    pub asked: bool,
+    /// The first line of the agent's last message.
+    pub message: Option<String>,
 }
 
 /// Who sent a prompt: Daniel, or Claude Code waking the session when one of its tasks returns.
@@ -437,6 +453,10 @@ pub struct CardRequest {
     pub base: Base,
     /// The diff of each file that changed since the base, commits included.
     pub change: String,
+    /// When the hook received the prompt of Daniel's that the card belongs to: its session's latest
+    /// prompt that is not a wake-up. `None` in cards stored before #377.
+    #[serde(default)]
+    pub prompt: Option<u64>,
 }
 
 /// A check that ran, shown as a pass or fail line.
@@ -720,6 +740,7 @@ impl Studio {
                 prompts: Vec::new(),
                 tasks: BTreeSet::new(),
                 questions: Vec::new(),
+                stopped: None,
             });
         // The hooks are async, so the latest event can land before an earlier one.
         session.last_event_at = session.last_event_at.max(event.studio_received_ms);
@@ -756,9 +777,14 @@ impl Studio {
                     }),
                     Sender::Daniel => {}
                 }
-                session.prompts.push(Prompt { at, sender });
+                session.prompts.push(Prompt {
+                    at,
+                    sender,
+                    text: event.prompt,
+                });
                 session.unblock();
                 session.turn_ended = false;
+                session.stopped = None;
             }
             "Stop" => {
                 // The order on `Stop`: clear its own blocks first, then ask if the message asks.
@@ -773,12 +799,22 @@ impl Studio {
                         transcript_path: event.transcript_path,
                     });
                 }
+                let card = format!("{}@{}", event.session_id, event.studio_received_ms);
+                let mut lines = event.last_assistant_message.lines().map(str::trim);
+                session.stopped = Some(Stopped {
+                    card: card.clone(),
+                    asked: change.is_some(),
+                    message: lines.find(|line| !line.is_empty()).map(Into::into),
+                });
                 if let Some(Change { base, diff }) = change {
+                    // A wake-up's work is on the prompt of Daniel's that started it.
+                    let daniels = |p: &&Prompt| !matches!(p.sender, Sender::WakeUp(_));
                     outputs.push(Output::Card(CardRequest {
                         session_id: event.session_id.clone(),
-                        id: format!("{}@{}", event.session_id, event.studio_received_ms),
+                        id: card,
                         base,
                         change: diff,
+                        prompt: session.prompts.iter().rfind(daniels).map(|p| p.at),
                     }));
                 }
             }

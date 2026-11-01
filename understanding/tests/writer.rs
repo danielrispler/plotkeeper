@@ -1,6 +1,6 @@
 //! The card writer (#328 and #369, Testing Decisions): the real `claude -p` command is checked
-//! without running it, the cards and their quizzes come from its reply, and a fake that fails is
-//! retried.
+//! without running it, the cards, their quizzes and the updated brief come from its reply, and a
+//! fake that fails is retried.
 
 use std::{cell::Cell, ffi::OsStr, fs, os::unix::fs::PermissionsExt, path::Path};
 use studio_core::{Base, CardRequest};
@@ -23,6 +23,7 @@ fn edit() -> CardRequest {
             "+.unchecked { font-size:15px; }\n",
         )
         .into(),
+        prompt: None,
     }
 }
 
@@ -33,24 +34,39 @@ struct Failing {
 }
 
 impl CardWriter for Failing {
-    fn reply(&self, request: &CardRequest) -> Result<String, String> {
+    fn reply(
+        &self,
+        request: &CardRequest,
+        earlier: &[String],
+        brief: &str,
+    ) -> Result<String, String> {
         self.calls.set(self.calls.get() + 1);
         if self.calls.get() <= self.fails {
             return Ok("Shall I read the file?".into());
         }
-        FakeWriter.reply(request)
+        FakeWriter.reply(request, earlier, brief)
     }
 
     fn more(&self, request: &CardRequest, card: &Card) -> Result<String, String> {
         FakeWriter.more(request, card)
     }
+
+    fn rewrite(
+        &self,
+        prompts: &[&str],
+        summaries: &[String],
+        diffstat: &str,
+    ) -> Result<String, String> {
+        FakeWriter.rewrite(prompts, summaries, diffstat)
+    }
 }
 
-/// The card `writer` writes on `edit()`, and the lines it logs.
+/// The card `writer` writes on `edit()`, with no earlier card and no brief yet, and the lines it
+/// logs.
 fn written(writer: &impl CardWriter) -> (Option<Card>, Vec<String>) {
     let mut lines = Vec::new();
-    let card = write_card(writer, &edit(), |line| lines.push(line));
-    (card, lines)
+    let card = write_card(writer, &edit(), &[], "", |line| lines.push(line));
+    (card.map(|(card, _)| card), lines)
 }
 
 #[test]
@@ -89,30 +105,41 @@ fn a_writer_that_fails_twice_gives_no_card_and_one_log_line() {
 struct Replying(String);
 
 impl CardWriter for Replying {
-    fn reply(&self, _: &CardRequest) -> Result<String, String> {
+    fn reply(&self, _: &CardRequest, _: &[String], _: &str) -> Result<String, String> {
         Ok(self.0.clone())
     }
 
     fn more(&self, _: &CardRequest, _: &Card) -> Result<String, String> {
         Ok(self.0.clone())
     }
+
+    fn rewrite(&self, _: &[&str], _: &[String], _: &str) -> Result<String, String> {
+        Ok(self.0.clone())
+    }
 }
 
-/// A good reply on `edit()`, in a code fence: the explanation and a quiz on its design.
+/// A good reply on `edit()`, in a code fence: the explanation, a quiz on its design, no
+/// architecture section, and the brief updated.
 const GOOD: &str = concat!(
     "```json\n",
-    r#"{"explanation": "הסוכן הגדיל את `font-size` של `.unchecked` כדי שאפשר יהיה לקרוא את שורת „לא נבדק” בלי מאמץ.", "#,
+    r#"{"summary": "הגופן של שורת „לא נבדק” גדל ל־`15px`.", "#,
+    r#""explanation": "הסוכן הגדיל את `font-size` של `.unchecked` כדי שאפשר יהיה לקרוא את שורת „לא נבדק” בלי מאמץ.", "#,
     r#""paths": ["apps/studio/ui/style.css"], "#,
     r#""code": "-.unchecked { font-size:12px; }\n+.unchecked { font-size:15px; }", "#,
     r#""why_it_matters": "טקסט משני ב־`12px` היה קטן מדי לקריאה בזמן המתנה.", "#,
     r#""not_checked": "לא נבדק אם הכרטיס עדיין נכנס בחלונית צרה.", "#,
+    r#""architecture": "structural: none", "#,
     r#""quiz": {"text": "למה השינוי נוגע רק ב־`.unchecked`?", "options": ["#,
     r#"{"text": "כי רק השורה הזו הייתה קטנה מדי לקריאה.", "why": "נכון: שאר הכרטיס כבר היה ב־`15px`."}, "#,
     r#"{"text": "כי `.unchecked` קובע את גודל הגופן של כל הכרטיס.", "why": "לא: הכלל חל רק על השורה עצמה."}, "#,
     r#"{"text": "כי גודל הגופן של הכרטיס בא מהגדרות המערכת.", "why": "לא: הגודל קבוע ב־`style.css`."}"#,
-    r#"], "key": 0}}"#,
+    r#"], "key": 0}, "#,
+    r#""brief": "הסשן מתקן את עיצוב הכרטיס.\nשורת „לא נבדק” גדלה ל־`15px`."}"#,
     "\n```\n",
 );
+
+/// `GOOD`'s brief.
+const BRIEF: &str = "הסשן מתקן את עיצוב הכרטיס.\nשורת „לא נבדק” גדלה ל־`15px`.";
 
 fn good_card() -> Card {
     let choice = |text: &str, why: &str| Choice {
@@ -120,6 +147,7 @@ fn good_card() -> Card {
         why: why.into(),
     };
     Card {
+        summary: "הגופן של שורת „לא נבדק” גדל ל־`15px`.".into(),
         explanation:
             "הסוכן הגדיל את `font-size` של `.unchecked` כדי שאפשר יהיה לקרוא את שורת „לא נבדק” בלי מאמץ."
                 .into(),
@@ -127,6 +155,7 @@ fn good_card() -> Card {
         code: "-.unchecked { font-size:12px; }\n+.unchecked { font-size:15px; }".into(),
         why_it_matters: "טקסט משני ב־`12px` היה קטן מדי לקריאה בזמן המתנה.".into(),
         not_checked: "לא נבדק אם הכרטיס עדיין נכנס בחלונית צרה.".into(),
+        architecture: None,
         quiz: Some(Quiz {
             text: "למה השינוי נוגע רק ב־`.unchecked`?".into(),
             options: vec![
@@ -151,6 +180,36 @@ fn good_card() -> Card {
 #[test]
 fn a_good_reply_gives_the_card_with_its_quiz_options_key_and_reasons() {
     assert_eq!(written(&Replying(GOOD.into())), (Some(good_card()), vec![]));
+}
+
+#[test]
+fn a_reply_with_an_architecture_section_gives_the_card_that_section() {
+    let section = "הקוד עבר מ־`lib.rs` למודול חדש, `brief.rs`, ש־`lib.rs` קורא לו.";
+    let reply = GOOD.replace("structural: none", section);
+
+    let (card, lines) = written(&Replying(reply));
+
+    let structural = Card {
+        architecture: Some(section.into()),
+        ..good_card()
+    };
+    assert_eq!((card, lines), (Some(structural), vec![]));
+}
+
+#[test]
+fn the_card_call_returns_the_brief_updated_and_one_with_none_logs_one_line() {
+    let updated = write_card(&Replying(GOOD.into()), &edit(), &[], "", |l| panic!("{l}"));
+    assert_eq!(updated, Some((good_card(), Some(BRIEF.into()))));
+
+    let no_brief = GOOD.replace(r#""brief""#, r#""other""#);
+    let mut lines = Vec::new();
+    let written = write_card(&Replying(no_brief), &edit(), &[], "", |l| lines.push(l));
+
+    assert_eq!(written, Some((good_card(), None)));
+    let [line] = &lines[..] else {
+        panic!("one log line: {lines:?}");
+    };
+    assert!(line.contains(&edit().id), "{line}");
 }
 
 #[test]
@@ -185,7 +244,9 @@ fn a_quiz_with_no_key_or_one_that_does_not_parse_logs_one_line_and_the_card_has_
 #[test]
 fn the_real_writer_runs_claude_on_the_subscription_in_its_neutral_folder() {
     let folder = Path::new("/h/Library/Application Support/dev.falinks.studio/card-writer");
-    let command = ClaudeWriter::new(CLAUDE.into(), folder.into()).command(&edit());
+    let earlier = ["`Card` קיבל שדה `summary`.".to_string()];
+    let brief = "הסשן מוסיף תקציר לכל סשן.\nהכותב מחזיר את התקציר.";
+    let command = ClaudeWriter::new(CLAUDE.into(), folder.into()).command(&edit(), &earlier, brief);
 
     assert_eq!(command.get_program(), CLAUDE);
     // Both keys would take precedence over the subscription login, and without the plugin the
@@ -209,8 +270,44 @@ fn the_real_writer_runs_claude_on_the_subscription_in_its_neutral_folder() {
     assert!(!args.contains(&"--bare"));
     let prompt = args[4];
     assert!(prompt.contains("multiple-choice question on the change's logic or design"));
+    // The architecture section reads the prompt's earlier cards; the brief is updated.
+    assert!(prompt.contains(&format!("earlier cards, oldest first:\n- {}\n", earlier[0])));
+    assert!(prompt.contains(&format!("The brief so far:\n{brief}\n")));
     assert!(prompt.ends_with(&format!("\nChange:\n{}", edit().change)));
     assert_eq!(command.get_current_dir(), Some(folder));
+}
+
+#[test]
+fn an_oversized_rewrite_cuts_the_oldest_prompts_first_and_keeps_every_summary() {
+    let folder = Path::new("/h/Library/Application Support/dev.falinks.studio/card-writer");
+    let writer = ClaudeWriter::new(CLAUDE.into(), folder.into());
+    // Three prompts of 30 KiB each, 90 KiB in all, and 200 summaries.
+    let prompts: Vec<String> = ["first", "second", "third"]
+        .iter()
+        .map(|name| format!("{name} {}", "x".repeat(30 << 10)))
+        .collect();
+    let prompts: Vec<&str> = prompts.iter().map(String::as_str).collect();
+    let summaries: Vec<String> = (0..200).map(|i| format!("summary {i}")).collect();
+    let diffstat = " core/src/lib.rs | 12 ++++++------\n 1 file changed\n";
+
+    let command = writer.rewrite_command(&prompts, &summaries, diffstat);
+
+    let args: Vec<_> = command.get_args().map(|a| a.to_str().unwrap()).collect();
+    assert_eq!(args[..4], ["--tools", "", "--strict-mcp-config", "-p"]);
+    let prompt = args[4];
+    assert!(
+        prompt.contains("rewrite from scratch the brief"),
+        "{prompt}"
+    );
+    assert!(!prompt.contains("first x"));
+    assert!(prompt.contains("second x") && prompt.contains("third x"));
+    assert!(
+        summaries
+            .iter()
+            .all(|s| prompt.contains(&format!("- {s}\n")))
+    );
+    assert!(prompt.ends_with(diffstat));
+    assert!(prompt.len() < 70 << 10, "{}", prompt.len());
 }
 
 #[test]
@@ -221,7 +318,7 @@ fn explain_more_runs_the_same_writer_on_the_cards_explanation_and_its_change() {
 
     let more = writer.more_command(&edit(), &card);
 
-    let card_run = writer.command(&edit());
+    let card_run = writer.command(&edit(), &[], "");
     assert_eq!(more.get_program(), card_run.get_program());
     assert!(more.get_envs().eq(card_run.get_envs()));
     assert_eq!(more.get_current_dir(), Some(folder));
@@ -241,7 +338,7 @@ fn a_huge_change_is_cut_so_the_prompt_stays_small() {
         change: format!("+{}\n", "א".repeat(100_000)),
         ..edit()
     };
-    let command = ClaudeWriter::new(CLAUDE.into(), folder.into()).command(&request);
+    let command = ClaudeWriter::new(CLAUDE.into(), folder.into()).command(&request, &[], "");
 
     let prompt = command.get_args().last().unwrap().to_str().unwrap();
     assert!(prompt.len() < 70 << 10, "{}", prompt.len());
