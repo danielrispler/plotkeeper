@@ -2,7 +2,9 @@
 //! core, then feeds it each new line live and hands the core's card requests to the card writer. The
 //! window lists every session (#369, decision 18) and shows the one Daniel selected: its guess
 //! prompt on its check, its cards, which the card store keeps on disk, and its check lines. A
-//! session that newly needs Daniel gets a macOS notification while the window is not focused.
+//! session that newly needs Daniel, a new card and a failed worker raise a macOS notification while
+//! the window is not focused, and the Dock badge counts the sessions that need him (#369, decision
+//! 22).
 
 use std::{
     collections::HashMap,
@@ -13,7 +15,7 @@ use std::{
     thread,
     time::Duration,
 };
-use studio_core::{Output, Session, Studio};
+use studio_core::{Notifications, Output, Session, State::NeedsYou, Studio};
 use studio_understanding::{
     CardStore, CardWriter, ClaudeWriter, FakeWriter, Fingerprints, SessionCards, find_claude,
     millis, write_card,
@@ -23,6 +25,9 @@ use tauri_plugin_notification::NotificationExt;
 
 /// The card store, which the log thread adds to and the pane reveals in.
 type Cards = Mutex<CardStore>;
+
+/// The notices not shown yet, which the log thread and the card writer's threads add to.
+type Notices = Mutex<Notifications>;
 
 /// The session list, in its order.
 #[tauri::command]
@@ -117,6 +122,7 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .manage(Mutex::new(studio))
         .manage(Cards::new(store))
+        .manage(Notices::default())
         .invoke_handler(tauri::generate_handler![
             sessions, select, open, selected, cards, shown, reveal, guess
         ])
@@ -141,6 +147,7 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
     // Each session's own, so another session's prompt in the same worktree moves no base.
     let mut fingerprints = HashMap::<String, Fingerprints>::new();
     let mut drawn_cards = None;
+    let mut badge = None;
     loop {
         let state = app.state::<Mutex<Studio>>();
         let mut read = false;
@@ -193,8 +200,10 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                         let (app, writer) = (app.clone(), writer.clone());
                         thread::spawn(move || match write_card(&*writer, &request) {
                             Ok(card) => {
+                                let session_id = request.session_id.clone();
                                 let store = app.state::<Cards>();
                                 unsaved(store.lock().unwrap().add(request, card, millis()));
+                                tell(&app, "New card", &session_id, None);
                             }
                             Err(line) => eprintln!("studio: {line}"),
                         });
@@ -202,14 +211,41 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                     // The pane draws the open prompt from the session, which the "selected" event
                     // below carries, so it also closes when the result arrives.
                     Output::Guess(_) => {}
-                    Output::NeedsYou { session_id } => notify(app, &session_id),
+                    Output::NeedsYou { session_id, agent } => {
+                        tell(app, "Needs you", &session_id, agent.as_deref());
+                    }
+                    Output::Failed { session_id, agent } => {
+                        tell(app, "Worker failed", &session_id, Some(&agent));
+                    }
                 }
             }
             read = read_to > read_from;
         }
         if state.lock().unwrap().tick(millis()) || read {
-            let _ = app.emit("sessions", sessions(app.state()));
+            let list = sessions(app.state());
+            let needing = list.iter().filter(|s| s.state == NeedsYou).count();
+            // macOS shows `Some(0)` as a "0" badge.
+            if badge != Some(needing)
+                && let Some(window) = app.get_webview_window("main")
+            {
+                let _ = window.set_badge_count((needing > 0).then_some(needing as i64));
+                badge = Some(needing);
+            }
+            let _ = app.emit("sessions", list);
             let _ = app.emit("selected", selected(state));
+        }
+        // Asking for focus waits on the main thread, which never takes this lock.
+        let focused = || {
+            let window = app.get_webview_window("main");
+            window.and_then(|w| w.is_focused().ok()) == Some(true)
+        };
+        let due = app
+            .state::<Notices>()
+            .lock()
+            .unwrap()
+            .due(millis(), focused);
+        if let Some((title, body)) = due {
+            let _ = app.notification().builder().title(title).body(body).show();
         }
         // The cards also change with no line read: a card arrives, or one turns 30 minutes old.
         let shown = cards(app.state(), app.state());
@@ -222,27 +258,16 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
     }
 }
 
-/// One notification per notice, only while the window is not focused (#328, module 9). Called
-/// without the core's lock held, because asking for focus waits on the main thread, which runs the
-/// pane's commands.
-fn notify(app: &AppHandle, session_id: &str) {
-    let focused = app
-        .get_webview_window("main")
-        .and_then(|w| w.is_focused().ok());
-    if focused == Some(true) {
-        return;
-    }
-    let studio = app.state::<Mutex<Studio>>();
-    let cwd = studio
+/// Adds a notice on session `session_id`'s line, naming its subagent `agent`, if any; the read loop
+/// shows it. Called without the core's lock held.
+fn tell(app: &AppHandle, title: &str, session_id: &str, agent: Option<&str>) {
+    let body = app
+        .state::<Mutex<Studio>>()
         .lock()
         .unwrap()
-        .session(session_id)
-        .map(|s| s.cwd.clone());
-    let folder = cwd.as_deref().and_then(|cwd| cwd.rsplit('/').next());
-    let _ = app
-        .notification()
-        .builder()
-        .title("Needs you")
-        .body(folder.unwrap_or_default())
-        .show();
+        .notice_body(session_id, agent);
+    app.state::<Notices>()
+        .lock()
+        .unwrap()
+        .push(title, body, millis());
 }

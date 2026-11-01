@@ -30,6 +30,7 @@ fn live(log: &str) -> Vec<Output> {
 fn notice(session: &str) -> Output {
     Output::NeedsYou {
         session_id: session.into(),
+        agent: None,
     }
 }
 

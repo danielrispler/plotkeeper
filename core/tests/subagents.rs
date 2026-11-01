@@ -305,7 +305,8 @@ fn a_childs_permission_request_makes_its_session_need_you_until_its_step_resolve
     expected.extend(vec![(YourTurn, None); 6]);
     assert_eq!(states, expected);
 
-    // The `Stop` while the child waits gives no second notice.
+    // One notice, on the session's line, naming the grandchild who asks (#369, decision 22). The
+    // `Stop` while it waits gives no second one.
     let mut studio = Studio::default();
     let notices = TREE.lines().flat_map(|line| studio.apply(line));
     let notices: Vec<Output> = notices
@@ -314,7 +315,8 @@ fn a_childs_permission_request_makes_its_session_need_you_until_its_step_resolve
     assert_eq!(
         notices,
         [Output::NeedsYou {
-            session_id: TREE_SESSION.into()
+            session_id: TREE_SESSION.into(),
+            agent: Some(TREE_EXPLORE.into()),
         }]
     );
 }

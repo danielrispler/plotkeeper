@@ -12,7 +12,7 @@ To run the app with a fake writer instead of `claude -p`:
 
     open --env STUDIO_CARD_WRITER=fake target/release/bundle/macos/Studio.app
 
-A session is running from a prompt until its turn ends; needs you while it waits on your permission, answer or plan approval; your turn when its turn ended without asking you, or it started and has had no prompt yet; idle after 2 hours at your turn with no events, until its next event; ended from its `SessionEnd` until it starts again under its id. Only "needs you" is in colour. When a session newly needs you and the window is not focused, macOS shows a notification. macOS asks once for permission to show them.
+A session is running from a prompt until its turn ends; needs you while it waits on your permission, answer or plan approval; your turn when its turn ended without asking you, or it started and has had no prompt yet; idle after 2 hours at your turn with no events, until its next event; ended from its `SessionEnd` until it starts again under its id. Only "needs you" is in colour. macOS shows a notification when a session newly needs you, a card arrives or a worker fails, only while the window is not focused. A subagent's wait, failure or card shows on its session's line and names the subagent; a failed helper raises none. Notices within 3 seconds of the first show as one notification. macOS asks once for permission to show them. The Dock badge counts the sessions that need you.
 
 - `plugin/`: the Claude Code plugin. On twelve hook events, `SubagentStart` and `SubagentStop` among them, it runs `studio-hook`.
 - `hook/`: `studio-hook`, which appends each hook payload as one line to the event log, and the log's path.
@@ -32,7 +32,7 @@ This builds `target/release/bundle/macos/Studio.app` with an ad-hoc signature (`
 
 `cargo test` runs:
 
-- `core/tests/`: hook events replayed through the core: what the pane shows and the two recorded logs (`replay`), the session list, its states and the selection on the recorded day (`sessions`), needs you (`needs_you`), checks and guesses (`checks`), and cards at `Stop` and where the shell fingerprints (`cards`);
+- `core/tests/`: hook events replayed through the core: what the pane shows and the two recorded logs (`replay`), the session list, its states and the selection on the recorded day (`sessions`), needs you (`needs_you`), notifications: their triggers, text and combining (`notices`), checks and guesses (`checks`), and cards at `Stop` and where the shell fingerprints (`cards`);
 - `understanding/tests/`: the `claude -p` command, built but never run, the `claude` lookup with a stand-in shell, the writer's replies and its retry (`writer`); the fingerprint against real `git` in temporary repositories (`fingerprint`); the core, the fingerprint and a fake writer joined as the shell joins them (`prompt_cards`); the card store, its move aside and its split at 30 minutes (`store`); the weekly rates (`week`);
 - the unit tests of the event log's path (`hook`), of what `scrub` keeps (`studio-core`) and of the weekly rates' dates (`understanding`).
 

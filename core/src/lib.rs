@@ -278,6 +278,17 @@ impl Session {
         self.asked || !self.blocks.is_empty()
     }
 
+    /// Its workers that failed: they ended with a status other than `completed`, such as `killed`.
+    fn failed_workers(&self) -> Vec<String> {
+        let failed =
+            |a: &&Agent| a.kind == Kind::Worker && !["running", "completed"].contains(&&*a.status);
+        self.agents
+            .iter()
+            .filter(failed)
+            .map(|a| a.id.clone())
+            .collect()
+    }
+
     /// Adds a block on the latest running call it waits on, so that the call's `PostToolUse` clears
     /// it, and the call's agent is the one who asks. With none, the call's `PreToolUse` may still land
     /// (the hooks are async); otherwise the block lasts until its agent's turn ends.
@@ -354,8 +365,14 @@ pub enum Output {
     Card(CardRequest),
     /// The wait's first check started: ask "Will it pass?".
     Guess(GuessPrompt),
-    /// A session newly needs Daniel.
-    NeedsYou { session_id: String },
+    /// A session newly needs Daniel: its own agent asks, or `agent`, a subagent at any depth, whose
+    /// notice goes on its session's line (#369, decision 22).
+    NeedsYou {
+        session_id: String,
+        agent: Option<String>,
+    },
+    /// Worker `agent` of a session, at any depth, newly failed. A failed helper raises none.
+    Failed { session_id: String, agent: String },
 }
 
 /// "Will it pass?" on the wait's first check (#328, module 3, "Guesses"). It is open from the
@@ -674,6 +691,7 @@ impl Studio {
             });
         // The hooks are async, so the latest event can land before an earlier one.
         session.last_event_at = session.last_event_at.max(event.studio_received_ms);
+        let failed_before = session.failed_workers();
         session.track_agents(&event, change.is_some());
         // A child's events still keep its session from going idle, but its folder and steps are its
         // own.
@@ -681,7 +699,14 @@ impl Studio {
         if own && !event.cwd.is_empty() {
             session.cwd.clone_from(&event.cwd);
         }
-        let mut outputs = Vec::new();
+        let failed = session.failed_workers().into_iter();
+        let mut outputs: Vec<Output> = failed
+            .filter(|agent| !failed_before.contains(agent))
+            .map(|agent| Output::Failed {
+                session_id: event.session_id.clone(),
+                agent,
+            })
+            .collect();
         let mut blocked_before = session.needs_you();
         let tool = event.tool_name.unwrap_or_default();
         let id = Some(event.tool_use_id.clone()).filter(|id| !id.is_empty());
@@ -863,6 +888,7 @@ impl Studio {
         if !blocked_before && session.state == State::NeedsYou {
             outputs.push(Output::NeedsYou {
                 session_id: event.session_id,
+                agent: session.waiting.as_ref().and_then(|w| w.agent.clone()),
             });
         }
         outputs
@@ -933,5 +959,65 @@ impl Studio {
     /// The session Daniel selected, which the session view shows; `None` until his first click.
     pub fn selected(&self) -> Option<&Session> {
         self.session(self.selected.as_deref()?)
+    }
+
+    /// The body of a notice on session `id`'s line: its folder and short id, as its row shows them,
+    /// and the subagent `agent` it names, by its spawn's description, else its short id.
+    pub fn notice_body(&self, id: &str, agent: Option<&str>) -> String {
+        let session = self.session(id);
+        let folder = session.and_then(|s| s.cwd.rsplit('/').next());
+        let mut body = format!("{} {}", folder.unwrap_or_default(), short(id, 8));
+        if let Some(agent) = agent {
+            let child = session.and_then(|s| s.agents.iter().find(|a| a.id == agent));
+            let name = child.and_then(|a| a.description.as_deref());
+            body = format!("{body} · {}", name.unwrap_or(short(agent, 5)));
+        }
+        body
+    }
+}
+
+/// The first `n` characters of an id.
+fn short(id: &str, n: usize) -> &str {
+    id.get(..n).unwrap_or(id)
+}
+
+/// 3 seconds, a starting guess for "a few seconds" (#369, decision 22 and Further Notes).
+const COMBINE_MS: u64 = 3_000;
+
+/// The notices the shell has not shown yet, each with its title and body. Those that come within
+/// `COMBINE_MS` of the first show as one notification, so a burst never floods Daniel and no notice
+/// waits longer than that.
+#[derive(Default)]
+pub struct Notifications {
+    pending: Vec<(String, String)>,
+    first_at: u64,
+}
+
+impl Notifications {
+    pub fn push(&mut self, title: &str, body: String, now: u64) {
+        if self.pending.is_empty() {
+            self.first_at = now;
+        }
+        self.pending.push((title.into(), body));
+    }
+
+    /// The notification due at `now`, as its title and body: the pending notices, once `COMBINE_MS`
+    /// has passed since the first. Only then is `focused` asked, and a focused window drops them,
+    /// since Daniel sees the list.
+    pub fn due(&mut self, now: u64, focused: impl FnOnce() -> bool) -> Option<(String, String)> {
+        if self.pending.is_empty() || now < self.first_at + COMBINE_MS {
+            return None;
+        }
+        let pending = std::mem::take(&mut self.pending);
+        if focused() {
+            return None;
+        }
+        Some(match &pending[..] {
+            [one] => one.clone(),
+            many => {
+                let lines: Vec<String> = many.iter().map(|(t, b)| format!("{t}: {b}")).collect();
+                (format!("{} notices", many.len()), lines.join("\n"))
+            }
+        })
     }
 }
