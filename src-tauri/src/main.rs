@@ -42,6 +42,12 @@ fn select(id: String, studio: State<Mutex<Studio>>) {
     studio.lock().unwrap().select(&id);
 }
 
+/// Daniel opened subagent `agent_id`'s line.
+#[tauri::command]
+fn open(agent_id: String, studio: State<Mutex<Studio>>) {
+    studio.lock().unwrap().open(&agent_id);
+}
+
 /// The session Daniel selected, or `None` before his first click.
 #[tauri::command]
 fn selected(studio: State<Mutex<Studio>>) -> Option<Session> {
@@ -112,7 +118,7 @@ fn main() {
         .manage(Mutex::new(studio))
         .manage(Cards::new(store))
         .invoke_handler(tauri::generate_handler![
-            sessions, select, selected, cards, shown, reveal, guess
+            sessions, select, open, selected, cards, shown, reveal, guess
         ])
         .setup(move |app| {
             let app = app.handle().clone();

@@ -1,4 +1,4 @@
-// The window: on the left the session list, on the right the session Daniel selected, with its state,
+// The window: on the left the session list with each session's subagents nested, on the right the session Daniel selected, with its state,
 // "now" line and cards. The core decides what it shows; this file only draws what the shell sends, on
 // load and on each "sessions", "selected" or "cards" event.
 
@@ -8,6 +8,25 @@ type GuessPrompt = { session_id: string; tool_use_id: string; step: Step; guess:
 type Check = { guess: boolean | null; exit_passed: boolean | null };
 // A check that ran: a pass or fail line, oldest first.
 type CheckLine = { command: string; check: Check };
+// Who spawned a subagent: the session's own agent, another subagent, or no known spawn.
+type Parent = "session" | "unattached" | { agent: string };
+type Agent = {
+  id: string;
+  parent: Parent;
+  kind: "worker" | "helper";
+  description: string | null;
+  agent_type: string | null;
+  // "running", then its wake-up's status, such as "completed" or "killed".
+  status: string;
+  started_at: number;
+  ended_at: number | null;
+  last_step: Step | null;
+  result: string | null;
+  opened: boolean;
+  faded: boolean;
+};
+// What a session that needs Daniel waits on: the subagent who asks, or null for its own agent.
+type Wait = { agent: string | null; since: number };
 type Session = {
   id: string;
   cwd: string;
@@ -15,6 +34,8 @@ type Session = {
   state: SessionState;
   guess: GuessPrompt | null;
   checks: CheckLine[];
+  agents: Agent[];
+  waiting: Wait | null;
 };
 // A session's change since its last card, from its base: HEAD and the files git status listed then.
 type Base = { head: string | null; files: string[] };
@@ -94,7 +115,35 @@ function text(tag: string, content: string, className = ""): HTMLElement {
   return node;
 }
 
-// One line: the folder, the session's short id, its state and its last tool step.
+const stepText = (step: Step | null) => (step ? `${step.tool} ${step.detail ?? ""}` : "No step yet");
+
+// The time from `from` to `to`, such as "3m".
+function age(from: number, to = Date.now()): string {
+  const minutes = Math.floor((to - from) / 60_000);
+  return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h`;
+}
+
+const parentId = (parent: Parent) => (typeof parent === "string" ? parent : parent.agent);
+const childrenOf = (session: Session, parent: string) =>
+  session.agents.filter((agent) => parentId(agent.parent) === parent);
+
+// The count of a parent's helpers that faded into its line.
+function done(session: Session, parent: string): HTMLElement[] {
+  const faded = childrenOf(session, parent).filter((agent) => agent.faded).length;
+  return faded ? [text("span", `${faded} done`, "id")] : [];
+}
+
+// What the session's line says: its last tool step, or while it needs Daniel, who asks and for how
+// long, such as "a1191 · Implement #355 asks · 3m".
+function rowText(session: Session): string {
+  const wait = session.waiting;
+  if (wait === null) return stepText(session.last_step);
+  if (wait.agent === null) return `${stepText(session.last_step)} · ${age(wait.since)}`;
+  const asker = session.agents.find((agent) => agent.id === wait.agent);
+  return `${wait.agent.slice(0, 5)} · ${asker?.description ?? ""} asks · ${age(wait.since)}`;
+}
+
+// One line: the folder, the session's short id, its state and what it is doing.
 function row(session: Session): HTMLElement {
   const button = document.createElement("button");
   button.type = "button";
@@ -102,15 +151,55 @@ function row(session: Session): HTMLElement {
   button.setAttribute("aria-pressed", String(session.id === selectedId));
   const state = text("span", stateLabels[session.state], "row-state");
   state.dataset.state = session.state;
-  const step = session.last_step;
   button.append(
     text("span", folder(session), "name"),
     text("span", session.id.slice(0, 8), "id"),
     state,
-    text("span", step ? `${step.tool} ${step.detail ?? ""}` : "No step yet", "row-step"),
+    ...done(session, "session"),
+    text("span", rowText(session), "row-step"),
   );
   button.addEventListener("click", () => select(session.id));
   return button;
+}
+
+// A subagent's line, indented under the agent that spawned it. A worker shows its task, status and
+// last step; a helper its task, type, status, duration and result. A failed child stands out until
+// Daniel opens it.
+function agentRow(session: Session, agent: Agent, depth: number): HTMLElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `row ${agent.kind}`;
+  button.style.paddingLeft = `${8 + 16 * depth}px`;
+  const asks = session.waiting?.agent === agent.id;
+  const state = text("span", asks ? stateLabels.needs_you : agent.status, "row-state");
+  if (asks) state.dataset.state = "needs_you";
+  const failed = agent.status !== "running" && agent.status !== "completed";
+  state.classList.toggle("failed", failed && !agent.opened);
+  const details =
+    agent.kind === "worker"
+      ? [stepText(agent.last_step)]
+      : [agent.agent_type, age(agent.started_at, agent.ended_at ?? Date.now()), agent.result];
+  button.append(
+    text("span", agent.description ?? agent.id.slice(0, 5), "name"),
+    state,
+    ...done(session, agent.id),
+    text("span", details.filter(Boolean).join(" · "), "row-step"),
+  );
+  button.addEventListener("click", () => openAgent(session.id, agent.id));
+  return button;
+}
+
+// A session's row, then its subagents under the agent that spawned them, at any depth, and those
+// with no known spawn under "Unattached". A faded helper is not drawn; its parent's line counts it.
+function tree(session: Session): HTMLElement[] {
+  const nested = (parent: string, depth: number): HTMLElement[] =>
+    childrenOf(session, parent).flatMap((agent) => [
+      ...(agent.faded ? [] : [agentRow(session, agent, depth)]),
+      ...nested(agent.id, depth + 1),
+    ]);
+  const unattached = nested("unattached", 2);
+  const label = text("p", "Unattached", "unattached");
+  return [row(session), ...nested("session", 1), ...(unattached.length ? [label, ...unattached] : [])];
 }
 
 // The core sends the sessions grouped by state, so a group starts where the state changes. Idle and
@@ -129,13 +218,13 @@ function showSessions(sessions: Session[]) {
       const title = `${stateLabels[state]} · ${rows.length}`;
       if (!collapsed.includes(state)) {
         const group = document.createElement("section");
-        group.append(text("h1", title), ...rows.map(row));
+        group.append(text("h1", title), ...rows.flatMap(tree));
         return group;
       }
       const group = document.createElement("details");
       group.open = opened.has(state);
       group.addEventListener("toggle", () => (group.open ? opened.add(state) : opened.delete(state)));
-      group.append(text("summary", title), ...rows.map(row));
+      group.append(text("summary", title), ...rows.flatMap(tree));
       return group;
     }),
   );
@@ -147,6 +236,13 @@ async function select(id: string) {
   await window.__TAURI__.core.invoke("select", { id });
   show(await window.__TAURI__.core.invoke<Session | null>("selected"));
   showCards(await window.__TAURI__.core.invoke<SessionCards>("cards"));
+}
+
+// Daniel opened a subagent's line: a failed helper then fades, and its session is selected.
+async function openAgent(sessionId: string, agentId: string) {
+  await window.__TAURI__.core.invoke("open", { agentId });
+  showSessions(await window.__TAURI__.core.invoke<Session[]>("sessions"));
+  await select(sessionId);
 }
 
 function show(session: Session | null) {

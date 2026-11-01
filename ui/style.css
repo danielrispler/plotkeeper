@@ -19,6 +19,11 @@ html, body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 
 .row .id, .row .row-state { color: var(--muted); flex: none; }
 .row .row-state[data-state="needs_you"] { color: var(--needs-you); font-weight: 600; }
 .row .row-step { color: var(--muted); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+/* A subagent's line is indented by its depth; a helper's is quieter than a worker's row. A failed child
+   stands out by weight, since colour is only for "needs you". */
+.row.helper { font-size: 13px; }
+.row .failed { font-weight: 600; color: var(--fg); }
+.unattached { margin: 2px 0 0; padding-left: 40px; font-size: 13px; color: var(--muted); }
 h1 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 8px; }
 .session { font-size: 14px; color: var(--muted); margin: 0 0 6px; }
 /* Colour only on "needs you" (#328, module 3): "your turn" stays as neutral as "running". */
