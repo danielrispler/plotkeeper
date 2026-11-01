@@ -27,6 +27,12 @@ type Agent = {
 };
 // What a session that needs Daniel waits on: the subagent who asks, or null for its own agent.
 type Wait = { agent: string | null; since: number };
+// An AskUserQuestion call, as the tool input gives it, with Daniel's choice for each question by its text
+// once he answers in the terminal.
+type Choice = { label: string; description?: string };
+type Asked = { question: string; header?: string; options: Choice[] };
+type Answer = "open" | "not_answered" | { answered: Record<string, string> };
+type Question = { agent: string | null; questions: Asked[]; answer: Answer };
 type Session = {
   id: string;
   cwd: string;
@@ -36,6 +42,7 @@ type Session = {
   checks: CheckLine[];
   agents: Agent[];
   waiting: Wait | null;
+  questions: Question[];
 };
 // A session's change since its last card, from its base: HEAD and the files git status listed then.
 type Base = { head: string | null; files: string[] };
@@ -101,9 +108,11 @@ for (const [id, willPass] of taps) {
 
 const folder = (session: Session) => session.cwd.split("/").pop() || session.cwd;
 
-// The session list, as the shell last sent it, and the row Daniel clicked last.
+// The session list, as the shell last sent it, and the row Daniel clicked last: a session's, or a
+// subagent's, whose view then shows its own line and questions.
 let listed: Session[] = [];
 let selectedId: string | null = null;
+let viewedAgent: string | null = null;
 // The collapsed groups Daniel opened, which stay open when the list is drawn again.
 const collapsed: SessionState[] = ["idle", "ended"];
 const opened = new Set<SessionState>();
@@ -148,7 +157,7 @@ function row(session: Session): HTMLElement {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "row";
-  button.setAttribute("aria-pressed", String(session.id === selectedId));
+  button.setAttribute("aria-pressed", String(session.id === selectedId && viewedAgent === null));
   const state = text("span", stateLabels[session.state], "row-state");
   state.dataset.state = session.state;
   button.append(
@@ -169,6 +178,7 @@ function agentRow(session: Session, agent: Agent, depth: number): HTMLElement {
   const button = document.createElement("button");
   button.type = "button";
   button.className = `row ${agent.kind}`;
+  button.setAttribute("aria-pressed", String(agent.id === viewedAgent));
   button.style.paddingLeft = `${8 + 16 * depth}px`;
   const asks = session.waiting?.agent === agent.id;
   const state = text("span", asks ? stateLabels.needs_you : agent.status, "row-state");
@@ -231,18 +241,21 @@ function showSessions(sessions: Session[]) {
   element("no-sessions").hidden = sessions.length > 0;
 }
 
-// Only Daniel's click changes the selected session.
-async function select(id: string) {
+// Only Daniel's click changes the selected session, and the subagent of it whose view shows, if any.
+async function select(id: string, agent: string | null = null) {
+  selectedId = id;
+  viewedAgent = agent;
+  showSessions(listed);
   await window.__TAURI__.core.invoke("select", { id });
   show(await window.__TAURI__.core.invoke<Session | null>("selected"));
   showCards(await window.__TAURI__.core.invoke<SessionCards>("cards"));
 }
 
-// Daniel opened a subagent's line: a failed helper then fades, and its session is selected.
+// Daniel opened a subagent's line: a failed helper then fades, and its view shows.
 async function openAgent(sessionId: string, agentId: string) {
   await window.__TAURI__.core.invoke("open", { agentId });
-  showSessions(await window.__TAURI__.core.invoke<Session[]>("sessions"));
-  await select(sessionId);
+  listed = await window.__TAURI__.core.invoke<Session[]>("sessions");
+  await select(sessionId, agentId);
 }
 
 function show(session: Session | null) {
@@ -254,12 +267,64 @@ function show(session: Session | null) {
     showSessions(listed);
   }
   if (session === null) return;
-  element("session").textContent = `${folder(session)} · ${session.id.slice(0, 8)}`;
-  element("state").textContent = stateLabels[session.state];
-  element("state").dataset.state = session.state;
-  element("tool").textContent = session.last_step?.tool ?? "No step yet";
-  element("detail").textContent = session.last_step?.detail ?? "";
+  // A subagent's view shows its own line and questions; the guess, cards and checks are its session's.
+  const agent = session.agents.find((a) => a.id === viewedAgent) ?? null;
+  const asks = agent !== null && session.waiting?.agent === agent.id;
+  const [label, state] =
+    agent === null
+      ? [stateLabels[session.state], session.state]
+      : asks
+        ? [stateLabels.needs_you, "needs_you"]
+        : [agent.status, agent.status];
+  const step = (agent ?? session).last_step;
+  element("view").toggleAttribute("data-agent", agent !== null);
+  element("session").textContent =
+    agent === null
+      ? `${folder(session)} · ${session.id.slice(0, 8)}`
+      : `${agent.description ?? ""} · ${agent.id.slice(0, 5)}`;
+  element("state").textContent = label;
+  element("state").dataset.state = state;
+  element("tool").textContent = step?.tool ?? "No step yet";
+  element("detail").textContent = step?.detail ?? "";
+  showQuestions(session.questions.filter((question) => question.agent === (agent?.id ?? null)));
   showChecks(session.checks);
+}
+
+// Whether a question is open, answered in the terminal, or not answered: its call failed, or its turn
+// or its agent ended first. An open one needs Daniel, so only it takes the colour.
+const answerLabels = { open: "Needs you", not_answered: "Not answered", answered: "Answered" };
+
+// An agent's question laid out as its choices, the one Daniel chose marked. Answering stays in the
+// terminal.
+function questionElement({ questions, answer }: Question): HTMLElement {
+  const block = document.createElement("article");
+  block.className = "question";
+  const status = typeof answer === "string" ? answer : "answered";
+  const state = text("p", answerLabels[status], "state");
+  if (status === "open") state.dataset.state = "needs_you";
+  block.append(state);
+  for (const asked of questions) {
+    const chosen = typeof answer === "string" ? null : (answer.answered[asked.question] ?? null);
+    const choices = document.createElement("ul");
+    choices.className = "choices";
+    choices.append(
+      ...asked.options.map((choice) => {
+        const item = document.createElement("li");
+        item.append(text("span", choice.label, "label"), text("span", choice.description ?? "", "description"));
+        item.classList.toggle("chosen", chosen?.split(", ").includes(choice.label) ?? false);
+        return item;
+      }),
+    );
+    block.append(text("p", asked.header ?? "", "header"), text("p", asked.question, "asked"), choices);
+    if (chosen !== null) block.append(text("p", `Your answer: ${chosen}`, "chosen-text"));
+  }
+  return block;
+}
+
+// The questions the viewed agent asked, newest first.
+function showQuestions(questions: Question[]) {
+  element("questions").replaceChildren(...[...questions].reverse().map(questionElement));
+  element("questions-title").hidden = questions.length === 0;
 }
 
 // Whether a check passed, from its exit code; with no colour, as colour is only for "needs you".

@@ -65,4 +65,19 @@ code:empty { display: none; }
 .taps button[aria-pressed="true"] { font-weight: 600; border: 2px solid var(--fg); }
 .taps button:disabled { cursor: default; }
 .taps button:disabled[aria-pressed="false"] { opacity: .45; }
+/* An agent's question, laid out as its choices; the chosen one is marked by its border, since colour is
+   only for "needs you". */
+.question { background: var(--code); border-radius: 8px; padding: 10px 12px; margin: 0 0 10px; }
+.question p { margin: 6px 0 0; }
+.question .state { margin: 0; }
+.question .header { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.question .asked { font-weight: 600; margin-top: 2px; }
+.choices { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; }
+.choices li { display: flex; gap: 8px; align-items: baseline; background: var(--bg); border: 2px solid transparent;
+              border-radius: 6px; padding: 4px 10px; }
+.choices .label { font-weight: 600; flex: none; }
+.choices .description { color: var(--muted); }
+.choices .chosen { border-color: var(--fg); }
+/* A subagent's view: its session's guess, cards and checks are not its own. */
+#view[data-agent] .own { display: none; }
 [hidden] { display: none !important; }

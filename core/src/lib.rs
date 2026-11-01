@@ -56,6 +56,31 @@ pub struct Session {
     pub agents: Vec<Agent>,
     /// What it waits on while it needs Daniel.
     pub waiting: Option<Wait>,
+    /// The questions its agents asked, oldest first (#369, decision 21).
+    pub questions: Vec<Question>,
+}
+
+/// An `AskUserQuestion` call, which Daniel answers in the terminal (#369, decision 21).
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Question {
+    #[serde(skip)]
+    tool_use_id: String,
+    /// The subagent that asks, `None` for the session's own agent.
+    pub agent: Option<String>,
+    /// Its questions and their options, as the tool input gives them.
+    pub questions: Value,
+    pub answer: Answer,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Answer {
+    /// Asked, with no result yet.
+    Open,
+    /// Daniel's choice for each question, keyed by its text: the `PostToolUse`'s `answers`.
+    Answered(Value),
+    /// Its call failed or was interrupted, or its turn or its agent ended first.
+    NotAnswered,
 }
 
 /// A subagent of a session (#369, decisions 5, 6 and 8).
@@ -645,6 +670,7 @@ impl Studio {
                 ended: false,
                 agents: Vec::new(),
                 waiting: None,
+                questions: Vec::new(),
             });
         // The hooks are async, so the latest event can land before an earlier one.
         session.last_event_at = session.last_event_at.max(event.studio_received_ms);
@@ -736,6 +762,14 @@ impl Studio {
                 if ASKING_TOOLS.contains(&call.tool.as_str()) {
                     session.blocks.push(call.clone());
                 }
+                if call.tool == "AskUserQuestion" {
+                    session.questions.push(Question {
+                        tool_use_id: event.tool_use_id.clone(),
+                        agent: call.agent.clone(),
+                        questions: call.input["questions"].clone(),
+                        answer: Answer::Open,
+                    });
+                }
                 // The hooks are async, so the block this call waits on may have landed first.
                 // shortcut: a block whose call ended before the block landed stays until the turn
                 // ends; remember ended calls if auto-denied calls (#322) show it.
@@ -768,6 +802,13 @@ impl Studio {
                 session.blocks.retain(|c| c.id != id);
                 let input = &event.tool_input;
                 let failed = event.hook_event_name == "PostToolUseFailure";
+                // The hooks are async, so an answer that lands after its turn's `Stop` still counts.
+                let mut asked = session.questions.iter_mut();
+                if !failed
+                    && let Some(question) = asked.find(|q| q.tool_use_id == event.tool_use_id)
+                {
+                    question.answer = Answer::Answered(event.tool_response["answers"].clone());
+                }
                 // A denied or interrupted call, or a failed Edit or Write, changed nothing: only a
                 // command that ran and failed has its exit code in its error.
                 let ran = !failed || event.error.starts_with("Exit code");
@@ -794,6 +835,17 @@ impl Studio {
                 }
             }
             _ => {}
+        }
+        // An open question whose block cleared with no answer was not answered: its call failed, or
+        // its turn or its agent ended first.
+        let blocks = &session.blocks;
+        for question in &mut session.questions {
+            let open = blocks
+                .iter()
+                .any(|b| b.id.as_ref() == Some(&question.tool_use_id));
+            if question.answer == Answer::Open && !open {
+                question.answer = Answer::NotAnswered;
+            }
         }
         session.state = if session.ended {
             State::Ended
