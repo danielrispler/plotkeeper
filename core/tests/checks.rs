@@ -9,10 +9,16 @@ const CHECKS: &str = include_str!("fixtures/checks.jsonl");
 const SESSION: &str = "a3e6c9f2-1b4d-4e7a-8c0f-5d2b9e6a3c18";
 const COMMAND: &str = "cd apps/studio && cargo test";
 
-/// The outputs of each line when the log arrives live.
+/// The outputs of each line when the log arrives live, but for the first `Stop`'s ask for Claude
+/// Code's version (`wake_ups.rs`).
 fn live(log: &str) -> Vec<Vec<Output>> {
     let mut studio = Studio::default();
-    log.lines().map(|line| studio.apply(line)).collect()
+    let mut outputs = |line| {
+        let mut outputs = studio.apply(line);
+        outputs.retain(|output| !matches!(output, Output::Version { .. }));
+        outputs
+    };
+    log.lines().map(&mut outputs).collect()
 }
 
 fn prompt(tool_use_id: &str) -> GuessPrompt {

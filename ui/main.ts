@@ -27,6 +27,10 @@ type Agent = {
 };
 // What a session that needs Daniel waits on: the subagent who asks, or null for its own agent.
 type Wait = { agent: string | null; since: number };
+// Who sent a prompt: Daniel, a wake-up naming the task that returned, or a known task id in markup
+// the studio does not know, which counts as Daniel's.
+type Sender = "daniel" | { wake_up: string } | { unrecognised: string };
+type Prompt = { at: number; sender: Sender };
 // An AskUserQuestion call, as the tool input gives it, with Daniel's choice for each question by its text
 // once he answers in the terminal.
 type Choice = { label: string; description?: string };
@@ -42,6 +46,7 @@ type Session = {
   checks: CheckLine[];
   agents: Agent[];
   waiting: Wait | null;
+  prompts: Prompt[];
   questions: Question[];
 };
 // A session's change since its last card, from its base: HEAD and the files git status listed then.
@@ -142,11 +147,20 @@ function done(session: Session, parent: string): HTMLElement[] {
   return faded ? [text("span", `${faded} done`, "id")] : [];
 }
 
-// What the session's line says: its last tool step, or while it needs Daniel, who asks and for how
-// long, such as "a1191 · Implement #355 asks · 3m".
+// "worker Implement #355 relocation returned", while the latest prompt is a wake-up and the session
+// has taken no step since; null otherwise.
+function returned(session: Session): string | null {
+  const sender = session.prompts[session.prompts.length - 1]?.sender;
+  if (session.last_step !== null || typeof sender !== "object" || !("wake_up" in sender)) return null;
+  const agent = session.agents.find((agent) => agent.id === sender.wake_up);
+  return `worker ${agent?.description ?? sender.wake_up.slice(0, 5)} returned`;
+}
+
+// What the session's line says: its last tool step, which worker returned, or while it needs Daniel,
+// who asks and for how long, such as "a1191 · Implement #355 asks · 3m".
 function rowText(session: Session): string {
   const wait = session.waiting;
-  if (wait === null) return stepText(session.last_step);
+  if (wait === null) return returned(session) ?? stepText(session.last_step);
   if (wait.agent === null) return `${stepText(session.last_step)} · ${age(wait.since)}`;
   const asker = session.agents.find((agent) => agent.id === wait.agent);
   return `${wait.agent.slice(0, 5)} · ${asker?.description ?? ""} asks · ${age(wait.since)}`;
@@ -284,7 +298,7 @@ function show(session: Session | null) {
       : `${agent.description ?? ""} · ${agent.id.slice(0, 5)}`;
   element("state").textContent = label;
   element("state").dataset.state = state;
-  element("tool").textContent = step?.tool ?? "No step yet";
+  element("tool").textContent = step?.tool ?? (agent === null ? returned(session) : null) ?? "No step yet";
   element("detail").textContent = step?.detail ?? "";
   showQuestions(session.questions.filter((question) => question.agent === (agent?.id ?? null)));
   showChecks(session.checks);
@@ -451,6 +465,11 @@ window.__TAURI__.core.invoke<Session[]>("sessions").then(showSessions);
 window.__TAURI__.event.listen<Session | null>("selected", (event) => show(event.payload));
 window.__TAURI__.core.invoke<Session | null>("selected").then(show);
 window.__TAURI__.event.listen<SessionCards>("cards", (event) => showCards(event.payload));
+// Claude Code's version changed: re-record the subagent fixture.
+window.__TAURI__.event.listen<string>("notice", (event) => {
+  element("notice").textContent = event.payload;
+  element("notice").hidden = false;
+});
 window.__TAURI__.core.invoke<SessionCards>("cards").then(showCards);
 
 export {};

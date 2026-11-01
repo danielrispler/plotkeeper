@@ -17,8 +17,8 @@ use std::{
 };
 use studio_core::{Notifications, Output, Session, State::NeedsYou, Studio};
 use studio_understanding::{
-    CardStore, CardWriter, ClaudeWriter, FakeWriter, Fingerprints, SessionCards, find_claude,
-    millis, write_card,
+    CardStore, CardWriter, ClaudeWriter, FakeWriter, Fingerprints, SessionCards, Versions,
+    find_claude, millis, write_card,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
@@ -146,6 +146,7 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
     let mut live = false;
     // Each session's own, so another session's prompt in the same worktree moves no base.
     let mut fingerprints = HashMap::<String, Fingerprints>::new();
+    let versions = Versions::beside(log);
     let mut drawn_cards = None;
     let mut badge = None;
     loop {
@@ -216,6 +217,24 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                     }
                     Output::Failed { session_id, agent } => {
                         tell(app, "Worker failed", &session_id, Some(&agent));
+                    }
+                    Output::Unrecognised {
+                        session_id,
+                        task_id,
+                    } => eprintln!(
+                        "studio: unrecognised wake-up: a prompt of session {session_id} names \
+                         task {task_id} in markup the studio does not know"
+                    ),
+                    // Reads the transcript's lines and nothing else (`apps/studio/AGENTS.md`).
+                    Output::Version { transcript_path } => {
+                        match versions.check(Path::new(&transcript_path), millis()) {
+                            Ok(Some(notice)) => {
+                                eprintln!("studio: {notice}");
+                                let _ = app.emit("notice", &notice);
+                            }
+                            Ok(None) => {}
+                            Err(e) => eprintln!("studio: keep Claude Code's version: {e}"),
+                        }
                     }
                 }
             }

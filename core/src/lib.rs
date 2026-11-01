@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     cmp::Reverse,
-    collections::{HashMap, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
 };
 
 #[derive(Default)]
@@ -52,12 +52,39 @@ pub struct Session {
     turn_ended: bool,
     #[serde(skip)]
     ended: bool,
+    /// Whether a `Stop` of it asked for Claude Code's version.
+    #[serde(skip)]
+    versioned: bool,
     /// Its subagents at any depth, in the order they were first seen (#369, decision 5).
     pub agents: Vec<Agent>,
     /// What it waits on while it needs Daniel.
     pub waiting: Option<Wait>,
+    /// Its prompts, oldest first, each marked with who sent it (#369, decision 7).
+    pub prompts: Vec<Prompt>,
+    /// The ids of its background tasks, commands included, from their responses and `Stop`'s
+    /// `background_tasks`. With its subagents' ids, they are the task ids a wake-up can name.
+    #[serde(skip)]
+    tasks: BTreeSet<String>,
     /// The questions its agents asked, oldest first (#369, decision 21).
     pub questions: Vec<Question>,
+}
+
+/// A prompt of a session (#369, decision 7), received at `at`.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Prompt {
+    pub at: u64,
+    pub sender: Sender,
+}
+
+/// Who sent a prompt: Daniel, or Claude Code waking the session when one of its tasks returns.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Sender {
+    Daniel,
+    /// A wake-up, with the id of the task it names.
+    WakeUp(String),
+    /// A known task id in markup the studio does not know: drift, counted as Daniel's.
+    Unrecognised(String),
 }
 
 /// An `AskUserQuestion` call, which Daniel answers in the terminal (#369, decision 21).
@@ -207,6 +234,12 @@ impl Session {
                 _ => {}
             }
         }
+        if let Some(task) = event.tool_response["backgroundTaskId"].as_str() {
+            self.tasks.insert(task.into());
+        }
+        let listed = event.background_tasks.as_array().into_iter().flatten();
+        let ids = listed.filter_map(|task| task["id"].as_str());
+        self.tasks.extend(ids.map(Into::into));
         match event.hook_event_name.as_str() {
             "PostToolUse"
                 if tool == "Agent"
@@ -272,6 +305,25 @@ impl Session {
         };
         self.blocks.retain(|call| !ended(call));
         self.running.retain(|call| !ended(call));
+    }
+
+    /// Who sent `prompt`. A wake-up names a known task id of the session in markup the studio
+    /// knows: `<agent-message from="…">` or `<task-id>…</task-id>`. A known id in other markup is
+    /// drift, and one in plain text is Daniel's.
+    fn sender(&self, prompt: &str) -> Sender {
+        let known = self.agents.iter().map(|a| &a.id).chain(&self.tasks);
+        let mut unrecognised = None;
+        for id in known {
+            if prompt.contains(&format!("<agent-message from=\"{id}\""))
+                || prompt.contains(&format!("<task-id>{id}</task-id>"))
+            {
+                return Sender::WakeUp(id.clone());
+            }
+            if prompt.contains(&format!("=\"{id}\"")) || prompt.contains(&format!(">{id}</")) {
+                unrecognised.get_or_insert_with(|| id.clone());
+            }
+        }
+        unrecognised.map_or(Sender::Daniel, Sender::Unrecognised)
     }
 
     fn needs_you(&self) -> bool {
@@ -373,6 +425,12 @@ pub enum Output {
     },
     /// Worker `agent` of a session, at any depth, newly failed. A failed helper raises none.
     Failed { session_id: String, agent: String },
+    /// A prompt named a known task id in markup the studio does not know: drift in Claude Code's
+    /// wake-ups, for stderr (#369, decision 7).
+    Unrecognised { session_id: String, task_id: String },
+    /// A session's first `Stop`: read Claude Code's version from its transcript, and nothing else
+    /// (#369, decision 9).
+    Version { transcript_path: String },
 }
 
 /// "Will it pass?" on the wait's first check (#328, module 3, "Guesses"). It is open from the
@@ -488,6 +546,9 @@ struct Event {
     error: String,
     #[serde(default)]
     last_assistant_message: String,
+    /// The session's transcript, whose lines carry Claude Code's version.
+    #[serde(default)]
+    transcript_path: String,
     #[serde(default)]
     notification_type: String,
     /// The start of a session: `startup`, `resume`, `clear` or `compact`.
@@ -685,8 +746,11 @@ impl Studio {
                 asked: false,
                 turn_ended: false,
                 ended: false,
+                versioned: false,
                 agents: Vec::new(),
                 waiting: None,
+                prompts: Vec::new(),
+                tasks: BTreeSet::new(),
                 questions: Vec::new(),
             });
         // The hooks are async, so the latest event can land before an earlier one.
@@ -714,6 +778,17 @@ impl Studio {
         match event.hook_event_name.as_str() {
             // A prompt opens a wait, also after an interrupt, which fires no `Stop`.
             "UserPromptSubmit" => {
+                let sender = session.sender(&event.prompt);
+                match &sender {
+                    // The row says which worker returned until the session's next step.
+                    Sender::WakeUp(_) => session.last_step = None,
+                    Sender::Unrecognised(task_id) => outputs.push(Output::Unrecognised {
+                        session_id: event.session_id.clone(),
+                        task_id: task_id.clone(),
+                    }),
+                    Sender::Daniel => {}
+                }
+                session.prompts.push(Prompt { at, sender });
                 self.unguessed.insert(event.session_id.clone());
                 session.unblock();
                 session.turn_ended = false;
@@ -729,6 +804,12 @@ impl Studio {
                 // A subagent's wait outlasts the turn, so it gives no second notice.
                 blocked_before = session.needs_you();
                 session.asked = asks(&event.last_assistant_message);
+                if !session.versioned && !event.transcript_path.is_empty() {
+                    session.versioned = true;
+                    outputs.push(Output::Version {
+                        transcript_path: event.transcript_path,
+                    });
+                }
                 if let Some(Change { base, diff }) = change {
                     outputs.push(Output::Card(CardRequest {
                         session_id: event.session_id.clone(),

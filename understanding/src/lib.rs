@@ -7,9 +7,11 @@ use std::{
 };
 use studio_core::CardRequest;
 
+mod drift;
 mod fingerprint;
 mod store;
 mod week;
+pub use drift::{Drift, Versions, drift};
 pub use fingerprint::Fingerprints;
 pub use store::{CardStore, Outcome, SessionCards, StoredCard, millis};
 pub use week::{Rate, Week, week};

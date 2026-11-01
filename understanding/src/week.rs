@@ -5,7 +5,7 @@
 use crate::{Outcome, StoredCard};
 use std::fmt;
 
-const WEEK: u64 = 7 * DAY;
+pub(crate) const WEEK: u64 = 7 * DAY;
 const DAY: u64 = 86_400_000;
 /// A reveal this long after its question counts as thinking, in milliseconds.
 const THINKING: u64 = 3_000;
@@ -102,7 +102,7 @@ impl fmt::Display for Week {
 
 /// The UTC date of `ms`, in Unix milliseconds, as `YYYY-MM-DD` (Howard Hinnant's
 /// `civil_from_days`).
-fn date(ms: u64) -> String {
+pub(crate) fn date(ms: u64) -> String {
     let days = ms / DAY + 719_468;
     let (era, day_of_era) = (days / 146_097, days % 146_097);
     let year_of_era =

@@ -32,8 +32,8 @@ This builds `target/release/bundle/macos/Studio.app` with an ad-hoc signature (`
 
 `cargo test` runs:
 
-- `core/tests/`: hook events replayed through the core: what the pane shows and the two recorded logs (`replay`), the session list, its states and the selection on the recorded day (`sessions`), needs you (`needs_you`), notifications: their triggers, text and combining (`notices`), checks and guesses (`checks`), and cards at `Stop` and where the shell fingerprints (`cards`);
-- `understanding/tests/`: the `claude -p` command, built but never run, the `claude` lookup with a stand-in shell, the writer's replies and its retry (`writer`); the fingerprint against real `git` in temporary repositories (`fingerprint`); the core, the fingerprint and a fake writer joined as the shell joins them (`prompt_cards`); the card store, its move aside and its split at 30 minutes (`store`); the weekly rates (`week`);
+- `core/tests/`: hook events replayed through the core: what the pane shows and the two recorded logs (`replay`), the session list, its states and the selection on the recorded day (`sessions`), needs you (`needs_you`), notifications: their triggers, text and combining (`notices`), checks and guesses (`checks`), cards at `Stop` and where the shell fingerprints (`cards`), and wake-ups and the ask for Claude Code's version (`wake_ups`);
+- `understanding/tests/`: the `claude -p` command, built but never run, the `claude` lookup with a stand-in shell, the writer's replies and its retry (`writer`); the fingerprint against real `git` in temporary repositories (`fingerprint`); the core, the fingerprint and a fake writer joined as the shell joins them (`prompt_cards`); the card store, its move aside and its split at 30 minutes (`store`); the weekly rates (`week`); the version read from a transcript, its notice and `weekly`'s drift lines (`drift`);
 - the unit tests of the event log's path (`hook`), of what `scrub` keeps (`studio-core`) and of the weekly rates' dates (`understanding`).
 
 It leaves out the shell, which needs `dist/` from `npm run build`.
@@ -72,6 +72,12 @@ Re-record the second when Claude Code's version changes. The script runs a neste
 
 Quit the studio app first: it would take the session as live and ask for cards. The script builds `studio-hook`, runs the session with this checkout's plugin, and scrubs the session's events from the event log into the fixture. Before you commit the new fixture, run `cargo test` and check that each text it keeps is a label, an id or a path.
 
+The app tells you when the version changed. At a session's first `Stop`, it reads Claude Code's version from the session's transcript, the `.jsonl` file at the event's `transcript_path`, and opens no other file. It keeps each new version, with when it was first seen, in `claude-versions.txt` beside the event log. A version that differs from the last one kept shows a one-line notice at the top of the pane, one line on stderr, and a line in `weekly`. The first version kept has nothing to compare with, so it shows nothing.
+
+## Wake-ups
+
+When a subagent or a background command returns, Claude Code sends its parent a prompt that names the task's id in markup: `<agent-message from="…">` or `<task-notification><task-id>…</task-id>`. A prompt that names a task id the session knows, from a spawn's response, a background command's response or `Stop`'s `background_tasks`, that way is a wake-up, never your prompt. The session's row reads "worker … returned" until its next step. A known id in plain text ("check what a1191 did") is your prompt. A known id in any other markup is your prompt too, logs one line on stderr and counts in `weekly`: Claude Code may have changed its markup.
+
 ## The card store
 
 `cards-v2.json` beside the event log: each card with the change it explains, its base (`request.base`: the `HEAD` sha and the files `git status` listed) and its record, in Unix milliseconds: `added_at`, when the card arrived; `shown_at`, when the pane first drew its question while the window was visible; and `revealed_at`, when you first opened it. Each is `null` until then. A missing store starts empty. The app writes it whole to a temporary file and renames it into place, so a crash mid-write keeps the previous store. On the first start after cards came to cover a prompt's whole change (#374), the app moves the old store, `cards.json`, to `cards-v1.json`, never over one already there, and starts the new store empty; `weekly` does the same.
@@ -88,6 +94,11 @@ The app shows no rate, score or tally. Once a week, print the rates of the cards
 - thinking rate: of the cards you opened, the share you opened 3 s or more after their question showed;
 - surprise rate: of the guesses that settled, the share that were wrong; no tap and an unknown verdict do not settle;
 - unknown rate: of the check cards, the share whose `passed` was unknown. A high rate argues for a `pipefail` instruction to agents.
+
+Then the drift in Claude Code over the same 7 days, from the event log and `claude-versions.txt`:
+
+- unrecognised wake-ups: the prompts that named a known task id in markup the studio does not know (see "Wake-ups");
+- one line per version change, with its date.
 
 A rate with nothing to count prints `n/a`. Checks are no cards since #374, so the surprise and unknown rates print `n/a` until #375 replaces the guess. To record your one-line verdict on the questions, add it after `--`:
 
