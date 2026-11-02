@@ -18,6 +18,10 @@ The time Daniel waits on an agent: from his prompt until the agent ends its turn
 An explanation, in the explanation language, of what a prompt changed, or what a worker changed, since the previous card. It opens with a quiz, and offers "explain more" and a rating.
 _Avoid_: Summary (read after the work, with no question first)
 
+**Base**:
+The state of a worktree that the next card's change is measured from: its commit and its files when the previous card was written, or when the prompt or worker began. A move of the commit that is not the agent's own work moves the base instead of adding to the change.
+_Avoid_: Snapshot, checkpoint (the engine's term)
+
 **Quiz**:
 A card's multiple-choice question on the change's logic or design, with the card writer's key, which grades Daniel's guess.
 _Avoid_: Question (an agent's question to Daniel)
