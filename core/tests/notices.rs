@@ -2,7 +2,8 @@
 //! core and check its notices. Each belongs to a top-level session and names the subagent it comes
 //! from (#369, decision 22).
 
-use studio_core::{Notifications, Output, Studio};
+use std::time::Duration;
+use studio_core::{Notifications, Output, State, Studio};
 
 /// The scripted session of `record-subagent-run.sh` (#370): a worktree worker completes, and a
 /// helper is stopped mid-step (line 25 says `killed`).
@@ -104,23 +105,29 @@ fn a_folder_ending_in_a_slash_shows_its_whole_cwd() {
     assert_eq!(session.folder_name, "/Users/danielrispler/work/Falinks/");
 }
 
-/// The notification due at `now`, from a window that is not focused.
-fn due(notifications: &mut Notifications, now: u64) -> Option<(String, String)> {
-    notifications.due(now, || false)
+/// `ms` milliseconds after the app started, on the monotonic clock the notices are combined on
+/// (#434, decision 28).
+fn at(ms: u64) -> Duration {
+    Duration::from_millis(ms)
+}
+
+/// The notification due at `ms`, from a window that is not focused, with no session needing Daniel.
+fn due(notifications: &mut Notifications, ms: u64) -> Option<(String, String)> {
+    notifications.due(at(ms), || false, |_| false)
 }
 
 #[test]
 fn notices_within_3_seconds_of_the_first_give_one_notification() {
     let mut notifications = Notifications::default();
-    notifications.push("Needs you", "Falinks e3b1c7a2".into(), 10_000);
-    notifications.push("New card", "Falinks 5d7f69ab".into(), 11_500);
+    notifications.push("Worker failed", "Falinks e3b1c7a2".into(), at(10_000));
+    notifications.push("New card", "Falinks 5d7f69ab".into(), at(11_500));
 
     assert_eq!(due(&mut notifications, 12_999), None);
     assert_eq!(
         due(&mut notifications, 13_000),
         Some((
             "2 notices".into(),
-            "Needs you: Falinks e3b1c7a2\nNew card: Falinks 5d7f69ab".into()
+            "Worker failed: Falinks e3b1c7a2\nNew card: Falinks 5d7f69ab".into()
         ))
     );
     assert_eq!(due(&mut notifications, 20_000), None);
@@ -129,7 +136,7 @@ fn notices_within_3_seconds_of_the_first_give_one_notification() {
     notifications.push(
         "Worker failed",
         "Falinks 5d7f69ab · Implement #355".into(),
-        21_000,
+        at(21_000),
     );
     assert_eq!(
         due(&mut notifications, 24_000),
@@ -143,9 +150,47 @@ fn notices_within_3_seconds_of_the_first_give_one_notification() {
 #[test]
 fn a_focused_window_gets_no_notification() {
     let mut notifications = Notifications::default();
-    notifications.push("Needs you", "Falinks e3b1c7a2".into(), 10_000);
+    notifications.push("New card", "Falinks e3b1c7a2".into(), at(10_000));
 
     // Daniel is looking at the list, so the notice is dropped, not held for later.
-    assert_eq!(notifications.due(13_000, || true), None);
+    assert_eq!(notifications.due(at(13_000), || true, |_| false), None);
     assert_eq!(due(&mut notifications, 14_000), None);
+}
+
+/// `permission-write.jsonl`'s session: a `Write` waits on Daniel's permission (line 3), and he
+/// allows it (line 5).
+const PERMISSION: &str = include_str!("fixtures/permission-write.jsonl");
+
+/// The notification due 3 seconds after the log's first `upto` lines arrive live, each queued as
+/// the shell queues it, with the window unfocused.
+fn needs_you_notification(upto: usize) -> Option<(String, String)> {
+    let mut studio = Studio::default();
+    let mut notifications = Notifications::default();
+    for line in PERMISSION.lines().take(upto) {
+        for output in studio.apply(line) {
+            if let Output::NeedsYou { session_id, agent } = output {
+                let body = studio.notice_body(&session_id, agent.as_deref());
+                notifications.push_needs_you(&session_id, body, at(1_000));
+            }
+        }
+    }
+    let needs_you = |id: &str| {
+        studio
+            .session(id)
+            .is_some_and(|s| s.state == State::NeedsYou)
+    };
+    notifications.due(at(4_000), || false, needs_you)
+}
+
+#[test]
+fn a_needs_you_notice_shows_while_its_session_still_needs_you() {
+    assert_eq!(
+        needs_you_notification(3),
+        Some(("Needs you".into(), "Falinks 7f3c2a9e".into()))
+    );
+}
+
+#[test]
+fn a_permission_answered_within_3_seconds_shows_no_needs_you_notice() {
+    assert_eq!(needs_you_notification(5), None);
 }

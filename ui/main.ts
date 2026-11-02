@@ -37,7 +37,8 @@ type Prompt = { at: number; sender: Sender };
 // An AskUserQuestion call, as the tool input gives it, with Daniel's choice for each question by its text
 // once he answers in the terminal.
 type Choice = { label: string; description?: string };
-type Asked = { question: string; header?: string; options: Choice[] };
+// A multi-select answer joins its labels with ", "; a single-choice answer is one whole label.
+type Asked = { question: string; header?: string; multiSelect?: boolean; options: Choice[] };
 type Answer = "open" | "not_answered" | { answered: Record<string, string> };
 type Question = { agent: string | null; questions: Asked[]; answer: Answer };
 type Session = {
@@ -172,9 +173,14 @@ function childrenOf(session: Session): Children {
   return children;
 }
 
+// Whether a subagent's line is not drawn: it faded, and nothing below it is drawn (#434, decision 43).
+function hidden(children: Children, agent: Subagent): boolean {
+  return agent.faded && (children.get(agent.id) ?? []).every((child) => hidden(children, child));
+}
+
 // The count of a parent's helpers that faded into its line.
-function done(children: Subagent[] = []): HTMLElement[] {
-  const faded = children.filter((agent) => agent.faded).length;
+function done(all: Children, children: Subagent[] = []): HTMLElement[] {
+  const faded = children.filter((agent) => hidden(all, agent)).length;
   return faded ? [text("span", `${faded} done`, "id")] : [];
 }
 
@@ -189,10 +195,19 @@ function row(session: Session, children: Children): HTMLElement {
     text("span", session.folder_name, "name"),
     text("span", session.id.slice(0, 8), "id"),
     state,
-    ...done(children.get("session")),
-    text("span", session.line ?? "", "row-step"),
+    ...done(children, children.get("session")),
+    rowLine(session.line ?? ""),
   );
   return button;
+}
+
+// A row's line, such as a Hebrew card summary, laid out by its own direction, its code spans
+// cleaned as a card's are (#434, decision 40).
+function rowLine(line: string): HTMLElement {
+  const node = hebrew("span", line);
+  node.className = "row-step";
+  node.dir = "auto";
+  return node;
 }
 
 // A subagent's line, indented under the agent that spawned it. A worker shows its task, status and
@@ -215,21 +230,22 @@ function agentRow(session: Session, children: Children, agent: Subagent, depth: 
   button.append(
     text("span", agent.name, "name"),
     state,
-    ...done(children.get(agent.id)),
-    text("span", details.filter(Boolean).join(" · "), "row-step"),
+    ...done(children, children.get(agent.id)),
+    rowLine(details.filter(Boolean).join(" · ")),
   );
   return button;
 }
 
 // A session's row, then its subagents under the agent that spawned them, at any depth, and those
-// with no known spawn under "Unattached". A faded helper is not drawn; its parent's line counts it.
+// with no known spawn under "Unattached". A faded helper is not drawn, and its parent's line counts
+// it, unless anything below it is drawn: then it keeps its line, so its children stay under it.
 function tree(session: Session): HTMLElement[] {
   const children = childrenOf(session);
   const nested = (parent: string, depth: number): HTMLElement[] =>
-    (children.get(parent) ?? []).flatMap((agent) => [
-      ...(agent.faded ? [] : [agentRow(session, children, agent, depth)]),
-      ...nested(agent.id, depth + 1),
-    ]);
+    (children.get(parent) ?? []).flatMap((agent) => {
+      const below = nested(agent.id, depth + 1);
+      return [...(hidden(children, agent) ? [] : [agentRow(session, children, agent, depth)]), ...below];
+    });
   const unattached = nested("unattached", 2);
   const label = text("p", "Unattached", "unattached");
   return [row(session, children), ...nested("session", 1), ...(unattached.length ? [label, ...unattached] : [])];
@@ -322,7 +338,9 @@ function questionElement({ questions, answer }: Question): HTMLElement {
       ...asked.options.map((choice) => {
         const item = document.createElement("li");
         item.append(text("span", choice.label, "label"), text("span", choice.description ?? "", "description"));
-        item.classList.toggle("chosen", chosen?.split(", ").includes(choice.label) ?? false);
+        // A label may hold a comma, so only a multi-select answer is split (#434, decision 41).
+        const labels = asked.multiSelect ? chosen?.split(", ") : [chosen];
+        item.classList.toggle("chosen", labels?.includes(choice.label) ?? false);
         return item;
       }),
     );

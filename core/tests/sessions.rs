@@ -122,6 +122,8 @@ fn the_days_sessions_change_state_only_by_their_named_setters_and_clearers() {
         // A session starts at your turn, before its first prompt.
         (None, YourTurn, "SessionStart"),
         (Some(YourTurn), Running, "UserPromptSubmit"),
+        // A queued prompt's turn starts at its first step, under a new prompt id (#434, decision 3).
+        (Some(YourTurn), Running, "PreToolUse"),
         (Some(Running), YourTurn, "Stop"),
         // An `AskUserQuestion` or `ExitPlanMode`, and a `Stop` that asks.
         (Some(Running), NeedsYou, "PreToolUse"),
@@ -133,7 +135,7 @@ fn the_days_sessions_change_state_only_by_their_named_setters_and_clearers() {
         (Some(Idle), Running, "UserPromptSubmit"),
         (Some(YourTurn), Ended, "SessionEnd"),
     ];
-    let named: [Change; 10] = named.map(|(from, to, cause)| (from, to, cause.into()));
+    let named: [Change; 11] = named.map(|(from, to, cause)| (from, to, cause.into()));
     assert_eq!(changes, BTreeSet::from(named));
 }
 

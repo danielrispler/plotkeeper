@@ -11,7 +11,7 @@ use std::{
     path::{Path, PathBuf},
     time::UNIX_EPOCH,
 };
-use studio_core::{CardRequest, Session, Step};
+use studio_core::{CardRequest, LiveFacts, Session, Step, Studio};
 
 /// A card in the store, with the change it explains and its base, and its record: when it was added,
 /// when its quiz showed, Daniel's guess, his flag on the key, his rating and the longer explanation he
@@ -169,6 +169,9 @@ pub struct CardStore {
     path: PathBuf,
     cards: Vec<StoredCard>,
     briefs: BTreeMap<String, Brief>,
+    /// What the live app learned that the event log does not hold, in `live-facts.json` beside the
+    /// cards (#434, decision 37).
+    facts: LiveFacts,
     /// Rises on every change, briefs included, so the shell sends the cards only when it moves.
     revision: u64,
 }
@@ -188,10 +191,12 @@ impl CardStore {
     pub fn open(path: PathBuf) -> io::Result<Self> {
         let cards = read(&path)?;
         let briefs = read(&path.with_file_name("briefs.json"))?;
+        let facts = read(&path.with_file_name("live-facts.json"))?;
         Ok(CardStore {
             path,
             cards,
             briefs,
+            facts,
             revision: 0,
         })
     }
@@ -382,6 +387,38 @@ impl CardStore {
             return self.save();
         }
         Ok(())
+    }
+
+    /// The live-only facts kept so far.
+    pub fn facts(&self) -> &LiveFacts {
+        &self.facts
+    }
+
+    /// Records that helper `id` became a worker (`Output::Promoted`), and saves the facts.
+    pub fn promoted(&mut self, id: &str) -> io::Result<()> {
+        if self.facts.promoted.insert(id.into()) {
+            return self.save_facts();
+        }
+        Ok(())
+    }
+
+    /// Records that Daniel opened failed line `id` (`Studio::open`), and saves the facts.
+    pub fn opened(&mut self, id: &str) -> io::Result<()> {
+        if self.facts.opened.insert(id.into()) {
+            return self.save_facts();
+        }
+        Ok(())
+    }
+
+    /// Applies the live-only facts and the cards to `studio` after its replay (#434, decisions 37
+    /// and 38).
+    pub fn restore(&self, studio: &mut Studio) {
+        let requests: Vec<CardRequest> = self.cards.iter().map(|k| k.request.clone()).collect();
+        studio.restore(&self.facts, &requests);
+    }
+
+    fn save_facts(&self) -> io::Result<()> {
+        write(&self.path.with_file_name("live-facts.json"), &self.facts)
     }
 
     /// Card `id`, to record on.

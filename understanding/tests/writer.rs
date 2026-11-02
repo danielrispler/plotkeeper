@@ -2,10 +2,20 @@
 //! without running it, the cards, their quizzes and the updated brief come from its reply, and a
 //! fake that fails is retried.
 
-use std::{cell::Cell, ffi::OsStr, fs, os::unix::fs::PermissionsExt, path::Path};
+use std::{
+    cell::Cell,
+    ffi::OsStr,
+    fs,
+    os::unix::fs::PermissionsExt,
+    path::Path,
+    process::{Command, Stdio},
+    sync::Mutex,
+    time::Duration,
+};
 use studio_core::{Base, CardRequest};
 use studio_understanding::{
-    Card, CardWriter, Choice, ClaudeWriter, FakeWriter, Quiz, find_claude, write_card,
+    Card, CardStore, CardWriter, Choice, ClaudeWriter, FakeWriter, Quiz, explain_more, find_claude,
+    write_card,
 };
 
 const CLAUDE: &str = "/opt/homebrew/bin/claude";
@@ -73,7 +83,7 @@ impl CardWriter for Failing {
 fn written(writer: &impl CardWriter) -> (Option<Card>, Vec<String>) {
     let mut lines = Vec::new();
     let card = write_card(writer, &edit(), &[], "", |line| lines.push(line));
-    (card.map(|(card, _)| card), lines)
+    (card.map(|(card, _)| sorted(card)), lines)
 }
 
 #[test]
@@ -152,12 +162,24 @@ const GOOD: &str = concat!(
 /// `GOOD`'s brief.
 const BRIEF: &str = "הסשן מתקן את עיצוב הכרטיס.\nשורת „לא נבדק” גדלה ל־`15px`.";
 
+/// `card` with its quiz's options in the order of their text, the key moved with them, so cards
+/// compare whatever order the shuffle gave.
+fn sorted(mut card: Card) -> Card {
+    if let Some(quiz) = &mut card.quiz {
+        let right = quiz.options[quiz.key].clone();
+        quiz.options.sort_by(|a, b| a.text.cmp(&b.text));
+        quiz.key = quiz.options.iter().position(|o| *o == right).unwrap();
+    }
+    card
+}
+
+/// The card in `GOOD`, its options sorted.
 fn good_card() -> Card {
     let choice = |text: &str, why: &str| Choice {
         text: text.into(),
         why: why.into(),
     };
-    Card {
+    let card = Card {
         summary: "הגופן של שורת „לא נבדק” גדל ל־`15px`.".into(),
         explanation:
             "הסוכן הגדיל את `font-size` של `.unchecked` כדי שאפשר יהיה לקרוא את שורת „לא נבדק” בלי מאמץ."
@@ -185,12 +207,40 @@ fn good_card() -> Card {
             ],
             key: 0,
         }),
-    }
+    };
+    sorted(card)
 }
 
 #[test]
 fn a_good_reply_gives_the_card_with_its_quiz_options_key_and_reasons() {
     assert_eq!(written(&Replying(GOOD.into())), (Some(good_card()), vec![]));
+}
+
+#[test]
+fn the_app_shuffles_the_quizs_options_and_the_key_and_reasons_move_with_them() {
+    let right = "כי רק השורה הזו הייתה קטנה מדי לקריאה.";
+    let mut keys = std::collections::BTreeSet::new();
+    for _ in 0..60 {
+        let (card, _) = Card::from_reply(GOOD).unwrap();
+        let quiz = card.quiz.clone().unwrap();
+
+        assert_eq!(quiz.options[quiz.key].text, right);
+        assert_eq!(sorted(card), good_card());
+        keys.insert(quiz.key);
+    }
+    assert_eq!(keys.len(), 3, "{keys:?}");
+}
+
+#[test]
+fn the_writer_places_no_option_and_never_names_options_by_letter() {
+    let folder = Path::new("/h/Library/Application Support/dev.falinks.studio/card-writer");
+    let (_, prompt) = ClaudeWriter::new(CLAUDE.into(), folder.into()).command(&edit(), &[], "");
+
+    assert!(!prompt.contains("random place"), "{prompt}");
+    assert!(
+        prompt.contains("never refer to an option by its letter"),
+        "{prompt}"
+    );
 }
 
 #[test]
@@ -210,12 +260,14 @@ fn a_reply_with_an_architecture_section_gives_the_card_that_section() {
 #[test]
 fn the_card_call_returns_the_brief_updated_and_one_with_none_logs_one_line() {
     let updated = write_card(&Replying(GOOD.into()), &edit(), &[], "", |l| panic!("{l}"));
+    let updated = updated.map(|(card, brief)| (sorted(card), brief));
     assert_eq!(updated, Some((good_card(), Some(BRIEF.into()))));
 
     let no_brief = GOOD.replace(r#""brief""#, r#""other""#);
     let mut lines = Vec::new();
     let written = write_card(&Replying(no_brief), &edit(), &[], "", |l| lines.push(l));
 
+    let written = written.map(|(card, brief)| (sorted(card), brief));
     assert_eq!(written, Some((good_card(), None)));
     let [line] = &lines[..] else {
         panic!("one log line: {lines:?}");
@@ -257,7 +309,8 @@ fn the_real_writer_runs_claude_on_the_subscription_in_its_neutral_folder() {
     let folder = Path::new("/h/Library/Application Support/dev.falinks.studio/card-writer");
     let earlier = ["`Card` קיבל שדה `summary`.".to_string()];
     let brief = "הסשן מוסיף תקציר לכל סשן.\nהכותב מחזיר את התקציר.";
-    let command = ClaudeWriter::new(CLAUDE.into(), folder.into()).command(&edit(), &earlier, brief);
+    let (command, prompt) =
+        ClaudeWriter::new(CLAUDE.into(), folder.into()).command(&edit(), &earlier, brief);
 
     assert_eq!(command.get_program(), CLAUDE);
     // Both keys would take precedence over the subscription login, and without the plugin the
@@ -276,10 +329,8 @@ fn the_real_writer_runs_claude_on_the_subscription_in_its_neutral_folder() {
         .get_args()
         .map(|arg| arg.to_str().unwrap())
         .collect();
-    // The change is untrusted text: no tools and no MCP servers.
-    assert_eq!(args[..4], ["--tools", "", "--strict-mcp-config", "-p"]);
-    assert!(!args.contains(&"--bare"));
-    let prompt = args[4];
+    // The change is untrusted text: no tools and no MCP servers. The prompt goes on standard input.
+    assert_eq!(args, ["--tools", "", "--strict-mcp-config", "-p"]);
     assert!(prompt.contains("multiple-choice question on the change's logic or design"));
     // The architecture section reads the prompt's earlier cards; the brief is updated.
     assert!(prompt.contains(&format!("earlier cards, oldest first:\n- {}\n", earlier[0])));
@@ -301,11 +352,8 @@ fn an_oversized_rewrite_cuts_the_oldest_prompts_first_and_keeps_every_summary() 
     let summaries: Vec<String> = (0..200).map(|i| format!("summary {i}")).collect();
     let diffstat = " core/src/lib.rs | 12 ++++++------\n 1 file changed\n";
 
-    let command = writer.rewrite_command(&prompts, &summaries, diffstat);
+    let (_, prompt) = writer.rewrite_command(&prompts, &summaries, diffstat);
 
-    let args: Vec<_> = command.get_args().map(|a| a.to_str().unwrap()).collect();
-    assert_eq!(args[..4], ["--tools", "", "--strict-mcp-config", "-p"]);
-    let prompt = args[4];
     assert!(
         prompt.contains("rewrite from scratch the brief"),
         "{prompt}"
@@ -322,23 +370,82 @@ fn an_oversized_rewrite_cuts_the_oldest_prompts_first_and_keeps_every_summary() 
 }
 
 #[test]
+fn a_rewrite_whose_newest_prompt_alone_is_over_the_budget_keeps_its_start() {
+    let folder = Path::new("/h/Library/Application Support/dev.falinks.studio/card-writer");
+    let writer = ClaudeWriter::new(CLAUDE.into(), folder.into());
+    // A pasted log of 100 KiB.
+    let pasted = format!("Why does this fail?\n{}", "x".repeat(100 << 10));
+
+    let (_, prompt) = writer.rewrite_command(&["Add a", &pasted], &["summary".into()], "");
+
+    assert!(!prompt.contains("Add a"), "{prompt}");
+    assert!(
+        prompt.contains("<prompt>\nWhy does this fail?\nxxx"),
+        "{prompt}"
+    );
+    assert!(prompt.contains("- summary\n"));
+    assert!(prompt.len() < 70 << 10, "{}", prompt.len());
+}
+
+#[test]
+fn a_rewrite_whose_summaries_fill_the_budget_still_keeps_the_newest_prompts_start() {
+    let folder = Path::new("/h/Library/Application Support/dev.falinks.studio/card-writer");
+    let writer = ClaudeWriter::new(CLAUDE.into(), folder.into());
+    // 2,000 summaries of about 40 bytes each, 80 KiB in all.
+    let summaries: Vec<String> = (0..2_000)
+        .map(|i| format!("summary {i:04} of a long session's card"))
+        .collect();
+
+    let (_, prompt) = writer.rewrite_command(&["Why does this fail?"], &summaries, "");
+
+    assert!(
+        prompt.contains("<prompt>\nWhy does this fail?\n"),
+        "{}",
+        &prompt[..500]
+    );
+}
+
+#[test]
 fn explain_more_runs_the_same_writer_on_the_cards_explanation_and_its_change() {
     let folder = Path::new("/h/Library/Application Support/dev.falinks.studio/card-writer");
     let writer = ClaudeWriter::new(CLAUDE.into(), folder.into());
     let card = good_card();
 
-    let more = writer.more_command(&edit(), &card);
+    let (more, prompt) = writer.more_command(&edit(), &card);
 
-    let card_run = writer.command(&edit(), &[], "");
+    let (card_run, _) = writer.command(&edit(), &[], "");
     assert_eq!(more.get_program(), card_run.get_program());
     assert!(more.get_envs().eq(card_run.get_envs()));
+    assert!(more.get_args().eq(card_run.get_args()));
     assert_eq!(more.get_current_dir(), Some(folder));
-    let args: Vec<_> = more.get_args().map(|arg| arg.to_str().unwrap()).collect();
-    assert_eq!(args[..4], ["--tools", "", "--strict-mcp-config", "-p"]);
-    let prompt = args[4];
     assert!(prompt.contains("in more depth than the card"), "{prompt}");
     assert!(prompt.contains(&card.explanation), "{prompt}");
     assert!(prompt.ends_with(&format!("\nChange:\n{}", edit().diff())));
+}
+
+#[test]
+fn explain_more_on_a_card_built_from_workers_tells_the_writer_there_is_no_diff() {
+    let folder = Path::new("/h/Library/Application Support/dev.falinks.studio/card-writer");
+    let writer = ClaudeWriter::new(CLAUDE.into(), folder.into());
+    let workers = CardRequest {
+        change: Some("No diff: the agent changed nothing itself since its last card. Its workers, each with its status and the summaries of its cards since then:\n- `Implement #378` (completed): `a.rs` נוסף.\n".into()),
+        ..edit()
+    };
+
+    let (_, prompt) = writer.more_command(&workers, &good_card());
+
+    let (_, card) = writer.command(&workers, &[], "");
+    let clause = card
+        .lines()
+        .find(|line| line.starts_with("When the change is not a diff"))
+        .unwrap();
+    assert!(clause.contains("how the work was split"), "{clause}");
+    assert!(prompt.contains("When the change is not a diff"), "{prompt}");
+    assert!(
+        prompt.contains("how the work was split and what came back"),
+        "{prompt}"
+    );
+    assert!(prompt.ends_with(workers.diff()));
 }
 
 #[test]
@@ -349,9 +456,8 @@ fn a_huge_change_is_cut_so_the_prompt_stays_small() {
         change: Some(format!("+{}\n", "א".repeat(100_000))),
         ..edit()
     };
-    let command = ClaudeWriter::new(CLAUDE.into(), folder.into()).command(&request, &[], "");
+    let (_, prompt) = ClaudeWriter::new(CLAUDE.into(), folder.into()).command(&request, &[], "");
 
-    let prompt = command.get_args().last().unwrap().to_str().unwrap();
     assert!(prompt.len() < 70 << 10, "{}", prompt.len());
     assert!(prompt.ends_with(" more bytes cut]"));
 }
@@ -398,4 +504,100 @@ fn a_reply_that_does_not_parse_gives_no_card_and_one_log_line() {
         let line = Card::from_reply(reply).expect_err(reply);
         assert_eq!(line.lines().count(), 1, "{line}");
     }
+}
+
+/// The writer on a stub `claude` in `dir` that runs `script`, stopped after one second.
+fn stub(dir: &Path, script: &str) -> ClaudeWriter {
+    let claude = shell(dir, "claude", script);
+    ClaudeWriter::new(claude, dir.into()).with_timeout(Duration::from_secs(1))
+}
+
+/// A store in `dir` that holds `good_card()` on `edit()`.
+fn stored(dir: &Path) -> Mutex<CardStore> {
+    let mut store = CardStore::open(dir.join("cards.json")).unwrap();
+    store.add(edit(), good_card(), 1).unwrap();
+    Mutex::new(store)
+}
+
+/// Whether process `pid` still runs, given a moment to go once it was stopped.
+fn running(pid: &str) -> bool {
+    (0..50).all(|_| {
+        let kill = Command::new("kill")
+            .args(["-0", pid])
+            .stderr(Stdio::null())
+            .status();
+        let alive = kill.unwrap().success();
+        alive && {
+            std::thread::sleep(Duration::from_millis(20));
+            true
+        }
+    })
+}
+
+#[test]
+fn a_claude_that_fails_prints_nothing_or_hangs_gives_nothing_keeps_nothing_and_leaves_nothing_running()
+ {
+    let scripts = [
+        "echo 'Not logged in'; exit 1",
+        "cat > /dev/null",
+        // A hung call whose own child also hangs.
+        "sleep 600 & echo $! > child; sleep 600",
+    ];
+    for script in scripts {
+        let dir = tempfile::tempdir().unwrap();
+        let store = stored(dir.path());
+        let mut lines = Vec::new();
+
+        let more = explain_more(&store, &stub(dir.path(), script), &edit().id, |l| {
+            lines.push(l)
+        });
+
+        assert_eq!(more, None, "{script}");
+        assert_eq!(store.lock().unwrap().cards()[0].more, None, "{script}");
+        let [line] = &lines[..] else {
+            panic!("one log line on {script}: {lines:?}");
+        };
+        assert_eq!(line.lines().count(), 1, "{line}");
+        if let Ok(child) = fs::read_to_string(dir.path().join("child")) {
+            assert!(!running(child.trim()), "{script}");
+        }
+    }
+}
+
+#[test]
+fn explain_more_after_a_failed_call_asks_the_writer_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = stored(dir.path());
+    // Fails on its first call, then explains.
+    let writer = stub(
+        dir.path(),
+        "cat > /dev/null; [ -e called ] || { touch called; exit 1; }; echo 'הסבר ארוך'",
+    );
+    let log = |_| {};
+
+    assert_eq!(explain_more(&store, &writer, &edit().id, log), None);
+    assert_eq!(
+        explain_more(&store, &writer, &edit().id, log).as_deref(),
+        Some("הסבר ארוך")
+    );
+}
+
+#[test]
+fn a_change_holding_nul_bytes_reaches_the_writer_on_standard_input_and_gets_a_card() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("reply"), GOOD).unwrap();
+    let writer = stub(dir.path(), "cat > input; cat reply");
+    let request = CardRequest {
+        change: Some("+++ b/data.bin\n+a\0b\n".into()),
+        ..edit()
+    };
+
+    let card = write_card(&writer, &request, &[], "", |l| panic!("{l}"));
+
+    assert!(card.is_some());
+    let input = fs::read_to_string(dir.path().join("input")).unwrap();
+    assert!(
+        input.ends_with("\nChange:\n+++ b/data.bin\n+ab\n"),
+        "{input}"
+    );
 }

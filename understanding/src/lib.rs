@@ -4,9 +4,14 @@
 //! (#369, decisions 7, 9 and 23).
 use serde::{Deserialize, Serialize};
 use std::{
+    hash::{BuildHasher, Hasher, RandomState},
+    io::{Read, Write},
+    os::unix::process::CommandExt,
     path::{Path, PathBuf},
-    process::Command,
-    sync::Mutex,
+    process::{Command, Stdio},
+    sync::{Mutex, mpsc},
+    thread,
+    time::{Duration, Instant},
 };
 use studio_core::{CardRequest, Kind, Session, Status};
 
@@ -15,7 +20,7 @@ mod fingerprint;
 mod store;
 mod week;
 pub use drift::{Drift, Versions, drift};
-pub use fingerprint::{Fingerprints, fingerprint_changes};
+pub use fingerprint::{Fingerprints, fingerprint_changes, worktree_root};
 pub use store::{
     Brief, CardStore, Guess, Level, Rating, Reason, Row, SessionCards, StoredCard, millis,
 };
@@ -70,14 +75,23 @@ pub struct Choice {
 }
 
 impl Quiz {
-    /// The quiz in `value`, or why it is unusable: it does not parse, or its key names none of two
-    /// or more options.
+    /// The quiz in `value`, its options shuffled with the key and reasons moving with them, as the
+    /// writer places the right one unevenly (#434, decision 36); or why it is unusable: it does not
+    /// parse, or its key names none of two or more options.
     fn from_value(value: serde_json::Value) -> Result<Quiz, String> {
-        let quiz: Quiz = serde_json::from_value(value).map_err(|e| e.to_string())?;
+        let mut quiz: Quiz = serde_json::from_value(value).map_err(|e| e.to_string())?;
         let options = quiz.options.len();
         if options < 2 || quiz.key >= options {
             return Err(format!("key {} of {options} options", quiz.key));
         }
+        let right = quiz.options[quiz.key].clone();
+        // Fisher-Yates, on the random keys std gives each hasher.
+        for last in (1..options).rev() {
+            let random = RandomState::new().build_hasher().finish();
+            quiz.options
+                .swap(last, (random % (last as u64 + 1)) as usize);
+        }
+        quiz.key = quiz.options.iter().position(|o| *o == right).unwrap();
         Ok(quiz)
     }
 }
@@ -148,13 +162,16 @@ const REWRITE_EVERY: u32 = 5;
 /// of its prompt and the brief of its owner, the worker or else the session, which the same reply
 /// updates, and both go in `store`. A card with no change is a session's that changed nothing
 /// itself: it is written from its workers' card summaries instead (`workers`). Every 5th update then
-/// rewrites the brief from scratch (`rebrief`). The store is not locked while the writer runs,
-/// which takes seconds. Each problem is one line for `log`. Returns whether a card was added.
+/// rewrites the brief from scratch (`rebrief`), after `stored` runs on the card stored, so the
+/// shell sends the list and the "New card" notice first (#434, decision 32). The store is not
+/// locked while the writer runs, which takes seconds. Each problem is one line for `log`. Returns
+/// whether a card was added.
 pub fn write_stop(
     store: &Mutex<CardStore>,
     writer: &(impl CardWriter + ?Sized),
     mut request: CardRequest,
     session: &Session,
+    stored: impl FnOnce(),
     mut log: impl FnMut(String),
 ) -> bool {
     let owner = request.owner().to_owned();
@@ -187,6 +204,7 @@ pub fn write_stop(
     if let Err(e) = store.lock().unwrap().add(request.clone(), card, millis()) {
         log(format!("save the card store: {e}"));
     }
+    stored();
     rebrief(
         store,
         writer,
@@ -255,7 +273,8 @@ fn workers(store: &CardStore, request: &CardRequest, session: &Session) -> Optio
         let of = cards
             .iter()
             .filter(|kept| kept.request.owner() == agent.agent.id);
-        let summaries: Vec<&str> = of.map(|kept| kept.card.summary.as_str()).collect();
+        // A card with no summary adds nothing (#434, decision 35).
+        let summaries: Vec<String> = of.filter_map(|kept| summary(kept)).collect();
         let running = agent.status == Status::Running && agent.kind == Kind::Worker;
         let name = &agent.name;
         let did = match &summaries[..] {
@@ -492,6 +511,8 @@ pub struct ClaudeWriter {
     /// The `claude` program, from `find_claude`.
     program: PathBuf,
     folder: PathBuf,
+    /// How long a call may run before it fails and is stopped (#434, decision 30).
+    timeout: Duration,
 }
 
 /// The `claude` program, as login shell `shell` finds it, or `claude` when it answers no path. An
@@ -513,7 +534,17 @@ pub fn find_claude(shell: &Path) -> PathBuf {
 
 impl ClaudeWriter {
     pub fn new(program: PathBuf, folder: PathBuf) -> Self {
-        Self { program, folder }
+        let timeout = Duration::from_secs(5 * 60);
+        Self {
+            program,
+            folder,
+            timeout,
+        }
+    }
+
+    /// The writer with each call stopped after `timeout` instead of 5 minutes.
+    pub fn with_timeout(self, timeout: Duration) -> Self {
+        Self { timeout, ..self }
     }
 
     /// The writer for event log `log`: its neutral folder, `card-writer` beside the log, made here,
@@ -526,8 +557,14 @@ impl ClaudeWriter {
     }
 
     /// The `claude -p` run for one change's card, read with the summaries of the prompt's `earlier`
-    /// cards and the session's `brief` so far.
-    pub fn command(&self, request: &CardRequest, earlier: &[String], brief: &str) -> Command {
+    /// cards and the session's `brief` so far, with the prompt it reads on standard input, as are
+    /// all the runs below.
+    pub fn command(
+        &self,
+        request: &CardRequest,
+        earlier: &[String],
+        brief: &str,
+    ) -> (Command, String) {
         let earlier: String = match earlier {
             [] => "none\n".into(),
             summaries => summaries.iter().map(|s| format!("- {s}\n")).collect(),
@@ -541,15 +578,16 @@ impl ClaudeWriter {
     }
 
     /// The `claude -p` run that rewrites a session's brief from Daniel's `prompts`, its card
-    /// `summaries` and `diffstat`. Past `MAX_CHANGE`, the oldest prompts are cut first; the
-    /// summaries stay.
+    /// `summaries` and `diffstat`. Past `MAX_CHANGE`, the oldest prompts are cut first, and the
+    /// newest is shortened rather than cut; the summaries stay.
     pub fn rewrite_command(
         &self,
         prompts: &[&str],
         summaries: &[String],
         diffstat: &str,
-    ) -> Command {
+    ) -> (Command, String) {
         let summaries: String = summaries.iter().map(|s| format!("- {s}\n")).collect();
+        let newest = prompts.last().copied();
         let prompts: Vec<String> = prompts
             .iter()
             .map(|prompt| format!("<prompt>\n{prompt}\n</prompt>\n"))
@@ -557,7 +595,7 @@ impl ClaudeWriter {
         let mut size =
             summaries.len() + diffstat.len() + prompts.iter().map(String::len).sum::<usize>();
         let mut cut = 0;
-        while size > MAX_CHANGE && cut < prompts.len() {
+        while size > MAX_CHANGE && cut + 1 < prompts.len() {
             size -= prompts[cut].len();
             cut += 1;
         }
@@ -565,7 +603,26 @@ impl ClaudeWriter {
             0 => String::new(),
             cut => format!(" (the {cut} oldest cut)"),
         };
-        let kept = prompts[cut..].concat();
+        let mut kept = prompts[cut..].concat();
+        // The newest prompt alone over the budget is shortened, not dropped (#434, decision 33),
+        // keeping its start even when the summaries fill the budget.
+        if size > MAX_CHANGE
+            && let Some(newest) = newest
+        {
+            let keep = newest
+                .len()
+                .saturating_sub(size - MAX_CHANGE)
+                .max(MIN_PROMPT);
+            let end = newest.floor_char_boundary(keep);
+            let over = newest.len() - end;
+            kept = match over {
+                0 => kept,
+                _ => format!(
+                    "<prompt>\n{}\n[{over} more bytes cut]\n</prompt>\n",
+                    &newest[..end]
+                ),
+            };
+        }
         self.run(&format!(
             "{REWRITE}\nThe developer's prompts, oldest first{note}:\n{kept}\n\
              The card summaries, oldest first:\n{summaries}\n\
@@ -574,7 +631,7 @@ impl ClaudeWriter {
     }
 
     /// The `claude -p` run that updates a session's `brief` from `workers`, what its workers did.
-    pub fn update_command(&self, brief: &str, workers: &str) -> Command {
+    pub fn update_command(&self, brief: &str, workers: &str) -> (Command, String) {
         let brief = so_far(brief);
         self.run(&format!(
             "{UPDATE}\nThe brief so far:\n{brief}\n\n{workers}"
@@ -582,13 +639,13 @@ impl ClaudeWriter {
     }
 
     /// The `claude -p` run for "explain more" on `card`, which the writer reads with its change.
-    pub fn more_command(&self, request: &CardRequest, card: &Card) -> Command {
+    pub fn more_command(&self, request: &CardRequest, card: &Card) -> (Command, String) {
         let head = format!("{MORE}\nThe card's explanation:\n{}\n", card.explanation);
         self.claude(&head, request.diff())
     }
 
     /// The `claude -p` run on `head`, then `change`, cut at `MAX_CHANGE`.
-    fn claude(&self, head: &str, change: &str) -> Command {
+    fn claude(&self, head: &str, change: &str) -> (Command, String) {
         let kept = &change[..change.floor_char_boundary(MAX_CHANGE)];
         let cut = match change.len() - kept.len() {
             0 => String::new(),
@@ -601,34 +658,84 @@ impl ClaudeWriter {
     /// uses the subscription login (#320, "Fact"); the studio never reads that login itself. The
     /// prompt holds untrusted text, a change or Daniel's prompts, so the run has no tools and no MCP
     /// servers, whatever Daniel's settings allow. It also runs without the studio plugin, so its
-    /// session sends no hook events.
-    fn run(&self, prompt: &str) -> Command {
+    /// session sends no hook events. The prompt goes on standard input without its NUL bytes, which
+    /// `claude` could not take in an argument either (#434, decision 31).
+    fn run(&self, prompt: &str) -> (Command, String) {
         let mut command = Command::new(&self.program);
         command
             // `--tools` takes several values, so an option must follow it.
-            .args(["--tools", "", "--strict-mcp-config", "-p", prompt])
+            .args(["--tools", "", "--strict-mcp-config", "-p"])
             .env_remove("ANTHROPIC_API_KEY")
             .env_remove("ANTHROPIC_AUTH_TOKEN")
             .env_remove("CLAUDE_CODE_PLUGIN_DIRS")
             .current_dir(&self.folder);
-        command
+        (command, prompt.replace('\0', ""))
+    }
+
+    /// What a run printed, or one line for the log when the call failed: it did not start, exited
+    /// with an error, printed nothing, or ran past the timeout, which stops it and every process it
+    /// started, all in its own process group (#434, decision 30).
+    fn stdout(&self, (mut command, prompt): (Command, String)) -> Result<String, String> {
+        let mut child = command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .process_group(0)
+            .spawn()
+            .map_err(|e| format!("`claude -p` did not start: {e}"))?;
+        let (mut stdin, mut stdout) = (child.stdin.take(), child.stdout.take());
+        // Threads, so a call that reads no input or never ends cannot hold back the timeout.
+        thread::spawn(move || stdin.as_mut().map(|i| i.write_all(prompt.as_bytes())));
+        let (sender, read) = mpsc::channel();
+        thread::spawn(move || {
+            let mut out = Vec::new();
+            let _ = stdout.as_mut().map(|o| o.read_to_end(&mut out));
+            let _ = sender.send(out);
+        });
+        let deadline = Instant::now() + self.timeout;
+        let out = read.recv_timeout(self.timeout).ok();
+        let status = loop {
+            match child.try_wait() {
+                Ok(None) if out.is_some() && Instant::now() < deadline => {
+                    thread::sleep(Duration::from_millis(10))
+                }
+                Ok(status) => break status,
+                Err(_) => break None,
+            }
+        };
+        let (Some(out), Some(status)) = (out, status) else {
+            // The group's id stays taken while the unreaped call or a process holding its output
+            // lives, so this stops no one else.
+            // SAFETY: `kill` takes no pointers.
+            unsafe { libc::kill(-(child.id() as i32), libc::SIGKILL) };
+            let _ = child.wait();
+            return Err(format!(
+                "`claude -p` ran past {:?} and was stopped",
+                self.timeout
+            ));
+        };
+        let out = String::from_utf8_lossy(&out);
+        let head: String = out.trim().chars().take(300).collect();
+        match (status.success(), head.is_empty()) {
+            (false, _) => Err(format!("`claude -p` failed ({status}): {head:?}")),
+            (true, true) => Err("`claude -p` printed nothing".into()),
+            (true, false) => Ok(out.into()),
+        }
     }
 }
 
 impl CardWriter for ClaudeWriter {
     /// Runs `claude -p`, which takes seconds, so the shell calls it off its log thread.
-    // shortcut: no timeout, as in v0; add one if a stuck `claude -p` ever holds a card back.
     fn reply(
         &self,
         request: &CardRequest,
         earlier: &[String],
         brief: &str,
     ) -> Result<String, String> {
-        stdout(self.command(request, earlier, brief))
+        self.stdout(self.command(request, earlier, brief))
     }
 
     fn more(&self, request: &CardRequest, card: &Card) -> Result<String, String> {
-        stdout(self.more_command(request, card))
+        self.stdout(self.more_command(request, card))
     }
 
     fn rewrite(
@@ -637,19 +744,11 @@ impl CardWriter for ClaudeWriter {
         summaries: &[String],
         diffstat: &str,
     ) -> Result<String, String> {
-        stdout(self.rewrite_command(prompts, summaries, diffstat))
+        self.stdout(self.rewrite_command(prompts, summaries, diffstat))
     }
 
     fn update(&self, brief: &str, workers: &str) -> Result<String, String> {
-        stdout(self.update_command(brief, workers))
-    }
-}
-
-/// What `command` printed, or one line when it did not start.
-fn stdout(mut command: Command) -> Result<String, String> {
-    match command.output() {
-        Ok(output) => Ok(String::from_utf8_lossy(&output.stdout).into()),
-        Err(error) => Err(format!("`claude -p` did not start: {error}")),
+        self.stdout(self.update_command(brief, workers))
     }
 }
 
@@ -657,9 +756,11 @@ fn stdout(mut command: Command) -> Result<String, String> {
 const NOT_STRUCTURAL: &str = "structural: none";
 
 /// The most of a change the writer gets, and of a brief rewrite's input: 64 KiB. The lines that
-/// matter fit, a huge new file or log costs no more, and the prompt stays far under macOS's 1 MiB
-/// limit on a command's arguments.
+/// matter fit, and a huge new file or log costs no more.
 const MAX_CHANGE: usize = 64 << 10;
+
+/// The least of the newest prompt a brief rewrite keeps, past `MAX_CHANGE` if it must: 4 KiB.
+const MIN_PROMPT: usize = 4 << 10;
 
 /// The explanation language, one paragraph in each of the writer's instructions below. A macro, as
 /// `concat!` takes literals and no `const`.
@@ -691,8 +792,8 @@ Reply with one JSON object and nothing else:
 - not_checked: one thing the diff does not show.
 - architecture: when the change is structural, a short section on how it changes the code's structure, before and after, and why: modules, types, interfaces or files added, removed, moved or split, or a change in which parts call or depend on which. Read it with the earlier cards' summaries, so that a structural change spread over several cards counts. Otherwise exactly "structural: none".
 - quiz.text: one question on the change's logic or design that the diff answers, such as why the code works this way, what a line does, or what would break without it. Never ask whether a command, test or check will pass.
-- quiz.options: 3 or 4 options, the right one at a random place. Each wrong option is something the code could plausibly have done instead, of the right option's length and tone, so the wording gives nothing away.
-- quiz.options[].why: one line on why that option is right or wrong.
+- quiz.options: 3 or 4 options. Each wrong option is something the code could plausibly have done instead, of the right option's length and tone, so the wording gives nothing away.
+- quiz.options[].why: one line on why that option is right or wrong. The options are shown in another order, so never refer to an option by its letter or place.
 - quiz.key: the place of the right option in quiz.options, counting from 0.
 - brief: the brief so far, updated with this change: what the session set out to do, what it has done, oldest first, and what is still open, in a few short lines. Keep what still holds. Its last line says what this change did.
 
@@ -736,7 +837,9 @@ Reply with one JSON object and nothing else: {"brief": string}
 const MORE: &str = concat!(
     r#"A developer read a card that explains a change a coding agent made to his code, and asked for more. Explain the change in more depth than the card: how the changed code works, step by step, and why it was done this way and not another. Do not repeat the card.
 
-Answer from the diff below. Use only this input: do not use tools or read files.
+Answer from the change below. Use only this input: do not use tools or read files.
+
+When the change is not a diff but the agent's workers with the summaries of their cards, the agent changed nothing itself and handed the work to them: explain how the work was split and what came back, and do not invent code you were not shown.
 
 "#,
     hebrew!(),

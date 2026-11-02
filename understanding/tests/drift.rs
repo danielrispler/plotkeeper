@@ -55,6 +55,30 @@ fn a_new_version_gives_one_notice_and_one_weekly_line_and_the_same_version_again
 }
 
 #[test]
+fn two_sessions_alternating_between_two_versions_seen_give_no_notice_and_no_line() {
+    let data = tempfile::tempdir().unwrap();
+    let versions = Versions::beside(&data.path().join("events.jsonl"));
+    let old = transcript(data.path(), "a.jsonl", "2.1.309");
+    let new = transcript(data.path(), "b.jsonl", "2.1.310");
+    versions.check(&old, NOW - 3 * DAY).unwrap();
+    versions.check(&new, NOW - 2 * DAY).unwrap();
+
+    // Two terminals, one on each version, stop in turn.
+    for (at, transcript) in [&old, &new, &old, &new].into_iter().enumerate() {
+        assert_eq!(
+            versions.check(transcript, NOW - DAY + at as u64).unwrap(),
+            None
+        );
+    }
+
+    assert_eq!(
+        drift(&Studio::default(), &versions, NOW).to_string(),
+        "unrecognised wake-ups: 0\n\
+         Claude Code changed from 2.1.309 to 2.1.310 on 2025-10-27\n"
+    );
+}
+
+#[test]
 fn the_version_read_touches_only_a_transcript_never_a_credential_file() {
     let data = tempfile::tempdir().unwrap();
     let versions = Versions::beside(&data.path().join("events.jsonl"));

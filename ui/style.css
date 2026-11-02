@@ -18,6 +18,8 @@ html, body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 
 .row .id, .row .row-state { color: var(--muted); flex: none; }
 .row .row-state[data-state="needs_you"] { color: var(--needs-you); font-weight: 600; }
 .row .row-step { color: var(--muted); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+/* A row line's code, left to right in its own isolate, as a card's is. */
+.row .row-step code { font-size: 12px; padding: 0 4px; overflow: visible; unicode-bidi: isolate; }
 /* A subagent's line is indented by its depth; a helper's is quieter than a worker's row. A failed child
    stands out by weight, since colour is only for "needs you". */
 .row.helper { font-size: 13px; }

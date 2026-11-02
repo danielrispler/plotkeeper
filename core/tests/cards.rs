@@ -182,13 +182,13 @@ fn the_shell_fingerprints_at_the_prompt_and_at_the_stop() {
     );
 }
 
-/// An interrupt fires no `Stop`, so the next prompt lands inside the open turn: it takes no new
-/// base, and the `Stop` covers both prompts' change.
+/// An interrupt fires no `Stop`, so the next prompt, with a new prompt id, ends the interrupted turn
+/// (#434, decision 5): its look is the interrupted turn's end, and the `Stop` covers the next turn.
 #[test]
-fn a_prompt_after_an_interrupt_keeps_the_interrupted_prompts_base() {
+fn a_prompt_after_an_interrupt_ends_the_interrupted_turn() {
     let log = include_str!("fixtures/interrupt-then-prompt.jsonl");
 
-    assert_eq!(fingerprinted(log), [0, 8]);
+    assert_eq!(fingerprinted(log), [0, 5, 8]);
 }
 
 #[test]

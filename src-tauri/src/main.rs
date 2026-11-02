@@ -11,14 +11,14 @@ use std::{
     fs::File,
     io::{self, BufRead, BufReader, Seek, SeekFrom},
     path::Path,
-    sync::{Arc, Mutex, mpsc},
+    sync::{Arc, LazyLock, Mutex, mpsc},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 use studio_core::{CardRequest, Notifications, Output, Session, State::NeedsYou, Studio};
 use studio_understanding::{
     CardStore, CardWriter, ClaudeWriter, FakeWriter, Fingerprints, Rating, Row, SessionCards,
-    Versions, fingerprint_changes, millis, write_brief, write_stop,
+    Versions, fingerprint_changes, millis, worktree_root, write_brief, write_stop,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
@@ -52,11 +52,14 @@ fn select(id: String, studio: State<Mutex<Studio>>) -> serde_json::Value {
     selection(&studio)
 }
 
-/// Daniel opened subagent `agent_id`'s line; returns the selection, which names it.
+/// Daniel opened subagent `agent_id`'s line; returns the selection, which names it. The card store
+/// keeps the opening of a failed line, so it stays faded after a restart.
 #[tauri::command]
-fn open(agent_id: String, studio: State<Mutex<Studio>>) -> serde_json::Value {
+fn open(agent_id: String, studio: State<Mutex<Studio>>, cards: State<Cards>) -> serde_json::Value {
     let mut studio = studio.lock().unwrap();
-    studio.open(&agent_id);
+    if studio.open(&agent_id) {
+        unsaved(cards.lock().unwrap().opened(&agent_id));
+    }
     selection(&studio)
 }
 
@@ -190,10 +193,11 @@ fn unsaved(saved: io::Result<()>) {
 type Writer = Arc<dyn CardWriter + Send + Sync>;
 
 fn main() {
+    uptime();
     let log = studio_hook::event_log(&std::env::home_dir().expect("a home directory"));
     // The store sits beside the log, in the studio's data directory.
     let store = CardStore::open_beside(&log).expect("read the card store");
-    let studio = Studio::default();
+    let studio = Studio::with_roots(worktree_root);
     let writer: Writer = match std::env::var("STUDIO_CARD_WRITER").as_deref() {
         Ok("fake") => Arc::new(FakeWriter),
         _ => Arc::new(ClaudeWriter::beside(&log).expect("create the card writer's folder")),
@@ -273,6 +277,9 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
             // replay get their base now, and their `Stop` has something to compare with. The list
             // goes first, so Daniel sees it while `git` runs.
             if !live {
+                let mut studio = state.lock().unwrap();
+                app.state::<Cards>().lock().unwrap().restore(&mut studio);
+                drop(studio);
                 state.lock().unwrap().tick(millis());
                 sent.list(app);
                 let waiting = state.lock().unwrap().waiting_folders();
@@ -283,10 +290,18 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                     Output::Card(request) => write(app, writer, &mut queues, request, true),
                     Output::Brief(request) => write(app, writer, &mut queues, request, false),
                     Output::NeedsYou { session_id, agent } => {
-                        tell(app, "Needs you", &session_id, agent.as_deref());
+                        tell(app, Notice::NeedsYou, &session_id, agent.as_deref());
                     }
                     Output::Failed { session_id, agent } => {
-                        tell(app, "Worker failed", &session_id, Some(&agent));
+                        tell(
+                            app,
+                            Notice::Titled("Worker failed"),
+                            &session_id,
+                            Some(&agent),
+                        );
+                    }
+                    Output::Promoted { agent } => {
+                        unsaved(app.state::<Cards>().lock().unwrap().promoted(&agent));
                     }
                     Output::Unrecognised {
                         session_id,
@@ -324,11 +339,16 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
             let window = app.get_webview_window("main");
             window.and_then(|w| w.is_focused().ok()) == Some(true)
         };
+        // Takes the core's lock under the notices' lock; `tell` never holds both.
+        let needs_you = |id: &str| {
+            let studio = state.lock().unwrap();
+            studio.session(id).is_some_and(|s| s.state == NeedsYou)
+        };
         let due = app
             .state::<Notices>()
             .lock()
             .unwrap()
-            .due(millis(), focused);
+            .due(uptime(), focused, needs_you);
         if let Some((title, body)) = due {
             let _ = app.notification().builder().title(title).body(body).show();
         }
@@ -367,15 +387,26 @@ fn write(
         let log = |line: String| eprintln!("studio: {line}");
         let store = app.state::<Cards>();
         let agent = request.agent.clone();
+        let sent = || {
+            let _ = app.emit("sessions", sessions(app.state(), app.state()));
+        };
+        // The list and the notice go out once the card is stored, before a brief rewrite.
+        let stored = || {
+            sent();
+            tell(
+                &app,
+                Notice::Titled("New card"),
+                &session.agent.id,
+                agent.as_deref(),
+            );
+        };
         let written = match card {
-            true => write_stop(&store, &*writer, request, &session, log),
+            true => write_stop(&store, &*writer, request, &session, stored, log),
             false => write_brief(&store, &*writer, request, &session, log),
         };
+        // The brief, which a row's line may show, changed again.
         if written {
-            let _ = app.emit("sessions", sessions(app.state(), app.state()));
-        }
-        if written && card {
-            tell(&app, "New card", &session.agent.id, agent.as_deref());
+            sent();
         }
     };
     let queue = queues.entry(id).or_insert_with(|| {
@@ -388,14 +419,29 @@ fn write(
 
 /// Adds a notice on session `session_id`'s line, naming its subagent `agent`, if any; the read loop
 /// shows it. Called without the core's lock held.
-fn tell(app: &AppHandle, title: &str, session_id: &str, agent: Option<&str>) {
+fn tell(app: &AppHandle, notice: Notice, session_id: &str, agent: Option<&str>) {
     let body = app
         .state::<Mutex<Studio>>()
         .lock()
         .unwrap()
         .notice_body(session_id, agent);
-    app.state::<Notices>()
-        .lock()
-        .unwrap()
-        .push(title, body, millis());
+    let notices = app.state::<Notices>();
+    let mut notices = notices.lock().unwrap();
+    match notice {
+        Notice::Titled(title) => notices.push(title, body, uptime()),
+        Notice::NeedsYou => notices.push_needs_you(session_id, body, uptime()),
+    }
+}
+
+/// What a notice says: that a session needs you, which shows only if it still needs Daniel when
+/// it is due, or its own title.
+enum Notice<'a> {
+    NeedsYou,
+    Titled(&'a str),
+}
+
+/// Time since the app started, a monotonic clock for combining notices (#434, decision 28).
+fn uptime() -> Duration {
+    static STARTED: LazyLock<Instant> = LazyLock::new(Instant::now);
+    STARTED.elapsed()
 }

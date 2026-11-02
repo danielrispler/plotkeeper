@@ -230,6 +230,166 @@ fn a_folder_outside_git_has_no_fingerprint() {
     assert_eq!(diff(&mut prints, dir.path()), None);
 }
 
+/// Commits `file` with `content` on a new branch `branch`, then checks out the branch it left, and
+/// fingerprints again so the base is past these moves.
+fn branch(dir: &Path, prints: &mut Fingerprints, branch: &str, file: &str, content: &str) {
+    git(dir, &["checkout", "-qb", branch]);
+    fs::write(dir.join(file), content).unwrap();
+    git(dir, &["add", file]);
+    git(dir, &["commit", "-qm", branch]);
+    git(dir, &["checkout", "-q", "-"]);
+    prints.take(dir);
+}
+
+/// #434, decision 12: only the agent's own commits are its change. A move of `HEAD` by any other
+/// command moves the base.
+#[test]
+fn a_fast_forward_pull_gives_no_change_and_moves_the_base() {
+    let (dir, mut prints) = repo();
+    branch(dir.path(), &mut prints, "upstream", "up.rs", "fn up() {}\n");
+
+    git(dir.path(), &["pull", "-q", "--ff-only", ".", "upstream"]);
+    assert_eq!(diff(&mut prints, dir.path()), None);
+
+    // In one look: the pull moves the base, and the edit after it is the change.
+    branch(dir.path(), &mut prints, "more", "more.rs", "fn more() {}\n");
+    git(dir.path(), &["pull", "-q", "--ff-only", ".", "more"]);
+    fs::write(dir.path().join("lib.rs"), "fn b() {}\n").unwrap();
+    let change = prints.take(dir.path()).expect("a change");
+    let renamed = "--- a/lib.rs\n+++ b/lib.rs\n@@ -1 +1 @@\n-fn a() {}\n+fn b() {}\n";
+    assert_eq!(change.diff, renamed);
+    assert_eq!(
+        change.base.head,
+        Some(git(dir.path(), &["rev-parse", "HEAD"]))
+    );
+}
+
+#[test]
+fn a_rebase_onto_another_branch_gives_no_change() {
+    let (dir, mut prints) = repo();
+    branch(
+        dir.path(),
+        &mut prints,
+        "other",
+        "other.rs",
+        "fn other() {}\n",
+    );
+    fs::write(dir.path().join("mine.rs"), "fn mine() {}\n").unwrap();
+    git(dir.path(), &["add", "mine.rs"]);
+    git(dir.path(), &["commit", "-qm", "Mine"]);
+    assert!(diff(&mut prints, dir.path()).is_some());
+
+    git(dir.path(), &["rebase", "-q", "other"]);
+
+    assert_eq!(diff(&mut prints, dir.path()), None);
+}
+
+#[test]
+fn a_checkout_gives_no_change() {
+    let (dir, mut prints) = repo();
+    branch(
+        dir.path(),
+        &mut prints,
+        "other",
+        "other.rs",
+        "fn other() {}\n",
+    );
+
+    git(dir.path(), &["checkout", "-q", "other"]);
+
+    assert_eq!(diff(&mut prints, dir.path()), None);
+}
+
+#[test]
+fn a_hard_reset_gives_no_change() {
+    let (dir, mut prints) = repo();
+    fs::write(dir.path().join("lib.rs"), "fn b() {}\n").unwrap();
+    git(dir.path(), &["commit", "-qam", "Rename a to b"]);
+    assert!(diff(&mut prints, dir.path()).is_some());
+
+    git(dir.path(), &["reset", "-q", "--hard", "HEAD~1"]);
+
+    assert_eq!(diff(&mut prints, dir.path()), None);
+}
+
+/// #434, decision 12: a merge moves the base, so upstream work never shows as the agent's.
+#[test]
+fn a_clean_merge_gives_no_change() {
+    let (dir, mut prints) = repo();
+    branch(
+        dir.path(),
+        &mut prints,
+        "other",
+        "other.rs",
+        "fn other() {}\n",
+    );
+    fs::write(dir.path().join("mine.rs"), "fn mine() {}\n").unwrap();
+    git(dir.path(), &["add", "mine.rs"]);
+    git(dir.path(), &["commit", "-qm", "Mine"]);
+    assert!(diff(&mut prints, dir.path()).is_some());
+
+    git(dir.path(), &["merge", "-q", "--no-edit", "other"]);
+
+    assert_eq!(diff(&mut prints, dir.path()), None);
+}
+
+/// #434, decision 13: a conflicted merge's change is its resolution alone, as git's remerge diff
+/// shows it.
+#[test]
+fn a_conflicted_merge_gives_only_its_resolution() {
+    let (dir, mut prints) = repo();
+    git(dir.path(), &["checkout", "-qb", "other"]);
+    fs::write(dir.path().join("lib.rs"), "fn theirs() {}\n").unwrap();
+    fs::write(dir.path().join("other.rs"), "fn other() {}\n").unwrap();
+    git(dir.path(), &["add", "."]);
+    git(dir.path(), &["commit", "-qm", "Theirs"]);
+    git(dir.path(), &["checkout", "-q", "-"]);
+    fs::write(dir.path().join("lib.rs"), "fn ours() {}\n").unwrap();
+    git(dir.path(), &["commit", "-qam", "Ours"]);
+    assert!(diff(&mut prints, dir.path()).is_some());
+
+    let merge = Command::new("git")
+        .args([
+            "-c",
+            "user.name=Studio",
+            "-c",
+            "user.email=studio@example.com",
+        ])
+        .args(["merge", "-q", "other"])
+        .current_dir(dir.path())
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .output()
+        .unwrap();
+    assert!(!merge.status.success(), "the merge conflicts");
+    fs::write(dir.path().join("lib.rs"), "fn resolved() {}\n").unwrap();
+    git(dir.path(), &["add", "lib.rs"]);
+    git(dir.path(), &["commit", "-q", "--no-edit"]);
+
+    let change = diff(&mut prints, dir.path()).expect("the resolution");
+    assert!(change.contains("+fn resolved() {}"), "{change}");
+    assert!(!change.contains("other.rs"), "{change}");
+}
+
+/// #434, decision 14: the first commit of a new repository is all its files, also those that were
+/// already there, untracked, at the base.
+#[test]
+fn a_first_commit_gives_every_committed_file() {
+    let dir = tempfile::tempdir().unwrap();
+    git(dir.path(), &["init", "-q"]);
+    fs::write(dir.path().join("lib.rs"), "fn a() {}\n").unwrap();
+    let mut prints = Fingerprints::default();
+    assert_eq!(diff(&mut prints, dir.path()), None);
+
+    fs::write(dir.path().join("main.rs"), "fn main() {}\n").unwrap();
+    git(dir.path(), &["add", "."]);
+    git(dir.path(), &["commit", "-qm", "Start"]);
+
+    let lib = "--- a/lib.rs\n+++ b/lib.rs\n@@ -0,0 +1 @@\n+fn a() {}\n";
+    let main = "--- a/main.rs\n+++ b/main.rs\n@@ -0,0 +1 @@\n+fn main() {}\n";
+    assert_eq!(diff(&mut prints, dir.path()), Some(format!("{lib}{main}")));
+}
+
 #[test]
 fn a_folder_that_becomes_a_repository_is_fingerprinted_from_then_on() {
     let dir = tempfile::tempdir().unwrap();

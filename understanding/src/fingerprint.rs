@@ -3,7 +3,8 @@
 //! before or now, or one a commit since changed, has other content, or now exists or is gone.
 //! Ignored files are never listed, and a commit alone leaves every file's content as it was. A file
 //! over 1 MiB is compared by size and modification time, and its diff is one line that names it, so
-//! neither the record nor the card writer gets it.
+//! neither the record nor the card writer gets it. Only the agent's own commits count; a pull, a
+//! rebase, a checkout, a reset or a merge moves the base instead (#434, decisions 12 to 14).
 
 use similar::TextDiff;
 use std::{
@@ -20,6 +21,8 @@ use studio_core::{Base, Change, Fingerprint, Purpose};
 struct Record {
     head: Option<String>,
     files: BTreeMap<String, Option<Content>>,
+    /// The length in bytes of `HEAD`'s reflog, so the next change reads only the moves since.
+    log: u64,
 }
 
 /// A file's content, or a large file's size and modification time.
@@ -42,16 +45,38 @@ fn read(path: &Path) -> Option<Content> {
 }
 
 /// Takes the fingerprints `looks` asks for, each in its key's own `Fingerprints` in `prints`, and
-/// returns the changes they found by key, as `Studio::apply_with_changes` takes them.
+/// returns the changes they found by key, as `Studio::apply_with_changes` takes them. A key's
+/// changes in several worktrees join into one, with the first one's base (#434, decision 10); a
+/// base's change is no one's, so it is left out.
 pub fn fingerprint_changes(
     looks: Vec<Fingerprint>,
     prints: &mut HashMap<String, Fingerprints>,
 ) -> BTreeMap<String, Change> {
-    let changes = looks.into_iter().filter_map(|look| {
+    let mut changes = BTreeMap::<String, Change>::new();
+    for look in looks {
         let print = prints.entry(look.key.clone()).or_default();
-        Some((look.key, print.look(Path::new(&look.folder), look.purpose)?))
-    });
-    changes.collect()
+        let found = print.look(Path::new(&look.folder), look.purpose);
+        let Some(found) = found.filter(|_| look.purpose != Purpose::Base) else {
+            continue;
+        };
+        match changes.get_mut(&look.key) {
+            Some(joined) => joined.diff += &found.diff,
+            None => _ = changes.insert(look.key, found),
+        }
+    }
+    changes
+}
+
+/// The root of the git worktree that holds `folder`, spelled as `folder` is, or `None` when it is
+/// in none. A folder that does not exist yet, such as a new file's, is looked up from its nearest
+/// existing parent.
+pub fn worktree_root(folder: &str) -> Option<String> {
+    let existing = Path::new(folder).ancestors().find(|p| p.is_dir())?;
+    let prefix = git(existing, &["rev-parse", "--show-prefix"])?;
+    let prefix = String::from_utf8(prefix).ok()?;
+    let existing = existing.to_str()?.trim_end_matches('/');
+    let root = existing.strip_suffix(prefix.trim_end().trim_end_matches('/'))?;
+    Some(root.trim_end_matches('/').to_owned()).filter(|root| !root.is_empty())
 }
 
 /// Each worktree's latest record, by the worktree's root.
@@ -99,47 +124,137 @@ impl Fingerprints {
                 (path, content)
             })
             .collect();
-        let record = Record { head, files };
+        let log = reflog(&root).and_then(|log| fs::metadata(log).ok());
+        let log = log.map_or(0, |meta| meta.len());
+        let record = Record { head, files, log };
         let previous = self.records.get(&root);
-        if purpose == Purpose::Commit && previous.is_some_and(|p| p.head == record.head) {
-            return change(&root, previous?, &record);
+        let found = previous.and_then(|previous| change(&root, previous, &record));
+        // A commit check keeps its record only when the agent committed since its base, or when
+        // `HEAD` moved and nothing is left to show, so a step that only edits does not eat its card.
+        let keep = purpose != Purpose::Commit
+            || found.as_ref().map_or_else(
+                || previous.is_none_or(|p| p.head != record.head),
+                |c| c.head != c.base.head,
+            );
+        if keep {
+            self.records.insert(root, record);
         }
-        let previous = self.records.insert(root.clone(), record)?;
-        change(&root, &previous, &self.records[&root])
+        found
     }
 }
 
-/// The change in the worktree at `root` from record `previous`, its base, to `record`.
+/// The path of the reflog of `HEAD` in the worktree at `root`.
+fn reflog(root: &Path) -> Option<PathBuf> {
+    let path = git(root, &["rev-parse", "--git-path", "logs/HEAD"])?;
+    Some(root.join(String::from_utf8(path).ok()?.trim_end()))
+}
+
+/// The moves of `HEAD` in the worktree at `root` since its reflog was `from` bytes long, oldest
+/// first: each one's sha before, sha after, and subject. Empty when the reflog was cut since.
+fn moves(root: &Path, from: u64) -> Vec<(String, String, String)> {
+    let log = reflog(root).and_then(|log| fs::read(log).ok());
+    let new = log
+        .as_deref()
+        .and_then(|log| log.get(usize::try_from(from).ok()?..));
+    let new = String::from_utf8_lossy(new.unwrap_or_default());
+    let moves = new.lines().filter_map(|line| {
+        let (who, subject) = line.split_once('\t')?;
+        let mut shas = who.split(' ');
+        let (old, new) = (shas.next()?.into(), shas.next()?.into());
+        Some((old, new, subject.into()))
+    });
+    moves.collect()
+}
+
+/// The change in the worktree at `root` from record `previous`, its base, to `record`. Only the
+/// agent's own commits count (#434, decisions 12 to 14): any other move of `HEAD` since the base
+/// moves the base to where it left `HEAD`, keeping the change of the agent's commits before it, and
+/// a conflicted merge adds its resolution.
 fn change(root: &Path, previous: &Record, record: &Record) -> Option<Change> {
-    // A file edited and committed since lists in neither record.
-    let committed = match (&previous.head, &record.head) {
-        (Some(before), Some(now)) if before != now => {
-            let names = ["diff", "--name-only", "-z", "--no-renames", before, now];
-            git(root, &names).map_or_else(Vec::new, |out| split_paths(&out, 0).collect())
+    let mut start = previous.head.clone();
+    let mut diff = String::new();
+    let mut moved = false;
+    if previous.head != record.head {
+        for (old, new, subject) in moves(root, previous.log) {
+            let own = ["commit:", "commit (amend):", "commit (initial):"];
+            if own.iter().any(|own| subject.starts_with(own)) {
+                continue;
+            }
+            let unborn = old.bytes().all(|byte| byte == b'0');
+            if !unborn && start.as_deref() != Some(&old) {
+                diff += &between(root, start.as_deref(), &old);
+            }
+            if subject.starts_with("commit (merge):") {
+                let resolution = ["show", "--remerge-diff", "--format=", &new];
+                diff += &String::from_utf8_lossy(&git(root, &resolution).unwrap_or_default());
+            }
+            start = Some(new);
+            moved = true;
         }
+    }
+    // The files whose content in `previous` is no base: those a move changed, and on an unborn base,
+    // every committed file, so the first commit is all of its files.
+    let touched: BTreeSet<String> = match (&start, &record.head) {
+        (Some(start), _) if moved => names(root, previous.head.as_deref(), start),
+        (None, Some(now)) => names(root, None, now),
+        _ => Vec::new(),
+    }
+    .into_iter()
+    .collect();
+    // A file edited and committed since lists in neither record.
+    let committed = match &record.head {
+        Some(now) if start.as_ref() != Some(now) => names(root, start.as_deref(), now),
         _ => Vec::new(),
     };
     let listed = previous.files.keys().chain(record.files.keys());
     let paths: BTreeSet<&String> = listed.chain(&committed).collect();
-    let diff: String = paths
+    let rest: String = paths
         .into_iter()
         .filter_map(|path| {
             // A file the previous record does not list was clean then: as its `HEAD` had it.
-            let before = previous.files.get(path).cloned().unwrap_or_else(|| {
-                let head = previous.head.as_deref()?;
-                git(root, &["show", &format!("{head}:{path}")]).map(Content::Bytes)
-            });
+            let kept = previous.files.get(path).filter(|_| !touched.contains(path));
+            let before = kept
+                .cloned()
+                .unwrap_or_else(|| show(root, start.as_deref(), path));
             let after = record.files.get(path).cloned();
             let after = after.unwrap_or_else(|| read(&root.join(path)));
             (before != after).then(|| unified(path, before, after))
         })
         .collect();
+    diff += &rest;
     let base = Base {
-        head: previous.head.clone(),
+        head: start,
         files: previous.files.keys().cloned().collect(),
     };
     let head = record.head.clone();
     (!diff.is_empty()).then_some(Change { base, diff, head })
+}
+
+/// The paths that differ between commits `from` and `to`; every path of `to` when `from` is `None`.
+fn names(root: &Path, from: Option<&str>, to: &str) -> Vec<String> {
+    let out = match from {
+        Some(from) => git(
+            root,
+            &["diff", "--name-only", "-z", "--no-renames", from, to],
+        ),
+        None => git(root, &["ls-tree", "-r", "--name-only", "-z", to]),
+    };
+    out.map_or_else(Vec::new, |out| split_paths(&out, 0).collect())
+}
+
+/// The file at `path` in commit `sha`, or `None` when it has none.
+fn show(root: &Path, sha: Option<&str>, path: &str) -> Option<Content> {
+    git(root, &["show", &format!("{}:{path}", sha?)]).map(Content::Bytes)
+}
+
+/// The change between commits `from` and `to`, file by file.
+fn between(root: &Path, from: Option<&str>, to: &str) -> String {
+    let names = names(root, from, to).into_iter();
+    let changed = names.filter_map(|path| {
+        let (before, after) = (show(root, from, &path), show(root, Some(to), &path));
+        (before != after).then(|| unified(&path, before, after))
+    });
+    changed.collect()
 }
 
 /// `git diff --stat` in `folder`'s worktree from commit `since` to the files as they are now, for the

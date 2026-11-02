@@ -48,6 +48,29 @@ fn a_question_shows_its_options_until_its_answer_marks_the_choice() {
     assert_eq!(session.state, State::Running);
 }
 
+#[test]
+fn an_answer_that_is_not_an_object_of_strings_leaves_the_question_unanswered() {
+    let answers = r#","answers":{"Which README section should I fix?":"Install"}"#;
+    // No answers, a non-string answer, and answers that are not an object.
+    let odd = [
+        "",
+        r#","answers":{"Which README section should I fix?":2}"#,
+        r#","answers":["Install"]"#,
+    ];
+    for odd in odd {
+        let log = ASK.replace(answers, odd);
+        let mut studio = replay_upto(&log, 5);
+
+        let session = studio.session(ASKER).expect("the session");
+        assert_eq!(session.questions[0].answer, Answer::NotAnswered, "{odd}");
+        assert_eq!(session.state, State::Running);
+        // The session view still draws.
+        studio.select(ASKER);
+        let view = serde_json::to_value(studio.selection()).expect("the view serializes");
+        assert_eq!(view["session"]["questions"][0]["answer"], "not_answered");
+    }
+}
+
 /// A hand-written log: a session's background helper asks a question across the session's `Stop`,
 /// and Daniel declines it.
 const CHILD: &str = include_str!("fixtures/child-question.jsonl");

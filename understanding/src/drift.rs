@@ -13,7 +13,7 @@ use std::{
 use studio_core::{Sender, Studio};
 
 /// The versions of Claude Code seen, in `claude-versions.txt` beside the event log: a line
-/// `<Unix ms> <version>` each time it changed, oldest first. The last line is the last version seen.
+/// `<Unix ms> <version>` for each version when first seen, oldest first.
 pub struct Versions {
     path: PathBuf,
 }
@@ -25,17 +25,20 @@ impl Versions {
         }
     }
 
-    /// Reads Claude Code's version from `transcript`, seen at `at`, and keeps it when it changed.
-    /// Returns the one-line notice when it differs from the last version seen; the first version
-    /// seen has nothing to compare with.
+    /// Reads Claude Code's version from `transcript`, seen at `at`, and keeps it when it was never
+    /// seen before. Returns the one-line notice for such a version; the first version seen has
+    /// nothing to compare with.
     pub fn check(&self, transcript: &Path, at: u64) -> io::Result<Option<String>> {
         let Some(version) = transcript_version(transcript) else {
             return Ok(None);
         };
-        let last = self.seen().pop().map(|(_, version)| version);
-        if last.as_ref() == Some(&version) {
+        let mut seen = self.seen();
+        // A version seen before, such as another terminal's older one, is no change (#434,
+        // decision 29).
+        if seen.iter().any(|(_, seen)| *seen == version) {
             return Ok(None);
         }
+        let last = seen.pop().map(|(_, version)| version);
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
