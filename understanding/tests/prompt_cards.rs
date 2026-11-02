@@ -13,7 +13,8 @@ use std::{
 };
 use studio_core::{CardRequest, Kind, Output, Studio};
 use studio_understanding::{
-    Card, CardStore, CardWriter, FakeWriter, Fingerprints, write_brief, write_stop,
+    Card, CardStore, CardWriter, FakeWriter, Fingerprints, explain_more, fingerprint_changes,
+    write_brief, write_stop,
 };
 
 /// What a rewrite read: the prompts, the summaries and the diffstat.
@@ -26,6 +27,8 @@ struct Recording {
     cards: RefCell<Vec<(Vec<String>, String)>>,
     rewrites: RefCell<Vec<Rewrite>>,
     updates: RefCell<Vec<(String, String)>>,
+    /// The change each "explain more" read.
+    mores: RefCell<Vec<String>>,
 }
 
 impl CardWriter for Recording {
@@ -40,6 +43,7 @@ impl CardWriter for Recording {
     }
 
     fn more(&self, request: &CardRequest, card: &Card) -> Result<String, String> {
+        self.mores.borrow_mut().push(request.diff().into());
         FakeWriter.more(request, card)
     }
 
@@ -125,11 +129,8 @@ impl Shell {
             .extend(fields.as_object().unwrap().clone());
         let line = event.to_string();
         let looks = self.studio.fingerprint_folders(&line);
-        let changes = looks.into_iter().filter_map(|look| {
-            let prints = self.fingerprints.entry(look.key.clone()).or_default();
-            Some((look.key, prints.look(Path::new(&look.folder), look.keep)?))
-        });
-        let outputs = self.studio.apply_with_changes(&line, changes.collect());
+        let changes = fingerprint_changes(looks, &mut self.fingerprints);
+        let outputs = self.studio.apply_with_changes(&line, changes);
         let requested = |output: &Output| matches!(output, Output::Card(_) | Output::Brief(_));
         outputs.into_iter().filter(requested).collect()
     }
@@ -207,10 +208,15 @@ impl Shell {
             .unwrap_or_default()
     }
 
-    /// What the session's row says while its turn is over.
-    fn line(&self) -> Option<String> {
+    /// What the session's row says now.
+    fn line(&self) -> String {
+        self.line_at(self.at)
+    }
+
+    /// What the session's row says at `now`.
+    fn line_at(&self, now: u64) -> String {
         let session = self.studio.session("s1").unwrap();
-        self.store.lock().unwrap().line(session)
+        self.store.lock().unwrap().line(session, now)
     }
 }
 
@@ -311,7 +317,7 @@ fn a_parent_that_changed_nothing_itself_gets_one_card_from_its_workers_summaries
     };
     assert_eq!(own.agent, None);
     assert_eq!(own.workers, std::slice::from_ref(&worker.id));
-    let read = &own.change;
+    let read = own.diff().to_owned();
     assert!(
         read.contains(&format!(
             "- `Implement #378` (completed): {}\n",
@@ -320,6 +326,11 @@ fn a_parent_that_changed_nothing_itself_gets_one_card_from_its_workers_summaries
         "{read}"
     );
     assert!(!read.contains("+++"), "{read}");
+    let id = own.id.clone();
+    drop(store);
+    // "Explain more" reads the workers' text the stored card keeps.
+    explain_more(&shell.store, &shell.writer, &id, |line| panic!("{line}")).unwrap();
+    assert_eq!(*shell.writer.mores.borrow(), [read]);
 }
 
 #[test]
@@ -342,7 +353,7 @@ fn a_wake_up_turn_that_changed_nothing_itself_updates_the_brief_and_writes_no_ca
     assert!(workers.contains(&summary("a.rs")), "{workers}");
     let updated = "העובדים חזרו, והסשן עצמו לא שינה דבר.";
     assert_eq!(shell.brief(), updated);
-    assert_eq!(shell.line().as_deref(), Some(updated));
+    assert_eq!(shell.line(), updated);
 }
 
 const MINUTE: u64 = 60 * 1000;
@@ -379,6 +390,31 @@ fn after_25_minutes_of_uncommitted_change_the_next_step_gets_a_card_and_one_with
         [(w1, summary("a.rs")), (own, summary("lib.rs"))]
     );
     assert_eq!(shell.writer.cards.borrow().len(), 2);
+}
+
+/// #410, decision 23: a fallback look that finds no change restarts the 20-minute wait, so a quiet
+/// worktree gets one look, not one per step, and a later change waits for the next fallback.
+#[test]
+fn a_quiet_worktrees_fallback_look_restarts_its_wait_so_a_later_change_waits_20_minutes_from_it() {
+    let mut shell = Shell::new();
+    shell.take("UserPromptSubmit", json!({ "prompt": "Implement #378" }));
+    shell.take("PostToolUse", spawn_child("w1", "Implement #378", true));
+    let one = shell.worktree("w1");
+    shell.child("w1", &one, "SubagentStart", json!({}));
+    let read = json!({"tool_name": "Read", "tool_input": {"file_path": "lib.rs"}});
+
+    shell.at += 25 * MINUTE;
+    shell.child("w1", &one, "PostToolUse", read.clone());
+    fs::write(one.join("a.rs"), "fn a1() {}\n").unwrap();
+    shell.at += MINUTE;
+    shell.child("w1", &one, "PostToolUse", read.clone());
+    shell.at += 18 * MINUTE;
+    shell.child("w1", &one, "PostToolUse", read.clone());
+    assert_eq!(shell.cards(), []);
+    shell.at += MINUTE;
+    shell.child("w1", &one, "PostToolUse", read);
+
+    assert_eq!(shell.cards(), [(Some("w1".to_string()), summary("a.rs"))]);
 }
 
 /// #369, decision 11: the fallback is on a step of a worker or of a prompt; after the session's
@@ -556,20 +592,68 @@ fn a_stopped_row_shows_the_agents_first_line_then_the_cards_summary_then_the_bri
     let mut shell = Shell::new();
     shell.take("UserPromptSubmit", json!({ "prompt": "Rename a" }));
     fs::write(shell.repo.join("lib.rs"), "fn b() {}\n").unwrap();
-    assert_eq!(shell.line(), None);
+    assert_eq!(shell.line(), "No step yet");
 
     let message = "\nRenamed `a` to `b`.\n\nThe tests pass.";
     let outputs = shell.event("Stop", json!({ "last_assistant_message": message }));
-    assert_eq!(shell.line().as_deref(), Some("Renamed `a` to `b`."));
+    assert_eq!(shell.line(), "Renamed `a` to `b`.");
 
     shell.write(outputs.into_iter().next().unwrap());
-    assert_eq!(shell.line().as_deref(), Some("שינוי לדוגמה ב־`lib.rs`"));
+    assert_eq!(shell.line(), "שינוי לדוגמה ב־`lib.rs`");
 
     // A turn that changed nothing gets no card: the row shows the brief's latest line.
     shell.take("UserPromptSubmit", json!({ "prompt": "Anything left?" }));
     shell.take("Stop", json!({ "last_assistant_message": "Nothing left." }));
-    assert_eq!(
-        shell.line().as_deref(),
-        Some("השינוי האחרון נגע ב־`lib.rs`.")
+    assert_eq!(shell.line(), "השינוי האחרון נגע ב־`lib.rs`.");
+}
+
+#[test]
+fn a_rows_line_is_who_needs_you_then_the_stopped_line_then_who_returned_then_the_last_step() {
+    let mut shell = Shell::new();
+    shell.take("UserPromptSubmit", json!({ "prompt": "Implement #378" }));
+    assert_eq!(shell.line(), "No step yet");
+    shell.take(
+        "PreToolUse",
+        json!({"tool_name": "Bash", "tool_use_id": "t1",
+        "tool_input": {"command": "cargo test"}}),
     );
+    assert_eq!(shell.line(), "Bash cargo test");
+
+    // The session's own agent asks: its last step and how long it has waited.
+    let ask = json!({"tool_name": "AskUserQuestion", "tool_use_id": "t2", "tool_input": {}});
+    shell.take("PreToolUse", ask.clone());
+    let line = shell.line_at(shell.at + 3 * MINUTE);
+    assert!(
+        line.starts_with("AskUserQuestion") && line.ends_with(" · 3m"),
+        "{line}"
+    );
+    shell.take("PostToolUse", ask);
+
+    // A subagent asks: its name, "asks", and how long it has waited.
+    shell.take("PostToolUse", spawn_child("w1", "Implement #378", false));
+    let ask = json!({"tool_name": "AskUserQuestion", "tool_use_id": "t3", "tool_input": {}});
+    let repo = shell.repo.clone();
+    shell.child("w1", &repo, "PreToolUse", ask.clone());
+    assert_eq!(
+        shell.line_at(shell.at + 2 * MINUTE),
+        "Implement #378 asks · 2m"
+    );
+    shell.child("w1", &repo, "PostToolUse", ask);
+    shell.child("w1", &repo, "SubagentStop", json!({}));
+
+    // A wake-up with no step since: the worker that returned.
+    let wake_up =
+        "<task-notification><task-id>w1</task-id><status>completed</status></task-notification>";
+    shell.take("UserPromptSubmit", json!({ "prompt": wake_up }));
+    assert_eq!(shell.line(), "worker Implement #378 returned");
+    shell.take(
+        "PreToolUse",
+        json!({"tool_name": "Bash", "tool_use_id": "t4",
+        "tool_input": {"command": "git log"}}),
+    );
+    assert_eq!(shell.line(), "Bash git log");
+
+    // Once the turn is over: the stopped line.
+    shell.event("Stop", json!({ "last_assistant_message": "Done." }));
+    assert_eq!(shell.line(), "Done.");
 }

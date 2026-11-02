@@ -8,8 +8,7 @@ html, body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 
 .list { overflow-y: auto; padding: 12px 10px; border-right: 1px solid var(--code); }
 .pane { overflow-y: auto; padding: 16px 18px; }
 .list h1, .list summary { margin: 10px 8px 4px; }
-.list summary { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
-                cursor: pointer; }
+.list summary { cursor: pointer; }
 /* One line per row; what does not fit is cut. */
 .row { display: flex; gap: 6px; align-items: baseline; width: 100%; padding: 4px 8px; border: 0; border-radius: 6px;
        background: none; color: var(--fg); font: 14px/1.5 -apple-system, sans-serif; text-align: left; cursor: pointer;
@@ -24,7 +23,10 @@ html, body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 
 .row.helper { font-size: 13px; }
 .row .failed { font-weight: 600; color: var(--fg); }
 .unattached { margin: 2px 0 0; padding-left: 40px; font-size: 13px; color: var(--muted); }
-h1 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 8px; }
+/* The muted heading: a group's title, a collapsed group's title and a question's header. */
+h1, .list summary, .question .header { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+                                       color: var(--muted); }
+h1 { margin: 0 0 8px; }
 .session { font-size: 14px; color: var(--muted); margin: 0 0 6px; }
 /* Colour only on "needs you" (#328, module 3): "your turn" stays as neutral as "running". */
 .state { font-size: 14px; font-weight: 600; margin: 0 0 6px; }
@@ -40,10 +42,12 @@ code:empty { display: none; }
 /* The session's brief, Hebrew, right to left, above its cards; its code wraps as a card's does. */
 .brief { margin: 14px 0 0; font-size: 16px; }
 .brief p { margin: 0 0 4px; overflow-wrap: anywhere; }
-.brief code { white-space: normal; overflow-wrap: anywhere; unicode-bidi: isolate; }
+.brief code, .card code { white-space: normal; overflow-wrap: anywhere; unicode-bidi: isolate; }
 /* A card is Hebrew, right to left; its code is left to right. No text in it is smaller than 14px (v0's
    secondary text was 12px). */
-.card { background: var(--code); border-radius: 8px; padding: 10px 12px; margin: 0 0 10px; font-size: 16px; }
+/* The box of a card and of a question. */
+.card, .question { background: var(--code); border-radius: 8px; padding: 10px 12px; margin: 0 0 10px; }
+.card { font-size: 16px; }
 .card p { margin: 8px 0 0; overflow-wrap: anywhere; }
 .quiz { font-weight: 600; margin: 0; }
 .explanation { white-space: pre-wrap; }
@@ -65,8 +69,7 @@ code:empty { display: none; }
 .rating p { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
 .rating span { font-size: 14px; color: var(--muted); }
 .rating button { font-size: 14px; padding: 2px 10px; margin: 0; }
-.card code { font-size: 14px; background: var(--bg); padding: 1px 5px; white-space: normal; overflow-wrap: anywhere;
-             unicode-bidi: isolate; }
+.card code { font-size: 14px; background: var(--bg); padding: 1px 5px; }
 .paths { display: flex; flex-wrap: wrap; gap: 6px; }
 .card pre { font: 14px/1.6 ui-monospace, Menlo, monospace; background: var(--bg); border-radius: 6px; padding: 8px 10px;
             margin: 10px 0 0; overflow-x: auto; }
@@ -79,10 +82,8 @@ code:empty { display: none; }
 .checks .outcome { font-weight: 600; flex: none; min-width: 52px; }
 /* An agent's question, laid out as its choices; the chosen one is marked by its border, since colour is
    only for "needs you". */
-.question { background: var(--code); border-radius: 8px; padding: 10px 12px; margin: 0 0 10px; }
 .question p { margin: 6px 0 0; }
 .question .state { margin: 0; }
-.question .header { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
 .question .asked { font-weight: 600; margin-top: 2px; }
 .choices { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; }
 .choices li { display: flex; gap: 8px; align-items: baseline; background: var(--bg); border: 2px solid transparent;

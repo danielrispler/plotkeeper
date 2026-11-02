@@ -10,7 +10,7 @@
 //! `cargo run -q -p studio-understanding --example real_card`
 
 use studio_core::{Base, CardRequest};
-use studio_understanding::{Card, CardWriter, ClaudeWriter, find_claude, write_card};
+use studio_understanding::{Card, CardWriter, ClaudeWriter, write_card};
 
 /// A structural change: the brief's rewrite moves out of `lib.rs` into a module of its own.
 const STRUCTURAL: &str = r#"--- a/apps/studio/understanding/src/lib.rs
@@ -140,7 +140,7 @@ fn request(change: &str, at: u64) -> CardRequest {
         session_id: "real-card".into(),
         id: format!("real-card@{at}"),
         base: Base::default(),
-        change: change.into(),
+        change: Some(change.into()),
         prompt: Some(at),
         ..CardRequest::default()
     }
@@ -148,10 +148,8 @@ fn request(change: &str, at: u64) -> CardRequest {
 
 fn main() {
     let home = std::env::home_dir().expect("a home directory");
-    let folder = studio_hook::event_log(&home).with_file_name("card-writer");
-    std::fs::create_dir_all(&folder).expect("create the card writer's folder");
-    let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/zsh".into());
-    let writer = Printing(ClaudeWriter::new(find_claude(shell.as_ref()), folder));
+    let log = studio_hook::event_log(&home);
+    let writer = Printing(ClaudeWriter::beside(&log).expect("create the card writer's folder"));
     let log = |line: String| println!("--- Log: {line}");
     let mut brief = String::new();
     let mut summaries = Vec::new();

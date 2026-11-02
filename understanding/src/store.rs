@@ -5,13 +5,13 @@
 use crate::Card;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs::{self, File},
     io::{self, Write},
     path::{Path, PathBuf},
     time::UNIX_EPOCH,
 };
-use studio_core::{CardRequest, Session};
+use studio_core::{CardRequest, Session, Step};
 
 /// A card in the store, with the change it explains and its base, and its record: when it was added,
 /// when its quiz showed, Daniel's guess, his flag on the key, his rating and the longer explanation he
@@ -80,12 +80,12 @@ pub struct Guess {
     pub at: u64,
 }
 
-/// A session list row: the session, and what its row says while its turn is over (`CardStore::line`).
+/// A session list row: the session, and what its row says (`CardStore::line`).
 #[derive(Clone, Debug, Serialize)]
 pub struct Row {
     #[serde(flatten)]
     pub session: Session,
-    pub line: Option<String>,
+    pub line: String,
 }
 
 /// A session's or a worker's rolling brief (#369, decision 16).
@@ -102,9 +102,55 @@ pub struct Brief {
 pub struct SessionCards {
     pub brief: Option<String>,
     /// The cards added in the last 30 minutes.
+    #[serde(serialize_with = "without_diffs")]
     pub recent: Vec<StoredCard>,
     /// The cards added before, or before the store kept the time.
+    #[serde(serialize_with = "without_diffs")]
     pub older: Vec<StoredCard>,
+}
+
+/// A stored card as the pane reads it: its request without the diff and base, which the pane never
+/// reads.
+#[derive(Serialize)]
+struct ShownCard<'a> {
+    request: ShownRequest<'a>,
+    card: &'a Card,
+    added_at: Option<u64>,
+    shown_at: Option<u64>,
+    guess: &'a Option<Guess>,
+    key_wrong: bool,
+    more: &'a Option<String>,
+    rating: &'a Option<Rating>,
+}
+
+#[derive(Serialize)]
+struct ShownRequest<'a> {
+    session_id: &'a str,
+    id: &'a str,
+    prompt: Option<u64>,
+    agent: &'a Option<String>,
+    changed_by: &'a BTreeMap<String, BTreeSet<String>>,
+    workers: &'a [String],
+}
+
+fn without_diffs<S: serde::Serializer>(cards: &[StoredCard], s: S) -> Result<S::Ok, S::Error> {
+    s.collect_seq(cards.iter().map(|kept| ShownCard {
+        request: ShownRequest {
+            session_id: &kept.request.session_id,
+            id: &kept.request.id,
+            prompt: kept.request.prompt,
+            agent: &kept.request.agent,
+            changed_by: &kept.request.changed_by,
+            workers: &kept.request.workers,
+        },
+        card: &kept.card,
+        added_at: kept.added_at,
+        shown_at: kept.shown_at,
+        guess: &kept.guess,
+        key_wrong: kept.key_wrong,
+        more: &kept.more,
+        rating: &kept.rating,
+    }))
 }
 
 /// The last 30 minutes (#369, decision 18).
@@ -123,6 +169,8 @@ pub struct CardStore {
     path: PathBuf,
     cards: Vec<StoredCard>,
     briefs: BTreeMap<String, Brief>,
+    /// Rises on every change, briefs included, so the shell sends the cards only when it moves.
+    revision: u64,
 }
 
 /// The JSON file at `path`, or the default when it is missing. One that does not parse is an
@@ -144,6 +192,7 @@ impl CardStore {
             path,
             cards,
             briefs,
+            revision: 0,
         })
     }
 
@@ -159,6 +208,11 @@ impl CardStore {
             fs::rename(old, aside)?;
         }
         Self::open(log.with_file_name("cards-v2.json"))
+    }
+
+    /// A number that every change to the cards or the briefs raises.
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     /// The cards, oldest first.
@@ -185,17 +239,49 @@ impl CardStore {
         }
     }
 
+    /// What `session`'s row says at `now`, in Unix milliseconds (#410, decision 27): while it needs
+    /// Daniel, who asks and for how long; once its turn is over, the stopped line; after a wake-up
+    /// with no step since, which worker returned; else its last step, else "No step yet".
+    pub fn line(&self, session: &Session, now: u64) -> String {
+        let step = match &session.agent.last_step {
+            Some(Step {
+                tool,
+                detail: Some(detail),
+            }) => format!("{tool} {detail}"),
+            Some(step) => step.tool.clone(),
+            None => "No step yet".into(),
+        };
+        if let Some(asker) = &session.asker {
+            let minutes = now.saturating_sub(asker.since) / 60_000;
+            let waited = if minutes < 60 {
+                format!("{minutes}m")
+            } else {
+                format!("{}h", minutes / 60)
+            };
+            let who = match &asker.agent {
+                None => step,
+                Some(id) => format!("{} asks", session.agent_name(id)),
+            };
+            return format!("{who} · {waited}");
+        }
+        self.stopped_line(session)
+            .or_else(|| session.returned.clone())
+            .unwrap_or(step)
+    }
+
     /// What `session`'s row says while its turn is over (#369, decision 19): the summary of the card
     /// on its `Stop`; the first line of the agent's last message until that card arrives; the brief's
     /// latest line when the `Stop` requested no card. `None` in a turn.
-    pub fn line(&self, session: &Session) -> Option<String> {
+    fn stopped_line(&self, session: &Session) -> Option<String> {
         let stopped = session.stopped.as_ref()?;
         let card = self
             .cards
             .iter()
             .find(|kept| kept.request.id == stopped.card);
         let summary = card.map(|kept| kept.card.summary.clone());
-        let brief = self.brief(&session.id).and_then(|b| b.text.lines().last());
+        let brief = self
+            .brief(&session.agent.id)
+            .and_then(|b| b.text.lines().last());
         let pending = stopped.requested.then(|| stopped.message.clone()).flatten();
         let latest = pending.or(brief.map(Into::into));
         summary
@@ -214,6 +300,7 @@ impl CardStore {
         let brief = self.briefs.entry(owner.into()).or_default();
         brief.text = text;
         brief.updates += 1;
+        self.revision += 1;
         write(&self.path.with_file_name("briefs.json"), &self.briefs)
     }
 
@@ -232,18 +319,21 @@ impl CardStore {
         self.save()
     }
 
-    /// Marks the quiz of card `id` shown at `at`, in Unix milliseconds, and saves the store. A card
-    /// keeps its first time, and one guessed before gets none, so a guess never comes before its
-    /// quiz.
-    pub fn show(&mut self, id: &str, at: u64) -> io::Result<()> {
-        if let Some(kept) = self.card_mut(id)
-            && kept.shown_at.is_none()
-            && kept.guess.is_none()
-        {
-            kept.shown_at = Some(at);
-            return self.save();
+    /// Marks the quizzes of cards `ids` shown at `at`, in Unix milliseconds, and saves the store
+    /// once if any changed. A card keeps its first time, and one guessed before gets none, so a
+    /// guess never comes before its quiz.
+    pub fn show(&mut self, ids: &[impl AsRef<str>], at: u64) -> io::Result<()> {
+        let mut changed = false;
+        for id in ids {
+            if let Some(kept) = self.card_mut(id.as_ref())
+                && kept.shown_at.is_none()
+                && kept.guess.is_none()
+            {
+                kept.shown_at = Some(at);
+                changed = true;
+            }
         }
-        Ok(())
+        if changed { self.save() } else { Ok(()) }
     }
 
     /// Records Daniel's tap on option `option` of card `id`'s quiz at `at`, in Unix milliseconds,
@@ -299,7 +389,9 @@ impl CardStore {
         self.cards.iter_mut().find(|kept| kept.request.id == id)
     }
 
-    fn save(&self) -> io::Result<()> {
+    /// Saves the cards after a change, which raises the revision.
+    fn save(&mut self) -> io::Result<()> {
+        self.revision += 1;
         write(&self.path, &self.cards)
     }
 }

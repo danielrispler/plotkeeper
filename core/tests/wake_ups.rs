@@ -5,11 +5,7 @@ use serde_json::json;
 use studio_core::{Output, Sender, State, Studio};
 
 fn replay(log: &str) -> Studio {
-    let mut studio = Studio::default();
-    for line in log.lines() {
-        studio.replay(line);
-    }
-    studio
+    Studio::replayed(log.lines())
 }
 
 /// The checkpoint day of #347, scrubbed (#370).
@@ -55,6 +51,19 @@ fn prompt(prompt: &str) -> String {
     .to_string()
 }
 
+#[test]
+fn a_wake_up_from_a_task_with_no_subagent_names_it_by_its_short_id() {
+    let mut studio = replay(DAY);
+
+    // `brh86k1fz` is the day's background command, which no subagent record names.
+    studio.apply(&prompt(
+        "<task-notification><task-id>brh86k1fz</task-id><status>completed</status></task-notification>",
+    ));
+
+    let session = studio.session(IMPLEMENT_SPEC).unwrap();
+    assert_eq!(session.returned.as_deref(), Some("worker brh86 returned"));
+}
+
 /// The senders of the prompts after the day's 18.
 fn new_senders(studio: &Studio) -> Vec<&Sender> {
     let session = studio.session(IMPLEMENT_SPEC).unwrap();
@@ -65,19 +74,19 @@ fn new_senders(studio: &Studio) -> Vec<&Sender> {
 fn a_wake_up_is_the_rows_text_until_the_sessions_next_step() {
     let mut studio = replay(DAY);
     let session = |studio: &Studio| studio.session(IMPLEMENT_SPEC).unwrap().clone();
-    assert!(session(&studio).last_step.is_some());
+    let before = session(&studio).agent.last_step.clone();
+    assert!(before.is_some());
 
     studio.apply(&prompt(
         "<task-notification><task-id>a1191df87fb730aa0</task-id><status>completed</status></task-notification>",
     ));
 
-    // The row reads "worker Implement #355 relocation returned": no step since its latest prompt,
-    // a wake-up from `a1191`.
+    // The row reads "worker Implement #355 relocation returned", and the last step stays true.
     let woken = session(&studio);
-    assert_eq!(woken.last_step, None);
+    assert_eq!(woken.agent.last_step, before);
     assert_eq!(
-        woken.prompts.last().unwrap().sender,
-        Sender::WakeUp("a1191df87fb730aa0".into())
+        woken.returned.as_deref(),
+        Some("worker Implement #355 relocation returned")
     );
     let step = json!({
         "session_id": IMPLEMENT_SPEC,
@@ -88,7 +97,19 @@ fn a_wake_up_is_the_rows_text_until_the_sessions_next_step() {
         "studio_received_ms": 1_793_400_000_001u64,
     });
     studio.apply(&step.to_string());
-    assert!(session(&studio).last_step.is_some());
+    let stepped = session(&studio);
+    assert_ne!(stepped.agent.last_step, before);
+    assert_eq!(stepped.returned, None);
+}
+
+#[test]
+fn daniels_prompt_ends_the_returned_line() {
+    let mut studio = replay(DAY);
+    studio.apply(&prompt(
+        "<task-notification><task-id>a1191df87fb730aa0</task-id><status>completed</status></task-notification>",
+    ));
+    studio.apply(&prompt("carry on"));
+    assert_eq!(studio.session(IMPLEMENT_SPEC).unwrap().returned, None);
 }
 
 /// Session `session`'s `Stop` at `at`, with its transcript.

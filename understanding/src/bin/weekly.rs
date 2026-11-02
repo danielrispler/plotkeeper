@@ -12,10 +12,8 @@ fn main() -> std::io::Result<()> {
     let store = CardStore::open_beside(&log)?;
     let now = millis();
     let rates = week(store.cards(), now);
-    let mut studio = Studio::default();
-    for line in String::from_utf8_lossy(&fs::read(&log).unwrap_or_default()).lines() {
-        studio.replay(line);
-    }
+    let lines = String::from_utf8_lossy(&fs::read(&log).unwrap_or_default()).into_owned();
+    let studio = Studio::replayed(lines.lines());
     let drift = drift(&studio, &Versions::beside(&log), now);
     print!("{rates}{drift}");
     let verdict = std::env::args().skip(1).collect::<Vec<_>>().join(" ");

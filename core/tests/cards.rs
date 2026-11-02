@@ -4,7 +4,7 @@
 
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
-use studio_core::{Base, CardRequest, Change, Fingerprint, Keep, Output, Stopped, Studio};
+use studio_core::{Base, CardRequest, Change, Fingerprint, Output, Purpose, Stopped, Studio};
 
 const LOG: &str = include_str!("fixtures/bash-steps.jsonl");
 const SESSION: &str = "e4a7c2f9-3b6d-4e1a-8c5f-2d9b7e0a6c13";
@@ -53,7 +53,7 @@ fn a_prompt_whose_worktree_changed_gets_one_card_on_the_whole_change_at_its_stop
             session_id: SESSION.into(),
             id: format!("{SESSION}@1793265021380"),
             base: found().base,
-            change: found().diff,
+            change: Some(found().diff),
             prompt: Some(1793265000140),
             agent: None,
             changed_by: Default::default(),
@@ -86,8 +86,7 @@ fn a_stop_keeps_its_cards_id_and_the_first_line_of_its_message_until_the_next_pr
     );
 
     // Replayed, the same `Stop` requested no card.
-    let mut replayed = Studio::default();
-    LOG.lines().for_each(|line| replayed.replay(line));
+    let mut replayed = Studio::replayed(LOG.lines());
     assert_eq!(
         stopped(&replayed).map(|s| (s.card, s.requested)),
         Some((card, false))
@@ -178,7 +177,7 @@ fn the_shell_fingerprints_at_the_prompt_and_at_the_stop() {
         [Fingerprint {
             key: SESSION.into(),
             folder: WORKTREE.into(),
-            keep: Keep::Always
+            purpose: Purpose::Base
         }]
     );
 }
@@ -194,17 +193,14 @@ fn a_prompt_after_an_interrupt_keeps_the_interrupted_prompts_base() {
 
 #[test]
 fn after_a_replay_the_shell_fingerprints_the_prompts_still_open() {
-    let waiting = |replayed: usize| -> Vec<(String, String)> {
-        let mut studio = Studio::default();
-        LOG.lines()
-            .take(replayed)
-            .for_each(|line| studio.replay(line));
-        let open = studio.waiting_folders();
-        open.map(|(id, folder)| (id.into(), folder.into()))
-            .collect()
-    };
+    let waiting = |replayed: usize| Studio::replayed(LOG.lines().take(replayed)).waiting_folders();
 
-    assert_eq!(waiting(7), [(SESSION.into(), WORKTREE.into())]);
+    let open = Fingerprint {
+        key: SESSION.into(),
+        folder: WORKTREE.into(),
+        purpose: Purpose::Base,
+    };
+    assert_eq!(waiting(7), [open]);
     assert_eq!(waiting(LOG.lines().count()), []);
 }
 
@@ -226,7 +222,7 @@ fn the_runs_worker_gets_a_card_at_its_commit_and_its_end_and_its_session_one_fro
         let mut changes = BTreeMap::new();
         for look in studio.fingerprint_folders(line) {
             let seen = looked.iter().any(|(_, key, _)| key == &look.key);
-            looked.push((index + 1, look.key.clone(), look.keep));
+            looked.push((index + 1, look.key.clone(), look.purpose));
             if look.key == RUN_WORKER && seen {
                 let change = Change {
                     base: Base::default(),
@@ -248,22 +244,22 @@ fn the_runs_worker_gets_a_card_at_its_commit_and_its_end_and_its_session_one_fro
     assert_eq!(
         looked,
         [
-            (2, session.clone(), Keep::Always),
+            (2, session.clone(), Purpose::Base),
             // The worker's first event, its commit's Bash step and its end.
-            (5, worker.clone(), Keep::Always),
-            (8, helper.clone(), Keep::Always),
-            (15, worker.clone(), Keep::OnCommit),
+            (5, worker.clone(), Purpose::Base),
+            (8, helper.clone(), Purpose::Base),
+            (15, worker.clone(), Purpose::Commit),
             // The helper shares the session's worktree; a change across its command, from before it
             // to after it, would still make it a worker.
-            (16, helper.clone(), Keep::Always),
-            (17, helper, Keep::OnCommit),
-            (18, worker, Keep::Always),
-            (28, session, Keep::Always),
+            (16, helper.clone(), Purpose::Base),
+            (17, helper, Purpose::Commit),
+            (18, worker, Purpose::Card),
+            (28, session, Purpose::TurnEnd),
         ]
     );
     let cards: Vec<(&str, Option<&str>, bool, &[String])> = requests
         .iter()
-        .map(|r| (&*r.id, r.agent.as_deref(), r.change.is_empty(), &*r.workers))
+        .map(|r| (&*r.id, r.agent.as_deref(), r.change.is_none(), &*r.workers))
         .collect();
     let commit = format!("{RUN_WORKER}@1793471824831");
     let end = format!("{RUN_WORKER}@1793471826289");

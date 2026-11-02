@@ -8,7 +8,7 @@
 
 use std::{
     collections::HashMap,
-    fs::{self, File},
+    fs::File,
     io::{self, BufRead, BufReader, Seek, SeekFrom},
     path::Path,
     sync::{Arc, Mutex, mpsc},
@@ -18,7 +18,7 @@ use std::{
 use studio_core::{CardRequest, Notifications, Output, Session, State::NeedsYou, Studio};
 use studio_understanding::{
     CardStore, CardWriter, ClaudeWriter, FakeWriter, Fingerprints, Rating, Row, SessionCards,
-    Versions, find_claude, millis, write_brief, write_stop,
+    Versions, fingerprint_changes, millis, write_brief, write_stop,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
@@ -32,41 +32,46 @@ type Notices = Mutex<Notifications>;
 /// The session list, in its order.
 #[tauri::command]
 fn sessions(studio: State<Mutex<Studio>>, cards: State<Cards>) -> Vec<Row> {
-    let list: Vec<Session> = studio
-        .lock()
-        .unwrap()
-        .sessions()
-        .into_iter()
-        .cloned()
-        .collect();
+    let studio = studio.lock().unwrap();
+    let now = studio.now();
+    let list: Vec<Session> = studio.sessions().into_iter().cloned().collect();
+    drop(studio);
     let cards = cards.lock().unwrap();
     let row = |session: Session| Row {
-        line: cards.line(&session),
+        line: cards.line(&session, now),
         session,
     };
     list.into_iter().map(row).collect()
 }
 
-/// Daniel clicked session `id`'s row.
+/// Daniel clicked session `id`'s row; returns the selection, which no longer names a subagent.
 #[tauri::command]
-fn select(id: String, studio: State<Mutex<Studio>>) {
-    studio.lock().unwrap().select(&id);
+fn select(id: String, studio: State<Mutex<Studio>>) -> serde_json::Value {
+    let mut studio = studio.lock().unwrap();
+    studio.select(&id);
+    selection(&studio)
 }
 
-/// Daniel opened subagent `agent_id`'s line.
+/// Daniel opened subagent `agent_id`'s line; returns the selection, which names it.
 #[tauri::command]
-fn open(agent_id: String, studio: State<Mutex<Studio>>) {
-    studio.lock().unwrap().open(&agent_id);
+fn open(agent_id: String, studio: State<Mutex<Studio>>) -> serde_json::Value {
+    let mut studio = studio.lock().unwrap();
+    studio.open(&agent_id);
+    selection(&studio)
 }
 
-/// The session Daniel selected, or `None` before his first click.
+/// The session Daniel selected and the subagent of it he opened, or `null` before his first click.
 #[tauri::command]
-fn selected(studio: State<Mutex<Studio>>) -> Option<Session> {
-    studio.lock().unwrap().selected().cloned()
+fn selected(studio: State<Mutex<Studio>>) -> serde_json::Value {
+    selection(&studio.lock().unwrap())
+}
+
+fn selection(studio: &Studio) -> serde_json::Value {
+    serde_json::to_value(studio.selection()).expect("selection serializes")
 }
 
 /// The brief and cards of the selected session, or of the worker of it Daniel opened, split at the
-/// latest tick.
+/// latest tick, without each card's diff and base, which the pane never reads.
 #[tauri::command]
 fn cards(studio: State<Mutex<Studio>>, cards: State<Cards>) -> SessionCards {
     let (viewed, now) = {
@@ -79,26 +84,88 @@ fn cards(studio: State<Mutex<Studio>>, cards: State<Cards>) -> SessionCards {
     }
 }
 
-/// The pane drew the quiz of card `id` in a visible window.
-#[tauri::command]
-fn shown(id: String, cards: State<Cards>) {
-    unsaved(cards.lock().unwrap().show(&id, millis()));
+/// What the read loop last sent the window, so it sends each again only when it changes.
+#[derive(Default)]
+struct Sent {
+    list: Option<serde_json::Value>,
+    selected: Option<serde_json::Value>,
+    badge: Option<usize>,
+    cards: Option<CardsKey>,
+}
+
+/// What the cards were built for; the minute moves a card past 30 minutes, up to one minute late.
+#[derive(PartialEq)]
+struct CardsKey {
+    viewed: Option<String>,
+    revision: u64,
+    minute: u64,
+}
+
+impl Sent {
+    /// Sends the session list, the Dock badge and the selection, each only if it changed.
+    fn list(&mut self, app: &AppHandle) {
+        let list = sessions(app.state(), app.state());
+        let needing = list.iter().filter(|r| r.session.state == NeedsYou).count();
+        // macOS shows `Some(0)` as a "0" badge.
+        if self.badge != Some(needing)
+            && let Some(window) = app.get_webview_window("main")
+        {
+            let _ = window.set_badge_count((needing > 0).then_some(needing as i64));
+            self.badge = Some(needing);
+        }
+        let list = serde_json::to_value(list).expect("sessions serialize");
+        if self.list.as_ref() != Some(&list) {
+            let _ = app.emit("sessions", &list);
+            self.list = Some(list);
+        }
+        let selected = selected(app.state());
+        if self.selected.as_ref() != Some(&selected) {
+            let _ = app.emit("selected", &selected);
+            self.selected = Some(selected);
+        }
+    }
+
+    /// Sends the cards when the viewed owner, the store's revision or the minute changed.
+    fn cards(&mut self, app: &AppHandle) {
+        let key = {
+            let studio = app.state::<Mutex<Studio>>();
+            let studio = studio.lock().unwrap();
+            let revision = app.state::<Cards>().lock().unwrap().revision();
+            CardsKey {
+                viewed: studio.viewed().map(String::from),
+                revision,
+                minute: studio.now() / 60_000,
+            }
+        };
+        if self.cards.as_ref() != Some(&key) {
+            let _ = app.emit("cards", cards(app.state(), app.state()));
+            self.cards = Some(key);
+        }
+    }
+}
+
+// The four store commands run off the main thread, since saving the store fsyncs.
+
+/// The pane drew the quizzes of cards `ids` in a visible window.
+#[tauri::command(async)]
+fn shown(ids: Vec<String>, cards: State<Cards>) {
+    unsaved(cards.lock().unwrap().show(&ids, millis()));
 }
 
 /// Daniel tapped option `option` of card `id`'s quiz.
-#[tauri::command]
+#[tauri::command(async)]
 fn guess(id: String, option: usize, cards: State<Cards>) {
     unsaved(cards.lock().unwrap().guess(&id, option, millis()));
 }
 
 /// Daniel flagged that the key of card `id`'s quiz is wrong.
-#[tauri::command]
+#[tauri::command(async)]
 fn key_wrong(id: String, cards: State<Cards>) {
     unsaved(cards.lock().unwrap().key_wrong(&id));
 }
 
 /// Daniel rated card `id`'s explanation.
-#[tauri::command]
+#[tauri::command(async)]
 fn rate(id: String, rating: Rating, cards: State<Cards>) {
     unsaved(cards.lock().unwrap().rate(&id, rating));
 }
@@ -126,16 +193,10 @@ fn main() {
     let log = studio_hook::event_log(&std::env::home_dir().expect("a home directory"));
     // The store sits beside the log, in the studio's data directory.
     let store = CardStore::open_beside(&log).expect("read the card store");
-    // The card writer's neutral folder, beside the log.
-    let folder = log.with_file_name("card-writer");
-    fs::create_dir_all(&folder).expect("create the card writer's folder");
     let studio = Studio::default();
     let writer: Writer = match std::env::var("STUDIO_CARD_WRITER").as_deref() {
         Ok("fake") => Arc::new(FakeWriter),
-        _ => {
-            let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/zsh".into());
-            Arc::new(ClaudeWriter::new(find_claude(shell.as_ref()), folder))
-        }
+        _ => Arc::new(ClaudeWriter::beside(&log).expect("create the card writer's folder")),
     };
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
@@ -180,8 +241,7 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
     // its workers' cards, and two cards never update one brief at once.
     let mut queues = HashMap::<String, mpsc::Sender<Job>>::new();
     let versions = Versions::beside(log);
-    let mut drawn_cards = None;
-    let mut badge = None;
+    let mut sent = Sent::default();
     loop {
         let state = app.state::<Mutex<Studio>>();
         let mut read = false;
@@ -202,11 +262,7 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                     // so an edit in between counts as Daniel's; take the fingerprint in the hook if a
                     // card ever misses one.
                     let looks = state.lock().unwrap().fingerprint_folders(&text);
-                    let changes = looks.into_iter().filter_map(|look| {
-                        let prints = fingerprints.entry(look.key.clone()).or_default();
-                        Some((look.key, prints.look(Path::new(&look.folder), look.keep)?))
-                    });
-                    let changes = changes.collect();
+                    let changes = fingerprint_changes(looks, &mut fingerprints);
                     outputs.extend(state.lock().unwrap().apply_with_changes(&text, changes));
                 } else {
                     state.lock().unwrap().replay(&text);
@@ -214,18 +270,13 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                 line.clear();
             }
             // A worktree's first fingerprint only records it, so the turns still open after the
-            // replay get their base now, and their `Stop` has something to compare with.
+            // replay get their base now, and their `Stop` has something to compare with. The list
+            // goes first, so Daniel sees it while `git` runs.
             if !live {
-                let waiting: Vec<(String, String)> = state
-                    .lock()
-                    .unwrap()
-                    .waiting_folders()
-                    .map(|(session, folder)| (session.into(), folder.into()))
-                    .collect();
-                for (key, folder) in waiting {
-                    let prints = fingerprints.entry(key).or_default();
-                    prints.take(Path::new(&folder));
-                }
+                state.lock().unwrap().tick(millis());
+                sent.list(app);
+                let waiting = state.lock().unwrap().waiting_folders();
+                fingerprint_changes(waiting, &mut fingerprints);
             }
             for output in outputs {
                 match output {
@@ -258,19 +309,15 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                 }
             }
             read = read_to > read_from;
+            // Dropping a queue's sender closes it: its thread finishes the jobs it holds, then ends.
+            if read {
+                let keys = state.lock().unwrap().live_keys();
+                fingerprints.retain(|key, _| keys.contains(key));
+                queues.retain(|key, _| keys.contains(key));
+            }
         }
         if state.lock().unwrap().tick(millis()) || read {
-            let list = sessions(app.state(), app.state());
-            let needing = list.iter().filter(|r| r.session.state == NeedsYou).count();
-            // macOS shows `Some(0)` as a "0" badge.
-            if badge != Some(needing)
-                && let Some(window) = app.get_webview_window("main")
-            {
-                let _ = window.set_badge_count((needing > 0).then_some(needing as i64));
-                badge = Some(needing);
-            }
-            let _ = app.emit("sessions", list);
-            let _ = app.emit("selected", selected(state));
+            sent.list(app);
         }
         // Asking for focus waits on the main thread, which never takes this lock.
         let focused = || {
@@ -286,11 +333,7 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
             let _ = app.notification().builder().title(title).body(body).show();
         }
         // The cards also change with no line read: a card arrives, or one turns 30 minutes old.
-        let shown = cards(app.state(), app.state());
-        if drawn_cards.as_ref() != Some(&shown) {
-            let _ = app.emit("cards", &shown);
-            drawn_cards = Some(shown);
-        }
+        sent.cards(app);
         live = true;
         thread::sleep(Duration::from_millis(200));
     }
@@ -332,7 +375,7 @@ fn write(
             let _ = app.emit("sessions", sessions(app.state(), app.state()));
         }
         if written && card {
-            tell(&app, "New card", &session.id, agent.as_deref());
+            tell(&app, "New card", &session.agent.id, agent.as_deref());
         }
     };
     let queue = queues.entry(id).or_insert_with(|| {

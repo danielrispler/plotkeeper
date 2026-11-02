@@ -17,7 +17,7 @@ fn record(days: u64, shown: Option<u64>, answered: Option<(u64, bool)>) -> Store
             session_id: "5b9e3d71-0c2a-4f8e-b6d4-8a1c3e5f7092".into(),
             id: format!("toolu_{days}"),
             base: Base::default(),
-            change: String::new(),
+            change: None,
             prompt: None,
             ..CardRequest::default()
         },

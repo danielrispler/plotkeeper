@@ -117,10 +117,7 @@ fn weekly_counts_the_last_7_days_unrecognised_wake_ups_and_no_other_prompt() {
         ),
         prompt(1, "what did bx7k2 print?"),
     ];
-    let mut studio = Studio::default();
-    for line in &log {
-        studio.replay(line);
-    }
+    let studio = Studio::replayed(&log);
     let data = tempfile::tempdir().unwrap();
     let versions = Versions::beside(&data.path().join("events.jsonl"));
 

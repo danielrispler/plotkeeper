@@ -13,7 +13,8 @@ type Subagent = {
   id: string;
   parent: Parent;
   kind: "worker" | "helper";
-  description: string | null;
+  // Its spawn's description, else its short id: the core's one name for it.
+  name: string;
   agent_type: string | null;
   // "running", then its wake-up's status, such as "completed" or "killed".
   status: string;
@@ -41,7 +42,7 @@ type Answer = "open" | "not_answered" | { answered: Record<string, string> };
 type Question = { agent: string | null; questions: Asked[]; answer: Answer };
 type Session = {
   id: string;
-  cwd: string;
+  folder_name: string;
   last_step: Step | null;
   state: SessionState;
   checks: CheckLine[];
@@ -49,18 +50,17 @@ type Session = {
   asker: Asker | null;
   prompts: Prompt[];
   questions: Question[];
-  // In the session list only: what its row says while its turn is over, from the card store.
-  line?: string | null;
+  // "worker <name> returned", after a wake-up until its next step or Daniel's next prompt.
+  returned: string | null;
+  // In the session list only: what its row says, built by the card store.
+  line?: string;
 };
-// A session's or a worker's change since its last card, from its base: HEAD and the files git
-// status listed then. `agent` is the worker whose card it is; `changed_by` holds the files other
-// subagents edited in its worktree, by subagent.
-type Base = { head: string | null; files: string[] };
+// The shell sends a card's request without its diff and base, which the pane never reads. `agent`
+// is the worker whose card it is; `changed_by` holds the files other subagents edited in its
+// worktree, by subagent.
 type CardRequest = {
   session_id: string;
   id: string;
-  base: Base;
-  change: string;
   agent: string | null;
   changed_by: Record<string, string[]>;
 };
@@ -117,13 +117,11 @@ declare global {
 
 const element = (id: string) => document.getElementById(id)!;
 
-const folder = (session: Session) => session.cwd.split("/").pop() || session.cwd;
-
-// The session list, as the shell last sent it, and the row Daniel clicked last: a session's, or a
-// subagent's, whose view then shows its own line and questions.
+// The session list and the selection, as the shell last sent them. The selection is the core's: the
+// session Daniel selected and the subagent of it he opened, whose view then shows its own line.
+type Selection = { session: Session; agent: string | null };
 let listed: Session[] = [];
-let selectedId: string | null = null;
-let viewedAgent: string | null = null;
+let selection: Selection | null = null;
 // The collapsed groups Daniel opened, which stay open when the list is drawn again.
 const collapsed: SessionState[] = ["idle", "ended"];
 const opened = new Set<SessionState>();
@@ -143,93 +141,98 @@ function age(from: number, to = Date.now()): string {
   return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h`;
 }
 
-const parentId = (parent: Parent) => (typeof parent === "string" ? parent : parent.agent);
-const childrenOf = (session: Session, parent: string) =>
-  session.agents.filter((agent) => parentId(agent.parent) === parent);
+// A button's type, pressed state and click.
+function pressable<T extends HTMLElement>(button: T, pressed: boolean, click: () => void): T {
+  button.setAttribute("type", "button");
+  button.setAttribute("aria-pressed", String(pressed));
+  button.addEventListener("click", click);
+  return button;
+}
+
+// A subagent's state label and its state: "Needs you" while it asks, else its status.
+function agentState(session: Session, agent: Subagent): [string, string] {
+  return session.asker?.agent === agent.id ? [stateLabels.needs_you, "needs_you"] : [agent.status, agent.status];
+}
+
+// Asks the shell for the selected session's cards and draws them.
+async function refreshCards() {
+  showCards(await window.__TAURI__.core.invoke<SessionCards>("cards"));
+}
+
+// A session's subagents by the id of the agent that spawned them: "session", "unattached" or a
+// subagent's id. Built once per draw, so the tree and the "done" counts do not scan every subagent.
+type Children = Map<string, Subagent[]>;
+function childrenOf(session: Session): Children {
+  const children: Children = new Map();
+  for (const agent of session.agents) {
+    const parent = typeof agent.parent === "string" ? agent.parent : agent.parent.agent;
+    if (!children.has(parent)) children.set(parent, []);
+    children.get(parent)!.push(agent);
+  }
+  return children;
+}
 
 // The count of a parent's helpers that faded into its line.
-function done(session: Session, parent: string): HTMLElement[] {
-  const faded = childrenOf(session, parent).filter((agent) => agent.faded).length;
+function done(children: Subagent[] = []): HTMLElement[] {
+  const faded = children.filter((agent) => agent.faded).length;
   return faded ? [text("span", `${faded} done`, "id")] : [];
 }
 
-// "worker Implement #355 relocation returned", while the latest prompt is a wake-up and the session
-// has taken no step since; null otherwise.
-function returned(session: Session): string | null {
-  const sender = session.prompts[session.prompts.length - 1]?.sender;
-  if (session.last_step !== null || typeof sender !== "object" || !("wake_up" in sender)) return null;
-  const agent = session.agents.find((agent) => agent.id === sender.wake_up);
-  return `worker ${agent?.description ?? sender.wake_up.slice(0, 5)} returned`;
-}
-
-// What the session's line says: once its turn is over, its card's summary, the agent's first line or
-// the brief's latest line; in a turn, its last tool step or which worker returned; while it needs
-// Daniel, who asks and for how long, such as "a1191 · Implement #355 asks · 3m".
-function rowText(session: Session): string {
-  const wait = session.asker;
-  if (wait === null) return session.line ?? returned(session) ?? stepText(session.last_step);
-  if (wait.agent === null) return `${stepText(session.last_step)} · ${age(wait.since)}`;
-  const asker = session.agents.find((agent) => agent.id === wait.agent);
-  return `${wait.agent.slice(0, 5)} · ${asker?.description ?? ""} asks · ${age(wait.since)}`;
-}
-
 // One line: the folder, the session's short id, its state and what it is doing.
-function row(session: Session): HTMLElement {
-  const button = document.createElement("button");
-  button.type = "button";
+function row(session: Session, children: Children): HTMLElement {
+  const pressed = session.id === selection?.session.id && selection.agent === null;
+  const button = pressable(document.createElement("button"), pressed, () => select(session.id));
   button.className = "row";
-  button.setAttribute("aria-pressed", String(session.id === selectedId && viewedAgent === null));
   const state = text("span", stateLabels[session.state], "row-state");
   state.dataset.state = session.state;
   button.append(
-    text("span", folder(session), "name"),
+    text("span", session.folder_name, "name"),
     text("span", session.id.slice(0, 8), "id"),
     state,
-    ...done(session, "session"),
-    text("span", rowText(session), "row-step"),
+    ...done(children.get("session")),
+    text("span", session.line ?? "", "row-step"),
   );
-  button.addEventListener("click", () => select(session.id));
   return button;
 }
 
 // A subagent's line, indented under the agent that spawned it. A worker shows its task, status and
 // last step; a helper its task, type, status, duration and result. A failed child stands out until
 // Daniel opens it.
-function agentRow(session: Session, agent: Subagent, depth: number): HTMLElement {
-  const button = document.createElement("button");
-  button.type = "button";
+function agentRow(session: Session, children: Children, agent: Subagent, depth: number): HTMLElement {
+  const button = pressable(document.createElement("button"), agent.id === selection?.agent, () =>
+    select(session.id, agent.id),
+  );
   button.className = `row ${agent.kind}`;
-  button.setAttribute("aria-pressed", String(agent.id === viewedAgent));
   button.style.paddingLeft = `${8 + 16 * depth}px`;
-  const asks = session.asker?.agent === agent.id;
-  const state = text("span", asks ? stateLabels.needs_you : agent.status, "row-state");
-  if (asks) state.dataset.state = "needs_you";
+  const [label, stateName] = agentState(session, agent);
+  const state = text("span", label, "row-state");
+  state.dataset.state = stateName;
   state.classList.toggle("failed", agent.failed && !agent.opened);
   const details =
     agent.kind === "worker"
       ? [stepText(agent.last_step)]
       : [agent.agent_type, age(agent.started_at, agent.ended_at ?? Date.now()), agent.result];
   button.append(
-    text("span", agent.description ?? agent.id.slice(0, 5), "name"),
+    text("span", agent.name, "name"),
     state,
-    ...done(session, agent.id),
+    ...done(children.get(agent.id)),
     text("span", details.filter(Boolean).join(" · "), "row-step"),
   );
-  button.addEventListener("click", () => select(session.id, agent.id));
   return button;
 }
 
 // A session's row, then its subagents under the agent that spawned them, at any depth, and those
 // with no known spawn under "Unattached". A faded helper is not drawn; its parent's line counts it.
 function tree(session: Session): HTMLElement[] {
+  const children = childrenOf(session);
   const nested = (parent: string, depth: number): HTMLElement[] =>
-    childrenOf(session, parent).flatMap((agent) => [
-      ...(agent.faded ? [] : [agentRow(session, agent, depth)]),
+    (children.get(parent) ?? []).flatMap((agent) => [
+      ...(agent.faded ? [] : [agentRow(session, children, agent, depth)]),
       ...nested(agent.id, depth + 1),
     ]);
   const unattached = nested("unattached", 2);
   const label = text("p", "Unattached", "unattached");
-  return [row(session), ...nested("session", 1), ...(unattached.length ? [label, ...unattached] : [])];
+  return [row(session, children), ...nested("session", 1), ...(unattached.length ? [label, ...unattached] : [])];
 }
 
 // The core sends the sessions grouped by state, so a group starts where the state changes. Idle and
@@ -263,45 +266,36 @@ function showSessions(sessions: Session[]) {
 
 // Only Daniel's click changes the selected session, and the subagent of it whose view shows, if any:
 // its own line, questions, brief and cards. Opening a subagent's line also fades a failed helper.
+// The core asks for it, and the pane draws the selection the core returns.
 async function select(id: string, agent: string | null = null) {
-  selectedId = id;
-  viewedAgent = agent;
-  showSessions(listed);
-  await window.__TAURI__.core.invoke("select", { id });
+  let selected = await window.__TAURI__.core.invoke<Selection>("select", { id });
   if (agent !== null) {
-    await window.__TAURI__.core.invoke("open", { agentId: agent });
-    showSessions(await window.__TAURI__.core.invoke<Session[]>("sessions"));
+    selected = await window.__TAURI__.core.invoke<Selection>("open", { agentId: agent });
+    listed = await window.__TAURI__.core.invoke<Session[]>("sessions");
   }
-  show(await window.__TAURI__.core.invoke<Session | null>("selected"));
-  showCards(await window.__TAURI__.core.invoke<SessionCards>("cards"));
+  show(selected);
+  await refreshCards();
 }
 
-function show(session: Session | null) {
-  element("empty").hidden = session !== null;
-  element("view").hidden = session === null;
-  if ((session?.id ?? null) !== selectedId) {
-    selectedId = session?.id ?? null;
-    showSessions(listed);
-  }
-  if (session === null) return;
+function show(selected: Selection | null) {
+  selection = selected;
+  showSessions(listed);
+  element("empty").hidden = selected !== null;
+  element("view").hidden = selected === null;
+  if (selected === null) return;
+  const session = selected.session;
   // A subagent's view shows its own line, questions, brief and cards; the checks are its session's.
-  const agent = session.agents.find((a) => a.id === viewedAgent) ?? null;
-  const asks = agent !== null && session.asker?.agent === agent.id;
-  const [label, state] =
-    agent === null
-      ? [stateLabels[session.state], session.state]
-      : asks
-        ? [stateLabels.needs_you, "needs_you"]
-        : [agent.status, agent.status];
+  const agent = session.agents.find((a) => a.id === selected.agent) ?? null;
+  const [label, state] = agent === null ? [stateLabels[session.state], session.state] : agentState(session, agent);
   const step = (agent ?? session).last_step;
   element("view").toggleAttribute("data-agent", agent !== null);
   element("session").textContent =
     agent === null
-      ? `${folder(session)} · ${session.id.slice(0, 8)}`
-      : `${agent.description ?? ""} · ${agent.id.slice(0, 5)}`;
+      ? `${session.folder_name} · ${session.id.slice(0, 8)}`
+      : agent.name;
   element("state").textContent = label;
   element("state").dataset.state = state;
-  element("tool").textContent = step?.tool ?? (agent === null ? returned(session) : null) ?? "No step yet";
+  element("tool").textContent = step?.tool ?? (agent === null ? session.returned : null) ?? "No step yet";
   element("detail").textContent = step?.detail ?? "";
   showQuestions(session.questions.filter((question) => question.agent === (agent?.id ?? null)));
   showChecks(session.checks);
@@ -333,7 +327,7 @@ function questionElement({ questions, answer }: Question): HTMLElement {
       }),
     );
     block.append(text("p", asked.header ?? "", "header"), text("p", asked.question, "asked"), choices);
-    if (chosen !== null) block.append(text("p", `Your answer: ${chosen}`, "chosen-text"));
+    if (chosen !== null) block.append(text("p", `Your answer: ${chosen}`));
   }
   return block;
 }
@@ -381,7 +375,7 @@ function hebrew(tag: string, text: string): HTMLElement {
 // Records Daniel's tap, his flag on the key or his rating, and draws the cards again at once.
 async function record(command: "guess" | "key_wrong" | "rate", args: Record<string, unknown>) {
   await window.__TAURI__.core.invoke(command, args);
-  showCards(await window.__TAURI__.core.invoke<SessionCards>("cards"));
+  await refreshCards();
 }
 
 // A card's quiz and its options, one tap each. Once Daniel taps, it shows whether he was right and,
@@ -393,11 +387,10 @@ function quizElements(id: string, quiz: Quiz, guess: Guess | null): HTMLElement[
   options.append(
     ...quiz.options.map((option, i) => {
       const item = document.createElement("li");
-      const button = hebrew("button", option.text) as HTMLButtonElement;
-      button.type = "button";
+      const button = pressable(hebrew("button", option.text) as HTMLButtonElement, guess?.option === i, () =>
+        record("guess", { id, option: i }),
+      );
       button.disabled = guess !== null;
-      button.setAttribute("aria-pressed", String(guess?.option === i));
-      button.addEventListener("click", () => record("guess", { id, option: i }));
       item.append(button);
       if (guess) {
         item.append(hebrew("p", `${i === quiz.key ? "התשובה הנכונה. " : ""}${option.why}`));
@@ -448,11 +441,11 @@ function cardElement({ request, card, guess, key_wrong, more, rating }: StoredCa
 }
 
 // Who changed what: the files another subagent, such as a helper, edited in the card's worktree, one
-// line per subagent, named by its task or its short id.
+// line per subagent, by the name the core gave it.
 function changedBy({ session_id, changed_by }: CardRequest): HTMLElement[] {
   const agents = listed.find((session) => session.id === session_id)?.agents ?? [];
   return Object.entries(changed_by).map(([id, files]) => {
-    const name = agents.find((agent) => agent.id === id)?.description ?? id.slice(0, 5);
+    const name = agents.find((agent) => agent.id === id)?.name ?? id;
     const line = document.createElement("p");
     line.className = "paths";
     line.append(text("span", `שונו בידי ${name}:`), ...files.map(code));
@@ -462,12 +455,10 @@ function changedBy({ session_id, changed_by }: CardRequest): HTMLElement[] {
 
 // "The key is wrong": one record, flagged from the quiz or from the rating, and never undone.
 function keyWrongButton(id: string, keyWrong: boolean): HTMLElement {
-  const flag = hebrew("button", keyWrong ? "סימנת שהמפתח שגוי" : "המפתח שגוי") as HTMLButtonElement;
-  flag.type = "button";
+  const label = keyWrong ? "סימנת שהמפתח שגוי" : "המפתח שגוי";
+  const flag = pressable(hebrew("button", label) as HTMLButtonElement, keyWrong, () => record("key_wrong", { id }));
   flag.className = "key-wrong";
   flag.disabled = keyWrong;
-  flag.setAttribute("aria-pressed", String(keyWrong));
-  flag.addEventListener("click", () => record("key_wrong", { id }));
   return flag;
 }
 
@@ -501,7 +492,7 @@ async function explainMore(id: string) {
   asking.delete(id);
   if (more === null) moreOpen.delete(id);
   drawn.delete(id);
-  showCards(await window.__TAURI__.core.invoke<SessionCards>("cards"));
+  await refreshCards();
 }
 
 const levels: [Level, string][] = [
@@ -519,13 +510,8 @@ const reasons: [Reason, string][] = [
 // Daniel's rating of the explanation: a level, then, once he picked one, the reasons, each tap
 // toggling one. `keyWrong` is the quiz's flag, offered as a reason on a card with a quiz.
 function ratingElement(id: string, rating: Rating | null, keyWrong: boolean | null): HTMLElement {
-  const choice = (label: string, pressed: boolean, picked: Rating) => {
-    const button = hebrew("button", label) as HTMLButtonElement;
-    button.type = "button";
-    button.setAttribute("aria-pressed", String(pressed));
-    button.addEventListener("click", () => record("rate", { id, rating: picked }));
-    return button;
-  };
+  const choice = (label: string, pressed: boolean, picked: Rating) =>
+    pressable(hebrew("button", label), pressed, () => record("rate", { id, rating: picked }));
   const node = document.createElement("div");
   node.className = "rating";
   const row = document.createElement("p");
@@ -557,7 +543,7 @@ const unshown = new Set<string>();
 
 function markShown() {
   if (document.visibilityState !== "visible") return;
-  for (const id of unshown) window.__TAURI__.core.invoke("shown", { id });
+  if (unshown.size) window.__TAURI__.core.invoke("shown", { ids: [...unshown] });
   unshown.clear();
 }
 
@@ -601,8 +587,8 @@ function showCards({ brief, recent, older }: SessionCards) {
 
 window.__TAURI__.event.listen<Session[]>("sessions", (event) => showSessions(event.payload));
 window.__TAURI__.core.invoke<Session[]>("sessions").then(showSessions);
-window.__TAURI__.event.listen<Session | null>("selected", (event) => show(event.payload));
-window.__TAURI__.core.invoke<Session | null>("selected").then(show);
+window.__TAURI__.event.listen<Selection | null>("selected", (event) => show(event.payload));
+window.__TAURI__.core.invoke<Selection | null>("selected").then(show);
 window.__TAURI__.event.listen<SessionCards>("cards", (event) => showCards(event.payload));
 // Claude Code's version changed: re-record the subagent fixture.
 window.__TAURI__.event.listen<string>("notice", (event) => {

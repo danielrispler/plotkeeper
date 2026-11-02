@@ -68,16 +68,40 @@ const TREE_EXPLORE: &str = "a5d9f1b3c7e2a4b6d";
 
 #[test]
 fn a_notice_says_its_sessions_folder_and_short_id_and_the_child_it_names() {
-    let mut studio = Studio::default();
-    for line in TREE.lines() {
-        studio.replay(line);
-    }
+    let studio = Studio::replayed(TREE.lines());
 
     assert_eq!(studio.notice_body(TREE_SESSION, None), "Falinks e3b1c7a2");
     assert_eq!(
         studio.notice_body(TREE_SESSION, Some(TREE_EXPLORE)),
         "Falinks e3b1c7a2 · Find the session tests"
     );
+}
+
+#[test]
+fn a_notice_names_a_child_with_no_description_by_its_short_id() {
+    let log = TREE.replace(r#""description":"Find the session tests","#, "");
+    let studio = Studio::replayed(log.lines());
+
+    assert_eq!(
+        studio.notice_body(TREE_SESSION, Some(TREE_EXPLORE)),
+        "Falinks e3b1c7a2 · a5d9f"
+    );
+}
+
+#[test]
+fn a_folder_ending_in_a_slash_shows_its_whole_cwd() {
+    let log = TREE.replace(
+        r#""cwd":"/Users/danielrispler/work/Falinks""#,
+        r#""cwd":"/Users/danielrispler/work/Falinks/""#,
+    );
+    let studio = Studio::replayed(log.lines());
+
+    assert_eq!(
+        studio.notice_body(TREE_SESSION, None),
+        "/Users/danielrispler/work/Falinks/ e3b1c7a2"
+    );
+    let session = studio.session(TREE_SESSION).expect("the session");
+    assert_eq!(session.folder_name, "/Users/danielrispler/work/Falinks/");
 }
 
 /// The notification due at `now`, from a window that is not focused.

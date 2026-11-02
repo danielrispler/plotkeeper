@@ -5,11 +5,7 @@
 use studio_core::{Step, Studio};
 
 fn replay(log: &str) -> Studio {
-    let mut studio = Studio::default();
-    for line in log.lines() {
-        studio.replay(line);
-    }
-    studio
+    Studio::replayed(log.lines())
 }
 
 fn step(tool: &str, detail: Option<&str>) -> Option<Step> {
@@ -27,7 +23,10 @@ fn a_failed_command_is_still_the_last_step() {
     let studio = replay(include_str!("fixtures/failing-bash.jsonl"));
 
     let probe = studio.session(PROBE).expect("the session");
-    assert_eq!(probe.last_step, step("Bash", Some("ls does-not-exist")));
+    assert_eq!(
+        probe.agent.last_step,
+        step("Bash", Some("ls does-not-exist"))
+    );
 }
 
 #[test]
@@ -35,7 +34,7 @@ fn a_permission_prompt_keeps_the_step_it_asks_about() {
     let studio = replay(include_str!("fixtures/permission-write.jsonl"));
 
     let probe = studio.session(PROBE).expect("the session");
-    assert_eq!(probe.last_step, step("Write", Some("probe.txt")));
+    assert_eq!(probe.agent.last_step, step("Write", Some("probe.txt")));
 }
 
 /// Before #371 the pane followed the session prompted last (#328, user story 33). Now only Daniel's
@@ -53,8 +52,8 @@ fn the_selection_holds_when_another_session_is_prompted() {
     }
 
     let selected = studio.selected().expect("a selected session");
-    assert_eq!(selected.id, first);
-    assert_eq!(selected.last_step, step("Edit", Some("src/lib.rs")));
+    assert_eq!(selected.agent.id, first);
+    assert_eq!(selected.agent.last_step, step("Edit", Some("src/lib.rs")));
     let other = studio
         .session("9e0b5f13-d72a-4c6e-b8f4-61a3c2d9e807")
         .expect("the session prompted last");
@@ -62,7 +61,10 @@ fn the_selection_holds_when_another_session_is_prompted() {
         other.cwd,
         "/Users/danielrispler/work/Falinks/.claude/worktrees/issue-322-terminals"
     );
-    assert_eq!(other.last_step, step("Grep", Some("STUDIO_TERMINAL_ID")));
+    assert_eq!(
+        other.agent.last_step,
+        step("Grep", Some("STUDIO_TERMINAL_ID"))
+    );
 }
 
 #[test]
@@ -75,14 +77,14 @@ fn questions_and_plan_approvals_inside_a_wait_leave_the_steps_in_order() {
     let asker = "2d8a6f41-c95e-4b37-a1d0-7e3f8b2c6a95";
     let asked = at_question.session(asker).expect("the session");
     assert_eq!(
-        asked.last_step,
+        asked.agent.last_step,
         step(
             "AskUserQuestion",
             Some("Which README section should I fix?")
         )
     );
     let done = at_end.session(asker).expect("the session");
-    assert_eq!(done.last_step, step("Edit", Some("README.md")));
+    assert_eq!(done.agent.last_step, step("Edit", Some("README.md")));
 }
 
 #[test]
@@ -94,7 +96,10 @@ fn lines_that_are_not_hook_events_are_skipped() {
     let studio = replay(&log);
 
     let probe = studio.session(PROBE).expect("the session");
-    assert_eq!(probe.last_step, step("Bash", Some("ls does-not-exist")));
+    assert_eq!(
+        probe.agent.last_step,
+        step("Bash", Some("ls does-not-exist"))
+    );
 }
 
 /// The two recorded logs (#370), scrubbed of their content: the checkpoint day's events, and the
@@ -126,5 +131,17 @@ fn nothing_is_selected_until_daniel_clicks() {
 
     studio.select(PROBE);
 
-    assert_eq!(studio.selected().map(|s| s.id.as_str()), Some(PROBE));
+    assert_eq!(studio.selected().map(|s| s.agent.id.as_str()), Some(PROBE));
+}
+
+/// Only four fields of a tool response are read, and lazily (#410, decision 20). A response that is
+/// not a JSON object yields none of them and still counts as an event.
+#[test]
+fn a_tool_response_that_is_a_string_still_updates_its_session() {
+    let line = r#"{"session_id":"s1","cwd":"/work","hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"ls"},"tool_use_id":"t1","tool_response":"plain text","studio_received_ms":1}"#;
+
+    let studio = replay(line);
+
+    let session = studio.session("s1").expect("the session");
+    assert_eq!(session.cwd, "/work");
 }

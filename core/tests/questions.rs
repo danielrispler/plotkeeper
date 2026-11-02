@@ -7,11 +7,7 @@ use studio_core::{Answer, Asker, State, Studio};
 
 /// The studio after the log's first `upto` lines, replayed.
 fn replay_upto(log: &str, upto: usize) -> Studio {
-    let mut studio = Studio::default();
-    for line in log.lines().take(upto) {
-        studio.replay(line);
-    }
-    studio
+    Studio::replayed(log.lines().take(upto))
 }
 
 const ASK: &str = include_str!("fixtures/ask-then-plan.jsonl");

@@ -15,14 +15,16 @@ fn edit() -> CardRequest {
         session_id: "2c7a9f14-6e3b-4d58-a1c9-0f8e2b7d4a63".into(),
         id: "2c7a9f14-6e3b-4d58-a1c9-0f8e2b7d4a63@1793263024310".into(),
         base: Base::default(),
-        change: concat!(
-            "--- a/apps/studio/ui/style.css\n",
-            "+++ b/apps/studio/ui/style.css\n",
-            "@@ -9,1 +9,1 @@\n",
-            "-.unchecked { font-size:12px; }\n",
-            "+.unchecked { font-size:15px; }\n",
-        )
-        .into(),
+        change: Some(
+            concat!(
+                "--- a/apps/studio/ui/style.css\n",
+                "+++ b/apps/studio/ui/style.css\n",
+                "@@ -9,1 +9,1 @@\n",
+                "-.unchecked { font-size:12px; }\n",
+                "+.unchecked { font-size:15px; }\n",
+            )
+            .into(),
+        ),
         prompt: None,
         ..CardRequest::default()
     }
@@ -282,7 +284,7 @@ fn the_real_writer_runs_claude_on_the_subscription_in_its_neutral_folder() {
     // The architecture section reads the prompt's earlier cards; the brief is updated.
     assert!(prompt.contains(&format!("earlier cards, oldest first:\n- {}\n", earlier[0])));
     assert!(prompt.contains(&format!("The brief so far:\n{brief}\n")));
-    assert!(prompt.ends_with(&format!("\nChange:\n{}", edit().change)));
+    assert!(prompt.ends_with(&format!("\nChange:\n{}", edit().diff())));
     assert_eq!(command.get_current_dir(), Some(folder));
 }
 
@@ -336,7 +338,7 @@ fn explain_more_runs_the_same_writer_on_the_cards_explanation_and_its_change() {
     let prompt = args[4];
     assert!(prompt.contains("in more depth than the card"), "{prompt}");
     assert!(prompt.contains(&card.explanation), "{prompt}");
-    assert!(prompt.ends_with(&format!("\nChange:\n{}", edit().change)));
+    assert!(prompt.ends_with(&format!("\nChange:\n{}", edit().diff())));
 }
 
 #[test]
@@ -344,7 +346,7 @@ fn a_huge_change_is_cut_so_the_prompt_stays_small() {
     let folder = Path::new("/h/Library/Application Support/dev.falinks.studio/card-writer");
     // A new file of 100 000 two-byte letters, as added lines.
     let request = CardRequest {
-        change: format!("+{}\n", "א".repeat(100_000)),
+        change: Some(format!("+{}\n", "א".repeat(100_000))),
         ..edit()
     };
     let command = ClaudeWriter::new(CLAUDE.into(), folder.into()).command(&request, &[], "");
