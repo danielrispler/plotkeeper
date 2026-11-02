@@ -18,6 +18,10 @@ The time Daniel waits on an agent: from his prompt until the agent ends its turn
 An explanation, in the explanation language, of what a prompt changed, or what a worker changed, since the previous card. It opens with a quiz, and offers "explain more" and a rating.
 _Avoid_: Summary (read after the work, with no question first)
 
+**Turn**:
+An agent session's work on one prompt, Daniel's or a wake-up, from its first event to the agent's end of turn. It also ends when the next turn starts after Daniel interrupts it, or when the session ends. A prompt Daniel queues during a turn starts its own turn when the running one ends.
+_Avoid_: Step (one tool call inside a turn)
+
 **Base**:
 The state of a worktree that the next card's change is measured from: its commit and its files when the previous card was written, or when the prompt or worker began. A move of the commit that is not the agent's own work moves the base instead of adding to the change.
 _Avoid_: Snapshot, checkpoint (the engine's term)
