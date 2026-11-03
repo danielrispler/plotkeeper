@@ -22,6 +22,18 @@ _Avoid_: Summary (read after the work, with no question first)
 An agent session's work on one prompt, Daniel's or a wake-up, from its first event to the agent's end of turn. It also ends when the next turn starts after Daniel interrupts it, or when the session ends. A prompt Daniel queues during a turn starts its own turn when the running one ends.
 _Avoid_: Step (one tool call inside a turn)
 
+**Intention**:
+The latest thing the agent wrote in its own words during a turn, such as why it is about to read an issue. It stays shown, with its age, until the agent writes again, so it covers the steps that follow it.
+_Avoid_: Reason (the card writer's account of a step)
+
+**Phase**:
+A recognisable stretch of a session's work on a ticket, such as orienting, designing, implementing, checking, or waiting on a PR's CI. A session moves through phases in a usual order.
+_Avoid_: Stage, step
+
+**Estimate**:
+A range for how long the agent's remaining work will take, from the typical durations of the phases still ahead. It appears only when there is enough history for the current kind of work, is always marked as an estimate, and leaves out the time that depends on Daniel.
+_Avoid_: ETA (implies a promise)
+
 **Base**:
 The state of a worktree that the next card's change is measured from: its commit and its files when the previous card was written, or when the prompt or worker began. A move of the commit that is not the agent's own work moves the base instead of adding to the change.
 _Avoid_: Snapshot, checkpoint (the engine's term)
