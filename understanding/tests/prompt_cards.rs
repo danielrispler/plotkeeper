@@ -276,7 +276,7 @@ fn bash(command: &str) -> Value {
 
 /// The summary the fake writer gives a change to `path`.
 fn summary(path: &str) -> String {
-    format!("שינוי לדוגמה ב־`{path}`")
+    format!("Sample change to `{path}`")
 }
 
 #[test]
@@ -411,7 +411,7 @@ fn a_wake_up_turn_that_changed_nothing_itself_updates_the_brief_and_writes_no_ca
     };
     assert_eq!(brief, "");
     assert!(workers.contains(&summary("a.rs")), "{workers}");
-    let updated = "העובדים חזרו, והסשן עצמו לא שינה דבר.";
+    let updated = "The workers came back, and the session itself changed nothing.";
     assert_eq!(shell.brief(), updated);
     assert_eq!(shell.line(), updated);
 }
@@ -599,7 +599,7 @@ fn a_wake_ups_card_reads_its_prompts_earlier_cards_and_each_card_the_brief_so_fa
         [
             (vec![], String::new()),
             // The wake-up's card is on Daniel's prompt before it.
-            (vec!["שינוי לדוגמה ב־`a.rs`".to_string()], first_brief),
+            (vec!["Sample change to `a.rs`".to_string()], first_brief),
             (vec![], second_brief.clone()),
         ]
     );
@@ -631,7 +631,7 @@ fn the_5th_update_rewrites_the_brief_from_daniels_prompts_the_summaries_and_the_
     };
     // No wake-up, and every card's summary.
     assert_eq!(prompts, &["Add a", "Add b", "Add d", "Add e"]);
-    let summary = |path| format!("שינוי לדוגמה ב־`{path}`");
+    let summary = |path| format!("Sample change to `{path}`");
     let all: Vec<String> = ["a.rs", "b.rs", "c.rs", "d.rs", "e.rs"].map(summary).into();
     assert_eq!(summaries, &all);
     // The diffstat since the session began, not the raw diff.
@@ -643,7 +643,7 @@ fn the_5th_update_rewrites_the_brief_from_daniels_prompts_the_summaries_and_the_
     assert!(!diffstat.contains("fn "), "{diffstat}");
     let store = shell.store.lock().unwrap();
     let brief = store.brief("s1").unwrap();
-    assert!(brief.text.contains("שנכתב מחדש"), "{}", brief.text);
+    assert!(brief.text.contains("rewritten"), "{}", brief.text);
     assert_eq!(brief.updates, 5);
 }
 
@@ -678,12 +678,12 @@ fn a_stopped_row_shows_the_agents_first_line_then_the_cards_summary_then_the_bri
     assert_eq!(shell.line(), "Renamed `a` to `b`.");
 
     shell.write(outputs.into_iter().next().unwrap());
-    assert_eq!(shell.line(), "שינוי לדוגמה ב־`lib.rs`");
+    assert_eq!(shell.line(), "Sample change to `lib.rs`");
 
     // A turn that changed nothing gets no card: the row shows the brief's latest line.
     shell.take("UserPromptSubmit", json!({ "prompt": "Anything left?" }));
     shell.take("Stop", json!({ "last_assistant_message": "Nothing left." }));
-    assert_eq!(shell.line(), "השינוי האחרון נגע ב־`lib.rs`.");
+    assert_eq!(shell.line(), "The latest change touched `lib.rs`.");
 }
 
 #[test]

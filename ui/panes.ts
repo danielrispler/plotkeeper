@@ -1,0 +1,149 @@
+// The terminal panes (#467): one per daemon terminal, in `#terminal-body`, one shown at a time. The
+// login shell `shell` in the configured repository shows until a session's pane does. A session
+// started from the studio runs `claude` in its own terminal, whose fresh id reaches its hooks as
+// `STUDIO_TERMINAL_ID`, so the core links its row to the pane (`Session.terminal`).
+// `closePane` ends a terminal and drops its pane (#469).
+// #470: at start every running terminal is attached, its screen replayed, and the terminals a dead
+// daemon ran come back (`revive`); so after a crash, a reboot or an upgrade, the same way.
+
+import type * as Xterm from "@xterm/xterm";
+import { connect, list, onEvent, request, type Listed } from "./daemon.js";
+import { element, invoke } from "./dom.js";
+import { offerBuilds, upgrade, type Revive } from "./restart.js";
+import { openPane } from "./terminal.js";
+import type { Session } from "./types.js";
+
+type Pane = { box: HTMLElement; term: Xterm.Terminal | null; title: string };
+const panes = new Map<string, Pane>();
+let repo = "";
+let shown = "";
+let ready: Promise<void> | null = null;
+let revived: Promise<void> = Promise.resolve();
+
+// Connects, shows the login shell in the configured repository, then brings back every terminal;
+// again each time the daemon is lost.
+export function startPanes(): Promise<void> {
+  offerBuilds();
+  ready = connect().then((config) => {
+    repo = config.repo;
+    show("shell", () => openPane(box("shell"), "shell", repo));
+    revived = revive(config.outdated);
+  });
+  onEvent((event) => {
+    if (event.ev !== "lost") return;
+    revived = connect().then((config) => revive(config.outdated));
+  });
+  return ready;
+}
+
+// Spawns each terminal the dead daemon ran, with `claude --resume` for a Claude terminal, then
+// attaches every running terminal: a new pane, hidden, or the pane it had.
+async function revive(outdated: boolean) {
+  const lost = await invoke<Listed[]>("terminal_lost");
+  for (const r of await invoke<Revive[]>("revival", { terms: lost })) {
+    // A revived conversation keeps its terminal's id, on purpose: its session stays linked to the
+    // pane it had. Only a new conversation gets a fresh id (`startClaude`, #467).
+    const argv = r.session ? await invoke<string[]>("claude_argv", { resume: r.session }) : r.argv;
+    const term = panes.get(r.id)?.term;
+    await request({ op: "spawn", id: r.id, argv, cwd: r.cwd, cols: term?.cols ?? 80, rows: term?.rows ?? 24 });
+  }
+  for (const t of await list()) {
+    if (t.exited !== null) continue;
+    if (panes.get(t.id)?.term) await request({ op: "attach", id: t.id });
+    else if (!panes.has(t.id)) draw(t.id, () => openPane(box(t.id), t.id, t.cwd, t.argv));
+  }
+  if (outdated) upgrade();
+}
+
+// A pane's box in `#terminal-body`, made the first time.
+function box(id: string): HTMLElement {
+  let pane = panes.get(id);
+  if (!pane) {
+    const node = document.createElement("div");
+    node.className = "pane";
+    node.hidden = true;
+    element("terminal-body").append(node);
+    pane = { box: node, term: null, title: "terminal" };
+    panes.set(id, pane);
+  }
+  return pane.box;
+}
+
+// Shows terminal `id`'s pane, drawing it with `open` the first time, and the header's title and size.
+function show(id: string, open: () => Xterm.Terminal | null) {
+  shown = id;
+  const place = box(id);
+  for (const pane of panes.values()) pane.box.hidden = pane.box !== place;
+  const pane = draw(id, open);
+  header(pane);
+  pane.term?.focus();
+}
+
+// Draws terminal `id`'s pane with `open` the first time.
+function draw(id: string, open: () => Xterm.Terminal | null): Pane {
+  const place = box(id);
+  const pane = panes.get(id)!;
+  if (pane.term === null && place.childElementCount === 0) {
+    pane.term = open();
+    pane.term?.onResize(() => shown === id && header(pane));
+    pane.term?.onTitleChange((title) => {
+      pane.title = title || "terminal";
+      if (shown === id) header(pane);
+    });
+  }
+  return pane;
+}
+
+function header({ term, title }: Pane) {
+  element("terminal-title").textContent = title;
+  element("size").textContent = term ? `${term.cols} × ${term.rows}` : "";
+}
+
+// Ends terminal `id`'s whole process group (#322, point 3), then forgets it and drops its pane; the
+// shell shows in its place.
+export async function closePane(id: string) {
+  await request({ op: "kill", id });
+  await request({ op: "forget", id });
+  // Its sessions end now, whether or not their `claude` lived to run its own end hook.
+  await invoke("closed", { terminal: id });
+  const pane = panes.get(id);
+  pane?.term?.dispose();
+  pane?.box.remove();
+  panes.delete(id);
+  if (shown === id) show("shell", () => openPane(box("shell"), "shell", repo));
+}
+
+// Starts `claude` in `cwd` in a new terminal, or `claude --resume <resume>` for an ended session,
+// and shows its pane.
+export async function startClaude(cwd: string, resume: string | null = null) {
+  const argv = await invoke<string[]>("claude_argv", { resume });
+  const id = `claude-${crypto.randomUUID()}`;
+  show(id, () => openPane(box(id), id, cwd, argv));
+}
+
+// The selected session's pane: its terminal's, or the shell for a session the studio did not start.
+// Daniel's click always shows it; the shell's updates of the selection switch the pane only when the
+// session or its terminal changed, so they never take away a pane Daniel just started.
+let selected: string | null = null;
+export async function showSession(session: Session | null, clicked = false) {
+  const key = session ? `${session.id} ${session.terminal ?? ""}` : null;
+  if (key === selected && !clicked) return;
+  selected = key;
+  const connected = await ready?.then(() => true, () => false);
+  await revived.catch((e) => console.warn(`terminal: revive: ${e}`));
+  const current = () => selected === key;
+  const id = session?.terminal;
+  if (!connected || !current()) return;
+  if (!id) return show("shell", () => openPane(box("shell"), "shell", repo));
+  if (panes.has(id)) return show(id, () => null);
+  // A terminal of an earlier app run: attach when the daemon still runs it. Opening an exited or
+  // unknown id would start a new program under it.
+  const terminal = (await list()).find((t) => t.id === id);
+  if (!current()) return;
+  const gone = terminal ? `its claude exited (${terminal.exited}); Open starts it again` : "the daemon has no such terminal";
+  show(id, () => {
+    if (terminal && terminal.exited === null) return openPane(box(id), id, terminal.cwd, terminal.argv);
+    box(id).append(Object.assign(document.createElement("p"), { className: "empty", textContent: `No pane: ${gone}.` }));
+    return null;
+  });
+}

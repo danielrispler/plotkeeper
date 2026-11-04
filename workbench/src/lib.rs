@@ -1,0 +1,170 @@
+//! Workbench git (#328, module 7; #461, decision 8): the places a session can start in, read live
+//! from `git worktree list --porcelain` with no stored copy, and the `claude` command a studio
+//! terminal runs. Beside them, creating and removing tasks (#468; #461, decision 9): no call passes
+//! git's force option, so git refuses whatever would lose work, and its message is shown as it is.
+
+use serde::Serialize;
+use std::{path::Path, process::Command};
+
+/// A main checkout or a task's worktree: its folder, and its branch, `None` at a detached `HEAD`.
+#[derive(Debug, PartialEq, Serialize)]
+pub struct Place {
+    pub path: String,
+    pub branch: Option<String>,
+}
+
+/// The repository's main checkout, its tasks, the worktrees under `.claude/worktrees/` in `git`'s
+/// order, and how many `agent-*` worktrees there were hidden.
+#[derive(Debug, PartialEq, Serialize)]
+pub struct Places {
+    pub main: Place,
+    pub tasks: Vec<Place>,
+    pub hidden: usize,
+}
+
+/// The places of the repository that holds `repo`, which may be any of its worktrees.
+pub fn places(repo: &Path) -> Result<Places, String> {
+    let output = Command::new("git")
+        .args(["worktree", "list", "--porcelain"])
+        .current_dir(repo)
+        .output()
+        .map_err(|e| format!("git worktree list: {e}"))?;
+    if !output.status.success() {
+        let error = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("git worktree list: {}", error.trim()));
+    }
+    // Each worktree is a block of lines; the main checkout's comes first.
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut listed = text.split("\n\n").filter_map(|block| {
+        let mut place = Place {
+            path: String::new(),
+            branch: None,
+        };
+        for line in block.lines() {
+            if let Some(path) = line.strip_prefix("worktree ") {
+                place.path = path.into();
+            } else if let Some(branch) = line.strip_prefix("branch ") {
+                place.branch = Some(branch.trim_start_matches("refs/heads/").into());
+            } else if line == "bare" || line.starts_with("prunable") {
+                // A bare repository has no files, and a prunable worktree's folder is gone.
+                return None;
+            }
+        }
+        (!place.path.is_empty()).then_some(place)
+    });
+    let main = listed.next().ok_or("git listed no main checkout")?;
+    let under = format!("{}/.claude/worktrees/", main.path);
+    let (agents, tasks): (Vec<Place>, Vec<Place>) = listed
+        .filter(|place| place.path.starts_with(&under))
+        .partition(|place| place.path[under.len()..].starts_with("agent-"));
+    Ok(Places {
+        main,
+        tasks,
+        hidden: agents.len(),
+    })
+}
+
+/// The command a studio terminal runs for a new session, or for `resume`, an ended session's id. It
+/// sets `CLAUDE_CODE_PLUGIN_DIRS` to the studio plugin at `plugin` alone, as the README loads it,
+/// so a profile that sets it too never loads the hooks twice. The daemon runs it under a login
+/// shell with the terminal's `STUDIO_TERMINAL_ID`.
+pub fn claude(plugin: &Path, resume: Option<&str>) -> Vec<String> {
+    let mut argv = vec![
+        "env".into(),
+        format!("CLAUDE_CODE_PLUGIN_DIRS={}", plugin.display()),
+        "claude".into(),
+    ];
+    if let Some(id) = resume {
+        argv.extend(["--resume".into(), id.into()]);
+    }
+    argv
+}
+
+/// Creates task `name`: after a `git fetch`, branch `name` from `origin`'s default branch, checked
+/// out in `.claude/worktrees/<name>` of the main checkout. A name already taken, by a branch here or
+/// at `origin` or by a folder, is refused and nothing is created.
+pub fn create_task(repo: &Path, name: &str) -> Result<Place, String> {
+    // A valid branch name has no `..` part, so the folder stays under `.claude/worktrees/`.
+    git(repo, &["check-ref-format", "--branch", name])?;
+    let main = places(repo)?.main.path;
+    let path = format!("{main}/.claude/worktrees/{name}");
+    git(repo, &["fetch", "--quiet", "origin"])?;
+    // `origin/HEAD` names the default branch; a clone sets it, `set-head` asks `origin` otherwise.
+    let head = ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"];
+    let base = match git(repo, &head) {
+        Ok(base) => base,
+        Err(_) => {
+            git(repo, &["remote", "set-head", "origin", "--auto"])?;
+            git(repo, &head)?
+        }
+    };
+    let taken =
+        |reference: String| git(repo, &["rev-parse", "--verify", "--quiet", &reference]).is_ok();
+    if taken(format!("refs/heads/{name}")) || taken(format!("refs/remotes/origin/{name}")) {
+        return Err(format!("a branch named '{name}' already exists"));
+    }
+    if Path::new(&path).exists() {
+        return Err(format!("'{path}' already exists"));
+    }
+    // `--no-track`: the task's branch does not follow the default branch it starts from.
+    let add = [
+        "worktree",
+        "add",
+        "--quiet",
+        "--no-track",
+        "-b",
+        name,
+        &path,
+        &base,
+    ];
+    git(repo, &add)?;
+    Ok(Place {
+        path,
+        branch: Some(name.into()),
+    })
+}
+
+/// What removing a task's worktree would lose: its uncommitted changes as `git status --short`
+/// lines, and its commits that no branch at `origin` holds, as `<short hash> <subject>`.
+#[derive(Debug, PartialEq, Serialize)]
+pub struct Losses {
+    pub uncommitted: Vec<String>,
+    pub unpushed: Vec<String>,
+}
+
+/// Removes the worktree at `path` with `git worktree remove`, never forced; its branch stays.
+/// Unless `confirmed`, a worktree with uncommitted changes or unpushed commits is left as it is and
+/// they are returned, for Daniel to confirm. Confirmed, git still refuses to drop uncommitted
+/// changes, and its message is the error.
+pub fn remove_task(repo: &Path, path: &str, confirmed: bool) -> Result<Option<Losses>, String> {
+    if !confirmed {
+        let task = Path::new(path);
+        let lines = |text: String| text.lines().map(String::from).collect::<Vec<_>>();
+        let losses = Losses {
+            uncommitted: lines(git(task, &["status", "--short"])?),
+            unpushed: lines(git(
+                task,
+                &["log", "--format=%h %s", "HEAD", "--not", "--remotes"],
+            )?),
+        };
+        if !losses.uncommitted.is_empty() || !losses.unpushed.is_empty() {
+            return Ok(Some(losses));
+        }
+    }
+    git(repo, &["worktree", "remove", path])?;
+    Ok(None)
+}
+
+/// Runs `git` in `dir` and returns its output, or git's own error message.
+fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .map_err(|e| format!("git {}: {e}", args[0]))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().into());
+    }
+    // Only the end: a status line may start with a space.
+    Ok(String::from_utf8_lossy(&output.stdout).trim_end().into())
+}

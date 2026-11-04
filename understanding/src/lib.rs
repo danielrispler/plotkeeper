@@ -20,13 +20,13 @@ mod fingerprint;
 mod store;
 mod week;
 pub use drift::{Drift, Versions, drift};
-pub use fingerprint::{Fingerprints, fingerprint_changes, worktree_root};
+pub use fingerprint::{Fingerprints, backfilled, fingerprint_changes, worktree_root};
 pub use store::{
     Brief, CardStore, Guess, Level, Rating, Reason, Row, SessionCards, StoredCard, millis,
 };
 pub use week::{Rate, Ratings, Week, week};
 
-/// A card on a change, in Hebrew; code stays in English, and code inside the Hebrew text is in
+/// A card on a change, in the explanation language; code inside its text is in
 /// backticks. It opens with its quiz; the rest shows when Daniel taps an option.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Card {
@@ -450,7 +450,7 @@ pub fn write_card(
     }
 }
 
-/// Writes a fixed Hebrew card that shows the change, and a fixed brief, so the app can run without
+/// Writes a fixed card that shows the change, and a fixed brief, so the app can run without
 /// `claude -p`.
 pub struct FakeWriter;
 
@@ -465,24 +465,24 @@ impl CardWriter for FakeWriter {
         // A change to several files gets a section, so the app shows one.
         let architecture = match paths.len() {
             0 | 1 => NOT_STRUCTURAL.into(),
-            _ => format!("סעיף ארכיטקטורה לדוגמה: השינוי נוגע ב־{named}."),
+            _ => format!("Sample architecture section: the change touches {named}."),
         };
         let option = |text: &str, why: &str| serde_json::json!({ "text": text, "why": why });
         let card = serde_json::json!({
-            "summary": format!("שינוי לדוגמה ב־{named}"),
-            "explanation": "כרטיס לדוגמה של הכותב המזויף, שלא קורא את הקוד. השינוי עצמו למטה.",
+            "summary": format!("Sample change to {named}"),
+            "explanation": "A sample card from the fake writer, which does not read the code. The change itself is below.",
             "paths": paths,
             "code": request.diff(),
             "architecture": architecture,
-            "brief": format!("תקציר לדוגמה של הכותב המזויף.\nהשינוי האחרון נגע ב־{named}."),
-            "why_it_matters": "כאן יופיע למה השינוי חשוב, עם קוד בתוך הטקסט כמו `if a <= b {`.",
-            "not_checked": "לא נבדק: כלום, זה כרטיס לדוגמה.",
+            "brief": format!("A sample brief from the fake writer.\nThe latest change touched {named}."),
+            "why_it_matters": "Why the change matters goes here, with code inside the text such as `if a <= b {`.",
+            "not_checked": "Not checked: nothing, this is a sample card.",
             "quiz": {
-                "text": format!("מה הסוכן שינה ב־`{}`?", paths.join("`, `")),
+                "text": format!("What did the agent change in `{}`?", paths.join("`, `")),
                 "options": [
-                    option("את מה שמופיע בקוד למטה.", "נכון: הקוד למטה הוא השינוי עצמו."),
-                    option("רק את התיעוד, בלי לגעת בקוד.", "לא: הכותב המזויף לא יודע מה השתנה."),
-                    option("כלום, הוא רק הריץ בדיקות.", "לא: כרטיס נכתב רק על שינוי."),
+                    option("What the code below shows.", "Right: the code below is the change itself."),
+                    option("Only the docs, without touching the code.", "No: the fake writer does not know what changed."),
+                    option("Nothing, it only ran tests.", "No: a card is written only on a change."),
                 ],
                 "key": 0,
             },
@@ -491,16 +491,18 @@ impl CardWriter for FakeWriter {
     }
 
     fn more(&self, _: &CardRequest, _: &Card) -> Result<String, String> {
-        Ok("הסבר ארוך יותר לדוגמה של הכותב המזויף, שלא קורא את הקוד. כאן יופיע איך הקוד שהשתנה עובד, צעד אחר צעד, ולמה נבחרה הדרך הזו, עם קוד כמו `if a <= b {`.".into())
+        Ok("A longer sample explanation from the fake writer, which does not read the code. How the changed code works goes here, step by step, and why it was done this way, with code such as `if a <= b {`.".into())
     }
 
     fn rewrite(&self, _: &[&str], _: &[String], _: &str) -> Result<String, String> {
-        let brief = "תקציר לדוגמה של הכותב המזויף, שנכתב מחדש.\nהוא לא קורא את הסשן.";
+        let brief =
+            "A sample brief from the fake writer, rewritten.\nIt does not read the session.";
         Ok(serde_json::json!({ "brief": brief }).to_string())
     }
 
     fn update(&self, brief: &str, _: &str) -> Result<String, String> {
-        let brief = format!("{brief}\nהעובדים חזרו, והסשן עצמו לא שינה דבר.");
+        let brief =
+            format!("{brief}\nThe workers came back, and the session itself changed nothing.");
         Ok(serde_json::json!({ "brief": brief }).to_string())
     }
 }
@@ -764,10 +766,10 @@ const MIN_PROMPT: usize = 4 << 10;
 
 /// The explanation language, one paragraph in each of the writer's instructions below. A macro, as
 /// `concat!` takes literals and no `const`.
-macro_rules! hebrew {
+macro_rules! explanation_language {
     () => {
-        "Write in Hebrew, in plain words. Code, code terms, file paths and commands stay in English; \
-         inside Hebrew text, wrap each of them in backticks."
+        "Write in English, in plain words a developer new to this code follows. Wrap code, code terms, file paths \
+         and commands in backticks."
     };
 }
 
@@ -779,7 +781,7 @@ const PROMPT: &str = concat!(
 Answer from the input below: the summaries of the earlier cards on the same prompt of his, the brief so far, and the diff. Use only this input: do not use tools or read files.
 
 "#,
-    hebrew!(),
+    explanation_language!(),
     r#"
 
 Reply with one JSON object and nothing else:
@@ -809,7 +811,7 @@ const UPDATE: &str = concat!(
 Answer from the input below: the brief so far, and the agent's workers, each with its status and the summaries of its cards since then. Use only this input: do not use tools or read files. Keep what still holds. Its last line says what came back.
 
 "#,
-    hebrew!(),
+    explanation_language!(),
     r#"
 
 Reply with one JSON object and nothing else: {"brief": string}
@@ -825,7 +827,7 @@ const REWRITE: &str = concat!(
 Answer from the input below: the developer's prompts, the one-line summaries of the session's cards, and `git diff --stat` since the session began. Use only this input: do not use tools or read files.
 
 "#,
-    hebrew!(),
+    explanation_language!(),
     r#"
 
 Reply with one JSON object and nothing else: {"brief": string}
@@ -842,7 +844,7 @@ Answer from the change below. Use only this input: do not use tools or read file
 When the change is not a diff but the agent's workers with the summaries of their cards, the agent changed nothing itself and handed the work to them: explain how the work was split and what came back, and do not invent code you were not shown.
 
 "#,
-    hebrew!(),
+    explanation_language!(),
     r#"
 
 Reply with the explanation only, in at most three short paragraphs: no JSON and no heading.

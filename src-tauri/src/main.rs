@@ -8,20 +8,27 @@
 
 use std::{
     collections::HashMap,
-    fs::File,
-    io::{self, BufRead, BufReader, Seek, SeekFrom},
+    fs::{File, OpenOptions},
+    io::{self, BufRead, BufReader, Seek, SeekFrom, Write},
     path::Path,
     sync::{Arc, LazyLock, Mutex, mpsc},
     thread,
     time::{Duration, Instant},
 };
-use studio_core::{CardRequest, Notifications, Output, Session, State::NeedsYou, Studio};
+use studio_core::{
+    CardRequest, Notifications, Output, Session,
+    State::{Ended, NeedsYou},
+    Studio,
+};
 use studio_understanding::{
     CardStore, CardWriter, ClaudeWriter, FakeWriter, Fingerprints, Rating, Row, SessionCards,
-    Versions, fingerprint_changes, millis, worktree_root, write_brief, write_stop,
+    Versions, backfilled, fingerprint_changes, millis, worktree_root, write_brief, write_stop,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
+
+mod restart;
+mod terminal;
 
 /// The card store, which the log thread adds to and the pane records guesses in.
 type Cards = Mutex<CardStore>;
@@ -181,6 +188,54 @@ fn explain_more(id: String, cards: State<Cards>, writer: State<Writer>) -> Optio
     studio_understanding::explain_more(&cards, &**writer, &id, log)
 }
 
+/// Daniel renamed session `id`: a `StudioRename` line in the event log, which the log thread then
+/// applies and a restart replays (#469). An empty `name` gives the row its folder's again.
+#[tauri::command(async)]
+fn rename(id: String, name: String) -> Result<(), String> {
+    append(&[serde_json::json!({
+        "session_id": id,
+        "hook_event_name": studio_core::RENAME,
+        "studio_name": name.trim(),
+        "studio_received_ms": millis(),
+    })])
+}
+
+/// Daniel closed terminal `terminal` (#461, story 15 and decision 8): a `SessionEnd` line in the event
+/// log for each session in it that has not ended, as its `claude` may die before its own hook runs.
+/// A real `SessionEnd` after it changes nothing.
+#[tauri::command(async)]
+fn closed(terminal: String, studio: State<Mutex<Studio>>) -> Result<(), String> {
+    let lines: Vec<serde_json::Value> = studio
+        .lock()
+        .unwrap()
+        .sessions()
+        .into_iter()
+        .filter(|s| s.terminal.as_deref() == Some(&terminal) && s.state != Ended)
+        .map(|s| {
+            serde_json::json!({
+                "session_id": s.agent.id,
+                "hook_event_name": "SessionEnd",
+                "reason": "studio_close",
+                "studio_received_ms": millis(),
+            })
+        })
+        .collect();
+    append(&lines)
+}
+
+/// Appends `lines` to the event log in one write under the lock the hook takes, so they never
+/// interleave with a hook's line.
+fn append(lines: &[serde_json::Value]) -> Result<(), String> {
+    let home = std::env::home_dir().ok_or("no home directory")?;
+    let open = OpenOptions::new()
+        .append(true)
+        .open(studio_hook::event_log(&home));
+    let mut log = open.map_err(|e| e.to_string())?;
+    log.lock().map_err(|e| e.to_string())?;
+    let text: String = lines.iter().map(|line| format!("{line}\n")).collect();
+    log.write_all(text.as_bytes()).map_err(|e| e.to_string())
+}
+
 /// Logs a card store change that could not be saved; it stays in memory until the next save.
 fn unsaved(saved: io::Result<()>) {
     if let Err(e) = saved {
@@ -203,11 +258,14 @@ fn main() {
         _ => Arc::new(ClaudeWriter::beside(&log).expect("create the card writer's folder")),
     };
     tauri::Builder::default()
+        // First, so a second instance exits before it sets anything up (#470).
+        .plugin(tauri_plugin_single_instance::init(restart::second_instance))
         .plugin(tauri_plugin_notification::init())
         .manage(Mutex::new(studio))
         .manage(Cards::new(store))
         .manage(Notices::default())
         .manage(writer.clone())
+        .manage(terminal::Daemon::default())
         .invoke_handler(tauri::generate_handler![
             sessions,
             select,
@@ -218,10 +276,24 @@ fn main() {
             guess,
             key_wrong,
             rate,
-            explain_more
+            explain_more,
+            rename,
+            closed,
+            terminal::terminal_connect,
+            terminal::terminal_send,
+            terminal::open_link,
+            terminal::places,
+            terminal::claude_argv,
+            terminal::create_task,
+            terminal::remove_task,
+            terminal::terminal_lost,
+            terminal::terminal_upgrade,
+            restart::revival,
+            restart::restart_into
         ])
         .setup(move |app| {
             let app = app.handle().clone();
+            restart::watch_build(app.clone());
             thread::spawn(move || follow(&app, &log, &writer));
             Ok(())
         })
@@ -231,7 +303,8 @@ fn main() {
 
 /// Reads the log from its start, then from where it stopped. A line counts once it ends in a newline,
 /// so a line the hook is still writing waits for the next read. The lines there at start are
-/// replayed, so steps that ran while the app was down get no cards and no notifications. Live lines
+/// replayed, so steps that ran while the app was down get no cards and no notifications, but for the
+/// turns of the last 24 hours with no card, which get one on the hook's trees (#486). Live lines
 /// get the worktree fingerprint the core asks for; replayed ones get none. Each pass ends with a
 /// tick, the first right after the replay.
 // shortcut: polls every 200 ms; switch to file-system events if the delay or the wake-ups matter.
@@ -278,12 +351,20 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
             // goes first, so Daniel sees it while `git` runs.
             if !live {
                 let mut studio = state.lock().unwrap();
-                app.state::<Cards>().lock().unwrap().restore(&mut studio);
-                drop(studio);
+                let store = app.state::<Cards>();
+                let store = store.lock().unwrap();
+                store.restore(&mut studio);
+                // The turns that ended while the app was down get their cards now (#486).
+                let requests: Vec<CardRequest> =
+                    store.cards().iter().map(|k| k.request.clone()).collect();
+                let backfill = studio.backfill(millis(), &requests);
+                drop((store, studio));
                 state.lock().unwrap().tick(millis());
                 sent.list(app);
                 let waiting = state.lock().unwrap().waiting_folders();
                 fingerprint_changes(waiting, &mut fingerprints);
+                let cards = backfill.into_iter().filter_map(backfilled);
+                outputs.extend(cards.map(Output::Card));
             }
             for output in outputs {
                 match output {
@@ -355,6 +436,7 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
         // The cards also change with no line read: a card arrives, or one turns 30 minutes old.
         sent.cards(app);
         live = true;
+        restart::REPLAYED.store(true, std::sync::atomic::Ordering::Release);
         thread::sleep(Duration::from_millis(200));
     }
 }

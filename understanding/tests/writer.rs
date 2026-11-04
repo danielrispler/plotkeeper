@@ -406,6 +406,24 @@ fn a_rewrite_whose_summaries_fill_the_budget_still_keeps_the_newest_prompts_star
 }
 
 #[test]
+fn every_prompt_asks_for_english_and_none_for_hebrew() {
+    let writer = ClaudeWriter::new(CLAUDE.into(), "/f".into());
+    let prompts = [
+        writer.command(&edit(), &[], "").1,
+        writer.more_command(&edit(), &good_card()).1,
+        writer.rewrite_command(&["Add a"], &[], "").1,
+        writer.update_command("brief", "workers").1,
+    ];
+    for prompt in prompts {
+        assert!(
+            prompt.contains("Write in English, in plain words"),
+            "{prompt}"
+        );
+        assert!(!prompt.contains("Hebrew"), "{prompt}");
+    }
+}
+
+#[test]
 fn explain_more_runs_the_same_writer_on_the_cards_explanation_and_its_change() {
     let folder = Path::new("/h/Library/Application Support/dev.falinks.studio/card-writer");
     let writer = ClaudeWriter::new(CLAUDE.into(), folder.into());

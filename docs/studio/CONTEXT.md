@@ -61,6 +61,22 @@ A project's original working copy, outside any task. It appears on the board and
 **Board**:
 The workbench view with one row per task and one per main checkout, showing the state of their agent sessions.
 
+**Place**:
+A folder where Daniel can start an agent session or a terminal: a project's main checkout or a task's worktree.
+_Avoid_: Location, workspace
+
+**Terminal daemon**:
+The background process that owns the workbench's terminals, so they outlive the app. The app connects to it over a socket.
+_Avoid_: Server, multiplexer
+
+**Pane**:
+The window's view of one terminal of the terminal daemon. One pane shows at a time; the others keep running hidden.
+_Avoid_: Tab
+
+**Revival**:
+Bringing back the terminals a terminal daemon ran after it died, from a crash, a reboot or an upgrade. A Claude terminal reopens its latest session with `claude --resume`; a shell starts again in its folder. Each loses its screen, and a shell its state.
+_Avoid_: Restore (nothing of the old process survives)
+
 **Needs you**:
 The state of an agent session that is blocked on Daniel: waiting for his permission, his answer to a question, or his approval of a plan.
 _Avoid_: Stuck (a session that is not progressing, which is a different state)
@@ -98,6 +114,9 @@ A prompt that Claude Code sends, not Daniel, to wake an agent when a subagent or
 **Session list**:
 The list of every agent session, one row each, grouped by state with needs you first and idle and ended sessions collapsed last. Each row says in one line what its session is doing, and subagents nest under the agent that spawned them. Only Daniel's click changes the session he looks at.
 
+**Story rail**:
+The column on the window's left that tells the selected session's or subagent's story: its state and step, its brief, cards and checks, and its open question docked at the bottom.
+
 **Falinks run**:
 Several agent sessions coordinated by the Falinks engine on one repository.
 
@@ -118,4 +137,4 @@ The default project mode. Waits and cards serve Daniel's understanding of this p
 The project mode for a project where Daniel cares only about the result. The wait is his own time, for practice or enrichment unrelated to the project. Approval requests and agent questions still reach him.
 
 **Explanation language**:
-The human language of cards and questions, such as Hebrew, in plain words at Daniel's level. Code terms stay in English.
+The human language of cards and questions: English for now, no longer Hebrew (#463), in plain words at Daniel's level. Code terms are in backticks.

@@ -1,37 +1,117 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" dir="ltr">
 <head>
   <meta charset="utf-8">
   <title>Studio</title>
+  <link rel="stylesheet" href="vendor/xterm.css">
   <link rel="stylesheet" href="style.css">
+  <script src="vendor/xterm.js"></script>
+  <script src="vendor/addon-fit.js"></script>
+  <script src="vendor/addon-unicode11.js"></script>
+  <script src="vendor/addon-webgl.js"></script>
+  <script src="vendor/addon-search.js"></script>
+  <script src="vendor/addon-web-links.js"></script>
   <script type="module" src="main.js"></script>
 </head>
-<body>
+<body data-layout="full">
+  <!-- The grid runs right to left: the list on the right, the terminal in the centre, the rail on the left. -->
   <div class="app">
+    <header class="top">
+      <!-- Identity: the selected session's name; naming and the context share fill it (#480). -->
+      <span id="identity" class="identity"></span>
+      <span class="sp"></span>
+      <button id="new-session" type="button">New session</button>
+      <!-- Usage: context, 5h and week (#480, #481). -->
+      <span id="usage" class="usage"></span>
+      <button id="rail-toggle" type="button" hidden>Story ⌘2</button>
+    </header>
+
     <nav class="list" aria-label="Sessions">
-      <p id="no-sessions" class="empty">No session yet.</p>
-      <div id="groups"></div>
+      <div class="full">
+        <p id="no-sessions" class="empty">No session yet.</p>
+        <div id="groups"></div>
+      </div>
+      <div id="strip" class="strip"></div>
     </nav>
-    <main class="pane">
-      <p id="notice" role="status" hidden></p>
-      <p id="empty" class="empty">Pick a session on the left.</p>
-      <section id="view" hidden>
-        <p id="session" class="session"></p>
-        <p id="state" class="state"></p>
-        <p id="step" class="step"><span id="tool" class="tool"></span> <code id="detail"></code></p>
-        <section id="brief" class="brief" dir="rtl" lang="he" hidden></section>
-        <h1 id="recent-title" class="cards-title" hidden>Last 30 minutes</h1>
-        <section id="recent"></section>
-        <h1 id="older-title" class="cards-title" hidden>Older</h1>
-        <section id="older"></section>
-        <h1 id="questions-title" class="cards-title" hidden>Questions</h1>
-        <section id="questions"></section>
-        <div class="own">
-        <h1 id="checks-title" class="cards-title" hidden>Checks</h1>
-        <ul id="checks" class="checks"></ul>
+
+    <!-- The picker (#467): where a new session starts. Creating and removing tasks is #468. -->
+    <div id="picker" class="picker" role="dialog" aria-label="New session" hidden></div>
+
+    <!-- The terminal panes (#466, #467) draw into #terminal-body. -->
+    <section id="terminal" class="term" aria-label="Terminal">
+      <div class="term-h"><span id="terminal-title">terminal</span><span id="size" class="mono"></span></div>
+      <!-- A new build to restart into, or the daemon upgrade's wait (#470). -->
+      <div id="restart" class="restart" role="status" hidden></div>
+      <div id="terminal-body" class="term-body"></div>
+    </section>
+
+    <aside class="rail" aria-label="Session story">
+      <div class="rail-h">
+        <!-- Times (#473), then the phases and the estimate (#475). -->
+        <div id="times" class="times"></div>
+        <div class="tools">
+          <button id="open-all" class="tool" type="button">Open all</button>
+          <button id="close-all" class="tool" type="button">Close all</button>
+          <button id="wide" class="tool" type="button">Read wide</button>
         </div>
-      </section>
-    </main>
+      </div>
+      <div id="story" class="story">
+        <p id="notice" role="status" hidden></p>
+        <p id="empty" class="empty">Pick a session in the list.</p>
+        <section id="view" hidden>
+          <p id="state" class="state"></p>
+          <!-- An ended session opens again with `claude --resume` (#467). -->
+          <button id="reopen" class="tool" type="button" hidden>Open</button>
+          <!-- Rename and close (#469). -->
+          <button id="rename" class="tool" type="button" hidden>Rename</button>
+          <button id="close" class="tool" type="button" hidden>Close</button>
+          <!-- Decision history (#479), a collapsed section above the turns. -->
+          <div id="decisions" class="decisions"></div>
+          <!-- The intention and step line (#472). -->
+          <div id="intention" class="intention"></div>
+          <p id="step" class="step"><span id="tool" class="tool-name"></span> <code id="detail"></code></p>
+          <section id="brief" class="brief" hidden></section>
+          <h1 id="recent-title" class="cards-title" hidden>Last 30 minutes</h1>
+          <section id="recent"></section>
+          <h1 id="older-title" class="cards-title" hidden>Older</h1>
+          <section id="older"></section>
+          <h1 id="questions-title" class="cards-title" hidden>Questions</h1>
+          <section id="questions"></section>
+          <div class="own">
+            <h1 id="checks-title" class="cards-title" hidden>Checks</h1>
+            <ul id="checks" class="checks"></ul>
+          </div>
+        </section>
+      </div>
+      <!-- The open question, docked under the story. -->
+      <div id="dock" class="dock" hidden></div>
+    </aside>
   </div>
+  <!-- The questions of rename and close (#469). -->
+  <dialog id="rename-dialog" class="ask">
+    <form method="dialog">
+      <label for="rename-field">Name this session</label>
+      <input id="rename-field" autocomplete="off" spellcheck="false" autofocus>
+      <!-- The default button comes first, so Enter in the field renames. -->
+      <div class="ask-buttons"><button value="rename">Rename</button><button value="cancel">Cancel</button></div>
+    </form>
+  </dialog>
+  <dialog id="close-dialog" class="ask">
+    <form method="dialog">
+      <p><strong id="close-name"></strong> is still working: it is in a turn or has background tasks.</p>
+      <p>Closing ends its terminal and every process in it.</p>
+      <div class="ask-buttons"><button value="close">Close</button><button value="cancel" autofocus>Cancel</button></div>
+    </form>
+  </dialog>
+  <!-- The daemon upgrade's question (#470, #322 resolution point 4). -->
+  <dialog id="upgrade" class="upgrade" aria-labelledby="upgrade-title">
+    <form method="dialog">
+      <h1 id="upgrade-title">Restart the terminal daemon?</h1>
+      <p>The daemon is older than this app. Every terminal is idle. A restart ends each terminal and brings it back:</p>
+      <ul id="upgrade-terms"></ul>
+      <p class="actions"><button value="no">Not now</button> <button value="yes" class="primary">Restart the daemon</button></p>
+    </form>
+  </dialog>
+  <span id="probe" aria-hidden="true">MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM</span>
 </body>
 </html>

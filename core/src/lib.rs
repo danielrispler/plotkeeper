@@ -21,6 +21,8 @@ pub struct Studio {
     /// The shell's latest tick, in Unix milliseconds.
     now: u64,
     roots: Roots,
+    /// The turns the replay saw end with both trees, for `backfill`.
+    ended: Vec<Backfill>,
 }
 
 type FindRoot = dyn Fn(&str) -> Option<String> + Send;
@@ -66,7 +68,19 @@ pub struct Session {
     pub cwd: String,
     /// The last segment of `cwd`, or the whole `cwd` when that segment is empty.
     pub folder_name: String,
+    /// The studio terminal it runs in, its `STUDIO_TERMINAL_ID` from its latest event, `None` when
+    /// it runs outside the studio (#461, decision 8).
+    pub terminal: Option<String>,
+    /// Daniel's name for it, from the studio's latest rename line in the log (#469); `None` for its
+    /// folder's.
+    pub name: Option<String>,
     pub state: State,
+    /// Whether closing its terminal asks first: it is in a turn, or its latest `Stop` listed
+    /// background tasks (#469).
+    pub asks_before_closing: bool,
+    /// Its latest `Stop` listed background tasks.
+    #[serde(skip)]
+    background: bool,
     /// The checks that ran, oldest first: pass or fail lines in the session's timeline (#369,
     /// decision 14).
     pub checks: Vec<CheckLine>,
@@ -119,9 +133,53 @@ pub struct Session {
     /// decision 9).
     #[serde(skip)]
     touched: BTreeSet<String>,
+    /// The tree the hook recorded at its latest turn's first touch of each worktree, by root (#486).
+    #[serde(skip)]
+    trees: BTreeMap<String, String>,
     /// "worker <name> returned", from its latest wake-up until its own next step or Daniel's next
     /// prompt (#410, decision 27).
     pub returned: Option<String>,
+}
+
+/// A terminal of the daemon, as its `list` gives it, or as its record of the terminals it ran gives
+/// them after it died (`terminal-daemon/src/lib.rs`). Fields the record lacks are empty.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct Terminal {
+    pub id: String,
+    /// What it was spawned with; empty for a login shell.
+    #[serde(default)]
+    pub argv: Vec<String>,
+    #[serde(default)]
+    pub cwd: String,
+    /// Its leader's pid, which leads its session.
+    #[serde(default)]
+    pub pid: Option<u32>,
+    #[serde(default)]
+    pub exited: Option<String>,
+    /// The program in its foreground.
+    #[serde(default)]
+    pub foreground: Option<String>,
+    #[serde(default)]
+    pub processes: Vec<Process>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct Process {
+    pub pid: u32,
+    pub command: String,
+}
+
+/// How a terminal comes back after its daemon is gone, and what a restart now would end.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Revive {
+    pub id: String,
+    pub cwd: String,
+    /// What it reruns: its spawn's argv, empty for a shell.
+    pub argv: Vec<String>,
+    /// The session to reopen with `claude --resume`, for a Claude terminal whose session is known.
+    pub session: Option<String>,
+    /// What runs in it that a restart would end: a program, "a turn" or "background tasks".
+    pub busy: Option<String>,
 }
 
 /// What happened in a worktree since the last card on it: a session's own, or a subagent's that
@@ -771,6 +829,27 @@ impl Session {
         output
     }
 
+    /// The backfill of its turn ended at `at` with the hook's trees `ends`: `None` when no worktree
+    /// has a start tree and another end tree.
+    fn backfill(&self, ends: &BTreeMap<String, String>, at: u64) -> Option<Backfill> {
+        let trees: Vec<Trees> = ends
+            .iter()
+            .filter_map(|(root, end)| {
+                let start = self.trees.get(root).filter(|start| *start != end)?;
+                let (root, start, end) = (root.clone(), start.clone(), end.clone());
+                Some(Trees { root, start, end })
+            })
+            .collect();
+        let daniels = self.prompts.iter().rfind(|p| p.sender.is_daniels());
+        let request = CardRequest {
+            session_id: self.agent.id.clone(),
+            id: card_id(&self.agent.id, at),
+            prompt: daniels.map(|p| p.at),
+            ..CardRequest::default()
+        };
+        (!trees.is_empty()).then_some(Backfill { request, trees })
+    }
+
     fn needs_you(&self) -> bool {
         self.asked || !self.blocks.is_empty()
     }
@@ -983,6 +1062,22 @@ pub struct CardRequest {
     pub workers: Vec<String>,
 }
 
+/// A turn that ended with no card, as the replay saw it (#486): its card request with no change,
+/// and its worktrees' trees, whose diffs the shell joins into the change.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Backfill {
+    pub request: CardRequest,
+    pub trees: Vec<Trees>,
+}
+
+/// The git trees the hook recorded for worktree `root` at a turn's start and end, which differ.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Trees {
+    pub root: String,
+    pub start: String,
+    pub end: String,
+}
+
 impl CardRequest {
     /// The change the writer reads: the diff, or the workers' text; empty when there is none.
     pub fn diff(&self) -> &str {
@@ -1132,7 +1227,22 @@ struct Event {
     source: String,
     #[serde(default)]
     studio_received_ms: u64,
+    /// The terminal the session runs in, which the hook records from `STUDIO_TERMINAL_ID`.
+    studio_terminal_id: Option<String>,
+    /// The trees the hook recorded at a turn's first touch of each worktree, by root (#486).
+    #[serde(default)]
+    studio_turn_start: BTreeMap<String, String>,
+    /// The trees the hook recorded at the end of the turn this event ends, by root.
+    #[serde(default)]
+    studio_turn_end: BTreeMap<String, String>,
+    /// On the studio's own `StudioRename` line, the session's new name; empty for none.
+    #[serde(default)]
+    studio_name: String,
 }
+
+/// The event the shell appends to the log when Daniel renames a session (#469). The log is what a
+/// restart replays, so the name survives it.
+pub const RENAME: &str = "StudioRename";
 
 /// Whether the turn's final message asks Daniel something: a sentence ending in `?`, after removing
 /// fenced code, inline code, blockquotes, headings and table rows (#321's evidence, "Transcripts").
@@ -1321,8 +1431,9 @@ impl Studio {
     /// with its own key: none, one, or at a wake-up also its workers' ends (#369, decisions 6, 8, 10
     /// and 11).
     pub fn fingerprint_folders(&self, line: &str) -> Vec<Fingerprint> {
-        let event = serde_json::from_str(line);
-        event.map_or_else(|_| Vec::new(), |event| self.looks(&event))
+        let event = serde_json::from_str::<Event>(line);
+        let event = event.ok().filter(|e| e.hook_event_name != RENAME);
+        event.map_or_else(Vec::new, |event| self.looks(&event))
     }
 
     /// The fingerprints before `event`: its own (`look`), and the end of each worker with cards that
@@ -1529,11 +1640,28 @@ impl Studio {
     pub fn apply_with_changes(
         &mut self,
         line: &str,
+        changes: BTreeMap<String, Change>,
+    ) -> Vec<Output> {
+        self.take(line, changes, false)
+    }
+
+    /// `apply_with_changes`, which on a replayed line keeps the turn it ends for `backfill`.
+    fn take(
+        &mut self,
+        line: &str,
         mut changes: BTreeMap<String, Change>,
+        replay: bool,
     ) -> Vec<Output> {
         let Ok(event) = serde_json::from_str::<Event>(line) else {
             return Vec::new();
         };
+        // A rename names a known session and is none of its events.
+        if event.hook_event_name == RENAME {
+            if let Some(session) = self.sessions.get_mut(&event.session_id) {
+                session.name = Some(event.studio_name).filter(|name| !name.is_empty());
+            }
+            return Vec::new();
+        }
         let looks = self.looks(&event);
         let touches = self.touches(&event);
         let roots = &self.roots;
@@ -1550,6 +1678,8 @@ impl Studio {
             });
         // The hooks are async, so the latest event can land before an earlier one.
         session.agent.last_event_at = session.agent.last_event_at.max(event.studio_received_ms);
+        // Every event of a `claude` process carries its terminal, so a resume elsewhere moves it.
+        session.terminal.clone_from(&event.studio_terminal_id);
         let failed_before = session.failed_workers();
         let in_turn = session.in_turn();
         let ends_early = session.ends_turn_early(&event);
@@ -1592,6 +1722,10 @@ impl Studio {
         if ends_early {
             let change = changes.remove(&session.agent.id);
             outputs.extend(session.end_turn(change, at));
+            if replay {
+                self.ended
+                    .extend(session.backfill(&event.studio_turn_end, at));
+            }
         }
         if starts {
             session.turn.clone_from(&event.prompt_id);
@@ -1604,6 +1738,15 @@ impl Studio {
         }
         if opens {
             session.touched.clear();
+            session.trees.clear();
+        }
+        if own {
+            for (root, tree) in &event.studio_turn_start {
+                session
+                    .trees
+                    .entry(root.clone())
+                    .or_insert_with(|| tree.clone());
+            }
         }
         // Who changed what (#369, story 20): a subagent's edit in a worktree whose cards are another's.
         if let Some(agent) = &event.agent_id
@@ -1702,7 +1845,14 @@ impl Studio {
             }
             "Stop" => {
                 // The order on `Stop`: clear its own blocks first, then ask if the message asks.
+                let in_turn = session.in_turn();
+                let tasks = event.background_tasks.as_array();
+                session.background = tasks.is_some_and(|tasks| !tasks.is_empty());
                 let output = session.end_turn(changes.remove(&session.agent.id), at);
+                if replay && in_turn {
+                    self.ended
+                        .extend(session.backfill(&event.studio_turn_end, at));
+                }
                 // A subagent's block outlasts the turn, so it gives no second notice.
                 blocked_before = session.needs_you();
                 session.asked = asks(&event.last_assistant_message);
@@ -1849,6 +1999,7 @@ impl Studio {
         } else {
             State::Running
         };
+        session.asks_before_closing = session.in_turn() || !session.ended && session.background;
         session.asker = session.blocks.first().map(|block| Asker {
             agent: block.asker(),
             since: block.at,
@@ -1872,9 +2023,21 @@ impl Studio {
     }
 
     /// Takes one event log line replayed at app start. It updates state exactly like `apply` and
-    /// requests nothing, so turns that ended while the app was down get no cards and no notices.
+    /// requests nothing, so turns that ended while the app was down get no cards and no notices
+    /// here; `backfill` then asks for their cards.
     pub fn replay(&mut self, line: &str) {
-        self.apply(line);
+        self.take(line, BTreeMap::new(), true);
+    }
+
+    /// After the replay, the turns that ended in the 24 hours before `now` with a change between
+    /// the hook's trees and no card among `cards` (#486). Each is returned once.
+    pub fn backfill(&mut self, now: u64, cards: &[CardRequest]) -> Vec<Backfill> {
+        let since = now.saturating_sub(24 * 60 * 60 * 1000);
+        let ended = std::mem::take(&mut self.ended).into_iter();
+        let ended = ended.filter(|b| card_time(&b.request.id) >= since);
+        ended
+            .filter(|b| cards.iter().all(|c| c.id != b.request.id))
+            .collect()
     }
 
     /// Applies, after the replay, what the live app learned before a restart (#434, decisions 37 and
@@ -1939,6 +2102,46 @@ impl Studio {
     /// The latest tick, in Unix milliseconds.
     pub fn now(&self) -> u64 {
         self.now
+    }
+
+    /// How each terminal of `terms` that has not exited comes back in a new daemon: a terminal spawned
+    /// with an argv, a Claude terminal, reopens its latest session with `claude --resume`, whether or
+    /// not the hangup ended it; a shell restarts in its folder. `busy` says what runs in it now.
+    pub fn revival(&self, terms: &[Terminal]) -> Vec<Revive> {
+        let running = terms.iter().filter(|t| t.exited.is_none());
+        let revive = |t: &Terminal| {
+            let linked = self
+                .sessions
+                .values()
+                .filter(|s| s.terminal.as_ref() == Some(&t.id));
+            let latest = linked.max_by_key(|s| s.agent.last_event_at);
+            let program = || Some(t.foreground.clone().unwrap_or_else(|| "a program".into()));
+            let busy = if t.argv.is_empty() {
+                // Its leader is the shell, so its prompt is when the shell itself has the foreground.
+                let leader = t.processes.iter().find(|p| Some(p.pid) == t.pid);
+                let at_prompt = leader.is_some_and(|l| Some(&l.command) == t.foreground.as_ref());
+                if at_prompt { None } else { program() }
+            } else {
+                match latest {
+                    // The rule a close asks by (#469).
+                    Some(s) if s.in_turn() => Some("a turn".into()),
+                    Some(s) if s.asks_before_closing => Some("background tasks".into()),
+                    Some(s) if !s.ended => None,
+                    // Started, with no event yet, or its session ended while the program runs on.
+                    _ => program(),
+                }
+            };
+            Revive {
+                id: t.id.clone(),
+                cwd: t.cwd.clone(),
+                argv: t.argv.clone(),
+                session: (!t.argv.is_empty())
+                    .then(|| latest.map(|s| s.agent.id.clone()))
+                    .flatten(),
+                busy,
+            }
+        };
+        running.map(revive).collect()
     }
 
     pub fn session(&self, id: &str) -> Option<&Session> {

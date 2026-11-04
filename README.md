@@ -26,7 +26,9 @@ A session is running from a prompt until its turn ends; needs you while it waits
 - `hook/`: `studio-hook`, which appends each hook payload as one line to the event log, and the log's path.
 - `core/`: the studio core, plain Rust with no I/O, and `scrub`, which turns event log lines into test fixtures. The app replays the whole log through it at start, then feeds it each new line live. Only live lines request cards and notifications.
 - `understanding/`: the understanding layer's I/O: the card writer interface, the `claude -p` writer and a fake, the worktree fingerprint, the card store with the briefs, Claude Code's version kept beside the event log, and `weekly`, the command that prints the week's thinking and surprise rates, ratings by level and reason and flags on the key, then the drift: unrecognised wake-ups and version changes.
-- `src-tauri/`: the app's Rust shell. `ui/`: its TypeScript pane.
+- `terminal-daemon/`: `studio-terminal-daemon`, the background process that owns the terminals, so they outlive the app (#322, #464). Its own crate and binary; the app links only its client library and runs the binary, so an app rebuild neither rebuilds nor restarts it. `serve` runs it on `~/Library/Application Support/dev.falinks.studio/terminal-daemon.sock`, one at a time; the protocol is in `src/lib.rs`. Every terminal starts through `$SHELL -l`, so the profile sets `PATH` even when the studio was started from the Dock, and without `CLAUDE*` or terminal-identity variables. `attach <terminal>` connects any terminal app to one of its terminals; Ctrl-] detaches.
+- `workbench/`: workbench git (#328, module 7): the picker's places from `git worktree list --porcelain`, and the `claude` command a session's terminal runs.
+- `src-tauri/`: the app's Rust shell, with the terminal daemon's client (`src/terminal.rs`). `ui/`: its TypeScript pane.
 
 ## Build
 
@@ -36,15 +38,56 @@ Needs Node and the Rust toolchain.
     npm ci
     npm run tauri build
 
-This builds `target/release/bundle/macos/Studio.app` with an ad-hoc signature (`codesign -dv` shows `Signature=adhoc`), and `target/release/studio-hook`, which the plugin runs. Open the app with `open target/release/bundle/macos/Studio.app`.
+This builds `target/release/bundle/macos/Studio.app` with an ad-hoc signature (`codesign -dv` shows `Signature=adhoc`), and `target/release/studio-hook`, which the plugin runs. The bundle carries `studio-terminal-daemon` beside the app's executable, in `Contents/MacOS/`. Open the app with `open target/release/bundle/macos/Studio.app`.
 
 `cargo test` runs:
 
-- `core/tests/`: hook events replayed through the core: what the pane shows and the two recorded logs (`replay`), the session list, its states and the selection on the recorded day (`sessions`), needs you (`needs_you`), the subagent tree, workers and helpers, their status, end and fading, and the waits they raise on their session (`subagents`), agents' questions, who asks them and their answers (`questions`), notifications: their triggers, text and combining (`notices`), check lines (`checks`), cards at `Stop`, the prompt each belongs to, the `Stop` a row tells about, where the shell fingerprints, and the recorded worker's cards at its commit and its end (`cards`), and wake-ups, the needs you a wake-up leaves in place and the ask for Claude Code's version (`wake_ups`);
+- `core/tests/`: hook events replayed through the core: what the pane shows and the two recorded logs (`replay`), the session list, its states and the selection on the recorded day (`sessions`), needs you (`needs_you`), the subagent tree, workers and helpers, their status, end and fading, and the waits they raise on their session (`subagents`), agents' questions, who asks them and their answers (`questions`), notifications: their triggers, text and combining (`notices`), check lines (`checks`), cards at `Stop`, the prompt each belongs to, the `Stop` a row tells about, where the shell fingerprints, and the recorded worker's cards at its commit and its end (`cards`), wake-ups, the needs you a wake-up leaves in place and the ask for Claude Code's version (`wake_ups`), and the daemon upgrade's idle rule and how each terminal comes back (`idle`);
 - `understanding/tests/`: the `claude -p` commands for a card, for "explain more" and for a brief's rewrite with its cut, built but never run, the `claude` lookup with a stand-in shell, the writer's replies, their quizzes, architecture sections and briefs, and its retry (`writer`); the fingerprint against real `git` in temporary repositories (`fingerprint`); the core, the fingerprint, `git diff --stat`, a fake writer and the card store joined as the shell joins them: the earlier summaries and the brief each card reads, the 5th update's rewrite, each case of a row's line, a worker's cards and brief in its own worktree, the 20-minute fallback, its new wait after a quiet look, and none between turns, a killed worker's end card at its wake-up, a parent's card from its workers' summaries, a wake-up's brief with no card, a helper's edits on its parent's card and a helper made a worker by its command, and not by others' changes before it (`prompt_cards`); the card store, your guesses, flags and ratings, "explain more" with a fake writer, the briefs, its move aside and its split at 30 minutes (`store`); the weekly rates and ratings (`week`); the version read from a transcript, its notice and `weekly`'s drift lines (`drift`);
+- `terminal-daemon/tests/`: the daemon against real PTYs: spawn, attach with replay, input, resize, list with size, foreground program, exit code and memory, kill leaving no process of the terminal's session, processes left behind, an app with an older minimum protocol, one daemon per socket, the clean environment, the scrollback cut, `attach` run inside a daemon terminal, and `stop` ending every terminal while the record of the running ones stays;
+- `workbench/tests/`: the picker's places against real `git` in temporary repositories: worktrees under `.claude/worktrees/` listed, one elsewhere not, `agent-*` ones hidden and counted, a detached `HEAD`, the listing from inside a task; and the `claude` command, new and resumed;
+- `core/tests/terminals.rs`: each session's terminal from `studio_terminal_id`, also after a resume elsewhere;
+- `core/tests/close_rename.rs`: closing asks first exactly while a session is in a turn or its latest `Stop` listed background tasks; a rename line keeps the session's name through a replay, as at a restart;
 - the unit tests of the event log's path (`hook`), of what `scrub` keeps (`studio-core`) and of the weekly rates' dates (`understanding`).
 
-It leaves out the shell, which needs `dist/` from `npm run build`.
+It leaves out the shell, which needs `dist/` from `npm run build`. `npm test` (after `npm ci`) builds the UI with `tsc` and runs `terminal-daemon/tests/replay.test.mjs`: a terminal's bytes replayed into a headless xterm of another size, with the resize sent, match a fresh render at that size; and `ui/tests/`: the UI's pure functions on the `tsc` output in `dist/`, such as the width rule's layout, the terminal's key mapping (`keys`) and its file paths (`paths`).
+
+## The terminal pane
+
+The centre of the window is one terminal (#466): a login shell in the configured repository, `STUDIO_REPO` when set, else the main checkout of the repository the app was built in. It runs in the terminal daemon, so it outlives the app; at start the app attaches to it again and replays its screen. When no daemon runs, the app starts `studio-terminal-daemon serve` from beside its own executable, logging to `terminal-daemon.log` beside the socket. A shell that exited starts again at the next key.
+
+The pane is xterm.js 6 with the WebGL renderer, which falls back to the default renderer when its context is lost, Unicode 11 widths, fit, search and web links. The CSP allows inline styles, which the default renderer needs. Terminal text is left to right.
+
+- Ctrl+V, and Cmd+V with an image on the clipboard, send Ctrl+V: Claude Code reads the macOS clipboard itself and makes an `[Image #N]` chip. Cmd+V with text pastes it, bracketed.
+- Shift+Enter sends ESC CR, a newline in Claude Code. Option is Meta: ESC, then the physical key, so Option+B is ESC b on any layout.
+- URLs and file paths with a folder (`ui/keys.ts:12`) open on click, files in their default app, relative to the repository. A file dropped on the window types its path, quoted for the shell.
+- Claude Code asks `ESC ] 7501 ; ?`, its Program Status query, and reports its status only to a terminal that answers. The pane answers `ESC ] 7501 ; ? BEL`.
+
+Every Cmd shortcut goes to the terminal or to the app (`ui/keys.ts`):
+
+| Shortcut | Goes to | Does |
+|---|---|---|
+| Cmd+C | terminal | copies the selection (the Edit menu's Copy) |
+| Cmd+V | terminal | pastes text; with an image, sends Ctrl+V |
+| Cmd+A | terminal | selects all of the scrollback |
+| Cmd+F | terminal | finds in the scrollback: Enter next, Shift+Enter previous, Esc closes |
+| Cmd+K | terminal | clears the scrollback |
+| Cmd+Left, Cmd+Right | terminal | sends Ctrl+A, Ctrl+E: start and end of line |
+| Cmd+Backspace | terminal | sends Ctrl+U: deletes to the line's start |
+| Cmd+1, Cmd+2 | app | opens the session list, the story rail |
+| any other Cmd shortcut, and any Cmd with Shift, Ctrl or Option | app | the app's menu: Cmd+Q, Cmd+W, Cmd+H, Cmd+M and the like |
+
+## Restarts and daemon upgrades
+
+The terminals live in the daemon, so a studio restart, rebuild or crash loses none (#470). At start the app attaches every terminal the daemon runs and replays its screen, then fits it to the window, whatever size it had. One app runs at a time: a second one hands over and exits, and the first comes forward. When the second is another build, or a rebuild replaces the running app's executable, a bar over the terminal offers "Restart into it".
+
+The daemon keeps a record of the terminals it runs, `terminal-daemon.terminals.json` beside its socket. When the app finds no daemon, after a crash or a reboot, it reads that record, starts a new daemon and brings each terminal back under its id: a shell in its folder, and a Claude terminal with `claude --resume <session_id>`, its latest session's id from the hooks, so the conversation survives and the shell's state does not. The same happens when the daemon dies while the app runs.
+
+A daemon below the app's protocol stays in use while the app waits for idle: every shell at its prompt, and every Claude session between turns with no background tasks in its latest `Stop`. The bar names what still runs. Then the app asks, listing each terminal and what it loses. It never restarts the daemon on its own. On yes it stops the old daemon (`SIGTERM`, then the hangup and `SIGKILL` to every process of its terminals), and the path above brings each terminal back in the new one.
+
+## Sessions in the studio
+
+"New session", in the top bar, opens the picker: the configured repository's main checkout and its tasks, the worktrees under `.claude/worktrees/`, read from `git worktree list --porcelain` each time it opens. `agent-*` worktrees are hidden, and the main checkout says how many. Choosing one starts `claude` there in a new daemon terminal, through a login shell, as `env CLAUDE_CODE_PLUGIN_DIRS=<this checkout>/apps/studio/plugin claude`: the studio plugin alone, so a profile that also sets the variable never loads the hooks twice. The terminal's id, `claude-<uuid>`, reaches every hook as `STUDIO_TERMINAL_ID`, and the core links the session's row to it (`terminal` in the list). Clicking a row shows its terminal; a session the studio did not start shows the login shell. A terminal from an earlier app run is attached when the daemon still runs it, and reported otherwise. "Open", on an ended session's view, runs `claude --resume <session_id>` in a new terminal in the session's folder. "Rename" names the session: the shell appends a `StudioRename` line to the event log, so the name survives a restart, and, while its `claude` runs in a studio terminal, types `/rename <name>` there, so Claude Code shows the same name. An empty name gives the row its folder's again. "Close" ends the session's terminal and its whole process group (`kill`, then `forget`), and the login shell shows again. It asks first while the session is in a turn or its latest `Stop` listed background tasks.
 
 ## Load the plugin
 

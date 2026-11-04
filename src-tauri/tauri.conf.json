@@ -4,18 +4,24 @@
   "identifier": "dev.falinks.studio",
   "build": {
     "frontendDist": "../dist",
-    "beforeDevCommand": "npm run build",
-    "beforeBuildCommand": "npm run build && cargo build --release -p studio-hook"
+    "beforeDevCommand": "npm run build && cargo build -p studio-terminal-daemon",
+    "beforeBuildCommand": "npm run build && cargo build --release -p studio-hook -p studio-terminal-daemon"
   },
   "app": {
     "withGlobalTauri": true,
     "windows": [{ "title": "Studio", "width": 960, "height": 640 }],
-    "security": { "csp": "default-src 'self' ipc: http://ipc.localhost" }
+    "security": {
+      "csp": "default-src 'self' ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'",
+      "dangerousDisableAssetCspModification": ["style-src"]
+    }
   },
   "bundle": {
     "active": true,
     "targets": ["app"],
     "icon": ["icons/icon.png"],
-    "macOS": { "signingIdentity": "-" }
+    "macOS": {
+      "signingIdentity": "-",
+      "files": { "MacOS/studio-terminal-daemon": "../target/release/studio-terminal-daemon" }
+    }
   }
 }
