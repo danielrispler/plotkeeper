@@ -37,12 +37,13 @@ fn the_days_subagents_are_5_workers_7_helpers_and_1_unattached_agent() {
     assert_eq!(
         tree,
         [
-            ("0222b62d", "a5532", Helper, session()),
-            ("0222b62d", "ac32f", Helper, session()),
             ("2afc85f5", "a5824", Helper, session()),
             ("2afc85f5", "aaf57", Worker, session()),
             ("596c28a1", "a66b1", Helper, session()),
             ("596c28a1", "a6838", Helper, session()),
+            // `0222b62d`'s, whose `/clear` continued `5bb84a4a`'s row (#474).
+            ("5bb84a4a", "a5532", Helper, session()),
+            ("5bb84a4a", "ac32f", Helper, session()),
             ("5d7f69ab", "a1191", Worker, session()),
             ("5d7f69ab", "a2526", Worker, session()),
             ("5d7f69ab", "a3c3f", Helper, session()),
@@ -377,6 +378,7 @@ fn a_childs_steps_are_its_own_not_its_sessions() {
     let own = Step {
         tool: "ToolSearch".into(),
         detail: Some("…".into()),
+        command: None,
     };
     assert_eq!(session.agent.last_step.as_ref(), Some(&own));
     assert_eq!(
@@ -386,6 +388,7 @@ fn a_childs_steps_are_its_own_not_its_sessions() {
     let write = Step {
         tool: "Write".into(),
         detail: Some("hello.txt".into()),
+        command: None,
     };
     assert_eq!(
         agent(&studio, RUN_SESSION, RUN_WORKER).agent.last_step,

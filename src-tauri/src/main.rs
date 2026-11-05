@@ -11,7 +11,12 @@ use std::{
     fs::{File, OpenOptions},
     io::{self, BufRead, BufReader, Seek, SeekFrom, Write},
     path::Path,
-    sync::{Arc, LazyLock, Mutex, mpsc},
+    process::Command,
+    sync::{
+        Arc, LazyLock, Mutex,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -27,6 +32,7 @@ use studio_understanding::{
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
 
+mod answer;
 mod restart;
 mod terminal;
 
@@ -92,6 +98,13 @@ fn cards(studio: State<Mutex<Studio>>, cards: State<Cards>) -> SessionCards {
         Some(owner) => cards.lock().unwrap().session_cards(&owner, now),
         None => SessionCards::default(),
     }
+}
+
+/// The plan's 5-hour and weekly usage from the status line's newest snapshot in the `usage` folder
+/// beside the event log, `null` when there is none (#481).
+#[tauri::command]
+fn usage() -> Option<serde_json::Value> {
+    studio_workbench::plan_usage(&studio_hook::data_dir(&std::env::home_dir()?).join("usage"))
 }
 
 /// What the read loop last sent the window, so it sends each again only when it changes.
@@ -188,6 +201,36 @@ fn explain_more(id: String, cards: State<Cards>, writer: State<Writer>) -> Optio
     studio_understanding::explain_more(&cards, &**writer, &id, log)
 }
 
+/// Daniel's side `question` on `item`, a response, card or intention of session `session` (#461,
+/// decision 20): the writer's answer, read with the turn's intentions, or why there is none, which
+/// the window shows with a retry. It takes seconds, so it runs off the main thread; nothing reaches
+/// the session.
+#[tauri::command(async)]
+fn ask(
+    session: String,
+    item: String,
+    question: String,
+    studio: State<Mutex<Studio>>,
+    writer: State<Writer>,
+) -> Result<String, String> {
+    // The lock ends with the statement, before the writer runs.
+    let transcript = studio
+        .lock()
+        .unwrap()
+        .session(&session)
+        .map(|s| s.transcript.clone());
+    let answer = studio_understanding::ask_about(
+        &**writer,
+        &transcript.unwrap_or_default(),
+        &item,
+        &question,
+    );
+    if let Err(line) = &answer {
+        eprintln!("studio: no answer on {session}: {line}");
+    }
+    answer
+}
+
 /// Daniel renamed session `id`: a `StudioRename` line in the event log, which the log thread then
 /// applies and a restart replays (#469). An empty `name` gives the row its folder's again.
 #[tauri::command(async)]
@@ -213,7 +256,7 @@ fn closed(terminal: String, studio: State<Mutex<Studio>>) -> Result<(), String> 
         .filter(|s| s.terminal.as_deref() == Some(&terminal) && s.state != Ended)
         .map(|s| {
             serde_json::json!({
-                "session_id": s.agent.id,
+                "session_id": s.resume_id,
                 "hook_event_name": "SessionEnd",
                 "reason": "studio_close",
                 "studio_received_ms": millis(),
@@ -277,8 +320,10 @@ fn main() {
             key_wrong,
             rate,
             explain_more,
+            ask,
             rename,
             closed,
+            usage,
             terminal::terminal_connect,
             terminal::terminal_send,
             terminal::open_link,
@@ -289,11 +334,15 @@ fn main() {
             terminal::terminal_lost,
             terminal::terminal_upgrade,
             restart::revival,
-            restart::restart_into
+            restart::restart_into,
+            answer::watch,
+            answer::answer
         ])
         .setup(move |app| {
             let app = app.handle().clone();
             restart::watch_build(app.clone());
+            let prs_app = app.clone();
+            thread::spawn(move || prs(&prs_app));
             thread::spawn(move || follow(&app, &log, &writer));
             Ok(())
         })
@@ -410,9 +459,19 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                 let keys = state.lock().unwrap().live_keys();
                 fingerprints.retain(|key, _| keys.contains(key));
                 queues.retain(|key, _| keys.contains(key));
+                // The decision history goes to the store, which keeps it across restarts (#479).
+                let studio = state.lock().unwrap();
+                let mut store = app.state::<Cards>().inner().lock().unwrap();
+                for session in studio.sessions() {
+                    unsaved(store.keep_decisions(&session.agent.id, &session.decisions));
+                }
             }
         }
-        if state.lock().unwrap().tick(millis()) || read {
+        // Reads the transcripts' lines and nothing else (`apps/studio/AGENTS.md`).
+        let log = |line: String| eprintln!("studio: {line}");
+        let transcripts_changed = state.lock().unwrap().follow_transcripts(log);
+        let names_changed = NAMES_CHANGED.swap(false, Ordering::AcqRel);
+        if state.lock().unwrap().tick(millis()) || read || transcripts_changed || names_changed {
             sent.list(app);
         }
         // Asking for focus waits on the main thread, which never takes this lock.
@@ -438,6 +497,53 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
         live = true;
         restart::REPLAYED.store(true, std::sync::atomic::Ordering::Release);
         thread::sleep(Duration::from_millis(200));
+    }
+}
+
+/// A session's name changed since the read loop last sent the list: a PR was found.
+static NAMES_CHANGED: AtomicBool = AtomicBool::new(false);
+
+/// Finds the PR of each session's branch with `gh pr view` (#461, decision 19), on its own thread so
+/// the read loop never waits on the network, and asks again after 5 minutes. `gh` runs as Daniel
+/// with its own login; no credential file is read.
+fn prs(app: &AppHandle) {
+    // An app started from the Dock gets launchd's `PATH`, which lacks Homebrew's folder.
+    let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/zsh".into());
+    let found = Command::new(shell).args(["-lc", "command -v gh"]).output();
+    let found = found.ok().filter(|o| o.status.success()).map(|o| o.stdout);
+    let gh = found
+        .as_deref()
+        .map(String::from_utf8_lossy)
+        .and_then(|out| out.lines().last().map(str::to_owned))
+        .filter(|path| path.starts_with('/'))
+        .unwrap_or_else(|| "gh".into());
+    let mut asked = HashMap::<String, Instant>::new();
+    loop {
+        let branches = app.state::<Mutex<Studio>>().lock().unwrap().branches();
+        for (cwd, branch) in branches {
+            if asked
+                .get(&branch)
+                .is_some_and(|at| at.elapsed() < Duration::from_secs(300))
+            {
+                continue;
+            }
+            asked.insert(branch.clone(), Instant::now());
+            let output = Command::new(&gh)
+                .args(["pr", "view", &branch, "--json", "number", "--jq", ".number"])
+                .current_dir(&cwd)
+                .output();
+            let output = output.ok().filter(|o| o.status.success());
+            let pr = output.and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse().ok());
+            if app
+                .state::<Mutex<Studio>>()
+                .lock()
+                .unwrap()
+                .set_pr(&branch, pr)
+            {
+                NAMES_CHANGED.store(true, Ordering::Release);
+            }
+        }
+        thread::sleep(Duration::from_secs(5));
     }
 }
 

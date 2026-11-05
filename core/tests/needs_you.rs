@@ -593,6 +593,71 @@ fn a_call_that_never_reported_back_holds_no_wait_past_its_sessions_turn() {
     );
 }
 
+/// The answer hook's `StudioAnswer` line for `line`'s call: Daniel's `answer` from the studio card
+/// (#478).
+fn card_answer(line: &str, answer: serde_json::Value) -> String {
+    let mut event: serde_json::Value = serde_json::from_str(line).unwrap();
+    event["studio_asked_by"] = event["hook_event_name"].clone();
+    event["hook_event_name"] = "StudioAnswer".into();
+    event["studio_answer"] = answer;
+    event["studio_received_ms"] = (event["studio_received_ms"].as_u64().unwrap() + 1).into();
+    event.to_string()
+}
+
+fn decision(decision: &str) -> serde_json::Value {
+    serde_json::json!({ "decision": decision })
+}
+
+#[test]
+fn a_permission_decided_on_the_card_stops_needing_you_at_once() {
+    let lines: Vec<&str> = include_str!("fixtures/permission-write.jsonl")
+        .lines()
+        .collect();
+    let allowed = card_answer(lines[2], decision("allow"));
+    let log = [lines[0], lines[1], lines[2], lines[3], &allowed, lines[4]].join("\n");
+
+    // UserPromptSubmit, PreToolUse, PermissionRequest, Notification, the card's answer, PostToolUse.
+    let expected = [Running, Running, NeedsYou, NeedsYou, Running, Running].map(Some);
+    assert_eq!(states(&log, PROBE), expected);
+
+    let lines: Vec<&str> = include_str!("fixtures/permission-denied.jsonl")
+        .lines()
+        .collect();
+    let denied = card_answer(lines[2], decision("deny"));
+    let log = [lines[0], lines[1], lines[2], &denied].join("\n");
+    let expected = [Running, Running, NeedsYou, Running].map(Some);
+    assert_eq!(states(&log, PROBE), expected);
+}
+
+#[test]
+fn a_plan_rejected_on_the_card_stops_needing_you_with_no_result() {
+    let asker = "2d8a6f41-c95e-4b37-a1d0-7e3f8b2c6a95";
+    let lines: Vec<&str> = include_str!("fixtures/ask-then-plan.jsonl")
+        .lines()
+        .collect();
+    // Up to ExitPlanMode's PreToolUse, then the card's rejection: a denied call may get no result.
+    let rejected = card_answer(lines[11], decision("deny"));
+    let mut log = lines[..12].to_vec();
+    log.push(&rejected);
+    let states = states(&log.join("\n"), asker);
+    assert_eq!(states[11..], [Some(NeedsYou), Some(Running)]);
+}
+
+#[test]
+fn a_question_answered_on_the_card_waits_for_its_result() {
+    let asker = "2d8a6f41-c95e-4b37-a1d0-7e3f8b2c6a95";
+    let lines: Vec<&str> = include_str!("fixtures/ask-then-plan.jsonl")
+        .lines()
+        .collect();
+    let answer = card_answer(
+        lines[1],
+        serde_json::json!({ "answers": { "Which?": "A" } }),
+    );
+    let log = [lines[0], lines[1], &answer].join("\n");
+    // Its PostToolUse carries the answer, so it stays open until then.
+    assert_eq!(states(&log, asker)[2], Some(NeedsYou));
+}
+
 #[test]
 fn a_question_on_a_line_that_opens_with_an_issue_number_needs_you() {
     let message = "#341 is done and its PR is green. Should I open the next ticket?";

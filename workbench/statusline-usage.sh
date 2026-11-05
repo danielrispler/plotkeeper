@@ -1,0 +1,1 @@
+( umask 077; usage_dir="$HOME/Library/Application Support/dev.falinks.studio/usage"; usage_id=$(jq -r '.session_id // empty' <<<"$input"); [[ "$usage_id" =~ ^[A-Za-z0-9_-]+$ ]] && mkdir -p "$usage_dir" && printf '%s' "$input" > "$usage_dir/$usage_id.$$.tmp" && mv -f "$usage_dir/$usage_id.$$.tmp" "$usage_dir/$usage_id.json"; ) 2>/dev/null

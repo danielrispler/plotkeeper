@@ -11,7 +11,7 @@ use std::{
     path::{Path, PathBuf},
     time::UNIX_EPOCH,
 };
-use studio_core::{CardRequest, LiveFacts, Session, Step, Studio};
+use studio_core::{CardRequest, Decision, LiveFacts, Session, Step, Studio};
 
 /// A card in the store, with the change it explains and its base, and its record: when it was added,
 /// when its quiz showed, Daniel's guess, his flag on the key, his rating and the longer explanation he
@@ -107,6 +107,8 @@ pub struct SessionCards {
     /// The cards added before, or before the store kept the time.
     #[serde(serialize_with = "without_diffs")]
     pub older: Vec<StoredCard>,
+    /// Its decision history, oldest first (#461, decision 17).
+    pub decisions: Vec<Decision>,
 }
 
 /// A stored card as the pane reads it: its request without the diff and base, which the pane never
@@ -172,6 +174,9 @@ pub struct CardStore {
     /// What the live app learned that the event log does not hold, in `live-facts.json` beside the
     /// cards (#434, decision 37).
     facts: LiveFacts,
+    /// Each session's decision history, by its row's id, in `decisions.json` beside the cards (#461,
+    /// decision 17).
+    decisions: BTreeMap<String, Vec<Decision>>,
     /// Rises on every change, briefs included, so the shell sends the cards only when it moves.
     revision: u64,
 }
@@ -192,11 +197,13 @@ impl CardStore {
         let cards = read(&path)?;
         let briefs = read(&path.with_file_name("briefs.json"))?;
         let facts = read(&path.with_file_name("live-facts.json"))?;
+        let decisions = read(&path.with_file_name("decisions.json"))?;
         Ok(CardStore {
             path,
             cards,
             briefs,
             facts,
+            decisions,
             revision: 0,
         })
     }
@@ -237,10 +244,16 @@ impl CardStore {
                 .is_some_and(|at| now.saturating_sub(at) < RECENT_MS)
         });
         let brief = self.brief(owner).map(|brief| brief.text.clone());
+        // A session's history holds its workers' decisions; a worker's, its own.
+        let decisions = self.decisions.iter().flat_map(|(session, kept)| {
+            let its = move |d: &&Decision| session == owner || d.agent.as_deref() == Some(owner);
+            kept.iter().filter(its)
+        });
         SessionCards {
             brief,
             recent,
             older,
+            decisions: decisions.cloned().collect(),
         }
     }
 
@@ -252,6 +265,7 @@ impl CardStore {
             Some(Step {
                 tool,
                 detail: Some(detail),
+                ..
             }) => format!("{tool} {detail}"),
             Some(step) => step.tool.clone(),
             None => "No step yet".into(),
@@ -387,6 +401,23 @@ impl CardStore {
             return self.save();
         }
         Ok(())
+    }
+
+    /// Keeps the decisions of session `session` (`Session::decisions`) not kept yet, by their call,
+    /// and saves the history if any was new.
+    pub fn keep_decisions(&mut self, session: &str, decisions: &[Decision]) -> io::Result<()> {
+        let kept = self.decisions.entry(session.into()).or_default();
+        let before = kept.len();
+        for decision in decisions {
+            if kept.iter().all(|k| k.call != decision.call) {
+                kept.push(decision.clone());
+            }
+        }
+        if kept.len() == before {
+            return Ok(());
+        }
+        self.revision += 1;
+        write(&self.path.with_file_name("decisions.json"), &self.decisions)
     }
 
     /// The live-only facts kept so far.

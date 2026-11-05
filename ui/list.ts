@@ -3,9 +3,10 @@
 // which opens the full list on click or ⌘1.
 
 import { age, element, prose, pressable, stepText, text } from "./dom.js";
+import { counts, timesText } from "./times.js";
 import { select } from "./selection.js";
 import { studio } from "./state.js";
-import { stateLabels, type Session, type SessionState, type Subagent } from "./types.js";
+import { stateLabels, type Context, type Session, type SessionState, type Subagent } from "./types.js";
 
 // The collapsed groups Daniel opened, which stay open when the list is drawn again.
 const collapsed: SessionState[] = ["idle", "ended"];
@@ -15,6 +16,24 @@ const opened = new Set<SessionState>();
 // first letters.
 export function stripLabel(folder: string): string {
   return /^issue-(\d+)/.exec(folder)?.[1] ?? folder.slice(0, 4);
+}
+
+// What a session is called: Daniel's name for it, else its issue, PR and worktree (#480), else its
+// folder.
+export function sessionName(session: Pick<Session, "name" | "identity" | "folder_name">): string {
+  return session.name ?? (session.identity.name || session.folder_name);
+}
+
+// How full a session's context is, as a share of its window: "23%", or "" before it is known.
+export function contextText(context: Context | null): string {
+  return context ? `${Math.round((100 * context.tokens) / context.window)}%` : "";
+}
+
+// The context share's node, titled with its tokens.
+function contextNode(context: Context | null): HTMLElement {
+  const node = text("span", contextText(context), "id");
+  if (context) node.title = `Context: ${Math.round(context.tokens / 1000)}k of ${context.window / 1000}k tokens`;
+  return node;
 }
 
 // A subagent's state label and its state: "Needs you" while it asks, else its status.
@@ -53,7 +72,7 @@ function done(all: Children, children: Subagent[] = []): HTMLElement[] {
   return faded ? [text("span", `${faded} done`, "id")] : [];
 }
 
-// A row's two lines: its dot, name and state, then what it is doing.
+// A row's lines: its dot, name and state, then what it is doing, then for a session its times.
 function rowLines(button: HTMLElement, state: string, label: string, name: HTMLElement[], below: HTMLElement[]) {
   const first = text("span", "", "l1");
   const stateNode = text("span", label, "row-state");
@@ -65,7 +84,7 @@ function rowLines(button: HTMLElement, state: string, label: string, name: HTMLE
   return stateNode;
 }
 
-// One row: the folder, the session's short id, its state and what it is doing.
+// One row: the session's name, its context share, its state and what it is doing.
 function row(session: Session, children: Children): HTMLElement {
   const selection = studio.selection;
   const pressed = session.id === selection?.session.id && selection.agent === null;
@@ -75,9 +94,10 @@ function row(session: Session, children: Children): HTMLElement {
     button,
     session.state,
     stateLabels[session.state],
-    [text("span", session.name ?? session.folder_name, "name"), text("span", session.id.slice(0, 8), "id")],
+    [Object.assign(text("span", sessionName(session), "name"), { title: sessionName(session) }), contextNode(session.transcript.context)],
     [...done(children, children.get("session")), rowLine(session.line ?? "")],
   );
+  button.append(counts(text("span", "", "l3"), (now) => timesText(session, session.step_span, now)));
   return button;
 }
 
@@ -143,8 +163,9 @@ function strip(sessions: Session[]): HTMLElement[] {
     ...shown.map((session) => {
       const pressed = session.id === studio.selection?.session.id;
       const button = pressable(document.createElement("button"), pressed, () => select(session.id));
-      button.title = `${session.folder_name} · ${stateLabels[session.state]}`;
-      button.append(dot(session.state), stripLabel(session.folder_name));
+      button.title = `${sessionName(session)} · ${stateLabels[session.state]}`;
+      const issue = session.identity.issue;
+      button.append(dot(session.state), issue === null ? stripLabel(session.folder_name) : String(issue));
       return button;
     }),
     ...(rest ? [Object.assign(pressable(text("button", String(rest)), false, toggle), { title: "Idle and ended" })] : []),

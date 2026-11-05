@@ -66,10 +66,13 @@
           <button id="rename" class="tool" type="button" hidden>Rename</button>
           <button id="close" class="tool" type="button" hidden>Close</button>
           <!-- Decision history (#479), a collapsed section above the turns. -->
-          <div id="decisions" class="decisions"></div>
+          <details id="decisions" class="decisions" hidden><summary id="decisions-title"></summary><ol id="decisions-list"></ol></details>
           <!-- The intention and step line (#472). -->
-          <div id="intention" class="intention"></div>
-          <p id="step" class="step"><span id="tool" class="tool-name"></span> <code id="detail"></code></p>
+          <p id="intention" class="intention"><span id="intention-text"></span> <span id="intention-age" class="age"></span></p>
+          <div id="intention-ask"></div>
+          <details id="unavailable" class="unavailable" hidden><summary>Steps only</summary><span id="unavailable-why"></span></details>
+          <details id="step" class="step"><summary><span id="tool" class="tool-name"></span> <span id="detail"></span></summary><code id="command"></code></details>
+          <details id="responses" class="responses" hidden><summary id="responses-title"></summary><div id="responses-body"></div></details>
           <section id="brief" class="brief" hidden></section>
           <h1 id="recent-title" class="cards-title" hidden>Last 30 minutes</h1>
           <section id="recent"></section>

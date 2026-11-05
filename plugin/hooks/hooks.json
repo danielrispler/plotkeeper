@@ -3,8 +3,14 @@
     "SessionStart": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/studio-hook", "async": true }] }],
     "SessionEnd": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/studio-hook", "async": true }] }],
     "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/studio-hook", "async": true }] }],
-    "PreToolUse": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/studio-hook", "async": true }] }],
-    "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/studio-hook", "async": true }] }],
+    "PreToolUse": [
+      { "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/studio-hook", "async": true }] },
+      { "matcher": "AskUserQuestion|ExitPlanMode", "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/studio-answer", "timeout": 130, "statusMessage": "Answer in the studio card" }] }
+    ],
+    "PermissionRequest": [
+      { "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/studio-hook", "async": true }] },
+      { "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/studio-answer", "timeout": 130, "statusMessage": "Answer in the studio card" }] }
+    ],
     "PostToolUse": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/studio-hook", "async": true }] }],
     "PostToolUseFailure": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/studio-hook", "async": true }] }],
     "Notification": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/studio-hook", "async": true }] }],

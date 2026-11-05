@@ -413,6 +413,7 @@ fn every_prompt_asks_for_english_and_none_for_hebrew() {
         writer.more_command(&edit(), &good_card()).1,
         writer.rewrite_command(&["Add a"], &[], "").1,
         writer.update_command("brief", "workers").1,
+        writer.ask_command("item", &[], "Why?").1,
     ];
     for prompt in prompts {
         assert!(

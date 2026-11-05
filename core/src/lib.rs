@@ -1,4 +1,5 @@
-//! The studio core (#328, module 3): plain Rust with no I/O. It takes hook events one at a time, in
+//! The studio core (#328, module 3): plain Rust with no I/O but the transcript reader
+//! (`transcript.rs`), which reads the sessions' transcripts. It takes hook events one at a time, in
 //! event log order, and keeps the state the app shows. App start replays the whole log through
 //! `replay`; live events go through `apply`, which updates state the same way and also returns what
 //! the shell must do.
@@ -10,6 +11,11 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     time::Duration,
 };
+
+mod transcript;
+mod work;
+pub use transcript::{Context, Transcript};
+pub use work::{Estimate, MIN_HISTORY, Phase, PhaseStart, Work, range};
 
 #[derive(Default)]
 pub struct Studio {
@@ -23,6 +29,11 @@ pub struct Studio {
     roots: Roots,
     /// The turns the replay saw end with both trees, for `backfill`.
     ended: Vec<Backfill>,
+    /// How long each check ran when it did not fail, by `check_key`, oldest first (#461, decision 13).
+    durations: HashMap<String, Vec<u64>>,
+    /// The row of each session that continues another after a `/clear`, by its own id (#461,
+    /// decision 18). A session not here is its own row.
+    rows: HashMap<String, String>,
 }
 
 type FindRoot = dyn Fn(&str) -> Option<String> + Send;
@@ -74,6 +85,15 @@ pub struct Session {
     /// Daniel's name for it, from the studio's latest rename line in the log (#469); `None` for its
     /// folder's.
     pub name: Option<String>,
+    /// The id `claude --resume` takes: its latest conversation's, which a `/clear` changes while the
+    /// row keeps its first id (#461, decision 18).
+    pub resume_id: String,
+    /// When each `/clear` continued it, oldest first: the "cleared" markers in its history.
+    pub cleared: Vec<u64>,
+    /// Its latest `SessionEnd` was a `/clear`, so the next `SessionStart` from `clear` on its
+    /// terminal, or in its folder, continues it.
+    #[serde(skip)]
+    clearing: bool,
     pub state: State,
     /// Whether closing its terminal asks first: it is in a turn, or its latest `Stop` listed
     /// background tasks (#469).
@@ -113,6 +133,15 @@ pub struct Session {
     tasks: BTreeSet<String>,
     /// The questions its agents asked, oldest first (#369, decision 21).
     pub questions: Vec<Question>,
+    /// Its answered questions, plans and permissions, oldest first: its decision history (#461,
+    /// decision 17). The card store keeps them across restarts and gives them to the pane.
+    #[serde(skip)]
+    pub decisions: Vec<Decision>,
+    /// The questions answered on the studio card, by call, whose result has not landed yet.
+    #[serde(skip)]
+    carded: BTreeSet<String>,
+    /// When its latest turn started and ended (#461, decision 13).
+    pub turn_span: Option<Span>,
     /// Its latest `Stop`, until its next prompt (#369, decision 19).
     pub stopped: Option<Stopped>,
     /// When its latest turn ended, which took its workers' cards since its last card.
@@ -139,6 +168,65 @@ pub struct Session {
     /// "worker <name> returned", from its latest wake-up until its own next step or Daniel's next
     /// prompt (#410, decision 27).
     pub returned: Option<String>,
+    /// What its transcript says of its latest turn: the intention, the agent's texts, or why it
+    /// cannot be read (#461, decision 12).
+    pub transcript: Transcript,
+    #[serde(skip)]
+    transcript_file: transcript::TranscriptFile,
+    /// Its issue, PR and worktree, which name it unless Daniel renamed it (#461, decision 19).
+    pub identity: Identity,
+    /// Its work on its ticket: its kind, its phases and how long its agent worked (#461, decision
+    /// 14).
+    pub work: Work,
+}
+
+/// What names a session (#461, decision 19): the issue of its `issue-<n>-…` branch, else the one
+/// it claimed with `wayfinder-startup --claim <n>`, the PR the shell finds for its branch, and its
+/// worktree's folder.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct Identity {
+    pub issue: Option<u64>,
+    /// Its folder's branch, from its transcript.
+    pub branch: Option<String>,
+    pub pr: Option<u64>,
+    /// The last segment of its folder's worktree root.
+    pub worktree: String,
+    /// The derived name: "#480 · PR #490 · agent-a1b2", "fix-typo · agent-a1b2" or "main · Falinks".
+    pub name: String,
+    #[serde(skip)]
+    claim: Option<u64>,
+}
+
+impl Identity {
+    fn named(&mut self) {
+        let branch = self.branch.as_deref();
+        let from_branch = branch
+            .and_then(|b| b.strip_prefix("issue-"))
+            .and_then(|rest| {
+                let digits = rest.split(|c: char| !c.is_ascii_digit()).next()?;
+                digits.parse().ok()
+            });
+        self.issue = from_branch.or(self.claim);
+        let shown = branch.filter(|_| from_branch.is_none());
+        let parts = [
+            self.issue.map(|n| format!("#{n}")),
+            shown.map(String::from),
+            self.pr.map(|n| format!("PR #{n}")),
+            // A task's worktree is often named after its branch.
+            Some(self.worktree.clone()).filter(|w| !w.is_empty() && Some(w.as_str()) != shown),
+        ];
+        self.name = parts.into_iter().flatten().collect::<Vec<_>>().join(" · ");
+    }
+}
+
+/// The issue a `wayfinder-startup … --claim <n>` command claims.
+fn claimed(command: &str) -> Option<u64> {
+    if !command.contains("wayfinder-startup") {
+        return None;
+    }
+    let mut words = command.split_whitespace();
+    words.find(|w| *w == "--claim")?;
+    words.next()?.parse().ok()
 }
 
 /// A terminal of the daemon, as its `list` gives it, or as its record of the terminals it ran gives
@@ -239,7 +327,7 @@ impl Sender {
 /// An `AskUserQuestion` call, which Daniel answers in the terminal (#369, decision 21).
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Question {
-    #[serde(skip)]
+    /// The call's id, which the answer hook's request names (#461, decision 16).
     tool_use_id: String,
     /// The subagent that asks, `None` for the session's own agent.
     pub agent: Option<String>,
@@ -258,6 +346,32 @@ pub enum Answer {
     Answered(Value),
     /// Its call failed or was interrupted, or its turn or its agent ended first.
     NotAnswered,
+}
+
+/// An answered question, plan or permission in its session's decision history (#461, decision 17).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Decision {
+    /// The call it decided, which keys it in the store.
+    pub call: String,
+    /// The subagent that asked, `None` for the session's own agent.
+    pub agent: Option<String>,
+    /// `AskUserQuestion`, `ExitPlanMode`, or the tool a permission was asked for.
+    pub tool: String,
+    /// What it asked: the call's input, with a question's questions and options or a plan's text.
+    pub input: Value,
+    /// A question's answers by question text; `"allow"` or `"deny"` for a plan or a permission.
+    pub answer: Value,
+    /// When it was answered, in Unix milliseconds.
+    pub at: u64,
+    pub source: Source,
+}
+
+/// Where Daniel answered: the studio card, through the answer hook, or the terminal.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Source {
+    Card,
+    Terminal,
 }
 
 /// A subagent of a session (#369, decisions 5, 6 and 8).
@@ -308,10 +422,22 @@ pub struct Agent {
     /// When the hook received its first and its latest event (`studio_received_ms`), in Unix
     /// milliseconds.
     pub started_at: u64,
+    pub last_event_at: u64,
+    /// When its last step started, and ended at its result or its turn's end (#461, decision 13).
+    pub step_span: Option<Span>,
+    /// The last step's `tool_use_id`, whose result ends it.
     #[serde(skip)]
-    last_event_at: u64,
+    step_call: String,
     #[serde(skip)]
     since: Since,
+}
+
+/// When something started and ended, in Unix milliseconds as the hook received them; `end` is `None`
+/// while it runs.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
+pub struct Span {
+    pub start: u64,
+    pub end: Option<u64>,
 }
 
 impl Agent {
@@ -321,6 +447,26 @@ impl Agent {
             started_at: at,
             last_event_at: at,
             ..Agent::default()
+        }
+    }
+
+    /// Its step of call `call` starts at `at`.
+    fn step(&mut self, step: Step, call: &str, at: u64) {
+        self.last_step = Some(step);
+        self.step_call = call.into();
+        self.step_span = Some(Span {
+            start: at,
+            end: None,
+        });
+    }
+
+    /// Call `call`'s result came at `at`: it ends the step when it is the last step's.
+    // shortcut: the hooks are async, so a result that lands before its step's start leaves that step
+    // running until the next one or the turn's end; remember ended calls if that shows.
+    fn step_done(&mut self, call: &str, at: u64) {
+        let span = self.step_span.as_mut().filter(|_| self.step_call == call);
+        if let Some(span) = span.filter(|s| s.end.is_none()) {
+            span.end = Some(at);
         }
     }
 }
@@ -599,14 +745,17 @@ impl Session {
             match event.hook_event_name.as_str() {
                 // A step after its end means its parent continued it (`SendMessage`).
                 "PreToolUse" => {
-                    agent.agent.last_step = Some(Step {
-                        tool: tool.into(),
-                        detail: step_detail(&event.tool_input, &event.cwd),
-                    });
+                    let step = Step::new(tool, &event.tool_input, &event.cwd);
+                    agent.agent.step(step, &event.tool_use_id, at);
                     agent.status = Status::Running;
                     agent.ended_at = None;
                 }
-                "PostToolUse" | "PostToolUseFailure" if changed => agent.kind = Kind::Worker,
+                "PostToolUse" | "PostToolUseFailure" => {
+                    agent.agent.step_done(&event.tool_use_id, at);
+                    if changed {
+                        agent.kind = Kind::Worker;
+                    }
+                }
                 "SubagentStop" => {
                     let mut lines = event.last_assistant_message.lines().map(str::trim);
                     agent.result = lines.find(|line| !line.is_empty()).map(Into::into);
@@ -815,6 +964,7 @@ impl Session {
     /// workers' cards since its last card, or only its brief when a wake-up opened the turn.
     fn end_turn(&mut self, change: Option<Change>, at: u64) -> Option<Output> {
         self.unblock();
+        self.close_spans(at);
         self.turn_ended = true;
         self.stopped_at = at;
         let workers = !self.agent.since.cards.is_empty();
@@ -848,6 +998,14 @@ impl Session {
             ..CardRequest::default()
         };
         (!trees.is_empty()).then_some(Backfill { request, trees })
+    }
+
+    /// Ends its turn's span and its step's at `at`, when they run.
+    fn close_spans(&mut self, at: u64) {
+        let spans = [&mut self.turn_span, &mut self.agent.step_span];
+        for span in spans.into_iter().flatten().filter(|s| s.end.is_none()) {
+            span.end = Some(at);
+        }
     }
 
     fn needs_you(&self) -> bool {
@@ -989,7 +1147,21 @@ const IDLE_AFTER_MS: u64 = 2 * 60 * 60 * 1000;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Step {
     pub tool: String,
+    /// What it works on (`step_detail`): a command's `description`, else its first line.
     pub detail: Option<String>,
+    /// A command's full text, one click away in the session view (#461, decision 12).
+    #[serde(default)]
+    pub command: Option<String>,
+}
+
+impl Step {
+    fn new(tool: &str, input: &Value, cwd: &str) -> Step {
+        Step {
+            tool: tool.into(),
+            detail: step_detail(input, cwd),
+            command: input["command"].as_str().map(Into::into),
+        }
+    }
 }
 
 /// What the shell must act on after a live event.
@@ -1099,14 +1271,69 @@ pub struct Fingerprint {
     pub purpose: Purpose,
 }
 
-/// A check that ran, shown as a pass or fail line.
+/// A check that runs or ran, shown as a pass or fail line once it ends.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct CheckLine {
     /// The command's first line.
     pub command: String,
     /// Whether the command exited 0, when that says whether the check passed: nothing in the
-    /// command masks the check's exit code (`exit_code_counts`). `None` otherwise.
+    /// command masks the check's exit code (`exit_code_counts`). `None` otherwise, and while it runs.
     pub passed: Option<bool>,
+    /// When it started, and when it ended: its result, or for a command in the background its
+    /// `<task-notification>`; `None` while it runs (#461, decision 13).
+    pub started_at: u64,
+    pub ended_at: Option<u64>,
+    /// Its typical duration when it started, from the checks that ran before (`Studio::typical`).
+    pub typical_ms: Option<u64>,
+    /// Its call's `tool_use_id`, and its background task's id once it moved to the background.
+    #[serde(skip)]
+    call: String,
+    #[serde(skip)]
+    task: Option<String>,
+    /// Whether its exit code says whether it passed (`exit_code_counts`).
+    #[serde(skip)]
+    counts: bool,
+}
+
+impl CheckLine {
+    fn new(command: &str, call: &str, at: u64, typical_ms: Option<u64>) -> Self {
+        CheckLine {
+            command: command.lines().next().unwrap_or_default().into(),
+            passed: None,
+            started_at: at,
+            ended_at: None,
+            typical_ms,
+            call: call.into(),
+            task: None,
+            counts: exit_code_counts(command),
+        }
+    }
+
+    /// It ended at `at`, failed or not, which its typical duration counts only when it did not fail.
+    fn end(&mut self, failed: bool, at: u64, durations: &mut HashMap<String, Vec<u64>>) {
+        self.ended_at = Some(at);
+        self.passed = self.counts.then_some(!failed);
+        if !failed {
+            let runs = durations.entry(check_key(&self.command)).or_default();
+            runs.push(at.saturating_sub(self.started_at));
+        }
+    }
+}
+
+/// What typical durations group check runs by: the command's first line, up to any pipe or output
+/// redirection, so `cargo test 2>&1 | tail` counts with `cargo test`.
+fn check_key(command: &str) -> String {
+    let first = command.lines().next().unwrap_or_default();
+    let first = first.split('|').next().unwrap_or_default();
+    let first = first.replace("2>&1", "");
+    first.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// The lower median of `runs`, `None` when there is none.
+fn median(runs: &[u64]) -> Option<u64> {
+    let mut runs = runs.to_vec();
+    runs.sort_unstable();
+    runs.get(runs.len().checked_sub(1)? / 2).copied()
 }
 
 /// The worktree a card's change starts from (#369, decision 10): the session's previous card, or its
@@ -1225,8 +1452,13 @@ struct Event {
     /// The start of a session: `startup`, `resume`, `clear` or `compact`.
     #[serde(default)]
     source: String,
+    /// The end of a session: `clear`, `logout`, `prompt_input_exit`, `other` and the like.
+    #[serde(default)]
+    reason: String,
     #[serde(default)]
     studio_received_ms: u64,
+    /// On a tool's result, how long its call took.
+    duration_ms: Option<u64>,
     /// The terminal the session runs in, which the hook records from `STUDIO_TERMINAL_ID`.
     studio_terminal_id: Option<String>,
     /// The trees the hook recorded at a turn's first touch of each worktree, by root (#486).
@@ -1238,11 +1470,20 @@ struct Event {
     /// On the studio's own `StudioRename` line, the session's new name; empty for none.
     #[serde(default)]
     studio_name: String,
+    /// On the answer hook's `StudioAnswer` line, Daniel's answer from the card: `answers` for a
+    /// question, `decision` for a plan or a permission.
+    #[serde(default)]
+    studio_answer: Value,
 }
 
 /// The event the shell appends to the log when Daniel renames a session (#469). The log is what a
 /// restart replays, so the name survives it.
 pub const RENAME: &str = "StudioRename";
+
+/// The line the answer hook appends when Daniel answers from the studio card (#478): the call's hook
+/// payload under this name, with `studio_asked_by` (the event that asked) and `studio_answer`. An
+/// answer in the terminal leaves none.
+pub const STUDIO_ANSWER: &str = "StudioAnswer";
 
 /// Whether the turn's final message asks Daniel something: a sentence ending in `?`, after removing
 /// fenced code, inline code, blockquotes, headings and table rows (#321's evidence, "Transcripts").
@@ -1288,10 +1529,17 @@ fn tag<'a>(text: &'a str, name: &str) -> Option<&'a str> {
     Some(rest.split_once(&format!("</{name}>"))?.0)
 }
 
-/// The tool input that says what a step works on: a command's first line, a path relative to the
-/// session's folder, the first question asked, or a search pattern, URL, query or task description.
+/// The tool input that says what a step works on: a command's `description`, which the agent sets
+/// on every Bash call (#461, decision 12), else its first line; a path relative to the session's
+/// folder, the first question asked, or a search pattern, URL, query or task description.
 fn step_detail(input: &Value, cwd: &str) -> Option<String> {
     if let Some(command) = input["command"].as_str() {
+        if let Some(description) = input["description"]
+            .as_str()
+            .filter(|d| !d.trim().is_empty())
+        {
+            return Some(description.into());
+        }
         return command.lines().next().map(Into::into);
     }
     if let Some(question) = input["questions"][0]["question"].as_str() {
@@ -1349,14 +1597,6 @@ fn is_check(command: &str) -> bool {
                 ) | ("go", Some("test" | "vet"))
             )
         })
-}
-
-/// Whether a tool call runs a check in the foreground. A background command's result arrives as soon
-/// as it starts, before the check has run.
-fn runs_check(tool: &str, input: &Value) -> bool {
-    tool == "Bash"
-        && input["run_in_background"] != true
-        && is_check(input["command"].as_str().unwrap_or_default())
 }
 
 /// Whether a check's exit code says whether it passed (#328, module 4). A command exits with its
@@ -1433,7 +1673,32 @@ impl Studio {
     pub fn fingerprint_folders(&self, line: &str) -> Vec<Fingerprint> {
         let event = serde_json::from_str::<Event>(line);
         let event = event.ok().filter(|e| e.hook_event_name != RENAME);
-        event.map_or_else(Vec::new, |event| self.looks(&event))
+        event.map_or_else(Vec::new, |mut event| {
+            event.session_id = self.row(&event);
+            self.looks(&event)
+        })
+    }
+
+    /// The row `event` belongs to: its session's, or for a start from `/clear`, the cleared session's
+    /// on the same terminal, or in the same folder outside studio terminals (#461, decision 18).
+    // shortcut: a start that lands before its clear's `SessionEnd` makes a new row; match both ways
+    // if the async hooks show it.
+    fn row(&self, event: &Event) -> String {
+        if let Some(row) = self.rows.get(&event.session_id) {
+            return row.clone();
+        }
+        let fresh = !self.sessions.contains_key(&event.session_id);
+        if fresh && event.hook_event_name == "SessionStart" && event.source == "clear" {
+            let same = |s: &&Session| match &event.studio_terminal_id {
+                Some(terminal) => s.terminal.as_ref() == Some(terminal),
+                None => s.terminal.is_none() && s.cwd == event.cwd,
+            };
+            let cleared = self.sessions.values().filter(|s| s.clearing).filter(same);
+            if let Some(s) = cleared.max_by_key(|s| s.agent.last_event_at) {
+                return s.agent.id.clone();
+            }
+        }
+        event.session_id.clone()
     }
 
     /// The fingerprints before `event`: its own (`look`), and the end of each worker with cards that
@@ -1652,9 +1917,15 @@ impl Studio {
         mut changes: BTreeMap<String, Change>,
         replay: bool,
     ) -> Vec<Output> {
-        let Ok(event) = serde_json::from_str::<Event>(line) else {
+        let Ok(mut event) = serde_json::from_str::<Event>(line) else {
             return Vec::new();
         };
+        let own_id = event.session_id.clone();
+        event.session_id = self.row(&event);
+        let continues = event.session_id != own_id && !self.rows.contains_key(&own_id);
+        if event.session_id != own_id {
+            self.rows.insert(own_id.clone(), event.session_id.clone());
+        }
         // A rename names a known session and is none of its events.
         if event.hook_event_name == RENAME {
             if let Some(session) = self.sessions.get_mut(&event.session_id) {
@@ -1664,6 +1935,7 @@ impl Studio {
         }
         let looks = self.looks(&event);
         let touches = self.touches(&event);
+        let typical = self.typical(event.tool_input["command"].as_str().unwrap_or_default());
         let roots = &self.roots;
         let session = self
             .sessions
@@ -1680,6 +1952,13 @@ impl Studio {
         session.agent.last_event_at = session.agent.last_event_at.max(event.studio_received_ms);
         // Every event of a `claude` process carries its terminal, so a resume elsewhere moves it.
         session.terminal.clone_from(&event.studio_terminal_id);
+        let working = session.state == State::Running;
+        session.work.passes(event.studio_received_ms, working);
+        let phases_before = session.work.phases.len();
+        session.resume_id = own_id;
+        if continues {
+            session.cleared.push(event.studio_received_ms);
+        }
         let failed_before = session.failed_workers();
         let in_turn = session.in_turn();
         let ends_early = session.ends_turn_early(&event);
@@ -1701,6 +1980,26 @@ impl Studio {
             session.cwd.clone_from(&event.cwd);
             let last = event.cwd.rsplit('/').next().unwrap_or_default();
             session.folder_name = if last.is_empty() { &event.cwd } else { last }.into();
+            let root = roots.of(&event.cwd);
+            let last = root.rsplit('/').next().unwrap_or_default();
+            session.identity.worktree = if last.is_empty() { &root } else { last }.into();
+            let command = event.tool_input["command"].as_str().unwrap_or_default();
+            if let Some(issue) = claimed(command) {
+                session.identity.claim = Some(issue);
+            }
+            session.identity.named();
+        }
+        // A resume or `/clear` may move it to another transcript, read from its start.
+        if own
+            && !event.transcript_path.is_empty()
+            && session.transcript_file.path != event.transcript_path
+        {
+            session.transcript_file = transcript::TranscriptFile::default();
+            session
+                .transcript_file
+                .path
+                .clone_from(&event.transcript_path);
+            session.transcript = Transcript::default();
         }
         let failed = session.failed_workers().into_iter();
         let mut outputs: Vec<Output> = failed
@@ -1737,6 +2036,10 @@ impl Studio {
             }
         }
         if opens {
+            session.turn_span = Some(Span {
+                start: at,
+                end: None,
+            });
             session.touched.clear();
             session.trees.clear();
         }
@@ -1824,6 +2127,18 @@ impl Studio {
                     }),
                     Sender::Daniel => {}
                 }
+                // A background check ends at the notification that names its task.
+                for (task, status) in reported(&event.prompt) {
+                    let running = session.checks.iter_mut().filter(|l| l.ended_at.is_none());
+                    let mut lines = running.filter(|l| l.task.as_deref() == Some(task));
+                    if let Some(line) = lines.next() {
+                        line.end(status != "completed", at, &mut self.durations);
+                        if !matches!(status, "completed" | "failed") {
+                            line.passed = None;
+                        }
+                    }
+                }
+                session.work.prompt(&event.prompt, at);
                 let prompt = Prompt {
                     at,
                     sender,
@@ -1875,21 +2190,36 @@ impl Studio {
                 // Its subagents end with it.
                 session.blocks.clear();
                 session.running.clear();
+                if session.in_turn() {
+                    session.close_spans(at);
+                }
                 session.turn_ended = true;
                 session.ended = true;
+                session.clearing = event.reason == "clear";
             }
             // A resumed session keeps its id; a compaction keeps the turn it happens in.
             "SessionStart" => {
                 session.ended = false;
+                session.clearing = false;
                 session.turn_ended |= event.source != "compact";
             }
             "PreToolUse" => {
                 if own {
                     session.returned = None;
-                    session.agent.last_step = Some(Step {
-                        tool: tool.clone(),
-                        detail: step_detail(&event.tool_input, &event.cwd),
-                    });
+                    let step = Step::new(&tool, &event.tool_input, &event.cwd);
+                    session.agent.step(step, &event.tool_use_id, at);
+                    session.work.call(&tool, &event.tool_input, at);
+                    // A check's line runs from its start (#461, decision 13).
+                    let command = event.tool_input["command"].as_str().unwrap_or_default();
+                    let known = session.checks.iter().any(|l| l.call == event.tool_use_id);
+                    if tool == "Bash" && is_check(command) && !known {
+                        session.checks.push(CheckLine::new(
+                            command,
+                            &event.tool_use_id,
+                            at,
+                            typical,
+                        ));
+                    }
                 }
                 let call = Call {
                     id,
@@ -1941,11 +2271,61 @@ impl Studio {
                 }
             }
             "Elicitation" => session.block("Elicitation".into(), Value::Null, event.agent_id, at),
+            // Daniel decided a plan or a permission from the studio card (#478): it waits on him no
+            // more, though its result comes only when the call ends, or for a denial maybe never. A
+            // question's result carries its answer, so its block waits for it.
+            STUDIO_ANSWER if event.studio_answer.get("decision").is_some() => {
+                let input = &event.tool_input;
+                let decided =
+                    |w: &Block| w.tool == tool && w.input == *input && w.agent == event.agent_id;
+                if let Some(block) = session.blocks.iter().find(|w| decided(w)) {
+                    let call = block.calls.first().map(|(call, _)| call.clone());
+                    session.decisions.push(Decision {
+                        call: call.unwrap_or(event.tool_use_id),
+                        agent: block.agent.clone(),
+                        tool: tool.clone(),
+                        input: block.input.clone(),
+                        answer: event.studio_answer["decision"].clone(),
+                        at,
+                        source: Source::Card,
+                    });
+                }
+                session.blocks.retain(|w| !decided(w));
+            }
+            // A question answered on the card: its result, which carries the answer, is the card's.
+            STUDIO_ANSWER => {
+                session.carded.insert(event.tool_use_id);
+            }
             "PostToolUse" | "PostToolUseFailure" => {
                 session.running.retain(|c| c.id != id);
+                let failed = event.hook_event_name == "PostToolUseFailure";
+                // A plan or a permission that still waited on Daniel was decided in the terminal:
+                // allowed if its call went on, denied if Daniel rejected it.
+                // shortcut: a call that failed for another reason, such as an Edit whose text was
+                // not found, records no decision; read its error if that loses real ones.
+                let held = session.blocks.iter().find(|w| {
+                    w.tool == tool && w.calls.iter().any(|(call, _)| Some(call) == id.as_ref())
+                });
+                let answer = match failed {
+                    false => Some("allow"),
+                    true if event.error.contains("doesn't want to proceed") => Some("deny"),
+                    true => None,
+                };
+                if let (Some(block), Some(answer), Some(call)) = (held, answer, &id)
+                    && tool != "AskUserQuestion"
+                {
+                    session.decisions.push(Decision {
+                        call: call.clone(),
+                        agent: block.agent.clone(),
+                        tool: tool.clone(),
+                        input: block.input.clone(),
+                        answer: answer.into(),
+                        at,
+                        source: Source::Terminal,
+                    });
+                }
                 session.resolve(|(call, _)| Some(call) == id.as_ref());
                 let input = &event.tool_input;
-                let failed = event.hook_event_name == "PostToolUseFailure";
                 // The hooks are async, so an answer that lands after its turn's `Stop` still counts.
                 let mut asked = session.questions.iter_mut();
                 if !failed
@@ -1960,18 +2340,55 @@ impl Studio {
                         true => Answer::Answered(answers.clone()),
                         false => Answer::NotAnswered,
                     };
+                    if strings {
+                        let card = session.carded.remove(&event.tool_use_id);
+                        session.decisions.push(Decision {
+                            call: event.tool_use_id.clone(),
+                            agent: question.agent.clone(),
+                            tool: tool.clone(),
+                            input: input.clone(),
+                            answer: answers.clone(),
+                            at,
+                            source: if card { Source::Card } else { Source::Terminal },
+                        });
+                    }
                 }
                 // A denied or interrupted call, or a failed Edit or Write, changed nothing: only a
                 // command that ran and failed has its exit code in its error.
                 let ran = !failed || event.error.starts_with("Exit code");
-                // A check gets its line whether it passed or failed. A child's checks are its own,
-                // so they add no line.
-                if ran && own && runs_check(&tool, input) {
-                    let command = input["command"].as_str().unwrap_or_default();
-                    session.checks.push(CheckLine {
-                        command: command.lines().next().unwrap_or_default().into(),
-                        passed: exit_code_counts(command).then_some(!failed),
-                    });
+                if own {
+                    session.agent.step_done(&event.tool_use_id, at);
+                }
+                // A check gets its line whether it passed or failed; one that did not run loses
+                // the line its start gave it. A child's checks are its own, so they add no line.
+                let command = input["command"].as_str().unwrap_or_default();
+                if own && tool == "Bash" && is_check(command) {
+                    let index = session
+                        .checks
+                        .iter()
+                        .position(|l| l.call == event.tool_use_id);
+                    let index = match index {
+                        _ if !ran => {
+                            session.checks.retain(|l| l.call != event.tool_use_id);
+                            None
+                        }
+                        Some(index) => Some(index),
+                        // The hooks are async, so its result can land before its start.
+                        None => {
+                            let start = at.saturating_sub(event.duration_ms.unwrap_or_default());
+                            let line = CheckLine::new(command, &event.tool_use_id, start, typical);
+                            session.checks.push(line);
+                            Some(session.checks.len() - 1)
+                        }
+                    };
+                    let task = event.tool_response.background_task_id.clone();
+                    if let Some(line) = index.map(|i| &mut session.checks[i]) {
+                        // In the background it runs on until its notification.
+                        match task {
+                            Some(task) => line.task = Some(task),
+                            None => line.end(failed, at, &mut self.durations),
+                        }
+                    }
                 }
             }
             _ => {}
@@ -2000,17 +2417,46 @@ impl Studio {
             State::Running
         };
         session.asks_before_closing = session.in_turn() || !session.ended && session.background;
+        session.work.estimate.depends_on_you = session.state == State::NeedsYou;
         session.asker = session.blocks.first().map(|block| Asker {
             agent: block.asker(),
             since: block.at,
         });
+        let phase_started = session.work.phases.len() != phases_before;
         if !blocked_before && session.state == State::NeedsYou {
             outputs.push(Output::NeedsYou {
-                session_id: event.session_id,
+                session_id: event.session_id.clone(),
                 agent: session.asker.as_ref().and_then(|w| w.agent.clone()),
             });
         }
+        if phase_started {
+            self.estimate(&event.session_id);
+        }
         outputs
+    }
+
+    /// Sets session `id`'s estimate from the start of its phase, from the sessions of its kind that
+    /// started before it and have ended (#461, decision 14): a paused session's time may be cut short.
+    fn estimate(&mut self, id: &str) {
+        let Some(session) = self.sessions.get(id) else {
+            return;
+        };
+        let work = &session.work;
+        let past: Vec<&Work> = self
+            .sessions
+            .values()
+            .filter(|s| {
+                s.agent.started_at < session.agent.started_at
+                    && work.kind.is_some()
+                    && s.work.kind == work.kind
+                    && s.ended
+            })
+            .map(|s| &s.work)
+            .collect();
+        let range = work.phase().and_then(|p| range(&past, p, MIN_HISTORY));
+        if let Some(session) = self.sessions.get_mut(id) {
+            session.work.estimate.range = range;
+        }
     }
 
     /// A new studio with `lines` replayed into it, in order.
@@ -2136,7 +2582,7 @@ impl Studio {
                 cwd: t.cwd.clone(),
                 argv: t.argv.clone(),
                 session: (!t.argv.is_empty())
-                    .then(|| latest.map(|s| s.agent.id.clone()))
+                    .then(|| latest.map(|s| s.resume_id.clone()))
                     .flatten(),
                 busy,
             }
@@ -2144,8 +2590,87 @@ impl Studio {
         running.map(revive).collect()
     }
 
+    /// Reads what was added to the transcripts of the sessions that have not ended, and of the
+    /// selected one, since the last call (#461, decision 12). `log` gets one line when a session's
+    /// transcript becomes unavailable. A session is read only from its first step or `Stop`, as its
+    /// transcript may not exist before. Returns whether any session's transcript changed.
+    pub fn follow_transcripts(&mut self, mut log: impl FnMut(String)) -> bool {
+        let mut changed = false;
+        for session in self.sessions.values_mut() {
+            let shown = self.selected.as_ref() == Some(&session.agent.id);
+            // shortcut: after a `/clear` the row keeps its old step, so the new transcript may read as
+            // gone for one poll (one stderr line); track a step per transcript if that shows.
+            let started = session.agent.last_step.is_some() || session.stopped.is_some();
+            if !started
+                || session.transcript_file.path.is_empty()
+                || session.state == State::Ended && !shown
+            {
+                continue;
+            }
+            let before = session.transcript.clone();
+            if let Some(why) = session.transcript_file.follow(&mut session.transcript) {
+                log(format!(
+                    "session {}: transcript unavailable, showing steps only: {why}",
+                    session.agent.id
+                ));
+            }
+            if session.transcript.branch.is_some()
+                && session.transcript.branch != session.identity.branch
+            {
+                session
+                    .identity
+                    .branch
+                    .clone_from(&session.transcript.branch);
+                session.identity.pr = None;
+                session.identity.named();
+            }
+            changed |= session.transcript != before;
+        }
+        changed
+    }
+
+    /// The folder and branch of each session that has not ended, and of the selected one, one per
+    /// branch: what the shell asks `gh pr view` about, off the poll (#461, decision 19).
+    pub fn branches(&self) -> Vec<(String, String)> {
+        let mut seen = BTreeMap::new();
+        for session in self.sessions.values() {
+            let shown = self.selected.as_ref() == Some(&session.agent.id);
+            if let Some(branch) = &session.identity.branch
+                && (session.state != State::Ended || shown)
+            {
+                seen.entry(branch.clone()).or_insert(session.cwd.clone());
+            }
+        }
+        seen.into_iter()
+            .map(|(branch, cwd)| (cwd, branch))
+            .collect()
+    }
+
+    /// The shell found `pr` for `branch`; returns whether any session's name changed.
+    pub fn set_pr(&mut self, branch: &str, pr: Option<u64>) -> bool {
+        let mut changed = false;
+        for session in self.sessions.values_mut() {
+            let identity = &mut session.identity;
+            if identity.branch.as_deref() == Some(branch) && identity.pr != pr {
+                identity.pr = pr;
+                identity.named();
+                changed = true;
+            }
+        }
+        changed
+    }
+
+    /// The typical duration of check `command`, in milliseconds: the median of how long its earlier
+    /// runs took when they did not fail, its backgrounded runs included (#461, decisions 13 to 15).
+    /// `None` when it never ran. Runs group by `check_key`.
+    pub fn typical(&self, command: &str) -> Option<u64> {
+        median(self.durations.get(&check_key(command))?)
+    }
+
+    /// Session `id`'s row: its own, or the row it continues after a `/clear`.
     pub fn session(&self, id: &str) -> Option<&Session> {
-        self.sessions.get(id)
+        self.sessions
+            .get(self.rows.get(id).map_or(id, String::as_str))
     }
 
     /// The session list: every session, grouped in `State` order, the newest first in each group.

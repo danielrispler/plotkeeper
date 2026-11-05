@@ -470,16 +470,16 @@ fn every_session_of_the_day_shows_all_of_its_cards_whichever_was_prompted_last()
         })
         .collect();
 
-    // In list order, one card per `Stop`; the two sessions with no prompt have none.
+    // In list order, one card per `Stop`; the session with no prompt has none.
     assert_eq!(
         shown,
         [
-            ("0222b62d", 4),
             ("596c28a1", 7),
+            // With `0222b62d`'s 4, whose `/clear` continued its row (#474), as `6641e809`'s none
+            // join `5d7f69ab`'s.
+            ("5bb84a4a", 8),
             ("2afc85f5", 14),
-            ("5bb84a4a", 4),
             ("57e9c1ab", 0),
-            ("6641e809", 0),
             ("1ac172be", 7),
             ("5d7f69ab", 14),
         ]

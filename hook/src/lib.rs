@@ -1,15 +1,33 @@
 //! The event log (#328, module 2): one append-only JSON Lines file, the only source of session state.
 
+pub mod answer;
+
 use std::{
     env, fs,
     path::{Path, PathBuf},
     process::{self, Command},
 };
 
-/// The log in the studio's data directory, which is Tauri's app data directory for the identifier
-/// in `src-tauri/tauri.conf.json`. The hook writes it; the app reads it.
+/// The studio's data directory, which is Tauri's app data directory for the identifier in
+/// `src-tauri/tauri.conf.json`.
+pub fn data_dir(home: &Path) -> PathBuf {
+    home.join("Library/Application Support/dev.falinks.studio")
+}
+
+/// The log in the studio's data directory. The hook writes it; the app reads it.
 pub fn event_log(home: &Path) -> PathBuf {
-    home.join("Library/Application Support/dev.falinks.studio/events.jsonl")
+    data_dir(home).join("events.jsonl")
+}
+
+/// Appends `event` to the log at `log` as one line, with one write under an exclusive lock, so hooks
+/// that fire together never interleave their lines.
+pub fn append(log: &Path, event: &serde_json::Value) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut line = serde_json::to_vec(event)?;
+    line.push(b'\n');
+    let mut log = fs::OpenOptions::new().create(true).append(true).open(log)?;
+    log.lock()?;
+    log.write_all(&line)
 }
 
 /// What the hook knows of a session's latest turn, kept between its runs (#486): its prompt id, the

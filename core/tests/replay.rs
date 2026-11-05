@@ -12,6 +12,7 @@ fn step(tool: &str, detail: Option<&str>) -> Option<Step> {
     Some(Step {
         tool: tool.into(),
         detail: detail.map(Into::into),
+        command: None,
     })
 }
 
@@ -25,7 +26,10 @@ fn a_failed_command_is_still_the_last_step() {
     let probe = studio.session(PROBE).expect("the session");
     assert_eq!(
         probe.agent.last_step,
-        step("Bash", Some("ls does-not-exist"))
+        Some(Step {
+            command: Some("ls does-not-exist".into()),
+            ..step("Bash", Some("List a path that does not exist")).unwrap()
+        })
     );
 }
 
@@ -98,7 +102,10 @@ fn lines_that_are_not_hook_events_are_skipped() {
     let probe = studio.session(PROBE).expect("the session");
     assert_eq!(
         probe.agent.last_step,
-        step("Bash", Some("ls does-not-exist"))
+        Some(Step {
+            command: Some("ls does-not-exist".into()),
+            ..step("Bash", Some("List a path that does not exist")).unwrap()
+        })
     );
 }
 

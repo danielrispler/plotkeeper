@@ -4,6 +4,11 @@
 
 use studio_core::{CheckLine, Output, Studio};
 
+/// What a line shows once its check ended: its command and whether it passed.
+fn shown(lines: Vec<CheckLine>) -> Vec<(String, Option<bool>)> {
+    lines.into_iter().map(|l| (l.command, l.passed)).collect()
+}
+
 const CHECKS: &str = include_str!("fixtures/checks.jsonl");
 const SESSION: &str = "a3e6c9f2-1b4d-4e7a-8c0f-5d2b9e6a3c18";
 const COMMAND: &str = "cd apps/studio && cargo test";
@@ -32,13 +37,10 @@ fn lines(log: &str) -> Vec<CheckLine> {
 /// Before #375 the wait's first check asked "Will it pass?" (#343).
 #[test]
 fn a_check_that_passes_or_fails_shows_as_a_line_and_raises_no_guess_or_card() {
-    let line = |passed| CheckLine {
-        command: COMMAND.into(),
-        passed,
-    };
+    let line = |passed| (COMMAND.to_string(), passed);
 
     assert_eq!(
-        lines(CHECKS),
+        shown(lines(CHECKS)),
         [line(Some(true)), line(Some(true)), line(Some(false))]
     );
     assert_eq!(live(CHECKS).concat(), []);
@@ -119,15 +121,24 @@ fn a_check_whose_result_lands_before_its_start_gets_its_line() {
     assert_eq!(passed, [Some(true)]);
 }
 
+/// Before #473 a check run in the background got no line. Now it runs until the notification that
+/// names its task (`times.rs`), which this log lacks.
 #[test]
-fn a_check_run_in_the_background_is_no_check() {
+fn a_check_run_in_the_background_runs_until_its_notification() {
     let log = first_wait(COMMAND).replace(
         &format!(r#""command":"{COMMAND}""#),
         &format!(r#""command":"{COMMAND}","run_in_background":true"#),
     );
 
     assert_eq!(log.matches("run_in_background").count(), 2);
-    assert_eq!(lines(&log), []);
+    let log = log.replace(
+        r#""interrupted":false"#,
+        r#""backgroundTaskId":"bq1w2e3r4","interrupted":false"#,
+    );
+    let [line] = &lines(&log)[..] else {
+        panic!("one check line");
+    };
+    assert_eq!((line.ended_at, line.passed), (None, None));
 }
 
 #[test]

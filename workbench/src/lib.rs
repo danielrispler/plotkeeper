@@ -80,6 +80,20 @@ pub fn claude(plugin: &Path, resume: Option<&str>) -> Vec<String> {
     argv
 }
 
+/// The plan's usage (#481; #461, decision 19): the `rate_limits` of the newest `*.json` snapshot in
+/// `dir`, where Daniel's status line command saves its stdin, one file per session, by temp file and
+/// rename. `None` when there is no snapshot, it has no limits yet, or it does not parse.
+pub fn plan_usage(dir: &Path) -> Option<serde_json::Value> {
+    let newest = std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .filter(|entry| entry.path().extension().is_some_and(|e| e == "json"))
+        .max_by_key(|entry| entry.metadata().and_then(|m| m.modified()).ok())?;
+    let snapshot: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(newest.path()).ok()?).ok()?;
+    snapshot.get("rate_limits").cloned()
+}
+
 /// Creates task `name`: after a `git fetch`, branch `name` from `origin`'s default branch, checked
 /// out in `.claude/worktrees/<name>` of the main checkout. A name already taken, by a branch here or
 /// at `origin` or by a folder, is refused and nothing is created.

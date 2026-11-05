@@ -23,16 +23,22 @@ An agent session's work on one prompt, Daniel's or a wake-up, from its first eve
 _Avoid_: Step (one tool call inside a turn)
 
 **Intention**:
-The latest thing the agent wrote in its own words during a turn, such as why it is about to read an issue. It stays shown, with its age, until the agent writes again, so it covers the steps that follow it.
+The latest thing the agent wrote in its own words during a turn, such as why it is about to read an issue. It stays shown, with its age, until the agent writes again, so it covers the steps that follow it. A turn's intentions are the last line of each of its responses; a side question ("ask about this") gets them as context.
 _Avoid_: Reason (the card writer's account of a step)
+
+**Transcript**:
+Claude Code's own record of an agent session, which the control room reads for the intention, the turn's responses, the branch and the context share. When it cannot be read, the session's view falls back to its steps only.
 
 **Phase**:
 A recognisable stretch of a session's work on a ticket, such as orienting, designing, implementing, checking, or waiting on a PR's CI. A session moves through phases in a usual order.
 _Avoid_: Stage, step
 
 **Estimate**:
-A range for how long the agent's remaining work will take, from the typical durations of the phases still ahead. It appears only when there is enough history for the current kind of work, is always marked as an estimate, and leaves out the time that depends on Daniel.
+A range for how long the agent's remaining work will take, from the typical durations of the phases still ahead. It appears only when there is enough history for the current kind of work: 20 ended agent sessions of that kind. It is always marked as an estimate and leaves out the time that depends on Daniel; while the session needs him, it shows "depends on you" instead of a range.
 _Avoid_: ETA (implies a promise)
+
+**Kind of work**:
+What an agent session's work is, named by its first prompt's slash command, else by its first skill, such as `implement` or `wayfinder`. An estimate compares a session only with sessions of the same kind.
 
 **Base**:
 The state of a worktree that the next card's change is measured from: its commit and its files when the previous card was written, or when the prompt or worker began. A move of the commit that is not the agent's own work moves the base instead of adding to the change.
@@ -76,6 +82,16 @@ _Avoid_: Tab
 **Revival**:
 Bringing back the terminals a terminal daemon ran after it died, from a crash, a reboot or an upgrade. A Claude terminal reopens its latest session with `claude --resume`; a shell starts again in its folder. Each loses its screen, and a shell its state.
 _Avoid_: Restore (nothing of the old process survives)
+
+**Decision**:
+A question, plan or permission Daniel answered, with his answer and where he gave it: on the card or in the terminal. A session's decisions, newest first, are its decision history.
+_Avoid_: Verdict (only a plan's or a permission's allow or deny)
+
+**Identity**:
+The name an agent session gets from its work: its issue, its PR and its worktree, such as "#480 · PR #490 · agent-a1b2". A name Daniel gives it replaces it.
+
+**Context share**:
+How much of its model's context window an agent session's latest turn uses, as a percentage.
 
 **Needs you**:
 The state of an agent session that is blocked on Daniel: waiting for his permission, his answer to a question, or his approval of a plan.

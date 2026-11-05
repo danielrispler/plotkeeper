@@ -36,13 +36,7 @@ fn append() -> Result<(), Box<dyn Error>> {
     if let Err(e) = trees(&mut event, data) {
         eprintln!("studio-hook: record the trees: {e}");
     }
-    let mut line = serde_json::to_vec(&event)?;
-    line.push(b'\n');
-
-    let mut log = OpenOptions::new().create(true).append(true).open(&path)?;
-    // One write under an exclusive lock, so hooks that fire together never interleave their lines.
-    log.lock()?;
-    log.write_all(&line)?;
+    studio_hook::append(&path, &event.into())?;
     Ok(())
 }
 

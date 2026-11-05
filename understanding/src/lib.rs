@@ -13,7 +13,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use studio_core::{CardRequest, Kind, Session, Status};
+use studio_core::{CardRequest, Kind, Session, Status, Transcript};
 
 mod drift;
 mod fingerprint;
@@ -152,6 +152,13 @@ pub trait CardWriter {
     /// last card, from their cards' summaries (#369, decision 11), or one line for the log when it
     /// gave none.
     fn update(&self, brief: &str, workers: &str) -> Result<String, String>;
+
+    /// The writer's reply to Daniel's side `question` on `item`, a response, card or intention, read
+    /// with `intentions`, those of the item's turn, oldest first (#461, decision 20), or one line
+    /// when it gave none. A writer that answers no questions says so.
+    fn ask(&self, _item: &str, _intentions: &[String], _question: &str) -> Result<String, String> {
+        Err("this writer answers no questions".into())
+    }
 }
 
 /// Every 5th update of a brief rewrites it from scratch (#369, decision 16), a starting guess.
@@ -349,6 +356,29 @@ fn rebrief(
     }
 }
 
+/// The answer to Daniel's side `question` on `item` (#461, decision 20), from one call to `writer`
+/// with the intentions of `transcript`'s turn, one per response. It stays in the studio: the session
+/// never sees it. Why there is none when the call failed or its reply holds no answer.
+pub fn ask_about(
+    writer: &(impl CardWriter + ?Sized),
+    transcript: &Transcript,
+    item: &str,
+    question: &str,
+) -> Result<String, String> {
+    let intentions: Vec<String> = transcript
+        .responses
+        .iter()
+        .filter_map(|text| text.lines().map(str::trim).rfind(|l| !l.is_empty()))
+        .map(Into::into)
+        .collect();
+    let reply = writer.ask(item, &intentions, question)?;
+    let value: serde_json::Value = serde_json::from_str(object(&reply)).unwrap_or_default();
+    match value["answer"].as_str().map(str::trim) {
+        Some(answer) if !answer.is_empty() => Ok(answer.into()),
+        _ => Err("the writer's reply holds no answer".into()),
+    }
+}
+
 /// The JSON object in a writer's reply, perhaps in a code fence: from its first `{` to its last `}`.
 fn object(reply: &str) -> &str {
     let object = reply.find('{').zip(reply.rfind('}'));
@@ -505,6 +535,18 @@ impl CardWriter for FakeWriter {
             format!("{brief}\nThe workers came back, and the session itself changed nothing.");
         Ok(serde_json::json!({ "brief": brief }).to_string())
     }
+
+    fn ask(&self, _: &str, intentions: &[String], question: &str) -> Result<String, String> {
+        // `STUDIO_FAKE_ASK=fail` makes it fail, so the error and its retry can be seen.
+        if std::env::var("STUDIO_FAKE_ASK").as_deref() == Ok("fail") {
+            return Ok("Shall I read the file?".into());
+        }
+        let answer = format!(
+            "A sample answer from the fake writer, which does not read the session, to `{question}`. It was given {} intentions of the turn.",
+            intentions.len()
+        );
+        Ok(serde_json::json!({ "answer": answer }).to_string())
+    }
 }
 
 /// Writes the card with `claude -p` on Daniel's subscription, in a neutral folder that holds none of
@@ -646,6 +688,25 @@ impl ClaudeWriter {
         self.claude(&head, request.diff())
     }
 
+    /// The `claude -p` run for Daniel's side `question` on `item`, read with its turn's `intentions`.
+    /// The item is cut at `MAX_CHANGE`, as a response may be long.
+    pub fn ask_command(
+        &self,
+        item: &str,
+        intentions: &[String],
+        question: &str,
+    ) -> (Command, String) {
+        let intentions: String = match intentions {
+            [] => "none\n".into(),
+            lines => lines.iter().map(|line| format!("- {line}\n")).collect(),
+        };
+        let item = &item[..item.floor_char_boundary(MAX_CHANGE)];
+        self.run(&format!(
+            "{ASK}\nThe intentions of the turn, oldest first:\n{intentions}\n\
+             <item>\n{item}\n</item>\n\nThe developer's question:\n{question}"
+        ))
+    }
+
     /// The `claude -p` run on `head`, then `change`, cut at `MAX_CHANGE`.
     fn claude(&self, head: &str, change: &str) -> (Command, String) {
         let kept = &change[..change.floor_char_boundary(MAX_CHANGE)];
@@ -752,6 +813,10 @@ impl CardWriter for ClaudeWriter {
     fn update(&self, brief: &str, workers: &str) -> Result<String, String> {
         self.stdout(self.update_command(brief, workers))
     }
+
+    fn ask(&self, item: &str, intentions: &[String], question: &str) -> Result<String, String> {
+        self.stdout(self.ask_command(item, intentions, question))
+    }
 }
 
 /// The writer's architecture section on a change that is not structural.
@@ -848,5 +913,20 @@ When the change is not a diff but the agent's workers with the summaries of thei
     r#"
 
 Reply with the explanation only, in at most three short paragraphs: no JSON and no heading.
+"#
+);
+
+/// The writer's instructions for "ask about this" (#461, decision 20): a side question on one item
+/// of a session, which the session never sees.
+const ASK: &str = concat!(
+    r#"A developer watches a coding agent work and asks a side question about one item of its session: one of the agent's responses, one of its intentions (the last line of a response, which says what it does next and why), or a card that explains a change it made. The agent never sees the question or your answer. Answer so that he understands the agent's work.
+
+Answer from the input below: the intentions of the item's turn, oldest first, the item itself, and the question. Use only this input: do not use tools or read files. When the input does not answer the question, say so, and say what would.
+
+"#,
+    explanation_language!(),
+    r#"
+
+Reply with one JSON object and nothing else: {"answer": string}, the answer in at most three short paragraphs.
 "#
 );

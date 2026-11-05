@@ -134,8 +134,10 @@ fn the_days_sessions_change_state_only_by_their_named_setters_and_clearers() {
         (Some(YourTurn), Idle, "tick"),
         (Some(Idle), Running, "UserPromptSubmit"),
         (Some(YourTurn), Ended, "SessionEnd"),
+        // A `/clear` continues the row it ended (#474).
+        (Some(Ended), YourTurn, "SessionStart"),
     ];
-    let named: [Change; 11] = named.map(|(from, to, cause)| (from, to, cause.into()));
+    let named: [Change; 12] = named.map(|(from, to, cause)| (from, to, cause.into()));
     assert_eq!(changes, BTreeSet::from(named));
 }
 
@@ -158,7 +160,7 @@ fn an_ended_session_stays_ended_until_it_starts_again_under_its_id() {
 }
 
 #[test]
-fn at_midnight_the_days_8_sessions_are_5_ended_2_at_your_turn_and_1_idle() {
+fn at_midnight_the_days_6_rows_are_3_ended_2_at_your_turn_and_1_idle() {
     let mut studio = Studio::default();
     day_changes(&mut studio);
 
@@ -172,12 +174,12 @@ fn at_midnight_the_days_8_sessions_are_5_ended_2_at_your_turn_and_1_idle() {
     assert_eq!(
         states,
         [
-            ("0222b62d", YourTurn),
             ("596c28a1", YourTurn),
+            // Its `/clear` started `0222b62d`, which continues its row (#474), as `6641e809`
+            // continues `5d7f69ab`'s.
+            ("5bb84a4a", YourTurn),
             ("2afc85f5", Idle),
-            ("5bb84a4a", Ended),
             ("57e9c1ab", Ended),
-            ("6641e809", Ended),
             ("1ac172be", Ended),
             ("5d7f69ab", Ended),
         ]
