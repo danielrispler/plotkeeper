@@ -412,6 +412,9 @@ fn a_client_that_stops_reading_leaves_the_other_terminals_flowing() {
     finished
         .recv_timeout(Duration::from_secs(10))
         .expect("the other terminal stalled behind a client that stopped reading");
-    // The stalled client was dropped: what was sent before ends at the socket's close.
-    while stalled.recv().is_ok() {}
+    // The stalled client is dropped once its queue fills, and the daemon shuts its socket, so a write fails. Reading
+    // first would let it catch up, so it would never be dropped and the read would follow `yes` forever.
+    wait_for("the stalled client to be dropped", || {
+        stalled.send(&json!({ "op": "list" })).is_err()
+    });
 }
