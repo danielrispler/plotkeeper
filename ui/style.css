@@ -29,6 +29,13 @@ code:empty { display: none; }
 body[data-layout="strip"] .app { grid-template-columns: var(--strip) 1fr var(--rail); }
 body[data-layout="overlay"] .app { grid-template-columns: var(--strip) 1fr 0; }
 
+/* The dividers on the list's and the rail's inner edges; each shows only while its column is in the grid. */
+.divider { position: fixed; top: var(--bar); bottom: 0; width: 6px; cursor: col-resize; z-index: 4; touch-action: none; }
+.divider:hover, .divider.dragging { background: var(--line); }
+#list-divider { right: calc(var(--list) - 3px); }
+#rail-divider { left: calc(var(--rail) - 3px); }
+body:not([data-layout="full"]) #list-divider, body[data-layout="overlay"] #rail-divider, body.wide #rail-divider { display: none; }
+
 /* The top bar: identity and usage. */
 .top { grid-column: 1 / -1; display: flex; align-items: center; gap: 14px; padding: 0 14px; background: var(--surface);
        border-bottom: 1px solid var(--line); white-space: nowrap; overflow: hidden; }

@@ -1,7 +1,7 @@
 // The UI's pure functions, run on the `tsc` output (#465). Run: `npm test` in apps/studio.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { layoutMode } from "../../dist/layout.js";
+import { defaultWidths, layoutMode, resized } from "../../dist/layout.js";
 import { stripLabel } from "../../dist/list.js";
 
 // The cell of 12.5px SF Mono in headless Chrome, and the three windows the #463 pick measured.
@@ -17,6 +17,16 @@ test("the list collapses to its strip first", () => {
 
 test("below that, the rail becomes an overlay", () => {
   assert.equal(layoutMode(1280, cell), "overlay");
+});
+
+test("a dragged divider stops at its column's least width", () => {
+  assert.equal(resized("list", 50, defaultWidths, "full", 1920, cell).list, 160);
+});
+
+test("a dragged divider stops where the terminal would lose its 100 columns", () => {
+  const { rail } = resized("rail", 5000, defaultWidths, "full", 1920, cell);
+  assert.equal(layoutMode(1920, cell, { ...defaultWidths, rail }), "full");
+  assert.equal(layoutMode(1920, cell, { ...defaultWidths, rail: rail + 10 }), "strip");
 });
 
 test("the strip names a session by its issue number, else by its folder", () => {

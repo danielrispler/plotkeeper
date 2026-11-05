@@ -7,7 +7,7 @@
 import { startWatching } from "./answer.js";
 import { markShown, showCards } from "./cards.js";
 import { element, invoke, listen } from "./dom.js";
-import { layoutMode } from "./layout.js";
+import { defaultWidths, type LayoutMode, layoutMode, resized, type Widths } from "./layout.js";
 import { showSessions } from "./list.js";
 import { show } from "./selection.js";
 import { startPanes } from "./panes.js";
@@ -18,16 +18,45 @@ import type { Selection, Session, SessionCards } from "./types.js";
 import { type Limits, usageText } from "./usage.js";
 
 // The terminal's cell, measured from a probe in its font, sets the columns' layout.
-function layout() {
+function cell(): number {
   const probe = element("probe");
-  const cell = probe.getBoundingClientRect();
-  const width = cell.width / (probe.textContent ?? "").length;
-  const mode = layoutMode(window.innerWidth, width);
+  return probe.getBoundingClientRect().width / (probe.textContent ?? "").length;
+}
+
+// The list's and the rail's widths, as their dividers last left them.
+const widths: Widths = { ...defaultWidths, ...JSON.parse(localStorage.getItem("widths") ?? "{}") };
+
+function layout() {
+  for (const [column, width] of Object.entries(widths)) document.documentElement.style.setProperty(`--${column}`, `${width}px`);
+  const mode = layoutMode(window.innerWidth, cell(), widths);
   document.body.dataset.layout = mode;
   element("rail-toggle").hidden = mode !== "overlay";
 }
 window.addEventListener("resize", layout);
 layout();
+
+// Dragging a divider resizes its column. The grid runs right to left, so the list's width is
+// measured from the window's right edge and the rail's from its left.
+function divider(id: string, column: keyof Widths, width: (x: number) => number) {
+  const handle = element(id);
+  handle.addEventListener("pointerdown", (event) => {
+    event.preventDefault(); // no text selection while dragging
+    handle.setPointerCapture(event.pointerId);
+    handle.classList.add("dragging");
+  });
+  handle.addEventListener("pointermove", (event) => {
+    if (!handle.hasPointerCapture(event.pointerId)) return;
+    const mode = (document.body.dataset.layout ?? "full") as LayoutMode;
+    Object.assign(widths, resized(column, width(event.clientX), widths, mode, window.innerWidth, cell()));
+    layout();
+  });
+  handle.addEventListener("lostpointercapture", () => {
+    handle.classList.remove("dragging");
+    localStorage.setItem("widths", JSON.stringify(widths));
+  });
+}
+divider("list-divider", "list", (x) => window.innerWidth - x);
+divider("rail-divider", "rail", (x) => x);
 
 // ⌘1 opens the list from its strip, ⌘2 the rail as an overlay; Esc closes both and "read wide".
 const toggle = (name: string) => document.body.classList.toggle(name);
