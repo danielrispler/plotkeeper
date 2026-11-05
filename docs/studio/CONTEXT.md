@@ -45,11 +45,20 @@ The state of a worktree that the next card's change is measured from: its commit
 _Avoid_: Snapshot, checkpoint (the engine's term)
 
 **Quiz**:
-A card's multiple-choice question on the change's logic or design, with the card writer's key, which grades Daniel's guess.
+A card's multiple-choice question on the change's logic or design, with the card writer's key, which grades Daniel's guess. On a check card the quiz asks whether the check will pass, and the check's result is the key.
 _Avoid_: Question (an agent's question to Daniel)
 
+**Check card**:
+The card a check of the session's own agent gets at its start when it usually runs over 2 minutes, on the change since the last card, so Daniel can guess while he waits whether the check will pass.
+
 **Guess**:
-Daniel's answer to a card's quiz. The card writer's key grades it, and the card shows right or wrong, with the reasons, as soon as he answers. It is never shown as a score.
+Daniel's answer to a card's quiz. The card writer's key grades it, and the card shows right or wrong, with the reasons, as soon as he answers. On a check card the check's result settles it instead, and the card shows right or wrong, with the reasons, once the check ends. It is never shown as a score.
+
+**Settle**:
+To grade the guess on a check card by the check's result, once the check ends. A tap after the result is no guess.
+
+**Not counted**:
+A check card's guess whose check ended with an exit code that does not say whether it passed, such as `cargo test 2>&1 | tail`. No option is named the right one, and the weekly rates leave it out.
 
 **Brief**:
 A rolling account of an agent session's or a worker's work so far, at the top of its view, so that Daniel can resume a session he lost track of. Each new card updates it.

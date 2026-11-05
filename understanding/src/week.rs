@@ -55,11 +55,12 @@ pub fn week(cards: &[StoredCard], now: u64) -> Week {
         let (shown, guess) = kept.shown_at.zip(kept.guess)?;
         Some(guess.at.saturating_sub(shown))
     });
-    let guesses = cards.iter().filter_map(|kept| kept.guess);
+    // A guess on a check's card counts once the check's result settles it.
+    let graded = cards.iter().filter_map(|kept| kept.guess?.right);
     Week {
         to: now,
         thinking: rate(gaps, |gap| *gap >= THINKING),
-        surprise: rate(guesses, |guess| !guess.right),
+        surprise: rate(graded, |right| !right),
         ratings: ratings(&cards),
     }
 }

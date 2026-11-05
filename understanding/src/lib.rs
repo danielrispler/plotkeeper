@@ -22,7 +22,8 @@ mod week;
 pub use drift::{Drift, Versions, drift};
 pub use fingerprint::{Fingerprints, backfilled, fingerprint_changes, worktree_root};
 pub use store::{
-    Brief, CardStore, Guess, Level, Rating, Reason, Row, SessionCards, StoredCard, millis,
+    Brief, CardStore, CheckResult, Guess, Level, Rating, Reason, Row, SessionCards, StoredCard,
+    millis,
 };
 pub use week::{Rate, Ratings, Week, week};
 
@@ -461,7 +462,14 @@ pub fn write_card(
 ) -> Option<(Card, Option<String>)> {
     let card = || {
         let reply = writer.reply(request, earlier, brief)?;
-        Card::from_reply(&reply).map(|(card, problem)| (card, problem, brief_in(&reply).ok()))
+        let (mut card, mut problem) = Card::from_reply(&reply)?;
+        // A check's card asks whether the check passes, which its result settles (#461, decision
+        // 15), so its quiz is the app's, with the writer's reasons.
+        if let Some(check) = &request.check {
+            card.quiz = Some(check_quiz(check, &reply));
+            problem = None;
+        }
+        Ok::<_, String>((card, problem, brief_in(&reply).ok()))
     };
     match card().or_else(|_| card()) {
         Ok((card, problem, brief)) => {
@@ -477,6 +485,29 @@ pub fn write_card(
             log(format!("no card on {}: {line}", request.id));
             None
         }
+    }
+}
+
+/// The quiz on a check's card: whether `check` passes, with the writer's `if_it_passes` and
+/// `if_it_fails` as the reasons, in that order. Its key is "It passes" until the result settles it
+/// (`CardStore::settle`).
+fn check_quiz(check: &str, reply: &str) -> Quiz {
+    let value: serde_json::Value = serde_json::from_str(object(reply)).unwrap_or_default();
+    let why = |field: &str| value[field].as_str().unwrap_or_default().to_owned();
+    let first = check.lines().next().unwrap_or_default();
+    Quiz {
+        text: format!("Will `{first}` pass?"),
+        options: vec![
+            Choice {
+                text: "It passes.".into(),
+                why: why("if_it_passes"),
+            },
+            Choice {
+                text: "It fails.".into(),
+                why: why("if_it_fails"),
+            },
+        ],
+        key: 0,
     }
 }
 
@@ -507,6 +538,8 @@ impl CardWriter for FakeWriter {
             "brief": format!("A sample brief from the fake writer.\nThe latest change touched {named}."),
             "why_it_matters": "Why the change matters goes here, with code inside the text such as `if a <= b {`.",
             "not_checked": "Not checked: nothing, this is a sample card.",
+            "if_it_passes": "It passes when the change is right: a sample reason from the fake writer.",
+            "if_it_fails": "It fails when the change breaks a test: a sample reason from the fake writer.",
             "quiz": {
                 "text": format!("What did the agent change in `{}`?", paths.join("`, `")),
                 "options": [
@@ -614,8 +647,13 @@ impl ClaudeWriter {
             summaries => summaries.iter().map(|s| format!("- {s}\n")).collect(),
         };
         let brief = so_far(brief);
+        // A check's card is on what the check verifies against the change (#461, decision 15).
+        let instructions = match &request.check {
+            Some(check) => format!("{CHECK}\nThe check's command:\n{check}\n"),
+            None => PROMPT.into(),
+        };
         let head = format!(
-            "{PROMPT}\nThe summaries of this prompt's earlier cards, oldest first:\n{earlier}\n\
+            "{instructions}\nThe summaries of this prompt's earlier cards, oldest first:\n{earlier}\n\
              The brief so far:\n{brief}\n"
         );
         self.claude(&head, request.diff())
@@ -865,6 +903,32 @@ Reply with one JSON object and nothing else:
 - brief: the brief so far, updated with this change: what the session set out to do, what it has done, oldest first, and what is still open, in a few short lines. Keep what still holds. Its last line says what this change did.
 
 When the change is not a diff but the agent's workers with the summaries of their cards, the agent changed nothing itself and handed the work to them: the card explains what it split up among them, what came back and what is still open, paths and code are empty, and the quiz is on how the work was split.
+"#
+);
+
+/// The card writer's instructions for a check's card (#461, decision 15), written while the check
+/// runs: on what the check verifies against the change so far. The app asks whether it passes.
+const CHECK: &str = concat!(
+    r#"A coding agent just started a check, a command that tests or verifies its code, which usually runs for minutes. You write one card that teaches the developer who waits on it what this check verifies against the change the agent made since the previous card, so he can guess whether it will pass. The card asks him "Will it pass?"; once the check ends, it shows whether he was right and your two reasons. You also update the session's brief, which he reads to resume the session.
+
+Answer from the input below: the check's command, the summaries of the earlier cards on the same prompt of his, the brief so far, and the diff. Use only this input: do not use tools or read files. You do not know the check's result.
+
+"#,
+    explanation_language!(),
+    r#"
+
+Reply with one JSON object and nothing else:
+{"summary": string, "explanation": string, "paths": [string], "code": string, "why_it_matters": string, "not_checked": string, "architecture": string, "if_it_passes": string, "if_it_fails": string, "brief": string}
+- summary: what the change did, in one short line.
+- explanation: what the check runs and what of the change it verifies, in at most three sentences.
+- paths: the files the change touched.
+- code: the lines of the change the check exercises most, copied from it, at most 12.
+- why_it_matters: what the check's result tells about the change, in one or two sentences.
+- not_checked: one thing in the change the check does not verify.
+- architecture: when the change is structural, a short section on how it changes the code's structure, before and after, and why. Otherwise exactly "structural: none".
+- if_it_passes: one line on what a pass would show about the change.
+- if_it_fails: one line on the likeliest reason in the change it could fail.
+- brief: the brief so far, updated with this change: what the session set out to do, what it has done, oldest first, and what is still open, in a few short lines. Keep what still holds. Its last line says what this change did.
 "#
 );
 

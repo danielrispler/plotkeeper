@@ -101,13 +101,16 @@ export type Session = {
 };
 // The shell sends a card's request without its diff and base, which the pane never reads. `agent`
 // is the worker whose card it is; `changed_by` holds the files other subagents edited in its
-// worktree, by subagent.
+// worktree, by subagent. `check` is the command of the check whose start requested the card (#476).
 export type CardRequest = {
   session_id: string;
   id: string;
   agent: string | null;
   changed_by: Record<string, string[]>;
+  check: string | null;
 };
+// A check's result, which settles the guess on its card; null while the check runs.
+export type CheckResult = "passed" | "failed" | "not_counted";
 // A card's multiple-choice question; `key` is the right option, counting from 0.
 export type Quiz = { text: string; options: { text: string; why: string }[]; key: number };
 // `architecture` is null when the change is not structural.
@@ -121,8 +124,9 @@ export type Card = {
   architecture: string | null;
   quiz: Quiz | null;
 };
-// Daniel's tap on a quiz, graded by the writer's key.
-export type Guess = { option: number; right: boolean; at: number };
+// Daniel's tap on a quiz, graded by the writer's key; on a check's card by its result, so `right`
+// is null until the result settles it, and stays null when the result does not say (#476).
+export type Guess = { option: number; right: boolean | null; at: number };
 // Daniel's rating of a card's explanation. His fifth reason, "the key is wrong", is `key_wrong`, the
 // one record the quiz's flag also sets.
 export type Level = "good" | "fair" | "poor";
@@ -137,6 +141,7 @@ export type StoredCard = {
   key_wrong: boolean;
   more: string | null;
   rating: Rating | null;
+  check_result: CheckResult | null;
 };
 // The selected session's brief, and its cards, split at 30 minutes by the shell's tick, each oldest
 // first.

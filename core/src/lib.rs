@@ -285,6 +285,24 @@ struct Since {
 /// 20 minutes, a starting guess (#369, decision 11 and Further Notes).
 const FALLBACK_MS: u64 = 20 * 60 * 1000;
 
+/// 2 minutes, a starting guess (#461, decision 22): a check that usually runs longer gets a card at
+/// its start (decision 15).
+const LONG_CHECK_MS: u64 = 2 * 60 * 1000;
+
+/// A check a `PreToolUse` starts (`Studio::check_start`): its whole command, and its typical duration
+/// (`Studio::typical`).
+struct CheckStart {
+    command: String,
+    typical: Option<u64>,
+}
+
+impl CheckStart {
+    /// It usually takes over 2 minutes, so it gets a card at its start (#461, decision 15).
+    fn long(&self) -> bool {
+        self.typical.is_some_and(|ms| ms > LONG_CHECK_MS)
+    }
+}
+
 /// A prompt of a session (#369, decision 7), received at `at`.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Prompt {
@@ -908,6 +926,7 @@ impl Session {
             agent: worker.then(|| owner.into()),
             changed_by: since.by,
             workers: since.cards,
+            check: None,
         }
     }
 
@@ -1232,6 +1251,10 @@ pub struct CardRequest {
     /// A session's workers' cards since its last card, at any depth.
     #[serde(default)]
     pub workers: Vec<String>,
+    /// The command of the check whose start requested it, which the card is on (#461, decision 15);
+    /// `None` for any other card.
+    #[serde(default)]
+    pub check: Option<String>,
 }
 
 /// A turn that ended with no card, as the replay saw it (#486): its card request with no change,
@@ -1285,6 +1308,9 @@ pub struct CheckLine {
     pub ended_at: Option<u64>,
     /// Its typical duration when it started, from the checks that ran before (`Studio::typical`).
     pub typical_ms: Option<u64>,
+    /// The card its start requested, when it usually takes over 2 minutes (#461, decision 15),
+    /// whose guess its result settles.
+    pub card: Option<String>,
     /// Its call's `tool_use_id`, and its background task's id once it moved to the background.
     #[serde(skip)]
     call: String,
@@ -1303,6 +1329,7 @@ impl CheckLine {
             started_at: at,
             ended_at: None,
             typical_ms,
+            card: None,
             call: call.into(),
             task: None,
             counts: exit_code_counts(command),
@@ -1675,7 +1702,8 @@ impl Studio {
         let event = event.ok().filter(|e| e.hook_event_name != RENAME);
         event.map_or_else(Vec::new, |mut event| {
             event.session_id = self.row(&event);
-            self.looks(&event)
+            let long_check = self.check_start(&event).is_some_and(|start| start.long());
+            self.looks(&event, long_check)
         })
     }
 
@@ -1703,8 +1731,8 @@ impl Studio {
 
     /// The fingerprints before `event`: its own (`look`), and the end of each worker with cards that
     /// it ends, by any signal (#434, decision 19).
-    fn looks(&self, event: &Event) -> Vec<Fingerprint> {
-        let mut looks = self.look(event);
+    fn looks(&self, event: &Event, long_check: bool) -> Vec<Fingerprint> {
+        let mut looks = self.look(event, long_check);
         let Some(session) = self.sessions.get(&event.session_id) else {
             return looks;
         };
@@ -1753,7 +1781,7 @@ impl Studio {
     /// worker's after each Bash step, for a commit; and a worker's end. On a step 20 minutes after
     /// the last card of the worktree it is in, that worktree's, for the fallback card; a session's
     /// only in a turn. A helper's look after its Bash step comes beside such a fallback's.
-    fn look(&self, event: &Event) -> Vec<Fingerprint> {
+    fn look(&self, event: &Event, long_check: bool) -> Vec<Fingerprint> {
         let name = event.hook_event_name.as_str();
         let step = matches!(name, "PostToolUse" | "PostToolUseFailure");
         let due = |since: &Since| step && event.studio_received_ms >= since.at + FALLBACK_MS;
@@ -1783,9 +1811,11 @@ impl Studio {
             }
             let purpose = match ends {
                 true => Some(Purpose::TurnEnd),
-                false => session
-                    .is_some_and(session_due)
-                    .then_some(Purpose::Fallback),
+                // A long check's start cards the change so far, as a fallback would (#461,
+                // decision 15).
+                false => {
+                    (session.is_some_and(session_due) || long_check).then_some(Purpose::Fallback)
+                }
             };
             let mut looks: Vec<Fingerprint> = purpose
                 .into_iter()
@@ -1933,7 +1963,12 @@ impl Studio {
             }
             return Vec::new();
         }
-        let looks = self.looks(&event);
+        let start = self.check_start(&event);
+        let long_check = start.as_ref().filter(|start| start.long());
+        let looks = self.looks(&event, long_check.is_some());
+        let long_check = long_check.map(|start| start.command.clone());
+        // The card a long check's start requests, which its line keeps.
+        let mut check_card = None;
         let touches = self.touches(&event);
         let typical = self.typical(event.tool_input["command"].as_str().unwrap_or_default());
         let roots = &self.roots;
@@ -2094,7 +2129,12 @@ impl Studio {
                 }
             }
             if !worker || session.has_cards(&look.key) {
-                let request = session.card(&look.key, Some(found), at);
+                let mut request = session.card(&look.key, Some(found), at);
+                // At a long check's start, the session's own look is the check's card.
+                if !worker && long_check.is_some() {
+                    request.check.clone_from(&long_check);
+                    check_card.get_or_insert_with(|| request.id.clone());
+                }
                 if worker {
                     session.agent.since.cards.push(request.id.clone());
                 }
@@ -2210,15 +2250,11 @@ impl Studio {
                     session.agent.step(step, &event.tool_use_id, at);
                     session.work.call(&tool, &event.tool_input, at);
                     // A check's line runs from its start (#461, decision 13).
-                    let command = event.tool_input["command"].as_str().unwrap_or_default();
-                    let known = session.checks.iter().any(|l| l.call == event.tool_use_id);
-                    if tool == "Bash" && is_check(command) && !known {
-                        session.checks.push(CheckLine::new(
-                            command,
-                            &event.tool_use_id,
-                            at,
-                            typical,
-                        ));
+                    if let Some(start) = &start {
+                        let call = &event.tool_use_id;
+                        let mut line = CheckLine::new(&start.command, call, at, start.typical);
+                        line.card = check_card.take();
+                        session.checks.push(line);
                     }
                 }
                 let call = Call {
@@ -2665,6 +2701,21 @@ impl Studio {
     /// `None` when it never ran. Runs group by `check_key`.
     pub fn typical(&self, command: &str) -> Option<u64> {
         median(self.durations.get(&check_key(command))?)
+    }
+
+    /// The check `event` starts: a new Bash call of its session's own agent that runs a check. A
+    /// subagent's checks are not recorded, so they get no line and no card.
+    fn check_start(&self, event: &Event) -> Option<CheckStart> {
+        let command = event.tool_input["command"].as_str()?;
+        let session = self.sessions.get(&event.session_id);
+        let known = session.is_some_and(|s| s.checks.iter().any(|l| l.call == event.tool_use_id));
+        let start = event.hook_event_name == "PreToolUse" && event.agent_id.is_none();
+        (start && event.tool_name.as_deref() == Some("Bash") && is_check(command) && !known).then(
+            || CheckStart {
+                command: command.into(),
+                typical: self.typical(command),
+            },
+        )
     }
 
     /// Session `id`'s row: its own, or the row it continues after a `/clear`.

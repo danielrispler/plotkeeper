@@ -175,10 +175,22 @@ fn shown(ids: Vec<String>, cards: State<Cards>) {
     unsaved(cards.lock().unwrap().show(&ids, millis()));
 }
 
-/// Daniel tapped option `option` of card `id`'s quiz.
+/// Daniel tapped option `option` of card `id`'s quiz, which on a check's card counts only before
+/// the check's result.
 #[tauri::command(async)]
-fn guess(id: String, option: usize, cards: State<Cards>) {
-    unsaved(cards.lock().unwrap().guess(&id, option, millis()));
+fn guess(id: String, option: usize, studio: State<Mutex<Studio>>, cards: State<Cards>) {
+    let studio = studio.lock().unwrap();
+    let mut store = cards.lock().unwrap();
+    settle_checks(&studio, &mut store);
+    unsaved(store.guess(&id, option, millis()));
+}
+
+/// Settles the guesses on the cards of the checks that ended (#461, decision 15). Takes the core's
+/// lock before the store's, as the read loop does.
+fn settle_checks(studio: &Studio, store: &mut CardStore) {
+    for session in studio.sessions() {
+        unsaved(store.settle_checks(session));
+    }
 }
 
 /// Daniel flagged that the key of card `id`'s quiz is wrong.
@@ -465,6 +477,7 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                 for session in studio.sessions() {
                     unsaved(store.keep_decisions(&session.agent.id, &session.decisions));
                 }
+                settle_checks(&studio, &mut store);
             }
         }
         // Reads the transcripts' lines and nothing else (`apps/studio/AGENTS.md`).
@@ -580,6 +593,9 @@ fn write(
         };
         // The list and the notice go out once the card is stored, before a brief rewrite.
         let stored = || {
+            // A check that ended while its card was written settles it before the pane draws it.
+            let studio = app.state::<Mutex<Studio>>();
+            settle_checks(&studio.lock().unwrap(), &mut store.lock().unwrap());
             sent();
             tell(
                 &app,

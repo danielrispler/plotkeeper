@@ -35,12 +35,13 @@ fn record(days: u64, shown: Option<u64>, answered: Option<(u64, bool)>) -> Store
         shown_at: shown.map(|s| added_at + s * 1000),
         guess: answered.map(|(s, right)| Guess {
             option: 0,
-            right,
+            right: Some(right),
             at: added_at + s * 1000,
         }),
         key_wrong: false,
         more: None,
         rating: None,
+        check_result: None,
     }
 }
 
