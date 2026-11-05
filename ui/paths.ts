@@ -13,3 +13,8 @@ export function pathLinks(line: string): { text: string; start: number }[] {
 
 // The path as the shell reads it back: as is when safe, else single-quoted.
 export const quotePath = (p: string) => (/^[\w./@+:,-]+$/.test(p) ? p : `'${p.replaceAll("'", "'\\''")}'`);
+
+// The task worktree a folder is in: `<main>/.claude/worktrees/<task>`, else null.
+export function worktreeOf(cwd: string): string | null {
+  return cwd.match(/^(.*\/\.claude\/worktrees\/[^/]+)/)?.[1] ?? null;
+}

@@ -2,7 +2,7 @@
 //! in temporary repositories that have a bare `origin`.
 
 use std::{path::Path, process::Command};
-use studio_workbench::{Losses, Place, create_task, remove_task};
+use studio_workbench::{Losses, Place, create_task, delete_merged_branch, remove_task};
 
 /// Runs `git` in `dir`, away from Daniel's own git config, and returns its trimmed output.
 fn git(dir: &Path, args: &[&str]) -> String {
@@ -156,6 +156,29 @@ fn uncommitted_changes_and_unpushed_commits_are_listed_and_kept_until_confirmed(
     assert_eq!(remove_task(&repos.main, &task.path, true), Ok(None));
     assert!(!path.exists());
     assert_eq!(git(&repos.main, &["rev-parse", "--short", "busy"]), work);
+}
+
+#[test]
+fn a_merged_branch_is_deleted_and_an_unmerged_one_kept_with_gits_reason() {
+    let repos = repos();
+    git(&repos.main, &["pull", "-q", "origin", "trunk"]);
+    let merged = create_task(&repos.main, "merged").unwrap();
+    let kept = create_task(&repos.main, "kept").unwrap();
+    git(
+        Path::new(&kept.path),
+        &["commit", "-q", "--allow-empty", "-m", "Not merged"],
+    );
+    let work = git(&repos.main, &["rev-parse", "kept"]);
+    remove_task(&repos.main, &merged.path, true).unwrap();
+    remove_task(&repos.main, &kept.path, true).unwrap();
+
+    assert_eq!(delete_merged_branch(&repos.main, "merged"), Ok(()));
+    let branches = git(&repos.main, &["branch", "--list", "merged"]);
+    assert!(branches.is_empty(), "{branches}");
+
+    let refused = delete_merged_branch(&repos.main, "kept").unwrap_err();
+    assert!(refused.contains("not fully merged"), "{refused}");
+    assert_eq!(git(&repos.main, &["rev-parse", "kept"]), work);
 }
 
 /// No code path forces git (#461, decision 9): the studio's own sources, the workbench, the shell

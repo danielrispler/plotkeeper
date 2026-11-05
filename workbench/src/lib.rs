@@ -169,6 +169,13 @@ pub fn remove_task(repo: &Path, path: &str, confirmed: bool) -> Result<Option<Lo
     Ok(None)
 }
 
+/// Deletes branch `branch` with `git branch -d`, never forced, after its task's worktree is gone. Git
+/// refuses a branch that the main checkout's `HEAD` does not hold, such as one merged by squash, and
+/// its message is the error; the branch stays.
+pub fn delete_merged_branch(repo: &Path, branch: &str) -> Result<(), String> {
+    git(repo, &["branch", "-d", branch]).map(drop)
+}
+
 /// Runs `git` in `dir` and returns its output, or git's own error message.
 fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
     let output = Command::new("git")

@@ -10,8 +10,10 @@ import { closePane, startClaude } from "./panes.js";
 import { openDecision } from "./answer.js";
 import { showCleared } from "./decisions.js";
 import { decisionElement, questionElement } from "./questions.js";
+import { worktreeOf } from "./paths.js";
 import { checkTime, counts, estimateText, timesText } from "./times.js";
-import { stateLabels, type CheckLine, type Question, type Selection, type Session, type Transcript } from "./types.js";
+import { studio } from "./state.js";
+import { stateLabels, type CheckLine, type Losses, type Places, type Question, type Selection, type Session, type Transcript } from "./types.js";
 
 export function showView(selected: Selection | null) {
   element("empty").hidden = selected !== null;
@@ -48,6 +50,8 @@ export function showView(selected: Selection | null) {
   // Only a terminal the studio runs can be closed from here.
   element("close").hidden = agent !== null || session.terminal === null;
   element("close").onclick = () => askClose(session);
+  element("delete").hidden = agent !== null;
+  element("delete").onclick = () => askDelete(session).catch(report);
   element("tool").textContent = step?.tool ?? (agent === null ? session.returned : null) ?? "No step yet";
   element("detail").textContent = step?.detail ?? "";
   element("command").textContent = step?.command ?? "";
@@ -109,6 +113,65 @@ function askClose(session: Session) {
   dialog.onclose = () => dialog.returnValue === "close" && close();
   dialog.returnValue = "";
   dialog.showModal();
+}
+
+// Shows a failed delete's reason over the story.
+function report(error: unknown) {
+  element("notice").textContent = String(error);
+  element("notice").hidden = false;
+}
+
+// Opens `dialog` and resolves to the button Daniel chose, "" for Esc.
+function choice(dialog: HTMLDialogElement): Promise<string> {
+  return new Promise((resolve) => {
+    dialog.onclose = () => resolve(dialog.returnValue);
+    dialog.returnValue = "";
+    dialog.showModal();
+  });
+}
+
+// Delete: ends the session's terminal, removes its worktree when ticked, asking first when that would
+// lose work, and its branch when the main checkout holds it, then drops its row. A branch git keeps
+// is reported, and the row goes anyway.
+async function askDelete(session: Session) {
+  const dialog = element("delete-dialog") as HTMLDialogElement;
+  const worktree = worktreeOf(session.cwd);
+  const ticked = element("delete-worktree") as HTMLInputElement;
+  ticked.checked = false;
+  element("delete-name").textContent = sessionName(session);
+  element("delete-working").hidden = !(session.terminal !== null && session.asks_before_closing);
+  element("delete-worktree-option").hidden = worktree === null;
+  element("delete-worktree-path").textContent = worktree ?? "";
+  const others = studio.listed.filter((s) => s.id !== session.id && s.state !== "ended" && worktreeOf(s.cwd) === worktree);
+  element("delete-shared").hidden = worktree === null || others.length === 0;
+  if ((await choice(dialog)) !== "delete") return;
+  if (session.terminal !== null) await closePane(session.terminal);
+  if (worktree !== null && ticked.checked) await removeWorktree(worktree);
+  await invoke("delete_session", { id: session.id });
+}
+
+// The branch is git's, read before the worktree goes: a session with no turn yet has none in its
+// transcript.
+async function removeWorktree(worktree: string) {
+  const { tasks } = await invoke<Places>("places");
+  const branch = tasks.find((task) => task.path === worktree)?.branch ?? null;
+  const losses = await invoke<Losses | null>("remove_task", { path: worktree, confirmed: false });
+  if (losses) {
+    const list = (title: string, lines: string[]) => {
+      if (!lines.length) return [];
+      const items = document.createElement("ul");
+      items.append(...lines.map((line) => text("li", line, "mono")));
+      return [text("p", title), items];
+    };
+    element("delete-losses-list").replaceChildren(
+      ...list("Uncommitted changes", losses.uncommitted),
+      ...list("Commits not on origin (they stay on the branch)", losses.unpushed),
+    );
+    if ((await choice(element("delete-losses") as HTMLDialogElement)) !== "remove") return;
+    await invoke("remove_task", { path: worktree, confirmed: true });
+  }
+  if (branch === null) return;
+  await invoke("delete_merged_branch", { branch }).catch((e) => report(`Branch ${branch} kept: ${e}`));
 }
 
 // The questions the viewed agent asked: an open one docked under the story, newest first, and those

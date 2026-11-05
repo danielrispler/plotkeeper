@@ -104,6 +104,12 @@ pub fn remove_task(
     studio_workbench::remove_task(Path::new(&repo()), &path, confirmed)
 }
 
+/// Deletes branch `branch` of the configured repository when its main checkout holds it.
+#[tauri::command(async)]
+pub fn delete_merged_branch(branch: String) -> Result<(), String> {
+    studio_workbench::delete_merged_branch(Path::new(&repo()), &branch)
+}
+
 /// The command a session's terminal runs: `claude` with the studio plugin of the configured
 /// repository's checkout, whose hooks run its `studio-hook`, or `claude --resume <resume>` for an
 /// ended session. From the repository, not the build folder, so a moved bundle still finds it.

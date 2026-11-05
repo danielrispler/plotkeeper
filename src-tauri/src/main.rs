@@ -255,6 +255,17 @@ fn rename(id: String, name: String) -> Result<(), String> {
     })])
 }
 
+/// Daniel deleted session `id`: a `StudioDelete` line in the event log, which hides its row now and
+/// after a restart.
+#[tauri::command(async)]
+fn delete_session(id: String) -> Result<(), String> {
+    append(&[serde_json::json!({
+        "session_id": id,
+        "hook_event_name": studio_core::DELETE,
+        "studio_received_ms": millis(),
+    })])
+}
+
 /// Daniel closed terminal `terminal` (#461, story 15 and decision 8): a `SessionEnd` line in the event
 /// log for each session in it that has not ended, as its `claude` may die before its own hook runs.
 /// A real `SessionEnd` after it changes nothing.
@@ -334,6 +345,7 @@ fn main() {
             explain_more,
             ask,
             rename,
+            delete_session,
             closed,
             usage,
             terminal::terminal_connect,
@@ -343,6 +355,7 @@ fn main() {
             terminal::claude_argv,
             terminal::create_task,
             terminal::remove_task,
+            terminal::delete_merged_branch,
             terminal::terminal_lost,
             terminal::terminal_upgrade,
             restart::revival,

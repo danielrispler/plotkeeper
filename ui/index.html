@@ -65,6 +65,7 @@
           <!-- Rename and close (#469). -->
           <button id="rename" class="tool" type="button" hidden>Rename</button>
           <button id="close" class="tool" type="button" hidden>Close</button>
+          <button id="delete" class="tool" type="button" hidden>Delete</button>
           <!-- Decision history (#479), a collapsed section above the turns. -->
           <details id="decisions" class="decisions" hidden><summary id="decisions-title"></summary><ol id="decisions-list"></ol></details>
           <!-- The intention and step line (#472). -->
@@ -107,6 +108,24 @@
       <p><strong id="close-name"></strong> is still working: it is in a turn or has background tasks.</p>
       <p>Closing ends its terminal and every process in it.</p>
       <div class="ask-buttons"><button value="close">Close</button><button value="cancel" autofocus>Cancel</button></div>
+    </form>
+  </dialog>
+  <!-- Delete: the row leaves the list; its worktree and merged branch only when ticked. -->
+  <dialog id="delete-dialog" class="ask">
+    <form method="dialog">
+      <p>Delete <strong id="delete-name"></strong> from the list? Its cards are kept.</p>
+      <p id="delete-working" hidden>It is still working: deleting ends its terminal and every process in it.</p>
+      <label id="delete-worktree-option"><input id="delete-worktree" type="checkbox"> Also remove its worktree
+        <code id="delete-worktree-path"></code> and, if merged, its branch</label>
+      <p id="delete-shared" hidden>Another session still works in this worktree.</p>
+      <div class="ask-buttons"><button value="delete">Delete</button><button value="cancel" autofocus>Cancel</button></div>
+    </form>
+  </dialog>
+  <dialog id="delete-losses" class="ask">
+    <form method="dialog">
+      <p>The worktree has work that is not on origin:</p>
+      <div id="delete-losses-list"></div>
+      <div class="ask-buttons"><button value="remove">Remove anyway</button><button value="keep" autofocus>Keep the worktree</button></div>
     </form>
   </dialog>
   <!-- The daemon upgrade's question (#470, #322 resolution point 4). -->

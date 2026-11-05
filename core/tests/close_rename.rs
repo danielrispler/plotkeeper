@@ -133,3 +133,33 @@ fn the_shells_end_line_after_close_ends_the_row_and_a_late_real_one_is_harmless(
     assert_eq!(studio.session(ID).unwrap().state, State::Ended);
     assert_eq!(studio.sessions().len(), 1);
 }
+
+// Delete: a `StudioDelete` line hides the row, after a restart too, and drops the selection; a late
+// `SessionEnd` leaves it hidden, and a `SessionStart` of it brings it back.
+#[test]
+fn a_deleted_session_leaves_the_list_until_it_starts_again() {
+    let delete =
+        json!({ "session_id": ID, "hook_event_name": "StudioDelete", "studio_received_ms": 3_000 });
+    let log = [
+        event("SessionStart", 1_000, json!({ "source": "startup" })),
+        event(
+            "SessionEnd",
+            2_000,
+            json!({ "reason": "prompt_input_exit" }),
+        ),
+    ];
+    let mut studio = Studio::replayed(&log);
+    studio.select(ID);
+    studio.apply(&delete.to_string());
+    assert!(studio.sessions().is_empty());
+    assert!(studio.selected().is_none(), "the view no longer shows it");
+
+    let replayed = Studio::replayed(log.iter().cloned().chain([delete.to_string()]));
+    assert!(replayed.sessions().is_empty(), "a restart keeps it deleted");
+
+    let mut studio = replayed;
+    studio.apply(&event("SessionEnd", 3_100, json!({ "reason": "other" })));
+    assert!(studio.sessions().is_empty(), "a late end");
+    studio.apply(&event("SessionStart", 4_000, json!({ "source": "resume" })));
+    assert_eq!(studio.sessions().len(), 1, "a resume");
+}

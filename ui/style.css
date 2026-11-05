@@ -262,6 +262,8 @@ body.wide .choices { grid-template-columns: repeat(3, 1fr); }
 .ask label { display: block; margin-bottom: 6px; }
 .ask input { width: 100%; box-sizing: border-box; font: inherit; padding: 6px; background: var(--raised); color: var(--fg);
              border: 1px solid var(--line); border-radius: var(--radius); }
+.ask input[type="checkbox"] { width: auto; }
+#delete-losses ul { margin: 0 0 6px; padding-left: 18px; overflow-wrap: anywhere; }
 .ask-buttons { display: flex; flex-direction: row-reverse; gap: 8px; margin-top: 12px; }
 .ask-buttons button { font: inherit; padding: 4px 12px; background: var(--raised); color: var(--fg);
                       border: 1px solid var(--line); border-radius: var(--radius); }

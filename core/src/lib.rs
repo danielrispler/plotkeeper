@@ -98,6 +98,9 @@ pub struct Session {
     /// Whether closing its terminal asks first: it is in a turn, or its latest `Stop` listed
     /// background tasks (#469).
     pub asks_before_closing: bool,
+    /// Daniel deleted it: the list leaves it out until it starts again.
+    #[serde(skip)]
+    deleted: bool,
     /// Its latest `Stop` listed background tasks.
     #[serde(skip)]
     background: bool,
@@ -1507,6 +1510,10 @@ struct Event {
 /// restart replays, so the name survives it.
 pub const RENAME: &str = "StudioRename";
 
+/// The event the shell appends to the log when Daniel deletes a session: its row leaves the list,
+/// at once and after a restart, until a `SessionStart` of it brings it back. Its cards stay.
+pub const DELETE: &str = "StudioDelete";
+
 /// The line the answer hook appends when Daniel answers from the studio card (#478): the call's hook
 /// payload under this name, with `studio_asked_by` (the event that asked) and `studio_answer`. An
 /// answer in the terminal leaves none.
@@ -1699,7 +1706,9 @@ impl Studio {
     /// and 11).
     pub fn fingerprint_folders(&self, line: &str) -> Vec<Fingerprint> {
         let event = serde_json::from_str::<Event>(line);
-        let event = event.ok().filter(|e| e.hook_event_name != RENAME);
+        let event = event
+            .ok()
+            .filter(|e| ![RENAME, DELETE].contains(&e.hook_event_name.as_str()));
         event.map_or_else(Vec::new, |mut event| {
             event.session_id = self.row(&event);
             let long_check = self.check_start(&event).is_some_and(|start| start.long());
@@ -1963,6 +1972,17 @@ impl Studio {
             }
             return Vec::new();
         }
+        // So does a delete, which also drops the selection when it was this session.
+        if event.hook_event_name == DELETE {
+            if let Some(session) = self.sessions.get_mut(&event.session_id) {
+                session.deleted = true;
+            }
+            if self.selected.as_deref() == Some(&event.session_id) {
+                self.selected = None;
+                self.viewed = None;
+            }
+            return Vec::new();
+        }
         let start = self.check_start(&event);
         let long_check = start.as_ref().filter(|start| start.long());
         let looks = self.looks(&event, long_check.is_some());
@@ -1983,6 +2003,8 @@ impl Studio {
                     ..Session::default()
                 }
             });
+        // A deleted session that starts again, by a resume, is back in the list; a late end is not.
+        session.deleted &= event.hook_event_name != "SessionStart";
         // The hooks are async, so the latest event can land before an earlier one.
         session.agent.last_event_at = session.agent.last_event_at.max(event.studio_received_ms);
         // Every event of a `claude` process carries its terminal, so a resume elsewhere moves it.
@@ -2724,9 +2746,9 @@ impl Studio {
             .get(self.rows.get(id).map_or(id, String::as_str))
     }
 
-    /// The session list: every session, grouped in `State` order, the newest first in each group.
+    /// The session list: every session Daniel has not deleted, grouped in `State` order, the newest first in each group.
     pub fn sessions(&self) -> Vec<&Session> {
-        let mut sessions: Vec<&Session> = self.sessions.values().collect();
+        let mut sessions: Vec<&Session> = self.sessions.values().filter(|s| !s.deleted).collect();
         sessions.sort_by_key(|s| (s.state, Reverse(s.agent.started_at), &s.agent.id));
         sessions
     }
