@@ -354,6 +354,7 @@ fn main() {
             terminal::places,
             terminal::claude_argv,
             terminal::create_task,
+            terminal::create_named_task,
             terminal::remove_task,
             terminal::delete_merged_branch,
             terminal::terminal_lost,

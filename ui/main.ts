@@ -58,17 +58,16 @@ function divider(id: string, column: keyof Widths, width: (x: number) => number)
 divider("list-divider", "list", (x) => window.innerWidth - x);
 divider("rail-divider", "rail", (x) => x);
 
-// ⌘1 opens the list from its strip, ⌘2 the rail as an overlay; Esc closes both and "read wide".
+// ⌘1 opens the list from its strip, ⌘2 the rail as an overlay; Esc closes both and the picker.
 const toggle = (name: string) => document.body.classList.toggle(name);
 window.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") document.body.classList.remove("wide", "list-open", "rail-open");
+  if (event.key === "Escape") document.body.classList.remove("list-open", "rail-open");
   if (event.key === "Escape") element("picker").hidden = true;
   if (event.metaKey && event.key === "1") toggle("list-open");
   if (event.metaKey && event.key === "2") toggle("rail-open");
   if (event.metaKey && ["1", "2"].includes(event.key)) event.preventDefault();
 });
 element("rail-toggle").addEventListener("click", () => toggle("rail-open"));
-element("wide").addEventListener("click", () => document.body.classList.add("wide"));
 // Every block in the story opens or closes, except a card's "explain more", whose first open asks the
 // writer, and the "ask about this" boxes.
 const blocks = () => element("story").querySelectorAll<HTMLDetailsElement>("details:not(.more):not(.ask-about)");
@@ -80,6 +79,11 @@ document.addEventListener("visibilitychange", markShown);
 // A login shell in the configured repository, then a pane per session terminal (#467).
 startPanes().catch((e) => (element("terminal-body").textContent = `No terminal: ${e}`));
 element("new-session").addEventListener("click", showPicker);
+// A click outside the picker, but not on its own button, closes it.
+document.addEventListener("pointerdown", (event) => {
+  const target = event.target as Node;
+  if (!element("picker").contains(target) && !element("new-session").contains(target)) element("picker").hidden = true;
+}, true); // capture: the terminal must not swallow it
 
 listen<Session[]>("sessions", showSessions);
 invoke<Session[]>("sessions").then(showSessions);

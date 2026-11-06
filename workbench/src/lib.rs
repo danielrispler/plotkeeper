@@ -112,9 +112,7 @@ pub fn create_task(repo: &Path, name: &str) -> Result<Place, String> {
             git(repo, &head)?
         }
     };
-    let taken =
-        |reference: String| git(repo, &["rev-parse", "--verify", "--quiet", &reference]).is_ok();
-    if taken(format!("refs/heads/{name}")) || taken(format!("refs/remotes/origin/{name}")) {
+    if branch_taken(repo, name) {
         return Err(format!("a branch named '{name}' already exists"));
     }
     if Path::new(&path).exists() {
@@ -136,6 +134,73 @@ pub fn create_task(repo: &Path, name: &str) -> Result<Place, String> {
         path,
         branch: Some(name.into()),
     })
+}
+
+/// Whether branch `name` exists here or at `origin`.
+fn branch_taken(repo: &Path, name: &str) -> bool {
+    let taken =
+        |reference: String| git(repo, &["rev-parse", "--verify", "--quiet", &reference]).is_ok();
+    taken(format!("refs/heads/{name}")) || taken(format!("refs/remotes/origin/{name}"))
+}
+
+/// Creates a task named after `request`, what Daniel asks a new session for: issue `#123` (or
+/// `123`) gives `123-<its title>`, or `issue-123` when `gh` cannot read the title; a file of the
+/// main checkout, such as a spec, gives its file name; any other text, a prompt, gives its first
+/// words. A taken name gets the next free number, `-2` and on.
+pub fn create_named_task(repo: &Path, request: &str) -> Result<Place, String> {
+    let request = request.trim();
+    let main = places(repo)?.main.path;
+    let spec = Path::new(&main).join(request);
+    let number = request.strip_prefix('#').unwrap_or(request);
+    let words = if !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit()) {
+        match issue_title(repo, number) {
+            Some(title) => format!("{number} {title}"),
+            None => format!("issue {number}"),
+        }
+    } else if !request.is_empty() && spec.is_file() {
+        let stem = spec.file_stem().unwrap_or_default();
+        stem.to_string_lossy().into_owned()
+    } else {
+        request.into()
+    };
+    let base = slug(&words);
+    let free = |name: &String| {
+        !branch_taken(repo, name)
+            && !Path::new(&format!("{main}/.claude/worktrees/{name}")).exists()
+    };
+    let name = std::iter::once(base.clone())
+        .chain((2..).map(|n| format!("{base}-{n}")))
+        .find(free)
+        .unwrap();
+    create_task(repo, &name)
+}
+
+/// Issue `number`'s title, from `gh` in `repo`.
+fn issue_title(repo: &Path, number: &str) -> Option<String> {
+    let output = Command::new("gh")
+        .args(["issue", "view", number, "--json", "title", "--jq", ".title"])
+        .current_dir(repo)
+        .output()
+        .ok()?;
+    let title = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (output.status.success() && !title.is_empty()).then_some(title)
+}
+
+/// A branch name from `words`: its first five words, in lowercase ASCII letters and digits joined
+/// by `-`, with apostrophes dropped; `session` when none is left.
+fn slug(words: &str) -> String {
+    let words: Vec<String> = words
+        .replace(['\'', '\u{2019}'], "")
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .take(5)
+        .map(str::to_ascii_lowercase)
+        .collect();
+    if words.is_empty() {
+        "session".into()
+    } else {
+        words.join("-")
+    }
 }
 
 /// What removing a task's worktree would lose: its uncommitted changes as `git status --short`

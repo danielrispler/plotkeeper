@@ -7,7 +7,7 @@
   --font: -apple-system, system-ui, "SF Pro Text", "Helvetica Neue", sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, monospace;
   --size: 14px; --size-read: 15.5px; --size-small: 12.5px; --size-mono: 12.5px; --term-line: 1.5;
-  --radius: 4px; --list: 248px; --strip: 48px; --rail: 520px; --wide: 760px; --bar: 34px;
+  --radius: 4px; --list: 248px; --strip: 48px; --rail: 520px; --bar: 34px;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: var(--size)/1.55 var(--font);
@@ -34,7 +34,7 @@ body[data-layout="overlay"] .app { grid-template-columns: var(--strip) 1fr 0; }
 .divider:hover, .divider.dragging { background: var(--line); }
 #list-divider { right: calc(var(--list) - 3px); }
 #rail-divider { left: calc(var(--rail) - 3px); }
-body:not([data-layout="full"]) #list-divider, body[data-layout="overlay"] #rail-divider, body.wide #rail-divider { display: none; }
+body:not([data-layout="full"]) #list-divider, body[data-layout="overlay"] #rail-divider { display: none; }
 
 /* The top bar: identity and usage. */
 .top { grid-column: 1 / -1; display: flex; align-items: center; gap: 14px; padding: 0 14px; background: var(--surface);
@@ -112,13 +112,12 @@ h1 { margin: 0 0 8px; }
 #probe { position: absolute; visibility: hidden; white-space: pre; font: var(--size-mono)/var(--term-line) var(--mono); }
 
 /* The rail: the story, its open question docked at the bottom. In "overlay" ⌘2 toggles it over the
-   terminal; "read wide" widens it over the terminal until Esc. */
+   terminal. */
 .rail { background: var(--bg); border-right: 1px solid var(--line); display: grid; grid-template-rows: auto 1fr auto;
         grid-template-columns: minmax(0, 1fr); }
 body[data-layout="overlay"] .rail { display: none; }
-body[data-layout="overlay"].rail-open .rail, body.wide .rail { display: grid; position: fixed; top: var(--bar); bottom: 0; left: 0;
+body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; top: var(--bar); bottom: 0; left: 0;
                                                                 width: var(--rail); box-shadow: 8px 0 24px #0008; z-index: 5; }
-body.wide .rail { width: min(var(--wide), calc(100vw - var(--strip))); }
 .rail-h { padding: 8px 14px; border-bottom: 1px solid var(--line-soft); font-size: var(--size-small); }
 .times { display: flex; gap: 4px 10px; flex-wrap: wrap; align-items: baseline; }
 .times:empty { display: none; }
@@ -206,7 +205,6 @@ body.wide .rail { width: min(var(--wide), calc(100vw - var(--strip))); }
 .question .state { margin: 0; }
 .question .asked { font-weight: 600; margin-top: 2px; font-size: var(--size-read); }
 .choices { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 5px; }
-body.wide .choices { grid-template-columns: repeat(3, 1fr); }
 .choices li { display: flex; flex-direction: column; background: var(--bg); border: 1px solid var(--line);
               border-radius: var(--radius); padding: 6px 10px; }
 .choices .label { font-weight: 600; font-size: 15px; }
@@ -252,6 +250,7 @@ body.wide .choices { grid-template-columns: repeat(3, 1fr); }
 .picker .new-task input { flex: 1; font: 13px var(--mono); color: inherit; background: var(--bg); border: 1px solid var(--line);
                           border-radius: var(--radius); padding: 3px 6px; }
 .picker .new-task button { margin: 0; }
+.picker .new-task:first-of-type { border-top: 0; margin-top: 2px; padding-top: 0; }
 .picker .picker-error { white-space: pre-wrap; font: 12px var(--mono); color: var(--needs-you); margin: 6px 4px; }
 #reopen, #rename, #close { margin: 0 0 8px; }
 /* The questions of rename and close (#469). */

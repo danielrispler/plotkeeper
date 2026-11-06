@@ -113,10 +113,10 @@ export async function closePane(id: string) {
   if (shown === id) show("shell", () => openPane(box("shell"), "shell", repo));
 }
 
-// Starts `claude` in `cwd` in a new terminal, or `claude --resume <resume>` for an ended session,
-// and shows its pane.
-export async function startClaude(cwd: string, resume: string | null = null) {
-  const argv = await invoke<string[]>("claude_argv", { resume });
+// Starts `claude` in `cwd` in a new terminal, with `prompt` as its first prompt, or
+// `claude --resume <resume>` for an ended session, and shows its pane.
+export async function startClaude(cwd: string, resume: string | null = null, prompt = "") {
+  const argv = [...(await invoke<string[]>("claude_argv", { resume })), ...(prompt ? ["--", prompt] : [])]; // `--`: a prompt like "-p x" is no flag
   const id = `claude-${crypto.randomUUID()}`;
   show(id, () => openPane(box(id), id, cwd, argv));
 }

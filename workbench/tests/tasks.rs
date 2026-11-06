@@ -2,7 +2,9 @@
 //! in temporary repositories that have a bare `origin`.
 
 use std::{path::Path, process::Command};
-use studio_workbench::{Losses, Place, create_task, delete_merged_branch, remove_task};
+use studio_workbench::{
+    Losses, Place, create_named_task, create_task, delete_merged_branch, remove_task,
+};
 
 /// Runs `git` in `dir`, away from Daniel's own git config, and returns its trimmed output.
 fn git(dir: &Path, args: &[&str]) -> String {
@@ -106,6 +108,28 @@ fn a_taken_name_is_refused_and_nothing_is_created() {
     assert!(!task_path(&repos, "here").exists());
     assert!(!task_path(&repos, "there").exists());
     assert!(!main.join(".claude/escape").exists());
+}
+
+#[test]
+fn a_named_task_takes_its_branch_from_the_prompt_the_spec_or_the_issue() {
+    let repos = repos();
+    let main = &repos.main;
+    std::fs::create_dir_all(main.join("docs")).unwrap();
+    std::fs::write(main.join("docs/Picker Spec.md"), "spec").unwrap();
+    git(main, &["branch", "fix-the-pickers-outside-click", "HEAD"]);
+
+    let branch = |request: &str| create_named_task(main, request).unwrap().branch.unwrap();
+
+    // A prompt: its first words; a taken name gets the next free number.
+    assert_eq!(
+        branch("Fix the picker's outside click, then open a PR with every fix"),
+        "fix-the-pickers-outside-click-2"
+    );
+    // A spec: its file's name.
+    assert_eq!(branch("docs/Picker Spec.md"), "picker-spec");
+    // An issue: its number, then its title, which `gh` cannot read here.
+    assert_eq!(branch("#123"), "issue-123");
+    assert_eq!(branch("!!!"), "session");
 }
 
 #[test]

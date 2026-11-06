@@ -95,6 +95,12 @@ pub fn create_task(name: String) -> Result<studio_workbench::Place, String> {
     studio_workbench::create_task(Path::new(&repo()), &name)
 }
 
+/// Creates a task named after `request`, an issue, a spec or a prompt, and returns its place.
+#[tauri::command(async)]
+pub fn create_named_task(request: String) -> Result<studio_workbench::Place, String> {
+    studio_workbench::create_named_task(Path::new(&repo()), &request)
+}
+
 /// Removes the task's worktree at `path`, or, unless `confirmed`, returns what that would lose.
 #[tauri::command(async)]
 pub fn remove_task(

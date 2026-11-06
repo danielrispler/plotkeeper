@@ -3,6 +3,7 @@
 // on the main checkout. Choosing one starts `claude` there in a new terminal.
 // Tasks (#468): a name field creates a task and starts a session in it; each task's "Remove" removes
 // its worktree, never forced, and first lists what that would lose. Git's errors show as they are.
+// The quick start, first: an issue, a spec or a prompt names a new task, and its session starts on it.
 
 import { element, invoke, pressable, text } from "./dom.js";
 import { startClaude } from "./panes.js";
@@ -14,34 +15,42 @@ function failed(error: unknown) {
   element("picker").append(text("pre", String(error), "picker-error"));
 }
 
-// The "new task" field: Enter or "Create" makes the task, then starts a session there.
-function newTask(): HTMLElement {
+// A field whose Enter or button makes a task with `create`, then starts a session there, given
+// `prompt` of the field's text as its first prompt.
+function newTask(placeholder: string, label: string, create: (value: string) => Promise<Place>, prompt: boolean): HTMLElement {
   const form = document.createElement("form");
   form.className = "new-task";
-  const name = document.createElement("input");
-  name.placeholder = "New task: branch name";
-  name.setAttribute("aria-label", "New task name");
-  name.spellcheck = false;
-  const create = text("button", "Create");
-  form.append(name, create);
+  const field = document.createElement("input");
+  field.placeholder = placeholder;
+  field.setAttribute("aria-label", placeholder);
+  field.spellcheck = false;
+  const button = text("button", label);
+  form.append(field, button);
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
-    if (!name.value.trim()) return;
-    create.textContent = "Creating…";
+    const value = field.value.trim();
+    if (!value) return;
+    button.textContent = "Creating…";
     form.inert = true;
     try {
-      const task = await invoke<Place>("create_task", { name: name.value.trim() });
+      const task = await create(value);
       element("picker").hidden = true;
-      await startClaude(task.path);
+      await startClaude(task.path, null, prompt ? value : "");
     } catch (e) {
       failed(e);
     } finally {
-      create.textContent = "Create";
+      button.textContent = label;
       form.inert = false;
     }
   });
   return form;
 }
+
+// The quick start: a task named after an issue, a spec or a prompt, whose session starts on it.
+const quickStart = () =>
+  newTask("Issue #, spec path or prompt", "Start", (request) => invoke<Place>("create_named_task", { request }), true);
+// A task with the branch name Daniel types.
+const namedTask = () => newTask("New task: branch name", "Create", (name) => invoke<Place>("create_task", { name }), false);
 
 // What removing a task would lose, and the choice to remove it anyway.
 function confirmRemoval(row: HTMLElement, task: Place, name: string, losses: Losses) {
@@ -104,11 +113,13 @@ function picked({ main, tasks, hidden }: Places): HTMLElement[] {
   const folder = (place: Place) => place.path.split("/").pop() ?? place.path;
   const count = hidden ? [text("p", `${hidden} agent worktree${hidden === 1 ? "" : "s"} hidden`, "hidden-count")] : [];
   return [
+    text("h1", "New session in its own task"),
+    quickStart(),
     text("h1", "Start a session in"),
     placeRow(`Main checkout${main.branch ? ` · ${main.branch}` : ""}`, main),
     ...count,
     ...tasks.map((task) => taskRow(task.branch ?? `${folder(task)} (detached)`, task)),
-    newTask(),
+    namedTask(),
   ];
 }
 
@@ -120,6 +131,7 @@ export async function showPicker() {
   picker.replaceChildren(text("p", "Reading worktrees…", "empty"));
   try {
     picker.replaceChildren(...picked(await invoke<Places>("places")));
+    picker.querySelector("input")?.focus();
   } catch (e) {
     picker.replaceChildren(text("p", `No worktrees: ${e}`, "empty"));
   }
