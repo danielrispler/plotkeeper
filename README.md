@@ -38,7 +38,7 @@ Needs Node and the Rust toolchain.
     npm ci
     npm run tauri build
 
-This builds `target/release/bundle/macos/Studio.app` with an ad-hoc signature (`codesign -dv` shows `Signature=adhoc`), and `target/release/studio-hook`, which the plugin runs. The bundle carries `studio-terminal-daemon` beside the app's executable, in `Contents/MacOS/`. Open the app with `open target/release/bundle/macos/Studio.app`.
+This builds `target/release/bundle/macos/Studio.app` with an ad-hoc signature (`codesign -dv` shows `Signature=adhoc`), and `target/release/studio-hook`, which the plugin runs. The bundle carries `studio-terminal-daemon` beside the app's executable, in `Contents/MacOS/`. Open the app with `open target/release/bundle/macos/Studio.app`. `npm start` does both: it builds, recompiling only what changed, then opens the app.
 
 `cargo test` runs:
 
