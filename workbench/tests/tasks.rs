@@ -3,7 +3,8 @@
 
 use std::{path::Path, process::Command};
 use studio_workbench::{
-    Losses, Place, create_named_task, create_task, delete_merged_branch, remove_task,
+    Losses, Place, create_named_task, create_task, delete_branch_merged_at, delete_merged_branch,
+    remove_task,
 };
 
 /// Runs `git` in `dir`, away from Daniel's own git config, and returns its trimmed output.
@@ -203,6 +204,35 @@ fn a_merged_branch_is_deleted_and_an_unmerged_one_kept_with_gits_reason() {
     let refused = delete_merged_branch(&repos.main, "kept").unwrap_err();
     assert!(refused.contains("not fully merged"), "{refused}");
     assert_eq!(git(&repos.main, &["rev-parse", "kept"]), work);
+}
+
+/// A branch merged by squash, which git refuses, goes when a merged pull request's head is its tip,
+/// and stays when it moved on since.
+#[test]
+fn a_squash_merged_branch_goes_only_at_its_pull_requests_head() {
+    let repos = repos();
+    let task = create_task(&repos.main, "squashed").unwrap();
+    git(
+        Path::new(&task.path),
+        &["commit", "-q", "--allow-empty", "-m", "Merged by squash"],
+    );
+    let head = git(&repos.main, &["rev-parse", "squashed"]);
+    git(
+        Path::new(&task.path),
+        &["commit", "-q", "--allow-empty", "-m", "After the merge"],
+    );
+    remove_task(&repos.main, &task.path, true).unwrap();
+
+    let refused = delete_branch_merged_at(&repos.main, "squashed", &[head]).unwrap_err();
+    assert!(refused.contains("not fully merged"), "{refused}");
+
+    let tip = git(&repos.main, &["rev-parse", "squashed"]);
+    assert_eq!(
+        delete_branch_merged_at(&repos.main, "squashed", &[tip]),
+        Ok(())
+    );
+    let branches = git(&repos.main, &["branch", "--list", "squashed"]);
+    assert!(branches.is_empty(), "{branches}");
 }
 
 /// No code path forces git (#461, decision 9): the studio's own sources, the workbench, the shell

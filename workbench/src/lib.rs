@@ -234,11 +234,53 @@ pub fn remove_task(repo: &Path, path: &str, confirmed: bool) -> Result<Option<Lo
     Ok(None)
 }
 
-/// Deletes branch `branch` with `git branch -d`, never forced, after its task's worktree is gone. Git
-/// refuses a branch that the main checkout's `HEAD` does not hold, such as one merged by squash, and
-/// its message is the error; the branch stays.
+/// Deletes branch `branch` after its task's worktree is gone, never forced: with `git branch -d`, or,
+/// when git refuses one merged by squash, when its tip is the head of a merged pull request from it,
+/// as `gh` lists them. Otherwise git's message is the error and the branch stays.
 pub fn delete_merged_branch(repo: &Path, branch: &str) -> Result<(), String> {
-    git(repo, &["branch", "-d", branch]).map(drop)
+    delete_branch_merged_at(repo, branch, &merged_heads(repo, branch))
+}
+
+/// The head commits of the merged pull requests from `branch`; none when `gh` cannot tell.
+fn merged_heads(repo: &Path, branch: &str) -> Vec<String> {
+    let args = ["pr", "list", "--head", branch, "--state", "merged"];
+    let jq = ["--json", "headRefOid", "--jq", ".[].headRefOid"];
+    Command::new("gh")
+        .args(args)
+        .args(jq)
+        .current_dir(repo)
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| {
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .map(String::from)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// [`delete_merged_branch`] with the merged pull requests' `heads` given. A squash merge leaves the
+/// branch's commits off `main` (#461, decision 9's one exception): a tip a merged pull request had
+/// loses nothing, and `update-ref` deletes it only while the branch still points there.
+pub fn delete_branch_merged_at(repo: &Path, branch: &str, heads: &[String]) -> Result<(), String> {
+    let refused = match git(repo, &["branch", "-d", branch]) {
+        Ok(_) => return Ok(()),
+        Err(refused) => refused,
+    };
+    let tip = git(
+        repo,
+        &["rev-parse", "--verify", &format!("refs/heads/{branch}")],
+    )?;
+    if !heads.contains(&tip) {
+        return Err(refused);
+    }
+    git(
+        repo,
+        &["update-ref", "-d", &format!("refs/heads/{branch}"), &tip],
+    )
+    .map(drop)
 }
 
 /// Runs `git` in `dir` and returns its output, or git's own error message.

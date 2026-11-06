@@ -3,7 +3,8 @@
 // on the main checkout. Choosing one starts `claude` there in a new terminal.
 // Tasks (#468): a name field creates a task and starts a session in it; each task's "Remove" removes
 // its worktree, never forced, and first lists what that would lose. Git's errors show as they are.
-// The quick start, first: an issue, a spec or a prompt names a new task, and its session starts on it.
+// The quick start, first: an issue, a spec or a prompt names a new task, and its session starts on it;
+// left empty, a session starts in the main checkout with no prompt.
 
 import { element, invoke, pressable, text } from "./dom.js";
 import { startClaude } from "./panes.js";
@@ -16,7 +17,7 @@ function failed(error: unknown) {
 }
 
 // A field whose Enter or button makes a task with `create`, then starts a session there, given
-// `prompt` of the field's text as its first prompt.
+// `prompt` of the field's text as its first prompt. Only a `prompt` field passes an empty text on.
 function newTask(placeholder: string, label: string, create: (value: string) => Promise<Place>, prompt: boolean): HTMLElement {
   const form = document.createElement("form");
   form.className = "new-task";
@@ -29,7 +30,7 @@ function newTask(placeholder: string, label: string, create: (value: string) => 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const value = field.value.trim();
-    if (!value) return;
+    if (!value && !prompt) return;
     button.textContent = "Creating…";
     form.inert = true;
     try {
@@ -46,9 +47,10 @@ function newTask(placeholder: string, label: string, create: (value: string) => 
   return form;
 }
 
-// The quick start: a task named after an issue, a spec or a prompt, whose session starts on it.
-const quickStart = () =>
-  newTask("Issue #, spec path or prompt", "Start", (request) => invoke<Place>("create_named_task", { request }), true);
+// The quick start: a task named after an issue, a spec or a prompt, whose session starts on it, or,
+// empty, the main checkout.
+const quickStart = (main: Place) =>
+  newTask("Issue #, spec path or prompt; empty for main", "Start", async (request) => request ? invoke<Place>("create_named_task", { request }) : main, true);
 // A task with the branch name Daniel types.
 const namedTask = () => newTask("New task: branch name", "Create", (name) => invoke<Place>("create_task", { name }), false);
 
@@ -74,12 +76,14 @@ function confirmRemoval(row: HTMLElement, task: Place, name: string, losses: Los
   row.append(box);
 }
 
-// Removes the task's worktree, or, unless confirmed, asks first when that would lose work.
+// Removes the task's worktree, or, unless confirmed, asks first when that would lose work, then its
+// branch when the main checkout holds it, as "Delete" does.
 async function remove(row: HTMLElement, task: Place, name: string, confirmed: boolean) {
   try {
     const losses = await invoke<Losses | null>("remove_task", { path: task.path, confirmed });
     if (losses) return confirmRemoval(row, task, name, losses);
     row.remove();
+    if (task.branch) await invoke("delete_merged_branch", { branch: task.branch }).catch((e) => failed(`Branch ${task.branch} kept: ${e}`));
   } catch (e) {
     failed(e);
   }
@@ -114,7 +118,7 @@ function picked({ main, tasks, hidden }: Places): HTMLElement[] {
   const count = hidden ? [text("p", `${hidden} agent worktree${hidden === 1 ? "" : "s"} hidden`, "hidden-count")] : [];
   return [
     text("h1", "New session in its own task"),
-    quickStart(),
+    quickStart(main),
     text("h1", "Start a session in"),
     placeRow(`Main checkout${main.branch ? ` · ${main.branch}` : ""}`, main),
     ...count,
