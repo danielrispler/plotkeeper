@@ -53,7 +53,7 @@ This builds `target/release/bundle/macos/Studio.app` with an ad-hoc signature (`
 
 It leaves out the shell, which needs `dist/` from `npm run build`. `npm test` (after `npm ci`) builds the UI with `tsc` and runs `terminal-daemon/tests/replay.test.mjs`: a terminal's bytes replayed into a headless xterm of another size, with the resize sent, match a fresh render at that size; and `ui/tests/`: the UI's pure functions on the `tsc` output in `dist/`, such as the width rule's layout, the terminal's key mapping (`keys`) and its file paths (`paths`), and a check card's verdict and quiz state (`check_cards`).
 
-These checks run in CI in `.github/workflows/studio.yml`, on macOS, for each pull request and push to `main` that changes `apps/studio/`: `npm ci`, `npm run build`, `npm test`, `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings` and `cargo test --workspace`, the shell included. The engine's `checks.yml` and `ci-checks` skip the studio.
+`npm run check` runs them all in order: `npm run build`, `npm test`, `cargo fmt --all --check`, `cargo clippy --locked --workspace --all-targets -- -D warnings` and `cargo test --locked --workspace`, the shell included. CI runs `npm ci` and `npm run check` in `.github/workflows/studio.yml`, on macOS. It runs for each pull request that changes `apps/studio/`, and for each push to `main` or to an `issue-*` branch that does. The engine's `checks.yml` and `ci-checks` skip the studio.
 
 ## The terminal pane
 
