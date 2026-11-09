@@ -71,8 +71,6 @@ fn scrub(event: Map<String, Value>) -> Map<String, Value> {
         let text = value.as_str().unwrap_or_default();
         let value = match key.as_str() {
             "prompt" => markup(text).into(),
-            // A turn whose last message asks Daniel something needs him, so the scrubbed one still asks.
-            "last_assistant_message" if studio_core::asks(text) => "…?".into(),
             // The core tells a command that ran by the exit code on the error's first line.
             "error" => match text.lines().next().filter(|line| exit_code(line)) {
                 Some(line) => line.into(),
@@ -365,7 +363,7 @@ mod tests {
     }
 
     #[test]
-    fn a_stop_keeps_whether_it_asks_and_its_background_tasks_without_their_commands() {
+    fn a_stop_keeps_its_background_tasks_without_their_commands() {
         let stop = |message: &str| {
             json!({"hook_event_name": "Stop", "last_assistant_message": message,
                 "background_tasks": [
@@ -378,7 +376,7 @@ mod tests {
 
         assert_eq!(
             scrub(stop("Merged. Shall I close #370?")),
-            json!({"hook_event_name": "Stop", "last_assistant_message": "…?",
+            json!({"hook_event_name": "Stop", "last_assistant_message": "…",
                 "background_tasks": [
                     {"id": "bbr1524wy", "type": "shell", "status": "running", "description": "Run the gate",
                         "command": "…"},
@@ -386,6 +384,5 @@ mod tests {
                         "description": "Standards review", "agent_type": "general-purpose"}],
                 "session_crons": []})
         );
-        assert_eq!(scrub(stop("Merged `x?`."))["last_assistant_message"], "…");
     }
 }

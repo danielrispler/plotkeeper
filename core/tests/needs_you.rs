@@ -49,13 +49,13 @@ fn each_time_a_session_newly_needs_you_gives_one_notice() {
         live(background),
         [notice("c41d8e27-6a3f-4b90-8e15-2f7a9b0c3d64")]
     );
-    // AskUserQuestion, the Stop that asks, ExitPlanMode.
-    assert_eq!(live(ask_then_plan), [asker, asker, asker].map(notice));
+    // AskUserQuestion, ExitPlanMode; the Stop that asks in text gives none (#540).
+    assert_eq!(live(ask_then_plan), [asker, asker].map(notice));
     assert_eq!(live(include_str!("fixtures/failing-bash.jsonl")), []);
 }
 
 #[test]
-fn a_stop_clears_every_block_before_it_asks() {
+fn a_stop_clears_every_block_even_when_its_message_asks() {
     let lines: Vec<&str> = include_str!("fixtures/sandbox-network.jsonl")
         .lines()
         .collect();
@@ -73,10 +73,9 @@ fn a_stop_clears_every_block_before_it_asks() {
     );
     assert_eq!(
         states(&asked, PROBE),
-        [Running, Running, NeedsYou, NeedsYou].map(Some)
+        [Running, Running, NeedsYou, YourTurn].map(Some)
     );
-    // The Stop's question is a new reason to need Daniel, so it gives its own notice.
-    assert_eq!(live(&asked), [notice(PROBE), notice(PROBE)]);
+    assert_eq!(live(&asked), [notice(PROBE)]);
 }
 
 #[test]
@@ -219,14 +218,14 @@ fn a_session_closed_at_a_plan_approval_stops_needing_you() {
 }
 
 #[test]
-fn a_question_and_a_plan_need_you_until_answered_and_a_turn_ends_on_your_turn_or_a_question() {
+fn a_question_and_a_plan_need_you_until_answered_and_each_turn_ends_on_your_turn() {
     let log = include_str!("fixtures/ask-then-plan.jsonl");
 
     let expected = [
         // AskUserQuestion: UserPromptSubmit, PreToolUse, PermissionRequest, Notification, PostToolUse.
         Running, NeedsYou, NeedsYou, NeedsYou, Running,
-        // Stop: "Should I plan the fix first, or edit it directly?"
-        NeedsYou,
+        // Stop: "Should I plan the fix first, or edit it directly?" A text question blocks nothing.
+        YourTurn,
         // UserPromptSubmit, then a Bash and a plan file, each PreToolUse and PostToolUse.
         Running, Running, Running, Running, Running,
         // ExitPlanMode: PreToolUse, PermissionRequest, Notification, PostToolUse.
@@ -253,79 +252,23 @@ fn after_stop(message: &str) -> State {
         .unwrap()
 }
 
-// The sentence rule. The messages follow the shapes in #321's evidence ("Transcripts"); the ones
-// marked "evidence" are quoted from it.
+// A reply that asks Daniel in text blocks nothing, so it is your turn (#540, reversing #328's story
+// 36). The messages follow the shapes in #321's evidence ("Transcripts").
 
 #[test]
-fn a_question_at_the_end_of_a_message_needs_you() {
-    let message = "I ran `cargo test` in `apps/studio`: 14 tests pass.
+fn a_reply_that_ends_with_a_question_is_your_turn() {
+    let end = "I ran `cargo test` in `apps/studio`: 14 tests pass.
 
 Two ways to go on:
 - merge now;
 - wait for the heavy run first.
 
 Which do you want?";
-    assert_eq!(after_stop(message), NeedsYou);
-}
-
-#[test]
-fn a_question_sentence_mid_paragraph_needs_you() {
-    let message = "The checks pass and the branch is merged.
-
-One question from the review is still open. Should the core drop closed sessions now? If yes, it needs its own ticket.";
-    assert_eq!(after_stop(message), NeedsYou);
-}
-
-#[test]
-fn an_ask_without_a_question_mark_is_your_turn() {
-    let your_call = "One design gap blocks the fixtures, so I need your call before writing them.";
-    // Evidence, "Hook payloads": a real Stop that asks without a `?`.
-    let decide = "I also haven't checked `apps/studio/AGENTS.md` for a studio language rule, which could decide between the two.";
-    assert_eq!(after_stop(your_call), YourTurn);
-    assert_eq!(after_stop(decide), YourTurn);
-}
-
-#[test]
-fn a_question_mark_in_fenced_code_is_your_turn() {
-    let message = "I can't start that skill for you. Type it as its own message:
-
-```
-/ask-matt which ticket should come next? I'm finishing #349.
-```
-
-I can also read the open issues and order them myself.";
-    assert_eq!(after_stop(message), YourTurn);
-}
-
-#[test]
-fn a_question_mark_in_inline_code_is_your_turn() {
-    let message =
-        "Running two checks in parallel: the notification build and the `?` rule measurement.";
-    assert_eq!(after_stop(message), YourTurn);
-}
-
-#[test]
-fn a_question_in_a_table_row_is_your_turn() {
-    // Evidence, "Transcripts": table cells such as `| … | Auto mode OK?` were false hits.
-    let message = "| Ticket | Session | Auto mode OK?
-|---|---|---|
-| #341 | auto mode | Yes |
-| #342 | outside auto mode | No |
-
-Only #342 runs the real card writer.";
-    assert_eq!(after_stop(message), YourTurn);
-}
-
-#[test]
-fn a_question_in_a_blockquote_or_a_heading_is_your_turn() {
-    let quote = "> Where do we read STUDIO_TERMINAL_ID?
-
-Only in `hook/src/main.rs`: the hook copies it from its environment into each event log line.";
-    let heading = "## Why are the hooks async?
-
-So Claude Code never waits for them. Two events that fire within a few milliseconds can land in either order.";
-    assert_eq!(after_stop(quote), YourTurn);
-    assert_eq!(after_stop(heading), YourTurn);
+    let mid = "One question from the review is still open. Should the core drop closed sessions now? If yes, it needs its own ticket.";
+    let issue = "#341 is done and its PR is green. Should I open the next ticket?";
+    assert_eq!(after_stop(end), YourTurn);
+    assert_eq!(after_stop(mid), YourTurn);
+    assert_eq!(after_stop(issue), YourTurn);
 }
 
 // Needs you across agents (#434, decisions 24 to 26): the four cases of #434's first version (B4) and
@@ -656,10 +599,4 @@ fn a_question_answered_on_the_card_waits_for_its_result() {
     let log = [lines[0], lines[1], &answer].join("\n");
     // Its PostToolUse carries the answer, so it stays open until then.
     assert_eq!(states(&log, asker)[2], Some(NeedsYou));
-}
-
-#[test]
-fn a_question_on_a_line_that_opens_with_an_issue_number_needs_you() {
-    let message = "#341 is done and its PR is green. Should I open the next ticket?";
-    assert_eq!(after_stop(message), NeedsYou);
 }
