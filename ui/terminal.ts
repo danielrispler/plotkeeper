@@ -7,6 +7,7 @@ import { connect, decode, encode, onEvent, request } from "./daemon.js";
 import { invoke, listen } from "./dom.js";
 import { keyAction, type Action } from "./keys.js";
 import { pathLinks, quotePath } from "./paths.js";
+import { studio } from "./state.js";
 
 declare const Terminal: typeof Xterm.Terminal;
 declare const FitAddon: typeof import("@xterm/addon-fit");
@@ -31,7 +32,7 @@ export function openPane(place: HTMLElement, id: string, cwd: string, argv: stri
     scrollback: 10000,
     cursorBlink: true,
     fontFamily: value("--mono"),
-    fontSize: parseFloat(value("--size-mono")),
+    fontSize: parseFloat(value("--term-size")),
     lineHeight: parseFloat(value("--term-line")),
     theme: { background: value("--term-bg"), foreground: value("--term-fg") },
   });
@@ -150,7 +151,7 @@ export function openPane(place: HTMLElement, id: string, cwd: string, argv: stri
     }
   };
   term.attachCustomKeyEventHandler((e) => {
-    const action = keyAction(e, false);
+    const action = keyAction(e, false, studio.settings.keymap);
     if (action === "terminal") return true;
     if (typeof action === "object" && e.type === "keydown") {
       e.preventDefault();
@@ -165,7 +166,7 @@ export function openPane(place: HTMLElement, id: string, cwd: string, argv: stri
     (e) => {
       const image = [...(e.clipboardData?.items ?? [])].some((item) => item.type.startsWith("image/"));
       const cmdV = { key: "v", code: "KeyV", metaKey: true, ctrlKey: false, altKey: false, shiftKey: false };
-      const action = keyAction(cmdV, image);
+      const action = keyAction(cmdV, image, studio.settings.keymap);
       if (typeof action === "object") {
         e.preventDefault();
         e.stopPropagation();
@@ -195,11 +196,18 @@ export function openPane(place: HTMLElement, id: string, cwd: string, argv: stri
     input(paths.map(quotePath).join(" ") + " ");
     term.focus();
   });
+  // A saved `settings.json` (`main.ts`) may change the font size.
+  const restyle = () => {
+    term.options.fontSize = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--term-size"));
+    fit.fit();
+  };
+  window.addEventListener("settings", restyle);
   // `term.dispose()` (`closePane`) disposes every addon, so this one stops the pane's listeners.
   term.loadAddon({
     activate() {},
     dispose() {
       resizes.disconnect();
+      window.removeEventListener("settings", restyle);
       for (const stop of [listening, drops]) stop.then((off) => off());
     },
   });
