@@ -156,6 +156,7 @@ body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; to
 .markdown pre code { background: none; padding: 0; white-space: pre; }
 .markdown table { border-collapse: collapse; display: block; overflow-x: auto; }
 .markdown th, .markdown td { border: 1px solid var(--line); padding: 3px 8px; text-align: start; }
+.markdown a { color: var(--fg); text-decoration: underline; }
 .markdown blockquote { margin: 8px 0 0; padding-left: 10px; border-left: 3px solid var(--line); color: var(--muted); }
 .cards-title { margin-top: 20px; }
 /* The session's brief, above its cards; its code wraps as a card's does. */

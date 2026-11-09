@@ -92,6 +92,15 @@ test("a later entry's rebind keeps the keys an earlier entry bound", () => {
   assert.equal(Workspace["cmd-2"], undefined);
 });
 
+test("a key that is not a keystroke is reported and the rest of the keymap stays", () => {
+  const keymap = `[{ "bindings": { "": "studio::Dismiss", "cmd-l": "studio::ToggleList" } }]`;
+  const loaded = reload(initial, { settings: null, keymap });
+  assert.deepEqual(loaded.errors, [`keymap.json: "" is not a keystroke`]);
+  assert.equal(loaded.keymap.Workspace["cmd-l"], "studio::ToggleList");
+  // The skipped binding does not move Dismiss off its default key.
+  assert.equal(loaded.keymap.Workspace.escape, "studio::Dismiss");
+});
+
 test("a file of the wrong shape is reported", () => {
   const loaded = reload(initial, { settings: `[]`, keymap: `{}` });
   assert.equal(loaded.errors.length, 2);

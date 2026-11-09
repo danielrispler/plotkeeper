@@ -1,7 +1,8 @@
 //! The writer's timing (#471's harness, kept for #518): `--runs` timed `write_card` calls with the
 //! real `ClaudeWriter`, as the app runs it in its neutral folder, on `real_card.rs`'s structural
 //! change with an empty brief. It prints JSON on standard output: each run's seconds and whether it
-//! returned a card, then the median and the slowest. The writer's log lines go to standard error.
+//! returned a card, the failed runs' count, then the median and the slowest of the runs that
+//! returned a card. It exits non-zero when any run failed. The writer's log lines go to standard error.
 //! It reads no credential file. Run it outside auto mode, from `apps/studio`:
 //!
 //! `cargo run -q -p studio-understanding --example writer_timing -- --runs 5`
@@ -74,20 +75,60 @@ fn main() {
     let log = studio_hook::event_log(&home);
     let writer = ClaudeWriter::beside(&log).expect("create the card writer's folder");
     let request = request();
-    let mut times = Vec::new();
     let mut each = Vec::new();
     for run in 1..=runs {
         let start = Instant::now();
         let card = write_card(&writer, &request, &[], "", |line| eprintln!("{line}")).is_some();
         let seconds = start.elapsed().as_secs_f64();
         eprintln!("run {run}: {seconds:.1} s, card: {card}");
-        times.push(seconds);
-        each.push(serde_json::json!({ "seconds": seconds, "card": card }));
+        each.push((seconds, card));
     }
+    let report = report(&each);
+    println!("{report:#}");
+    if report["failed"] != 0 {
+        std::process::exit(1);
+    }
+}
+
+/// Each run's seconds and whether it returned a card, the failed runs' count, and the median and
+/// slowest of the runs that returned a card (null when none did).
+fn report(each: &[(f64, bool)]) -> serde_json::Value {
+    let mut times: Vec<f64> = each
+        .iter()
+        .filter(|(_, card)| *card)
+        .map(|(s, _)| *s)
+        .collect();
     times.sort_by(f64::total_cmp);
     // With an even count this is the upper middle run, never an average.
-    let median = times[times.len() / 2];
-    let slowest = times[times.len() - 1];
-    let report = serde_json::json!({ "runs": each, "median": median, "slowest": slowest });
-    println!("{report:#}");
+    let median = times.get(times.len() / 2);
+    let slowest = times.last();
+    let runs: Vec<_> = each
+        .iter()
+        .map(|(seconds, card)| serde_json::json!({ "seconds": seconds, "card": card }))
+        .collect();
+    let failed = each.len() - times.len();
+    serde_json::json!({ "runs": runs, "failed": failed, "median": median, "slowest": slowest })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::report;
+    use serde_json::json;
+
+    #[test]
+    fn a_failed_run_is_counted_but_not_timed() {
+        let report = report(&[(10.0, true), (50.0, false), (20.0, true), (30.0, true)]);
+        assert_eq!(report["median"], json!(20.0));
+        assert_eq!(report["slowest"], json!(30.0));
+        assert_eq!(report["failed"], json!(1));
+        assert_eq!(report["runs"][1], json!({ "seconds": 50.0, "card": false }));
+    }
+
+    #[test]
+    fn no_card_leaves_no_median() {
+        let report = report(&[(5.0, false)]);
+        assert_eq!(report["median"], json!(null));
+        assert_eq!(report["slowest"], json!(null));
+        assert_eq!(report["failed"], json!(1));
+    }
 }

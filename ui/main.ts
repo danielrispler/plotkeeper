@@ -97,10 +97,11 @@ function applySettings(files: SettingsFiles) {
   studio.files = reload(studio.files, files);
   const { settings, errors } = studio.files;
   const notice = element("notice");
-  if (errors.length) {
-    notice.textContent = errors.join("\n");
-    notice.hidden = false;
-  } else if (/^(settings|keymap)\.json: /.test(notice.textContent ?? "")) notice.hidden = true;
+  // Other notices, such as the Claude Code version's, stay beside the settings errors.
+  const others = (notice.textContent ?? "").split("\n").filter((line) => line && !/^(settings|keymap)\.json: /.test(line));
+  notice.textContent = [...others, ...errors].join("\n");
+  if (errors.length) notice.hidden = false;
+  else if (!others.length) notice.hidden = true;
   // Only a changed `zoom` resets the zoom the keys set.
   if (settings.zoom !== previous.zoom) setZoom(settings.zoom);
   const size = settings.terminal.font_size;

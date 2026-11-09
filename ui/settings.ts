@@ -123,9 +123,11 @@ function readSettings(json: unknown, report: Report): Settings {
 // The order modifiers take in a keystroke, here and in `keys.ts`.
 export const MODIFIERS = ["ctrl", "alt", "shift", "cmd"] as const;
 
-// A keystroke with its modifiers in `MODIFIERS` order.
-function normal(stroke: string): string {
-  const [, mods, key] = new RegExp(`^((?:(?:${MODIFIERS.join("|")})-)*)(.+)$`).exec(stroke.toLowerCase())!;
+// A keystroke with its modifiers in `MODIFIERS` order; null: not a keystroke.
+function normal(stroke: string): string | null {
+  const parsed = new RegExp(`^((?:(?:${MODIFIERS.join("|")})-)*)(.+)$`).exec(stroke.toLowerCase());
+  if (!parsed) return null;
+  const [, mods, key] = parsed;
   return [...MODIFIERS.filter((m) => mods.includes(`${m}-`)), key].join("-");
 }
 
@@ -134,7 +136,7 @@ const isBinding = (v: unknown): v is Binding =>
 
 // Zed's keymap: an array of `{ "context", "bindings" }`, over the defaults. Unlike Zed, binding an
 // action to a new key unbinds its default keys, so a rebound shortcut moves; `null` unbinds a key.
-function readKeymap(json: unknown): Keymap {
+function readKeymap(json: unknown, report: Report): Keymap {
   if (!Array.isArray(json)) throw new Error("expected an array");
   const keymap: Keymap = Object.fromEntries(Object.entries(defaultKeymap).map(([c, b]) => [c, { ...b }]));
   for (const entry of json) {
@@ -142,13 +144,18 @@ function readKeymap(json: unknown): Keymap {
     const context = typeof entry.context === "string" ? entry.context : "Workspace";
     const bindings = (keymap[context] ??= {});
     const same = (a: Binding, b: Binding) => JSON.stringify(a) === JSON.stringify(b);
-    for (const action of Object.values(entry.bindings).filter(isBinding)) {
+    // A key that is not a keystroke is reported and skipped, so it unbinds nothing either.
+    const strokes = Object.entries(entry.bindings).flatMap(([stroke, action]) => {
+      const key = normal(stroke);
+      if (key === null) report(`${JSON.stringify(stroke)} is not a keystroke`);
+      return key === null ? [] : [[key, action] as const];
+    });
+    for (const action of strokes.map(([, a]) => a).filter(isBinding)) {
       // Only keys still on their default: an earlier entry's binding stays.
       for (const [key, bound] of Object.entries(defaultKeymap[context] ?? {}))
         if (same(bound, action) && bindings[key] !== undefined && same(bindings[key], bound)) delete bindings[key];
     }
-    for (const [stroke, action] of Object.entries(entry.bindings)) {
-      const key = normal(stroke);
+    for (const [key, action] of strokes) {
       if (action === null) delete bindings[key];
       else if (isBinding(action)) bindings[key] = action;
     }
