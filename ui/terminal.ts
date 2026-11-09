@@ -151,7 +151,7 @@ export function openPane(place: HTMLElement, id: string, cwd: string, argv: stri
     }
   };
   term.attachCustomKeyEventHandler((e) => {
-    const action = keyAction(e, false, studio.settings.keymap);
+    const action = keyAction(e, false, studio.files.keymap);
     if (action === "terminal") return true;
     if (typeof action === "object" && e.type === "keydown") {
       e.preventDefault();
@@ -166,7 +166,7 @@ export function openPane(place: HTMLElement, id: string, cwd: string, argv: stri
     (e) => {
       const image = [...(e.clipboardData?.items ?? [])].some((item) => item.type.startsWith("image/"));
       const cmdV = { key: "v", code: "KeyV", metaKey: true, ctrlKey: false, altKey: false, shiftKey: false };
-      const action = keyAction(cmdV, image, studio.settings.keymap);
+      const action = keyAction(cmdV, image, studio.files.keymap);
       if (typeof action === "object") {
         e.preventDefault();
         e.stopPropagation();

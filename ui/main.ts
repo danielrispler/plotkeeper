@@ -83,7 +83,7 @@ window.addEventListener("keydown", (event) => {
   // The terminal types into xterm's hidden textarea, so this covers it too.
   const target = event.target as HTMLElement;
   const typing = target.isContentEditable || target.matches?.("input, textarea, select") === true;
-  const action = windowBinding(studio.settings.keymap, event, typing);
+  const action = windowBinding(studio.files.keymap, event, typing);
   const run = typeof action === "string" ? actions[action] : undefined;
   if (!run) return;
   run();
@@ -93,17 +93,17 @@ window.addEventListener("keydown", (event) => {
 // `settings.json` and `keymap.json`, at start and each time one is saved. A file that does not parse
 // is reported in the notice line and the last good one stays in effect.
 function applySettings(files: SettingsFiles) {
-  const previous = studio.settings.options;
-  studio.settings = reload(studio.settings, files);
-  const { options, errors } = studio.settings;
+  const previous = studio.files.settings;
+  studio.files = reload(studio.files, files);
+  const { settings, errors } = studio.files;
   const notice = element("notice");
   if (errors.length) {
     notice.textContent = errors.join("\n");
     notice.hidden = false;
   } else if (/^(settings|keymap)\.json: /.test(notice.textContent ?? "")) notice.hidden = true;
   // Only a changed `zoom` resets the zoom the keys set.
-  if (options.zoom !== previous.zoom) setZoom(options.zoom);
-  const size = options.terminal.font_size;
+  if (settings.zoom !== previous.zoom) setZoom(settings.zoom);
+  const size = settings.terminal.font_size;
   if (size === null) document.documentElement.style.removeProperty("--term-size");
   else document.documentElement.style.setProperty("--term-size", `${size}px`);
   layout();
