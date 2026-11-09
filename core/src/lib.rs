@@ -2718,6 +2718,22 @@ impl Studio {
         changed
     }
 
+    /// The shell read `window`, the context window of session `id`'s status line snapshot, `None`
+    /// with no snapshot (#517, decisions 1 and 2); returns whether its context share changed.
+    pub fn set_window(&mut self, id: &str, window: Option<u64>) -> bool {
+        let context = self
+            .sessions
+            .get_mut(id)
+            .and_then(|s| s.transcript.context.as_mut());
+        match context {
+            Some(context) if context.window != window => {
+                *context = Context::new(context.tokens, window);
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// The typical duration of check `command`, in milliseconds: the median of how long its earlier
     /// runs took when they did not fail, its backgrounded runs included (#461, decisions 13 to 15).
     /// `None` when it never ran. Runs group by `check_key`.
