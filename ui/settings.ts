@@ -16,7 +16,8 @@ export interface DoctorEntry {
   kind: "shell" | "session";
 }
 
-export interface Settings {
+// `settings.json`'s part of the settings.
+export interface Options {
   zoom: number;
   // null: the stylesheet's `--size-mono`.
   terminal: { font_size: number | null };
@@ -25,10 +26,12 @@ export interface Settings {
   doctor: DoctorEntry[];
 }
 
-export interface Loaded {
-  settings: Settings;
+// Both files: the settings in effect.
+export interface Settings {
+  options: Options;
   keymap: Keymap;
-  // One line per file that did not parse, such as "settings.json: Unexpected end of JSON input".
+  // One line per file that did not parse or key of the wrong type, such as
+  // "settings.json: Unexpected end of JSON input".
   errors: string[];
 }
 
@@ -40,7 +43,10 @@ export const clampZoom = (zoom: number) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN,
 // The zoom `by` steps from `zoom`, inside its bounds; 0 resets it.
 export const zoomed = (zoom: number, by: number) => clampZoom(by === 0 ? 1 : Math.round((zoom + by * ZOOM_STEP) * 10) / 10);
 
-const defaultSettings: Settings = {
+const FONT_MIN = 8;
+const FONT_MAX = 40;
+
+const defaultOptions: Options = {
   zoom: 1,
   terminal: { font_size: null },
   summaries: { model: "haiku", effort: "low", on_open: false },
@@ -71,7 +77,7 @@ const defaultKeymap: Keymap = {
   },
 };
 
-export const initial: Loaded = { settings: defaultSettings, keymap: defaultKeymap, errors: [] };
+export const initial: Settings = { options: defaultOptions, keymap: defaultKeymap, errors: [] };
 
 // Drops comments and trailing commas outside strings, so `JSON.parse` reads Zed's format.
 function parseJsonc(text: string): unknown {
@@ -80,38 +86,50 @@ function parseJsonc(text: string): unknown {
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
-// `value` when it has the type of `fallback`, else `fallback`.
-const pick = <T>(value: unknown, fallback: T): T => (typeof value === typeof fallback ? (value as T) : fallback);
+type Report = (problem: string) => void;
 
-function readSettings(json: unknown): Settings {
+function readOptions(json: unknown, report: Report): Options {
   if (!isObject(json)) throw new Error("expected an object");
+  // `value` when it has the type of `fallback`; else `fallback`, and a key of the wrong type is reported.
+  const pick = <T>(name: string, value: unknown, fallback: T): T => {
+    if (value === undefined || typeof value === typeof fallback) return (value ?? fallback) as T;
+    report(`${name}: expected a ${typeof fallback}`);
+    return fallback;
+  };
   const terminal = isObject(json.terminal) ? json.terminal : {};
   const summaries = isObject(json.summaries) ? json.summaries : {};
-  const d = defaultSettings;
+  const d = defaultOptions;
+  // null when unset or of the wrong type: the stylesheet's size.
+  const fontSize = pick("terminal.font_size", terminal.font_size ?? undefined, NaN);
   return {
-    zoom: clampZoom(pick(json.zoom, d.zoom)),
-    terminal: { font_size: typeof terminal.font_size === "number" ? terminal.font_size : null },
+    zoom: clampZoom(pick("zoom", json.zoom, d.zoom)),
+    terminal: { font_size: Number.isNaN(fontSize) ? null : Math.min(FONT_MAX, Math.max(FONT_MIN, fontSize)) },
     summaries: {
-      model: pick(summaries.model, d.summaries.model),
-      effort: pick(summaries.effort, d.summaries.effort),
-      on_open: pick(summaries.on_open, d.summaries.on_open),
+      model: pick("summaries.model", summaries.model, d.summaries.model),
+      effort: pick("summaries.effort", summaries.effort, d.summaries.effort),
+      on_open: pick("summaries.on_open", summaries.on_open, d.summaries.on_open),
     },
     doctor: Array.isArray(json.doctor)
-      ? json.doctor.filter(
-          (e): e is DoctorEntry =>
-            isObject(e) && typeof e.label === "string" && typeof e.command === "string" && (e.kind === "shell" || e.kind === "session"),
-        )
+      ? json.doctor.filter((e, i): e is DoctorEntry => {
+          const ok =
+            isObject(e) && typeof e.label === "string" && typeof e.command === "string" && (e.kind === "shell" || e.kind === "session");
+          if (!ok) report(`doctor[${i}]: expected a label, a command and a kind of shell or session`);
+          return ok;
+        })
       : d.doctor,
   };
 }
 
-// A keystroke with its modifiers in one order, ctrl-alt-shift-cmd, as `keys.ts` reads a key.
+// The order modifiers take in a keystroke, here and in `keys.ts`.
+export const MODIFIERS = ["ctrl", "alt", "shift", "cmd"] as const;
+
+// A keystroke with its modifiers in `MODIFIERS` order.
 function normal(stroke: string): string {
-  const [, mods, key] = /^((?:(?:ctrl|alt|shift|cmd)-)*)(.+)$/.exec(stroke.toLowerCase())!;
-  return [...["ctrl", "alt", "shift", "cmd"].filter((m) => mods.includes(`${m}-`)), key].join("-");
+  const [, mods, key] = new RegExp(`^((?:(?:${MODIFIERS.join("|")})-)*)(.+)$`).exec(stroke.toLowerCase())!;
+  return [...MODIFIERS.filter((m) => mods.includes(`${m}-`)), key].join("-");
 }
 
-const isBinding =(v: unknown): v is Binding =>
+const isBinding = (v: unknown): v is Binding =>
   typeof v === "string" || (Array.isArray(v) && v.length === 2 && v.every((s) => typeof s === "string"));
 
 // Zed's keymap: an array of `{ "context", "bindings" }`, over the defaults. Unlike Zed, binding an
@@ -125,7 +143,9 @@ function readKeymap(json: unknown): Keymap {
     const bindings = (keymap[context] ??= {});
     const same = (a: Binding, b: Binding) => JSON.stringify(a) === JSON.stringify(b);
     for (const action of Object.values(entry.bindings).filter(isBinding)) {
-      for (const [key, bound] of Object.entries(defaultKeymap[context] ?? {})) if (same(bound, action)) delete bindings[key];
+      // Only keys still on their default: an earlier entry's binding stays.
+      for (const [key, bound] of Object.entries(defaultKeymap[context] ?? {}))
+        if (same(bound, action) && bindings[key] !== undefined && same(bindings[key], bound)) delete bindings[key];
     }
     for (const [stroke, action] of Object.entries(entry.bindings)) {
       const key = normal(stroke);
@@ -136,20 +156,22 @@ function readKeymap(json: unknown): Keymap {
   return keymap;
 }
 
-// The settings and keymap from the files' text (null: no file), each falling back to `previous`
-// when its file does not parse.
-export function reload(previous: Loaded, files: { settings: string | null; keymap: string | null }): Loaded {
+// The two files' text, as the shell sends it; null: no file.
+export type SettingsFiles = { settings: string | null; keymap: string | null };
+
+// The settings from the files' text, each file falling back to `previous` when it does not parse.
+export function reload(previous: Settings, files: SettingsFiles): Settings {
   const errors: string[] = [];
-  const read = <T>(name: string, text: string | null, parse: (json: unknown) => T, fallback: T, last: T): T => {
+  const read = <T>(name: string, text: string | null, parse: (json: unknown, report: Report) => T, fallback: T, last: T): T => {
     if (text === null || !text.trim()) return fallback;
     try {
-      return parse(parseJsonc(text));
+      return parse(parseJsonc(text), (problem) => errors.push(`${name}: ${problem}`));
     } catch (e) {
       errors.push(`${name}: ${e instanceof Error ? e.message : e}`);
       return last;
     }
   };
-  const settings = read("settings.json", files.settings, readSettings, defaultSettings, previous.settings);
+  const options = read("settings.json", files.settings, readOptions, defaultOptions, previous.options);
   const keymap = read("keymap.json", files.keymap, readKeymap, defaultKeymap, previous.keymap);
-  return { settings, keymap, errors };
+  return { options, keymap, errors };
 }

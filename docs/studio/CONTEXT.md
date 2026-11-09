@@ -162,7 +162,7 @@ The default project mode. Waits and cards serve Daniel's understanding of this p
 The project mode for a project where Daniel cares only about the result. The wait is his own time, for practice or enrichment unrelated to the project. Approval requests and agent questions still reach him.
 
 **Settings**:
-Daniel's choices for the studio, kept in `settings.json` and `keymap.json` in its data folder, in Zed's format: zoom, the terminal's font size, the summary writer's model and effort, the Doctor menu, and the shortcuts. The studio reloads them when saved; a file that does not parse is reported and the last good settings stay in effect.
+Daniel's choices for the studio, kept in `settings.json` and `keymap.json` in its data folder, in Zed's format: zoom, the terminal's font size, the summary writer's model and effort, the Doctor menu, and the shortcuts. The studio reloads them when saved; a file that does not parse is reported and the last good settings stay in effect. The summary writer's model and effort and the Doctor menu are read but not used yet; later tickets wire them.
 _Avoid_: Preferences, config
 
 **Explanation language**:

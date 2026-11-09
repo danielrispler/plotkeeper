@@ -2,7 +2,7 @@
 // whether the clipboard holds an image, to what happens. The Cmd table is in the README; the
 // terminal's Cmd shortcuts come from `keymap.json` (#524).
 
-import { type Binding, initial, type Keymap } from "./settings.js";
+import { type Binding, initial, type Keymap, MODIFIERS } from "./settings.js";
 
 // The fields of a `KeyboardEvent` the mapping reads.
 export interface Key {
@@ -34,12 +34,19 @@ const names: Record<string, string> = {
 // The key as Zed's keymap writes it, such as "cmd-shift-k", by the physical key.
 export function keystroke({ code, metaKey, ctrlKey, altKey, shiftKey }: Key): string {
   const name = /^(?:Key|Digit)(.)$/.exec(code)?.[1].toLowerCase() ?? names[code] ?? code.toLowerCase();
-  const mods = [ctrlKey && "ctrl", altKey && "alt", shiftKey && "shift", metaKey && "cmd"].filter(Boolean);
-  return [...mods, name].join("-");
+  const held = { ctrl: ctrlKey, alt: altKey, shift: shiftKey, cmd: metaKey };
+  return [...MODIFIERS.filter((m) => held[m]), name].join("-");
 }
 
 // The action `key` triggers in `context` of `keymap`.
 export const bound = (keymap: Keymap, context: string, key: Key): Binding | undefined => keymap[context]?.[keystroke(key)];
+
+// The window's action for `key`. While typing in a field or the terminal, a binding without Cmd leaves
+// the key to it; only Dismiss runs, since it does not take the key.
+export function windowBinding(keymap: Keymap, key: Key, typing: boolean): Binding | undefined {
+  const action = bound(keymap, "Workspace", key);
+  return typing && !key.metaKey && action !== "studio::Dismiss" ? undefined : action;
+}
 
 // The terminal's commands, as `keymap.json` names them.
 const commands: Record<string, "selectAll" | "find" | "clear"> = {
