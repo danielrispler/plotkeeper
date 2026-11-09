@@ -103,14 +103,14 @@ The name an agent session gets from its work: its issue, its PR and its worktree
 How much of its context window an agent session uses, as a percentage. It is measured as Claude Code's status line measures it, from the session's status line snapshot: its tokens, its window size, and its own percent used and left. Without a snapshot, the control room shows the latest turn's tokens only.
 
 **Needs you**:
-The state of an agent session that is blocked on Daniel: waiting for his permission, his answer to a question, or his approval of a plan.
+The state of an agent session that is blocked on Daniel: waiting for his permission, his answer to a question tool, his approval of a plan, or an MCP request for input. A reply that ends with a question in its text blocks nothing, so it is your turn.
 _Avoid_: Stuck (a session that is not progressing, which is a different state)
 
 **Running**:
 The state of an agent session in a turn: from Daniel's prompt until the agent ends its turn or the session ends.
 
 **Your turn**:
-The state of an agent session that finished its turn without asking Daniel anything, or that started and has had no prompt yet. Unlike needs you, it does not interrupt him.
+The state of an agent session that finished its turn with nothing blocked on Daniel, even when its reply asks him something, or that started and has had no prompt yet. Unlike needs you, it does not interrupt him.
 _Avoid_: Done (the turn ended, not the task)
 
 **Idle**:

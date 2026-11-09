@@ -125,19 +125,19 @@ fn the_days_sessions_change_state_only_by_their_named_setters_and_clearers() {
         // A queued prompt's turn starts at its first step, under a new prompt id (#434, decision 3).
         (Some(YourTurn), Running, "PreToolUse"),
         (Some(Running), YourTurn, "Stop"),
-        // An `AskUserQuestion` or `ExitPlanMode`, and a `Stop` that asks.
+        // An `AskUserQuestion`, `ExitPlanMode` or permission; a `Stop` that asks in text does not (#540).
         (Some(Running), NeedsYou, "PreToolUse"),
-        (Some(Running), NeedsYou, "Stop"),
-        // The step that asked resolves, or Daniel prompts.
+        // The step that asked resolves.
         (Some(NeedsYou), Running, "PostToolUse"),
-        (Some(NeedsYou), Running, "UserPromptSubmit"),
         (Some(YourTurn), Idle, "tick"),
+        // Any event ends idle, a late notification too.
         (Some(Idle), Running, "UserPromptSubmit"),
+        (Some(Idle), YourTurn, "Notification"),
         (Some(YourTurn), Ended, "SessionEnd"),
         // A `/clear` continues the row it ended (#474).
         (Some(Ended), YourTurn, "SessionStart"),
     ];
-    let named: [Change; 12] = named.map(|(from, to, cause)| (from, to, cause.into()));
+    let named: [Change; 11] = named.map(|(from, to, cause)| (from, to, cause.into()));
     assert_eq!(changes, BTreeSet::from(named));
 }
 
@@ -187,9 +187,9 @@ fn at_midnight_the_days_6_rows_are_3_ended_2_at_your_turn_and_1_idle() {
 }
 
 #[test]
-fn the_list_shows_needs_you_first_then_running_then_ended() {
+fn the_list_shows_needs_you_first_then_your_turn_then_ended() {
     let mut studio = Studio::default();
-    for line in DAY.lines().take(729) {
+    for line in DAY.lines().take(732) {
         let event: Value = serde_json::from_str(line).unwrap();
         studio.tick(event["studio_received_ms"].as_u64().unwrap());
         studio.apply(line);
@@ -205,8 +205,8 @@ fn the_list_shows_needs_you_first_then_running_then_ended() {
     assert_eq!(
         list,
         [
-            ("2afc85f5", NeedsYou),
-            ("5d7f69ab", Running),
+            ("5d7f69ab", NeedsYou),
+            ("2afc85f5", YourTurn),
             ("1ac172be", Ended)
         ]
     );
