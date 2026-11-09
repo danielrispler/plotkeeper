@@ -122,7 +122,7 @@ body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; to
 .times { display: flex; gap: 4px 10px; flex-wrap: wrap; align-items: baseline; }
 .times:empty { display: none; }
 .times .estimate { color: var(--muted); }
-.times .estimate:empty { display: none; }
+.times .estimate:empty, .times .runs-at:empty { display: none; }
 .tools { display: flex; gap: 6px; }
 .tool { white-space: nowrap; border: 1px solid var(--line); background: var(--raised); color: var(--muted);
         border-radius: var(--radius); padding: 2px 9px; cursor: pointer; font-size: 12px; }

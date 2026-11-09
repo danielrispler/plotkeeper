@@ -33,7 +33,11 @@ export function showView(selected: Selection | null) {
   const estimate = document.createElement("span");
   estimate.className = "estimate";
   estimate.textContent = agent === null ? estimateText(session.work) : "";
-  element("times").replaceChildren(...times(session, stepSpan).map(timeNode), estimate);
+  // The model and effort the session runs at (#517, decision 8); a subagent's are its own.
+  const { model, effort } = session.transcript;
+  const runsAt = text("span", agent === null ? [model, effort && `effort ${effort}`].filter(Boolean).join(" · ") : "", "runs-at");
+  runsAt.title = "Model and reasoning effort, from the transcript";
+  element("times").replaceChildren(...times(session, stepSpan).map(timeNode), runsAt, estimate);
   element("view").toggleAttribute("data-agent", agent !== null);
   const context = session.transcript.context;
   element("identity").textContent =

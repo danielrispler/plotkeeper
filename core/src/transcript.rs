@@ -31,6 +31,12 @@ pub struct Transcript {
     pub context: Option<Context>,
     /// The git branch of the session's folder, from its latest line; kept across turns.
     pub branch: Option<String>,
+    /// The model the session runs at, from the agent's latest message (#517, decision 8); kept
+    /// across turns.
+    pub model: Option<String>,
+    /// The session's effort, from its latest line that carries one (#517, decision 8); kept across
+    /// turns.
+    pub effort: Option<String>,
 }
 
 /// The input tokens of the agent's latest message, out of the context window Claude Code's status
@@ -72,6 +78,16 @@ impl Transcript {
         }
         if let Some(branch) = line["gitBranch"].as_str().filter(|b| !b.is_empty()) {
             self.branch = Some(branch.into());
+        }
+        if let Some(effort) = line["effort"].as_str() {
+            self.effort = Some(effort.into());
+        }
+        // An API error's line is `<synthetic>`, no model the session runs at.
+        if let Some(model) = line["message"]["model"]
+            .as_str()
+            .filter(|m| *m != "<synthetic>")
+        {
+            self.model = Some(model.into());
         }
         let usage = &line["message"]["usage"];
         if kind == "assistant" && usage.is_object() {
@@ -119,6 +135,8 @@ impl Transcript {
         *self = Transcript {
             context: self.context.take(),
             branch: self.branch.take(),
+            model: self.model.take(),
+            effort: self.effort.take(),
             ..Transcript::default()
         };
     }

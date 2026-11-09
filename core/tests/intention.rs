@@ -171,3 +171,40 @@ fn a_missing_file_falls_back_to_the_step_with_one_stderr_line() {
 
     assert_fallback(&mut studio, logged);
 }
+
+/// An assistant line of the main agent, at model `model` and effort `effort`.
+fn assistant_at(model: &str, effort: &str) -> String {
+    format!(
+        r#"{{"isSidechain":false,"type":"assistant","effort":"{effort}","message":{{"model":"{model}","role":"assistant","content":[{{"type":"text","text":"(scrubbed)"}}]}}}}"#
+    ) + "\n"
+}
+
+#[test]
+fn the_session_runs_at_its_latest_model_and_effort_across_turns() {
+    // A helper's line and an API error's synthetic line name no model the session runs at.
+    let helper = r#"{"isSidechain":true,"type":"assistant","effort":"low","message":{"model":"claude-haiku-5","role":"assistant","content":[{"type":"text","text":"(scrubbed)"}]}}"#;
+    let error = r#"{"isSidechain":false,"type":"assistant","message":{"model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"API Error"}]}}"#;
+    let prompt = CHAIN.lines().nth(13).unwrap();
+    let lines = first(2)
+        + &assistant_at("claude-sonnet-5", "high")
+        + &assistant_at("claude-opus-5-5", "medium")
+        + &format!("{helper}\n{error}\n{prompt}\n");
+    let path = transcript("model", &lines);
+    let mut studio = session_at(&path);
+
+    follow(&mut studio);
+    let transcript = &studio.session(SESSION).unwrap().transcript;
+    assert_eq!(transcript.model.as_deref(), Some("claude-opus-5-5"));
+    assert_eq!(transcript.effort.as_deref(), Some("medium"));
+}
+
+#[test]
+fn a_transcript_without_model_or_effort_has_neither() {
+    let path = transcript("no-model", &first(2));
+    let mut studio = session_at(&path);
+
+    follow(&mut studio);
+    let transcript = &studio.session(SESSION).unwrap().transcript;
+    assert_eq!(transcript.model, None);
+    assert_eq!(transcript.effort, None);
+}
