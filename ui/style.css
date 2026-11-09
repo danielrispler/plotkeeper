@@ -145,8 +145,18 @@ body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; to
 .step code { display: block; white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0 0; }
 .tool-name { font-weight: 600; }
 .responses { margin: 8px 0 0; }
-.responses pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: var(--size-read); margin: 6px 0 0;
-                 padding-top: 6px; border-top: 1px solid var(--line-soft); }
+.responses .response { margin: 6px 0 0; padding-top: 6px; border-top: 1px solid var(--line-soft); }
+/* Rendered Markdown (#525): responses and "ask about this" replies. */
+.markdown { font-size: var(--size-read); overflow-wrap: anywhere; }
+.markdown > :first-child { margin-top: 0; }
+.markdown p, .markdown ul, .markdown ol, .markdown table, .markdown pre { margin: 8px 0 0; }
+.markdown h1, .markdown h2, .markdown h3, .markdown h4 { font-size: 1em; font-weight: 600; margin: 12px 0 0; }
+.markdown code { white-space: normal; overflow: visible; }
+.markdown pre { background: var(--raised); border-radius: var(--radius); padding: 8px 10px; overflow-x: auto; }
+.markdown pre code { background: none; padding: 0; white-space: pre; }
+.markdown table { border-collapse: collapse; display: block; overflow-x: auto; }
+.markdown th, .markdown td { border: 1px solid var(--line); padding: 3px 8px; text-align: start; }
+.markdown blockquote { margin: 8px 0 0; padding-left: 10px; border-left: 3px solid var(--line); color: var(--muted); }
 .cards-title { margin-top: 20px; }
 /* The session's brief, above its cards; its code wraps as a card's does. */
 .brief { margin: 14px 0 0; font-size: var(--size-read); }
@@ -182,7 +192,8 @@ body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; to
 .ask-about button { margin-top: 6px; font-size: var(--size); padding: 2px 12px; border: 1px solid var(--line);
               border-radius: var(--radius); background: var(--raised); color: var(--fg); cursor: pointer; }
 .ask-about button:disabled { opacity: .45; cursor: default; }
-.ask-reply p { font-size: var(--size-read); margin: 8px 0 0; }
+.ask-reply > p { font-size: var(--size-read); margin: 8px 0 0; }
+.ask-reply .markdown { margin: 8px 0 0; }
 .ask-reply .asking, .ask-reply .ask-error { color: var(--muted); font-style: italic; }
 .rating p { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
 .rating span { font-size: 14px; color: var(--muted); }

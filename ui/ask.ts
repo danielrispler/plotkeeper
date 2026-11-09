@@ -2,7 +2,8 @@
 // answers it with the card writer's own call, read with the turn's intentions; the answer stays here
 // and the session never sees it. A failed call or a reply with no answer shows why, with a retry.
 
-import { invoke, prose, text } from "./dom.js";
+import { invoke, text } from "./dom.js";
+import { rendered } from "./markdown.js";
 
 // Each item's box, kept across the view's redraws (every second), so a question being typed, an
 // open box and an answer all stay. shortcut: never pruned; prune by the listed sessions if it grows.
@@ -33,7 +34,7 @@ function askBox(session: string, item: string): HTMLElement {
     reply.replaceChildren(text("p", "Asking…", "asking"));
     try {
       const answer = await invoke<string>("ask", { session, item, question });
-      reply.replaceChildren(prose("p", answer));
+      reply.replaceChildren(rendered("div", answer));
     } catch (e) {
       const retry = button("Retry");
       retry.addEventListener("click", ask);

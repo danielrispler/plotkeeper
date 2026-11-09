@@ -314,6 +314,12 @@ fn unsaved(saved: io::Result<()>) {
 /// not run `claude -p`.
 type Writer = Arc<dyn CardWriter + Send + Sync>;
 
+/// Whether a navigation stays on the app's own pages (#525, decision 21): a backstop, as a rendered
+/// link opens in the browser through `open_link` and never navigates the window.
+fn in_app(url: &tauri::Url) -> bool {
+    url.scheme() == "tauri" || url.host_str() == Some("tauri.localhost")
+}
+
 fn main() {
     uptime();
     let log = studio_hook::event_log(&std::env::home_dir().expect("a home directory"));
@@ -328,6 +334,11 @@ fn main() {
         // First, so a second instance exits before it sets anything up (#470).
         .plugin(tauri_plugin_single_instance::init(restart::second_instance))
         .plugin(tauri_plugin_notification::init())
+        .plugin(
+            tauri::plugin::Builder::<_, ()>::new("navigation")
+                .on_navigation(|_, url| in_app(url))
+                .build(),
+        )
         .manage(Mutex::new(studio))
         .manage(Cards::new(store))
         .manage(Notices::default())
@@ -666,4 +677,20 @@ enum Notice<'a> {
 fn uptime() -> Duration {
     static STARTED: LazyLock<Instant> = LazyLock::new(Instant::now);
     STARTED.elapsed()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::in_app;
+
+    #[test]
+    fn the_window_stays_on_the_app() {
+        let url = |s: &str| tauri::Url::parse(s).unwrap();
+        assert!(in_app(&url("tauri://localhost/index.html")));
+        assert!(in_app(&url("http://tauri.localhost/index.html")));
+        assert!(!in_app(&url("https://example.com/")));
+        assert!(!in_app(&url("http://tauri.localhost.example.com/")));
+        assert!(!in_app(&url("file:///etc/passwd")));
+        assert!(!in_app(&url("javascript:alert(1)")));
+    }
 }

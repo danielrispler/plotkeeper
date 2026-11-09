@@ -4,6 +4,7 @@
 
 import { code, element, invoke, text } from "./dom.js";
 import { askElement } from "./ask.js";
+import { rendered } from "./markdown.js";
 import { encode, request } from "./daemon.js";
 import { agentState, contextText, sessionName } from "./list.js";
 import { closePane, startClaude } from "./panes.js";
@@ -80,7 +81,7 @@ function showStory(session: string, story: Transcript | null) {
   element("responses").hidden = responses.length === 0;
   element("responses-title").textContent = `Responses (${responses.length})`;
   element("responses-body").replaceChildren(
-    ...responses.flatMap((response) => [text("pre", response), askElement(session, response)]),
+    ...responses.flatMap((response) => [rendered("div", response, "response"), askElement(session, response)]),
   );
 }
 
