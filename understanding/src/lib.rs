@@ -759,13 +759,14 @@ impl ClaudeWriter {
     /// uses the subscription login (#320, "Fact"); the studio never reads that login itself. The
     /// prompt holds untrusted text, a change or Daniel's prompts, so the run has no tools and no MCP
     /// servers, whatever Daniel's settings allow. It also runs without the studio plugin, so its
-    /// session sends no hook events. The prompt goes on standard input without its NUL bytes, which
+    /// session sends no hook events, and in safe mode, so none of Daniel's plugins, hooks, skills or
+    /// CLAUDE.md reach it (#517, decision 9). The prompt goes on standard input without its NUL bytes, which
     /// `claude` could not take in an argument either (#434, decision 31).
     fn run(&self, prompt: &str) -> (Command, String) {
         let mut command = Command::new(&self.program);
         command
             // `--tools` takes several values, so an option must follow it.
-            .args(["--tools", "", "--strict-mcp-config", "-p"])
+            .args(["--tools", "", "--strict-mcp-config", "--safe-mode", "-p"])
             .env_remove("ANTHROPIC_API_KEY")
             .env_remove("ANTHROPIC_AUTH_TOKEN")
             .env_remove("CLAUDE_CODE_PLUGIN_DIRS")
