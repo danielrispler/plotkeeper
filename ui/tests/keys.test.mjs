@@ -1,7 +1,7 @@
 // The terminal pane's key mapping (#466), run on the `tsc` output. Run: `npm test` in apps/studio.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { bound, keyAction, keystroke } from "../../dist/keys.js";
+import { bound, keyAction, keystroke, windowBinding } from "../../dist/keys.js";
 import { initial, reload } from "../../dist/settings.js";
 
 const key = (code, mods = {}, key = "") => ({
@@ -93,4 +93,16 @@ test("a rebound shortcut triggers its action, and the old key no longer does", (
   assert.equal(keyAction(key("KeyK", { metaKey: true }), false, keymap), "app");
   assert.equal(keyAction(key("ArrowLeft", { metaKey: true }), false, keymap), "app");
   assert.deepEqual(keyAction(key("ArrowRight", { metaKey: true }), false, keymap), { send: "\x05" });
+});
+
+test("while typing, a window shortcut without Cmd leaves the key to the field, except Esc's dismiss", () => {
+  const { keymap } = reload(initial, {
+    settings: null,
+    keymap: `[{ "bindings": { "ctrl-l": "studio::ToggleList", "alt-1": "studio::ToggleRail" } }]`,
+  });
+  assert.equal(windowBinding(keymap, key("KeyL", { ctrlKey: true }, "l"), true), undefined);
+  assert.equal(windowBinding(keymap, key("Digit1", { altKey: true }, "1"), true), undefined);
+  assert.equal(windowBinding(keymap, key("KeyL", { ctrlKey: true }, "l"), false), "studio::ToggleList");
+  assert.equal(windowBinding(keymap, key("Escape", {}, "Escape"), true), "studio::Dismiss");
+  assert.equal(windowBinding(keymap, key("Equal", { metaKey: true }, "="), true), "studio::ZoomIn");
 });

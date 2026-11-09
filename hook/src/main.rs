@@ -52,8 +52,7 @@ fn trees(event: &mut Map<String, Value>, data: &Path) -> Result<(), Box<dyn Erro
     let outside = matches!(name, "SessionStart" | "SessionEnd" | "Notification");
     let session = text("session_id").unwrap_or_default();
     // The id names a file, so it must be a plain one.
-    let plain = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_';
-    let plain = !session.is_empty() && session.chars().all(plain);
+    let plain = studio_hook::answer::is_file_safe(session);
     let turns = data.join("turns");
     let state = turns.join(format!("{session}.json"));
     // A session's record goes with it; a start, which is rare, prunes those whose end never came.

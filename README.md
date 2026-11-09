@@ -83,12 +83,12 @@ Every shortcut here but Cmd+C and Cmd+V can be rebound in `keymap.json` (see Set
 
 ## Settings
 
-`settings.json` and `keymap.json` sit in the studio's data folder, `~/Library/Application Support/dev.falinks.studio/`, in Zed's format: JSON with comments and trailing commas (#524). The app reloads them when either is saved. A file that does not parse is reported in the notice line, and the last good one stays in effect. Missing keys keep their defaults:
+`settings.json` and `keymap.json` sit in the studio's data folder, `~/Library/Application Support/dev.falinks.studio/`, in Zed's format: JSON with comments and trailing commas (#524). The app reloads them when either is saved. A file that does not parse is reported in the notice line, and the last good one stays in effect. Missing keys keep their defaults; a key of the wrong type is reported in the same line and keeps its default. `summaries` and `doctor` are read but not used yet; later tickets of #517 wire them:
 
 ```jsonc
 {
   "zoom": 1,                     // 0.5 to 2
-  "terminal": { "font_size": 15 }, // default: the stylesheet's 12.5
+  "terminal": { "font_size": 15 }, // 8 to 40; default: the stylesheet's 12.5
   "summaries": { "model": "haiku", "effort": "low", "on_open": false },
   "doctor": [
     { "label": "Check the installation", "command": "claude doctor", "kind": "shell" },
@@ -97,7 +97,7 @@ Every shortcut here but Cmd+C and Cmd+V can be rebound in `keymap.json` (see Set
 }
 ```
 
-`keymap.json` is Zed's array of contexts, `Workspace` for the window and `Terminal` for the pane. The actions are `studio::ToggleList`, `studio::ToggleRail`, `studio::Dismiss` (Esc), `studio::ZoomIn`, `studio::ZoomOut`, `studio::ResetZoom`, `terminal::SelectAll`, `terminal::Find`, `terminal::Clear` and `["terminal::SendText", "<text>"]`. Unlike Zed, binding an action to a new key unbinds its default key; `null` unbinds a key:
+`keymap.json` is Zed's array of contexts, `Workspace` for the window and `Terminal` for the pane. The actions are `studio::ToggleList`, `studio::ToggleRail`, `studio::Dismiss` (Esc), `studio::ZoomIn`, `studio::ZoomOut`, `studio::ResetZoom`, `terminal::SelectAll`, `terminal::Find`, `terminal::Clear` and `["terminal::SendText", "<text>"]`. Unlike Zed, binding an action to a new key unbinds its default key; `null` unbinds a key. A `Workspace` shortcut without Cmd, other than `studio::Dismiss`, leaves the key to the terminal or text box you are typing in:
 
 ```json
 [{ "context": "Workspace", "bindings": { "cmd-l": "studio::ToggleList", "escape": null } }]
