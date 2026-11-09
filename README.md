@@ -53,6 +53,8 @@ This builds `target/release/bundle/macos/Studio.app` with an ad-hoc signature (`
 
 It leaves out the shell, which needs `dist/` from `npm run build`. `npm test` (after `npm ci`) builds the UI with `tsc` and runs `terminal-daemon/tests/replay.test.mjs`: a terminal's bytes replayed into a headless xterm of another size, with the resize sent, match a fresh render at that size; and `ui/tests/`: the UI's pure functions on the `tsc` output in `dist/`, such as the width rule's layout, the terminal's key mapping (`keys`) and its file paths (`paths`), and a check card's verdict and quiz state (`check_cards`).
 
+These checks run in CI in `.github/workflows/studio.yml`, on macOS, for each pull request and push to `main` that changes `apps/studio/`: `npm ci`, `npm run build`, `npm test`, `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings` and `cargo test --workspace`, the shell included. The engine's `checks.yml` and `ci-checks` skip the studio.
+
 ## The terminal pane
 
 The centre of the window is one terminal (#466): a login shell in the configured repository, `STUDIO_REPO` when set, else the main checkout of the repository the app was built in. It runs in the terminal daemon, so it outlives the app; at start the app attaches to it again and replays its screen. When no daemon runs, the app starts `studio-terminal-daemon serve` from beside its own executable, logging to `terminal-daemon.log` beside the socket. A shell that exited starts again at the next key.
@@ -76,7 +78,32 @@ Every Cmd shortcut goes to the terminal or to the app (`ui/keys.ts`):
 | Cmd+Left, Cmd+Right | terminal | sends Ctrl+A, Ctrl+E: start and end of line |
 | Cmd+Backspace | terminal | sends Ctrl+U: deletes to the line's start |
 | Cmd+1, Cmd+2 | app | opens the session list, the story rail |
-| any other Cmd shortcut, and any Cmd with Shift, Ctrl or Option | app | the app's menu: Cmd+Q, Cmd+W, Cmd+H, Cmd+M and the like |
+| Cmd+=, Cmd+-, Cmd+0 | app | zooms the window in, out (from half to double size) and back |
+| any other Cmd shortcut | app | the app's menu: Cmd+Q, Cmd+W, Cmd+H, Cmd+M and the like |
+
+Every shortcut here but Cmd+C and Cmd+V can be rebound in `keymap.json` (see Settings files).
+
+## Settings files
+
+`settings.json` and `keymap.json` sit in the studio's data folder, `~/Library/Application Support/dev.falinks.studio/`, in Zed's format: JSON with comments and trailing commas (#524). The app reloads them when either is saved. A file that does not parse is reported in the notice line, and the last good one stays in effect. Missing keys keep their defaults; a key of the wrong type is reported in the same line and keeps its default. `summaries` and `doctor` are read but not used yet; later tickets of #517 wire them:
+
+```jsonc
+{
+  "zoom": 1,                     // 0.5 to 2
+  "terminal": { "font_size": 15 }, // 8 to 40; default: the stylesheet's 12.5
+  "summaries": { "model": "haiku", "effort": "low", "on_open": false },
+  "doctor": [
+    { "label": "Check the installation", "command": "claude doctor", "kind": "shell" },
+    { "label": "Full checkup", "command": "/doctor", "kind": "session" }
+  ]
+}
+```
+
+`keymap.json` is Zed's array of contexts, `Workspace` for the window and `Terminal` for the pane. The actions are `studio::ToggleList`, `studio::ToggleRail`, `studio::Dismiss` (Esc), `studio::ZoomIn`, `studio::ZoomOut`, `studio::ResetZoom`, `terminal::SelectAll`, `terminal::Find`, `terminal::Clear` and `["terminal::SendText", "<text>"]`. Unlike Zed, binding an action to a new key unbinds its default key; `null` unbinds a key. A `Workspace` shortcut without Cmd, other than `studio::Dismiss`, leaves the key to the terminal or text box you are typing in:
+
+```json
+[{ "context": "Workspace", "bindings": { "cmd-l": "studio::ToggleList", "escape": null } }]
+```
 
 ## Restarts and daemon upgrades
 

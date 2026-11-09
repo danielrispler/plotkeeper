@@ -34,6 +34,7 @@ use tauri_plugin_notification::NotificationExt;
 
 mod answer;
 mod restart;
+mod settings;
 mod terminal;
 
 /// The card store, which the log thread adds to and the pane records guesses in.
@@ -313,6 +314,12 @@ fn unsaved(saved: io::Result<()>) {
 /// not run `claude -p`.
 type Writer = Arc<dyn CardWriter + Send + Sync>;
 
+/// Whether a navigation stays on the app's own pages (#525, decision 21): a backstop, as a rendered
+/// link opens in the browser through `open_link` and never navigates the window.
+fn in_app(url: &tauri::Url) -> bool {
+    url.scheme() == "tauri" || url.host_str() == Some("tauri.localhost")
+}
+
 fn main() {
     uptime();
     let log = studio_hook::event_log(&std::env::home_dir().expect("a home directory"));
@@ -327,6 +334,11 @@ fn main() {
         // First, so a second instance exits before it sets anything up (#470).
         .plugin(tauri_plugin_single_instance::init(restart::second_instance))
         .plugin(tauri_plugin_notification::init())
+        .plugin(
+            tauri::plugin::Builder::<_, ()>::new("navigation")
+                .on_navigation(|_, url| in_app(url))
+                .build(),
+        )
         .manage(Mutex::new(studio))
         .manage(Cards::new(store))
         .manage(Notices::default())
@@ -362,11 +374,14 @@ fn main() {
             restart::revival,
             restart::restart_into,
             answer::watch,
-            answer::answer
+            answer::answer,
+            settings::settings_files,
+            settings::set_zoom
         ])
         .setup(move |app| {
             let app = app.handle().clone();
             restart::watch_build(app.clone());
+            settings::watch(app.clone());
             let prs_app = app.clone();
             thread::spawn(move || prs(&prs_app));
             thread::spawn(move || follow(&app, &log, &writer));
@@ -497,8 +512,21 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
         // Reads the transcripts' lines and nothing else (`apps/studio/AGENTS.md`).
         let log = |line: String| eprintln!("studio: {line}");
         let transcripts_changed = state.lock().unwrap().follow_transcripts(log);
+        // Each live session's context, from its status line snapshot (#517, decision 1; #519); the
+        // snapshot is named by the conversation's id, which a `/clear` changes.
+        let running: Vec<_> = (state.lock().unwrap().sessions().into_iter())
+            .filter(|s| s.state != Ended)
+            .map(|s| (s.agent.id.clone(), s.resume_id.clone()))
+            .collect();
+        let home = std::env::home_dir().unwrap_or_default();
+        let usage = studio_hook::data_dir(&home).join("usage");
+        let windows_changed = running.into_iter().fold(false, |changed, (id, resume_id)| {
+            let snapshot = studio_workbench::context_window(&usage, &resume_id);
+            state.lock().unwrap().set_snapshot(&id, snapshot) | changed
+        });
         let names_changed = NAMES_CHANGED.swap(false, Ordering::AcqRel);
-        if state.lock().unwrap().tick(millis()) || read || transcripts_changed || names_changed {
+        let changed = read || transcripts_changed || windows_changed || names_changed;
+        if state.lock().unwrap().tick(millis()) || changed {
             sent.list(app);
         }
         // Asking for focus waits on the main thread, which never takes this lock.
@@ -662,4 +690,20 @@ enum Notice<'a> {
 fn uptime() -> Duration {
     static STARTED: LazyLock<Instant> = LazyLock::new(Instant::now);
     STARTED.elapsed()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::in_app;
+
+    #[test]
+    fn the_window_stays_on_the_app() {
+        let url = |s: &str| tauri::Url::parse(s).unwrap();
+        assert!(in_app(&url("tauri://localhost/index.html")));
+        assert!(in_app(&url("http://tauri.localhost/index.html")));
+        assert!(!in_app(&url("https://example.com/")));
+        assert!(!in_app(&url("http://tauri.localhost.example.com/")));
+        assert!(!in_app(&url("file:///etc/passwd")));
+        assert!(!in_app(&url("javascript:alert(1)")));
+    }
 }

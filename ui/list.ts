@@ -3,7 +3,7 @@
 // which opens the full list on click or ⌘1.
 
 import { age, element, prose, pressable, stepText, text } from "./dom.js";
-import { counts, timesText } from "./times.js";
+import { counts, times } from "./times.js";
 import { select } from "./selection.js";
 import { studio } from "./state.js";
 import { stateLabels, type Context, type Session, type SessionState, type Subagent } from "./types.js";
@@ -24,16 +24,27 @@ export function sessionName(session: Pick<Session, "name" | "identity" | "folder
   return session.name ?? (session.identity.name || session.folder_name);
 }
 
-// How full a session's context is, as a share of its window: "23%", or "" before it is known.
+const thousands = (n: number) => `${Math.round(n / 1000).toLocaleString("en-US")}k`;
+
+// How full a session's context is (#517, decisions 2 and 3): "context 9%", its tokens such as "85k"
+// when the window is unknown, or "" before it is known.
 export function contextText(context: Context | null): string {
-  return context ? `${Math.round((100 * context.tokens) / context.window)}%` : "";
+  if (!context) return "";
+  return context.share === null ? thousands(context.tokens) : `context ${context.share}%`;
 }
 
-// The context share's node, titled with its tokens.
+// The context share's hover: its tokens of the window, and what Claude's status line shows: its own
+// percent left.
+export function contextTitle(context: Context | null): string {
+  if (!context) return "";
+  const used = thousands(context.tokens);
+  if (context.window === null || context.left === null) return `${used} tokens used · the window size is unknown`;
+  return `${used} of ${thousands(context.window)} tokens used · Claude's status line shows this as ${context.left}% left`;
+}
+
+// The context share's node, with its hover.
 function contextNode(context: Context | null): HTMLElement {
-  const node = text("span", contextText(context), "id");
-  if (context) node.title = `Context: ${Math.round(context.tokens / 1000)}k of ${context.window / 1000}k tokens`;
-  return node;
+  return Object.assign(text("span", contextText(context), "id"), { title: contextTitle(context) });
 }
 
 // A subagent's state label and its state: "Needs you" while it asks, else its status.
@@ -97,7 +108,10 @@ function row(session: Session, children: Children): HTMLElement {
     [Object.assign(text("span", sessionName(session), "name"), { title: sessionName(session) }), contextNode(session.transcript.context)],
     [...done(children, children.get("session")), rowLine(session.line ?? "")],
   );
-  button.append(counts(text("span", "", "l3"), (now) => timesText(session, session.step_span, now)));
+  // The row keeps the turn time; the rail has all three (#517, decision 4).
+  const turn = times(session, null)[1];
+  const l3 = text("span", "", "l3");
+  button.append(turn ? Object.assign(counts(l3, turn[1]), { title: turn[0] }) : l3);
   return button;
 }
 

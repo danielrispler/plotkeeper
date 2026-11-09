@@ -113,9 +113,6 @@ pub struct Session {
     /// What blocks it on Daniel, so that it needs you, oldest first (#434, decision 24).
     #[serde(skip)]
     blocks: Vec<Block>,
-    /// Its turn's final message asks Daniel something: a block no tool call clears.
-    #[serde(skip)]
-    asked: bool,
     #[serde(skip)]
     turn_ended: bool,
     #[serde(skip)]
@@ -1031,7 +1028,7 @@ impl Session {
     }
 
     fn needs_you(&self) -> bool {
-        self.asked || !self.blocks.is_empty()
+        !self.blocks.is_empty()
     }
 
     /// Its workers that failed: they ended with a status other than `completed`, such as `killed`.
@@ -1087,7 +1084,6 @@ impl Session {
     fn unblock(&mut self) {
         self.blocks.retain(|w| w.named && w.agent.is_some());
         self.running.retain(|c| c.agent.is_some());
-        self.asked = false;
     }
 }
 
@@ -1518,37 +1514,6 @@ pub const DELETE: &str = "StudioDelete";
 /// payload under this name, with `studio_asked_by` (the event that asked) and `studio_answer`. An
 /// answer in the terminal leaves none.
 pub const STUDIO_ANSWER: &str = "StudioAnswer";
-
-/// Whether the turn's final message asks Daniel something: a sentence ending in `?`, after removing
-/// fenced code, inline code, blockquotes, headings and table rows (#321's evidence, "Transcripts").
-pub fn asks(message: &str) -> bool {
-    let mut in_fence = false;
-    message.lines().any(|line| {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-            in_fence = !in_fence;
-            return false;
-        }
-        // Inline code sits between pairs of backticks; an unpaired last one starts no code.
-        let parts: Vec<&str> = line.split('`').collect();
-        let prose: String = parts
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| i % 2 == 0 || i + 1 == parts.len())
-            .map(|(_, part)| *part)
-            .collect();
-        let prose = prose
-            .trim()
-            .trim_end_matches([' ', '\t', '*', '_', ')', '"', '\'', '”', '’']);
-        // A heading is `#`s and a space, so a line that opens with an issue number such as `#341` is
-        // prose.
-        let heading = prose.starts_with('#') && prose.trim_start_matches('#').starts_with(' ');
-        !in_fence
-            && !heading
-            && !prose.starts_with(['>', '|'])
-            && prose.split_whitespace().any(|word| word.ends_with('?'))
-    })
-}
 
 /// The tasks a wake-up reports on, each with how it ended: its `<task-id>` and its `<status>`
 /// (#370 note).
@@ -2069,7 +2034,7 @@ impl Studio {
         let worker = |id: &String| session.subagent(id).is_some_and(|a| a.kind == Kind::Worker);
         let promoted = helpers.into_iter().filter(worker);
         outputs.extend(promoted.map(|agent| Output::Promoted { agent }));
-        let mut blocked_before = session.needs_you();
+        let blocked_before = session.needs_you();
         let tool = event.tool_name.unwrap_or_default();
         let id = Some(event.tool_use_id.clone()).filter(|id| !id.is_empty());
         let at = event.studio_received_ms;
@@ -2221,7 +2186,8 @@ impl Studio {
                 }
             }
             "Stop" => {
-                // The order on `Stop`: clear its own blocks first, then ask if the message asks.
+                // A reply that asks in text blocks nothing, so the turn ends on your turn unless a
+                // subagent's block outlasts it (#540).
                 let in_turn = session.in_turn();
                 let tasks = event.background_tasks.as_array();
                 session.background = tasks.is_some_and(|tasks| !tasks.is_empty());
@@ -2230,9 +2196,6 @@ impl Studio {
                     self.ended
                         .extend(session.backfill(&event.studio_turn_end, at));
                 }
-                // A subagent's block outlasts the turn, so it gives no second notice.
-                blocked_before = session.needs_you();
-                session.asked = asks(&event.last_assistant_message);
                 if !session.versioned && !event.transcript_path.is_empty() {
                     session.versioned = true;
                     outputs.push(Output::Version {
@@ -2672,6 +2635,8 @@ impl Studio {
                     session.agent.id
                 ));
             }
+            let ended = !session.in_turn();
+            session.transcript.end(ended);
             if session.transcript.branch.is_some()
                 && session.transcript.branch != session.identity.branch
             {
@@ -2716,6 +2681,23 @@ impl Studio {
             }
         }
         changed
+    }
+
+    /// The shell read `snapshot`, the `context_window` of session `id`'s status line snapshot, `None`
+    /// with no snapshot (#517, decisions 1 and 2; #519); returns whether it changed, and with it
+    /// maybe the context's tokens or percentages.
+    pub fn set_snapshot(&mut self, id: &str, snapshot: Option<serde_json::Value>) -> bool {
+        let context = self
+            .sessions
+            .get_mut(id)
+            .and_then(|s| s.transcript.context.as_mut());
+        match context {
+            Some(context) if context.snapshot != snapshot => {
+                *context = Context::new(context.measured, snapshot);
+                true
+            }
+            _ => false,
+        }
     }
 
     /// The typical duration of check `command`, in milliseconds: the median of how long its earlier

@@ -2,7 +2,7 @@
 // in apps/studio.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { checkTime, duration, estimateText, timesText } from "../../dist/times.js";
+import { checkTime, duration, estimateText, times } from "../../dist/times.js";
 
 const MIN = 60_000;
 
@@ -19,11 +19,21 @@ test("a running check shows its time against its typical time; an ended one how 
   assert.equal(checkTime({ ...line, ended_at: 8 * MIN + 30_000, passed: true }, 99 * MIN), "8m");
 });
 
-test("the times line counts running spans to now and stops an ended session at its last event", () => {
+// Each time as its text at `now` and its hover.
+const drawn = (parts, now) => parts.map(([title, draw]) => [draw(now), title]);
+
+test("the times count running spans to now, each labelled with hover text, and stop an ended session at its last event", () => {
   const session = { state: "running", started_at: 0, last_event_at: 30 * MIN, turn_span: { start: 50 * MIN, end: null } };
-  assert.equal(timesText(session, { start: 61 * MIN, end: null }, 61 * MIN + 45_000), "Session 1h 01m · Turn 11m · Step 45s");
+  assert.deepEqual(drawn(times(session, { start: 61 * MIN, end: null }), 61 * MIN + 45_000), [
+    ["Session 1h 01m", "Time since the session started"],
+    ["Turn 11m", "Time on the current prompt"],
+    ["Step 45s", "Time on the current step"],
+  ]);
   const ended = { ...session, state: "ended", turn_span: { start: 10 * MIN, end: 20 * MIN } };
-  assert.equal(timesText(ended, null, 999 * MIN), "Session 30m · Turn 10m");
+  assert.deepEqual(drawn(times(ended, null), 999 * MIN), [
+    ["Session 30m", "Time since the session started"],
+    ["Turn 10m", "Time on the current prompt"],
+  ]);
 });
 
 test("the estimate line names the phase, then a range marked as an estimate, no estimate, or depends on you in place of a time", () => {

@@ -18,7 +18,8 @@ use std::{
 /// What the transcript says of the session's latest turn, which the session view shows.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct Transcript {
-    /// The intention: the last line of the agent's latest text in the turn.
+    /// The intention: the last line of the agent's latest text while the turn runs, its first line
+    /// once the turn ended (#517, decision 16), so a plugin's footer is never the intention.
     pub intention: Option<String>,
     /// The steps (tool calls) the agent made since that text.
     pub steps_ago: usize,
@@ -31,13 +32,70 @@ pub struct Transcript {
     pub context: Option<Context>,
     /// The git branch of the session's folder, from its latest line; kept across turns.
     pub branch: Option<String>,
+    /// The model the session runs at, from the agent's latest message (#517, decision 8); kept
+    /// across turns.
+    pub model: Option<String>,
+    /// The session's effort, from its latest line that carries one (#517, decision 8); kept across
+    /// turns.
+    pub effort: Option<String>,
+    /// Whether the session's turn has ended, which the core sets from its hooks; kept across turns.
+    #[serde(skip)]
+    pub ended: bool,
 }
 
-/// The input tokens of the agent's latest message, out of its model's context window.
+/// How full the context is, as Claude Code's status line measures it: from the session's status line
+/// snapshot when there is one, else the input tokens of the agent's latest message with no share
+/// (#517, decisions 1 and 2; #519).
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Context {
     pub tokens: u64,
-    pub window: u64,
+    pub window: Option<u64>,
+    /// The percent of the window used, Claude's own `used_percentage`, else rounded to nearest.
+    pub share: Option<u64>,
+    /// The percent left, Claude's own `remaining_percentage`, else `100 - share`.
+    pub left: Option<u64>,
+    /// The transcript's tokens, which count when the snapshot has no `current_usage` yet.
+    #[serde(skip)]
+    pub(crate) measured: u64,
+    /// The snapshot's `context_window`, which the shell sets (`Studio::set_snapshot`).
+    #[serde(skip)]
+    pub(crate) snapshot: Option<Value>,
+}
+
+impl Context {
+    pub(crate) fn new(measured: u64, snapshot: Option<Value>) -> Self {
+        let field = |key: &str| snapshot.as_ref().and_then(|s| s[key].as_u64());
+        let window = field("context_window_size").filter(|&w| w > 0);
+        // `current_usage` is null before the session's first API call.
+        let usage = snapshot.as_ref().map(|s| &s["current_usage"]);
+        let tokens = match usage {
+            Some(usage) if window.is_some() && usage.is_object() => input_tokens(usage),
+            _ => measured,
+        };
+        let share =
+            window.map(|w| field("used_percentage").unwrap_or_else(|| (100 * tokens + w / 2) / w));
+        let left = share.map(|s| field("remaining_percentage").unwrap_or(100 - s.min(100)));
+        Context {
+            tokens,
+            window,
+            share,
+            left,
+            measured,
+            snapshot,
+        }
+    }
+}
+
+/// The input tokens of an API call's `usage`: fresh, cache-written and cache-read.
+fn input_tokens(usage: &Value) -> u64 {
+    [
+        "input_tokens",
+        "cache_creation_input_tokens",
+        "cache_read_input_tokens",
+    ]
+    .iter()
+    .map(|k| usage[k].as_u64().unwrap_or(0))
+    .sum()
 }
 
 impl Transcript {
@@ -56,23 +114,21 @@ impl Transcript {
         if let Some(branch) = line["gitBranch"].as_str().filter(|b| !b.is_empty()) {
             self.branch = Some(branch.into());
         }
+        if let Some(effort) = line["effort"].as_str() {
+            self.effort = Some(effort.into());
+        }
+        // An API error's line is `<synthetic>`, no model the session runs at.
+        if let Some(model) = line["message"]["model"]
+            .as_str()
+            .filter(|m| *m != "<synthetic>")
+        {
+            self.model = Some(model.into());
+        }
         let usage = &line["message"]["usage"];
         if kind == "assistant" && usage.is_object() {
-            let tokens = [
-                "input_tokens",
-                "cache_creation_input_tokens",
-                "cache_read_input_tokens",
-            ]
-            .iter()
-            .map(|k| usage[k].as_u64().unwrap_or(0))
-            .sum();
-            // shortcut: the window from the `[1m]` mark Claude Code puts on the requested model, else
-            // 200k; take it from the status line's snapshot (#481) if a model differs.
-            let long = line["requestedModel"]
-                .as_str()
-                .is_some_and(|m| m.ends_with("[1m]"));
-            let window = if long { 1_000_000 } else { 200_000 };
-            self.context = Some(Context { tokens, window });
+            // The snapshot stays, which the shell sets (`Studio::set_snapshot`).
+            let snapshot = self.context.as_mut().and_then(|c| c.snapshot.take());
+            self.context = Some(Context::new(input_tokens(usage), snapshot));
         }
         let content = &line["message"]["content"];
         let blocks = match content {
@@ -89,10 +145,10 @@ impl Transcript {
                 ("assistant", Some("tool_use")) => self.steps_ago += 1,
                 ("assistant", Some("text")) => {
                     let text = block["text"].as_str().unwrap_or_default().trim();
-                    let Some(last) = text.lines().map(str::trim).rfind(|l| !l.is_empty()) else {
+                    if text.is_empty() {
                         continue;
-                    };
-                    self.intention = Some(last.into());
+                    }
+                    self.intention = line_of(text, self.ended).map(Into::into);
                     self.steps_ago = 0;
                     self.responses.push(text.into());
                 }
@@ -102,12 +158,44 @@ impl Transcript {
         Ok(())
     }
 
+    /// The turn's intentions, one per response, oldest first: each its last line, but the final
+    /// response's first line once the turn ended.
+    pub fn intentions(&self) -> Vec<String> {
+        let last = self.responses.len().saturating_sub(1);
+        let lines = self.responses.iter().enumerate();
+        lines
+            .filter_map(|(i, text)| line_of(text, self.ended && i == last))
+            .map(Into::into)
+            .collect()
+    }
+
+    /// Notes whether the session's turn has `ended`, which picks the latest response's line.
+    pub(crate) fn end(&mut self, ended: bool) {
+        self.ended = ended;
+        if let Some(text) = self.responses.last() {
+            self.intention = line_of(text, ended).map(Into::into);
+        }
+    }
+
     fn new_turn(&mut self) {
         *self = Transcript {
             context: self.context.take(),
             branch: self.branch.take(),
+            model: self.model.take(),
+            effort: self.effort.take(),
+            ended: self.ended,
             ..Transcript::default()
         };
+    }
+}
+
+/// The first or else the last non-empty line of `text`, trimmed.
+fn line_of(text: &str, first: bool) -> Option<&str> {
+    let mut lines = text.lines().map(str::trim).filter(|l| !l.is_empty());
+    if first {
+        lines.next()
+    } else {
+        lines.next_back()
     }
 }
 

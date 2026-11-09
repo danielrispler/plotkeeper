@@ -23,7 +23,7 @@ An agent session's work on one prompt, Daniel's or a wake-up, from its first eve
 _Avoid_: Step (one tool call inside a turn)
 
 **Intention**:
-The latest thing the agent wrote in its own words during a turn, such as why it is about to read an issue. It stays shown, with its age, until the agent writes again, so it covers the steps that follow it. A turn's intentions are the last line of each of its responses; a side question ("ask about this") gets them as context.
+The latest thing the agent wrote in its own words during a turn, such as why it is about to read an issue. It stays shown, with its age, until the agent writes again, so it covers the steps that follow it. While a turn runs, its intentions are the last line of each of its responses. When the turn ends, its final response's intention becomes that response's first line, which says what the agent did, so a footer a plugin adds is never the intention. A side question ("ask about this") gets these intentions as context.
 _Avoid_: Reason (the card writer's account of a step)
 
 **Transcript**:
@@ -100,17 +100,17 @@ _Avoid_: Verdict (only a plan's or a permission's allow or deny)
 The name an agent session gets from its work: its issue, its PR and its worktree, such as "#480 · PR #490 · agent-a1b2". A name Daniel gives it replaces it.
 
 **Context share**:
-How much of its model's context window an agent session's latest turn uses, as a percentage.
+How much of its context window an agent session uses, as a percentage. It is measured as Claude Code's status line measures it, from the session's status line snapshot: its tokens, its window size, and its own percent used and left. Without a snapshot, the control room shows the latest turn's tokens only.
 
 **Needs you**:
-The state of an agent session that is blocked on Daniel: waiting for his permission, his answer to a question, or his approval of a plan.
+The state of an agent session that is blocked on Daniel: waiting for his permission, his answer to a question tool, his approval of a plan, or an MCP request for input. A reply that ends with a question in its text blocks nothing, so it is your turn.
 _Avoid_: Stuck (a session that is not progressing, which is a different state)
 
 **Running**:
 The state of an agent session in a turn: from Daniel's prompt until the agent ends its turn or the session ends.
 
 **Your turn**:
-The state of an agent session that finished its turn without asking Daniel anything, or that started and has had no prompt yet. Unlike needs you, it does not interrupt him.
+The state of an agent session that finished its turn with nothing blocked on Daniel, even when its reply asks him something, or that started and has had no prompt yet. Unlike needs you, it does not interrupt him.
 _Avoid_: Done (the turn ended, not the task)
 
 **Idle**:
@@ -160,6 +160,14 @@ The default project mode. Waits and cards serve Daniel's understanding of this p
 
 **Results-only mode**:
 The project mode for a project where Daniel cares only about the result. The wait is his own time, for practice or enrichment unrelated to the project. Approval requests and agent questions still reach him.
+
+**Settings**:
+Daniel's choices for the studio, kept in `settings.json` in its data folder, in Zed's format: zoom, the terminal's font size, the summary writer's model and effort, and the Doctor menu. The summary writer's model and effort and the Doctor menu are read but not used yet; later tickets wire them. "Settings files" means `settings.json` and `keymap.json` together: the studio reloads either when saved, and a file that does not parse is reported while its last good version stays in effect.
+_Avoid_: Preferences, config
+
+**Keymap**:
+Daniel's shortcuts for the studio, kept in `keymap.json` beside the settings, in Zed's format: keystrokes bound to actions, by context.
+_Avoid_: Keybindings, shortcuts file
 
 **Explanation language**:
 The human language of cards and questions: English for now, no longer Hebrew (#463), in plain words at Daniel's level. Code terms are in backticks.

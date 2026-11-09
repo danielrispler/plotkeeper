@@ -329,14 +329,39 @@ fn the_real_writer_runs_claude_on_the_subscription_in_its_neutral_folder() {
         .get_args()
         .map(|arg| arg.to_str().unwrap())
         .collect();
-    // The change is untrusted text: no tools and no MCP servers. The prompt goes on standard input.
-    assert_eq!(args, ["--tools", "", "--strict-mcp-config", "-p"]);
+    // The change is untrusted text: no tools and no MCP servers, and safe mode keeps Daniel's
+    // plugins, hooks, skills and CLAUDE.md out (#517, decision 9). The prompt goes on standard input.
+    assert_eq!(
+        args,
+        ["--tools", "", "--strict-mcp-config", "--safe-mode", "-p"]
+    );
     assert!(prompt.contains("multiple-choice question on the change's logic or design"));
     // The architecture section reads the prompt's earlier cards; the brief is updated.
     assert!(prompt.contains(&format!("earlier cards, oldest first:\n- {}\n", earlier[0])));
     assert!(prompt.contains(&format!("The brief so far:\n{brief}\n")));
     assert!(prompt.ends_with(&format!("\nChange:\n{}", edit().diff())));
     assert_eq!(command.get_current_dir(), Some(folder));
+}
+
+#[test]
+fn every_writer_run_is_in_safe_mode() {
+    let writer = ClaudeWriter::new(CLAUDE.into(), "/card-writer".into());
+    let reply = FakeWriter.reply(&edit(), &[], "").unwrap();
+    let (card, _) = Card::from_reply(&reply).unwrap();
+    let runs = [
+        ("card", writer.command(&edit(), &[], "")),
+        ("rewrite", writer.rewrite_command(&["a prompt"], &[], "")),
+        ("update", writer.update_command("", "workers")),
+        ("explain more", writer.more_command(&edit(), &card)),
+        ("ask", writer.ask_command("an item", &[], "why?")),
+    ];
+    for (name, (command, _)) in runs {
+        let args: Vec<_> = command.get_args().collect();
+        assert!(
+            args.contains(&OsStr::new("--safe-mode")),
+            "{name}: {args:?}"
+        );
+    }
 }
 
 #[test]

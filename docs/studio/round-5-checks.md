@@ -1,0 +1,44 @@
+# Round 5: Daniel's final checks
+
+Every check in round 5 (#517) that needs Daniel, collected in one place. Daniel decided on 2026-11-09 that he does them all at once at the end: he upgrades to the new build, uses it, and goes through this list. A ticket that adds a by-hand check adds a line here.
+
+Between passes, nothing waits for him. After each pass, a code-review agent that did not write the code reviews it. Once its fixes are in and the automated checks pass, the pass merges to `main`.
+
+## Real model calls
+
+Run once, outside auto mode, from any checkout:
+
+```sh
+apps/studio/real-calls.sh
+```
+
+It writes every output to `local-evidence/2026-11-09-round-5/real-calls-<time>/`, and it skips a step whose code is not built yet. It runs:
+
+- [ ] **#518:** the 5-run writer timing. Record the median and slowest on #518, beside #471's median of 20.1 s and slowest of 24.4 s. If safe mode made the writer much slower, that triggers grilling (pass plan).
+- [ ] **#518:** real cards; their text carries no plugin footer. The script greps for one.
+- [ ] **#526:** Haiku summaries on 3 real turns. Judge them, and record their time and cost on #526. Weak summaries reopen decision 14 (pass plan).
+
+## In the running app
+
+- [ ] **#518:** one card written by the app itself, with no plugin footer.
+- [ ] **#519:** a session row and the rail show `context N%` with the same number as Claude's status line, and the hover reads "… tokens used · Claude's status line shows this as M% left".
+- [ ] **#520:** a finished turn's intention is its final reply's first line, not a footer.
+- [ ] **#521:** in a session the studio started, Daniel's status line looks the same, and the top bar's usage updates. Then remove the #481 line from `~/.claude/statusline-command.sh`, with Daniel's approval, and check the top bar still updates.
+- [ ] **#522:** a real "your turn" notification while Daniel is in another app, and the orange text.
+- [ ] **#523:** the rail header shows the model and effort, such as `claude-opus-5-5 · effort medium`.
+- [ ] **#524:** saving `settings.json` changes zoom and font size live; ⌘=, ⌘- and ⌘0 reach the window and are not taken by a menu.
+- [ ] **#525:** a table in a response renders; clicking a link opens the browser, and the studio's window stays on the app.
+- [ ] **#527:** both Doctor defaults run in a new terminal in the selected place.
+- [ ] **#528:** "Edit" opens a user skill in Zed.
+- [ ] **#529:** two live terminals side by side and stacked, each taking input and resizing.
+- [ ] **#535:** a finished subagent leaves the list; opening its history entry writes one real summary.
+- [ ] **#540:** a reply ending with a question shows "your turn", not "needs you"; a session waiting on its subagents is not in the "Needs you" group.
+- [ ] **#541:** a session started with Auto mode runs in auto mode, and a blocked action still shows "needs you".
+- [ ] **#542:** the docked panel's shell survives an app restart and shows under a #529 split.
+
+## Checked automatically, early
+
+The two checks that would cost rework if found late, run on 2026-11-09:
+
+- **#525, Markdown in WebKit:** the renderer's output with the studio's stylesheet, rendered through macOS QuickLook, which uses WebKit like WKWebView. Tables, nested lists, code blocks, quotes and inline code render, and raw HTML shows as text. One defect: links use WebKit's default dark blue on the dark background. The render and its script are in `local-evidence/2026-11-09-round-5/webkit-525/`. The link click and the navigation guard still need the app.
+- **#521, `--settings` over the status line:** Claude Code's settings docs say `--settings` "applies above your user, project, and local files and below managed settings", and a key set there "overrides the same key in your project and user settings files" ([Settings files and precedence](https://code.claude.com/docs/en/settings), read 2026-11-09). `statusLine` can be set from any file ([settings reference](https://code.claude.com/docs/en/settings-reference.md)). Only a managed `statusLine` would win, and Daniel's machine has no `/Library/Application Support/ClaudeCode/` folder, where a managed settings file would be. The live check above confirms it.
