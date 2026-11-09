@@ -54,7 +54,7 @@ Sources are rich; the gaps are named where they matter.
 
 - **herdr:** "A space holds work on one machine, usually in one repo. Each space has tabs. Split a tab into panes" ([app-readme]). Suggested use: "a space per repo, a tab per task" ([home]).
 - **Studio:** a space is near a project, a tab near a task, a pane near a pane. The studio shows one pane at a time by decision (`CONTEXT.md`, **Pane**).
-- **Mark: skip.** The studio already has projects, tasks and places. Split panes go against the one-pane decision, and the earlier survey found split views serve only a few sessions at once ([agent session UI research](../agent-session-ui-research.md)).
+- **Mark: skip.** The studio already has projects, tasks and places. Split panes are already decided as up to two terminal panes ([#517](https://github.com/danielrispler/Falinks/issues/517), "Split terminals", decision 20); herdr's free-form splits go beyond that, which #517 puts out of scope ("Splits beyond two panes, and saved layouts").
 
 ### 7. Worktrees as spaces, with branch state
 
@@ -118,7 +118,7 @@ Daniel named it. The sources describe the default layout only as sidebars for sp
 
 - **Copy (both S):** an unseen mark on your-turn rows (5); ahead/behind and uncommitted counts on board rows (7).
 - **Later:** remote machines and laptop-closed work (2, 3, XL); OSC 7501 status for other agents (4, M) or their full understanding layer (XL); holder-per-terminal upgrades (1, L); command palette (10, M); needs-you sound (11, S); a CLI that opens a task (12, M).
-- **Skip:** what the studio already has (1, 6, 9, 14), what conflicts with a decision (split panes, Electron-free rewrite, settings-file hooks), and what another part already covers (8, 13, 15).
+- **Skip:** what the studio already has (1, 6, 9, 14), what conflicts with a decision (splits beyond two panes, Electron-free rewrite, settings-file hooks), and what another part already covers (8, 13, 15).
 
 ## Direction changes for Daniel
 
