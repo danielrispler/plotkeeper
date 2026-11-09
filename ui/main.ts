@@ -7,11 +7,13 @@
 import { startWatching } from "./answer.js";
 import { markShown, showCards } from "./cards.js";
 import { element, invoke, listen } from "./dom.js";
+import { bound } from "./keys.js";
 import { defaultWidths, type LayoutMode, layoutMode, resized, type Widths } from "./layout.js";
 import { showSessions } from "./list.js";
 import { show } from "./selection.js";
 import { startPanes } from "./panes.js";
 import { showPicker } from "./picker.js";
+import { reload, zoomed } from "./settings.js";
 import { studio } from "./state.js";
 import { showView } from "./story.js";
 import type { Selection, Session, SessionCards } from "./types.js";
@@ -58,15 +60,55 @@ function divider(id: string, column: keyof Widths, width: (x: number) => number)
 divider("list-divider", "list", (x) => window.innerWidth - x);
 divider("rail-divider", "rail", (x) => x);
 
-// ⌘1 opens the list from its strip, ⌘2 the rail as an overlay; Esc closes both and the picker.
+// The window's shortcuts, from `keymap.json` (#524). By default ⌘1 opens the list from its strip,
+// ⌘2 the rail as an overlay, Esc closes both and the picker, and ⌘=, ⌘- and ⌘0 zoom.
 const toggle = (name: string) => document.body.classList.toggle(name);
+let zoom = 1;
+const setZoom = (to: number) => {
+  zoom = to;
+  invoke("set_zoom", { zoom }).then(layout, (e) => console.warn(e));
+};
+const actions: Record<string, () => void> = {
+  "studio::ToggleList": () => toggle("list-open"),
+  "studio::ToggleRail": () => toggle("rail-open"),
+  "studio::Dismiss": () => {
+    document.body.classList.remove("list-open", "rail-open");
+    element("picker").hidden = true;
+  },
+  "studio::ZoomIn": () => setZoom(zoomed(zoom, 1)),
+  "studio::ZoomOut": () => setZoom(zoomed(zoom, -1)),
+  "studio::ResetZoom": () => setZoom(zoomed(zoom, 0)),
+};
 window.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") document.body.classList.remove("list-open", "rail-open");
-  if (event.key === "Escape") element("picker").hidden = true;
-  if (event.metaKey && event.key === "1") toggle("list-open");
-  if (event.metaKey && event.key === "2") toggle("rail-open");
-  if (event.metaKey && ["1", "2"].includes(event.key)) event.preventDefault();
+  const action = bound(studio.settings.keymap, "Workspace", event);
+  const run = typeof action === "string" ? actions[action] : undefined;
+  if (!run) return;
+  run();
+  if (action !== "studio::Dismiss") event.preventDefault();
 });
+
+// `settings.json` and `keymap.json`, at start and each time one is saved. A file that does not parse
+// is reported in the notice line and the last good one stays in effect.
+type Files = { settings: string | null; keymap: string | null };
+function applySettings(files: Files) {
+  const previous = studio.settings.settings;
+  studio.settings = reload(studio.settings, files);
+  const { settings, errors } = studio.settings;
+  const notice = element("notice");
+  if (errors.length) {
+    notice.textContent = errors.join("\n");
+    notice.hidden = false;
+  } else if (/^(settings|keymap)\.json: /.test(notice.textContent ?? "")) notice.hidden = true;
+  // Only a changed `zoom` resets the zoom the keys set.
+  if (settings.zoom !== previous.zoom) setZoom(settings.zoom);
+  const size = settings.terminal.font_size;
+  if (size === null) document.documentElement.style.removeProperty("--term-size");
+  else document.documentElement.style.setProperty("--term-size", `${size}px`);
+  layout();
+  window.dispatchEvent(new Event("settings"));
+}
+listen<Files>("settings-files", applySettings);
+invoke<Files>("settings_files").then(applySettings);
 element("rail-toggle").addEventListener("click", () => toggle("rail-open"));
 // Every block in the story opens or closes, except a card's "explain more", whose first open asks the
 // writer, and the "ask about this" boxes.

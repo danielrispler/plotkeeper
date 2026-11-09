@@ -76,7 +76,32 @@ Every Cmd shortcut goes to the terminal or to the app (`ui/keys.ts`):
 | Cmd+Left, Cmd+Right | terminal | sends Ctrl+A, Ctrl+E: start and end of line |
 | Cmd+Backspace | terminal | sends Ctrl+U: deletes to the line's start |
 | Cmd+1, Cmd+2 | app | opens the session list, the story rail |
-| any other Cmd shortcut, and any Cmd with Shift, Ctrl or Option | app | the app's menu: Cmd+Q, Cmd+W, Cmd+H, Cmd+M and the like |
+| Cmd+=, Cmd+-, Cmd+0 | app | zooms the window in, out (from half to double size) and back |
+| any other Cmd shortcut | app | the app's menu: Cmd+Q, Cmd+W, Cmd+H, Cmd+M and the like |
+
+Every shortcut here but Cmd+C and Cmd+V can be rebound in `keymap.json` (see Settings).
+
+## Settings
+
+`settings.json` and `keymap.json` sit in the studio's data folder, `~/Library/Application Support/dev.falinks.studio/`, in Zed's format: JSON with comments and trailing commas (#524). The app reloads them when either is saved. A file that does not parse is reported in the notice line, and the last good one stays in effect. Missing keys keep their defaults:
+
+```jsonc
+{
+  "zoom": 1,                     // 0.5 to 2
+  "terminal": { "font_size": 15 }, // default: the stylesheet's 12.5
+  "summaries": { "model": "haiku", "effort": "low", "on_open": false },
+  "doctor": [
+    { "label": "Check the installation", "command": "claude doctor", "kind": "shell" },
+    { "label": "Full checkup", "command": "/doctor", "kind": "session" }
+  ]
+}
+```
+
+`keymap.json` is Zed's array of contexts, `Workspace` for the window and `Terminal` for the pane. The actions are `studio::ToggleList`, `studio::ToggleRail`, `studio::Dismiss` (Esc), `studio::ZoomIn`, `studio::ZoomOut`, `studio::ResetZoom`, `terminal::SelectAll`, `terminal::Find`, `terminal::Clear` and `["terminal::SendText", "<text>"]`. Unlike Zed, binding an action to a new key unbinds its default key; `null` unbinds a key:
+
+```json
+[{ "context": "Workspace", "bindings": { "cmd-l": "studio::ToggleList", "escape": null } }]
+```
 
 ## Restarts and daemon upgrades
 

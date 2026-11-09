@@ -1,5 +1,8 @@
 // The terminal pane's key mapping (#461, decision 7): one pure function from a key event, plus
-// whether the clipboard holds an image, to what happens. The Cmd table is in the README.
+// whether the clipboard holds an image, to what happens. The Cmd table is in the README; the
+// terminal's Cmd shortcuts come from `keymap.json` (#524).
+
+import { type Binding, initial, type Keymap } from "./settings.js";
 
 // The fields of a `KeyboardEvent` the mapping reads.
 export interface Key {
@@ -21,17 +24,28 @@ export type Action =
   | "native"
   | "app";
 
-// Cmd with no other modifier, by physical key; every Cmd shortcut not here goes to the app.
-const cmd: Record<string, Action> = {
-  KeyC: "native",
-  KeyV: "native",
-  KeyA: { command: "selectAll" },
-  KeyF: { command: "find" },
-  KeyK: { command: "clear" },
-  // Start of line, end of line and delete to the line's start, as Zed's terminal sends them.
-  ArrowLeft: { send: "\x01" },
-  ArrowRight: { send: "\x05" },
-  Backspace: { send: "\x15" },
+// Zed's names for the keys whose `code` is not `Key<letter>` or `Digit<n>`.
+const names: Record<string, string> = {
+  ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down", Equal: "=", Minus: "-",
+  Comma: ",", Period: ".", Slash: "/", Semicolon: ";", Quote: "'", BracketLeft: "[", BracketRight: "]",
+  Backslash: "\\", Backquote: "`",
+};
+
+// The key as Zed's keymap writes it, such as "cmd-shift-k", by the physical key.
+export function keystroke({ code, metaKey, ctrlKey, altKey, shiftKey }: Key): string {
+  const name = /^(?:Key|Digit)(.)$/.exec(code)?.[1].toLowerCase() ?? names[code] ?? code.toLowerCase();
+  const mods = [ctrlKey && "ctrl", altKey && "alt", shiftKey && "shift", metaKey && "cmd"].filter(Boolean);
+  return [...mods, name].join("-");
+}
+
+// The action `key` triggers in `context` of `keymap`.
+export const bound = (keymap: Keymap, context: string, key: Key): Binding | undefined => keymap[context]?.[keystroke(key)];
+
+// The terminal's commands, as `keymap.json` names them.
+const commands: Record<string, "selectAll" | "find" | "clear"> = {
+  "terminal::SelectAll": "selectAll",
+  "terminal::Find": "find",
+  "terminal::Clear": "clear",
 };
 
 // Option as Meta: ESC, then the key. Word moves and word delete as readline binds them.
@@ -42,14 +56,17 @@ const meta: Record<string, string> = {
   Enter: "\x1b\r",
 };
 
-export function keyAction(key: Key, clipboardHasImage: boolean): Action {
+export function keyAction(key: Key, clipboardHasImage: boolean, keymap: Keymap = initial.keymap): Action {
   const { code, metaKey, ctrlKey, altKey, shiftKey } = key;
-  if (metaKey) {
-    if (ctrlKey || altKey || shiftKey) return "app";
-    // Claude Code reads the macOS clipboard itself on Ctrl+V and makes an `[Image #N]` chip.
-    if (code === "KeyV" && clipboardHasImage) return { send: "\x16" };
-    return cmd[code] ?? "app";
-  }
+  const plainCmd = metaKey && !ctrlKey && !altKey && !shiftKey;
+  // Claude Code reads the macOS clipboard itself on Ctrl+V and makes an `[Image #N]` chip.
+  if (plainCmd && code === "KeyV" && clipboardHasImage) return { send: "\x16" };
+  if (plainCmd && (code === "KeyC" || code === "KeyV")) return "native";
+  const action = bound(keymap, "Terminal", key);
+  if (Array.isArray(action) && action[0] === "terminal::SendText") return { send: action[1] };
+  if (typeof action === "string" && commands[action]) return { command: commands[action] };
+  // Every Cmd shortcut the terminal has not bound goes to the app.
+  if (metaKey) return "app";
   if (altKey && !ctrlKey) {
     // By the physical key, since Option changes what the layout types (Option+B is "∫").
     const letter = /^Key([A-Z])$/.exec(code)?.[1];

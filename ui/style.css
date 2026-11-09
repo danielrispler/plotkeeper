@@ -6,7 +6,7 @@
   --needs-you: #ff8f5e; --needs-you-bg: #3a2318; --needs-you-line: #6b3a24;
   --font: -apple-system, system-ui, "SF Pro Text", "Helvetica Neue", sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, monospace;
-  --size: 14px; --size-read: 15.5px; --size-small: 12.5px; --size-mono: 12.5px; --term-line: 1.5;
+  --size: 14px; --size-read: 15.5px; --size-small: 12.5px; --size-mono: 12.5px; --term-size: var(--size-mono); --term-line: 1.5;
   --radius: 4px; --list: 248px; --strip: 48px; --rail: 520px; --bar: 34px;
 }
 * { box-sizing: border-box; }
@@ -109,7 +109,7 @@ h1 { margin: 0 0 8px; }
 .term-body { min-height: 0; min-width: 0; overflow: hidden; padding: 8px 14px; position: relative; }
 .pane { height: 100%; }
 .term-find { position: absolute; top: 6px; right: 14px; z-index: 10; width: 220px; font: inherit; }
-#probe { position: absolute; visibility: hidden; white-space: pre; font: var(--size-mono)/var(--term-line) var(--mono); }
+#probe { position: absolute; visibility: hidden; white-space: pre; font: var(--term-size)/var(--term-line) var(--mono); }
 
 /* The rail: the story, its open question docked at the bottom. In "overlay" ⌘2 toggles it over the
    terminal. */
