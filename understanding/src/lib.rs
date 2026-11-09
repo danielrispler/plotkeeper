@@ -366,13 +366,7 @@ pub fn ask_about(
     item: &str,
     question: &str,
 ) -> Result<String, String> {
-    let intentions: Vec<String> = transcript
-        .responses
-        .iter()
-        .filter_map(|text| text.lines().map(str::trim).rfind(|l| !l.is_empty()))
-        .map(Into::into)
-        .collect();
-    let reply = writer.ask(item, &intentions, question)?;
+    let reply = writer.ask(item, &transcript.intentions(), question)?;
     let value: serde_json::Value = serde_json::from_str(object(&reply)).unwrap_or_default();
     match value["answer"].as_str().map(str::trim) {
         Some(answer) if !answer.is_empty() => Ok(answer.into()),
@@ -984,7 +978,7 @@ Reply with the explanation only, in at most three short paragraphs: no JSON and 
 /// The writer's instructions for "ask about this" (#461, decision 20): a side question on one item
 /// of a session, which the session never sees.
 const ASK: &str = concat!(
-    r#"A developer watches a coding agent work and asks a side question about one item of its session: one of the agent's responses, one of its intentions (the last line of a response, which says what it does next and why), or a card that explains a change it made. The agent never sees the question or your answer. Answer so that he understands the agent's work.
+    r#"A developer watches a coding agent work and asks a side question about one item of its session: one of the agent's responses, one of its intentions (the last line of a response, which says what it does next and why, or the first line of a finished turn's final response, which says what it did), or a card that explains a change it made. The agent never sees the question or your answer. Answer so that he understands the agent's work.
 
 Answer from the input below: the intentions of the item's turn, oldest first, the item itself, and the question. Use only this input: do not use tools or read files. When the input does not answer the question, say so, and say what would.
 

@@ -18,7 +18,8 @@ use std::{
 /// What the transcript says of the session's latest turn, which the session view shows.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct Transcript {
-    /// The intention: the last line of the agent's latest text in the turn.
+    /// The intention: the last line of the agent's latest text while the turn runs, its first line
+    /// once the turn ended (#517, decision 16), so a plugin's footer is never the intention.
     pub intention: Option<String>,
     /// The steps (tool calls) the agent made since that text.
     pub steps_ago: usize,
@@ -37,6 +38,9 @@ pub struct Transcript {
     /// The session's effort, from its latest line that carries one (#517, decision 8); kept across
     /// turns.
     pub effort: Option<String>,
+    /// Whether the session's turn has ended, which the core sets from its hooks; kept across turns.
+    #[serde(skip)]
+    pub ended: bool,
 }
 
 /// The input tokens of the agent's latest message, out of the context window Claude Code's status
@@ -118,10 +122,10 @@ impl Transcript {
                 ("assistant", Some("tool_use")) => self.steps_ago += 1,
                 ("assistant", Some("text")) => {
                     let text = block["text"].as_str().unwrap_or_default().trim();
-                    let Some(last) = text.lines().map(str::trim).rfind(|l| !l.is_empty()) else {
+                    if text.is_empty() {
                         continue;
-                    };
-                    self.intention = Some(last.into());
+                    }
+                    self.intention = line_of(text, self.ended).map(Into::into);
                     self.steps_ago = 0;
                     self.responses.push(text.into());
                 }
@@ -131,14 +135,44 @@ impl Transcript {
         Ok(())
     }
 
+    /// The turn's intentions, one per response, oldest first: each its last line, but the final
+    /// response's first line once the turn ended.
+    pub fn intentions(&self) -> Vec<String> {
+        let last = self.responses.len().saturating_sub(1);
+        let lines = self.responses.iter().enumerate();
+        lines
+            .filter_map(|(i, text)| line_of(text, self.ended && i == last))
+            .map(Into::into)
+            .collect()
+    }
+
+    /// Notes whether the session's turn has `ended`, which picks the latest response's line.
+    pub(crate) fn end(&mut self, ended: bool) {
+        self.ended = ended;
+        if let Some(text) = self.responses.last() {
+            self.intention = line_of(text, ended).map(Into::into);
+        }
+    }
+
     fn new_turn(&mut self) {
         *self = Transcript {
             context: self.context.take(),
             branch: self.branch.take(),
             model: self.model.take(),
             effort: self.effort.take(),
+            ended: self.ended,
             ..Transcript::default()
         };
+    }
+}
+
+/// The first or else the last non-empty line of `text`, trimmed.
+fn line_of(text: &str, first: bool) -> Option<&str> {
+    let mut lines = text.lines().map(str::trim).filter(|l| !l.is_empty());
+    if first {
+        lines.next()
+    } else {
+        lines.next_back()
     }
 }
 
