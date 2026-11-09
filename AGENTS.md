@@ -11,6 +11,10 @@ These rules apply to work under `apps/studio`, the control room tracked by map #
 
 Rust only does not bind the studio. The stack is Tauri 2: a Rust shell with a TypeScript frontend ([scope decision](https://github.com/danielrispler/Falinks/issues/320#issuecomment-6465695482), "Stays as decided").
 
+## Checks
+
+Before handing off a studio change, run `npm ci` once, then `npm run check` from `apps/studio`. It builds the UI first, which the Tauri crate needs to compile, then runs the same checks as `.github/workflows/studio.yml`.
+
 ## Context
 
 Studio vocabulary is `docs/studio/CONTEXT.md`. Standing preferences, decisions and findings live in the Notes of map #266; read them there.

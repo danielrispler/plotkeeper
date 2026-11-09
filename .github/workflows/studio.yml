@@ -4,14 +4,15 @@ name: Studio checks
 on:
   pull_request:
     paths: ["apps/studio/**", ".github/workflows/studio.yml"]
+  # `issue-*` covers integration branches, which take merges with no pull request.
   push:
-    branches: [main]
+    branches: [main, "issue-*"]
     paths: ["apps/studio/**", ".github/workflows/studio.yml"]
 
-# A new push cancels its pull request's older run; every main commit runs to completion.
+# A new push cancels the older run on its branch or pull request; every main commit runs to completion.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
@@ -37,9 +38,5 @@ jobs:
           rustflags: ""
           cache-workspaces: apps/studio -> target
       - run: npm ci
-      # The Tauri crate embeds ../dist at compile time.
-      - run: npm run build
-      - run: npm test
-      - run: cargo fmt --all --check
-      - run: cargo clippy --locked --workspace --all-targets -- -D warnings
-      - run: cargo test --locked --workspace
+      # The same command an agent runs locally (package.json, `check`).
+      - run: npm run check
