@@ -1,0 +1,45 @@
+name: Studio checks
+
+# The studio's own workspace (apps/studio); checks.yml skips it.
+on:
+  pull_request:
+    paths: ["apps/studio/**", ".github/workflows/studio.yml"]
+  push:
+    branches: [main]
+    paths: ["apps/studio/**", ".github/workflows/studio.yml"]
+
+# A new push cancels its pull request's older run; every main commit runs to completion.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    # The studio is a Tauri app built and used on macOS only.
+    runs-on: macos-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: apps/studio
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/studio/package-lock.json
+      # Reads rust-toolchain.toml; caches cargo's registry and apps/studio/target.
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
+        with:
+          rustflags: ""
+          cache-workspaces: apps/studio -> target
+      - run: npm ci
+      # The Tauri crate embeds ../dist at compile time.
+      - run: npm run build
+      - run: npm test
+      - run: cargo fmt --all --check
+      - run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - run: cargo test --locked --workspace
