@@ -53,6 +53,8 @@ This builds `target/release/bundle/macos/Studio.app` with an ad-hoc signature (`
 
 It leaves out the shell, which needs `dist/` from `npm run build`. `npm test` (after `npm ci`) builds the UI with `tsc` and runs `terminal-daemon/tests/replay.test.mjs`: a terminal's bytes replayed into a headless xterm of another size, with the resize sent, match a fresh render at that size; and `ui/tests/`: the UI's pure functions on the `tsc` output in `dist/`, such as the width rule's layout, the terminal's key mapping (`keys`) and its file paths (`paths`), and a check card's verdict and quiz state (`check_cards`).
 
+These checks run in CI in `.github/workflows/studio.yml`, on macOS, for each pull request and push to `main` that changes `apps/studio/`: `npm ci`, `npm run build`, `npm test`, `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings` and `cargo test --workspace`, the shell included. The engine's `checks.yml` and `ci-checks` skip the studio.
+
 ## The terminal pane
 
 The centre of the window is one terminal (#466): a login shell in the configured repository, `STUDIO_REPO` when set, else the main checkout of the repository the app was built in. It runs in the terminal daemon, so it outlives the app; at start the app attaches to it again and replays its screen. When no daemon runs, the app starts `studio-terminal-daemon serve` from beside its own executable, logging to `terminal-daemon.log` beside the socket. A shell that exited starts again at the next key.
