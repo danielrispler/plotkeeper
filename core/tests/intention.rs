@@ -208,3 +208,38 @@ fn a_transcript_without_model_or_effort_has_neither() {
     assert_eq!(transcript.model, None);
     assert_eq!(transcript.effort, None);
 }
+
+/// An assistant line of the main agent writing `text`.
+fn assistant_text(text: &str) -> String {
+    let text = serde_json::to_string(text).unwrap();
+    format!(
+        r#"{{"isSidechain":false,"type":"assistant","message":{{"role":"assistant","content":[{{"type":"text","text":{text}}}]}}}}"#
+    ) + "\n"
+}
+
+#[test]
+fn a_turn_ends_on_its_final_replys_first_line_not_its_footer() {
+    let reply = "Fixed the typo.\n\nThe probe now reads right.\n\nNot checked: the CI run.";
+    let path = transcript("footer", &(first(13) + &assistant_text(reply)));
+    let mut studio = session_at(&path);
+
+    // While the turn runs, the intention is the latest response's last line.
+    follow(&mut studio);
+    let transcript = &studio.session(SESSION).unwrap().transcript;
+    assert_eq!(
+        transcript.intention.as_deref(),
+        Some("Not checked: the CI run.")
+    );
+
+    let path = path.display();
+    studio.apply(&format!(
+        r#"{{"session_id":"{SESSION}","hook_event_name":"Stop","last_assistant_message":"(scrubbed)","transcript_path":"{path}","cwd":"/Users/danielrispler/work/Falinks","studio_received_ms":1793265009000}}"#
+    ));
+    follow(&mut studio);
+    let transcript = &studio.session(SESSION).unwrap().transcript;
+    assert_eq!(transcript.intention.as_deref(), Some("Fixed the typo."));
+    assert_eq!(
+        transcript.intentions(),
+        ["Reading the probe first.", "Fixed the typo."]
+    );
+}

@@ -23,7 +23,7 @@ An agent session's work on one prompt, Daniel's or a wake-up, from its first eve
 _Avoid_: Step (one tool call inside a turn)
 
 **Intention**:
-The latest thing the agent wrote in its own words during a turn, such as why it is about to read an issue. It stays shown, with its age, until the agent writes again, so it covers the steps that follow it. A turn's intentions are the last line of each of its responses; a side question ("ask about this") gets them as context.
+The latest thing the agent wrote in its own words during a turn, such as why it is about to read an issue. It stays shown, with its age, until the agent writes again, so it covers the steps that follow it. While a turn runs, its intentions are the last line of each of its responses. When the turn ends, its final response's intention becomes that response's first line, which says what the agent did, so a footer a plugin adds is never the intention. A side question ("ask about this") gets these intentions as context.
 _Avoid_: Reason (the card writer's account of a step)
 
 **Transcript**:

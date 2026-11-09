@@ -78,6 +78,22 @@ fn the_request_carries_the_item_the_question_and_the_turns_intentions_and_the_an
 }
 
 #[test]
+fn an_ended_turns_final_intention_is_its_first_line_not_its_footer() {
+    let writer = Asked::replying(Ok(r#"{"answer": "It ran them."}"#));
+    let mut transcript = transcript();
+    transcript.responses[1].push_str("\n\nNot checked: the CI run.");
+    transcript.ended = true;
+
+    ask_about(&writer, &transcript, "item", "Did it test?").unwrap();
+
+    let (_, intentions, _) = writer.asked.into_inner().remove(0);
+    assert_eq!(
+        intentions,
+        ["Then I look at the writer.", "The writer is fine."]
+    );
+}
+
+#[test]
 fn a_reply_that_does_not_parse_or_a_failed_call_gives_an_error() {
     let replies = [
         Ok("Shall I read the file?"),

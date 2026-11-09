@@ -2672,6 +2672,8 @@ impl Studio {
                     session.agent.id
                 ));
             }
+            let ended = !session.in_turn();
+            session.transcript.end(ended);
             if session.transcript.branch.is_some()
                 && session.transcript.branch != session.identity.branch
             {
