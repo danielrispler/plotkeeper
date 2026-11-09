@@ -3,7 +3,7 @@
 
 use serde_json::json;
 use std::{fs, thread, time::Duration};
-use studio_workbench::plan_usage;
+use studio_workbench::{context_window, plan_usage};
 
 const LIMITS: &str = r#"{"five_hour":{"used_percentage":23.5,"resets_at":1738425600},"seven_day":{"used_percentage":41.2,"resets_at":1738857600}}"#;
 
@@ -57,4 +57,24 @@ fn the_status_lines_temp_file_is_not_read() {
         plan_usage(dir.path()).unwrap()["five_hour"]["used_percentage"],
         json!(23.5)
     );
+}
+
+/// #517, decision 1: a session's context window is its own snapshot's `context_window_size`.
+#[test]
+fn a_sessions_snapshot_gives_its_context_window() {
+    let dir = tempfile::tempdir().unwrap();
+    let window = |size: &str| {
+        format!(r#"{{"session_id":"a-1","context_window":{{"context_window_size":{size}}}}}"#)
+    };
+    fs::write(dir.path().join("a-1.json"), window("1000000")).unwrap();
+    fs::write(dir.path().join("b-2.json"), window("200000")).unwrap();
+
+    assert_eq!(context_window(dir.path(), "a-1"), Some(1_000_000));
+    assert_eq!(context_window(dir.path(), "b-2"), Some(200_000));
+    // No snapshot, one without the field, or an id that is no file name: no window.
+    assert_eq!(context_window(dir.path(), "c-3"), None);
+    fs::write(dir.path().join("d-4.json"), r#"{"session_id":"d-4"}"#).unwrap();
+    assert_eq!(context_window(dir.path(), "d-4"), None);
+    let name = dir.path().file_name().unwrap().to_str().unwrap();
+    assert_eq!(context_window(dir.path(), &format!("../{name}/a-1")), None);
 }
