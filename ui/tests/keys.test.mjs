@@ -1,7 +1,8 @@
 // The terminal pane's key mapping (#466), run on the `tsc` output. Run: `npm test` in apps/studio.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { keyAction } from "../../dist/keys.js";
+import { bound, keyAction, keystroke } from "../../dist/keys.js";
+import { initial, reload } from "../../dist/settings.js";
 
 const key = (code, mods = {}, key = "") => ({
   key, code, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...mods,
@@ -58,4 +59,38 @@ test("every other Cmd shortcut goes to the app", () => {
     assert.equal(keyAction(key(code, { metaKey: true }), false), "app", code);
   }
   assert.equal(keyAction(key("KeyC", { metaKey: true, shiftKey: true }), false), "app");
+});
+
+test("keystrokes read as Zed writes them, by the physical key", () => {
+  assert.equal(keystroke(key("Digit1", { metaKey: true }, "1")), "cmd-1");
+  assert.equal(keystroke(key("Escape", {}, "Escape")), "escape");
+  assert.equal(keystroke(key("Equal", { metaKey: true }, "=")), "cmd-=");
+  assert.equal(keystroke(key("Minus", { metaKey: true }, "-")), "cmd--");
+  assert.equal(keystroke(key("KeyK", { metaKey: true, shiftKey: true, ctrlKey: true, altKey: true }, "˚")), "ctrl-alt-shift-cmd-k");
+  assert.equal(keystroke(key("ArrowLeft", { metaKey: true })), "cmd-left");
+});
+
+test("today's window shortcuts are bound by default", () => {
+  const { keymap } = initial;
+  assert.equal(bound(keymap, "Workspace", key("Digit1", { metaKey: true }, "1")), "studio::ToggleList");
+  assert.equal(bound(keymap, "Workspace", key("Digit2", { metaKey: true }, "2")), "studio::ToggleRail");
+  assert.equal(bound(keymap, "Workspace", key("Escape", {}, "Escape")), "studio::Dismiss");
+  assert.equal(bound(keymap, "Workspace", key("Equal", { metaKey: true }, "=")), "studio::ZoomIn");
+});
+
+test("a rebound shortcut triggers its action, and the old key no longer does", () => {
+  const { keymap } = reload(initial, {
+    settings: null,
+    keymap: `[
+      { "context": "Workspace", "bindings": { "cmd-l": "studio::ToggleList" } },
+      { "context": "Terminal", "bindings": { "cmd-shift-k": "terminal::Clear", "cmd-left": null } },
+    ]`,
+  });
+  assert.equal(bound(keymap, "Workspace", key("KeyL", { metaKey: true }, "l")), "studio::ToggleList");
+  assert.equal(bound(keymap, "Workspace", key("Digit1", { metaKey: true }, "1")), undefined);
+  assert.equal(bound(keymap, "Workspace", key("Digit2", { metaKey: true }, "2")), "studio::ToggleRail");
+  assert.deepEqual(keyAction(key("KeyK", { metaKey: true, shiftKey: true }), false, keymap), { command: "clear" });
+  assert.equal(keyAction(key("KeyK", { metaKey: true }), false, keymap), "app");
+  assert.equal(keyAction(key("ArrowLeft", { metaKey: true }), false, keymap), "app");
+  assert.deepEqual(keyAction(key("ArrowRight", { metaKey: true }), false, keymap), { send: "\x05" });
 });

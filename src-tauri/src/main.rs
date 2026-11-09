@@ -34,6 +34,7 @@ use tauri_plugin_notification::NotificationExt;
 
 mod answer;
 mod restart;
+mod settings;
 mod terminal;
 
 /// The card store, which the log thread adds to and the pane records guesses in.
@@ -362,11 +363,14 @@ fn main() {
             restart::revival,
             restart::restart_into,
             answer::watch,
-            answer::answer
+            answer::answer,
+            settings::settings_files,
+            settings::set_zoom
         ])
         .setup(move |app| {
             let app = app.handle().clone();
             restart::watch_build(app.clone());
+            settings::watch(app.clone());
             let prs_app = app.clone();
             thread::spawn(move || prs(&prs_app));
             thread::spawn(move || follow(&app, &log, &writer));
