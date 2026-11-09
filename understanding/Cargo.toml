@@ -15,3 +15,8 @@ studio-hook = { path = "../hook" }
 
 [dev-dependencies]
 tempfile = "3"
+
+# Its timing summary has unit tests, which `cargo test` runs without a model call.
+[[example]]
+name = "writer_timing"
+test = true

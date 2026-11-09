@@ -99,14 +99,14 @@ The studio itself does not use file-system events. It polls the event log every 
 
 ## 6. What happens to "needs you"
 
-Today "needs you" comes from `PreToolUse` of `AskUserQuestion` and `ExitPlanMode`, from `PermissionRequest`, from a `permission_prompt` notification, from `Elicitation` and from a `?` sentence at `Stop` ([`core/src/lib.rs:1094-1095`](https://github.com/danielrispler/Falinks/blob/ad16f07/apps/studio/core/src/lib.rs#L1094-L1095), [`:2314-2320`](https://github.com/danielrispler/Falinks/blob/ad16f07/apps/studio/core/src/lib.rs#L2314-L2320); map #266, minimal version).
+Today "needs you" comes from `PreToolUse` of `AskUserQuestion` and `ExitPlanMode`, from `PermissionRequest`, from a `permission_prompt` notification, from `Elicitation`, and before #540 also from a `?` sentence at `Stop` ([`core/src/lib.rs:1094-1095`](https://github.com/danielrispler/Falinks/blob/ad16f07/apps/studio/core/src/lib.rs#L1094-L1095), [`:2314-2320`](https://github.com/danielrispler/Falinks/blob/ad16f07/apps/studio/core/src/lib.rs#L2314-L2320); map #266, minimal version).
 
 In bypass mode:
 
 - **Permissions go.** `PermissionRequest` hooks "run only when Claude Code is about to ask you for permission" ([hooks](https://code.claude.com/docs/en/hooks)), and bypass mode asks only for the few actions no mode approves: explicit ask rules, critical-path `rm`, and the out-of-workspace read and write blocks when turned on ([permission modes](https://code.claude.com/docs/en/permission-modes)). So permission waits nearly vanish.
 - **Questions stay.** `AskUserQuestion` still prompts in every mode (same page). Elicitations from MCP servers are not permission prompts, so **Inference:** they stay too.
 - **Plans mostly go.** In interactive bypass sessions "plan mode's blocks aren't enforced": an edit or command during planning runs without prompting (same page). **Inference:** plan approval stops being a gate, so a plan "needs you" is a formality.
-- **The `?` at `Stop` stays.** It reads the agent's text, not the mode.
+- **A text question stays your turn.** Since #540 a `?` sentence at `Stop` no longer means "needs you", and the mode does not change that.
 
 **Inference:** "needs you" would become rare and mean "the agent asked me something", which suits a calm control room. But the decision history loses its permission entries, and Daniel loses his chance to stop a risky call, which is what "never in bypass mode by default" protects (map #266: "agents start with normal permission prompts, never in bypass mode by default"). Hook payloads carry `permission_mode`, including `"bypassPermissions"` ([hooks](https://code.claude.com/docs/en/hooks), common input fields), so the studio could at least mark such a session.
 
