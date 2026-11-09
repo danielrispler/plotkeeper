@@ -100,7 +100,7 @@ _Avoid_: Verdict (only a plan's or a permission's allow or deny)
 The name an agent session gets from its work: its issue, its PR and its worktree, such as "#480 · PR #490 · agent-a1b2". A name Daniel gives it replaces it.
 
 **Context share**:
-How much of its context window an agent session's latest turn uses, as a percentage. It is measured against Claude Code's own window size, from the session's status line snapshot. When that size is unknown, the control room shows the turn's tokens only.
+How much of its context window an agent session uses, as a percentage. It is measured as Claude Code's status line measures it, from the session's status line snapshot: its tokens, its window size, and its own percent used and left. Without a snapshot, the control room shows the latest turn's tokens only.
 
 **Needs you**:
 The state of an agent session that is blocked on Daniel: waiting for his permission, his answer to a question, or his approval of a plan.
@@ -162,8 +162,12 @@ The default project mode. Waits and cards serve Daniel's understanding of this p
 The project mode for a project where Daniel cares only about the result. The wait is his own time, for practice or enrichment unrelated to the project. Approval requests and agent questions still reach him.
 
 **Settings**:
-Daniel's choices for the studio, kept in `settings.json` and `keymap.json` in its data folder, in Zed's format: zoom, the terminal's font size, the summary writer's model and effort, the Doctor menu, and the shortcuts. The studio reloads them when saved; a file that does not parse is reported and the last good settings stay in effect. The summary writer's model and effort and the Doctor menu are read but not used yet; later tickets wire them.
+Daniel's choices for the studio, kept in `settings.json` in its data folder, in Zed's format: zoom, the terminal's font size, the summary writer's model and effort, and the Doctor menu. The summary writer's model and effort and the Doctor menu are read but not used yet; later tickets wire them. "Settings files" means `settings.json` and `keymap.json` together: the studio reloads either when saved, and a file that does not parse is reported while its last good version stays in effect.
 _Avoid_: Preferences, config
+
+**Keymap**:
+Daniel's shortcuts for the studio, kept in `keymap.json` beside the settings, in Zed's format: keystrokes bound to actions, by context.
+_Avoid_: Keybindings, shortcuts file
 
 **Explanation language**:
 The human language of cards and questions: English for now, no longer Hebrew (#463), in plain words at Daniel's level. Code terms are in backticks.

@@ -59,19 +59,23 @@ fn the_status_lines_temp_file_is_not_read() {
     );
 }
 
-/// #517, decision 1: a session's context window is its own snapshot's `context_window_size`.
+/// #517, decision 1; #519: a session's context is its own snapshot's `context_window`.
 #[test]
 fn a_sessions_snapshot_gives_its_context_window() {
     let dir = tempfile::tempdir().unwrap();
     let window = |size: &str| {
-        format!(r#"{{"session_id":"a-1","context_window":{{"context_window_size":{size}}}}}"#)
+        format!(
+            r#"{{"session_id":"a-1","context_window":{{"context_window_size":{size},"used_percentage":13}}}}"#
+        )
     };
     fs::write(dir.path().join("a-1.json"), window("1000000")).unwrap();
     fs::write(dir.path().join("b-2.json"), window("200000")).unwrap();
 
-    assert_eq!(context_window(dir.path(), "a-1"), Some(1_000_000));
-    assert_eq!(context_window(dir.path(), "b-2"), Some(200_000));
-    // No snapshot, one without the field, or an id that is no file name: no window.
+    let a = json!({"context_window_size": 1_000_000, "used_percentage": 13});
+    assert_eq!(context_window(dir.path(), "a-1"), Some(a));
+    let b = context_window(dir.path(), "b-2").unwrap();
+    assert_eq!(b["context_window_size"], json!(200_000));
+    // No snapshot, one without the field, or an id that is no file name: none.
     assert_eq!(context_window(dir.path(), "c-3"), None);
     fs::write(dir.path().join("d-4.json"), r#"{"session_id":"d-4"}"#).unwrap();
     assert_eq!(context_window(dir.path(), "d-4"), None);

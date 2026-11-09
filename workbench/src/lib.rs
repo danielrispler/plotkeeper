@@ -94,17 +94,19 @@ pub fn plan_usage(dir: &Path) -> Option<serde_json::Value> {
     snapshot.get("rate_limits").cloned()
 }
 
-/// The context window of session `id`, from its status line snapshot's `context_window_size` in
-/// `dir` (#517, decision 1). `None` when there is no snapshot, it has no window, or `id` is no plain
-/// session id, as the status line saves only those.
-pub fn context_window(dir: &Path, id: &str) -> Option<u64> {
+/// The `context_window` of session `id`'s status line snapshot in `dir`: its window size, current
+/// usage and percentages (#517, decision 1; #519). `None` when there is no snapshot, it has no window
+/// size, or `id` is no plain session id, as the status line saves only those.
+pub fn context_window(dir: &Path, id: &str) -> Option<serde_json::Value> {
     let plain = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-';
     if id.is_empty() || !id.chars().all(plain) {
         return None;
     }
     let snapshot = std::fs::read(dir.join(format!("{id}.json"))).ok()?;
     let snapshot: serde_json::Value = serde_json::from_slice(&snapshot).ok()?;
-    snapshot["context_window"]["context_window_size"].as_u64()
+    let window = snapshot.get("context_window")?;
+    window["context_window_size"].as_u64()?;
+    Some(window.clone())
 }
 
 /// Creates task `name`: after a `git fetch`, branch `name` from `origin`'s default branch, checked

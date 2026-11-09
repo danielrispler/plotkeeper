@@ -2,6 +2,7 @@
 //! decisions 1 and 2): hook events through the core, with a made-up transcript fixture (generator in
 //! the PR's notes).
 
+use serde_json::{Value, json};
 use studio_core::{Context, Studio};
 
 const NAMING: &str = include_str!("fixtures/transcripts/naming.jsonl");
@@ -50,50 +51,97 @@ fn context(studio: &Studio) -> Option<Context> {
     studio.session(SESSION).unwrap().transcript.context.clone()
 }
 
+/// The context's tokens, window, share and what is left of the window.
+fn measured(studio: &Studio) -> (u64, Option<u64>, Option<u64>, Option<u64>) {
+    let c = context(studio).unwrap();
+    (c.tokens, c.window, c.share, c.left)
+}
+
+/// A status line snapshot's `context_window` of a 1M window, its `current_usage` holding `cached`
+/// cache-read tokens, with Claude's own percentages when `percentages` gives them.
+fn snapshot(cached: u64, percentages: Option<(u64, u64)>) -> Option<Value> {
+    let mut window = json!({
+        "total_input_tokens": 133_671,
+        "context_window_size": 1_000_000,
+        "current_usage": {"input_tokens": 2, "output_tokens": 8, "cache_creation_input_tokens": 4_901, "cache_read_input_tokens": cached},
+    });
+    if let Some((used, left)) = percentages {
+        window["used_percentage"] = json!(used);
+        window["remaining_percentage"] = json!(left);
+    }
+    Some(window)
+}
+
 #[test]
-fn the_context_share_follows_the_last_assistant_messages_token_counts() {
+fn the_context_follows_the_last_assistant_messages_token_counts() {
     let (mut studio, path) = session("context", TASK, &first(3), "gh issue view 480");
-    let window = Some(1_000_000);
 
     follow(&mut studio);
-    assert!(studio.set_window(SESSION, window));
     // 2 + 30,000 + 70,000 input tokens.
     let tokens = |studio: &Studio| context(studio).map(|c| c.tokens);
     assert_eq!(tokens(&studio), Some(100_002));
 
-    // A helper's line is its own context; the agent's next message counts, in the same window.
+    // A helper's line is its own context; the agent's next message counts.
     std::fs::write(&path, first(6)).unwrap();
     follow(&mut studio);
-    let latest = Some(Context {
-        tokens: 250_004,
-        window,
-        share: Some(26),
-    });
-    assert_eq!(context(&studio), latest);
+    assert_eq!(tokens(&studio), Some(250_004));
 
     // A new prompt starts a turn, not a context.
     std::fs::write(&path, first(7)).unwrap();
     follow(&mut studio);
-    assert_eq!(context(&studio), latest);
+    assert_eq!(tokens(&studio), Some(250_004));
 }
 
 #[test]
-fn the_window_comes_from_the_status_line_snapshot_not_the_model() {
-    // #517, measurement 1: 84.8k tokens, and a model without the `[1m]` mark.
-    let lines = first(3)
-        .replace("claude-opus-5-5[1m]", "claude-opus-5-5")
-        .replace(
-            "\"cache_read_input_tokens\":70000",
-            "\"cache_read_input_tokens\":54798",
-        );
-    let (mut studio, _) = session("snapshot", TASK, &lines, "gh issue view 480");
-
+fn with_a_snapshot_the_context_is_claudes_status_line_view() {
+    // #517, measurement 1's turn: the snapshot counts 2 + 4,901 + 84,899 = 89,802 tokens, its 9% used
+    // and 91% left, whatever the transcript's latest message says.
+    let (mut studio, path) = session("snapshot", TASK, &first(3), "gh issue view 480");
     follow(&mut studio);
-    assert!(studio.set_window(SESSION, Some(1_000_000)));
-    let share = context(&studio).and_then(|c| c.share);
-    assert_eq!(share, Some(9));
-    // The same window again changes nothing.
-    assert!(!studio.set_window(SESSION, Some(1_000_000)));
+    let claudes = snapshot(84_899, Some((9, 91)));
+
+    assert!(studio.set_snapshot(SESSION, claudes.clone()));
+    assert_eq!(
+        measured(&studio),
+        (89_802, Some(1_000_000), Some(9), Some(91))
+    );
+    // The same snapshot again changes nothing.
+    assert!(!studio.set_snapshot(SESSION, claudes));
+    // The transcript's next message keeps the snapshot's view.
+    std::fs::write(&path, first(6)).unwrap();
+    follow(&mut studio);
+    assert_eq!(
+        measured(&studio),
+        (89_802, Some(1_000_000), Some(9), Some(91))
+    );
+}
+
+#[test]
+fn a_snapshot_without_percentages_rounds_to_nearest() {
+    let (mut studio, _) = session("rounding", TASK, &first(3), "gh issue view 480");
+    follow(&mut studio);
+
+    // 2 + 4,901 + 197,797 = 202,700 tokens, 20.27% of the window: 20 used, 80 left, not 21.
+    assert!(studio.set_snapshot(SESSION, snapshot(197_797, None)));
+    assert_eq!(
+        measured(&studio),
+        (202_700, Some(1_000_000), Some(20), Some(80))
+    );
+}
+
+#[test]
+fn before_the_first_api_call_the_transcript_counts_in_the_snapshots_window() {
+    let (mut studio, _) = session("no-usage", TASK, &first(3), "gh issue view 480");
+    follow(&mut studio);
+
+    let mut start = snapshot(0, None).unwrap();
+    start["current_usage"] = Value::Null;
+    assert!(studio.set_snapshot(SESSION, Some(start)));
+    // The transcript's 100,002 tokens of 1M: 10% used, 90% left.
+    assert_eq!(
+        measured(&studio),
+        (100_002, Some(1_000_000), Some(10), Some(90))
+    );
 }
 
 #[test]
@@ -101,12 +149,8 @@ fn with_no_snapshot_a_session_has_a_token_count_and_no_share() {
     let (mut studio, _) = session("no-snapshot", TASK, &first(3), "gh issue view 480");
 
     follow(&mut studio);
-    assert!(!studio.set_window(SESSION, None));
-    let context = context(&studio).unwrap();
-    assert_eq!(
-        (context.tokens, context.window, context.share),
-        (100_002, None, None)
-    );
+    assert!(!studio.set_snapshot(SESSION, None));
+    assert_eq!(measured(&studio), (100_002, None, None, None));
 }
 
 fn name(studio: &Studio) -> String {

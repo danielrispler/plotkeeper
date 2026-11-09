@@ -43,28 +43,59 @@ pub struct Transcript {
     pub ended: bool,
 }
 
-/// The input tokens of the agent's latest message, out of the context window Claude Code's status
-/// line snapshot gives (#517, decisions 1 and 2); `None` with no snapshot, which has no share.
+/// How full the context is, as Claude Code's status line measures it: from the session's status line
+/// snapshot when there is one, else the input tokens of the agent's latest message with no share
+/// (#517, decisions 1 and 2; #519).
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Context {
     pub tokens: u64,
     pub window: Option<u64>,
-    /// The percent of the window used, rounded up as Claude Code's status line shows it (#517,
-    /// measurement 1: 84.8k of 1M is its 9%).
+    /// The percent of the window used, Claude's own `used_percentage`, else rounded to nearest.
     pub share: Option<u64>,
+    /// The percent left, Claude's own `remaining_percentage`, else `100 - share`.
+    pub left: Option<u64>,
+    /// The transcript's tokens, which count when the snapshot has no `current_usage` yet.
+    #[serde(skip)]
+    pub(crate) measured: u64,
+    /// The snapshot's `context_window`, which the shell sets (`Studio::set_snapshot`).
+    #[serde(skip)]
+    pub(crate) snapshot: Option<Value>,
 }
 
 impl Context {
-    pub(crate) fn new(tokens: u64, window: Option<u64>) -> Self {
-        let share = window
-            .filter(|&w| w > 0)
-            .map(|w| (100 * tokens).div_ceil(w));
+    pub(crate) fn new(measured: u64, snapshot: Option<Value>) -> Self {
+        let field = |key: &str| snapshot.as_ref().and_then(|s| s[key].as_u64());
+        let window = field("context_window_size").filter(|&w| w > 0);
+        // `current_usage` is null before the session's first API call.
+        let usage = snapshot.as_ref().map(|s| &s["current_usage"]);
+        let tokens = match usage {
+            Some(usage) if window.is_some() && usage.is_object() => input_tokens(usage),
+            _ => measured,
+        };
+        let share =
+            window.map(|w| field("used_percentage").unwrap_or_else(|| (100 * tokens + w / 2) / w));
+        let left = share.map(|s| field("remaining_percentage").unwrap_or(100 - s.min(100)));
         Context {
             tokens,
             window,
             share,
+            left,
+            measured,
+            snapshot,
         }
     }
+}
+
+/// The input tokens of an API call's `usage`: fresh, cache-written and cache-read.
+fn input_tokens(usage: &Value) -> u64 {
+    [
+        "input_tokens",
+        "cache_creation_input_tokens",
+        "cache_read_input_tokens",
+    ]
+    .iter()
+    .map(|k| usage[k].as_u64().unwrap_or(0))
+    .sum()
 }
 
 impl Transcript {
@@ -95,17 +126,9 @@ impl Transcript {
         }
         let usage = &line["message"]["usage"];
         if kind == "assistant" && usage.is_object() {
-            let tokens = [
-                "input_tokens",
-                "cache_creation_input_tokens",
-                "cache_read_input_tokens",
-            ]
-            .iter()
-            .map(|k| usage[k].as_u64().unwrap_or(0))
-            .sum();
-            // The window stays the snapshot's, which the shell sets (`Studio::set_window`).
-            let window = self.context.as_ref().and_then(|c| c.window);
-            self.context = Some(Context::new(tokens, window));
+            // The snapshot stays, which the shell sets (`Studio::set_snapshot`).
+            let snapshot = self.context.as_mut().and_then(|c| c.snapshot.take());
+            self.context = Some(Context::new(input_tokens(usage), snapshot));
         }
         let content = &line["message"]["content"];
         let blocks = match content {

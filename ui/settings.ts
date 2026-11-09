@@ -16,8 +16,8 @@ export interface DoctorEntry {
   kind: "shell" | "session";
 }
 
-// `settings.json`'s part of the settings.
-export interface Options {
+// The settings: `settings.json`'s choices.
+export interface Settings {
   zoom: number;
   // null: the stylesheet's `--size-mono`.
   terminal: { font_size: number | null };
@@ -26,9 +26,9 @@ export interface Options {
   doctor: DoctorEntry[];
 }
 
-// Both files: the settings in effect.
-export interface Settings {
-  options: Options;
+// Both settings files, parsed: the settings and keymap in effect.
+export interface Files {
+  settings: Settings;
   keymap: Keymap;
   // One line per file that did not parse or key of the wrong type, such as
   // "settings.json: Unexpected end of JSON input".
@@ -46,7 +46,7 @@ export const zoomed = (zoom: number, by: number) => clampZoom(by === 0 ? 1 : Mat
 const FONT_MIN = 8;
 const FONT_MAX = 40;
 
-const defaultOptions: Options = {
+const defaultSettings: Settings = {
   zoom: 1,
   terminal: { font_size: null },
   summaries: { model: "haiku", effort: "low", on_open: false },
@@ -77,7 +77,7 @@ const defaultKeymap: Keymap = {
   },
 };
 
-export const initial: Settings = { options: defaultOptions, keymap: defaultKeymap, errors: [] };
+export const initial: Files = { settings: defaultSettings, keymap: defaultKeymap, errors: [] };
 
 // Drops comments and trailing commas outside strings, so `JSON.parse` reads Zed's format.
 function parseJsonc(text: string): unknown {
@@ -88,7 +88,7 @@ function parseJsonc(text: string): unknown {
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 type Report = (problem: string) => void;
 
-function readOptions(json: unknown, report: Report): Options {
+function readSettings(json: unknown, report: Report): Settings {
   if (!isObject(json)) throw new Error("expected an object");
   // `value` when it has the type of `fallback`; else `fallback`, and a key of the wrong type is reported.
   const pick = <T>(name: string, value: unknown, fallback: T): T => {
@@ -98,7 +98,7 @@ function readOptions(json: unknown, report: Report): Options {
   };
   const terminal = isObject(json.terminal) ? json.terminal : {};
   const summaries = isObject(json.summaries) ? json.summaries : {};
-  const d = defaultOptions;
+  const d = defaultSettings;
   // null when unset or of the wrong type: the stylesheet's size.
   const fontSize = pick("terminal.font_size", terminal.font_size ?? undefined, NaN);
   return {
@@ -159,8 +159,8 @@ function readKeymap(json: unknown): Keymap {
 // The two files' text, as the shell sends it; null: no file.
 export type SettingsFiles = { settings: string | null; keymap: string | null };
 
-// The settings from the files' text, each file falling back to `previous` when it does not parse.
-export function reload(previous: Settings, files: SettingsFiles): Settings {
+// The settings files from their text, each falling back to `previous` when it does not parse.
+export function reload(previous: Files, files: SettingsFiles): Files {
   const errors: string[] = [];
   const read = <T>(name: string, text: string | null, parse: (json: unknown, report: Report) => T, fallback: T, last: T): T => {
     if (text === null || !text.trim()) return fallback;
@@ -171,7 +171,7 @@ export function reload(previous: Settings, files: SettingsFiles): Settings {
       return last;
     }
   };
-  const options = read("settings.json", files.settings, readOptions, defaultOptions, previous.options);
+  const settings = read("settings.json", files.settings, readSettings, defaultSettings, previous.settings);
   const keymap = read("keymap.json", files.keymap, readKeymap, defaultKeymap, previous.keymap);
-  return { options, keymap, errors };
+  return { settings, keymap, errors };
 }

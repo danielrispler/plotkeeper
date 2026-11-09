@@ -79,9 +79,9 @@ Every Cmd shortcut goes to the terminal or to the app (`ui/keys.ts`):
 | Cmd+=, Cmd+-, Cmd+0 | app | zooms the window in, out (from half to double size) and back |
 | any other Cmd shortcut | app | the app's menu: Cmd+Q, Cmd+W, Cmd+H, Cmd+M and the like |
 
-Every shortcut here but Cmd+C and Cmd+V can be rebound in `keymap.json` (see Settings).
+Every shortcut here but Cmd+C and Cmd+V can be rebound in `keymap.json` (see Settings files).
 
-## Settings
+## Settings files
 
 `settings.json` and `keymap.json` sit in the studio's data folder, `~/Library/Application Support/dev.falinks.studio/`, in Zed's format: JSON with comments and trailing commas (#524). The app reloads them when either is saved. A file that does not parse is reported in the notice line, and the last good one stays in effect. Missing keys keep their defaults; a key of the wrong type is reported in the same line and keeps its default. `summaries` and `doctor` are read but not used yet; later tickets of #517 wire them:
 

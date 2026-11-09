@@ -33,13 +33,13 @@ export function contextText(context: Context | null): string {
   return context.share === null ? thousands(context.tokens) : `context ${context.share}%`;
 }
 
-// The context share's hover: its tokens of the window, and the share as Claude's status line shows
-// it, which counts what is left.
+// The context share's hover: its tokens of the window, and what Claude's status line shows: its own
+// percent left.
 export function contextTitle(context: Context | null): string {
   if (!context) return "";
   const used = thousands(context.tokens);
-  if (context.window === null || context.share === null) return `${used} tokens used · the window size is unknown`;
-  return `${used} of ${thousands(context.window)} tokens used · Claude's status line shows this as ${100 - context.share}% left`;
+  if (context.window === null || context.left === null) return `${used} tokens used · the window size is unknown`;
+  return `${used} of ${thousands(context.window)} tokens used · Claude's status line shows this as ${context.left}% left`;
 }
 
 // The context share's node, with its hover.
