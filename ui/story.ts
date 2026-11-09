@@ -5,13 +5,13 @@
 import { code, element, invoke, text } from "./dom.js";
 import { askElement } from "./ask.js";
 import { encode, request } from "./daemon.js";
-import { agentState, contextText, sessionName } from "./list.js";
+import { agentState, contextText, contextTitle, sessionName } from "./list.js";
 import { closePane, startClaude } from "./panes.js";
 import { openDecision } from "./answer.js";
 import { showCleared } from "./decisions.js";
 import { decisionElement, questionElement } from "./questions.js";
 import { worktreeOf } from "./paths.js";
-import { checkTime, counts, estimateText, timesText } from "./times.js";
+import { checkTime, counts, estimateText, timeNode, times } from "./times.js";
 import { studio } from "./state.js";
 import { stateLabels, type CheckLine, type Losses, type Places, type Question, type Selection, type Session, type Transcript } from "./types.js";
 
@@ -33,13 +33,14 @@ export function showView(selected: Selection | null) {
   const estimate = document.createElement("span");
   estimate.className = "estimate";
   estimate.textContent = agent === null ? estimateText(session.work) : "";
-  element("times").replaceChildren(counts(document.createElement("span"), (now) => timesText(session, stepSpan, now)), estimate);
+  element("times").replaceChildren(...times(session, stepSpan).map(timeNode), estimate);
   element("view").toggleAttribute("data-agent", agent !== null);
-  const share = contextText(session.transcript.context);
+  const context = session.transcript.context;
   element("identity").textContent =
     agent === null
-      ? [sessionName(session), share && `context ${share}`].filter(Boolean).join(" · ")
+      ? [sessionName(session), contextText(context)].filter(Boolean).join(" · ")
       : `${sessionName(session)} · ${agent.name}`;
+  element("identity").title = agent === null ? contextTitle(context) : "";
   element("state").textContent = label;
   element("state").dataset.state = state;
   // "Open" resumes an ended session in a new terminal, in its folder, where Claude Code keeps it.

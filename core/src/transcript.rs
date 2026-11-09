@@ -33,11 +33,28 @@ pub struct Transcript {
     pub branch: Option<String>,
 }
 
-/// The input tokens of the agent's latest message, out of its model's context window.
+/// The input tokens of the agent's latest message, out of the context window Claude Code's status
+/// line snapshot gives (#517, decisions 1 and 2); `None` with no snapshot, which has no share.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Context {
     pub tokens: u64,
-    pub window: u64,
+    pub window: Option<u64>,
+    /// The percent of the window used, rounded up as Claude Code's status line shows it (#517,
+    /// measurement 1: 84.8k of 1M is its 9%).
+    pub share: Option<u64>,
+}
+
+impl Context {
+    pub(crate) fn new(tokens: u64, window: Option<u64>) -> Self {
+        let share = window
+            .filter(|&w| w > 0)
+            .map(|w| (100 * tokens).div_ceil(w));
+        Context {
+            tokens,
+            window,
+            share,
+        }
+    }
 }
 
 impl Transcript {
@@ -66,13 +83,9 @@ impl Transcript {
             .iter()
             .map(|k| usage[k].as_u64().unwrap_or(0))
             .sum();
-            // shortcut: the window from the `[1m]` mark Claude Code puts on the requested model, else
-            // 200k; take it from the status line's snapshot (#481) if a model differs.
-            let long = line["requestedModel"]
-                .as_str()
-                .is_some_and(|m| m.ends_with("[1m]"));
-            let window = if long { 1_000_000 } else { 200_000 };
-            self.context = Some(Context { tokens, window });
+            // The window stays the snapshot's, which the shell sets (`Studio::set_window`).
+            let window = self.context.as_ref().and_then(|c| c.window);
+            self.context = Some(Context::new(tokens, window));
         }
         let content = &line["message"]["content"];
         let blocks = match content {

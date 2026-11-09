@@ -497,8 +497,21 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
         // Reads the transcripts' lines and nothing else (`apps/studio/AGENTS.md`).
         let log = |line: String| eprintln!("studio: {line}");
         let transcripts_changed = state.lock().unwrap().follow_transcripts(log);
+        // Each live session's context window, from its status line snapshot (#517, decision 1); the
+        // snapshot is named by the conversation's id, which a `/clear` changes.
+        let running: Vec<_> = (state.lock().unwrap().sessions().into_iter())
+            .filter(|s| s.state != Ended)
+            .map(|s| (s.agent.id.clone(), s.resume_id.clone()))
+            .collect();
+        let home = std::env::home_dir().unwrap_or_default();
+        let usage = studio_hook::data_dir(&home).join("usage");
+        let windows_changed = running.into_iter().fold(false, |changed, (id, resume_id)| {
+            let window = studio_workbench::context_window(&usage, &resume_id);
+            state.lock().unwrap().set_window(&id, window) | changed
+        });
         let names_changed = NAMES_CHANGED.swap(false, Ordering::AcqRel);
-        if state.lock().unwrap().tick(millis()) || read || transcripts_changed || names_changed {
+        let changed = read || transcripts_changed || windows_changed || names_changed;
+        if state.lock().unwrap().tick(millis()) || changed {
             sent.list(app);
         }
         // Asking for focus waits on the main thread, which never takes this lock.

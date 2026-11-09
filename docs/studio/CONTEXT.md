@@ -100,7 +100,7 @@ _Avoid_: Verdict (only a plan's or a permission's allow or deny)
 The name an agent session gets from its work: its issue, its PR and its worktree, such as "#480 · PR #490 · agent-a1b2". A name Daniel gives it replaces it.
 
 **Context share**:
-How much of its model's context window an agent session's latest turn uses, as a percentage.
+How much of its context window an agent session's latest turn uses, as a percentage. It is measured against Claude Code's own window size, from the session's status line snapshot. When that size is unknown, the control room shows the turn's tokens only.
 
 **Needs you**:
 The state of an agent session that is blocked on Daniel: waiting for his permission, his answer to a question, or his approval of a plan.

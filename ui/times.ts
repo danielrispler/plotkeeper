@@ -14,15 +14,23 @@ export function duration(ms: number): string {
 
 const spanText = (span: Span, now: number) => duration((span.end ?? now) - span.start);
 
-// The session's, its latest turn's and the step's times, such as "Session 2h 05m · Turn 12m · Step
-// 45s". An ended session's time stops at its last event.
-export function timesText(session: Session, step: Span | null, now: number): string {
+// A time: its hover, and how to draw it at a time, such as "Turn 12m".
+export type Time = [title: string, draw: (now: number) => string];
+
+// The session's, its latest turn's and the step's times, each labelled with hover text (#517,
+// decision 4), such as "Session 2h 05m", "Turn 12m" and "Step 45s". An ended session's time stops at
+// its last event.
+export function times(session: Pick<Session, "state" | "started_at" | "last_event_at" | "turn_span">, step: Span | null): Time[] {
   const end = session.state === "ended" ? session.last_event_at : null;
-  const parts = [`Session ${spanText({ start: session.started_at, end }, now)}`];
-  if (session.turn_span) parts.push(`Turn ${spanText(session.turn_span, now)}`);
-  if (step) parts.push(`Step ${spanText(step, now)}`);
-  return parts.join(" · ");
+  const parts: Time[] = [["Time since the session started", (now) => `Session ${spanText({ start: session.started_at, end }, now)}`]];
+  const turn = session.turn_span;
+  if (turn) parts.push(["Time on the current prompt", (now) => `Turn ${spanText(turn, now)}`]);
+  if (step) parts.push(["Time on the current step", (now) => `Step ${spanText(step, now)}`]);
+  return parts;
 }
+
+// Time `time`'s node, which counts up.
+export const timeNode = ([title, draw]: Time) => Object.assign(counts(document.createElement("span"), draw), { title });
 
 // A check's time: how long it took, or while it runs, against its typical time ("3m of usually 7m").
 export function checkTime(line: CheckLine, now: number): string {
