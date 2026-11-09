@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Story Rail Mockup</title>
+<style>
+:root {
+  --bg: #1e1f22; --panel: #26282c; --line: #3a3d42; --text: #e6e6e6; --dim: #9aa0a6;
+  --orange: #ff9f43; --red: #ff5f56; --accent: #6cb6ff; --code: #31343a;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f6f6f4; --panel: #ffffff; --line: #ddd; --text: #222; --dim: #666;
+    --orange: #d96c00; --red: #d0342c; --accent: #1f6feb; --code: #f0f0ee;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 -apple-system, system-ui, sans-serif; }
+.wrap { display: flex; gap: 16px; padding: 16px; flex-wrap: wrap; }
+.rail { width: 420px; max-width: 100%; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; }
+.note { flex: 1; min-width: 260px; color: var(--dim); font-size: 13px; }
+.note h2 { color: var(--text); font-size: 15px; margin-top: 0; }
+.head { display: flex; justify-content: space-between; align-items: baseline; }
+.name { font-weight: 600; }
+.yt { color: var(--orange); font-weight: 700; }
+.meta { color: var(--dim); font-size: 12px; margin: 2px 0 10px; }
+.meta span[title] { border-bottom: 1px dotted var(--dim); cursor: help; }
+.turn { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 10px; }
+.turn h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--dim); margin: 0 0 6px; }
+.summary ul { margin: 0; padding-left: 18px; }
+.summary li { margin: 3px 0; }
+details { margin-top: 10px; border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; }
+summary { cursor: pointer; color: var(--accent); font-size: 13px; }
+details[open] summary { margin-bottom: 8px; }
+table { border-collapse: collapse; width: 100%; font-size: 12px; margin: 6px 0; }
+th, td { border: 1px solid var(--line); padding: 4px 6px; text-align: left; }
+th { background: var(--code); }
+code { background: var(--code); padding: 0 4px; border-radius: 3px; font-size: 12px; }
+.q { margin: 6px 0; }
+.opt { display: block; width: 100%; text-align: left; margin: 4px 0; padding: 6px 8px; background: var(--code); color: var(--text); border: 1px solid var(--line); border-radius: 5px; cursor: pointer; font: inherit; font-size: 13px; }
+.opt.right { border-color: #3fb950; }
+.opt.wrong { border-color: var(--red); }
+.why { display: none; font-size: 13px; color: var(--dim); margin-top: 6px; }
+.why.show { display: block; }
+.tag { font-size: 11px; color: var(--dim); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="rail">
+    <div class="head"><span class="name">main · Falinks</span><span class="yt">Your turn</span></div>
+    <div class="meta">
+      <span title="Context share: 85k of 1,000k tokens the latest turn uses">context 9%</span> ·
+      <span title="Time since the session started">session 9m</span> ·
+      <span title="Time on your current prompt">turn 2m</span> ·
+      <span title="Model and reasoning effort, from the transcript">opus-5-5 · effort medium</span>
+    </div>
+
+    <div class="turn">
+      <h3>Turn summary <span class="tag">· Haiku · 9 s · written when the turn ended</span></h3>
+      <div class="summary">
+        <ul>
+          <li><b>Four edits applied to #490:</b> a 15% tie rule that favours the simpler Git variant, a fresh baseline, a pinned setup and a <code>go list</code> check.</li>
+          <li><b>Setup pinned:</b> any change to version, model or effort restarts qualification.</li>
+          <li><b>Three drafts await your review:</b> brief, trap, qualification rule.</li>
+          <li><b>Open for you:</b> should qualification require the trap to break 1 of 3 <code>git-2</code> runs?</li>
+        </ul>
+      </div>
+
+      <details>
+        <summary>Learning: the main idea, and one question</summary>
+        <p><b>Main idea:</b> a test that picks its fixture using the same signal it later measures risks selection bias.</p>
+        <div class="q">Why is requiring the trap to break a <code>git-2</code> run during qualification risky?</div>
+        <button class="opt" data-k="0">A. It needs too many runs for the budget.</button>
+        <button class="opt" data-k="1">B. It picks the fixture by the signal (C2) later measured.</button>
+        <button class="opt" data-k="0">C. It looks at Falinks results during qualification.</button>
+        <div class="why">B. Filtering fixtures on the outcome you plan to measure can bias it. The agent keeps the rule anyway: one Git failure is a weak filter and scored runs are fresh.</div>
+      </details>
+
+      <details>
+        <summary>Full response (rendered)</summary>
+        <p>Applied all four edits and posted them on #490.</p>
+        <table>
+          <tr><th>Edit</th><th>Where</th><th>Status</th></tr>
+          <tr><td>15% tie rule</td><td>#490 resolution</td><td>posted</td></tr>
+          <tr><td>Fresh B1 baseline</td><td>#490 resolution</td><td>posted</td></tr>
+          <tr><td>Pinned setup</td><td>Step A spec #498</td><td>posted</td></tr>
+          <tr><td><code>go list</code> check</td><td>Step A spec #498</td><td>posted</td></tr>
+        </table>
+        <p>Three drafts are ready for review…</p>
+      </details>
+    </div>
+  </div>
+
+  <div class="note">
+    <h2>The story rail Daniel approved on 2026-11-08 (#517, decision 11)</h2>
+    <p>The content is a real turn from another session, summarised by Haiku. The summary and question text are its output, trimmed.</p>
+    <p><b>Top:</b> the turn summary, always open. <b>Middle:</b> the learning section, collapsed, with the main idea and one question. <b>Bottom:</b> the full response, collapsed and rendered as Markdown (the table).</p>
+    <p>The header shows the labelled context share and timers with hover text (decisions 1–4), and the model and effort (decision 8).</p>
+    <p>The layout and order are the decision. The colours, text and exact styling are illustration only. Click a quiz option to see the grading.</p>
+  </div>
+</div>
+<script>
+document.querySelectorAll(".opt").forEach(b => b.addEventListener("click", () => {
+  const box = b.parentElement;
+  box.querySelectorAll(".opt").forEach(o => o.classList.add(o.dataset.k === "1" ? "right" : "wrong"));
+  box.querySelector(".why").classList.add("show");
+}));
+</script>
+</body>
+</html>
