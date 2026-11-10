@@ -1,8 +1,7 @@
 // The picker (#467): where a new session starts. It lists the configured repository's main checkout
 // and its tasks, read live from git each time it opens, with `agent-*` worktrees hidden and counted
 // on the main checkout. Choosing one starts `claude` there in a new terminal.
-// Tasks (#468): a name field creates a task and starts a session in it; each task's "Remove" removes
-// its worktree, never forced, and first lists what that would lose. Git's errors show as they are.
+// Creating a task by its branch name and removing one (#468) live in Places (#576), at the list's foot.
 // The quick start, first: an issue, a spec or a prompt names a new task, and its session starts on it;
 // left empty, a session starts in the main checkout with no prompt.
 
@@ -10,8 +9,9 @@ import { element, invoke, pressable, text } from "./dom.js";
 import type { Entry } from "./keys.js";
 import { startClaude } from "./panes.js";
 import { shortPath } from "./paths.js";
+import { placeRows } from "./places.js";
 import type { Binding } from "./settings.js";
-import type { Losses, Place, Places } from "./types.js";
+import type { Place, Places } from "./types.js";
 
 // Git's error, or any other, at the picker's foot.
 function failed(error: unknown) {
@@ -21,7 +21,14 @@ function failed(error: unknown) {
 
 // A field whose Enter or button makes a task with `create`, then starts a session there, given
 // `prompt` of the field's text as its first prompt. Only a `prompt` field passes an empty text on.
-function newTask(placeholder: string, label: string, create: (value: string) => Promise<Place>, prompt: boolean): HTMLElement {
+// Errors go to `report`: the picker's foot, or Places' (#576).
+export function newTask(
+  placeholder: string,
+  label: string,
+  create: (value: string) => Promise<Place>,
+  prompt: boolean,
+  report: (error: unknown) => void = failed,
+): HTMLElement {
   const form = document.createElement("form");
   form.className = "new-task";
   const field = document.createElement("input");
@@ -41,7 +48,7 @@ function newTask(placeholder: string, label: string, create: (value: string) => 
       element("picker").hidden = true;
       await startClaude(task.path, null, prompt ? value : "");
     } catch (e) {
-      failed(e);
+      report(e);
     } finally {
       button.textContent = label;
       form.inert = false;
@@ -54,53 +61,6 @@ function newTask(placeholder: string, label: string, create: (value: string) => 
 // empty, the main checkout.
 const quickStart = (main: Place) =>
   newTask("Issue #, spec path or prompt; empty for main", "Start", async (request) => request ? invoke<Place>("create_named_task", { request }) : main, true);
-// A task with the branch name Daniel types.
-const namedTask = () => newTask("New task: branch name", "Create", (name) => invoke<Place>("create_task", { name }), false);
-
-// What removing a task would lose, and the choice to remove it anyway.
-function confirmRemoval(row: HTMLElement, task: Place, name: string, losses: Losses) {
-  const box = document.createElement("div");
-  box.className = "losses";
-  box.append(text("p", `${name} has work that is not on origin:`));
-  const listed = (title: string, lines: string[]) => {
-    if (!lines.length) return;
-    const list = document.createElement("ul");
-    list.append(...lines.map((line) => text("li", line, "mono")));
-    box.append(text("p", title, "losses-title"), list);
-  };
-  listed("Uncommitted changes", losses.uncommitted);
-  listed("Commits not on origin (they stay on the branch)", losses.unpushed);
-  const anyway = pressable(text("button", "Remove anyway"), false, () => remove(row, task, name, true));
-  const cancel = pressable(text("button", "Cancel"), false, () => box.remove());
-  const buttons = document.createElement("div");
-  buttons.append(anyway, cancel);
-  box.append(buttons);
-  row.querySelector(".losses")?.remove();
-  row.append(box);
-}
-
-// Removes the task's worktree, or, unless confirmed, asks first when that would lose work, then its
-// branch when the main checkout holds it, as "Delete" does.
-async function remove(row: HTMLElement, task: Place, name: string, confirmed: boolean) {
-  try {
-    const losses = await invoke<Losses | null>("remove_task", { path: task.path, confirmed });
-    if (losses) return confirmRemoval(row, task, name, losses);
-    row.remove();
-    if (task.branch) await invoke("delete_merged_branch", { branch: task.branch }).catch((e) => failed(`Branch ${task.branch} kept: ${e}`));
-  } catch (e) {
-    failed(e);
-  }
-}
-
-// A task's row, with its "Remove" button.
-function taskRow(name: string, task: Place): HTMLElement {
-  const row = document.createElement("div");
-  row.className = "task";
-  const removing = pressable(text("button", "Remove", "remove"), false, () => remove(row, task, name, false));
-  removing.setAttribute("aria-label", `Remove ${name}`);
-  row.append(placeRow(name, task), removing);
-  return row;
-}
 
 // A place's row: its name, then its folder.
 function placeRow(name: string, place: Place): HTMLElement {
@@ -116,17 +76,17 @@ function placeRow(name: string, place: Place): HTMLElement {
   return button;
 }
 
-function picked({ main, tasks, hidden }: Places): HTMLElement[] {
-  const folder = (place: Place) => place.path.split("/").pop() ?? place.path;
+function picked(places: Places): HTMLElement[] {
+  const { hidden } = places;
   const count = hidden ? [text("p", `${hidden} agent worktree${hidden === 1 ? "" : "s"} hidden`, "hidden-count")] : [];
+  const [main, ...tasks] = placeRows(places, [], []).map(({ name, place }) => placeRow(name, place));
   return [
     text("h1", "New session in its own task"),
-    quickStart(main),
+    quickStart(places.main),
     text("h1", "Start a session in"),
-    placeRow(`Main checkout${main.branch ? ` · ${main.branch}` : ""}`, main),
+    main,
     ...count,
-    ...tasks.map((task) => taskRow(task.branch ?? `${folder(task)} (detached)`, task)),
-    namedTask(),
+    ...tasks,
   ];
 }
 

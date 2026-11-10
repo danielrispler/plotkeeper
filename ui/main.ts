@@ -13,6 +13,7 @@ import { showSessions } from "./list.js";
 import { select, show } from "./selection.js";
 import { startPanes } from "./panes.js";
 import { showPalette, showPicker } from "./picker.js";
+import { readPlaces, showPlaces } from "./places.js";
 import { reload, type SettingsFiles, zoomed } from "./settings.js";
 import { studio } from "./state.js";
 import { showView } from "./story.js";
@@ -191,8 +192,11 @@ document.addEventListener("pointerdown", (event) => {
 
 const showList = (sessions: Session[]) => {
   showSessions(sessions);
+  showPlaces();
   showToast();
 };
+// Opening Places reads git's counts at once (#576).
+element("places").addEventListener("toggle", () => void ((element("places") as HTMLDetailsElement).open && readPlaces(true)));
 listen<Session[]>("sessions", showList);
 invoke<Session[]>("sessions").then(showList);
 // A press on the toast jumps to its session; the press itself keeps the terminal's keyboard focus.

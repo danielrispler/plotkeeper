@@ -233,7 +233,7 @@ async function askDelete(session: Session) {
 
 // The branch is git's, read before the worktree goes: a session with no turn yet has none in its
 // transcript.
-async function removeWorktree(worktree: string) {
+export async function removeWorktree(worktree: string) {
   const { tasks } = await invoke<Places>("places");
   const branch = tasks.find((task) => task.path === worktree)?.branch ?? null;
   const losses = await invoke<Losses | null>("remove_task", { path: worktree, confirmed: false });

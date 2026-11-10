@@ -178,6 +178,8 @@ export type Selection = { session: Session; agent: string | null };
 // the count of `agent-*` worktrees hidden. `branch` is null at a detached HEAD.
 export type Place = { path: string; branch: string | null };
 export type Places = { main: Place; tasks: Place[]; hidden: number };
+// A place's counts (#576): commits ahead of and behind its base, null with no base, and changed files.
+export type Counts ={ ahead_behind: [number, number] | null; changed: number };
 export type Losses = { uncommitted: string[]; unpushed: string[] };
 
 export const stateLabels: Record<SessionState, string> = {

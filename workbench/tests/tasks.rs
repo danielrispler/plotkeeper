@@ -3,8 +3,8 @@
 
 use std::{path::Path, process::Command};
 use studio_workbench::{
-    Losses, Place, create_named_task, create_task, delete_branch_merged_at, delete_merged_branch,
-    remove_task,
+    Counts, Losses, Place, counts, create_named_task, create_task, delete_branch_merged_at,
+    delete_merged_branch, places, remove_task,
 };
 
 /// Runs `git` in `dir`, away from Daniel's own git config, and returns its trimmed output.
@@ -233,6 +233,42 @@ fn a_squash_merged_branch_goes_only_at_its_pull_requests_head() {
     );
     let branches = git(&repos.main, &["branch", "--list", "squashed"]);
     assert!(branches.is_empty(), "{branches}");
+}
+
+/// Places' counts (#576, after #559): a task against `origin`'s default branch, the main checkout
+/// against its upstream, and the files `git status` lists.
+#[test]
+fn a_place_counts_commits_ahead_and_behind_its_base_and_its_changed_files() {
+    let repos = repos();
+    let busy = create_task(&repos.main, "busy").unwrap();
+    let clean = create_task(&repos.main, "clean").unwrap();
+    let path = Path::new(&busy.path);
+    git(path, &["commit", "-q", "--allow-empty", "-m", "One"]);
+    git(path, &["commit", "-q", "--allow-empty", "-m", "Two"]);
+    for file in ["a.txt", "b.txt", "c.txt"] {
+        std::fs::write(path.join(file), "draft").unwrap();
+    }
+    let seed = repos.origin.with_file_name("seed");
+    git(&seed, &["commit", "-q", "--allow-empty", "-m", "Third"]);
+    git(&seed, &["push", "-q", "origin", "trunk"]);
+    git(&repos.main, &["fetch", "-q", "origin"]);
+    // The tasks' folder is not a change of the main checkout's.
+    std::fs::write(repos.main.join(".git/info/exclude"), ".claude/\n").unwrap();
+    let main = places(&repos.main).unwrap().main;
+    let counted = |ahead, behind, changed| {
+        Ok(Counts {
+            ahead_behind: Some((ahead, behind)),
+            changed,
+        })
+    };
+
+    assert_eq!(counts(&busy.path, false), counted(2, 1, 3));
+    assert_eq!(counts(&clean.path, false), counted(0, 1, 0));
+    // The main checkout's `trunk` is two behind `origin/trunk`, its upstream.
+    assert_eq!(counts(&main.path, true), counted(0, 2, 0));
+    let clean_path = Path::new(&clean.path);
+    git(clean_path, &["merge", "-q", "--ff-only", "origin/trunk"]);
+    assert_eq!(counts(&clean.path, false), counted(0, 0, 0));
 }
 
 /// No code path forces git (#461, decision 9): the studio's own sources, the workbench, the shell

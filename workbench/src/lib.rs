@@ -64,6 +64,45 @@ pub fn places(repo: &Path) -> Result<Places, String> {
     })
 }
 
+/// Where a place's branch stands (#576, after #559): its commits ahead of and behind its base, `None`
+/// with no base, and how many files `git status` lists as changed.
+#[derive(Debug, PartialEq, Serialize)]
+pub struct Counts {
+    pub ahead_behind: Option<(u32, u32)>,
+    pub changed: usize,
+}
+
+/// The counts of the place at `path`. A task's base is `origin`'s default branch, which tasks start
+/// from; the `main` checkout's is its branch's upstream.
+pub fn counts(path: &str, main: bool) -> Result<Counts, String> {
+    let dir = Path::new(path);
+    let base = if main {
+        "@{upstream}"
+    } else {
+        "refs/remotes/origin/HEAD"
+    };
+    // git fails when there is no such base, as at a detached `HEAD` or with no `origin`.
+    let ahead_behind = git(
+        dir,
+        &[
+            "rev-list",
+            "--left-right",
+            "--count",
+            &format!("HEAD...{base}"),
+        ],
+    )
+    .ok()
+    .and_then(|line| {
+        let (ahead, behind) = line.split_once('\t')?;
+        Some((ahead.parse().ok()?, behind.parse().ok()?))
+    });
+    let changed = git(dir, &["status", "--porcelain"])?.lines().count();
+    Ok(Counts {
+        ahead_behind,
+        changed,
+    })
+}
+
 /// The command a studio terminal runs for a new session, or for `resume`, an ended session's id. It
 /// sets `CLAUDE_CODE_PLUGIN_DIRS` to the studio plugin at `plugin` alone, as the README loads it,
 /// so a profile that sets it too never loads the hooks twice, and `CLAUDE_CLIENT_PRESENCE_FILE` to

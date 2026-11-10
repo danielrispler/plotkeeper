@@ -77,3 +77,11 @@ Between passes, nothing waits for him. After each pass, a code-review agent that
 - [ ] With 10 sessions open, at full width, which one needs you is clear at a glance: it is first, with the only coloured mark (the "Needs you" pill), and the top bar's chip says "1 needs you". Clicking the chip selects it.
 - [ ] Narrow the window until the list is a strip. The needs-you session is still clear at a glance (the coloured dot), and no two strip labels read the same. Hovering the strip opens the list over the terminal; the terminal does not move or resize.
 - [ ] Each row is one line: a running session shows a turning spinner, your turn a dot, idle and ended a ring. Only running and needs-you rows have a second, muted line. Hovering a row names its state in words.
+
+## #576: Places, a home for tasks (with #559's counts)
+
+- [ ] Open Places at the bottom of the list. It lists the main checkout and each task, one row each; the sessions themselves stay in the list above.
+- [ ] On a real task with commits and edits, the row's counts match git, run in that task's folder: `git status --porcelain | wc -l` for "changed", and `git rev-list --left-right --count HEAD...origin/HEAD` for "ahead" and "behind" (for the main checkout, `HEAD...@{upstream}`). A clean task level with `main` shows no counts.
+- [ ] Each row's session count matches the sessions working in that folder.
+- [ ] Click a task: "New session here" starts a session in it; Remove asks first when it would lose work, then removes the worktree. Create a task from Places' field: a session starts in it and its row appears.
+- [ ] The new-session picker (⌘N) only starts sessions: it has no Remove buttons and no branch-name field.

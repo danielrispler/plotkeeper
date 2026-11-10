@@ -289,21 +289,14 @@ body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; to
           overflow-y: auto; background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); padding: var(--sp-3); }
 .picker .row .l2 { font-family: var(--mono); font-size: var(--size-xs); }
 .picker .hidden-count { color: var(--faint); font-size: var(--size-small); margin: var(--sp-1) var(--sp-4) var(--sp-3); }
-.picker .task { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; }
-.picker .task .losses { grid-column: 1 / -1; }
-.picker .remove, .picker .losses .btn, .picker .new-task .btn { margin: var(--sp-3) var(--sp-2) 0 0; }
-/* The work a removal would lose: a warning, so it keeps the needs-you edge. */
-.picker .losses { border: var(--hair) solid var(--needs-you-line); background: var(--needs-you-bg); border-radius: var(--radius);
-                  padding: var(--sp-3) var(--sp-5); margin: var(--sp-1) 0 var(--sp-3); }
-.picker .losses p { margin: 0 0 var(--sp-2); }
-.picker .losses .losses-title { color: var(--muted); font-size: var(--size-small); }
-.picker .losses ul { margin: 0 0 var(--sp-3); padding-left: var(--sp-6); overflow-wrap: anywhere; }
-.picker .new-task { display: flex; gap: var(--sp-3); margin: var(--sp-4) var(--sp-2) var(--sp-1); padding-top: var(--sp-4); }
-.picker .new-task input { flex: 1; font: var(--size-small) var(--mono); color: inherit; background: var(--bg);
-                          border: var(--hair) solid var(--edge); border-radius: var(--radius); padding: var(--sp-1) var(--sp-3); }
-.picker .new-task .btn { margin: 0; }
+:is(.picker, .places) .new-task { display: flex; gap: var(--sp-3); margin: var(--sp-4) var(--sp-2) var(--sp-1); padding-top: var(--sp-4); }
+:is(.picker, .places) .new-task input { flex: 1; min-width: 0; font: var(--size-small) var(--mono); color: inherit; background: var(--bg);
+                                        border: var(--hair) solid var(--edge); border-radius: var(--radius); padding: var(--sp-1) var(--sp-3); }
+:is(.picker, .places) .new-task .btn { margin: 0; }
 .picker .new-task:first-of-type { margin-top: var(--sp-1); padding-top: 0; }
-.picker .picker-error { white-space: pre-wrap; font: var(--size-small) var(--mono); color: var(--needs-you); margin: var(--sp-3) var(--sp-2); }
+:is(.picker, .places) .picker-error { white-space: pre-wrap; font: var(--size-small) var(--mono); color: var(--needs-you); margin: var(--sp-3) var(--sp-2); }
+/* Places (#576): a clicked place's actions, under its row. */
+.places .place-actions { display: flex; gap: var(--sp-3); padding: var(--sp-1) var(--sp-4) var(--sp-3); }
 #reopen, #rename, #close { margin: 0 0 var(--sp-4); }
 /* The questions of rename and close (#469). */
 .ask { background: var(--surface); color: var(--fg); border: 0; border-radius: var(--radius); box-shadow: var(--shadow);

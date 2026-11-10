@@ -72,21 +72,22 @@ A check card's guess whose check ended with an exit code that does not say wheth
 A rolling account of an agent session's or a worker's work so far, at the top of its view, so that Daniel can resume a session he lost track of. Each new card updates it.
 
 **Workbench**:
-The part of the control room where agent work happens: terminals, tasks and the board. It works without the understanding layer.
+The part of the control room where agent work happens: terminals, tasks and Places. It works without the understanding layer.
 
 **Task**:
 One piece of agent work with its own git worktree and branch, and the terminals and agent sessions running in it.
 _Avoid_: Ticket (an issue on the tracker; a ticket may become a task)
 
 **Main checkout**:
-A project's original working copy, outside any task. It appears on the board and can host terminals and agent sessions, but it is not a task.
-
-**Board**:
-The workbench view with one row per task and one per main checkout, showing the state of their agent sessions.
+A project's original working copy, outside any task. It appears in Places and can host terminals and agent sessions, but it is not a task.
 
 **Place**:
 A folder where Daniel can start an agent session or a terminal: a project's main checkout or a task's worktree.
 _Avoid_: Location, workspace
+
+**Places**:
+The folded section at the bottom of the session list, the home of tasks: one row per place, with its branch, its commits ahead of and behind its base, its uncommitted files and its number of sessions. A task's base is its repository's default branch; the main checkout's is its upstream. Clicking a place offers a new session there and, for a task, Remove; tasks are created here too. The sessions themselves show only in the list.
+_Avoid_: Board (an earlier plan for a view of its own, which Places replaces)
 
 **Terminal daemon**:
 The background process that owns the workbench's terminals, so they outlive the app. The app connects to it over a socket.

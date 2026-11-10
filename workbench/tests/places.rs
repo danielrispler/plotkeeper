@@ -2,7 +2,7 @@
 //! repositories, as the engine's tests do (`src/lib.rs`, `retention_checks_every_blob_of_a_snapshot`).
 
 use std::{path::Path, process::Command};
-use studio_workbench::{Place, claude, places};
+use studio_workbench::{Counts, Place, claude, counts, places};
 
 /// Runs `git` in `repo`, away from Daniel's own git config.
 fn git(repo: &Path, args: &[&str]) {
@@ -84,6 +84,27 @@ fn the_listing_from_inside_a_task_still_names_the_main_checkout() {
 
     assert_eq!(found.main, place(&main, Some("main")));
     assert_eq!(found.tasks.len(), 1);
+}
+
+/// With no `origin` there is no base: neither the main checkout, with no upstream, nor a task shows
+/// ahead and behind (#576).
+#[test]
+fn a_branch_with_no_base_has_no_ahead_and_behind() {
+    let (dir, _) = repo();
+    git(
+        dir.path(),
+        &["worktree", "add", "-q", "-b", "t", ".claude/worktrees/t"],
+    );
+    // The tasks' folder is not a change of the main checkout's.
+    std::fs::write(dir.path().join(".git/info/exclude"), ".claude/\n").unwrap();
+    let found = places(dir.path()).unwrap();
+    let none = Ok(Counts {
+        ahead_behind: None,
+        changed: 0,
+    });
+
+    assert_eq!(counts(&found.main.path, true), none);
+    assert_eq!(counts(&found.tasks[0].path, false), none);
 }
 
 #[test]

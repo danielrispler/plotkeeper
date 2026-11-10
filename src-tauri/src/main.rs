@@ -448,6 +448,7 @@ fn main() {
             terminal::open_link,
             terminal::open_file,
             terminal::places,
+            terminal::place_counts,
             terminal::claude_argv,
             terminal::create_task,
             terminal::create_named_task,
