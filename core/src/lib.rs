@@ -1995,6 +1995,10 @@ impl Studio {
             };
             for s in self.sessions.values_mut().filter(throwaway) {
                 s.deleted = true;
+                // Daniel's new terminal selected the throwaway id; its replacement keeps the selection.
+                if self.selected.as_deref() == Some(&s.agent.id) {
+                    self.selected = Some(event.session_id.clone());
+                }
             }
         }
         // A rename names a known session and is none of its events.

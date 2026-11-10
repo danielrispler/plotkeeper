@@ -132,14 +132,21 @@ export function rowTime(session: Pick<Session, "state" | "started_at" | "last_ev
 export function plain(line: string): string {
   return line
     .split("`")
-    .map((part, i) => (i % 2 ? part : part.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\*\*|__|^#{1,6}\s+/g, "")))
+    .map((part, i) => (i % 2 ? part : part.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(i ? /\*\*|__/g : /\*\*|__|^#{1,6}\s+/g, "")))
     .join("`");
+}
+
+// A row line as shown, and its hover title: the original line whenever a link's URL or a long path's
+// start is dropped, so the full line stays reachable (#571); else "".
+export function rowText(line: string): [shown: string, title: string] {
+  const [shown, full] = shortPaths(plain(line));
+  return [shown, full || /\]\([^)]*\)/.test(line) ? line : ""];
 }
 
 // A row's line, such as a card summary stored in Hebrew, laid out by its own direction, its code spans
 // cleaned as a card's are (#434, decision 40), its paths shortened with the full line on hover (#571).
 function rowLine(line: string): HTMLElement {
-  const [shown, full] = shortPaths(plain(line));
+  const [shown, full] = rowText(line);
   const node = prose("span", shown);
   node.className = "row-step";
   node.dir = "auto";
