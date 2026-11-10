@@ -94,3 +94,10 @@ Between passes, nothing waits for him. After each pass, a code-review agent that
 - [ ] Below, the turns read newest first, each with its prompt in one line, its summary, its learning question (folded), its cards, its subagents, its checks and its full response (folded). Opening an older turn's full response shows its final reply. No "Last 30 minutes", "Older", "Responses", "Questions" or "Subagents" section is left; #535's subagent entries are in the turn that ran them.
 - [ ] Each turn shows one "Ask about this", only on hover; asking about a turn works as before.
 - [ ] With summaries written on open (settings), opening a session writes its waiting turns' summaries once, not again on each redraw.
+
+## #541: start a session in auto mode
+
+- [ ] Open the picker (⌘N): "Auto mode" is unticked. Tick it and start a session: it runs in Claude Code's auto mode (its footer says so), and after its first prompt the rail's line reads "Running auto mode …". No bypass option is offered anywhere.
+- [ ] In that session, ask for something auto mode's classifier blocks: the row shows **needs you** and the toast fires, as in default mode.
+- [ ] A session started without the tick shows no mode on the rail's line.
+- [ ] End the auto session, then "Open" it from the rail's "⋯" menu (or "Open here"): it resumes in auto mode. Restarting the terminal daemon (#470) also brings it back in auto mode.

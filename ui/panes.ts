@@ -45,7 +45,7 @@ async function revive(outdated: boolean) {
   for (const r of await invoke<Revive[]>("revival", { terms: lost })) {
     // A revived conversation keeps its terminal's id, on purpose: its session stays linked to the
     // pane it had. Only a new conversation gets a fresh id (`startClaude`, #467).
-    const argv = r.session ? await invoke<string[]>("claude_argv", { resume: r.session }) : r.argv;
+    const argv = r.session ? await invoke<string[]>("claude_argv", { resume: r.session, auto: startedAuto(r.argv) }) : r.argv;
     const term = panes.get(r.id)?.term;
     await request({ op: "spawn", id: r.id, argv, cwd: r.cwd, cols: term?.cols ?? 80, rows: term?.rows ?? 24 });
   }
@@ -119,11 +119,12 @@ export async function closePane(id: string) {
 }
 
 // Starts `claude` in `cwd` in a new terminal, with `prompt` as its first prompt, or
-// `claude --resume <resume>` for an ended session, and shows its pane. Nothing is selected until the
-// session's first event names its terminal; then the core selects it, so the rail follows (#567).
+// `claude --resume <resume>` for an ended session, and shows its pane, in auto mode when `auto`
+// (#541). Nothing is selected until the session's first event names its terminal; then the core
+// selects it, so the rail follows (#567).
 let starting: string | null = null;
-export async function startClaude(cwd: string, resume: string | null = null, prompt = "") {
-  const argv = [...(await invoke<string[]>("claude_argv", { resume })), ...(prompt ? ["--", prompt] : [])]; // `--`: a prompt like "-p x" is no flag
+export async function startClaude(cwd: string, resume: string | null = null, prompt = "", auto = false) {
+  const argv = [...(await invoke<string[]>("claude_argv", { resume, auto })), ...(prompt ? ["--", prompt] : [])]; // `--`: a prompt like "-p x" is no flag
   const id = `claude-${crypto.randomUUID()}`;
   starting = id;
   element("terminal-head").hidden = false;
@@ -131,6 +132,9 @@ export async function startClaude(cwd: string, resume: string | null = null, pro
   show(id, () => openPane(box(id), id, cwd, argv));
   showSelection(await invoke<Selection | null>("select_terminal", { terminal: id }));
 }
+
+// Whether a terminal's spawn `argv` started Claude Code in auto mode (#541), so its revival keeps it.
+export const startedAuto = (argv: string[]) => argv[argv.indexOf("--permission-mode") + 1] === "auto";
 
 // What the terminal shows for the selected session (#567): its own terminal while the daemon runs
 // it, else a message with "Open here", never the login shell, which may run another session. The
@@ -172,7 +176,7 @@ export async function showSession(session: Session | null, clicked = false) {
   const view = paneView(session, Boolean(own || terminal));
   if (view === "shell") return;
   if ("terminal" in view) return show(view.terminal, () => openPane(box(view.terminal), view.terminal, terminal!.cwd, terminal!.argv));
-  const resume = () => startClaude(session.cwd, session.resume_id).catch((e) => console.warn(e));
+  const resume = () => startClaude(session.cwd, session.resume_id, "", session.permission_mode === "auto").catch((e) => console.warn(e));
   box(ELSEWHERE).classList.add("elsewhere");
   box(ELSEWHERE).replaceChildren(text("p", view.message, "empty"), pressable(text("button", "Open here"), false, resume));
   show(ELSEWHERE, () => null);
