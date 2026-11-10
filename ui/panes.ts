@@ -14,6 +14,7 @@ import { show as showSelection } from "./selection.js";
 import { studio } from "./state.js";
 import { sessionName } from "./list.js";
 import { openPane, startNotice } from "./terminal.js";
+import { showStartToast } from "./toast.js";
 import type { Selection, Session } from "./types.js";
 
 type Pane = { box: HTMLElement; term: Xterm.Terminal | null; title: string };
@@ -181,14 +182,17 @@ export async function showSession(session: Session | null, clicked = false) {
 }
 const ELSEWHERE = "elsewhere";
 
-// A program that failed at start (#558), a session's, a Doctor entry's or a revived one: the message
-// box names the session, else the program, and the code, above its last lines; "Show output" shows
-// its pane. It shows at once: the start was Daniel's own, under 2 s ago.
+// A program that failed at start (#558), a session's, a Doctor entry's or a revived one: a toast names
+// the session, else the program, and the code, with "Show output", which shows its pane. When its pane
+// is the shown one, the message box also takes its place, with its last lines; a hidden one only toasts.
+export const failureTakesPane = (failed: string, current: string) => failed === current;
 function failedAtStart({ id, name, status, lines }: { id: string; name: string; status: string; lines: string[] }) {
   const session = studio.listed.find((s) => s.terminal === id);
-  const notice = text("p", startNotice(session ? sessionName(session) : name, { status }), "empty");
-  notice.setAttribute("role", "alert");
+  const notice = startNotice(session ? sessionName(session) : name, { status });
+  const output = () => show(id, () => null);
+  showStartToast(notice, output);
+  if (!failureTakesPane(id, shown)) return;
   box(ELSEWHERE).classList.add("elsewhere");
-  box(ELSEWHERE).replaceChildren(notice, text("pre", lines.join("\n"), "last-lines"), pressable(text("button", "Show output"), false, () => show(id, () => null)));
+  box(ELSEWHERE).replaceChildren(text("p", notice, "empty"), text("pre", lines.join("\n"), "last-lines"), pressable(text("button", "Show output"), false, output));
   show(ELSEWHERE, () => null);
 }

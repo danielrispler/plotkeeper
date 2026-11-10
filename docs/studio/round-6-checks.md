@@ -98,4 +98,6 @@ Between passes, nothing waits for him. After each pass, a code-review agent that
 ## #558: a program that fails at start shows its exit code and last lines
 
 - [ ] Start a session in a folder where `claude` cannot start (for example, with a failing `claude` script first on `PATH`). Within 2 s, the terminal's place says "claude could not start: code <n>" above the program's last lines, with "Show output", which shows its pane and full output.
+- [ ] At the same time, a toast at the terminal's bottom-right corner names the session (or program) and the code, with "Show output" and ×. Typing in the terminal goes on: the toast takes no focus and nothing moves.
+- [ ] Let a hidden pane fail at start, for example a revived terminal or a Doctor entry while another pane shows. The shown terminal stays; only the toast appears, and its "Show output" shows the failed pane.
 - [ ] A session that runs a while and then exits, and a program that exits with code 0, show no notice: only the pane's usual exit line.

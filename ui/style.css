@@ -159,6 +159,10 @@ h1 { margin: 0 0 var(--sp-4); }
 .toast .count { color: var(--muted); }
 .toast .btn { padding: 0 var(--sp-2); }
 .toast .line { grid-column: 1 / -1; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The start-failure toast (#558): the bottom-right corner, so it never covers the needs-you one; not in colour. */
+.toast.start { top: auto; bottom: var(--sp-5); background: var(--raised); cursor: default;
+               box-shadow: inset 0 0 0 var(--hair) var(--edge), var(--shadow); }
+.toast.start .name { color: var(--fg); }
 #probe { position: absolute; visibility: hidden; white-space: pre; font: var(--term-size)/var(--term-line) var(--mono); }
 
 /* The rail (#574): one header line, the open question docked under it, then the story: "now" and the
