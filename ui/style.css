@@ -43,6 +43,9 @@ code:empty { display: none; }
 .app > * { direction: ltr; min-height: 0; min-width: 0; }
 body[data-layout="strip"] .app { grid-template-columns: var(--strip) 1fr var(--rail); }
 body[data-layout="overlay"] .app { grid-template-columns: var(--strip) 1fr 0; }
+/* Focus mode (#573): the list and the rail fold, still in the grid, and the terminal takes the window. */
+body[data-layout="focus"] .app { grid-template-columns: 0 1fr 0; }
+body[data-layout="focus"] .list, body[data-layout="focus"] .rail { visibility: hidden; }
 
 /* The dividers on the list's and the rail's inner edges; each shows only while its column is in the grid. */
 .divider { position: fixed; top: var(--bar); bottom: 0; width: var(--divider); cursor: col-resize; z-index: 4; touch-action: none;
@@ -50,13 +53,18 @@ body[data-layout="overlay"] .app { grid-template-columns: var(--strip) 1fr 0; }
 .divider:hover, .divider.dragging { background: var(--edge); }
 #list-divider { right: calc(var(--list) - var(--divider) / 2); }
 #rail-divider { left: calc(var(--rail) - var(--divider) / 2); }
-body:not([data-layout="full"]) #list-divider, body[data-layout="overlay"] #rail-divider { display: none; }
+body:not([data-layout="full"]) #list-divider, body[data-layout="overlay"] #rail-divider,
+body[data-layout="focus"] #rail-divider { display: none; }
 
 /* The top bar: new session and usage. The native title bar is hidden (#566), so the bar is where the
    window drags, and its start keeps room for the traffic lights. */
 .top { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--sp-5); padding: 0 var(--sp-5) 0 var(--lights);
        white-space: nowrap; overflow: hidden; }
 .usage { font-size: var(--size-small); color: var(--muted); }
+/* The rail's slim header while it is an overlay (#573): the selected session's state and open question. */
+.slim { display: flex; gap: var(--sp-4); align-items: baseline; min-width: 0; overflow: hidden; font-size: var(--size-small); }
+.slim .state { font-size: inherit; margin: 0; }
+.slim .line { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
 
 /* The session list: full, or a strip that opens over the terminal on click or ⌘1, never on hover. */
 .list { overflow-y: auto; position: relative; z-index: 3; }
@@ -125,6 +133,16 @@ h1 { margin: 0 0 var(--sp-4); }
 .pane[hidden] { display: block; }
 .pane[hidden], .pane.fitting { visibility: hidden; }
 .term-find { position: absolute; top: var(--sp-3); right: var(--sp-5); z-index: 10; width: var(--find); font: inherit; }
+/* The needs-you toast (#573): over the terminal's top-right corner, taking none of its space. */
+.term { position: relative; }
+.toast { position: absolute; top: var(--sp-5); right: var(--sp-5); z-index: 11; max-width: var(--toast); display: grid;
+         grid-template-columns: minmax(0, 1fr) auto auto; gap: var(--sp-1) var(--sp-4); align-items: baseline;
+         padding: var(--sp-4) var(--sp-5); border-radius: var(--radius); background: var(--needs-you-bg); color: var(--fg);
+         box-shadow: inset 0 0 0 var(--hair) var(--needs-you-line), var(--shadow); font-size: var(--size-small); cursor: pointer; }
+.toast .name { color: var(--needs-you); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.toast .count { color: var(--muted); }
+.toast .btn { padding: 0 var(--sp-2); }
+.toast .line { grid-column: 1 / -1; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #probe { position: absolute; visibility: hidden; white-space: pre; font: var(--term-size)/var(--term-line) var(--mono); }
 
 /* The rail: the story, its open question docked at the bottom. In "overlay" ⌘2 toggles it over the
