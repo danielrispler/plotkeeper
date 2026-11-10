@@ -2,6 +2,7 @@
 // shows, if any. The core decides; this draws the selection it returns, in the list, the top bar and
 // the rail.
 
+import { rewatch } from "./answer.js";
 import { showCards } from "./cards.js";
 import { invoke } from "./dom.js";
 import { showSessions } from "./list.js";
@@ -34,4 +35,5 @@ export function show(selected: Selection | null) {
   showSessions(studio.listed);
   showView(selected);
   showSession(selected?.session ?? null);
+  rewatch();
 }

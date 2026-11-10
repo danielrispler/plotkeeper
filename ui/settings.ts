@@ -24,7 +24,13 @@ export interface Settings {
   // The summary writer's model and effort ("" for the model's default), and whether opening a turn
   // writes its summary.
   summaries: { model: string; effort: string; on_open: boolean };
+  // Whether "your turn" also notifies while the window is focused, for any session but the selected
+  // one (#517, decision 6).
+  notifications: { while_focused: boolean };
   doctor: DoctorEntry[];
+  // The command that opens a file at its line (#557), an argv with `{path}`, `{line}` and `{column}`,
+  // never a shell string. null: the shell's default, Zed's CLI when installed, else `open`.
+  editor: string[] | null;
 }
 
 // Both settings files, parsed: the settings and keymap in effect.
@@ -52,10 +58,12 @@ const defaultSettings: Settings = {
   terminal: { font_size: null },
   // Haiku at its default effort (#517, decision 14).
   summaries: { model: "haiku", effort: "", on_open: false },
+  notifications: { while_focused: false },
   doctor: [
     { label: "Check the installation", command: "claude doctor", kind: "shell" },
     { label: "Full checkup", command: "/doctor", kind: "session" },
   ],
+  editor: null,
 };
 
 // Today's shortcuts. The terminal's Cmd+C and Cmd+V stay the Edit menu's (`keys.ts`).
@@ -100,6 +108,7 @@ function readSettings(json: unknown, report: Report): Settings {
   };
   const terminal = isObject(json.terminal) ? json.terminal : {};
   const summaries = isObject(json.summaries) ? json.summaries : {};
+  const notifications = isObject(json.notifications) ? json.notifications : {};
   const d = defaultSettings;
   // null when unset or of the wrong type: the stylesheet's size.
   const fontSize = pick("terminal.font_size", terminal.font_size ?? undefined, NaN);
@@ -111,6 +120,9 @@ function readSettings(json: unknown, report: Report): Settings {
       effort: pick("summaries.effort", summaries.effort, d.summaries.effort),
       on_open: pick("summaries.on_open", summaries.on_open, d.summaries.on_open),
     },
+    notifications: {
+      while_focused: pick("notifications.while_focused", notifications.while_focused, d.notifications.while_focused),
+    },
     doctor: Array.isArray(json.doctor)
       ? json.doctor.filter((e, i): e is DoctorEntry => {
           const ok =
@@ -119,7 +131,15 @@ function readSettings(json: unknown, report: Report): Settings {
           return ok;
         })
       : d.doctor,
+    editor: readEditor(json.editor, report),
   };
+}
+
+function readEditor(value: unknown, report: Report): string[] | null {
+  if (value === undefined || value === null) return null;
+  if (Array.isArray(value) && value.length > 0 && value.every((arg) => typeof arg === "string")) return value;
+  report('editor: expected an array of strings, such as ["code", "-g", "{path}:{line}:{column}"]');
+  return null;
 }
 
 // The order modifiers take in a keystroke, here and in `keys.ts`.

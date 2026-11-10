@@ -92,6 +92,7 @@ Every shortcut here but Cmd+C and Cmd+V can be rebound in `keymap.json` (see Set
   "zoom": 1,                     // 0.5 to 2
   "terminal": { "font_size": 15 }, // 8 to 40; default: the stylesheet's 12.5
   "summaries": { "model": "haiku", "effort": "low", "on_open": false },
+  "notifications": { "while_focused": false }, // also notify "your turn" while focused, but not for the selected session
   "doctor": [
     { "label": "Check the installation", "command": "claude doctor", "kind": "shell" },
     { "label": "Full checkup", "command": "/doctor", "kind": "session" }
@@ -140,7 +141,7 @@ The log is never rotated. It holds tool inputs and results, file contents includ
 
 ## Plan usage
 
-Claude Code gives the plan's 5-hour and weekly usage only to the status line command, on its stdin. The line in `workbench/statusline-usage.sh`, added to your status line script right after it reads stdin into `$input`, saves that stdin as `usage/<session_id>.json` beside the event log, by temp file and rename, readable only by you (mode 0600), and prints nothing. The top bar shows the newest snapshot's `rate_limits`, or "no usage". Snapshots are never deleted; remove the folder at any time.
+Claude Code gives the plan's 5-hour and weekly usage, and the context window's size, only to the status line command, on its stdin. Sessions the studio starts run `claude --settings` with `workbench/statusline.sh` as their status line, so you edit nothing. On every refresh it saves that stdin as `usage/<session_id>.json` beside the event log, by temp file and rename, readable only by you (mode 0600), with the line in `workbench/statusline-usage.sh`. Then it reads `statusLine.command` from `~/.claude/settings.json`, runs it on the same stdin, and passes its output and exit status through; with none set, it prints nothing. The top bar shows the newest snapshot's `rate_limits`, or "no usage". Sessions started outside the studio save no snapshot. Snapshots are never deleted; remove the folder at any time.
 
 ## Recorded logs
 

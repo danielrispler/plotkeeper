@@ -12,19 +12,23 @@ Run once, outside auto mode, from any checkout:
 apps/studio/real-calls.sh
 ```
 
-It writes every output to `local-evidence/2026-11-09-round-5/real-calls-<time>/`, and it skips a step whose code is not built yet. It runs:
+It writes every output to `local-evidence/2026-11-09-round-5/real-calls-<time>/`, with its own terminal output in `run.log`, and it skips a step whose code is not built yet. It runs:
 
 - [ ] **#518:** the 5-run writer timing. Record the median and slowest on #518, beside #471's median of 20.1 s and slowest of 24.4 s. If safe mode made the writer much slower, that triggers grilling (pass plan).
 - [ ] **#518:** real cards; their text carries no plugin footer. The script greps for one.
 - [ ] **#526:** Haiku summaries on 3 real turns. Judge them, and record their time and cost on #526. Weak summaries reopen decision 14 (pass plan).
+- [ ] **#543:** can macOS kill the terminal daemon? It builds a separate app, `StudioRepro`, with its own identifier, home, socket and data folder, launches it through `open`, and ends it by Quit, `kill -9` and `kill -SEGV`. After each, it checks the daemon and both terminals' programs are alive: `543-daemon-kill.json`, with the daemon's log in `543-daemon.log`. The crash may show a "quit unexpectedly" dialog; dismiss it. Record the three results on #543; a killed daemon means #555 adds the launchd job. Memory pressure is not tested.
 
 ## In the running app
 
 - [ ] **#518:** one card written by the app itself, with no plugin footer.
 - [ ] **#519:** a session row and the rail show `context N%` with the same number as Claude's status line, and the hover reads "… tokens used · Claude's status line shows this as M% left".
 - [ ] **#520:** a finished turn's intention is its final reply's first line, not a footer.
-- [ ] **#521:** in a session the studio started, Daniel's status line looks the same, and the top bar's usage updates. Then remove the #481 line from `~/.claude/statusline-command.sh`, with Daniel's approval, and check the top bar still updates.
-- [ ] **#522:** a real "your turn" notification while Daniel is in another app, and the orange text.
+- [ ] **#521:** in a session the studio started, `--settings` wins over the `statusLine` in `~/.claude/settings.json`: `ps -o args= -p <claude pid>` shows `--settings` with `workbench/statusline.sh`, and the session's `usage/<session_id>.json` updates. Daniel's status line looks the same, padding included (the wrapper's `--settings` sets no `padding`). If `--settings` does not win, stop and report on #521; that reopens decision 5.
+- [ ] **#521:** then remove the #481 line (the one in `apps/studio/workbench/statusline-usage.sh`) from `~/.claude/statusline-command.sh`, with Daniel's approval, and check the top bar's usage still updates from a studio-started session.
+- [ ] **#522:** a real "your turn" notification while Daniel is in another app, in a screenshot in the PR. (No orange text: #565, decision 1, dropped it.)
+- [ ] **#522:** with Remote Control on (Daniel's own `remoteControlAtStartup`), in a session the studio started: no phone push while the studio is focused, and a push while it is in the background. `~/Library/Application Support/dev.falinks.studio/present` exists only while the window is focused.
+- [ ] **#522:** a turn driven from the phone still sends hook events: its row and card update in the studio. If it fails, report it on #522.
 - [ ] **#523:** the rail header shows the model and effort, such as `claude-opus-5-5 · effort medium`.
 - [ ] **#524:** saving `settings.json` changes zoom and font size live; ⌘=, ⌘- and ⌘0 reach the window and are not taken by a menu.
 - [ ] **#526:** after a long turn ends, its intention first shows the reply's first line, then switches once, about 10 s later, to the turn summary's first line. With `"summaries": { "on_open": true }` in `settings.json`, it stays the reply's first line. The summaries are kept in `summaries.json` in the studio's data folder; the rail shows them with #574.
@@ -37,6 +41,9 @@ It writes every output to `local-evidence/2026-11-09-round-5/real-calls-<time>/`
 - [ ] **#540:** a reply ending with a question shows "your turn", not "needs you"; a session waiting on its subagents is not in the "Needs you" group.
 - [ ] **#541:** a session started with Auto mode runs in auto mode, and a blocked action still shows "needs you".
 - [ ] **#542:** the docked panel's shell survives an app restart and shows under a #529 split.
+- [ ] **#568:** a turn that only writes a `.DS_Store` (open its folder in Finder) gets no card.
+- [ ] **#569:** a question, a plan and a permission each dock within the read loop's 200 ms, not after up to 1.2 s. Time the worst of a few from the terminal's prompt to the card, and record it beside 1.2 s in the PR. The UX harness (`local-evidence/2026-11-09-ui-ux/measure/`) stubs the shell and has no dock scenario, so it cannot time this.
+- [ ] **#557:** from a task worktree session, clicking `path:line` in the terminal and a file link in the rail opens that worktree's file, not the main checkout's, at that line in Zed.
 
 ## Checked automatically, early
 

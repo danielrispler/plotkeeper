@@ -64,7 +64,7 @@ export function showView(selected: Selection | null) {
   element("command").textContent = step?.command ?? "";
   element("step").classList.toggle("has-command", Boolean(step?.command));
   // A subagent's transcript is its own, which the studio does not read.
-  showStory(session.id, agent === null ? session.transcript : null);
+  showStory(session.id, session.cwd, agent === null ? session.transcript : null);
   showQuestions(session.questions.filter((question) => question.agent === (agent?.id ?? null)));
   showChecks(session.checks);
   showCleared(agent === null ? session.cleared : []);
@@ -74,8 +74,8 @@ export function showView(selected: Selection | null) {
 const FRESH_STEPS = 5;
 
 // The intention, its age, the turn's full responses, each with "ask about this" (#482), and the mark
-// when the transcript is unreadable.
-function showStory(session: string, story: Transcript | null) {
+// when the transcript is unreadable. A file a response links opens from `cwd`, the session's folder.
+function showStory(session: string, cwd: string, story: Transcript | null) {
   const steps = story?.steps_ago ?? 0;
   element("intention-text").textContent = story?.intention ?? "";
   element("intention-ask").replaceChildren(...(story?.intention ? [askElement(session, story.intention)] : []));
@@ -87,7 +87,7 @@ function showStory(session: string, story: Transcript | null) {
   element("responses").hidden = responses.length === 0;
   element("responses-title").textContent = `Responses (${responses.length})`;
   element("responses-body").replaceChildren(
-    ...responses.flatMap((response) => [rendered("div", response, "response"), askElement(session, response)]),
+    ...responses.flatMap((response) => [rendered("div", response, "response", cwd), askElement(session, response)]),
   );
 }
 
