@@ -71,3 +71,9 @@ Between passes, nothing waits for him. After each pass, a code-review agent that
 - [ ] ⌘⇧P opens the palette: every action with its key. Typing filters it, Enter runs the first one, and Esc closes it. Focus mode is listed with ⇧⌘↩.
 - [ ] Rebind one key in `keymap.json`, such as `{ "bindings": { "cmd-shift-j": "studio::NextNeedsYou" } }`: the new key works, ⌘J no longer does, and the palette shows ⇧⌘J.
 - [ ] Ctrl+letters (Ctrl+C, Ctrl+R) still reach Claude Code in the terminal.
+
+## #572: one-line rows, status by shape, a needs-you chip
+
+- [ ] With 10 sessions open, at full width, which one needs you is clear at a glance: it is first, with the only coloured mark (the "Needs you" pill), and the top bar's chip says "1 needs you". Clicking the chip selects it.
+- [ ] Narrow the window until the list is a strip. The needs-you session is still clear at a glance (the coloured dot), and no two strip labels read the same. Hovering the strip opens the list over the terminal; the terminal does not move or resize.
+- [ ] Each row is one line: a running session shows a turning spinner, your turn a dot, idle and ended a ring. Only running and needs-you rows have a second, muted line. Hovering a row names its state in words.

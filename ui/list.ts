@@ -1,6 +1,6 @@
-// The session list, on the window's right: the sessions grouped by state, each session's subagents
-// nested under it. When the window is narrow it collapses to a strip of state dots and issue numbers,
-// which opens the full list on click or ⌘1.
+// The session list, on the window's right: one line per session, sorted by state, its status shown
+// by shape (#572), each session's subagents nested under it. When the window is narrow it collapses to
+// a strip of glyphs and labels, which opens the full list on hover, on click or on ⌘1.
 
 import { age, element, patch, prose, pressable, stepText, text } from "./dom.js";
 import { counts, times, type Time } from "./times.js";
@@ -53,11 +53,42 @@ export function agentState(session: Session, agent: Subagent): [string, string] 
   return session.asker?.agent === agent.id ? [stateLabels.needs_you, "needs_you"] : [agent.status, agent.status];
 }
 
-// The dot of a state: only "needs you" takes the colour.
-function dot(state: string): HTMLElement {
-  const node = text("span", "", "dot");
-  node.dataset.state = state;
+// A status's shape and its word (#572): a "Needs you" pill, the only colour (#565, decision 1); a
+// spinner while running; a dot at your turn, filled once it finished unseen (#556); a ring when idle,
+// ended or, for a subagent, done.
+export type Glyph = "pill" | "spinner" | "dot" | "filled" | "ring";
+export function status(state: string, unseen = false): [Glyph, string] {
+  const label = stateLabels[state as SessionState] ?? state;
+  if (state === "needs_you") return ["pill", label];
+  if (state === "running") return ["spinner", label];
+  if (state === "your_turn") return unseen ? ["filled", `${label}, not seen`] : ["dot", label];
+  return ["ring", label];
+}
+
+// A status's glyph, named by its word, so the shape is never alone. The pill shows its word.
+function glyph(state: string, unseen = false): HTMLElement {
+  const [shape, word] = status(state, unseen);
+  const node = text("span", shape === "pill" ? word : "", "glyph");
+  node.dataset.glyph = shape;
+  node.setAttribute("role", "img");
+  node.setAttribute("aria-label", word);
   return node;
+}
+
+// A row's second line, only while it runs or needs Daniel: the current step, or the open question's
+// first line, else who asks (a plan or a permission); null otherwise.
+export function secondLine(session: Pick<Session, "state" | "line" | "questions">): string | null {
+  if (session.state === "running") return session.line ?? "";
+  if (session.state !== "needs_you") return null;
+  const open = session.questions.filter((question) => question.answer === "open").at(-1);
+  // A question with no text, as a redacted log holds, falls back to the row's line rather than throw.
+  return open?.questions[0]?.question?.split("\n")[0] ?? session.line ?? "";
+}
+
+// The top bar's chip: how many sessions need Daniel, or "" when none.
+export function chipText(sessions: Pick<Session, "state">[]): string {
+  const count = sessions.filter((session) => session.state === "needs_you").length;
+  return count ? `${count} ${count === 1 ? "needs" : "need"} you` : "";
 }
 
 // A session's subagents by the id of the agent that spawned them: "session", "unattached" or a
@@ -85,16 +116,20 @@ function done(all: Children, children: Subagent[] = []): HTMLElement[] {
   return faded ? [text("span", `${faded} done`, "id")] : [];
 }
 
-// A row's lines: its dot, name and state, then what it is doing, then for a session its times.
-function rowLines(button: HTMLElement, state: string, label: string, name: HTMLElement[], below: HTMLElement[]) {
+// A row's lines: its name and status glyph, then, if any, what it is doing, muted. Its title pairs
+// the name with the status's word.
+function rowLines(button: HTMLElement, state: string, name: HTMLElement[], below: HTMLElement[] | null, unseen = false) {
   const first = text("span", "", "l1");
-  const stateNode = text("span", label, "row-state");
-  stateNode.dataset.state = state;
-  first.append(dot(state), ...name, stateNode);
-  const second = text("span", "", "l2");
-  second.append(...below);
-  button.append(first, second);
-  return stateNode;
+  first.append(...name, glyph(state, unseen));
+  button.append(first);
+  button.title = `${name[0].textContent} · ${status(state, unseen)[1]}`;
+  button.classList.toggle("unseen", unseen);
+  if (below) {
+    const second = text("span", "", "l2");
+    second.append(...below);
+    button.append(second);
+  }
+  return first;
 }
 
 // A row's button, keyed by what it selects (`patch` keeps it across updates). It selects on the press,
@@ -106,20 +141,23 @@ function selecting(id: string, agent: string | null, key = `${id} ${agent ?? ""}
   return button;
 }
 
-// One row: the session's name, its context share, its state and what it is doing.
+// One row: the session's name, its context share and its status glyph; while it runs or needs
+// Daniel, what it is doing and, on the row being looked at, the turn's clock.
 function row(session: Session, children: Children): HTMLElement {
   const button = selecting(session.id, null);
   button.classList.add("row");
+  const line = secondLine(session);
+  const turn = line === null ? null : rowTime(session, isSelected(session.id));
+  const clock = text("span", "", "clock");
   rowLines(
     button,
     session.state,
-    stateLabels[session.state],
-    [Object.assign(text("span", sessionName(session), "name"), { title: sessionName(session) }), contextNode(session.transcript.context)],
-    [...done(children, children.get("session")), rowLine(session.line ?? "")],
+    [text("span", sessionName(session), "name"), contextNode(session.transcript.context)],
+    line === null
+      ? null
+      : [...done(children, children.get("session")), rowLine(line), ...(turn ? [Object.assign(counts(clock, turn[1]), { title: turn[0] })] : [])],
+    session.unseen,
   );
-  const turn = rowTime(session, isSelected(session.id));
-  const l3 = text("span", "", "l3");
-  button.append(turn ? Object.assign(counts(l3, turn[1]), { title: turn[0] }) : l3);
   return button;
 }
 
@@ -162,19 +200,18 @@ function agentRow(session: Session, children: Children, agent: Subagent, depth: 
   const button = selecting(session.id, agent.id);
   button.classList.add("row", agent.kind);
   button.style.paddingInlineStart = `calc(var(--sp-4) + var(--indent) * ${depth})`;
-  const [label, stateName] = agentState(session, agent);
+  const [, stateName] = agentState(session, agent);
   const details =
     agent.kind === "worker"
       ? [stepText(agent.last_step)]
       : [agent.agent_type, age(agent.started_at, agent.ended_at ?? Date.now()), agent.result];
-  const state = rowLines(
+  const first = rowLines(
     button,
     stateName,
-    label,
     [text("span", agent.name, "name")],
     [...done(children, children.get(agent.id)), rowLine(details.filter(Boolean).join(" · "))],
   );
-  state.classList.toggle("failed", agent.failed && !agent.opened);
+  first.classList.toggle("failed", agent.failed && !agent.opened);
   return button;
 }
 
@@ -193,30 +230,45 @@ function tree(session: Session): HTMLElement[] {
   return [row(session, children), ...nested("session", 1), ...(unattached.length ? [label, ...unattached] : [])];
 }
 
-// The strip: a button per session that is not idle or ended, by its dot and strip label, then one
+// The strip's labels, one per session, from its name: its issue number, else the name's first
+// letters; sessions whose labels would match are numbered, so none reads "Fali" five times (#572).
+export function stripLabels(sessions: Pick<Session, "name" | "identity" | "folder_name">[]): string[] {
+  const base = sessions.map((session) =>
+    session.identity.issue === null ? stripLabel(sessionName(session)) : String(session.identity.issue),
+  );
+  const nth = new Map<string, number>();
+  return base.map((label) => {
+    if (base.indexOf(label) === base.lastIndexOf(label)) return label;
+    nth.set(label, (nth.get(label) ?? 0) + 1);
+    return `${label}·${nth.get(label)}`;
+  });
+}
+
+// The strip: a button per session that is not idle or ended, by its glyph and strip label, then one
 // count for those collapsed, which opens the full list.
 function strip(sessions: Session[]): HTMLElement[] {
   const toggle = () => document.body.classList.toggle("list-open");
   const open = pressable(text("button", "☰", "open"), false, toggle);
   open.title = "Open list (⌘1)";
   const shown = sessions.filter((session) => !collapsed.includes(session.state));
+  const labels = stripLabels(shown);
   const rest = sessions.length - shown.length;
   return [
     open,
-    ...shown.map((session) => {
+    ...shown.map((session, i) => {
       const button = selecting(session.id, null, `strip ${session.id}`);
       button.setAttribute("aria-pressed", String(isSelected(session.id)));
-      button.title = `${sessionName(session)} · ${stateLabels[session.state]}`;
-      const issue = session.identity.issue;
-      button.append(dot(session.state), issue === null ? stripLabel(session.folder_name) : String(issue));
+      button.title = `${sessionName(session)} · ${status(session.state, session.unseen)[1]}`;
+      button.append(glyph(session.state, session.unseen), labels[i]);
       return button;
     }),
     ...(rest ? [Object.assign(pressable(text("button", String(rest)), false, toggle), { title: "Idle and ended" })] : []),
   ];
 }
 
-// The core sends the sessions grouped by state, so a group starts where the state changes. Idle and
-// ended sessions collapse at the bottom.
+// The core sends the sessions sorted by state: needs you, running, your turn, then idle and ended,
+// which collapse at the bottom. The rows above them carry their state by shape, so they have no group
+// heading (#572).
 export function showSessions(sessions: Session[]) {
   studio.listed = sessions;
   const groups: Session[][] = [];
@@ -232,7 +284,7 @@ export function showSessions(sessions: Session[]) {
       if (!collapsed.includes(state)) {
         const group = document.createElement("section");
         group.dataset.key = state;
-        group.append(text("h1", title), ...rows.flatMap(tree));
+        group.append(...rows.flatMap(tree));
         return group;
       }
       const group = document.createElement("details");
@@ -245,4 +297,7 @@ export function showSessions(sessions: Session[]) {
   );
   patch(element("strip"), strip(sessions));
   element("no-sessions").hidden = sessions.length > 0;
+  const chip = element("needs-you");
+  chip.textContent = chipText(sessions);
+  chip.hidden = chip.textContent === "";
 }

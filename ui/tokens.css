@@ -26,13 +26,13 @@
   /* Lines, radii and motion. */
   --hair: 1px; --mark: 2px; --halo: 3px;
   --radius-small: 4px; --radius: 6px; --radius-pane: 10px;
-  --motion: 120ms ease-out;
+  --motion: 120ms ease-out; --spin: 900ms;
   --scrollbar: 8px;
 
   /* The window's parts. The list's, strip's and rail's widths are layout.ts's too. */
   --list: 260px; --strip: 56px; --rail: 380px; --bar: 34px; --term-head: 26px;
   /* The space the hidden title bar's traffic lights keep at the top bar's start. */
   --lights: 78px;
-  --divider: 6px; --strip-button: 40px; --dot: 7px;
+  --divider: 6px; --strip-button: calc(var(--strip) - var(--sp-2)); --dot: 6px; --glyph: 10px;
   --popover: 380px; --dialog: 560px; --find: 220px; --outcome: 52px; --toast: 360px;
 }
