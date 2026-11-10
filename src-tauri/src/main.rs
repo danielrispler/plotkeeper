@@ -37,6 +37,7 @@ mod answer;
 mod presence;
 mod restart;
 mod settings;
+mod skills;
 mod terminal;
 
 /// The card store, which the log thread adds to and the pane records guesses in.
@@ -464,6 +465,7 @@ fn main() {
             terminal::terminal_send,
             terminal::open_link,
             terminal::open_file,
+            skills::skills,
             terminal::places,
             terminal::place_counts,
             terminal::claude_argv,

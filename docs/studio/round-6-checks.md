@@ -100,3 +100,10 @@ Between passes, nothing waits for him. After each pass, a code-review agent that
 - [ ] Select a session in a task, open the palette (⌘⇧P) and type "doctor": it lists "Doctor: Check the installation" marked "no tokens" and "Doctor: Full checkup" marked "starts a Claude session, spends tokens", in full, and no Doctor button is anywhere.
 - [ ] Run each. Both open a new terminal in the selected session's folder: the first runs `claude doctor` and leaves a shell after it; the second starts `claude` on `/doctor`. With nothing selected, both run in the configured repository.
 - [ ] Add your own entry under `doctor` in `settings.json`: on save, the palette lists it in place of the defaults, marked with its kind's warning.
+
+## #528: skills and plugins browser
+
+- [ ] ⌘⇧P, then "Skills": the browser takes the rail's place, grouped as "Your skills", "This project" (the selected session's folder, else the repository) and one group per plugin. Esc brings the rail back.
+- [ ] Open a skill: its `SKILL.md` shows rendered, with its description under its name.
+- [ ] "Edit" on one of your skills opens its `SKILL.md` in Zed. Plugin skills have no "Edit".
+- [ ] Each plugin shows once, at its installed version, not an older cached one. A disabled plugin is listed too (known shortcut).

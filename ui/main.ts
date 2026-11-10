@@ -16,6 +16,7 @@ import { showPalette, showPicker } from "./picker.js";
 import { readPlaces, showPlaces } from "./places.js";
 import { reload, type SettingsFiles, zoomed } from "./settings.js";
 import { studio } from "./state.js";
+import { showSkills } from "./skills.js";
 import { showView } from "./story.js";
 import { jumpToNeedsYou, showToast } from "./toast.js";
 import type { Selection, Session, SessionCards } from "./types.js";
@@ -113,7 +114,7 @@ const actions: Actions = {
   "studio::ToggleList": () => toggle("list-open"),
   "studio::ToggleRail": () => toggle("rail-open"),
   "studio::Dismiss": () => {
-    document.body.classList.remove("list-open", "rail-open");
+    document.body.classList.remove("list-open", "rail-open", "skills-open");
     element("picker").hidden = true;
   },
   "studio::ToggleFocus": () => {
@@ -133,6 +134,11 @@ const actions: Actions = {
   "studio::Answer": (n) => answer(Number(n)),
   "studio::NewSession": showPicker,
   "studio::OpenSettings": () => void invoke("open_settings", { editor: studio.files.settings.editor }).catch((e) => console.warn(e)),
+  // The skills browser (#528), in the rail's place; it leaves focus mode, which hides the rail.
+  "studio::Skills": () => {
+    if (studio.focus) actions["studio::ToggleFocus"]();
+    showSkills().catch((e) => console.warn(e));
+  },
   // A Doctor entry from settings, by its command (#527).
   "studio::Doctor": (command) => {
     const entry = studio.files.settings.doctor.find((e) => e.command === command);
