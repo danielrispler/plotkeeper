@@ -133,6 +133,9 @@ pub struct Session {
     pub asker: Option<Asker>,
     /// Its prompts, oldest first, each marked with who sent it (#369, decision 7).
     pub prompts: Vec<Prompt>,
+    /// Its turns, oldest first: the rail's feed (#574). Its checks, subagents and questions name the
+    /// turn they started in.
+    pub turns: Vec<Turn>,
     /// The ids of its background tasks, commands included, from their responses and `Stop`'s
     /// `background_tasks`. With its subagents' ids, they are the task ids a wake-up can name.
     #[serde(skip)]
@@ -330,6 +333,23 @@ pub struct Stopped {
     pub message: Option<String>,
 }
 
+/// A turn of a session, a block in the rail's feed (#574): from what opened it until it ended.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct Turn {
+    pub started_at: u64,
+    pub ended_at: Option<u64>,
+    /// The first line of the prompt that opened it, or "worker <name> returned" for a wake-up; empty
+    /// until a prompt arrives, as a queued prompt's turn may start on a step.
+    pub prompt: String,
+    /// The id its `Stop` gives a card or a summary on it (`Stopped::card`); `None` until it stopped.
+    pub id: Option<String>,
+    /// The first line of its final reply, from its `Stop`.
+    pub message: Option<String>,
+    /// Its whole final reply, which the rail fetches when its block opens (`Studio::turn_reply`).
+    #[serde(skip)]
+    pub reply: String,
+}
+
 /// Who sent a prompt: Daniel, or Claude Code waking the session when one of its tasks returns.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -358,6 +378,8 @@ pub struct Question {
     /// Its questions and their options, as the tool input gives them.
     pub questions: Value,
     pub answer: Answer,
+    /// The turn it was asked in (`Session::turns`).
+    pub turn: Option<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -423,6 +445,8 @@ pub struct Subagent {
     pub message: String,
     /// Daniel opened its line after it failed (#434, decision 39).
     pub opened: bool,
+    /// The turn of its session it was first seen in (`Session::turns`).
+    pub turn: Option<usize>,
     /// The folder of its first event that has one: its worktree, or its parent's folder.
     #[serde(skip)]
     pub folder: Option<String>,
@@ -618,10 +642,12 @@ impl Session {
         let index = match self.agents.iter().position(|a| a.agent.id == id) {
             Some(index) => index,
             None => {
+                let turn = self.current_turn();
                 self.agents.push(Subagent {
                     agent: Agent::new(id, at),
                     name: short(id, 5).into(),
                     status: Status::Running,
+                    turn,
                     ..Subagent::default()
                 });
                 self.agents.len() - 1
@@ -986,10 +1012,29 @@ impl Session {
             && (idle || self.starts_turn(event))
     }
 
-    /// Takes `prompt` as a prompt of its turn; `opens` when it opened the turn.
+    /// Takes `prompt` as a prompt of its turn; `opens` when it opened the turn. The turn's first
+    /// prompt names it in the feed.
     fn take_prompt(&mut self, prompt: Prompt, opens: bool) {
         self.woken = !prompt.sender.is_daniels() && (self.woken || opens);
+        let line = match &prompt.sender {
+            Sender::WakeUp(_) => self.returned.clone().unwrap_or_default(),
+            _ => prompt
+                .text
+                .lines()
+                .map(str::trim)
+                .find(|l| !l.is_empty())
+                .unwrap_or_default()
+                .into(),
+        };
+        if let Some(turn) = self.turns.last_mut().filter(|t| t.prompt.is_empty()) {
+            turn.prompt = line;
+        }
         self.prompts.push(prompt);
+    }
+
+    /// The index of its latest turn, which a check, subagent or question that starts now is in.
+    fn current_turn(&self) -> Option<usize> {
+        self.turns.len().checked_sub(1)
     }
 
     /// Ends its turn at `at`, with the change since the turn's base: a card on it, else on its
@@ -997,6 +1042,9 @@ impl Session {
     fn end_turn(&mut self, change: Option<Change>, at: u64) -> Option<Output> {
         self.unblock();
         self.close_spans(at);
+        if let Some(turn) = self.turns.last_mut().filter(|t| t.ended_at.is_none()) {
+            turn.ended_at = Some(at);
+        }
         self.turn_ended = true;
         self.stopped_at = at;
         let workers = !self.agent.since.cards.is_empty();
@@ -1357,6 +1405,8 @@ pub struct CheckLine {
     /// The card its start requested, when it usually takes over 2 minutes (#461, decision 15),
     /// whose guess its result settles.
     pub card: Option<String>,
+    /// The turn of its session it started in (`Session::turns`).
+    pub turn: Option<usize>,
     /// Its call's `tool_use_id`, and its background task's id once it moved to the background.
     #[serde(skip)]
     call: String,
@@ -1376,6 +1426,7 @@ impl CheckLine {
             ended_at: None,
             typical_ms,
             card: None,
+            turn: None,
             call: call.into(),
             task: None,
             counts: exit_code_counts(command),
@@ -2147,6 +2198,10 @@ impl Studio {
             }
         }
         if opens {
+            session.turns.push(Turn {
+                started_at: at,
+                ..Turn::default()
+            });
             session.turn_span = Some(Span {
                 start: at,
                 end: None,
@@ -2316,11 +2371,17 @@ impl Studio {
                     }));
                 }
                 let mut lines = event.last_assistant_message.lines().map(str::trim);
-                session.stopped = Some(Stopped {
+                let stopped = Stopped {
                     card: card_id(&event.session_id, at),
                     requested: matches!(output, Some(Output::Card(_))),
                     message: lines.find(|line| !line.is_empty()).map(Into::into),
-                });
+                };
+                if let Some(turn) = session.turns.last_mut().filter(|_| in_turn) {
+                    turn.id = Some(stopped.card.clone());
+                    turn.message.clone_from(&stopped.message);
+                    turn.reply = event.last_assistant_message.trim().into();
+                }
+                session.stopped = Some(stopped);
                 outputs.extend(output);
             }
             "SessionEnd" => {
@@ -2330,6 +2391,9 @@ impl Studio {
                 session.running.clear();
                 if session.in_turn() {
                     session.close_spans(at);
+                    if let Some(turn) = session.turns.last_mut().filter(|t| t.ended_at.is_none()) {
+                        turn.ended_at = Some(at);
+                    }
                 }
                 session.turn_ended = true;
                 session.ended = true;
@@ -2352,6 +2416,7 @@ impl Studio {
                         let call = &event.tool_use_id;
                         let mut line = CheckLine::new(&start.command, call, at, start.typical);
                         line.card = check_card.take();
+                        line.turn = session.current_turn();
                         session.checks.push(line);
                     }
                 }
@@ -2367,6 +2432,7 @@ impl Studio {
                         agent: call.agent.clone(),
                         questions: call.input["questions"].clone(),
                         answer: Answer::Open,
+                        turn: session.current_turn(),
                     });
                 }
                 // The hooks are async, so a block on this call may have landed first.
@@ -2510,7 +2576,9 @@ impl Studio {
                         // The hooks are async, so its result can land before its start.
                         None => {
                             let start = at.saturating_sub(event.duration_ms.unwrap_or_default());
-                            let line = CheckLine::new(command, &event.tool_use_id, start, typical);
+                            let mut line =
+                                CheckLine::new(command, &event.tool_use_id, start, typical);
+                            line.turn = session.current_turn();
                             session.checks.push(line);
                             Some(session.checks.len() - 1)
                         }
@@ -2795,6 +2863,13 @@ impl Studio {
         session.transcript.summary = Some(line.into());
         session.transcript.end(true);
         true
+    }
+
+    /// The whole final reply of turn `index` of session `session_id` (#574), which the rail shows
+    /// folded; `None` when there is no such turn.
+    pub fn turn_reply(&self, session_id: &str, index: usize) -> Option<String> {
+        let turn = self.sessions.get(session_id)?.turns.get(index)?;
+        Some(turn.reply.clone())
     }
 
     /// The folder and branch of each session that has not ended, and of the selected one, one per

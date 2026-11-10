@@ -85,3 +85,12 @@ Between passes, nothing waits for him. After each pass, a code-review agent that
 - [ ] Each row's session count matches the sessions working in that folder.
 - [ ] Click a task: "New session here" starts a session in it; Remove asks first when it would lose work, then removes the worktree. Create a task from Places' field: a session starts in it and its row appears.
 - [ ] The new-session picker (⌘N) only starts sessions: it has no Remove buttons and no branch-name field.
+
+## #574: the rail opens on now, as a feed of turns
+
+- [ ] Select a session with a few turns and cards, without scrolling the rail: the newest card is in view at the top, then the boxed intention and the latest turn's summary. (In the recording, reaching a card took 7 s of scrolling.)
+- [ ] Let the session ask a question: it docks at the top of the rail, under the header, and stays there while the rail scrolls. Once answered, the newest card is back at the top.
+- [ ] The rail's header is one line: the verdict and the phase. Hovering it shows the times and the model. Rename, Close and Delete (and Open all, Close all) are in its "⋯" menu, which closes on a choice or a click outside.
+- [ ] Below, the turns read newest first, each with its prompt in one line, its summary, its learning question (folded), its cards, its subagents, its checks and its full response (folded). Opening an older turn's full response shows its final reply. No "Last 30 minutes", "Older", "Responses", "Questions" or "Subagents" section is left; #535's subagent entries are in the turn that ran them.
+- [ ] Each turn shows one "Ask about this", only on hover; asking about a turn works as before.
+- [ ] With summaries written on open (settings), opening a session writes its waiting turns' summaries once, not again on each redraw.

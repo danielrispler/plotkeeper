@@ -159,38 +159,56 @@ h1 { margin: 0 0 var(--sp-4); }
 .toast .line { grid-column: 1 / -1; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #probe { position: absolute; visibility: hidden; white-space: pre; font: var(--term-size)/var(--term-line) var(--mono); }
 
-/* The rail: the story, its open question docked at the bottom. In "overlay" ⌘2 toggles it over the
-   terminal. */
-.rail { display: grid; grid-template-rows: auto 1fr auto; grid-template-columns: minmax(0, 1fr); }
+/* The rail (#574): one header line, the open question docked under it, then the story: "now" and the
+   feed of turns. In "overlay" ⌘2 toggles it over the terminal. */
+.rail { display: grid; grid-template-rows: auto auto 1fr; grid-template-columns: minmax(0, 1fr); }
 body[data-layout="overlay"] .rail { display: none; }
 body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; top: var(--bar); bottom: 0; left: 0;
                                                                 width: var(--rail); background: var(--chrome); box-shadow: var(--shadow-end); z-index: 5; }
-.rail-h { padding: var(--sp-4) var(--sp-5); font-size: var(--size-small); }
-.times { display: flex; gap: var(--sp-2) var(--sp-4); flex-wrap: wrap; align-items: baseline; }
-.times:empty { display: none; }
-.times .estimate { color: var(--muted); }
-.times > :empty { display: none; }
-.tools { display: flex; gap: var(--sp-3); }
-.tool { white-space: nowrap; }
+.rail-h { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-4) var(--sp-5); min-height: var(--sp-7); }
+/* The verdict and the phase on one line; the times and the model are its hover text. */
+.headline { flex: 1; min-width: 0; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.phase { color: var(--muted); font-size: var(--size-small); }
+/* The "⋯" menu: Open, Rename, Close, Open all, Close all and Delete, under the button, over the story. */
+.menu { position: fixed; inset: auto; top: calc(var(--bar) + var(--sp-7) + var(--sp-5)); left: calc(var(--rail) - var(--menu) - var(--sp-5));
+        width: var(--menu); margin: 0; border: 0; padding: var(--sp-3); background: var(--surface); color: var(--fg);
+        border-radius: var(--radius); box-shadow: var(--shadow); }
+.menu:popover-open { display: flex; flex-direction: column; gap: var(--sp-2); }
+.menu .btn { text-align: start; }
+.menu .btn[hidden] { display: none; }
 .story { overflow-y: auto; padding: var(--sp-4) var(--sp-5) var(--sp-5); }
 #notice { margin: 0 0 var(--sp-4); color: var(--muted); }
 /* Colour only on "needs you" (#328, module 3; #565, decision 1): "your turn" stays as neutral as "running". */
 .state { font-size: var(--size); font-weight: 600; margin: 0 0 var(--sp-3); }
+.headline .state { margin: 0; }
 .state[data-state="needs_you"] { color: var(--needs-you); background: var(--needs-you-bg); border-radius: var(--radius);
                                  padding: var(--sp-1) var(--sp-4); display: inline-block; }
-/* The intention and step line (#472): the agent's latest line, dim once it is over 5 steps old. */
-.intention { margin: 0 0 var(--sp-2); font-size: var(--size-read); overflow-wrap: anywhere; }
-.intention.old { color: var(--muted); }
-.intention:has(#intention-text:empty) { display: none; }
-.age { color: var(--muted); font-size: var(--size-small); }
+/* The intention, the anchor of "now" (mockup C): boxed, the biggest line, with a bright edge; dim once
+   it is over 5 steps old (#472). The step line sits under it. */
+.intention { margin: 0 0 var(--sp-5); padding: var(--sp-4) var(--sp-5); background: var(--surface); border-radius: var(--radius);
+             box-shadow: inset var(--mark) 0 0 var(--fg); overflow-wrap: anywhere; }
+.intention > p { margin: 0 0 var(--sp-2); font-size: var(--size-large); font-weight: 500; }
+.intention.old > p { color: var(--muted); }
+.intention:has(#intention-text:empty) > p { display: none; }
+.age { color: var(--muted); font-size: var(--size-small); font-weight: 400; }
 .unavailable { color: var(--muted); font-size: var(--size-small); margin: 0 0 var(--sp-2); }
-.step { margin: 0; min-width: 0; }
+.step { margin: 0; min-width: 0; font-size: var(--size-small); }
 .step summary { overflow-wrap: anywhere; }
 .step:not(.has-command) summary { list-style: none; pointer-events: none; }
 .step code { display: block; white-space: pre-wrap; overflow-wrap: anywhere; margin: var(--sp-2) 0 0; }
 .tool-name { font-weight: 600; }
-.responses { margin: var(--sp-4) 0 0; }
-.responses .response { margin: var(--sp-5) 0 0; }
+/* The feed of turns, newest first: each turn one block, told apart by a line, as in the story rail
+   mockup (#517). Its prompt is one line; its "ask about this" shows on hover or while open. */
+.feed { list-style: none; margin: var(--sp-5) 0 0; padding: 0; }
+.turn { border-top: var(--hair) solid var(--line); padding: var(--sp-4) 0 var(--sp-5); }
+.turn > * + * { margin-top: var(--sp-4); }
+.turn .prompt { margin: 0; color: var(--muted); font-size: var(--size-small); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.turn .checks, .turn .subagents { list-style: none; padding: 0; }
+.turn .subagents li { margin: 0 0 var(--sp-2); }
+.turn:not(:hover) > .ask-about:not([open]):not(:focus-within) { visibility: hidden; }
+.fold > summary { font-size: var(--size); color: var(--muted); cursor: pointer; }
+.fold .response { margin: var(--sp-4) 0 0; }
+.fold .learning { margin: var(--sp-4) 0 0; }
 /* Rendered Markdown (#525): responses and "ask about this" replies. */
 .markdown { font-size: var(--size-read); overflow-wrap: anywhere; }
 .markdown > :first-child { margin-top: 0; }
@@ -203,8 +221,7 @@ body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; to
 .markdown th, .markdown td { border: var(--hair) solid var(--edge); padding: var(--sp-1) var(--sp-4); text-align: start; }
 .markdown a { color: var(--fg); text-decoration: underline; }
 .markdown blockquote { margin: var(--sp-4) 0 0; padding-left: var(--sp-5); border-left: var(--halo) solid var(--line); color: var(--muted); }
-.cards-title { margin-top: var(--sp-7); }
-/* The session's brief, above its cards; its code wraps as a card's does. */
+/* The session's brief, folded under the feed; its code wraps as a card's does. */
 .brief { margin: var(--sp-5) 0 0; font-size: var(--size-read); }
 .brief p { margin: 0 0 var(--sp-2); overflow-wrap: anywhere; }
 .brief code, .card code { white-space: normal; overflow-wrap: anywhere; }
@@ -265,8 +282,8 @@ body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; to
 .choices .label { font-weight: 600; font-size: var(--size-read); }
 .choices .description { color: var(--muted); font-size: var(--size-small); }
 .choices .chosen { box-shadow: inset 0 0 0 var(--mark) var(--fg); }
-/* The open question, docked under the story; its top line is the needs-you edge. */
-.dock { border-top: var(--hair) solid var(--needs-you-line); background: var(--needs-you-bg); padding: var(--sp-4) var(--sp-5);
+/* The open question, docked at the top of the rail (#574); its edges are the needs-you lines. */
+.dock { border-block: var(--hair) solid var(--needs-you-line); background: var(--needs-you-bg); padding: var(--sp-4) var(--sp-5);
         max-height: 55vh; overflow-y: auto; }
 .dock .question { background: none; padding: 0; margin: 0; }
 .dock .asked { font-size: var(--size-large); }
@@ -281,8 +298,6 @@ body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; to
 .decision .plan { white-space: pre-wrap; max-height: 30vh; overflow-y: auto; margin: var(--sp-3) 0 0; padding: var(--sp-3) var(--sp-5);
                   background: var(--hover); border-radius: var(--radius); }
 .decision .description { color: var(--muted); }
-/* A subagent's view: its session's checks are not its own; its brief and cards are. */
-#view[data-agent] .own { display: none; }
 
 /* The picker (#467): where a new session starts, under the top bar's button. */
 .picker { position: fixed; top: calc(var(--bar) + var(--sp-2)); right: var(--sp-5); z-index: 8; width: var(--popover); max-height: 70vh;
@@ -297,7 +312,6 @@ body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; to
 :is(.picker, .places) .picker-error { white-space: pre-wrap; font: var(--size-small) var(--mono); color: var(--needs-you); margin: var(--sp-3) var(--sp-2); }
 /* Places (#576): a clicked place's actions, under its row. */
 .places .place-actions { display: flex; gap: var(--sp-3); padding: var(--sp-1) var(--sp-4) var(--sp-3); }
-#reopen, #rename, #close { margin: 0 0 var(--sp-4); }
 /* The questions of rename and close (#469). */
 .ask { background: var(--surface); color: var(--fg); border: 0; border-radius: var(--radius); box-shadow: var(--shadow);
        padding: var(--sp-5); width: var(--popover); }
@@ -322,5 +336,5 @@ body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; to
 .decisions .answer { font-weight: 600; }
 .decisions .cleared { border-left-style: dashed; }
 .decisions .plan { white-space: pre-wrap; max-height: 30vh; overflow-y: auto; font-size: var(--size-read); }
-/* The rail's subagent history (#535): each entry a button that opens its subagent, its lines stacked. */
+/* A turn's subagents (#535, #574): each entry a button that opens its subagent, its lines stacked. */
 .subagents button { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-1); width: 100%; text-align: start; overflow-wrap: anywhere; }
