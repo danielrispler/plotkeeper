@@ -111,3 +111,36 @@ fn a_resume_from_a_fresh_claude_shows_only_the_resumed_row() {
     assert_eq!(row.prompts.len(), 1);
     assert_eq!(row.state, State::YourTurn);
 }
+
+/// `74034bf9` on 2026-11-09: a second `claude` from the fork's terminal loaded an old session in the
+/// background, likely from the `/resume` picker backed out of, and never got a prompt.
+#[test]
+fn a_prompt_less_resume_beside_a_live_session_is_no_row_until_its_first_prompt() {
+    const LOADED: &str = "74034bf9-6b2e-4a8e-9d51-0c3f2e7a1b44";
+    let mut lines = forked();
+    lines.push(event(
+        LOADED,
+        "SessionStart",
+        7_000,
+        json!({ "source": "resume" }),
+    ));
+    let studio = Studio::replayed(lines.clone());
+
+    assert_eq!(studio.sessions().len(), 1, "no row for the loaded session");
+    assert_eq!(studio.sessions()[0].agent.id, OLD);
+
+    lines.push(event(
+        LOADED,
+        "UserPromptSubmit",
+        8_000,
+        json!({ "prompt": "Go on.", "prompt_id": "p-2" }),
+    ));
+    let studio = Studio::replayed(lines);
+
+    assert_eq!(
+        studio.sessions().len(),
+        2,
+        "its first prompt makes it a row"
+    );
+    assert!(studio.sessions().iter().any(|s| s.agent.id == LOADED));
+}

@@ -2985,8 +2985,22 @@ impl Studio {
     }
 
     /// The session list: every session Daniel has not deleted, grouped in `State` order, the newest first in each group.
+    /// A session with no prompt is no row while its terminal's live session has prompts: a session
+    /// loaded beside it, as by the `/resume` picker backed out of, until its first prompt (#562).
     pub fn sessions(&self) -> Vec<&Session> {
-        let mut sessions: Vec<&Session> = self.sessions.values().filter(|s| !s.deleted).collect();
+        let beside_live = |s: &Session| {
+            s.prompts.is_empty()
+                && s.terminal.is_some()
+                && self.sessions.values().any(|live| {
+                    live.terminal == s.terminal
+                        && !live.ended
+                        && !live.deleted
+                        && !live.prompts.is_empty()
+                })
+        };
+        let mut sessions: Vec<&Session> = (self.sessions.values())
+            .filter(|s| !s.deleted && !beside_live(s))
+            .collect();
         sessions.sort_by_key(|s| (s.state, Reverse(s.agent.started_at), &s.agent.id));
         sessions
     }
