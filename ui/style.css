@@ -148,6 +148,10 @@ h1 { margin: 0 0 var(--sp-4); }
 .pane { position: absolute; inset: var(--sp-3); }
 .pane[hidden] { display: block; }
 .pane[hidden], .pane.fitting { visibility: hidden; }
+/* A split's divider (#529), in the gap between its two panes. */
+.split-divider { position: absolute; z-index: 4; width: calc(2 * var(--sp-3)); cursor: col-resize; touch-action: none; border-radius: var(--radius-small); }
+.split-divider.stacked { width: auto; height: calc(2 * var(--sp-3)); cursor: row-resize; }
+.split-divider:hover, .split-divider.dragging { background: var(--edge); }
 .term-find { position: absolute; top: var(--sp-3); right: var(--sp-5); z-index: 10; width: var(--find); font: inherit; }
 /* The needs-you toast (#573): over the terminal's top-right corner, taking none of its space. */
 .term { position: relative; }

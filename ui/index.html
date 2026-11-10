@@ -49,7 +49,8 @@
       <div id="terminal-head" class="term-h"><span id="terminal-title">terminal</span></div>
       <!-- A new build to restart into, or the daemon upgrade's wait (#470). -->
       <div id="restart" class="restart" role="status" hidden></div>
-      <div id="terminal-body" class="term-body"></div>
+      <!-- A split (#529) shows two panes, the divider between them. -->
+      <div id="terminal-body" class="term-body"><div id="split-divider" class="split-divider" hidden></div></div>
       <!-- The needs-you toast (#573): over the terminal's top-right corner, never focused. -->
       <div id="toast" class="toast" role="status" hidden></div>
       <!-- A program that failed at start (#558): over the terminal's bottom-right corner, never focused. -->

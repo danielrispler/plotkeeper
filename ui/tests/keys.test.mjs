@@ -248,4 +248,5 @@ test("every default window action has a title and a key in the palette", () => {
   assert.deepEqual(entries.find((entry) => entry.title === "Next session").keys, ["⌘]"]);
   assert.deepEqual(entries.find((entry) => entry.title === "Select next").keys, ["↓"]);
   assert.deepEqual(entries.find((entry) => entry.title === "Toggle focus").keys, ["⇧⌘↩"]);
+  assert.deepEqual(entries.find((entry) => entry.title === "Toggle split").keys, ["⌘D"]);
 });

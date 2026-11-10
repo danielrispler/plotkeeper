@@ -78,6 +78,8 @@ const defaultKeymap: Keymap = {
     escape: "studio::Dismiss",
     // Focus mode (#573), in `MODIFIERS` order, as the lookup reads it.
     "shift-cmd-enter": "studio::ToggleFocus",
+    // Split terminals (#529): the pane shown stays beside the next one selected.
+    "cmd-d": "studio::ToggleSplit",
     "cmd-=": "studio::ZoomIn",
     "cmd--": "studio::ZoomOut",
     "cmd-0": "studio::ResetZoom",

@@ -5,10 +5,13 @@
 // `closePane` ends a terminal and drops its pane (#469).
 // #470: at start every running terminal is attached, its screen replayed, and the terminals a dead
 // daemon ran come back (`revive`); so after a crash, a reboot or an upgrade, the same way.
+// #529: a split pins the pane shown to the column's second half while the selection drives the first;
+// while both are the same terminal, one pane shows.
 
 import type * as Xterm from "@xterm/xterm";
 import { connect, list, onEvent, request, type Listed } from "./daemon.js";
 import { element, invoke, pressable, text } from "./dom.js";
+import { type Box, paneBoxes } from "./layout.js";
 import { offerBuilds, upgrade, type Revive } from "./restart.js";
 import { show as showSelection } from "./selection.js";
 import { studio } from "./state.js";
@@ -23,6 +26,13 @@ let repo = "";
 let shown = "";
 let ready: Promise<void> | null = null;
 let revived: Promise<void> = Promise.resolve();
+// The split's pinned terminal, the first pane's share of the column, and, as the width rule last
+// laid it out, whether the panes stack and the terminal's cell width.
+let pinned: string | null = null;
+let share = 0.5;
+let stacked = false;
+let cell = 8;
+let laidSplit = false;
 
 // Connects, shows the login shell in the configured repository, then brings back every terminal;
 // again each time the daemon is lost.
@@ -78,7 +88,10 @@ function box(id: string): HTMLElement {
 function show(id: string, open: () => Xterm.Terminal | null) {
   shown = id;
   const place = box(id);
-  for (const pane of panes.values()) pane.box.hidden = pane.box !== place;
+  for (const [key, pane] of panes) pane.box.hidden = pane.box !== place && !(split() && key === pinned);
+  // A split opening or closing changes the width rule's layout (`main.ts`), which places the panes.
+  if (split() !== laidSplit) window.dispatchEvent(new Event("layout"));
+  else placePanes(stacked, cell);
   const pane = draw(id, open);
   header(pane);
   pane.term?.focus();
@@ -118,7 +131,62 @@ export async function closePane(id: string) {
   pane?.term?.dispose();
   pane?.box.remove();
   panes.delete(id);
+  const wasPinned = pinned === id;
+  if (wasPinned) pinned = null;
   if (shown === id) show("shell", () => openPane(box("shell"), "shell", repo));
+  else if (wasPinned) show(shown, () => null);
+}
+
+// Whether two panes show: the pinned one and a different one the selection shows.
+export const split = () => pinned !== null && pinned !== shown && panes.has(pinned);
+
+// Splits the column, pinning the pane shown; true when it split. Only a terminal pins, not the
+// "Open here" message. Again, the split closes.
+export function toggleSplit(): boolean {
+  if (pinned !== null) {
+    pinned = null;
+    show(shown, () => null);
+    return false;
+  }
+  if (!panes.get(shown)?.term) return false;
+  pinned = shown;
+  return true;
+}
+
+// Places the shown panes by `paneBoxes`: the selected one first, beside the rail, the pinned one
+// second, stacked as the width rule says; a hidden pane keeps the stylesheet's box.
+export function placePanes(stack: boolean, width: number) {
+  [stacked, cell, laidSplit] = [stack, width, split()];
+  const body = element("terminal-body");
+  const [first, second] = paneBoxes(body.clientWidth, body.clientHeight, cell, laidSplit ? { stacked, share } : null);
+  const inset = ({ top, right, bottom, left }: Box) => `${top}px ${right}px ${bottom}px ${left}px`;
+  for (const pane of panes.values()) pane.box.style.inset = "";
+  const divider = element("split-divider");
+  divider.hidden = !second;
+  if (!second) return;
+  panes.get(shown)!.box.style.inset = inset(first);
+  panes.get(pinned!)!.box.style.inset = inset(second);
+  // The divider fills the gap between the panes.
+  divider.classList.toggle("stacked", stacked);
+  divider.style.inset = stacked ? `${body.clientHeight - first.bottom}px 0 auto` : `0 auto 0 ${body.clientWidth - first.right}px`;
+}
+
+// Dragging the split's divider moves the share, and the panes refit as their boxes change.
+export function dragSplit() {
+  const handle = element("split-divider");
+  handle.addEventListener("pointerdown", (event) => {
+    event.preventDefault(); // no text selection while dragging
+    handle.setPointerCapture(event.pointerId);
+    handle.classList.add("dragging");
+  });
+  handle.addEventListener("pointermove", (event) => {
+    if (!handle.hasPointerCapture(event.pointerId)) return;
+    const body = element("terminal-body").getBoundingClientRect();
+    share = stacked ? (event.clientY - body.top) / body.height : (event.clientX - body.left) / body.width;
+    placePanes(stacked, cell);
+  });
+  handle.addEventListener("lostpointercapture", () => handle.classList.remove("dragging"));
+  new ResizeObserver(() => placePanes(stacked, cell)).observe(element("terminal-body"));
 }
 
 // Starts `claude` in `cwd` in a new terminal, with `prompt` as its first prompt, or
