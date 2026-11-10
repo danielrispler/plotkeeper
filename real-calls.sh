@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
-# Every real model call round 5 needs (#517), in one run. Daniel runs it outside auto mode, from any
-# checkout: `apps/studio/real-calls.sh`. Each call's output goes to one folder in `local-evidence/`;
-# a step whose code is not built yet is skipped and says so. The calls use Daniel's subscription.
+# Every step round 5 needs (#517) that cannot run in auto mode, in one run: real model calls, and
+# steps that launch and kill an app build. Daniel runs it outside auto mode, from any checkout:
+# `apps/studio/real-calls.sh`. Each step's output goes to one folder in `local-evidence/`, with the
+# script's own terminal output in `run.log`; a step whose code is not built yet is skipped and says
+# so. The model calls use Daniel's subscription.
 set -uo pipefail
 
 studio=$(cd "$(dirname "$0")" && pwd)
 main=$(cd "$(git -C "$studio" rev-parse --path-format=absolute --git-common-dir)/.." && pwd)
 out="$main/local-evidence/2026-11-09-round-5/real-calls-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$out"
-cd "$studio"
+exec > >(tee "$out/run.log") 2>&1
+cd "$studio" || exit 1
 echo "commit $(git rev-parse --short HEAD), output $out"
 
 # One step: its name, its file, then the command. A failure is logged and the next step runs.
@@ -43,4 +46,18 @@ elif grep -n -i -E "what i (did not|didn't) check|^not checked|ponytail|caveman"
   echo "   footer found in 518-real-card.txt"
 else
   echo "== no footer in 518-real-card.txt"
+fi
+
+# #543: can macOS kill the terminal daemon when the app quits, is force quit or crashes? A separate
+# build, `StudioRepro`, with its own identifier, home, socket and data folder, so the live app,
+# daemon and terminals are never touched. A crash may show macOS's "quit unexpectedly" dialog.
+repro_app="$studio/target/release/bundle/macos/StudioRepro.app"
+build_repro() {
+  { [ -d node_modules ] || npm ci; } &&
+    npx tauri build --config '{"identifier":"dev.falinks.studio-repro","productName":"StudioRepro"}'
+}
+if step "#543 repro build" 543-build.txt build_repro; then
+  step "#543 daemon kill" 543-daemon-kill.json cargo run -q -p studio-terminal-daemon --example kill_repro -- --app "$repro_app" --out "$out"
+else
+  echo "== #543 daemon kill: skipped, the repro build failed"
 fi

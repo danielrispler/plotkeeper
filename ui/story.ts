@@ -14,6 +14,7 @@ import { decisionElement, questionElement } from "./questions.js";
 import { shortPaths, worktreeOf } from "./paths.js";
 import { checkTime, counts, estimateText, timeNode, times } from "./times.js";
 import { studio } from "./state.js";
+import { typeInto } from "./typing.js";
 import { stateLabels, type CheckLine, type Losses, type Places, type Question, type Selection, type Session, type Transcript } from "./types.js";
 
 export function showView(selected: Selection | null) {
@@ -58,7 +59,7 @@ export function showView(selected: Selection | null) {
   element("command").textContent = step?.command ?? "";
   element("step").classList.toggle("has-command", Boolean(step?.command));
   // A subagent's transcript is its own, which the studio does not read.
-  showStory(session.id, agent === null ? session.transcript : null);
+  showStory(session.id, session.cwd, agent === null ? session.transcript : null);
   showQuestions(session.questions.filter((question) => question.agent === (agent?.id ?? null)));
   showChecks(session.checks);
   showCleared(agent === null ? session.cleared : []);
@@ -68,8 +69,8 @@ export function showView(selected: Selection | null) {
 const FRESH_STEPS = 5;
 
 // The intention, its age, the turn's full responses, each with "ask about this" (#482), and the mark
-// when the transcript is unreadable.
-function showStory(session: string, story: Transcript | null) {
+// when the transcript is unreadable. A file a response links opens from `cwd`, the session's folder.
+function showStory(session: string, cwd: string, story: Transcript | null) {
   const steps = story?.steps_ago ?? 0;
   element("intention-text").textContent = story?.intention ?? "";
   element("intention-ask").replaceChildren(...(story?.intention ? [askElement(session, story.intention)] : []));
@@ -81,14 +82,13 @@ function showStory(session: string, story: Transcript | null) {
   element("responses").hidden = responses.length === 0;
   element("responses-title").textContent = `Responses (${responses.length})`;
   element("responses-body").replaceChildren(
-    ...responses.flatMap((response) => [rendered("div", response, "response"), askElement(session, response)]),
+    ...responses.flatMap((response) => [rendered("div", response, "response", cwd), askElement(session, response)]),
   );
 }
 
 // Rename (#469): the row's name, kept in the event log, and `/rename` typed into the session while
 // its claude runs, so Claude Code shows the same name. An empty name gives the row its folder's again.
-// shortcut: the command lands after anything Daniel left typed in its prompt; clear the line first
-// if that bites.
+// The command waits for Daniel's draft and never answers a session that needs him (#544).
 function askName(session: Session) {
   const dialog = element("rename-dialog") as HTMLDialogElement;
   const field = element("rename-field") as HTMLInputElement;
@@ -98,8 +98,17 @@ function askName(session: Session) {
     const name = field.value.trim();
     await invoke("rename", { id: session.id, name }).catch((e) => console.warn(e));
     if (!name || session.terminal === null || session.state === "ended") return;
-    const type = (data: string) => request({ op: "input", id: session.terminal, data: encode(new TextEncoder().encode(data)) });
-    await type(`/rename ${name}`).then(() => type("\r")).catch((e) => console.warn(e));
+    const terminal = session.terminal;
+    const blocked = () => studio.listed.find((s) => s.id === session.id)?.state === "needs_you";
+    await typeInto(terminal, `/rename ${name}`, blocked, {
+      now: Date.now,
+      sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
+      send: (data) => request({ op: "input", id: terminal, data: encode(new TextEncoder().encode(data)) }),
+      notice: (text) => {
+        element("notice").textContent = text;
+        element("notice").hidden = false;
+      },
+    }).catch((e) => console.warn(e));
   };
   dialog.returnValue = "";
   dialog.showModal();

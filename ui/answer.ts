@@ -1,9 +1,9 @@
 // Answering from the card (#461, decision 16). While a session's view shows and the window is
-// visible, the window tells the shell every second, so the answer hook waits for the card; the shell
-// returns the session's open request, whose nonce the answer echoes. The hook waits only while the
+// visible, the shell watches it, so the answer hook waits for the card; the shell sends the session's
+// open request in its read loop (#569), and the answer echoes its nonce. The hook waits only while the
 // request's card shows: a question asked in a view that is not shown is handed to the terminal.
 
-import { invoke } from "./dom.js";
+import { invoke, listen } from "./dom.js";
 import { studio } from "./state.js";
 import { askKind, type Question } from "./types.js";
 
@@ -43,23 +43,54 @@ export const openDecision = () =>
 const watch = (session: string | null) =>
   invoke<Ask | null>("watch", { session }).catch((e) => (console.warn(e), null));
 
+// The view watched last, so a redraw of the same one asks the shell nothing.
+let watched = "";
+
+// The session and subagent whose view shows, null while the window is hidden.
+const shown = () => {
+  const selection = document.visibilityState === "visible" ? studio.selection : null;
+  const selected = selection?.session;
+  // The hook's payload names the latest conversation, which a `/clear` changes, not the row (#474).
+  const session = selected ? selected.resume_id || selected.id : null;
+  return { session, agent: selection?.agent ?? null };
+};
+
+// Docks `ask`, the shown session's open request, or undocks when it is null.
+async function take(ask: Ask | null) {
+  const { session, agent } = shown();
+  if (ask !== null && !cardShown(ask, agent)) {
+    // Its card is not shown, so stop watching: the hook hands the call to the terminal at once. Watch
+    // again once the hook, which looks every 100 ms, has let go, so the view's next request docks.
+    await watch(null);
+    watched = "";
+    setTimeout(rewatch, 300);
+    ask = null;
+  }
+  const next = session !== null && ask !== null && ask.nonce !== sent ? { session, ask } : null;
+  if (next?.ask.nonce === current?.ask.nonce) return;
+  current = next;
+  redraw();
+}
+
+// Tells the shell which session's view shows, when that changed (#569): the shell keeps the
+// heartbeat and sends the session's open request as an `ask` event, with no poll here.
+export async function rewatch() {
+  const { session, agent } = shown();
+  const key = JSON.stringify([session, agent]);
+  if (key === watched) return;
+  watched = key;
+  await take(await watch(session));
+}
+
 export function startWatching(draw: () => void) {
   redraw = draw;
-  setInterval(async () => {
-    const selection = document.visibilityState === "visible" ? studio.selection : null;
-    const selected = selection?.session;
-    // The hook's payload names the latest conversation, which a `/clear` changes, not the row (#474).
-    const session = selected ? selected.resume_id || selected.id : null;
-    let ask = await watch(session);
-    if (ask !== null && !cardShown(ask, selection?.agent ?? null)) {
-      // Its card is not shown, so stop watching: the hook hands the call to the terminal at once.
-      await watch(null);
-      ask = null;
-    }
-    const next = session !== null && ask !== null && ask.nonce !== sent ? { session, ask } : null;
-    if (next?.ask.nonce === current?.ask.nonce) return;
-    current = next;
-    redraw();
+  listen<Ask | null>("ask", (ask) => take(ask));
+  document.addEventListener("visibilitychange", rewatch);
+  rewatch();
+  // Shows the shell the window is alive, so a frozen window lets the hook hand a question to the
+  // terminal within seconds (#569). It asks for nothing; the open request still comes as an event.
+  setInterval(() => {
+    if (shown().session !== null) invoke("alive").catch(() => {});
   }, 1000);
 }
 

@@ -17,7 +17,8 @@ test("missing files give the defaults", () => {
   const loaded = reload(initial, { settings: null, keymap: null });
   assert.equal(loaded.settings.zoom, 1);
   assert.equal(loaded.settings.terminal.font_size, null);
-  assert.deepEqual(loaded.settings.summaries, { model: "haiku", effort: "low", on_open: false });
+  assert.deepEqual(loaded.settings.summaries, { model: "haiku", effort: "", on_open: false });
+  assert.deepEqual(loaded.settings.notifications, { while_focused: false });
   assert.deepEqual(loaded.settings.doctor, [
     { label: "Check the installation", command: "claude doctor", kind: "shell" },
     { label: "Full checkup", command: "/doctor", kind: "session" },
@@ -37,7 +38,10 @@ test("a Zed-style file, with comments and trailing commas, sets its keys and lea
   const loaded = reload(initial, { settings, keymap: null });
   assert.equal(loaded.settings.zoom, 1.5);
   assert.equal(loaded.settings.terminal.font_size, 15);
-  assert.deepEqual(loaded.settings.summaries, { model: "sonnet", effort: "low", on_open: false });
+  assert.deepEqual(loaded.settings.summaries, { model: "sonnet", effort: "", on_open: false });
+  assert.deepEqual(reload(initial, { settings: `{ "notifications": { "while_focused": true } }`, keymap: null }).settings.notifications, {
+    while_focused: true,
+  });
   assert.deepEqual(loaded.settings.doctor, [{ label: "Audit", command: "/audit", kind: "session" }]);
   assert.deepEqual(loaded.errors, []);
 });
@@ -105,4 +109,13 @@ test("a file of the wrong shape is reported", () => {
   const loaded = reload(initial, { settings: `[]`, keymap: `{}` });
   assert.equal(loaded.errors.length, 2);
   assert.equal(loaded.settings.zoom, 1);
+});
+
+test("the editor is an argv template, none by default, and anything else is reported", () => {
+  assert.equal(reload(initial, { settings: null, keymap: null }).settings.editor, null);
+  const code = `{ "editor": ["code", "-g", "{path}:{line}:{column}"] }`;
+  assert.deepEqual(reload(initial, { settings: code, keymap: null }).settings.editor, ["code", "-g", "{path}:{line}:{column}"]);
+  const shell = reload(initial, { settings: `{ "editor": "code -g {path}" }`, keymap: null });
+  assert.equal(shell.settings.editor, null);
+  assert.deepEqual(shell.errors, ['settings.json: editor: expected an array of strings, such as ["code", "-g", "{path}:{line}:{column}"]']);
 });

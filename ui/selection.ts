@@ -2,6 +2,7 @@
 // session, and the subagent of it whose view shows, if any. The core decides; this draws the one
 // selection it returns in the list, the rail and the terminal (#567).
 
+import { rewatch } from "./answer.js";
 import { showCards } from "./cards.js";
 import { invoke } from "./dom.js";
 import { showSessions } from "./list.js";
@@ -57,4 +58,5 @@ export function show(selected: Selection | null) {
   showSessions(studio.listed);
   showView(selected);
   showSession(selected?.session ?? null);
+  rewatch();
 }

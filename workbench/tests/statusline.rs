@@ -72,6 +72,19 @@ fn the_line_saves_the_snapshot_and_leaves_the_output_unchanged() {
 }
 
 #[test]
+fn a_usage_folder_open_to_others_is_made_private() {
+    let home = tempfile::tempdir().unwrap();
+    let dir = usage_dir(home.path());
+    fs::create_dir_all(&dir).unwrap();
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+
+    run(&script(true), STDIN, home.path());
+
+    let mode = fs::metadata(&dir).unwrap().permissions().mode();
+    assert_eq!(mode & 0o777, 0o700);
+}
+
+#[test]
 fn a_bad_session_id_or_an_unwritable_folder_changes_nothing_either() {
     let home = tempfile::tempdir().unwrap();
     let escape = STDIN.replace("9e0b5f13-d72a-4c6e-b8f4-61a3c2d9e807", "../../x");

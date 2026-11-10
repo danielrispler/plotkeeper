@@ -37,6 +37,9 @@ pub struct Studio {
     /// The row of each session that continues another after a `/clear`, by its own id (#461,
     /// decision 18). A session not here is its own row.
     rows: HashMap<String, String>,
+    /// Summaries are written when Daniel opens a turn, not at its end, so they move no intention
+    /// (#517, decisions 13 and 16), from the settings.
+    summaries_on_open: bool,
 }
 
 type FindRoot = dyn Fn(&str) -> Option<String> + Send;
@@ -1200,6 +1203,9 @@ pub enum Output {
         session_id: String,
         agent: Option<String>,
     },
+    /// A session newly reached your turn: its turn ended, with nothing blocked on Daniel (#517,
+    /// decision 6).
+    YourTurn { session_id: String },
     /// Worker `agent` of a session, at any depth, newly failed. A failed helper raises none.
     Failed { session_id: String, agent: String },
     /// Helper `agent` became a worker, which the card store keeps, since a replay takes no
@@ -1208,6 +1214,9 @@ pub enum Output {
     /// A prompt named a known task id in markup the studio does not know: drift in Claude Code's
     /// wake-ups, for stderr (#369, decision 7).
     Unrecognised { session_id: String, task_id: String },
+    /// A session's turn ended with a long reply or by asking Daniel something: its turn summary
+    /// (#517, decisions 12 and 13).
+    Summary(SummaryRequest),
     /// A session's first `Stop`: read Claude Code's version from its transcript, and nothing else
     /// (#369, decision 9).
     Version { transcript_path: String },
@@ -1257,6 +1266,34 @@ pub struct CardRequest {
     /// `None` for any other card.
     #[serde(default)]
     pub check: Option<String>,
+}
+
+/// A turn that gets a summary (#517, decisions 12, 13 and 15): what the summary writer reads of it.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SummaryRequest {
+    pub session_id: String,
+    /// Names the turn: its session, `@`, and when its `Stop` arrived, as `Stopped::card`.
+    pub id: String,
+    /// Daniel's latest prompt.
+    pub prompt: String,
+    /// The agent's texts in the turn, oldest first, the final reply last.
+    pub responses: Vec<String>,
+    /// The turn's intentions, one per response.
+    pub intentions: Vec<String>,
+    /// The card its `Stop` requested, which the learning section points to instead of a question.
+    #[serde(default)]
+    pub card: Option<String>,
+}
+
+/// A reply of at least this many words gets a summary (#517, decision 12).
+const SUMMARY_WORDS: usize = 150;
+
+/// Whether a turn whose final reply is `reply` gets a summary: the reply is long, or the turn ends
+/// asking Daniel something, in a question or a block that outlasts it (`asks`).
+pub fn wants_summary(reply: &str, asks: bool) -> bool {
+    let last = reply.lines().map(str::trim).rfind(|l| !l.is_empty());
+    asks || reply.split_whitespace().count() >= SUMMARY_WORDS
+        || last.is_some_and(|l| l.ends_with('?'))
 }
 
 /// A turn that ended with no card, as the replay saw it (#486): its card request with no change,
@@ -2075,6 +2112,7 @@ impl Studio {
         let promoted = helpers.into_iter().filter(worker);
         outputs.extend(promoted.map(|agent| Output::Promoted { agent }));
         let blocked_before = session.needs_you();
+        let state_before = session.state;
         let tool = event.tool_name.unwrap_or_default();
         let id = Some(event.tool_use_id.clone()).filter(|id| !id.is_empty());
         let at = event.studio_received_ms;
@@ -2241,6 +2279,30 @@ impl Studio {
                     outputs.push(Output::Version {
                         transcript_path: event.transcript_path,
                     });
+                }
+                let reply = event.last_assistant_message.trim();
+                if !replay && wants_summary(reply, session.needs_you()) {
+                    // shortcut: the transcript may lag the `Stop` by one poll, so the final reply
+                    // is taken from the `Stop`; read the transcript first if earlier texts go missing.
+                    let mut turn = session.transcript.clone();
+                    if !reply.is_empty() && turn.responses.last().map(String::as_str) != Some(reply)
+                    {
+                        turn.responses.push(reply.into());
+                    }
+                    turn.ended = true;
+                    turn.summary = None;
+                    let daniels = session.prompts.iter().rfind(|p| p.sender.is_daniels());
+                    outputs.push(Output::Summary(SummaryRequest {
+                        session_id: session.agent.id.clone(),
+                        id: card_id(&event.session_id, at),
+                        prompt: daniels.map(|p| p.text.clone()).unwrap_or_default(),
+                        intentions: turn.intentions(),
+                        responses: turn.responses,
+                        card: match &output {
+                            Some(Output::Card(card)) => Some(card.id.clone()),
+                            _ => None,
+                        },
+                    }));
                 }
                 let mut lines = event.last_assistant_message.lines().map(str::trim);
                 session.stopped = Some(Stopped {
@@ -2490,6 +2552,13 @@ impl Studio {
                 agent: session.asker.as_ref().and_then(|w| w.agent.clone()),
             });
         }
+        // A fresh session also starts at your turn, from its default `Running`, but has nothing to tell.
+        let reached = matches!(state_before, State::Running | State::NeedsYou);
+        if reached && session.state == State::YourTurn && name != "SessionStart" {
+            outputs.push(Output::YourTurn {
+                session_id: event.session_id.clone(),
+            });
+        }
         if phase_started {
             self.estimate(&event.session_id);
         }
@@ -2692,6 +2761,31 @@ impl Studio {
         changed
     }
 
+    /// Whether summaries are written when Daniel opens a turn (`summaries.on_open` in the settings).
+    pub fn set_summaries_on_open(&mut self, on: bool) {
+        self.summaries_on_open = on;
+    }
+
+    pub fn summaries_on_open(&self) -> bool {
+        self.summaries_on_open
+    }
+
+    /// The summary of turn `id` of session `session_id` arrived, whose first line is `line`: its
+    /// turn-end intention switches to it once (#517, decision 16). Nothing changes when summaries
+    /// are written on open, or when the session has moved past that turn. Returns whether it did.
+    pub fn summarized(&mut self, session_id: &str, id: &str, line: &str) -> bool {
+        let Some(session) = self.sessions.get_mut(session_id) else {
+            return false;
+        };
+        let current = session.stopped.as_ref().is_some_and(|s| s.card == id);
+        if self.summaries_on_open || !current || session.in_turn() {
+            return false;
+        }
+        session.transcript.summary = Some(line.into());
+        session.transcript.end(true);
+        true
+    }
+
     /// The folder and branch of each session that has not ended, and of the selected one, one per
     /// branch: what the shell asks `gh pr view` about, off the poll (#461, decision 19).
     pub fn branches(&self) -> Vec<(String, String)> {
@@ -2858,11 +2952,13 @@ fn short(id: &str, n: usize) -> &str {
 /// 3 seconds, a starting guess for "a few seconds" (#369, decision 22 and Further Notes).
 const COMBINE: Duration = Duration::from_secs(3);
 
-/// A notice not shown yet: its title and body, and for "needs you" the session it is about.
+/// A notice not shown yet: its title and body, and for "needs you" or "your turn" the session it is
+/// about.
 struct Pending {
     title: String,
     body: String,
     needs_you: Option<String>,
+    your_turn: Option<String>,
 }
 
 /// The notices the shell has not shown yet. Those that come within `COMBINE` of the first show as
@@ -2873,20 +2969,35 @@ struct Pending {
 pub struct Notifications {
     pending: Vec<Pending>,
     first_at: Duration,
+    /// The setting that also shows "your turn" while the window is focused, for any session but
+    /// the selected one; off by default (#517, decision 6).
+    pub while_focused: bool,
 }
 
 impl Notifications {
     pub fn push(&mut self, title: &str, body: String, now: Duration) {
-        self.queue(title, body, None, now);
+        self.queue(title, body, None, None, now);
     }
 
     /// A "needs you" notice on session `session_id`, which shows only if the session still needs
     /// Daniel when it is due (#434, decision 27).
     pub fn push_needs_you(&mut self, session_id: &str, body: String, now: Duration) {
-        self.queue("Needs you", body, Some(session_id.into()), now);
+        self.queue("Needs you", body, Some(session_id.into()), None, now);
     }
 
-    fn queue(&mut self, title: &str, body: String, needs_you: Option<String>, now: Duration) {
+    /// A "your turn" notice on session `session_id` (#517, decision 6).
+    pub fn push_your_turn(&mut self, session_id: &str, body: String, now: Duration) {
+        self.queue("Your turn", body, None, Some(session_id.into()), now);
+    }
+
+    fn queue(
+        &mut self,
+        title: &str,
+        body: String,
+        needs_you: Option<String>,
+        your_turn: Option<String>,
+        now: Duration,
+    ) {
         if self.pending.is_empty() {
             self.first_at = now;
         }
@@ -2895,25 +3006,33 @@ impl Notifications {
             title,
             body,
             needs_you,
+            your_turn,
         });
     }
 
     /// The notification due at `now`, as its title and body: the pending notices, once `COMBINE`
     /// has passed since the first, less the "needs you" ones whose session `needs_you` says no
     /// longer needs Daniel. Only then is `focused` asked, and a focused window drops them, since
-    /// Daniel sees the list.
+    /// Daniel sees the list; with `while_focused` on, it keeps "your turn" on any session but the
+    /// one `selected` names.
     pub fn due(
         &mut self,
         now: Duration,
         focused: impl FnOnce() -> bool,
         needs_you: impl Fn(&str) -> bool,
+        selected: impl FnOnce() -> Option<String>,
     ) -> Option<(String, String)> {
         if self.pending.is_empty() || now < self.first_at + COMBINE {
             return None;
         }
         let mut pending = std::mem::take(&mut self.pending);
         pending.retain(|p| p.needs_you.as_deref().is_none_or(&needs_you));
-        if pending.is_empty() || focused() {
+        if !pending.is_empty() && focused() {
+            let selected = self.while_focused.then(selected).flatten();
+            pending
+                .retain(|p| self.while_focused && p.your_turn.is_some() && p.your_turn != selected);
+        }
+        if pending.is_empty() {
             return None;
         }
         let pending: Vec<(String, String)> =
