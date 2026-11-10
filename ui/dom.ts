@@ -33,8 +33,9 @@ export function age(from: number, to = Date.now()): string {
   return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h`;
 }
 
-// A button's type, pressed state and click.
+// A button: the one button component (#566), its type, pressed state and click.
 export function pressable<T extends HTMLElement>(button: T, pressed: boolean, click: () => void): T {
+  button.classList.add("btn");
   button.setAttribute("type", "button");
   button.setAttribute("aria-pressed", String(pressed));
   button.addEventListener("click", click);

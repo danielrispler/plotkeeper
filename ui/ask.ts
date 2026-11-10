@@ -50,7 +50,7 @@ function askBox(session: string, item: string): HTMLElement {
 }
 
 function button(label: string): HTMLButtonElement {
-  const node = text("button", label) as HTMLButtonElement;
+  const node = text("button", label, "btn") as HTMLButtonElement;
   node.type = "button";
   return node;
 }

@@ -100,7 +100,7 @@ function row(session: Session, children: Children): HTMLElement {
   const selection = studio.selection;
   const pressed = session.id === selection?.session.id && selection.agent === null;
   const button = pressable(document.createElement("button"), pressed, () => select(session.id));
-  button.className = "row";
+  button.classList.add("row");
   rowLines(
     button,
     session.state,
@@ -131,8 +131,8 @@ function agentRow(session: Session, children: Children, agent: Subagent, depth: 
   const button = pressable(document.createElement("button"), agent.id === studio.selection?.agent, () =>
     select(session.id, agent.id),
   );
-  button.className = `row ${agent.kind}`;
-  button.style.paddingInlineStart = `${8 + 14 * depth}px`;
+  button.classList.add("row", agent.kind);
+  button.style.paddingInlineStart = `calc(var(--sp-4) + var(--indent) * ${depth})`;
   const [label, stateName] = agentState(session, agent);
   const details =
     agent.kind === "worker"

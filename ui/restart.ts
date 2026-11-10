@@ -30,7 +30,7 @@ function say(message: string | null, actions: [string, () => void][] = []) {
   bar.hidden = message === null;
   bar.replaceChildren(text("span", message ?? ""));
   for (const [name, act] of actions) {
-    const button = text("button", name);
+    const button = text("button", name, "btn");
     button.addEventListener("click", act);
     bar.append(button);
   }
