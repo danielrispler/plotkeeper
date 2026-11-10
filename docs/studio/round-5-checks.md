@@ -27,6 +27,7 @@ It writes every output to `local-evidence/2026-11-09-round-5/real-calls-<time>/`
 - [ ] **#522:** a real "your turn" notification while Daniel is in another app, and the orange text.
 - [ ] **#523:** the rail header shows the model and effort, such as `claude-opus-5-5 · effort medium`.
 - [ ] **#524:** saving `settings.json` changes zoom and font size live; ⌘=, ⌘- and ⌘0 reach the window and are not taken by a menu.
+- [ ] **#526:** after a long turn ends, its intention first shows the reply's first line, then switches once, about 10 s later, to the turn summary's first line. With `"summaries": { "on_open": true }` in `settings.json`, it stays the reply's first line. The summaries are kept in `summaries.json` in the studio's data folder; the rail shows them with #574.
 - [ ] **#525:** a table in a response renders; clicking a link opens the browser, and the studio's window stays on the app.
 - [ ] **#527:** both Doctor defaults run in a new terminal in the selected place.
 - [ ] **#528:** "Edit" opens a user skill in Zed.

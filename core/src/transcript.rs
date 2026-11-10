@@ -38,6 +38,8 @@ pub struct Transcript {
     /// The session's effort, from its latest line that carries one (#517, decision 8); kept across
     /// turns.
     pub effort: Option<String>,
+    /// The first line of the turn's summary, once it arrived (#526): the turn-end intention then.
+    pub summary: Option<String>,
     /// Whether the session's turn has ended, which the core sets from its hooks; kept across turns.
     #[serde(skip)]
     pub ended: bool,
@@ -159,21 +161,28 @@ impl Transcript {
     }
 
     /// The turn's intentions, one per response, oldest first: each its last line, but the final
-    /// response's first line once the turn ended.
+    /// response's first line once the turn ended, or its summary's when it has one.
     pub fn intentions(&self) -> Vec<String> {
         let last = self.responses.len().saturating_sub(1);
         let lines = self.responses.iter().enumerate();
         lines
-            .filter_map(|(i, text)| line_of(text, self.ended && i == last))
+            .filter_map(|(i, text)| match &self.summary {
+                Some(summary) if self.ended && i == last => Some(summary.as_str()),
+                _ => line_of(text, self.ended && i == last),
+            })
             .map(Into::into)
             .collect()
     }
 
-    /// Notes whether the session's turn has `ended`, which picks the latest response's line.
+    /// Notes whether the session's turn has `ended`, which picks the latest response's line, or
+    /// the summary's once the turn ended with one (#517, decision 16).
     pub(crate) fn end(&mut self, ended: bool) {
         self.ended = ended;
         if let Some(text) = self.responses.last() {
-            self.intention = line_of(text, ended).map(Into::into);
+            self.intention = match &self.summary {
+                Some(summary) if ended => Some(summary.clone()),
+                _ => line_of(text, ended).map(Into::into),
+            };
         }
     }
 

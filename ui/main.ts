@@ -108,6 +108,8 @@ function applySettings(files: SettingsFiles) {
   if (size === null) document.documentElement.style.removeProperty("--term-size");
   else document.documentElement.style.setProperty("--term-size", `${size}px`);
   layout();
+  const { model, effort, on_open: onOpen } = settings.summaries;
+  invoke("summary_settings", { model, effort, onOpen }).catch((e) => console.warn(e));
   window.dispatchEvent(new Event("settings"));
 }
 listen<SettingsFiles>("settings-files", applySettings);

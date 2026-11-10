@@ -34,6 +34,9 @@ pub struct Studio {
     /// The row of each session that continues another after a `/clear`, by its own id (#461,
     /// decision 18). A session not here is its own row.
     rows: HashMap<String, String>,
+    /// Summaries are written when Daniel opens a turn, not at its end, so they move no intention
+    /// (#517, decisions 13 and 16), from the settings.
+    summaries_on_open: bool,
 }
 
 type FindRoot = dyn Fn(&str) -> Option<String> + Send;
@@ -1205,6 +1208,9 @@ pub enum Output {
     /// A prompt named a known task id in markup the studio does not know: drift in Claude Code's
     /// wake-ups, for stderr (#369, decision 7).
     Unrecognised { session_id: String, task_id: String },
+    /// A session's turn ended with a long reply or by asking Daniel something: its turn summary
+    /// (#517, decisions 12 and 13).
+    Summary(SummaryRequest),
     /// A session's first `Stop`: read Claude Code's version from its transcript, and nothing else
     /// (#369, decision 9).
     Version { transcript_path: String },
@@ -1254,6 +1260,34 @@ pub struct CardRequest {
     /// `None` for any other card.
     #[serde(default)]
     pub check: Option<String>,
+}
+
+/// A turn that gets a summary (#517, decisions 12, 13 and 15): what the summary writer reads of it.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SummaryRequest {
+    pub session_id: String,
+    /// Names the turn: its session, `@`, and when its `Stop` arrived, as `Stopped::card`.
+    pub id: String,
+    /// Daniel's latest prompt.
+    pub prompt: String,
+    /// The agent's texts in the turn, oldest first, the final reply last.
+    pub responses: Vec<String>,
+    /// The turn's intentions, one per response.
+    pub intentions: Vec<String>,
+    /// The card its `Stop` requested, which the learning section points to instead of a question.
+    #[serde(default)]
+    pub card: Option<String>,
+}
+
+/// A reply of at least this many words gets a summary (#517, decision 12).
+const SUMMARY_WORDS: usize = 150;
+
+/// Whether a turn whose final reply is `reply` gets a summary: the reply is long, or the turn ends
+/// asking Daniel something, in a question or a block that outlasts it (`asks`).
+pub fn wants_summary(reply: &str, asks: bool) -> bool {
+    let last = reply.lines().map(str::trim).rfind(|l| !l.is_empty());
+    asks || reply.split_whitespace().count() >= SUMMARY_WORDS
+        || last.is_some_and(|l| l.ends_with('?'))
 }
 
 /// A turn that ended with no card, as the replay saw it (#486): its card request with no change,
@@ -2202,6 +2236,30 @@ impl Studio {
                         transcript_path: event.transcript_path,
                     });
                 }
+                let reply = event.last_assistant_message.trim();
+                if !replay && wants_summary(reply, session.needs_you()) {
+                    // shortcut: the transcript may lag the `Stop` by one poll, so the final reply
+                    // is taken from the `Stop`; read the transcript first if earlier texts go missing.
+                    let mut turn = session.transcript.clone();
+                    if !reply.is_empty() && turn.responses.last().map(String::as_str) != Some(reply)
+                    {
+                        turn.responses.push(reply.into());
+                    }
+                    turn.ended = true;
+                    turn.summary = None;
+                    let daniels = session.prompts.iter().rfind(|p| p.sender.is_daniels());
+                    outputs.push(Output::Summary(SummaryRequest {
+                        session_id: session.agent.id.clone(),
+                        id: card_id(&event.session_id, at),
+                        prompt: daniels.map(|p| p.text.clone()).unwrap_or_default(),
+                        intentions: turn.intentions(),
+                        responses: turn.responses,
+                        card: match &output {
+                            Some(Output::Card(card)) => Some(card.id.clone()),
+                            _ => None,
+                        },
+                    }));
+                }
                 let mut lines = event.last_assistant_message.lines().map(str::trim);
                 session.stopped = Some(Stopped {
                     card: card_id(&event.session_id, at),
@@ -2650,6 +2708,31 @@ impl Studio {
             changed |= session.transcript != before;
         }
         changed
+    }
+
+    /// Whether summaries are written when Daniel opens a turn (`summaries.on_open` in the settings).
+    pub fn set_summaries_on_open(&mut self, on: bool) {
+        self.summaries_on_open = on;
+    }
+
+    pub fn summaries_on_open(&self) -> bool {
+        self.summaries_on_open
+    }
+
+    /// The summary of turn `id` of session `session_id` arrived, whose first line is `line`: its
+    /// turn-end intention switches to it once (#517, decision 16). Nothing changes when summaries
+    /// are written on open, or when the session has moved past that turn. Returns whether it did.
+    pub fn summarized(&mut self, session_id: &str, id: &str, line: &str) -> bool {
+        let Some(session) = self.sessions.get_mut(session_id) else {
+            return false;
+        };
+        let current = session.stopped.as_ref().is_some_and(|s| s.card == id);
+        if self.summaries_on_open || !current || session.in_turn() {
+            return false;
+        }
+        session.transcript.summary = Some(line.into());
+        session.transcript.end(true);
+        true
     }
 
     /// The folder and branch of each session that has not ended, and of the selected one, one per

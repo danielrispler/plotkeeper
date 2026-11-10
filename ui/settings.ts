@@ -21,7 +21,8 @@ export interface Settings {
   zoom: number;
   // null: the stylesheet's `--size-mono`.
   terminal: { font_size: number | null };
-  // The summary writer's model and effort, and whether opening a turn writes its summary.
+  // The summary writer's model and effort ("" for the model's default), and whether opening a turn
+  // writes its summary.
   summaries: { model: string; effort: string; on_open: boolean };
   doctor: DoctorEntry[];
 }
@@ -49,7 +50,8 @@ const FONT_MAX = 40;
 const defaultSettings: Settings = {
   zoom: 1,
   terminal: { font_size: null },
-  summaries: { model: "haiku", effort: "low", on_open: false },
+  // Haiku at its default effort (#517, decision 14).
+  summaries: { model: "haiku", effort: "", on_open: false },
   doctor: [
     { label: "Check the installation", command: "claude doctor", kind: "shell" },
     { label: "Full checkup", command: "/doctor", kind: "session" },
