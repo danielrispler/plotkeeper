@@ -252,6 +252,9 @@ fn a_session_shows_the_permission_mode_its_latest_event_names() {
     // An event without one keeps it.
     studio.apply(&event(PROBE, "Notification", PROBE_STOPPED_AT + 2).to_string());
     assert_eq!(mode(&studio).as_deref(), Some("auto"));
+    // The mode it started in stays, for a resume (#541).
+    let started = studio.session(PROBE).unwrap().started_mode.clone();
+    assert_eq!(started.as_deref(), Some("default"));
 
     let fresh = replay(&event("b8d4f2a6", "SessionStart", 1).to_string());
     assert_eq!(fresh.session("b8d4f2a6").unwrap().permission_mode, None);

@@ -137,7 +137,7 @@ The state of an agent session that finished its turn with nothing blocked on Dan
 _Avoid_: Done (the turn ended, not the task)
 
 **Unseen**:
-A your-turn agent session whose last ended turn Daniel has not seen. A turn is seen when the session is selected while the window is focused; a window left open in an empty room does not count. The row shows a filled dot and a bold name, and the strip the filled dot; "Mark unseen" in the rail's menu brings it back until he selects the session again. It is the cue for "finished, not seen", and it survives a restart.
+A your-turn agent session whose last ended turn Daniel has not seen; going idle keeps the mark. A turn is seen when the session is selected while the window is focused and the story rail shows it; a window left open in an empty room does not count, nor does focus mode, a closed overlay or the skills browser over the rail. The row shows a filled dot and a bold name, and the strip the filled dot; "Mark unseen" in the rail's menu brings it back until he selects the session again. It is the cue for "finished, not seen", and it survives a restart.
 _Avoid_: Unread, new, done until seen
 
 **Idle**:
@@ -195,6 +195,10 @@ The project mode for a project where Daniel cares only about the result. The wai
 **Settings**:
 Daniel's choices for the studio, kept in `settings.json` in its data folder, in Zed's format: zoom, the terminal's font size, the summary writer's model and effort, and the Doctor menu, whose entries are palette actions. "Settings files" means `settings.json` and `keymap.json` together: the studio reloads either when saved, and a file that does not parse is reported while its last good version stays in effect.
 _Avoid_: Preferences, config
+
+**Sounds**:
+The `sounds` setting, on by default: a sound when a session newly needs Daniel and, with the window not focused, when a turn ends. A needs-you sounds with its toast, at once; unfocused, the sound plays with the notification. The session he is looking at makes none.
+_Avoid_: Alerts, chimes
 
 **Keymap**:
 Daniel's shortcuts for the studio, kept in `keymap.json` beside the settings, in Zed's format: keystrokes bound to actions, by context.

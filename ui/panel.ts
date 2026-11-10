@@ -42,6 +42,13 @@ export function togglePanel(focusAbove: () => void) {
   else focusAbove();
 }
 
+// Opens the panel on its shell `id`, as a start failure's "Show output" asks (#558).
+export function showPanelShell(id: string, focusAbove: () => void) {
+  current = { id, cwd: id.slice(PANEL.length) };
+  if (open) draw(true);
+  else togglePanel(focusAbove);
+}
+
 // The panel's height in the terminal column, as the width rule's layout or a drag changes it.
 export function placePanel() {
   dragged ??= Number(localStorage.getItem("panel")) || 240;

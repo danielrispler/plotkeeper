@@ -148,3 +148,14 @@ Between passes, nothing waits for him. After each pass, a code-review agent that
 - [ ] Run something in the panel, then quit and reopen the app: the panel's shell is still there, with its scrollback.
 - [ ] With a split (⌘D) open, the panel shows under both panes.
 - [ ] Rebind it in `keymap.json` (`{ "bindings": { "ctrl-j": "studio::TogglePanel" } }`): the new key toggles it and ⌃` reaches the terminal. ⌘⇧P lists "Toggle panel".
+
+## #565: pass 6c review fixes
+
+- [ ] Let a session's turn end while focus mode is on, the rail is a closed overlay, or the skills browser shows: it stays unseen. Show the rail on it: the mark clears.
+- [ ] Leave an unseen session for 2 hours: it goes idle and keeps its filled dot and bold name until you select it.
+- [ ] Start a session in auto mode, switch it to default with Shift+Tab, end it, then press "Open": it resumes in auto mode. One started in default mode and switched to auto resumes in default mode.
+- [ ] Add a Doctor `shell` entry whose command fails (`"command": "(exit 3)"`): a notice names the entry's label with code 3, and the shell stays open.
+- [ ] Make two programs fail at start: both notices show, one under the other; dismissing one keeps the other.
+- [ ] A panel shell that fails at start: its notice's "Show output" opens the panel on it, not the main column.
+- [ ] In focus mode, with the window focused, another session newly needs you: the sound plays as its toast shows, not 3 s later.
+- [ ] Symlink a skill folder from outside `~/.claude/skills` into it: the skills browser does not list it.

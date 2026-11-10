@@ -79,7 +79,8 @@ Every Cmd shortcut goes to the terminal or to the app (`ui/keys.ts`):
 | Cmd+Backspace | terminal | sends Ctrl+U: deletes to the line's start |
 | Cmd+1, Cmd+2 | app | opens the session list, the story rail |
 | Cmd+], Cmd+[ | app | selects the next, the previous session in the list's order |
-| Cmd+J | app | selects the next session that needs you |
+| Cmd+J | app | selects the next session that needs you, else the next unseen one |
+| Cmd+D | app | splits the terminal column: pins the pane shown and shows the next session beside it; again to close |
 | Up, Down | app, while the list has focus | selects the row above, below |
 | Cmd+Shift+Enter | app | focus mode: hides the list and the rail; again to leave |
 | Ctrl+` | app, from the terminal too | the terminal panel: a shell in the shown session's folder, under the terminal; again to hide |

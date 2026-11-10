@@ -77,7 +77,7 @@ export function stepSession(sessions: { id: string }[], selected: string | null,
 export function nextNeedsYou(sessions: { id: string; state: string; unseen?: boolean }[], selected: string | null): string | null {
   const at = sessions.findIndex((session) => session.id === selected);
   const order = [...sessions.slice(at + 1), ...sessions.slice(0, at + 1)];
-  return (order.find((session) => session.state === "needs_you") ?? order.find((session) => session.state === "your_turn" && session.unseen))?.id ?? null;
+  return (order.find((session) => session.state === "needs_you") ?? order.find((session) => session.unseen))?.id ?? null;
 }
 
 const symbols: Record<string, string> = { ctrl: "⌃", alt: "⌥", shift: "⇧", cmd: "⌘", up: "↑", down: "↓", left: "←", right: "→", escape: "Esc", enter: "↩", backspace: "⌫", tab: "⇥", space: "Space" };

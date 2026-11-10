@@ -30,6 +30,8 @@ export function startFailure(status: string, ms: number, buffer: Lines, count = 
   return { status, lines: lines.slice(-count) };
 }
 export const startNotice = (name: string, failure: { status: string }) => `${name} could not start: ${failure.status}`;
+// The OSC a Doctor entry's wrapper writes with its command's failing code, as its shell stays (#558).
+export const FAILED_OSC = 7502;
 
 // Draws terminal `id` of the daemon into `place`, spawning it in `cwd` running `argv` (empty: a login
 // shell) unless it already runs. A shell that exited starts again at the next key; an exited Claude
@@ -164,6 +166,16 @@ export function openPane(place: HTMLElement, id: string, cwd: string, argv: stri
   // to a terminal that answers; any reply whose data starts with `?` counts (#466).
   term.parser.registerOscHandler(7501, (data) => {
     if (data.startsWith("?")) input("\x1b]7501;?\x07");
+    return true;
+  });
+  // A Doctor entry's command failed (`doctorArgv`): its notice, with its own code. A replay's copy
+  // was already told.
+  term.parser.registerOscHandler(FAILED_OSC, (code) => {
+    if (quiet) return true;
+    term.write("", () => {
+      const failure = startFailure(`code ${code}`, 0, term.buffer.active);
+      if (failure) window.dispatchEvent(new CustomEvent("start-failed", { detail: { id, name: "the command", ...failure } }));
+    });
     return true;
   });
 

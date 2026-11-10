@@ -3,8 +3,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import xterm from "@xterm/headless";
 import fs from "node:fs";
-import { failureTakesPane } from "../../dist/panes.js";
-import { startFailure, startNotice } from "../../dist/terminal.js";
+import { execFileSync } from "node:child_process";
+import { doctorArgv, failureTakesPane } from "../../dist/panes.js";
+import { FAILED_OSC, startFailure, startNotice } from "../../dist/terminal.js";
 
 const read = (name) => fs.readFileSync(new URL(`../${name}`, import.meta.url), "utf8");
 
@@ -32,6 +33,26 @@ test("the notice is also a toast with Show output, beside the needs-you toast, n
   const toast = read("toast.ts");
   assert.match(toast, /"Show output"/);
   assert.match(toast, /tabIndex = -1/);
+});
+
+test("a second failure stacks under the first, never replaces it", () => {
+  const start = read("toast.ts").slice(read("toast.ts").indexOf("export function showStartToast"));
+  const body = start.slice(0, start.indexOf("\n}\n"));
+  assert.match(body, /toast\.append\(\.\.\.row\)/);
+  assert.doesNotMatch(body, /replaceChildren/);
+});
+
+test("a panel shell's Show output opens the panel, not the main column", () => {
+  assert.match(read("panes.ts"), /isPanel\(id\) \? showPanelShell\(id, focusPane\) : show\(id, \(\) => null\)/);
+});
+
+test("a failing Doctor command reports its own code, and its shell stays", () => {
+  const out = execFileSync("/bin/sh", ["-c", doctorArgv("(exit 3)")[2]], { env: { ...process.env, SHELL: "/usr/bin/true" } }).toString();
+  assert.equal(out, `\x1b]${FAILED_OSC};3\x07`);
+  const ok = execFileSync("/bin/sh", ["-c", doctorArgv("true")[2]], { env: { ...process.env, SHELL: "/usr/bin/true" } }).toString();
+  assert.equal(ok, "");
+  // Its notice is named after the entry's label, not "sh".
+  assert.match(read("panes.ts"), /labels\.get\(id\) \?\? name/);
 });
 
 test("a failed pane takes the terminal's place only when it is the shown one; a hidden one only toasts", () => {

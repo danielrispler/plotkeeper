@@ -77,3 +77,8 @@ export function paneBoxes(width: number, height: number, cell: number, split: Sp
 // The terminal panel's height (#542): a band under the terminal column (#565, decision 5), as its
 // divider was dragged, at least 80 px but never over 40 % of the column. It costs height, never width.
 export const panelHeight = (dragged: number, column: number) => Math.round(Math.min(Math.max(dragged, 80), 0.4 * column));
+
+// Whether the story rail shows the selected session (#556): not in focus mode, not behind a closed
+// overlay, and not under the skills browser, which takes its place.
+export const railShown = (mode: LayoutMode, railOpen: boolean, skillsOpen: boolean) =>
+  mode !== "focus" && (mode !== "overlay" || railOpen) && !skillsOpen;

@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { startedAuto } from "../../dist/panes.js";
+import { resumesAuto, startedAuto } from "../../dist/panes.js";
 import { modeText } from "../../dist/story.js";
 
 test("the rail's line names any mode but the default, and auto mode always", () => {
@@ -24,6 +24,18 @@ test("a revived terminal resumes in auto mode only when its spawn started in it"
   assert.equal(startedAuto([...base, "--permission-mode", "auto", "--resume", "9e0b5f13"]), true);
   assert.equal(startedAuto([...base, "--", "fix it"]), false);
   assert.equal(startedAuto([]), false);
+});
+
+test("an ended session resumes in the mode it started in, not the one it ended in", () => {
+  assert.equal(resumesAuto({ started_mode: "auto" }), true);
+  assert.equal(resumesAuto({ started_mode: "default" }), false);
+  assert.equal(resumesAuto({ started_mode: null }), false);
+  // Both "Open" in the rail and "Open here" in the pane resume by it.
+  for (const file of ["story.ts", "panes.ts"]) {
+    const source = fs.readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
+    assert.match(source, /session\.resume_id, "", resumesAuto\(session\)\)/);
+    assert.doesNotMatch(source, /permission_mode === "auto"/);
+  }
 });
 
 test("the picker's Auto mode choice is off by default and reaches the start command", () => {

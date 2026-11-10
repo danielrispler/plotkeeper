@@ -2,7 +2,7 @@
 //! and the sounds that go with needs you and your turn.
 
 use std::time::Duration;
-use studio_core::{Due, LiveFacts, Notifications, Output, Sound, Studio};
+use studio_core::{Due, LiveFacts, Notifications, Output, Sound, State, Studio};
 
 /// `two-sessions.jsonl`'s sessions, both in a turn at its end.
 const TWO: &str = include_str!("fixtures/two-sessions.jsonl");
@@ -39,6 +39,17 @@ fn a_turn_ending_while_its_session_is_not_shown_leaves_it_unseen() {
     // Looking at another session does not see it.
     assert_eq!(studio.see_selected(true), None);
     assert!(unseen(&studio, SECOND));
+}
+
+#[test]
+fn going_idle_keeps_the_mark_until_daniel_sees_it() {
+    let mut studio = second_stopped();
+    studio.tick(1_793_261_020_000 + 3 * 60 * 60 * 1000);
+    assert_eq!(studio.session(SECOND).unwrap().state, State::Idle);
+    assert!(unseen(&studio, SECOND));
+    studio.select(SECOND);
+    assert_eq!(studio.see_selected(true), Some((SECOND.into(), 1)));
+    assert!(!unseen(&studio, SECOND));
 }
 
 #[test]
@@ -143,6 +154,35 @@ fn focused_a_needs_you_on_another_session_sounds_with_no_notification() {
     let due = needs_you(Some(FIRST), true, true);
     assert_eq!(due.sound, Some(Sound::NeedsYou));
     assert_eq!(due.notification, None);
+}
+
+#[test]
+fn focused_a_needs_you_sounds_at_once_with_its_toast_and_once_only() {
+    let mut notifications = Notifications::default();
+    notifications.push_needs_you(ASKING, String::new(), at(1_000));
+    let selected = || Some(FIRST.to_owned());
+    let due = notifications.due(at(1_200), || true, |_| true, selected);
+    assert_eq!(
+        due,
+        Due {
+            notification: None,
+            sound: Some(Sound::NeedsYou)
+        }
+    );
+    assert_eq!(
+        notifications.due(at(1_400), || true, |_| true, selected),
+        Due::default()
+    );
+    assert_eq!(
+        notifications.due(at(4_000), || true, |_| true, selected),
+        Due::default()
+    );
+    // A block that cleared before the toast showed never sounds.
+    notifications.push_needs_you(ASKING, String::new(), at(5_000));
+    assert_eq!(
+        notifications.due(at(5_200), || true, |_| false, selected),
+        Due::default()
+    );
 }
 
 #[test]

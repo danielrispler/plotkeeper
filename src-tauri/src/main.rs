@@ -489,6 +489,7 @@ fn main() {
             agent_summary,
             notify_while_focused,
             mark_unseen,
+            rail_shown,
             sounds
         ])
         .on_window_event(|_, event| {
@@ -671,10 +672,12 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
             let window = app.get_webview_window("main");
             window.and_then(|w| w.is_focused().ok()) == Some(true)
         };
-        // Daniel sees the selected session in a focused window (#556); the window is asked only
-        // while it is unseen, and not under the core's lock, which the main thread's commands take.
+        // Daniel sees the selected session in a focused window while the story rail shows it (#556);
+        // the window is asked only while it is unseen, and not under the core's lock, which the main
+        // thread's commands take.
         let unseen = state.lock().unwrap().selected().is_some_and(|s| s.unseen);
-        let seen = state.lock().unwrap().see_selected(unseen && focused());
+        let shown = unseen && RAIL_SHOWN.load(Ordering::Acquire) && focused();
+        let seen = state.lock().unwrap().see_selected(shown);
         if let Some((id, turns)) = &seen {
             unsaved(app.state::<Cards>().lock().unwrap().seen(id, *turns));
         }
@@ -711,6 +714,16 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
 /// The list changed outside the read loop since it last sent it: a PR was found, or Daniel marked a
 /// session unseen.
 static LIST_CHANGED: AtomicBool = AtomicBool::new(false);
+
+/// Whether the story rail shows, as the UI last said: not in focus mode, behind a closed overlay or
+/// under the skills browser, when a turn on it is not seen (#556).
+static RAIL_SHOWN: AtomicBool = AtomicBool::new(true);
+
+/// The UI's rail showed or hid.
+#[tauri::command]
+fn rail_shown(shown: bool) {
+    RAIL_SHOWN.store(shown, Ordering::Release);
+}
 
 /// Finds the PR of each session's branch with `gh pr view` (#461, decision 19), on its own thread so
 /// the read loop never waits on the network, and asks again after 5 minutes. `gh` runs as Daniel

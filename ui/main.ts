@@ -8,7 +8,7 @@ import { startWatching } from "./answer.js";
 import { markShown, showCards } from "./cards.js";
 import { element, invoke, listen } from "./dom.js";
 import { type Actions, doctorEntries, nextNeedsYou, paletteEntries, run, stepSession, windowBinding } from "./keys.js";
-import { arrange, defaultWidths, type LayoutMode, resized, type Widths } from "./layout.js";
+import { arrange, defaultWidths, type LayoutMode, railShown, resized, type Widths } from "./layout.js";
 import { showSessions } from "./list.js";
 import { select, show } from "./selection.js";
 import { dragPanel, placePanel, togglePanel } from "./panel.js";
@@ -44,6 +44,15 @@ function layout() {
   showToast();
 }
 window.addEventListener("resize", layout);
+// The shell counts a turn seen only while the rail shows its session (#556), so it is told whether it
+// does each time the layout or the body's classes change.
+let railWas: boolean | null = null;
+new MutationObserver(() => {
+  const { classList, dataset } = document.body;
+  const shown = railShown((dataset.layout ?? "full") as LayoutMode, classList.contains("rail-open"), classList.contains("skills-open"));
+  if (shown !== railWas) invoke("rail_shown", { shown }).catch((e) => console.warn(e));
+  railWas = shown;
+}).observe(document.body, { attributes: true, attributeFilter: ["class", "data-layout"] });
 // Leaving focus mode from the toast, and a split opening or closing (`panes.ts`).
 window.addEventListener("layout", layout);
 layout();

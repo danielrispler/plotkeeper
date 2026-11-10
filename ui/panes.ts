@@ -14,13 +14,13 @@ import type * as Xterm from "@xterm/xterm";
 import { connect, list, onEvent, request, type Listed } from "./daemon.js";
 import { element, invoke, pressable, text } from "./dom.js";
 import { type Box, paneBoxes } from "./layout.js";
-import { isPanel, panelTerm, showPanel } from "./panel.js";
+import { isPanel, panelTerm, showPanel, showPanelShell } from "./panel.js";
 import { offerBuilds, upgrade, type Revive } from "./restart.js";
 import { show as showSelection } from "./selection.js";
 import type { DoctorEntry } from "./settings.js";
 import { studio } from "./state.js";
 import { sessionName } from "./list.js";
-import { openPane, startNotice } from "./terminal.js";
+import { FAILED_OSC, openPane, startNotice } from "./terminal.js";
 import { showStartToast } from "./toast.js";
 import type { Selection, Session } from "./types.js";
 
@@ -211,11 +211,23 @@ export async function startClaude(cwd: string, resume: string | null = null, pro
 // A Doctor entry (#527) in a new terminal in the selected session's folder, else the configured
 // repository. `shell` runs its command under the login shell, then leaves a shell for reading and
 // rerunning; `session` starts `claude` with the command as its first prompt.
-export function runDoctor({ command, kind }: DoctorEntry) {
+export function runDoctor({ label, command, kind }: DoctorEntry) {
   const cwd = studio.selection?.session.cwd ?? repo;
   if (kind === "session") return startClaude(cwd, null, command);
-  return startTerminal(`doctor-${crypto.randomUUID()}`, cwd, ["/bin/sh", "-c", `${command}; exec "$SHELL" -l`]);
+  const id = `doctor-${crypto.randomUUID()}`;
+  labels.set(id, label);
+  return startTerminal(id, cwd, doctorArgv(command));
 }
+// The Doctor entries' labels by terminal, which name their start-failure notices.
+const labels = new Map<string, string>();
+
+// A `shell` Doctor entry's argv: a failing command reports its code (`FAILED_OSC`, read in
+// `terminal.ts`) before the login shell takes over, so the shell staying open still raises the notice.
+export const doctorArgv = (command: string) => [
+  "/bin/sh",
+  "-c",
+  `${command}\ns=$?; [ "$s" -eq 0 ] || printf '\\033]${FAILED_OSC};%s\\007' "$s"; exec "$SHELL" -l`,
+];
 
 async function startTerminal(id: string, cwd: string, argv: string[]) {
   starting = id;
@@ -227,6 +239,9 @@ async function startTerminal(id: string, cwd: string, argv: string[]) {
 
 // Whether a terminal's spawn `argv` started Claude Code in auto mode (#541), so its revival keeps it.
 export const startedAuto = (argv: string[]) => argv[argv.indexOf("--permission-mode") + 1] === "auto";
+// Whether "Open here" or "Open" resumes a session in auto mode: only when it started in it (#541),
+// whatever mode it ended in, so a later switch never carries over; never bypass.
+export const resumesAuto = (session: Pick<Session, "started_mode">) => session.started_mode === "auto";
 
 // What the terminal shows for the selected session (#567): its own terminal while the daemon runs
 // it, else a message with "Open here", never the login shell, which may run another session. The
@@ -269,7 +284,7 @@ export async function showSession(session: Session | null, clicked = false) {
   const view = paneView(session, Boolean(own || terminal));
   if (view === "shell") return;
   if ("terminal" in view) return show(view.terminal, () => openPane(box(view.terminal), view.terminal, terminal!.cwd, terminal!.argv));
-  const resume = () => startClaude(session.cwd, session.resume_id, "", session.permission_mode === "auto").catch((e) => console.warn(e));
+  const resume = () => startClaude(session.cwd, session.resume_id, "", resumesAuto(session)).catch((e) => console.warn(e));
   box(ELSEWHERE).classList.add("elsewhere");
   box(ELSEWHERE).replaceChildren(text("p", view.message, "empty"), pressable(text("button", "Open here"), false, resume));
   show(ELSEWHERE, () => null);
@@ -282,8 +297,9 @@ const ELSEWHERE = "elsewhere";
 export const failureTakesPane = (failed: string, current: string) => failed === current;
 function failedAtStart({ id, name, status, lines }: { id: string; name: string; status: string; lines: string[] }) {
   const session = studio.listed.find((s) => s.terminal === id);
-  const notice = startNotice(session ? sessionName(session) : name, { status });
-  const output = () => show(id, () => null);
+  const notice = startNotice(session ? sessionName(session) : (labels.get(id) ?? name), { status });
+  // A panel's shell shows in the panel, never in the main column.
+  const output = () => (isPanel(id) ? showPanelShell(id, focusPane) : show(id, () => null));
   showStartToast(notice, output);
   if (!failureTakesPane(id, shown)) return;
   box(ELSEWHERE).classList.add("elsewhere");

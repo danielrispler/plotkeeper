@@ -201,6 +201,8 @@ test("with no needs-you, the next unseen comes after the selected session", () =
   assert.equal(nextNeedsYou(sessions, "c"), "a");
   assert.equal(nextNeedsYou([...sessions, { id: "d", state: "needs_you" }], "a"), "d");
   assert.equal(nextNeedsYou([{ id: "a", state: "your_turn", unseen: false }], null), null);
+  // An unseen session gone idle is still next.
+  assert.equal(nextNeedsYou([{ id: "a", state: "idle", unseen: true }], null), "a");
 });
 
 test("keys read as macOS menus show them", () => {

@@ -1,7 +1,7 @@
 // The UI's pure functions, run on the `tsc` output (#465). Run: `npm test` in apps/studio.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { arrange, defaultWidths, paneBoxes, panelHeight, resized } from "../../dist/layout.js";
+import { arrange, defaultWidths, paneBoxes, panelHeight, railShown, resized } from "../../dist/layout.js";
 import { stripLabel } from "../../dist/list.js";
 
 // The cell of 12.5px SF Mono in WebKit, as #577 measured it, and the terminal's padding, which holds no column.
@@ -118,4 +118,13 @@ test("the panel takes its dragged height, at most 40 % of the terminal column an
 test("the strip names a session by its issue number, else by its folder", () => {
   assert.equal(stripLabel("issue-338-205-pilots-final-freeze"), "338");
   assert.equal(stripLabel("Falinks"), "Fali");
+});
+
+test("a turn is seen only while the rail shows its session: not in focus mode, a closed overlay or the skills browser (#556)", () => {
+  assert.equal(railShown("full", false, false), true);
+  assert.equal(railShown("strip", false, false), true);
+  assert.equal(railShown("focus", false, false), false);
+  assert.equal(railShown("overlay", false, false), false);
+  assert.equal(railShown("overlay", true, false), true);
+  assert.equal(railShown("full", true, true), false);
 });

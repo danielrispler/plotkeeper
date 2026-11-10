@@ -32,12 +32,13 @@ pub fn list(home: &Path, project: &Path) -> Vec<Value> {
     skills
 }
 
-/// Each `<folder>/<name>/SKILL.md`, by name.
+/// Each `<folder>/<name>/SKILL.md`, by name; a symlinked one is skipped, so nothing outside the
+/// source's root is read.
 fn skill_files(folder: &Path) -> Vec<(String, PathBuf)> {
     let mut found: Vec<_> = dirs(folder)
         .into_iter()
         .map(|dir| (name(&dir), dir.join("SKILL.md")))
-        .filter(|(_, path)| path.is_file())
+        .filter(|(_, path)| fs::symlink_metadata(path).is_ok_and(|m| m.is_file()))
         .collect();
     found.sort();
     found
@@ -61,9 +62,11 @@ fn plugins(cache: &Path) -> Vec<(String, PathBuf)> {
     found
 }
 
+/// The folders in `folder`, never a symlink, which could lead out of it.
 fn dirs(folder: &Path) -> Vec<PathBuf> {
     let entries = fs::read_dir(folder).into_iter().flatten().flatten();
-    entries.map(|e| e.path()).filter(|p| p.is_dir()).collect()
+    let real = |e: &fs::DirEntry| e.file_type().is_ok_and(|t| t.is_dir());
+    entries.filter(real).map(|e| e.path()).collect()
 }
 
 fn name(path: &Path) -> String {
@@ -128,6 +131,22 @@ mod tests {
             got,
             want.map(|(n, s, e, t)| (n.to_owned(), s.to_owned(), e, t.to_owned()))
         );
+    }
+
+    #[test]
+    fn a_symlink_out_of_a_source_is_never_followed() {
+        let home = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        skill(&outside.path().join("secret"), "# Secret");
+        let skills = home.path().join(".claude/skills");
+        fs::create_dir_all(skills.join("linked-file")).unwrap();
+        std::os::unix::fs::symlink(outside.path().join("secret"), skills.join("linked")).unwrap();
+        std::os::unix::fs::symlink(
+            outside.path().join("secret/SKILL.md"),
+            skills.join("linked-file/SKILL.md"),
+        )
+        .unwrap();
+        assert!(list(home.path(), home.path()).is_empty());
     }
 
     #[test]
