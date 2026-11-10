@@ -170,6 +170,7 @@ body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; to
 .markdown table { border-collapse: collapse; display: block; overflow-x: auto; }
 .markdown th, .markdown td { border: var(--hair) solid var(--edge); padding: var(--sp-1) var(--sp-4); text-align: start; }
 .markdown a { color: var(--fg); text-decoration: underline; }
+.markdown a[data-file]:has(> code):not(:hover) { text-decoration: none; }
 .markdown blockquote { margin: var(--sp-4) 0 0; padding-left: var(--sp-5); border-left: var(--halo) solid var(--line); color: var(--muted); }
 .cards-title { margin-top: var(--sp-7); }
 /* The session's brief, above its cards; its code wraps as a card's does. */

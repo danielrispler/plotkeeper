@@ -42,3 +42,22 @@ test("a file link renders as a link the editor opens, an http(s) link as one the
   assert.match(html, /<a href="https:\/\/e.com">web<\/a>/);
   assert.doesNotMatch(html, /<a[^>]*>no/);
 });
+
+test("inline code that is a whole file path links to the editor, keeping its code look (#581)", () => {
+  const html = markdown("`src/foo.rs:42` `src/foo.rs` `foo.rs:42` `apps/a.ts#L5`");
+  for (const p of ["src/foo.rs:42", "src/foo.rs", "foo.rs:42", "apps/a.ts#L5"])
+    assert.ok(html.includes(`<a href="${p}" data-file><code>${p}</code></a>`), p);
+});
+
+test("inline code that only looks like a path, and fenced code, stay plain code (#581)", () => {
+  const spans = ["origin/main", "std::fs", "@types/node", "apps/studio", "see src/foo.rs:42 here", "https://e.com/a.rs", "localhost:8080", "1/2"];
+  const html = markdown(spans.map((s) => `\`${s}\``).join(" ") + "\n\n```\nsrc/foo.rs:42\n```");
+  assert.doesNotMatch(html, /<a\b/);
+  assert.match(html, /<pre><code>src\/foo.rs:42\n<\/code><\/pre>/);
+});
+
+test("inline code stays escaped, linked or not (#581)", () => {
+  const html = markdown('`a<b "c" & d` `src/a&b.rs`');
+  assert.match(html, /<code>a&lt;b &quot;c&quot; &amp; d<\/code>/);
+  assert.doesNotMatch(html, /<a\b/);
+});
