@@ -25,7 +25,7 @@
 //! the query's own terminator.
 //!
 //! - `app`: marks the connection as the app's, not a CLI attach's; no reply. When it drops (a quit or a crash), the
-//!   daemon deletes the presence file ([`presence`]).
+//!   daemon deletes the presence file ([`presence`]), but not when the daemon drops it for falling behind.
 //!
 //! Unknown requests and fields are ignored.
 //!

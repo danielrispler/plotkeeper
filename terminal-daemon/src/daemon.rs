@@ -16,7 +16,8 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
-        mpsc::{SyncSender, sync_channel},
+        atomic::{AtomicBool, Ordering},
+        mpsc::{SyncSender, TrySendError, sync_channel},
     },
 };
 
@@ -95,13 +96,19 @@ struct Conn {
     queue: SyncSender<String>,
     stream: UnixStream,
     attached: HashSet<String>,
+    /// Whether it was dropped for falling behind, not gone: an app's window may still be focused.
+    lagged: Arc<AtomicBool>,
 }
 
 impl Conn {
     // Queues `msg`; false when the client is gone or too far behind, and then closes its socket, which ends its
     // reading thread.
     fn send(&self, msg: &Value) -> bool {
-        let sent = self.queue.try_send(format!("{msg}\n")).is_ok();
+        let sent = self.queue.try_send(format!("{msg}\n"));
+        if let Err(TrySendError::Full(_)) = sent {
+            self.lagged.store(true, Ordering::Relaxed);
+        }
+        let sent = sent.is_ok();
         if !sent {
             let _ = self.stream.shutdown(Shutdown::Both);
         }
@@ -267,10 +274,12 @@ fn serve_conn(n: usize, stream: UnixStream, state: Shared) {
             }
         }
     });
+    let lagged = Arc::new(AtomicBool::new(false));
     let conn = Conn {
         queue,
         stream: shut,
         attached: HashSet::new(),
+        lagged: lagged.clone(),
     };
     conn.send(&json!({ "ev": "hello", "protocol": PROTOCOL, "daemon_pid": std::process::id() }));
     state.lock().unwrap().conns.insert(n, conn);
@@ -388,8 +397,9 @@ fn serve_conn(n: usize, stream: UnixStream, state: Shared) {
     }
     let s = &mut *state.lock().unwrap();
     s.conns.remove(&n);
-    // The app quit or crashed, so nobody is looking at the studio (#555).
-    if app {
+    // The app quit or crashed, so nobody is looking at the studio (#555). An app dropped for lag
+    // reconnects, and its window may still be focused.
+    if app && !lagged.load(Ordering::Relaxed) {
         let _ = std::fs::remove_file(&s.presence);
     }
 }

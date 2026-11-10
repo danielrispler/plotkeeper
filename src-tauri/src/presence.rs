@@ -2,7 +2,8 @@
 //! by `CLAUDE_CLIENT_PRESENCE_FILE` exists, and reads nothing from it. The studio's terminals set
 //! it to `path()`; the shell keeps the file while the window is focused, and deletes it on blur, on
 //! quit and at start, for a file a crash left. After a crash the daemon deletes it once the app's
-//! connection drops (#555).
+//! connection drops (#555),
+//! unless the daemon dropped it for falling behind.
 
 use std::{
     fs,
