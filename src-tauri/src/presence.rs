@@ -2,8 +2,8 @@
 //! by `CLAUDE_CLIENT_PRESENCE_FILE` exists, and reads nothing from it. The studio's terminals set
 //! it to `path()`; the shell keeps the file while the window is focused, and deletes it on blur, on
 //! quit and at start, for a file a crash left. After a crash the daemon deletes it once the app's
-//! connection drops (#555),
-//! unless the daemon dropped it for falling behind.
+//! connection drops (#555), unless
+//! the daemon dropped it for falling behind.
 
 use std::{
     fs,
@@ -30,10 +30,22 @@ pub fn set(path: &Path, focused: bool) {
     }
 }
 
-/// Sets the file from the window's focus, or deletes it with no window.
-pub fn focus(focused: bool) {
-    if let Some(path) = path() {
-        set(&path, focused);
+/// At the app's start: deletes a file a crash left.
+pub fn start(path: &Path) {
+    set(path, false);
+}
+
+/// On a window event: focus creates the file, blur deletes it.
+pub fn window_event(path: &Path, event: &tauri::WindowEvent) {
+    if let tauri::WindowEvent::Focused(focused) = event {
+        set(path, *focused);
+    }
+}
+
+/// On a run event: the app's exit deletes the file.
+pub fn run_event(path: &Path, event: &tauri::RunEvent) {
+    if let tauri::RunEvent::Exit = event {
+        set(path, false);
     }
 }
 
@@ -53,6 +65,29 @@ mod tests {
         assert!(!path.exists());
         // At start, with no file left, deleting it is no error.
         set(&path, false);
+        assert!(!path.exists());
+    }
+
+    /// The shell's wiring: start deletes a file a crash left, focus creates it, blur and the app's
+    /// exit delete it, and other events leave it.
+    #[test]
+    fn start_focus_blur_and_exit_set_the_file() {
+        use tauri::{RunEvent, WindowEvent};
+        let path = std::env::temp_dir().join(format!("studio-wired-{}", std::process::id()));
+        std::fs::write(&path, "").unwrap();
+
+        super::start(&path);
+        assert!(!path.exists());
+        super::window_event(&path, &WindowEvent::Focused(true));
+        assert!(path.exists());
+        super::window_event(&path, &WindowEvent::Destroyed);
+        assert!(path.exists());
+        super::window_event(&path, &WindowEvent::Focused(false));
+        assert!(!path.exists());
+        super::window_event(&path, &WindowEvent::Focused(true));
+        super::run_event(&path, &RunEvent::Ready);
+        assert!(path.exists());
+        super::run_event(&path, &RunEvent::Exit);
         assert!(!path.exists());
     }
 
