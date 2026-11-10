@@ -9,7 +9,6 @@
 import type * as Xterm from "@xterm/xterm";
 import { connect, list, onEvent, request, type Listed } from "./daemon.js";
 import { element, invoke, pressable, text } from "./dom.js";
-import { sessionName } from "./list.js";
 import { offerBuilds, upgrade, type Revive } from "./restart.js";
 import { show as showSelection } from "./selection.js";
 import { openPane } from "./terminal.js";
@@ -96,12 +95,13 @@ function draw(id: string, open: () => Xterm.Terminal | null): Pane {
   return pane;
 }
 
-// The header names the selected session as the list and the rail do (#567); with nothing selected,
-// the shell or a pane just started keeps the title its program sets.
-let label: string | null = null;
+// The selected session's name is on its row only (#571), so the header is empty while one is selected;
+// with nothing selected, the shell or a pane just started keeps the title its program sets. The grid
+// size is on the header's hover.
+let named = false;
 function header({ term, title }: Pane) {
-  element("terminal-title").textContent = label ?? title;
-  element("size").textContent = term ? `${term.cols} × ${term.rows}` : "";
+  element("terminal-title").textContent = named ? "" : title;
+  element("terminal-head").title = term ? `${term.cols} × ${term.rows}` : "";
 }
 
 // Ends terminal `id`'s whole process group (#322, point 3), then forgets it and drops its pane; the
@@ -126,7 +126,7 @@ export async function startClaude(cwd: string, resume: string | null = null, pro
   const argv = [...(await invoke<string[]>("claude_argv", { resume })), ...(prompt ? ["--", prompt] : [])]; // `--`: a prompt like "-p x" is no flag
   const id = `claude-${crypto.randomUUID()}`;
   starting = id;
-  label = null;
+  named = false;
   show(id, () => openPane(box(id), id, cwd, argv));
   showSelection(await invoke<Selection | null>("select_terminal", { terminal: id }));
 }
@@ -147,8 +147,7 @@ export function paneView(session: Pick<Session, "terminal" | "state"> | null, ru
 let selected: string | null = null;
 export async function showSession(session: Session | null, clicked = false) {
   const key = session ? `${session.id} ${session.terminal ?? ""} ${session.state === "ended"}` : null;
-  // A rename shows in the header at once.
-  label = session ? sessionName(session) : null;
+  named = session !== null;
   const pane = panes.get(shown);
   if (pane) header(pane);
   if (key === selected && !clicked) return;

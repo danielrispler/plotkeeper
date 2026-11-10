@@ -32,3 +32,10 @@ Between passes, nothing waits for him. After each pass, a code-review agent that
 - [ ] Tab to a row, or select text in a row, and wait for a few updates: the focus ring and the text selection stay.
 - [ ] "New session" opens the picker with its rows; no "Reading worktrees…" box flashes first.
 - [ ] Tapping a quiz option marks it at once.
+
+## #571: each fact once
+
+- [ ] With a session selected, its name shows only on its list row: not in the top bar and not in the terminal's header. In the strip, hovering its button names it.
+- [ ] Only the selected row shows a time ("Turn 12m"), and no clock shows seconds or changes more than once a minute. The rail shows "Step" only once a step has run a minute.
+- [ ] No "no estimate", "Step 0s", grid size such as `169 × 38`, or raw `**` anywhere on screen. Hovering the terminal's header shows the grid size.
+- [ ] A row or the rail's step with a long path shows its last 2 segments; hovering shows the full line. The picker's paths read the same way.

@@ -12,20 +12,24 @@ export function duration(ms: number): string {
   return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m`;
 }
 
-const spanText = (span: Span, now: number) => duration((span.end ?? now) - span.start);
+// A clock at minute level (#571): nothing in its first minute, so no "Step 0s", and no second ticks.
+const clock = (label: string, span: Span) => (now: number) => {
+  const ms = (span.end ?? now) - span.start;
+  return ms < 60_000 ? "" : `${label} ${duration(ms)}`;
+};
 
 // A time: its hover, and how to draw it at a time, such as "Turn 12m".
 export type Time = [title: string, draw: (now: number) => string];
 
 // The session's, its latest turn's and the step's times, each labelled with hover text (#517,
-// decision 4), such as "Session 2h 05m", "Turn 12m" and "Step 45s". An ended session's time stops at
-// its last event.
+// decision 4), such as "Session 2h 05m", "Turn 12m" and "Step 3m", each empty in its first minute.
+// An ended session's time stops at its last event.
 export function times(session: Pick<Session, "state" | "started_at" | "last_event_at" | "turn_span">, step: Span | null): Time[] {
   const end = session.state === "ended" ? session.last_event_at : null;
-  const parts: Time[] = [["Time since the session started", (now) => `Session ${spanText({ start: session.started_at, end }, now)}`]];
+  const parts: Time[] = [["Time since the session started", clock("Session", { start: session.started_at, end })]];
   const turn = session.turn_span;
-  if (turn) parts.push(["Time on the current prompt", (now) => `Turn ${spanText(turn, now)}`]);
-  if (step) parts.push(["Time on the current step", (now) => `Step ${spanText(step, now)}`]);
+  if (turn) parts.push(["Time on the current prompt", clock("Turn", turn)]);
+  if (step) parts.push(["Time on the current step", clock("Step", step)]);
   return parts;
 }
 
@@ -50,19 +54,15 @@ const phaseNames: Record<Phase, string> = {
 };
 
 // The phase and the estimate (#475), such as "Implementing · est. 16m–29m left", or
-// "Implementing · depends on you" in place of a time while the session waits on Daniel; empty
-// before the first phase.
+// "Implementing · depends on you" in place of a time while the session waits on Daniel; the phase
+// alone with no estimate yet (#571); empty before the first phase.
 export function estimateText(work: Pick<Work, "phases" | "estimate">): string {
   const phase = work.phases.at(-1)?.phase;
   if (phase === undefined) return "";
   if (phase === "merged") return phaseNames.merged;
   const range = work.estimate.range;
-  const time = work.estimate.depends_on_you
-    ? "depends on you"
-    : range === null
-      ? "no estimate"
-      : `est. ${duration(range[0])}–${duration(range[1])} left`;
-  return `${phaseNames[phase]} · ${time}`;
+  if (work.estimate.depends_on_you) return `${phaseNames[phase]} · depends on you`;
+  return range === null ? phaseNames[phase] : `${phaseNames[phase]} · est. ${duration(range[0])}–${duration(range[1])} left`;
 }
 
 // The elements whose text counts up, each with how to draw it at a time.
@@ -82,8 +82,9 @@ if (typeof setInterval === "function" && typeof document === "object") {
   setInterval(() => {
     const now = Date.now();
     for (const [node, draw] of counting) {
-      if (node.isConnected) node.textContent = draw(now);
-      else counting.delete(node);
+      const next = draw(now);
+      if (!node.isConnected) counting.delete(node);
+      else if (node.textContent !== next) node.textContent = next; // a minute clock changes once a minute
     }
   }, 1000);
 }

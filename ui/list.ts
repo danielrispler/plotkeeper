@@ -3,7 +3,8 @@
 // which opens the full list on click or ⌘1.
 
 import { age, element, patch, prose, pressable, stepText, text } from "./dom.js";
-import { counts, times } from "./times.js";
+import { counts, times, type Time } from "./times.js";
+import { shortPaths } from "./paths.js";
 import { isSelected, select } from "./selection.js";
 import { studio } from "./state.js";
 import { stateLabels, type Context, type Session, type SessionState, type Subagent } from "./types.js";
@@ -115,19 +116,34 @@ function row(session: Session, children: Children): HTMLElement {
     [Object.assign(text("span", sessionName(session), "name"), { title: sessionName(session) }), contextNode(session.transcript.context)],
     [...done(children, children.get("session")), rowLine(session.line ?? "")],
   );
-  // The row keeps the turn time; the rail has all three (#517, decision 4).
-  const turn = times(session, null)[1];
+  const turn = rowTime(session, isSelected(session.id));
   const l3 = text("span", "", "l3");
   button.append(turn ? Object.assign(counts(l3, turn[1]), { title: turn[0] }) : l3);
   return button;
 }
 
+// The row's clock: the turn time, only on the row being looked at; the rail has all three (#517,
+// decision 4; #571).
+export function rowTime(session: Pick<Session, "state" | "started_at" | "last_event_at" | "turn_span">, selected: boolean): Time | null {
+  return (selected && session.turn_span && times(session, null)[1]) || null;
+}
+
+// A row line as plain text (#571): Markdown's emphasis, headings and links dropped outside code spans.
+export function plain(line: string): string {
+  return line
+    .split("`")
+    .map((part, i) => (i % 2 ? part : part.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\*\*|__|^#{1,6}\s+/g, "")))
+    .join("`");
+}
+
 // A row's line, such as a card summary stored in Hebrew, laid out by its own direction, its code spans
-// cleaned as a card's are (#434, decision 40).
+// cleaned as a card's are (#434, decision 40), its paths shortened with the full line on hover (#571).
 function rowLine(line: string): HTMLElement {
-  const node = prose("span", line);
+  const [shown, full] = shortPaths(plain(line));
+  const node = prose("span", shown);
   node.className = "row-step";
   node.dir = "auto";
+  if (full) node.title = full;
   return node;
 }
 

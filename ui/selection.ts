@@ -1,6 +1,6 @@
 // The selection: only Daniel's click, or a session he starts (`startClaude`), changes the selected
 // session, and the subagent of it whose view shows, if any. The core decides; this draws the one
-// selection it returns in the list, the top bar, the rail and the terminal (#567).
+// selection it returns in the list, the rail and the terminal (#567).
 
 import { showCards } from "./cards.js";
 import { invoke } from "./dom.js";

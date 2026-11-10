@@ -19,8 +19,7 @@
   <!-- The grid runs right to left: the list on the right, the terminal in the centre, the rail on the left. -->
   <div class="app">
     <header class="top" data-tauri-drag-region="deep">
-      <!-- Identity: the selected session's name; naming and the context share fill it (#480). -->
-      <span id="identity" class="identity"></span>
+      <!-- The selected session's name and context share are on its row only (#571). -->
       <span class="sp"></span>
       <button id="new-session" class="btn small" type="button">New session</button>
       <!-- Usage: context, 5h and week (#480, #481). -->
@@ -41,7 +40,7 @@
 
     <!-- The terminal panes (#466, #467) draw into #terminal-body. -->
     <section id="terminal" class="term" aria-label="Terminal">
-      <div class="term-h"><span id="terminal-title">terminal</span><span id="size" class="mono"></span></div>
+      <div id="terminal-head" class="term-h"><span id="terminal-title">terminal</span></div>
       <!-- A new build to restart into, or the daemon upgrade's wait (#470). -->
       <div id="restart" class="restart" role="status" hidden></div>
       <div id="terminal-body" class="term-body"></div>

@@ -8,6 +8,7 @@
 
 import { element, invoke, pressable, text } from "./dom.js";
 import { startClaude } from "./panes.js";
+import { shortPath } from "./paths.js";
 import type { Losses, Place, Places } from "./types.js";
 
 // Git's error, or any other, at the picker's foot.
@@ -108,7 +109,7 @@ function placeRow(name: string, place: Place): HTMLElement {
   button.classList.add("row");
   const first = text("span", "", "l1");
   first.append(text("span", name, "name"));
-  const second = text("span", place.path, "l2");
+  const second = Object.assign(text("span", shortPath(place.path), "l2"), { title: place.path }); // #571
   button.append(first, second);
   return button;
 }

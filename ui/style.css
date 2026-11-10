@@ -52,11 +52,10 @@ body[data-layout="overlay"] .app { grid-template-columns: var(--strip) 1fr 0; }
 #rail-divider { left: calc(var(--rail) - var(--divider) / 2); }
 body:not([data-layout="full"]) #list-divider, body[data-layout="overlay"] #rail-divider { display: none; }
 
-/* The top bar: identity and usage. The native title bar is hidden (#566), so the bar is where the
+/* The top bar: new session and usage. The native title bar is hidden (#566), so the bar is where the
    window drags, and its start keeps room for the traffic lights. */
 .top { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--sp-5); padding: 0 var(--sp-5) 0 var(--lights);
        white-space: nowrap; overflow: hidden; }
-.identity { font-weight: 600; }
 .usage { font-size: var(--size-small); color: var(--muted); }
 
 /* The session list: full, or a strip that opens over the terminal on click or ⌘1, never on hover. */
@@ -99,8 +98,8 @@ h1 { margin: 0 0 var(--sp-4); }
 .dot[data-state="running"] { background: var(--fg); }
 .dot[data-state="needs_you"] { background: var(--needs-you); box-shadow: 0 0 0 var(--halo) var(--needs-you-bg); }
 
-/* The terminal, the stage: an inset, rounded pane on the frame, left to right; its header shows the
-   columns and rows it fits. The inset and the body's padding add up to layout.ts's padding. */
+/* The terminal, the stage: an inset, rounded pane on the frame, left to right; its header shows a
+   program's title, and the grid size on hover (#571). The inset and the body's padding add up to layout.ts's padding. */
 .term { background: var(--term-bg); color: var(--term-fg); display: grid; grid-template-rows: var(--term-head) auto 1fr; min-width: 0;
         margin: 0 var(--sp-4) var(--sp-4); border-radius: var(--radius-pane); box-shadow: inset 0 0 0 var(--hair) var(--edge);
         overflow: hidden; }
@@ -118,7 +117,6 @@ h1 { margin: 0 0 var(--sp-4); }
 .upgrade .primary { background: var(--selected); }
 .term-h { display: flex; gap: var(--sp-5); align-items: center; padding: 0 var(--sp-5); font-size: var(--size-xs); color: var(--faint);
           white-space: nowrap; overflow: hidden; }
-.term-h .mono { font-size: var(--size-xs); color: var(--muted); }
 .term-body { min-height: 0; min-width: 0; overflow: hidden; padding: var(--sp-3); position: relative; }
 /* The panes lie on top of each other, the hidden ones invisible but still laid out, so each stays
    fitted to the body and a switch shows it as it is, with no resize and redraw after (#570). A new
@@ -139,7 +137,7 @@ body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; to
 .times { display: flex; gap: var(--sp-2) var(--sp-4); flex-wrap: wrap; align-items: baseline; }
 .times:empty { display: none; }
 .times .estimate { color: var(--muted); }
-.times .estimate:empty, .times .runs-at:empty { display: none; }
+.times > :empty { display: none; }
 .tools { display: flex; gap: var(--sp-3); }
 .tool { white-space: nowrap; }
 .story { overflow-y: auto; padding: var(--sp-4) var(--sp-5) var(--sp-5); }

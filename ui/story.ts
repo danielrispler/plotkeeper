@@ -6,12 +6,12 @@ import { code, element, invoke, text } from "./dom.js";
 import { askElement } from "./ask.js";
 import { rendered } from "./markdown.js";
 import { encode, request } from "./daemon.js";
-import { agentState, contextText, contextTitle, sessionName } from "./list.js";
+import { agentState, sessionName } from "./list.js";
 import { closePane, startClaude } from "./panes.js";
 import { openDecision } from "./answer.js";
 import { showCleared } from "./decisions.js";
 import { decisionElement, questionElement } from "./questions.js";
-import { worktreeOf } from "./paths.js";
+import { shortPaths, worktreeOf } from "./paths.js";
 import { checkTime, counts, estimateText, timeNode, times } from "./times.js";
 import { studio } from "./state.js";
 import { stateLabels, type CheckLine, type Losses, type Places, type Question, type Selection, type Session, type Transcript } from "./types.js";
@@ -19,7 +19,6 @@ import { stateLabels, type CheckLine, type Losses, type Places, type Question, t
 export function showView(selected: Selection | null) {
   element("empty").hidden = selected !== null;
   element("view").hidden = selected === null;
-  element("identity").textContent = "";
   element("times").replaceChildren();
   if (selected === null) {
     showQuestions([]);
@@ -40,12 +39,6 @@ export function showView(selected: Selection | null) {
   runsAt.title = "Model and reasoning effort, from the transcript";
   element("times").replaceChildren(...times(session, stepSpan).map(timeNode), runsAt, estimate);
   element("view").toggleAttribute("data-agent", agent !== null);
-  const context = session.transcript.context;
-  element("identity").textContent =
-    agent === null
-      ? [sessionName(session), contextText(context)].filter(Boolean).join(" · ")
-      : `${sessionName(session)} · ${agent.name}`;
-  element("identity").title = agent === null ? contextTitle(context) : "";
   element("state").textContent = label;
   element("state").dataset.state = state;
   // "Open" resumes an ended session in a new terminal, in its folder, where Claude Code keeps it.
@@ -59,7 +52,9 @@ export function showView(selected: Selection | null) {
   element("delete").hidden = agent !== null;
   element("delete").onclick = () => askDelete(session).catch(report);
   element("tool").textContent = step?.tool ?? (agent === null ? session.returned : null) ?? "No step yet";
-  element("detail").textContent = step?.detail ?? "";
+  const [detail, fullDetail] = shortPaths(step?.detail ?? "");
+  element("detail").textContent = detail;
+  element("detail").title = fullDetail;
   element("command").textContent = step?.command ?? "";
   element("step").classList.toggle("has-command", Boolean(step?.command));
   // A subagent's transcript is its own, which the studio does not read.
