@@ -7,12 +7,12 @@
 import { startWatching } from "./answer.js";
 import { markShown, showCards } from "./cards.js";
 import { element, invoke, listen } from "./dom.js";
-import { windowBinding } from "./keys.js";
+import { type Actions, nextNeedsYou, paletteEntries, run, stepSession, windowBinding } from "./keys.js";
 import { defaultWidths, type LayoutMode, layoutMode, resized, type Widths } from "./layout.js";
 import { showSessions } from "./list.js";
-import { show } from "./selection.js";
+import { select, show } from "./selection.js";
 import { startPanes } from "./panes.js";
-import { showPicker } from "./picker.js";
+import { showPalette, showPicker } from "./picker.js";
 import { reload, type SettingsFiles, zoomed } from "./settings.js";
 import { studio } from "./state.js";
 import { showView } from "./story.js";
@@ -68,7 +68,36 @@ const setZoom = (to: number) => {
   zoom = to;
   invoke("set_zoom", { zoom }).then(layout, (e) => console.warn(e));
 };
-const actions: Record<string, () => void> = {
+// The keyboard spine (#575): ⌘] and ⌘[ step through the sessions, ⌘J goes to the next needs-you, ↑
+// and ↓ move in the list, 1–4 answer the docked card, ⌘N starts a session, ⌘, opens `settings.json`
+// and ⌘⇧P opens the palette of every action here.
+const selectedId = () => studio.selection?.session.id ?? null;
+const go = (id: string | null) => void (id && select(id));
+
+// Focuses and selects the visible row `by` from the focused one, else from the selected one.
+function moveInList(by: 1 | -1) {
+  const rows = [...element("groups").querySelectorAll<HTMLButtonElement>("button.row")].filter((row) => row.offsetParent !== null);
+  const focused = rows.indexOf(document.activeElement as HTMLButtonElement);
+  const next = rows[(focused === -1 ? rows.findIndex((row) => row.ariaPressed === "true") : focused) + by];
+  next?.focus();
+  next?.click(); // a click without a pointer selects (`list.ts`)
+}
+
+// The docked card's open request, if any: only then are its answer buttons drawn.
+const answerable = () => !element("dock").hidden && element("dock").querySelector(".answer-buttons") !== null;
+
+// Chooses choice `n` of the docked card's first question not yet chosen, else a plan's or a
+// permission's `n`th button. Once every question has a choice, "Send" takes focus, for Enter.
+// shortcut: a multi-select takes one choice by key; more by Tab and Enter.
+function answer(n: number) {
+  const dock = element("dock");
+  const open = [...dock.querySelectorAll("ul.choices")].find((list) => list.querySelector("button") && !list.querySelector('[aria-pressed="true"]'));
+  const buttons = (open ?? dock.querySelector(".decision .answer-buttons"))?.querySelectorAll<HTMLButtonElement>("button");
+  buttons?.[n - 1]?.click();
+  dock.querySelector<HTMLButtonElement>(".send:not([disabled])")?.focus();
+}
+
+const actions: Actions = {
   "studio::ToggleList": () => toggle("list-open"),
   "studio::ToggleRail": () => toggle("rail-open"),
   "studio::Dismiss": () => {
@@ -78,15 +107,24 @@ const actions: Record<string, () => void> = {
   "studio::ZoomIn": () => setZoom(zoomed(zoom, 1)),
   "studio::ZoomOut": () => setZoom(zoomed(zoom, -1)),
   "studio::ResetZoom": () => setZoom(zoomed(zoom, 0)),
+  "studio::NextSession": () => go(stepSession(studio.listed, selectedId(), 1)),
+  "studio::PreviousSession": () => go(stepSession(studio.listed, selectedId(), -1)),
+  "studio::NextNeedsYou": () => go(nextNeedsYou(studio.listed, selectedId())),
+  "studio::SelectNext": () => moveInList(1),
+  "studio::SelectPrevious": () => moveInList(-1),
+  "studio::Answer": (n) => answer(Number(n)),
+  "studio::NewSession": showPicker,
+  "studio::OpenSettings": () => void invoke("open_settings", { editor: studio.files.settings.editor }).catch((e) => console.warn(e)),
+  "studio::Palette": () => showPalette(paletteEntries(studio.files.keymap, Object.keys(actions)), (binding) => run(actions, binding)),
 };
 window.addEventListener("keydown", (event) => {
   // The terminal types into xterm's hidden textarea, so this covers it too.
   const target = event.target as HTMLElement;
   const typing = target.isContentEditable || target.matches?.("input, textarea, select") === true;
-  const action = windowBinding(studio.files.keymap, event, typing);
-  const run = typeof action === "string" ? actions[action] : undefined;
-  if (!run) return;
-  run();
+  const inList = target.closest?.(".list") != null;
+  const inTerminal = target.closest?.("#terminal") != null;
+  const action = windowBinding(studio.files.keymap, event, typing, inList, inTerminal && answerable());
+  if (!run(actions, action)) return;
   if (action !== "studio::Dismiss") event.preventDefault();
 });
 

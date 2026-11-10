@@ -96,6 +96,10 @@ _Avoid_: Server, multiplexer
 The window's view of one terminal of the terminal daemon. One pane shows at a time; the others keep running hidden.
 _Avoid_: Tab
 
+**Palette**:
+The picker over every action of the window, each shown with its key, built from `keymap.json`, so it is also the list of keys. ⌘⇧P opens it. A new view or menu becomes an action in the palette, not a button in the top bar.
+_Avoid_: Command menu, help
+
 **Draft**:
 What Daniel has typed into a session's prompt and not sent yet, as the studio follows his keys. The studio types into a terminal only once he has no draft there and has stopped typing for 3 seconds.
 

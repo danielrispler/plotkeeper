@@ -7,8 +7,10 @@
 // left empty, a session starts in the main checkout with no prompt.
 
 import { element, invoke, pressable, text } from "./dom.js";
+import type { Entry } from "./keys.js";
 import { startClaude } from "./panes.js";
 import { shortPath } from "./paths.js";
+import type { Binding } from "./settings.js";
 import type { Losses, Place, Places } from "./types.js";
 
 // Git's error, or any other, at the picker's foot.
@@ -128,10 +130,61 @@ function picked({ main, tasks, hidden }: Places): HTMLElement[] {
   ];
 }
 
+// Closes the picker when it shows `label`, and says so; else names it `label`, to open it.
+function closed(label: string): boolean {
+  const picker = element("picker");
+  const shows = !picker.hidden && picker.ariaLabel === label;
+  if (shows) picker.hidden = true;
+  picker.ariaLabel = label;
+  return shows;
+}
+
+// The palette (#575), in the picker's box: every action with its keys, filtered by what Daniel types;
+// Enter or a click runs one, from where the focus was. Opening it again closes it.
+// shortcut: Tab moves between the rows, not ↑ and ↓.
+export function showPalette(entries: Entry[], run: (binding: Binding) => void) {
+  if (closed("Palette")) return;
+  const picker = element("picker");
+  const back = document.activeElement as HTMLElement | null;
+  const choose = (entry: Entry) => {
+    picker.hidden = true;
+    back?.focus();
+    run(entry.binding);
+  };
+  const form = document.createElement("form");
+  form.className = "new-task";
+  const field = Object.assign(document.createElement("input"), { placeholder: "Run an action", spellcheck: false });
+  field.setAttribute("aria-label", "Run an action");
+  form.append(field);
+  const rows = document.createElement("div");
+  const shown = () => entries.filter((entry) => entry.title.toLowerCase().includes(field.value.trim().toLowerCase()));
+  const draw = () =>
+    rows.replaceChildren(
+      ...shown().map((entry) => {
+        const button = pressable(document.createElement("button"), false, () => choose(entry));
+        button.classList.add("row");
+        const line = text("span", "", "l1");
+        line.append(text("span", entry.title, "name"), text("span", entry.keys.join("  "), "row-state"));
+        button.append(line);
+        return button;
+      }),
+    );
+  field.addEventListener("input", draw);
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const first = shown()[0];
+    if (first) choose(first);
+  });
+  draw();
+  picker.replaceChildren(form, rows);
+  picker.hidden = false;
+  field.focus();
+}
+
 // Opens the picker, or closes it when open.
 export async function showPicker() {
   const picker = element("picker");
-  if (!picker.hidden) return void (picker.hidden = true);
+  if (closed("New session")) return;
   // It opens once its rows are read, so no placeholder flashes first in another box (#570).
   try {
     picker.replaceChildren(...picked(await invoke<Places>("places")));

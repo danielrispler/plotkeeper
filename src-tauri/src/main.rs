@@ -462,6 +462,7 @@ fn main() {
             answer::answer,
             settings::settings_files,
             settings::set_zoom,
+            settings::open_settings,
             summary_settings,
             turn_summary,
             agent_summary,
