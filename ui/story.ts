@@ -41,6 +41,7 @@ export function showView(selected: Selection | null) {
   if (selected === null) {
     element("state").textContent = "";
     element("phase").textContent = "";
+    element("mode").textContent = "";
     showQuestions([]);
     showCleared([]);
     return;
@@ -54,6 +55,8 @@ export function showView(selected: Selection | null) {
   element("state").textContent = label;
   element("state").dataset.state = state;
   element("phase").textContent = agent === null ? estimateText(session.work) : "";
+  // A subagent runs in its session's mode.
+  element("mode").textContent = modeText(session.permission_mode);
   // The model and effort the session runs at (#517, decision 8); none for a subagent, whose transcript the studio does not read.
   const { model, effort } = session.transcript;
   const runsAt = agent === null ? [model, effort && `effort ${effort}`].filter(Boolean).join(" · ") : "";
@@ -64,7 +67,7 @@ export function showView(selected: Selection | null) {
   element("view").toggleAttribute("data-agent", agent !== null);
   // "Open" resumes an ended session in a new terminal, in its folder, where Claude Code keeps it.
   element("reopen").hidden = agent !== null || session.state !== "ended";
-  element("reopen").onclick = () => startClaude(session.cwd, session.resume_id).catch((e) => console.warn(e));
+  element("reopen").onclick = () => startClaude(session.cwd, session.resume_id, "", session.permission_mode === "auto").catch((e) => console.warn(e));
   element("rename").hidden = agent !== null;
   element("rename").onclick = () => askName(session);
   // Only a terminal the studio runs can be closed from here.
@@ -98,6 +101,11 @@ export function showView(selected: Selection | null) {
   }
   drawFeed();
 }
+
+// The session's permission mode on the rail's line (#541), never only on hover, as it is a safety
+// fact; nothing for the default mode, or before an event names one.
+const modes: Record<string, string> = { auto: "auto mode", plan: "plan mode", acceptEdits: "accept edits", bypassPermissions: "bypass permissions" };
+export const modeText = (mode: string | null) => (!mode || mode === "default" ? "" : (modes[mode] ?? mode));
 
 // The subagent summaries the writer gave (#535), by subagent id, those being written, and those
 // whose call failed while the subagent stays open, so a redraw does not ask again.
