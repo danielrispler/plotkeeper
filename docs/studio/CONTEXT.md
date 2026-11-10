@@ -94,7 +94,7 @@ The background process that owns the workbench's terminals, so they outlive the 
 _Avoid_: Server, multiplexer
 
 **Pane**:
-The window's view of one terminal of the terminal daemon. One pane shows at a time; the others keep running hidden.
+The window's view of one terminal of the terminal daemon. Up to two panes show at a time, when the terminal column is split; the others keep running hidden.
 _Avoid_: Tab
 
 **Palette**:

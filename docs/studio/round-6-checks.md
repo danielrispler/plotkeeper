@@ -94,3 +94,11 @@ Between passes, nothing waits for him. After each pass, a code-review agent that
 - [ ] Below, the turns read newest first, each with its prompt in one line, its summary, its learning question (folded), its cards, its subagents, its checks and its full response (folded). Opening an older turn's full response shows its final reply. No "Last 30 minutes", "Older", "Responses", "Questions" or "Subagents" section is left; #535's subagent entries are in the turn that ran them.
 - [ ] Each turn shows one "Ask about this", only on hover; asking about a turn works as before.
 - [ ] With summaries written on open (settings), opening a session writes its waiting turns' summaries once, not again on each redraw.
+
+## #529: split terminals
+
+- [ ] With two sessions running in the studio, select one and press ⌘D: its pane stays and the next session's terminal shows beside it, the selected one nearer the rail. Both take input: click into each and type. The rail follows the selection, not the pinned pane.
+- [ ] On a wide screen (each pane at least 100 columns), the two sit side by side. Narrow the window: they stack, one above the other, before the rail turns into an overlay. Focus mode (⌘⇧↩) puts them side by side again when the whole window has room.
+- [ ] Drag the divider between the panes: both resize, and Claude Code redraws in each at its new size; the divider stops before a pane gets too small.
+- [ ] Selecting the pinned session shows it alone; selecting another brings the split back. ⌘D again closes the split. Closing the pinned session's terminal closes the split.
+- [ ] ⌘⇧P lists "Toggle split" with ⌘D. Dropping a file types its path into the focused pane only.
