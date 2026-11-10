@@ -1682,7 +1682,8 @@ impl Studio {
     }
 
     /// The row `event` belongs to: its session's, or for a start from `/clear`, the cleared session's
-    /// on the same terminal, or in the same folder outside studio terminals (#461, decision 18).
+    /// on the same terminal, or in the same folder outside studio terminals (#461, decision 18); for a
+    /// start from a fork, the live session with a prompt on the same terminal (#562).
     // shortcut: a start that lands before its clear's `SessionEnd` makes a new row; match both ways
     // if the async hooks show it.
     fn row(&self, event: &Event) -> String {
@@ -1697,6 +1698,18 @@ impl Studio {
             };
             let cleared = self.sessions.values().filter(|s| s.clearing).filter(same);
             if let Some(s) = cleared.max_by_key(|s| s.agent.last_event_at) {
+                return s.agent.id.clone();
+            }
+        }
+        // A fork mid-conversation goes on in the same `claude`, so on the same terminal (#562).
+        if fresh && event.hook_event_name == "SessionStart" && event.source == "fork" {
+            let forked = self.sessions.values().filter(|s| {
+                s.terminal.is_some()
+                    && s.terminal == event.studio_terminal_id
+                    && !s.ended
+                    && !s.prompts.is_empty()
+            });
+            if let Some(s) = forked.max_by_key(|s| s.agent.last_event_at) {
                 return s.agent.id.clone();
             }
         }
@@ -1930,6 +1943,20 @@ impl Studio {
         if event.session_id != own_id {
             self.rows.insert(own_id.clone(), event.session_id.clone());
         }
+        // A resume or fork in a `claude` replaces the id it started under, which had no prompt (#562).
+        if event.hook_event_name == "SessionStart"
+            && ["resume", "fork"].contains(&event.source.as_str())
+            && event.studio_terminal_id.is_some()
+        {
+            let throwaway = |s: &&mut Session| {
+                s.agent.id != event.session_id
+                    && s.terminal == event.studio_terminal_id
+                    && s.prompts.is_empty()
+            };
+            for s in self.sessions.values_mut().filter(throwaway) {
+                s.deleted = true;
+            }
+        }
         // A rename names a known session and is none of its events.
         if event.hook_event_name == RENAME {
             if let Some(session) = self.sessions.get_mut(&event.session_id) {
@@ -1977,8 +2004,11 @@ impl Studio {
         let working = session.state == State::Running;
         session.work.passes(event.studio_received_ms, working);
         let phases_before = session.work.phases.len();
-        session.resume_id = own_id;
-        if continues {
+        // The old id of a fork goes on sending late events, but the fork is what `--resume` takes.
+        if session.resume_id.is_empty() || event.hook_event_name == "SessionStart" {
+            session.resume_id = own_id.clone();
+        }
+        if continues && event.source == "clear" {
             session.cleared.push(event.studio_received_ms);
         }
         let failed_before = session.failed_workers();
@@ -2013,6 +2043,7 @@ impl Studio {
         }
         // A resume or `/clear` may move it to another transcript, read from its start.
         if own
+            && own_id == session.resume_id
             && !event.transcript_path.is_empty()
             && session.transcript_file.path != event.transcript_path
         {
