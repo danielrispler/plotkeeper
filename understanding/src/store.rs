@@ -232,7 +232,9 @@ impl CardStore {
         let facts = read(&path.with_file_name("live-facts.json"))?;
         let decisions = read(&path.with_file_name("decisions.json"))?;
         let summaries = read(&path.with_file_name("summaries.json"))?;
-        let agent_summaries = read(&path.with_file_name("agent-summaries.json"))?;
+        // A cache: a corrupt file costs the summaries again, never the studio's start.
+        let agent_summaries =
+            read(&path.with_file_name("agent-summaries.json")).unwrap_or_default();
         Ok(CardStore {
             path,
             cards,

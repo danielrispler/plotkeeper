@@ -66,28 +66,38 @@ export function showView(selected: Selection | null) {
   showCleared(agent === null ? session.cleared : []);
   showHistory(agent === null ? session : null);
   // A subagent's view has no intention of its own: its written summary takes that line (#535).
+  if ((agent?.id ?? null) !== shownAgent) {
+    shownAgent = agent?.id ?? null;
+    failed.clear();
+  }
   if (agent !== null) {
     element("intention-text").textContent = agentSummaries.get(agent.id) ?? "";
     if (agent.ended_at !== null) summarize(agent.id);
   }
 }
 
-// The subagent summaries the writer gave (#535), by subagent id, and those being written.
+// The subagent summaries the writer gave (#535), by subagent id, those being written, and those
+// whose call failed while the subagent stays open, so a redraw does not ask again.
 const agentSummaries = new Map<string, string>();
 const writing = new Set<string>();
+const failed = new Set<string>();
+let shownAgent: string | null = null;
 
 // Asks the shell for subagent `id`'s summary: the store's, or one writer call now. A failed call
 // leaves its name and first line, and the next opening asks again.
 function summarize(id: string) {
-  if (agentSummaries.has(id) || writing.has(id)) return;
+  if (agentSummaries.has(id) || writing.has(id) || failed.has(id)) return;
   writing.add(id);
   invoke<string | null>("agent_summary", { agentId: id })
     .then((summary) => {
-      if (summary === null) return;
+      if (summary === null) return void failed.add(id);
       agentSummaries.set(id, summary);
       if (studio.selection?.agent === id) element("intention-text").textContent = summary;
     })
-    .catch((e) => console.warn(e))
+    .catch((e) => {
+      failed.add(id);
+      console.warn(e);
+    })
     .finally(() => writing.delete(id));
 }
 

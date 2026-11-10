@@ -105,6 +105,10 @@ fn agent_summary(
         let agent = agents.find(|a| a.agent.id == agent_id && a.ended_at.is_some())?;
         (agent.prompt.clone(), agent.message.clone())
     };
+    // A subagent that ended without a last message (killed, or its session ended) has no result to sum up.
+    if message.is_empty() {
+        return None;
+    }
     let setup = summaries.setup.lock().unwrap().clone();
     let log = |line: String| eprintln!("studio: {line}");
     write_agent_summary(&cards, &**writer, &setup, &agent_id, &prompt, &message, log)
