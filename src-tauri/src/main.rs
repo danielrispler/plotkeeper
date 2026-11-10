@@ -344,6 +344,7 @@ fn main() {
         .manage(Notices::default())
         .manage(writer.clone())
         .manage(terminal::Daemon::default())
+        .manage(Mutex::new(answer::Watching::default()))
         .invoke_handler(tauri::generate_handler![
             sessions,
             select,
@@ -526,6 +527,16 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
         });
         let names_changed = NAMES_CHANGED.swap(false, Ordering::AcqRel);
         let changed = read || transcripts_changed || windows_changed || names_changed;
+        // The open request goes in the same pass as the list that shows "needs you" (#569).
+        if let Ok(data) = answer::data()
+            && let Some(ask) = app
+                .state::<Mutex<answer::Watching>>()
+                .lock()
+                .unwrap()
+                .pass(&data)
+        {
+            let _ = app.emit("ask", ask);
+        }
         if state.lock().unwrap().tick(millis()) || changed {
             sent.list(app);
         }

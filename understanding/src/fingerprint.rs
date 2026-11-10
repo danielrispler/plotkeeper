@@ -4,7 +4,8 @@
 //! Ignored files are never listed, and a commit alone leaves every file's content as it was. A file
 //! over 1 MiB is compared by size and modification time, and its diff is one line that names it, so
 //! neither the record nor the card writer gets it. Only the agent's own commits count; a pull, a
-//! rebase, a checkout, a reset or a merge moves the base instead (#434, decisions 12 to 14).
+//! rebase, a checkout, a reset or a merge moves the base instead (#434, decisions 12 to 14). Files
+//! the operating system writes, such as `.DS_Store`, are never listed (#568).
 
 use similar::TextDiff;
 use std::{
@@ -278,11 +279,24 @@ pub(crate) fn diff_stat(folder: &Path, since: &str) -> String {
     String::from_utf8_lossy(&stat).into()
 }
 
-/// The paths in `git`'s `-z` output, each after `skip` bytes.
+/// The paths in `git`'s `-z` output, each after `skip` bytes, without the operating system's own
+/// files, which are not the agent's work (#568).
 fn split_paths(out: &[u8], skip: usize) -> impl Iterator<Item = String> {
     let entries = out.split(|&byte| byte == 0);
     let entries = entries.filter_map(move |entry| entry.get(skip..).filter(|p| !p.is_empty()));
-    entries.map(|path| String::from_utf8_lossy(path).into_owned())
+    let paths = entries.map(|path| String::from_utf8_lossy(path).into_owned());
+    paths.filter(|path| !os_file(path))
+}
+
+/// Whether `path` is a file the operating system writes: `.DS_Store`, `._*`, `Thumbs.db`, or one
+/// in `.Spotlight-V100` or `.Trashes`.
+fn os_file(path: &str) -> bool {
+    path.split('/').any(|part| {
+        matches!(
+            part,
+            ".DS_Store" | "Thumbs.db" | ".Spotlight-V100" | ".Trashes"
+        ) || part.starts_with("._")
+    })
 }
 
 /// `git`'s output in `folder`, or `None` when it fails. It takes no optional locks, so it never
