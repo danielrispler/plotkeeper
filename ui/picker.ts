@@ -137,7 +137,7 @@ export function showPalette(entries: Entry[], run: (binding: Binding) => void) {
         button.classList.add("row");
         const line = text("span", "", "l1");
         line.append(text("span", entry.title, "name"), text("span", entry.keys.join("  "), "row-state"));
-        button.append(line);
+        button.append(line, ...(entry.note ? [text("span", entry.note, "l2")] : []));
         return button;
       }),
     );

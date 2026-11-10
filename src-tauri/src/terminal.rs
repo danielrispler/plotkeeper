@@ -322,7 +322,7 @@ fn start(log: &Path) -> io::Result<()> {
 
 /// The configured repository: `STUDIO_REPO`, else the main checkout of the repository the app was
 /// built in (#461, decision 3), else the home folder.
-fn repo() -> String {
+pub(crate) fn repo() -> String {
     if let Ok(repo) = std::env::var("STUDIO_REPO") {
         return repo;
     }

@@ -1,7 +1,7 @@
 // The terminal pane's key mapping (#466), run on the `tsc` output. Run: `npm test` in apps/studio.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { bound, keyAction, keyLabel, keystroke, nextNeedsYou, paletteEntries, run, stepSession, windowBinding } from "../../dist/keys.js";
+import { bound, doctorEntries, keyAction, keyLabel, keystroke, nextNeedsYou, paletteEntries, run, stepSession, windowBinding } from "../../dist/keys.js";
 import { initial, reload } from "../../dist/settings.js";
 
 const key = (code, mods = {}, key = "") => ({
@@ -263,4 +263,18 @@ test("ctrl-` toggles the panel, from the terminal too; a rebound key toggles it 
   assert.equal(keyAction(key("KeyJ", { ctrlKey: true }, "j"), false, keymap), "app");
   assert.equal(windowBinding(keymap, backquote, true), undefined);
   assert.equal(keyAction(backquote, false, keymap), "terminal");
+});
+
+test("the Doctor's entries are palette actions, each warned by its kind, and the defaults show with none in settings", () => {
+  const { settings } = reload(initial, { settings: `{ "zoom": 1 }`, keymap: null });
+  assert.deepEqual(
+    doctorEntries(settings.doctor).map(({ binding, title, note }) => [binding, title, note]),
+    [
+      [["studio::Doctor", "claude doctor"], "Doctor: Check the installation", "no tokens"],
+      [["studio::Doctor", "/doctor"], "Doctor: Full checkup", "starts a Claude session, spends tokens"],
+    ],
+  );
+  // The warning comes from the kind, not the label or the command.
+  const [own] = doctorEntries([{ label: "Audit", command: "claude doctor", kind: "session" }]);
+  assert.equal(own.note, "starts a Claude session, spends tokens");
 });

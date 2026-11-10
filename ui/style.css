@@ -194,6 +194,13 @@ body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; to
 .menu .btn[hidden] { display: none; }
 .story { overflow-y: auto; padding: var(--sp-4) var(--sp-5) var(--sp-5); }
 #notice { margin: 0 0 var(--sp-4); color: var(--muted); }
+/* The skills browser (#528) takes the whole rail while open. */
+#skills, .skills-open .rail > :not(#skills) { display: none; }
+.skills-open #skills { display: block; grid-row: 1 / -1; }
+.skills h1:not(:first-child) { margin-top: var(--sp-5); }
+.skill > summary { display: flex; flex-direction: column; padding: var(--sp-2) 0; cursor: pointer; }
+.skill > summary .l2 { font-size: var(--size-small); color: var(--muted); }
+.skill > .btn { margin: var(--sp-2) 0; }
 /* Colour only on "needs you" (#328, module 3; #565, decision 1): "your turn" stays as neutral as "running". */
 .state { font-size: var(--size); font-weight: 600; margin: 0 0 var(--sp-3); }
 .headline .state { margin: 0; }
