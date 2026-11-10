@@ -132,6 +132,10 @@ The state of an agent session in a turn: from Daniel's prompt until the agent en
 The state of an agent session that finished its turn with nothing blocked on Daniel, even when its reply asks him something, or that started and has had no prompt yet. Unlike needs you, it does not interrupt him.
 _Avoid_: Done (the turn ended, not the task)
 
+**Unseen**:
+A your-turn agent session whose last ended turn Daniel has not seen. A turn is seen when the session is selected while the window is focused; a window left open in an empty room does not count. The row shows a filled dot and a bold name, and the strip the filled dot; "Mark unseen" in the rail's menu brings it back until he selects the session again. It is the cue for "finished, not seen", and it survives a restart.
+_Avoid_: Unread, new, done until seen
+
 **Idle**:
 The state of an agent session left at your turn with no events for 2 hours or more. Its next event brings it back.
 

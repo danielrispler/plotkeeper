@@ -76,7 +76,7 @@ const setZoom = (to: number) => {
   zoom = to;
   invoke("set_zoom", { zoom }).then(layout, (e) => console.warn(e));
 };
-// The keyboard spine (#575): ⌘] and ⌘[ step through the sessions, ⌘J goes to the next needs-you, ↑
+// The keyboard spine (#575): ⌘] and ⌘[ step through the sessions, ⌘J goes to the next needs-you, else the next unseen, ↑
 // and ↓ move in the list, 1–4 answer the docked card, ⌘N starts a session, ⌘, opens `settings.json`
 // and ⌘⇧P opens the palette of every action here.
 const selectedId = () => studio.selection?.session.id ?? null;
@@ -161,6 +161,7 @@ function applySettings(files: SettingsFiles) {
   // Only a changed `zoom` resets the zoom the keys set.
   if (settings.zoom !== previous.zoom) setZoom(settings.zoom);
   invoke("notify_while_focused", { on: settings.notifications.while_focused }).catch((e) => console.warn(e));
+  invoke("sounds", { on: settings.sounds }).catch((e) => console.warn(e));
   const size = settings.terminal.font_size;
   if (size === null) document.documentElement.style.removeProperty("--term-size");
   else document.documentElement.style.setProperty("--term-size", `${size}px`);
@@ -199,7 +200,7 @@ document.addEventListener("pointerdown", (event) => {
 const showList = (sessions: Session[]) => {
   showSessions(sessions);
   showPlaces();
-  showToast(true);
+  showToast();
 };
 // Opening Places reads git's counts at once (#576).
 element("places").addEventListener("toggle", () => void ((element("places") as HTMLDetailsElement).open && readPlaces(true)));

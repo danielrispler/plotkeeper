@@ -94,3 +94,13 @@ Between passes, nothing waits for him. After each pass, a code-review agent that
 - [ ] Below, the turns read newest first, each with its prompt in one line, its summary, its learning question (folded), its cards, its subagents, its checks and its full response (folded). Opening an older turn's full response shows its final reply. No "Last 30 minutes", "Older", "Responses", "Questions" or "Subagents" section is left; #535's subagent entries are in the turn that ran them.
 - [ ] Each turn shows one "Ask about this", only on hover; asking about a turn works as before.
 - [ ] With summaries written on open (settings), opening a session writes its waiting turns' summaries once, not again on each redraw.
+
+## #556: unseen your-turn mark and sounds
+
+- [ ] A session whose turn ends while you look at another shows a filled dot and a bold name, in the list and in the strip. Selecting it with the window focused clears the mark; selecting it while another app has focus does not.
+- [ ] After a restart, the sessions you had seen stay plain and the unseen ones keep the mark.
+- [ ] "Mark unseen" in the rail's ⋯ menu brings the mark back; it stays until you select the session again.
+- [ ] ⌘J with no session needing you goes to the next unseen one.
+- [ ] Focused: another session that needs you plays one sound (Glass) after about 3 seconds, in any layout, and never twice. The session you are viewing plays none, and a your-turn plays none.
+- [ ] In the background: needs you plays Glass and your turn plays Tink, each only with its notification.
+- [ ] `"sounds": false` in `settings.json` silences both. The sounds feel right, not alarming.

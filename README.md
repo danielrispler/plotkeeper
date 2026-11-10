@@ -100,6 +100,7 @@ Every shortcut here but Cmd+C and Cmd+V can be rebound in `keymap.json` (see Set
   "terminal": { "font_size": 15 }, // 8 to 40; default: the stylesheet's 12.5
   "summaries": { "model": "haiku", "effort": "low", "on_open": false },
   "notifications": { "while_focused": false }, // also notify "your turn" while focused, but not for the selected session
+  "sounds": true,                // false: no needs-you or your-turn sound
   "doctor": [
     { "label": "Check the installation", "command": "claude doctor", "kind": "shell" },
     { "label": "Full checkup", "command": "/doctor", "kind": "session" }
