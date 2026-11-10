@@ -51,20 +51,39 @@ const EARLIER: usize = 3;
 /// 14).
 const MARKS: [&str; 7] = ["✅", "✔️", "✔", "✓", "☑️", "(correct)", "(Correct)"];
 
-/// A right option longer than this many times the longest wrong option gives the answer away
-/// (#583). Of Haiku's 3 real questions, the 2 guessable ones' right options were 1.30 and 1.60
-/// times it, and the fair one's 0.85.
+/// A right option longer than this many times the longest wrong option, and by more than
+/// `KEY_GAP` characters, gives the answer away (#583). Of Haiku's 3 real questions, the 2
+/// guessable ones' right options were 1.30 and 1.60 times it, and the fair one's 0.85.
 const KEY_RATIO: f64 = 1.25;
 
-/// Why a learning section whose right option is clearly the longest is unusable; a reply with one
-/// is asked for once more.
-const GUESSABLE: &str = "its right option is much longer than every wrong one";
+/// The characters a right option must exceed the longest wrong one by to be guessable, so short
+/// options such as `O(n log n)` against `O(n)` pass.
+const KEY_GAP: f64 = 15.0;
+
+/// Why a learning section is unusable.
+enum Unusable {
+    /// Its right option is clearly the longest; a reply with one is asked for once more.
+    Guessable,
+    Other(String),
+}
+
+impl std::fmt::Display for Unusable {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Unusable::Guessable => {
+                f.write_str("its right option is much longer than every wrong one")
+            }
+            Unusable::Other(why) => f.write_str(why),
+        }
+    }
+}
 
 impl TurnSummary {
     /// The summary in a writer's reply, which must hold one JSON object with a summary. On a turn
     /// with a `card`, any learning section is dropped; a `null` one means the turn has nothing to
-    /// teach. A learning section that is unusable is dropped too, with one line on why.
-    pub fn from_reply(reply: &str, card: bool) -> Result<(TurnSummary, Option<String>), String> {
+    /// teach, and a missing one is unusable. A learning section that is unusable is dropped too,
+    /// with why.
+    fn from_reply(reply: &str, card: bool) -> Result<(TurnSummary, Option<Unusable>), String> {
         let head: String = reply.chars().take(300).collect();
         let value: serde_json::Value = serde_json::from_str(object(reply))
             .map_err(|e| format!("the summary reply does not parse ({e}): {head:?}"))?;
@@ -72,7 +91,7 @@ impl TurnSummary {
         if summary.is_empty() {
             return Err(format!("the summary reply holds no summary: {head:?}"));
         }
-        let learning = match card || value["learning"].is_null() {
+        let learning = match card || value.get("learning") == Some(&serde_json::Value::Null) {
             true => Ok(None),
             false => learning(&value["learning"]).map(Some),
         };
@@ -86,12 +105,12 @@ impl TurnSummary {
 }
 
 /// The learning section in `value`, its options' marks removed, or why it is unusable.
-fn learning(value: &serde_json::Value) -> Result<Learning, String> {
+fn learning(value: &serde_json::Value) -> Result<Learning, Unusable> {
     let idea = value["idea"].as_str().map(str::trim).unwrap_or_default();
     if idea.is_empty() {
-        return Err("its learning section has no idea".into());
+        return Err(Unusable::Other("its learning section has no idea".into()));
     }
-    let mut question = Quiz::from_value(value["question"].clone())?;
+    let mut question = Quiz::from_value(value["question"].clone()).map_err(Unusable::Other)?;
     for option in &mut question.options {
         let text = MARKS
             .iter()
@@ -104,8 +123,8 @@ fn learning(value: &serde_json::Value) -> Result<Learning, String> {
         .filter(|(i, _)| *i != question.key)
         .map(|(_, o)| length(o))
         .fold(0.0, f64::max);
-    if key > KEY_RATIO * wrong {
-        return Err(GUESSABLE.into());
+    if key > KEY_RATIO * wrong && key - wrong > KEY_GAP {
+        return Err(Unusable::Guessable);
     }
     Ok(Learning {
         idea: idea.into(),
@@ -134,7 +153,7 @@ pub fn write_summary(
     let first = summary();
     let retry = match &first {
         Err(_) => true,
-        Ok((_, problem)) => problem.as_deref() == Some(GUESSABLE),
+        Ok((_, problem)) => matches!(problem, Some(Unusable::Guessable)),
     };
     match if retry { summary().or(first) } else { first } {
         Ok((summary, problem)) => {
