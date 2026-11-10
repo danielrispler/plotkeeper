@@ -12,5 +12,7 @@ export const studio = {
   missed: false,
   // The selected session's brief, cards and decisions, as the shell last sent them.
   cards: { brief: null, recent: [], older: [], decisions: [] } as SessionCards,
+  // Focus mode (#573): the list and the rail folded, the terminal takes the window.
+  focus: false,
   files: initial,
 };

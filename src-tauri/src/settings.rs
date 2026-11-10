@@ -21,6 +21,27 @@ pub fn settings_files() -> serde_json::Value {
     serde_json::json!({ "settings": settings, "keymap": keymap })
 }
 
+/// Opens `settings.json` in Daniel's editor (⌘,, #575), first creating it empty when missing; an
+/// empty file is the defaults.
+#[tauri::command(async)]
+pub fn open_settings(editor: Option<Vec<String>>) -> Result<(), String> {
+    let [settings, _] = paths().ok_or("no home folder")?;
+    if let Some(dir) = settings.parent() {
+        fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    // Never truncates: a file saved meanwhile stays.
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&settings)
+    {
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(e) => return Err(e.to_string()),
+    }
+    crate::terminal::open_file(settings.display().to_string(), 1, 1, None, editor)
+}
+
 /// Sends `settings-files` when either file is saved, created or removed.
 // shortcut: polls every 500 ms, as `restart::watch_build` does; switch to file-system events if
 // the delay matters.

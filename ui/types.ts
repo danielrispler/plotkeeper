@@ -111,6 +111,8 @@ export type Session = {
   work: Work;
   // In the session list only: what its row says, built by the card store.
   line?: string;
+  // Its turn finished and Daniel has not looked at it since; #556 sets it (#572 draws it).
+  unseen?: boolean;
 };
 // The shell sends a card's request without its diff and base, which the pane never reads. `agent`
 // is the worker whose card it is; `changed_by` holds the files other subagents edited in its
