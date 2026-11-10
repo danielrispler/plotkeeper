@@ -418,3 +418,36 @@ fn a_client_that_stops_reading_leaves_the_other_terminals_flowing() {
         stalled.send(&json!({ "op": "list" })).is_err()
     });
 }
+
+// #555, row 7: only Daniel's account can reach the socket.
+#[test]
+fn the_daemons_folder_is_private_and_its_socket_owner_only() {
+    use std::os::unix::fs::PermissionsExt;
+    let d = Daemon::start("perms");
+    let mode = |p: PathBuf| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode(d.dir.clone()), 0o700);
+    assert_eq!(mode(d.socket()), 0o600);
+}
+
+// #555: a crashed app must not leave Remote Control's phone pushes off, so the daemon deletes the
+// presence file when the app's connection drops, but not when a CLI attach's does.
+#[test]
+fn the_presence_file_goes_when_the_app_disconnects_not_a_cli_attach() {
+    let d = Daemon::start("presence");
+    let present = studio_terminal_daemon::presence(&d.socket());
+    assert_eq!(present, d.dir.join("present"));
+    std::fs::write(&present, "").unwrap();
+
+    let mut cli = d.client();
+    list(&mut cli);
+    drop(cli);
+    let mut app = d.client();
+    app.send(&json!({ "op": "app" })).unwrap();
+    list(&mut app);
+    // Time for the daemon to see the CLI's drop.
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(present.exists(), "a CLI attach's disconnect deleted it");
+
+    drop(app);
+    wait_for("the presence file to go", || !present.exists());
+}

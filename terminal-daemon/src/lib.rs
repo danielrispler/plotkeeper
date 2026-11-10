@@ -18,6 +18,9 @@
 //!   terminal's session, so after `exited` is set it lists what was left behind; `rss_kb` is their sum. `cwd` is
 //!   the folder its leader is in now, such as where its shell `cd`-ed to, until it exits.
 //!
+//! - `app`: marks the connection as the app's, not a CLI attach's; no reply. When it drops (a quit or a crash), the
+//!   daemon deletes the presence file ([`presence`]).
+//!
 //! Unknown requests and fields are ignored.
 //!
 //! Beside the socket, the daemon keeps a record of the terminals it runs, `[{id, argv, cwd}]` ([`record`]), rewritten
@@ -40,6 +43,12 @@ pub const PROTOCOL: u64 = 1;
 /// The record of the terminals the daemon on `socket` runs.
 pub fn record(socket: &Path) -> PathBuf {
     socket.with_extension("terminals.json")
+}
+
+/// The studio's presence file for Remote Control (#522), which the daemon deletes when the app's connection drops
+/// (#555). The socket lives in the studio's data folder, `studio_hook::data_dir`, beside `present`.
+pub fn presence(socket: &Path) -> PathBuf {
+    socket.with_file_name("present")
 }
 
 /// Stops the daemon on `socket`, whatever its protocol, for an upgrade (#322 resolution, point 4): `SIGTERM`, then
