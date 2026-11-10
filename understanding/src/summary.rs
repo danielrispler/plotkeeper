@@ -14,7 +14,8 @@ use studio_core::SummaryRequest;
 pub struct TurnSummary {
     /// The turn's main ideas in a few lines; its first line is the turn-end intention.
     pub summary: String,
-    /// `None` on a turn with a card, which teaches it instead, or when the writer's was unusable.
+    /// `None` on a turn with a card, which teaches it instead, on a turn with nothing to teach
+    /// (#583), or when the writer's was unusable.
     pub learning: Option<Learning>,
 }
 
@@ -50,11 +51,39 @@ const EARLIER: usize = 3;
 /// 14).
 const MARKS: [&str; 7] = ["✅", "✔️", "✔", "✓", "☑️", "(correct)", "(Correct)"];
 
+/// A right option longer than this many times the longest wrong option, and by more than
+/// `KEY_GAP` characters, gives the answer away (#583). Of Haiku's 3 real questions, the 2
+/// guessable ones' right options were 1.30 and 1.60 times it, and the fair one's 0.85.
+const KEY_RATIO: f64 = 1.25;
+
+/// The characters a right option must exceed the longest wrong one by to be guessable, so short
+/// options such as `O(n log n)` against `O(n)` pass.
+const KEY_GAP: f64 = 15.0;
+
+/// Why a learning section is unusable.
+enum Unusable {
+    /// Its right option is clearly the longest; a reply with one is asked for once more.
+    Guessable,
+    Other(String),
+}
+
+impl std::fmt::Display for Unusable {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Unusable::Guessable => {
+                f.write_str("its right option is much longer than every wrong one")
+            }
+            Unusable::Other(why) => f.write_str(why),
+        }
+    }
+}
+
 impl TurnSummary {
     /// The summary in a writer's reply, which must hold one JSON object with a summary. On a turn
-    /// with a `card`, any learning section is dropped. A learning section that is unusable is
-    /// dropped too, with one line on why.
-    pub fn from_reply(reply: &str, card: bool) -> Result<(TurnSummary, Option<String>), String> {
+    /// with a `card`, any learning section is dropped; a `null` one means the turn has nothing to
+    /// teach, and a missing one is unusable. A learning section that is unusable is dropped too,
+    /// with why.
+    fn from_reply(reply: &str, card: bool) -> Result<(TurnSummary, Option<Unusable>), String> {
         let head: String = reply.chars().take(300).collect();
         let value: serde_json::Value = serde_json::from_str(object(reply))
             .map_err(|e| format!("the summary reply does not parse ({e}): {head:?}"))?;
@@ -62,7 +91,7 @@ impl TurnSummary {
         if summary.is_empty() {
             return Err(format!("the summary reply holds no summary: {head:?}"));
         }
-        let learning = match card {
+        let learning = match card || value.get("learning") == Some(&serde_json::Value::Null) {
             true => Ok(None),
             false => learning(&value["learning"]).map(Some),
         };
@@ -76,17 +105,26 @@ impl TurnSummary {
 }
 
 /// The learning section in `value`, its options' marks removed, or why it is unusable.
-fn learning(value: &serde_json::Value) -> Result<Learning, String> {
+fn learning(value: &serde_json::Value) -> Result<Learning, Unusable> {
     let idea = value["idea"].as_str().map(str::trim).unwrap_or_default();
     if idea.is_empty() {
-        return Err("its learning section has no idea".into());
+        return Err(Unusable::Other("its learning section has no idea".into()));
     }
-    let mut question = Quiz::from_value(value["question"].clone())?;
+    let mut question = Quiz::from_value(value["question"].clone()).map_err(Unusable::Other)?;
     for option in &mut question.options {
         let text = MARKS
             .iter()
             .fold(option.text.clone(), |t, m| t.replace(m, ""));
         option.text = text.trim().into();
+    }
+    let length = |o: &crate::Choice| o.text.chars().count() as f64;
+    let key = question.options.get(question.key).map_or(0.0, length);
+    let wrong = (question.options.iter().enumerate())
+        .filter(|(i, _)| *i != question.key)
+        .map(|(_, o)| length(o))
+        .fold(0.0, f64::max);
+    if key > KEY_RATIO * wrong && key - wrong > KEY_GAP {
+        return Err(Unusable::Guessable);
     }
     Ok(Learning {
         idea: idea.into(),
@@ -95,7 +133,9 @@ fn learning(value: &serde_json::Value) -> Result<Learning, String> {
 }
 
 /// The summary of `request`'s turn from `writer`, read with the session's last 3 summaries in
-/// `store`, which keeps it. The writer is asked once more when its reply gives none. Each problem
+/// `store`, which keeps it. The writer is asked once more when its reply gives none, or gives a
+/// learning section whose right option is guessable by its length; the second reply stands, or the
+/// first when the second gives no summary. Each problem
 /// is one line for `log`. The store is not locked while the writer runs.
 pub fn write_summary(
     store: &Mutex<CardStore>,
@@ -110,7 +150,12 @@ pub fn write_summary(
         .latest_summaries(&request.session_id, EARLIER);
     let card = request.card.is_some();
     let summary = || TurnSummary::from_reply(&writer.summarize(setup, &request, &earlier)?, card);
-    match summary().or_else(|_| summary()) {
+    let first = summary();
+    let retry = match &first {
+        Err(_) => true,
+        Ok((_, problem)) => matches!(problem, Some(Unusable::Guessable)),
+    };
+    match if retry { summary().or(first) } else { first } {
         Ok((summary, problem)) => {
             if let Some(problem) = problem {
                 log(format!("no learning section on {}: {problem}", request.id));
@@ -273,7 +318,7 @@ Reply with one JSON object and nothing else:
 
 /// The summary writer's system prompt (#517, decision 14), which replaces Claude Code's own.
 const SUMMARY: &str = concat!(
-    r#"You write the turn summary of one turn of a coding agent's session, for the developer who runs it and wants to learn from the turn instead of reading its raw output. Under the summary sits a learning section: the turn's main idea and one multiple-choice question on it, which he answers when he chooses.
+    r#"You write the turn summary of one turn of a coding agent's session, for the developer who runs it and wants to learn from the turn instead of reading its raw output. Under the summary sits, when the turn has something to teach, a learning section: the turn's main idea and one multiple-choice question on it, which he answers when he chooses.
 
 Answer from the input: his prompt, the agent's responses in the turn, its intentions, and the session's latest turn summaries with their questions. Connect to those earlier turns where it helps, and never ask the same question twice. Use only this input: do not use tools or read files.
 
@@ -285,10 +330,14 @@ Reply with one JSON object and nothing else:
 {"summary": string, "learning": {"idea": string, "question": {"text": string, "options": [{"text": string, "why": string}], "key": number}}}
 - summary: the turn's main ideas in at most 4 short lines. Its first line says what the turn did or found, or what it asks the developer.
 - learning.idea: the one idea from the turn worth keeping, in one or two sentences.
-- learning.question.text: one question on that idea that the turn answers.
-- learning.question.options: 3 or 4 options. Each wrong option is plausible, of the right option's length and tone. Never mark the right option in its text, with a sign, an emoji or a word: the options are shown in another order, and the key alone says which is right.
+- learning.question.text: one question on that idea that asks why something works or how a mechanism behaves, so its answer carries over beyond this session. Never ask what the agent did or decided.
+- learning.question.options: 3 or 4 options. Each wrong option is plausible: a mistake a developer could really make, of the right option's length, specificity and tone. The right option is not the longest or most specific one. Never mark the right option in its text, with a sign, an emoji or a word: the options are shown in another order, and the key alone says which is right.
 - learning.question.options[].why: one line on why that option is right or wrong, never naming an option by its letter or place.
 - learning.question.key: the place of the right option, counting from 0.
+
+A number taken from the input keeps its bound or condition, such as "upper bound", "on fixtures" or "median", wherever it appears.
+
+When the turn holds no idea that carries over beyond this session, such as orchestration, status, merges or bookkeeping, reply with {"summary": string, "learning": null}. The summary is still written: a question made up for such a turn wastes the developer's time.
 
 When the input says the turn has a card, reply with {"summary": string} only.
 "#

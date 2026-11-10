@@ -31,7 +31,7 @@ A few lines on a turn's main ideas, written by one cheap writer call when the tu
 _Avoid_: Card (on a change, with its quiz first), brief (the whole session's, kept for resuming)
 
 **Learning section**:
-The part under a turn summary that teaches: the turn's main idea and one multiple-choice question on it, collapsed until Daniel opens it. The same writer call writes it. A turn with a card has none; it points to the card instead, so the turn is not quizzed twice.
+The part under a turn summary that teaches: the turn's main idea and one multiple-choice question on it, collapsed until Daniel opens it. The same writer call writes it. Its question asks why something works or how it behaves, not what the agent did. A turn with a card has none; it points to the card instead, so the turn is not quizzed twice. A turn with nothing that carries over beyond the session, such as a merge or a status turn, has none either.
 _Avoid_: Quiz (a card's question on a change)
 
 **Transcript**:
