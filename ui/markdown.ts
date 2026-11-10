@@ -1,8 +1,9 @@
 // Responses render as Markdown (#525, decision 21): tables, lists, code and links. The text is
-// untrusted and the page can call the shell, so raw HTML stays text, only `http(s)` links become
-// links, and an image shows its alt text. marked loads as a plain script from `vendor/`.
+// untrusted and the page can call the shell, so raw HTML stays text, only `http(s)` and file links
+// (#557) become links, and an image shows its alt text. marked loads as a plain script from `vendor/`.
 
 import { invoke } from "./dom.js";
+import { fileTarget, openFile } from "./paths.js";
 
 declare const marked: typeof import("marked");
 
@@ -18,7 +19,8 @@ const create = () =>
       image: ({ text }) => escape(text),
       link({ href, tokens }) {
         const inner = this.parser.parseInline(tokens);
-        return /^https?:\/\//i.test(href) ? `<a href="${escape(href)}">${inner}</a>` : inner;
+        if (/^https?:\/\//i.test(href)) return `<a href="${escape(href)}">${inner}</a>`;
+        return !href.startsWith("#") && fileTarget(href) ? `<a href="${escape(href)}" data-file>${inner}</a>` : inner;
       },
     },
   });
@@ -27,8 +29,9 @@ let renderer: ReturnType<typeof create> | undefined;
 // `text` as safe HTML.
 export const markdown = (text: string) => (renderer ??= create()).parse(text, { async: false });
 
-// An element showing `text` rendered; a link click opens in the browser through the shell.
-export function rendered(tag: string, text: string, className = ""): HTMLElement {
+// An element showing `text` rendered; a link click opens in the browser through the shell, a file
+// link in Daniel's editor, a relative one from `cwd`, the folder of the session that wrote it.
+export function rendered(tag: string, text: string, className = "", cwd: string | null = null): HTMLElement {
   const node = document.createElement(tag);
   node.className = `markdown ${className}`.trim();
   node.dir = "auto";
@@ -37,7 +40,10 @@ export function rendered(tag: string, text: string, className = ""): HTMLElement
     const link = (event.target as Element).closest("a");
     if (!link) return;
     event.preventDefault();
-    invoke("open_link", { target: link.href }).catch((e) => console.warn(e));
+    // marked percent-encodes a link's path; a `file://` URL is decoded with its host dropped.
+    const href = link.getAttribute("href") ?? "";
+    if (link.hasAttribute("data-file")) openFile(href.startsWith("file:") ? href : decodeURI(href), cwd);
+    else invoke("open_link", { target: link.href }).catch((e) => console.warn(e));
   });
   return node;
 }

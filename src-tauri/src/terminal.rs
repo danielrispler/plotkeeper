@@ -125,37 +125,114 @@ pub fn claude_argv(resume: Option<String>) -> Vec<String> {
     studio_workbench::claude(&plugin, resume.as_deref())
 }
 
-/// Opens a link Daniel clicked in a terminal: an `http(s)` URL, or a file path, absolute or
-/// relative to the configured repository, with any `:line:column` dropped. A file that could run
-/// when opened is revealed in Finder instead (`reveals`).
-// shortcut: opens files in their default app and loses the line; open in an editor at the line if
-// that matters.
+/// Opens an `http(s)` URL Daniel clicked, in a terminal or a rendered reply, in the browser. A file
+/// goes through `open_file`.
 #[tauri::command]
 pub fn open_link(target: String) -> Result<(), String> {
-    let mut reveal = false;
-    let target = if target.starts_with("https://") || target.starts_with("http://") {
-        target
-    } else {
-        let path = target.split(':').next().unwrap_or_default();
-        let path = match path.strip_prefix("~/") {
-            Some(rest) => std::env::home_dir().unwrap_or_default().join(rest),
-            None => Path::new(&repo()).join(path),
-        };
-        if !path.exists() {
-            return Err(format!("no such file: {}", path.display()));
-        }
-        reveal = reveals(&path);
-        path.display().to_string()
-    };
-    // Never an option: a URL starts with its scheme and a path is absolute.
-    let mut open = Command::new("/usr/bin/open");
-    if reveal {
-        open.arg("-R");
+    if !(target.starts_with("https://") || target.starts_with("http://")) {
+        return Err(format!("not a web link: {target}"));
     }
-    let opened = open.arg(&target).status();
-    match opened {
+    // Never an option: a URL starts with its scheme.
+    run(&["/usr/bin/open".into(), target])
+}
+
+/// Zed's command-line tool, the default editor when installed.
+const ZED: &str = "/Applications/Zed.app/Contents/MacOS/cli";
+
+/// The one opener for files (#557): opens `path` in Daniel's editor at `line` and `column`. A
+/// relative path resolves in `cwd`, the folder of the session that printed it, else the configured
+/// repository. `editor` is `settings.json`'s argv template, never a shell string (`editor_argv`). A
+/// file that could run when opened is revealed in Finder instead (`reveals`).
+#[tauri::command(async)]
+pub fn open_file(
+    path: String,
+    line: u32,
+    column: u32,
+    cwd: Option<String>,
+    editor: Option<Vec<String>>,
+) -> Result<(), String> {
+    let path = resolve(&path, &cwd.unwrap_or_else(repo));
+    if !path.exists() {
+        return Err(format!("no such file: {}", path.display()));
+    }
+    let shown = path.display().to_string();
+    let argv = if reveals(&path) {
+        vec!["/usr/bin/open".into(), "-R".into(), shown]
+    } else {
+        editor_argv(
+            editor.as_deref(),
+            &shown,
+            line,
+            column,
+            Path::new(ZED).exists(),
+        )
+    };
+    run(&argv)
+}
+
+/// `path` from the folder `cwd`: `~/` from the home folder, a relative path inside `cwd`.
+fn resolve(path: &str, cwd: &str) -> PathBuf {
+    match path.strip_prefix("~/") {
+        Some(rest) => std::env::home_dir().unwrap_or_default().join(rest),
+        None => Path::new(cwd).join(path),
+    }
+}
+
+/// The editor's argv for `path`, absolute, at `line` and `column`: `template`'s arguments with
+/// `{path}`, `{line}` and `{column}` filled in, so the path stays one argument whatever it holds.
+/// With no template, Zed's CLI when `zed` is installed, else `open`, which loses the line.
+fn editor_argv(
+    template: Option<&[String]>,
+    path: &str,
+    line: u32,
+    column: u32,
+    zed: bool,
+) -> Vec<String> {
+    let default = if zed {
+        [ZED, "{path}:{line}:{column}"]
+    } else {
+        ["/usr/bin/open", "{path}"]
+    };
+    let template = template.map_or_else(|| default.map(String::from).to_vec(), <[_]>::to_vec);
+    // The path last, so a `{line}` in it stays as written.
+    template
+        .iter()
+        .map(|arg| {
+            arg.replace("{line}", &line.to_string())
+                .replace("{column}", &column.to_string())
+                .replace("{path}", path)
+        })
+        .collect()
+}
+
+/// The argv that runs `argv`: as is when its program is a path, else under a login shell, so a bare
+/// name (`code`) is found on the profile's `PATH` as the daemon finds `claude`; a Finder launch has
+/// a bare one. The arguments reach the program as `"$@"`, never parsed by the shell.
+fn launcher(argv: &[String]) -> Vec<String> {
+    if argv.first().is_none_or(|program| program.contains('/')) {
+        return argv.to_vec();
+    }
+    let shell = std::env::var("SHELL").unwrap_or("/bin/zsh".into());
+    [
+        shell,
+        "-l".into(),
+        "-c".into(),
+        "exec \"$@\"".into(),
+        "studio".into(),
+    ]
+    .into_iter()
+    .chain(argv.iter().cloned())
+    .collect()
+}
+
+/// Runs `argv` through `launcher` and waits for it.
+fn run(argv: &[String]) -> Result<(), String> {
+    let argv = launcher(argv);
+    let (program, args) = argv.split_first().ok_or("the editor command is empty")?;
+    match Command::new(program).args(args).status() {
         Ok(status) if status.success() => Ok(()),
-        _ => Err(format!("could not open {target}")),
+        Ok(status) => Err(format!("{} exited with {status}", argv.join(" "))),
+        Err(e) => Err(format!("could not run {program}: {e}")),
     }
 }
 
@@ -281,5 +358,57 @@ mod tests {
         .collect();
         let _ = fs::remove_dir_all(&dir);
         assert_eq!(revealed, ["Tool.app", "run", "go.command", "setup.SH"]);
+    }
+
+    fn strings(args: &[&str]) -> Vec<String> {
+        args.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn the_editor_argv_keeps_the_path_one_argument() {
+        let path = "/r/my dir/a;rm -rf ~.rs";
+        let zed = super::editor_argv(None, path, 12, 3, true);
+        assert_eq!(
+            zed,
+            [super::ZED, "/r/my dir/a;rm -rf ~.rs:12:3"].map(String::from)
+        );
+        let code = strings(&["code", "-g", "{path}:{line}:{column}"]);
+        assert_eq!(
+            super::editor_argv(Some(&code), path, 5, 1, true),
+            strings(&["code", "-g", "/r/my dir/a;rm -rf ~.rs:5:1"])
+        );
+        // A bare program is found through the login shell's `PATH`, with each argument its own.
+        let launched = super::launcher(&strings(&["code", "-g", path]));
+        assert_eq!(
+            &launched[1..],
+            strings(&["-l", "-c", "exec \"$@\"", "studio", "code", "-g", path])
+        );
+    }
+
+    #[test]
+    fn with_no_zed_and_no_editor_set_the_fallback_is_open() {
+        assert_eq!(
+            super::editor_argv(None, "/r/a.rs", 4, 1, false),
+            strings(&["/usr/bin/open", "/r/a.rs"])
+        );
+        assert_eq!(
+            super::launcher(&strings(&["/usr/bin/open", "/r/a.rs"])),
+            strings(&["/usr/bin/open", "/r/a.rs"])
+        );
+    }
+
+    #[test]
+    fn a_relative_path_resolves_in_the_folder_of_the_session_that_printed_it() {
+        let worktree = "/r/Falinks/.claude/worktrees/fix-x";
+        assert_eq!(
+            super::resolve("src/foo.rs", worktree),
+            std::path::Path::new("/r/Falinks/.claude/worktrees/fix-x/src/foo.rs")
+        );
+        assert_eq!(
+            super::resolve("/abs/a.rs", worktree),
+            std::path::Path::new("/abs/a.rs")
+        );
+        assert!(super::resolve("~/notes.md", worktree).ends_with("notes.md"));
+        assert!(!super::resolve("~/notes.md", worktree).starts_with(worktree));
     }
 }

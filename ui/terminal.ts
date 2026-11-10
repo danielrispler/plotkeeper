@@ -6,7 +6,7 @@ import type * as Xterm from "@xterm/xterm";
 import { connect, decode, encode, onEvent, request } from "./daemon.js";
 import { invoke, listen } from "./dom.js";
 import { keyAction, type Action } from "./keys.js";
-import { pathLinks, quotePath } from "./paths.js";
+import { openFile, pathLinks, quotePath } from "./paths.js";
 import { studio } from "./state.js";
 
 declare const Terminal: typeof Xterm.Terminal;
@@ -35,6 +35,11 @@ export function openPane(place: HTMLElement, id: string, cwd: string, argv: stri
     fontSize: parseFloat(value("--term-size")),
     lineHeight: parseFloat(value("--term-line")),
     theme: { background: value("--term-bg"), foreground: value("--term-fg") },
+    // OSC 8 links: a `file://` one opens in the editor, any other through the shell's `open_link`.
+    linkHandler: {
+      allowNonHttpProtocols: true,
+      activate: (_, uri) => (/^file:/i.test(uri) ? openFile(uri, cwd) : openLink(uri)),
+    },
   });
   const fit = new FitAddon.FitAddon();
   const search = new SearchAddon.SearchAddon();
@@ -185,7 +190,7 @@ export function openPane(place: HTMLElement, id: string, cwd: string, argv: stri
       const links = pathLinks(line).map(({ text, start }) => ({
         text,
         range: { start: { x: start + 1, y }, end: { x: start + text.length, y } },
-        activate: () => openLink(text),
+        activate: () => openFile(text, cwd),
       }));
       show(links.length ? links : undefined);
     },

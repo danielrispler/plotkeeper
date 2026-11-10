@@ -363,6 +363,7 @@ fn main() {
             terminal::terminal_connect,
             terminal::terminal_send,
             terminal::open_link,
+            terminal::open_file,
             terminal::places,
             terminal::claude_argv,
             terminal::create_task,

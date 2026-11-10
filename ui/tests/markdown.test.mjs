@@ -26,11 +26,19 @@ test("raw HTML, a javascript: link and an event handler come out as inert text",
       '[q](https://e.com/"onmouseover="x)',
   );
   assert.doesNotMatch(html, /<(script|img|b)\b/);
-  assert.doesNotMatch(html, /<a href="(?!https?:)/);
+  assert.doesNotMatch(html, /<a href="(?!https?:|file:)/);
   assert.doesNotMatch(html, /<[^>]*\son\w+=/i);
   assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
   assert.match(html, /&lt;img src=x onerror=&quot;alert\(1\)&quot;&gt;/);
   assert.match(html, /click/);
   assert.match(html, /file/);
   assert.doesNotMatch(html, /<a[^>]*>click/);
+});
+
+test("a file link renders as a link the editor opens, an http(s) link as one the browser opens (#557)", () => {
+  const html = markdown("[keys](apps/studio/ui/keys.ts#L12) [abs](file:///Users/d/a.rs) [web](https://e.com) [no](javascript:x())");
+  assert.match(html, /<a href="apps\/studio\/ui\/keys.ts#L12" data-file>keys<\/a>/);
+  assert.match(html, /<a href="file:\/\/\/Users\/d\/a.rs" data-file>abs<\/a>/);
+  assert.match(html, /<a href="https:\/\/e.com">web<\/a>/);
+  assert.doesNotMatch(html, /<a[^>]*>no/);
 });

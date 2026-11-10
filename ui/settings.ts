@@ -24,6 +24,9 @@ export interface Settings {
   // The summary writer's model and effort, and whether opening a turn writes its summary.
   summaries: { model: string; effort: string; on_open: boolean };
   doctor: DoctorEntry[];
+  // The command that opens a file at its line (#557), an argv with `{path}`, `{line}` and `{column}`,
+  // never a shell string. null: the shell's default, Zed's CLI when installed, else `open`.
+  editor: string[] | null;
 }
 
 // Both settings files, parsed: the settings and keymap in effect.
@@ -54,6 +57,7 @@ const defaultSettings: Settings = {
     { label: "Check the installation", command: "claude doctor", kind: "shell" },
     { label: "Full checkup", command: "/doctor", kind: "session" },
   ],
+  editor: null,
 };
 
 // Today's shortcuts. The terminal's Cmd+C and Cmd+V stay the Edit menu's (`keys.ts`).
@@ -117,7 +121,15 @@ function readSettings(json: unknown, report: Report): Settings {
           return ok;
         })
       : d.doctor,
+    editor: readEditor(json.editor, report),
   };
+}
+
+function readEditor(value: unknown, report: Report): string[] | null {
+  if (value === undefined || value === null) return null;
+  if (Array.isArray(value) && value.length > 0 && value.every((arg) => typeof arg === "string")) return value;
+  report('editor: expected an array of strings, such as ["code", "-g", "{path}:{line}:{column}"]');
+  return null;
 }
 
 // The order modifiers take in a keystroke, here and in `keys.ts`.

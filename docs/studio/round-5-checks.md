@@ -35,6 +35,7 @@ It writes every output to `local-evidence/2026-11-09-round-5/real-calls-<time>/`
 - [ ] **#540:** a reply ending with a question shows "your turn", not "needs you"; a session waiting on its subagents is not in the "Needs you" group.
 - [ ] **#541:** a session started with Auto mode runs in auto mode, and a blocked action still shows "needs you".
 - [ ] **#542:** the docked panel's shell survives an app restart and shows under a #529 split.
+- [ ] **#557:** from a task worktree session, clicking `path:line` in the terminal and a file link in the rail opens that worktree's file, not the main checkout's, at that line in Zed.
 
 ## Checked automatically, early
 
