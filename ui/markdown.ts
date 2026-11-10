@@ -3,7 +3,7 @@
 // (#557) become links, and an image shows its alt text. marked loads as a plain script from `vendor/`.
 
 import { invoke } from "./dom.js";
-import { fileTarget, openFile } from "./paths.js";
+import { codePath, fileTarget, openFile } from "./paths.js";
 
 declare const marked: typeof import("marked");
 
@@ -17,6 +17,11 @@ const create = () =>
     renderer: {
       html: ({ text, block }) => (block ? `<p>${escape(text)}</p>` : escape(text)),
       image: ({ text }) => escape(text),
+      // Inline code that is a whole file path links to the editor (#581).
+      codespan({ text }) {
+        const code = `<code>${escape(text)}</code>`;
+        return codePath(text) ? `<a href="${escape(text)}" data-file>${code}</a>` : code;
+      },
       link({ href, tokens }) {
         const inner = this.parser.parseInline(tokens);
         if (/^https?:\/\//i.test(href)) return `<a href="${escape(href)}">${inner}</a>`;
