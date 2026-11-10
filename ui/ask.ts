@@ -4,6 +4,7 @@
 
 import { invoke, text } from "./dom.js";
 import { rendered } from "./markdown.js";
+import { studio } from "./state.js";
 
 // Each item's box, kept across the view's redraws (every second), so a question being typed, an
 // open box and an answer all stay. shortcut: never pruned; prune by the listed sessions if it grows.
@@ -34,7 +35,8 @@ function askBox(session: string, item: string): HTMLElement {
     reply.replaceChildren(text("p", "Asking…", "asking"));
     try {
       const answer = await invoke<string>("ask", { session, item, question });
-      reply.replaceChildren(rendered("div", answer));
+      const cwd = studio.listed.find((s) => s.id === session)?.cwd ?? null;
+      reply.replaceChildren(rendered("div", answer, "", cwd));
     } catch (e) {
       const retry = button("Retry");
       retry.addEventListener("click", ask);

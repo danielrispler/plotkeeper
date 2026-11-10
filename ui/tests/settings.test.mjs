@@ -106,3 +106,12 @@ test("a file of the wrong shape is reported", () => {
   assert.equal(loaded.errors.length, 2);
   assert.equal(loaded.settings.zoom, 1);
 });
+
+test("the editor is an argv template, none by default, and anything else is reported", () => {
+  assert.equal(reload(initial, { settings: null, keymap: null }).settings.editor, null);
+  const code = `{ "editor": ["code", "-g", "{path}:{line}:{column}"] }`;
+  assert.deepEqual(reload(initial, { settings: code, keymap: null }).settings.editor, ["code", "-g", "{path}:{line}:{column}"]);
+  const shell = reload(initial, { settings: `{ "editor": "code -g {path}" }`, keymap: null });
+  assert.equal(shell.settings.editor, null);
+  assert.deepEqual(shell.errors, ['settings.json: editor: expected an array of strings, such as ["code", "-g", "{path}:{line}:{column}"]']);
+});
