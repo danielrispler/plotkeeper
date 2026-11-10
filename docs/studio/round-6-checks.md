@@ -101,6 +101,14 @@ Between passes, nothing waits for him. After each pass, a code-review agent that
 - [ ] Run each. Both open a new terminal in the selected session's folder: the first runs `claude doctor` and leaves a shell after it; the second starts `claude` on `/doctor`. With nothing selected, both run in the configured repository.
 - [ ] Add your own entry under `doctor` in `settings.json`: on save, the palette lists it in place of the defaults, marked with its kind's warning.
 
+## #529: split terminals
+
+- [ ] With two sessions running in the studio, select one and press ⌘D: its pane stays and the next session's terminal shows beside it, the selected one nearer the rail. Both take input: click into each and type. The rail follows the selection, not the pinned pane.
+- [ ] On a wide screen (each pane at least 100 columns), the two sit side by side. Narrow the window: they stack, one above the other, before the rail turns into an overlay. Focus mode (⌘⇧↩) puts them side by side again when the whole window has room.
+- [ ] Drag the divider between the panes: both resize, and Claude Code redraws in each at its new size; the divider stops before a pane gets too small.
+- [ ] Selecting the pinned session shows it alone; selecting another brings the split back. ⌘D again closes the split. Closing the pinned session's terminal closes the split.
+- [ ] ⌘⇧P lists "Toggle split" with ⌘D. Dropping a file types its path into the focused pane only.
+
 ## #558: a program that fails at start shows its exit code and last lines
 
 - [ ] Start a session in a folder where `claude` cannot start (for example, with a failing `claude` script first on `PATH`). Within 2 s, the terminal's place says "claude could not start: code <n>" above the program's last lines, with "Show output", which shows its pane and full output.
@@ -114,3 +122,13 @@ Between passes, nothing waits for him. After each pass, a code-review agent that
 - [ ] In that session, ask for something auto mode's classifier blocks: the row shows **needs you** and the toast fires, as in default mode.
 - [ ] A session started without the tick shows no mode on the rail's line.
 - [ ] End the auto session, then "Open" it from the rail's "⋯" menu (or "Open here"): it resumes in auto mode. Restarting the terminal daemon (#470) also brings it back in auto mode.
+
+## #556: unseen your-turn mark and sounds
+
+- [ ] A session whose turn ends while you look at another shows a filled dot and a bold name, in the list and in the strip. Selecting it with the window focused clears the mark; selecting it while another app has focus does not.
+- [ ] After a restart, the sessions you had seen stay plain and the unseen ones keep the mark.
+- [ ] "Mark unseen" in the rail's ⋯ menu brings the mark back; it stays until you select the session again.
+- [ ] ⌘J with no session needing you goes to the next unseen one.
+- [ ] Focused: another session that needs you plays one sound (Glass) after about 3 seconds, in any layout, and never twice. The session you are viewing plays none, and a your-turn plays none.
+- [ ] In the background: needs you plays Glass and your turn plays Tink, each only with its notification.
+- [ ] `"sounds": false` in `settings.json` silences both. The sounds feel right, not alarming.

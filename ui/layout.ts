@@ -54,3 +54,22 @@ export function resized(column: keyof Widths, width: number, widths: Widths, mod
   while (columns(window - other - most, cell) < wide) most--; // float error at the edge
   return { ...widths, [column]: Math.max(least[column], Math.min(Math.round(width), most)) };
 }
+
+// A pane's box in the terminal's body, as insets from its edges in px.
+export type Box = { top: number; right: number; bottom: number; left: number };
+export type Split = { stacked: boolean; share: number };
+// The margin around a pane, which is also half the gap that holds a split's divider.
+const margin = 6;
+
+// The panes' boxes in a terminal body of `width` × `height` px (#529): one pane fills it, else a split
+// gives its first pane `share` of the body, side by side or stacked, the other pane the rest. A dragged
+// share stops where a pane would get under 80 columns side by side, or under 120 px stacked.
+export function paneBoxes(width: number, height: number, cell: number, split: Split | null): Box[] {
+  const all = { top: margin, right: margin, bottom: margin, left: margin };
+  if (!split) return [all];
+  const length = split.stacked ? height : width;
+  const least = split.stacked ? 120 : Math.ceil(narrow * cell) + 2 * margin;
+  const at = Math.round(Math.max(least, Math.min(split.share * length, length - least)));
+  const [start, end] = split.stacked ? (["top", "bottom"] as const) : (["left", "right"] as const);
+  return [{ ...all, [end]: length - at + margin }, { ...all, [start]: at + margin }];
+}

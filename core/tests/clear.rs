@@ -204,5 +204,5 @@ fn your_turn_after_a_clear_names_the_selected_row() {
     let selected = studio.selected().map(|s| s.agent.id.clone());
     assert_eq!(selected.as_deref(), Some(OLD));
     let due = notifications.due(Duration::from_secs(10), || true, |_| false, || selected);
-    assert_eq!(due, None);
+    assert_eq!(due.notification, None);
 }

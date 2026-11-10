@@ -232,9 +232,10 @@ export function openPane(place: HTMLElement, id: string, cwd: string, argv: stri
       show(links.length ? links : undefined);
     },
   });
-  // A file dropped on the window types its path into the visible pane.
+  // A file dropped on the window types its path into the visible pane; in a split (#529), the focused one.
   const drops = listen<{ paths: string[] }>("tauri://drag-drop", ({ paths }) => {
     if (place.hidden || place.offsetParent === null) return;
+    if (document.querySelectorAll(".pane:not([hidden])").length > 1 && !place.contains(document.activeElement)) return;
     keys(paths.map(quotePath).join(" ") + " ");
     term.focus();
   });

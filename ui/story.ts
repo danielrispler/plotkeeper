@@ -70,6 +70,8 @@ export function showView(selected: Selection | null) {
   element("reopen").onclick = () => startClaude(session.cwd, session.resume_id, "", session.permission_mode === "auto").catch((e) => console.warn(e));
   element("rename").hidden = agent !== null;
   element("rename").onclick = () => askName(session);
+  element("mark-unseen").hidden = agent !== null || session.state !== "your_turn" || session.unseen === true;
+  element("mark-unseen").onclick = () => void invoke("mark_unseen", { id: session.id }).catch((e) => console.warn(e));
   // Only a terminal the studio runs can be closed from here.
   element("close").hidden = agent !== null || session.terminal === null;
   element("close").onclick = () => askClose(session);

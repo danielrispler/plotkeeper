@@ -21,7 +21,7 @@ use std::{
     time::{Duration, Instant},
 };
 use studio_core::{
-    CardRequest, Notifications, Output, Session,
+    CardRequest, Notifications, Output, Session, Sound,
     State::{Ended, NeedsYou},
     Studio, SummaryRequest,
 };
@@ -485,7 +485,9 @@ fn main() {
             turn_summary,
             turn_reply,
             agent_summary,
-            notify_while_focused
+            notify_while_focused,
+            mark_unseen,
+            sounds
         ])
         .on_window_event(|_, event| {
             if let Some(path) = presence::path() {
@@ -650,8 +652,8 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
             let snapshot = studio_workbench::context_window(&usage, &resume_id);
             state.lock().unwrap().set_snapshot(&id, snapshot) | changed
         });
-        let names_changed = NAMES_CHANGED.swap(false, Ordering::AcqRel);
-        let changed = read || transcripts_changed || windows_changed || names_changed;
+        let list_changed = LIST_CHANGED.swap(false, Ordering::AcqRel);
+        let changed = read || transcripts_changed || windows_changed || list_changed;
         // The open request goes in the same pass as the list that shows "needs you" (#569).
         if let Ok(data) = answer::data()
             && let Some(ask) = app
@@ -662,14 +664,21 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
         {
             let _ = app.emit("ask", ask);
         }
-        if state.lock().unwrap().tick(millis()) || changed {
-            sent.list(app);
-        }
         // Asking for focus waits on the main thread, which never takes this lock.
         let focused = || {
             let window = app.get_webview_window("main");
             window.and_then(|w| w.is_focused().ok()) == Some(true)
         };
+        // Daniel sees the selected session in a focused window (#556); the window is asked only
+        // while it is unseen, and not under the core's lock, which the main thread's commands take.
+        let unseen = state.lock().unwrap().selected().is_some_and(|s| s.unseen);
+        let seen = state.lock().unwrap().see_selected(unseen && focused());
+        if let Some((id, turns)) = &seen {
+            unsaved(app.state::<Cards>().lock().unwrap().seen(id, *turns));
+        }
+        if state.lock().unwrap().tick(millis()) || changed || seen.is_some() {
+            sent.list(app);
+        }
         // Takes the core's lock under the notices' lock; `tell` never holds both.
         let needs_you = |id: &str| {
             let studio = state.lock().unwrap();
@@ -683,8 +692,11 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                 let studio = state.lock().unwrap();
                 studio.selected().map(|s| s.agent.id.clone())
             });
-        if let Some((title, body)) = due {
+        if let Some((title, body)) = due.notification {
             let _ = app.notification().builder().title(title).body(body).show();
+        }
+        if let Some(sound) = due.sound {
+            play(sound);
         }
         // The cards also change with no line read: a card arrives, or one turns 30 minutes old.
         sent.cards(app);
@@ -694,8 +706,9 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
     }
 }
 
-/// A session's name changed since the read loop last sent the list: a PR was found.
-static NAMES_CHANGED: AtomicBool = AtomicBool::new(false);
+/// The list changed outside the read loop since it last sent it: a PR was found, or Daniel marked a
+/// session unseen.
+static LIST_CHANGED: AtomicBool = AtomicBool::new(false);
 
 /// Finds the PR of each session's branch with `gh pr view` (#461, decision 19), on its own thread so
 /// the read loop never waits on the network, and asks again after 5 minutes. `gh` runs as Daniel
@@ -734,7 +747,7 @@ fn prs(app: &AppHandle) {
                 .unwrap()
                 .set_pr(&branch, pr)
             {
-                NAMES_CHANGED.store(true, Ordering::Release);
+                LIST_CHANGED.store(true, Ordering::Release);
             }
         }
         thread::sleep(Duration::from_secs(5));
@@ -874,6 +887,36 @@ enum Notice<'a> {
 #[tauri::command]
 fn notify_while_focused(on: bool, notices: State<Notices>) {
     notices.lock().unwrap().while_focused = on;
+}
+
+/// Daniel marked session `id` unseen (#556), from the rail's menu.
+#[tauri::command(async)]
+fn mark_unseen(id: String, studio: State<Mutex<Studio>>, cards: State<Cards>) {
+    if let Some((id, turns)) = studio.lock().unwrap().mark_unseen(&id) {
+        unsaved(cards.lock().unwrap().seen(&id, turns));
+        LIST_CHANGED.store(true, Ordering::Release);
+    }
+}
+
+/// The `sounds` setting (#556), from `settings.json`, which the window parses.
+#[tauri::command]
+fn sounds(on: bool, notices: State<Notices>) {
+    notices.lock().unwrap().sounds = on;
+}
+
+/// Plays a macOS system sound, so the studio bundles none (#556).
+fn play(sound: Sound) {
+    let name = match sound {
+        Sound::NeedsYou => "Glass",
+        Sound::YourTurn => "Tink",
+    };
+    let file = format!("/System/Library/Sounds/{name}.aiff");
+    // Waited on its own thread, so no finished `afplay` is left a zombie.
+    thread::spawn(move || {
+        if let Err(e) = Command::new("afplay").arg(file).status() {
+            eprintln!("studio: play the {name} sound: {e}");
+        }
+    });
 }
 
 /// Time since the app started, a monotonic clock for combining notices (#434, decision 28).
