@@ -57,10 +57,11 @@
     </section>
 
     <aside class="rail" aria-label="Session story">
-      <!-- One line (#574): the verdict and the phase (#475); the times (#473) and the model show on
-           hover. Rename, Close and Delete wait in the "⋯" menu. -->
+      <!-- One line (#574): the verdict, the permission mode unless default (#541), always shown, and
+           the phase (#475); the times (#473) and the model show on hover. Rename, Close and Delete
+           wait in the "⋯" menu. -->
       <div class="rail-h">
-        <p id="headline" class="headline"><span id="state" class="state"></span> <span id="phase" class="phase"></span></p>
+        <p id="headline" class="headline"><span id="state" class="state"></span> <span id="mode" class="mode"></span> <span id="phase" class="phase"></span></p>
         <button id="rail-more" class="btn small" type="button" popovertarget="rail-actions" aria-label="More actions" hidden>⋯</button>
         <div id="rail-actions" class="menu" popover>
           <!-- An ended session opens again with `claude --resume` (#467). -->

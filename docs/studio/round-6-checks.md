@@ -101,3 +101,10 @@ Between passes, nothing waits for him. After each pass, a code-review agent that
 - [ ] At the same time, a toast at the terminal's bottom-right corner names the session (or program) and the code, with "Show output" and ×. Typing in the terminal goes on: the toast takes no focus and nothing moves.
 - [ ] Let a hidden pane fail at start, for example a revived terminal or a Doctor entry while another pane shows. The shown terminal stays; only the toast appears, and its "Show output" shows the failed pane.
 - [ ] A session that runs a while and then exits, and a program that exits with code 0, show no notice: only the pane's usual exit line.
+
+## #541: start a session in auto mode
+
+- [ ] Open the picker (⌘N): "Auto mode" is unticked. Tick it and start a session: it runs in Claude Code's auto mode (its footer says so), and after its first prompt the rail's line reads "Running auto mode …". No bypass option is offered anywhere.
+- [ ] In that session, ask for something auto mode's classifier blocks: the row shows **needs you** and the toast fires, as in default mode.
+- [ ] A session started without the tick shows no mode on the rail's line.
+- [ ] End the auto session, then "Open" it from the rail's "⋯" menu (or "Open here"): it resumes in auto mode. Restarting the terminal daemon (#470) also brings it back in auto mode.

@@ -114,7 +114,9 @@ pub fn counts(repo: &Path, path: &str) -> Result<Counts, String> {
 /// so a profile that sets it too never loads the hooks twice, and `CLAUDE_CLIENT_PRESENCE_FILE` to
 /// `presence`, which the shell keeps while the window is focused, so Remote Control skips a phone
 /// push then (#522). The daemon runs it under a login shell with the terminal's `STUDIO_TERMINAL_ID`.
-pub fn claude(plugin: &Path, presence: &Path, resume: Option<&str>) -> Vec<String> {
+/// `auto` runs it in Claude Code's auto mode (#541), which still asks when its classifier blocks a
+/// step; bypass mode is never offered.
+pub fn claude(plugin: &Path, presence: &Path, resume: Option<&str>, auto: bool) -> Vec<String> {
     let mut argv = vec![
         "env".into(),
         format!("CLAUDE_CODE_PLUGIN_DIRS={}", plugin.display()),
@@ -123,6 +125,9 @@ pub fn claude(plugin: &Path, presence: &Path, resume: Option<&str>) -> Vec<Strin
         "--settings".into(),
         status_line(plugin),
     ];
+    if auto {
+        argv.extend(["--permission-mode".into(), "auto".into()]);
+    }
     if let Some(id) = resume {
         argv.extend(["--resume".into(), id.into()]);
     }
