@@ -262,13 +262,13 @@ fn a_place_counts_commits_ahead_and_behind_its_base_and_its_changed_files() {
         })
     };
 
-    assert_eq!(counts(&busy.path, false), counted(2, 1, 3));
-    assert_eq!(counts(&clean.path, false), counted(0, 1, 0));
+    assert_eq!(counts(&repos.main, &busy.path), counted(2, 1, 3));
+    assert_eq!(counts(&repos.main, &clean.path), counted(0, 1, 0));
     // The main checkout's `trunk` is two behind `origin/trunk`, its upstream.
-    assert_eq!(counts(&main.path, true), counted(0, 2, 0));
+    assert_eq!(counts(&repos.main, &main.path), counted(0, 2, 0));
     let clean_path = Path::new(&clean.path);
     git(clean_path, &["merge", "-q", "--ff-only", "origin/trunk"]);
-    assert_eq!(counts(&clean.path, false), counted(0, 0, 0));
+    assert_eq!(counts(&repos.main, &clean.path), counted(0, 0, 0));
 }
 
 /// No code path forces git (#461, decision 9): the studio's own sources, the workbench, the shell

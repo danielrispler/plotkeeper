@@ -44,12 +44,12 @@ export const bound = (keymap: Keymap, context: string, key: Key): Binding | unde
 // The window's action for `key`; `inList`: the session list has focus, so its own keys come first.
 // While typing in a field or the terminal, a binding without Cmd leaves the key to it, so plain
 // control-letters and digits reach the terminal; only Dismiss runs, since it does not take the key.
-// `answering`: the terminal has focus while a docked card waits for its answer, so the hook holds the
-// call and the terminal has no question to type into; then the answer keys answer the card.
-export function windowBinding(keymap: Keymap, key: Key, typing: boolean, inList = false, answering = false): Binding | undefined {
+// The answer keys answer only while `answerable`: focus is outside the terminal and text fields, and
+// the docked card is on screen (#575, decision 7). The terminal never loses a digit to the card.
+export function windowBinding(keymap: Keymap, key: Key, typing: boolean, inList = false, answerable = false): Binding | undefined {
   const action = (inList ? bound(keymap, "List", key) : undefined) ?? bound(keymap, "Workspace", key);
-  const answers = answering && Array.isArray(action) && action[0] === "studio::Answer";
-  return typing && !key.metaKey && action !== "studio::Dismiss" && !answers ? undefined : action;
+  if (Array.isArray(action) && action[0] === "studio::Answer" && !answerable) return undefined;
+  return typing && !key.metaKey && action !== "studio::Dismiss" ? undefined : action;
 }
 
 // The window's actions by name (#575); an action with an argument, such as `["studio::Answer", "1"]`,

@@ -81,7 +81,8 @@ Every Cmd shortcut goes to the terminal or to the app (`ui/keys.ts`):
 | Cmd+], Cmd+[ | app | selects the next, the previous session in the list's order |
 | Cmd+J | app | selects the next session that needs you |
 | Up, Down | app, while the list has focus | selects the row above, below |
-| 1 to 4 | app, unless typing; also from the terminal while a docked card waits | chooses that answer on the docked card |
+| Cmd+Shift+Enter | app | focus mode: hides the list and the rail; again to leave |
+| 1 to 4 | app, while focus is in the list, the dock or the rail and the rail is on screen; never from the terminal or a text box | chooses that answer on the docked card |
 | Cmd+N, Cmd+, | app | opens the new-session picker; opens `settings.json` in your editor |
 | Cmd+Shift+P | app | the palette: every action with its key; type to filter, Enter runs |
 | Cmd+=, Cmd+-, Cmd+0 | app | zooms the window in, out (from half to double size) and back |

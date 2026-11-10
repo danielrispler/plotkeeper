@@ -87,6 +87,11 @@ export function showView(selected: Selection | null) {
     shownAgent = agent?.id ?? null;
     failed.clear();
   }
+  // Opening another session retries its turns whose summary write failed.
+  if (session.id !== shownSession) {
+    shownSession = session.id;
+    failedTurns.clear();
+  }
   if (agent !== null) {
     element("intention-text").textContent = agentSummaries.get(agent.id) ?? "";
     if (agent.ended_at !== null) summarize(agent.id);
@@ -100,6 +105,7 @@ const agentSummaries = new Map<string, string>();
 const writing = new Set<string>();
 const failed = new Set<string>();
 let shownAgent: string | null = null;
+let shownSession: string | null = null;
 
 // Asks the shell for subagent `id`'s summary: the store's, or one writer call now. A failed call
 // leaves its name and first line, and the next opening asks again.
@@ -215,21 +221,51 @@ export function railTop(docked: boolean, cards: StoredCard[]): StoredCard | null
 }
 
 // The turn summaries the store gave (#526), by turn id, null for a turn with none yet, and those
-// being asked for. With summaries written on open, asking writes a waiting turn's summary.
+// being asked for. With summaries written on open, asking writes a waiting turn's summary, a
+// `claude -p` call, so the asks go one at a time (#574). Those whose write failed wait for the next
+// opening of their session, not the next redraw.
 const summaries = new Map<string, TurnSummary | null>();
 const asking = new Set<string>();
+const failedTurns = new Set<string>();
 
-// Turn `id`'s summary, asked for once; the answer draws the feed again.
-function summaryOf(id: string): TurnSummary | null {
-  if (summaries.has(id) || asking.has(id)) return summaries.get(id) ?? null;
-  asking.add(id);
+// A queue that runs `run` on each pushed id in order, one in flight at a time.
+export function oneAtATime(run: (id: string) => Promise<void>): (id: string) => void {
+  const queue: string[] = [];
+  let busy = false;
+  const next = () => {
+    const id = busy ? undefined : queue.shift();
+    if (id === undefined) return;
+    busy = true;
+    void run(id).finally(() => {
+      busy = false;
+      next();
+    });
+  };
+  return (id) => {
+    queue.push(id);
+    next();
+  };
+}
+
+const askSummary = oneAtATime((id) =>
   invoke<TurnSummary | null>("turn_summary", { id })
-    .then((summary) => summaries.set(id, summary))
-    .catch((e) => console.warn(e))
+    .then((summary) => void summaries.set(id, summary))
+    .catch((e) => {
+      failedTurns.add(id);
+      console.warn(e);
+    })
     .finally(() => {
       asking.delete(id);
       drawFeed();
-    });
+    }),
+);
+
+// Turn `id`'s summary, asked for once; the answer draws the feed again. The feed asks for the newest
+// turn first, so its summary is written first.
+function summaryOf(id: string): TurnSummary | null {
+  if (summaries.has(id) || asking.has(id) || failedTurns.has(id)) return summaries.get(id) ?? null;
+  asking.add(id);
+  askSummary(id);
   return null;
 }
 

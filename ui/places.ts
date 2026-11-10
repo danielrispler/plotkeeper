@@ -52,6 +52,8 @@ export function placeRows({ main, tasks }: Places, counts: (Counts | null)[], se
 // The last places read, their counts, and the places whose actions show.
 let read: { places: Places; counts: (Counts | null)[] } | null = null;
 let reading = false;
+// A forced read asked for while one runs: one more read follows it.
+let again = false;
 let readAt = 0;
 const opened = new Set<string>();
 
@@ -106,22 +108,31 @@ function draw() {
 }
 
 // Reads the places from git, and, while the section is open, their counts. At most one read at a
-// time and, unless `now`, one per 10 s, as the list redraws on every hook event.
+// time and, unless `now`, one per 10 s, as the list redraws on every hook event. A `now` during a
+// read is not dropped: the read after it sees the change, such as a new task.
 export async function readPlaces(now = false) {
-  if (reading || (!now && Date.now() - readAt < 10_000)) return;
+  if (reading) {
+    again ||= now;
+    return;
+  }
+  if (!now && Date.now() - readAt < 10_000) return;
   reading = true;
   readAt = Date.now();
   try {
     const places = await invoke<Places>("places");
     const all = [places.main, ...places.tasks];
     const open = (element("places") as HTMLDetailsElement).open;
-    const count = (place: Place, i: number) => invoke<Counts>("place_counts", { path: place.path, main: i === 0 }).catch(() => null);
+    const count = (place: Place) => invoke<Counts>("place_counts", { path: place.path }).catch(() => null);
     read = { places, counts: open ? await Promise.all(all.map(count)) : all.map(() => null) };
     draw();
   } catch (e) {
     failed(e);
   } finally {
     reading = false;
+  }
+  if (again) {
+    again = false;
+    await readPlaces(true);
   }
 }
 

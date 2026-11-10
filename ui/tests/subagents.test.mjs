@@ -2,8 +2,15 @@
 // apps/studio.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { childrenOf, doneCount, hidden } from "../../dist/list.js";
+import { agentLine, childrenOf, doneCount, hidden } from "../../dist/list.js";
 import { subagentHistory } from "../../dist/story.js";
+
+test("a subagent row has a second line only while it runs or needs you (#572)", () => {
+  assert.equal(agentLine("running", ["Read", null]), "Read");
+  assert.equal(agentLine("needs_you", ["Explore", "2m"]), "Explore · 2m");
+  assert.equal(agentLine("done", ["Explore", "2m", "Found it"]), null);
+  assert.equal(agentLine("failed", ["Explore"]), null);
+});
 
 const MIN = 60_000;
 const agent = (id, fields = {}) => ({

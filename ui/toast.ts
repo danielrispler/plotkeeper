@@ -28,9 +28,17 @@ export function toastFor(listed: Session[], focused: string | null, dismissed: S
   return blocked.length ? { session: blocked[0], count: blocked.length } : null;
 }
 
+// Whether the toast sounds: only for a block not `heard` at the last draw, and only while the window
+// has focus. Unfocused, the shell's "Needs you" notification (#434) sounds for it instead.
+export function chimes(toast: Toast | null, blocked: Set<string>, heard: Set<string> | null, focused: string | null, dismissed: Set<string>, windowFocused: boolean): boolean {
+  if (!toast || heard === null || !windowFocused) return false;
+  return [...blocked].some((id) => !heard.has(id) && id !== focused && !dismissed.has(id));
+}
+
 const dismissed = new Set<string>();
-// The sessions that needed Daniel at the last draw: only a new block sounds.
-let heard = new Set<string>();
+// The sessions that needed Daniel at the last draw: only a new block sounds. Null before the first
+// draw, so the blocks already there at start stay silent.
+let heard: Set<string> | null = null;
 let shown: Toast | null = null;
 
 // shortcut: a synthesised two-note chime; swap in a sound file if Daniel wants another.
@@ -51,15 +59,16 @@ function chime() {
 }
 
 // Draws the toast and the slim header from the list, the selection and the layout.
-export function showToast() {
+// `fromList`: the shell sent the list; its first sending seeds `heard`.
+export function showToast(fromList = false) {
   const mode = (document.body.dataset.layout ?? "full") as LayoutMode;
   const focused = studio.selection?.session.id ?? null;
   const blocked = new Set(studio.listed.filter((s) => s.state === "needs_you").map((s) => s.id));
   // A block Daniel acted on is forgotten, so the session's next one toasts again.
   for (const id of dismissed) if (!blocked.has(id)) dismissed.delete(id);
   shown = toastShows(mode) ? toastFor(studio.listed, focused, dismissed) : null;
-  if (shown && [...blocked].some((id) => !heard.has(id) && id !== focused && !dismissed.has(id))) chime();
-  heard = blocked;
+  if (chimes(shown, blocked, heard, focused, dismissed, document.hasFocus())) chime();
+  if (heard !== null || fromList) heard = blocked;
   const toast = element("toast");
   toast.hidden = shown === null;
   if (shown) {

@@ -91,8 +91,12 @@ function moveInList(by: 1 | -1) {
   next?.click(); // a click without a pointer selects (`list.ts`)
 }
 
-// The docked card's open request, if any: only then are its answer buttons drawn.
-const answerable = () => !element("dock").hidden && element("dock").querySelector(".answer-buttons") !== null;
+// The docked card's open request, if any, on screen: only then are its answer buttons drawn, and
+// focus mode (`visibility`) or a closed overlay (`display`) hides the rail.
+const answerable = () => {
+  const dock = element("dock");
+  return !dock.hidden && dock.offsetParent !== null && getComputedStyle(dock).visibility === "visible" && dock.querySelector(".answer-buttons") !== null;
+};
 
 // Chooses choice `n` of the docked card's first question not yet chosen, else a plan's or a
 // permission's `n`th button. Once every question has a choice, "Send" takes focus, for Enter.
@@ -137,7 +141,7 @@ window.addEventListener("keydown", (event) => {
   const typing = target.isContentEditable || target.matches?.("input, textarea, select") === true;
   const inList = target.closest?.(".list") != null;
   const inTerminal = target.closest?.("#terminal") != null;
-  const action = windowBinding(studio.files.keymap, event, typing, inList, inTerminal && answerable());
+  const action = windowBinding(studio.files.keymap, event, typing, inList, !typing && !inTerminal && answerable());
   if (!run(actions, action)) return;
   if (action !== "studio::Dismiss") event.preventDefault();
 });
@@ -195,7 +199,7 @@ document.addEventListener("pointerdown", (event) => {
 const showList = (sessions: Session[]) => {
   showSessions(sessions);
   showPlaces();
-  showToast();
+  showToast(true);
 };
 // Opening Places reads git's counts at once (#576).
 element("places").addEventListener("toggle", () => void ((element("places") as HTMLDetailsElement).open && readPlaces(true)));

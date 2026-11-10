@@ -2,7 +2,24 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { cardTime, feedTurns, railTop, turnAt } from "../../dist/story.js";
+import { cardTime, feedTurns, oneAtATime, railTop, turnAt } from "../../dist/story.js";
+
+test("summaries on open are written one at a time, in the order asked, newest first", async () => {
+  const started = [];
+  const done = [];
+  const ask = oneAtATime((id) => {
+    started.push(id);
+    return new Promise((resolve) => done.push(resolve));
+  });
+  for (const id of ["newest", "older", "oldest"]) ask(id);
+  assert.deepEqual(started, ["newest"]);
+  done[0]();
+  await new Promise((resolve) => setTimeout(resolve));
+  assert.deepEqual(started, ["newest", "older"]);
+  done[1]();
+  await new Promise((resolve) => setTimeout(resolve));
+  assert.deepEqual(started, ["newest", "older", "oldest"]);
+});
 
 const html = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
 const rail = html.slice(html.indexOf('<aside class="rail"'), html.indexOf("</aside>"));

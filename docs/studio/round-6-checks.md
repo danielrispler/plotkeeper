@@ -65,7 +65,7 @@ Between passes, nothing waits for him. After each pass, a code-review agent that
 
 ## #575: a keyboard spine and a palette
 
-- [ ] A whole loop without the mouse: with two sessions asking a question, press ⌘J. The first one that needs you is selected. Press 1 (from the terminal too): its docked question is answered. Press ⌘J again for the second one (in focus mode, ⌘J jumps to the toast's session and leaves focus mode), answer it, then ⌘] and ⌘[ to step to the next and previous session.
+- [ ] A whole loop without the mouse: with two sessions asking a question, press ⌘J. The first one that needs you is selected. Tab into the list and press 1: its docked question is answered. With the terminal focused, 1 types "1" into it and the card stays open; in focus mode, or with the rail overlay closed, 1 from the list does nothing. Press ⌘J again for the second one (in focus mode, ⌘J jumps to the toast's session and leaves focus mode), answer it, then ⌘] and ⌘[ to step to the next and previous session.
 - [ ] Tab into the session list, then ↑ and ↓ move the selection row by row; the terminal still gets ↑ and ↓ when it has focus.
 - [ ] ⌘N opens the new-session picker; ⌘, opens `settings.json` in your editor, creating it empty if it was missing.
 - [ ] ⌘⇧P opens the palette: every action with its key. Typing filters it, Enter runs the first one, and Esc closes it. Focus mode is listed with ⇧⌘↩.

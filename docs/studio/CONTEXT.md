@@ -162,7 +162,7 @@ The list of every agent session, one row each, sorted by state: needs you, runni
 The column on the window's left that tells the selected session's or subagent's story. It opens on "now": one header line (the verdict and the phase, with the times and the model on hover, and a "⋯" menu for Rename, Close and Delete), then the open question docked under it, or else the newest card, then the current intention, boxed, then the latest turn's summary. Below is a feed of turns, newest first. A turn is one block: its prompt in one line, its summary, its learning question, its cards, the subagents and checks it ran, and its full response, folded, with one "ask about this". The brief and the decision history are folded under the feed.
 
 **Focus mode**:
-The window with the session list and the story rail folded, so the terminal takes the window. One key, rebindable in the keymap, enters it and the same key leaves it; nothing else changes the layout, so the terminal's size never moves under Daniel's typing. While in it, a session that newly needs you shows a toast over the terminal's corner instead.
+The window with the session list and the story rail folded, so the terminal takes the window. One key, rebindable in the keymap, enters it and the same key leaves it. Only two other things leave it: pressing the toast to jump to its session, and the next-needs-you key. Nothing else changes the layout, so the terminal's size never moves under Daniel's typing. While in it, a session that newly needs you shows a toast over the terminal's corner instead.
 _Avoid_: Zen mode, full screen (the macOS window state)
 
 **Falinks run**:

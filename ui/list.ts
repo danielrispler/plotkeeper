@@ -193,6 +193,11 @@ function rowLine(line: string): HTMLElement {
   return node;
 }
 
+// A subagent row's second line, as a session row's (#572): only while it runs or needs Daniel.
+export function agentLine(state: string, details: (string | null)[]): string | null {
+  return state === "running" || state === "needs_you" ? details.filter(Boolean).join(" · ") : null;
+}
+
 // A subagent's row, indented under the agent that spawned it. A worker shows its task, status and
 // last step; a helper its task, type, status, duration and result. A failed child stands out until
 // Daniel opens it.
@@ -205,11 +210,12 @@ function agentRow(session: Session, children: Children, agent: Subagent, depth: 
     agent.kind === "worker"
       ? [stepText(agent.last_step)]
       : [agent.agent_type, age(agent.started_at, agent.ended_at ?? Date.now()), agent.result];
+  const line = agentLine(stateName, details);
   const first = rowLines(
     button,
     stateName,
     [text("span", agent.name, "name")],
-    [...done(children, children.get(agent.id)), rowLine(details.filter(Boolean).join(" · "))],
+    line === null ? null : [...done(children, children.get(agent.id)), rowLine(line)],
   );
   first.classList.toggle("failed", agent.failed && !agent.opened);
   return button;

@@ -70,22 +70,32 @@ fn summary_settings(
 }
 
 /// Daniel opened turn `id` (#526): its summary, written now when it waits for him, which takes
-/// seconds, so the command runs off the main thread. `None` when the turn has none.
+/// seconds, so the command runs off the main thread. `None` when the turn has none. A failed write
+/// keeps the turn waiting and is an error, so the window asks again only at the next opening.
 #[tauri::command(async)]
 fn turn_summary(
     id: String,
     cards: State<Cards>,
     summaries: State<Summaries>,
     writer: State<Writer>,
-) -> Option<StoredSummary> {
+) -> Result<Option<StoredSummary>, String> {
     if let Some(kept) = cards.lock().unwrap().turn_summary(&id) {
-        return Some(kept.clone());
+        return Ok(Some(kept.clone()));
     }
-    let request = summaries.waiting.lock().unwrap().remove(&id)?;
+    let Some(request) = summaries.waiting.lock().unwrap().remove(&id) else {
+        return Ok(None);
+    };
     let setup = summaries.setup.lock().unwrap().clone();
     let log = |line: String| eprintln!("studio: {line}");
-    write_summary(&cards, &**writer, &setup, request, log)?;
-    cards.lock().unwrap().turn_summary(&id).cloned()
+    if write_summary(&cards, &**writer, &setup, request.clone(), log).is_none() {
+        summaries
+            .waiting
+            .lock()
+            .unwrap()
+            .insert(id.clone(), request);
+        return Err(format!("no summary on {id}"));
+    }
+    Ok(cards.lock().unwrap().turn_summary(&id).cloned())
 }
 
 /// The whole final reply of turn `index` of session `id` (#574), which the rail fetches when Daniel

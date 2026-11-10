@@ -108,7 +108,7 @@ test("while typing, a window shortcut without Cmd leaves the key to the field, e
 });
 
 // The keyboard spine and the palette (#575).
-const press = (code, mods = {}) => windowBinding(initial.keymap, key(code, mods), false);
+const press = (code, mods = {}) => windowBinding(initial.keymap, key(code, mods), false, false, true);
 
 test("each default key of the spine runs its action", () => {
   const ran = [];
@@ -146,11 +146,13 @@ test("the digits that answer, and plain control-letters, reach the terminal whil
   assert.equal(keyAction(key("KeyJ", { ctrlKey: true }, "j"), false), "terminal");
 });
 
-test("while a docked card waits for its answer, the digits answer it from the terminal, and other keys stay the terminal's", () => {
-  assert.deepEqual(windowBinding(initial.keymap, key("Digit2", {}, "2"), true, false, true), ["studio::Answer", "2"]);
-  assert.equal(windowBinding(initial.keymap, key("Digit5", {}, "5"), true, false, true), undefined);
-  const { keymap } = reload(initial, { settings: null, keymap: `[{ "bindings": { "ctrl-l": "studio::ToggleList" } }]` });
-  assert.equal(windowBinding(keymap, key("KeyL", { ctrlKey: true }, "l"), true, false, true), undefined);
+test("the digits never answer from the terminal, and answer from the list only while the card is on screen", () => {
+  // From the terminal (typing): the digit is the terminal's, even with a card on screen.
+  assert.equal(windowBinding(initial.keymap, key("Digit2", {}, "2"), true, false, true), undefined);
+  assert.deepEqual(windowBinding(initial.keymap, key("Digit2", {}, "2"), false, true, true), ["studio::Answer", "2"]);
+  // Not while focus mode or a closed overlay hides the card.
+  assert.equal(windowBinding(initial.keymap, key("Digit2", {}, "2"), false, true, false), undefined);
+  assert.equal(windowBinding(initial.keymap, key("Digit5", {}, "5"), false, true, true), undefined);
 });
 
 test("a rebound spine key works and its old key does not", () => {
@@ -160,9 +162,9 @@ test("a rebound spine key works and its old key does not", () => {
   });
   assert.equal(windowBinding(keymap, key("KeyJ", { metaKey: true, shiftKey: true }), false), "studio::NextNeedsYou");
   assert.equal(windowBinding(keymap, key("KeyJ", { metaKey: true }), false), undefined);
-  assert.deepEqual(windowBinding(keymap, key("Digit1", { ctrlKey: true }), false), ["studio::Answer", "1"]);
-  assert.equal(windowBinding(keymap, key("Digit1"), false), undefined);
-  assert.deepEqual(windowBinding(keymap, key("Digit2"), false), ["studio::Answer", "2"]);
+  assert.deepEqual(windowBinding(keymap, key("Digit1", { ctrlKey: true }), false, false, true), ["studio::Answer", "1"]);
+  assert.equal(windowBinding(keymap, key("Digit1"), false, false, true), undefined);
+  assert.deepEqual(windowBinding(keymap, key("Digit2"), false, false, true), ["studio::Answer", "2"]);
 });
 
 const sessions = [

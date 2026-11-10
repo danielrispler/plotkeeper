@@ -72,9 +72,15 @@ pub struct Counts {
     pub changed: usize,
 }
 
-/// The counts of the place at `path`. A task's base is `origin`'s default branch, which tasks start
-/// from; the `main` checkout's is its branch's upstream.
-pub fn counts(path: &str, main: bool) -> Result<Counts, String> {
+/// The counts of the place at `path`, one of the places of `repo`; any other path is refused, so the
+/// window cannot run git in an arbitrary folder. A task's base is `origin`'s default branch, which
+/// tasks start from; the main checkout's is its branch's upstream.
+pub fn counts(repo: &Path, path: &str) -> Result<Counts, String> {
+    let known = places(repo)?;
+    let main = known.main.path == path;
+    if !main && !known.tasks.iter().any(|task| task.path == path) {
+        return Err(format!("not a place of this repository: {path}"));
+    }
     let dir = Path::new(path);
     let base = if main {
         "@{upstream}"

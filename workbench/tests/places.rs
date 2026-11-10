@@ -103,8 +103,18 @@ fn a_branch_with_no_base_has_no_ahead_and_behind() {
         changed: 0,
     });
 
-    assert_eq!(counts(&found.main.path, true), none);
-    assert_eq!(counts(&found.tasks[0].path, false), none);
+    assert_eq!(counts(dir.path(), &found.main.path), none);
+    assert_eq!(counts(dir.path(), &found.tasks[0].path), none);
+}
+
+/// Counts run git only in a place of the repository (#576).
+#[test]
+fn counts_refuse_a_folder_that_is_not_a_place() {
+    let (dir, _) = repo();
+    let other = tempfile::tempdir().unwrap();
+
+    assert!(counts(dir.path(), &other.path().display().to_string()).is_err());
+    assert!(counts(dir.path(), "/").is_err());
 }
 
 #[test]
