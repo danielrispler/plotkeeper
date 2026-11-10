@@ -25,7 +25,7 @@ function newTask(placeholder: string, label: string, create: (value: string) => 
   field.placeholder = placeholder;
   field.setAttribute("aria-label", placeholder);
   field.spellcheck = false;
-  const button = text("button", label);
+  const button = text("button", label, "btn");
   form.append(field, button);
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -105,7 +105,7 @@ function placeRow(name: string, place: Place): HTMLElement {
     element("picker").hidden = true;
     startClaude(place.path).catch((e) => console.warn(e));
   });
-  button.className = "row";
+  button.classList.add("row");
   const first = text("span", "", "l1");
   first.append(text("span", name, "name"));
   const second = text("span", place.path, "l2");

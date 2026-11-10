@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <title>Studio</title>
   <link rel="stylesheet" href="vendor/xterm.css">
+  <link rel="stylesheet" href="tokens.css">
   <link rel="stylesheet" href="style.css">
   <script src="vendor/xterm.js"></script>
   <script src="vendor/addon-fit.js"></script>
@@ -17,14 +18,14 @@
 <body data-layout="full">
   <!-- The grid runs right to left: the list on the right, the terminal in the centre, the rail on the left. -->
   <div class="app">
-    <header class="top">
+    <header class="top" data-tauri-drag-region="deep">
       <!-- Identity: the selected session's name; naming and the context share fill it (#480). -->
       <span id="identity" class="identity"></span>
       <span class="sp"></span>
-      <button id="new-session" type="button">New session</button>
+      <button id="new-session" class="btn small" type="button">New session</button>
       <!-- Usage: context, 5h and week (#480, #481). -->
       <span id="usage" class="usage"></span>
-      <button id="rail-toggle" type="button" hidden>Story ⌘2</button>
+      <button id="rail-toggle" class="btn small" type="button" hidden>Story ⌘2</button>
     </header>
 
     <nav class="list" aria-label="Sessions">
@@ -51,8 +52,8 @@
         <!-- Times (#473), then the phases and the estimate (#475). -->
         <div id="times" class="times"></div>
         <div class="tools">
-          <button id="open-all" class="tool" type="button">Open all</button>
-          <button id="close-all" class="tool" type="button">Close all</button>
+          <button id="open-all" class="btn small tool" type="button">Open all</button>
+          <button id="close-all" class="btn small tool" type="button">Close all</button>
         </div>
       </div>
       <div id="story" class="story">
@@ -61,11 +62,11 @@
         <section id="view" hidden>
           <p id="state" class="state"></p>
           <!-- An ended session opens again with `claude --resume` (#467). -->
-          <button id="reopen" class="tool" type="button" hidden>Open</button>
+          <button id="reopen" class="btn small tool" type="button" hidden>Open</button>
           <!-- Rename and close (#469). -->
-          <button id="rename" class="tool" type="button" hidden>Rename</button>
-          <button id="close" class="tool" type="button" hidden>Close</button>
-          <button id="delete" class="tool" type="button" hidden>Delete</button>
+          <button id="rename" class="btn small tool" type="button" hidden>Rename</button>
+          <button id="close" class="btn small tool" type="button" hidden>Close</button>
+          <button id="delete" class="btn small tool" type="button" hidden>Delete</button>
           <!-- Decision history (#479), a collapsed section above the turns. -->
           <details id="decisions" class="decisions" hidden><summary id="decisions-title"></summary><ol id="decisions-list"></ol></details>
           <!-- The intention and step line (#472). -->
@@ -100,14 +101,14 @@
       <label for="rename-field">Name this session</label>
       <input id="rename-field" autocomplete="off" spellcheck="false" autofocus>
       <!-- The default button comes first, so Enter in the field renames. -->
-      <div class="ask-buttons"><button value="rename">Rename</button><button value="cancel">Cancel</button></div>
+      <div class="ask-buttons"><button class="btn" value="rename">Rename</button><button class="btn" value="cancel">Cancel</button></div>
     </form>
   </dialog>
   <dialog id="close-dialog" class="ask">
     <form method="dialog">
       <p><strong id="close-name"></strong> is still working: it is in a turn or has background tasks.</p>
       <p>Closing ends its terminal and every process in it.</p>
-      <div class="ask-buttons"><button value="close">Close</button><button value="cancel" autofocus>Cancel</button></div>
+      <div class="ask-buttons"><button class="btn" value="close">Close</button><button class="btn" value="cancel" autofocus>Cancel</button></div>
     </form>
   </dialog>
   <!-- Delete: the row leaves the list; its worktree and merged branch only when ticked. -->
@@ -118,14 +119,14 @@
       <label id="delete-worktree-option"><input id="delete-worktree" type="checkbox"> Also remove its worktree
         <code id="delete-worktree-path"></code> and, if merged, its branch</label>
       <p id="delete-shared" hidden>Another session still works in this worktree.</p>
-      <div class="ask-buttons"><button value="delete">Delete</button><button value="cancel" autofocus>Cancel</button></div>
+      <div class="ask-buttons"><button class="btn" value="delete">Delete</button><button class="btn" value="cancel" autofocus>Cancel</button></div>
     </form>
   </dialog>
   <dialog id="delete-losses" class="ask">
     <form method="dialog">
       <p>The worktree has work that is not on origin:</p>
       <div id="delete-losses-list"></div>
-      <div class="ask-buttons"><button value="remove">Remove anyway</button><button value="keep" autofocus>Keep the worktree</button></div>
+      <div class="ask-buttons"><button class="btn" value="remove">Remove anyway</button><button class="btn" value="keep" autofocus>Keep the worktree</button></div>
     </form>
   </dialog>
   <!-- The daemon upgrade's question (#470, #322 resolution point 4). -->
@@ -134,7 +135,7 @@
       <h1 id="upgrade-title">Restart the terminal daemon?</h1>
       <p>The daemon is older than this app. Every terminal is idle. A restart ends each terminal and brings it back:</p>
       <ul id="upgrade-terms"></ul>
-      <p class="actions"><button value="no">Not now</button> <button value="yes" class="primary">Restart the daemon</button></p>
+      <p class="actions"><button class="btn" value="no">Not now</button> <button class="btn primary" value="yes">Restart the daemon</button></p>
     </form>
   </dialog>
   <span id="probe" aria-hidden="true">MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM</span>

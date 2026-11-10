@@ -137,7 +137,7 @@ function changedBy({ session_id, changed_by }: CardRequest): HTMLElement[] {
 function keyWrongButton(id: string, keyWrong: boolean): HTMLElement {
   const label = keyWrong ? "You flagged the key as wrong" : "The key is wrong";
   const flag = pressable(prose("button", label) as HTMLButtonElement, keyWrong, () => record("key_wrong", { id }));
-  flag.className = "key-wrong";
+  flag.classList.add("key-wrong");
   flag.disabled = keyWrong;
   return flag;
 }
