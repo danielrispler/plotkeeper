@@ -129,6 +129,8 @@ h1 { margin: 0 0 var(--sp-4); }
 .restart { display: flex; gap: var(--sp-4); align-items: center; padding: var(--sp-2) var(--sp-3); font-size: var(--size-small);
            color: var(--fg); background: var(--raised); }
 .restart[hidden] { display: none; }
+/* A program that failed at start (#558): its last lines, between the notice and "Show output". */
+.elsewhere .last-lines { font: var(--size-small)/var(--term-line) var(--mono); color: var(--fg); white-space: pre-wrap; margin: var(--sp-3) 0 var(--sp-4); }
 .restart .btn, .elsewhere .btn { flex: none; font-size: var(--size-small); padding: var(--sp-1) var(--sp-4); background: var(--selected); }
 .upgrade { background: var(--surface); color: var(--fg); border: 0; border-radius: var(--radius); box-shadow: var(--shadow);
            max-width: var(--dialog); padding: var(--sp-6); }

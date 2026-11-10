@@ -12,7 +12,8 @@ import { element, invoke, pressable, text } from "./dom.js";
 import { offerBuilds, upgrade, type Revive } from "./restart.js";
 import { show as showSelection } from "./selection.js";
 import { studio } from "./state.js";
-import { openPane } from "./terminal.js";
+import { sessionName } from "./list.js";
+import { openPane, startNotice } from "./terminal.js";
 import type { Selection, Session } from "./types.js";
 
 type Pane = { box: HTMLElement; term: Xterm.Terminal | null; title: string };
@@ -31,6 +32,7 @@ export function startPanes(): Promise<void> {
     show("shell", () => openPane(box("shell"), "shell", repo));
     revived = revive(config.outdated);
   });
+  window.addEventListener("start-failed", (e) => failedAtStart((e as CustomEvent).detail));
   onEvent((event) => {
     if (event.ev !== "lost") return;
     revived = connect().then((config) => revive(config.outdated));
@@ -178,3 +180,15 @@ export async function showSession(session: Session | null, clicked = false) {
   show(ELSEWHERE, () => null);
 }
 const ELSEWHERE = "elsewhere";
+
+// A program that failed at start (#558), a session's, a Doctor entry's or a revived one: the message
+// box names the session, else the program, and the code, above its last lines; "Show output" shows
+// its pane. It shows at once: the start was Daniel's own, under 2 s ago.
+function failedAtStart({ id, name, status, lines }: { id: string; name: string; status: string; lines: string[] }) {
+  const session = studio.listed.find((s) => s.terminal === id);
+  const notice = text("p", startNotice(session ? sessionName(session) : name, { status }), "empty");
+  notice.setAttribute("role", "alert");
+  box(ELSEWHERE).classList.add("elsewhere");
+  box(ELSEWHERE).replaceChildren(notice, text("pre", lines.join("\n"), "last-lines"), pressable(text("button", "Show output"), false, () => show(id, () => null)));
+  show(ELSEWHERE, () => null);
+}

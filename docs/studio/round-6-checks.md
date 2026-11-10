@@ -94,3 +94,8 @@ Between passes, nothing waits for him. After each pass, a code-review agent that
 - [ ] Below, the turns read newest first, each with its prompt in one line, its summary, its learning question (folded), its cards, its subagents, its checks and its full response (folded). Opening an older turn's full response shows its final reply. No "Last 30 minutes", "Older", "Responses", "Questions" or "Subagents" section is left; #535's subagent entries are in the turn that ran them.
 - [ ] Each turn shows one "Ask about this", only on hover; asking about a turn works as before.
 - [ ] With summaries written on open (settings), opening a session writes its waiting turns' summaries once, not again on each redraw.
+
+## #558: a program that fails at start shows its exit code and last lines
+
+- [ ] Start a session in a folder where `claude` cannot start (for example, with a failing `claude` script first on `PATH`). Within 2 s, the terminal's place says "claude could not start: code <n>" above the program's last lines, with "Show output", which shows its pane and full output.
+- [ ] A session that runs a while and then exits, and a program that exits with code 0, show no notice: only the pane's usual exit line.
