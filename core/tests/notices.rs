@@ -113,7 +113,7 @@ fn at(ms: u64) -> Duration {
 
 /// The notification due at `ms`, from a window that is not focused, with no session needing Daniel.
 fn due(notifications: &mut Notifications, ms: u64) -> Option<(String, String)> {
-    notifications.due(at(ms), || false, |_| false)
+    notifications.due(at(ms), || false, |_| false, || None)
 }
 
 #[test]
@@ -153,7 +153,10 @@ fn a_focused_window_gets_no_notification() {
     notifications.push("New card", "Falinks e3b1c7a2".into(), at(10_000));
 
     // Daniel is looking at the list, so the notice is dropped, not held for later.
-    assert_eq!(notifications.due(at(13_000), || true, |_| false), None);
+    assert_eq!(
+        notifications.due(at(13_000), || true, |_| false, || None),
+        None
+    );
     assert_eq!(due(&mut notifications, 14_000), None);
 }
 
@@ -179,7 +182,7 @@ fn needs_you_notification(upto: usize) -> Option<(String, String)> {
             .session(id)
             .is_some_and(|s| s.state == State::NeedsYou)
     };
-    notifications.due(at(4_000), || false, needs_you)
+    notifications.due(at(4_000), || false, needs_you, || None)
 }
 
 #[test]
@@ -193,4 +196,89 @@ fn a_needs_you_notice_shows_while_its_session_still_needs_you() {
 #[test]
 fn a_permission_answered_within_3_seconds_shows_no_needs_you_notice() {
     assert_eq!(needs_you_notification(5), None);
+}
+
+/// `two-sessions.jsonl`'s sessions, both in a turn at its end: the first in `Falinks`, the second in
+/// the `issue-322-terminals` worktree.
+const TWO: &str = include_str!("fixtures/two-sessions.jsonl");
+const FIRST: &str = "c41d8e27-6a3f-4b90-8e15-2f7a9b0c3d64";
+const SECOND: &str = "9e0b5f13-d72a-4c6e-b8f4-61a3c2d9e807";
+
+/// Session `id`'s `Stop`, under the prompt id its turn runs under.
+fn stop(id: &str) -> String {
+    let prompt_id = match id {
+        FIRST => "e2a7c9d1-3f5b-4a8e-9c6d-0b1a2f3e4d5c",
+        _ => "71c3e5a9-b2d4-4f6e-8a0c-1e3d5f7a9b2c",
+    };
+    format!(
+        r#"{{"session_id":"{id}","prompt_id":"{prompt_id}","hook_event_name":"Stop","stop_hook_active":false,"studio_received_ms":1793261020000}}"#
+    )
+}
+
+/// The notification due 3 seconds after the sessions `stopped` reach "your turn" live, each queued
+/// as the shell queues it, with the first session selected, the window `focused` or not, and the
+/// setting for notifying while focused `while_focused`.
+fn your_turn_notification(
+    stopped: &[&str],
+    focused: bool,
+    while_focused: bool,
+) -> Option<(String, String)> {
+    let mut studio = Studio::replayed(TWO.lines());
+    studio.select(FIRST);
+    let mut notifications = Notifications::default();
+    notifications.while_focused = while_focused;
+    for id in stopped {
+        for output in studio.apply(&stop(id)) {
+            if let Output::YourTurn { session_id } = output {
+                let body = studio.notice_body(&session_id, None);
+                notifications.push_your_turn(&session_id, body, at(1_000));
+            }
+        }
+    }
+    let selected = studio.selected().map(|s| s.agent.id.clone());
+    notifications.due(at(4_000), || focused, |_| false, || selected)
+}
+
+#[test]
+fn a_session_starting_raises_no_your_turn() {
+    // Line 4 is the second session's `SessionStart`: at your turn, with no turn ended.
+    let mut studio = Studio::default();
+    let outputs = TWO.lines().flat_map(|line| studio.apply(line));
+    assert!(
+        !outputs
+            .into_iter()
+            .any(|o| matches!(o, Output::YourTurn { .. }))
+    );
+}
+
+#[test]
+fn your_turn_notifies_while_not_focused_for_the_selected_session_too() {
+    assert_eq!(
+        your_turn_notification(&[FIRST], false, false),
+        Some(("Your turn".into(), "Falinks c41d8e27".into()))
+    );
+}
+
+#[test]
+fn your_turn_does_not_notify_while_focused_by_default() {
+    assert_eq!(your_turn_notification(&[FIRST, SECOND], true, false), None);
+}
+
+#[test]
+fn your_turn_notifies_while_focused_with_the_setting_on_for_another_session_only() {
+    assert_eq!(
+        your_turn_notification(&[FIRST, SECOND], true, true),
+        Some(("Your turn".into(), "issue-322-terminals 9e0b5f13".into()))
+    );
+}
+
+#[test]
+fn two_sessions_reaching_your_turn_together_give_one_notification() {
+    assert_eq!(
+        your_turn_notification(&[FIRST, SECOND], false, false),
+        Some((
+            "2 notices".into(),
+            "Your turn: Falinks c41d8e27\nYour turn: issue-322-terminals 9e0b5f13".into()
+        ))
+    );
 }

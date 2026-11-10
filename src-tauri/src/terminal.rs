@@ -122,7 +122,8 @@ pub fn delete_merged_branch(branch: String) -> Result<(), String> {
 #[tauri::command]
 pub fn claude_argv(resume: Option<String>) -> Vec<String> {
     let plugin = Path::new(&repo()).join("apps/studio/plugin");
-    studio_workbench::claude(&plugin, resume.as_deref())
+    let presence = crate::presence::path().unwrap_or_default();
+    studio_workbench::claude(&plugin, &presence, resume.as_deref())
 }
 
 /// Opens an `http(s)` URL Daniel clicked, in a terminal or a rendered reply, in the browser. A file

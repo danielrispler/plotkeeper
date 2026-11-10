@@ -23,6 +23,9 @@ export interface Settings {
   terminal: { font_size: number | null };
   // The summary writer's model and effort, and whether opening a turn writes its summary.
   summaries: { model: string; effort: string; on_open: boolean };
+  // Whether "your turn" also notifies while the window is focused, for any session but the selected
+  // one (#517, decision 6).
+  notifications: { while_focused: boolean };
   doctor: DoctorEntry[];
   // The command that opens a file at its line (#557), an argv with `{path}`, `{line}` and `{column}`,
   // never a shell string. null: the shell's default, Zed's CLI when installed, else `open`.
@@ -53,6 +56,7 @@ const defaultSettings: Settings = {
   zoom: 1,
   terminal: { font_size: null },
   summaries: { model: "haiku", effort: "low", on_open: false },
+  notifications: { while_focused: false },
   doctor: [
     { label: "Check the installation", command: "claude doctor", kind: "shell" },
     { label: "Full checkup", command: "/doctor", kind: "session" },
@@ -102,6 +106,7 @@ function readSettings(json: unknown, report: Report): Settings {
   };
   const terminal = isObject(json.terminal) ? json.terminal : {};
   const summaries = isObject(json.summaries) ? json.summaries : {};
+  const notifications = isObject(json.notifications) ? json.notifications : {};
   const d = defaultSettings;
   // null when unset or of the wrong type: the stylesheet's size.
   const fontSize = pick("terminal.font_size", terminal.font_size ?? undefined, NaN);
@@ -112,6 +117,9 @@ function readSettings(json: unknown, report: Report): Settings {
       model: pick("summaries.model", summaries.model, d.summaries.model),
       effort: pick("summaries.effort", summaries.effort, d.summaries.effort),
       on_open: pick("summaries.on_open", summaries.on_open, d.summaries.on_open),
+    },
+    notifications: {
+      while_focused: pick("notifications.while_focused", notifications.while_focused, d.notifications.while_focused),
     },
     doctor: Array.isArray(json.doctor)
       ? json.doctor.filter((e, i): e is DoctorEntry => {

@@ -2,9 +2,9 @@
 //! core, then feeds it each new line live and hands the core's card requests to the card writer. The
 //! window lists every session (#369, decision 18) and shows the one Daniel selected: its cards, with
 //! their quizzes, his guesses, his ratings and the longer explanations he asked for, which the card
-//! store keeps on disk, and its check lines. A session that newly needs Daniel, a new card and a
-//! failed worker raise a macOS notification while the window is not focused, and the Dock badge
-//! counts the sessions that need him (#369, decision 22).
+//! store keeps on disk, and its check lines. A session that newly needs Daniel or reaches your turn,
+//! a new card and a failed worker raise a macOS notification while the window is not focused, and
+//! the Dock badge counts the sessions that need him (#369, decision 22; #517, decision 6).
 
 use std::{
     collections::HashMap,
@@ -33,6 +33,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
 
 mod answer;
+mod presence;
 mod restart;
 mod settings;
 mod terminal;
@@ -378,9 +379,16 @@ fn main() {
             answer::watch,
             answer::answer,
             settings::settings_files,
-            settings::set_zoom
+            settings::set_zoom,
+            notify_while_focused
         ])
+        .on_window_event(|_, event| {
+            if let tauri::WindowEvent::Focused(focused) = event {
+                presence::focus(*focused);
+            }
+        })
         .setup(move |app| {
+            presence::focus(false);
             let app = app.handle().clone();
             restart::watch_build(app.clone());
             settings::watch(app.clone());
@@ -389,8 +397,13 @@ fn main() {
             thread::spawn(move || follow(&app, &log, &writer));
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("run the studio");
+        .build(tauri::generate_context!())
+        .expect("build the studio")
+        .run(|_, event| {
+            if let tauri::RunEvent::Exit = event {
+                presence::focus(false);
+            }
+        });
 }
 
 /// Reads the log from its start, then from where it stopped. A line counts once it ends in a newline,
@@ -464,6 +477,9 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                     Output::Brief(request) => write(app, writer, &mut queues, request, false),
                     Output::NeedsYou { session_id, agent } => {
                         tell(app, Notice::NeedsYou, &session_id, agent.as_deref());
+                    }
+                    Output::YourTurn { session_id } => {
+                        tell(app, Notice::YourTurn, &session_id, None);
                     }
                     Output::Failed { session_id, agent } => {
                         tell(
@@ -555,7 +571,10 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
             .state::<Notices>()
             .lock()
             .unwrap()
-            .due(uptime(), focused, needs_you);
+            .due(uptime(), focused, needs_you, || {
+                let studio = state.lock().unwrap();
+                studio.selected().map(|s| s.agent.id.clone())
+            });
         if let Some((title, body)) = due {
             let _ = app.notification().builder().title(title).body(body).show();
         }
@@ -688,6 +707,7 @@ fn tell(app: &AppHandle, notice: Notice, session_id: &str, agent: Option<&str>) 
     match notice {
         Notice::Titled(title) => notices.push(title, body, uptime()),
         Notice::NeedsYou => notices.push_needs_you(session_id, body, uptime()),
+        Notice::YourTurn => notices.push_your_turn(session_id, body, uptime()),
     }
 }
 
@@ -695,7 +715,15 @@ fn tell(app: &AppHandle, notice: Notice, session_id: &str, agent: Option<&str>) 
 /// it is due, or its own title.
 enum Notice<'a> {
     NeedsYou,
+    YourTurn,
     Titled(&'a str),
+}
+
+/// The setting that also notifies "your turn" while the window is focused (#517, decision 6), from
+/// `settings.json`, which the window parses.
+#[tauri::command]
+fn notify_while_focused(on: bool, notices: State<Notices>) {
+    notices.lock().unwrap().while_focused = on;
 }
 
 /// Time since the app started, a monotonic clock for combining notices (#434, decision 28).
