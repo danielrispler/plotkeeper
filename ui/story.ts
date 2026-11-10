@@ -14,6 +14,7 @@ import { decisionElement, questionElement } from "./questions.js";
 import { worktreeOf } from "./paths.js";
 import { checkTime, counts, estimateText, timeNode, times } from "./times.js";
 import { studio } from "./state.js";
+import { typeInto } from "./typing.js";
 import { stateLabels, type CheckLine, type Losses, type Places, type Question, type Selection, type Session, type Transcript } from "./types.js";
 
 export function showView(selected: Selection | null) {
@@ -92,8 +93,7 @@ function showStory(session: string, cwd: string, story: Transcript | null) {
 
 // Rename (#469): the row's name, kept in the event log, and `/rename` typed into the session while
 // its claude runs, so Claude Code shows the same name. An empty name gives the row its folder's again.
-// shortcut: the command lands after anything Daniel left typed in its prompt; clear the line first
-// if that bites.
+// The command waits for Daniel's draft and never answers a session that needs him (#544).
 function askName(session: Session) {
   const dialog = element("rename-dialog") as HTMLDialogElement;
   const field = element("rename-field") as HTMLInputElement;
@@ -103,8 +103,17 @@ function askName(session: Session) {
     const name = field.value.trim();
     await invoke("rename", { id: session.id, name }).catch((e) => console.warn(e));
     if (!name || session.terminal === null || session.state === "ended") return;
-    const type = (data: string) => request({ op: "input", id: session.terminal, data: encode(new TextEncoder().encode(data)) });
-    await type(`/rename ${name}`).then(() => type("\r")).catch((e) => console.warn(e));
+    const terminal = session.terminal;
+    const blocked = () => studio.listed.find((s) => s.id === session.id)?.state === "needs_you";
+    await typeInto(terminal, `/rename ${name}`, blocked, {
+      now: Date.now,
+      sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
+      send: (data) => request({ op: "input", id: terminal, data: encode(new TextEncoder().encode(data)) }),
+      notice: (text) => {
+        element("notice").textContent = text;
+        element("notice").hidden = false;
+      },
+    }).catch((e) => console.warn(e));
   };
   dialog.returnValue = "";
   dialog.showModal();

@@ -23,11 +23,12 @@ use std::{
 use studio_core::{
     CardRequest, Notifications, Output, Session,
     State::{Ended, NeedsYou},
-    Studio,
+    Studio, SummaryRequest,
 };
 use studio_understanding::{
     CardStore, CardWriter, ClaudeWriter, FakeWriter, Fingerprints, Rating, Row, SessionCards,
-    Versions, backfilled, fingerprint_changes, millis, worktree_root, write_brief, write_stop,
+    StoredSummary, SummarySetup, Versions, backfilled, fingerprint_changes, millis, worktree_root,
+    write_brief, write_stop, write_summary,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
@@ -43,6 +44,49 @@ type Cards = Mutex<CardStore>;
 
 /// The notices not shown yet, which the log thread and the card writer's threads add to.
 type Notices = Mutex<Notifications>;
+
+/// The summary writer's setup, from the settings the window sends (#526), and the turns whose
+/// summary waits for Daniel to open it while summaries are written on open, by turn id.
+// shortcut: the waiting turns live in memory, so a restart loses them; keep them in the store if
+// that bites.
+#[derive(Default)]
+struct Summaries {
+    setup: Mutex<SummarySetup>,
+    waiting: Mutex<HashMap<String, SummaryRequest>>,
+}
+
+/// The settings' `summaries` (#517, decision 17): the writer's model and effort, and whether a
+/// summary is written when Daniel opens its turn instead of at the turn's end.
+#[tauri::command]
+fn summary_settings(
+    model: String,
+    effort: String,
+    on_open: bool,
+    summaries: State<Summaries>,
+    studio: State<Mutex<Studio>>,
+) {
+    *summaries.setup.lock().unwrap() = SummarySetup { model, effort };
+    studio.lock().unwrap().set_summaries_on_open(on_open);
+}
+
+/// Daniel opened turn `id` (#526): its summary, written now when it waits for him, which takes
+/// seconds, so the command runs off the main thread. `None` when the turn has none.
+#[tauri::command(async)]
+fn turn_summary(
+    id: String,
+    cards: State<Cards>,
+    summaries: State<Summaries>,
+    writer: State<Writer>,
+) -> Option<StoredSummary> {
+    if let Some(kept) = cards.lock().unwrap().turn_summary(&id) {
+        return Some(kept.clone());
+    }
+    let request = summaries.waiting.lock().unwrap().remove(&id)?;
+    let setup = summaries.setup.lock().unwrap().clone();
+    let log = |line: String| eprintln!("studio: {line}");
+    write_summary(&cards, &**writer, &setup, request, log)?;
+    cards.lock().unwrap().turn_summary(&id).cloned()
+}
 
 /// The session list, in its order.
 #[tauri::command]
@@ -344,6 +388,7 @@ fn main() {
         .manage(Cards::new(store))
         .manage(Notices::default())
         .manage(writer.clone())
+        .manage(Summaries::default())
         .manage(terminal::Daemon::default())
         .manage(Mutex::new(answer::Watching::default()))
         .invoke_handler(tauri::generate_handler![
@@ -380,6 +425,8 @@ fn main() {
             answer::answer,
             settings::settings_files,
             settings::set_zoom,
+            summary_settings,
+            turn_summary,
             notify_while_focused
         ])
         .on_window_event(|_, event| {
@@ -475,6 +522,7 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                 match output {
                     Output::Card(request) => write(app, writer, &mut queues, request, true),
                     Output::Brief(request) => write(app, writer, &mut queues, request, false),
+                    Output::Summary(request) => summarize(app, writer, &mut queues, request),
                     Output::NeedsYou { session_id, agent } => {
                         tell(app, Notice::NeedsYou, &session_id, agent.as_deref());
                     }
@@ -686,12 +734,54 @@ fn write(
             sent();
         }
     };
-    let queue = queues.entry(id).or_insert_with(|| {
+    let _ = queue(queues, id).send(Box::new(job));
+}
+
+/// Writes the summary of `request`'s turn on its session's queue, after the turn's card, then
+/// switches the turn's intention to its first line (#517, decision 16). While summaries are written
+/// on open, the turn waits for Daniel instead (`turn_summary`).
+fn summarize(
+    app: &AppHandle,
+    writer: &Writer,
+    queues: &mut HashMap<String, mpsc::Sender<Job>>,
+    request: SummaryRequest,
+) {
+    if app
+        .state::<Mutex<Studio>>()
+        .lock()
+        .unwrap()
+        .summaries_on_open()
+    {
+        let waiting = &app.state::<Summaries>().waiting;
+        waiting.lock().unwrap().insert(request.id.clone(), request);
+        return;
+    }
+    let (app, writer) = (app.clone(), writer.clone());
+    let id = request.session_id.clone();
+    let job = move || {
+        let log = |line: String| eprintln!("studio: {line}");
+        let setup = app.state::<Summaries>().setup.lock().unwrap().clone();
+        let (session, turn) = (request.session_id.clone(), request.id.clone());
+        let Some(summary) = write_summary(&app.state::<Cards>(), &*writer, &setup, request, log)
+        else {
+            return;
+        };
+        let first = summary.summary.lines().next().unwrap_or_default();
+        let studio = app.state::<Mutex<Studio>>();
+        if studio.lock().unwrap().summarized(&session, &turn, first) {
+            let _ = app.emit("sessions", sessions(app.state(), app.state()));
+        }
+    };
+    queue(queues, id).send(Box::new(job)).ok();
+}
+
+/// Session `id`'s queue in `queues`, started when it has none.
+fn queue(queues: &mut HashMap<String, mpsc::Sender<Job>>, id: String) -> &mpsc::Sender<Job> {
+    queues.entry(id).or_insert_with(|| {
         let (queue, jobs) = mpsc::channel::<Job>();
         thread::spawn(move || jobs.into_iter().for_each(|job| job()));
         queue
-    });
-    let _ = queue.send(Box::new(job));
+    })
 }
 
 /// Adds a notice on session `session_id`'s line, naming its subagent `agent`, if any; the read loop

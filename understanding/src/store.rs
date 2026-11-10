@@ -2,7 +2,7 @@
 //! session's brief, on disk in the studio's data directory, so a restart neither loses nor re-asks
 //! them.
 
-use crate::Card;
+use crate::{Card, TurnSummary};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -11,7 +11,7 @@ use std::{
     path::{Path, PathBuf},
     time::UNIX_EPOCH,
 };
-use studio_core::{CardRequest, Decision, LiveFacts, Session, Step, Studio};
+use studio_core::{CardRequest, Decision, LiveFacts, Session, Step, Studio, SummaryRequest};
 
 /// A card in the store, with the change it explains and its base, and its record: when it was added,
 /// when its quiz showed, Daniel's guess, his flag on the key, his rating and the longer explanation he
@@ -54,6 +54,14 @@ pub enum CheckResult {
     Passed,
     Failed,
     NotCounted,
+}
+
+/// A turn summary in the store (#526), with the turn it is on and when it arrived.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct StoredSummary {
+    pub request: SummaryRequest,
+    pub summary: TurnSummary,
+    pub added_at: u64,
 }
 
 /// Daniel's rating of a card's explanation: a level and the reasons he picked. His fifth reason, "the
@@ -198,6 +206,8 @@ pub struct CardStore {
     /// Each session's decision history, by its row's id, in `decisions.json` beside the cards (#461,
     /// decision 17).
     decisions: BTreeMap<String, Vec<Decision>>,
+    /// The turn summaries, oldest first, in `summaries.json` beside the cards (#526).
+    summaries: Vec<StoredSummary>,
     /// Rises on every change, briefs included, so the shell sends the cards only when it moves.
     revision: u64,
 }
@@ -219,12 +229,14 @@ impl CardStore {
         let briefs = read(&path.with_file_name("briefs.json"))?;
         let facts = read(&path.with_file_name("live-facts.json"))?;
         let decisions = read(&path.with_file_name("decisions.json"))?;
+        let summaries = read(&path.with_file_name("summaries.json"))?;
         Ok(CardStore {
             path,
             cards,
             briefs,
             facts,
             decisions,
+            summaries,
             revision: 0,
         })
     }
@@ -484,6 +496,34 @@ impl CardStore {
         }
         self.revision += 1;
         write(&self.path.with_file_name("decisions.json"), &self.decisions)
+    }
+
+    /// Keeps `summary` of `request`'s turn, and saves the summaries.
+    pub fn add_summary(&mut self, request: SummaryRequest, summary: TurnSummary) -> io::Result<()> {
+        self.summaries.push(StoredSummary {
+            request,
+            summary,
+            added_at: millis(),
+        });
+        self.revision += 1;
+        write(&self.path.with_file_name("summaries.json"), &self.summaries)
+    }
+
+    /// The summary of turn `id` (`SummaryRequest::id`), when it was written.
+    pub fn turn_summary(&self, id: &str) -> Option<&StoredSummary> {
+        self.summaries.iter().find(|kept| kept.request.id == id)
+    }
+
+    /// Session `session`'s latest `n` summaries, oldest first.
+    pub fn latest_summaries(&self, session: &str, n: usize) -> Vec<TurnSummary> {
+        let its = self
+            .summaries
+            .iter()
+            .filter(|kept| kept.request.session_id == session);
+        let mut latest: Vec<TurnSummary> =
+            its.rev().take(n).map(|kept| kept.summary.clone()).collect();
+        latest.reverse();
+        latest
     }
 
     /// The live-only facts kept so far.

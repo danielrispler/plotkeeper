@@ -26,6 +26,14 @@ _Avoid_: Step (one tool call inside a turn)
 The latest thing the agent wrote in its own words during a turn, such as why it is about to read an issue. It stays shown, with its age, until the agent writes again, so it covers the steps that follow it. While a turn runs, its intentions are the last line of each of its responses. When the turn ends, its final response's intention becomes that response's first line, which says what the agent did, so a footer a plugin adds is never the intention. A side question ("ask about this") gets these intentions as context.
 _Avoid_: Reason (the card writer's account of a step)
 
+**Turn summary**:
+A few lines on a turn's main ideas, written by one cheap writer call when the turn ends, or when Daniel opens the turn if summaries are set to write on open. A turn gets one when its final response is about 150 words or more, or when it ends asking Daniel something; other turns show their response as it is. When it arrives, the turn-end intention switches once to its first line, except with summaries written on open.
+_Avoid_: Card (on a change, with its quiz first), brief (the whole session's, kept for resuming)
+
+**Learning section**:
+The part under a turn summary that teaches: the turn's main idea and one multiple-choice question on it, collapsed until Daniel opens it. The same writer call writes it. A turn with a card has none; it points to the card instead, so the turn is not quizzed twice.
+_Avoid_: Quiz (a card's question on a change)
+
 **Transcript**:
 Claude Code's own record of an agent session, which the control room reads for the intention, the turn's responses, the branch and the context share. When it cannot be read, the session's view falls back to its steps only.
 
