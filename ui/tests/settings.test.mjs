@@ -18,6 +18,7 @@ test("missing files give the defaults", () => {
   assert.equal(loaded.settings.zoom, 1);
   assert.equal(loaded.settings.terminal.font_size, null);
   assert.deepEqual(loaded.settings.summaries, { model: "haiku", effort: "low", on_open: false });
+  assert.deepEqual(loaded.settings.notifications, { while_focused: false });
   assert.deepEqual(loaded.settings.doctor, [
     { label: "Check the installation", command: "claude doctor", kind: "shell" },
     { label: "Full checkup", command: "/doctor", kind: "session" },
@@ -38,6 +39,9 @@ test("a Zed-style file, with comments and trailing commas, sets its keys and lea
   assert.equal(loaded.settings.zoom, 1.5);
   assert.equal(loaded.settings.terminal.font_size, 15);
   assert.deepEqual(loaded.settings.summaries, { model: "sonnet", effort: "low", on_open: false });
+  assert.deepEqual(reload(initial, { settings: `{ "notifications": { "while_focused": true } }`, keymap: null }).settings.notifications, {
+    while_focused: true,
+  });
   assert.deepEqual(loaded.settings.doctor, [{ label: "Audit", command: "/audit", kind: "session" }]);
   assert.deepEqual(loaded.errors, []);
 });

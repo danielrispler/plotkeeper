@@ -1197,6 +1197,9 @@ pub enum Output {
         session_id: String,
         agent: Option<String>,
     },
+    /// A session newly reached your turn: its turn ended, with nothing blocked on Daniel (#517,
+    /// decision 6).
+    YourTurn { session_id: String },
     /// Worker `agent` of a session, at any depth, newly failed. A failed helper raises none.
     Failed { session_id: String, agent: String },
     /// Helper `agent` became a worker, which the card store keeps, since a replay takes no
@@ -2035,6 +2038,7 @@ impl Studio {
         let promoted = helpers.into_iter().filter(worker);
         outputs.extend(promoted.map(|agent| Output::Promoted { agent }));
         let blocked_before = session.needs_you();
+        let state_before = session.state;
         let tool = event.tool_name.unwrap_or_default();
         let id = Some(event.tool_use_id.clone()).filter(|id| !id.is_empty());
         let at = event.studio_received_ms;
@@ -2450,6 +2454,13 @@ impl Studio {
                 agent: session.asker.as_ref().and_then(|w| w.agent.clone()),
             });
         }
+        // A fresh session also starts at your turn, from its default `Running`, but has nothing to tell.
+        let reached = matches!(state_before, State::Running | State::NeedsYou);
+        if reached && session.state == State::YourTurn && name != "SessionStart" {
+            outputs.push(Output::YourTurn {
+                session_id: event.session_id.clone(),
+            });
+        }
         if phase_started {
             self.estimate(&event.session_id);
         }
@@ -2808,11 +2819,13 @@ fn short(id: &str, n: usize) -> &str {
 /// 3 seconds, a starting guess for "a few seconds" (#369, decision 22 and Further Notes).
 const COMBINE: Duration = Duration::from_secs(3);
 
-/// A notice not shown yet: its title and body, and for "needs you" the session it is about.
+/// A notice not shown yet: its title and body, and for "needs you" or "your turn" the session it is
+/// about.
 struct Pending {
     title: String,
     body: String,
     needs_you: Option<String>,
+    your_turn: Option<String>,
 }
 
 /// The notices the shell has not shown yet. Those that come within `COMBINE` of the first show as
@@ -2823,20 +2836,35 @@ struct Pending {
 pub struct Notifications {
     pending: Vec<Pending>,
     first_at: Duration,
+    /// The setting that also shows "your turn" while the window is focused, for any session but
+    /// the selected one; off by default (#517, decision 6).
+    pub while_focused: bool,
 }
 
 impl Notifications {
     pub fn push(&mut self, title: &str, body: String, now: Duration) {
-        self.queue(title, body, None, now);
+        self.queue(title, body, None, None, now);
     }
 
     /// A "needs you" notice on session `session_id`, which shows only if the session still needs
     /// Daniel when it is due (#434, decision 27).
     pub fn push_needs_you(&mut self, session_id: &str, body: String, now: Duration) {
-        self.queue("Needs you", body, Some(session_id.into()), now);
+        self.queue("Needs you", body, Some(session_id.into()), None, now);
     }
 
-    fn queue(&mut self, title: &str, body: String, needs_you: Option<String>, now: Duration) {
+    /// A "your turn" notice on session `session_id` (#517, decision 6).
+    pub fn push_your_turn(&mut self, session_id: &str, body: String, now: Duration) {
+        self.queue("Your turn", body, None, Some(session_id.into()), now);
+    }
+
+    fn queue(
+        &mut self,
+        title: &str,
+        body: String,
+        needs_you: Option<String>,
+        your_turn: Option<String>,
+        now: Duration,
+    ) {
         if self.pending.is_empty() {
             self.first_at = now;
         }
@@ -2845,25 +2873,33 @@ impl Notifications {
             title,
             body,
             needs_you,
+            your_turn,
         });
     }
 
     /// The notification due at `now`, as its title and body: the pending notices, once `COMBINE`
     /// has passed since the first, less the "needs you" ones whose session `needs_you` says no
     /// longer needs Daniel. Only then is `focused` asked, and a focused window drops them, since
-    /// Daniel sees the list.
+    /// Daniel sees the list; with `while_focused` on, it keeps "your turn" on any session but the
+    /// one `selected` names.
     pub fn due(
         &mut self,
         now: Duration,
         focused: impl FnOnce() -> bool,
         needs_you: impl Fn(&str) -> bool,
+        selected: impl FnOnce() -> Option<String>,
     ) -> Option<(String, String)> {
         if self.pending.is_empty() || now < self.first_at + COMBINE {
             return None;
         }
         let mut pending = std::mem::take(&mut self.pending);
         pending.retain(|p| p.needs_you.as_deref().is_none_or(&needs_you));
-        if pending.is_empty() || focused() {
+        if !pending.is_empty() && focused() {
+            let selected = self.while_focused.then(selected).flatten();
+            pending
+                .retain(|p| self.while_focused && p.your_turn.is_some() && p.your_turn != selected);
+        }
+        if pending.is_empty() {
             return None;
         }
         let pending: Vec<(String, String)> =

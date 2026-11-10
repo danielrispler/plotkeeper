@@ -104,6 +104,7 @@ function applySettings(files: SettingsFiles) {
   else if (!others.length) notice.hidden = true;
   // Only a changed `zoom` resets the zoom the keys set.
   if (settings.zoom !== previous.zoom) setZoom(settings.zoom);
+  invoke("notify_while_focused", { on: settings.notifications.while_focused }).catch((e) => console.warn(e));
   const size = settings.terminal.font_size;
   if (size === null) document.documentElement.style.removeProperty("--term-size");
   else document.documentElement.style.setProperty("--term-size", `${size}px`);
