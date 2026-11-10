@@ -12,11 +12,12 @@ Run once, outside auto mode, from any checkout:
 apps/studio/real-calls.sh
 ```
 
-It writes every output to `local-evidence/2026-11-09-round-5/real-calls-<time>/`, and it skips a step whose code is not built yet. It runs:
+It writes every output to `local-evidence/2026-11-09-round-5/real-calls-<time>/`, with its own terminal output in `run.log`, and it skips a step whose code is not built yet. It runs:
 
 - [ ] **#518:** the 5-run writer timing. Record the median and slowest on #518, beside #471's median of 20.1 s and slowest of 24.4 s. If safe mode made the writer much slower, that triggers grilling (pass plan).
 - [ ] **#518:** real cards; their text carries no plugin footer. The script greps for one.
 - [ ] **#526:** Haiku summaries on 3 real turns. Judge them, and record their time and cost on #526. Weak summaries reopen decision 14 (pass plan).
+- [ ] **#543:** can macOS kill the terminal daemon? It builds a separate app, `StudioRepro`, with its own identifier, home, socket and data folder, launches it through `open`, and ends it by Quit, `kill -9` and `kill -SEGV`. After each, it checks the daemon and both terminals' programs are alive: `543-daemon-kill.json`, with the daemon's log in `543-daemon.log`. The crash may show a "quit unexpectedly" dialog; dismiss it. Record the three results on #543; a killed daemon means #555 adds the launchd job. Memory pressure is not tested.
 
 ## In the running app
 
