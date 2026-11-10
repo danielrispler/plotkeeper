@@ -541,3 +541,22 @@ fn the_presence_file_goes_when_the_app_disconnects_not_a_cli_attach() {
     drop(app);
     wait_for("the presence file to go", || !present.exists());
 }
+
+// #555: the daemon drops an app that falls behind while its window may still be focused, so that drop
+// leaves the presence file; the app reconnects and marks itself again.
+#[test]
+fn an_app_dropped_for_lag_keeps_the_presence_file() {
+    let d = Daemon::start("presence-lag");
+    let present = studio_terminal_daemon::presence(&d.socket());
+    std::fs::write(&present, "").unwrap();
+    let mut app = d.client();
+    app.send(&json!({ "op": "app" })).unwrap();
+    spawn(&mut app, "flood", &["yes"]);
+    app.send(&json!({ "op": "attach", "id": "flood" })).unwrap();
+
+    wait_for("the lagging app to be dropped", || {
+        app.send(&json!({ "op": "list" })).is_err()
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(present.exists(), "a lag drop deleted the presence file");
+}

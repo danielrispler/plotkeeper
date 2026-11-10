@@ -87,6 +87,11 @@ export function startWatching(draw: () => void) {
   listen<Ask | null>("ask", (ask) => take(ask));
   document.addEventListener("visibilitychange", rewatch);
   rewatch();
+  // Shows the shell the window is alive, so a frozen window lets the hook hand a question to the
+  // terminal within seconds (#569). It asks for nothing; the open request still comes as an event.
+  setInterval(() => {
+    if (shown().session !== null) invoke("alive").catch(() => {});
+  }, 1000);
 }
 
 export async function sendAnswer(ask: Ask, reply: Reply) {

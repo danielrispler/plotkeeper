@@ -422,6 +422,7 @@ fn main() {
             restart::revival,
             restart::restart_into,
             answer::watch,
+            answer::alive,
             answer::answer,
             settings::settings_files,
             settings::set_zoom,
@@ -430,12 +431,14 @@ fn main() {
             notify_while_focused
         ])
         .on_window_event(|_, event| {
-            if let tauri::WindowEvent::Focused(focused) = event {
-                presence::focus(*focused);
+            if let Some(path) = presence::path() {
+                presence::window_event(&path, event);
             }
         })
         .setup(move |app| {
-            presence::focus(false);
+            if let Some(path) = presence::path() {
+                presence::start(&path);
+            }
             let app = app.handle().clone();
             restart::watch_build(app.clone());
             settings::watch(app.clone());
@@ -447,8 +450,8 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("build the studio")
         .run(|_, event| {
-            if let tauri::RunEvent::Exit = event {
-                presence::focus(false);
+            if let Some(path) = presence::path() {
+                presence::run_event(&path, &event);
             }
         });
 }
@@ -598,7 +601,7 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                 .state::<Mutex<answer::Watching>>()
                 .lock()
                 .unwrap()
-                .pass(&data)
+                .pass(&data, studio_hook::answer::now_ms())
         {
             let _ = app.emit("ask", ask);
         }

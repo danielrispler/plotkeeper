@@ -81,3 +81,28 @@ test("the command arrives as a bracketed paste, then Enter 200 ms later", async 
     [200, "\r"],
   ]);
 });
+
+test("a session that needs you between the paste and Enter gets no Enter, and a notice shows", async () => {
+  const { io, sent, notices } = fake();
+  let checks = 0;
+
+  const typed = await typeInto("t6", "/rename x", () => checks++ > 0, io);
+
+  assert.equal(typed, false);
+  assert.deepEqual(sent, [[0, "\x1b[200~/rename x\x1b[201~"]]);
+  assert.equal(notices.length, 1);
+  assert.match(notices[0], /needs you/);
+});
+
+test("Option-Backspace takes a word off the draft", async () => {
+  noteKeys("t7", "fix the", 0);
+  noteKeys("t7", "\x1b\x7f", 100);
+  const left = fake();
+  assert.equal(await typeInto("t7", "/rename x", () => false, left.io), false);
+  assert.match(left.notices[0], /draft/);
+
+  noteKeys("t8", "fix the", 0);
+  noteKeys("t8", "\x1b\x7f\x1b\x7f", 100);
+  const cleared = fake();
+  assert.equal(await typeInto("t8", "/rename x", () => false, cleared.io), true);
+});

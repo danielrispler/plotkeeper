@@ -96,6 +96,12 @@ _Avoid_: Server, multiplexer
 The window's view of one terminal of the terminal daemon. One pane shows at a time; the others keep running hidden.
 _Avoid_: Tab
 
+**Draft**:
+What Daniel has typed into a session's prompt and not sent yet, as the studio follows his keys. The studio types into a terminal only once he has no draft there and has stopped typing for 3 seconds.
+
+**Presence file**:
+The empty file `present` in the studio's data folder, kept while the window is focused, so Claude Code's Remote Control skips a phone push Daniel would see on screen. Blur, quit and the app's start delete it, and the terminal daemon deletes it when the app's connection drops, unless it dropped the app for falling behind.
+
 **Revival**:
 Bringing back the terminals a terminal daemon ran after it died, from a crash, a reboot or an upgrade. A Claude terminal reopens its latest session with `claude --resume`; a shell starts again in its folder. Each loses its screen, and a shell its state.
 _Avoid_: Restore (nothing of the old process survives)
