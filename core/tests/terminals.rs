@@ -54,3 +54,56 @@ fn a_session_resumed_in_a_new_terminal_maps_to_the_new_one() {
     studio.apply(&event("SessionStart", None, 1_793_264_000_000));
     assert_eq!(terminal(&studio, IN_STUDIO), None);
 }
+
+/// One selection everywhere (#567): the pane and the rail both read the one selection, so the
+/// selected session names the terminal the pane shows.
+#[test]
+fn selecting_a_session_sets_one_selection_that_names_its_terminal() {
+    let mut studio = replay();
+
+    studio.select(IN_STUDIO);
+
+    let selection = studio.selection().expect("a selection");
+    assert_eq!(selection.session.agent.id, IN_STUDIO);
+    assert_eq!(selection.session.terminal.as_deref(), Some("t-2"));
+}
+
+/// A session Daniel starts from the studio is selected once its first event names its terminal, so
+/// the rail follows the new pane; until then nothing is selected (#567).
+#[test]
+fn a_session_started_in_a_new_terminal_is_selected_when_it_arrives() {
+    let lines: Vec<&str> = include_str!("fixtures/two-sessions.jsonl")
+        .lines()
+        .collect();
+    let mut studio = Studio::replayed(lines[..3].iter().copied());
+    studio.select(OUTSIDE);
+
+    studio.select_terminal("t-2");
+    assert_eq!(studio.selection(), None);
+    for line in &lines[3..] {
+        studio.apply(line);
+    }
+
+    let selected = studio.selected().expect("the new session");
+    assert_eq!(selected.agent.id, IN_STUDIO);
+}
+
+/// A click before the new session arrives wins: its first event does not take the selection.
+#[test]
+fn a_click_before_the_new_session_arrives_keeps_the_selection() {
+    let lines: Vec<&str> = include_str!("fixtures/two-sessions.jsonl")
+        .lines()
+        .collect();
+    let mut studio = Studio::replayed(lines[..3].iter().copied());
+
+    studio.select_terminal("t-2");
+    studio.select(OUTSIDE);
+    for line in &lines[3..] {
+        studio.apply(line);
+    }
+
+    assert_eq!(
+        studio.selected().map(|s| s.agent.id.as_str()),
+        Some(OUTSIDE)
+    );
+}

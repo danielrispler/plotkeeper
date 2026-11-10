@@ -24,6 +24,9 @@ pub struct Studio {
     selected: Option<String>,
     /// The subagent of it whose line he opened since, whose own view shows instead.
     viewed: Option<String>,
+    /// The studio terminal of a session Daniel started, which is selected when its first event
+    /// names that terminal (#567).
+    awaiting: Option<String>,
     /// The shell's latest tick, in Unix milliseconds.
     now: u64,
     roots: Roots,
@@ -1974,6 +1977,12 @@ impl Studio {
         session.agent.last_event_at = session.agent.last_event_at.max(event.studio_received_ms);
         // Every event of a `claude` process carries its terminal, so a resume elsewhere moves it.
         session.terminal.clone_from(&event.studio_terminal_id);
+        // The session Daniel started in a new terminal takes the selection, so the rail follows its pane.
+        if self.awaiting.is_some() && session.terminal == self.awaiting {
+            self.awaiting = None;
+            self.selected = Some(event.session_id.clone());
+            self.viewed = None;
+        }
         let working = session.state == State::Running;
         session.work.passes(event.studio_received_ms, working);
         let phases_before = session.work.phases.len();
@@ -2735,10 +2744,20 @@ impl Studio {
         sessions
     }
 
-    /// Daniel clicked session `id`'s row, whose own view shows. Nothing else changes the selection.
+    /// Daniel clicked session `id`'s row, whose own view shows. Only this and a session he starts
+    /// (`select_terminal`) change the selection.
     pub fn select(&mut self, id: &str) {
         self.selected = Some(id.into());
         self.viewed = None;
+        self.awaiting = None;
+    }
+
+    /// Daniel started a session in studio terminal `terminal`: nothing is selected until its first
+    /// event names that terminal, and then it is (#567). The pane and the rail never show two sessions.
+    pub fn select_terminal(&mut self, terminal: &str) {
+        self.selected = None;
+        self.viewed = None;
+        self.awaiting = Some(terminal.into());
     }
 
     /// Daniel opened subagent `id`'s line, so its view shows, with its own cards and brief, and a

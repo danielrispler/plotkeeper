@@ -1,6 +1,6 @@
-// The selection: only Daniel's click changes the selected session, and the subagent of it whose view
-// shows, if any. The core decides; this draws the selection it returns, in the list, the top bar and
-// the rail.
+// The selection: only Daniel's click, or a session he starts (`startClaude`), changes the selected
+// session, and the subagent of it whose view shows, if any. The core decides; this draws the one
+// selection it returns in the list, the top bar, the rail and the terminal (#567).
 
 import { showCards } from "./cards.js";
 import { invoke } from "./dom.js";
@@ -23,10 +23,12 @@ export async function select(id: string, agent: string | null = null) {
     selected = await invoke<Selection>("open", { agentId: agent });
     studio.listed = await invoke<Session[]>("sessions");
   }
+  // The cards come first, so the rail draws the new session once, with its cards (#567).
+  const cards = await invoke<SessionCards>("cards");
   document.body.classList.remove("list-open");
   show(selected);
+  showCards(cards);
   showSession(selected.session, true);
-  await refreshCards();
 }
 
 export function show(selected: Selection | null) {

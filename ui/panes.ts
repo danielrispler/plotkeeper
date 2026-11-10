@@ -1,5 +1,5 @@
 // The terminal panes (#467): one per daemon terminal, in `#terminal-body`, one shown at a time. The
-// login shell `shell` in the configured repository shows until a session's pane does. A session
+// login shell `shell` in the configured repository shows while no session is selected. A session
 // started from the studio runs `claude` in its own terminal, whose fresh id reaches its hooks as
 // `STUDIO_TERMINAL_ID`, so the core links its row to the pane (`Session.terminal`).
 // `closePane` ends a terminal and drops its pane (#469).
@@ -8,10 +8,12 @@
 
 import type * as Xterm from "@xterm/xterm";
 import { connect, list, onEvent, request, type Listed } from "./daemon.js";
-import { element, invoke } from "./dom.js";
+import { element, invoke, pressable, text } from "./dom.js";
+import { sessionName } from "./list.js";
 import { offerBuilds, upgrade, type Revive } from "./restart.js";
+import { show as showSelection } from "./selection.js";
 import { openPane } from "./terminal.js";
-import type { Session } from "./types.js";
+import type { Selection, Session } from "./types.js";
 
 type Pane = { box: HTMLElement; term: Xterm.Terminal | null; title: string };
 const panes = new Map<string, Pane>();
@@ -94,8 +96,11 @@ function draw(id: string, open: () => Xterm.Terminal | null): Pane {
   return pane;
 }
 
+// The header names the selected session as the list and the rail do (#567); with nothing selected,
+// the shell or a pane just started keeps the title its program sets.
+let label: string | null = null;
 function header({ term, title }: Pane) {
-  element("terminal-title").textContent = title;
+  element("terminal-title").textContent = label ?? title;
   element("size").textContent = term ? `${term.cols} × ${term.rows}` : "";
 }
 
@@ -114,36 +119,62 @@ export async function closePane(id: string) {
 }
 
 // Starts `claude` in `cwd` in a new terminal, with `prompt` as its first prompt, or
-// `claude --resume <resume>` for an ended session, and shows its pane.
+// `claude --resume <resume>` for an ended session, and shows its pane. Nothing is selected until the
+// session's first event names its terminal; then the core selects it, so the rail follows (#567).
+let starting: string | null = null;
 export async function startClaude(cwd: string, resume: string | null = null, prompt = "") {
   const argv = [...(await invoke<string[]>("claude_argv", { resume })), ...(prompt ? ["--", prompt] : [])]; // `--`: a prompt like "-p x" is no flag
   const id = `claude-${crypto.randomUUID()}`;
+  starting = id;
+  label = null;
   show(id, () => openPane(box(id), id, cwd, argv));
+  showSelection(await invoke<Selection | null>("select_terminal", { terminal: id }));
 }
 
-// The selected session's pane: its terminal's, or the shell for a session the studio did not start.
-// Daniel's click always shows it; the shell's updates of the selection switch the pane only when the
-// session or its terminal changed, so they never take away a pane Daniel just started.
+// What the terminal shows for the selected session (#567): its own terminal while the daemon runs
+// it, else a message with "Open here", never the login shell, which may run another session. The
+// shell shows only while nothing is selected.
+export type PaneView = "shell" | { terminal: string } | { message: string };
+export function paneView(session: Pick<Session, "terminal" | "state"> | null, running: boolean): PaneView {
+  if (!session) return "shell";
+  if (session.terminal && running) return { terminal: session.terminal };
+  return { message: session.state === "ended" ? "Ended. Open here resumes it." : "Runs in another terminal. Open here resumes it." };
+}
+
+// The selected session's pane, by `paneView`. Daniel's click always shows it; the shell's updates of
+// the selection switch the pane only when the session, its terminal or its end changed, so they
+// never take away a pane Daniel just started.
 let selected: string | null = null;
 export async function showSession(session: Session | null, clicked = false) {
-  const key = session ? `${session.id} ${session.terminal ?? ""}` : null;
+  const key = session ? `${session.id} ${session.terminal ?? ""} ${session.state === "ended"}` : null;
+  // A rename shows in the header at once.
+  label = session ? sessionName(session) : null;
+  const pane = panes.get(shown);
+  if (pane) header(pane);
   if (key === selected && !clicked) return;
   selected = key;
+  if (session) starting = null;
   const connected = await ready?.then(() => true, () => false);
   await revived.catch((e) => console.warn(`terminal: revive: ${e}`));
   const current = () => selected === key;
-  const id = session?.terminal;
   if (!connected || !current()) return;
-  if (!id) return show("shell", () => openPane(box("shell"), "shell", repo));
-  if (panes.has(id)) return show(id, () => null);
+  if (!session) {
+    // A pane Daniel just started stays until its session arrives.
+    if (starting !== shown) show("shell", () => openPane(box("shell"), "shell", repo));
+    return;
+  }
   // A terminal of an earlier app run: attach when the daemon still runs it. Opening an exited or
   // unknown id would start a new program under it.
-  const terminal = (await list()).find((t) => t.id === id);
+  const id = session.terminal;
+  const own = id ? panes.get(id)?.term : null;
+  const terminal = id && !own ? (await list()).find((t) => t.id === id && t.exited === null) : undefined;
   if (!current()) return;
-  const gone = terminal ? `its claude exited (${terminal.exited}); Open starts it again` : "the daemon has no such terminal";
-  show(id, () => {
-    if (terminal && terminal.exited === null) return openPane(box(id), id, terminal.cwd, terminal.argv);
-    box(id).append(Object.assign(document.createElement("p"), { className: "empty", textContent: `No pane: ${gone}.` }));
-    return null;
-  });
+  const view = paneView(session, Boolean(own || terminal));
+  if (view === "shell") return;
+  if ("terminal" in view) return show(view.terminal, () => openPane(box(view.terminal), view.terminal, terminal!.cwd, terminal!.argv));
+  const resume = () => startClaude(session.cwd, session.resume_id).catch((e) => console.warn(e));
+  box(ELSEWHERE).classList.add("elsewhere");
+  box(ELSEWHERE).replaceChildren(text("p", view.message, "empty"), pressable(text("button", "Open here"), false, resume));
+  show(ELSEWHERE, () => null);
 }
+const ELSEWHERE = "elsewhere";

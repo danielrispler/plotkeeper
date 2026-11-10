@@ -66,6 +66,15 @@ fn select(id: String, studio: State<Mutex<Studio>>) -> serde_json::Value {
     selection(&studio)
 }
 
+/// Daniel started a session in studio terminal `terminal`; returns the selection, `null` until the
+/// session's first event names that terminal and selects it (#567).
+#[tauri::command]
+fn select_terminal(terminal: String, studio: State<Mutex<Studio>>) -> serde_json::Value {
+    let mut studio = studio.lock().unwrap();
+    studio.select_terminal(&terminal);
+    selection(&studio)
+}
+
 /// Daniel opened subagent `agent_id`'s line; returns the selection, which names it. The card store
 /// keeps the opening of a failed line, so it stays faded after a restart.
 #[tauri::command]
@@ -347,6 +356,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             sessions,
             select,
+            select_terminal,
             open,
             selected,
             cards,
