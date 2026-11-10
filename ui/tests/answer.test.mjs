@@ -31,8 +31,13 @@ test("a call asks a question, a plan or a permission, by its tool", () => {
 });
 
 // #569: the shell pushes the open request as an `ask` event in its read loop; no timer polls for it.
+// The one timer only tells the shell the window is alive.
 test("the window takes open requests from the shell's ask event, with no poll", () => {
   const source = readFileSync(new URL("../answer.ts", import.meta.url), "utf8");
-  assert.doesNotMatch(source, /setInterval/);
+  const timers = source.split("setInterval(").slice(1);
+  assert.equal(timers.length, 1);
+  const timer = timers[0].slice(0, timers[0].indexOf("}, 1000)"));
+  assert.match(timer, /invoke\("alive"\)/);
+  assert.doesNotMatch(timer, /watch/);
   assert.match(source, /listen<Ask \| null>\("ask"/);
 });

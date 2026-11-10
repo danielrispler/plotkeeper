@@ -5,7 +5,8 @@
 //! terminal, or 120 seconds pass.
 //!
 //! Files, all in the studio's data directory, written whole (temp file plus rename) with mode 0600:
-//! - `watching.json`, by the studio every second: `{"session_id", "pid", "heartbeat_ms"}`.
+//! - `watching.json`, by the studio's read loop every 200 ms while its window shows life:
+//!   `{"session_id", "pid", "heartbeat_ms"}`.
 //! - `asks/<session>.json`, by the hook: `{"nonce", "hook_event_name", "tool_name", "tool_use_id",
 //!   "tool_input", "asked_ms"}`.
 //! - `asks/<session>.answer.json`, by the studio: for a question `{"nonce", "answers"}`, each answer a

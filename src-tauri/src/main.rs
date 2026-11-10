@@ -422,6 +422,7 @@ fn main() {
             restart::revival,
             restart::restart_into,
             answer::watch,
+            answer::alive,
             answer::answer,
             settings::settings_files,
             settings::set_zoom,
@@ -598,7 +599,7 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                 .state::<Mutex<answer::Watching>>()
                 .lock()
                 .unwrap()
-                .pass(&data)
+                .pass(&data, studio_hook::answer::now_ms())
         {
             let _ = app.emit("ask", ask);
         }
