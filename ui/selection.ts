@@ -39,18 +39,32 @@ export async function select(id: string, agent: string | null = null) {
     }
     // The cards come first, so the rail draws the new session once, with its cards (#567).
     const cards = await invoke<SessionCards>("cards");
-    if (studio.pending !== pressed) return;
-    studio.pending = null;
-    document.body.classList.remove("list-open");
-    show(selected);
-    showCards(cards);
-    showSession(selected.session, true);
+    if (studio.pending === pressed) {
+      studio.pending = null;
+      document.body.classList.remove("list-open");
+      show(selected);
+      showCards(cards);
+      showSession(selected.session, true);
+    }
   } catch (e) {
-    if (studio.pending !== pressed) return;
-    studio.pending = null;
-    showSessions(studio.listed);
+    if (studio.pending === pressed) {
+      studio.pending = null;
+      showSessions(studio.listed);
+    }
     console.warn(e);
   }
+  await catchUp();
+}
+
+// Draws the selection and cards that events sent while a press waited; fetched again, since an
+// event held back may predate the press's reply.
+async function catchUp() {
+  if (studio.pending || !studio.missed) return;
+  studio.missed = false;
+  const [selected, cards] = await Promise.all([invoke<Selection | null>("selected"), invoke<SessionCards>("cards")]);
+  if (studio.pending) return; // a newer press draws its own reply
+  show(selected);
+  showCards(cards);
 }
 
 export function show(selected: Selection | null) {

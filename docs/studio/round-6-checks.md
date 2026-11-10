@@ -40,6 +40,13 @@ Between passes, nothing waits for him. After each pass, a code-review agent that
 - [ ] No "no estimate", "Step 0s", grid size such as `169 × 38`, or raw `**` anywhere on screen. Hovering the terminal's header shows the grid size.
 - [ ] A row or the rail's step with a long path shows its last 2 segments; hovering shows the full line. The picker's paths read the same way.
 
+## #565: pass 6a review fixes
+
+- [ ] Start a session from the studio that resumes another (`/resume`): the resumed session stays selected in the list and the rail, and its pane stays.
+- [ ] Press a row, then start a new session before the row's reply lands: the new session's pane stays.
+- [ ] With a session selected, the terminal has no empty strip above it; with nothing selected, the header shows the title.
+- [ ] A row whose line had a link shows the link's text; hovering shows the full line with its URL.
+
 ## #535: finished subagents leave the list; the rail keeps their history
 
 - [ ] Run a session that spawns a worker and a helper. When each one finishes, its row leaves the list and its parent's line counts it in "N done". A failed one stays, marked failed, until you open it.

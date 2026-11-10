@@ -2,7 +2,7 @@
 // full path on hover, and no clock or estimate says nothing. Run: `npm test` in apps/studio.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { plain, rowTime } from "../../dist/list.js";
+import { plain, rowText, rowTime } from "../../dist/list.js";
 import { shortPath, shortPaths } from "../../dist/paths.js";
 import { estimateText, times } from "../../dist/times.js";
 
@@ -13,6 +13,13 @@ test("a row line renders no raw Markdown, but keeps code as code", () => {
   assert.equal(plain("Yes, screenshots of **our app…"), "Yes, screenshots of our app…");
   assert.equal(plain("## Plan: see [the spec](https://x.y/565) and __this__"), "Plan: see the spec and this");
   assert.equal(plain("Glob `**/*.rs` in **src**"), "Glob `**/*.rs` in src");
+  assert.equal(plain("Issue `x`# 565"), "Issue `x`# 565");
+});
+
+test("a row line that drops a link's URL keeps the full line on hover", () => {
+  const line = "See [the spec](https://x.y/565)";
+  assert.deepEqual(rowText(line), ["See the spec", line]);
+  assert.deepEqual(rowText("See **this**"), ["See this", ""]);
 });
 
 test("a long path shows its last 2 segments, with the full path in its title", () => {

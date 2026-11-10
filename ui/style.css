@@ -100,7 +100,7 @@ h1 { margin: 0 0 var(--sp-4); }
 
 /* The terminal, the stage: an inset, rounded pane on the frame, left to right; its header shows a
    program's title, and the grid size on hover (#571). The inset and the body's padding add up to layout.ts's padding. */
-.term { background: var(--term-bg); color: var(--term-fg); display: grid; grid-template-rows: var(--term-head) auto 1fr; min-width: 0;
+.term { background: var(--term-bg); color: var(--term-fg); display: grid; grid-template-rows: auto auto 1fr; min-width: 0;
         margin: 0 var(--sp-4) var(--sp-4); border-radius: var(--radius-pane); box-shadow: inset 0 0 0 var(--hair) var(--edge);
         overflow: hidden; }
 .term > .term-body { grid-row: 3; }
@@ -115,7 +115,7 @@ h1 { margin: 0 0 var(--sp-4); }
 .upgrade ul { margin: 0 0 var(--sp-5); padding-inline-start: var(--sp-6); }
 .upgrade .actions { display: flex; justify-content: flex-end; gap: var(--sp-4); margin: 0; }
 .upgrade .primary { background: var(--selected); }
-.term-h { display: flex; gap: var(--sp-5); align-items: center; padding: 0 var(--sp-5); font-size: var(--size-xs); color: var(--faint);
+.term-h { height: var(--term-head); display: flex; gap: var(--sp-5); align-items: center; padding: 0 var(--sp-5); font-size: var(--size-xs); color: var(--faint);
           white-space: nowrap; overflow: hidden; }
 .term-body { min-height: 0; min-width: 0; overflow: hidden; padding: var(--sp-3); position: relative; }
 /* The panes lie on top of each other, the hidden ones invisible but still laid out, so each stays

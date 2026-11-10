@@ -8,5 +8,7 @@ export const studio = {
   listed: [] as Session[],
   selection: null as Selection | null,
   pending: null as { id: string; agent: string | null } | null,
+  // A `selected` or `cards` event came while `pending` waited, so the press's settling fetches both.
+  missed: false,
   files: initial,
 };

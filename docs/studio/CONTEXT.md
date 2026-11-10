@@ -151,7 +151,7 @@ A subagent that is not a worker, such as a review or a search. It shows as one l
 A prompt that Claude Code sends, not Daniel, to wake an agent when a subagent or a background command it started returns. It names the returning task's id in markup. It never counts as Daniel's prompt.
 
 **Session list**:
-The list of every agent session, one row each, grouped by state with needs you first and idle and ended sessions collapsed last. Each row says in one line what its session is doing, and running subagents nest under the agent that spawned them. A finished subagent leaves the list and counts in its parent's "N done"; a failed one stays until Daniel opens it. Only Daniel's click changes the session he looks at.
+The list of every agent session, one row each, grouped by state with needs you first and idle and ended sessions collapsed last. Each row says in one line what its session is doing, and running subagents nest under the agent that spawned them. A finished subagent leaves the list and counts in its parent's "N done"; a failed one stays until Daniel opens it. Only Daniel's own actions change the session he looks at: a click or key on a row, or starting a session, which selects it once it reports its terminal.
 
 **Story rail**:
 The column on the window's left that tells the selected session's or subagent's story: its state and step, its brief, cards and checks, and its open question docked at the bottom.

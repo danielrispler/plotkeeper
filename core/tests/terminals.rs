@@ -107,3 +107,29 @@ fn a_click_before_the_new_session_arrives_keeps_the_selection() {
         Some(OUTSIDE)
     );
 }
+
+/// A session Daniel started that resumes another drops its throwaway startup id (#562); the
+/// selection follows to the resumed session, so it stays live and visible.
+#[test]
+fn a_resume_in_a_new_terminal_moves_the_selection_to_the_resumed_session() {
+    let mut studio = replay();
+    let start = |id: &str, source: &str, at: u64| {
+        json!({
+            "session_id": id,
+            "hook_event_name": "SessionStart",
+            "source": source,
+            "cwd": "/Users/danielrispler/work/Falinks",
+            "studio_terminal_id": "t-5",
+            "studio_received_ms": at,
+        })
+        .to_string()
+    };
+
+    studio.select_terminal("t-5");
+    studio.apply(&start("throwaway-id", "startup", 1_793_263_000_000));
+    studio.apply(&start(OUTSIDE, "resume", 1_793_263_001_000));
+
+    let selected = studio.selected().expect("a selection");
+    assert_eq!(selected.agent.id, OUTSIDE);
+    assert!(studio.sessions().iter().any(|s| s.agent.id == OUTSIDE));
+}

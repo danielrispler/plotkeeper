@@ -11,6 +11,7 @@ import { connect, list, onEvent, request, type Listed } from "./daemon.js";
 import { element, invoke, pressable, text } from "./dom.js";
 import { offerBuilds, upgrade, type Revive } from "./restart.js";
 import { show as showSelection } from "./selection.js";
+import { studio } from "./state.js";
 import { openPane } from "./terminal.js";
 import type { Selection, Session } from "./types.js";
 
@@ -95,12 +96,11 @@ function draw(id: string, open: () => Xterm.Terminal | null): Pane {
   return pane;
 }
 
-// The selected session's name is on its row only (#571), so the header is empty while one is selected;
-// with nothing selected, the shell or a pane just started keeps the title its program sets. The grid
-// size is on the header's hover.
-let named = false;
+// The selected session's name is on its row only (#571), so the header hides while one is selected and
+// the terminal takes its height; with nothing selected, the shell or a pane just started keeps the
+// title its program sets. The grid size is on the header's hover.
 function header({ term, title }: Pane) {
-  element("terminal-title").textContent = named ? "" : title;
+  element("terminal-title").textContent = title;
   element("terminal-head").title = term ? `${term.cols} × ${term.rows}` : "";
 }
 
@@ -126,7 +126,8 @@ export async function startClaude(cwd: string, resume: string | null = null, pro
   const argv = [...(await invoke<string[]>("claude_argv", { resume })), ...(prompt ? ["--", prompt] : [])]; // `--`: a prompt like "-p x" is no flag
   const id = `claude-${crypto.randomUUID()}`;
   starting = id;
-  named = false;
+  element("terminal-head").hidden = false;
+  studio.pending = null; // an earlier press's late reply must not take the pane from this session
   show(id, () => openPane(box(id), id, cwd, argv));
   showSelection(await invoke<Selection | null>("select_terminal", { terminal: id }));
 }
@@ -147,7 +148,7 @@ export function paneView(session: Pick<Session, "terminal" | "state"> | null, ru
 let selected: string | null = null;
 export async function showSession(session: Session | null, clicked = false) {
   const key = session ? `${session.id} ${session.terminal ?? ""} ${session.state === "ended"}` : null;
-  named = session !== null;
+  element("terminal-head").hidden = session !== null;
   const pane = panes.get(shown);
   if (pane) header(pane);
   if (key === selected && !clicked) return;
