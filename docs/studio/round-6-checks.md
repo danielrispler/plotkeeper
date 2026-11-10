@@ -24,6 +24,7 @@ Between passes, nothing waits for him. After each pass, a code-review agent that
 - [ ] Open a new Claude terminal, run `claude`, and pick an earlier session with `/resume`. Do it twice. The list shows that session as one row, with its history, and no extra "Falinks" row with "No step yet".
 - [ ] When Claude Code forks a session mid-conversation (its `SessionStart` comes `from fork`), the list keeps one row, under the session's name, and it does not stay "Running" after the turn ends.
 - [ ] Delete that row. Only that row goes.
+- [ ] In a session that has prompts, open `/resume`, look at the list, then back out with Esc. No new row appears. A session you switch to shows as a row once you send it a prompt.
 
 ## #570: instant feedback
 
