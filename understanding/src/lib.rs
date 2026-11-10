@@ -13,18 +13,20 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use studio_core::{CardRequest, Kind, Session, Status, Transcript};
+use studio_core::{CardRequest, Kind, Session, Status, SummaryRequest, Transcript};
 
 mod drift;
 mod fingerprint;
 mod store;
+mod summary;
 mod week;
 pub use drift::{Drift, Versions, drift};
 pub use fingerprint::{Fingerprints, backfilled, fingerprint_changes, worktree_root};
 pub use store::{
     Brief, CardStore, CheckResult, Guess, Level, Rating, Reason, Row, SessionCards, StoredCard,
-    millis,
+    StoredSummary, millis,
 };
+pub use summary::{Learning, SummarySetup, TurnSummary, write_summary};
 pub use week::{Rate, Ratings, Week, week};
 
 /// A card on a change, in the explanation language; code inside its text is in
@@ -159,6 +161,18 @@ pub trait CardWriter {
     /// when it gave none. A writer that answers no questions says so.
     fn ask(&self, _item: &str, _intentions: &[String], _question: &str) -> Result<String, String> {
         Err("this writer answers no questions".into())
+    }
+
+    /// The writer's reply with the summary of `request`'s turn, read with `earlier`, the session's
+    /// latest summaries, oldest first, at `setup`'s model and effort (#526), or one line when it
+    /// gave none. A writer that writes no summaries says so.
+    fn summarize(
+        &self,
+        _setup: &SummarySetup,
+        _request: &SummaryRequest,
+        _earlier: &[TurnSummary],
+    ) -> Result<String, String> {
+        Err("this writer writes no summaries".into())
     }
 }
 
@@ -574,6 +588,36 @@ impl CardWriter for FakeWriter {
         );
         Ok(serde_json::json!({ "answer": answer }).to_string())
     }
+
+    fn summarize(
+        &self,
+        _: &SummarySetup,
+        request: &SummaryRequest,
+        earlier: &[TurnSummary],
+    ) -> Result<String, String> {
+        let option = |text: &str, why: &str| serde_json::json!({ "text": text, "why": why });
+        let summary = format!(
+            "A sample turn summary from the fake writer, which does not read the turn.\nIt was given {} responses and {} earlier summaries.",
+            request.responses.len(),
+            earlier.len()
+        );
+        Ok(serde_json::json!({
+            "summary": summary,
+            "learning": {
+                "idea": "The turn's main idea goes here.",
+                "question": {
+                    "text": "What did the fake writer read?",
+                    "options": [
+                        option("Nothing of the turn.", "Right: it writes a fixed sample."),
+                        option("The whole transcript.", "No: it reads nothing."),
+                        option("Only the final reply.", "No: it reads nothing."),
+                    ],
+                    "key": 0,
+                },
+            },
+        })
+        .to_string())
+    }
 }
 
 /// Writes the card with `claude -p` on Daniel's subscription, in a neutral folder that holds none of
@@ -757,10 +801,17 @@ impl ClaudeWriter {
     /// CLAUDE.md reach it (#517, decision 9). The prompt goes on standard input without its NUL bytes, which
     /// `claude` could not take in an argument either (#434, decision 31).
     fn run(&self, prompt: &str) -> (Command, String) {
+        self.run_with(&[], prompt)
+    }
+
+    /// `run`, with `options` before `-p`.
+    fn run_with(&self, options: &[&str], prompt: &str) -> (Command, String) {
         let mut command = Command::new(&self.program);
         command
             // `--tools` takes several values, so an option must follow it.
-            .args(["--tools", "", "--strict-mcp-config", "--safe-mode", "-p"])
+            .args(["--tools", "", "--strict-mcp-config", "--safe-mode"])
+            .args(options)
+            .arg("-p")
             .env_remove("ANTHROPIC_API_KEY")
             .env_remove("ANTHROPIC_AUTH_TOKEN")
             .env_remove("CLAUDE_CODE_PLUGIN_DIRS")
@@ -850,6 +901,15 @@ impl CardWriter for ClaudeWriter {
     fn ask(&self, item: &str, intentions: &[String], question: &str) -> Result<String, String> {
         self.stdout(self.ask_command(item, intentions, question))
     }
+
+    fn summarize(
+        &self,
+        setup: &SummarySetup,
+        request: &SummaryRequest,
+        earlier: &[TurnSummary],
+    ) -> Result<String, String> {
+        self.stdout(self.summary_command(setup, request, earlier))
+    }
 }
 
 /// The writer's architecture section on a change that is not structural.
@@ -870,6 +930,7 @@ macro_rules! explanation_language {
          and commands in backticks."
     };
 }
+pub(crate) use explanation_language;
 
 /// The card writer's instructions. Its input is the change, the summaries of the prompt's earlier
 /// cards and the brief, not the payloads (v0 note, proposal 8).

@@ -93,26 +93,38 @@ fn a_folder_outside_git_is_an_error() {
     assert!(places(dir.path()).is_err());
 }
 
+/// The studio's status line wrapper beside the plugin (#521), quoted for the shell that runs it.
+const STATUS_LINE: &str =
+    r#"{"statusLine":{"command":"'/r/apps/studio/workbench/statusline.sh'","type":"command"}}"#;
+
 /// `claude` runs with the studio plugin alone, set the way the README loads it, so a profile that
-/// also sets `CLAUDE_CODE_PLUGIN_DIRS` never loads its hooks twice.
+/// also sets `CLAUDE_CODE_PLUGIN_DIRS` never loads its hooks twice. It names the presence file, so
+/// Remote Control skips a phone push while the studio is focused (#522).
 #[test]
 fn claude_starts_with_the_studio_plugin_and_resumes_by_session_id() {
     let plugin = Path::new("/r/apps/studio/plugin");
+    let presence = Path::new("/d/present");
 
     assert_eq!(
-        claude(plugin, None),
+        claude(plugin, presence, None),
         [
             "env",
             "CLAUDE_CODE_PLUGIN_DIRS=/r/apps/studio/plugin",
-            "claude"
+            "CLAUDE_CLIENT_PRESENCE_FILE=/d/present",
+            "claude",
+            "--settings",
+            STATUS_LINE,
         ]
     );
     assert_eq!(
-        claude(plugin, Some("9e0b5f13")),
+        claude(plugin, presence, Some("9e0b5f13")),
         [
             "env",
             "CLAUDE_CODE_PLUGIN_DIRS=/r/apps/studio/plugin",
+            "CLAUDE_CLIENT_PRESENCE_FILE=/d/present",
             "claude",
+            "--settings",
+            STATUS_LINE,
             "--resume",
             "9e0b5f13"
         ]

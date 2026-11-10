@@ -6,8 +6,9 @@ import type * as Xterm from "@xterm/xterm";
 import { connect, decode, encode, onEvent, request } from "./daemon.js";
 import { invoke, listen } from "./dom.js";
 import { keyAction, type Action } from "./keys.js";
-import { pathLinks, quotePath } from "./paths.js";
+import { openFile, pathLinks, quotePath } from "./paths.js";
 import { studio } from "./state.js";
+import { noteKeys } from "./typing.js";
 
 declare const Terminal: typeof Xterm.Terminal;
 declare const FitAddon: typeof import("@xterm/addon-fit");
@@ -35,6 +36,11 @@ export function openPane(place: HTMLElement, id: string, cwd: string, argv: stri
     fontSize: parseFloat(value("--term-size")),
     lineHeight: parseFloat(value("--term-line")),
     theme: { background: value("--term-bg"), foreground: value("--term-fg") },
+    // OSC 8 links: a `file://` one opens in the editor, any other through the shell's `open_link`.
+    linkHandler: {
+      allowNonHttpProtocols: true,
+      activate: (_, uri) => (/^file:/i.test(uri) ? openFile(uri, cwd) : openLink(uri)),
+    },
   });
   const fit = new FitAddon.FitAddon();
   const search = new SearchAddon.SearchAddon();
@@ -80,6 +86,11 @@ export function openPane(place: HTMLElement, id: string, cwd: string, argv: stri
     if (ended) return restart();
     request({ op: "input", id, data: encode(utf8.encode(data)) });
   };
+  // Daniel's own keys, which the studio's typing waits on (#544).
+  const keys = (data: string) => {
+    noteKeys(id, data);
+    input(data);
+  };
 
   const listening = onEvent((event) => {
     if (event.id !== undefined && event.id !== id) return;
@@ -112,7 +123,7 @@ export function openPane(place: HTMLElement, id: string, cwd: string, argv: stri
   });
   listening.then(() => start().catch((e) => note(`${e}`)));
 
-  term.onData(input);
+  term.onData(keys);
   term.onBinary((data) => !quiet && request({ op: "input", id, data: btoa(data) }));
   term.onResize(({ cols, rows }) => request({ op: "resize", id, cols, rows }));
   const resizes = new ResizeObserver(() => fit.fit());
@@ -142,7 +153,7 @@ export function openPane(place: HTMLElement, id: string, cwd: string, argv: stri
   });
 
   const run = (action: Exclude<Action, string>) => {
-    if ("send" in action) return input(action.send);
+    if ("send" in action) return keys(action.send);
     if (action.command === "selectAll") term.selectAll();
     if (action.command === "clear") term.clear();
     if (action.command === "find") {
@@ -185,7 +196,7 @@ export function openPane(place: HTMLElement, id: string, cwd: string, argv: stri
       const links = pathLinks(line).map(({ text, start }) => ({
         text,
         range: { start: { x: start + 1, y }, end: { x: start + text.length, y } },
-        activate: () => openLink(text),
+        activate: () => openFile(text, cwd),
       }));
       show(links.length ? links : undefined);
     },
@@ -193,7 +204,7 @@ export function openPane(place: HTMLElement, id: string, cwd: string, argv: stri
   // A file dropped on the window types its path into the visible pane.
   const drops = listen<{ paths: string[] }>("tauri://drag-drop", ({ paths }) => {
     if (place.offsetParent === null) return;
-    input(paths.map(quotePath).join(" ") + " ");
+    keys(paths.map(quotePath).join(" ") + " ");
     term.focus();
   });
   // A saved `settings.json` (`main.ts`) may change the font size.

@@ -406,3 +406,43 @@ fn a_folder_that_becomes_a_repository_is_fingerprinted_from_then_on() {
     let change = "--- a/lib.rs\n+++ b/lib.rs\n@@ -1 +1 @@\n-fn a() {}\n+fn b() {}\n";
     assert_eq!(diff(&mut prints, dir.path()).as_deref(), Some(change));
 }
+
+/// #568: files the operating system writes are not the agent's work, so a turn that changed only
+/// them gets no card.
+#[test]
+fn changing_only_os_files_is_no_change() {
+    let (dir, mut prints) = repo();
+
+    fs::write(dir.path().join(".DS_Store"), [0u8, 1, 2]).unwrap();
+    fs::create_dir(dir.path().join("src")).unwrap();
+    fs::write(dir.path().join("src/._lib.rs"), [0u8, 5]).unwrap();
+    fs::write(dir.path().join("src/Thumbs.db"), [0u8, 3]).unwrap();
+    fs::create_dir_all(dir.path().join(".Spotlight-V100/Store")).unwrap();
+    fs::write(dir.path().join(".Spotlight-V100/Store/index"), "x\n").unwrap();
+    fs::create_dir(dir.path().join(".Trashes")).unwrap();
+    fs::write(dir.path().join(".Trashes/old"), "x\n").unwrap();
+
+    assert_eq!(diff(&mut prints, dir.path()), None);
+}
+
+#[test]
+fn a_change_leaves_out_the_os_files_beside_it() {
+    let (dir, mut prints) = repo();
+
+    fs::write(dir.path().join(".DS_Store"), [0u8, 1, 2]).unwrap();
+    fs::write(dir.path().join("lib.rs"), "fn a() {}\nfn b() {}\n").unwrap();
+
+    let change = "--- a/lib.rs\n+++ b/lib.rs\n@@ -1 +1,2 @@\n fn a() {}\n+fn b() {}\n";
+    assert_eq!(diff(&mut prints, dir.path()).as_deref(), Some(change));
+}
+
+#[test]
+fn committing_only_an_os_file_is_no_change() {
+    let (dir, mut prints) = repo();
+
+    fs::write(dir.path().join(".DS_Store"), [0u8, 1, 2]).unwrap();
+    git(dir.path(), &["add", "."]);
+    git(dir.path(), &["commit", "-qm", "Oops"]);
+
+    assert_eq!(diff(&mut prints, dir.path()), None);
+}

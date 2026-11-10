@@ -2,9 +2,9 @@
 //! core, then feeds it each new line live and hands the core's card requests to the card writer. The
 //! window lists every session (#369, decision 18) and shows the one Daniel selected: its cards, with
 //! their quizzes, his guesses, his ratings and the longer explanations he asked for, which the card
-//! store keeps on disk, and its check lines. A session that newly needs Daniel, a new card and a
-//! failed worker raise a macOS notification while the window is not focused, and the Dock badge
-//! counts the sessions that need him (#369, decision 22).
+//! store keeps on disk, and its check lines. A session that newly needs Daniel or reaches your turn,
+//! a new card and a failed worker raise a macOS notification while the window is not focused, and
+//! the Dock badge counts the sessions that need him (#369, decision 22; #517, decision 6).
 
 use std::{
     collections::HashMap,
@@ -23,16 +23,18 @@ use std::{
 use studio_core::{
     CardRequest, Notifications, Output, Session,
     State::{Ended, NeedsYou},
-    Studio,
+    Studio, SummaryRequest,
 };
 use studio_understanding::{
     CardStore, CardWriter, ClaudeWriter, FakeWriter, Fingerprints, Rating, Row, SessionCards,
-    Versions, backfilled, fingerprint_changes, millis, worktree_root, write_brief, write_stop,
+    StoredSummary, SummarySetup, Versions, backfilled, fingerprint_changes, millis, worktree_root,
+    write_brief, write_stop, write_summary,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
 
 mod answer;
+mod presence;
 mod restart;
 mod settings;
 mod terminal;
@@ -42,6 +44,49 @@ type Cards = Mutex<CardStore>;
 
 /// The notices not shown yet, which the log thread and the card writer's threads add to.
 type Notices = Mutex<Notifications>;
+
+/// The summary writer's setup, from the settings the window sends (#526), and the turns whose
+/// summary waits for Daniel to open it while summaries are written on open, by turn id.
+// shortcut: the waiting turns live in memory, so a restart loses them; keep them in the store if
+// that bites.
+#[derive(Default)]
+struct Summaries {
+    setup: Mutex<SummarySetup>,
+    waiting: Mutex<HashMap<String, SummaryRequest>>,
+}
+
+/// The settings' `summaries` (#517, decision 17): the writer's model and effort, and whether a
+/// summary is written when Daniel opens its turn instead of at the turn's end.
+#[tauri::command]
+fn summary_settings(
+    model: String,
+    effort: String,
+    on_open: bool,
+    summaries: State<Summaries>,
+    studio: State<Mutex<Studio>>,
+) {
+    *summaries.setup.lock().unwrap() = SummarySetup { model, effort };
+    studio.lock().unwrap().set_summaries_on_open(on_open);
+}
+
+/// Daniel opened turn `id` (#526): its summary, written now when it waits for him, which takes
+/// seconds, so the command runs off the main thread. `None` when the turn has none.
+#[tauri::command(async)]
+fn turn_summary(
+    id: String,
+    cards: State<Cards>,
+    summaries: State<Summaries>,
+    writer: State<Writer>,
+) -> Option<StoredSummary> {
+    if let Some(kept) = cards.lock().unwrap().turn_summary(&id) {
+        return Some(kept.clone());
+    }
+    let request = summaries.waiting.lock().unwrap().remove(&id)?;
+    let setup = summaries.setup.lock().unwrap().clone();
+    let log = |line: String| eprintln!("studio: {line}");
+    write_summary(&cards, &**writer, &setup, request, log)?;
+    cards.lock().unwrap().turn_summary(&id).cloned()
+}
 
 /// The session list, in its order.
 #[tauri::command]
@@ -343,7 +388,9 @@ fn main() {
         .manage(Cards::new(store))
         .manage(Notices::default())
         .manage(writer.clone())
+        .manage(Summaries::default())
         .manage(terminal::Daemon::default())
+        .manage(Mutex::new(answer::Watching::default()))
         .invoke_handler(tauri::generate_handler![
             sessions,
             select,
@@ -363,6 +410,7 @@ fn main() {
             terminal::terminal_connect,
             terminal::terminal_send,
             terminal::open_link,
+            terminal::open_file,
             terminal::places,
             terminal::claude_argv,
             terminal::create_task,
@@ -374,11 +422,23 @@ fn main() {
             restart::revival,
             restart::restart_into,
             answer::watch,
+            answer::alive,
             answer::answer,
             settings::settings_files,
-            settings::set_zoom
+            settings::set_zoom,
+            summary_settings,
+            turn_summary,
+            notify_while_focused
         ])
+        .on_window_event(|_, event| {
+            if let Some(path) = presence::path() {
+                presence::window_event(&path, event);
+            }
+        })
         .setup(move |app| {
+            if let Some(path) = presence::path() {
+                presence::start(&path);
+            }
             let app = app.handle().clone();
             restart::watch_build(app.clone());
             settings::watch(app.clone());
@@ -387,8 +447,13 @@ fn main() {
             thread::spawn(move || follow(&app, &log, &writer));
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("run the studio");
+        .build(tauri::generate_context!())
+        .expect("build the studio")
+        .run(|_, event| {
+            if let Some(path) = presence::path() {
+                presence::run_event(&path, &event);
+            }
+        });
 }
 
 /// Reads the log from its start, then from where it stopped. A line counts once it ends in a newline,
@@ -460,8 +525,12 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                 match output {
                     Output::Card(request) => write(app, writer, &mut queues, request, true),
                     Output::Brief(request) => write(app, writer, &mut queues, request, false),
+                    Output::Summary(request) => summarize(app, writer, &mut queues, request),
                     Output::NeedsYou { session_id, agent } => {
                         tell(app, Notice::NeedsYou, &session_id, agent.as_deref());
+                    }
+                    Output::YourTurn { session_id } => {
+                        tell(app, Notice::YourTurn, &session_id, None);
                     }
                     Output::Failed { session_id, agent } => {
                         tell(
@@ -526,6 +595,16 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
         });
         let names_changed = NAMES_CHANGED.swap(false, Ordering::AcqRel);
         let changed = read || transcripts_changed || windows_changed || names_changed;
+        // The open request goes in the same pass as the list that shows "needs you" (#569).
+        if let Ok(data) = answer::data()
+            && let Some(ask) = app
+                .state::<Mutex<answer::Watching>>()
+                .lock()
+                .unwrap()
+                .pass(&data, studio_hook::answer::now_ms())
+        {
+            let _ = app.emit("ask", ask);
+        }
         if state.lock().unwrap().tick(millis()) || changed {
             sent.list(app);
         }
@@ -543,7 +622,10 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
             .state::<Notices>()
             .lock()
             .unwrap()
-            .due(uptime(), focused, needs_you);
+            .due(uptime(), focused, needs_you, || {
+                let studio = state.lock().unwrap();
+                studio.selected().map(|s| s.agent.id.clone())
+            });
         if let Some((title, body)) = due {
             let _ = app.notification().builder().title(title).body(body).show();
         }
@@ -655,12 +737,54 @@ fn write(
             sent();
         }
     };
-    let queue = queues.entry(id).or_insert_with(|| {
+    let _ = queue(queues, id).send(Box::new(job));
+}
+
+/// Writes the summary of `request`'s turn on its session's queue, after the turn's card, then
+/// switches the turn's intention to its first line (#517, decision 16). While summaries are written
+/// on open, the turn waits for Daniel instead (`turn_summary`).
+fn summarize(
+    app: &AppHandle,
+    writer: &Writer,
+    queues: &mut HashMap<String, mpsc::Sender<Job>>,
+    request: SummaryRequest,
+) {
+    if app
+        .state::<Mutex<Studio>>()
+        .lock()
+        .unwrap()
+        .summaries_on_open()
+    {
+        let waiting = &app.state::<Summaries>().waiting;
+        waiting.lock().unwrap().insert(request.id.clone(), request);
+        return;
+    }
+    let (app, writer) = (app.clone(), writer.clone());
+    let id = request.session_id.clone();
+    let job = move || {
+        let log = |line: String| eprintln!("studio: {line}");
+        let setup = app.state::<Summaries>().setup.lock().unwrap().clone();
+        let (session, turn) = (request.session_id.clone(), request.id.clone());
+        let Some(summary) = write_summary(&app.state::<Cards>(), &*writer, &setup, request, log)
+        else {
+            return;
+        };
+        let first = summary.summary.lines().next().unwrap_or_default();
+        let studio = app.state::<Mutex<Studio>>();
+        if studio.lock().unwrap().summarized(&session, &turn, first) {
+            let _ = app.emit("sessions", sessions(app.state(), app.state()));
+        }
+    };
+    queue(queues, id).send(Box::new(job)).ok();
+}
+
+/// Session `id`'s queue in `queues`, started when it has none.
+fn queue(queues: &mut HashMap<String, mpsc::Sender<Job>>, id: String) -> &mpsc::Sender<Job> {
+    queues.entry(id).or_insert_with(|| {
         let (queue, jobs) = mpsc::channel::<Job>();
         thread::spawn(move || jobs.into_iter().for_each(|job| job()));
         queue
-    });
-    let _ = queue.send(Box::new(job));
+    })
 }
 
 /// Adds a notice on session `session_id`'s line, naming its subagent `agent`, if any; the read loop
@@ -676,6 +800,7 @@ fn tell(app: &AppHandle, notice: Notice, session_id: &str, agent: Option<&str>) 
     match notice {
         Notice::Titled(title) => notices.push(title, body, uptime()),
         Notice::NeedsYou => notices.push_needs_you(session_id, body, uptime()),
+        Notice::YourTurn => notices.push_your_turn(session_id, body, uptime()),
     }
 }
 
@@ -683,7 +808,15 @@ fn tell(app: &AppHandle, notice: Notice, session_id: &str, agent: Option<&str>) 
 /// it is due, or its own title.
 enum Notice<'a> {
     NeedsYou,
+    YourTurn,
     Titled(&'a str),
+}
+
+/// The setting that also notifies "your turn" while the window is focused (#517, decision 6), from
+/// `settings.json`, which the window parses.
+#[tauri::command]
+fn notify_while_focused(on: bool, notices: State<Notices>) {
+    notices.lock().unwrap().while_focused = on;
 }
 
 /// Time since the app started, a monotonic clock for combining notices (#434, decision 28).

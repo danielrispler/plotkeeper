@@ -12,10 +12,10 @@ use std::{
     sync::Mutex,
     time::Duration,
 };
-use studio_core::{Base, CardRequest};
+use studio_core::{Base, CardRequest, SummaryRequest};
 use studio_understanding::{
-    Card, CardStore, CardWriter, Choice, ClaudeWriter, FakeWriter, Quiz, explain_more, find_claude,
-    write_card,
+    Card, CardStore, CardWriter, Choice, ClaudeWriter, FakeWriter, Quiz, SummarySetup, TurnSummary,
+    explain_more, find_claude, write_card, write_summary,
 };
 
 const CLAUDE: &str = "/opt/homebrew/bin/claude";
@@ -354,6 +354,10 @@ fn every_writer_run_is_in_safe_mode() {
         ("update", writer.update_command("", "workers")),
         ("explain more", writer.more_command(&edit(), &card)),
         ("ask", writer.ask_command("an item", &[], "why?")),
+        (
+            "summary",
+            writer.summary_command(&setup(), &turn("s", 1), &[]),
+        ),
     ];
     for (name, (command, _)) in runs {
         let args: Vec<_> = command.get_args().collect();
@@ -644,4 +648,254 @@ fn a_change_holding_nul_bytes_reaches_the_writer_on_standard_input_and_gets_a_ca
         input.ends_with("\nChange:\n+++ b/data.bin\n+ab\n"),
         "{input}"
     );
+}
+
+// The turn summary (#526; #517, decisions 13 to 15).
+
+/// A turn of session `session`, named by `n`, that gets a summary.
+fn turn(session: &str, n: u64) -> SummaryRequest {
+    SummaryRequest {
+        session_id: session.into(),
+        id: format!("{session}@{n}"),
+        prompt: "Explain the parser".into(),
+        responses: vec![
+            "Reading the parser first.".into(),
+            "Rewrote the parser.\n\nIt keeps a bracket stack.".into(),
+        ],
+        intentions: vec![
+            "Reading the parser first.".into(),
+            "Rewrote the parser.".into(),
+        ],
+        card: None,
+    }
+}
+
+fn setup() -> SummarySetup {
+    SummarySetup {
+        model: "claude-haiku-4-5".into(),
+        effort: "medium".into(),
+    }
+}
+
+/// A summary reply whose learning section's options are `options`, the first the key.
+fn summary_reply(summary: &str, options: [&str; 3]) -> String {
+    let option =
+        |text: &str| serde_json::json!({ "text": text, "why": format!("Because of {text}.") });
+    serde_json::json!({
+        "summary": summary,
+        "learning": {
+            "idea": "A stack matches nested brackets.",
+            "question": {
+                "text": "Why a stack?",
+                "options": options.map(option),
+                "key": 0,
+            },
+        },
+    })
+    .to_string()
+}
+
+#[test]
+fn the_summary_call_runs_in_safe_mode_with_the_settings_model_effort_and_its_own_system_prompt() {
+    let writer = ClaudeWriter::new(CLAUDE.into(), "/card-writer".into());
+    let (command, input) = writer.summary_command(&setup(), &turn("s", 1), &[]);
+
+    let args: Vec<_> = command.get_args().map(|a| a.to_str().unwrap()).collect();
+    let [tools, none, mcp, safe, model, m, effort, e, system, s, p] = args[..] else {
+        panic!("{args:?}");
+    };
+    assert_eq!(
+        [tools, none, mcp, safe, model, m, effort, e, system, p],
+        [
+            "--tools",
+            "",
+            "--strict-mcp-config",
+            "--safe-mode",
+            "--model",
+            "claude-haiku-4-5",
+            "--effort",
+            "medium",
+            "--system-prompt",
+            "-p"
+        ]
+    );
+    assert!(s.contains("turn summary"), "{s}");
+    // The answer stays out of the options (#517, decision 14).
+    assert!(s.contains("Never mark the right option"), "{s}");
+    assert!(input.contains("Explain the parser"));
+    assert!(input.contains("It keeps a bracket stack."));
+    assert!(input.contains("- Rewrote the parser.\n"));
+}
+
+#[test]
+fn an_empty_effort_leaves_the_models_default() {
+    let writer = ClaudeWriter::new(CLAUDE.into(), "/card-writer".into());
+    let setup = SummarySetup {
+        effort: String::new(),
+        ..setup()
+    };
+    let (command, _) = writer.summary_command(&setup, &turn("s", 1), &[]);
+    assert!(!command.get_args().any(|a| a == "--effort"));
+}
+
+/// The real summary command's input, recorded, with a fake reply.
+struct Recording {
+    inputs: Mutex<Vec<String>>,
+    reply: String,
+}
+
+impl CardWriter for Recording {
+    fn reply(&self, r: &CardRequest, e: &[String], b: &str) -> Result<String, String> {
+        FakeWriter.reply(r, e, b)
+    }
+    fn more(&self, r: &CardRequest, c: &Card) -> Result<String, String> {
+        FakeWriter.more(r, c)
+    }
+    fn rewrite(&self, p: &[&str], s: &[String], d: &str) -> Result<String, String> {
+        FakeWriter.rewrite(p, s, d)
+    }
+    fn update(&self, b: &str, w: &str) -> Result<String, String> {
+        FakeWriter.update(b, w)
+    }
+    fn summarize(
+        &self,
+        setup: &SummarySetup,
+        request: &SummaryRequest,
+        earlier: &[TurnSummary],
+    ) -> Result<String, String> {
+        let writer = ClaudeWriter::new(CLAUDE.into(), "/card-writer".into());
+        let (_, input) = writer.summary_command(setup, request, earlier);
+        self.inputs.lock().unwrap().push(input);
+        Ok(self.reply.clone())
+    }
+}
+
+fn recording(reply: String) -> Recording {
+    Recording {
+        inputs: Mutex::default(),
+        reply,
+    }
+}
+
+fn summaries(dir: &Path) -> Mutex<CardStore> {
+    Mutex::new(CardStore::open(dir.join("cards.json")).unwrap())
+}
+
+#[test]
+fn the_summary_input_holds_the_sessions_last_3_summaries_and_their_questions() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = summaries(dir.path());
+    for n in 1..=4 {
+        let writer = recording(summary_reply(&format!("Summary {n}."), ["a", "b", "c"]));
+        write_summary(&store, &writer, &setup(), turn("s", n), |_| {}).unwrap();
+    }
+    // Another session's summary is not this session's.
+    let other = recording(summary_reply("Other session.", ["a", "b", "c"]));
+    write_summary(&store, &other, &setup(), turn("t", 5), |_| {}).unwrap();
+
+    let writer = recording(summary_reply("Summary 6.", ["a", "b", "c"]));
+    write_summary(&store, &writer, &setup(), turn("s", 6), |_| {}).unwrap();
+
+    let input = writer.inputs.lock().unwrap().pop().unwrap();
+    assert!(!input.contains("Summary 1."), "{input}");
+    assert!(!input.contains("Other session."), "{input}");
+    for n in 2..=4 {
+        assert!(input.contains(&format!("Summary {n}.")), "{input}");
+    }
+    assert_eq!(input.matches("Why a stack?").count(), 3, "{input}");
+    let kept = store.lock().unwrap().turn_summary("s@6").cloned();
+    assert_eq!(kept.unwrap().summary.summary, "Summary 6.");
+    // The store keeps them across restarts.
+    assert!(
+        summaries(dir.path())
+            .lock()
+            .unwrap()
+            .turn_summary("s@6")
+            .is_some()
+    );
+}
+
+#[test]
+fn a_summary_reply_gives_the_summary_and_the_learning_section() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = summaries(dir.path());
+    let writer = recording(summary_reply(
+        "Rewrote the parser.\nIt keeps a stack.",
+        [
+            "It matches nesting.",
+            "It is faster.",
+            "It uses less memory.",
+        ],
+    ));
+
+    let summary = write_summary(&store, &writer, &setup(), turn("s", 1), |_| {}).unwrap();
+
+    assert_eq!(summary.summary, "Rewrote the parser.\nIt keeps a stack.");
+    let learning = summary.learning.expect("a learning section");
+    assert_eq!(learning.idea, "A stack matches nested brackets.");
+    assert_eq!(learning.question.text, "Why a stack?");
+    let key = &learning.question.options[learning.question.key];
+    assert_eq!(key.text, "It matches nesting.");
+}
+
+#[test]
+fn a_reply_that_marks_the_answer_inside_the_options_has_the_mark_removed() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = summaries(dir.path());
+    let writer = recording(summary_reply(
+        "Rewrote the parser.",
+        [
+            "✅ It matches nesting.",
+            "It is faster.",
+            "It uses less memory (correct)",
+        ],
+    ));
+
+    let summary = write_summary(&store, &writer, &setup(), turn("s", 1), |_| {}).unwrap();
+
+    let options = summary.learning.unwrap().question.options.into_iter();
+    let mut options: Vec<String> = options.map(|o| o.text).collect();
+    options.sort();
+    assert_eq!(
+        options,
+        [
+            "It is faster.",
+            "It matches nesting.",
+            "It uses less memory"
+        ]
+    );
+}
+
+#[test]
+fn a_malformed_summary_reply_gives_none_and_one_log_line() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = summaries(dir.path());
+    let writer = recording("Shall I read the transcript?".into());
+    let mut lines = Vec::new();
+
+    let summary = write_summary(&store, &writer, &setup(), turn("s", 1), |l| lines.push(l));
+
+    assert_eq!(summary, None);
+    assert_eq!(writer.inputs.lock().unwrap().len(), 2, "asked once more");
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(lines[0].contains("s@1"), "{lines:?}");
+    assert_eq!(store.lock().unwrap().turn_summary("s@1"), None);
+}
+
+#[test]
+fn a_turn_with_a_card_gets_its_summary_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = summaries(dir.path());
+    let writer = recording(summary_reply("Rewrote the parser.", ["a", "b", "c"]));
+    let request = SummaryRequest {
+        card: Some("s@1".into()),
+        ..turn("s", 1)
+    };
+
+    let summary = write_summary(&store, &writer, &setup(), request, |_| {}).unwrap();
+
+    assert_eq!(summary.summary, "Rewrote the parser.");
+    assert_eq!(summary.learning, None);
+    let input = writer.inputs.lock().unwrap().pop().unwrap();
+    assert!(input.contains("has a card"), "{input}");
 }

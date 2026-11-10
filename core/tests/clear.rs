@@ -3,7 +3,8 @@
 //! the row on the same studio terminal, or in the same folder outside studio terminals.
 
 use serde_json::{Value, json};
-use studio_core::{State, Studio};
+use std::time::Duration;
+use studio_core::{Notifications, Output, State, Studio};
 
 const FOLDER: &str = "/Users/danielrispler/work/Falinks/.claude/worktrees/issue-474-clear";
 const OLD: &str = "5b1e0c7a-2d94-4f63-a8e1-9c3f6d20b417";
@@ -168,4 +169,40 @@ fn the_checkpoint_days_clears_each_keep_their_row() {
         assert_eq!(row.agent.id, old, "{new} continues {old}'s row");
         assert_eq!(row.cleared.len(), 1);
     }
+}
+
+/// #522: after a `/clear`, the new conversation's `Stop` notifies "your turn" under the row's id,
+/// the one the selection names, so the setting for notifying while focused still skips the session
+/// Daniel looks at.
+#[test]
+fn your_turn_after_a_clear_names_the_selected_row() {
+    let mut studio = Studio::replayed(cleared(OLD, NEW, Some("claude-1")));
+    studio.select(NEW);
+    studio.apply(&event(
+        NEW,
+        "UserPromptSubmit",
+        8_000,
+        Some("claude-1"),
+        json!({ "prompt": "Next.", "prompt_id": "p-2" }),
+    ));
+    let mut notifications = Notifications::default();
+    notifications.while_focused = true;
+
+    let stop = event(
+        NEW,
+        "Stop",
+        9_000,
+        Some("claude-1"),
+        json!({ "prompt_id": "p-2" }),
+    );
+    let your_turn = Output::YourTurn {
+        session_id: OLD.into(),
+    };
+    assert!(studio.apply(&stop).contains(&your_turn));
+    notifications.push_your_turn(OLD, String::new(), Duration::ZERO);
+
+    let selected = studio.selected().map(|s| s.agent.id.clone());
+    assert_eq!(selected.as_deref(), Some(OLD));
+    let due = notifications.due(Duration::from_secs(10), || true, |_| false, || selected);
+    assert_eq!(due, None);
 }
