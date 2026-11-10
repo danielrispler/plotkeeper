@@ -9,6 +9,7 @@ import { showSessions } from "./list.js";
 import { showSession } from "./panes.js";
 import { studio } from "./state.js";
 import { showView } from "./story.js";
+import { showToast } from "./toast.js";
 import type { Selection, Session, SessionCards } from "./types.js";
 
 // Asks the shell for the selected session's cards and draws them.
@@ -70,6 +71,7 @@ async function catchUp() {
 export function show(selected: Selection | null) {
   studio.selection = selected;
   showSessions(studio.listed);
+  showToast();
   showView(selected);
   showSession(selected?.session ?? null);
   rewatch();

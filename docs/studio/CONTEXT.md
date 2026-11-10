@@ -156,6 +156,10 @@ The list of every agent session, one row each, sorted by state: needs you, runni
 **Story rail**:
 The column on the window's left that tells the selected session's or subagent's story: its state and step, its brief, cards and checks, and its open question docked at the bottom.
 
+**Focus mode**:
+The window with the session list and the story rail folded, so the terminal takes the window. One key, rebindable in the keymap, enters it and the same key leaves it; nothing else changes the layout, so the terminal's size never moves under Daniel's typing. While in it, a session that newly needs you shows a toast over the terminal's corner instead.
+_Avoid_: Zen mode, full screen (the macOS window state)
+
 **Falinks run**:
 Several agent sessions coordinated by the Falinks engine on one repository.
 

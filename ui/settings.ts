@@ -72,6 +72,8 @@ const defaultKeymap: Keymap = {
     "cmd-1": "studio::ToggleList",
     "cmd-2": "studio::ToggleRail",
     escape: "studio::Dismiss",
+    // Focus mode (#573), in `MODIFIERS` order, as the lookup reads it.
+    "shift-cmd-enter": "studio::ToggleFocus",
     "cmd-=": "studio::ZoomIn",
     "cmd--": "studio::ZoomOut",
     "cmd-0": "studio::ResetZoom",

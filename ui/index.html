@@ -26,6 +26,8 @@
       <button id="new-session" class="btn small" type="button">New session</button>
       <!-- Usage: context, 5h and week (#480, #481). -->
       <span id="usage" class="usage"></span>
+      <!-- While the rail is an overlay: the selected session's state and open question (#573). -->
+      <span id="slim" class="slim" hidden></span>
       <button id="rail-toggle" class="btn small" type="button" hidden>Story ⌘2</button>
     </header>
 
@@ -46,6 +48,8 @@
       <!-- A new build to restart into, or the daemon upgrade's wait (#470). -->
       <div id="restart" class="restart" role="status" hidden></div>
       <div id="terminal-body" class="term-body"></div>
+      <!-- The needs-you toast (#573): over the terminal's top-right corner, never focused. -->
+      <div id="toast" class="toast" role="status" hidden></div>
     </section>
 
     <aside class="rail" aria-label="Session story">

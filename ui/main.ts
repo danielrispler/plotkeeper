@@ -8,7 +8,7 @@ import { startWatching } from "./answer.js";
 import { markShown, showCards } from "./cards.js";
 import { element, invoke, listen } from "./dom.js";
 import { windowBinding } from "./keys.js";
-import { defaultWidths, type LayoutMode, layoutMode, resized, type Widths } from "./layout.js";
+import { arrange, defaultWidths, type LayoutMode, resized, type Widths } from "./layout.js";
 import { showSessions } from "./list.js";
 import { select, show } from "./selection.js";
 import { startPanes } from "./panes.js";
@@ -16,6 +16,7 @@ import { showPicker } from "./picker.js";
 import { reload, type SettingsFiles, zoomed } from "./settings.js";
 import { studio } from "./state.js";
 import { showView } from "./story.js";
+import { jumpToNeedsYou, showToast } from "./toast.js";
 import type { Selection, Session, SessionCards } from "./types.js";
 import { type Limits, usageText } from "./usage.js";
 
@@ -28,13 +29,18 @@ function cell(): number {
 // The list's and the rail's widths, as their dividers last left them.
 const widths: Widths = { ...defaultWidths, ...JSON.parse(localStorage.getItem("widths") ?? "{}") };
 
+// The list's open width is the one its divider left; the rail's is the width rule's.
 function layout() {
-  for (const [column, width] of Object.entries(widths)) document.documentElement.style.setProperty(`--${column}`, `${width}px`);
-  const mode = layoutMode(window.innerWidth, cell(), widths);
+  const { mode, rail } = arrange(window.innerWidth, cell(), widths, { focus: studio.focus });
+  document.documentElement.style.setProperty("--list", `${widths.list}px`);
+  document.documentElement.style.setProperty("--rail", `${rail || widths.rail}px`);
   document.body.dataset.layout = mode;
   element("rail-toggle").hidden = mode !== "overlay";
+  showToast();
 }
 window.addEventListener("resize", layout);
+// Leaving focus mode from the toast.
+window.addEventListener("layout", layout);
 layout();
 
 // Dragging a divider resizes its column. The grid runs right to left, so the list's width is
@@ -61,7 +67,8 @@ divider("list-divider", "list", (x) => window.innerWidth - x);
 divider("rail-divider", "rail", (x) => x);
 
 // The window's shortcuts, from `keymap.json` (#524). By default ⌘1 opens the list from its strip,
-// ⌘2 the rail as an overlay, Esc closes both and the picker, and ⌘=, ⌘- and ⌘0 zoom.
+// ⌘2 the rail as an overlay, Esc closes both and the picker, ⌘⇧↩ toggles focus mode, and ⌘=, ⌘- and
+// ⌘0 zoom. Only focus mode's key changes the terminal's size; a needs-you only toasts (#573).
 const toggle = (name: string) => document.body.classList.toggle(name);
 let zoom = 1;
 const setZoom = (to: number) => {
@@ -74,6 +81,11 @@ const actions: Record<string, () => void> = {
   "studio::Dismiss": () => {
     document.body.classList.remove("list-open", "rail-open");
     element("picker").hidden = true;
+  },
+  "studio::ToggleFocus": () => {
+    studio.focus = !studio.focus;
+    document.body.classList.remove("list-open", "rail-open");
+    layout();
   },
   "studio::ZoomIn": () => setZoom(zoomed(zoom, 1)),
   "studio::ZoomOut": () => setZoom(zoomed(zoom, -1)),
@@ -138,8 +150,15 @@ document.addEventListener("pointerdown", (event) => {
   if (!element("picker").contains(target) && !element("new-session").contains(target)) element("picker").hidden = true;
 }, true); // capture: the terminal must not swallow it
 
-listen<Session[]>("sessions", showSessions);
-invoke<Session[]>("sessions").then(showSessions);
+const showList = (sessions: Session[]) => {
+  showSessions(sessions);
+  showToast();
+};
+listen<Session[]>("sessions", showList);
+invoke<Session[]>("sessions").then(showList);
+// A press on the toast jumps to its session; the press itself keeps the terminal's keyboard focus.
+element("toast").addEventListener("pointerdown", (event) => event.preventDefault());
+element("toast").addEventListener("click", jumpToNeedsYou);
 // While a press waits for its reply, the reply draws the rail once, with its cards; an event between
 // would draw it with the last session's cards for a frame (#570).
 // The press's settling fetches what it held back.
