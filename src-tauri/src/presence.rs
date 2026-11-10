@@ -58,6 +58,9 @@ mod tests {
     #[test]
     fn the_daemon_deletes_this_same_file() {
         let socket = studio_terminal_daemon::default_socket();
-        assert_eq!(super::path(), Some(studio_terminal_daemon::presence(&socket)));
+        assert_eq!(
+            super::path(),
+            Some(studio_terminal_daemon::presence(&socket))
+        );
     }
 }

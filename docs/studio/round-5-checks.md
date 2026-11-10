@@ -41,6 +41,7 @@ It writes every output to `local-evidence/2026-11-09-round-5/real-calls-<time>/`
 - [ ] **#542:** the docked panel's shell survives an app restart and shows under a #529 split.
 - [ ] **#568:** a turn that only writes a `.DS_Store` (open its folder in Finder) gets no card.
 - [ ] **#569:** a question, a plan and a permission each dock within the read loop's 200 ms, not after up to 1.2 s. Time the worst of a few from the terminal's prompt to the card, and record it beside 1.2 s in the PR. The UX harness (`local-evidence/2026-11-09-ui-ux/measure/`) stubs the shell and has no dock scenario, so it cannot time this.
+- [ ] **#555:** after the daemon upgrade (accept the app's upgrade prompt), every terminal revives. Then, with Claude working in a studio pane, `(echo '{"op":"list"}'; sleep 1) | nc -U ~/Library/Application\ Support/dev.falinks.studio/terminal-daemon.sock` shows that terminal with `"state":"working"` and `"app"` set, and `turn` goes up after the turn ends. The folder is `drwx------` and the socket `srw-------` (`ls -la` of the folder). Quitting the app (or `kill -9` on it) deletes `present`; a CLI `attach` that detaches leaves it.
 - [ ] **#557:** from a task worktree session, clicking `path:line` in the terminal and a file link in the rail opens that worktree's file, not the main checkout's, at that line in Zed.
 
 ## Checked automatically, early

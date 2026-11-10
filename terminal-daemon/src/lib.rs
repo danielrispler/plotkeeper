@@ -16,7 +16,13 @@
 //! - `list`: `list {daemon_pid, daemon_rss_kb, terms: [{id, argv, cwd, pid, exited, foreground, cols, rows,
 //!   scrollback_bytes, rss_kb, processes: [{pid, command, rss_kb}]}]}`. `processes` is every live process of the
 //!   terminal's session, so after `exited` is set it lists what was left behind; `rss_kb` is their sum. `cwd` is
-//!   the folder its leader is in now, such as where its shell `cd`-ed to, until it exits.
+//!   the folder its leader is in now, such as where its shell `cd`-ed to, until it exits. Each row also carries the
+//!   program's OSC 7501 root status (#555): `state`, `kind`, `app` and `status_ms` (when the state last changed),
+//!   all null until it reports and after `clear` or its exit, and `turn`, which goes up each time the root leaves
+//!   `working`.
+//!
+//! The daemon answers a program's OSC 7501 query (`ESC ] 7501 ; ?`) with the states and kinds it knows, ending with
+//! the query's own terminator.
 //!
 //! - `app`: marks the connection as the app's, not a CLI attach's; no reply. When it drops (a quit or a crash), the
 //!   daemon deletes the presence file ([`presence`]).
@@ -36,6 +42,7 @@ use std::{
 
 pub mod attach;
 pub mod daemon;
+mod status;
 
 /// The protocol version this daemon speaks. Bump it only for a change an older app cannot read.
 pub const PROTOCOL: u64 = 1;

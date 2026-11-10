@@ -1,6 +1,6 @@
 // The daemon itself, built from the #322 spike (`terminal-spike/src/daemon.rs`). It owns the PTYs, keeps each
 // terminal's raw output as scrollback, and serves clients over the socket (protocol in lib.rs).
-use crate::{PROTOCOL, decode, encode};
+use crate::{PROTOCOL, decode, encode, status::Status};
 use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use serde_json::{Value, json};
 use std::{
@@ -60,6 +60,7 @@ struct Term {
     cols: u16,
     rows: u16,
     exited: Option<String>,
+    status: Status,
 }
 
 impl Term {
@@ -155,8 +156,7 @@ impl Record {
         };
         // Written aside and renamed, so a crash mid-write leaves the last whole record.
         let aside = self.path.with_extension("tmp");
-        let saved =
-            std::fs::write(&aside, text).and_then(|()| std::fs::rename(&aside, &self.path));
+        let saved = std::fs::write(&aside, text).and_then(|()| std::fs::rename(&aside, &self.path));
         if let Err(e) = saved {
             eprintln!("record the terminals: {e}");
         }
@@ -223,6 +223,10 @@ fn error(id: &str, message: &str) -> Value {
 fn on_output(state: &Shared, id: &str, bytes: &[u8]) {
     let s = &mut *state.lock().unwrap();
     let Some(t) = s.terms.get_mut(id) else { return };
+    let replies = t.status.read(bytes);
+    if !replies.is_empty() {
+        let _ = t.pty.writer.write_all(&replies);
+    }
     t.buf.extend(bytes);
     let excess = t.buf.len().saturating_sub(SCROLLBACK);
     t.buf.drain(..excess);
@@ -239,6 +243,7 @@ fn on_exit(state: &Shared, id: &str, status: String) {
         let s = &mut *state.lock().unwrap();
         if let Some(t) = s.terms.get_mut(id) {
             t.exited = Some(status.clone());
+            t.status.exit();
         }
         broadcast(
             &mut s.conns,
@@ -326,6 +331,7 @@ fn serve_conn(n: usize, stream: UnixStream, state: Shared) {
                                 cols,
                                 rows,
                                 exited: None,
+                                status: Status::default(),
                             },
                         );
                         saved = Some(s.save());
@@ -519,14 +525,15 @@ fn session(all: &[Proc], sid: u32) -> Vec<&Proc> {
 
 fn list(state: &Shared) -> Value {
     // Read under the lock; `ps` runs after it, so output keeps flowing meanwhile.
-    let (terms, record): (Vec<(Value, Option<u32>, Option<u32>)>, _) = {
+    let (terms, record) = {
         let s = state.lock().unwrap();
-        let rows = s
+        let rows: Vec<(Value, Option<u32>, Option<u32>)> = s
             .terms
             .iter()
             .map(|(id, t)| {
-                let row = json!({ "id": id, "argv": t.argv, "cwd": t.cwd(), "pid": t.pty.pid, "exited": t.exited,
+                let mut row = json!({ "id": id, "argv": t.argv, "cwd": t.cwd(), "pid": t.pty.pid, "exited": t.exited,
                                   "cols": t.cols, "rows": t.rows, "scrollback_bytes": t.buf.len() });
+                t.status.fields(&mut row);
                 (row, t.pty.pid, t.pty.master.process_group_leader().map(|p| p as u32))
             })
             .collect();
