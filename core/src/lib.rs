@@ -97,6 +97,9 @@ pub struct Session {
     /// The id `claude --resume` takes: its latest conversation's, which a `/clear` changes while the
     /// row keeps its first id (#461, decision 18).
     pub resume_id: String,
+    /// Claude Code's permission mode, from its latest event that names one (#541): `default`,
+    /// `auto`, `plan` and the like; `None` until one does, as `SessionStart` does not.
+    pub permission_mode: Option<String>,
     /// When each `/clear` continued it, oldest first: the "cleared" markers in its history.
     pub cleared: Vec<u64>,
     /// Its latest `SessionEnd` was a `/clear`, so the next `SessionStart` from `clear` on its
@@ -1596,6 +1599,8 @@ struct Event {
     reason: String,
     #[serde(default)]
     studio_received_ms: u64,
+    /// The session's permission mode, which `SessionStart` leaves out.
+    permission_mode: Option<String>,
     /// On a tool's result, how long its call took.
     duration_ms: Option<u64>,
     /// The terminal the session runs in, which the hook records from `STUDIO_TERMINAL_ID`.
@@ -2118,6 +2123,9 @@ impl Studio {
         session.agent.last_event_at = session.agent.last_event_at.max(event.studio_received_ms);
         // Every event of a `claude` process carries its terminal, so a resume elsewhere moves it.
         session.terminal.clone_from(&event.studio_terminal_id);
+        if event.permission_mode.is_some() {
+            session.permission_mode.clone_from(&event.permission_mode);
+        }
         // The session Daniel started in a new terminal takes the selection, so the rail follows its pane.
         if self.awaiting.is_some() && session.terminal == self.awaiting {
             self.awaiting = None;

@@ -52,13 +52,16 @@
       <div id="terminal-body" class="term-body"></div>
       <!-- The needs-you toast (#573): over the terminal's top-right corner, never focused. -->
       <div id="toast" class="toast" role="status" hidden></div>
+      <!-- A program that failed at start (#558): over the terminal's bottom-right corner, never focused. -->
+      <div id="start-toast" class="toast start" role="status" hidden></div>
     </section>
 
     <aside class="rail" aria-label="Session story">
-      <!-- One line (#574): the verdict and the phase (#475); the times (#473) and the model show on
-           hover. Rename, Close and Delete wait in the "⋯" menu. -->
+      <!-- One line (#574): the verdict, the permission mode unless default (#541), always shown, and
+           the phase (#475); the times (#473) and the model show on hover. Rename, Close and Delete
+           wait in the "⋯" menu. -->
       <div class="rail-h">
-        <p id="headline" class="headline"><span id="state" class="state"></span> <span id="phase" class="phase"></span></p>
+        <p id="headline" class="headline"><span id="state" class="state"></span> <span id="mode" class="mode"></span> <span id="phase" class="phase"></span></p>
         <button id="rail-more" class="btn small" type="button" popovertarget="rail-actions" aria-label="More actions" hidden>⋯</button>
         <div id="rail-actions" class="menu" popover>
           <!-- An ended session opens again with `claude --resume` (#467). -->

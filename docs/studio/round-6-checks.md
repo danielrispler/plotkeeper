@@ -95,6 +95,20 @@ Between passes, nothing waits for him. After each pass, a code-review agent that
 - [ ] Each turn shows one "Ask about this", only on hover; asking about a turn works as before.
 - [ ] With summaries written on open (settings), opening a session writes its waiting turns' summaries once, not again on each redraw.
 
+## #558: a program that fails at start shows its exit code and last lines
+
+- [ ] Start a session in a folder where `claude` cannot start (for example, with a failing `claude` script first on `PATH`). Within 2 s, the terminal's place says "claude could not start: code <n>" above the program's last lines, with "Show output", which shows its pane and full output.
+- [ ] At the same time, a toast at the terminal's bottom-right corner names the session (or program) and the code, with "Show output" and ×. Typing in the terminal goes on: the toast takes no focus and nothing moves.
+- [ ] Let a hidden pane fail at start, for example a revived terminal or a Doctor entry while another pane shows. The shown terminal stays; only the toast appears, and its "Show output" shows the failed pane.
+- [ ] A session that runs a while and then exits, and a program that exits with code 0, show no notice: only the pane's usual exit line.
+
+## #541: start a session in auto mode
+
+- [ ] Open the picker (⌘N): "Auto mode" is unticked. Tick it and start a session: it runs in Claude Code's auto mode (its footer says so), and after its first prompt the rail's line reads "Running auto mode …". No bypass option is offered anywhere.
+- [ ] In that session, ask for something auto mode's classifier blocks: the row shows **needs you** and the toast fires, as in default mode.
+- [ ] A session started without the tick shows no mode on the rail's line.
+- [ ] End the auto session, then "Open" it from the rail's "⋯" menu (or "Open here"): it resumes in auto mode. Restarting the terminal daemon (#470) also brings it back in auto mode.
+
 ## #556: unseen your-turn mark and sounds
 
 - [ ] A session whose turn ends while you look at another shows a filled dot and a bold name, in the list and in the strip. Selecting it with the window focused clears the mark; selecting it while another app has focus does not.

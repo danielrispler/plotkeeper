@@ -28,6 +28,7 @@ export function newTask(
   create: (value: string) => Promise<Place>,
   prompt: boolean,
   report: (error: unknown) => void = failed,
+  auto: () => boolean = () => false,
 ): HTMLElement {
   const form = document.createElement("form");
   form.className = "new-task";
@@ -46,7 +47,7 @@ export function newTask(
     try {
       const task = await create(value);
       element("picker").hidden = true;
-      await startClaude(task.path, null, prompt ? value : "");
+      await startClaude(task.path, null, prompt ? value : "", auto());
     } catch (e) {
       report(e);
     } finally {
@@ -59,14 +60,23 @@ export function newTask(
 
 // The quick start: a task named after an issue, a spec or a prompt, whose session starts on it, or,
 // empty, the main checkout.
-const quickStart = (main: Place) =>
-  newTask("Issue #, spec path or prompt; empty for main", "Start", async (request) => request ? invoke<Place>("create_named_task", { request }) : main, true);
+const quickStart = (main: Place, auto: () => boolean) =>
+  newTask("Issue #, spec path or prompt; empty for main", "Start", async (request) => request ? invoke<Place>("create_named_task", { request }) : main, true, failed, auto);
+
+// The Auto mode choice (#541): off each time the picker opens; the session starts in Claude Code's
+// auto mode when on. Bypass mode is never offered.
+function autoChoice(): [HTMLElement, () => boolean] {
+  const box = Object.assign(document.createElement("input"), { type: "checkbox" });
+  const label = text("label", "", "auto-mode");
+  label.append(box, " Auto mode");
+  return [label, () => box.checked];
+}
 
 // A place's row: its name, then its folder.
-function placeRow(name: string, place: Place): HTMLElement {
+function placeRow(name: string, place: Place, auto: () => boolean): HTMLElement {
   const button = pressable(document.createElement("button"), false, () => {
     element("picker").hidden = true;
-    startClaude(place.path).catch((e) => console.warn(e));
+    startClaude(place.path, null, "", auto()).catch((e) => console.warn(e));
   });
   button.classList.add("row");
   const first = text("span", "", "l1");
@@ -79,10 +89,12 @@ function placeRow(name: string, place: Place): HTMLElement {
 function picked(places: Places): HTMLElement[] {
   const { hidden } = places;
   const count = hidden ? [text("p", `${hidden} agent worktree${hidden === 1 ? "" : "s"} hidden`, "hidden-count")] : [];
-  const [main, ...tasks] = placeRows(places, [], []).map(({ name, place }) => placeRow(name, place));
+  const [choice, auto] = autoChoice();
+  const [main, ...tasks] = placeRows(places, [], []).map(({ name, place }) => placeRow(name, place, auto));
   return [
     text("h1", "New session in its own task"),
-    quickStart(places.main),
+    quickStart(places.main, auto),
+    choice,
     text("h1", "Start a session in"),
     main,
     ...count,
