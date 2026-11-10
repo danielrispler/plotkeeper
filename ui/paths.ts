@@ -17,6 +17,17 @@ export function pathLinks(line: string): { text: string; start: number }[] {
     .filter((link) => /[A-Za-z]/.test(link.text));
 }
 
+// Whether inline code in a reply is a whole file path (#581): a path with a file extension and either
+// a folder or a line suffix, or with a folder and a line suffix. So `src/a.rs`, `a.rs:42` and
+// `src/Makefile:3` are; `origin/main`, `@types/node`, `std::fs` and `localhost:8080` are not.
+export function codePath(text: string): boolean {
+  const m = /^((?:~|\.{1,2})?\/?[\w.@+-]+(?:\/[\w.@+-]+)*)(:\d+(?:-\d+|:\d+)?|#L\d+(?:-L\d+)?)?$/.exec(text);
+  if (!m || !/[A-Za-z]/.test(m[1])) return false;
+  const folder = m[1].includes("/");
+  const extension = /[\w-]\.[A-Za-z]\w*$/.test(m[1]);
+  return extension ? folder || !!m[2] : folder && !!m[2];
+}
+
 // The path as the shell reads it back: as is when safe, else single-quoted.
 export const quotePath = (p: string) => (/^[\w./@+:,-]+$/.test(p) ? p : `'${p.replaceAll("'", "'\\''")}'`);
 
