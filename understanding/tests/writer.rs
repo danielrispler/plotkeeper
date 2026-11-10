@@ -726,6 +726,15 @@ fn the_summary_call_runs_in_safe_mode_with_the_settings_model_effort_and_its_own
     assert!(s.contains("turn summary"), "{s}");
     // The answer stays out of the options (#517, decision 14).
     assert!(s.contains("Never mark the right option"), "{s}");
+    // The question tests understanding, and only when the turn has something to teach (#583).
+    for rule in [
+        "why something works or how a mechanism behaves",
+        "a mistake a developer could really make",
+        "keeps its bound or condition",
+        r#""learning": null"#,
+    ] {
+        assert!(s.contains(rule), "{rule}: {s}");
+    }
     assert!(input.contains("Explain the parser"));
     assert!(input.contains("It keeps a bracket stack."));
     assert!(input.contains("- Rewrote the parser.\n"));
@@ -851,6 +860,57 @@ fn a_summary_reply_gives_the_summary_and_the_learning_section() {
     assert_eq!(learning.question.text, "Why a stack?");
     let key = &learning.question.options[learning.question.key];
     assert_eq!(key.text, "It matches nesting.");
+}
+
+#[test]
+fn a_reply_with_a_null_learning_section_gives_the_summary_alone_and_logs_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = summaries(dir.path());
+    let writer = recording(r#"{"summary": "Merged the lanes.", "learning": null}"#.into());
+    let mut lines = Vec::new();
+
+    let summary = write_summary(&store, &writer, &setup(), turn("s", 1), |l| lines.push(l));
+
+    assert_eq!(summary.unwrap().learning, None);
+    assert_eq!(lines, Vec::<String>::new());
+    assert_eq!(writer.inputs.lock().unwrap().len(), 1, "no retry");
+}
+
+#[test]
+fn a_reply_whose_key_is_much_longer_than_its_wrong_options_is_asked_once_more() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = summaries(dir.path());
+    // The lengths of a real guessable reply (#583): a key of 100 characters, the longest wrong 77.
+    let writer = recording(summary_reply(
+        "Rewrote the parser.",
+        [&"k".repeat(100), &"w".repeat(77), &"w".repeat(66)],
+    ));
+    let mut lines = Vec::new();
+
+    let summary = write_summary(&store, &writer, &setup(), turn("s", 1), |l| lines.push(l));
+
+    let summary = summary.unwrap();
+    assert_eq!(summary.summary, "Rewrote the parser.");
+    assert_eq!(summary.learning, None);
+    assert_eq!(writer.inputs.lock().unwrap().len(), 2, "asked once more");
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(lines[0].contains("s@1"), "{lines:?}");
+}
+
+#[test]
+fn a_reply_whose_options_are_of_similar_length_passes_on_the_first_call() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = summaries(dir.path());
+    // A real reply whose key is the shortest (#583): 97 characters, the wrong ones up to 114.
+    let writer = recording(summary_reply(
+        "Rewrote the parser.",
+        [&"k".repeat(97), &"w".repeat(114), &"w".repeat(101)],
+    ));
+
+    let summary = write_summary(&store, &writer, &setup(), turn("s", 1), |_| {}).unwrap();
+
+    assert!(summary.learning.is_some());
+    assert_eq!(writer.inputs.lock().unwrap().len(), 1);
 }
 
 #[test]
