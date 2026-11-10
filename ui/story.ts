@@ -1,6 +1,9 @@
-// The story rail, on the window's left: the selected session's state and step, its brief, cards and
-// checks, with its open question docked at the bottom. A subagent's view shows its own line,
-// questions, brief and cards; the checks are its session's.
+// The story rail, on the window's left (#574). One header line: the verdict and the phase, with the
+// times and the model on hover, and a "⋯" menu. Then "now": the open question, docked, or else the
+// newest card; the current intention, boxed; the latest turn's summary. Below, a feed of turns,
+// newest first, each with its prompt, summary, learning question, cards, questions, subagents,
+// checks and folded response, and one "ask about this". A subagent's view shows its own line,
+// questions, brief and cards in one block.
 
 import { age, code, element, invoke, pressable, prose, text } from "./dom.js";
 import { select } from "./selection.js";
@@ -10,19 +13,34 @@ import { encode, request } from "./daemon.js";
 import { agentState, sessionName } from "./list.js";
 import { closePane, startClaude } from "./panes.js";
 import { openDecision } from "./answer.js";
+import { cardNode } from "./cards.js";
 import { showCleared } from "./decisions.js";
 import { decisionElement, questionElement } from "./questions.js";
 import { shortPaths, worktreeOf } from "./paths.js";
-import { checkTime, counts, estimateText, timeNode, times } from "./times.js";
+import { checkTime, counts, estimateText, times } from "./times.js";
 import { studio } from "./state.js";
 import { typeInto } from "./typing.js";
-import { stateLabels, type CheckLine, type Losses, type Places, type Question, type Selection, type Session, type Transcript } from "./types.js";
+import {
+  stateLabels,
+  type CheckLine,
+  type Losses,
+  type Places,
+  type Question,
+  type Selection,
+  type Session,
+  type StoredCard,
+  type Subagent,
+  type Turn,
+  type TurnSummary,
+} from "./types.js";
 
 export function showView(selected: Selection | null) {
   element("empty").hidden = selected !== null;
   element("view").hidden = selected === null;
-  element("times").replaceChildren();
+  element("rail-more").hidden = selected === null;
   if (selected === null) {
+    element("state").textContent = "";
+    element("phase").textContent = "";
     showQuestions([]);
     showCleared([]);
     return;
@@ -32,17 +50,18 @@ export function showView(selected: Selection | null) {
   const [label, state] = agent === null ? [stateLabels[session.state], session.state] : agentState(session, agent);
   const step = (agent ?? session).last_step;
   const stepSpan = (agent ?? session).step_span;
-  const estimate = document.createElement("span");
-  estimate.className = "estimate";
-  estimate.textContent = agent === null ? estimateText(session.work) : "";
-  // The model and effort the session runs at (#517, decision 8); none for a subagent, whose transcript the studio does not read.
-  const { model, effort } = session.transcript;
-  const runsAt = text("span", agent === null ? [model, effort && `effort ${effort}`].filter(Boolean).join(" · ") : "", "runs-at");
-  runsAt.title = "Model and reasoning effort, from the transcript";
-  element("times").replaceChildren(...times(session, stepSpan).map(timeNode), runsAt, estimate);
-  element("view").toggleAttribute("data-agent", agent !== null);
+  // One line: the verdict and the phase; the times and the model show on hover, counted at the hover.
   element("state").textContent = label;
   element("state").dataset.state = state;
+  element("phase").textContent = agent === null ? estimateText(session.work) : "";
+  // The model and effort the session runs at (#517, decision 8); none for a subagent, whose transcript the studio does not read.
+  const { model, effort } = session.transcript;
+  const runsAt = agent === null ? [model, effort && `effort ${effort}`].filter(Boolean).join(" · ") : "";
+  element("headline").onmouseenter = () => {
+    const now = Date.now();
+    element("headline").title = [...times(session, stepSpan).map(([, draw]) => draw(now)), runsAt].filter(Boolean).join(" · ");
+  };
+  element("view").toggleAttribute("data-agent", agent !== null);
   // "Open" resumes an ended session in a new terminal, in its folder, where Claude Code keeps it.
   element("reopen").hidden = agent !== null || session.state !== "ended";
   element("reopen").onclick = () => startClaude(session.cwd, session.resume_id).catch((e) => console.warn(e));
@@ -60,20 +79,24 @@ export function showView(selected: Selection | null) {
   element("command").textContent = step?.command ?? "";
   element("step").classList.toggle("has-command", Boolean(step?.command));
   // A subagent's transcript is its own, which the studio does not read.
-  showStory(session.id, session.cwd, agent === null ? session.transcript : null);
+  showIntention(agent === null ? session.transcript : null);
   showQuestions(session.questions.filter((question) => question.agent === (agent?.id ?? null)));
-  showChecks(session.checks);
   showCleared(agent === null ? session.cleared : []);
-  showHistory(agent === null ? session : null);
   // A subagent's view has no intention of its own: its written summary takes that line (#535).
   if ((agent?.id ?? null) !== shownAgent) {
     shownAgent = agent?.id ?? null;
     failed.clear();
   }
+  // Opening another session retries its turns whose summary write failed.
+  if (session.id !== shownSession) {
+    shownSession = session.id;
+    failedTurns.clear();
+  }
   if (agent !== null) {
     element("intention-text").textContent = agentSummaries.get(agent.id) ?? "";
     if (agent.ended_at !== null) summarize(agent.id);
   }
+  drawFeed();
 }
 
 // The subagent summaries the writer gave (#535), by subagent id, those being written, and those
@@ -82,6 +105,7 @@ const agentSummaries = new Map<string, string>();
 const writing = new Set<string>();
 const failed = new Set<string>();
 let shownAgent: string | null = null;
+let shownSession: string | null = null;
 
 // Asks the shell for subagent `id`'s summary: the store's, or one writer call now. A failed call
 // leaves its name and first line, and the next opening asks again.
@@ -93,6 +117,7 @@ function summarize(id: string) {
       if (summary === null) return void failed.add(id);
       agentSummaries.set(id, summary);
       if (studio.selection?.agent === id) element("intention-text").textContent = summary;
+      else drawFeed();
     })
     .catch((e) => {
       failed.add(id);
@@ -118,45 +143,292 @@ export function subagentHistory(session: Pick<Session, "agents">, summaries: Map
     }));
 }
 
-// The rail's Subagents section, on a session's own view only; an entry's click opens that subagent.
-function showHistory(session: Session | null) {
-  const entries = session === null ? [] : subagentHistory(session, agentSummaries);
-  element("subagents-list").replaceChildren(
-    ...entries.map((entry) => {
-      const button = pressable(document.createElement("button"), false, () => select(session!.id, entry.agent));
-      button.classList.add("subagent");
-      const lines = [text("span", entry.purpose, "asked"), ...(entry.asked ? [prose("span", entry.asked)] : [])];
-      button.append(...lines, prose("span", entry.result), text("span", entry.details, "kind"));
-      const item = document.createElement("li");
-      item.append(button);
-      return item;
-    }),
-  );
-  element("subagents-title").textContent = `Subagents (${entries.length})`;
-  element("subagents").hidden = entries.length === 0;
+// A subagent's entry in the turn that ran it; its click opens that subagent.
+function historyElement(session: string, entry: HistoryEntry): HTMLElement {
+  const button = pressable(document.createElement("button"), false, () => select(session, entry.agent));
+  button.classList.add("subagent");
+  const lines = [text("span", entry.purpose, "asked"), ...(entry.asked ? [prose("span", entry.asked)] : [])];
+  button.append(...lines, prose("span", entry.result), text("span", entry.details, "kind"));
+  const item = document.createElement("li");
+  item.append(button);
+  return item;
 }
 
 // After this many steps the intention dims, as it may no longer say what the agent does (#472).
 const FRESH_STEPS = 5;
 
-// The intention, its age, the turn's full responses, each with "ask about this" (#482), and the mark
-// when the transcript is unreadable. A file a response links opens from `cwd`, the session's folder.
-function showStory(session: string, cwd: string, story: Transcript | null) {
+// The intention, boxed as the anchor of "now" (mockup C), its age, and the mark when the transcript is
+// unreadable.
+function showIntention(story: Session["transcript"] | null) {
   const steps = story?.steps_ago ?? 0;
   element("intention-text").textContent = story?.intention ?? "";
-  element("intention-ask").replaceChildren(...(story?.intention ? [askElement(session, story.intention)] : []));
   element("intention-age").textContent = steps === 0 ? "" : `· ${steps} ${steps === 1 ? "step" : "steps"} ago`;
   element("intention").classList.toggle("old", steps > FRESH_STEPS);
   element("unavailable").hidden = !story?.unavailable;
   element("unavailable-why").textContent = story?.unavailable ? `The transcript cannot be read: ${story.unavailable}.` : "";
-  const responses = story?.responses ?? [];
-  element("responses").hidden = responses.length === 0;
-  element("responses-title").textContent = `Responses (${responses.length})`;
-  element("responses-body").replaceChildren(
-    ...responses.flatMap((response) => [rendered("div", response, "response", cwd), askElement(session, response)]),
-  );
 }
 
+// When the event card `id` was written at: the part after its `@`, in Unix ms (the core's `card_time`).
+export const cardTime = (id: string) => Number(id.slice(id.lastIndexOf("@") + 1)) || 0;
+
+// The index of the turn that runs at `at`: the latest that started at or before it, else null.
+export function turnAt(turns: Pick<Turn, "started_at">[], at: number): number | null {
+  let index = turns.length - 1;
+  while (index >= 0 && turns[index].started_at > at) index--;
+  return index < 0 ? null : index;
+}
+
+// A block of the feed: turn `index` and what started in it, newest first. `index` is null for the
+// block of what started in no turn, such as a subagent's view, whose session's turns are not its own.
+export type FeedTurn = {
+  index: number | null;
+  turn: Turn | null;
+  cards: StoredCard[];
+  checks: CheckLine[];
+  agents: Subagent[];
+  questions: Question[];
+};
+
+// The feed (#574): one block per turn, newest first, each holding the cards written in it (by their
+// id's time), and the checks, subagents and questions the core put in it. What has no turn goes in
+// one last block, so nothing is lost.
+export function feedTurns(
+  turns: Turn[],
+  { cards, checks, agents, questions }: Pick<FeedTurn, "cards" | "checks" | "agents" | "questions">,
+): FeedTurn[] {
+  const blocks: FeedTurn[] = [...turns.map((turn, index) => ({ index, turn })), { index: null, turn: null }].map((b) => ({
+    ...b,
+    cards: [],
+    checks: [],
+    agents: [],
+    questions: [],
+  }));
+  const at = (index: number | null) => blocks[index !== null && index < turns.length ? index : turns.length];
+  // Each list is oldest first; the blocks show the newest first.
+  for (const card of [...cards].reverse()) at(turnAt(turns, cardTime(card.request.id))).cards.push(card);
+  for (const check of [...checks].reverse()) at(check.turn).checks.push(check);
+  for (const agent of [...agents].sort((a, b) => b.started_at - a.started_at)) at(agent.turn).agents.push(agent);
+  for (const question of [...questions].reverse()) at(question.turn).questions.push(question);
+  const rest = blocks.pop()!;
+  const empty = !rest.cards.length && !rest.checks.length && !rest.agents.length && !rest.questions.length;
+  return [...blocks.reverse(), ...(empty ? [] : [rest])];
+}
+
+// What the rail starts with: the open question, docked, when one is; else the newest card, which its
+// turn then leaves out. `cards` is oldest first.
+export function railTop(docked: boolean, cards: StoredCard[]): StoredCard | null {
+  return docked ? null : (cards.at(-1) ?? null);
+}
+
+// The turn summaries the store gave (#526), by turn id, null for a turn with none yet, and those
+// being asked for. With summaries written on open, asking writes a waiting turn's summary, a
+// `claude -p` call, so the asks go one at a time (#574). Those whose write failed wait for the next
+// opening of their session, not the next redraw.
+const summaries = new Map<string, TurnSummary | null>();
+const asking = new Set<string>();
+const failedTurns = new Set<string>();
+
+// A queue that runs `run` on each pushed id in order, one in flight at a time.
+export function oneAtATime(run: (id: string) => Promise<void>): (id: string) => void {
+  const queue: string[] = [];
+  let busy = false;
+  const next = () => {
+    const id = busy ? undefined : queue.shift();
+    if (id === undefined) return;
+    busy = true;
+    void run(id).finally(() => {
+      busy = false;
+      next();
+    });
+  };
+  return (id) => {
+    queue.push(id);
+    next();
+  };
+}
+
+const askSummary = oneAtATime((id) =>
+  invoke<TurnSummary | null>("turn_summary", { id })
+    .then((summary) => void summaries.set(id, summary))
+    .catch((e) => {
+      failedTurns.add(id);
+      console.warn(e);
+    })
+    .finally(() => {
+      asking.delete(id);
+      drawFeed();
+    }),
+);
+
+// Turn `id`'s summary, asked for once; the answer draws the feed again. The feed asks for the newest
+// turn first, so its summary is written first.
+function summaryOf(id: string): TurnSummary | null {
+  if (summaries.has(id) || asking.has(id) || failedTurns.has(id)) return summaries.get(id) ?? null;
+  asking.add(id);
+  askSummary(id);
+  return null;
+}
+
+// A new card store revision may hold a summary that was missing: ask again for those.
+export function forgetMissingSummaries() {
+  for (const [id, summary] of summaries) if (summary === null) summaries.delete(id);
+}
+
+// The folded blocks Daniel opened, by key, which outlast the feed's redraws, and the older turns'
+// replies, fetched at their first opening.
+const opened = new Set<string>();
+const replies = new Map<string, string>();
+// The option Daniel picked on each turn's learning question, by turn id; kept in the window only.
+const learned = new Map<string, number>();
+
+// A folded block keyed `key`, open while Daniel keeps it open; `onOpen` runs at each opening.
+function folded(key: string, title: string, body: HTMLElement[], onOpen?: () => void): HTMLElement {
+  const node = document.createElement("details");
+  node.className = "fold";
+  node.open = opened.has(key);
+  node.append(text("summary", title), ...body);
+  node.addEventListener("toggle", () => {
+    if (node.open) opened.add(key);
+    else opened.delete(key);
+    if (node.open) onOpen?.();
+  });
+  return node;
+}
+
+// The learning section (#526): the turn's main idea and one question, graded at the tap by the
+// writer's key, each option's reason shown after it.
+function learningElement(id: string, learning: NonNullable<TurnSummary["summary"]["learning"]>): HTMLElement {
+  const picked = learned.get(id) ?? null;
+  const { question } = learning;
+  const options = document.createElement("ol");
+  options.className = "options";
+  options.append(
+    ...question.options.map((option, i) => {
+      const item = document.createElement("li");
+      const button = pressable(prose("button", option.text) as HTMLButtonElement, picked === i, () => {
+        learned.set(id, i);
+        drawFeed();
+      });
+      button.disabled = picked !== null;
+      item.append(button);
+      if (picked !== null) {
+        const why = prose("p", option.why);
+        if (i === question.key) why.prepend(Object.assign(text("span", "The right answer. "), { dir: "ltr" }));
+        item.append(why);
+      }
+      return item;
+    }),
+  );
+  const box = document.createElement("div");
+  box.className = "card learning";
+  const quiz = prose("p", question.text);
+  quiz.className = "quiz";
+  box.append(prose("p", learning.idea), quiz, options);
+  return folded(`${id} learning`, "Learning: the main idea, and one question", [box]);
+}
+
+// The latest turn's summary, at the top, and the newest card when no question is docked.
+function drawNow(session: Session | null, latest: Turn | null, top: StoredCard | null) {
+  const summary = latest?.id ? summaryOf(latest.id) : null;
+  const cwd = session?.cwd ?? null;
+  element("now-summary").replaceChildren(...(summary ? [rendered("div", summary.summary.summary, "summary", cwd)] : []));
+  element("now-card").replaceChildren(...(top ? [cardNode(top)] : []));
+}
+
+// A check line: its outcome, its command, and how long it took or, while it runs, its time against
+// its typical time. No colour, as colour is only for "needs you".
+function checkElement(line: CheckLine): HTMLElement {
+  const item = document.createElement("li");
+  const label = line.ended_at === null ? "Running" : line.passed === null ? "Ran" : line.passed ? "Passed" : "Failed";
+  const time = counts(text("span", "", "check-time"), (now) => checkTime(line, now));
+  item.append(text("span", label, "outcome"), code(line.command), time);
+  return item;
+}
+
+// One block of the feed. The newest turn's summary is at the top, so its block leaves it out.
+function turnElement(session: Session, block: FeedTurn, newest: boolean): HTMLElement {
+  const { turn, index } = block;
+  const node = document.createElement("li");
+  node.className = "turn";
+  const key = `${session.id} ${index ?? "rest"}`;
+  if (turn) {
+    const prompt = text("p", turn.prompt || "No prompt", "prompt");
+    prompt.title = turn.prompt;
+    node.append(prompt);
+  }
+  const summary = turn?.id ? summaryOf(turn.id) : null;
+  if (summary && !newest) node.append(rendered("div", summary.summary.summary, "summary", session.cwd));
+  if (summary?.summary.learning && turn?.id) node.append(learningElement(turn.id, summary.summary.learning));
+  node.append(...block.cards.map(cardNode));
+  node.append(...block.questions.filter((q) => q.answer === "not_answered").map(questionElement));
+  if (block.agents.length) {
+    const list = document.createElement("ol");
+    list.className = "subagents";
+    const entries = subagentHistory({ agents: block.agents }, agentSummaries);
+    list.append(...entries.map((entry) => historyElement(session.id, entry)));
+    node.append(list);
+  }
+  if (block.checks.length) {
+    const list = document.createElement("ul");
+    list.className = "checks";
+    list.append(...block.checks.map(checkElement));
+    node.append(list);
+  }
+  // The full response, folded: the latest turn's from the transcript, an older one's fetched at its
+  // first opening.
+  const latest = index !== null && index === session.turns.length - 1;
+  const responses = latest ? session.transcript.responses : [];
+  if (turn && (latest ? responses.length : turn.id)) {
+    const body = document.createElement("div");
+    const fill = (texts: string[]) => body.replaceChildren(...texts.map((t) => rendered("div", t, "response", session.cwd)));
+    const fetched = replies.get(key);
+    if (latest) fill(responses);
+    else if (fetched !== undefined) fill([fetched]);
+    const fetch = () => {
+      if (latest || replies.has(key)) return;
+      invoke<string | null>("turn_reply", { id: session.id, index })
+        .then((reply) => {
+          replies.set(key, reply ?? "");
+          fill([reply ?? ""]);
+        })
+        .catch((e) => console.warn(e));
+    };
+    const fold = folded(`${key} response`, "Full response", [body], fetch);
+    if (fold.hasAttribute("open")) fetch();
+    node.append(fold);
+  }
+  // One "ask about this" per turn, shown on hover; it asks about the turn's summary, else its reply.
+  const about = summary?.summary.summary || (latest ? responses.join("\n\n") : "") || turn?.message || "";
+  if (about) node.append(askElement(session.id, about));
+  return node;
+}
+
+// Draws "now" and the feed from the selection and the cards the shell last sent.
+export function drawFeed() {
+  const selected = studio.selection;
+  const { recent, older } = studio.cards;
+  const all = [...older, ...recent];
+  const docked = !element("dock").hidden;
+  const top = railTop(docked, all);
+  const cards = all.filter((card) => card !== top);
+  if (selected === null) {
+    drawNow(null, null, null);
+    element("feed").replaceChildren();
+    return;
+  }
+  const session = selected.session;
+  const own = selected.agent === null;
+  const turns = own ? session.turns : [];
+  drawNow(session, own ? (turns.at(-1) ?? null) : null, top);
+  const blocks = feedTurns(turns, {
+    cards,
+    // A subagent's view: its session's checks and subagents are not its own.
+    checks: own ? session.checks : [],
+    agents: own ? session.agents : [],
+    questions: session.questions.filter((question) => question.agent === selected.agent),
+  });
+  element("feed").replaceChildren(...blocks.map((block, i) => turnElement(session, block, own && i === 0 && block.index !== null)));
+}
 // Rename (#469): the row's name, kept in the event log, and `/rename` typed into the session while
 // its claude runs, so Claude Code shows the same name. An empty name gives the row its folder's again.
 // The command waits for Daniel's draft and never answers a session that needs him (#544).
@@ -233,7 +505,7 @@ async function askDelete(session: Session) {
 
 // The branch is git's, read before the worktree goes: a session with no turn yet has none in its
 // transcript.
-async function removeWorktree(worktree: string) {
+export async function removeWorktree(worktree: string) {
   const { tasks } = await invoke<Places>("places");
   const branch = tasks.find((task) => task.path === worktree)?.branch ?? null;
   const losses = await invoke<Losses | null>("remove_task", { path: worktree, confirmed: false });
@@ -255,37 +527,14 @@ async function removeWorktree(worktree: string) {
   await invoke("delete_merged_branch", { branch }).catch((e) => report(`Branch ${branch} kept: ${e}`));
 }
 
-// The questions the viewed agent asked: an open one docked under the story, newest first, and those
-// never answered in the story; an answered one is in the decision history (#479). A plan or a permission the answer hook waits on docks too, whichever agent asks (#478).
+
+// The open question of the viewed agent, docked at the top of the rail, newest first; a plan or a
+// permission the answer hook waits on docks too, whichever agent asks (#478). A question never
+// answered shows in its turn; an answered one is in the decision history (#479).
 function showQuestions(questions: Question[]) {
-  const newest = [...questions].reverse();
-  const open = newest.filter((question) => question.answer === "open");
-  const past = newest.filter((question) => question.answer === "not_answered");
+  const open = [...questions].reverse().filter((question) => question.answer === "open");
   const decision = openDecision();
   const docked = [...(decision ? [decisionElement(decision)] : []), ...open.map(questionElement)];
   element("dock").replaceChildren(...docked);
   element("dock").hidden = docked.length === 0;
-  element("questions").replaceChildren(...past.map(questionElement));
-  element("questions-title").hidden = past.length === 0;
-}
-
-// Whether a check passed, from its exit code; with no colour, as colour is only for "needs you".
-function outcome(passed: boolean | null): string {
-  if (passed === null) return "Ran";
-  return passed ? "Passed" : "Failed";
-}
-
-// The checks, newest first, one line each, with how long each took or, while it runs, its time against
-// its typical time.
-function showChecks(checks: CheckLine[]) {
-  element("checks").replaceChildren(
-    ...[...checks].reverse().map((line) => {
-      const item = document.createElement("li");
-      const label = line.ended_at === null ? "Running" : outcome(line.passed);
-      const time = counts(text("span", "", "check-time"), (now) => checkTime(line, now));
-      item.append(text("span", label, "outcome"), code(line.command), time);
-      return item;
-    }),
-  );
-  element("checks-title").hidden = checks.length === 0;
 }

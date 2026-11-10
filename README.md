@@ -78,6 +78,13 @@ Every Cmd shortcut goes to the terminal or to the app (`ui/keys.ts`):
 | Cmd+Left, Cmd+Right | terminal | sends Ctrl+A, Ctrl+E: start and end of line |
 | Cmd+Backspace | terminal | sends Ctrl+U: deletes to the line's start |
 | Cmd+1, Cmd+2 | app | opens the session list, the story rail |
+| Cmd+], Cmd+[ | app | selects the next, the previous session in the list's order |
+| Cmd+J | app | selects the next session that needs you |
+| Up, Down | app, while the list has focus | selects the row above, below |
+| Cmd+Shift+Enter | app | focus mode: hides the list and the rail; again to leave |
+| 1 to 4 | app, while focus is in the list, the dock or the rail and the rail is on screen; never from the terminal or a text box | chooses that answer on the docked card |
+| Cmd+N, Cmd+, | app | opens the new-session picker; opens `settings.json` in your editor |
+| Cmd+Shift+P | app | the palette: every action with its key; type to filter, Enter runs |
 | Cmd+=, Cmd+-, Cmd+0 | app | zooms the window in, out (from half to double size) and back |
 | any other Cmd shortcut | app | the app's menu: Cmd+Q, Cmd+W, Cmd+H, Cmd+M and the like |
 
@@ -100,7 +107,7 @@ Every shortcut here but Cmd+C and Cmd+V can be rebound in `keymap.json` (see Set
 }
 ```
 
-`keymap.json` is Zed's array of contexts, `Workspace` for the window and `Terminal` for the pane. The actions are `studio::ToggleList`, `studio::ToggleRail`, `studio::Dismiss` (Esc), `studio::ZoomIn`, `studio::ZoomOut`, `studio::ResetZoom`, `terminal::SelectAll`, `terminal::Find`, `terminal::Clear` and `["terminal::SendText", "<text>"]`. Unlike Zed, binding an action to a new key unbinds its default key; `null` unbinds a key. A `Workspace` shortcut without Cmd, other than `studio::Dismiss`, leaves the key to the terminal or text box you are typing in:
+`keymap.json` is Zed's array of contexts, `Workspace` for the window, `List` for the session list while it has focus, and `Terminal` for the pane. The window's actions are listed, with their keys, in the palette (Cmd+Shift+P): `studio::ToggleList`, `studio::ToggleRail`, `studio::Dismiss` (Esc), `studio::ZoomIn`, `studio::ZoomOut`, `studio::ResetZoom`, `studio::NextSession`, `studio::PreviousSession`, `studio::NextNeedsYou`, `studio::SelectNext`, `studio::SelectPrevious`, `["studio::Answer", "1"]` to `"4"`, `studio::NewSession`, `studio::OpenSettings` and `studio::Palette`. The pane's are `terminal::SelectAll`, `terminal::Find`, `terminal::Clear` and `["terminal::SendText", "<text>"]`. Unlike Zed, binding an action to a new key unbinds its default key; `null` unbinds a key. A `Workspace` shortcut without Cmd, other than `studio::Dismiss`, leaves the key to the terminal or text box you are typing in:
 
 ```json
 [{ "context": "Workspace", "bindings": { "cmd-l": "studio::ToggleList", "escape": null } }]

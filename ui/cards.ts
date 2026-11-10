@@ -1,11 +1,12 @@
-// The cards, in the story rail: the session's brief, then its cards, the last 30 minutes' and the
-// older ones. The writer writes them in English (#487); cards stored in Hebrew keep their direction.
+// The cards, in the story rail: the session's brief, and each card, which the rail places in the turn
+// it was written in, or at the top when it is the newest (#574). The writer writes them in English
+// (#487); cards stored in Hebrew keep their direction.
 
-import { askElement } from "./ask.js";
 import { code, element, prose, invoke, pressable, text } from "./dom.js";
 import { refreshCards } from "./selection.js";
 import { studio } from "./state.js";
 import { showDecisions } from "./decisions.js";
+import { drawFeed, forgetMissingSummaries } from "./story.js";
 import type { CardRequest, CheckResult, Guess, Level, Quiz, Rating, Reason, SessionCards, StoredCard } from "./types.js";
 
 // Records Daniel's tap, his flag on the key or his rating, and draws the cards again at once.
@@ -90,16 +91,8 @@ function cardElement(stored: StoredCard): HTMLElement {
   const quiz = card.quiz;
   const state = quizState(stored);
   if (quiz) node.append(...quizElements(stored, quiz, state));
-  // Every card offers "ask about this" (#482), a quiz card before its guess too.
-  // shortcut: the ask sends the session's current turn's intentions, not the card's own turn's; the
-  // core keeps only the current turn's responses. Keep each turn's intentions by its prompt if asks
-  // on older cards mislead.
-  const item = [card.summary, card.explanation, card.code].filter(Boolean).join("\n\n");
-  const ask = askElement(request.session_id, item);
-  if (quiz && !state.answered) {
-    node.append(ask);
-    return node;
-  }
+  // Its turn holds the one "ask about this" (#574).
+  if (quiz && !state.answered) return node;
   const explanation = prose("p", card.explanation);
   explanation.className = "explanation";
   const paths = document.createElement("p");
@@ -118,7 +111,7 @@ function cardElement(stored: StoredCard): HTMLElement {
   );
   const flaggable = quiz && state.flaggable;
   if (flaggable) node.append(keyWrongButton(request.id, key_wrong));
-  node.append(moreElement(request.id, more), ratingElement(request.id, rating, flaggable ? key_wrong : null), ask);
+  node.append(moreElement(request.id, more), ratingElement(request.id, rating, flaggable ? key_wrong : null));
   return node;
 }
 
@@ -234,35 +227,35 @@ export function markShown() {
 // only when its record changed, such as after a tap, and is moved whole to the older group.
 const drawn = new Map<string, { record: string; node: HTMLElement }>();
 
-// The session's brief at the top of its view, one paragraph per line.
+// The session's brief, folded under the feed, one paragraph per line.
 function showBrief(brief: string | null) {
   element("brief").replaceChildren(...(brief ?? "").split("\n").map((line) => prose("p", line)));
-  element("brief").hidden = brief === null;
+  element("brief-fold").hidden = brief === null;
 }
 
-export function showCards({ brief, recent, older, decisions }: SessionCards) {
-  showBrief(brief);
-  showDecisions(decisions);
-  const ids = new Set([...recent, ...older].map(({ request }) => request.id));
+// Card `stored`'s node, drawn again only when its record changed.
+export function cardNode(stored: StoredCard): HTMLElement {
+  const id = stored.request.id;
+  const record = JSON.stringify(stored);
+  if (drawn.get(id)?.record !== record) {
+    if (!drawn.has(id) && stored.guess === null) unshown.add(id);
+    drawn.set(id, { record, node: cardElement(stored) });
+  }
+  return drawn.get(id)!.node;
+}
+
+export function showCards(cards: SessionCards) {
+  studio.cards = cards;
+  showBrief(cards.brief);
+  showDecisions(cards.decisions);
+  const ids = new Set([...cards.recent, ...cards.older].map(({ request }) => request.id));
   for (const id of drawn.keys()) {
     if (ids.has(id)) continue;
     drawn.delete(id);
     unshown.delete(id);
   }
-  // The newest card first.
-  const nodes = (cards: StoredCard[]) =>
-    [...cards].reverse().map((stored) => {
-      const id = stored.request.id;
-      const record = JSON.stringify(stored);
-      if (drawn.get(id)?.record !== record) {
-        if (!drawn.has(id) && stored.guess === null) unshown.add(id);
-        drawn.set(id, { record, node: cardElement(stored) });
-      }
-      return drawn.get(id)!.node;
-    });
-  element("recent").replaceChildren(...nodes(recent));
-  element("older").replaceChildren(...nodes(older));
-  element("recent-title").hidden = recent.length === 0;
-  element("older-title").hidden = older.length === 0;
+  // The store changed: a summary missing before may be in it now.
+  forgetMissingSummaries();
+  drawFeed();
   markShown();
 }

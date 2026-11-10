@@ -43,6 +43,9 @@ code:empty { display: none; }
 .app > * { direction: ltr; min-height: 0; min-width: 0; }
 body[data-layout="strip"] .app { grid-template-columns: var(--strip) 1fr var(--rail); }
 body[data-layout="overlay"] .app { grid-template-columns: var(--strip) 1fr 0; }
+/* Focus mode (#573): the list and the rail fold, still in the grid, and the terminal takes the window. */
+body[data-layout="focus"] .app { grid-template-columns: 0 1fr 0; }
+body[data-layout="focus"] .list, body[data-layout="focus"] .rail { visibility: hidden; }
 
 /* The dividers on the list's and the rail's inner edges; each shows only while its column is in the grid. */
 .divider { position: fixed; top: var(--bar); bottom: 0; width: var(--divider); cursor: col-resize; z-index: 4; touch-action: none;
@@ -50,42 +53,53 @@ body[data-layout="overlay"] .app { grid-template-columns: var(--strip) 1fr 0; }
 .divider:hover, .divider.dragging { background: var(--edge); }
 #list-divider { right: calc(var(--list) - var(--divider) / 2); }
 #rail-divider { left: calc(var(--rail) - var(--divider) / 2); }
-body:not([data-layout="full"]) #list-divider, body[data-layout="overlay"] #rail-divider { display: none; }
+body:not([data-layout="full"]) #list-divider, body[data-layout="overlay"] #rail-divider,
+body[data-layout="focus"] #rail-divider { display: none; }
 
 /* The top bar: new session and usage. The native title bar is hidden (#566), so the bar is where the
    window drags, and its start keeps room for the traffic lights. */
 .top { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--sp-5); padding: 0 var(--sp-5) 0 var(--lights);
        white-space: nowrap; overflow: hidden; }
 .usage { font-size: var(--size-small); color: var(--muted); }
+/* The rail's slim header while it is an overlay (#573): the selected session's state and open question. */
+.slim { display: flex; gap: var(--sp-4); align-items: baseline; min-width: 0; overflow: hidden; font-size: var(--size-small); }
+.slim .state { font-size: inherit; margin: 0; }
+.slim .line { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+/* The needs-you chip (#572): the count of sessions that need Daniel, in the needs-you colour. */
+.top .chip { color: var(--needs-you); background: var(--needs-you-bg); font-weight: 600; }
+.top .chip:hover { color: var(--needs-you); background: var(--needs-you-line); }
 
-/* The session list: full, or a strip that opens over the terminal on click or ⌘1, never on hover. */
+/* The session list: full, or a strip that opens over the terminal on hover, on click or on ⌘1; the
+   overlay never moves the terminal (#572). */
 .list { overflow-y: auto; position: relative; z-index: 3; }
 .full { padding: var(--sp-4) var(--sp-3); }
 .strip { display: none; flex-direction: column; align-items: center; gap: var(--sp-2); padding: var(--sp-4) 0; }
 body:not([data-layout="full"]) .full { display: none; }
 body:not([data-layout="full"]) .strip { display: flex; }
-body.list-open .full { display: block !important; position: fixed; top: var(--bar); bottom: 0; right: 0; width: var(--list);
-                       background: var(--surface); box-shadow: var(--shadow-start); overflow-y: auto; z-index: 6; }
+body.list-open .full, body:not([data-layout="full"]) .list:hover .full {
+  display: block !important; position: fixed; top: var(--bar); bottom: 0; right: 0; width: var(--list);
+  background: var(--surface); box-shadow: var(--shadow-start); overflow-y: auto; z-index: 6; }
 .strip .btn { width: var(--strip-button); padding: var(--sp-2) 0; display: flex; flex-direction: column; align-items: center;
-              gap: var(--sp-1); font: var(--size-xs) var(--mono); color: var(--muted); }
+              gap: var(--sp-1); font: var(--size-xs) var(--mono); color: var(--muted); white-space: nowrap; overflow: hidden; }
 .strip .btn[aria-pressed="true"] { color: var(--fg); }
 .strip .open { font-size: var(--size); color: var(--faint); }
-/* The muted heading, in sentence case: a group's title, a collapsed group's title and a question's header. */
+/* In the strip, needs you is a coloured dot: the pill's word is in the button's title and the glyph's name. */
+.strip .glyph[data-glyph="pill"] { font-size: 0; padding: 0; width: var(--glyph); height: var(--glyph); border-radius: 50%;
+                                   background: var(--needs-you); }
+/* The muted heading, in sentence case: a collapsed group's title and a question's header. */
 h1, .list summary, .question .header { font-size: var(--size-xs); font-weight: 500; color: var(--muted); }
 h1 { margin: 0 0 var(--sp-4); }
-.list h1, .list summary { margin: var(--sp-5) var(--sp-4) var(--sp-2); }
-.list summary { cursor: pointer; }
-/* A row: its dot, name and state, then what it is doing; what does not fit is cut. */
-.row { display: block; width: 100%; padding: var(--sp-3) var(--sp-4); color: var(--fg); }
+.list summary { margin: var(--sp-5) var(--sp-4) var(--sp-2); cursor: pointer; }
+/* A row (#572): one line, its name then its status glyph, in regular weight; running and needs-you rows
+   add what they are doing, muted. What does not fit is cut. */
+.row { display: block; width: 100%; padding: var(--sp-2) var(--sp-4); color: var(--fg); }
 .row .l1 { display: flex; gap: var(--sp-3); align-items: center; white-space: nowrap; overflow: hidden; }
 .row .l2 { display: flex; gap: var(--sp-3); font-size: var(--size-small); color: var(--muted); white-space: nowrap; overflow: hidden; }
-.row .l2:empty { display: none; }
-.row .l3 { display: block; font-size: var(--size-xs); color: var(--muted); white-space: nowrap; overflow: hidden;
-           text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
-.row .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.row .name { overflow: hidden; text-overflow: ellipsis; }
+.row.unseen .name { font-weight: 600; }
 .row .id { color: var(--muted); flex: none; font-size: var(--size-small); }
-.row .row-state { margin-inline-start: auto; font-size: var(--size-small); color: var(--muted); flex: none; }
-.row .row-state[data-state="needs_you"] { color: var(--needs-you); font-weight: 600; }
+.row .l1 .glyph { margin-inline-start: auto; }
+.row .clock { flex: none; margin-inline-start: auto; font-size: var(--size-xs); }
 .row .row-step { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 /* A row line's code, left to right in its own isolate, as a card's is. */
 .row .row-step code { font-size: var(--size-xs); overflow: visible; }
@@ -94,9 +108,17 @@ h1 { margin: 0 0 var(--sp-4); }
 .row.helper { font-size: var(--size-small); }
 .row .failed { font-weight: 600; color: var(--fg); }
 .unattached { margin: var(--sp-1) 0 0; padding-inline-start: calc(var(--sp-7) + var(--sp-5)); font-size: var(--size-small); color: var(--muted); }
-.dot { width: var(--dot); height: var(--dot); border-radius: 50%; background: var(--faint); flex: none; }
-.dot[data-state="running"] { background: var(--fg); }
-.dot[data-state="needs_you"] { background: var(--needs-you); box-shadow: 0 0 0 var(--halo) var(--needs-you-bg); }
+/* Status by shape (#572): a spinner while running, a dot at your turn, a filled dot once unseen, a ring
+   when idle or ended, and the "Needs you" pill, the only colour. */
+.glyph { flex: none; width: var(--glyph); height: var(--glyph); border-radius: 50%; display: grid; place-items: center; }
+.glyph[data-glyph="dot"]::after { content: ""; width: var(--dot); height: var(--dot); border-radius: 50%; background: var(--muted); }
+.glyph[data-glyph="filled"] { background: var(--fg); }
+.glyph[data-glyph="ring"] { box-shadow: inset 0 0 0 var(--hair) var(--faint); }
+.glyph[data-glyph="spinner"] { border: var(--mark) solid var(--line); border-top-color: var(--fg); animation: spin var(--spin) linear infinite; }
+.glyph[data-glyph="pill"] { width: auto; height: auto; border-radius: var(--radius); padding: 0 var(--sp-3); font-size: var(--size-xs);
+                            font-weight: 600; line-height: 1.6; color: var(--needs-you); background: var(--needs-you-bg); }
+@keyframes spin { to { transform: rotate(1turn); } }
+@media (prefers-reduced-motion: reduce) { .glyph[data-glyph="spinner"] { animation: none; } }
 
 /* The terminal, the stage: an inset, rounded pane on the frame, left to right; its header shows a
    program's title, and the grid size on hover (#571). The inset and the body's padding add up to layout.ts's padding. */
@@ -125,40 +147,68 @@ h1 { margin: 0 0 var(--sp-4); }
 .pane[hidden] { display: block; }
 .pane[hidden], .pane.fitting { visibility: hidden; }
 .term-find { position: absolute; top: var(--sp-3); right: var(--sp-5); z-index: 10; width: var(--find); font: inherit; }
+/* The needs-you toast (#573): over the terminal's top-right corner, taking none of its space. */
+.term { position: relative; }
+.toast { position: absolute; top: var(--sp-5); right: var(--sp-5); z-index: 11; max-width: var(--toast); display: grid;
+         grid-template-columns: minmax(0, 1fr) auto auto; gap: var(--sp-1) var(--sp-4); align-items: baseline;
+         padding: var(--sp-4) var(--sp-5); border-radius: var(--radius); background: var(--needs-you-bg); color: var(--fg);
+         box-shadow: inset 0 0 0 var(--hair) var(--needs-you-line), var(--shadow); font-size: var(--size-small); cursor: pointer; }
+.toast .name { color: var(--needs-you); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.toast .count { color: var(--muted); }
+.toast .btn { padding: 0 var(--sp-2); }
+.toast .line { grid-column: 1 / -1; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #probe { position: absolute; visibility: hidden; white-space: pre; font: var(--term-size)/var(--term-line) var(--mono); }
 
-/* The rail: the story, its open question docked at the bottom. In "overlay" ⌘2 toggles it over the
-   terminal. */
-.rail { display: grid; grid-template-rows: auto 1fr auto; grid-template-columns: minmax(0, 1fr); }
+/* The rail (#574): one header line, the open question docked under it, then the story: "now" and the
+   feed of turns. In "overlay" ⌘2 toggles it over the terminal. */
+.rail { display: grid; grid-template-rows: auto auto 1fr; grid-template-columns: minmax(0, 1fr); }
 body[data-layout="overlay"] .rail { display: none; }
 body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; top: var(--bar); bottom: 0; left: 0;
                                                                 width: var(--rail); background: var(--chrome); box-shadow: var(--shadow-end); z-index: 5; }
-.rail-h { padding: var(--sp-4) var(--sp-5); font-size: var(--size-small); }
-.times { display: flex; gap: var(--sp-2) var(--sp-4); flex-wrap: wrap; align-items: baseline; }
-.times:empty { display: none; }
-.times .estimate { color: var(--muted); }
-.times > :empty { display: none; }
-.tools { display: flex; gap: var(--sp-3); }
-.tool { white-space: nowrap; }
+.rail-h { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-4) var(--sp-5); min-height: var(--sp-7); }
+/* The verdict and the phase on one line; the times and the model are its hover text. */
+.headline { flex: 1; min-width: 0; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.phase { color: var(--muted); font-size: var(--size-small); }
+/* The "⋯" menu: Open, Rename, Close, Open all, Close all and Delete, under the button, over the story. */
+.menu { position: fixed; inset: auto; top: calc(var(--bar) + var(--sp-7) + var(--sp-5)); left: calc(var(--rail) - var(--menu) - var(--sp-5));
+        width: var(--menu); margin: 0; border: 0; padding: var(--sp-3); background: var(--surface); color: var(--fg);
+        border-radius: var(--radius); box-shadow: var(--shadow); }
+.menu:popover-open { display: flex; flex-direction: column; gap: var(--sp-2); }
+.menu .btn { text-align: start; }
+.menu .btn[hidden] { display: none; }
 .story { overflow-y: auto; padding: var(--sp-4) var(--sp-5) var(--sp-5); }
 #notice { margin: 0 0 var(--sp-4); color: var(--muted); }
 /* Colour only on "needs you" (#328, module 3; #565, decision 1): "your turn" stays as neutral as "running". */
 .state { font-size: var(--size); font-weight: 600; margin: 0 0 var(--sp-3); }
+.headline .state { margin: 0; }
 .state[data-state="needs_you"] { color: var(--needs-you); background: var(--needs-you-bg); border-radius: var(--radius);
                                  padding: var(--sp-1) var(--sp-4); display: inline-block; }
-/* The intention and step line (#472): the agent's latest line, dim once it is over 5 steps old. */
-.intention { margin: 0 0 var(--sp-2); font-size: var(--size-read); overflow-wrap: anywhere; }
-.intention.old { color: var(--muted); }
-.intention:has(#intention-text:empty) { display: none; }
-.age { color: var(--muted); font-size: var(--size-small); }
+/* The intention, the anchor of "now" (mockup C): boxed, the biggest line, with a bright edge; dim once
+   it is over 5 steps old (#472). The step line sits under it. */
+.intention { margin: 0 0 var(--sp-5); padding: var(--sp-4) var(--sp-5); background: var(--surface); border-radius: var(--radius);
+             box-shadow: inset var(--mark) 0 0 var(--fg); overflow-wrap: anywhere; }
+.intention > p { margin: 0 0 var(--sp-2); font-size: var(--size-large); font-weight: 500; }
+.intention.old > p { color: var(--muted); }
+.intention:has(#intention-text:empty) > p { display: none; }
+.age { color: var(--muted); font-size: var(--size-small); font-weight: 400; }
 .unavailable { color: var(--muted); font-size: var(--size-small); margin: 0 0 var(--sp-2); }
-.step { margin: 0; min-width: 0; }
+.step { margin: 0; min-width: 0; font-size: var(--size-small); }
 .step summary { overflow-wrap: anywhere; }
 .step:not(.has-command) summary { list-style: none; pointer-events: none; }
 .step code { display: block; white-space: pre-wrap; overflow-wrap: anywhere; margin: var(--sp-2) 0 0; }
 .tool-name { font-weight: 600; }
-.responses { margin: var(--sp-4) 0 0; }
-.responses .response { margin: var(--sp-5) 0 0; }
+/* The feed of turns, newest first: each turn one block, told apart by a line, as in the story rail
+   mockup (#517). Its prompt is one line; its "ask about this" shows on hover or while open. */
+.feed { list-style: none; margin: var(--sp-5) 0 0; padding: 0; }
+.turn { border-top: var(--hair) solid var(--line); padding: var(--sp-4) 0 var(--sp-5); }
+.turn > * + * { margin-top: var(--sp-4); }
+.turn .prompt { margin: 0; color: var(--muted); font-size: var(--size-small); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.turn .checks, .turn .subagents { list-style: none; padding: 0; }
+.turn .subagents li { margin: 0 0 var(--sp-2); }
+.turn:not(:hover) > .ask-about:not([open]):not(:focus-within) { visibility: hidden; }
+.fold > summary { font-size: var(--size); color: var(--muted); cursor: pointer; }
+.fold .response { margin: var(--sp-4) 0 0; }
+.fold .learning { margin: var(--sp-4) 0 0; }
 /* Rendered Markdown (#525): responses and "ask about this" replies. */
 .markdown { font-size: var(--size-read); overflow-wrap: anywhere; }
 .markdown > :first-child { margin-top: 0; }
@@ -172,8 +222,7 @@ body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; to
 .markdown a { color: var(--fg); text-decoration: underline; }
 .markdown a[data-file]:has(> code):not(:hover) { text-decoration: none; }
 .markdown blockquote { margin: var(--sp-4) 0 0; padding-left: var(--sp-5); border-left: var(--halo) solid var(--line); color: var(--muted); }
-.cards-title { margin-top: var(--sp-7); }
-/* The session's brief, above its cards; its code wraps as a card's does. */
+/* The session's brief, folded under the feed; its code wraps as a card's does. */
 .brief { margin: var(--sp-5) 0 0; font-size: var(--size-read); }
 .brief p { margin: 0 0 var(--sp-2); overflow-wrap: anywhere; }
 .brief code, .card code { white-space: normal; overflow-wrap: anywhere; }
@@ -234,8 +283,8 @@ body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; to
 .choices .label { font-weight: 600; font-size: var(--size-read); }
 .choices .description { color: var(--muted); font-size: var(--size-small); }
 .choices .chosen { box-shadow: inset 0 0 0 var(--mark) var(--fg); }
-/* The open question, docked under the story; its top line is the needs-you edge. */
-.dock { border-top: var(--hair) solid var(--needs-you-line); background: var(--needs-you-bg); padding: var(--sp-4) var(--sp-5);
+/* The open question, docked at the top of the rail (#574); its edges are the needs-you lines. */
+.dock { border-block: var(--hair) solid var(--needs-you-line); background: var(--needs-you-bg); padding: var(--sp-4) var(--sp-5);
         max-height: 55vh; overflow-y: auto; }
 .dock .question { background: none; padding: 0; margin: 0; }
 .dock .asked { font-size: var(--size-large); }
@@ -250,30 +299,20 @@ body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; to
 .decision .plan { white-space: pre-wrap; max-height: 30vh; overflow-y: auto; margin: var(--sp-3) 0 0; padding: var(--sp-3) var(--sp-5);
                   background: var(--hover); border-radius: var(--radius); }
 .decision .description { color: var(--muted); }
-/* A subagent's view: its session's checks are not its own; its brief and cards are. */
-#view[data-agent] .own { display: none; }
 
 /* The picker (#467): where a new session starts, under the top bar's button. */
 .picker { position: fixed; top: calc(var(--bar) + var(--sp-2)); right: var(--sp-5); z-index: 8; width: var(--popover); max-height: 70vh;
           overflow-y: auto; background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); padding: var(--sp-3); }
 .picker .row .l2 { font-family: var(--mono); font-size: var(--size-xs); }
 .picker .hidden-count { color: var(--faint); font-size: var(--size-small); margin: var(--sp-1) var(--sp-4) var(--sp-3); }
-.picker .task { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; }
-.picker .task .losses { grid-column: 1 / -1; }
-.picker .remove, .picker .losses .btn, .picker .new-task .btn { margin: var(--sp-3) var(--sp-2) 0 0; }
-/* The work a removal would lose: a warning, so it keeps the needs-you edge. */
-.picker .losses { border: var(--hair) solid var(--needs-you-line); background: var(--needs-you-bg); border-radius: var(--radius);
-                  padding: var(--sp-3) var(--sp-5); margin: var(--sp-1) 0 var(--sp-3); }
-.picker .losses p { margin: 0 0 var(--sp-2); }
-.picker .losses .losses-title { color: var(--muted); font-size: var(--size-small); }
-.picker .losses ul { margin: 0 0 var(--sp-3); padding-left: var(--sp-6); overflow-wrap: anywhere; }
-.picker .new-task { display: flex; gap: var(--sp-3); margin: var(--sp-4) var(--sp-2) var(--sp-1); padding-top: var(--sp-4); }
-.picker .new-task input { flex: 1; font: var(--size-small) var(--mono); color: inherit; background: var(--bg);
-                          border: var(--hair) solid var(--edge); border-radius: var(--radius); padding: var(--sp-1) var(--sp-3); }
-.picker .new-task .btn { margin: 0; }
+:is(.picker, .places) .new-task { display: flex; gap: var(--sp-3); margin: var(--sp-4) var(--sp-2) var(--sp-1); padding-top: var(--sp-4); }
+:is(.picker, .places) .new-task input { flex: 1; min-width: 0; font: var(--size-small) var(--mono); color: inherit; background: var(--bg);
+                                        border: var(--hair) solid var(--edge); border-radius: var(--radius); padding: var(--sp-1) var(--sp-3); }
+:is(.picker, .places) .new-task .btn { margin: 0; }
 .picker .new-task:first-of-type { margin-top: var(--sp-1); padding-top: 0; }
-.picker .picker-error { white-space: pre-wrap; font: var(--size-small) var(--mono); color: var(--needs-you); margin: var(--sp-3) var(--sp-2); }
-#reopen, #rename, #close { margin: 0 0 var(--sp-4); }
+:is(.picker, .places) .picker-error { white-space: pre-wrap; font: var(--size-small) var(--mono); color: var(--needs-you); margin: var(--sp-3) var(--sp-2); }
+/* Places (#576): a clicked place's actions, under its row. */
+.places .place-actions { display: flex; gap: var(--sp-3); padding: var(--sp-1) var(--sp-4) var(--sp-3); }
 /* The questions of rename and close (#469). */
 .ask { background: var(--surface); color: var(--fg); border: 0; border-radius: var(--radius); box-shadow: var(--shadow);
        padding: var(--sp-5); width: var(--popover); }
@@ -298,5 +337,5 @@ body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; to
 .decisions .answer { font-weight: 600; }
 .decisions .cleared { border-left-style: dashed; }
 .decisions .plan { white-space: pre-wrap; max-height: 30vh; overflow-y: auto; font-size: var(--size-read); }
-/* The rail's subagent history (#535): each entry a button that opens its subagent, its lines stacked. */
+/* A turn's subagents (#535, #574): each entry a button that opens its subagent, its lines stacked. */
 .subagents button { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-1); width: 100%; text-align: start; overflow-wrap: anywhere; }

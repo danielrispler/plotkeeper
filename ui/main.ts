@@ -7,15 +7,17 @@
 import { startWatching } from "./answer.js";
 import { markShown, showCards } from "./cards.js";
 import { element, invoke, listen } from "./dom.js";
-import { windowBinding } from "./keys.js";
-import { defaultWidths, type LayoutMode, layoutMode, resized, type Widths } from "./layout.js";
+import { type Actions, nextNeedsYou, paletteEntries, run, stepSession, windowBinding } from "./keys.js";
+import { arrange, defaultWidths, type LayoutMode, resized, type Widths } from "./layout.js";
 import { showSessions } from "./list.js";
-import { show } from "./selection.js";
+import { select, show } from "./selection.js";
 import { startPanes } from "./panes.js";
-import { showPicker } from "./picker.js";
+import { showPalette, showPicker } from "./picker.js";
+import { readPlaces, showPlaces } from "./places.js";
 import { reload, type SettingsFiles, zoomed } from "./settings.js";
 import { studio } from "./state.js";
 import { showView } from "./story.js";
+import { jumpToNeedsYou, showToast } from "./toast.js";
 import type { Selection, Session, SessionCards } from "./types.js";
 import { type Limits, usageText } from "./usage.js";
 
@@ -28,13 +30,18 @@ function cell(): number {
 // The list's and the rail's widths, as their dividers last left them.
 const widths: Widths = { ...defaultWidths, ...JSON.parse(localStorage.getItem("widths") ?? "{}") };
 
+// The list's open width is the one its divider left; the rail's is the width rule's.
 function layout() {
-  for (const [column, width] of Object.entries(widths)) document.documentElement.style.setProperty(`--${column}`, `${width}px`);
-  const mode = layoutMode(window.innerWidth, cell(), widths);
+  const { mode, rail } = arrange(window.innerWidth, cell(), widths, { focus: studio.focus });
+  document.documentElement.style.setProperty("--list", `${widths.list}px`);
+  document.documentElement.style.setProperty("--rail", `${rail || widths.rail}px`);
   document.body.dataset.layout = mode;
   element("rail-toggle").hidden = mode !== "overlay";
+  showToast();
 }
 window.addEventListener("resize", layout);
+// Leaving focus mode from the toast.
+window.addEventListener("layout", layout);
 layout();
 
 // Dragging a divider resizes its column. The grid runs right to left, so the list's width is
@@ -61,32 +68,81 @@ divider("list-divider", "list", (x) => window.innerWidth - x);
 divider("rail-divider", "rail", (x) => x);
 
 // The window's shortcuts, from `keymap.json` (#524). By default ⌘1 opens the list from its strip,
-// ⌘2 the rail as an overlay, Esc closes both and the picker, and ⌘=, ⌘- and ⌘0 zoom.
+// ⌘2 the rail as an overlay, Esc closes both and the picker, ⌘⇧↩ toggles focus mode, and ⌘=, ⌘- and
+// ⌘0 zoom. Only focus mode's key changes the terminal's size; a needs-you only toasts (#573).
 const toggle = (name: string) => document.body.classList.toggle(name);
 let zoom = 1;
 const setZoom = (to: number) => {
   zoom = to;
   invoke("set_zoom", { zoom }).then(layout, (e) => console.warn(e));
 };
-const actions: Record<string, () => void> = {
+// The keyboard spine (#575): ⌘] and ⌘[ step through the sessions, ⌘J goes to the next needs-you, ↑
+// and ↓ move in the list, 1–4 answer the docked card, ⌘N starts a session, ⌘, opens `settings.json`
+// and ⌘⇧P opens the palette of every action here.
+const selectedId = () => studio.selection?.session.id ?? null;
+const go = (id: string | null) => void (id && select(id));
+
+// Focuses and selects the visible row `by` from the focused one, else from the selected one.
+function moveInList(by: 1 | -1) {
+  const rows = [...element("groups").querySelectorAll<HTMLButtonElement>("button.row")].filter((row) => row.offsetParent !== null);
+  const focused = rows.indexOf(document.activeElement as HTMLButtonElement);
+  const next = rows[(focused === -1 ? rows.findIndex((row) => row.ariaPressed === "true") : focused) + by];
+  next?.focus();
+  next?.click(); // a click without a pointer selects (`list.ts`)
+}
+
+// The docked card's open request, if any, on screen: only then are its answer buttons drawn, and
+// focus mode (`visibility`) or a closed overlay (`display`) hides the rail.
+const answerable = () => {
+  const dock = element("dock");
+  return !dock.hidden && dock.offsetParent !== null && getComputedStyle(dock).visibility === "visible" && dock.querySelector(".answer-buttons") !== null;
+};
+
+// Chooses choice `n` of the docked card's first question not yet chosen, else a plan's or a
+// permission's `n`th button. Once every question has a choice, "Send" takes focus, for Enter.
+// shortcut: a multi-select takes one choice by key; more by Tab and Enter.
+function answer(n: number) {
+  const dock = element("dock");
+  const open = [...dock.querySelectorAll("ul.choices")].find((list) => list.querySelector("button") && !list.querySelector('[aria-pressed="true"]'));
+  const buttons = (open ?? dock.querySelector(".decision .answer-buttons"))?.querySelectorAll<HTMLButtonElement>("button");
+  buttons?.[n - 1]?.click();
+  dock.querySelector<HTMLButtonElement>(".send:not([disabled])")?.focus();
+}
+
+const actions: Actions = {
   "studio::ToggleList": () => toggle("list-open"),
   "studio::ToggleRail": () => toggle("rail-open"),
   "studio::Dismiss": () => {
     document.body.classList.remove("list-open", "rail-open");
     element("picker").hidden = true;
   },
+  "studio::ToggleFocus": () => {
+    studio.focus = !studio.focus;
+    document.body.classList.remove("list-open", "rail-open");
+    layout();
+  },
   "studio::ZoomIn": () => setZoom(zoomed(zoom, 1)),
   "studio::ZoomOut": () => setZoom(zoomed(zoom, -1)),
   "studio::ResetZoom": () => setZoom(zoomed(zoom, 0)),
+  "studio::NextSession": () => go(stepSession(studio.listed, selectedId(), 1)),
+  "studio::PreviousSession": () => go(stepSession(studio.listed, selectedId(), -1)),
+  // The toast's session first, which also leaves focus mode (#573).
+  "studio::NextNeedsYou": () => void (jumpToNeedsYou() || go(nextNeedsYou(studio.listed, selectedId()))),
+  "studio::SelectNext": () => moveInList(1),
+  "studio::SelectPrevious": () => moveInList(-1),
+  "studio::Answer": (n) => answer(Number(n)),
+  "studio::NewSession": showPicker,
+  "studio::OpenSettings": () => void invoke("open_settings", { editor: studio.files.settings.editor }).catch((e) => console.warn(e)),
+  "studio::Palette": () => showPalette(paletteEntries(studio.files.keymap, Object.keys(actions)), (binding) => run(actions, binding)),
 };
 window.addEventListener("keydown", (event) => {
   // The terminal types into xterm's hidden textarea, so this covers it too.
   const target = event.target as HTMLElement;
   const typing = target.isContentEditable || target.matches?.("input, textarea, select") === true;
-  const action = windowBinding(studio.files.keymap, event, typing);
-  const run = typeof action === "string" ? actions[action] : undefined;
-  if (!run) return;
-  run();
+  const inList = target.closest?.(".list") != null;
+  const inTerminal = target.closest?.("#terminal") != null;
+  const action = windowBinding(studio.files.keymap, event, typing, inList, !typing && !inTerminal && answerable());
+  if (!run(actions, action)) return;
   if (action !== "studio::Dismiss") event.preventDefault();
 });
 
@@ -121,20 +177,37 @@ element("rail-toggle").addEventListener("click", () => toggle("rail-open"));
 const blocks = () => element("story").querySelectorAll<HTMLDetailsElement>("details:not(.more):not(.ask-about)");
 element("open-all").addEventListener("click", () => blocks().forEach((block) => (block.open = true)));
 element("close-all").addEventListener("click", () => blocks().forEach((block) => (block.open = false)));
+// The rail's "⋯" menu (#574) closes once an action in it is chosen.
+element("rail-actions").addEventListener("click", () => element("rail-actions").hidePopover());
 
 document.addEventListener("visibilitychange", markShown);
 
 // A login shell in the configured repository, then a pane per session terminal (#467).
 startPanes().catch((e) => (element("terminal-body").textContent = `No terminal: ${e}`));
 element("new-session").addEventListener("click", showPicker);
+// The needs-you chip (#572) selects the first session that needs Daniel.
+element("needs-you").addEventListener("click", () => {
+  const first = studio.listed.find((session) => session.state === "needs_you");
+  if (first) select(first.id);
+});
 // A click outside the picker, but not on its own button, closes it.
 document.addEventListener("pointerdown", (event) => {
   const target = event.target as Node;
   if (!element("picker").contains(target) && !element("new-session").contains(target)) element("picker").hidden = true;
 }, true); // capture: the terminal must not swallow it
 
-listen<Session[]>("sessions", showSessions);
-invoke<Session[]>("sessions").then(showSessions);
+const showList = (sessions: Session[]) => {
+  showSessions(sessions);
+  showPlaces();
+  showToast(true);
+};
+// Opening Places reads git's counts at once (#576).
+element("places").addEventListener("toggle", () => void ((element("places") as HTMLDetailsElement).open && readPlaces(true)));
+listen<Session[]>("sessions", showList);
+invoke<Session[]>("sessions").then(showList);
+// A press on the toast jumps to its session; the press itself keeps the terminal's keyboard focus.
+element("toast").addEventListener("pointerdown", (event) => event.preventDefault());
+element("toast").addEventListener("click", jumpToNeedsYou);
 // While a press waits for its reply, the reply draws the rail once, with its cards; an event between
 // would draw it with the last session's cards for a frame (#570).
 // The press's settling fetches what it held back.

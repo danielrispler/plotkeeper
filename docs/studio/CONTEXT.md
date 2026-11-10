@@ -72,21 +72,22 @@ A check card's guess whose check ended with an exit code that does not say wheth
 A rolling account of an agent session's or a worker's work so far, at the top of its view, so that Daniel can resume a session he lost track of. Each new card updates it.
 
 **Workbench**:
-The part of the control room where agent work happens: terminals, tasks and the board. It works without the understanding layer.
+The part of the control room where agent work happens: terminals, tasks and Places. It works without the understanding layer.
 
 **Task**:
 One piece of agent work with its own git worktree and branch, and the terminals and agent sessions running in it.
 _Avoid_: Ticket (an issue on the tracker; a ticket may become a task)
 
 **Main checkout**:
-A project's original working copy, outside any task. It appears on the board and can host terminals and agent sessions, but it is not a task.
-
-**Board**:
-The workbench view with one row per task and one per main checkout, showing the state of their agent sessions.
+A project's original working copy, outside any task. It appears in Places and can host terminals and agent sessions, but it is not a task.
 
 **Place**:
 A folder where Daniel can start an agent session or a terminal: a project's main checkout or a task's worktree.
 _Avoid_: Location, workspace
+
+**Places**:
+The folded section at the bottom of the session list, the home of tasks: one row per place, with its branch, its commits ahead of and behind its base, its uncommitted files and its number of sessions. A task's base is its repository's default branch; the main checkout's is its upstream. Clicking a place offers a new session there and, for a task, Remove; tasks are created here too. The sessions themselves show only in the list.
+_Avoid_: Board (an earlier plan for a view of its own, which Places replaces)
 
 **Terminal daemon**:
 The background process that owns the workbench's terminals, so they outlive the app. The app connects to it over a socket.
@@ -95,6 +96,10 @@ _Avoid_: Server, multiplexer
 **Pane**:
 The window's view of one terminal of the terminal daemon. One pane shows at a time; the others keep running hidden.
 _Avoid_: Tab
+
+**Palette**:
+The picker over every action of the window, each shown with its key, built from `keymap.json`, so it is also the list of keys. ⌘⇧P opens it. A new view or menu becomes an action in the palette, not a button in the top bar.
+_Avoid_: Command menu, help
 
 **Draft**:
 What Daniel has typed into a session's prompt and not sent yet, as the studio follows his keys. The studio types into a terminal only once he has no draft there and has stopped typing for 3 seconds.
@@ -151,10 +156,14 @@ A subagent that is not a worker, such as a review or a search. It shows as one l
 A prompt that Claude Code sends, not Daniel, to wake an agent when a subagent or a background command it started returns. It names the returning task's id in markup. It never counts as Daniel's prompt.
 
 **Session list**:
-The list of every agent session, one row each, grouped by state with needs you first and idle and ended sessions collapsed last. Each row says in one line what its session is doing, and running subagents nest under the agent that spawned them. A finished subagent leaves the list and counts in its parent's "N done"; a failed one stays until Daniel opens it. Only Daniel's own actions change the session he looks at: a click or key on a row, or starting a session, which selects it once it reports its terminal.
+The list of every agent session, one row each, sorted by state: needs you, running, your turn, then idle and ended sessions collapsed last. A row is one line, its name then its state's shape: a "Needs you" pill (the only colour), a spinner while running, a dot at your turn (filled, with a bold name, while **unseen**), a ring when idle or ended. Only a running or needs-you row adds a second, muted line: its current step, or its question's first line. Running subagents nest under the agent that spawned them. When the window is narrow the list is a **strip** of the same shapes, each with a short label from the session's name, distinct between sessions; hovering it opens the list over the terminal. The top bar's needs-you chip counts the sessions that need Daniel. A finished subagent leaves the list and counts in its parent's "N done"; a failed one stays until Daniel opens it. Only Daniel's own actions change the session he looks at: a click or key on a row, or starting a session, which selects it once it reports its terminal.
 
 **Story rail**:
-The column on the window's left that tells the selected session's or subagent's story: its state and step, its brief, cards and checks, and its open question docked at the bottom.
+The column on the window's left that tells the selected session's or subagent's story. It opens on "now": one header line (the verdict and the phase, with the times and the model on hover, and a "⋯" menu for Rename, Close and Delete), then the open question docked under it, or else the newest card, then the current intention, boxed, then the latest turn's summary. Below is a feed of turns, newest first. A turn is one block: its prompt in one line, its summary, its learning question, its cards, the subagents and checks it ran, and its full response, folded, with one "ask about this". The brief and the decision history are folded under the feed.
+
+**Focus mode**:
+The window with the session list and the story rail folded, so the terminal takes the window. One key, rebindable in the keymap, enters it and the same key leaves it. Only two other things leave it: pressing the toast to jump to its session, and the next-needs-you key. Nothing else changes the layout, so the terminal's size never moves under Daniel's typing. While in it, a session that newly needs you shows a toast over the terminal's corner instead.
+_Avoid_: Zen mode, full screen (the macOS window state)
 
 **Falinks run**:
 Several agent sessions coordinated by the Falinks engine on one repository.

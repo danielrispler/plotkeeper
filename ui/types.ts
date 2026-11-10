@@ -31,6 +31,8 @@ export type CheckLine = {
   started_at: number;
   ended_at: number | null;
   typical_ms: number | null;
+  // The turn it started in, an index into `Session.turns` (#574).
+  turn: number | null;
 };
 // Who spawned a subagent: the session's own agent, another subagent, or no known spawn.
 export type Parent = "session" | "unattached" | { agent: string };
@@ -54,6 +56,7 @@ export type Subagent = {
   failed: boolean;
   opened: boolean;
   faded: boolean;
+  turn: number | null;
 };
 // Who a session that needs Daniel waits on, and since when: the subagent who asks, or null for its
 // own agent.
@@ -68,7 +71,10 @@ export type Choice = { label: string; description?: string };
 // A multi-select answer joins its labels with ", "; a single-choice answer is one whole label.
 export type Asked = { question: string; header?: string; multiSelect?: boolean; options: Choice[] };
 export type Answer = "open" | "not_answered" | { answered: Record<string, string> };
-export type Question = { tool_use_id: string; agent: string | null; questions: Asked[]; answer: Answer };
+export type Question = { tool_use_id: string; agent: string | null; questions: Asked[]; answer: Answer; turn: number | null };
+// A turn, a block in the rail's feed (#574): its prompt's first line, or "worker <name> returned";
+// `id` names its card and summary once its `Stop` came; `message` is its final reply's first line.
+export type Turn = { started_at: number; ended_at: number | null; prompt: string; id: string | null; message: string | null };
 export type Session = {
   id: string;
   // The folder it works in, from its latest event; `folder_name` is its last segment.
@@ -95,6 +101,7 @@ export type Session = {
   agents: Subagent[];
   asker: Asker | null;
   prompts: Prompt[];
+  turns: Turn[];
   questions: Question[];
   // "worker <name> returned", after a wake-up until its next step or Daniel's next prompt.
   returned: string | null;
@@ -104,6 +111,8 @@ export type Session = {
   work: Work;
   // In the session list only: what its row says, built by the card store.
   line?: string;
+  // Its turn finished and Daniel has not looked at it since; #556 sets it (#572 draws it).
+  unseen?: boolean;
 };
 // The shell sends a card's request without its diff and base, which the pane never reads. `agent`
 // is the worker whose card it is; `changed_by` holds the files other subagents edited in its
@@ -162,6 +171,9 @@ export type Decision = {
   at: number;
   source: "card" | "terminal";
 };
+// A turn's summary (#526) and, unless the turn has a card, its learning section, as the store keeps
+// it.
+export type TurnSummary = { summary: { summary: string; learning: { idea: string; question: Quiz } | null } };
 export type SessionCards = { brief: string | null; recent: StoredCard[]; older: StoredCard[]; decisions: Decision[] };
 // What a call asks Daniel, by its tool, as the answer hook's `Kind`: a question, a plan, or any other
 // tool's permission.
@@ -176,6 +188,8 @@ export type Selection = { session: Session; agent: string | null };
 // the count of `agent-*` worktrees hidden. `branch` is null at a detached HEAD.
 export type Place = { path: string; branch: string | null };
 export type Places = { main: Place; tasks: Place[]; hidden: number };
+// A place's counts (#576): commits ahead of and behind its base, null with no base, and changed files.
+export type Counts ={ ahead_behind: [number, number] | null; changed: number };
 export type Losses = { uncommitted: string[]; unpushed: string[] };
 
 export const stateLabels: Record<SessionState, string> = {

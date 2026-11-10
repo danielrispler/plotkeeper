@@ -6,7 +6,7 @@
 // An action, or an action with its argument, as Zed writes `["terminal::SendText", "\u0001"]`.
 export type Binding = string | [string, string];
 // Keystrokes, as Zed writes them ("cmd-1", "escape"), to actions, by context: "Workspace" for the
-// window, "Terminal" for the terminal pane.
+// window, "List" for the session list while it has focus, "Terminal" for the terminal pane.
 export type Keymap = Record<string, Record<string, Binding>>;
 
 export interface DoctorEntry {
@@ -66,15 +66,34 @@ const defaultSettings: Settings = {
   editor: null,
 };
 
-// Today's shortcuts. The terminal's Cmd+C and Cmd+V stay the Edit menu's (`keys.ts`).
+// Today's shortcuts. The terminal's Cmd+C and Cmd+V stay the Edit menu's (`keys.ts`). "List" holds
+// the keys of the session list while it has focus, over the window's (#575).
 const defaultKeymap: Keymap = {
   Workspace: {
     "cmd-1": "studio::ToggleList",
     "cmd-2": "studio::ToggleRail",
     escape: "studio::Dismiss",
+    // Focus mode (#573), in `MODIFIERS` order, as the lookup reads it.
+    "shift-cmd-enter": "studio::ToggleFocus",
     "cmd-=": "studio::ZoomIn",
     "cmd--": "studio::ZoomOut",
     "cmd-0": "studio::ResetZoom",
+    // The keyboard spine (#565, decision 7).
+    "cmd-]": "studio::NextSession",
+    "cmd-[": "studio::PreviousSession",
+    "cmd-j": "studio::NextNeedsYou",
+    "1": ["studio::Answer", "1"],
+    "2": ["studio::Answer", "2"],
+    "3": ["studio::Answer", "3"],
+    "4": ["studio::Answer", "4"],
+    "cmd-n": "studio::NewSession",
+    "cmd-,": "studio::OpenSettings",
+    // Modifiers in `MODIFIERS` order, as a keystroke reads.
+    "shift-cmd-p": "studio::Palette",
+  },
+  List: {
+    down: "studio::SelectNext",
+    up: "studio::SelectPrevious",
   },
   Terminal: {
     "cmd-a": "terminal::SelectAll",
