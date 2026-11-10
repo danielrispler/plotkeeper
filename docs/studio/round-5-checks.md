@@ -31,6 +31,8 @@ It writes every output to `local-evidence/2026-11-09-round-5/real-calls-<time>/`
 - [ ] **#522:** a turn driven from the phone still sends hook events: its row and card update in the studio. If it fails, report it on #522.
 - [ ] **#523:** the rail header shows the model and effort, such as `claude-opus-5-5 · effort medium`.
 - [ ] **#524:** saving `settings.json` changes zoom and font size live; ⌘=, ⌘- and ⌘0 reach the window and are not taken by a menu.
+- [ ] **#526:** after a long turn ends, its intention first shows the reply's first line, then switches once, about 10 s later, to the turn summary's first line. With `"summaries": { "on_open": true }` in `settings.json`, it stays the reply's first line. The summaries are kept in `summaries.json` in the studio's data folder; the rail shows them with #574.
+- [ ] **#544:** renaming a session with a half-typed draft in its prompt leaves the draft intact: the rename waits, and after 60 s shows a notice instead of typing. Once the draft is sent or cleared, `/rename` arrives about 3 s later. Renaming a session in "needs you" shows a notice and types nothing.
 - [ ] **#525:** a table in a response renders; clicking a link opens the browser, and the studio's window stays on the app.
 - [ ] **#527:** both Doctor defaults run in a new terminal in the selected place.
 - [ ] **#528:** "Edit" opens a user skill in Zed.
