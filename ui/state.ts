@@ -10,5 +10,7 @@ export const studio = {
   pending: null as { id: string; agent: string | null } | null,
   // A `selected` or `cards` event came while `pending` waited, so the press's settling fetches both.
   missed: false,
+  // Focus mode (#573): the list and the rail folded, the terminal takes the window.
+  focus: false,
   files: initial,
 };

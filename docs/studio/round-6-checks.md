@@ -53,11 +53,21 @@ Between passes, nothing waits for him. After each pass, a code-review agent that
 - [ ] Open the session's rail: the collapsed **Subagents** section lists every subagent it ran, newest first, each with its name, its prompt's first line, its result, and its type, duration and kind.
 - [ ] Click a finished entry: the rail opens that subagent with its cards and brief. Within seconds, its written summary of what it was asked and what it came back with shows on its intention line, and on the entry when you go back. Opening it again writes no new summary (no new `claude -p` run). Outside auto mode.
 
+## #573: the width rule, focus mode and the needs-you toast
+
+- [ ] On the laptop screen, maximised, with one terminal: the list shows in full, the rail stays on screen, and the terminal has at least 100 columns (hover its header for the grid size, with nothing selected).
+- [ ] Narrow the window slowly: the list folds to its strip first, then the rail narrows, then the terminal loses columns, and only last does the rail become an overlay. In the overlay, the top bar shows the selected session's state, and its open question when it needs you.
+- [ ] ⌘⇧↩ folds the list and the rail, and the terminal takes the window; ⌘⇧↩ again brings them back. Rebinding `studio::ToggleFocus` in `keymap.json` moves it to the new key.
+- [ ] In focus mode, let another session ask a question. A toast shows its name and the question's first line over the terminal's top-right corner, with a sound, and you keep typing in the terminal: nothing moves and no key is lost. A second block shows "+1 more" in the same toast.
+- [ ] Click the toast: focus mode ends and that session is selected. Its × dismisses it without taking the terminal's focus.
+- [ ] A question from the session in the focused terminal shows no toast and makes no sound.
+- [ ] The sound feels right, not alarming.
+
 ## #575: a keyboard spine and a palette
 
-- [ ] A whole loop without the mouse: with two sessions asking a question, press ⌘J. The first one that needs you is selected. Press 1 (from the terminal too): its docked question is answered. Press ⌘J again for the second one, answer it, then ⌘] and ⌘[ to step to the next and previous session.
+- [ ] A whole loop without the mouse: with two sessions asking a question, press ⌘J. The first one that needs you is selected. Press 1 (from the terminal too): its docked question is answered. Press ⌘J again for the second one (in focus mode, ⌘J jumps to the toast's session and leaves focus mode), answer it, then ⌘] and ⌘[ to step to the next and previous session.
 - [ ] Tab into the session list, then ↑ and ↓ move the selection row by row; the terminal still gets ↑ and ↓ when it has focus.
 - [ ] ⌘N opens the new-session picker; ⌘, opens `settings.json` in your editor, creating it empty if it was missing.
-- [ ] ⌘⇧P opens the palette: every action with its key. Typing filters it, Enter runs the first one, and Esc closes it. Once focus mode (#573) is in, it is listed with its key.
+- [ ] ⌘⇧P opens the palette: every action with its key. Typing filters it, Enter runs the first one, and Esc closes it. Focus mode is listed with ⇧⌘↩.
 - [ ] Rebind one key in `keymap.json`, such as `{ "bindings": { "cmd-shift-j": "studio::NextNeedsYou" } }`: the new key works, ⌘J no longer does, and the palette shows ⇧⌘J.
 - [ ] Ctrl+letters (Ctrl+C, Ctrl+R) still reach Claude Code in the terminal.
