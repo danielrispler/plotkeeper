@@ -23,7 +23,7 @@ code:empty { display: none; }
    selected (`aria-pressed`) and disabled states. A variant changes its layout, never its states. */
 .btn { font: inherit; color: inherit; background: var(--raised); border: 0; border-radius: var(--radius);
        padding: var(--sp-2) var(--sp-4); cursor: pointer; text-align: start;
-       transition: background-color var(--motion), color var(--motion); }
+       transition: background-color var(--motion), color var(--motion), box-shadow var(--motion); }
 .btn:hover { background: var(--pressed); }
 .btn:active { background: var(--selected); }
 .btn[aria-pressed="true"] { background: var(--selected); }
@@ -31,7 +31,8 @@ code:empty { display: none; }
 /* Quiet: no fill until hovered, for actions that should recede. */
 .btn.quiet, .btn.row, .strip .btn { background: none; }
 .btn.quiet:hover, .btn.row:hover, .strip .btn:hover { background: var(--hover); }
-.btn.row[aria-pressed="true"], .strip .btn[aria-pressed="true"] { background: var(--selected); }
+/* The selected row: a fill and an edge bar at its start (#570). */
+.btn.row[aria-pressed="true"], .strip .btn[aria-pressed="true"] { background: var(--selected); box-shadow: inset var(--mark) 0 0 var(--fg); }
 .btn.small { font-size: var(--size-small); padding: var(--sp-1) var(--sp-4); color: var(--muted); }
 .btn.small:hover { color: var(--fg); }
 
@@ -119,7 +120,12 @@ h1 { margin: 0 0 var(--sp-4); }
           white-space: nowrap; overflow: hidden; }
 .term-h .mono { font-size: var(--size-xs); color: var(--muted); }
 .term-body { min-height: 0; min-width: 0; overflow: hidden; padding: var(--sp-3); position: relative; }
-.pane { height: 100%; }
+/* The panes lie on top of each other, the hidden ones invisible but still laid out, so each stays
+   fitted to the body and a switch shows it as it is, with no resize and redraw after (#570). A new
+   pane stays invisible until its first replay is written and fitted. */
+.pane { position: absolute; inset: var(--sp-3); }
+.pane[hidden] { display: block; }
+.pane[hidden], .pane.fitting { visibility: hidden; }
 .term-find { position: absolute; top: var(--sp-3); right: var(--sp-5); z-index: 10; width: var(--find); font: inherit; }
 #probe { position: absolute; visibility: hidden; white-space: pre; font: var(--term-size)/var(--term-line) var(--mono); }
 

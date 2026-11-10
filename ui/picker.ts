@@ -130,13 +130,13 @@ function picked({ main, tasks, hidden }: Places): HTMLElement[] {
 // Opens the picker, or closes it when open.
 export async function showPicker() {
   const picker = element("picker");
-  picker.hidden = !picker.hidden;
-  if (picker.hidden) return;
-  picker.replaceChildren(text("p", "Reading worktrees…", "empty"));
+  if (!picker.hidden) return void (picker.hidden = true);
+  // It opens once its rows are read, so no placeholder flashes first in another box (#570).
   try {
     picker.replaceChildren(...picked(await invoke<Places>("places")));
-    picker.querySelector("input")?.focus();
   } catch (e) {
     picker.replaceChildren(text("p", `No worktrees: ${e}`, "empty"));
   }
+  picker.hidden = false;
+  picker.querySelector("input")?.focus();
 }

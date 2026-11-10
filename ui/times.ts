@@ -69,8 +69,11 @@ export function estimateText(work: Pick<Work, "phases" | "estimate">): string {
 const counting = new Map<HTMLElement, (now: number) => string>();
 
 // Sets `node`'s text from `draw` now, and again each second while it is in the window.
+// Each gets its own key, so `patch` swaps it in rather than keep an old node counting the old time.
+let made = 0;
 export function counts(node: HTMLElement, draw: (now: number) => string): HTMLElement {
   node.textContent = draw(Date.now());
+  node.dataset.key = `count ${++made}`;
   counting.set(node, draw);
   return node;
 }

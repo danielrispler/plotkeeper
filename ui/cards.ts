@@ -54,9 +54,11 @@ function quizElements({ request: { id }, guess }: StoredCard, quiz: Quiz, state:
   options.append(
     ...quiz.options.map((option, i) => {
       const item = document.createElement("li");
-      const button = pressable(prose("button", option.text) as HTMLButtonElement, guess?.option === i, () =>
-        record("guess", { id, option: i }),
-      );
+      // The tap shows at once; the cards drawn from the shell's reply then settle it (#570).
+      const button = pressable(prose("button", option.text) as HTMLButtonElement, guess?.option === i, () => {
+        button.setAttribute("aria-pressed", "true");
+        record("guess", { id, option: i });
+      });
       button.disabled = state.answered;
       item.append(button);
       if (state.reasons) {

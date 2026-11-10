@@ -24,3 +24,11 @@ Between passes, nothing waits for him. After each pass, a code-review agent that
 - [ ] Open a new Claude terminal, run `claude`, and pick an earlier session with `/resume`. Do it twice. The list shows that session as one row, with its history, and no extra "Falinks" row with "No step yet".
 - [ ] When Claude Code forks a session mid-conversation (its `SessionStart` comes `from fork`), the list keeps one row, under the session's name, and it does not stay "Running" after the turn ends.
 - [ ] Delete that row. Only that row goes.
+
+## #570: instant feedback
+
+- [ ] Switching sessions feels immediate: the row shows selected (a fill and an edge bar at its start) as the mouse goes down, before the rail and terminal follow. Rows and buttons react to hover.
+- [ ] After a switch, the terminal does not jump: it shows at once at its size and scroll position, with no second or third position. The rail does not draw an in-between layout first.
+- [ ] Tab to a row, or select text in a row, and wait for a few updates: the focus ring and the text selection stay.
+- [ ] "New session" opens the picker with its rows; no "Reading worktrees…" box flashes first.
+- [ ] Tapping a quiz option marks it at once.

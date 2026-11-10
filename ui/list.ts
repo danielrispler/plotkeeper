@@ -2,9 +2,9 @@
 // nested under it. When the window is narrow it collapses to a strip of state dots and issue numbers,
 // which opens the full list on click or ⌘1.
 
-import { age, element, prose, pressable, stepText, text } from "./dom.js";
+import { age, element, patch, prose, pressable, stepText, text } from "./dom.js";
 import { counts, times } from "./times.js";
-import { select } from "./selection.js";
+import { isSelected, select } from "./selection.js";
 import { studio } from "./state.js";
 import { stateLabels, type Context, type Session, type SessionState, type Subagent } from "./types.js";
 
@@ -95,11 +95,18 @@ function rowLines(button: HTMLElement, state: string, label: string, name: HTMLE
   return stateNode;
 }
 
+// A row's button, keyed by what it selects (`patch` keeps it across updates). It selects on the press,
+// so the row shows selected at once (#570); a click without a pointer, from the keyboard, selects too.
+function selecting(id: string, agent: string | null, key = `${id} ${agent ?? ""}`): HTMLButtonElement {
+  const button = pressable(document.createElement("button"), isSelected(id, agent), (event: MouseEvent) => event.detail === 0 && select(id, agent));
+  button.dataset.key = key;
+  button.addEventListener("pointerdown", (event) => event.button === 0 && select(id, agent));
+  return button;
+}
+
 // One row: the session's name, its context share, its state and what it is doing.
 function row(session: Session, children: Children): HTMLElement {
-  const selection = studio.selection;
-  const pressed = session.id === selection?.session.id && selection.agent === null;
-  const button = pressable(document.createElement("button"), pressed, () => select(session.id));
+  const button = selecting(session.id, null);
   button.classList.add("row");
   rowLines(
     button,
@@ -128,9 +135,7 @@ function rowLine(line: string): HTMLElement {
 // last step; a helper its task, type, status, duration and result. A failed child stands out until
 // Daniel opens it.
 function agentRow(session: Session, children: Children, agent: Subagent, depth: number): HTMLElement {
-  const button = pressable(document.createElement("button"), agent.id === studio.selection?.agent, () =>
-    select(session.id, agent.id),
-  );
+  const button = selecting(session.id, agent.id);
   button.classList.add("row", agent.kind);
   button.style.paddingInlineStart = `calc(var(--sp-4) + var(--indent) * ${depth})`;
   const [label, stateName] = agentState(session, agent);
@@ -175,8 +180,8 @@ function strip(sessions: Session[]): HTMLElement[] {
   return [
     open,
     ...shown.map((session) => {
-      const pressed = session.id === studio.selection?.session.id;
-      const button = pressable(document.createElement("button"), pressed, () => select(session.id));
+      const button = selecting(session.id, null, `strip ${session.id}`);
+      button.setAttribute("aria-pressed", String(isSelected(session.id)));
       button.title = `${sessionName(session)} · ${stateLabels[session.state]}`;
       const issue = session.identity.issue;
       button.append(dot(session.state), issue === null ? stripLabel(session.folder_name) : String(issue));
@@ -196,22 +201,24 @@ export function showSessions(sessions: Session[]) {
     if (last?.[0].state === session.state) last.push(session);
     else groups.push([session]);
   }
-  element("groups").replaceChildren(
-    ...groups.map((rows) => {
+  // Patched, not rebuilt, so focus and text selection survive the update (#570).
+  patch(element("groups"), groups.map((rows) => {
       const state = rows[0].state;
       const title = `${stateLabels[state]} · ${rows.length}`;
       if (!collapsed.includes(state)) {
         const group = document.createElement("section");
+        group.dataset.key = state;
         group.append(text("h1", title), ...rows.flatMap(tree));
         return group;
       }
       const group = document.createElement("details");
+      group.dataset.key = state;
       group.open = opened.has(state);
       group.addEventListener("toggle", () => (group.open ? opened.add(state) : opened.delete(state)));
       group.append(text("summary", title), ...rows.flatMap(tree));
       return group;
     }),
   );
-  element("strip").replaceChildren(...strip(sessions));
+  patch(element("strip"), strip(sessions));
   element("no-sessions").hidden = sessions.length > 0;
 }
