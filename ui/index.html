@@ -47,50 +47,46 @@
     </section>
 
     <aside class="rail" aria-label="Session story">
+      <!-- One line (#574): the verdict and the phase (#475); the times (#473) and the model show on
+           hover. Rename, Close and Delete wait in the "⋯" menu. -->
       <div class="rail-h">
-        <!-- Times (#473), then the phases and the estimate (#475). -->
-        <div id="times" class="times"></div>
-        <div class="tools">
-          <button id="open-all" class="btn small tool" type="button">Open all</button>
-          <button id="close-all" class="btn small tool" type="button">Close all</button>
+        <p id="headline" class="headline"><span id="state" class="state"></span> <span id="phase" class="phase"></span></p>
+        <button id="rail-more" class="btn small" type="button" popovertarget="rail-actions" aria-label="More actions" hidden>⋯</button>
+        <div id="rail-actions" class="menu" popover>
+          <!-- An ended session opens again with `claude --resume` (#467). -->
+          <button id="reopen" class="btn small" type="button" hidden>Open</button>
+          <!-- Rename and close (#469). -->
+          <button id="rename" class="btn small" type="button" hidden>Rename</button>
+          <button id="close" class="btn small" type="button" hidden>Close</button>
+          <button id="open-all" class="btn small" type="button">Open all</button>
+          <button id="close-all" class="btn small" type="button">Close all</button>
+          <button id="delete" class="btn small" type="button" hidden>Delete</button>
         </div>
       </div>
+      <!-- "Now" starts with the open question, docked so it never scrolls away. -->
+      <div id="dock" class="dock" hidden></div>
       <div id="story" class="story">
         <p id="notice" role="status" hidden></p>
         <p id="empty" class="empty">Pick a session in the list.</p>
         <section id="view" hidden>
-          <p id="state" class="state"></p>
-          <!-- An ended session opens again with `claude --resume` (#467). -->
-          <button id="reopen" class="btn small tool" type="button" hidden>Open</button>
-          <!-- Rename and close (#469). -->
-          <button id="rename" class="btn small tool" type="button" hidden>Rename</button>
-          <button id="close" class="btn small tool" type="button" hidden>Close</button>
-          <button id="delete" class="btn small tool" type="button" hidden>Delete</button>
-          <!-- Decision history (#479), a collapsed section above the turns. -->
-          <details id="decisions" class="decisions" hidden><summary id="decisions-title"></summary><ol id="decisions-list"></ol></details>
-          <!-- Every subagent the session ran, newest first (#535), collapsed like the decisions. -->
-          <details id="subagents" class="decisions subagents" hidden><summary id="subagents-title"></summary><ol id="subagents-list"></ol></details>
-          <!-- The intention and step line (#472). -->
-          <p id="intention" class="intention"><span id="intention-text"></span> <span id="intention-age" class="age"></span></p>
-          <div id="intention-ask"></div>
-          <details id="unavailable" class="unavailable" hidden><summary>Steps only</summary><span id="unavailable-why"></span></details>
-          <details id="step" class="step"><summary><span id="tool" class="tool-name"></span> <span id="detail"></span></summary><code id="command"></code></details>
-          <details id="responses" class="responses" hidden><summary id="responses-title"></summary><div id="responses-body"></div></details>
-          <section id="brief" class="brief" hidden></section>
-          <h1 id="recent-title" class="cards-title" hidden>Last 30 minutes</h1>
-          <section id="recent"></section>
-          <h1 id="older-title" class="cards-title" hidden>Older</h1>
-          <section id="older"></section>
-          <h1 id="questions-title" class="cards-title" hidden>Questions</h1>
-          <section id="questions"></section>
-          <div class="own">
-            <h1 id="checks-title" class="cards-title" hidden>Checks</h1>
-            <ul id="checks" class="checks"></ul>
+          <!-- Else the newest card (#574). -->
+          <section id="now-card"></section>
+          <!-- The intention, boxed as the anchor (mockup C), and the step line (#472). -->
+          <div id="intention" class="intention">
+            <p><span id="intention-text"></span> <span id="intention-age" class="age"></span></p>
+            <details id="unavailable" class="unavailable" hidden><summary>Steps only</summary><span id="unavailable-why"></span></details>
+            <details id="step" class="step"><summary><span id="tool" class="tool-name"></span> <span id="detail"></span></summary><code id="command"></code></details>
           </div>
+          <!-- The latest turn's summary (#526). -->
+          <section id="now-summary"></section>
+          <!-- The feed of turns, newest first: each with its prompt, summary, learning question, cards,
+               subagents (#535), checks and folded response. -->
+          <ol id="feed" class="feed"></ol>
+          <details id="brief-fold" class="decisions" hidden><summary>Brief</summary><section id="brief" class="brief"></section></details>
+          <!-- Decision history (#479), folded under the feed. -->
+          <details id="decisions" class="decisions" hidden><summary id="decisions-title"></summary><ol id="decisions-list"></ol></details>
         </section>
       </div>
-      <!-- The open question, docked under the story. -->
-      <div id="dock" class="dock" hidden></div>
     </aside>
   </div>
   <!-- The dividers: drag to resize the list and the rail. -->

@@ -154,7 +154,7 @@ A prompt that Claude Code sends, not Daniel, to wake an agent when a subagent or
 The list of every agent session, one row each, grouped by state with needs you first and idle and ended sessions collapsed last. Each row says in one line what its session is doing, and running subagents nest under the agent that spawned them. A finished subagent leaves the list and counts in its parent's "N done"; a failed one stays until Daniel opens it. Only Daniel's own actions change the session he looks at: a click or key on a row, or starting a session, which selects it once it reports its terminal.
 
 **Story rail**:
-The column on the window's left that tells the selected session's or subagent's story: its state and step, its brief, cards and checks, and its open question docked at the bottom.
+The column on the window's left that tells the selected session's or subagent's story. It opens on "now": one header line (the verdict and the phase, with the times and the model on hover, and a "⋯" menu for Rename, Close and Delete), then the open question docked under it, or else the newest card, then the current intention, boxed, then the latest turn's summary. Below is a feed of turns, newest first. A turn is one block: its prompt in one line, its summary, its learning question, its cards, the subagents and checks it ran, and its full response, folded, with one "ask about this". The brief and the decision history are folded under the feed.
 
 **Falinks run**:
 Several agent sessions coordinated by the Falinks engine on one repository.

@@ -121,6 +121,8 @@ element("rail-toggle").addEventListener("click", () => toggle("rail-open"));
 const blocks = () => element("story").querySelectorAll<HTMLDetailsElement>("details:not(.more):not(.ask-about)");
 element("open-all").addEventListener("click", () => blocks().forEach((block) => (block.open = true)));
 element("close-all").addEventListener("click", () => blocks().forEach((block) => (block.open = false)));
+// The rail's "⋯" menu (#574) closes once an action in it is chosen.
+element("rail-actions").addEventListener("click", () => element("rail-actions").hidePopover());
 
 document.addEventListener("visibilitychange", markShown);
 

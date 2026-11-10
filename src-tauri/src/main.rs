@@ -88,6 +88,13 @@ fn turn_summary(
     cards.lock().unwrap().turn_summary(&id).cloned()
 }
 
+/// The whole final reply of turn `index` of session `id` (#574), which the rail fetches when Daniel
+/// opens that turn's folded response; the session list never carries it.
+#[tauri::command]
+fn turn_reply(id: String, index: usize, studio: State<Mutex<Studio>>) -> Option<String> {
+    studio.lock().unwrap().turn_reply(&id, index)
+}
+
 /// Daniel opened subagent `agent_id` (#535): the summary of its purpose and result, written now
 /// when it has none and has ended, which takes seconds, so the command runs off the main thread.
 /// `None` while it runs or when the call failed, and the rail keeps its first line.
@@ -464,6 +471,7 @@ fn main() {
             settings::set_zoom,
             summary_settings,
             turn_summary,
+            turn_reply,
             agent_summary,
             notify_while_focused
         ])
