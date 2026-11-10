@@ -80,6 +80,8 @@ const defaultKeymap: Keymap = {
     "shift-cmd-enter": "studio::ToggleFocus",
     // Split terminals (#529): the pane shown stays beside the next one selected.
     "cmd-d": "studio::ToggleSplit",
+    // The terminal panel (#542), as in VS Code; it works from inside a terminal too (`keys.ts`).
+    "ctrl-`": "studio::TogglePanel",
     "cmd-=": "studio::ZoomIn",
     "cmd--": "studio::ZoomOut",
     "cmd-0": "studio::ResetZoom",

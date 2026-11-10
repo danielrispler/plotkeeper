@@ -249,4 +249,18 @@ test("every default window action has a title and a key in the palette", () => {
   assert.deepEqual(entries.find((entry) => entry.title === "Select next").keys, ["↓"]);
   assert.deepEqual(entries.find((entry) => entry.title === "Toggle focus").keys, ["⇧⌘↩"]);
   assert.deepEqual(entries.find((entry) => entry.title === "Toggle split").keys, ["⌘D"]);
+  assert.deepEqual(entries.find((entry) => entry.title === "Toggle panel").keys, ["⌃`"]);
+});
+
+// The terminal panel (#542): its key works from inside a terminal too, as in VS Code.
+test("ctrl-` toggles the panel, from the terminal too; a rebound key toggles it and the old one does not", () => {
+  const backquote = key("Backquote", { ctrlKey: true }, "`");
+  assert.equal(windowBinding(initial.keymap, backquote, true), "studio::TogglePanel");
+  // xterm skips it, so the window's handler gets it.
+  assert.equal(keyAction(backquote, false), "app");
+  const { keymap } = reload(initial, { settings: null, keymap: `[{ "bindings": { "ctrl-j": "studio::TogglePanel" } }]` });
+  assert.equal(windowBinding(keymap, key("KeyJ", { ctrlKey: true }, "j"), true), "studio::TogglePanel");
+  assert.equal(keyAction(key("KeyJ", { ctrlKey: true }, "j"), false, keymap), "app");
+  assert.equal(windowBinding(keymap, backquote, true), undefined);
+  assert.equal(keyAction(backquote, false, keymap), "terminal");
 });

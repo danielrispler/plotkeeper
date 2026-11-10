@@ -97,6 +97,10 @@ _Avoid_: Server, multiplexer
 The window's view of one terminal of the terminal daemon. Up to two panes show at a time, when the terminal column is split; the others keep running hidden.
 _Avoid_: Tab
 
+**Terminal panel**:
+A band under the terminal column that holds a plain login shell in the folder of the session shown, or the main checkout's with none, like the terminal panel of VS Code or Zed. One key shows and hides it. It sits under the pane, or under both panes of a split, at most 40 % of the column's height; it never spans the list or the rail. Each folder has one panel shell, kept by the **Terminal daemon**, so it survives restarts and keeps its scrollback when Daniel switches away and back.
+_Avoid_: Bottom terminal, console
+
 **Palette**:
 The picker over every action of the window, each shown with its key, built from `keymap.json`, so it is also the list of keys. ⌘⇧P opens it. A new view or menu becomes an action in the palette, not a button in the top bar.
 _Avoid_: Command menu, help

@@ -126,3 +126,12 @@ Between passes, nothing waits for him. After each pass, a code-review agent that
 - [ ] Focused: another session that needs you plays one sound (Glass) after about 3 seconds, in any layout, and never twice. The session you are viewing plays none, and a your-turn plays none.
 - [ ] In the background: needs you plays Glass and your turn plays Tink, each only with its notification.
 - [ ] `"sounds": false` in `settings.json` silences both. The sounds feel right, not alarming.
+
+## #542: a docked terminal panel
+
+- [ ] Press ⌃` with a session selected: a band opens under the terminal with a plain shell in that session's folder, and takes the keys; the session's terminal stays above it, as wide as before. ⌃` again, from inside the panel too, hides it and gives the keys back to the terminal above.
+- [ ] The band never covers the list or the rail. Drag its top edge: it resizes, stops at 40 % of the terminal's height, and keeps its height after a restart.
+- [ ] Select a session in another folder: the panel shows that folder's shell. Go back: the first shell is there with its scrollback.
+- [ ] Run something in the panel, then quit and reopen the app: the panel's shell is still there, with its scrollback.
+- [ ] With a split (⌘D) open, the panel shows under both panes.
+- [ ] Rebind it in `keymap.json` (`{ "bindings": { "ctrl-j": "studio::TogglePanel" } }`): the new key toggles it and ⌃` reaches the terminal. ⌘⇧P lists "Toggle panel".

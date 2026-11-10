@@ -43,13 +43,14 @@ export const bound = (keymap: Keymap, context: string, key: Key): Binding | unde
 
 // The window's action for `key`; `inList`: the session list has focus, so its own keys come first.
 // While typing in a field or the terminal, a binding without Cmd leaves the key to it, so plain
-// control-letters and digits reach the terminal; only Dismiss runs, since it does not take the key.
+// control-letters and digits reach the terminal; only Dismiss runs, since it does not take the key,
+// and the panel's toggle (#542), which the terminal never needs.
 // The answer keys answer only while `answerable`: focus is outside the terminal and text fields, and
 // the docked card is on screen (#575, decision 7). The terminal never loses a digit to the card.
 export function windowBinding(keymap: Keymap, key: Key, typing: boolean, inList = false, answerable = false): Binding | undefined {
   const action = (inList ? bound(keymap, "List", key) : undefined) ?? bound(keymap, "Workspace", key);
   if (Array.isArray(action) && action[0] === "studio::Answer" && !answerable) return undefined;
-  return typing && !key.metaKey && action !== "studio::Dismiss" ? undefined : action;
+  return typing && !key.metaKey && action !== "studio::Dismiss" && action !== "studio::TogglePanel" ? undefined : action;
 }
 
 // The window's actions by name (#575); an action with an argument, such as `["studio::Answer", "1"]`,
@@ -137,8 +138,8 @@ export function keyAction(key: Key, clipboardHasImage: boolean, keymap: Keymap =
   const action = bound(keymap, "Terminal", key);
   if (Array.isArray(action) && action[0] === "terminal::SendText") return { send: action[1] };
   if (typeof action === "string" && commands[action]) return { command: commands[action] };
-  // Every Cmd shortcut the terminal has not bound goes to the app.
-  if (metaKey) return "app";
+  // Every Cmd shortcut the terminal has not bound goes to the app, and the panel's key (#542).
+  if (metaKey || bound(keymap, "Workspace", key) === "studio::TogglePanel") return "app";
   if (altKey && !ctrlKey) {
     // By the physical key, since Option changes what the layout types (Option+B is "∫").
     const letter = /^Key([A-Z])$/.exec(code)?.[1];

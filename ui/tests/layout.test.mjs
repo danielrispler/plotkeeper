@@ -1,7 +1,7 @@
 // The UI's pure functions, run on the `tsc` output (#465). Run: `npm test` in apps/studio.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { arrange, defaultWidths, paneBoxes, resized } from "../../dist/layout.js";
+import { arrange, defaultWidths, paneBoxes, panelHeight, resized } from "../../dist/layout.js";
 import { stripLabel } from "../../dist/list.js";
 
 // The cell of 12.5px SF Mono in WebKit, as #577 measured it, and the terminal's padding, which holds no column.
@@ -104,6 +104,15 @@ test("a dragged split divider moves the share, and stops where a pane would get 
   const [first] = paneBoxes(1920, 900, cell, { stacked: false, share: 0.05 });
   assert.equal(paneColumns(1920, first), 80);
   assert.equal(paneBoxes(1920, 900, cell, { stacked: true, share: 0.99 })[1].top, 786);
+});
+
+// The terminal panel (#542, #565 decision 5): a band under the terminal column, costing height only.
+test("the panel takes its dragged height, at most 40 % of the terminal column and at least 80 px", () => {
+  assert.equal(panelHeight(240, 900), 240);
+  assert.equal(panelHeight(700, 900), 360);
+  assert.equal(panelHeight(20, 900), 80);
+  // A column too short for both keeps the 40 %.
+  assert.equal(panelHeight(20, 150), 60);
 });
 
 test("the strip names a session by its issue number, else by its folder", () => {

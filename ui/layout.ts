@@ -73,3 +73,7 @@ export function paneBoxes(width: number, height: number, cell: number, split: Sp
   const [start, end] = split.stacked ? (["top", "bottom"] as const) : (["left", "right"] as const);
   return [{ ...all, [end]: length - at + margin }, { ...all, [start]: at + margin }];
 }
+
+// The terminal panel's height (#542): a band under the terminal column (#565, decision 5), as its
+// divider was dragged, at least 80 px but never over 40 % of the column. It costs height, never width.
+export const panelHeight = (dragged: number, column: number) => Math.round(Math.min(Math.max(dragged, 80), 0.4 * column));

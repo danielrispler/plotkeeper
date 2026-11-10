@@ -7,11 +7,14 @@
 // daemon ran come back (`revive`); so after a crash, a reboot or an upgrade, the same way.
 // #529: a split pins the pane shown to the column's second half while the selection drives the first;
 // while both are the same terminal, one pane shows.
+// #542: the terminal panel's shells (`panel.ts`) live in the panel, not here; this follows the
+// selection's folder for it and reattaches them after a lost daemon.
 
 import type * as Xterm from "@xterm/xterm";
 import { connect, list, onEvent, request, type Listed } from "./daemon.js";
 import { element, invoke, pressable, text } from "./dom.js";
 import { type Box, paneBoxes } from "./layout.js";
+import { isPanel, panelTerm, showPanel } from "./panel.js";
 import { offerBuilds, upgrade, type Revive } from "./restart.js";
 import { show as showSelection } from "./selection.js";
 import { studio } from "./state.js";
@@ -40,6 +43,7 @@ export function startPanes(): Promise<void> {
   offerBuilds();
   ready = connect().then((config) => {
     repo = config.repo;
+    showPanel(null, repo);
     show("shell", () => openPane(box("shell"), "shell", repo));
     revived = revive(config.outdated);
   });
@@ -59,13 +63,14 @@ async function revive(outdated: boolean) {
     // A revived conversation keeps its terminal's id, on purpose: its session stays linked to the
     // pane it had. Only a new conversation gets a fresh id (`startClaude`, #467).
     const argv = r.session ? await invoke<string[]>("claude_argv", { resume: r.session, auto: startedAuto(r.argv) }) : r.argv;
-    const term = panes.get(r.id)?.term;
+    const term = panes.get(r.id)?.term ?? panelTerm(r.id);
     await request({ op: "spawn", id: r.id, argv, cwd: r.cwd, cols: term?.cols ?? 80, rows: term?.rows ?? 24 });
   }
   for (const t of await list()) {
     if (t.exited !== null) continue;
-    if (panes.get(t.id)?.term) await request({ op: "attach", id: t.id });
-    else if (!panes.has(t.id)) draw(t.id, () => openPane(box(t.id), t.id, t.cwd, t.argv));
+    if (panes.get(t.id)?.term || panelTerm(t.id)) await request({ op: "attach", id: t.id });
+    // A panel's shell waits for its folder to show in the panel.
+    else if (!panes.has(t.id) && !isPanel(t.id)) draw(t.id, () => openPane(box(t.id), t.id, t.cwd, t.argv));
   }
   if (outdated) upgrade();
 }
@@ -136,6 +141,9 @@ export async function closePane(id: string) {
   if (shown === id) show("shell", () => openPane(box("shell"), "shell", repo));
   else if (wasPinned) show(shown, () => null);
 }
+
+// Gives the keyboard back to the pane shown, as the panel hides.
+export const focusPane = () => panes.get(shown)?.term?.focus();
 
 // Whether two panes show: the pinned one and a different one the selection shows.
 export const split = () => pinned !== null && pinned !== shown && panes.has(pinned);
@@ -233,6 +241,7 @@ export async function showSession(session: Session | null, clicked = false) {
   await revived.catch((e) => console.warn(`terminal: revive: ${e}`));
   const current = () => selected === key;
   if (!connected || !current()) return;
+  showPanel(session, repo);
   if (!session) {
     // A pane Daniel just started stays until its session arrives.
     if (starting !== shown) show("shell", () => openPane(box("shell"), "shell", repo));

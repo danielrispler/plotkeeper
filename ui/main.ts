@@ -11,7 +11,8 @@ import { type Actions, nextNeedsYou, paletteEntries, run, stepSession, windowBin
 import { arrange, defaultWidths, type LayoutMode, resized, type Widths } from "./layout.js";
 import { showSessions } from "./list.js";
 import { select, show } from "./selection.js";
-import { dragSplit, placePanes, split, startPanes, toggleSplit } from "./panes.js";
+import { dragPanel, placePanel, togglePanel } from "./panel.js";
+import { dragSplit, focusPane, placePanes, split, startPanes, toggleSplit } from "./panes.js";
 import { showPalette, showPicker } from "./picker.js";
 import { readPlaces, showPlaces } from "./places.js";
 import { reload, type SettingsFiles, zoomed } from "./settings.js";
@@ -37,6 +38,7 @@ function layout() {
   document.documentElement.style.setProperty("--rail", `${rail || widths.rail}px`);
   document.body.dataset.layout = mode;
   element("rail-toggle").hidden = mode !== "overlay";
+  placePanel();
   placePanes(stacked, cell());
   showToast();
 }
@@ -124,6 +126,8 @@ const actions: Actions = {
   },
   // A split (#529) pins the pane shown and shows the next session beside it.
   "studio::ToggleSplit": () => void (toggleSplit() && go(stepSession(studio.listed, selectedId(), 1))),
+  // The terminal panel (#542): a shell in the shown session's folder, under the terminal column.
+  "studio::TogglePanel": () => togglePanel(focusPane),
   "studio::ZoomIn": () => setZoom(zoomed(zoom, 1)),
   "studio::ZoomOut": () => setZoom(zoomed(zoom, -1)),
   "studio::ResetZoom": () => setZoom(zoomed(zoom, 0)),
@@ -189,6 +193,7 @@ document.addEventListener("visibilitychange", markShown);
 // A login shell in the configured repository, then a pane per session terminal (#467).
 startPanes().catch((e) => element("terminal-body").append(`No terminal: ${e}`));
 dragSplit();
+dragPanel();
 element("new-session").addEventListener("click", showPicker);
 // The needs-you chip (#572) selects the first session that needs Daniel.
 element("needs-you").addEventListener("click", () => {
