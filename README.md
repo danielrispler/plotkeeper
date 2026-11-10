@@ -141,7 +141,7 @@ The log is never rotated. It holds tool inputs and results, file contents includ
 
 ## Plan usage
 
-Claude Code gives the plan's 5-hour and weekly usage, and the context window's size, only to the status line command, on its stdin. Sessions the studio starts run `claude --settings` with `workbench/statusline.sh` as their status line, so you edit nothing. On every refresh it saves that stdin as `usage/<session_id>.json` beside the event log, by temp file and rename, readable only by you (mode 0600), with the line in `workbench/statusline-usage.sh`. Then it reads `statusLine.command` from `~/.claude/settings.json`, runs it on the same stdin, and passes its output and exit status through; with none set, it prints nothing. The top bar shows the newest snapshot's `rate_limits`, or "no usage". Sessions started outside the studio save no snapshot. Snapshots are never deleted; remove the folder at any time.
+Claude Code gives the plan's 5-hour and weekly usage, and the context window's size, only to the status line command, on its stdin. Sessions the studio starts run `claude --settings` with `workbench/statusline.sh` as their status line, so you edit nothing. On every refresh it saves that stdin as `usage/<session_id>.json` beside the event log, by temp file and rename, readable only by you (mode 0600, in a folder of mode 0700), with the line in `workbench/statusline-usage.sh`. Then it reads `statusLine.command` from `~/.claude/settings.json`, runs it on the same stdin, and passes its output and exit status through; with none set, it prints nothing. The top bar shows the newest snapshot's `rate_limits`, or "no usage". Sessions started outside the studio save no snapshot. Snapshots are never deleted; remove the folder at any time.
 
 ## Recorded logs
 
