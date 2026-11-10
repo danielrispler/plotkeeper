@@ -7,11 +7,11 @@
 import { startWatching } from "./answer.js";
 import { markShown, showCards } from "./cards.js";
 import { element, invoke, listen } from "./dom.js";
-import { type Actions, nextNeedsYou, paletteEntries, run, stepSession, windowBinding } from "./keys.js";
+import { type Actions, doctorEntries, nextNeedsYou, paletteEntries, run, stepSession, windowBinding } from "./keys.js";
 import { arrange, defaultWidths, type LayoutMode, resized, type Widths } from "./layout.js";
 import { showSessions } from "./list.js";
 import { select, show } from "./selection.js";
-import { startPanes } from "./panes.js";
+import { runDoctor, startPanes } from "./panes.js";
 import { showPalette, showPicker } from "./picker.js";
 import { readPlaces, showPlaces } from "./places.js";
 import { reload, type SettingsFiles, zoomed } from "./settings.js";
@@ -133,7 +133,17 @@ const actions: Actions = {
   "studio::Answer": (n) => answer(Number(n)),
   "studio::NewSession": showPicker,
   "studio::OpenSettings": () => void invoke("open_settings", { editor: studio.files.settings.editor }).catch((e) => console.warn(e)),
-  "studio::Palette": () => showPalette(paletteEntries(studio.files.keymap, Object.keys(actions)), (binding) => run(actions, binding)),
+  // A Doctor entry from settings, by its command (#527).
+  "studio::Doctor": (command) => {
+    const entry = studio.files.settings.doctor.find((e) => e.command === command);
+    if (entry) runDoctor(entry).catch((e) => console.warn(e));
+  },
+  "studio::Palette": () => {
+    const { keymap, settings } = studio.files;
+    // The Doctor is listed once per entry, with its warning, not as one bare action.
+    const names = Object.keys(actions).filter((name) => name !== "studio::Doctor");
+    showPalette([...paletteEntries(keymap, names), ...doctorEntries(settings.doctor)], (binding) => run(actions, binding));
+  },
 };
 window.addEventListener("keydown", (event) => {
   // The terminal types into xterm's hidden textarea, so this covers it too.

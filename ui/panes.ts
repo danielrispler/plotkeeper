@@ -11,6 +11,7 @@ import { connect, list, onEvent, request, type Listed } from "./daemon.js";
 import { element, invoke, pressable, text } from "./dom.js";
 import { offerBuilds, upgrade, type Revive } from "./restart.js";
 import { show as showSelection } from "./selection.js";
+import type { DoctorEntry } from "./settings.js";
 import { studio } from "./state.js";
 import { openPane } from "./terminal.js";
 import type { Selection, Session } from "./types.js";
@@ -124,7 +125,19 @@ export async function closePane(id: string) {
 let starting: string | null = null;
 export async function startClaude(cwd: string, resume: string | null = null, prompt = "") {
   const argv = [...(await invoke<string[]>("claude_argv", { resume })), ...(prompt ? ["--", prompt] : [])]; // `--`: a prompt like "-p x" is no flag
-  const id = `claude-${crypto.randomUUID()}`;
+  await startTerminal(`claude-${crypto.randomUUID()}`, cwd, argv);
+}
+
+// A Doctor entry (#527) in a new terminal in the selected session's folder, else the configured
+// repository. `shell` runs its command under the login shell, then leaves a shell for reading and
+// rerunning; `session` starts `claude` with the command as its first prompt.
+export function runDoctor({ command, kind }: DoctorEntry) {
+  const cwd = studio.selection?.session.cwd ?? repo;
+  if (kind === "session") return startClaude(cwd, null, command);
+  return startTerminal(`doctor-${crypto.randomUUID()}`, cwd, ["/bin/sh", "-c", `${command}; exec "$SHELL" -l`]);
+}
+
+async function startTerminal(id: string, cwd: string, argv: string[]) {
   starting = id;
   element("terminal-head").hidden = false;
   studio.pending = null; // an earlier press's late reply must not take the pane from this session

@@ -2,7 +2,7 @@
 // whether the clipboard holds an image, to what happens. The Cmd table is in the README; the
 // terminal's Cmd shortcuts come from `keymap.json` (#524).
 
-import { type Binding, initial, type Keymap, MODIFIERS } from "./settings.js";
+import { type Binding, type DoctorEntry, initial, type Keymap, MODIFIERS } from "./settings.js";
 
 // The fields of a `KeyboardEvent` the mapping reads.
 export interface Key {
@@ -95,7 +95,8 @@ const title = (binding: Binding) => {
   return [words[0].toUpperCase() + words.slice(1), arg].filter(Boolean).join(" ");
 };
 
-export type Entry = { binding: Binding; title: string; keys: string[] };
+// `note`: a second line, such as a Doctor entry's cost.
+export type Entry = { binding: Binding; title: string; keys: string[]; note?: string };
 
 // The palette (#575): every action in `actions` that the window runs, in the keymap's order, each with
 // the keys `keymap` binds it to now. An action unbound since, or never bound, is listed with none.
@@ -113,6 +114,13 @@ export function paletteEntries(keymap: Keymap, actions: string[]): Entry[] {
   for (const name of actions) if (!named.has(name)) add(name);
   return [...entries.values()];
 }
+
+// What each Doctor kind costs (#527): the warning comes from the kind, never from the entry.
+const doctorWarnings: Record<DoctorEntry["kind"], string> = { shell: "no tokens", session: "starts a Claude session, spends tokens" };
+
+// The Doctor's entries as palette actions (#565, decision 7), each run by its command.
+export const doctorEntries = (doctor: DoctorEntry[]): Entry[] =>
+  doctor.map(({ label, command, kind }) => ({ binding: ["studio::Doctor", command], title: `Doctor: ${label}`, keys: [], note: doctorWarnings[kind] }));
 
 // The terminal's commands, as `keymap.json` names them.
 const commands: Record<string, "selectAll" | "find" | "clear"> = {

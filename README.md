@@ -92,7 +92,7 @@ Every shortcut here but Cmd+C and Cmd+V can be rebound in `keymap.json` (see Set
 
 ## Settings files
 
-`settings.json` and `keymap.json` sit in the studio's data folder, `~/Library/Application Support/dev.falinks.studio/`, in Zed's format: JSON with comments and trailing commas (#524). The app reloads them when either is saved. A file that does not parse is reported in the notice line, and the last good one stays in effect. Missing keys keep their defaults; a key of the wrong type is reported in the same line and keeps its default. `summaries` and `doctor` are read but not used yet; later tickets of #517 wire them:
+`settings.json` and `keymap.json` sit in the studio's data folder, `~/Library/Application Support/dev.falinks.studio/`, in Zed's format: JSON with comments and trailing commas (#524). The app reloads them when either is saved. A file that does not parse is reported in the notice line, and the last good one stays in effect. Missing keys keep their defaults; a key of the wrong type is reported in the same line and keeps its default. Each `doctor` entry is a palette action, "Doctor: <label>", marked with its kind's cost and run in a new terminal in the selected session's folder (#527): a `shell` one runs its command ("no tokens"), a `session` one starts `claude` with it as the prompt ("starts a Claude session, spends tokens"). A keymap can bind one as `["studio::Doctor", "<command>"]`:
 
 ```jsonc
 {
