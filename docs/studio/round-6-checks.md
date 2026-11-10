@@ -102,3 +102,17 @@ Between passes, nothing waits for him. After each pass, a code-review agent that
 - [ ] Drag the divider between the panes: both resize, and Claude Code redraws in each at its new size; the divider stops before a pane gets too small.
 - [ ] Selecting the pinned session shows it alone; selecting another brings the split back. ⌘D again closes the split. Closing the pinned session's terminal closes the split.
 - [ ] ⌘⇧P lists "Toggle split" with ⌘D. Dropping a file types its path into the focused pane only.
+
+## #558: a program that fails at start shows its exit code and last lines
+
+- [ ] Start a session in a folder where `claude` cannot start (for example, with a failing `claude` script first on `PATH`). Within 2 s, the terminal's place says "claude could not start: code <n>" above the program's last lines, with "Show output", which shows its pane and full output.
+- [ ] At the same time, a toast at the terminal's bottom-right corner names the session (or program) and the code, with "Show output" and ×. Typing in the terminal goes on: the toast takes no focus and nothing moves.
+- [ ] Let a hidden pane fail at start, for example a revived terminal or a Doctor entry while another pane shows. The shown terminal stays; only the toast appears, and its "Show output" shows the failed pane.
+- [ ] A session that runs a while and then exits, and a program that exits with code 0, show no notice: only the pane's usual exit line.
+
+## #541: start a session in auto mode
+
+- [ ] Open the picker (⌘N): "Auto mode" is unticked. Tick it and start a session: it runs in Claude Code's auto mode (its footer says so), and after its first prompt the rail's line reads "Running auto mode …". No bypass option is offered anywhere.
+- [ ] In that session, ask for something auto mode's classifier blocks: the row shows **needs you** and the toast fires, as in default mode.
+- [ ] A session started without the tick shows no mode on the rail's line.
+- [ ] End the auto session, then "Open" it from the rail's "⋯" menu (or "Open here"): it resumes in auto mode. Restarting the terminal daemon (#470) also brings it back in auto mode.

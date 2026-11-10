@@ -20,6 +20,17 @@ declare const WebLinksAddon: typeof import("@xterm/addon-web-links");
 const utf8 = new TextEncoder();
 const openLink = (target: string) => invoke("open_link", { target }).catch((e) => console.warn(e));
 
+// A program that ends nonzero within 2 s of starting failed at start (#558): its status and its last
+// lines of output, read from the terminal's buffer; else null, and the pane only notes the exit.
+type Lines = { length: number; getLine(y: number): { translateToString(trim: boolean): string } | undefined };
+export function startFailure(status: string, ms: number, buffer: Lines, count = 5): { status: string; lines: string[] } | null {
+  if (status === "code 0" || ms >= 2000) return null;
+  const lines = Array.from({ length: buffer.length }, (_, y) => buffer.getLine(y)?.translateToString(true) ?? "");
+  while (lines.length && !lines[lines.length - 1]) lines.pop();
+  return { status, lines: lines.slice(-count) };
+}
+export const startNotice = (name: string, failure: { status: string }) => `${name} could not start: ${failure.status}`;
+
 // Draws terminal `id` of the daemon into `place`, spawning it in `cwd` running `argv` (empty: a login
 // shell) unless it already runs. A shell that exited starts again at the next key; an exited Claude
 // terminal does not, as its new conversation would keep this id: "Open" starts one in a new terminal,
@@ -65,9 +76,12 @@ export function openPane(place: HTMLElement, id: string, cwd: string, argv: stri
   let quiet = false;
   // Why the terminal stopped, until the next key starts it again.
   let ended: "exited" | "lost" | null = null;
+  // When this pane last started its program; an exit soon after is a failure at start (#558).
+  let started = Date.now();
 
   async function start() {
     await connect();
+    started = Date.now();
     // "The id is taken" when it already runs; the attach replays it either way.
     await request({ op: "spawn", id, argv, cwd, cols: term.cols, rows: term.rows });
     await request({ op: "attach", id });
@@ -83,8 +97,17 @@ export function openPane(place: HTMLElement, id: string, cwd: string, argv: stri
     place.classList.remove("fitting");
     term.write(`\r\n\x1b[2m[${text}]\x1b[0m\r\n`);
   };
-  const exited = (status: string) =>
+  const exited = (status: string) => {
+    // Read once the output before it is written, and before the note below. `panes.ts` shows the
+    // notice, naming the program until a session names the terminal.
+    const ms = Date.now() - started;
+    term.write("", () => {
+      const failure = startFailure(status, ms, term.buffer.active);
+      const name = argv[0]?.split("/").pop() ?? "the shell";
+      if (failure) window.dispatchEvent(new CustomEvent("start-failed", { detail: { id, name, ...failure } }));
+    });
     note(argv.length ? `claude exited: ${status}; Open in the story starts it again` : `exited: ${status}; press a key for a new shell`);
+  };
   const input = (data: string) => {
     if (quiet) return;
     if (ended === "lost" || (ended === "exited" && argv.length > 0)) return;
@@ -103,6 +126,8 @@ export function openPane(place: HTMLElement, id: string, cwd: string, argv: stri
       // A shell that ended while the app was away: a new one starts in its place.
       request({ op: "forget", id }).then(start);
     } else if (event.ev === "replay") {
+      // After a lost daemon, `revive` has just started the program again.
+      if (ended === "lost") started = Date.now();
       ended = event.exited ? "exited" : null;
       // At the size its bytes were written for, then fitted, which redraws full-screen programs.
       term.reset();

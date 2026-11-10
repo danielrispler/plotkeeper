@@ -15,7 +15,9 @@ import { type Box, paneBoxes } from "./layout.js";
 import { offerBuilds, upgrade, type Revive } from "./restart.js";
 import { show as showSelection } from "./selection.js";
 import { studio } from "./state.js";
-import { openPane } from "./terminal.js";
+import { sessionName } from "./list.js";
+import { openPane, startNotice } from "./terminal.js";
+import { showStartToast } from "./toast.js";
 import type { Selection, Session } from "./types.js";
 
 type Pane = { box: HTMLElement; term: Xterm.Terminal | null; title: string };
@@ -41,6 +43,7 @@ export function startPanes(): Promise<void> {
     show("shell", () => openPane(box("shell"), "shell", repo));
     revived = revive(config.outdated);
   });
+  window.addEventListener("start-failed", (e) => failedAtStart((e as CustomEvent).detail));
   onEvent((event) => {
     if (event.ev !== "lost") return;
     revived = connect().then((config) => revive(config.outdated));
@@ -55,7 +58,7 @@ async function revive(outdated: boolean) {
   for (const r of await invoke<Revive[]>("revival", { terms: lost })) {
     // A revived conversation keeps its terminal's id, on purpose: its session stays linked to the
     // pane it had. Only a new conversation gets a fresh id (`startClaude`, #467).
-    const argv = r.session ? await invoke<string[]>("claude_argv", { resume: r.session }) : r.argv;
+    const argv = r.session ? await invoke<string[]>("claude_argv", { resume: r.session, auto: startedAuto(r.argv) }) : r.argv;
     const term = panes.get(r.id)?.term;
     await request({ op: "spawn", id: r.id, argv, cwd: r.cwd, cols: term?.cols ?? 80, rows: term?.rows ?? 24 });
   }
@@ -187,11 +190,12 @@ export function dragSplit() {
 }
 
 // Starts `claude` in `cwd` in a new terminal, with `prompt` as its first prompt, or
-// `claude --resume <resume>` for an ended session, and shows its pane. Nothing is selected until the
-// session's first event names its terminal; then the core selects it, so the rail follows (#567).
+// `claude --resume <resume>` for an ended session, and shows its pane, in auto mode when `auto`
+// (#541). Nothing is selected until the session's first event names its terminal; then the core
+// selects it, so the rail follows (#567).
 let starting: string | null = null;
-export async function startClaude(cwd: string, resume: string | null = null, prompt = "") {
-  const argv = [...(await invoke<string[]>("claude_argv", { resume })), ...(prompt ? ["--", prompt] : [])]; // `--`: a prompt like "-p x" is no flag
+export async function startClaude(cwd: string, resume: string | null = null, prompt = "", auto = false) {
+  const argv = [...(await invoke<string[]>("claude_argv", { resume, auto })), ...(prompt ? ["--", prompt] : [])]; // `--`: a prompt like "-p x" is no flag
   const id = `claude-${crypto.randomUUID()}`;
   starting = id;
   element("terminal-head").hidden = false;
@@ -199,6 +203,9 @@ export async function startClaude(cwd: string, resume: string | null = null, pro
   show(id, () => openPane(box(id), id, cwd, argv));
   showSelection(await invoke<Selection | null>("select_terminal", { terminal: id }));
 }
+
+// Whether a terminal's spawn `argv` started Claude Code in auto mode (#541), so its revival keeps it.
+export const startedAuto = (argv: string[]) => argv[argv.indexOf("--permission-mode") + 1] === "auto";
 
 // What the terminal shows for the selected session (#567): its own terminal while the daemon runs
 // it, else a message with "Open here", never the login shell, which may run another session. The
@@ -240,9 +247,24 @@ export async function showSession(session: Session | null, clicked = false) {
   const view = paneView(session, Boolean(own || terminal));
   if (view === "shell") return;
   if ("terminal" in view) return show(view.terminal, () => openPane(box(view.terminal), view.terminal, terminal!.cwd, terminal!.argv));
-  const resume = () => startClaude(session.cwd, session.resume_id).catch((e) => console.warn(e));
+  const resume = () => startClaude(session.cwd, session.resume_id, "", session.permission_mode === "auto").catch((e) => console.warn(e));
   box(ELSEWHERE).classList.add("elsewhere");
   box(ELSEWHERE).replaceChildren(text("p", view.message, "empty"), pressable(text("button", "Open here"), false, resume));
   show(ELSEWHERE, () => null);
 }
 const ELSEWHERE = "elsewhere";
+
+// A program that failed at start (#558), a session's, a Doctor entry's or a revived one: a toast names
+// the session, else the program, and the code, with "Show output", which shows its pane. When its pane
+// is the shown one, the message box also takes its place, with its last lines; a hidden one only toasts.
+export const failureTakesPane = (failed: string, current: string) => failed === current;
+function failedAtStart({ id, name, status, lines }: { id: string; name: string; status: string; lines: string[] }) {
+  const session = studio.listed.find((s) => s.terminal === id);
+  const notice = startNotice(session ? sessionName(session) : name, { status });
+  const output = () => show(id, () => null);
+  showStartToast(notice, output);
+  if (!failureTakesPane(id, shown)) return;
+  box(ELSEWHERE).classList.add("elsewhere");
+  box(ELSEWHERE).replaceChildren(text("p", notice, "empty"), text("pre", lines.join("\n"), "last-lines"), pressable(text("button", "Show output"), false, output));
+  show(ELSEWHERE, () => null);
+}
