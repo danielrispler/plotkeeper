@@ -79,9 +79,11 @@ Every Cmd shortcut goes to the terminal or to the app (`ui/keys.ts`):
 | Cmd+Backspace | terminal | sends Ctrl+U: deletes to the line's start |
 | Cmd+1, Cmd+2 | app | opens the session list, the story rail |
 | Cmd+], Cmd+[ | app | selects the next, the previous session in the list's order |
-| Cmd+J | app | selects the next session that needs you |
+| Cmd+J | app | selects the next session that needs you, else the next unseen one |
+| Cmd+D | app | splits the terminal column: pins the pane shown and shows the next session beside it; again to close |
 | Up, Down | app, while the list has focus | selects the row above, below |
 | Cmd+Shift+Enter | app | focus mode: hides the list and the rail; again to leave |
+| Ctrl+` | app, from the terminal too | the terminal panel: a shell in the shown session's folder, under the terminal; again to hide |
 | 1 to 4 | app, while focus is in the list, the dock or the rail and the rail is on screen; never from the terminal or a text box | chooses that answer on the docked card |
 | Cmd+N, Cmd+, | app | opens the new-session picker; opens `settings.json` in your editor |
 | Cmd+Shift+P | app | the palette: every action with its key; type to filter, Enter runs |
@@ -92,7 +94,7 @@ Every shortcut here but Cmd+C and Cmd+V can be rebound in `keymap.json` (see Set
 
 ## Settings files
 
-`settings.json` and `keymap.json` sit in the studio's data folder, `~/Library/Application Support/dev.falinks.studio/`, in Zed's format: JSON with comments and trailing commas (#524). The app reloads them when either is saved. A file that does not parse is reported in the notice line, and the last good one stays in effect. Missing keys keep their defaults; a key of the wrong type is reported in the same line and keeps its default. `summaries` and `doctor` are read but not used yet; later tickets of #517 wire them:
+`settings.json` and `keymap.json` sit in the studio's data folder, `~/Library/Application Support/dev.falinks.studio/`, in Zed's format: JSON with comments and trailing commas (#524). The app reloads them when either is saved. A file that does not parse is reported in the notice line, and the last good one stays in effect. Missing keys keep their defaults; a key of the wrong type is reported in the same line and keeps its default. Each `doctor` entry is a palette action, "Doctor: <label>", marked with its kind's cost and run in a new terminal in the selected session's folder (#527): a `shell` one runs its command ("no tokens"), a `session` one starts `claude` with it as the prompt ("starts a Claude session, spends tokens"). A keymap can bind one as `["studio::Doctor", "<command>"]`:
 
 ```jsonc
 {
@@ -100,6 +102,7 @@ Every shortcut here but Cmd+C and Cmd+V can be rebound in `keymap.json` (see Set
   "terminal": { "font_size": 15 }, // 8 to 40; default: the stylesheet's 12.5
   "summaries": { "model": "haiku", "effort": "low", "on_open": false },
   "notifications": { "while_focused": false }, // also notify "your turn" while focused, but not for the selected session
+  "sounds": true,                // false: no needs-you or your-turn sound
   "doctor": [
     { "label": "Check the installation", "command": "claude doctor", "kind": "shell" },
     { "label": "Full checkup", "command": "/doctor", "kind": "session" }
@@ -107,7 +110,7 @@ Every shortcut here but Cmd+C and Cmd+V can be rebound in `keymap.json` (see Set
 }
 ```
 
-`keymap.json` is Zed's array of contexts, `Workspace` for the window, `List` for the session list while it has focus, and `Terminal` for the pane. The window's actions are listed, with their keys, in the palette (Cmd+Shift+P): `studio::ToggleList`, `studio::ToggleRail`, `studio::Dismiss` (Esc), `studio::ZoomIn`, `studio::ZoomOut`, `studio::ResetZoom`, `studio::NextSession`, `studio::PreviousSession`, `studio::NextNeedsYou`, `studio::SelectNext`, `studio::SelectPrevious`, `["studio::Answer", "1"]` to `"4"`, `studio::NewSession`, `studio::OpenSettings` and `studio::Palette`. The pane's are `terminal::SelectAll`, `terminal::Find`, `terminal::Clear` and `["terminal::SendText", "<text>"]`. Unlike Zed, binding an action to a new key unbinds its default key; `null` unbinds a key. A `Workspace` shortcut without Cmd, other than `studio::Dismiss`, leaves the key to the terminal or text box you are typing in:
+`keymap.json` is Zed's array of contexts, `Workspace` for the window, `List` for the session list while it has focus, and `Terminal` for the pane. The window's actions are listed, with their keys, in the palette (Cmd+Shift+P): `studio::ToggleList`, `studio::ToggleRail`, `studio::Dismiss` (Esc), `studio::ZoomIn`, `studio::ZoomOut`, `studio::ResetZoom`, `studio::ToggleSplit` (Cmd+D), `studio::TogglePanel` (Ctrl+`), `studio::NextSession`, `studio::PreviousSession`, `studio::NextNeedsYou`, `studio::SelectNext`, `studio::SelectPrevious`, `["studio::Answer", "1"]` to `"4"`, `studio::NewSession`, `studio::OpenSettings`, `studio::Palette` and `studio::Skills` (the skills browser, #528, in the rail's place; Esc returns). The pane's are `terminal::SelectAll`, `terminal::Find`, `terminal::Clear` and `["terminal::SendText", "<text>"]`. Unlike Zed, binding an action to a new key unbinds its default key; `null` unbinds a key. A `Workspace` shortcut without Cmd, other than `studio::Dismiss` and `studio::TogglePanel`, leaves the key to the terminal or text box you are typing in:
 
 ```json
 [{ "context": "Workspace", "bindings": { "cmd-l": "studio::ToggleList", "escape": null } }]

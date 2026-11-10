@@ -232,3 +232,30 @@ fn the_selection_holds_all_day_while_its_session_changes_group_and_others_are_pr
         BTreeSet::from([NeedsYou, Running, YourTurn, Ended].map(Some))
     );
 }
+
+/// A session's permission mode (#541) is its latest event's, so the rail can always show auto mode;
+/// `None` until an event carries one, as `SessionStart` does not.
+#[test]
+fn a_session_shows_the_permission_mode_its_latest_event_names() {
+    let mut studio = replay(include_str!("fixtures/failing-bash.jsonl"));
+    let mode = |studio: &Studio| {
+        studio
+            .session(PROBE)
+            .and_then(|s| s.permission_mode.clone())
+    };
+    assert_eq!(mode(&studio).as_deref(), Some("default"));
+
+    let mut prompt = event(PROBE, "UserPromptSubmit", PROBE_STOPPED_AT + 1);
+    prompt["permission_mode"] = "auto".into();
+    studio.apply(&prompt.to_string());
+    assert_eq!(mode(&studio).as_deref(), Some("auto"));
+    // An event without one keeps it.
+    studio.apply(&event(PROBE, "Notification", PROBE_STOPPED_AT + 2).to_string());
+    assert_eq!(mode(&studio).as_deref(), Some("auto"));
+    // The mode it started in stays, for a resume (#541).
+    let started = studio.session(PROBE).unwrap().started_mode.clone();
+    assert_eq!(started.as_deref(), Some("default"));
+
+    let fresh = replay(&event("b8d4f2a6", "SessionStart", 1).to_string());
+    assert_eq!(fresh.session("b8d4f2a6").unwrap().permission_mode, None);
+}

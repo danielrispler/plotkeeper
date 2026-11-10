@@ -1,7 +1,7 @@
 // The terminal pane's key mapping (#466), run on the `tsc` output. Run: `npm test` in apps/studio.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { bound, keyAction, keyLabel, keystroke, nextNeedsYou, paletteEntries, run, stepSession, windowBinding } from "../../dist/keys.js";
+import { bound, doctorEntries, keyAction, keyLabel, keystroke, nextNeedsYou, paletteEntries, run, stepSession, windowBinding } from "../../dist/keys.js";
 import { initial, reload } from "../../dist/settings.js";
 
 const key = (code, mods = {}, key = "") => ({
@@ -191,6 +191,20 @@ test("the next needs-you comes after the selected session, wrapping", () => {
   assert.equal(nextNeedsYou([{ id: "b", state: "running" }], "b"), null);
 });
 
+test("with no needs-you, the next unseen comes after the selected session", () => {
+  const sessions = [
+    { id: "a", state: "your_turn", unseen: true },
+    { id: "b", state: "your_turn", unseen: false },
+    { id: "c", state: "your_turn", unseen: true },
+  ];
+  assert.equal(nextNeedsYou(sessions, "a"), "c");
+  assert.equal(nextNeedsYou(sessions, "c"), "a");
+  assert.equal(nextNeedsYou([...sessions, { id: "d", state: "needs_you" }], "a"), "d");
+  assert.equal(nextNeedsYou([{ id: "a", state: "your_turn", unseen: false }], null), null);
+  // An unseen session gone idle is still next.
+  assert.equal(nextNeedsYou([{ id: "a", state: "idle", unseen: true }], null), "a");
+});
+
 test("keys read as macOS menus show them", () => {
   assert.equal(keyLabel("cmd-shift-p"), "⇧⌘P");
   assert.equal(keyLabel("cmd-]"), "⌘]");
@@ -236,4 +250,33 @@ test("every default window action has a title and a key in the palette", () => {
   assert.deepEqual(entries.find((entry) => entry.title === "Next session").keys, ["⌘]"]);
   assert.deepEqual(entries.find((entry) => entry.title === "Select next").keys, ["↓"]);
   assert.deepEqual(entries.find((entry) => entry.title === "Toggle focus").keys, ["⇧⌘↩"]);
+  assert.deepEqual(entries.find((entry) => entry.title === "Toggle split").keys, ["⌘D"]);
+  assert.deepEqual(entries.find((entry) => entry.title === "Toggle panel").keys, ["⌃`"]);
+});
+
+// The terminal panel (#542): its key works from inside a terminal too, as in VS Code.
+test("ctrl-` toggles the panel, from the terminal too; a rebound key toggles it and the old one does not", () => {
+  const backquote = key("Backquote", { ctrlKey: true }, "`");
+  assert.equal(windowBinding(initial.keymap, backquote, true), "studio::TogglePanel");
+  // xterm skips it, so the window's handler gets it.
+  assert.equal(keyAction(backquote, false), "app");
+  const { keymap } = reload(initial, { settings: null, keymap: `[{ "bindings": { "ctrl-j": "studio::TogglePanel" } }]` });
+  assert.equal(windowBinding(keymap, key("KeyJ", { ctrlKey: true }, "j"), true), "studio::TogglePanel");
+  assert.equal(keyAction(key("KeyJ", { ctrlKey: true }, "j"), false, keymap), "app");
+  assert.equal(windowBinding(keymap, backquote, true), undefined);
+  assert.equal(keyAction(backquote, false, keymap), "terminal");
+});
+
+test("the Doctor's entries are palette actions, each warned by its kind, and the defaults show with none in settings", () => {
+  const { settings } = reload(initial, { settings: `{ "zoom": 1 }`, keymap: null });
+  assert.deepEqual(
+    doctorEntries(settings.doctor).map(({ binding, title, note }) => [binding, title, note]),
+    [
+      [["studio::Doctor", "claude doctor"], "Doctor: Check the installation", "no tokens"],
+      [["studio::Doctor", "/doctor"], "Doctor: Full checkup", "starts a Claude session, spends tokens"],
+    ],
+  );
+  // The warning comes from the kind, not the label or the command.
+  const [own] = doctorEntries([{ label: "Audit", command: "claude doctor", kind: "session" }]);
+  assert.equal(own.note, "starts a Claude session, spends tokens");
 });

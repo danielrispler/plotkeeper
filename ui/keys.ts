@@ -2,7 +2,7 @@
 // whether the clipboard holds an image, to what happens. The Cmd table is in the README; the
 // terminal's Cmd shortcuts come from `keymap.json` (#524).
 
-import { type Binding, initial, type Keymap, MODIFIERS } from "./settings.js";
+import { type Binding, type DoctorEntry, initial, type Keymap, MODIFIERS } from "./settings.js";
 
 // The fields of a `KeyboardEvent` the mapping reads.
 export interface Key {
@@ -43,13 +43,14 @@ export const bound = (keymap: Keymap, context: string, key: Key): Binding | unde
 
 // The window's action for `key`; `inList`: the session list has focus, so its own keys come first.
 // While typing in a field or the terminal, a binding without Cmd leaves the key to it, so plain
-// control-letters and digits reach the terminal; only Dismiss runs, since it does not take the key.
+// control-letters and digits reach the terminal; only Dismiss runs, since it does not take the key,
+// and the panel's toggle (#542), which the terminal never needs.
 // The answer keys answer only while `answerable`: focus is outside the terminal and text fields, and
 // the docked card is on screen (#575, decision 7). The terminal never loses a digit to the card.
 export function windowBinding(keymap: Keymap, key: Key, typing: boolean, inList = false, answerable = false): Binding | undefined {
   const action = (inList ? bound(keymap, "List", key) : undefined) ?? bound(keymap, "Workspace", key);
   if (Array.isArray(action) && action[0] === "studio::Answer" && !answerable) return undefined;
-  return typing && !key.metaKey && action !== "studio::Dismiss" ? undefined : action;
+  return typing && !key.metaKey && action !== "studio::Dismiss" && action !== "studio::TogglePanel" ? undefined : action;
 }
 
 // The window's actions by name (#575); an action with an argument, such as `["studio::Answer", "1"]`,
@@ -72,12 +73,11 @@ export function stepSession(sessions: { id: string }[], selected: string | null,
   return sessions[(from + by + sessions.length) % sessions.length].id;
 }
 
-// The first session that needs Daniel after `selected`, wrapping.
-// shortcut: needs-you only; the next unseen follows once #556 marks sessions unseen.
-export function nextNeedsYou(sessions: { id: string; state: string }[], selected: string | null): string | null {
+// The first session that needs Daniel after `selected`, wrapping; with none, the first unseen (#556).
+export function nextNeedsYou(sessions: { id: string; state: string; unseen?: boolean }[], selected: string | null): string | null {
   const at = sessions.findIndex((session) => session.id === selected);
   const order = [...sessions.slice(at + 1), ...sessions.slice(0, at + 1)];
-  return order.find((session) => session.state === "needs_you")?.id ?? null;
+  return (order.find((session) => session.state === "needs_you") ?? order.find((session) => session.unseen))?.id ?? null;
 }
 
 const symbols: Record<string, string> = { ctrl: "⌃", alt: "⌥", shift: "⇧", cmd: "⌘", up: "↑", down: "↓", left: "←", right: "→", escape: "Esc", enter: "↩", backspace: "⌫", tab: "⇥", space: "Space" };
@@ -95,7 +95,8 @@ const title = (binding: Binding) => {
   return [words[0].toUpperCase() + words.slice(1), arg].filter(Boolean).join(" ");
 };
 
-export type Entry = { binding: Binding; title: string; keys: string[] };
+// `note`: a second line, such as a Doctor entry's cost.
+export type Entry = { binding: Binding; title: string; keys: string[]; note?: string };
 
 // The palette (#575): every action in `actions` that the window runs, in the keymap's order, each with
 // the keys `keymap` binds it to now. An action unbound since, or never bound, is listed with none.
@@ -113,6 +114,13 @@ export function paletteEntries(keymap: Keymap, actions: string[]): Entry[] {
   for (const name of actions) if (!named.has(name)) add(name);
   return [...entries.values()];
 }
+
+// What each Doctor kind costs (#527): the warning comes from the kind, never from the entry.
+const doctorWarnings: Record<DoctorEntry["kind"], string> = { shell: "no tokens", session: "starts a Claude session, spends tokens" };
+
+// The Doctor's entries as palette actions (#565, decision 7), each run by its command.
+export const doctorEntries = (doctor: DoctorEntry[]): Entry[] =>
+  doctor.map(({ label, command, kind }) => ({ binding: ["studio::Doctor", command], title: `Doctor: ${label}`, keys: [], note: doctorWarnings[kind] }));
 
 // The terminal's commands, as `keymap.json` names them.
 const commands: Record<string, "selectAll" | "find" | "clear"> = {
@@ -138,8 +146,8 @@ export function keyAction(key: Key, clipboardHasImage: boolean, keymap: Keymap =
   const action = bound(keymap, "Terminal", key);
   if (Array.isArray(action) && action[0] === "terminal::SendText") return { send: action[1] };
   if (typeof action === "string" && commands[action]) return { command: commands[action] };
-  // Every Cmd shortcut the terminal has not bound goes to the app.
-  if (metaKey) return "app";
+  // Every Cmd shortcut the terminal has not bound goes to the app, and the panel's key (#542).
+  if (metaKey || bound(keymap, "Workspace", key) === "studio::TogglePanel") return "app";
   if (altKey && !ctrlKey) {
     // By the physical key, since Option changes what the layout types (Option+B is "∫").
     const letter = /^Key([A-Z])$/.exec(code)?.[1];

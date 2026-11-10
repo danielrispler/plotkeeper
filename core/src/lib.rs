@@ -27,6 +27,9 @@ pub struct Studio {
     /// The studio terminal of a session Daniel started, which is selected when its first event
     /// names that terminal (#567).
     awaiting: Option<String>,
+    /// The session Daniel marked unseen, which looking at it does not see until he selects it
+    /// again (#556).
+    held: Option<String>,
     /// The shell's latest tick, in Unix milliseconds.
     now: u64,
     roots: Roots,
@@ -94,6 +97,12 @@ pub struct Session {
     /// The id `claude --resume` takes: its latest conversation's, which a `/clear` changes while the
     /// row keeps its first id (#461, decision 18).
     pub resume_id: String,
+    /// Claude Code's permission mode, from its latest event that names one (#541): `default`,
+    /// `auto`, `plan` and the like; `None` until one does, as `SessionStart` does not.
+    pub permission_mode: Option<String>,
+    /// The permission mode it started in, from its first event that names one, which a resume keeps
+    /// (#541); `None` until one does.
+    pub started_mode: Option<String>,
     /// When each `/clear` continued it, oldest first: the "cleared" markers in its history.
     pub cleared: Vec<u64>,
     /// Its latest `SessionEnd` was a `/clear`, so the next `SessionStart` from `clear` on its
@@ -136,6 +145,12 @@ pub struct Session {
     /// Its turns, oldest first: the rail's feed (#574). Its checks, subagents and questions name the
     /// turn they started in.
     pub turns: Vec<Turn>,
+    /// At your turn, or idle since, with a turn Daniel has not seen (#556): its row's filled dot and
+    /// bold name.
+    pub unseen: bool,
+    /// How many of its turns Daniel has seen, which the card store keeps (#556).
+    #[serde(skip)]
+    seen: usize,
     /// The ids of its background tasks, commands included, from their responses and `Stop`'s
     /// `background_tasks`. With its subagents' ids, they are the task ids a wake-up can name.
     #[serde(skip)]
@@ -627,6 +642,12 @@ pub enum Kind {
 }
 
 impl Session {
+    fn update_unseen(&mut self) {
+        // Going idle keeps the mark: only Daniel seeing the session clears it (#556).
+        self.unseen =
+            matches!(self.state, State::YourTurn | State::Idle) && self.turns.len() > self.seen;
+    }
+
     /// Its subagent `id`, at any depth.
     pub fn subagent(&self, id: &str) -> Option<&Subagent> {
         self.agents.iter().find(|a| a.agent.id == id)
@@ -1287,6 +1308,9 @@ pub struct LiveFacts {
     /// The failed lines Daniel opened (`Studio::open`).
     #[serde(default)]
     pub opened: BTreeSet<String>,
+    /// How many turns of each session Daniel has seen, by its row's id (#556).
+    #[serde(default)]
+    pub seen: BTreeMap<String, usize>,
 }
 
 /// A session's change since its last card (#369, decision 10), with what the card writer needs: the
@@ -1581,6 +1605,8 @@ struct Event {
     reason: String,
     #[serde(default)]
     studio_received_ms: u64,
+    /// The session's permission mode, which `SessionStart` leaves out.
+    permission_mode: Option<String>,
     /// On a tool's result, how long its call took.
     duration_ms: Option<u64>,
     /// The terminal the session runs in, which the hook records from `STUDIO_TERMINAL_ID`.
@@ -2103,6 +2129,12 @@ impl Studio {
         session.agent.last_event_at = session.agent.last_event_at.max(event.studio_received_ms);
         // Every event of a `claude` process carries its terminal, so a resume elsewhere moves it.
         session.terminal.clone_from(&event.studio_terminal_id);
+        if event.permission_mode.is_some() {
+            session.permission_mode.clone_from(&event.permission_mode);
+            if session.started_mode.is_none() {
+                session.started_mode.clone_from(&event.permission_mode);
+            }
+        }
         // The session Daniel started in a new terminal takes the selection, so the rail follows its pane.
         if self.awaiting.is_some() && session.terminal == self.awaiting {
             self.awaiting = None;
@@ -2618,6 +2650,7 @@ impl Studio {
         } else {
             State::Running
         };
+        session.update_unseen();
         session.asks_before_closing = session.in_turn() || !session.ended && session.background;
         session.work.estimate.depends_on_you = session.state == State::NeedsYou;
         session.asker = session.blocks.first().map(|block| Asker {
@@ -2707,6 +2740,8 @@ impl Studio {
         }
         for session in self.sessions.values_mut() {
             let id = session.agent.id.clone();
+            session.seen = facts.seen.get(&id).copied().unwrap_or_default();
+            session.update_unseen();
             let ours: Vec<(&CardRequest, u64)> = cards
                 .iter()
                 .filter(|r| r.session_id == id)
@@ -2739,6 +2774,7 @@ impl Studio {
                 && now.saturating_sub(session.agent.last_event_at) >= IDLE_AFTER_MS
             {
                 session.state = State::Idle;
+                session.update_unseen();
                 changed = true;
             }
         }
@@ -2961,6 +2997,32 @@ impl Studio {
         self.selected = Some(id.into());
         self.viewed = None;
         self.awaiting = None;
+        self.held = None;
+    }
+
+    /// Daniel looks at the selected session (#556): while it is unseen, and only if `shown`, the
+    /// window focused with the story rail showing it, its ended turns count as seen. Returns its row's id and the turns seen when that
+    /// changed, for the card store to keep.
+    pub fn see_selected(&mut self, shown: bool) -> Option<(String, usize)> {
+        let id = self.selected()?.agent.id.clone();
+        let session = self.sessions.get_mut(&id).filter(|s| s.unseen)?;
+        if !shown || self.held.as_ref() == Some(&id) {
+            return None;
+        }
+        session.seen = session.turns.len();
+        session.update_unseen();
+        Some((id, session.seen))
+    }
+
+    /// Daniel marked session `id` unseen (#556): its last turn is unseen again, until he selects it
+    /// again and looks. Returns its row's id and the turns seen, for the card store to keep.
+    pub fn mark_unseen(&mut self, id: &str) -> Option<(String, usize)> {
+        let id = self.session(id)?.agent.id.clone();
+        let session = self.sessions.get_mut(&id)?;
+        session.seen = session.turns.len().saturating_sub(1);
+        session.update_unseen();
+        self.held = Some(id.clone());
+        Some((id, session.seen))
     }
 
     /// Daniel started a session in studio terminal `terminal`: nothing is selected until its first
@@ -3051,13 +3113,42 @@ struct Pending {
 /// one notification, so a burst never floods Daniel and no notice waits longer than that. Times are
 /// on a monotonic clock, time since the app started, so a clock change never holds them back
 /// (#434, decision 28).
-#[derive(Default)]
 pub struct Notifications {
     pending: Vec<Pending>,
     first_at: Duration,
+    /// The pending needs-you already sounded, with its toast, before `COMBINE` passed.
+    sounded: bool,
     /// The setting that also shows "your turn" while the window is focused, for any session but
     /// the selected one; off by default (#517, decision 6).
     pub while_focused: bool,
+    /// The `sounds` setting, on by default (#556).
+    pub sounds: bool,
+}
+
+impl Default for Notifications {
+    fn default() -> Self {
+        Notifications {
+            pending: Vec::new(),
+            first_at: Duration::ZERO,
+            sounded: false,
+            while_focused: false,
+            sounds: true,
+        }
+    }
+}
+
+/// A sound the shell plays (#556).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Sound {
+    NeedsYou,
+    YourTurn,
+}
+
+/// What `Notifications::due` gives the shell: a notification, as its title and body, and a sound.
+#[derive(Debug, Default, PartialEq)]
+pub struct Due {
+    pub notification: Option<(String, String)>,
+    pub sound: Option<Sound>,
 }
 
 impl Notifications {
@@ -3098,37 +3189,77 @@ impl Notifications {
 
     /// The notification due at `now`, as its title and body: the pending notices, once `COMBINE`
     /// has passed since the first, less the "needs you" ones whose session `needs_you` says no
-    /// longer needs Daniel. Only then is `focused` asked, and a focused window drops them, since
+    /// longer needs Daniel. A focused window drops them, since
     /// Daniel sees the list; with `while_focused` on, it keeps "your turn" on any session but the
-    /// one `selected` names.
+    /// one `selected` names. The sound (#556), with `sounds` on: focused, only for needs you on a
+    /// session `selected` does not name, at once, with the toast that shows it (#565, decision 3),
+    /// so a block that clears quickly sounds as it toasts; else only with a notification of needs
+    /// you or your turn.
     pub fn due(
         &mut self,
         now: Duration,
         focused: impl FnOnce() -> bool,
         needs_you: impl Fn(&str) -> bool,
         selected: impl FnOnce() -> Option<String>,
-    ) -> Option<(String, String)> {
-        if self.pending.is_empty() || now < self.first_at + COMBINE {
-            return None;
+    ) -> Due {
+        let blocked = |p: &Pending| p.needs_you.as_deref().is_some_and(&needs_you);
+        let combined = now >= self.first_at + COMBINE;
+        if self.pending.is_empty()
+            || !combined && (self.sounded || !self.pending.iter().any(blocked))
+        {
+            return Due::default();
         }
+        let focused = focused();
+        let selected = if focused { selected() } else { None };
+        if !combined {
+            let sound =
+                focused && (self.pending.iter()).any(|p| blocked(p) && p.needs_you != selected);
+            self.sounded = sound;
+            let sound = sound.then_some(Sound::NeedsYou);
+            return Due {
+                notification: None,
+                sound: sound.filter(|_| self.sounds),
+            };
+        }
+        let sounded = std::mem::take(&mut self.sounded);
         let mut pending = std::mem::take(&mut self.pending);
         pending.retain(|p| p.needs_you.as_deref().is_none_or(&needs_you));
-        if !pending.is_empty() && focused() {
-            let selected = self.while_focused.then(selected).flatten();
+        let mut sound = None;
+        if !pending.is_empty() && focused {
+            if pending
+                .iter()
+                .any(|p| p.needs_you.is_some() && p.needs_you != selected)
+            {
+                sound = Some(Sound::NeedsYou);
+            }
             pending
                 .retain(|p| self.while_focused && p.your_turn.is_some() && p.your_turn != selected);
+        } else if pending.iter().any(|p| p.needs_you.is_some()) {
+            sound = Some(Sound::NeedsYou);
+        } else if pending.iter().any(|p| p.your_turn.is_some()) {
+            sound = Some(Sound::YourTurn);
         }
+        // A needs-you that sounded with its toast does not sound again with the notification.
+        let sound = sound.filter(|s| !(sounded && *s == Sound::NeedsYou));
+        let sound = sound.filter(|_| self.sounds);
         if pending.is_empty() {
-            return None;
+            return Due {
+                notification: None,
+                sound,
+            };
         }
         let pending: Vec<(String, String)> =
             pending.into_iter().map(|p| (p.title, p.body)).collect();
-        Some(match &pending[..] {
+        let notification = Some(match &pending[..] {
             [one] => one.clone(),
             many => {
                 let lines: Vec<String> = many.iter().map(|(t, b)| format!("{t}: {b}")).collect();
                 (format!("{} notices", many.len()), lines.join("\n"))
             }
-        })
+        });
+        Due {
+            notification,
+            sound,
+        }
     }
 }

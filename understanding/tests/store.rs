@@ -610,8 +610,8 @@ fn the_payload_without_diffs() {
     );
 }
 
-/// #434, decision 37: the helpers promoted live and the failed lines Daniel opened survive a
-/// restart, and a store from before they were kept opens with none.
+/// #434, decision 37: the helpers promoted live, the failed lines Daniel opened and the turns he
+/// saw (#556) survive a restart, and a store from before they were kept opens with none.
 #[test]
 fn the_live_only_facts_survive_a_restart_and_an_older_store_opens_with_none() {
     let data = tempfile::tempdir().unwrap();
@@ -622,11 +622,13 @@ fn the_live_only_facts_survive_a_restart_and_an_older_store_opens_with_none() {
     store.promoted("a551b").unwrap();
     store.opened("a551b").unwrap();
     store.opened("add0c").unwrap();
+    store.seen("c41d8", 2).unwrap();
 
     let reopened = CardStore::open(path).unwrap();
     let facts = LiveFacts {
         promoted: ["a551b".to_string()].into(),
         opened: ["a551b".to_string(), "add0c".to_string()].into(),
+        seen: [("c41d8".to_string(), 2)].into(),
     };
     assert_eq!(reopened.facts(), &facts);
     assert_eq!(reopened.cards(), store.cards());

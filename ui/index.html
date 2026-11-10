@@ -49,22 +49,30 @@
       <div id="terminal-head" class="term-h"><span id="terminal-title">terminal</span></div>
       <!-- A new build to restart into, or the daemon upgrade's wait (#470). -->
       <div id="restart" class="restart" role="status" hidden></div>
-      <div id="terminal-body" class="term-body"></div>
+      <!-- A split (#529) shows two panes, the divider between them. -->
+      <div id="terminal-body" class="term-body"><div id="split-divider" class="split-divider" hidden></div></div>
+      <!-- The terminal panel (#542): a shell in the shown session's folder, a band under the panes. -->
+      <div id="panel" class="term-body panel" hidden><div id="panel-divider" class="split-divider stacked" role="separator" aria-orientation="horizontal" aria-label="Resize the terminal panel"></div></div>
       <!-- The needs-you toast (#573): over the terminal's top-right corner, never focused. -->
       <div id="toast" class="toast" role="status" hidden></div>
+      <!-- A program that failed at start (#558): over the terminal's bottom-right corner, never focused. -->
+      <div id="start-toast" class="toast start" role="status" hidden></div>
     </section>
 
     <aside class="rail" aria-label="Session story">
-      <!-- One line (#574): the verdict and the phase (#475); the times (#473) and the model show on
-           hover. Rename, Close and Delete wait in the "⋯" menu. -->
+      <!-- One line (#574): the verdict, the permission mode unless default (#541), always shown, and
+           the phase (#475); the times (#473) and the model show on hover. Rename, Close and Delete
+           wait in the "⋯" menu. -->
       <div class="rail-h">
-        <p id="headline" class="headline"><span id="state" class="state"></span> <span id="phase" class="phase"></span></p>
+        <p id="headline" class="headline"><span id="state" class="state"></span> <span id="mode" class="mode"></span> <span id="phase" class="phase"></span></p>
         <button id="rail-more" class="btn small" type="button" popovertarget="rail-actions" aria-label="More actions" hidden>⋯</button>
         <div id="rail-actions" class="menu" popover>
           <!-- An ended session opens again with `claude --resume` (#467). -->
           <button id="reopen" class="btn small" type="button" hidden>Open</button>
           <!-- Rename and close (#469). -->
           <button id="rename" class="btn small" type="button" hidden>Rename</button>
+          <!-- Unseen (#556): the row's mark comes back until Daniel selects it again. -->
+          <button id="mark-unseen" class="btn small" type="button" hidden>Mark unseen</button>
           <button id="close" class="btn small" type="button" hidden>Close</button>
           <button id="open-all" class="btn small" type="button">Open all</button>
           <button id="close-all" class="btn small" type="button">Close all</button>
@@ -95,6 +103,8 @@
           <details id="decisions" class="decisions" hidden><summary id="decisions-title"></summary><ol id="decisions-list"></ol></details>
         </section>
       </div>
+      <!-- The skills browser (#528), in the rail's place while open; Esc returns. -->
+      <section id="skills" class="story skills" aria-label="Skills"></section>
     </aside>
   </div>
   <!-- The dividers: drag to resize the list and the rail. -->

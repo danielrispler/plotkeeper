@@ -94,3 +94,68 @@ Between passes, nothing waits for him. After each pass, a code-review agent that
 - [ ] Below, the turns read newest first, each with its prompt in one line, its summary, its learning question (folded), its cards, its subagents, its checks and its full response (folded). Opening an older turn's full response shows its final reply. No "Last 30 minutes", "Older", "Responses", "Questions" or "Subagents" section is left; #535's subagent entries are in the turn that ran them.
 - [ ] Each turn shows one "Ask about this", only on hover; asking about a turn works as before.
 - [ ] With summaries written on open (settings), opening a session writes its waiting turns' summaries once, not again on each redraw.
+
+## #527: Doctor actions in the palette
+
+- [ ] Select a session in a task, open the palette (⌘⇧P) and type "doctor": it lists "Doctor: Check the installation" marked "no tokens" and "Doctor: Full checkup" marked "starts a Claude session, spends tokens", in full, and no Doctor button is anywhere.
+- [ ] Run each. Both open a new terminal in the selected session's folder: the first runs `claude doctor` and leaves a shell after it; the second starts `claude` on `/doctor`. With nothing selected, both run in the configured repository.
+- [ ] Add your own entry under `doctor` in `settings.json`: on save, the palette lists it in place of the defaults, marked with its kind's warning.
+
+## #528: skills and plugins browser
+
+- [ ] ⌘⇧P, then "Skills": the browser takes the rail's place, grouped as "Your skills", "This project" (the selected session's folder, else the repository) and one group per plugin. Esc brings the rail back.
+- [ ] Open a skill: its `SKILL.md` shows rendered, with its description under its name.
+- [ ] "Edit" on one of your skills opens its `SKILL.md` in Zed. Plugin skills have no "Edit".
+- [ ] Each plugin shows once, at its installed version, not an older cached one. A disabled plugin is listed too (known shortcut).
+
+## #529: split terminals
+
+- [ ] With two sessions running in the studio, select one and press ⌘D: its pane stays and the next session's terminal shows beside it, the selected one nearer the rail. Both take input: click into each and type. The rail follows the selection, not the pinned pane.
+- [ ] On a wide screen (each pane at least 100 columns), the two sit side by side. Narrow the window: they stack, one above the other, before the rail turns into an overlay. Focus mode (⌘⇧↩) puts them side by side again when the whole window has room.
+- [ ] Drag the divider between the panes: both resize, and Claude Code redraws in each at its new size; the divider stops before a pane gets too small.
+- [ ] Selecting the pinned session shows it alone; selecting another brings the split back. ⌘D again closes the split. Closing the pinned session's terminal closes the split.
+- [ ] ⌘⇧P lists "Toggle split" with ⌘D. Dropping a file types its path into the focused pane only.
+
+## #558: a program that fails at start shows its exit code and last lines
+
+- [ ] Start a session in a folder where `claude` cannot start (for example, with a failing `claude` script first on `PATH`). Within 2 s, the terminal's place says "claude could not start: code <n>" above the program's last lines, with "Show output", which shows its pane and full output.
+- [ ] At the same time, a toast at the terminal's bottom-right corner names the session (or program) and the code, with "Show output" and ×. Typing in the terminal goes on: the toast takes no focus and nothing moves.
+- [ ] Let a hidden pane fail at start, for example a revived terminal or a Doctor entry while another pane shows. The shown terminal stays; only the toast appears, and its "Show output" shows the failed pane.
+- [ ] A session that runs a while and then exits, and a program that exits with code 0, show no notice: only the pane's usual exit line.
+
+## #541: start a session in auto mode
+
+- [ ] Open the picker (⌘N): "Auto mode" is unticked. Tick it and start a session: it runs in Claude Code's auto mode (its footer says so), and after its first prompt the rail's line reads "Running auto mode …". No bypass option is offered anywhere.
+- [ ] In that session, ask for something auto mode's classifier blocks: the row shows **needs you** and the toast fires, as in default mode.
+- [ ] A session started without the tick shows no mode on the rail's line.
+- [ ] End the auto session, then "Open" it from the rail's "⋯" menu (or "Open here"): it resumes in auto mode. Restarting the terminal daemon (#470) also brings it back in auto mode.
+
+## #556: unseen your-turn mark and sounds
+
+- [ ] A session whose turn ends while you look at another shows a filled dot and a bold name, in the list and in the strip. Selecting it with the window focused clears the mark; selecting it while another app has focus does not.
+- [ ] After a restart, the sessions you had seen stay plain and the unseen ones keep the mark.
+- [ ] "Mark unseen" in the rail's ⋯ menu brings the mark back; it stays until you select the session again.
+- [ ] ⌘J with no session needing you goes to the next unseen one.
+- [ ] Focused: another session that needs you plays one sound (Glass) after about 3 seconds, in any layout, and never twice. The session you are viewing plays none, and a your-turn plays none.
+- [ ] In the background: needs you plays Glass and your turn plays Tink, each only with its notification.
+- [ ] `"sounds": false` in `settings.json` silences both. The sounds feel right, not alarming.
+
+## #542: a docked terminal panel
+
+- [ ] Press ⌃` with a session selected: a band opens under the terminal with a plain shell in that session's folder, and takes the keys; the session's terminal stays above it, as wide as before. ⌃` again, from inside the panel too, hides it and gives the keys back to the terminal above.
+- [ ] The band never covers the list or the rail. Drag its top edge: it resizes, stops at 40 % of the terminal's height, and keeps its height after a restart.
+- [ ] Select a session in another folder: the panel shows that folder's shell. Go back: the first shell is there with its scrollback.
+- [ ] Run something in the panel, then quit and reopen the app: the panel's shell is still there, with its scrollback.
+- [ ] With a split (⌘D) open, the panel shows under both panes.
+- [ ] Rebind it in `keymap.json` (`{ "bindings": { "ctrl-j": "studio::TogglePanel" } }`): the new key toggles it and ⌃` reaches the terminal. ⌘⇧P lists "Toggle panel".
+
+## #565: pass 6c review fixes
+
+- [ ] Let a session's turn end while focus mode is on, the rail is a closed overlay, or the skills browser shows: it stays unseen. Show the rail on it: the mark clears.
+- [ ] Leave an unseen session for 2 hours: it goes idle and keeps its filled dot and bold name until you select it.
+- [ ] Start a session in auto mode, switch it to default with Shift+Tab, end it, then press "Open": it resumes in auto mode. One started in default mode and switched to auto resumes in default mode.
+- [ ] Add a Doctor `shell` entry whose command fails (`"command": "(exit 3)"`): a notice names the entry's label with code 3, and the shell stays open.
+- [ ] Make two programs fail at start: both notices show, one under the other; dismissing one keeps the other.
+- [ ] A panel shell that fails at start: its notice's "Show output" opens the panel on it, not the main column.
+- [ ] In focus mode, with the window focused, another session newly needs you: the sound plays as its toast shows, not 3 s later.
+- [ ] Symlink a skill folder from outside `~/.claude/skills` into it: the skills browser does not list it.

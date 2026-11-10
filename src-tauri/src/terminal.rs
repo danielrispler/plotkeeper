@@ -129,11 +129,12 @@ pub fn delete_merged_branch(branch: String) -> Result<(), String> {
 /// The command a session's terminal runs: `claude` with the studio plugin of the configured
 /// repository's checkout, whose hooks run its `studio-hook`, or `claude --resume <resume>` for an
 /// ended session. From the repository, not the build folder, so a moved bundle still finds it.
+/// `auto` starts it in auto mode (#541).
 #[tauri::command]
-pub fn claude_argv(resume: Option<String>) -> Vec<String> {
+pub fn claude_argv(resume: Option<String>, auto: bool) -> Vec<String> {
     let plugin = Path::new(&repo()).join("apps/studio/plugin");
     let presence = crate::presence::path().unwrap_or_default();
-    studio_workbench::claude(&plugin, &presence, resume.as_deref())
+    studio_workbench::claude(&plugin, &presence, resume.as_deref(), auto)
 }
 
 /// Opens an `http(s)` URL Daniel clicked, in a terminal or a rendered reply, in the browser. A file
@@ -321,7 +322,7 @@ fn start(log: &Path) -> io::Result<()> {
 
 /// The configured repository: `STUDIO_REPO`, else the main checkout of the repository the app was
 /// built in (#461, decision 3), else the home folder.
-fn repo() -> String {
+pub(crate) fn repo() -> String {
     if let Ok(repo) = std::env::var("STUDIO_REPO") {
         return repo;
     }

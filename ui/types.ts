@@ -86,6 +86,10 @@ export type Session = {
   name: string | null;
   // The id `claude --resume` takes: its latest conversation's; a `/clear` changes it, not `id` (#474).
   resume_id: string;
+  // Claude Code's permission mode from its latest event that names one, null before (#541).
+  permission_mode: string | null;
+  // The mode it started in, from its first event that names one, which a resume keeps (#541).
+  started_mode: string | null;
   // When each `/clear` continued the row, in Unix ms: its "cleared" markers.
   cleared: number[];
   // Closing its terminal asks first: it is in a turn or has background tasks (#469).

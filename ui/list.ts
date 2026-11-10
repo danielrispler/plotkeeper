@@ -54,14 +54,16 @@ export function agentState(session: Session, agent: Subagent): [string, string] 
 }
 
 // A status's shape and its word (#572): a "Needs you" pill, the only colour (#565, decision 1); a
-// spinner while running; a dot at your turn, filled once it finished unseen (#556); a ring when idle,
+// spinner while running; a dot at your turn, filled once it finished unseen, idle too (#556); a ring when idle,
 // ended or, for a subagent, done.
 export type Glyph = "pill" | "spinner" | "dot" | "filled" | "ring";
 export function status(state: string, unseen = false): [Glyph, string] {
   const label = stateLabels[state as SessionState] ?? state;
   if (state === "needs_you") return ["pill", label];
   if (state === "running") return ["spinner", label];
-  if (state === "your_turn") return unseen ? ["filled", `${label}, not seen`] : ["dot", label];
+  // The core marks a turn unseen only at your turn and once idle after it, which keeps the mark.
+  if (unseen) return ["filled", `${label}, not seen`];
+  if (state === "your_turn") return ["dot", label];
   return ["ring", label];
 }
 

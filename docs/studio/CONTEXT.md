@@ -94,8 +94,12 @@ The background process that owns the workbench's terminals, so they outlive the 
 _Avoid_: Server, multiplexer
 
 **Pane**:
-The window's view of one terminal of the terminal daemon. One pane shows at a time; the others keep running hidden.
+The window's view of one terminal of the terminal daemon. Up to two panes show at a time, when the terminal column is split; the others keep running hidden.
 _Avoid_: Tab
+
+**Terminal panel**:
+A band under the terminal column that holds a plain login shell in the folder of the session shown, or the main checkout's with none, like the terminal panel of VS Code or Zed. One key shows and hides it. It sits under the pane, or under both panes of a split, at most 40 % of the column's height; it never spans the list or the rail. Each folder has one panel shell, kept by the **Terminal daemon**, so it survives restarts and keeps its scrollback when Daniel switches away and back.
+_Avoid_: Bottom terminal, console
 
 **Palette**:
 The picker over every action of the window, each shown with its key, built from `keymap.json`, so it is also the list of keys. ⌘⇧P opens it. A new view or menu becomes an action in the palette, not a button in the top bar.
@@ -131,6 +135,10 @@ The state of an agent session in a turn: from Daniel's prompt until the agent en
 **Your turn**:
 The state of an agent session that finished its turn with nothing blocked on Daniel, even when its reply asks him something, or that started and has had no prompt yet. Unlike needs you, it does not interrupt him.
 _Avoid_: Done (the turn ended, not the task)
+
+**Unseen**:
+A your-turn agent session whose last ended turn Daniel has not seen; going idle keeps the mark. A turn is seen when the session is selected while the window is focused and the story rail shows it; a window left open in an empty room does not count, nor does focus mode, a closed overlay or the skills browser over the rail. The row shows a filled dot and a bold name, and the strip the filled dot; "Mark unseen" in the rail's menu brings it back until he selects the session again. It is the cue for "finished, not seen", and it survives a restart.
+_Avoid_: Unread, new, done until seen
 
 **Idle**:
 The state of an agent session left at your turn with no events for 2 hours or more. Its next event brings it back.
@@ -185,8 +193,12 @@ The default project mode. Waits and cards serve Daniel's understanding of this p
 The project mode for a project where Daniel cares only about the result. The wait is his own time, for practice or enrichment unrelated to the project. Approval requests and agent questions still reach him.
 
 **Settings**:
-Daniel's choices for the studio, kept in `settings.json` in its data folder, in Zed's format: zoom, the terminal's font size, the summary writer's model and effort, and the Doctor menu. The summary writer's model and effort and the Doctor menu are read but not used yet; later tickets wire them. "Settings files" means `settings.json` and `keymap.json` together: the studio reloads either when saved, and a file that does not parse is reported while its last good version stays in effect.
+Daniel's choices for the studio, kept in `settings.json` in its data folder, in Zed's format: zoom, the terminal's font size, the summary writer's model and effort, and the Doctor menu, whose entries are palette actions. "Settings files" means `settings.json` and `keymap.json` together: the studio reloads either when saved, and a file that does not parse is reported while its last good version stays in effect.
 _Avoid_: Preferences, config
+
+**Sounds**:
+The `sounds` setting, on by default: a sound when a session newly needs Daniel and, with the window not focused, when a turn ends. A needs-you sounds with its toast, at once; unfocused, the sound plays with the notification. The session he is looking at makes none.
+_Avoid_: Alerts, chimes
 
 **Keymap**:
 Daniel's shortcuts for the studio, kept in `keymap.json` beside the settings, in Zed's format: keystrokes bound to actions, by context.

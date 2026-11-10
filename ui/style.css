@@ -122,13 +122,15 @@ h1 { margin: 0 0 var(--sp-4); }
 
 /* The terminal, the stage: an inset, rounded pane on the frame, left to right; its header shows a
    program's title, and the grid size on hover (#571). The inset and the body's padding add up to layout.ts's padding. */
-.term { background: var(--term-bg); color: var(--term-fg); display: grid; grid-template-rows: auto auto 1fr; min-width: 0;
+.term { background: var(--term-bg); color: var(--term-fg); display: grid; grid-template-rows: auto auto 1fr auto; min-width: 0;
         margin: 0 var(--sp-4) var(--sp-4); border-radius: var(--radius-pane); box-shadow: inset 0 0 0 var(--hair) var(--edge);
         overflow: hidden; }
 .term > .term-body { grid-row: 3; }
 .restart { display: flex; gap: var(--sp-4); align-items: center; padding: var(--sp-2) var(--sp-3); font-size: var(--size-small);
            color: var(--fg); background: var(--raised); }
 .restart[hidden] { display: none; }
+/* A program that failed at start (#558): its last lines, between the notice and "Show output". */
+.elsewhere .last-lines { font: var(--size-small)/var(--term-line) var(--mono); color: var(--fg); white-space: pre-wrap; margin: var(--sp-3) 0 var(--sp-4); }
 .restart .btn, .elsewhere .btn { flex: none; font-size: var(--size-small); padding: var(--sp-1) var(--sp-4); background: var(--selected); }
 .upgrade { background: var(--surface); color: var(--fg); border: 0; border-radius: var(--radius); box-shadow: var(--shadow);
            max-width: var(--dialog); padding: var(--sp-6); }
@@ -146,6 +148,14 @@ h1 { margin: 0 0 var(--sp-4); }
 .pane { position: absolute; inset: var(--sp-3); }
 .pane[hidden] { display: block; }
 .pane[hidden], .pane.fitting { visibility: hidden; }
+/* A split's divider (#529), in the gap between its two panes. */
+.split-divider { position: absolute; z-index: 4; width: calc(2 * var(--sp-3)); cursor: col-resize; touch-action: none; border-radius: var(--radius-small); }
+.split-divider.stacked { width: auto; height: calc(2 * var(--sp-3)); cursor: row-resize; }
+.split-divider:hover, .split-divider.dragging { background: var(--edge); }
+/* The terminal panel (#542): a band under the panes, its height set by `panel.ts`; its divider on its top edge. */
+.term > .panel { grid-row: 4; box-shadow: inset 0 var(--hair) 0 var(--edge); }
+.panel[hidden] { display: none; }
+.panel > .split-divider { inset: 0 0 auto; height: var(--sp-3); }
 .term-find { position: absolute; top: var(--sp-3); right: var(--sp-5); z-index: 10; width: var(--find); font: inherit; }
 /* The needs-you toast (#573): over the terminal's top-right corner, taking none of its space. */
 .term { position: relative; }
@@ -157,6 +167,10 @@ h1 { margin: 0 0 var(--sp-4); }
 .toast .count { color: var(--muted); }
 .toast .btn { padding: 0 var(--sp-2); }
 .toast .line { grid-column: 1 / -1; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The start-failure toast (#558): the bottom-right corner, so it never covers the needs-you one; not in colour. */
+.toast.start { top: auto; bottom: var(--sp-5); background: var(--raised); cursor: default;
+               box-shadow: inset 0 0 0 var(--hair) var(--edge), var(--shadow); }
+.toast.start .name { color: var(--fg); }
 #probe { position: absolute; visibility: hidden; white-space: pre; font: var(--term-size)/var(--term-line) var(--mono); }
 
 /* The rail (#574): one header line, the open question docked under it, then the story: "now" and the
@@ -169,6 +183,8 @@ body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; to
 /* The verdict and the phase on one line; the times and the model are its hover text. */
 .headline { flex: 1; min-width: 0; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .phase { color: var(--muted); font-size: var(--size-small); }
+/* The permission mode (#541): a safety fact, so it reads at a glance, before the phase. */
+.mode { font-size: var(--size-small); font-weight: 600; }
 /* The "⋯" menu: Open, Rename, Close, Open all, Close all and Delete, under the button, over the story. */
 .menu { position: fixed; inset: auto; top: calc(var(--bar) + var(--sp-7) + var(--sp-5)); left: calc(var(--rail) - var(--menu) - var(--sp-5));
         width: var(--menu); margin: 0; border: 0; padding: var(--sp-3); background: var(--surface); color: var(--fg);
@@ -178,6 +194,13 @@ body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; to
 .menu .btn[hidden] { display: none; }
 .story { overflow-y: auto; padding: var(--sp-4) var(--sp-5) var(--sp-5); }
 #notice { margin: 0 0 var(--sp-4); color: var(--muted); }
+/* The skills browser (#528) takes the whole rail while open. */
+#skills, .skills-open .rail > :not(#skills) { display: none; }
+.skills-open #skills { display: block; grid-row: 1 / -1; }
+.skills h1:not(:first-child) { margin-top: var(--sp-5); }
+.skill > summary { display: flex; flex-direction: column; padding: var(--sp-2) 0; cursor: pointer; }
+.skill > summary .l2 { font-size: var(--size-small); color: var(--muted); }
+.skill > .btn { margin: var(--sp-2) 0; }
 /* Colour only on "needs you" (#328, module 3; #565, decision 1): "your turn" stays as neutral as "running". */
 .state { font-size: var(--size); font-weight: 600; margin: 0 0 var(--sp-3); }
 .headline .state { margin: 0; }
@@ -304,6 +327,7 @@ body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; to
 .picker { position: fixed; top: calc(var(--bar) + var(--sp-2)); right: var(--sp-5); z-index: 8; width: var(--popover); max-height: 70vh;
           overflow-y: auto; background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); padding: var(--sp-3); }
 .picker .row .l2 { font-family: var(--mono); font-size: var(--size-xs); }
+.picker .auto-mode { display: block; font-size: var(--size-small); margin: var(--sp-2) var(--sp-4) var(--sp-3); }
 .picker .hidden-count { color: var(--faint); font-size: var(--size-small); margin: var(--sp-1) var(--sp-4) var(--sp-3); }
 :is(.picker, .places) .new-task { display: flex; gap: var(--sp-3); margin: var(--sp-4) var(--sp-2) var(--sp-1); padding-top: var(--sp-4); }
 :is(.picker, .places) .new-task input { flex: 1; min-width: 0; font: var(--size-small) var(--mono); color: inherit; background: var(--bg);

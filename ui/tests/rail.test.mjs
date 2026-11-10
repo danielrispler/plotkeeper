@@ -73,7 +73,7 @@ test("what started in no turn, such as a subagent's cards, goes in one last bloc
 
 test("the header is one line, with Rename, Close and Delete in its ⋯ menu", () => {
   const header = rail.slice(rail.indexOf('class="rail-h"'), rail.indexOf('id="dock"'));
-  assert.match(header, /<p id="headline"[^>]*><span id="state"[^>]*><\/span> <span id="phase"[^>]*><\/span><\/p>/);
+  assert.match(header, /<p id="headline"[^>]*><span id="state"[^>]*><\/span> <span id="mode"[^>]*><\/span> <span id="phase"[^>]*><\/span><\/p>/);
   assert.match(header, /<button id="rail-more"[^>]*popovertarget="rail-actions"[^>]*>⋯<\/button>/);
   const menu = header.slice(header.indexOf('id="rail-actions"'));
   for (const id of ["rename", "close", "delete"]) assert.match(menu, new RegExp(`<button id="${id}"`));

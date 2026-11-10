@@ -567,6 +567,15 @@ impl CardStore {
         Ok(())
     }
 
+    /// Records the turns of session `id` Daniel has seen (`Studio::see_selected`,
+    /// `Studio::mark_unseen`), and saves the facts.
+    pub fn seen(&mut self, id: &str, turns: usize) -> io::Result<()> {
+        if self.facts.seen.insert(id.into(), turns) != Some(turns) {
+            return self.save_facts();
+        }
+        Ok(())
+    }
+
     /// Applies the live-only facts and the cards to `studio` after its replay (#434, decisions 37
     /// and 38).
     pub fn restore(&self, studio: &mut Studio) {

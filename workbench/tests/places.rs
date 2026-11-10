@@ -137,7 +137,7 @@ fn claude_starts_with_the_studio_plugin_and_resumes_by_session_id() {
     let presence = Path::new("/d/present");
 
     assert_eq!(
-        claude(plugin, presence, None),
+        claude(plugin, presence, None, false),
         [
             "env",
             "CLAUDE_CODE_PLUGIN_DIRS=/r/apps/studio/plugin",
@@ -148,7 +148,7 @@ fn claude_starts_with_the_studio_plugin_and_resumes_by_session_id() {
         ]
     );
     assert_eq!(
-        claude(plugin, presence, Some("9e0b5f13")),
+        claude(plugin, presence, Some("9e0b5f13"), false),
         [
             "env",
             "CLAUDE_CODE_PLUGIN_DIRS=/r/apps/studio/plugin",
@@ -160,4 +160,23 @@ fn claude_starts_with_the_studio_plugin_and_resumes_by_session_id() {
             "9e0b5f13"
         ]
     );
+}
+
+/// Auto mode (#541) is Claude Code's `--permission-mode auto`, added only when asked, for a new
+/// session and for a resumed one, which keeps the mode it was started with. Never bypass.
+#[test]
+fn claude_runs_in_auto_mode_only_when_asked() {
+    let plugin = Path::new("/r/apps/studio/plugin");
+    let presence = Path::new("/d/present");
+    let tail = |argv: Vec<String>| argv[6..].to_vec();
+
+    assert_eq!(
+        tail(claude(plugin, presence, None, true)),
+        ["--permission-mode", "auto"]
+    );
+    assert_eq!(
+        tail(claude(plugin, presence, Some("9e0b5f13"), true)),
+        ["--permission-mode", "auto", "--resume", "9e0b5f13"]
+    );
+    assert!(tail(claude(plugin, presence, None, false)).is_empty());
 }

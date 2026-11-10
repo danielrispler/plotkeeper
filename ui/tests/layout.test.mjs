@@ -1,7 +1,7 @@
 // The UI's pure functions, run on the `tsc` output (#465). Run: `npm test` in apps/studio.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { arrange, defaultWidths, resized } from "../../dist/layout.js";
+import { arrange, defaultWidths, paneBoxes, panelHeight, railShown, resized } from "../../dist/layout.js";
 import { stripLabel } from "../../dist/list.js";
 
 // The cell of 12.5px SF Mono in WebKit, as #577 measured it, and the terminal's padding, which holds no column.
@@ -71,7 +71,60 @@ test("a dragged divider stops where the terminal would lose its 100 columns", ()
   assert.equal(arrange(1920, cell, { ...defaultWidths, rail: rail + 10 }).mode, "strip");
 });
 
+// The terminal's body, the window less the list and the rail, at a height of 900 px; a pane's columns
+// from its box of insets.
+const body = (window, split) => window - Object.values(arrange(window, cell, defaultWidths, { split })).filter(Number.isFinite).reduce((a, b) => a + b, 0);
+const paneColumns = (width, { left, right }) => Math.floor((width - left - right) / cell);
+
+test("one pane fills the terminal's body, inside its margin", () => {
+  assert.deepEqual(paneBoxes(1100, 900, cell, null), [{ top: 6, right: 6, bottom: 6, left: 6 }]);
+});
+
+test("a split side by side halves the body, each pane at 100 columns or more", () => {
+  const width = body(2560, true);
+  assert.equal(arrange(2560, cell, defaultWidths, { split: true }).stacked, false);
+  const [first, second] = paneBoxes(width, 900, cell, { stacked: false, share: 0.5 });
+  assert.deepEqual(first, { top: 6, right: 966, bottom: 6, left: 6 });
+  assert.deepEqual(second, { top: 6, right: 6, bottom: 6, left: 966 });
+  for (const box of [first, second]) assert.ok(paneColumns(width, box) >= 100);
+});
+
+test("a stacked split halves the body's height, each pane its whole width", () => {
+  const width = body(1512, true);
+  assert.equal(arrange(1512, cell, defaultWidths, { split: true }).stacked, true);
+  assert.deepEqual(paneBoxes(width, 900, cell, { stacked: true, share: 0.5 }), [
+    { top: 6, right: 6, bottom: 456, left: 6 },
+    { top: 456, right: 6, bottom: 6, left: 6 },
+  ]);
+});
+
+test("a dragged split divider moves the share, and stops where a pane would get too small", () => {
+  assert.deepEqual(paneBoxes(1920, 900, cell, { stacked: false, share: 0.6 })[1].left, 1158);
+  // Side by side, each pane keeps 80 columns; stacked, 120 pixels.
+  const [first] = paneBoxes(1920, 900, cell, { stacked: false, share: 0.05 });
+  assert.equal(paneColumns(1920, first), 80);
+  assert.equal(paneBoxes(1920, 900, cell, { stacked: true, share: 0.99 })[1].top, 786);
+});
+
+// The terminal panel (#542, #565 decision 5): a band under the terminal column, costing height only.
+test("the panel takes its dragged height, at most 40 % of the terminal column and at least 80 px", () => {
+  assert.equal(panelHeight(240, 900), 240);
+  assert.equal(panelHeight(700, 900), 360);
+  assert.equal(panelHeight(20, 900), 80);
+  // A column too short for both keeps the 40 %.
+  assert.equal(panelHeight(20, 150), 60);
+});
+
 test("the strip names a session by its issue number, else by its folder", () => {
   assert.equal(stripLabel("issue-338-205-pilots-final-freeze"), "338");
   assert.equal(stripLabel("Falinks"), "Fali");
+});
+
+test("a turn is seen only while the rail shows its session: not in focus mode, a closed overlay or the skills browser (#556)", () => {
+  assert.equal(railShown("full", false, false), true);
+  assert.equal(railShown("strip", false, false), true);
+  assert.equal(railShown("focus", false, false), false);
+  assert.equal(railShown("overlay", false, false), false);
+  assert.equal(railShown("overlay", true, false), true);
+  assert.equal(railShown("full", true, true), false);
 });

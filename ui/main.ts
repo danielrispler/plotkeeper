@@ -7,15 +7,17 @@
 import { startWatching } from "./answer.js";
 import { markShown, showCards } from "./cards.js";
 import { element, invoke, listen } from "./dom.js";
-import { type Actions, nextNeedsYou, paletteEntries, run, stepSession, windowBinding } from "./keys.js";
-import { arrange, defaultWidths, type LayoutMode, resized, type Widths } from "./layout.js";
+import { type Actions, doctorEntries, nextNeedsYou, paletteEntries, run, stepSession, windowBinding } from "./keys.js";
+import { arrange, defaultWidths, type LayoutMode, railShown, resized, type Widths } from "./layout.js";
 import { showSessions } from "./list.js";
 import { select, show } from "./selection.js";
-import { startPanes } from "./panes.js";
+import { dragPanel, placePanel, togglePanel } from "./panel.js";
+import { dragSplit, focusPane, placePanes, runDoctor, split, startPanes, toggleSplit } from "./panes.js";
 import { showPalette, showPicker } from "./picker.js";
 import { readPlaces, showPlaces } from "./places.js";
 import { reload, type SettingsFiles, zoomed } from "./settings.js";
 import { studio } from "./state.js";
+import { showSkills } from "./skills.js";
 import { showView } from "./story.js";
 import { jumpToNeedsYou, showToast } from "./toast.js";
 import type { Selection, Session, SessionCards } from "./types.js";
@@ -32,15 +34,26 @@ const widths: Widths = { ...defaultWidths, ...JSON.parse(localStorage.getItem("w
 
 // The list's open width is the one its divider left; the rail's is the width rule's.
 function layout() {
-  const { mode, rail } = arrange(window.innerWidth, cell(), widths, { focus: studio.focus });
+  const { mode, rail, stacked } = arrange(window.innerWidth, cell(), widths, { focus: studio.focus, split: split() });
   document.documentElement.style.setProperty("--list", `${widths.list}px`);
   document.documentElement.style.setProperty("--rail", `${rail || widths.rail}px`);
   document.body.dataset.layout = mode;
   element("rail-toggle").hidden = mode !== "overlay";
+  placePanel();
+  placePanes(stacked, cell());
   showToast();
 }
 window.addEventListener("resize", layout);
-// Leaving focus mode from the toast.
+// The shell counts a turn seen only while the rail shows its session (#556), so it is told whether it
+// does each time the layout or the body's classes change.
+let railWas: boolean | null = null;
+new MutationObserver(() => {
+  const { classList, dataset } = document.body;
+  const shown = railShown((dataset.layout ?? "full") as LayoutMode, classList.contains("rail-open"), classList.contains("skills-open"));
+  if (shown !== railWas) invoke("rail_shown", { shown }).catch((e) => console.warn(e));
+  railWas = shown;
+}).observe(document.body, { attributes: true, attributeFilter: ["class", "data-layout"] });
+// Leaving focus mode from the toast, and a split opening or closing (`panes.ts`).
 window.addEventListener("layout", layout);
 layout();
 
@@ -76,7 +89,7 @@ const setZoom = (to: number) => {
   zoom = to;
   invoke("set_zoom", { zoom }).then(layout, (e) => console.warn(e));
 };
-// The keyboard spine (#575): ⌘] and ⌘[ step through the sessions, ⌘J goes to the next needs-you, ↑
+// The keyboard spine (#575): ⌘] and ⌘[ step through the sessions, ⌘J goes to the next needs-you, else the next unseen, ↑
 // and ↓ move in the list, 1–4 answer the docked card, ⌘N starts a session, ⌘, opens `settings.json`
 // and ⌘⇧P opens the palette of every action here.
 const selectedId = () => studio.selection?.session.id ?? null;
@@ -113,7 +126,7 @@ const actions: Actions = {
   "studio::ToggleList": () => toggle("list-open"),
   "studio::ToggleRail": () => toggle("rail-open"),
   "studio::Dismiss": () => {
-    document.body.classList.remove("list-open", "rail-open");
+    document.body.classList.remove("list-open", "rail-open", "skills-open");
     element("picker").hidden = true;
   },
   "studio::ToggleFocus": () => {
@@ -121,6 +134,10 @@ const actions: Actions = {
     document.body.classList.remove("list-open", "rail-open");
     layout();
   },
+  // A split (#529) pins the pane shown and shows the next session beside it.
+  "studio::ToggleSplit": () => void (toggleSplit() && go(stepSession(studio.listed, selectedId(), 1))),
+  // The terminal panel (#542): a shell in the shown session's folder, under the terminal column.
+  "studio::TogglePanel": () => togglePanel(focusPane),
   "studio::ZoomIn": () => setZoom(zoomed(zoom, 1)),
   "studio::ZoomOut": () => setZoom(zoomed(zoom, -1)),
   "studio::ResetZoom": () => setZoom(zoomed(zoom, 0)),
@@ -133,7 +150,22 @@ const actions: Actions = {
   "studio::Answer": (n) => answer(Number(n)),
   "studio::NewSession": showPicker,
   "studio::OpenSettings": () => void invoke("open_settings", { editor: studio.files.settings.editor }).catch((e) => console.warn(e)),
-  "studio::Palette": () => showPalette(paletteEntries(studio.files.keymap, Object.keys(actions)), (binding) => run(actions, binding)),
+  // The skills browser (#528), in the rail's place; it leaves focus mode, which hides the rail.
+  "studio::Skills": () => {
+    if (studio.focus) actions["studio::ToggleFocus"]();
+    showSkills().catch((e) => console.warn(e));
+  },
+  // A Doctor entry from settings, by its command (#527).
+  "studio::Doctor": (command) => {
+    const entry = studio.files.settings.doctor.find((e) => e.command === command);
+    if (entry) runDoctor(entry).catch((e) => console.warn(e));
+  },
+  "studio::Palette": () => {
+    const { keymap, settings } = studio.files;
+    // The Doctor is listed once per entry, with its warning, not as one bare action.
+    const names = Object.keys(actions).filter((name) => name !== "studio::Doctor");
+    showPalette([...paletteEntries(keymap, names), ...doctorEntries(settings.doctor)], (binding) => run(actions, binding));
+  },
 };
 window.addEventListener("keydown", (event) => {
   // The terminal types into xterm's hidden textarea, so this covers it too.
@@ -161,6 +193,7 @@ function applySettings(files: SettingsFiles) {
   // Only a changed `zoom` resets the zoom the keys set.
   if (settings.zoom !== previous.zoom) setZoom(settings.zoom);
   invoke("notify_while_focused", { on: settings.notifications.while_focused }).catch((e) => console.warn(e));
+  invoke("sounds", { on: settings.sounds }).catch((e) => console.warn(e));
   const size = settings.terminal.font_size;
   if (size === null) document.documentElement.style.removeProperty("--term-size");
   else document.documentElement.style.setProperty("--term-size", `${size}px`);
@@ -183,7 +216,9 @@ element("rail-actions").addEventListener("click", () => element("rail-actions").
 document.addEventListener("visibilitychange", markShown);
 
 // A login shell in the configured repository, then a pane per session terminal (#467).
-startPanes().catch((e) => (element("terminal-body").textContent = `No terminal: ${e}`));
+startPanes().catch((e) => element("terminal-body").append(`No terminal: ${e}`));
+dragSplit();
+dragPanel();
 element("new-session").addEventListener("click", showPicker);
 // The needs-you chip (#572) selects the first session that needs Daniel.
 element("needs-you").addEventListener("click", () => {
@@ -199,7 +234,7 @@ document.addEventListener("pointerdown", (event) => {
 const showList = (sessions: Session[]) => {
   showSessions(sessions);
   showPlaces();
-  showToast(true);
+  showToast();
 };
 // Opening Places reads git's counts at once (#576).
 element("places").addEventListener("toggle", () => void ((element("places") as HTMLDetailsElement).open && readPlaces(true)));
