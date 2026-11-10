@@ -57,35 +57,41 @@ body:not([data-layout="full"]) #list-divider, body[data-layout="overlay"] #rail-
 .top { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--sp-5); padding: 0 var(--sp-5) 0 var(--lights);
        white-space: nowrap; overflow: hidden; }
 .usage { font-size: var(--size-small); color: var(--muted); }
+/* The needs-you chip (#572): the count of sessions that need Daniel, in the needs-you colour. */
+.top .chip { color: var(--needs-you); background: var(--needs-you-bg); font-weight: 600; }
+.top .chip:hover { color: var(--needs-you); background: var(--needs-you-line); }
 
-/* The session list: full, or a strip that opens over the terminal on click or ⌘1, never on hover. */
+/* The session list: full, or a strip that opens over the terminal on hover, on click or on ⌘1; the
+   overlay never moves the terminal (#572). */
 .list { overflow-y: auto; position: relative; z-index: 3; }
 .full { padding: var(--sp-4) var(--sp-3); }
 .strip { display: none; flex-direction: column; align-items: center; gap: var(--sp-2); padding: var(--sp-4) 0; }
 body:not([data-layout="full"]) .full { display: none; }
 body:not([data-layout="full"]) .strip { display: flex; }
-body.list-open .full { display: block !important; position: fixed; top: var(--bar); bottom: 0; right: 0; width: var(--list);
-                       background: var(--surface); box-shadow: var(--shadow-start); overflow-y: auto; z-index: 6; }
+body.list-open .full, body:not([data-layout="full"]) .list:hover .full {
+  display: block !important; position: fixed; top: var(--bar); bottom: 0; right: 0; width: var(--list);
+  background: var(--surface); box-shadow: var(--shadow-start); overflow-y: auto; z-index: 6; }
 .strip .btn { width: var(--strip-button); padding: var(--sp-2) 0; display: flex; flex-direction: column; align-items: center;
-              gap: var(--sp-1); font: var(--size-xs) var(--mono); color: var(--muted); }
+              gap: var(--sp-1); font: var(--size-xs) var(--mono); color: var(--muted); white-space: nowrap; overflow: hidden; }
 .strip .btn[aria-pressed="true"] { color: var(--fg); }
 .strip .open { font-size: var(--size); color: var(--faint); }
-/* The muted heading, in sentence case: a group's title, a collapsed group's title and a question's header. */
+/* In the strip, needs you is a coloured dot: the pill's word is in the button's title and the glyph's name. */
+.strip .glyph[data-glyph="pill"] { font-size: 0; padding: 0; width: var(--glyph); height: var(--glyph); border-radius: 50%;
+                                   background: var(--needs-you); }
+/* The muted heading, in sentence case: a collapsed group's title and a question's header. */
 h1, .list summary, .question .header { font-size: var(--size-xs); font-weight: 500; color: var(--muted); }
 h1 { margin: 0 0 var(--sp-4); }
-.list h1, .list summary { margin: var(--sp-5) var(--sp-4) var(--sp-2); }
-.list summary { cursor: pointer; }
-/* A row: its dot, name and state, then what it is doing; what does not fit is cut. */
-.row { display: block; width: 100%; padding: var(--sp-3) var(--sp-4); color: var(--fg); }
+.list summary { margin: var(--sp-5) var(--sp-4) var(--sp-2); cursor: pointer; }
+/* A row (#572): one line, its name then its status glyph, in regular weight; running and needs-you rows
+   add what they are doing, muted. What does not fit is cut. */
+.row { display: block; width: 100%; padding: var(--sp-2) var(--sp-4); color: var(--fg); }
 .row .l1 { display: flex; gap: var(--sp-3); align-items: center; white-space: nowrap; overflow: hidden; }
 .row .l2 { display: flex; gap: var(--sp-3); font-size: var(--size-small); color: var(--muted); white-space: nowrap; overflow: hidden; }
-.row .l2:empty { display: none; }
-.row .l3 { display: block; font-size: var(--size-xs); color: var(--muted); white-space: nowrap; overflow: hidden;
-           text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
-.row .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.row .name { overflow: hidden; text-overflow: ellipsis; }
+.row.unseen .name { font-weight: 600; }
 .row .id { color: var(--muted); flex: none; font-size: var(--size-small); }
-.row .row-state { margin-inline-start: auto; font-size: var(--size-small); color: var(--muted); flex: none; }
-.row .row-state[data-state="needs_you"] { color: var(--needs-you); font-weight: 600; }
+.row .l1 .glyph { margin-inline-start: auto; }
+.row .clock { flex: none; margin-inline-start: auto; font-size: var(--size-xs); }
 .row .row-step { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 /* A row line's code, left to right in its own isolate, as a card's is. */
 .row .row-step code { font-size: var(--size-xs); overflow: visible; }
@@ -94,9 +100,17 @@ h1 { margin: 0 0 var(--sp-4); }
 .row.helper { font-size: var(--size-small); }
 .row .failed { font-weight: 600; color: var(--fg); }
 .unattached { margin: var(--sp-1) 0 0; padding-inline-start: calc(var(--sp-7) + var(--sp-5)); font-size: var(--size-small); color: var(--muted); }
-.dot { width: var(--dot); height: var(--dot); border-radius: 50%; background: var(--faint); flex: none; }
-.dot[data-state="running"] { background: var(--fg); }
-.dot[data-state="needs_you"] { background: var(--needs-you); box-shadow: 0 0 0 var(--halo) var(--needs-you-bg); }
+/* Status by shape (#572): a spinner while running, a dot at your turn, a filled dot once unseen, a ring
+   when idle or ended, and the "Needs you" pill, the only colour. */
+.glyph { flex: none; width: var(--glyph); height: var(--glyph); border-radius: 50%; display: grid; place-items: center; }
+.glyph[data-glyph="dot"]::after { content: ""; width: var(--dot); height: var(--dot); border-radius: 50%; background: var(--muted); }
+.glyph[data-glyph="filled"] { background: var(--fg); }
+.glyph[data-glyph="ring"] { box-shadow: inset 0 0 0 var(--hair) var(--faint); }
+.glyph[data-glyph="spinner"] { border: var(--mark) solid var(--line); border-top-color: var(--fg); animation: spin var(--spin) linear infinite; }
+.glyph[data-glyph="pill"] { width: auto; height: auto; border-radius: var(--radius); padding: 0 var(--sp-3); font-size: var(--size-xs);
+                            font-weight: 600; line-height: 1.6; color: var(--needs-you); background: var(--needs-you-bg); }
+@keyframes spin { to { transform: rotate(1turn); } }
+@media (prefers-reduced-motion: reduce) { .glyph[data-glyph="spinner"] { animation: none; } }
 
 /* The terminal, the stage: an inset, rounded pane on the frame, left to right; its header shows a
    program's title, and the grid size on hover (#571). The inset and the body's padding add up to layout.ts's padding. */

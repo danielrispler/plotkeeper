@@ -21,6 +21,8 @@
     <header class="top" data-tauri-drag-region="deep">
       <!-- The selected session's name and context share are on its row only (#571). -->
       <span class="sp"></span>
+      <!-- How many sessions need Daniel (#572), shown whenever any do; it selects the first. -->
+      <button id="needs-you" class="btn small chip" type="button" hidden></button>
       <button id="new-session" class="btn small" type="button">New session</button>
       <!-- Usage: context, 5h and week (#480, #481). -->
       <span id="usage" class="usage"></span>

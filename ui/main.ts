@@ -10,7 +10,7 @@ import { element, invoke, listen } from "./dom.js";
 import { windowBinding } from "./keys.js";
 import { defaultWidths, type LayoutMode, layoutMode, resized, type Widths } from "./layout.js";
 import { showSessions } from "./list.js";
-import { show } from "./selection.js";
+import { select, show } from "./selection.js";
 import { startPanes } from "./panes.js";
 import { showPicker } from "./picker.js";
 import { reload, type SettingsFiles, zoomed } from "./settings.js";
@@ -127,6 +127,11 @@ document.addEventListener("visibilitychange", markShown);
 // A login shell in the configured repository, then a pane per session terminal (#467).
 startPanes().catch((e) => (element("terminal-body").textContent = `No terminal: ${e}`));
 element("new-session").addEventListener("click", showPicker);
+// The needs-you chip (#572) selects the first session that needs Daniel.
+element("needs-you").addEventListener("click", () => {
+  const first = studio.listed.find((session) => session.state === "needs_you");
+  if (first) select(first.id);
+});
 // A click outside the picker, but not on its own button, closes it.
 document.addEventListener("pointerdown", (event) => {
   const target = event.target as Node;

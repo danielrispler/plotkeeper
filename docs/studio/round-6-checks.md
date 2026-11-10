@@ -52,3 +52,9 @@ Between passes, nothing waits for him. After each pass, a code-review agent that
 - [ ] Run a session that spawns a worker and a helper. When each one finishes, its row leaves the list and its parent's line counts it in "N done". A failed one stays, marked failed, until you open it.
 - [ ] Open the session's rail: the collapsed **Subagents** section lists every subagent it ran, newest first, each with its name, its prompt's first line, its result, and its type, duration and kind.
 - [ ] Click a finished entry: the rail opens that subagent with its cards and brief. Within seconds, its written summary of what it was asked and what it came back with shows on its intention line, and on the entry when you go back. Opening it again writes no new summary (no new `claude -p` run). Outside auto mode.
+
+## #572: one-line rows, status by shape, a needs-you chip
+
+- [ ] With 10 sessions open, at full width, which one needs you is clear at a glance: it is first, with the only coloured mark (the "Needs you" pill), and the top bar's chip says "1 needs you". Clicking the chip selects it.
+- [ ] Narrow the window until the list is a strip. The needs-you session is still clear at a glance (the coloured dot), and no two strip labels read the same. Hovering the strip opens the list over the terminal; the terminal does not move or resize.
+- [ ] Each row is one line: a running session shows a turning spinner, your turn a dot, idle and ended a ring. Only running and needs-you rows have a second, muted line. Hovering a row names its state in words.
