@@ -418,6 +418,9 @@ pub struct Subagent {
     pub ended_at: Option<u64>,
     /// The first line of its last message, from its `SubagentStop`.
     pub result: Option<String>,
+    /// Its whole last message, which its summary reads (#535); the pane never shows it.
+    #[serde(skip)]
+    pub message: String,
     /// Daniel opened its line after it failed (#434, decision 39).
     pub opened: bool,
     /// The folder of its first event that has one: its worktree, or its parent's folder.
@@ -512,11 +515,11 @@ impl Subagent {
         matches!(self.status, Status::Ended(_))
     }
 
-    /// A helper that succeeded, or one that failed and Daniel opened, folds into its parent's line
-    /// (#369, story 18). A failed child stays visible until he opens it.
+    /// A subagent that succeeded, or one that failed and Daniel opened, folds into its parent's line
+    /// (#369, story 18), a worker as a helper does (#535). A failed child stays visible until he
+    /// opens it.
     pub fn faded(&self) -> bool {
-        let succeeded = self.status == Status::Completed;
-        self.kind == Kind::Helper && (succeeded || self.failed() && self.opened)
+        self.status == Status::Completed || self.failed() && self.opened
     }
 }
 
@@ -556,7 +559,8 @@ impl Serialize for Status {
     }
 }
 
-/// Each subagent with its computed `failed` and `faded`, which the pane reads.
+/// Each subagent with its computed `failed` and `faded`, and its prompt's first line, `asked`, which
+/// the rail's history shows under its name (#535).
 fn serialize_agents<S: serde::Serializer>(
     agents: &[Subagent],
     serializer: S,
@@ -567,11 +571,13 @@ fn serialize_agents<S: serde::Serializer>(
         agent: &'a Subagent,
         failed: bool,
         faded: bool,
+        asked: Option<&'a str>,
     }
     let wire = agents.iter().map(|agent| Wire {
         agent,
         failed: agent.failed(),
         faded: agent.faded(),
+        asked: agent.prompt.lines().map(str::trim).find(|l| !l.is_empty()),
     });
     serializer.collect_seq(wire)
 }
@@ -783,6 +789,7 @@ impl Session {
                 "SubagentStop" => {
                     let mut lines = event.last_assistant_message.lines().map(str::trim);
                     agent.result = lines.find(|line| !line.is_empty()).map(Into::into);
+                    agent.message = event.last_assistant_message.clone();
                     agent.end(None, at);
                 }
                 _ => {}

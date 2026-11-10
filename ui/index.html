@@ -68,6 +68,8 @@
           <button id="delete" class="btn small tool" type="button" hidden>Delete</button>
           <!-- Decision history (#479), a collapsed section above the turns. -->
           <details id="decisions" class="decisions" hidden><summary id="decisions-title"></summary><ol id="decisions-list"></ol></details>
+          <!-- Every subagent the session ran, newest first (#535), collapsed like the decisions. -->
+          <details id="subagents" class="decisions subagents" hidden><summary id="subagents-title"></summary><ol id="subagents-list"></ol></details>
           <!-- The intention and step line (#472). -->
           <p id="intention" class="intention"><span id="intention-text"></span> <span id="intention-age" class="age"></span></p>
           <div id="intention-ask"></div>

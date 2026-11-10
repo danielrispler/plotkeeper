@@ -2,7 +2,8 @@
 // checks, with its open question docked at the bottom. A subagent's view shows its own line,
 // questions, brief and cards; the checks are its session's.
 
-import { code, element, invoke, text } from "./dom.js";
+import { age, code, element, invoke, pressable, prose, text } from "./dom.js";
+import { select } from "./selection.js";
 import { askElement } from "./ask.js";
 import { rendered } from "./markdown.js";
 import { encode, request } from "./daemon.js";
@@ -63,6 +64,66 @@ export function showView(selected: Selection | null) {
   showQuestions(session.questions.filter((question) => question.agent === (agent?.id ?? null)));
   showChecks(session.checks);
   showCleared(agent === null ? session.cleared : []);
+  showHistory(agent === null ? session : null);
+  // A subagent's view has no intention of its own: its written summary takes that line (#535).
+  if (agent !== null) {
+    element("intention-text").textContent = agentSummaries.get(agent.id) ?? "";
+    if (agent.ended_at !== null) summarize(agent.id);
+  }
+}
+
+// The subagent summaries the writer gave (#535), by subagent id, and those being written.
+const agentSummaries = new Map<string, string>();
+const writing = new Set<string>();
+
+// Asks the shell for subagent `id`'s summary: the store's, or one writer call now. A failed call
+// leaves its name and first line, and the next opening asks again.
+function summarize(id: string) {
+  if (agentSummaries.has(id) || writing.has(id)) return;
+  writing.add(id);
+  invoke<string | null>("agent_summary", { agentId: id })
+    .then((summary) => {
+      if (summary === null) return;
+      agentSummaries.set(id, summary);
+      if (studio.selection?.agent === id) element("intention-text").textContent = summary;
+    })
+    .catch((e) => console.warn(e))
+    .finally(() => writing.delete(id));
+}
+
+export type HistoryEntry = { agent: string; purpose: string; asked: string; result: string; details: string };
+
+// A session's subagent history (#535): every subagent it ran, newest first, faded ones too. Each
+// entry's purpose is its name and its prompt's first line; its result is its written summary, else
+// its last message's first line, or its status when it failed or has none yet.
+export function subagentHistory(session: Pick<Session, "agents">, summaries: Map<string, string>, now = Date.now()): HistoryEntry[] {
+  return [...session.agents]
+    .sort((a, b) => b.started_at - a.started_at)
+    .map((a) => ({
+      agent: a.id,
+      purpose: a.name,
+      asked: a.asked ?? "",
+      result: summaries.get(a.id) ?? ((a.failed ? null : a.result) || a.status),
+      details: [a.agent_type, age(a.started_at, a.ended_at ?? now), a.kind].filter(Boolean).join(" · "),
+    }));
+}
+
+// The rail's Subagents section, on a session's own view only; an entry's click opens that subagent.
+function showHistory(session: Session | null) {
+  const entries = session === null ? [] : subagentHistory(session, agentSummaries);
+  element("subagents-list").replaceChildren(
+    ...entries.map((entry) => {
+      const button = pressable(document.createElement("button"), false, () => select(session!.id, entry.agent));
+      button.classList.add("subagent");
+      const lines = [text("span", entry.purpose, "asked"), ...(entry.asked ? [prose("span", entry.asked)] : [])];
+      button.append(...lines, prose("span", entry.result), text("span", entry.details, "kind"));
+      const item = document.createElement("li");
+      item.append(button);
+      return item;
+    }),
+  );
+  element("subagents-title").textContent = `Subagents (${entries.length})`;
+  element("subagents").hidden = entries.length === 0;
 }
 
 // After this many steps the intention dims, as it may no longer say what the agent does (#472).

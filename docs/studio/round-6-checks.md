@@ -39,3 +39,9 @@ Between passes, nothing waits for him. After each pass, a code-review agent that
 - [ ] Only the selected row shows a time ("Turn 12m"), and no clock shows seconds or changes more than once a minute. The rail shows "Step" only once a step has run a minute.
 - [ ] No "no estimate", "Step 0s", grid size such as `169 × 38`, or raw `**` anywhere on screen. Hovering the terminal's header shows the grid size.
 - [ ] A row or the rail's step with a long path shows its last 2 segments; hovering shows the full line. The picker's paths read the same way.
+
+## #535: finished subagents leave the list; the rail keeps their history
+
+- [ ] Run a session that spawns a worker and a helper. When each one finishes, its row leaves the list and its parent's line counts it in "N done". A failed one stays, marked failed, until you open it.
+- [ ] Open the session's rail: the collapsed **Subagents** section lists every subagent it ran, newest first, each with its name, its prompt's first line, its result, and its type, duration and kind.
+- [ ] Click a finished entry: the rail opens that subagent with its cards and brief. Within seconds, its written summary of what it was asked and what it came back with shows on its intention line, and on the entry when you go back. Opening it again writes no new summary (no new `claude -p` run). Outside auto mode.

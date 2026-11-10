@@ -63,7 +63,7 @@ function dot(state: string): HTMLElement {
 // A session's subagents by the id of the agent that spawned them: "session", "unattached" or a
 // subagent's id. Built once per draw, so the tree and the "done" counts do not scan every subagent.
 type Children = Map<string, Subagent[]>;
-function childrenOf(session: Session): Children {
+export function childrenOf(session: Pick<Session, "agents">): Children {
   const children: Children = new Map();
   for (const agent of session.agents) {
     const parent = typeof agent.parent === "string" ? agent.parent : agent.parent.agent;
@@ -74,13 +74,14 @@ function childrenOf(session: Session): Children {
 }
 
 // Whether a subagent's line is not drawn: it faded, and nothing below it is drawn (#434, decision 43).
-function hidden(children: Children, agent: Subagent): boolean {
+export function hidden(children: Children, agent: Subagent): boolean {
   return agent.faded && (children.get(agent.id) ?? []).every((child) => hidden(children, child));
 }
 
-// The count of a parent's helpers that faded into its line.
+// The count of a parent's subagents that faded into its line, workers as helpers (#535).
+export const doneCount = (all: Children, children: Subagent[] = []) => children.filter((agent) => hidden(all, agent)).length;
 function done(all: Children, children: Subagent[] = []): HTMLElement[] {
-  const faded = children.filter((agent) => hidden(all, agent)).length;
+  const faded = doneCount(all, children);
   return faded ? [text("span", `${faded} done`, "id")] : [];
 }
 
@@ -171,7 +172,7 @@ function agentRow(session: Session, children: Children, agent: Subagent, depth: 
 }
 
 // A session's row, then its subagents under the agent that spawned them, at any depth, and those
-// with no known spawn under "Unattached". A faded helper is not drawn, and its parent's line counts
+// with no known spawn under "Unattached". A faded subagent is not drawn, and its parent's line counts
 // it, unless anything below it is drawn: then it keeps its line, so its children stay under it.
 function tree(session: Session): HTMLElement[] {
   const children = childrenOf(session);

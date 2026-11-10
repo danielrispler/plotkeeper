@@ -297,3 +297,5 @@ body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; to
 .decisions .answer { font-weight: 600; }
 .decisions .cleared { border-left-style: dashed; }
 .decisions .plan { white-space: pre-wrap; max-height: 30vh; overflow-y: auto; font-size: var(--size-read); }
+/* The rail's subagent history (#535): each entry a button that opens its subagent, its lines stacked. */
+.subagents button { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-1); width: 100%; text-align: start; overflow-wrap: anywhere; }

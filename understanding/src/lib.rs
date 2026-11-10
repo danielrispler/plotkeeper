@@ -26,7 +26,7 @@ pub use store::{
     Brief, CardStore, CheckResult, Guess, Level, Rating, Reason, Row, SessionCards, StoredCard,
     StoredSummary, millis,
 };
-pub use summary::{Learning, SummarySetup, TurnSummary, write_summary};
+pub use summary::{Learning, SummarySetup, TurnSummary, write_agent_summary, write_summary};
 pub use week::{Rate, Ratings, Week, week};
 
 /// A card on a change, in the explanation language; code inside its text is in
@@ -171,6 +171,18 @@ pub trait CardWriter {
         _setup: &SummarySetup,
         _request: &SummaryRequest,
         _earlier: &[TurnSummary],
+    ) -> Result<String, String> {
+        Err("this writer writes no summaries".into())
+    }
+
+    /// The writer's reply with the summary of a subagent's purpose and result, from its spawn's
+    /// `prompt` and its last `message`, at `setup`'s model and effort (#535), or one line when it
+    /// gave none. A writer that writes no summaries says so.
+    fn summarize_agent(
+        &self,
+        _setup: &SummarySetup,
+        _prompt: &str,
+        _message: &str,
     ) -> Result<String, String> {
         Err("this writer writes no summaries".into())
     }
@@ -618,6 +630,14 @@ impl CardWriter for FakeWriter {
         })
         .to_string())
     }
+
+    fn summarize_agent(&self, _: &SummarySetup, prompt: &str, _: &str) -> Result<String, String> {
+        let summary = format!(
+            "A sample subagent summary from the fake writer, which read a {}-byte prompt.",
+            prompt.len()
+        );
+        Ok(serde_json::json!({ "summary": summary }).to_string())
+    }
 }
 
 /// Writes the card with `claude -p` on Daniel's subscription, in a neutral folder that holds none of
@@ -909,6 +929,15 @@ impl CardWriter for ClaudeWriter {
         earlier: &[TurnSummary],
     ) -> Result<String, String> {
         self.stdout(self.summary_command(setup, request, earlier))
+    }
+
+    fn summarize_agent(
+        &self,
+        setup: &SummarySetup,
+        prompt: &str,
+        message: &str,
+    ) -> Result<String, String> {
+        self.stdout(self.agent_summary_command(setup, prompt, message))
     }
 }
 

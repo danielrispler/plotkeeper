@@ -166,13 +166,8 @@ impl ClaudeWriter {
             Some(_) => "This turn has a card, which teaches it: write the summary only.",
             None => "Write the summary and the learning section.",
         };
-        let mut options = vec!["--model", &setup.model];
-        if !setup.effort.is_empty() {
-            options.extend(["--effort", &setup.effort]);
-        }
-        options.extend(["--system-prompt", SUMMARY]);
         self.run_with(
-            &options,
+            &options(setup, SUMMARY),
             &format!(
                 "The developer's prompt:\n<prompt>\n{}\n</prompt>\n\n\
                  The agent's responses in the turn, oldest first:\n{responses}\n\
@@ -184,6 +179,97 @@ impl ClaudeWriter {
         )
     }
 }
+
+/// The options of a summary run: `setup`'s model and effort, and `system`, the studio's own system
+/// prompt.
+fn options<'a>(setup: &'a SummarySetup, system: &'a str) -> Vec<&'a str> {
+    let mut options = vec!["--model", &setup.model];
+    if !setup.effort.is_empty() {
+        options.extend(["--effort", &setup.effort]);
+    }
+    options.extend(["--system-prompt", system]);
+    options
+}
+
+/// The summary of subagent `id`'s purpose and result (#535): the one `store` keeps, or else one
+/// call to `writer` on its spawn's `prompt` and its last `message`, which the store then keeps.
+/// When the call gives none, nothing is kept, one line goes to `log`, and the rail keeps the
+/// subagent's name and first line. The store is not locked while the writer runs.
+pub fn write_agent_summary(
+    store: &Mutex<CardStore>,
+    writer: &(impl CardWriter + ?Sized),
+    setup: &SummarySetup,
+    id: &str,
+    prompt: &str,
+    message: &str,
+    mut log: impl FnMut(String),
+) -> Option<String> {
+    if let Some(kept) = store.lock().unwrap().agent_summary(id) {
+        return Some(kept.into());
+    }
+    let summary = writer
+        .summarize_agent(setup, prompt, message)
+        .and_then(|reply| {
+            let value: serde_json::Value = serde_json::from_str(object(&reply)).unwrap_or_default();
+            match value["summary"].as_str().map(str::trim) {
+                Some(summary) if !summary.is_empty() => Ok(summary.to_string()),
+                _ => Err(format!(
+                    "the reply holds none: {:?}",
+                    reply.chars().take(300).collect::<String>()
+                )),
+            }
+        });
+    match summary {
+        Ok(summary) => {
+            if let Err(e) = store.lock().unwrap().add_agent_summary(id, &summary) {
+                log(format!("save the summary of subagent {id}: {e}"));
+            }
+            Some(summary)
+        }
+        Err(line) => {
+            log(format!("no summary on subagent {id}: {line}"));
+            None
+        }
+    }
+}
+
+impl ClaudeWriter {
+    /// The `claude -p` run for a subagent's summary, at `setup`'s model and effort with the studio's
+    /// own system prompt, on its spawn's `prompt` and its last `message`, each cut at `MAX_CHANGE`.
+    pub fn agent_summary_command(
+        &self,
+        setup: &SummarySetup,
+        prompt: &str,
+        message: &str,
+    ) -> (Command, String) {
+        let cut = |text: &str| text[..text.floor_char_boundary(MAX_CHANGE)].to_string();
+        self.run_with(
+            &options(setup, AGENT_SUMMARY),
+            &format!(
+                "The prompt it was spawned with:\n<prompt>\n{}\n</prompt>\n\n\
+                 Its last message:\n<message>\n{}\n</message>",
+                cut(prompt),
+                cut(message)
+            ),
+        )
+    }
+}
+
+/// The subagent summary writer's system prompt (#535), which replaces Claude Code's own.
+const AGENT_SUMMARY: &str = concat!(
+    r#"You write a short summary of one subagent of a coding agent: what it was asked to do, and what it came back with, for the developer who runs it and reads the summary instead of its raw output.
+
+Answer from the input: the prompt the subagent was spawned with, and its last message. Use only this input: do not use tools or read files. Skip any preamble such as "Done." and say the result itself.
+
+"#,
+    explanation_language!(),
+    r#"
+
+Reply with one JSON object and nothing else:
+{"summary": string}
+- summary: at most 3 short lines. The first says what it was asked to do, the next what it found or changed, or why it failed.
+"#
+);
 
 /// The summary writer's system prompt (#517, decision 14), which replaces Claude Code's own.
 const SUMMARY: &str = concat!(

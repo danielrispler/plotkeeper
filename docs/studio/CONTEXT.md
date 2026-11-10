@@ -142,7 +142,7 @@ An agent that an agent session, or another subagent, spawned to do part of its w
 _Avoid_: Task (the workbench's unit of work)
 
 **Worker**:
-A subagent spawned with its own git worktree, or one that changes files. A helper becomes a worker at its first change. Daniel follows a worker like a session, with its own cards and brief. A worker is not a task.
+A subagent spawned with its own git worktree, or one that changes files. A helper becomes a worker at its first change. Daniel follows a worker like a session, with its own cards and brief. A finished worker folds into its parent's line as a helper does, and its session's rail keeps it in the subagent history. A worker is not a task.
 
 **Helper**:
 A subagent that is not a worker, such as a review or a search. It shows as one line under the agent that spawned it.
@@ -151,7 +151,7 @@ A subagent that is not a worker, such as a review or a search. It shows as one l
 A prompt that Claude Code sends, not Daniel, to wake an agent when a subagent or a background command it started returns. It names the returning task's id in markup. It never counts as Daniel's prompt.
 
 **Session list**:
-The list of every agent session, one row each, grouped by state with needs you first and idle and ended sessions collapsed last. Each row says in one line what its session is doing, and subagents nest under the agent that spawned them. Only Daniel's click changes the session he looks at.
+The list of every agent session, one row each, grouped by state with needs you first and idle and ended sessions collapsed last. Each row says in one line what its session is doing, and running subagents nest under the agent that spawned them. A finished subagent leaves the list and counts in its parent's "N done"; a failed one stays until Daniel opens it. Only Daniel's click changes the session he looks at.
 
 **Story rail**:
 The column on the window's left that tells the selected session's or subagent's story: its state and step, its brief, cards and checks, and its open question docked at the bottom.

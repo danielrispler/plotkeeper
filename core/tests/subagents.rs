@@ -144,7 +144,7 @@ fn a_helper_opened_while_running_and_then_killed_stays_visible_and_failed() {
 }
 
 #[test]
-fn a_helper_that_succeeds_fades_and_a_worker_keeps_its_row() {
+fn a_helper_or_worker_that_succeeds_fades() {
     let studio = replay(DAY);
 
     // The review helper handed back (line 530); the session's next `Stop` (line 534) no longer lists
@@ -169,8 +169,25 @@ fn a_helper_that_succeeds_fades_and_a_worker_keeps_its_row() {
     );
     assert_eq!(
         (worker.status.to_string().as_str(), worker.faded()),
-        ("completed", false)
+        ("completed", true),
+        "a finished worker folds into its parent's line too (#535)"
     );
+}
+
+/// #535: a failed worker stays visible until Daniel opens it, as a failed helper does.
+#[test]
+fn a_failed_worker_stays_visible_until_it_is_opened() {
+    let killed = RUN.replace(
+        &format!("<task-id>{RUN_HELPER}</task-id>"),
+        &format!("<task-id>{RUN_WORKER}</task-id>"),
+    );
+    let mut studio = replay(&killed);
+    let worker = agent(&studio, RUN_SESSION, RUN_WORKER);
+    assert!(worker.kind == Worker && worker.failed() && !worker.faded());
+
+    studio.open(RUN_WORKER);
+
+    assert!(agent(&studio, RUN_SESSION, RUN_WORKER).faded());
 }
 
 #[test]
@@ -643,6 +660,77 @@ fn a_killed_worker_that_its_sessions_stop_ended_first_still_gets_its_end_look() 
         purpose: Purpose::Card,
     };
     assert!(looks.contains(&end), "{looks:?}");
+}
+
+/// #535: the rail's history of a session's subagents reads each one off the wire, faded or not: its
+/// purpose (its name and its prompt's first line), its result, type, times and kind. The summary
+/// call reads its whole prompt and last message.
+#[test]
+fn the_wire_keeps_every_subagents_history_faded_or_not() {
+    let mut studio = Studio::default();
+    let input = json!({"description": "Review the diff", "subagent_type": "code-reviewer",
+        "prompt": "\n  Review the parser change.\nLook for off-by-ones."});
+    studio.apply(&launched(1, "t1", None, "c1", input.clone()));
+    studio.apply(&launched(
+        2,
+        "t2",
+        None,
+        "c2",
+        json!({"description": "Implement #9"}),
+    ));
+    let message = "Done.\nThe parser change is fine.";
+    let stop = json!({"agent_id": "c1", "last_assistant_message": message});
+    studio.apply(&ev("SubagentStop", 60_002, "p1", stop));
+
+    let c1 = agent(&studio, "s1", "c1");
+    assert_eq!(
+        (c1.prompt.as_str(), c1.message.as_str()),
+        (input["prompt"].as_str().unwrap(), message)
+    );
+    let json = serde_json::to_value(studio.session("s1").unwrap()).unwrap();
+    let wire: Vec<_> = (json["agents"].as_array().unwrap().iter())
+        .map(|a| {
+            let keys = [
+                "id",
+                "name",
+                "asked",
+                "result",
+                "agent_type",
+                "started_at",
+                "ended_at",
+            ];
+            let mut fields: Vec<_> = keys.iter().map(|k| a[k].clone()).collect();
+            fields.extend([a["kind"].clone(), a["faded"].clone()]);
+            fields
+        })
+        .collect();
+    assert_eq!(
+        wire,
+        [
+            vec![
+                json!("c1"),
+                json!("Review the diff"),
+                json!("Review the parser change."),
+                json!("Done."),
+                json!("code-reviewer"),
+                json!(1),
+                json!(60_002),
+                json!("helper"),
+                json!(true),
+            ],
+            vec![
+                json!("c2"),
+                json!("Implement #9"),
+                json!(null),
+                json!(null),
+                json!(null),
+                json!(2),
+                json!(null),
+                json!("helper"),
+                json!(false),
+            ],
+        ]
+    );
 }
 
 #[test]

@@ -15,7 +15,7 @@ use std::{
 use studio_core::{Base, CardRequest, SummaryRequest};
 use studio_understanding::{
     Card, CardStore, CardWriter, Choice, ClaudeWriter, FakeWriter, Quiz, SummarySetup, TurnSummary,
-    explain_more, find_claude, write_card, write_summary,
+    explain_more, find_claude, write_agent_summary, write_card, write_summary,
 };
 
 const CLAUDE: &str = "/opt/homebrew/bin/claude";
@@ -357,6 +357,10 @@ fn every_writer_run_is_in_safe_mode() {
         (
             "summary",
             writer.summary_command(&setup(), &turn("s", 1), &[]),
+        ),
+        (
+            "subagent summary",
+            writer.agent_summary_command(&setup(), "a prompt", "a message"),
         ),
     ];
     for (name, (command, _)) in runs {
@@ -768,6 +772,17 @@ impl CardWriter for Recording {
         self.inputs.lock().unwrap().push(input);
         Ok(self.reply.clone())
     }
+    fn summarize_agent(
+        &self,
+        setup: &SummarySetup,
+        prompt: &str,
+        message: &str,
+    ) -> Result<String, String> {
+        let writer = ClaudeWriter::new(CLAUDE.into(), "/card-writer".into());
+        let (_, input) = writer.agent_summary_command(setup, prompt, message);
+        self.inputs.lock().unwrap().push(input);
+        Ok(self.reply.clone())
+    }
 }
 
 fn recording(reply: String) -> Recording {
@@ -898,4 +913,89 @@ fn a_turn_with_a_card_gets_its_summary_only() {
     assert_eq!(summary.learning, None);
     let input = writer.inputs.lock().unwrap().pop().unwrap();
     assert!(input.contains("has a card"), "{input}");
+}
+
+// The subagent summary, written when Daniel opens a subagent (#535).
+
+const SPAWNED: &str = "Review the parser change.\nLook for off-by-ones.";
+const LAST: &str = "Done.\nThe parser change is fine: the bounds hold.";
+
+#[test]
+fn the_subagent_summary_call_runs_in_safe_mode_with_the_settings_model_and_effort() {
+    let writer = ClaudeWriter::new(CLAUDE.into(), "/card-writer".into());
+    let (command, input) = writer.agent_summary_command(&setup(), SPAWNED, LAST);
+
+    let args: Vec<_> = command.get_args().map(|a| a.to_str().unwrap()).collect();
+    let [tools, none, mcp, safe, model, m, effort, e, system, s, p] = args[..] else {
+        panic!("{args:?}");
+    };
+    assert_eq!(
+        [tools, none, mcp, safe, model, m, effort, e, system, p],
+        [
+            "--tools",
+            "",
+            "--strict-mcp-config",
+            "--safe-mode",
+            "--model",
+            "claude-haiku-4-5",
+            "--effort",
+            "medium",
+            "--system-prompt",
+            "-p"
+        ]
+    );
+    assert!(s.contains("subagent"), "{s}");
+    assert!(input.contains(SPAWNED) && input.contains(LAST), "{input}");
+}
+
+#[test]
+fn opening_a_subagent_writes_its_summary_once_and_opening_it_again_makes_no_call() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = summaries(dir.path());
+    let writer = recording(r#"{"summary": "Reviewed the parser change: the bounds hold."}"#.into());
+
+    let first = write_agent_summary(&store, &writer, &setup(), "c1", SPAWNED, LAST, |_| {});
+    let again = write_agent_summary(
+        &summaries(dir.path()),
+        &writer,
+        &setup(),
+        "c1",
+        SPAWNED,
+        LAST,
+        |_| {},
+    );
+
+    assert_eq!(
+        first.as_deref(),
+        Some("Reviewed the parser change: the bounds hold.")
+    );
+    assert_eq!(again, first, "kept across restarts");
+    let inputs = writer.inputs.lock().unwrap();
+    assert_eq!(inputs.len(), 1, "one call");
+    assert!(inputs[0].contains(SPAWNED) && inputs[0].contains(LAST));
+}
+
+#[test]
+fn a_failed_subagent_summary_keeps_nothing_and_logs_one_line() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = summaries(dir.path());
+    let writer = recording("Shall I read the transcript?".into());
+    let mut lines = Vec::new();
+
+    let summary = write_agent_summary(&store, &writer, &setup(), "c1", SPAWNED, LAST, |l| {
+        lines.push(l)
+    });
+
+    assert_eq!(summary, None);
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(lines[0].contains("c1"), "{lines:?}");
+    assert_eq!(store.lock().unwrap().agent_summary("c1"), None);
+    let failing = Failing {
+        fails: 0,
+        calls: Cell::new(0),
+    };
+    assert_eq!(
+        write_agent_summary(&store, &failing, &setup(), "c1", SPAWNED, LAST, |_| {}),
+        None
+    );
 }
