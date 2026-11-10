@@ -98,7 +98,7 @@ Open the sessions for the day's work: at least two in parallel, one in a task wo
 
 ### One row per conversation
 
-- [ ] **#562:** open a new Claude terminal, run `claude`, and pick an earlier session with `/resume`. Do it twice. The list shows that session as one row, with its history, and no extra "Falinks" row with "No step yet". Open `/resume` once more and back out: no new row appears.
+- [ ] **#562:** open a new Claude terminal, run `claude`, and pick an earlier session with `/resume`. Do it twice. The list shows that session as one row, with its history, and no extra "Falinks" row with "No step yet". Open `/resume` once more and back out with Esc: no new row appears. A session you switch to shows as a row once you send it a prompt.
 - [ ] **#565 (6a fix):** in a session the studio started, `/resume` another: the resumed session stays selected in the list and the rail, and its pane stays.
 - [ ] **#567:** select a session that runs in another terminal (started outside the studio, for example in Zed's terminal before the day began). The terminal's place says "Runs in another terminal. Open here resumes it." with "Open here", not a login shell. "Open here" resumes it in a new pane, and the rail stays on it.
 
