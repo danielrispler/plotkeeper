@@ -40,7 +40,11 @@ pub struct Daemon {
 pub fn terminal_connect(app: AppHandle, daemon: State<Daemon>) -> Result<Value, String> {
     let mut writer = daemon.writer.lock().unwrap();
     if writer.is_none() {
-        let (client, lost) = connect()?;
+        let (mut client, lost) = connect()?;
+        // So the daemon deletes the presence file if the app crashes (#555); an older daemon ignores it.
+        client
+            .send(&json!({ "op": "app" }))
+            .map_err(|e| format!("the terminal daemon: {e}"))?;
         *daemon.outdated.lock().unwrap() = client.protocol < PROTOCOL;
         daemon.lost.lock().unwrap().extend(lost);
         let (reader, stream) = client.split();

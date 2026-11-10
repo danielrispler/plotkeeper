@@ -418,3 +418,126 @@ fn a_client_that_stops_reading_leaves_the_other_terminals_flowing() {
         stalled.send(&json!({ "op": "list" })).is_err()
     });
 }
+
+// #555, row 7: only Daniel's account can reach the socket.
+#[test]
+fn the_daemons_folder_is_private_and_its_socket_owner_only() {
+    use std::os::unix::fs::PermissionsExt;
+    let d = Daemon::start("perms");
+    let mode = |p: PathBuf| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode(d.dir.clone()), 0o700);
+    assert_eq!(mode(d.socket()), 0o600);
+}
+
+// #555, row 1: Claude Code and Antigravity report their status only to a terminal that answers the
+// OSC 7501 query. The program reads the reply raw and prints it with ESC as `E` and BEL as `B`.
+#[test]
+fn an_osc_7501_query_gets_the_reply_with_its_own_terminator() {
+    let d = Daemon::start("query");
+    let mut c = d.client();
+    let reply = "E]7501;?:states=idle,working,done,blocked,error:kinds=permission,question,auth";
+    for (id, query, end) in [("st", r"\033\\", r"E\"), ("bel", r"\007", "B")] {
+        let n = reply.len() + end.len();
+        let script = format!(
+            "stty raw -echo; printf '\\033]7501;?{query}'; head -c {n} | tr '\\033\\007' EB; echo; sleep 1000"
+        );
+        spawn(&mut c, id, &["sh", "-c", &script]);
+        c.send(&json!({ "op": "attach", "id": id })).unwrap();
+        output_until(&mut c, id, &format!("{reply}{end}"));
+    }
+}
+
+// #555: every program's OSC 7501 reports set its terminal's root status in `list`. `turn` goes up each
+// time the root leaves `working`, as herdr-core counts it. Each step waits for Enter, then prints
+// its reports and a marker.
+#[test]
+fn osc_7501_reports_give_list_the_status_and_count_turns() {
+    let d = Daemon::start("status");
+    let mut c = d.client();
+    let long = "A".repeat(6000);
+    let steps = [
+        // A report split across two reads, with a key the spec may add later.
+        r"printf '\033]7501;state=work'; sleep 0.3; printf 'ing:app=claude-code:future=x\033\\'"
+            .to_string(),
+        // Over the 4096-byte limit: dropped whole.
+        format!(r"printf '\033]7501;state=done:msg={long}\033\\'"),
+        // The same state again: `status_ms` stays.
+        r"printf '\033]7501;state=working:app=claude-code:progress=50\033\\'".into(),
+        // A child record: ignored.
+        r"printf '\033]7501;state=done:id=a/b\007'".into(),
+        r"printf '\033]7501;state=done:app=claude-code\033\\'".into(),
+        r"printf '\033]7501;state=blocked:kind=permission:app=claude-code\007'".into(),
+        r"printf '\033]7501;state=working\007'".into(),
+        r"printf '\033]7501;state=clear\007'".into(),
+        r"printf '\033]7501;state=working\007'".into(),
+        "exit 0".into(),
+    ];
+    let script: String = steps
+        .iter()
+        .enumerate()
+        .map(|(n, s)| format!("read x; {s}; echo step-{n}-done\n"))
+        .collect();
+    spawn(&mut c, "t1", &["sh", "-c", &script]);
+    c.send(&json!({ "op": "attach", "id": "t1" })).unwrap();
+    let fields = |t: &Value| {
+        let f = |k: &str| t[k].as_str().unwrap_or("-").to_string();
+        format!(
+            "{} {} {} turn {}",
+            f("state"),
+            f("kind"),
+            f("app"),
+            t["turn"]
+        )
+    };
+    let never = term(&list(&mut c), "t1").clone();
+    assert_eq!(fields(&never), "- - - turn 0");
+    assert!(never["status_ms"].is_null());
+    let mut step = |n: usize| {
+        let enter = studio_terminal_daemon::encode(b"\n");
+        c.send(&json!({ "op": "input", "id": "t1", "data": enter }))
+            .unwrap();
+        output_until(&mut c, "t1", &format!("step-{n}-done"));
+        term(&list(&mut c), "t1").clone()
+    };
+    let working = step(0);
+    assert_eq!(fields(&working), "working - claude-code turn 0");
+    assert!(working["status_ms"].as_u64().unwrap() > 0);
+    assert_eq!(fields(&step(1)), "working - claude-code turn 0");
+    let again = step(2);
+    assert_eq!(again["status_ms"], working["status_ms"]);
+    assert_eq!(fields(&step(3)), "working - claude-code turn 0");
+    assert_eq!(fields(&step(4)), "done - claude-code turn 1");
+    // Not from `working`, so no new turn.
+    assert_eq!(fields(&step(5)), "blocked permission claude-code turn 1");
+    assert_eq!(fields(&step(6)), "working - - turn 1");
+    assert_eq!(fields(&step(7)), "- - - turn 2");
+    assert_eq!(fields(&step(8)), "working - - turn 2");
+    c.send(&json!({ "op": "input", "id": "t1", "data": studio_terminal_daemon::encode(b"\n") }))
+        .unwrap();
+    wait_for("the exit", || {
+        fields(term(&list(&mut c), "t1")) == "- - - turn 3"
+    });
+}
+
+// #555: a crashed app must not leave Remote Control's phone pushes off, so the daemon deletes the
+// presence file when the app's connection drops, but not when a CLI attach's does.
+#[test]
+fn the_presence_file_goes_when_the_app_disconnects_not_a_cli_attach() {
+    let d = Daemon::start("presence");
+    let present = studio_terminal_daemon::presence(&d.socket());
+    assert_eq!(present, d.dir.join("present"));
+    std::fs::write(&present, "").unwrap();
+
+    let mut cli = d.client();
+    list(&mut cli);
+    drop(cli);
+    let mut app = d.client();
+    app.send(&json!({ "op": "app" })).unwrap();
+    list(&mut app);
+    // Time for the daemon to see the CLI's drop.
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(present.exists(), "a CLI attach's disconnect deleted it");
+
+    drop(app);
+    wait_for("the presence file to go", || !present.exists());
+}

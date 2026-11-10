@@ -1,14 +1,16 @@
 // The daemon itself, built from the #322 spike (`terminal-spike/src/daemon.rs`). It owns the PTYs, keeps each
 // terminal's raw output as scrollback, and serves clients over the socket (protocol in lib.rs).
-use crate::{PROTOCOL, decode, encode};
+use crate::{PROTOCOL, decode, encode, status::Status};
 use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use serde_json::{Value, json};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
+    fs::Permissions,
     io::{BufRead, BufReader, Read, Write},
     net::Shutdown,
     os::{
         fd::AsRawFd,
+        unix::fs::PermissionsExt,
         unix::net::{UnixListener, UnixStream},
     },
     path::{Path, PathBuf},
@@ -58,6 +60,7 @@ struct Term {
     cols: u16,
     rows: u16,
     exited: Option<String>,
+    status: Status,
 }
 
 impl Term {
@@ -111,7 +114,9 @@ struct State {
     terms: HashMap<String, Term>,
     conns: HashMap<usize, Conn>,
     /// Where it records the terminals it runs (`crate::record`).
-    record: PathBuf,
+    record: Arc<Record>,
+    /// The studio's presence file (`crate::presence`).
+    presence: PathBuf,
 }
 
 impl State {
@@ -122,16 +127,36 @@ impl State {
         }
     }
 
-    // shortcut: rewrites the whole record under the lock at each change; fine for a few terminals.
-    fn save(&self) {
+    // Takes the record's newest copy under the lock; the caller writes it with `Record::write` after releasing it.
+    fn save(&self) -> Arc<Record> {
         let running = self.terms.iter().filter(|(_, t)| t.exited.is_none());
         let terms: Vec<Value> = running
             .map(|(id, t)| json!({ "id": id, "argv": t.argv, "cwd": t.cwd() }))
             .collect();
+        *self.record.newest.lock().unwrap() = Some(json!(terms).to_string());
+        self.record.clone()
+    }
+}
+
+// The record of the terminals (`crate::record`), written outside the state lock so output never waits on disk
+// (#555, row 6). Only the newest copy is written: a writer takes whatever is newest when its turn comes.
+#[derive(Default)]
+struct Record {
+    path: PathBuf,
+    newest: Mutex<Option<String>>,
+    // Held while writing, so copies reach the disk in the order they were taken.
+    writing: Mutex<()>,
+}
+
+impl Record {
+    fn write(&self) {
+        let _writing = self.writing.lock().unwrap();
+        let Some(text) = self.newest.lock().unwrap().take() else {
+            return;
+        };
         // Written aside and renamed, so a crash mid-write leaves the last whole record.
-        let aside = self.record.with_extension("tmp");
-        let saved = std::fs::write(&aside, json!(terms).to_string())
-            .and_then(|()| std::fs::rename(&aside, &self.record));
+        let aside = self.path.with_extension("tmp");
+        let saved = std::fs::write(&aside, text).and_then(|()| std::fs::rename(&aside, &self.path));
         if let Err(e) = saved {
             eprintln!("record the terminals: {e}");
         }
@@ -147,8 +172,11 @@ pub fn serve(socket: &Path) -> Result<(), String> {
         libc::signal(libc::SIGHUP, libc::SIG_IGN);
         libc::signal(libc::SIGPIPE, libc::SIG_IGN);
     }
+    // Only Daniel's account may reach the socket (#555): the folder is 0700, also when it already existed.
     if let Some(dir) = socket.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(dir)
+            .and_then(|()| std::fs::set_permissions(dir, Permissions::from_mode(0o700)))
+            .map_err(|e| e.to_string())?;
     }
     // One daemon at a time: the lock is held for the daemon's whole life and freed by the kernel when it dies.
     let lock = std::fs::File::create(socket.with_extension("lock")).map_err(|e| e.to_string())?;
@@ -156,14 +184,20 @@ pub fn serve(socket: &Path) -> Result<(), String> {
         return Err(format!("a daemon already serves {}", socket.display()));
     }
     let _ = std::fs::remove_file(socket);
-    let listener = UnixListener::bind(socket).map_err(|e| e.to_string())?;
+    let listener = UnixListener::bind(socket)
+        .and_then(|l| std::fs::set_permissions(socket, Permissions::from_mode(0o600)).map(|()| l))
+        .map_err(|e| e.to_string())?;
     eprintln!(
         "daemon {} (protocol {PROTOCOL}) listening on {}",
         std::process::id(),
         socket.display()
     );
     let state = Shared::new(Mutex::new(State {
-        record: crate::record(socket),
+        record: Arc::new(Record {
+            path: crate::record(socket),
+            ..Record::default()
+        }),
+        presence: crate::presence(socket),
         ..State::default()
     }));
     for (n, stream) in listener.incoming().enumerate() {
@@ -189,6 +223,10 @@ fn error(id: &str, message: &str) -> Value {
 fn on_output(state: &Shared, id: &str, bytes: &[u8]) {
     let s = &mut *state.lock().unwrap();
     let Some(t) = s.terms.get_mut(id) else { return };
+    let replies = t.status.read(bytes);
+    if !replies.is_empty() {
+        let _ = t.pty.writer.write_all(&replies);
+    }
     t.buf.extend(bytes);
     let excess = t.buf.len().saturating_sub(SCROLLBACK);
     t.buf.drain(..excess);
@@ -201,16 +239,20 @@ fn on_output(state: &Shared, id: &str, bytes: &[u8]) {
 
 fn on_exit(state: &Shared, id: &str, status: String) {
     eprintln!("{id} exited: {status}");
-    let s = &mut *state.lock().unwrap();
-    if let Some(t) = s.terms.get_mut(id) {
-        t.exited = Some(status.clone());
-    }
-    s.save();
-    broadcast(
-        &mut s.conns,
-        id,
-        &json!({ "ev": "exit", "id": id, "status": status }),
-    );
+    let record = {
+        let s = &mut *state.lock().unwrap();
+        if let Some(t) = s.terms.get_mut(id) {
+            t.exited = Some(status.clone());
+            t.status.exit();
+        }
+        broadcast(
+            &mut s.conns,
+            id,
+            &json!({ "ev": "exit", "id": id, "status": status }),
+        );
+        s.save()
+    };
+    record.write();
 }
 
 fn serve_conn(n: usize, stream: UnixStream, state: Shared) {
@@ -232,6 +274,7 @@ fn serve_conn(n: usize, stream: UnixStream, state: Shared) {
     };
     conn.send(&json!({ "ev": "hello", "protocol": PROTOCOL, "daemon_pid": std::process::id() }));
     state.lock().unwrap().conns.insert(n, conn);
+    let mut app = false;
     for line in BufReader::new(stream).lines() {
         let Ok(line) = line else { break };
         let req: Value = serde_json::from_str(&line).unwrap_or_default();
@@ -245,6 +288,10 @@ fn serve_conn(n: usize, stream: UnixStream, state: Shared) {
                 req["rows"].as_u64().unwrap_or(d.1) as u16,
             )
         };
+        if op == "app" {
+            app = true;
+            continue;
+        }
         if op == "list" {
             // Outside the lock: `ps` is slow, and output must keep flowing meanwhile.
             let msg = list(&state);
@@ -252,7 +299,9 @@ fn serve_conn(n: usize, stream: UnixStream, state: Shared) {
             continue;
         }
         // Every message is queued under this lock, so a replay and the live output after it never interleave.
-        let s = &mut *state.lock().unwrap();
+        let mut guard = state.lock().unwrap();
+        let s = &mut *guard;
+        let mut saved = None;
         match op {
             "spawn" if s.terms.contains_key(&id) => s.reply(n, &error(&id, "the id is taken")),
             "spawn" => {
@@ -282,9 +331,10 @@ fn serve_conn(n: usize, stream: UnixStream, state: Shared) {
                                 cols,
                                 rows,
                                 exited: None,
+                                status: Status::default(),
                             },
                         );
-                        s.save();
+                        saved = Some(s.save());
                         json!({ "ev": "spawned", "id": id })
                     }
                     Err(message) => error(&id, &message),
@@ -326,13 +376,22 @@ fn serve_conn(n: usize, stream: UnixStream, state: Shared) {
             "forget" => {
                 if let Some(mut t) = s.terms.remove(&id) {
                     kill(&mut t);
-                    s.save();
+                    saved = Some(s.save());
                 }
             }
             _ => {}
         }
+        drop(guard);
+        if let Some(record) = saved {
+            record.write();
+        }
     }
-    state.lock().unwrap().conns.remove(&n);
+    let s = &mut *state.lock().unwrap();
+    s.conns.remove(&n);
+    // The app quit or crashed, so nobody is looking at the studio (#555).
+    if app {
+        let _ = std::fs::remove_file(&s.presence);
+    }
 }
 
 fn spawn(
@@ -466,19 +525,22 @@ fn session(all: &[Proc], sid: u32) -> Vec<&Proc> {
 
 fn list(state: &Shared) -> Value {
     // Read under the lock; `ps` runs after it, so output keeps flowing meanwhile.
-    let terms: Vec<(Value, Option<u32>, Option<u32>)> = {
+    let (terms, record) = {
         let s = state.lock().unwrap();
-        // The record follows the shells' folders too; `stop` lists just before it stops the daemon.
-        s.save();
-        s.terms
+        let rows: Vec<(Value, Option<u32>, Option<u32>)> = s
+            .terms
             .iter()
             .map(|(id, t)| {
-                let row = json!({ "id": id, "argv": t.argv, "cwd": t.cwd(), "pid": t.pty.pid, "exited": t.exited,
+                let mut row = json!({ "id": id, "argv": t.argv, "cwd": t.cwd(), "pid": t.pty.pid, "exited": t.exited,
                                   "cols": t.cols, "rows": t.rows, "scrollback_bytes": t.buf.len() });
+                t.status.fields(&mut row);
                 (row, t.pty.pid, t.pty.master.process_group_leader().map(|p| p as u32))
             })
-            .collect()
+            .collect();
+        // The record follows the shells' folders too; `stop` lists just before it stops the daemon.
+        (rows, s.save())
     };
+    record.write();
     let all = processes();
     let me = std::process::id();
     let terms: Vec<Value> = terms

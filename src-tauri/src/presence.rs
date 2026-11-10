@@ -9,7 +9,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// `present` in the studio's data folder.
+/// `present` in the studio's data folder, the one `studio_terminal_daemon::presence` names.
 pub fn path() -> Option<PathBuf> {
     Some(studio_hook::data_dir(&std::env::home_dir()?).join("present"))
 }
@@ -53,5 +53,14 @@ mod tests {
         // At start, with no file left, deleting it is no error.
         set(&path, false);
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn the_daemon_deletes_this_same_file() {
+        let socket = studio_terminal_daemon::default_socket();
+        assert_eq!(
+            super::path(),
+            Some(studio_terminal_daemon::presence(&socket))
+        );
     }
 }
