@@ -23,7 +23,8 @@ It writes every output to `local-evidence/2026-11-09-round-5/real-calls-<time>/`
 - [ ] **#518:** one card written by the app itself, with no plugin footer.
 - [ ] **#519:** a session row and the rail show `context N%` with the same number as Claude's status line, and the hover reads "… tokens used · Claude's status line shows this as M% left".
 - [ ] **#520:** a finished turn's intention is its final reply's first line, not a footer.
-- [ ] **#521:** in a session the studio started, Daniel's status line looks the same, and the top bar's usage updates. Then remove the #481 line from `~/.claude/statusline-command.sh`, with Daniel's approval, and check the top bar still updates.
+- [ ] **#521:** in a session the studio started, `--settings` wins over the `statusLine` in `~/.claude/settings.json`: `ps -o args= -p <claude pid>` shows `--settings` with `workbench/statusline.sh`, and the session's `usage/<session_id>.json` updates. Daniel's status line looks the same, padding included (the wrapper's `--settings` sets no `padding`). If `--settings` does not win, stop and report on #521; that reopens decision 5.
+- [ ] **#521:** then remove the #481 line (the one in `apps/studio/workbench/statusline-usage.sh`) from `~/.claude/statusline-command.sh`, with Daniel's approval, and check the top bar's usage still updates from a studio-started session.
 - [ ] **#522:** a real "your turn" notification while Daniel is in another app, in a screenshot in the PR. (No orange text: #565, decision 1, dropped it.)
 - [ ] **#522:** with Remote Control on (Daniel's own `remoteControlAtStartup`), in a session the studio started: no phone push while the studio is focused, and a push while it is in the background. `~/Library/Application Support/dev.falinks.studio/present` exists only while the window is focused.
 - [ ] **#522:** a turn driven from the phone still sends hook events: its row and card update in the studio. If it fails, report it on #522.

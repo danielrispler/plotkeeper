@@ -75,11 +75,22 @@ pub fn claude(plugin: &Path, presence: &Path, resume: Option<&str>) -> Vec<Strin
         format!("CLAUDE_CODE_PLUGIN_DIRS={}", plugin.display()),
         format!("CLAUDE_CLIENT_PRESENCE_FILE={}", presence.display()),
         "claude".into(),
+        "--settings".into(),
+        status_line(plugin),
     ];
     if let Some(id) = resume {
         argv.extend(["--resume".into(), id.into()]);
     }
     argv
+}
+
+/// `--settings` that make the session's status line the studio's wrapper, `workbench/statusline.sh`
+/// beside the plugin (#521; #517, decision 5): it saves the usage snapshot, then runs the user's own
+/// status line. The path is single-quoted, as Claude Code runs the command in a shell.
+fn status_line(plugin: &Path) -> String {
+    let wrapper = plugin.with_file_name("workbench").join("statusline.sh");
+    let quoted = format!("'{}'", wrapper.display().to_string().replace('\'', r"'\''"));
+    serde_json::json!({ "statusLine": { "type": "command", "command": quoted } }).to_string()
 }
 
 /// The plan's usage (#481; #461, decision 19): the `rate_limits` of the newest `*.json` snapshot in
