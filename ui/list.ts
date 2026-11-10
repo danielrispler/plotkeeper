@@ -2,9 +2,10 @@
 // nested under it. When the window is narrow it collapses to a strip of state dots and issue numbers,
 // which opens the full list on click or ⌘1.
 
-import { age, element, prose, pressable, stepText, text } from "./dom.js";
-import { counts, times } from "./times.js";
-import { select } from "./selection.js";
+import { age, element, patch, prose, pressable, stepText, text } from "./dom.js";
+import { counts, times, type Time } from "./times.js";
+import { shortPaths } from "./paths.js";
+import { isSelected, select } from "./selection.js";
 import { studio } from "./state.js";
 import { stateLabels, type Context, type Session, type SessionState, type Subagent } from "./types.js";
 
@@ -62,7 +63,7 @@ function dot(state: string): HTMLElement {
 // A session's subagents by the id of the agent that spawned them: "session", "unattached" or a
 // subagent's id. Built once per draw, so the tree and the "done" counts do not scan every subagent.
 type Children = Map<string, Subagent[]>;
-function childrenOf(session: Session): Children {
+export function childrenOf(session: Pick<Session, "agents">): Children {
   const children: Children = new Map();
   for (const agent of session.agents) {
     const parent = typeof agent.parent === "string" ? agent.parent : agent.parent.agent;
@@ -73,13 +74,14 @@ function childrenOf(session: Session): Children {
 }
 
 // Whether a subagent's line is not drawn: it faded, and nothing below it is drawn (#434, decision 43).
-function hidden(children: Children, agent: Subagent): boolean {
+export function hidden(children: Children, agent: Subagent): boolean {
   return agent.faded && (children.get(agent.id) ?? []).every((child) => hidden(children, child));
 }
 
-// The count of a parent's helpers that faded into its line.
+// The count of a parent's subagents that faded into its line, workers as helpers (#535).
+export const doneCount = (all: Children, children: Subagent[] = []) => children.filter((agent) => hidden(all, agent)).length;
 function done(all: Children, children: Subagent[] = []): HTMLElement[] {
-  const faded = children.filter((agent) => hidden(all, agent)).length;
+  const faded = doneCount(all, children);
   return faded ? [text("span", `${faded} done`, "id")] : [];
 }
 
@@ -95,12 +97,19 @@ function rowLines(button: HTMLElement, state: string, label: string, name: HTMLE
   return stateNode;
 }
 
+// A row's button, keyed by what it selects (`patch` keeps it across updates). It selects on the press,
+// so the row shows selected at once (#570); a click without a pointer, from the keyboard, selects too.
+function selecting(id: string, agent: string | null, key = `${id} ${agent ?? ""}`): HTMLButtonElement {
+  const button = pressable(document.createElement("button"), isSelected(id, agent), (event: MouseEvent) => event.detail === 0 && select(id, agent));
+  button.dataset.key = key;
+  button.addEventListener("pointerdown", (event) => event.button === 0 && select(id, agent));
+  return button;
+}
+
 // One row: the session's name, its context share, its state and what it is doing.
 function row(session: Session, children: Children): HTMLElement {
-  const selection = studio.selection;
-  const pressed = session.id === selection?.session.id && selection.agent === null;
-  const button = pressable(document.createElement("button"), pressed, () => select(session.id));
-  button.className = "row";
+  const button = selecting(session.id, null);
+  button.classList.add("row");
   rowLines(
     button,
     session.state,
@@ -108,19 +117,41 @@ function row(session: Session, children: Children): HTMLElement {
     [Object.assign(text("span", sessionName(session), "name"), { title: sessionName(session) }), contextNode(session.transcript.context)],
     [...done(children, children.get("session")), rowLine(session.line ?? "")],
   );
-  // The row keeps the turn time; the rail has all three (#517, decision 4).
-  const turn = times(session, null)[1];
+  const turn = rowTime(session, isSelected(session.id));
   const l3 = text("span", "", "l3");
   button.append(turn ? Object.assign(counts(l3, turn[1]), { title: turn[0] }) : l3);
   return button;
 }
 
+// The row's clock: the turn time, only on the row being looked at; the rail has all three (#517,
+// decision 4; #571).
+export function rowTime(session: Pick<Session, "state" | "started_at" | "last_event_at" | "turn_span">, selected: boolean): Time | null {
+  return (selected && session.turn_span && times(session, null)[1]) || null;
+}
+
+// A row line as plain text (#571): Markdown's emphasis, headings and links dropped outside code spans.
+export function plain(line: string): string {
+  return line
+    .split("`")
+    .map((part, i) => (i % 2 ? part : part.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(i ? /\*\*|__/g : /\*\*|__|^#{1,6}\s+/g, "")))
+    .join("`");
+}
+
+// A row line as shown, and its hover title: the original line whenever a link's URL or a long path's
+// start is dropped, so the full line stays reachable (#571); else "".
+export function rowText(line: string): [shown: string, title: string] {
+  const [shown, full] = shortPaths(plain(line));
+  return [shown, full || /\]\([^)]*\)/.test(line) ? line : ""];
+}
+
 // A row's line, such as a card summary stored in Hebrew, laid out by its own direction, its code spans
-// cleaned as a card's are (#434, decision 40).
+// cleaned as a card's are (#434, decision 40), its paths shortened with the full line on hover (#571).
 function rowLine(line: string): HTMLElement {
-  const node = prose("span", line);
+  const [shown, full] = rowText(line);
+  const node = prose("span", shown);
   node.className = "row-step";
   node.dir = "auto";
+  if (full) node.title = full;
   return node;
 }
 
@@ -128,11 +159,9 @@ function rowLine(line: string): HTMLElement {
 // last step; a helper its task, type, status, duration and result. A failed child stands out until
 // Daniel opens it.
 function agentRow(session: Session, children: Children, agent: Subagent, depth: number): HTMLElement {
-  const button = pressable(document.createElement("button"), agent.id === studio.selection?.agent, () =>
-    select(session.id, agent.id),
-  );
-  button.className = `row ${agent.kind}`;
-  button.style.paddingInlineStart = `${8 + 14 * depth}px`;
+  const button = selecting(session.id, agent.id);
+  button.classList.add("row", agent.kind);
+  button.style.paddingInlineStart = `calc(var(--sp-4) + var(--indent) * ${depth})`;
   const [label, stateName] = agentState(session, agent);
   const details =
     agent.kind === "worker"
@@ -150,7 +179,7 @@ function agentRow(session: Session, children: Children, agent: Subagent, depth: 
 }
 
 // A session's row, then its subagents under the agent that spawned them, at any depth, and those
-// with no known spawn under "Unattached". A faded helper is not drawn, and its parent's line counts
+// with no known spawn under "Unattached". A faded subagent is not drawn, and its parent's line counts
 // it, unless anything below it is drawn: then it keeps its line, so its children stay under it.
 function tree(session: Session): HTMLElement[] {
   const children = childrenOf(session);
@@ -175,8 +204,8 @@ function strip(sessions: Session[]): HTMLElement[] {
   return [
     open,
     ...shown.map((session) => {
-      const pressed = session.id === studio.selection?.session.id;
-      const button = pressable(document.createElement("button"), pressed, () => select(session.id));
+      const button = selecting(session.id, null, `strip ${session.id}`);
+      button.setAttribute("aria-pressed", String(isSelected(session.id)));
       button.title = `${sessionName(session)} · ${stateLabels[session.state]}`;
       const issue = session.identity.issue;
       button.append(dot(session.state), issue === null ? stripLabel(session.folder_name) : String(issue));
@@ -196,22 +225,24 @@ export function showSessions(sessions: Session[]) {
     if (last?.[0].state === session.state) last.push(session);
     else groups.push([session]);
   }
-  element("groups").replaceChildren(
-    ...groups.map((rows) => {
+  // Patched, not rebuilt, so focus and text selection survive the update (#570).
+  patch(element("groups"), groups.map((rows) => {
       const state = rows[0].state;
       const title = `${stateLabels[state]} · ${rows.length}`;
       if (!collapsed.includes(state)) {
         const group = document.createElement("section");
+        group.dataset.key = state;
         group.append(text("h1", title), ...rows.flatMap(tree));
         return group;
       }
       const group = document.createElement("details");
+      group.dataset.key = state;
       group.open = opened.has(state);
       group.addEventListener("toggle", () => (group.open ? opened.add(state) : opened.delete(state)));
       group.append(text("summary", title), ...rows.flatMap(tree));
       return group;
     }),
   );
-  element("strip").replaceChildren(...strip(sessions));
+  patch(element("strip"), strip(sessions));
   element("no-sessions").hidden = sessions.length > 0;
 }

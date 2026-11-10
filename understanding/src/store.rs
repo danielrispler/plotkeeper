@@ -208,6 +208,8 @@ pub struct CardStore {
     decisions: BTreeMap<String, Vec<Decision>>,
     /// The turn summaries, oldest first, in `summaries.json` beside the cards (#526).
     summaries: Vec<StoredSummary>,
+    /// The subagent summaries, by subagent id, in `agent-summaries.json` beside the cards (#535).
+    agent_summaries: BTreeMap<String, String>,
     /// Rises on every change, briefs included, so the shell sends the cards only when it moves.
     revision: u64,
 }
@@ -230,6 +232,9 @@ impl CardStore {
         let facts = read(&path.with_file_name("live-facts.json"))?;
         let decisions = read(&path.with_file_name("decisions.json"))?;
         let summaries = read(&path.with_file_name("summaries.json"))?;
+        // A cache: a corrupt file costs the summaries again, never the studio's start.
+        let agent_summaries =
+            read(&path.with_file_name("agent-summaries.json")).unwrap_or_default();
         Ok(CardStore {
             path,
             cards,
@@ -237,6 +242,7 @@ impl CardStore {
             facts,
             decisions,
             summaries,
+            agent_summaries,
             revision: 0,
         })
     }
@@ -512,6 +518,20 @@ impl CardStore {
     /// The summary of turn `id` (`SummaryRequest::id`), when it was written.
     pub fn turn_summary(&self, id: &str) -> Option<&StoredSummary> {
         self.summaries.iter().find(|kept| kept.request.id == id)
+    }
+
+    /// Keeps `summary` of subagent `id`, and saves the subagent summaries.
+    pub fn add_agent_summary(&mut self, id: &str, summary: &str) -> io::Result<()> {
+        self.agent_summaries.insert(id.into(), summary.into());
+        write(
+            &self.path.with_file_name("agent-summaries.json"),
+            &self.agent_summaries,
+        )
+    }
+
+    /// The summary of subagent `id`, when it was written.
+    pub fn agent_summary(&self, id: &str) -> Option<&str> {
+        self.agent_summaries.get(id).map(String::as_str)
     }
 
     /// Session `session`'s latest `n` summaries, oldest first.

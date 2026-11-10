@@ -25,6 +25,16 @@ export function worktreeOf(cwd: string): string | null {
   return cwd.match(/^(.*\/\.claude\/worktrees\/[^/]+)/)?.[1] ?? null;
 }
 
+// A path's last 2 segments, such as `scratchpad/map266.md` (#571); the full path goes on hover.
+export const shortPath = (p: string) => p.split("/").filter(Boolean).slice(-2).join("/");
+
+// `line` with each path of more than 2 segments shortened, and the full line for its hover, or "" when
+// nothing was shortened.
+export function shortPaths(line: string): [shown: string, title: string] {
+  const shown = line.replace(path, (p) => (p.split("/").filter(Boolean).length > 2 ? shortPath(p) : p));
+  return [shown, shown === line ? "" : line];
+}
+
 export type FileTarget = { path: string; line: number; column: number };
 
 // The file a link's text names, at its line and column (1 when none): a path with a line suffix, or

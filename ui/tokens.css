@@ -1,0 +1,38 @@
+/* The tokens (#566): every size, spacing step, colour and motion the window uses. style.css uses only
+   these; `ui/tests/frame.test.mjs` greps it for raw values. The start is the #463 pick, mockup C; the
+   frame, fills and edges follow herdr's derived greys. Colour only for "needs you" (#565, decision 1). */
+:root {
+  /* Colour. The frame (top bar, list, rail) is darkest; the terminal is the stage, a step lighter; the
+     surfaces hold cards and pop-overs. */
+  --chrome: #0e0f11; --term-bg: #161719; --term-fg: #d4d2cc;
+  --bg: #161719; --surface: #1d1e21; --raised: #24262a;
+  --fg: #e7e5df; --muted: #a09d95; --faint: #6f6c66;
+  /* Fills tell sections apart; a line stays only where it means something. */
+  --hover: #ffffff0e; --selected: #ffffff17; --pressed: #ffffff21; --edge: #ffffff17; --line: #31343a;
+  --focus: #8b887f;
+  --needs-you: #ff8f5e; --needs-you-bg: #3a2318; --needs-you-line: #6b3a24;
+  --shadow: 0 8px 24px #0008; --shadow-start: -8px 0 24px #0008; --shadow-end: 8px 0 24px #0008; --backdrop: #0008;
+
+  /* Type: five sizes. */
+  --font: -apple-system, system-ui, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --size-xs: 11.5px; --size-small: 12.5px; --size: 14px; --size-read: 15.5px; --size-large: 16.5px;
+  --size-mono: var(--size-small); --term-size: var(--size-mono); --term-line: 1.5;
+
+  /* Spacing steps. */
+  --sp-1: 2px; --sp-2: 4px; --sp-3: 6px; --sp-4: 8px; --sp-5: 12px; --sp-6: 16px; --sp-7: 24px;
+  --indent: 14px;
+
+  /* Lines, radii and motion. */
+  --hair: 1px; --mark: 2px; --halo: 3px;
+  --radius-small: 4px; --radius: 6px; --radius-pane: 10px;
+  --motion: 120ms ease-out;
+  --scrollbar: 8px;
+
+  /* The window's parts. The list's, strip's and rail's widths are layout.ts's too. */
+  --list: 248px; --strip: 48px; --rail: 520px; --bar: 34px; --term-head: 26px;
+  /* The space the hidden title bar's traffic lights keep at the top bar's start. */
+  --lights: 78px;
+  --divider: 6px; --strip-button: 40px; --dot: 7px;
+  --popover: 380px; --dialog: 560px; --find: 220px; --outcome: 52px;
+}

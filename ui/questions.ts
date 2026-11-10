@@ -116,7 +116,7 @@ function answerButtons(ask: Ask, buttons: [string, () => void, string?][]): HTML
   const row = document.createElement("p");
   row.className = "answer-buttons";
   const button = (label: string, click: () => void, className = "") => {
-    const node = text("button", label, className) as HTMLButtonElement;
+    const node = text("button", label, `btn ${className}`.trim()) as HTMLButtonElement;
     node.type = "button";
     node.addEventListener("click", click);
     return node;

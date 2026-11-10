@@ -48,6 +48,8 @@ export function openPane(place: HTMLElement, id: string, cwd: string, argv: stri
   term.loadAddon(search);
   term.loadAddon(new Unicode11Addon.Unicode11Addon());
   term.unicode.activeVersion = "11";
+  // Invisible until the first replay is written and fitted, so it never shows at the old size (#570).
+  place.classList.add("fitting");
   term.open(place);
   try {
     const webgl = new WebglAddon.WebglAddon();
@@ -77,7 +79,10 @@ export function openPane(place: HTMLElement, id: string, cwd: string, argv: stri
     const forget = was === "exited" ? request({ op: "forget", id }) : Promise.resolve();
     forget.then(start).catch((e) => note(`${e}`));
   }
-  const note = (text: string) => term.write(`\r\n\x1b[2m[${text}]\x1b[0m\r\n`);
+  const note = (text: string) => {
+    place.classList.remove("fitting");
+    term.write(`\r\n\x1b[2m[${text}]\x1b[0m\r\n`);
+  };
   const exited = (status: string) =>
     note(argv.length ? `claude exited: ${status}; Open in the story starts it again` : `exited: ${status}; press a key for a new shell`);
   const input = (data: string) => {
@@ -106,6 +111,7 @@ export function openPane(place: HTMLElement, id: string, cwd: string, argv: stri
       term.write(decode(event.data ?? ""), () => {
         quiet = false;
         fit.fit();
+        place.classList.remove("fitting");
       });
       if (event.exited) exited(event.exited);
     } else if (event.ev === "output") {
@@ -203,7 +209,7 @@ export function openPane(place: HTMLElement, id: string, cwd: string, argv: stri
   });
   // A file dropped on the window types its path into the visible pane.
   const drops = listen<{ paths: string[] }>("tauri://drag-drop", ({ paths }) => {
-    if (place.offsetParent === null) return;
+    if (place.hidden || place.offsetParent === null) return;
     keys(paths.map(quotePath).join(" ") + " ");
     term.focus();
   });

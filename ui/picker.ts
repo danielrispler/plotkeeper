@@ -8,6 +8,7 @@
 
 import { element, invoke, pressable, text } from "./dom.js";
 import { startClaude } from "./panes.js";
+import { shortPath } from "./paths.js";
 import type { Losses, Place, Places } from "./types.js";
 
 // Git's error, or any other, at the picker's foot.
@@ -25,7 +26,7 @@ function newTask(placeholder: string, label: string, create: (value: string) => 
   field.placeholder = placeholder;
   field.setAttribute("aria-label", placeholder);
   field.spellcheck = false;
-  const button = text("button", label);
+  const button = text("button", label, "btn");
   form.append(field, button);
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -105,10 +106,10 @@ function placeRow(name: string, place: Place): HTMLElement {
     element("picker").hidden = true;
     startClaude(place.path).catch((e) => console.warn(e));
   });
-  button.className = "row";
+  button.classList.add("row");
   const first = text("span", "", "l1");
   first.append(text("span", name, "name"));
-  const second = text("span", place.path, "l2");
+  const second = Object.assign(text("span", shortPath(place.path), "l2"), { title: place.path }); // #571
   button.append(first, second);
   return button;
 }
@@ -130,13 +131,13 @@ function picked({ main, tasks, hidden }: Places): HTMLElement[] {
 // Opens the picker, or closes it when open.
 export async function showPicker() {
   const picker = element("picker");
-  picker.hidden = !picker.hidden;
-  if (picker.hidden) return;
-  picker.replaceChildren(text("p", "Reading worktrees…", "empty"));
+  if (!picker.hidden) return void (picker.hidden = true);
+  // It opens once its rows are read, so no placeholder flashes first in another box (#570).
   try {
     picker.replaceChildren(...picked(await invoke<Places>("places")));
-    picker.querySelector("input")?.focus();
   } catch (e) {
     picker.replaceChildren(text("p", `No worktrees: ${e}`, "empty"));
   }
+  picker.hidden = false;
+  picker.querySelector("input")?.focus();
 }

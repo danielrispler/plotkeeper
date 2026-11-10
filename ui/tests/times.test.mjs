@@ -22,12 +22,12 @@ test("a running check shows its time against its typical time; an ended one how 
 // Each time as its text at `now` and its hover.
 const drawn = (parts, now) => parts.map(([title, draw]) => [draw(now), title]);
 
-test("the times count running spans to now, each labelled with hover text, and stop an ended session at its last event", () => {
+test("the times count running spans to now, each labelled with hover text, empty in their first minute, and stop an ended session at its last event", () => {
   const session = { state: "running", started_at: 0, last_event_at: 30 * MIN, turn_span: { start: 50 * MIN, end: null } };
   assert.deepEqual(drawn(times(session, { start: 61 * MIN, end: null }), 61 * MIN + 45_000), [
     ["Session 1h 01m", "Time since the session started"],
     ["Turn 11m", "Time on the current prompt"],
-    ["Step 45s", "Time on the current step"],
+    ["", "Time on the current step"],
   ]);
   const ended = { ...session, state: "ended", turn_span: { start: 10 * MIN, end: 20 * MIN } };
   assert.deepEqual(drawn(times(ended, null), 999 * MIN), [
@@ -36,14 +36,14 @@ test("the times count running spans to now, each labelled with hover text, and s
   ]);
 });
 
-test("the estimate line names the phase, then a range marked as an estimate, no estimate, or depends on you in place of a time", () => {
+test("the estimate line names the phase, then a range marked as an estimate, nothing, or depends on you in place of a time", () => {
   const work = (phase, range, depends_on_you = false) => ({
     phases: phase ? [{ phase, at: 0, agent_ms: 0 }] : [],
     estimate: { range, depends_on_you },
   });
   assert.equal(estimateText(work(null, null)), "");
   assert.equal(estimateText(work("implementing", [16 * MIN, 29 * MIN])), "Implementing · est. 16m–29m left");
-  assert.equal(estimateText(work("waiting_on_ci", null)), "Waiting on CI · no estimate");
+  assert.equal(estimateText(work("waiting_on_ci", null)), "Waiting on CI");
   assert.equal(estimateText(work("opening_pr", [MIN, 5 * MIN], true)), "Opening the PR · depends on you");
   assert.equal(estimateText(work("orienting", null, true)), "Orienting · depends on you");
   assert.equal(estimateText(work("merged", [0, 0])), "Merged");

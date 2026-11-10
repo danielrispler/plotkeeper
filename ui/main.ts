@@ -135,9 +135,12 @@ document.addEventListener("pointerdown", (event) => {
 
 listen<Session[]>("sessions", showSessions);
 invoke<Session[]>("sessions").then(showSessions);
-listen<Selection | null>("selected", show);
+// While a press waits for its reply, the reply draws the rail once, with its cards; an event between
+// would draw it with the last session's cards for a frame (#570).
+// The press's settling fetches what it held back.
+listen<Selection | null>("selected", (selected) => (studio.pending ? (studio.missed = true) : show(selected)));
 invoke<Selection | null>("selected").then(show);
-listen<SessionCards>("cards", showCards);
+listen<SessionCards>("cards", (cards) => (studio.pending ? (studio.missed = true) : showCards(cards)));
 // Claude Code's version changed: re-record the subagent fixture.
 listen<string>("notice", (notice) => {
   element("notice").textContent = notice;

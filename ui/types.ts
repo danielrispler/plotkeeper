@@ -40,6 +40,8 @@ export type Subagent = {
   kind: "worker" | "helper";
   // Its spawn's description, else its short id: the core's one name for it.
   name: string;
+  // The first line of its spawn's prompt, which the rail's history shows under its name (#535).
+  asked: string | null;
   agent_type: string | null;
   // "running", then its wake-up's status, such as "completed" or "killed".
   status: string;

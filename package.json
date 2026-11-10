@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc && cp ui/index.html ui/style.css dist/ && mkdir -p dist/vendor && cp node_modules/@xterm/xterm/lib/xterm.js node_modules/@xterm/xterm/css/xterm.css node_modules/@xterm/addon-fit/lib/addon-fit.js node_modules/@xterm/addon-unicode11/lib/addon-unicode11.js node_modules/@xterm/addon-webgl/lib/addon-webgl.js node_modules/@xterm/addon-search/lib/addon-search.js node_modules/@xterm/addon-web-links/lib/addon-web-links.js node_modules/marked/lib/marked.umd.js dist/vendor/",
+    "build": "tsc && cp ui/index.html ui/tokens.css ui/style.css dist/ && mkdir -p dist/vendor && cp node_modules/@xterm/xterm/lib/xterm.js node_modules/@xterm/xterm/css/xterm.css node_modules/@xterm/addon-fit/lib/addon-fit.js node_modules/@xterm/addon-unicode11/lib/addon-unicode11.js node_modules/@xterm/addon-webgl/lib/addon-webgl.js node_modules/@xterm/addon-search/lib/addon-search.js node_modules/@xterm/addon-web-links/lib/addon-web-links.js node_modules/marked/lib/marked.umd.js dist/vendor/",
     "tauri": "tauri",
     "start": "tauri build && open target/release/bundle/macos/Studio.app",
     "test": "tsc && node --test terminal-daemon/tests/replay.test.mjs ui/tests/*.test.mjs",

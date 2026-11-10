@@ -24,6 +24,9 @@ pub struct Studio {
     selected: Option<String>,
     /// The subagent of it whose line he opened since, whose own view shows instead.
     viewed: Option<String>,
+    /// The studio terminal of a session Daniel started, which is selected when its first event
+    /// names that terminal (#567).
+    awaiting: Option<String>,
     /// The shell's latest tick, in Unix milliseconds.
     now: u64,
     roots: Roots,
@@ -415,6 +418,9 @@ pub struct Subagent {
     pub ended_at: Option<u64>,
     /// The first line of its last message, from its `SubagentStop`.
     pub result: Option<String>,
+    /// Its whole last message, which its summary reads (#535); the pane never shows it.
+    #[serde(skip)]
+    pub message: String,
     /// Daniel opened its line after it failed (#434, decision 39).
     pub opened: bool,
     /// The folder of its first event that has one: its worktree, or its parent's folder.
@@ -509,11 +515,11 @@ impl Subagent {
         matches!(self.status, Status::Ended(_))
     }
 
-    /// A helper that succeeded, or one that failed and Daniel opened, folds into its parent's line
-    /// (#369, story 18). A failed child stays visible until he opens it.
+    /// A subagent that succeeded, or one that failed and Daniel opened, folds into its parent's line
+    /// (#369, story 18), a worker as a helper does (#535). A failed child stays visible until he
+    /// opens it.
     pub fn faded(&self) -> bool {
-        let succeeded = self.status == Status::Completed;
-        self.kind == Kind::Helper && (succeeded || self.failed() && self.opened)
+        self.status == Status::Completed || self.failed() && self.opened
     }
 }
 
@@ -553,7 +559,8 @@ impl Serialize for Status {
     }
 }
 
-/// Each subagent with its computed `failed` and `faded`, which the pane reads.
+/// Each subagent with its computed `failed` and `faded`, and its prompt's first line, `asked`, which
+/// the rail's history shows under its name (#535).
 fn serialize_agents<S: serde::Serializer>(
     agents: &[Subagent],
     serializer: S,
@@ -564,11 +571,13 @@ fn serialize_agents<S: serde::Serializer>(
         agent: &'a Subagent,
         failed: bool,
         faded: bool,
+        asked: Option<&'a str>,
     }
     let wire = agents.iter().map(|agent| Wire {
         agent,
         failed: agent.failed(),
         faded: agent.faded(),
+        asked: agent.prompt.lines().map(str::trim).find(|l| !l.is_empty()),
     });
     serializer.collect_seq(wire)
 }
@@ -780,6 +789,7 @@ impl Session {
                 "SubagentStop" => {
                     let mut lines = event.last_assistant_message.lines().map(str::trim);
                     agent.result = lines.find(|line| !line.is_empty()).map(Into::into);
+                    agent.message = event.last_assistant_message.clone();
                     agent.end(None, at);
                 }
                 _ => {}
@@ -1719,7 +1729,8 @@ impl Studio {
     }
 
     /// The row `event` belongs to: its session's, or for a start from `/clear`, the cleared session's
-    /// on the same terminal, or in the same folder outside studio terminals (#461, decision 18).
+    /// on the same terminal, or in the same folder outside studio terminals (#461, decision 18); for a
+    /// start from a fork, the live session with a prompt on the same terminal (#562).
     // shortcut: a start that lands before its clear's `SessionEnd` makes a new row; match both ways
     // if the async hooks show it.
     fn row(&self, event: &Event) -> String {
@@ -1734,6 +1745,18 @@ impl Studio {
             };
             let cleared = self.sessions.values().filter(|s| s.clearing).filter(same);
             if let Some(s) = cleared.max_by_key(|s| s.agent.last_event_at) {
+                return s.agent.id.clone();
+            }
+        }
+        // A fork mid-conversation goes on in the same `claude`, so on the same terminal (#562).
+        if fresh && event.hook_event_name == "SessionStart" && event.source == "fork" {
+            let forked = self.sessions.values().filter(|s| {
+                s.terminal.is_some()
+                    && s.terminal == event.studio_terminal_id
+                    && !s.ended
+                    && !s.prompts.is_empty()
+            });
+            if let Some(s) = forked.max_by_key(|s| s.agent.last_event_at) {
                 return s.agent.id.clone();
             }
         }
@@ -1967,6 +1990,24 @@ impl Studio {
         if event.session_id != own_id {
             self.rows.insert(own_id.clone(), event.session_id.clone());
         }
+        // A resume or fork in a `claude` replaces the id it started under, which had no prompt (#562).
+        if event.hook_event_name == "SessionStart"
+            && ["resume", "fork"].contains(&event.source.as_str())
+            && event.studio_terminal_id.is_some()
+        {
+            let throwaway = |s: &&mut Session| {
+                s.agent.id != event.session_id
+                    && s.terminal == event.studio_terminal_id
+                    && s.prompts.is_empty()
+            };
+            for s in self.sessions.values_mut().filter(throwaway) {
+                s.deleted = true;
+                // Daniel's new terminal selected the throwaway id; its replacement keeps the selection.
+                if self.selected.as_deref() == Some(&s.agent.id) {
+                    self.selected = Some(event.session_id.clone());
+                }
+            }
+        }
         // A rename names a known session and is none of its events.
         if event.hook_event_name == RENAME {
             if let Some(session) = self.sessions.get_mut(&event.session_id) {
@@ -2011,11 +2052,20 @@ impl Studio {
         session.agent.last_event_at = session.agent.last_event_at.max(event.studio_received_ms);
         // Every event of a `claude` process carries its terminal, so a resume elsewhere moves it.
         session.terminal.clone_from(&event.studio_terminal_id);
+        // The session Daniel started in a new terminal takes the selection, so the rail follows its pane.
+        if self.awaiting.is_some() && session.terminal == self.awaiting {
+            self.awaiting = None;
+            self.selected = Some(event.session_id.clone());
+            self.viewed = None;
+        }
         let working = session.state == State::Running;
         session.work.passes(event.studio_received_ms, working);
         let phases_before = session.work.phases.len();
-        session.resume_id = own_id;
-        if continues {
+        // The old id of a fork goes on sending late events, but the fork is what `--resume` takes.
+        if session.resume_id.is_empty() || event.hook_event_name == "SessionStart" {
+            session.resume_id = own_id.clone();
+        }
+        if continues && event.source == "clear" {
             session.cleared.push(event.studio_received_ms);
         }
         let failed_before = session.failed_workers();
@@ -2050,6 +2100,7 @@ impl Studio {
         }
         // A resume or `/clear` may move it to another transcript, read from its start.
         if own
+            && own_id == session.resume_id
             && !event.transcript_path.is_empty()
             && session.transcript_file.path != event.transcript_path
         {
@@ -2829,10 +2880,20 @@ impl Studio {
         sessions
     }
 
-    /// Daniel clicked session `id`'s row, whose own view shows. Nothing else changes the selection.
+    /// Daniel clicked session `id`'s row, whose own view shows. Only this and a session he starts
+    /// (`select_terminal`) change the selection.
     pub fn select(&mut self, id: &str) {
         self.selected = Some(id.into());
         self.viewed = None;
+        self.awaiting = None;
+    }
+
+    /// Daniel started a session in studio terminal `terminal`: nothing is selected until its first
+    /// event names that terminal, and then it is (#567). The pane and the rail never show two sessions.
+    pub fn select_terminal(&mut self, terminal: &str) {
+        self.selected = None;
+        self.viewed = None;
+        self.awaiting = Some(terminal.into());
     }
 
     /// Daniel opened subagent `id`'s line, so its view shows, with its own cards and brief, and a

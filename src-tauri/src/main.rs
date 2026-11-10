@@ -28,7 +28,7 @@ use studio_core::{
 use studio_understanding::{
     CardStore, CardWriter, ClaudeWriter, FakeWriter, Fingerprints, Rating, Row, SessionCards,
     StoredSummary, SummarySetup, Versions, backfilled, fingerprint_changes, millis, worktree_root,
-    write_brief, write_stop, write_summary,
+    write_agent_summary, write_brief, write_stop, write_summary,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
@@ -88,6 +88,32 @@ fn turn_summary(
     cards.lock().unwrap().turn_summary(&id).cloned()
 }
 
+/// Daniel opened subagent `agent_id` (#535): the summary of its purpose and result, written now
+/// when it has none and has ended, which takes seconds, so the command runs off the main thread.
+/// `None` while it runs or when the call failed, and the rail keeps its first line.
+#[tauri::command(async)]
+fn agent_summary(
+    agent_id: String,
+    studio: State<Mutex<Studio>>,
+    cards: State<Cards>,
+    summaries: State<Summaries>,
+    writer: State<Writer>,
+) -> Option<String> {
+    let (prompt, message) = {
+        let studio = studio.lock().unwrap();
+        let mut agents = studio.sessions().into_iter().flat_map(|s| &s.agents);
+        let agent = agents.find(|a| a.agent.id == agent_id && a.ended_at.is_some())?;
+        (agent.prompt.clone(), agent.message.clone())
+    };
+    // A subagent that ended without a last message (killed, or its session ended) has no result to sum up.
+    if message.is_empty() {
+        return None;
+    }
+    let setup = summaries.setup.lock().unwrap().clone();
+    let log = |line: String| eprintln!("studio: {line}");
+    write_agent_summary(&cards, &**writer, &setup, &agent_id, &prompt, &message, log)
+}
+
 /// The session list, in its order.
 #[tauri::command]
 fn sessions(studio: State<Mutex<Studio>>, cards: State<Cards>) -> Vec<Row> {
@@ -108,6 +134,15 @@ fn sessions(studio: State<Mutex<Studio>>, cards: State<Cards>) -> Vec<Row> {
 fn select(id: String, studio: State<Mutex<Studio>>) -> serde_json::Value {
     let mut studio = studio.lock().unwrap();
     studio.select(&id);
+    selection(&studio)
+}
+
+/// Daniel started a session in studio terminal `terminal`; returns the selection, `null` until the
+/// session's first event names that terminal and selects it (#567).
+#[tauri::command]
+fn select_terminal(terminal: String, studio: State<Mutex<Studio>>) -> serde_json::Value {
+    let mut studio = studio.lock().unwrap();
+    studio.select_terminal(&terminal);
     selection(&studio)
 }
 
@@ -394,6 +429,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             sessions,
             select,
+            select_terminal,
             open,
             selected,
             cards,
@@ -428,6 +464,7 @@ fn main() {
             settings::set_zoom,
             summary_settings,
             turn_summary,
+            agent_summary,
             notify_while_focused
         ])
         .on_window_event(|_, event| {
