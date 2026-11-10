@@ -146,6 +146,43 @@ mod tests {
         );
     }
 
+    /// #569: once the answer hook's request and the `PreToolUse` line are both there, the read loop's
+    /// pass that reads the line, and sets needs you, also carries the request to the window.
+    #[test]
+    fn an_open_question_reaches_the_window_in_the_pass_that_sets_needs_you() {
+        let data = tempfile::tempdir().unwrap();
+        let mut studio = studio_core::Studio::default();
+        let line = |name: &str, at: u64, extra: Value| {
+            let mut line = json!({ "session_id": "s1", "hook_event_name": name, "cwd": "/",
+                "studio_received_ms": at });
+            line.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            line.to_string()
+        };
+        studio.apply(&line("SessionStart", 1_000, json!({ "source": "startup" })));
+        studio.apply(&line(
+            "UserPromptSubmit",
+            2_000,
+            json!({ "prompt": "Plan it.", "prompt_id": "p-1" }),
+        ));
+        let mut watching = Watching::default();
+        watching.watch(data.path(), Some("s1".into()));
+        let input = json!({ "questions": [{ "question": "Which base?", "options": [] }] });
+        let call = json!({ "tool_name": "AskUserQuestion", "tool_use_id": "toolu_ask",
+            "tool_input": input, "prompt_id": "p-1" });
+
+        let ask =
+            json!({ "nonce": "n1", "tool_name": "AskUserQuestion", "tool_use_id": "toolu_ask" });
+        answer::write_private(&answer::ask_file(data.path(), "s1"), &ask).unwrap();
+        studio.apply(&line("PreToolUse", 3_000, call));
+        let sent = watching.pass(data.path(), answer::now_ms());
+
+        let state = studio.session("s1").unwrap().state;
+        assert_eq!(state, studio_core::State::NeedsYou);
+        assert_eq!(sent, Some(ask));
+    }
+
     /// #569: the read loop keeps the heartbeat only while the window shows life, so a frozen window
     /// hands a question to the terminal after `STALE_MS`, not after the hook's whole timeout.
     #[test]
