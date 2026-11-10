@@ -35,6 +35,8 @@ It writes every output to `local-evidence/2026-11-09-round-5/real-calls-<time>/`
 - [ ] **#540:** a reply ending with a question shows "your turn", not "needs you"; a session waiting on its subagents is not in the "Needs you" group.
 - [ ] **#541:** a session started with Auto mode runs in auto mode, and a blocked action still shows "needs you".
 - [ ] **#542:** the docked panel's shell survives an app restart and shows under a #529 split.
+- [ ] **#568:** a turn that only writes a `.DS_Store` (open its folder in Finder) gets no card.
+- [ ] **#569:** a question, a plan and a permission each dock within the read loop's 200 ms, not after up to 1.2 s. Time the worst of a few from the terminal's prompt to the card, and record it beside 1.2 s in the PR. The UX harness (`local-evidence/2026-11-09-ui-ux/measure/`) stubs the shell and has no dock scenario, so it cannot time this.
 
 ## Checked automatically, early
 
