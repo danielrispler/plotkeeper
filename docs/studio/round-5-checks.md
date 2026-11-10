@@ -24,7 +24,8 @@ It writes every output to `local-evidence/2026-11-09-round-5/real-calls-<time>/`
 - [ ] **#518:** one card written by the app itself, with no plugin footer.
 - [ ] **#519:** a session row and the rail show `context N%` with the same number as Claude's status line, and the hover reads "… tokens used · Claude's status line shows this as M% left".
 - [ ] **#520:** a finished turn's intention is its final reply's first line, not a footer.
-- [ ] **#521:** in a session the studio started, Daniel's status line looks the same, and the top bar's usage updates. Then remove the #481 line from `~/.claude/statusline-command.sh`, with Daniel's approval, and check the top bar still updates.
+- [ ] **#521:** in a session the studio started, `--settings` wins over the `statusLine` in `~/.claude/settings.json`: `ps -o args= -p <claude pid>` shows `--settings` with `workbench/statusline.sh`, and the session's `usage/<session_id>.json` updates. Daniel's status line looks the same, padding included (the wrapper's `--settings` sets no `padding`). If `--settings` does not win, stop and report on #521; that reopens decision 5.
+- [ ] **#521:** then remove the #481 line (the one in `apps/studio/workbench/statusline-usage.sh`) from `~/.claude/statusline-command.sh`, with Daniel's approval, and check the top bar's usage still updates from a studio-started session.
 - [ ] **#522:** a real "your turn" notification while Daniel is in another app, and the orange text.
 - [ ] **#523:** the rail header shows the model and effort, such as `claude-opus-5-5 · effort medium`.
 - [ ] **#524:** saving `settings.json` changes zoom and font size live; ⌘=, ⌘- and ⌘0 reach the window and are not taken by a menu.
