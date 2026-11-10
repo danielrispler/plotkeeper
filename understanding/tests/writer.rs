@@ -914,6 +914,37 @@ fn a_reply_whose_options_are_of_similar_length_passes_on_the_first_call() {
 }
 
 #[test]
+fn a_reply_with_no_learning_field_gives_the_summary_alone_and_logs_why() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = summaries(dir.path());
+    let writer = recording(r#"{"summary": "Rewrote the parser."}"#.into());
+    let mut lines = Vec::new();
+
+    let summary = write_summary(&store, &writer, &setup(), turn("s", 1), |l| lines.push(l));
+
+    assert_eq!(summary.unwrap().learning, None);
+    assert_eq!(lines.len(), 1, "only an explicit null is silent: {lines:?}");
+    assert_eq!(writer.inputs.lock().unwrap().len(), 1, "no retry");
+}
+
+#[test]
+fn a_short_key_a_little_longer_than_its_wrong_options_passes_on_the_first_call() {
+    for options in [
+        ["O(n log n)", "O(n)", "O(1)"],
+        ["Yes, it blocks", "No", "Only on Linux"],
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let store = summaries(dir.path());
+        let writer = recording(summary_reply("Rewrote the parser.", options));
+
+        let summary = write_summary(&store, &writer, &setup(), turn("s", 1), |_| {}).unwrap();
+
+        assert!(summary.learning.is_some(), "{options:?}");
+        assert_eq!(writer.inputs.lock().unwrap().len(), 1, "{options:?}");
+    }
+}
+
+#[test]
 fn a_reply_that_marks_the_answer_inside_the_options_has_the_mark_removed() {
     let dir = tempfile::tempdir().unwrap();
     let store = summaries(dir.path());

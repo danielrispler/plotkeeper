@@ -10,6 +10,9 @@ declare const marked: typeof import("marked");
 const entities: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 const escape = (text: string) => text.replace(/[&<>"']/g, (c) => entities[c]);
 
+// Set while a link's text renders, so inline code there is not linked again inside it.
+let inLink = false;
+
 // Built at first use, so modules that import this one load where marked is not (the UI tests).
 const create = () =>
   new marked.Marked({
@@ -17,13 +20,19 @@ const create = () =>
     renderer: {
       html: ({ text, block }) => (block ? `<p>${escape(text)}</p>` : escape(text)),
       image: ({ text }) => escape(text),
-      // Inline code that is a whole file path links to the editor (#581).
+      // Inline code that is a whole file path links to the editor (#581), unless it is a link's text.
       codespan({ text }) {
         const code = `<code>${escape(text)}</code>`;
-        return codePath(text) ? `<a href="${escape(text)}" data-file>${code}</a>` : code;
+        return !inLink && codePath(text) ? `<a href="${escape(text)}" data-file>${code}</a>` : code;
       },
       link({ href, tokens }) {
-        const inner = this.parser.parseInline(tokens);
+        inLink = true;
+        let inner: string;
+        try {
+          inner = this.parser.parseInline(tokens);
+        } finally {
+          inLink = false;
+        }
         if (/^https?:\/\//i.test(href)) return `<a href="${escape(href)}">${inner}</a>`;
         return !href.startsWith("#") && fileTarget(href) ? `<a href="${escape(href)}" data-file>${inner}</a>` : inner;
       },

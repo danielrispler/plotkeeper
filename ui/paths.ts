@@ -4,11 +4,21 @@
 import { invoke } from "./dom.js";
 import { studio } from "./state.js";
 
-// A path with at least one folder, absolute or relative, and an optional line: `:line`, `:line:column`,
-// `:line-end`, `#Lline` or `#Lline-Lend`. It may not start inside a URL or a longer word.
-const path = /(?<![\w:/.~-])(?:~|\.{1,2})?\/?[\w.@+-]+(?:\/[\w.@+-]+)+(?::\d+(?:-\d+|:\d+)?|#L\d+(?:-L\d+)?)?/g;
+// A path's start (home, `.` or `..`, and a root), one of its segments, and its line suffix: `:line`,
+// `:line:column`, `:line-end`, `#Lline` or `#Lline-Lend`, capturing the line and column.
+const start = String.raw`(?:~|\.{1,2})?\/?`;
+const segment = String.raw`[\w.@+-]+`;
+const suffix = String.raw`(?::(\d+)(?:-\d+|:(\d+))?|#L(\d+)(?:-L\d+)?)`;
+// A path with at least one folder, absolute or relative, and an optional line. It may not start inside
+// a URL or a longer word.
+const path = new RegExp(String.raw`(?<![\w:/.~-])${start}${segment}(?:\/${segment})+${suffix}?`, "g");
 // The line suffix of a link's text: a line, then a column after `:`, and any range end ignored.
-const lineSuffix = /(?::(\d+)(?:-\d+|:(\d+))?|#L(\d+)(?:-L\d+)?)$/;
+const lineSuffix = new RegExp(`${suffix}$`);
+// A whole text that is a path, with or without a folder, and its line suffix.
+const wholePath = new RegExp(String.raw`^(${start}${segment}(?:\/${segment})*)(${suffix})?$`);
+// The extensions a bare file name with a line, such as `a.rs:42`, may have; so `example.com:443` and
+// `std.io:3` are not files.
+const sourceExtension = /\.(?:rs|ts|tsx|js|mjs|cjs|go|py|md|json|toml|ya?ml|sh|html|css|txt|lock)$/i;
 
 // The paths in one line of terminal text, with where each starts.
 export function pathLinks(line: string): { text: string; start: number }[] {
@@ -17,15 +27,18 @@ export function pathLinks(line: string): { text: string; start: number }[] {
     .filter((link) => /[A-Za-z]/.test(link.text));
 }
 
-// Whether inline code in a reply is a whole file path (#581): a path with a file extension and either
-// a folder or a line suffix, or with a folder and a line suffix. So `src/a.rs`, `a.rs:42` and
-// `src/Makefile:3` are; `origin/main`, `@types/node`, `std::fs` and `localhost:8080` are not.
+// Whether inline code in a reply is a whole file path (#581): its last segment has a file extension,
+// with no `@`, and either a folder whose first segment is no host name, or a line suffix and a source
+// extension. So `src/a.rs`, `src/a.rs:42` and `a.rs:42` are; `origin/main:3`, `@types/node`,
+// `git@github.com:22`, `example.com/index.html`, `std.io:3` and `localhost:8080` are not.
 export function codePath(text: string): boolean {
-  const m = /^((?:~|\.{1,2})?\/?[\w.@+-]+(?:\/[\w.@+-]+)*)(:\d+(?:-\d+|:\d+)?|#L\d+(?:-L\d+)?)?$/.exec(text);
-  if (!m || !/[A-Za-z]/.test(m[1])) return false;
-  const folder = m[1].includes("/");
-  const extension = /[\w-]\.[A-Za-z]\w*$/.test(m[1]);
-  return extension ? folder || !!m[2] : folder && !!m[2];
+  const m = wholePath.exec(text);
+  if (!m || m[1].includes("@")) return false;
+  const segments = m[1].split("/");
+  const name = segments[segments.length - 1];
+  if (!/[\w-]\.[A-Za-z]\w*$/.test(name)) return false;
+  if (segments.length > 1) return !/^[\w-]+(?:\.[\w-]+)+$/.test(segments[0]);
+  return !!m[2] && sourceExtension.test(name);
 }
 
 // The path as the shell reads it back: as is when safe, else single-quoted.

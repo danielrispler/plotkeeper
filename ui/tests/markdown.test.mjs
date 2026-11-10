@@ -61,3 +61,14 @@ test("inline code stays escaped, linked or not (#581)", () => {
   assert.match(html, /<code>a&lt;b &quot;c&quot; &amp; d<\/code>/);
   assert.doesNotMatch(html, /<a\b/);
 });
+
+test("inline code shaped like a host, a module or a ref stays plain code (#581)", () => {
+  const spans = ["example.com:443", "api.example.com:8080", "git@github.com:22", "Foo.bar:12", "std.io:3", "example.com/index.html", "origin/main:3"];
+  for (const s of spans) assert.doesNotMatch(markdown(`\`${s}\``), /<a\b/, s);
+});
+
+test("inline code inside a Markdown link is not linked again (#581)", () => {
+  const html = markdown("[`src/a.rs`](https://x.com)");
+  assert.equal(html.match(/<a\b/g)?.length, 1, html);
+  assert.match(html, /<a href="https:\/\/x.com"><code>src\/a.rs<\/code><\/a>/);
+});

@@ -1,9 +1,10 @@
 //! The turn summary on real turns (#526): the last `--turns` turns that get a summary (#517,
 //! decision 12) from Daniel's most recent Falinks transcripts in `~/.claude/projects/`, each run
-//! through the real summary call at the settings' defaults (Haiku at its default effort), as the
-//! app runs it. It prints Markdown on standard output: each turn's prompt, summary, learning
-//! section, seconds and `total_cost_usd`. It reads transcripts and no credential file. Run it
-//! outside auto mode, from `apps/studio`:
+//! through `write_summary` at the settings' defaults (Haiku at its default effort), as the app runs
+//! it: with its retry, and a throwaway store in a temporary folder. It prints Markdown on standard
+//! output: each turn's prompt, summary, learning section, any logged problem lines, calls, seconds
+//! and `total_cost_usd`. It reads transcripts and no credential file. Run it outside auto mode,
+//! from `apps/studio`:
 //!
 //! `cargo run -q -p studio-understanding --example summary_trial -- --turns 3`
 
@@ -11,10 +12,61 @@ use std::{
     io::Write,
     path::PathBuf,
     process::Stdio,
+    sync::Mutex,
     time::{Instant, SystemTime},
 };
-use studio_core::{SummaryRequest, wants_summary};
-use studio_understanding::{ClaudeWriter, SummarySetup, TurnSummary};
+use studio_core::{CardRequest, SummaryRequest, wants_summary};
+use studio_understanding::{
+    Card, CardStore, CardWriter, ClaudeWriter, SummarySetup, TurnSummary, write_summary,
+};
+
+/// The real summary call, which also counts its calls and adds up their `total_cost_usd`.
+struct Costed {
+    writer: ClaudeWriter,
+    calls: Mutex<(u32, f64)>,
+}
+
+impl CardWriter for Costed {
+    fn reply(&self, _: &CardRequest, _: &[String], _: &str) -> Result<String, String> {
+        Err("the trial writes summaries only".into())
+    }
+
+    fn more(&self, _: &CardRequest, _: &Card) -> Result<String, String> {
+        Err("the trial writes summaries only".into())
+    }
+
+    fn rewrite(&self, _: &[&str], _: &[String], _: &str) -> Result<String, String> {
+        Err("the trial writes summaries only".into())
+    }
+
+    fn update(&self, _: &str, _: &str) -> Result<String, String> {
+        Err("the trial writes summaries only".into())
+    }
+
+    fn summarize(
+        &self,
+        setup: &SummarySetup,
+        request: &SummaryRequest,
+        earlier: &[TurnSummary],
+    ) -> Result<String, String> {
+        let (mut command, input) = self.writer.summary_command(setup, request, earlier);
+        command.args(["--output-format", "json"]);
+        let output = command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .and_then(|mut child| {
+                child.stdin.take().unwrap().write_all(input.as_bytes())?;
+                child.wait_with_output()
+            })
+            .map_err(|e| format!("`claude -p` did not run: {e}"))?;
+        let reply: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap_or_default();
+        let mut calls = self.calls.lock().unwrap();
+        calls.0 += 1;
+        calls.1 += reply["total_cost_usd"].as_f64().unwrap_or_default();
+        Ok(reply["result"].as_str().unwrap_or_default().into())
+    }
+}
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -27,43 +79,45 @@ fn main() {
         None => 3,
     };
     let home = std::env::home_dir().expect("a home directory");
-    let writer = ClaudeWriter::beside(&studio_hook::event_log(&home))
-        .expect("create the card writer's folder");
+    let writer = Costed {
+        writer: ClaudeWriter::beside(&studio_hook::event_log(&home))
+            .expect("create the card writer's folder"),
+        calls: Mutex::new((0, 0.0)),
+    };
+    let folder = tempfile::tempdir().expect("create a temporary folder");
+    let store = Mutex::new(CardStore::open(folder.path().join("cards.json")).expect("a store"));
     let setup = SummarySetup::default();
     println!("# Turn summaries on {turns} real turns\n");
     println!("Model `{}` at its default effort.\n", setup.model);
-    for (file, request) in latest(&home.join(".claude/projects"), turns) {
+    for (n, (file, mut request)) in latest(&home.join(".claude/projects"), turns)
+        .into_iter()
+        .enumerate()
+    {
         println!("## {}\n", file.display());
         println!("**Prompt:** {}\n", first_line(&request.prompt));
-        let (mut command, input) = writer.summary_command(&setup, &request, &[]);
-        command.args(["--output-format", "json"]);
+        // As in the app, a turn reads its session's earlier summaries.
+        request.session_id = file.display().to_string();
+        request.id = format!("turn {}", n + 1);
+        *writer.calls.lock().unwrap() = (0, 0.0);
+        let mut lines = Vec::new();
         let start = Instant::now();
-        let output = command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .and_then(|mut child| {
-                child.stdin.take().unwrap().write_all(input.as_bytes())?;
-                child.wait_with_output()
-            });
+        let summary = write_summary(&store, &writer, &setup, request, |l| lines.push(l));
         let seconds = start.elapsed().as_secs_f64();
-        let reply: serde_json::Value = output
-            .ok()
-            .and_then(|o| serde_json::from_slice(&o.stdout).ok())
-            .unwrap_or_default();
-        let cost = &reply["total_cost_usd"];
-        println!("**Time:** {seconds:.1} s · **total_cost_usd:** {cost}\n");
-        match TurnSummary::from_reply(reply["result"].as_str().unwrap_or_default(), false) {
-            Ok((summary, problem)) => print(&summary, problem),
-            Err(line) => println!("**No summary:** {line}\n"),
+        let (calls, cost) = *writer.calls.lock().unwrap();
+        println!("**Calls:** {calls} · **Time:** {seconds:.1} s · **total_cost_usd:** {cost}\n");
+        for line in lines {
+            println!("**Logged:** {line}\n");
+        }
+        if let Some(summary) = summary {
+            print(&summary);
         }
     }
 }
 
-fn print(summary: &TurnSummary, problem: Option<String>) {
+fn print(summary: &TurnSummary) {
     println!("### Summary\n\n{}\n", summary.summary);
     let Some(learning) = &summary.learning else {
-        println!("**No learning section:** {}\n", problem.unwrap_or_default());
+        println!("**No learning section.**\n");
         return;
     };
     println!(
