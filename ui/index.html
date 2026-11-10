@@ -49,7 +49,8 @@
       <div id="terminal-head" class="term-h"><span id="terminal-title">terminal</span></div>
       <!-- A new build to restart into, or the daemon upgrade's wait (#470). -->
       <div id="restart" class="restart" role="status" hidden></div>
-      <div id="terminal-body" class="term-body"></div>
+      <!-- A split (#529) shows two panes, the divider between them. -->
+      <div id="terminal-body" class="term-body"><div id="split-divider" class="split-divider" hidden></div></div>
       <!-- The needs-you toast (#573): over the terminal's top-right corner, never focused. -->
       <div id="toast" class="toast" role="status" hidden></div>
       <!-- A program that failed at start (#558): over the terminal's bottom-right corner, never focused. -->
@@ -68,6 +69,8 @@
           <button id="reopen" class="btn small" type="button" hidden>Open</button>
           <!-- Rename and close (#469). -->
           <button id="rename" class="btn small" type="button" hidden>Rename</button>
+          <!-- Unseen (#556): the row's mark comes back until Daniel selects it again. -->
+          <button id="mark-unseen" class="btn small" type="button" hidden>Mark unseen</button>
           <button id="close" class="btn small" type="button" hidden>Close</button>
           <button id="open-all" class="btn small" type="button">Open all</button>
           <button id="close-all" class="btn small" type="button">Close all</button>

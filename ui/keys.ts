@@ -72,12 +72,11 @@ export function stepSession(sessions: { id: string }[], selected: string | null,
   return sessions[(from + by + sessions.length) % sessions.length].id;
 }
 
-// The first session that needs Daniel after `selected`, wrapping.
-// shortcut: needs-you only; the next unseen follows once #556 marks sessions unseen.
-export function nextNeedsYou(sessions: { id: string; state: string }[], selected: string | null): string | null {
+// The first session that needs Daniel after `selected`, wrapping; with none, the first unseen (#556).
+export function nextNeedsYou(sessions: { id: string; state: string; unseen?: boolean }[], selected: string | null): string | null {
   const at = sessions.findIndex((session) => session.id === selected);
   const order = [...sessions.slice(at + 1), ...sessions.slice(0, at + 1)];
-  return order.find((session) => session.state === "needs_you")?.id ?? null;
+  return (order.find((session) => session.state === "needs_you") ?? order.find((session) => session.state === "your_turn" && session.unseen))?.id ?? null;
 }
 
 const symbols: Record<string, string> = { ctrl: "⌃", alt: "⌥", shift: "⇧", cmd: "⌘", up: "↑", down: "↓", left: "←", right: "→", escape: "Esc", enter: "↩", backspace: "⌫", tab: "⇥", space: "Space" };

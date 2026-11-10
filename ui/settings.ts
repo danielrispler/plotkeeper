@@ -27,6 +27,8 @@ export interface Settings {
   // Whether "your turn" also notifies while the window is focused, for any session but the selected
   // one (#517, decision 6).
   notifications: { while_focused: boolean };
+  // The needs-you and your-turn sounds (#556).
+  sounds: boolean;
   doctor: DoctorEntry[];
   // The command that opens a file at its line (#557), an argv with `{path}`, `{line}` and `{column}`,
   // never a shell string. null: the shell's default, Zed's CLI when installed, else `open`.
@@ -59,6 +61,7 @@ const defaultSettings: Settings = {
   // Haiku at its default effort (#517, decision 14).
   summaries: { model: "haiku", effort: "", on_open: false },
   notifications: { while_focused: false },
+  sounds: true,
   doctor: [
     { label: "Check the installation", command: "claude doctor", kind: "shell" },
     { label: "Full checkup", command: "/doctor", kind: "session" },
@@ -75,6 +78,8 @@ const defaultKeymap: Keymap = {
     escape: "studio::Dismiss",
     // Focus mode (#573), in `MODIFIERS` order, as the lookup reads it.
     "shift-cmd-enter": "studio::ToggleFocus",
+    // Split terminals (#529): the pane shown stays beside the next one selected.
+    "cmd-d": "studio::ToggleSplit",
     "cmd-=": "studio::ZoomIn",
     "cmd--": "studio::ZoomOut",
     "cmd-0": "studio::ResetZoom",
@@ -142,6 +147,7 @@ function readSettings(json: unknown, report: Report): Settings {
     notifications: {
       while_focused: pick("notifications.while_focused", notifications.while_focused, d.notifications.while_focused),
     },
+    sounds: pick("sounds", json.sounds, d.sounds),
     doctor: Array.isArray(json.doctor)
       ? json.doctor.filter((e, i): e is DoctorEntry => {
           const ok =

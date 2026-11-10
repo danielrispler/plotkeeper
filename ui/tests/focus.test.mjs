@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { bound } from "../../dist/keys.js";
 import { initial } from "../../dist/settings.js";
-import { chimes, questionLine, toastFor, toastShows } from "../../dist/toast.js";
+import { questionLine, toastFor, toastShows } from "../../dist/toast.js";
 
 const ui = new URL("../", import.meta.url);
 const read = (name) => fs.readFileSync(new URL(name, ui), "utf8");
@@ -39,17 +39,6 @@ test("several blocks share one toast, with a count", () => {
   const toast = toastFor([asking("b", "One?"), asking("c", "Two?")], "a", new Set());
   assert.equal(toast.session.id, "b");
   assert.equal(toast.count, 2);
-});
-
-test("the toast sounds only for a new block while the window has focus, never at the first draw", () => {
-  const toast = toastFor([asking("b", "One?")], "a", new Set());
-  const blocked = new Set(["b"]);
-  // The first draw: the blocks there at start stay silent.
-  assert.equal(chimes(toast, blocked, null, "a", new Set(), true), false);
-  assert.equal(chimes(toast, blocked, new Set(), "a", new Set(), true), true);
-  assert.equal(chimes(toast, blocked, new Set(["b"]), "a", new Set(), true), false);
-  // Unfocused, the OS "Needs you" notification sounds instead.
-  assert.equal(chimes(toast, blocked, new Set(), "a", new Set(), false), false);
 });
 
 test("a block in the focused session shows no toast", () => {

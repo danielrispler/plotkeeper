@@ -191,6 +191,18 @@ test("the next needs-you comes after the selected session, wrapping", () => {
   assert.equal(nextNeedsYou([{ id: "b", state: "running" }], "b"), null);
 });
 
+test("with no needs-you, the next unseen comes after the selected session", () => {
+  const sessions = [
+    { id: "a", state: "your_turn", unseen: true },
+    { id: "b", state: "your_turn", unseen: false },
+    { id: "c", state: "your_turn", unseen: true },
+  ];
+  assert.equal(nextNeedsYou(sessions, "a"), "c");
+  assert.equal(nextNeedsYou(sessions, "c"), "a");
+  assert.equal(nextNeedsYou([...sessions, { id: "d", state: "needs_you" }], "a"), "d");
+  assert.equal(nextNeedsYou([{ id: "a", state: "your_turn", unseen: false }], null), null);
+});
+
 test("keys read as macOS menus show them", () => {
   assert.equal(keyLabel("cmd-shift-p"), "⇧⌘P");
   assert.equal(keyLabel("cmd-]"), "⌘]");
@@ -236,6 +248,7 @@ test("every default window action has a title and a key in the palette", () => {
   assert.deepEqual(entries.find((entry) => entry.title === "Next session").keys, ["⌘]"]);
   assert.deepEqual(entries.find((entry) => entry.title === "Select next").keys, ["↓"]);
   assert.deepEqual(entries.find((entry) => entry.title === "Toggle focus").keys, ["⇧⌘↩"]);
+  assert.deepEqual(entries.find((entry) => entry.title === "Toggle split").keys, ["⌘D"]);
 });
 
 test("the Doctor's entries are palette actions, each warned by its kind, and the defaults show with none in settings", () => {

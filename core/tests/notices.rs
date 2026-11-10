@@ -113,7 +113,9 @@ fn at(ms: u64) -> Duration {
 
 /// The notification due at `ms`, from a window that is not focused, with no session needing Daniel.
 fn due(notifications: &mut Notifications, ms: u64) -> Option<(String, String)> {
-    notifications.due(at(ms), || false, |_| false, || None)
+    notifications
+        .due(at(ms), || false, |_| false, || None)
+        .notification
 }
 
 #[test]
@@ -154,7 +156,9 @@ fn a_focused_window_gets_no_notification() {
 
     // Daniel is looking at the list, so the notice is dropped, not held for later.
     assert_eq!(
-        notifications.due(at(13_000), || true, |_| false, || None),
+        notifications
+            .due(at(13_000), || true, |_| false, || None)
+            .notification,
         None
     );
     assert_eq!(due(&mut notifications, 14_000), None);
@@ -182,7 +186,9 @@ fn needs_you_notification(upto: usize) -> Option<(String, String)> {
             .session(id)
             .is_some_and(|s| s.state == State::NeedsYou)
     };
-    notifications.due(at(4_000), || false, needs_you, || None)
+    notifications
+        .due(at(4_000), || false, needs_you, || None)
+        .notification
 }
 
 #[test]
@@ -236,7 +242,9 @@ fn your_turn_notification(
         }
     }
     let selected = studio.selected().map(|s| s.agent.id.clone());
-    notifications.due(at(4_000), || focused, |_| false, || selected)
+    notifications
+        .due(at(4_000), || focused, |_| false, || selected)
+        .notification
 }
 
 #[test]
