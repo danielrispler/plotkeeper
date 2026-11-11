@@ -78,7 +78,9 @@ Check the results when it ends:
   ```
 
   The status line looks the same as before, padding included. If `--settings` does not win, stop and report on #521: that reopens its decision 5.
-- [ ] Then, with Daniel's approval, remove the #481 line from `~/.claude/statusline-command.sh`. It is the line copied from `apps/studio/workbench/statusline-usage.sh`, line 4, after `input=$(cat)`. Check the top bar's usage still updates from a studio-started session, and that it matches `/usage`.
+- [x] Then, with Daniel's approval, remove the #481 line from `~/.claude/statusline-command.sh`. It is the line copied from `apps/studio/workbench/statusline-usage.sh`, line 4, after `input=$(cat)`. Check the top bar's usage still updates from a studio-started session, and that it matches `/usage`.
+
+  2026-11-11 (#598): line removed; the usage file still updates per turn. The week matched `/usage` exactly. The 5 hours read 5 % in the top bar against 7 % in `/usage`: the top bar shows the last status-line snapshot (6 % at 18:40), which lags `/usage` between turns, as #481 designed.
 
 ## 2. First look at the new window (#598)
 
