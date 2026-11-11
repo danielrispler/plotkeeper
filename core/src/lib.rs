@@ -46,6 +46,9 @@ pub struct Studio {
     /// Since when each Claude session's hook state and its terminal's OSC 7501 state disagree, and
     /// whether that disagreement was logged (#560).
     mismatched: HashMap<String, (u64, bool)>,
+    /// Whether `terminals` has had its first list: the rows that list finds tell nothing, as Claude
+    /// sessions replayed at start tell nothing (#522).
+    listed: bool,
 }
 
 type FindRoot = dyn Fn(&str) -> Option<String> + Send;
@@ -208,6 +211,9 @@ pub struct Session {
     /// A row of another agent than Claude Code, from its terminal's OSC 7501 status only (#560): it
     /// has no intention, card, brief, estimate or decisions. Its id is its terminal's.
     pub status_only: bool,
+    /// A status-only row's terminal `turn` at the last list (#560).
+    #[serde(skip)]
+    reported_turn: u64,
 }
 
 /// What names a session (#461, decision 19): the issue of its `issue-<n>-…` branch, else the one
@@ -289,6 +295,9 @@ pub struct Terminal {
     /// When the state last changed, in Unix milliseconds.
     #[serde(default)]
     pub status_ms: Option<u64>,
+    /// How often its program left `working`: a turn ended each time it went up (#555).
+    #[serde(default)]
+    pub turn: u64,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -1261,12 +1270,14 @@ pub enum State {
 const MISMATCH_AFTER_MS: u64 = 5_000;
 
 /// The state an OSC 7501 root state shows (#560): `working` is running, `blocked` and `error` need
-/// Daniel, and a turn that ended (`done`) or a program waiting (`idle`) is his turn.
-fn shown_state(reported: &str) -> State {
+/// Daniel, and a turn that ended (`done`) or a program waiting (`idle`) is his turn; `None` for a
+/// state the protocol does not list.
+fn shown_state(reported: &str) -> Option<State> {
     match reported {
-        "working" => State::Running,
-        "blocked" | "error" => State::NeedsYou,
-        _ => State::YourTurn,
+        "working" => Some(State::Running),
+        "blocked" | "error" => Some(State::NeedsYou),
+        "done" | "idle" => Some(State::YourTurn),
+        _ => None,
     }
 }
 
@@ -2902,7 +2913,7 @@ impl Studio {
             } else {
                 hook
             };
-            if hook_shown == shown_state(reported) {
+            if shown_state(reported).is_none_or(|s| s == hook_shown) {
                 continue;
             }
             disagreeing.insert(id.clone());
@@ -2916,13 +2927,20 @@ impl Studio {
         self.mismatched.retain(|id, _| disagreeing.contains(id));
         // Everyone else's terminal: a status-only row.
         let mut rows = BTreeSet::new();
+        let at_start = !std::mem::replace(&mut self.listed, true);
         for (t, reported) in &reporting {
             let claude = t.app.as_deref() == Some("claude-code");
             if claude || claude_on(&self.sessions, &t.id).is_some() {
                 continue;
             }
+            let shown = shown_state(reported);
+            // An unknown state leaves a row as it was, and makes none.
+            let Some(state) = shown.or(self.sessions.get(&t.id).map(|s| s.state)) else {
+                continue;
+            };
             rows.insert(t.id.clone());
             let at = t.status_ms.unwrap_or(now);
+            let first_seen = !self.sessions.contains_key(&t.id);
             let row = self
                 .sessions
                 .entry(t.id.clone())
@@ -2930,7 +2948,8 @@ impl Studio {
                     agent: Agent::new(&t.id, at),
                     terminal: Some(t.id.clone()),
                     status_only: true,
-                    state: shown_state(reported),
+                    state,
+                    reported_turn: t.turn,
                     ..Session::default()
                 });
             let last = t.cwd.rsplit('/').next().unwrap_or_default();
@@ -2944,19 +2963,34 @@ impl Studio {
                 row.identity.name.push_str(" · latest conversation");
             }
             row.agent.last_event_at = at;
-            let state = shown_state(reported);
-            // The tick's idle stays until the status changes.
-            let idle = row.state == State::Idle && state == State::YourTurn;
-            if row.state == state || idle {
+            // A turn ended since the last list, even one that ended and restarted between two lists.
+            let turn_ended = t.turn > std::mem::replace(&mut row.reported_turn, t.turn);
+            if first_seen {
+                if !at_start && state == State::NeedsYou {
+                    outputs.push(Output::NeedsYou {
+                        session_id: t.id.clone(),
+                        agent: None,
+                    });
+                }
                 continue;
             }
-            let was = std::mem::replace(&mut row.state, state);
+            // The tick's idle stays until the status changes.
+            let idle = row.state == State::Idle && state == State::YourTurn && !turn_ended;
+            let was = if idle {
+                row.state
+            } else {
+                std::mem::replace(&mut row.state, state)
+            };
+            let reached = matches!(was, State::Running | State::NeedsYou) && was != state;
             match state {
-                State::NeedsYou => outputs.push(Output::NeedsYou {
-                    session_id: t.id.clone(),
-                    agent: None,
-                }),
-                State::YourTurn if matches!(was, State::Running | State::NeedsYou) => {
+                State::NeedsYou if was != state || turn_ended => {
+                    outputs.push(Output::NeedsYou {
+                        session_id: t.id.clone(),
+                        agent: None,
+                    });
+                }
+                State::NeedsYou => {}
+                _ if turn_ended || state == State::YourTurn && reached => {
                     outputs.push(Output::YourTurn {
                         session_id: t.id.clone(),
                     });

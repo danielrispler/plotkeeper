@@ -11,6 +11,11 @@ const T0: u64 = 1_793_270_000_000;
 
 /// One terminal of the daemon's `list`, with its 7501 status.
 fn term(id: &str, state: Option<&str>, app: Option<&str>, at: u64) -> Terminal {
+    term_at_turn(id, state, app, at, 0)
+}
+
+/// As `term`, with the daemon's count of how often the program left `working`.
+fn term_at_turn(id: &str, state: Option<&str>, app: Option<&str>, at: u64, turn: u64) -> Terminal {
     let row: Value = json!({
         "id": id,
         "argv": [],
@@ -23,7 +28,7 @@ fn term(id: &str, state: Option<&str>, app: Option<&str>, at: u64) -> Terminal {
         "kind": null,
         "app": app,
         "status_ms": state.map(|_| at),
-        "turn": 0,
+        "turn": turn,
     });
     serde_json::from_value(row).unwrap()
 }
@@ -55,7 +60,7 @@ fn a_codex_like_terminal_shows_running_then_needs_you_then_your_turn() {
 
     let blocked = listed(
         &mut studio,
-        &[term("t-7", Some("blocked"), Some("codex"), T0 + 1_000)],
+        &[term_at_turn("t-7", Some("blocked"), Some("codex"), T0 + 1_000, 1)],
         T0 + 1_000,
     );
     assert_eq!(state(&studio, "t-7"), Some(State::NeedsYou));
@@ -67,7 +72,7 @@ fn a_codex_like_terminal_shows_running_then_needs_you_then_your_turn() {
 
     let done = listed(
         &mut studio,
-        &[term("t-7", Some("done"), Some("codex"), T0 + 2_000)],
+        &[term_at_turn("t-7", Some("done"), Some("codex"), T0 + 2_000, 1)],
         T0 + 2_000,
     );
     assert_eq!(state(&studio, "t-7"), Some(State::YourTurn));
@@ -131,6 +136,58 @@ fn a_terminal_that_never_reported_gets_no_row() {
     );
     listed(&mut studio, &[], T0 + 2_000);
     assert!(studio.sessions().is_empty());
+}
+
+#[test]
+fn a_turn_that_ends_and_restarts_between_two_lists_is_your_turn() {
+    // The program went `working`, `done`, `working` inside one poll: only `turn` shows it.
+    let mut studio = Studio::default();
+    let at = |turn, now| [term_at_turn("t-7", Some("working"), Some("codex"), now, turn)];
+
+    listed(&mut studio, &at(0, T0), T0);
+    let out = listed(&mut studio, &at(1, T0 + 1_000), T0 + 1_000);
+
+    assert_eq!(state(&studio, "t-7"), Some(State::Running));
+    assert!(out.contains(&Output::YourTurn {
+        session_id: "t-7".into()
+    }));
+}
+
+#[test]
+fn a_row_already_blocked_at_start_is_quiet_and_one_appearing_later_needs_you() {
+    // As Claude sessions, which replay quietly at start (#522), rows the first list finds tell nothing.
+    let mut studio = Studio::default();
+    let blocked = |id| term(id, Some("blocked"), Some("codex"), T0);
+
+    let start = listed(&mut studio, &[blocked("t-7")], T0);
+    assert!(start.is_empty(), "{start:?}");
+    assert_eq!(state(&studio, "t-7"), Some(State::NeedsYou));
+
+    let later = listed(&mut studio, &[blocked("t-7"), blocked("t-8")], T0 + 1_000);
+    assert_eq!(
+        later,
+        vec![Output::NeedsYou {
+            session_id: "t-8".into(),
+            agent: None
+        }]
+    );
+}
+
+#[test]
+fn an_unknown_state_leaves_the_row_as_it_was() {
+    let mut studio = Studio::default();
+
+    listed(&mut studio, &[term("t-7", Some("thinking"), Some("codex"), T0)], T0);
+    assert!(studio.session("t-7").is_none());
+
+    listed(&mut studio, &[term("t-7", Some("working"), Some("codex"), T0)], T0);
+    let out = listed(
+        &mut studio,
+        &[term("t-7", Some("thinking"), Some("codex"), T0 + 1_000)],
+        T0 + 1_000,
+    );
+    assert_eq!(state(&studio, "t-7"), Some(State::Running));
+    assert!(out.is_empty(), "{out:?}");
 }
 
 fn replay() -> Studio {
