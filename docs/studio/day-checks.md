@@ -25,13 +25,15 @@ npm start
 `npm start` builds `Studio.app` and `studio-hook`, then opens the app. Quit the old app first if one runs. From now on, work only in the studio's terminals.
 
 - [ ] **#555:** if the app offers a daemon upgrade, accept it. Every terminal revives.
+
+  2026-11-11 (#598): no upgrade was offered. `PROTOCOL` is still 1, so the Nov 6 daemon (from before #555) kept running, and its folder and socket stayed `rwxr-xr-x`. Its fixes apply only once a new daemon starts.
 - [ ] **#555:** the data folder is `drwx------` and the socket `srw-------`:
 
   ```sh
   ls -la ~/Library/Application\ Support/dev.falinks.studio/
   ```
 
-- [ ] **#466:** the bundle places and signs `Contents/MacOS/studio-terminal-daemon`:
+- [x] **#466:** the bundle places and signs `Contents/MacOS/studio-terminal-daemon`:
 
   ```sh
   codesign --verify --verbose /Users/danielrispler/work/Falinks/apps/studio/target/release/bundle/macos/Studio.app/Contents/MacOS/studio-terminal-daemon
@@ -52,7 +54,7 @@ It writes every output to a new `local-evidence/2026-11-09-round-5/real-calls-<t
 
 Check the results when it ends:
 
-- [ ] **#518:** `518-real-card.txt` carries no plugin footer; the script greps for one and says so in `run.log`.
+- [x] **#518:** `518-real-card.txt` carries no plugin footer; the script greps for one and says so in `run.log`.
 - [ ] **#583, the quiz before and after:** compare the new `526-summaries.md` with the earlier run's `local-evidence/2026-11-09-round-5/real-calls-20261110-153629/526-summaries.md`.
   - An orchestration turn (a merge, or an `/implement-spec` status) gets no learning section.
   - The other turns' questions ask why or how something works, and no answer is guessable by its length.
@@ -62,7 +64,7 @@ Check the results when it ends:
 
 ### #521: the status line wrapper
 
-- [ ] Start a session in the studio. Find its `claude` process and check `--settings` wins over `~/.claude/settings.json`:
+- [x] Start a session in the studio. Find its `claude` process and check `--settings` wins over `~/.claude/settings.json`:
 
   ```sh
   pgrep -fl 'claude' | grep -v grep
