@@ -15,6 +15,8 @@ Rust only does not bind the studio. The stack is Tauri 2: a Rust shell with a Ty
 
 Before handing off a studio change, run `npm ci` once, then `npm run check` from `apps/studio`. It builds the UI first, which the Tauri crate needs to compile, then runs the same checks as `.github/workflows/studio.yml`.
 
+In a worktree, share the main checkout's cargo target dir so the build starts warm: prefix cargo and `npm run check` with `CARGO_TARGET_DIR="$(git rev-parse --path-format=absolute --git-common-dir)/../apps/studio/target"`. Parallel workers sharing it wait briefly on cargo's lock but still finish sooner than cold builds (#549).
+
 ## Context
 
 Studio vocabulary is `docs/studio/CONTEXT.md`. Standing preferences, decisions and findings live in the Notes of map #266; read them there.
