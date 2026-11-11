@@ -112,7 +112,7 @@ What Daniel has typed into a session's prompt and not sent yet, as the studio fo
 The empty file `present` in the studio's data folder, kept while the window is focused, so Claude Code's Remote Control skips a phone push Daniel would see on screen. Blur, quit and the app's start delete it, and the terminal daemon deletes it when the app's connection drops, unless it dropped the app for falling behind.
 
 **Revival**:
-Bringing back the terminals a terminal daemon ran after it died, from a crash, a reboot or an upgrade. A Claude terminal reopens its latest session with `claude --resume`; a shell starts again in its folder. Each loses its screen, and a shell its state.
+Bringing back the terminals a terminal daemon ran after it died, from a crash, a reboot or an upgrade. A Claude terminal reopens its latest session with `claude --resume`; a shell that ran another agent with a resume command, such as `agy` or `codex`, reopens that agent's latest conversation in its folder; any other shell starts again in its folder. Each loses its screen, and a shell its state.
 _Avoid_: Restore (nothing of the old process survives)
 
 **Decision**:

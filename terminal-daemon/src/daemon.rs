@@ -62,6 +62,8 @@ struct Term {
     rows: u16,
     exited: Option<String>,
     status: Status,
+    /// The program in its foreground as `list` last saw it, for the record (#561).
+    foreground: Option<String>,
 }
 
 impl Term {
@@ -138,7 +140,7 @@ impl State {
     fn save(&self) -> Arc<Record> {
         let running = self.terms.iter().filter(|(_, t)| t.exited.is_none());
         let terms: Vec<Value> = running
-            .map(|(id, t)| json!({ "id": id, "argv": t.argv, "cwd": t.cwd() }))
+            .map(|(id, t)| json!({ "id": id, "argv": t.argv, "cwd": t.cwd(), "foreground": t.foreground }))
             .collect();
         *self.record.newest.lock().unwrap() = Some(json!(terms).to_string());
         self.record.clone()
@@ -341,6 +343,7 @@ fn serve_conn(n: usize, stream: UnixStream, state: Shared) {
                                 rows,
                                 exited: None,
                                 status: Status::default(),
+                                foreground: None,
                             },
                         );
                         saved = Some(s.save());
@@ -534,35 +537,35 @@ fn session(all: &[Proc], sid: u32) -> Vec<&Proc> {
 }
 
 fn list(state: &Shared) -> Value {
-    // Read under the lock; `ps` runs after it, so output keeps flowing meanwhile.
+    // `ps` runs before the lock and the sessions' lookups after it, so output keeps flowing meanwhile.
+    let all = processes();
     let (terms, record) = {
-        let s = state.lock().unwrap();
-        let rows: Vec<(Value, Option<u32>, Option<u32>)> = s
+        let mut s = state.lock().unwrap();
+        let rows: Vec<(Value, Option<u32>)> = s
             .terms
-            .iter()
+            .iter_mut()
             .map(|(id, t)| {
+                // The program in the terminal's foreground, such as `zsh` or `claude`.
+                let leader = t.pty.master.process_group_leader().map(|p| p as u32);
+                t.foreground = leader
+                    .and_then(|f| all.iter().find(|p| p.pid == f))
+                    .map(|p| p.command.clone());
                 let mut row = json!({ "id": id, "argv": t.argv, "cwd": t.cwd(), "pid": t.pty.pid, "exited": t.exited,
-                                  "cols": t.cols, "rows": t.rows, "scrollback_bytes": t.buf.len() });
+                                  "foreground": t.foreground, "cols": t.cols, "rows": t.rows,
+                                  "scrollback_bytes": t.buf.len() });
                 t.status.fields(&mut row);
-                (row, t.pty.pid, t.pty.master.process_group_leader().map(|p| p as u32))
+                (row, t.pty.pid)
             })
             .collect();
-        // The record follows the shells' folders too; `stop` lists just before it stops the daemon.
+        // The record follows the shells' folders and programs too; `stop` lists just before it stops the daemon.
         (rows, s.save())
     };
     record.write();
-    let all = processes();
     let me = std::process::id();
     let terms: Vec<Value> = terms
         .into_iter()
-        .map(|(mut row, pid, foreground)| {
+        .map(|(mut row, pid)| {
             let procs = pid.map(|sid| session(&all, sid)).unwrap_or_default();
-            // The program in the terminal's foreground, such as `zsh` or `claude`.
-            row["foreground"] = json!(
-                foreground
-                    .and_then(|f| all.iter().find(|p| p.pid == f))
-                    .map(|p| &p.command)
-            );
             row["rss_kb"] = json!(procs.iter().map(|p| p.rss_kb).sum::<u64>());
             row["processes"] = procs
                 .iter()

@@ -254,6 +254,14 @@ Save everything in a new folder: `local-evidence/<date>-ui-ux-recheck/` (for exa
 
   Choose "Restart into it". No session is lost, the "needs you" state is still there, and the panel's shell is back with its scrollback (#542).
 
+- [ ] **#561:** run `agy` in a studio terminal and tell it a word to remember. Revival happens only when the terminal daemon dies, so end it as a crash would:
+
+  ```sh
+  pkill -x studio-terminal-daemon
+  ```
+
+  The terminal comes back running `agy --continue`, in the same conversation: ask for the word. Its row, once `agy` reports a status, ends in "latest conversation". If the daemon that died was older than this build, it kept no foreground program and the terminal comes back as a plain shell: run the check again.
+
 ## 5. End of the day
 
 - [ ] **#556:** quit and reopen the app. The sessions you had seen stay plain; the unseen ones keep the mark.

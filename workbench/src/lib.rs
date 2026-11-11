@@ -134,6 +134,30 @@ pub fn claude(plugin: &Path, presence: &Path, resume: Option<&str>, auto: bool) 
     argv
 }
 
+/// The command that brings back an agent other than Claude Code (#561), by the name of the program a
+/// revived terminal had in its foreground: conversation `id` when it is known, else the latest one
+/// in the terminal's folder. `None` for any other program, which revives as a plain shell. Checked
+/// from each tool's `--help`: `agy` 1.4.7 and `codex` 0.167.0 (2026-11-11). Cursor's `agent` was not
+/// installed; its `--resume [id]` is from its docs (2026-11-09), unchecked.
+pub fn resume(program: &str, id: Option<&str>) -> Option<Vec<String>> {
+    let argv: &[&str] = match (program, id) {
+        ("agy", Some(_)) => &["agy", "--conversation"],
+        ("agy", None) => &["agy", "--continue"],
+        ("agent" | "cursor-agent", _) => &[program, "--resume"],
+        ("codex", Some(_)) => &["codex", "resume"],
+        // `codex resume` lists the folder's sessions only, unless given `--all`.
+        ("codex", None) => &["codex", "resume", "--last"],
+        _ => return None,
+    };
+    Some(argv.iter().copied().chain(id).map(String::from).collect())
+}
+
+/// Whether `argv` is `resume`'s command for an agent's latest conversation, not a known one.
+pub fn resumes_latest(argv: &[String]) -> bool {
+    argv.first()
+        .is_some_and(|program| resume(program, None).as_deref() == Some(argv))
+}
+
 /// `--settings` that make the session's status line the studio's wrapper, `workbench/statusline.sh`
 /// beside the plugin (#521; #517, decision 5): it saves the usage snapshot, then runs the user's own
 /// status line. The path is single-quoted, as Claude Code runs the command in a shell.

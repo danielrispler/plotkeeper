@@ -302,7 +302,7 @@ pub struct Process {
 pub struct Revive {
     pub id: String,
     pub cwd: String,
-    /// What it reruns: its spawn's argv, empty for a shell.
+    /// What it reruns: its spawn's argv, or an agent's resume command, empty for a shell.
     pub argv: Vec<String>,
     /// The session to reopen with `claude --resume`, for a Claude terminal whose session is known.
     pub session: Option<String>,
@@ -2830,7 +2830,9 @@ impl Studio {
 
     /// How each terminal of `terms` that has not exited comes back in a new daemon: a terminal spawned
     /// with an argv, a Claude terminal, reopens its latest session with `claude --resume`, whether or
-    /// not the hangup ended it; a shell restarts in its folder. `busy` says what runs in it now.
+    /// not the hangup ended it. A shell whose foreground program is another agent with a resume
+    /// command (`studio_workbench::resume`, #561) comes back as that agent, rerun the same way at
+    /// the next revival; any other shell restarts in its folder. `busy` says what runs in it now.
     pub fn revival(&self, terms: &[Terminal]) -> Vec<Revive> {
         let running = terms.iter().filter(|t| t.exited.is_none());
         let revive = |t: &Terminal| {
@@ -2855,10 +2857,14 @@ impl Studio {
                     _ => program(),
                 }
             };
+            // A shell's `busy` is its foreground program. The conversation's id is not known yet, so
+            // the agent resumes the latest one in the folder.
+            let agent = busy.as_deref().filter(|_| t.argv.is_empty());
+            let argv = agent.and_then(|program| studio_workbench::resume(program, None));
             Revive {
                 id: t.id.clone(),
                 cwd: t.cwd.clone(),
-                argv: t.argv.clone(),
+                argv: argv.unwrap_or_else(|| t.argv.clone()),
                 session: (!t.argv.is_empty())
                     .then(|| latest.map(|s| s.resume_id.clone()))
                     .flatten(),
@@ -2933,6 +2939,10 @@ impl Studio {
             let program = t.app.as_ref().or(t.foreground.as_ref());
             let program = program.map_or("a program", String::as_str);
             row.identity.name = format!("{program} · {}", row.folder_name);
+            // Revival resumed the folder's latest conversation, which may not be the one it had (#561).
+            if studio_workbench::resumes_latest(&t.argv) {
+                row.identity.name.push_str(" · latest conversation");
+            }
             row.agent.last_event_at = at;
             let state = shown_state(reported);
             // The tick's idle stays until the status changes.
