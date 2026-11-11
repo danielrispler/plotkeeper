@@ -129,7 +129,7 @@ Open the sessions for the day's work: at least two in parallel, one in a task wo
 - [ ] **#565 (6c fix):** add a Doctor `shell` entry whose command fails, `"command": "(exit 3)"`. A notice names the entry's label with code 3, and the shell stays open. Remove the entry after.
 - [ ] **#528:** ⌘⇧P, then "Skills". The browser takes the rail's place, grouped as "Your skills", "This project" and one group per plugin. Opening a skill shows its `SKILL.md` rendered. Esc brings the rail back.
 - [ ] **#528:** "Edit" on one of your skills opens its `SKILL.md` in Zed. Plugin skills have no "Edit".
-- [ ] **#528 / #592:** compare the plugin groups with `/plugin` in Claude Code. Today a plugin may show an older cached version and a disabled plugin is listed; #592 fixes both. Note any difference on #592.
+- [ ] **#592:** compare the browser's plugin groups with `/plugin` in Claude Code, in the same project. Each enabled plugin shows, at the version `/plugin` names; a plugin turned off there is missing. Turn one off in `/plugin`, reopen "Skills": its group is gone. Turn it back on after. Note any difference on #592.
 - [ ] **#565 (6c fix):** symlink a skill folder from outside `~/.claude/skills` into it. The browser does not list it. Remove the link after.
 
 ## 4. During the work
