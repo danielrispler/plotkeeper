@@ -68,16 +68,21 @@ export function showView(selected: Selection | null) {
   // "Open" resumes an ended session in a new terminal, in its folder, where Claude Code keeps it.
   element("reopen").hidden = agent !== null || session.state !== "ended";
   element("reopen").onclick = () => startClaude(session.cwd, session.resume_id, "", resumesAuto(session)).catch((e) => console.warn(e));
-  element("rename").hidden = agent !== null;
+  // Another agent's row (#560) has no name of its own to keep, nor turns to mark, and comes back
+  // with its status if dropped.
+  const own = agent === null && !session.status_only;
+  element("rename").hidden = !own;
   element("rename").onclick = () => askName(session);
-  element("mark-unseen").hidden = agent !== null || session.state !== "your_turn" || session.unseen === true;
+  element("mark-unseen").hidden = !own || session.state !== "your_turn" || session.unseen === true;
   element("mark-unseen").onclick = () => void invoke("mark_unseen", { id: session.id }).catch((e) => console.warn(e));
   // Only a terminal the studio runs can be closed from here.
   element("close").hidden = agent !== null || session.terminal === null;
   element("close").onclick = () => askClose(session);
-  element("delete").hidden = agent !== null;
+  element("delete").hidden = !own;
   element("delete").onclick = () => askDelete(session).catch(report);
-  element("tool").textContent = step?.tool ?? (agent === null ? session.returned : null) ?? "No step yet";
+  element("tool").textContent = session.status_only
+    ? "Status only: another agent, with no steps, intention, cards or brief"
+    : (step?.tool ?? (agent === null ? session.returned : null) ?? "No step yet");
   const [detail, fullDetail] = shortPaths(step?.detail ?? "");
   element("detail").textContent = detail;
   element("detail").title = fullDetail;

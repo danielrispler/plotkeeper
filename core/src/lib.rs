@@ -43,6 +43,9 @@ pub struct Studio {
     /// Summaries are written when Daniel opens a turn, not at its end, so they move no intention
     /// (#517, decisions 13 and 16), from the settings.
     summaries_on_open: bool,
+    /// Since when each Claude session's hook state and its terminal's OSC 7501 state disagree, and
+    /// whether that disagreement was logged (#560).
+    mismatched: HashMap<String, (u64, bool)>,
 }
 
 type FindRoot = dyn Fn(&str) -> Option<String> + Send;
@@ -202,6 +205,9 @@ pub struct Session {
     /// Its work on its ticket: its kind, its phases and how long its agent worked (#461, decision
     /// 14).
     pub work: Work,
+    /// A row of another agent than Claude Code, from its terminal's OSC 7501 status only (#560): it
+    /// has no intention, card, brief, estimate or decisions. Its id is its terminal's.
+    pub status_only: bool,
 }
 
 /// What names a session (#461, decision 19): the issue of its `issue-<n>-…` branch, else the one
@@ -273,6 +279,16 @@ pub struct Terminal {
     pub foreground: Option<String>,
     #[serde(default)]
     pub processes: Vec<Process>,
+    /// Its program's OSC 7501 root status (#555): `working`, `blocked`, `done` and the like; `None`
+    /// until it reports and after `clear` or its exit.
+    #[serde(default)]
+    pub state: Option<String>,
+    /// The program's name for itself in its reports, such as `codex` or `claude-code`.
+    #[serde(default)]
+    pub app: Option<String>,
+    /// When the state last changed, in Unix milliseconds.
+    #[serde(default)]
+    pub status_ms: Option<u64>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -1240,6 +1256,20 @@ pub enum State {
     Ended,
 }
 
+/// How long a Claude session's hook state and its OSC 7501 state may disagree before the mismatch log
+/// gets a line (#560); a starting guess.
+const MISMATCH_AFTER_MS: u64 = 5_000;
+
+/// The state an OSC 7501 root state shows (#560): `working` is running, `blocked` and `error` need
+/// Daniel, and a turn that ended (`done`) or a program waiting (`idle`) is his turn.
+fn shown_state(reported: &str) -> State {
+    match reported {
+        "working" => State::Running,
+        "blocked" | "error" => State::NeedsYou,
+        _ => State::YourTurn,
+    }
+}
+
 /// 2 hours, a starting guess (#369, decision 4).
 const IDLE_AFTER_MS: u64 = 2 * 60 * 60 * 1000;
 
@@ -1293,6 +1323,9 @@ pub enum Output {
     /// A session's turn ended with a long reply or by asking Daniel something: its turn summary
     /// (#517, decisions 12 and 13).
     Summary(SummaryRequest),
+    /// A Claude session's hook state and its OSC 7501 state disagreed past `MISMATCH_AFTER_MS`:
+    /// `line` goes to the local mismatch log, for debugging (#560).
+    Mismatch { line: String },
     /// A session's first `Stop`: read Claude Code's version from its transcript, and nothing else
     /// (#369, decision 9).
     Version { transcript_path: String },
@@ -2833,6 +2866,97 @@ impl Studio {
             }
         };
         running.map(revive).collect()
+    }
+
+    /// The daemon's `list` at `now` (#560). A terminal that has not exited, whose program reports OSC
+    /// 7501 and is not Claude Code, gets a status-only row named by its `app`, else its foreground
+    /// program, and its folder; the row goes when the status clears or the terminal does. A Claude
+    /// session keeps its hook state; when its terminal's 7501 state disagrees past
+    /// `MISMATCH_AFTER_MS`, one `Output::Mismatch` line says so. Returns the notices a status-only
+    /// row raises, as a Claude session's would.
+    pub fn terminals(&mut self, terms: &[Terminal], now: u64) -> Vec<Output> {
+        let mut outputs = Vec::new();
+        let reporting = terms.iter().filter(|t| t.exited.is_none());
+        let reporting: Vec<(&Terminal, &str)> = reporting
+            .filter_map(|t| Some((t, t.state.as_deref()?)))
+            .collect();
+        let claude_on = |sessions: &HashMap<String, Session>, id: &str| {
+            let on = |s: &&Session| !s.status_only && !s.ended && s.terminal.as_deref() == Some(id);
+            sessions.values().find(on).map(|s| s.agent.id.clone())
+        };
+        // A Claude session's hook state stays; a lasting disagreement is logged once.
+        let mut disagreeing = BTreeSet::new();
+        for (t, reported) in &reporting {
+            let Some(id) = claude_on(&self.sessions, &t.id) else {
+                continue;
+            };
+            let hook = self.sessions[&id].state;
+            let hook_shown = if hook == State::Idle {
+                State::YourTurn
+            } else {
+                hook
+            };
+            if hook_shown == shown_state(reported) {
+                continue;
+            }
+            disagreeing.insert(id.clone());
+            let (since, logged) = self.mismatched.entry(id.clone()).or_insert((now, false));
+            if !*logged && now.saturating_sub(*since) >= MISMATCH_AFTER_MS {
+                *logged = true;
+                let line = format!("{now} session {id}: hook {hook:?}, 7501 {reported}");
+                outputs.push(Output::Mismatch { line });
+            }
+        }
+        self.mismatched.retain(|id, _| disagreeing.contains(id));
+        // Everyone else's terminal: a status-only row.
+        let mut rows = BTreeSet::new();
+        for (t, reported) in &reporting {
+            let claude = t.app.as_deref() == Some("claude-code");
+            if claude || claude_on(&self.sessions, &t.id).is_some() {
+                continue;
+            }
+            rows.insert(t.id.clone());
+            let at = t.status_ms.unwrap_or(now);
+            let row = self
+                .sessions
+                .entry(t.id.clone())
+                .or_insert_with(|| Session {
+                    agent: Agent::new(&t.id, at),
+                    terminal: Some(t.id.clone()),
+                    status_only: true,
+                    state: shown_state(reported),
+                    ..Session::default()
+                });
+            let last = t.cwd.rsplit('/').next().unwrap_or_default();
+            row.cwd.clone_from(&t.cwd);
+            row.folder_name = if last.is_empty() { &t.cwd } else { last }.into();
+            let program = t.app.as_ref().or(t.foreground.as_ref());
+            let program = program.map_or("a program", String::as_str);
+            row.identity.name = format!("{program} · {}", row.folder_name);
+            row.agent.last_event_at = at;
+            let state = shown_state(reported);
+            // The tick's idle stays until the status changes.
+            let idle = row.state == State::Idle && state == State::YourTurn;
+            if row.state == state || idle {
+                continue;
+            }
+            let was = std::mem::replace(&mut row.state, state);
+            match state {
+                State::NeedsYou => outputs.push(Output::NeedsYou {
+                    session_id: t.id.clone(),
+                    agent: None,
+                }),
+                State::YourTurn if matches!(was, State::Running | State::NeedsYou) => {
+                    outputs.push(Output::YourTurn {
+                        session_id: t.id.clone(),
+                    });
+                }
+                _ => {}
+            }
+        }
+        self.sessions
+            .retain(|id, s| !s.status_only || rows.contains(id));
+        outputs
     }
 
     /// Reads what was added to the transcripts of the sessions that have not ended, and of the
