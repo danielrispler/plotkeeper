@@ -60,7 +60,13 @@ fn a_codex_like_terminal_shows_running_then_needs_you_then_your_turn() {
 
     let blocked = listed(
         &mut studio,
-        &[term_at_turn("t-7", Some("blocked"), Some("codex"), T0 + 1_000, 1)],
+        &[term_at_turn(
+            "t-7",
+            Some("blocked"),
+            Some("codex"),
+            T0 + 1_000,
+            1,
+        )],
         T0 + 1_000,
     );
     assert_eq!(state(&studio, "t-7"), Some(State::NeedsYou));
@@ -72,7 +78,13 @@ fn a_codex_like_terminal_shows_running_then_needs_you_then_your_turn() {
 
     let done = listed(
         &mut studio,
-        &[term_at_turn("t-7", Some("done"), Some("codex"), T0 + 2_000, 1)],
+        &[term_at_turn(
+            "t-7",
+            Some("done"),
+            Some("codex"),
+            T0 + 2_000,
+            1,
+        )],
         T0 + 2_000,
     );
     assert_eq!(state(&studio, "t-7"), Some(State::YourTurn));
@@ -142,7 +154,15 @@ fn a_terminal_that_never_reported_gets_no_row() {
 fn a_turn_that_ends_and_restarts_between_two_lists_is_your_turn() {
     // The program went `working`, `done`, `working` inside one poll: only `turn` shows it.
     let mut studio = Studio::default();
-    let at = |turn, now| [term_at_turn("t-7", Some("working"), Some("codex"), now, turn)];
+    let at = |turn, now| {
+        [term_at_turn(
+            "t-7",
+            Some("working"),
+            Some("codex"),
+            now,
+            turn,
+        )]
+    };
 
     listed(&mut studio, &at(0, T0), T0);
     let out = listed(&mut studio, &at(1, T0 + 1_000), T0 + 1_000);
@@ -177,10 +197,18 @@ fn a_row_already_blocked_at_start_is_quiet_and_one_appearing_later_needs_you() {
 fn an_unknown_state_leaves_the_row_as_it_was() {
     let mut studio = Studio::default();
 
-    listed(&mut studio, &[term("t-7", Some("thinking"), Some("codex"), T0)], T0);
+    listed(
+        &mut studio,
+        &[term("t-7", Some("thinking"), Some("codex"), T0)],
+        T0,
+    );
     assert!(studio.session("t-7").is_none());
 
-    listed(&mut studio, &[term("t-7", Some("working"), Some("codex"), T0)], T0);
+    listed(
+        &mut studio,
+        &[term("t-7", Some("working"), Some("codex"), T0)],
+        T0,
+    );
     let out = listed(
         &mut studio,
         &[term("t-7", Some("thinking"), Some("codex"), T0 + 1_000)],

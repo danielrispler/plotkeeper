@@ -112,8 +112,11 @@ What Daniel has typed into a session's prompt and not sent yet, as the studio fo
 The empty file `present` in the studio's data folder, kept while the window is focused, so Claude Code's Remote Control skips a phone push Daniel would see on screen. Blur, quit and the app's start delete it, and the terminal daemon deletes it when the app's connection drops, unless it dropped the app for falling behind.
 
 **Revival**:
-Bringing back the terminals a terminal daemon ran after it died, from a crash, a reboot or an upgrade. A Claude terminal reopens its latest session with `claude --resume`; a shell that ran another agent with a resume command, such as `agy` or `codex`, reopens that agent's latest conversation in its folder; any other shell starts again in its folder. Each loses its screen, and a shell its state.
+Bringing back the terminals a terminal daemon ran after it died, from a crash, a reboot or an upgrade. A Claude terminal reopens its latest session with `claude --resume`; a shell that ran another agent with a resume command, such as `agy` or `codex`, reopens that agent's latest conversation in its folder; any other shell starts again in its folder. Each loses its screen, and a shell its state. Quitting a revived agent ends its terminal, as the agent, not a shell, is the terminal's program.
 _Avoid_: Restore (nothing of the old process survives)
+
+**Mismatch log**:
+A local debug log, beside the event log, of the Claude sessions whose hook state and OSC 7501 state disagree for more than a few seconds: one line each, with the time, the session and both states.
 
 **Decision**:
 A question, plan or permission Daniel answered, with his answer and where he gave it: on the card or in the terminal. A session's decisions, newest first, are its decision history.

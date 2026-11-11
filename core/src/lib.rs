@@ -2841,9 +2841,10 @@ impl Studio {
 
     /// How each terminal of `terms` that has not exited comes back in a new daemon: a terminal spawned
     /// with an argv, a Claude terminal, reopens its latest session with `claude --resume`, whether or
-    /// not the hangup ended it. A shell whose foreground program is another agent with a resume
-    /// command (`studio_workbench::resume`, #561) comes back as that agent, rerun the same way at
-    /// the next revival; any other shell restarts in its folder. `busy` says what runs in it now.
+    /// not the hangup ended it. A shell whose foreground program, or else its 7501 `app`, is another
+    /// agent with a resume command (`studio_workbench::resume`, #561) comes back as that agent, rerun
+    /// the same way at the next revival; any other shell restarts in its folder. `busy` says what
+    /// runs in it now.
     pub fn revival(&self, terms: &[Terminal]) -> Vec<Revive> {
         let running = terms.iter().filter(|t| t.exited.is_none());
         let revive = |t: &Terminal| {
@@ -2871,7 +2872,9 @@ impl Studio {
             // A shell's `busy` is its foreground program. The conversation's id is not known yet, so
             // the agent resumes the latest one in the folder.
             let agent = busy.as_deref().filter(|_| t.argv.is_empty());
-            let argv = agent.and_then(|program| studio_workbench::resume(program, None));
+            // A node-launched agent's foreground is `node`: its 7501 `app` names it then.
+            let resume = |program: &str| studio_workbench::resume(program, None);
+            let argv = agent.and_then(|p| resume(p).or_else(|| t.app.as_deref().and_then(resume)));
             Revive {
                 id: t.id.clone(),
                 cwd: t.cwd.clone(),

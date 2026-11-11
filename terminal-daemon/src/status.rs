@@ -133,6 +133,11 @@ impl Status {
         self.root = None;
     }
 
+    /// The program's name for itself in its root status, for the record (#561).
+    pub fn app(&self) -> Option<&str> {
+        self.root.as_ref()?.app.as_deref()
+    }
+
     /// Adds `state`, `kind`, `app`, `turn` and `status_ms` to a `list` row; all but `turn` are null without a status.
     pub fn fields(&self, row: &mut Value) {
         let r = self.root.as_ref();

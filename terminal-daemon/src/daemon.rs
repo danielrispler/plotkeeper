@@ -140,7 +140,10 @@ impl State {
     fn save(&self) -> Arc<Record> {
         let running = self.terms.iter().filter(|(_, t)| t.exited.is_none());
         let terms: Vec<Value> = running
-            .map(|(id, t)| json!({ "id": id, "argv": t.argv, "cwd": t.cwd(), "foreground": t.foreground }))
+            .map(|(id, t)| {
+                json!({ "id": id, "argv": t.argv, "cwd": t.cwd(), "foreground": t.foreground,
+                                       "app": t.status.app() })
+            })
             .collect();
         *self.record.newest.lock().unwrap() = Some(json!(terms).to_string());
         self.record.clone()
