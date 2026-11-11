@@ -376,6 +376,7 @@ fn closed(terminal: String, studio: State<Mutex<Studio>>) -> Result<(), String> 
         .sessions()
         .into_iter()
         .filter(|s| s.terminal.as_deref() == Some(&terminal) && s.state != Ended)
+        .filter(|s| !s.status_only)
         .map(|s| {
             serde_json::json!({
                 "session_id": s.resume_id,
@@ -399,6 +400,39 @@ fn append(lines: &[serde_json::Value]) -> Result<(), String> {
     log.lock().map_err(|e| e.to_string())?;
     let text: String = lines.iter().map(|line| format!("{line}\n")).collect();
     log.write_all(text.as_bytes()).map_err(|e| e.to_string())
+}
+
+/// The daemon's `list` (#560): the core's status-only rows and mismatch lines follow its terminals'
+/// OSC 7501 status. A row's notices go out as a Claude session's do.
+fn listed(app: &AppHandle, terms: Vec<studio_core::Terminal>) {
+    let outputs = app
+        .state::<Mutex<Studio>>()
+        .lock()
+        .unwrap()
+        .terminals(&terms, millis());
+    for output in outputs {
+        match output {
+            Output::NeedsYou { session_id, agent } => {
+                tell(app, Notice::NeedsYou, &session_id, agent.as_deref());
+            }
+            Output::YourTurn { session_id } => tell(app, Notice::YourTurn, &session_id, None),
+            Output::Mismatch { line } => mismatch(&line),
+            _ => {}
+        }
+    }
+    LIST_CHANGED.store(true, Ordering::Release);
+}
+
+/// Appends `line` to the mismatch log beside the event log, local and only for debugging (#560).
+fn mismatch(line: &str) {
+    let Some(home) = std::env::home_dir() else {
+        return;
+    };
+    let path = studio_hook::data_dir(&home).join("mismatch.log");
+    let open = OpenOptions::new().create(true).append(true).open(&path);
+    if let Err(e) = open.and_then(|mut log| writeln!(log, "{line}")) {
+        eprintln!("studio: append to {}: {e}", path.display());
+    }
 }
 
 /// Logs a card store change that could not be saved; it stays in memory until the next save.
@@ -612,6 +646,7 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                         "studio: unrecognised wake-up: a prompt of session {session_id} names \
                          task {task_id} in markup the studio does not know"
                     ),
+                    Output::Mismatch { line } => mismatch(&line),
                     // Reads the transcript's lines and nothing else (`apps/studio/AGENTS.md`).
                     Output::Version { transcript_path } => {
                         match versions.check(Path::new(&transcript_path), millis()) {
@@ -646,7 +681,7 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
         // Each live session's context, from its status line snapshot (#517, decision 1; #519); the
         // snapshot is named by the conversation's id, which a `/clear` changes.
         let running: Vec<_> = (state.lock().unwrap().sessions().into_iter())
-            .filter(|s| s.state != Ended)
+            .filter(|s| s.state != Ended && !s.status_only)
             .map(|s| (s.agent.id.clone(), s.resume_id.clone()))
             .collect();
         let home = std::env::home_dir().unwrap_or_default();

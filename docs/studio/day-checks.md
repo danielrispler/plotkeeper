@@ -143,6 +143,7 @@ Open the sessions for the day's work: at least two in parallel, one in a task wo
 - [ ] **#574:** a question docks at the top of the rail, under the header, and stays there while the rail scrolls. Once answered, the newest card is back at the top.
 - [ ] **#540:** a reply ending with a question shows "your turn", not "needs you". A session waiting on its subagents is not counted as needing you.
 - [ ] **#541:** in the auto-mode session, ask for something auto mode's classifier blocks: the row shows **needs you** and the toast fires, as in default mode.
+- [ ] **#560:** run `agy` or `codex` in a studio terminal. A row named after it and its folder appears, marked "status only", with no step line. Ask for something that needs a permission: the row turns **needs you** and the toast fires; once answered and finished, it shows **your turn**.
 
 ### Focus mode, the toast and sounds
 
@@ -266,6 +267,7 @@ Save everything in a new folder: `local-evidence/<date>-ui-ux-recheck/` (for exa
 
   That terminal shows `"state":"working"` and `"app"` set, and `turn` goes up after the turn ends.
 - [ ] **#555:** quitting the app deletes `present`; a CLI `attach` that detaches leaves it.
+- [ ] **#560:** review the mismatch log, `~/Library/Application Support/dev.falinks.studio/mismatch.log`: each line is a Claude session whose hook state and OSC 7501 state disagreed for over 5 s. Report any pattern on #560; no file means none did.
 
 ## 6. The test-day note
 
