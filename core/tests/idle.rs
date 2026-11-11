@@ -154,3 +154,33 @@ fn a_claude_terminal_comes_back_resumed_and_a_shell_as_a_shell() {
         [("shell", "/tmp", None), ("claude-1", CWD, Some(SESSION))]
     );
 }
+
+#[test]
+fn a_shell_that_ran_another_agent_comes_back_as_that_agent_and_any_other_as_a_shell() {
+    // #561: the dead daemon's record keeps each shell's foreground program.
+    let studio = replayed(&[]);
+    let lost: Vec<Terminal> = serde_json::from_value(json!([
+        { "id": "t-agy", "argv": [], "cwd": "/tmp", "foreground": "agy" },
+        { "id": "t-vim", "argv": [], "cwd": "/tmp", "foreground": "vim" },
+        { "id": "t-old", "argv": [], "cwd": "/tmp" },
+        { "id": "t-again", "argv": ["agy", "--continue"], "cwd": "/tmp", "foreground": "agy" },
+    ]))
+    .unwrap();
+    let argvs: Vec<Vec<String>> = studio.revival(&lost).into_iter().map(|r| r.argv).collect();
+    let agy = vec!["agy".to_string(), "--continue".into()];
+    assert_eq!(argvs, [agy.clone(), vec![], vec![], agy]);
+}
+
+#[test]
+fn a_shell_whose_agent_shows_as_node_comes_back_by_its_7501_app() {
+    // #561: a node-launched CLI's foreground is `node`; the record keeps the name it reports itself by.
+    let studio = replayed(&[]);
+    let lost: Vec<Terminal> = serde_json::from_value(json!([
+        { "id": "t-codex", "argv": [], "cwd": "/tmp", "foreground": "node", "app": "codex" },
+        { "id": "t-node", "argv": [], "cwd": "/tmp", "foreground": "node" },
+    ]))
+    .unwrap();
+    let argvs: Vec<Vec<String>> = studio.revival(&lost).into_iter().map(|r| r.argv).collect();
+    let codex: Vec<String> = ["codex", "resume", "--last"].map(String::from).into();
+    assert_eq!(argvs, [codex, vec![]]);
+}

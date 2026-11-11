@@ -82,6 +82,9 @@ export type Session = {
   folder_name: string;
   // The studio terminal it runs in, its `STUDIO_TERMINAL_ID`; null when it runs outside the studio.
   terminal: string | null;
+  // Another agent than Claude Code, from its terminal's OSC 7501 status only (#560): no intention,
+  // card, brief, estimate or decisions. Its id is its terminal's.
+  status_only: boolean;
   // Daniel's name for it from the studio (#469); null for its folder's.
   name: string | null;
   // The id `claude --resume` takes: its latest conversation's; a `/clear` changes it, not `id` (#474).

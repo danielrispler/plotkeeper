@@ -43,9 +43,16 @@ export function contextTitle(context: Context | null): string {
   return `${used} of ${thousands(context.window)} tokens used · Claude's status line shows this as ${context.left}% left`;
 }
 
-// The context share's node, with its hover.
-function contextNode(context: Context | null): HTMLElement {
-  return Object.assign(text("span", contextText(context), "id"), { title: contextTitle(context) });
+// The muted mark after a row's name: "status only" for another agent's row (#560), so it never reads
+// as a Claude session with missing data; else the context share.
+export function rowMark(session: Pick<Session, "status_only" | "transcript">): string {
+  return session.status_only ? "status only" : contextText(session.transcript.context);
+}
+
+// The mark's node, with the context share's hover.
+function markNode(session: Session): HTMLElement {
+  const title = session.status_only ? "Another agent, followed by its reported status only" : contextTitle(session.transcript.context);
+  return Object.assign(text("span", rowMark(session), "id"), { title });
 }
 
 // A subagent's state label and its state: "Needs you" while it asks, else its status.
@@ -79,7 +86,9 @@ function glyph(state: string, unseen = false): HTMLElement {
 
 // A row's second line, only while it runs or needs Daniel: the current step, or the open question's
 // first line, else who asks (a plan or a permission); null otherwise.
-export function secondLine(session: Pick<Session, "state" | "line" | "questions">): string | null {
+export function secondLine(session: Pick<Session, "state" | "line" | "questions"> & { status_only?: boolean }): string | null {
+  // A status-only row has no step or question to show (#560).
+  if (session.status_only) return null;
   if (session.state === "running") return session.line ?? "";
   if (session.state !== "needs_you") return null;
   const open = session.questions.filter((question) => question.answer === "open").at(-1);
@@ -143,7 +152,7 @@ function selecting(id: string, agent: string | null, key = `${id} ${agent ?? ""}
   return button;
 }
 
-// One row: the session's name, its context share and its status glyph; while it runs or needs
+// One row: the session's name, its mark and its status glyph; while it runs or needs
 // Daniel, what it is doing and, on the row being looked at, the turn's clock.
 function row(session: Session, children: Children): HTMLElement {
   const button = selecting(session.id, null);
@@ -154,7 +163,7 @@ function row(session: Session, children: Children): HTMLElement {
   rowLines(
     button,
     session.state,
-    [text("span", sessionName(session), "name"), contextNode(session.transcript.context)],
+    [text("span", sessionName(session), "name"), markNode(session)],
     line === null
       ? null
       : [...done(children, children.get("session")), rowLine(line), ...(turn ? [Object.assign(counts(clock, turn[1]), { title: turn[0] })] : [])],

@@ -49,9 +49,19 @@ pub fn terminal_connect(app: AppHandle, daemon: State<Daemon>) -> Result<Value, 
         daemon.lost.lock().unwrap().extend(lost);
         let (reader, stream) = client.split();
         *writer = Some(stream);
+        if !POLLING.swap(true, std::sync::atomic::Ordering::AcqRel) {
+            let app = app.clone();
+            thread::spawn(move || poll(app));
+        }
         thread::spawn(move || {
             for line in reader.lines().map_while(Result::ok) {
                 if let Ok(event) = serde_json::from_str::<Value>(&line) {
+                    // Each `list`'s OSC 7501 status goes to the core (#560).
+                    if event["ev"] == "list"
+                        && let Ok(terms) = serde_json::from_value(event["terms"].clone())
+                    {
+                        crate::listed(&app, terms);
+                    }
                     let _ = app.emit("terminal", event);
                 }
             }
@@ -61,6 +71,21 @@ pub fn terminal_connect(app: AppHandle, daemon: State<Daemon>) -> Result<Value, 
     }
     let outdated = *daemon.outdated.lock().unwrap();
     Ok(json!({ "repo": repo(), "outdated": outdated }))
+}
+
+/// Whether `poll` runs: one thread per app run, across reconnects.
+static POLLING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Asks the daemon for its `list` every second while connected, so the core follows each terminal's
+/// OSC 7501 status (#560); the read loop hands the reply to the core.
+// shortcut: polls; have the daemon push status changes if the delay or the traffic matters.
+fn poll(app: AppHandle) {
+    loop {
+        thread::sleep(Duration::from_secs(1));
+        if let Some(stream) = app.state::<Daemon>().writer.lock().unwrap().as_mut() {
+            let _ = writeln!(stream, "{}", json!({ "op": "list" }));
+        }
+    }
 }
 
 /// The terminals the last daemon ran when it died, each once.

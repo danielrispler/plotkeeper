@@ -68,23 +68,27 @@ export function showView(selected: Selection | null) {
   // "Open" resumes an ended session in a new terminal, in its folder, where Claude Code keeps it.
   element("reopen").hidden = agent !== null || session.state !== "ended";
   element("reopen").onclick = () => startClaude(session.cwd, session.resume_id, "", resumesAuto(session)).catch((e) => console.warn(e));
-  element("rename").hidden = agent !== null;
+  // Another agent's row (#560) has no name of its own to keep, nor turns to mark, and comes back
+  // with its status if dropped.
+  const own = agent === null && !session.status_only;
+  element("rename").hidden = !own;
   element("rename").onclick = () => askName(session);
-  element("mark-unseen").hidden = agent !== null || session.state !== "your_turn" || session.unseen === true;
+  element("mark-unseen").hidden = !own || session.state !== "your_turn" || session.unseen === true;
   element("mark-unseen").onclick = () => void invoke("mark_unseen", { id: session.id }).catch((e) => console.warn(e));
   // Only a terminal the studio runs can be closed from here.
   element("close").hidden = agent !== null || session.terminal === null;
   element("close").onclick = () => askClose(session);
-  element("delete").hidden = agent !== null;
+  element("delete").hidden = !own;
   element("delete").onclick = () => askDelete(session).catch(report);
-  element("tool").textContent = step?.tool ?? (agent === null ? session.returned : null) ?? "No step yet";
+  element("tool").textContent = session.status_only
+    ? "Status only: another agent, with no steps, intention, cards or brief"
+    : (step?.tool ?? (agent === null ? session.returned : null) ?? "No step yet");
   const [detail, fullDetail] = shortPaths(step?.detail ?? "");
   element("detail").textContent = detail;
   element("detail").title = fullDetail;
   element("command").textContent = step?.command ?? "";
   element("step").classList.toggle("has-command", Boolean(step?.command));
-  // A subagent's transcript is its own, which the studio does not read.
-  showIntention(agent === null ? session.transcript : null);
+  showIntention(storyOf(session, agent));
   showQuestions(session.questions.filter((question) => question.agent === (agent?.id ?? null)));
   showCleared(agent === null ? session.cleared : []);
   // A subagent's view has no intention of its own: its written summary takes that line (#535).
@@ -176,6 +180,28 @@ function showIntention(story: Session["transcript"] | null) {
   element("intention").classList.toggle("old", steps > FRESH_STEPS);
   element("unavailable").hidden = !story?.unavailable;
   element("unavailable-why").textContent = story?.unavailable ? `The transcript cannot be read: ${story.unavailable}.` : "";
+}
+
+// The transcript the rail tells: none for a subagent's, which the studio does not read, nor for
+// another agent's status-only row (#560).
+export const storyOf = (session: Session, agent: unknown) => (agent === null && !session.status_only ? session.transcript : null);
+
+// What the rail draws for `selected`: "now"'s card and latest turn, and the feed. A status-only row
+// (#560) has no turns or cards to show.
+export function railOf({ session, agent }: Selection, docked: boolean, all: StoredCard[]) {
+  if (session.status_only) return { top: null, latest: null, blocks: [] };
+  const top = railTop(docked, all);
+  const cards = all.filter((card) => card !== top);
+  const own = agent === null;
+  const turns = own ? session.turns : [];
+  const blocks = feedTurns(turns, {
+    cards,
+    // A subagent's view: its session's checks and subagents are not its own.
+    checks: own ? session.checks : [],
+    agents: own ? session.agents : [],
+    questions: session.questions.filter((question) => question.agent === agent),
+  });
+  return { top, latest: own ? (turns.at(-1) ?? null) : null, blocks };
 }
 
 // When the event card `id` was written at: the part after its `@`, in Unix ms (the core's `card_time`).
@@ -419,8 +445,6 @@ export function drawFeed() {
   const { recent, older } = studio.cards;
   const all = [...older, ...recent];
   const docked = !element("dock").hidden;
-  const top = railTop(docked, all);
-  const cards = all.filter((card) => card !== top);
   if (selected === null) {
     drawNow(null, null, null);
     element("feed").replaceChildren();
@@ -428,15 +452,8 @@ export function drawFeed() {
   }
   const session = selected.session;
   const own = selected.agent === null;
-  const turns = own ? session.turns : [];
-  drawNow(session, own ? (turns.at(-1) ?? null) : null, top);
-  const blocks = feedTurns(turns, {
-    cards,
-    // A subagent's view: its session's checks and subagents are not its own.
-    checks: own ? session.checks : [],
-    agents: own ? session.agents : [],
-    questions: session.questions.filter((question) => question.agent === selected.agent),
-  });
+  const { top, latest, blocks } = railOf(selected, docked, all);
+  drawNow(session, latest, top);
   element("feed").replaceChildren(...blocks.map((block, i) => turnElement(session, block, own && i === 0 && block.index !== null)));
 }
 // Rename (#469): the row's name, kept in the event log, and `/rename` typed into the session while

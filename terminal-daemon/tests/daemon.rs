@@ -384,6 +384,42 @@ fn list_and_the_record_give_the_folder_a_shell_moved_to() {
     );
 }
 
+// #561: the record keeps each terminal's foreground program as `list` last saw it, so a shell that ran
+// another agent can come back as that agent.
+#[test]
+fn the_record_keeps_the_foreground_program_list_last_saw() {
+    let d = Daemon::start("fg");
+    let mut c = d.client();
+    spawn(&mut c, "t1", &["sh", "-c", "sleep 1000"]);
+    wait_for("sleep in the foreground", || {
+        term(&list(&mut c), "t1")["foreground"] == "sleep"
+    });
+    let record = std::fs::read_to_string(studio_terminal_daemon::record(&d.socket())).unwrap();
+    let terms: Value = serde_json::from_str(&record).unwrap();
+    assert_eq!(terms[0]["foreground"], "sleep");
+}
+
+// #561: the record keeps the name a program reports itself by in OSC 7501, as a node-launched agent's
+// foreground is `node`.
+#[test]
+fn the_record_keeps_the_osc_7501_app() {
+    let d = Daemon::start("app");
+    let mut c = d.client();
+    spawn(
+        &mut c,
+        "t1",
+        &[
+            "sh",
+            "-c",
+            r"printf '\033]7501;state=idle:app=codex\033\\'; sleep 1000",
+        ],
+    );
+    wait_for("its status", || term(&list(&mut c), "t1")["app"] == "codex");
+    let record = std::fs::read_to_string(studio_terminal_daemon::record(&d.socket())).unwrap();
+    let terms: Value = serde_json::from_str(&record).unwrap();
+    assert_eq!(terms[0]["app"], "codex");
+}
+
 // A client that stops reading must not stall the daemon: it is dropped once too far behind, and every
 // other terminal keeps flowing.
 #[test]

@@ -129,7 +129,7 @@ Open the sessions for the day's work: at least two in parallel, one in a task wo
 - [ ] **#565 (6c fix):** add a Doctor `shell` entry whose command fails, `"command": "(exit 3)"`. A notice names the entry's label with code 3, and the shell stays open. Remove the entry after.
 - [ ] **#528:** ⌘⇧P, then "Skills". The browser takes the rail's place, grouped as "Your skills", "This project" and one group per plugin. Opening a skill shows its `SKILL.md` rendered. Esc brings the rail back.
 - [ ] **#528:** "Edit" on one of your skills opens its `SKILL.md` in Zed. Plugin skills have no "Edit".
-- [ ] **#528 / #592:** compare the plugin groups with `/plugin` in Claude Code. Today a plugin may show an older cached version and a disabled plugin is listed; #592 fixes both. Note any difference on #592.
+- [ ] **#592:** compare the browser's plugin groups with `/plugin` in Claude Code, in the same project. Each enabled plugin shows, at the version `/plugin` names; a plugin turned off there is missing. Turn one off in `/plugin`, reopen "Skills": its group is gone. Turn it back on after. Note any difference on #592.
 - [ ] **#565 (6c fix):** symlink a skill folder from outside `~/.claude/skills` into it. The browser does not list it. Remove the link after.
 
 ## 4. During the work
@@ -143,6 +143,7 @@ Open the sessions for the day's work: at least two in parallel, one in a task wo
 - [ ] **#574:** a question docks at the top of the rail, under the header, and stays there while the rail scrolls. Once answered, the newest card is back at the top.
 - [ ] **#540:** a reply ending with a question shows "your turn", not "needs you". A session waiting on its subagents is not counted as needing you.
 - [ ] **#541:** in the auto-mode session, ask for something auto mode's classifier blocks: the row shows **needs you** and the toast fires, as in default mode.
+- [ ] **#560:** run `agy` or `codex` in a studio terminal. A row named after it and its folder appears, marked "status only", with no step line. Ask for something that needs a permission: the row turns **needs you** and the toast fires; once answered and finished, it shows **your turn**.
 
 ### Focus mode, the toast and sounds
 
@@ -253,6 +254,14 @@ Save everything in a new folder: `local-evidence/<date>-ui-ux-recheck/` (for exa
 
   Choose "Restart into it". No session is lost, the "needs you" state is still there, and the panel's shell is back with its scrollback (#542).
 
+- [ ] **#561:** run `agy` in a studio terminal and tell it a word to remember. Revival happens only when the terminal daemon dies, so end it as a crash would:
+
+  ```sh
+  pkill -x studio-terminal-daemon
+  ```
+
+  The terminal comes back running `agy --continue`, in the same conversation: ask for the word. Its row, once `agy` reports a status, ends in "latest conversation". If the daemon that died was older than this build, it kept no foreground program and the terminal comes back as a plain shell: run the check again.
+
 ## 5. End of the day
 
 - [ ] **#556:** quit and reopen the app. The sessions you had seen stay plain; the unseen ones keep the mark.
@@ -266,6 +275,7 @@ Save everything in a new folder: `local-evidence/<date>-ui-ux-recheck/` (for exa
 
   That terminal shows `"state":"working"` and `"app"` set, and `turn` goes up after the turn ends.
 - [ ] **#555:** quitting the app deletes `present`; a CLI `attach` that detaches leaves it.
+- [ ] **#560:** review the mismatch log, `~/Library/Application Support/dev.falinks.studio/mismatch.log`: each line is a Claude session whose hook state and OSC 7501 state disagreed for over 5 s. Report any pattern on #560; no file means none did.
 
 ## 6. The test-day note
 

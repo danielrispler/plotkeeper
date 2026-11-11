@@ -1,6 +1,7 @@
 //! The skills browser (#528): every skill in Daniel's skills folder, the project's `.claude/skills`
-//! and the installed plugins, with its `SKILL.md`. It reads only `SKILL.md` files and lists folders,
-//! never a JSON file under `~/.claude`, which may hold tokens (`apps/studio/AGENTS.md`).
+//! and the installed plugins, with its `SKILL.md`. Besides `SKILL.md` files and folder lists, it reads
+//! Claude Code's `installed_plugins.json` and only the `enabledPlugins` key of its settings files,
+//! which may hold tokens (`apps/studio/AGENTS.md`).
 
 use serde_json::{Value, json};
 use std::{
@@ -26,7 +27,7 @@ pub fn list(home: &Path, project: &Path) -> Vec<Value> {
     if project != home {
         add(&project.join(".claude/skills"), "project", true);
     }
-    for (plugin, root) in plugins(&home.join(".claude/plugins/cache")) {
+    for (plugin, root) in plugins(home, project) {
         add(&root.join("skills"), &format!("plugin {plugin}"), false);
     }
     skills
@@ -44,22 +45,95 @@ fn skill_files(folder: &Path) -> Vec<(String, PathBuf)> {
     found
 }
 
-/// Each plugin in the cache (`<marketplace>/<plugin>/<version>`) at its newest version.
-/// shortcut: the newest version by modification time, not `installed_plugins.json`'s, which is not
-/// read; a disabled plugin is listed too. Upgrade if stale or disabled plugins confuse.
-fn plugins(cache: &Path) -> Vec<(String, PathBuf)> {
-    let mut found: Vec<_> = dirs(cache)
+/// Each enabled plugin in the cache (`<marketplace>/<plugin>/<version>`) at the version Claude Code
+/// installed for `project`, from `installed_plugins.json`. If that file is missing or broken, each
+/// plugin shows at its newest cached version. A plugin whose installed version is not cached, or
+/// which is not installed here, is left out.
+fn plugins(home: &Path, project: &Path) -> Vec<(String, PathBuf)> {
+    static FALLBACK: std::sync::Once = std::sync::Once::new();
+    let plugins = home.join(".claude/plugins");
+    let installed = fs::read_to_string(plugins.join("installed_plugins.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .and_then(|json| json.get("plugins").filter(|p| p.is_object()).cloned());
+    if installed.is_none() {
+        FALLBACK.call_once(|| {
+            eprintln!("studio: no readable installed_plugins.json; skills show each plugin's newest cached version");
+        });
+    }
+    let enabled = enabled(home, project);
+    let mut found: Vec<_> = dirs(&plugins.join("cache"))
         .iter()
-        .flat_map(|market| dirs(market))
-        .filter_map(|plugin| {
-            let newest = dirs(&plugin)
-                .into_iter()
-                .max_by_key(|v| v.metadata().and_then(|m| m.modified()).ok())?;
-            Some((name(&plugin), newest))
+        .flat_map(|market| dirs(market).into_iter().map(move |p| (name(market), p)))
+        .filter_map(|(market, plugin)| {
+            let id = format!("{}@{market}", name(&plugin));
+            if enabled.get(&id) == Some(&false) {
+                return None;
+            }
+            let versions = dirs(&plugin);
+            let version = match &installed {
+                Some(installed) => {
+                    let version = installed_version(installed.get(&id)?, project)?;
+                    // Matched against the cached folders, so the JSON never names a path.
+                    versions.into_iter().find(|v| name(v) == version)?
+                }
+                None => versions
+                    .into_iter()
+                    .max_by_key(|v| v.metadata().and_then(|m| m.modified()).ok())?,
+            };
+            Some((name(&plugin), version))
         })
         .collect();
     found.sort();
     found
+}
+
+/// The version of one `installed_plugins.json` entry that applies to `project`: an install for this
+/// project, else the one for every project. Version 1 of the file has one entry, version 2 a list.
+fn installed_version<'a>(entry: &'a Value, project: &Path) -> Option<&'a str> {
+    let installs = entry
+        .as_array()
+        .map_or(std::slice::from_ref(entry), Vec::as_slice);
+    let here = |i: &&Value| i["projectPath"].as_str().map(Path::new) == Some(project);
+    let everywhere = |i: &&Value| i.get("projectPath").is_none();
+    let install = installs
+        .iter()
+        .find(here)
+        .or_else(|| installs.iter().find(everywhere))?;
+    install["version"].as_str()
+}
+
+/// Each plugin turned on or off in Claude Code's user and project settings, the later file winning.
+/// Only `enabledPlugins` is taken; the rest may hold tokens and is never kept or logged. An unreadable
+/// file adds nothing, so with none every plugin shows.
+fn enabled(home: &Path, project: &Path) -> std::collections::HashMap<String, bool> {
+    let files = [
+        home.join(".claude/settings.json"),
+        project.join(".claude/settings.json"),
+        project.join(".claude/settings.local.json"),
+    ];
+    let mut enabled = std::collections::HashMap::new();
+    for file in files {
+        let Some(settings) = fs::read_to_string(file)
+            .ok()
+            .and_then(|text| serde_json::from_str::<Settings>(&text).ok())
+        else {
+            continue;
+        };
+        for (id, on) in settings.enabled_plugins {
+            if let Some(on) = on.as_bool() {
+                enabled.insert(id, on);
+            }
+        }
+    }
+    enabled
+}
+
+/// The one key of a Claude Code settings file the studio reads (#592); serde skips the rest unread.
+#[derive(serde::Deserialize)]
+struct Settings {
+    #[serde(default, rename = "enabledPlugins")]
+    enabled_plugins: std::collections::HashMap<String, Value>,
 }
 
 /// The folders in `folder`, never a symlink, which could lead out of it.
@@ -103,13 +177,8 @@ mod tests {
         skill(&project.path().join(".claude/skills/ours"), "# Ours");
         let plugin = home.path().join(".claude/plugins/cache/market/tools/1.0.0");
         skill(&plugin.join("skills/theirs"), "# Theirs");
-        // Not a skill: a folder with no `SKILL.md`, and the cache's JSON, which is never read.
+        // Not a skill: a folder with no `SKILL.md`.
         fs::create_dir_all(home.path().join(".claude/skills/empty")).unwrap();
-        fs::write(
-            home.path().join(".claude/plugins/installed_plugins.json"),
-            "{}",
-        )
-        .unwrap();
 
         let got: Vec<_> = list(home.path(), project.path())
             .iter()
@@ -149,17 +218,67 @@ mod tests {
         assert!(list(home.path(), home.path()).is_empty());
     }
 
-    #[test]
-    fn a_plugin_shows_its_newest_version_only() {
-        let home = tempfile::tempdir().unwrap();
-        let tools = home.path().join(".claude/plugins/cache/market/tools");
+    /// Two cached versions of `tools`, the newer one written last, and the names `list` returns.
+    fn two_versions(home: &Path) -> Vec<Value> {
+        let tools = home.join(".claude/plugins/cache/market/tools");
         skill(&tools.join("1.0.0/skills/old"), "old");
         std::thread::sleep(std::time::Duration::from_millis(20));
         skill(&tools.join("2.0.0/skills/new"), "new");
-        let names: Vec<_> = list(home.path(), home.path())
+        list(home, home).iter().map(|s| s["name"].clone()).collect()
+    }
+
+    fn write(path: &Path, text: &str) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, text).unwrap();
+    }
+
+    #[test]
+    fn a_plugin_shows_the_version_claude_code_installed_not_the_newest_in_the_cache() {
+        let home = tempfile::tempdir().unwrap();
+        write(
+            &home.path().join(".claude/plugins/installed_plugins.json"),
+            r#"{"version": 2, "plugins": {"tools@market": [{"scope": "user", "version": "1.0.0"}]}}"#,
+        );
+        assert_eq!(two_versions(home.path()), ["old"]);
+    }
+
+    #[test]
+    fn a_broken_installed_plugins_json_falls_back_to_the_newest_cached_version() {
+        let home = tempfile::tempdir().unwrap();
+        write(
+            &home.path().join(".claude/plugins/installed_plugins.json"),
+            "{ not json",
+        );
+        assert_eq!(two_versions(home.path()), ["new"]);
+    }
+
+    #[test]
+    fn a_plugin_turned_off_in_claude_code_settings_is_left_out() {
+        let home = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let cache = home.path().join(".claude/plugins/cache/market");
+        skill(&cache.join("off/1.0.0/skills/hidden"), "");
+        skill(&cache.join("back-on/1.0.0/skills/back"), "");
+        skill(&cache.join("unlisted/1.0.0/skills/shown"), "");
+        write(
+            &home.path().join(".claude/settings.json"),
+            r#"{"apiKeyHelper": "secret", "enabledPlugins": {"off@market": false, "back-on@market": false}}"#,
+        );
+        // The project's local settings win over the user's.
+        write(
+            &project.path().join(".claude/settings.local.json"),
+            r#"{"enabledPlugins": {"back-on@market": true}}"#,
+        );
+        let names: Vec<_> = list(home.path(), project.path())
             .iter()
             .map(|s| s["name"].clone())
             .collect();
-        assert_eq!(names, ["new"]);
+        assert_eq!(names, ["back", "shown"]);
+    }
+
+    #[test]
+    fn with_no_installed_plugins_json_a_plugin_shows_its_newest_cached_version() {
+        let home = tempfile::tempdir().unwrap();
+        assert_eq!(two_versions(home.path()), ["new"]);
     }
 }

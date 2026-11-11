@@ -112,8 +112,11 @@ What Daniel has typed into a session's prompt and not sent yet, as the studio fo
 The empty file `present` in the studio's data folder, kept while the window is focused, so Claude Code's Remote Control skips a phone push Daniel would see on screen. Blur, quit and the app's start delete it, and the terminal daemon deletes it when the app's connection drops, unless it dropped the app for falling behind.
 
 **Revival**:
-Bringing back the terminals a terminal daemon ran after it died, from a crash, a reboot or an upgrade. A Claude terminal reopens its latest session with `claude --resume`; a shell starts again in its folder. Each loses its screen, and a shell its state.
+Bringing back the terminals a terminal daemon ran after it died, from a crash, a reboot or an upgrade. A Claude terminal reopens its latest session with `claude --resume`; a shell that ran another agent with a resume command, such as `agy` or `codex`, reopens that agent's latest conversation in its folder; any other shell starts again in its folder. Each loses its screen, and a shell its state. Quitting a revived agent ends its terminal, as the agent, not a shell, is the terminal's program.
 _Avoid_: Restore (nothing of the old process survives)
+
+**Mismatch log**:
+A local debug log, beside the event log, of the Claude sessions whose hook state and OSC 7501 state disagree for more than a few seconds: one line each, with the time, the session and both states.
 
 **Decision**:
 A question, plan or permission Daniel answered, with his answer and where he gave it: on the card or in the terminal. A session's decisions, newest first, are its decision history.
@@ -147,7 +150,7 @@ The state of an agent session left at your turn with no events for 2 hours or mo
 The state of an agent session from its own end event until it starts again under its id. The control room never guesses that a session is gone.
 
 **Agent session**:
-One worker runtime session running one agent on a task, such as a Claude Code session in a terminal. The unit the control room watches.
+One worker runtime session running one agent on a task, such as a Claude Code session in a terminal. The unit the control room watches. A Claude Code session is followed fully, from its hooks and transcript; a session of another agent has its status only.
 _Avoid_: Run (alone)
 
 **Subagent**:
@@ -164,7 +167,7 @@ A subagent that is not a worker, such as a review or a search. It shows as one l
 A prompt that Claude Code sends, not Daniel, to wake an agent when a subagent or a background command it started returns. It names the returning task's id in markup. It never counts as Daniel's prompt.
 
 **Session list**:
-The list of every agent session, one row each, sorted by state: needs you, running, your turn, then idle and ended sessions collapsed last. A row is one line, its name then its state's shape: a "Needs you" pill (the only colour), a spinner while running, a dot at your turn (filled, with a bold name, while **unseen**), a ring when idle or ended. Only a running or needs-you row adds a second, muted line: its current step, or its question's first line. Running subagents nest under the agent that spawned them. When the window is narrow the list is a **strip** of the same shapes, each with a short label from the session's name, distinct between sessions; hovering it opens the list over the terminal. The top bar's needs-you chip counts the sessions that need Daniel. A finished subagent leaves the list and counts in its parent's "N done"; a failed one stays until Daniel opens it. Only Daniel's own actions change the session he looks at: a click or key on a row, or starting a session, which selects it once it reports its terminal.
+The list of every agent session, one row each, sorted by state: needs you, running, your turn, then idle and ended sessions collapsed last. A row is one line, its name then its state's shape: a "Needs you" pill (the only colour), a spinner while running, a dot at your turn (filled, with a bold name, while **unseen**), a ring when idle or ended. Only a running or needs-you row adds a second, muted line: its current step, or its question's first line. Running subagents nest under the agent that spawned them. When the window is narrow the list is a **strip** of the same shapes, each with a short label from the session's name, distinct between sessions; hovering it opens the list over the terminal. The top bar's needs-you chip counts the sessions that need Daniel. A finished subagent leaves the list and counts in its parent's "N done"; a failed one stays until Daniel opens it. A **status-only row** is a session of another agent than Claude Code, such as Codex, in a studio terminal whose program reports its status (OSC 7501): it shows running, needs you or your turn from that status, its name from the program and its folder, and a "status only" mark instead of a second line, as it has no intention, card, brief, estimate or decisions. It notifies as a Claude session does, and goes when its status clears or its terminal ends. Only Daniel's own actions change the session he looks at: a click or key on a row, or starting a session, which selects it once it reports its terminal.
 
 **Story rail**:
 The column on the window's left that tells the selected session's or subagent's story. It opens on "now": one header line (the verdict and the phase, with the times and the model on hover, and a "⋯" menu for Rename, Close and Delete), then the open question docked under it, or else the newest card, then the current intention, boxed, then the latest turn's summary. Below is a feed of turns, newest first. A turn is one block: its prompt in one line, its summary, its learning question, its cards, the subagents and checks it ran, and its full response, folded, with one "ask about this". The brief and the decision history are folded under the feed.
