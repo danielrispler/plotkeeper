@@ -91,10 +91,15 @@ fn plugins(home: &Path, project: &Path) -> Vec<(String, PathBuf)> {
 /// The version of one `installed_plugins.json` entry that applies to `project`: an install for this
 /// project, else the one for every project. Version 1 of the file has one entry, version 2 a list.
 fn installed_version<'a>(entry: &'a Value, project: &Path) -> Option<&'a str> {
-    let installs = entry.as_array().map_or(std::slice::from_ref(entry), Vec::as_slice);
+    let installs = entry
+        .as_array()
+        .map_or(std::slice::from_ref(entry), Vec::as_slice);
     let here = |i: &&Value| i["projectPath"].as_str().map(Path::new) == Some(project);
     let everywhere = |i: &&Value| i.get("projectPath").is_none();
-    let install = installs.iter().find(here).or_else(|| installs.iter().find(everywhere))?;
+    let install = installs
+        .iter()
+        .find(here)
+        .or_else(|| installs.iter().find(everywhere))?;
     install["version"].as_str()
 }
 
