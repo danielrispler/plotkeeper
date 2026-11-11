@@ -384,6 +384,21 @@ fn list_and_the_record_give_the_folder_a_shell_moved_to() {
     );
 }
 
+// #561: the record keeps each terminal's foreground program as `list` last saw it, so a shell that ran
+// another agent can come back as that agent.
+#[test]
+fn the_record_keeps_the_foreground_program_list_last_saw() {
+    let d = Daemon::start("fg");
+    let mut c = d.client();
+    spawn(&mut c, "t1", &["sh", "-c", "sleep 1000"]);
+    wait_for("sleep in the foreground", || {
+        term(&list(&mut c), "t1")["foreground"] == "sleep"
+    });
+    let record = std::fs::read_to_string(studio_terminal_daemon::record(&d.socket())).unwrap();
+    let terms: Value = serde_json::from_str(&record).unwrap();
+    assert_eq!(terms[0]["foreground"], "sleep");
+}
+
 // A client that stops reading must not stall the daemon: it is dropped once too far behind, and every
 // other terminal keeps flowing.
 #[test]

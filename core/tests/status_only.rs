@@ -90,6 +90,22 @@ fn with_no_app_the_row_is_named_by_its_foreground_program() {
 }
 
 #[test]
+fn an_agent_revived_into_its_latest_conversation_says_so_on_its_row() {
+    // #561: revival with no known conversation id resumes the folder's latest one.
+    let mut studio = Studio::default();
+    let mut latest = term("t-9", Some("idle"), Some("codex"), T0);
+    latest.argv = vec!["codex".into(), "resume".into(), "--last".into()];
+    let mut known = term("t-10", Some("idle"), Some("codex"), T0);
+    known.argv = vec!["codex".into(), "resume".into(), "c-1".into()];
+
+    listed(&mut studio, &[latest, known], T0);
+
+    let name = |id| studio.session(id).unwrap().identity.name.clone();
+    assert_eq!(name("t-9"), "codex · other-project · latest conversation");
+    assert_eq!(name("t-10"), "codex · other-project");
+}
+
+#[test]
 fn a_terminal_that_never_reported_gets_no_row() {
     let mut studio = Studio::default();
 

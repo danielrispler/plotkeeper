@@ -29,8 +29,9 @@
 //!
 //! Unknown requests and fields are ignored.
 //!
-//! Beside the socket, the daemon keeps a record of the terminals it runs, `[{id, argv, cwd}]` ([`record`]), rewritten
-//! at each spawn, exit, forget and `list`, with `cwd` as `list` gives it. It outlives the daemon, so after a crash, a reboot or [`stop`] it lists the
+//! Beside the socket, the daemon keeps a record of the terminals it runs, `[{id, argv, cwd, foreground}]` ([`record`]),
+//! rewritten at each spawn, exit, forget and `list`, with `cwd` as `list` gives it and `foreground` as `list` last
+//! saw it (#561). It outlives the daemon, so after a crash, a reboot or [`stop`] it lists the
 //! terminals that were lost (#470).
 use base64::{Engine, engine::general_purpose::STANDARD as B64};
 use serde_json::Value;
