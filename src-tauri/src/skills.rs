@@ -114,22 +114,26 @@ fn enabled(home: &Path, project: &Path) -> std::collections::HashMap<String, boo
     ];
     let mut enabled = std::collections::HashMap::new();
     for file in files {
-        let Some(json) = fs::read_to_string(file)
+        let Some(settings) = fs::read_to_string(file)
             .ok()
-            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+            .and_then(|text| serde_json::from_str::<Settings>(&text).ok())
         else {
             continue;
         };
-        let Some(plugins) = json.get("enabledPlugins").and_then(Value::as_object) else {
-            continue;
-        };
-        for (id, on) in plugins {
+        for (id, on) in settings.enabled_plugins {
             if let Some(on) = on.as_bool() {
-                enabled.insert(id.clone(), on);
+                enabled.insert(id, on);
             }
         }
     }
     enabled
+}
+
+/// The one key of a Claude Code settings file the studio reads (#592); serde skips the rest unread.
+#[derive(serde::Deserialize)]
+struct Settings {
+    #[serde(default, rename = "enabledPlugins")]
+    enabled_plugins: std::collections::HashMap<String, Value>,
 }
 
 /// The folders in `folder`, never a symlink, which could lead out of it.

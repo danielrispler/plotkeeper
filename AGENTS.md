@@ -5,7 +5,7 @@ These rules apply to work under `apps/studio`, the control room tracked by map #
 ## Hard rules
 
 - **Never open scored runs** (`"scored": true` in `result.json`), per #228. This is stricter than the engine's lifted "Scored-batch inspection" rule; the studio follows the stricter rule.
-- **Never read, copy or send credential files or tokens of any CLI** (Claude Code, `gh`, Codex, `gcloud` and the like). Running a CLI as a normal user (for example `gh issue list`) is fine. Reading its stored credentials or config that may hold tokens (such as `~/.claude.json`, `~/.claude/.credentials.json`, the keychain, `~/.config/gh/hosts.yml`) is not.
+- **Never read, copy or send credential files or tokens of any CLI** (Claude Code, `gh`, Codex, `gcloud` and the like). Running a CLI as a normal user (for example `gh issue list`) is fine. Reading its stored credentials or config that may hold tokens (such as `~/.claude.json`, `~/.claude/.credentials.json`, the keychain, `~/.config/gh/hosts.yml`) is not. The one exception: the skills browser reads only the `enabledPlugins` key of Claude Code's settings files (#592).
 
 ## Implementation language
 
