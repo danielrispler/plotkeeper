@@ -55,12 +55,14 @@ It writes every output to a new `local-evidence/2026-11-09-round-5/real-calls-<t
 Check the results when it ends:
 
 - [x] **#518:** `518-real-card.txt` carries no plugin footer; the script greps for one and says so in `run.log`.
-- [ ] **#583, the quiz before and after:** compare the new `526-summaries.md` with the earlier run's `local-evidence/2026-11-09-round-5/real-calls-20261110-153629/526-summaries.md`.
+- [x] **#583, the quiz before and after:** compare the new `526-summaries.md` with the earlier run's `local-evidence/2026-11-09-round-5/real-calls-20261110-153629/526-summaries.md`.
   - An orchestration turn (a merge, or an `/implement-spec` status) gets no learning section.
   - The other turns' questions ask why or how something works, and no answer is guessable by its length.
   - A guessable key is asked once more (**Calls:** 2). A second guessable reply shows as "**No learning section.**" under a "**Logged:**" line naming it. A turn with nothing to teach shows "**No learning section.**" with no logged line.
   - Weak questions are the trigger to try a larger model, which reopens #526's decision 14 (Daniel's call).
-- [ ] **#526:** judge the summaries, and record their time and cost on #526.
+
+  2026-11-11 (#598), `real-calls-20261111-182912`: the two status turns got no learning section and no logged line; the one question asks why, with balanced options. Daniel: good enough, decision 14 stays. The main idea above the question gives its answer away: #600. Not covered by this run: a retry (**Calls:** 2), a **Logged:** line, an `/implement-spec` turn.
+- [x] **#526:** judge the summaries, and record their time and cost on #526. 2026-11-11: pass; [time and cost](https://github.com/danielrispler/Falinks/issues/526#issuecomment-6822741182).
 
 ### #521: the status line wrapper
 
