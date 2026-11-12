@@ -26,8 +26,8 @@ npm start
 
 - [ ] **#555:** if the app offers a daemon upgrade, accept it. Every terminal revives.
 
-  2026-11-11 (#598): no upgrade was offered. `PROTOCOL` is still 1, so the Nov 6 daemon (from before #555) kept running, and its folder and socket stayed `rwxr-xr-x`. Its fixes apply only once a new daemon starts.
-- [ ] **#555:** the data folder is `drwx------` and the socket `srw-------`:
+  2026-11-11 (#598): no upgrade was offered. `PROTOCOL` is still 1, so the Nov 6 daemon (from before #555) kept running, and its folder and socket stayed `rwxr-xr-x`. Its fixes apply only once a new daemon starts (#601). On 2026-11-12 Daniel killed it by hand; the app started daemon 7414, revived all 4 terminals (3 `claude --resume <id>`, 1 login shell), and the folder and socket are now `drwx------` and `srw-------`.
+- [x] **#555:** the data folder is `drwx------` and the socket `srw-------`:
 
   ```sh
   ls -la ~/Library/Application\ Support/dev.falinks.studio/
@@ -300,7 +300,7 @@ Save everything in a new folder: `local-evidence/<date>-ui-ux-recheck/` (for exa
 - [ ] **#561 (#598):** run `agy` in a studio terminal and tell it a word to remember. Revival happens only when the terminal daemon dies, so end it as a crash would:
 
   ```sh
-  pkill -x studio-terminal-daemon
+  pkill -f 'studio-terminal-daemon serve'  # -x misses it: macOS keeps only 16 characters of the name
   ```
 
   The terminal comes back running `agy --continue`, in the same conversation: ask for the word. Its row, once `agy` reports a status, ends in "latest conversation". If the daemon that died was older than this build, it kept no foreground program and the terminal comes back as a plain shell: run the check again.
