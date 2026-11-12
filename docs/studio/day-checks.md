@@ -95,10 +95,10 @@ Before opening any work, with the app maximised on the laptop screen.
 - [x] **#573:** narrow the window slowly. The list folds to its strip first, then the rail narrows, then the terminal loses columns, and only last does the rail become an overlay. In the overlay, the top bar shows the selected session's state, and its open question when it needs you.
 - [x] **#572:** at strip width, no two strip labels read the same. Hovering the strip opens the list over the terminal; the terminal does not move or resize.
 
-  2026-11-12 (#598): 14 and 15 pass, but Daniel finds the narrow layout ugly, wants the rail overlay to open on hover like the list's strip, and finds the rail too full of text to read. Follow-up pending his call.
+  2026-11-12 (#598): 14 and 15 pass, but Daniel finds the narrow layout ugly, wants the rail overlay to open on hover like the list's strip, and finds the rail too full of text to read. Follow-up: grilling #603.
 - [ ] **#524:** saving `settings.json` changes zoom and font size live. ⌘=, ⌘- and ⌘0 reach the window and are not taken by a menu.
 
-  2026-11-12 (#598): **failed.** ⌘, opened nothing (no `settings.json` was created), and ⌘=, ⌘- and ⌘0 did not zoom. Cause not found yet.
+  2026-11-12 (#598): **failed.** ⌘, opened nothing (no `settings.json` was created), and ⌘=, ⌘- and ⌘0 did not zoom. Cause not found yet. The palette's "Zoom in" and settings actions work, so it is the keys. ⌘, worked on 2026-11-12 (§3, #575).
 
 ## 3. Morning: start the day's sessions (#599, except where a section names #598)
 
@@ -140,11 +140,15 @@ Open the sessions for the day's work: at least two in parallel, one in a task wo
 
 ### Keys and the palette (#598)
 
-- [ ] **#575:** ⌘⇧P opens the palette: every action with its key. Typing filters, Enter runs the first match, Esc closes it. It lists focus mode with ⇧⌘↩, "Toggle split" with ⌘D and "Toggle panel" with ⌃`.
-- [ ] **#575:** Tab into the list; ↑ and ↓ move the selection row by row. The terminal still gets ↑ and ↓ when it has focus. Ctrl+C and Ctrl+R still reach Claude Code.
-- [ ] **#575:** ⌘, opens `settings.json` in the editor, creating it empty if it was missing.
-- [ ] **#575:** rebind one key in `keymap.json`, such as `{ "bindings": { "cmd-shift-j": "studio::NextNeedsYou" } }`. The new key works, ⌘J no longer does, and the palette shows ⇧⌘J. Undo it after.
+- [x] **#575:** ⌘⇧P opens the palette: every action with its key. Typing filters, Enter runs the first match, Esc closes it. It lists focus mode with ⇧⌘↩, "Toggle split" with ⌘D and "Toggle panel" with ⌃`.
+
+  2026-11-12 (#598): holds, from the terminal and from the list. But ↑ and ↓ do not move through the results; only the mouse or Enter picks one.
+- [x] **#575:** Tab into the list; ↑ and ↓ move the selection row by row. The terminal still gets ↑ and ↓ when it has focus. Ctrl+C and Ctrl+R still reach Claude Code.
+- [x] **#575:** ⌘, opens `settings.json` in the editor, creating it empty if it was missing.
+- [ ] **#575:** rebind one key in `keymap.json`, such as `[{ "bindings": { "cmd-shift-j": "studio::NextNeedsYou" } }]` (an array, as in Zed). The new key works, ⌘J no longer does, and the palette shows ⇧⌘J. Undo it after.
 - [ ] **#465:** ⌘1, ⌘2 and Esc work in the real window. Panes and dialogs (the picker, the palette) draw correctly.
+
+  2026-11-12 (#598): Esc, the picker and the palette hold. ⌘1 and ⌘2 did nothing in a maximised window, where the list and the rail are already shown; retest at strip width.
 
 ### Terminal parity with Zed's (#598)
 
@@ -257,7 +261,7 @@ Run one `/implement-spec` (or any run with workers and helpers) in the studio.
 - [ ] **#529:** drag the divider: both resize, and Claude Code redraws in each; it stops before a pane gets too small. Selecting the pinned session shows it alone; selecting another brings the split back. ⌘D again closes it. Dropping a file types its path into the focused pane only.
 - [ ] **#542:** press ⌃` with a session selected. A band opens under the terminal with a shell in that session's folder, and takes the keys; the terminal above stays as wide as before. ⌃` again, from inside the panel too, hides it.
 - [ ] **#542:** the band never covers the list or the rail. Drag its top edge: it stops at 40 % of the terminal's height. Select a session in another folder: the panel shows that folder's shell; going back shows the first shell with its scrollback. With a split open, the panel shows under both panes.
-- [ ] **#542:** rebind it in `keymap.json` (`{ "bindings": { "ctrl-j": "studio::TogglePanel" } }`): the new key toggles it, and ⌃` reaches the terminal. Undo it after.
+- [ ] **#542:** rebind it in `keymap.json` (`[{ "bindings": { "ctrl-j": "studio::TogglePanel" } }]`): the new key toggles it, and ⌃` reaches the terminal. Undo it after.
 
 ### A program that fails at start (#598)
 
