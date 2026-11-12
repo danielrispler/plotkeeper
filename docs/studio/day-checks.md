@@ -88,13 +88,17 @@ Check the results when it ends:
 
 Before opening any work, with the app maximised on the laptop screen.
 
-- [ ] **#566:** the window reads calmer: sections are told apart by fill, not lines, and the terminal reads as the main thing. Only "needs you" is in colour.
-- [ ] **#566:** the native title bar is gone. The traffic lights sit at the top bar's start and do not cover anything; dragging the top bar moves the window, and double-clicking it zooms it.
-- [ ] **#566:** every button reacts to hover and press. Tabbing to a button or field shows a grey ring, never macOS blue. Scrollbars in the list and the rail are thin.
-- [ ] **#573:** maximised, with one terminal, the list shows in full, the rail stays on screen, and the terminal has at least 100 columns (hover its header, with nothing selected, for the grid size).
-- [ ] **#573:** narrow the window slowly. The list folds to its strip first, then the rail narrows, then the terminal loses columns, and only last does the rail become an overlay. In the overlay, the top bar shows the selected session's state, and its open question when it needs you.
-- [ ] **#572:** at strip width, no two strip labels read the same. Hovering the strip opens the list over the terminal; the terminal does not move or resize.
+- [x] **#566:** the window reads calmer: sections are told apart by fill, not lines, and the terminal reads as the main thing. Only "needs you" is in colour.
+- [x] **#566:** the native title bar is gone. The traffic lights sit at the top bar's start and do not cover anything; dragging the top bar moves the window, and double-clicking it zooms it.
+- [x] **#566:** every button reacts to hover and press. Tabbing to a button or field shows a grey ring, never macOS blue. Scrollbars in the list and the rail are thin.
+- [x] **#573:** maximised, with one terminal, the list shows in full, the rail stays on screen, and the terminal has at least 100 columns (hover its header, with nothing selected, for the grid size).
+- [x] **#573:** narrow the window slowly. The list folds to its strip first, then the rail narrows, then the terminal loses columns, and only last does the rail become an overlay. In the overlay, the top bar shows the selected session's state, and its open question when it needs you.
+- [x] **#572:** at strip width, no two strip labels read the same. Hovering the strip opens the list over the terminal; the terminal does not move or resize.
+
+  2026-11-12 (#598): 14 and 15 pass, but Daniel finds the narrow layout ugly, wants the rail overlay to open on hover like the list's strip, and finds the rail too full of text to read. Follow-up pending his call.
 - [ ] **#524:** saving `settings.json` changes zoom and font size live. ⌘=, ⌘- and ⌘0 reach the window and are not taken by a menu.
+
+  2026-11-12 (#598): **failed.** ⌘, opened nothing (no `settings.json` was created), and ⌘=, ⌘- and ⌘0 did not zoom. Cause not found yet.
 
 ## 3. Morning: start the day's sessions (#599, except where a section names #598)
 
