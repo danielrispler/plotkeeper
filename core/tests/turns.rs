@@ -1,5 +1,5 @@
-//! Seam 1 (#434, Testing Decisions) for turns (#434, decisions 3 to 7): a turn is keyed by Claude
-//! Code's prompt id. Two fixtures are cut from the checkpoint day (#370): the wake-up turn of session
+//! Seam 1 (danielrispler/Falinks#434, Testing Decisions) for turns (danielrispler/Falinks#434, decisions 3 to 7): a turn is keyed by Claude
+//! Code's prompt id. Two fixtures are cut from the checkpoint day (danielrispler/Falinks#370): the wake-up turn of session
 //! 2afc85f5 and the prompt Daniel queued during it, and the Esc in session 5bb84a4a.
 
 use serde_json::{Value, json};

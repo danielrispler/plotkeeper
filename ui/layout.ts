@@ -1,4 +1,4 @@
-// The window's width rule (#565, decision 4). As the window narrows, the columns give way in order:
+// The window's width rule (danielrispler/Falinks#565, decision 4). As the window narrows, the columns give way in order:
 // the list to its strip, the rail from its width to 320 px, a terminal pane from 100 to 80 columns, a
 // split from side by side to stacked once either pane would get under 100 columns, and last, the rail
 // to an overlay. Focus mode (decision 2) folds the list and the rail, and the terminal takes the
@@ -61,7 +61,7 @@ export type Split = { stacked: boolean; share: number };
 // The margin around a pane, which is also half the gap that holds a split's divider.
 const margin = 6;
 
-// The panes' boxes in a terminal body of `width` × `height` px (#529): one pane fills it, else a split
+// The panes' boxes in a terminal body of `width` × `height` px (danielrispler/Falinks#529): one pane fills it, else a split
 // gives its first pane `share` of the body, side by side or stacked, the other pane the rest. A dragged
 // share stops where a pane would get under 80 columns side by side, or under 120 px stacked.
 export function paneBoxes(width: number, height: number, cell: number, split: Split | null): Box[] {
@@ -74,11 +74,11 @@ export function paneBoxes(width: number, height: number, cell: number, split: Sp
   return [{ ...all, [end]: length - at + margin }, { ...all, [start]: at + margin }];
 }
 
-// The terminal panel's height (#542): a band under the terminal column (#565, decision 5), as its
+// The terminal panel's height (danielrispler/Falinks#542): a band under the terminal column (danielrispler/Falinks#565, decision 5), as its
 // divider was dragged, at least 80 px but never over 40 % of the column. It costs height, never width.
 export const panelHeight = (dragged: number, column: number) => Math.round(Math.min(Math.max(dragged, 80), 0.4 * column));
 
-// Whether the story rail shows the selected session (#556): not in focus mode, not behind a closed
+// Whether the story rail shows the selected session (danielrispler/Falinks#556): not in focus mode, not behind a closed
 // overlay, and not under the skills browser, which takes its place.
 export const railShown = (mode: LayoutMode, railOpen: boolean, skillsOpen: boolean) =>
   mode !== "focus" && (mode !== "overlay" || railOpen) && !skillsOpen;

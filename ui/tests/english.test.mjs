@@ -1,4 +1,4 @@
-// The studio is English only, left to right (#487): no Hebrew label and no right-to-left markup in
+// The studio is English only, left to right (danielrispler/Falinks#487): no Hebrew label and no right-to-left markup in
 // the UI's sources. Cards stored in Hebrew still lay out right to left, by `dir="auto"` on their text.
 import { test } from "node:test";
 import assert from "node:assert/strict";

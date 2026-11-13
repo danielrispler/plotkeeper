@@ -1,8 +1,8 @@
-//! The presence file for Remote Control (#522). Claude Code skips a phone push while the file named
+//! The presence file for Remote Control (danielrispler/Falinks#522). Claude Code skips a phone push while the file named
 //! by `CLAUDE_CLIENT_PRESENCE_FILE` exists, and reads nothing from it. The studio's terminals set
 //! it to `path()`; the shell keeps the file while the window is focused, and deletes it on blur, on
 //! quit and at start, for a file a crash left. After a crash the daemon deletes it once the app's
-//! connection drops (#555), unless
+//! connection drops (danielrispler/Falinks#555), unless
 //! the daemon dropped it for falling behind.
 
 use std::{

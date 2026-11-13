@@ -1,6 +1,6 @@
-// The window (#463 pick, mockup C): a top bar, then the session list on the right, the terminal in
+// The window (danielrispler/Falinks#463 pick, mockup C): a top bar, then the session list on the right, the terminal in
 // the centre and the story rail on the left. Each region is its own module: `list.ts`, `story.ts`
-// with `questions.ts` and `cards.ts`, and the terminal pane, `terminal.ts` (#466). The core
+// with `questions.ts` and `cards.ts`, and the terminal pane, `terminal.ts` (danielrispler/Falinks#466). The core
 // decides what the window shows; this file wires the shell's events to the regions and lays the
 // columns out by the width rule in `layout.ts`.
 
@@ -44,7 +44,7 @@ function layout() {
   showToast();
 }
 window.addEventListener("resize", layout);
-// The shell counts a turn seen only while the rail shows its session (#556), so it is told whether it
+// The shell counts a turn seen only while the rail shows its session (danielrispler/Falinks#556), so it is told whether it
 // does each time the layout or the body's classes change.
 let railWas: boolean | null = null;
 new MutationObserver(() => {
@@ -80,16 +80,16 @@ function divider(id: string, column: keyof Widths, width: (x: number) => number)
 divider("list-divider", "list", (x) => window.innerWidth - x);
 divider("rail-divider", "rail", (x) => x);
 
-// The window's shortcuts, from `keymap.json` (#524). By default ⌘1 opens the list from its strip,
+// The window's shortcuts, from `keymap.json` (danielrispler/Falinks#524). By default ⌘1 opens the list from its strip,
 // ⌘2 the rail as an overlay, Esc closes both and the picker, ⌘⇧↩ toggles focus mode, and ⌘=, ⌘- and
-// ⌘0 zoom. Only focus mode's key changes the terminal's size; a needs-you only toasts (#573).
+// ⌘0 zoom. Only focus mode's key changes the terminal's size; a needs-you only toasts (danielrispler/Falinks#573).
 const toggle = (name: string) => document.body.classList.toggle(name);
 let zoom = 1;
 const setZoom = (to: number) => {
   zoom = to;
   invoke("set_zoom", { zoom }).then(layout, (e) => console.warn(e));
 };
-// The keyboard spine (#575): ⌘] and ⌘[ step through the sessions, ⌘J goes to the next needs-you, else the next unseen, ↑
+// The keyboard spine (danielrispler/Falinks#575): ⌘] and ⌘[ step through the sessions, ⌘J goes to the next needs-you, else the next unseen, ↑
 // and ↓ move in the list, 1–4 answer the docked card, ⌘N starts a session, ⌘, opens `settings.json`
 // and ⌘⇧P opens the palette of every action here.
 const selectedId = () => studio.selection?.session.id ?? null;
@@ -134,28 +134,28 @@ const actions: Actions = {
     document.body.classList.remove("list-open", "rail-open");
     layout();
   },
-  // A split (#529) pins the pane shown and shows the next session beside it.
+  // A split (danielrispler/Falinks#529) pins the pane shown and shows the next session beside it.
   "studio::ToggleSplit": () => void (toggleSplit() && go(stepSession(studio.listed, selectedId(), 1))),
-  // The terminal panel (#542): a shell in the shown session's folder, under the terminal column.
+  // The terminal panel (danielrispler/Falinks#542): a shell in the shown session's folder, under the terminal column.
   "studio::TogglePanel": () => togglePanel(focusPane),
   "studio::ZoomIn": () => setZoom(zoomed(zoom, 1)),
   "studio::ZoomOut": () => setZoom(zoomed(zoom, -1)),
   "studio::ResetZoom": () => setZoom(zoomed(zoom, 0)),
   "studio::NextSession": () => go(stepSession(studio.listed, selectedId(), 1)),
   "studio::PreviousSession": () => go(stepSession(studio.listed, selectedId(), -1)),
-  // The toast's session first, which also leaves focus mode (#573).
+  // The toast's session first, which also leaves focus mode (danielrispler/Falinks#573).
   "studio::NextNeedsYou": () => void (jumpToNeedsYou() || go(nextNeedsYou(studio.listed, selectedId()))),
   "studio::SelectNext": () => moveInList(1),
   "studio::SelectPrevious": () => moveInList(-1),
   "studio::Answer": (n) => answer(Number(n)),
   "studio::NewSession": showPicker,
   "studio::OpenSettings": () => void invoke("open_settings", { editor: studio.files.settings.editor }).catch((e) => console.warn(e)),
-  // The skills browser (#528), in the rail's place; it leaves focus mode, which hides the rail.
+  // The skills browser (danielrispler/Falinks#528), in the rail's place; it leaves focus mode, which hides the rail.
   "studio::Skills": () => {
     if (studio.focus) actions["studio::ToggleFocus"]();
     showSkills().catch((e) => console.warn(e));
   },
-  // A Doctor entry from settings, by its command (#527).
+  // A Doctor entry from settings, by its command (danielrispler/Falinks#527).
   "studio::Doctor": (command) => {
     const entry = studio.files.settings.doctor.find((e) => e.command === command);
     if (entry) runDoctor(entry).catch((e) => console.warn(e));
@@ -210,17 +210,17 @@ element("rail-toggle").addEventListener("click", () => toggle("rail-open"));
 const blocks = () => element("story").querySelectorAll<HTMLDetailsElement>("details:not(.more):not(.ask-about)");
 element("open-all").addEventListener("click", () => blocks().forEach((block) => (block.open = true)));
 element("close-all").addEventListener("click", () => blocks().forEach((block) => (block.open = false)));
-// The rail's "⋯" menu (#574) closes once an action in it is chosen.
+// The rail's "⋯" menu (danielrispler/Falinks#574) closes once an action in it is chosen.
 element("rail-actions").addEventListener("click", () => element("rail-actions").hidePopover());
 
 document.addEventListener("visibilitychange", markShown);
 
-// A login shell in the configured repository, then a pane per session terminal (#467).
+// A login shell in the configured repository, then a pane per session terminal (danielrispler/Falinks#467).
 startPanes().catch((e) => element("terminal-body").append(`No terminal: ${e}`));
 dragSplit();
 dragPanel();
 element("new-session").addEventListener("click", showPicker);
-// The needs-you chip (#572) selects the first session that needs Daniel.
+// The needs-you chip (danielrispler/Falinks#572) selects the first session that needs Daniel.
 element("needs-you").addEventListener("click", () => {
   const first = studio.listed.find((session) => session.state === "needs_you");
   if (first) select(first.id);
@@ -236,7 +236,7 @@ const showList = (sessions: Session[]) => {
   showPlaces();
   showToast();
 };
-// Opening Places reads git's counts at once (#576).
+// Opening Places reads git's counts at once (danielrispler/Falinks#576).
 element("places").addEventListener("toggle", () => void ((element("places") as HTMLDetailsElement).open && readPlaces(true)));
 listen<Session[]>("sessions", showList);
 invoke<Session[]>("sessions").then(showList);
@@ -244,7 +244,7 @@ invoke<Session[]>("sessions").then(showList);
 element("toast").addEventListener("pointerdown", (event) => event.preventDefault());
 element("toast").addEventListener("click", jumpToNeedsYou);
 // While a press waits for its reply, the reply draws the rail once, with its cards; an event between
-// would draw it with the last session's cards for a frame (#570).
+// would draw it with the last session's cards for a frame (danielrispler/Falinks#570).
 // The press's settling fetches what it held back.
 listen<Selection | null>("selected", (selected) => (studio.pending ? (studio.missed = true) : show(selected)));
 invoke<Selection | null>("selected").then(show);
@@ -255,10 +255,10 @@ listen<string>("notice", (notice) => {
   element("notice").hidden = false;
 });
 invoke<SessionCards>("cards").then(showCards);
-// The answer hook waits for the card only while its session shows (#461, decision 16).
+// The answer hook waits for the card only while its session shows (danielrispler/Falinks#461, decision 16).
 startWatching(() => showView(studio.selection));
 
-// The plan's usage, from the status line's snapshot (#481). The status line runs after each message.
+// The plan's usage, from the status line's snapshot (danielrispler/Falinks#481). The status line runs after each message.
 // shortcut: polls every 10 s; push from the shell if the delay matters.
 const showUsage = () =>
   invoke<Limits | null>("usage").then((limits) => {

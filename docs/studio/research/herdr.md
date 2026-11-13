@@ -1,6 +1,6 @@
 # herdr: how it works, how people use it, what the studio should take
 
-Research for #530 (spec #517, decision 22), 9 November 2026. It replaces the first version of this note, which read READMEs only. Daniel's ask: understand herdr properly, and "no need to reinvent the wheel: if they figured something out, take inspiration and build it ourselves."
+Research for danielrispler/Falinks#530 (spec danielrispler/Falinks#517, decision 22), 9 November 2026. It replaces the first version of this note, which read READMEs only. Daniel's ask: understand herdr properly, and "no need to reinvent the wheel: if they figured something out, take inspiration and build it ourselves."
 
 Studio terms follow `docs/studio/CONTEXT.md`. herdr's own words (space, tab, done, multiplexer) appear only when describing herdr.
 
@@ -29,7 +29,7 @@ Three Apache-2.0 Rust products under [github.com/herdrdev](https://github.com/he
 | **herdr-core** (`hc`), the runtime that owns terminals and "draws nothing" | `herdrdev/herdr-core` | 16 October 2026 | 535 | 0.1.19, 7 November 2026 |
 | **Herdr** (`herdr-app`), a native GPUI desktop app, one client of `hc` | `herdrdev/herdr-app` | 16 October 2026 | 2,488 | 0.1.14, 8 November 2026 |
 
-**History.** The TUI grew fast through mid-2026. The project joined Y Combinator in August ([HN 49201003](https://news.ycombinator.com/item?id=49201003), 6 August 2026). The app and core went public on about 30 October ([HN 50298436](https://news.ycombinator.com/item?id=50298436)). The app and the TUI do not share agents. The maker calls them "separate on purpose ... whether the tui moves onto herdr-core later is still open" ([herdr-app #63](https://github.com/herdrdev/herdr-app/issues/63), 29 October 2026). So there are two user bases: a large TUI base (June to October) and an app base about ten days old.
+**History.** The TUI grew fast through mid-2026. The project joined Y Combinator in August ([HN 49201003](https://news.ycombinator.com/item?id=49201003), 6 August 2026). The app and core went public on about 30 October ([HN 50298436](https://news.ycombinator.com/item?id=50298436)). The app and the TUI do not share agents. The maker calls them "separate on purpose ... whether the tui moves onto herdr-core later is still open" ([herdr-app danielrispler/Falinks#63](https://github.com/herdrdev/herdr-app/issues/63), 29 October 2026). So there are two user bases: a large TUI base (June to October) and an app base about ten days old.
 
 **Mental model** (from the new stack):
 
@@ -118,7 +118,7 @@ ESC ] 7501 ; state=blocked:kind=permission:id=a/b:msg=<base64> BEL
 - `progress` runs 0..100. `id` names a record; `a/b` nests, and empty means the root.
 - `app` is at most 32 bytes. `title` and `msg` are base64.
 - A report over the limits (4096-byte sequence, 2048-byte msg, 192-byte title) is dropped whole.
-- Unknown keys are ignored. That is how the spec extends the protocol ([herdr-core #15](https://github.com/herdrdev/herdr-core/issues/15)).
+- Unknown keys are ignored. That is how the spec extends the protocol ([herdr-core danielrispler/Falinks#15](https://github.com/herdrdev/herdr-core/issues/15)).
 
 **Query and reply** (`program_status.zig:1-23`, `:90-107`):
 
@@ -129,7 +129,7 @@ terminal: ESC ] 7501 ; ?:states=idle,working,done,blocked,error:kinds=permission
 
 - The reply ends with the same terminator the query used (`ESC \` or `BEL`). "The specification only requires the `?`"; the lists are optional.
 - herdr-core's own test: `t.write(b"\x1b]7501;?\x1b\\")` gives a response that `starts_with("\x1b]7501;?")` (`herdr-core@3ba03e6 crates/ghostty-vt/src/tests.rs:169-171`).
-- **This is the reply format #322 was missing.** Claude Code added 7501 support in 2.1.295: "terminals that implement it can show whether Claude Code is working, waiting on you, or done" (Claude Code `CHANGELOG.md`, 2.1.295). Per the #322 spike, Claude sends only the query, and reports only to a terminal that answers.
+- **This is the reply format danielrispler/Falinks#322 was missing.** Claude Code added 7501 support in 2.1.295: "terminals that implement it can show whether Claude Code is working, waiting on you, or done" (Claude Code `CHANGELOG.md`, 2.1.295). Per the danielrispler/Falinks#322 spike, Claude sends only the query, and reports only to a terminal that answers.
 - Which `kind` values Claude Code sends, and whether it sends `done` or `idle` at a turn's end, is **not verified**.
 
 **What the core does with reports** (`core:status.rs`):
@@ -233,11 +233,11 @@ This section holds user voices only. Maker and vendor voices come last. HN links
    - "My cat decided to sit on the power button of my laptop, and upon restart herdr-app greeted me with empty terminal panes, whereas herdr-tui was just fine." ([_kblcuk_, 31 October 2026](https://news.ycombinator.com/item?id=50319113))
    - "Opened the app, started a new session, closed the app, and my session was gone." ([sonar_un, 30 October 2026](https://news.ycombinator.com/item?id=50305870))
    - "I've had instances of my agents randomly getting killed on herdr-core + macOS app stack." ([sheepscreek, 2 November 2026](https://news.ycombinator.com/item?id=50331719))
-   - On macOS with Claude Code: "After a full OS reboot, all 7 tabs came back as fresh shells" ([lengbone, herdr-app #406, 5 November 2026](https://github.com/herdrdev/herdr-app/issues/406#issuecomment-6646863207)).
-   - [herdr-app #429](https://github.com/herdrdev/herdr-app/issues/429), "Restore each pane's Pi session after reboot, as supported by the legacy TUI", has 11 thumbs-up.
+   - On macOS with Claude Code: "After a full OS reboot, all 7 tabs came back as fresh shells" ([lengbone, herdr-app danielrispler/Falinks#406, 5 November 2026](https://github.com/herdrdev/herdr-app/issues/406#issuecomment-6646863207)).
+   - [herdr-app danielrispler/Falinks#429](https://github.com/herdrdev/herdr-app/issues/429), "Restore each pane's Pi session after reboot, as supported by the legacy TUI", has 11 thumbs-up.
 2. **The app and TUI split.**
    - "fully incompatible ... It doesn't see the sessions in my already-running remote herdr server" ([nlitened, 30 October 2026](https://news.ycombinator.com/item?id=50301816))
-   - [herdr-core #25](https://github.com/herdrdev/herdr-core/issues/25), a TUI client for core, has 21 thumbs-up; [herdr-app #63](https://github.com/herdrdev/herdr-app/issues/63) has 19.
+   - [herdr-core danielrispler/Falinks#25](https://github.com/herdrdev/herdr-core/issues/25), a TUI client for core, has 21 thumbs-up; [herdr-app danielrispler/Falinks#63](https://github.com/herdrdev/herdr-app/issues/63) has 19.
 3. **Performance.**
    - "with work done on 5 remote machines herdr just gets laggy after couple of hours" ([rs_rs_rs_rs_rs, 11 September 2026](https://news.ycombinator.com/item?id=49654105))
    - "flushes events only every 100ms -- the agent output is quite jittery with that." (_kblcuk_, same comment as above)
@@ -261,10 +261,10 @@ This section holds user voices only. Maker and vendor voices come last. HN links
   - "turn off my computer and drive home while Claude works overnight." ([Tadpole9181, 31 October 2026](https://news.ycombinator.com/item?id=50321125))
 - **Phone check-ins through SSH apps or third-party clients.**
   - "I just ssh to my machine (from phone etc) and run `herdr` to resume." ([asadm, 6 August 2026](https://news.ycombinator.com/item?id=49203470))
-  - The top app issue is official mobile access, with 38 thumbs-up. Users want to "check on running agents, respond to permission requests, and send follow-up instructions from my phone, then return to the same sessions on desktop." ([herdr-app #306](https://github.com/herdrdev/herdr-app/issues/306), 1 November 2026)
+  - The top app issue is official mobile access, with 38 thumbs-up. Users want to "check on running agents, respond to permission requests, and send follow-up instructions from my phone, then return to the same sessions on desktop." ([herdr-app danielrispler/Falinks#306](https://github.com/herdrdev/herdr-app/issues/306), 1 November 2026)
   - No maker reply there as of 9 November. Users point at third-party core clients (hirte, Ovis).
 - **Native notifications.**
-  - "When the Herdr window is behind other apps or on another Space, I don't notice agents finishing or needing input" ([herdr-app #120](https://github.com/herdrdev/herdr-app/issues/120#issuecomment-6663687561), 5 November 2026)
+  - "When the Herdr window is behind other apps or on another Space, I don't notice agents finishing or needing input" ([herdr-app danielrispler/Falinks#120](https://github.com/herdrdev/herdr-app/issues/120#issuecomment-6663687561), 5 November 2026)
 - **Against Claude Code's own tools.**
   - "It's hard to beat Claude Code with /remote." ([aaronschroeder, 30 October 2026](https://news.ycombinator.com/item?id=50304427))
   - "subagents are only great as temporary workers you never want to interact with" ([alepar, 30 October 2026](https://news.ycombinator.com/item?id=50305214))
@@ -281,7 +281,7 @@ The earlier draft of this research said the most-mentioned rival was "Rex, Mitch
 
 ### Maker and vendor voices (not user evidence)
 
-- The author, Can (ogulcancelik), on the split: herdr-app #63, quoted in section 1.
+- The author, Can (ogulcancelik), on the split: herdr-app danielrispler/Falinks#63, quoted in section 1.
 - Fabien Penso's herdr-gpui ("Herdr UI", now "Sheprd") is a third-party client. His posts are release notes.
 - A Bessemer post claims a $6M seed, 34,000 stars and 660,000 downloads. It was **not verified**.
 - herdr.dev's landing and compare pages are marketing, and are not used as evidence here.
@@ -301,7 +301,7 @@ Mark: **copy** now, **later**, or **skip**. Size is for the studio, with the cod
 | 7 | Socket directory 0700, socket 0600 | terminal daemon | **copy** | **S.** Today `create_dir_all` uses the default umask and the socket keeps default permissions (`daemon.rs:150-159`, `lib.rs:80-84`). `~/Library` is normally 0700, so the risk is low. | `core:platform/unix.rs:125-135` |
 | 8 | Exit code plus last lines when a program fails within 2 s | pane | **copy** | **S.** The daemon already reports exit status (`daemon.rs:394-400`), and `ui/terminal.ts:74-75` prints it. Add the last lines and a toast. | AGENTS.md, "Notifications" |
 | 9 | Parsed screen for first paint, instead of a raw replay | revival, pane | **later** | **M.** It needs a headless emulator crate (`alacritty_terminal` or `vt100`) in the daemon. This is the upgrade the `daemon.rs:21-23` shortcut already names. | `core:viewers.rs:396-421` |
-| 10 | Programs survive a daemon upgrade | terminal daemon | **later** | **L** to pass PTY descriptors (the TUI's way), or **XL** for herdr's holder split with `DRAIN` (`holder.rs` is 447 lines, plus parts of `runtime.rs`). Today `stop()` kills every terminal, then revival (`terminal-daemon/src/lib.rs:45-67`); #322 point 4 already names re-exec as "later". | `core:runtime.rs:371-391`, `tui:server/handoff.rs` |
+| 10 | Programs survive a daemon upgrade | terminal daemon | **later** | **L** to pass PTY descriptors (the TUI's way), or **XL** for herdr's holder split with `DRAIN` (`holder.rs` is 447 lines, plus parts of `runtime.rs`). Today `stop()` kills every terminal, then revival (`terminal-daemon/src/lib.rs:45-67`); danielrispler/Falinks#322 point 4 already names re-exec as "later". | `core:runtime.rs:371-391`, `tui:server/handoff.rs` |
 | 11 | Remote machines in the same list, over `ssh host … connect` | a place on another machine | **later** | **L** for terminals: a stdio bridge like `attach.rs` plus machine-qualified ids. **XL** with the understanding layer: hooks, transcripts and Git live on the remote. Direction change A. | `core:machines.rs:42-77`, `core:remote.rs` |
 | 12 | Any 7501 program gets status; launchers in `programs.json` | agent session of another provider | **later** | **M** for status only, given row 1. **XL** per provider for the full understanding layer. Direction change B. | `herdr-core/AGENTS.md:34-36`, `defaults/programs.json` |
 | 13 | Worktree rows show branch, ahead/behind and uncommitted changes | task, board | **copy** | **S.** Git is already a data source (`apps/studio/workbench/src/lib.rs`). Add counts to the board row. | AGENTS.md, "worktree" mod |
@@ -310,11 +310,11 @@ Mark: **copy** now, **later**, or **skip**. Size is for the studio, with the cod
 | 16 | Command palette listing every command and its key | keymap | **later** | **M.** The keymap's actions exist (`ui/keys.ts`); a palette needs a command list and a picker (`ui/picker.ts` exists). | app README |
 | 17 | CLI that drives the window (`herdr-app do tab.new --argv … --task …`) | open a task with an agent session and a first prompt | **later** | **M.** It needs a control socket in `src-tauri`. It would let Daniel's agent open a task for a ticket. | AGENTS.md, "Commands" |
 | 18 | Agent channel: `hc run`, `send`, `wait`, notes to parents | subagents, workers | **later** | **M** for a send command; **L** for parent notes. Direction change E. | `core:notes.rs`, `core:input.rs` |
-| 19 | Phone: ntfy mod; third-party clients on the core API | needs you, away from the Mac | **later** | **S** for push only; **L** or more to answer from the phone. Direction change D. | AGENTS.md; herdr-app #306 |
-| 20 | Spaces, tabs, free-form splits, layout files, mods | projects, tasks, panes | **skip** | #517 decision 20 allows two terminal panes. Daniel's agent edits the studio's own source, so a mod API would be a second, weaker way to change it. | app README |
+| 19 | Phone: ntfy mod; third-party clients on the core API | needs you, away from the Mac | **later** | **S** for push only; **L** or more to answer from the phone. Direction change D. | AGENTS.md; herdr-app danielrispler/Falinks#306 |
+| 20 | Spaces, tabs, free-form splits, layout files, mods | projects, tasks, panes | **skip** | danielrispler/Falinks#517 decision 20 allows two terminal panes. Daniel's agent edits the studio's own source, so a mod API would be a second, weaker way to change it. | app README |
 | 21 | Layout as a versioned document inside the runtime | — | **skip** | It pays only with a second client or remote places. Revisit with A or D. | `app:mirror.rs:1-36` |
 | 22 | Screen scraping with regex manifests and a remote update feed | — | **skip** | 7501 replaced it, even in herdr. | `tui:detect/` |
-| 23 | Hooks written into `~/.claude/settings.json` | studio plugin | **skip** | The studio loads its plugin through `CLAUDE_CODE_PLUGIN_DIRS` (#340), which is less invasive. | `herdr-agent-state.sh` |
+| 23 | Hooks written into `~/.claude/settings.json` | studio plugin | **skip** | The studio loads its plugin through `CLAUDE_CODE_PLUGIN_DIRS` (danielrispler/Falinks#340), which is less invasive. | `herdr-agent-state.sh` |
 | 24 | Fresh shell in the last folder after a reboot, with no resume | revival | **skip** (ours is better) | Revival reopens Claude with `claude --resume` (`apps/studio/workbench/src/lib.rs:78`, `core/src/lib.rs:2612`). Users' loudest app complaint is that herdr does not. | section 3 |
 | 25 | Foreground process facts | `list`'s `foreground` | **skip** (have it) | `daemon.rs:435-503` reads `ps`. | `core:foreground.rs` |
 | 26 | Changes panel with commit | card | **skip** | Cards cover a change, and agents commit. | app changelog 0.1.8 |
@@ -329,7 +329,7 @@ Daniel wants these grilled, not parked. Each has the evidence, the cost, the ris
 
 ### A. Remote and always-on agents
 
-**What herdr does.** A second core runs on a box that stays on. The laptop's core reaches it with `ssh -T host hc connect` and merges its terminals into one list (section 2, "Remote machines"). Work continues while the laptop sleeps, "as long as the remote machine and core stay up" (app README). Users love it (section 3, loves 2; patterns). Their complaints are lag with many remotes, and remote agents missing from the sidebar in the TUI ([herdr #1170](https://github.com/herdrdev/herdr/issues/1170), 17 thumbs-up).
+**What herdr does.** A second core runs on a box that stays on. The laptop's core reaches it with `ssh -T host hc connect` and merges its terminals into one list (section 2, "Remote machines"). Work continues while the laptop sleeps, "as long as the remote machine and core stay up" (app README). Users love it (section 3, loves 2; patterns). Their complaints are lag with many remotes, and remote agents missing from the sidebar in the TUI ([herdr danielrispler/Falinks#1170](https://github.com/herdrdev/herdr/issues/1170), 17 thumbs-up).
 
 **What it would take for us:**
 
@@ -343,11 +343,11 @@ Daniel wants these grilled, not parked. Each has the evidence, the cost, the ris
    - The transcript and the worktree are also there.
    - So we would need a remote tail of `events.jsonl` over the same line, plus remote transcript reads and Git reads. herdr's `file.read` and `machine.exec` with `on:` show the read pattern.
 3. **The answer hook** accepts only local 0600 files with a nonce (`hook/src/answer.rs:1-20`). Answering from the card for a remote session needs a new channel.
-4. **The plugin and Claude login on the remote.** The plugin loads through `CLAUDE_CODE_PLUGIN_DIRS` (#340). Claude must run on Daniel's subscription there (#320, "Model calls run on Daniel's subscription").
+4. **The plugin and Claude login on the remote.** The plugin loads through `CLAUDE_CODE_PLUGIN_DIRS` (danielrispler/Falinks#340). Claude must run on Daniel's subscription there (danielrispler/Falinks#320, "Model calls run on Daniel's subscription").
 
 **Cheaper neighbours:**
 
-- Containers (#531) are a remote place on the same Mac.
+- Containers (danielrispler/Falinks#531) are a remote place on the same Mac.
 - Claude Code's own Remote Control (`claude remote-control`, `/remote-control` in the Claude Code changelog) carries one session to other devices with no studio code.
 
 **Risks:**
@@ -359,9 +359,9 @@ Daniel wants these grilled, not parked. Each has the evidence, the cost, the ris
 
 **Decisions touched:**
 
-- #320 scope: the studio as the one place on Daniel's Mac; the understanding layer runs on hook events.
-- #322 point 3: the daemon carries bytes only, so a remote events stream would be a second stream beside the daemon, not inside it.
-- #340: plugin shipping.
+- danielrispler/Falinks#320 scope: the studio as the one place on Daniel's Mac; the understanding layer runs on hook events.
+- danielrispler/Falinks#322 point 3: the daemon carries bytes only, so a remote events stream would be a second stream beside the daemon, not inside it.
+- danielrispler/Falinks#340: plugin shipping.
 
 ### B. Providers other than Claude Code
 
@@ -376,7 +376,7 @@ Daniel wants these grilled, not parked. Each has the evidence, the cost, the ris
 
 1. **Status only (M), after copy row 1.** Another provider's agent session appears in the session list with running, needs you and your turn from 7501.
    - It has no intention, card, brief, estimate or decisions, since those come from Claude Code's hooks and transcript.
-   - Revival needs that provider's resume command, if it has one. herdr's own app has none ([herdr-core #15](https://github.com/herdrdev/herdr-core/issues/15) proposes a `resume=` key in 7501).
+   - Revival needs that provider's resume command, if it has one. herdr's own app has none ([herdr-core danielrispler/Falinks#15](https://github.com/herdrdev/herdr-core/issues/15) proposes a `resume=` key in 7501).
    - Which providers speak 7501 today: only Claude Code is verified (its changelog, 2.1.295).
 2. **Full understanding layer (XL per provider).** A hook or event source, a transcript reader, fixtures and replay tests per provider.
 
@@ -386,11 +386,11 @@ Daniel wants these grilled, not parked. Each has the evidence, the cost, the ris
 - 7501's `idle` after an interrupt is a turn end herdr counts but our hooks may model differently.
 - The **Agent session** definition is already provider-neutral, but **Transcript** and **Wake-up** name Claude Code.
 
-**Decisions touched:** #320 point 5, "Claude Code only. Codex and other agents go to Not yet specified."
+**Decisions touched:** danielrispler/Falinks#320 point 5, "Claude Code only. Codex and other agents go to Not yet specified."
 
 ### C. Adopt herdr-core instead of our terminal daemon
 
-**What changed since #322.** #322 point 1 rejected Herdr because "Herdr offers no raw byte stream for another renderer, and an exited pane disappears with no status". That was the TUI. herdr-core fixes both:
+**What changed since danielrispler/Falinks#322.** danielrispler/Falinks#322 point 1 rejected Herdr because "Herdr offers no raw byte stream for another renderer, and an exited pane disappears with no status". That was the TUI. herdr-core fixes both:
 
 - Each `terminal.attach` gets its own raw byte channel (`core:wire.rs:1-2`).
 - Finished terminals keep their exit facts for 24 h (`core:terminals.rs:9-10`).
@@ -419,17 +419,17 @@ Daniel wants these grilled, not parked. Each has the evidence, the cost, the ris
 - **Maturity.** Core is three weeks old at 0.1.19 and moves fast. A macOS user reports agents "randomly getting killed" on the new stack (sheepscreek, section 3).
 - **Security.** No per-client checks, and self-asserted caller ids. The same trust boundary as ours, but a much larger API reachable through it (`file.write`, `machine.exec`).
 - **Direction.** VC-funded and app-first. The TUI's fate is "still open".
-- **Our rules.** We lose our own rules from #322 point 3: the environment scrub (`daemon.rs:24-30`), ending a terminal's whole process group, and per-tree memory. Whether core does each is unverified.
+- **Our rules.** We lose our own rules from danielrispler/Falinks#322 point 3: the environment scrub (`daemon.rs:24-30`), ending a terminal's whole process group, and per-tree memory. Whether core does each is unverified.
 
 **Middle path:** copy rows 1, 5, 6, 7 and later 9 and 10 into our daemon. That takes the ideas without the dependency.
 
-**Decisions touched:** #322 point 1, "No tmux backend or fallback, and no Herdr"; point 3, the daemon rules; point 4, upgrades.
+**Decisions touched:** danielrispler/Falinks#322 point 1, "No tmux backend or fallback, and no Herdr"; point 3, the daemon rules; point 4, upgrades.
 
 ### D. Phone access
 
 **What herdr does.**
 
-- No official phone app. [herdr-app #306](https://github.com/herdrdev/herdr-app/issues/306) is the top app issue (38 thumbs-up) with no maker reply, though `docs/labels.md` names "the phone app" as a client.
+- No official phone app. [herdr-app danielrispler/Falinks#306](https://github.com/herdrdev/herdr-app/issues/306) is the top app issue (38 thumbs-up) with no maker reply, though `docs/labels.md` names "the phone app" as a client.
 - Users SSH in with Termius or Prompt, or use third-party core clients (hirte, Ovis).
 - Push alerts come from an ntfy mod (guide prompt 7).
 
@@ -449,8 +449,8 @@ Daniel wants these grilled, not parked. Each has the evidence, the cost, the ris
 
 **Decisions touched:**
 
-- #266 Notes: one macOS notification per newly needs you, only while unfocused.
-- #320: Tauri, local only.
+- danielrispler/Falinks#266 Notes: one macOS notification per newly needs you, only while unfocused.
+- danielrispler/Falinks#320: Tauri, local only.
 
 ### E. An agent-to-agent channel
 
@@ -463,14 +463,14 @@ Daniel wants these grilled, not parked. Each has the evidence, the cost, the ris
 
 **Risks:**
 
-- **Typed text is a prompt to Claude Code.** It fires `UserPromptSubmit` like Daniel's own. `CONTEXT.md` says a wake-up "never counts as Daniel's prompt", but an injected message would, so waits, turns and cards would misfire unless the hook recognises a tag, as #322 point 7 does for `<agent-message from="`.
+- **Typed text is a prompt to Claude Code.** It fires `UserPromptSubmit` like Daniel's own. `CONTEXT.md` says a wake-up "never counts as Daniel's prompt", but an injected message would, so waits, turns and cards would misfire unless the hook recognises a tag, as danielrispler/Falinks#322 point 7 does for `<agent-message from="`.
 - Self-asserted sender ids.
 - Prompt injection between agents. herdr tells agents to treat reports "not [as] instructions from your user".
 - It overlaps Claude Code's subagents and the Falinks engine.
 
 **Decisions touched:**
 
-- #320: the engine is separate and is the multi-session orchestrator.
+- danielrispler/Falinks#320: the engine is separate and is the multi-session orchestrator.
 - `CONTEXT.md`: **Wake-up**, **Turn**, **Subagent**.
 
 ## 6. Studio risks found along the way
@@ -478,12 +478,12 @@ Daniel wants these grilled, not parked. Each has the evidence, the cost, the ris
 1. **macOS can kill the terminal daemon. Verdict: we are exposed by design. A kill has not been observed.**
    - The app starts the daemon with a plain `Command::spawn` (`apps/studio/src-tauri/src/terminal.rs:216-231`). The daemon only calls `setsid` and ignores `SIGHUP` (`apps/studio/terminal-daemon/src/daemon.rs:144-149`).
    - That is exactly the setup herdr's authors replaced: "setsid alone leaves it in the app's coalition, which macOS can kill when the app quits" (`core:platform/macos_launchd.rs:1-2`).
-   - In practice the #322 spike and #470 showed the daemon outliving app quits and rebuilds, and no studio issue reports a kill. So the risk is in cases we have not tested: a force quit, a crash, or memory pressure.
+   - In practice the danielrispler/Falinks#322 spike and danielrispler/Falinks#470 showed the daemon outliving app quits and rebuilds, and no studio issue reports a kill. So the risk is in cases we have not tested: a force quit, a crash, or memory pressure.
    - herdr's claim about coalitions is its authors' word, not checked against Apple documentation.
    - The fix is copy row 5 (M).
    - **Related inference, unverified:** with `setsid`, the studio app stays the "responsible" process for privacy prompts from programs in its terminals. An unsigned app rebuilt often may lose those grants at each build. herdr moved them to the core ("privacy requests from terminal programs belong to Herdr Core, not Herdr.app").
 2. **Typing into a pane tramples a draft.** The rename types `/rename <name>` and Enter at once (`ui/story.ts:95-107`). Copy row 4.
-3. **Every daemon upgrade kills every terminal** (`terminal-daemon/src/lib.rs:45-67`). This is accepted by #322 point 4. Copy rows 1, 5, 6 and 7 each change the daemon, so batch them into one upgrade.
+3. **Every daemon upgrade kills every terminal** (`terminal-daemon/src/lib.rs:45-67`). This is accepted by danielrispler/Falinks#322 point 4. Copy rows 1, 5, 6 and 7 each change the daemon, so batch them into one upgrade.
 4. **No 7501 answer.** Claude Code in studio panes reports no status today, because nothing answers its query. The hooks cover it, but a free cross-check is missing. Copy row 1.
 5. **The record is written under the lock** (`daemon.rs:125-138`), and **the socket keeps default permissions** (`daemon.rs:150-159`). Low risk. Copy rows 6 and 7.
 
@@ -491,9 +491,9 @@ Daniel wants these grilled, not parked. Each has the evidence, the cost, the ris
 
 - **Holder.** Wrong: "a holder per terminal". Right: one holder per core build, with old builds drained.
 - **7501 reply.** Was "not researched"; now known and quoted from the parser and herdr-core's test.
-- **#322's reasons against Herdr** applied to the TUI. herdr-core has a raw attach stream and keeps exit facts.
+- **danielrispler/Falinks#322's reasons against Herdr** applied to the TUI. herdr-core has a raw attach stream and keeps exit facts.
 - **Age.** Herdr is not "three weeks old" as a project. The TUI dates from March 2026 and has about 49.7k stars; only core and the app are new.
-- **The phone app** is named in `docs/labels.md` but has no official release; #306 is open.
+- **The phone app** is named in `docs/labels.md` but has no official release; danielrispler/Falinks#306 is open.
 - **New:** the launchd finding, the typing rules, users' voices, and the full direction-change analysis.
 
 **Dropped or corrected from the research inputs:**

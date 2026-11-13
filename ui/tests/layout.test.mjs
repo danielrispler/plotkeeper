@@ -1,10 +1,10 @@
-// The UI's pure functions, run on the `tsc` output (#465). Run: `npm test` in apps/studio.
+// The UI's pure functions, run on the `tsc` output (danielrispler/Falinks#465). Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { arrange, defaultWidths, paneBoxes, panelHeight, railShown, resized } from "../../dist/layout.js";
 import { stripLabel } from "../../dist/list.js";
 
-// The cell of 12.5px SF Mono in WebKit, as #577 measured it, and the terminal's padding, which holds no column.
+// The cell of 12.5px SF Mono in WebKit, as danielrispler/Falinks#577 measured it, and the terminal's padding, which holds no column.
 const cell = 7.73;
 const padding = 28;
 const columns = (window, { list, rail }) => Math.floor((window - list - rail - padding) / cell);
@@ -106,7 +106,7 @@ test("a dragged split divider moves the share, and stops where a pane would get 
   assert.equal(paneBoxes(1920, 900, cell, { stacked: true, share: 0.99 })[1].top, 786);
 });
 
-// The terminal panel (#542, #565 decision 5): a band under the terminal column, costing height only.
+// The terminal panel (danielrispler/Falinks#542, danielrispler/Falinks#565 decision 5): a band under the terminal column, costing height only.
 test("the panel takes its dragged height, at most 40 % of the terminal column and at least 80 px", () => {
   assert.equal(panelHeight(240, 900), 240);
   assert.equal(panelHeight(700, 900), 360);
@@ -120,7 +120,7 @@ test("the strip names a session by its issue number, else by its folder", () => 
   assert.equal(stripLabel("Falinks"), "Fali");
 });
 
-test("a turn is seen only while the rail shows its session: not in focus mode, a closed overlay or the skills browser (#556)", () => {
+test("a turn is seen only while the rail shows its session: not in focus mode, a closed overlay or the skills browser (danielrispler/Falinks#556)", () => {
   assert.equal(railShown("full", false, false), true);
   assert.equal(railShown("strip", false, false), true);
   assert.equal(railShown("focus", false, false), false);

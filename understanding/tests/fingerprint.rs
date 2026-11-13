@@ -1,4 +1,4 @@
-//! Seam 2 (#328 and #369, Testing Decisions): the worktree fingerprint against real `git` in
+//! Seam 2 (danielrispler/Falinks#328 and danielrispler/Falinks#369, Testing Decisions): the worktree fingerprint against real `git` in
 //! temporary repositories, as the engine's tests do (`src/lib.rs`,
 //! `retention_checks_every_blob_of_a_snapshot`).
 
@@ -87,7 +87,7 @@ fn committing_a_changed_file_is_no_change() {
     assert_eq!(diff(&mut prints, dir.path()), None);
 }
 
-/// #369, decision 10: a commit within the prompt counts, though `git status` lists the file in
+/// danielrispler/Falinks#369, decision 10: a commit within the prompt counts, though `git status` lists the file in
 /// neither fingerprint.
 #[test]
 fn an_edit_then_a_commit_within_one_prompt_is_the_change() {
@@ -154,7 +154,7 @@ fn two_worktrees_each_give_their_own_change() {
     assert_eq!(diff(&mut prints, &worker).as_deref(), Some(side));
 }
 
-/// #369, decision 11: a worker's step looks for a commit. The change it sees stays in the next one
+/// danielrispler/Falinks#369, decision 11: a worker's step looks for a commit. The change it sees stays in the next one
 /// until `HEAD` moves, so a step that only edits does not eat the commit's card.
 #[test]
 fn a_commit_check_keeps_its_record_only_when_head_moved() {
@@ -241,7 +241,7 @@ fn branch(dir: &Path, prints: &mut Fingerprints, branch: &str, file: &str, conte
     prints.take(dir);
 }
 
-/// #434, decision 12: only the agent's own commits are its change. A move of `HEAD` by any other
+/// danielrispler/Falinks#434, decision 12: only the agent's own commits are its change. A move of `HEAD` by any other
 /// command moves the base.
 #[test]
 fn a_fast_forward_pull_gives_no_change_and_moves_the_base() {
@@ -312,7 +312,7 @@ fn a_hard_reset_gives_no_change() {
     assert_eq!(diff(&mut prints, dir.path()), None);
 }
 
-/// #434, decision 12: a merge moves the base, so upstream work never shows as the agent's.
+/// danielrispler/Falinks#434, decision 12: a merge moves the base, so upstream work never shows as the agent's.
 #[test]
 fn a_clean_merge_gives_no_change() {
     let (dir, mut prints) = repo();
@@ -333,7 +333,7 @@ fn a_clean_merge_gives_no_change() {
     assert_eq!(diff(&mut prints, dir.path()), None);
 }
 
-/// #434, decision 13: a conflicted merge's change is its resolution alone, as git's remerge diff
+/// danielrispler/Falinks#434, decision 13: a conflicted merge's change is its resolution alone, as git's remerge diff
 /// shows it.
 #[test]
 fn a_conflicted_merge_gives_only_its_resolution() {
@@ -371,7 +371,7 @@ fn a_conflicted_merge_gives_only_its_resolution() {
     assert!(!change.contains("other.rs"), "{change}");
 }
 
-/// #434, decision 14: the first commit of a new repository is all its files, also those that were
+/// danielrispler/Falinks#434, decision 14: the first commit of a new repository is all its files, also those that were
 /// already there, untracked, at the base.
 #[test]
 fn a_first_commit_gives_every_committed_file() {
@@ -407,7 +407,7 @@ fn a_folder_that_becomes_a_repository_is_fingerprinted_from_then_on() {
     assert_eq!(diff(&mut prints, dir.path()).as_deref(), Some(change));
 }
 
-/// #568: files the operating system writes are not the agent's work, so a turn that changed only
+/// danielrispler/Falinks#568: files the operating system writes are not the agent's work, so a turn that changed only
 /// them gets no card.
 #[test]
 fn changing_only_os_files_is_no_change() {

@@ -1,6 +1,6 @@
-//! Turns event log lines into a test fixture (#370): reads the log on stdin and writes the events of
+//! Turns event log lines into a test fixture (danielrispler/Falinks#370): reads the log on stdin and writes the events of
 //! the sessions named as arguments, or of every session when none is named, to stdout. Each event
-//! keeps its shape and loses its content (#369, "Further Notes", "Fixtures and Daniel's data").
+//! keeps its shape and loses its content (danielrispler/Falinks#369, "Further Notes", "Fixtures and Daniel's data").
 //!
 //!     cargo run -p studio-core --bin scrub -- <session-id>... < events.jsonl > fixture.jsonl
 
@@ -156,7 +156,7 @@ const TAGS: &[&str] = &[
     "worktreePath",
 ];
 
-/// A prompt's markup without its text, so a wake-up stays one (#369, decision 7) and Daniel's prompt
+/// A prompt's markup without its text, so a wake-up stays one (danielrispler/Falinks#369, decision 7) and Daniel's prompt
 /// keeps none of its words. Each tag in `TAGS` stays, with the attributes whose key and value look
 /// like ids, as in `<agent-message from="a2526f0d7353298ee">`. So does an id or a status right after
 /// `<status>` or a tag ending in `id`, as in `<task-id>a1191df87fb730aa0</task-id>`. Any other tag

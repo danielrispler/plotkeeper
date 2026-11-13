@@ -1,4 +1,4 @@
-//! The turn summary and its learning section (#526; #517, decisions 12 to 15): one writer call
+//! The turn summary and its learning section (danielrispler/Falinks#526; danielrispler/Falinks#517, decisions 12 to 15): one writer call
 //! when a long turn ends, on a small model with the studio's own system prompt, read with the
 //! session's last 3 summaries.
 
@@ -15,7 +15,7 @@ pub struct TurnSummary {
     /// The turn's main ideas in a few lines; its first line is the turn-end intention.
     pub summary: String,
     /// `None` on a turn with a card, which teaches it instead, on a turn with nothing to teach
-    /// (#583), or when the writer's was unusable.
+    /// (danielrispler/Falinks#583), or when the writer's was unusable.
     pub learning: Option<Learning>,
 }
 
@@ -26,7 +26,7 @@ pub struct Learning {
     pub question: Quiz,
 }
 
-/// The summary writer's model and effort, from the settings (#517, decision 17). An empty effort
+/// The summary writer's model and effort, from the settings (danielrispler/Falinks#517, decision 17). An empty effort
 /// leaves the model's default.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SummarySetup {
@@ -35,7 +35,7 @@ pub struct SummarySetup {
 }
 
 impl Default for SummarySetup {
-    /// Haiku at its default effort (#517, decision 14).
+    /// Haiku at its default effort (danielrispler/Falinks#517, decision 14).
     fn default() -> Self {
         Self {
             model: "haiku".into(),
@@ -44,15 +44,15 @@ impl Default for SummarySetup {
     }
 }
 
-/// How many of the session's latest summaries the writer reads (#517, decision 15).
+/// How many of the session's latest summaries the writer reads (danielrispler/Falinks#517, decision 15).
 const EARLIER: usize = 3;
 
-/// Marks a writer may put on the right option, which would give the answer away (#517, decision
+/// Marks a writer may put on the right option, which would give the answer away (danielrispler/Falinks#517, decision
 /// 14).
 const MARKS: [&str; 7] = ["✅", "✔️", "✔", "✓", "☑️", "(correct)", "(Correct)"];
 
 /// A right option longer than this many times the longest wrong option, and by more than
-/// `KEY_GAP` characters, gives the answer away (#583). Of Haiku's 3 real questions, the 2
+/// `KEY_GAP` characters, gives the answer away (danielrispler/Falinks#583). Of Haiku's 3 real questions, the 2
 /// guessable ones' right options were 1.30 and 1.60 times it, and the fair one's 0.85.
 const KEY_RATIO: f64 = 1.25;
 
@@ -236,7 +236,7 @@ fn options<'a>(setup: &'a SummarySetup, system: &'a str) -> Vec<&'a str> {
     options
 }
 
-/// The summary of subagent `id`'s purpose and result (#535): the one `store` keeps, or else one
+/// The summary of subagent `id`'s purpose and result (danielrispler/Falinks#535): the one `store` keeps, or else one
 /// call to `writer` on its spawn's `prompt` and its last `message`, which the store then keeps.
 /// When the call gives none, nothing is kept, one line goes to `log`, and the rail keeps the
 /// subagent's name and first line. The store is not locked while the writer runs.
@@ -300,7 +300,7 @@ impl ClaudeWriter {
     }
 }
 
-/// The subagent summary writer's system prompt (#535), which replaces Claude Code's own.
+/// The subagent summary writer's system prompt (danielrispler/Falinks#535), which replaces Claude Code's own.
 const AGENT_SUMMARY: &str = concat!(
     r#"You write a short summary of one subagent of a coding agent: what it was asked to do, and what it came back with, for the developer who runs it and reads the summary instead of its raw output.
 
@@ -316,7 +316,7 @@ Reply with one JSON object and nothing else:
 "#
 );
 
-/// The summary writer's system prompt (#517, decision 14), which replaces Claude Code's own.
+/// The summary writer's system prompt (danielrispler/Falinks#517, decision 14), which replaces Claude Code's own.
 const SUMMARY: &str = concat!(
     r#"You write the turn summary of one turn of a coding agent's session, for the developer who runs it and wants to learn from the turn instead of reading its raw output. Under the summary sits, when the turn has something to teach, a learning section: the turn's main idea and one multiple-choice question on it, which he answers when he chooses.
 

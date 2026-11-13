@@ -1,4 +1,4 @@
-//! #481 (#461, decision 19): the status line writes one snapshot of its stdin per session into the
+//! danielrispler/Falinks#481 (danielrispler/Falinks#461, decision 19): the status line writes one snapshot of its stdin per session into the
 //! studio's `usage` folder; the studio shows the plan's 5-hour and weekly usage from the newest one.
 
 use serde_json::json;
@@ -59,7 +59,7 @@ fn the_status_lines_temp_file_is_not_read() {
     );
 }
 
-/// #517, decision 1; #519: a session's context is its own snapshot's `context_window`.
+/// danielrispler/Falinks#517, decision 1; danielrispler/Falinks#519: a session's context is its own snapshot's `context_window`.
 #[test]
 fn a_sessions_snapshot_gives_its_context_window() {
     let dir = tempfile::tempdir().unwrap();

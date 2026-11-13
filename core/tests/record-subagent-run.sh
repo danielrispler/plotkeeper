@@ -1,12 +1,12 @@
 #!/bin/sh
-# Records fixtures/subagent-run.jsonl (#370): a short scripted Claude Code session in a temporary
+# Records fixtures/subagent-run.jsonl (danielrispler/Falinks#370): a short scripted Claude Code session in a temporary
 # repository, with the studio plugin loaded, that spawns a worktree worker and a read-only helper in
 # the background and stops the helper mid-step. Its events land in the event log, and `scrub` copies
 # them here without their content. Quit the studio app first, or it takes the session as live and
 # asks for cards. It runs a nested `claude` on your subscription, so run it yourself, outside auto
 # mode, from any folder:
 #
-#     apps/studio/core/tests/record-subagent-run.sh
+#     core/tests/record-subagent-run.sh
 set -eu
 
 studio=$(cd "$(dirname "$0")/../.." && pwd)

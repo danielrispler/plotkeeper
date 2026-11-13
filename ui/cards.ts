@@ -1,6 +1,6 @@
 // The cards, in the story rail: the session's brief, and each card, which the rail places in the turn
-// it was written in, or at the top when it is the newest (#574). The writer writes them in English
-// (#487); cards stored in Hebrew keep their direction.
+// it was written in, or at the top when it is the newest (danielrispler/Falinks#574). The writer writes them in English
+// (danielrispler/Falinks#487); cards stored in Hebrew keep their direction.
 
 import { code, element, prose, invoke, pressable, text } from "./dom.js";
 import { refreshCards } from "./selection.js";
@@ -15,7 +15,7 @@ async function record(command: "guess" | "key_wrong" | "rate", args: Record<stri
   await refreshCards();
 }
 
-// The verdict on a check's card (#476): the check's result settles the guess, so until it ends the
+// The verdict on a check's card (danielrispler/Falinks#476): the check's result settles the guess, so until it ends the
 // card says only that it runs. Null on a card that waits for the tap.
 export function checkVerdict(result: CheckResult | null, guess: Guess | null): string | null {
   if (result === null) return guess ? "The check still runs; its result settles your guess." : null;
@@ -28,7 +28,7 @@ export function checkVerdict(result: CheckResult | null, guess: Guess | null): s
 // How a card's quiz stands: whether it is past its quiz, so its options are closed; whether the
 // reasons under its options show, and with them the right one named; its verdict; and whether its key
 // can be flagged wrong. Any other card is past its quiz at the tap, which the writer's key grades. On
-// a check's card the check's result is the key (#476): the quiz closes when the check ends, the
+// a check's card the check's result is the key (danielrispler/Falinks#476): the quiz closes when the check ends, the
 // reasons and the verdict wait for it, and its key cannot be wrong.
 export function quizState({ request, guess, check_result }: StoredCard) {
   if (request.check === null) {
@@ -55,7 +55,7 @@ function quizElements({ request: { id }, guess }: StoredCard, quiz: Quiz, state:
   options.append(
     ...quiz.options.map((option, i) => {
       const item = document.createElement("li");
-      // The tap shows at once; the cards drawn from the shell's reply then settle it (#570).
+      // The tap shows at once; the cards drawn from the shell's reply then settle it (danielrispler/Falinks#570).
       const button = pressable(prose("button", option.text) as HTMLButtonElement, guess?.option === i, () => {
         button.setAttribute("aria-pressed", "true");
         record("guess", { id, option: i });
@@ -91,7 +91,7 @@ function cardElement(stored: StoredCard): HTMLElement {
   const quiz = card.quiz;
   const state = quizState(stored);
   if (quiz) node.append(...quizElements(stored, quiz, state));
-  // Its turn holds the one "ask about this" (#574).
+  // Its turn holds the one "ask about this" (danielrispler/Falinks#574).
   if (quiz && !state.answered) return node;
   const explanation = prose("p", card.explanation);
   explanation.className = "explanation";

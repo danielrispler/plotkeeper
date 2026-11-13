@@ -1,4 +1,4 @@
-// Seam 3 (#461): the daemon binary against real PTYs, driven over its socket.
+// Seam 3 (danielrispler/Falinks#461): the daemon binary against real PTYs, driven over its socket.
 use serde_json::{Value, json};
 use std::{
     path::PathBuf,
@@ -332,7 +332,7 @@ fn scrollback_is_cut_at_a_fixed_size() {
     });
 }
 
-// #470: the daemon keeps a record of the terminals it runs, which outlives it, so the app can revive
+// danielrispler/Falinks#470: the daemon keeps a record of the terminals it runs, which outlives it, so the app can revive
 // them after a crash, a reboot or `stop`.
 fn recorded(d: &Daemon) -> Vec<String> {
     let record = studio_terminal_daemon::record(&d.socket());
@@ -365,7 +365,7 @@ fn stopping_the_daemon_ends_its_terminals_and_leaves_the_record_of_the_running_o
     assert_eq!(recorded(&d), running);
 }
 
-// #470: a shell comes back in the folder it moved to, not the one it started in.
+// danielrispler/Falinks#470: a shell comes back in the folder it moved to, not the one it started in.
 #[test]
 fn list_and_the_record_give_the_folder_a_shell_moved_to() {
     let d = Daemon::start("cwd");
@@ -384,7 +384,7 @@ fn list_and_the_record_give_the_folder_a_shell_moved_to() {
     );
 }
 
-// #561: the record keeps each terminal's foreground program as `list` last saw it, so a shell that ran
+// danielrispler/Falinks#561: the record keeps each terminal's foreground program as `list` last saw it, so a shell that ran
 // another agent can come back as that agent.
 #[test]
 fn the_record_keeps_the_foreground_program_list_last_saw() {
@@ -399,7 +399,7 @@ fn the_record_keeps_the_foreground_program_list_last_saw() {
     assert_eq!(terms[0]["foreground"], "sleep");
 }
 
-// #561: the record keeps the name a program reports itself by in OSC 7501, as a node-launched agent's
+// danielrispler/Falinks#561: the record keeps the name a program reports itself by in OSC 7501, as a node-launched agent's
 // foreground is `node`.
 #[test]
 fn the_record_keeps_the_osc_7501_app() {
@@ -455,7 +455,7 @@ fn a_client_that_stops_reading_leaves_the_other_terminals_flowing() {
     });
 }
 
-// #555, row 7: only Daniel's account can reach the socket.
+// danielrispler/Falinks#555, row 7: only Daniel's account can reach the socket.
 #[test]
 fn the_daemons_folder_is_private_and_its_socket_owner_only() {
     use std::os::unix::fs::PermissionsExt;
@@ -465,7 +465,7 @@ fn the_daemons_folder_is_private_and_its_socket_owner_only() {
     assert_eq!(mode(d.socket()), 0o600);
 }
 
-// #555, row 1: Claude Code and Antigravity report their status only to a terminal that answers the
+// danielrispler/Falinks#555, row 1: Claude Code and Antigravity report their status only to a terminal that answers the
 // OSC 7501 query. The program reads the reply raw and prints it with ESC as `E` and BEL as `B`.
 #[test]
 fn an_osc_7501_query_gets_the_reply_with_its_own_terminator() {
@@ -483,7 +483,7 @@ fn an_osc_7501_query_gets_the_reply_with_its_own_terminator() {
     }
 }
 
-// #555: every program's OSC 7501 reports set its terminal's root status in `list`. `turn` goes up each
+// danielrispler/Falinks#555: every program's OSC 7501 reports set its terminal's root status in `list`. `turn` goes up each
 // time the root leaves `working`, as herdr-core counts it. Each step waits for Enter, then prints
 // its reports and a marker.
 #[test]
@@ -555,7 +555,7 @@ fn osc_7501_reports_give_list_the_status_and_count_turns() {
     });
 }
 
-// #555: a crashed app must not leave Remote Control's phone pushes off, so the daemon deletes the
+// danielrispler/Falinks#555: a crashed app must not leave Remote Control's phone pushes off, so the daemon deletes the
 // presence file when the app's connection drops, but not when a CLI attach's does.
 #[test]
 fn the_presence_file_goes_when_the_app_disconnects_not_a_cli_attach() {
@@ -578,7 +578,7 @@ fn the_presence_file_goes_when_the_app_disconnects_not_a_cli_attach() {
     wait_for("the presence file to go", || !present.exists());
 }
 
-// #555: the daemon drops an app that falls behind while its window may still be focused, so that drop
+// danielrispler/Falinks#555: the daemon drops an app that falls behind while its window may still be focused, so that drop
 // leaves the presence file; the app reconnects and marks itself again.
 #[test]
 fn an_app_dropped_for_lag_keeps_the_presence_file() {

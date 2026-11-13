@@ -1,6 +1,6 @@
-// The skills browser (#528): a palette action (#565, decision 7) that takes the rail's place; Esc
+// The skills browser (danielrispler/Falinks#528): a palette action (danielrispler/Falinks#565, decision 7) that takes the rail's place; Esc
 // returns. Skills are grouped by source, Daniel's own, the project's, then each plugin's, and each
-// opens to its `SKILL.md`, rendered. "Edit" opens a user or project skill through the opener (#557);
+// opens to its `SKILL.md`, rendered. "Edit" opens a user or project skill through the opener (danielrispler/Falinks#557);
 // plugin skills are read-only.
 
 import { element, invoke, pressable, text } from "./dom.js";

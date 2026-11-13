@@ -1,6 +1,6 @@
-// Places (#576; #565, decision 6): the home of tasks, a folded section at the bottom of the list. One
+// Places (danielrispler/Falinks#576; danielrispler/Falinks#565, decision 6): the home of tasks, a folded section at the bottom of the list. One
 // row per place, the main checkout and each task, with its branch, where it stands against its base
-// (#559's counts), its changed files and how many sessions work in it; the sessions themselves stay
+// (danielrispler/Falinks#559's counts), its changed files and how many sessions work in it; the sessions themselves stay
 // in the list. Clicking a place offers a new session there and, for a task, Remove, with the loss
 // check of a session's Delete. Creating a task is here too, not in the new-session picker.
 

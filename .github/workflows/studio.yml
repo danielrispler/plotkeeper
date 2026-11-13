@@ -1,13 +1,10 @@
 name: Studio checks
 
-# The studio's own workspace (apps/studio); checks.yml skips it.
 on:
   pull_request:
-    paths: ["apps/studio/**", ".github/workflows/studio.yml"]
   # `issue-*` covers integration branches, which take merges with no pull request.
   push:
     branches: [main, "issue-*"]
-    paths: ["apps/studio/**", ".github/workflows/studio.yml"]
 
 # A new push cancels the older run on its branch or pull request; every main commit runs to completion.
 concurrency:
@@ -22,21 +19,18 @@ jobs:
     # The studio is a Tauri app built and used on macOS only.
     runs-on: macos-latest
     timeout-minutes: 30
-    defaults:
-      run:
-        working-directory: apps/studio
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: apps/studio/package-lock.json
-      # Reads rust-toolchain.toml; caches cargo's registry and apps/studio/target.
+          cache-dependency-path: package-lock.json
+      # Reads rust-toolchain.toml; caches cargo's registry and target.
       - uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
           rustflags: ""
-          cache-workspaces: apps/studio -> target
+          cache-workspaces: . -> target
       - run: npm ci
       # The same command an agent runs locally (package.json, `check`).
       - run: npm run check

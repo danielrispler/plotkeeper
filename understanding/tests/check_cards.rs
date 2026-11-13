@@ -1,4 +1,4 @@
-//! The card while a check runs (#461, decision 15): the request a long check's start makes reaches
+//! The card while a check runs (danielrispler/Falinks#461, decision 15): the request a long check's start makes reaches
 //! the writer with the change so far and the check's command, the card's guess is whether the check
 //! passes, and the check's result settles it.
 

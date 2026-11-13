@@ -1,4 +1,4 @@
-//! Seams 1 and 2 together (#369, Testing Decisions): hook events through the core, the fingerprint
+//! Seams 1 and 2 together (danielrispler/Falinks#369, Testing Decisions): hook events through the core, the fingerprint
 //! and `git diff --stat` on a real repository, a fake writer and the card store, joined as the shell
 //! joins them.
 
@@ -307,7 +307,7 @@ fn a_worker_gets_a_card_at_each_commit_in_its_worktree_and_at_its_end_with_its_o
     assert_eq!(store.brief("s1"), None);
 }
 
-/// #369, decisions 8 and 11: a killed worker has no `SubagentStop`; its end is read from its
+/// danielrispler/Falinks#369, decisions 8 and 11: a killed worker has no `SubagentStop`; its end is read from its
 /// wake-up, which also opens the session's next turn and takes that turn's base.
 #[test]
 fn a_killed_worker_gets_its_end_card_at_the_wake_up_that_reports_it() {
@@ -418,7 +418,7 @@ fn a_wake_up_turn_that_changed_nothing_itself_updates_the_brief_and_writes_no_ca
 
 const MINUTE: u64 = 60 * 1000;
 
-/// #369, decision 11: no timer; a step 20 minutes or more after the last card checks its worktree.
+/// danielrispler/Falinks#369, decision 11: no timer; a step 20 minutes or more after the last card checks its worktree.
 #[test]
 fn after_25_minutes_of_uncommitted_change_the_next_step_gets_a_card_and_one_with_no_change_none() {
     let mut shell = Shell::new();
@@ -452,7 +452,7 @@ fn after_25_minutes_of_uncommitted_change_the_next_step_gets_a_card_and_one_with
     assert_eq!(shell.writer.cards.borrow().len(), 2);
 }
 
-/// #410, decision 23: a fallback look that finds no change restarts the 20-minute wait, so a quiet
+/// danielrispler/Falinks#410, decision 23: a fallback look that finds no change restarts the 20-minute wait, so a quiet
 /// worktree gets one look, not one per step, and a later change waits for the next fallback.
 #[test]
 fn a_quiet_worktrees_fallback_look_restarts_its_wait_so_a_later_change_waits_20_minutes_from_it() {
@@ -477,7 +477,7 @@ fn a_quiet_worktrees_fallback_look_restarts_its_wait_so_a_later_change_waits_20_
     assert_eq!(shell.cards(), [(Some("w1".to_string()), summary("a.rs"))]);
 }
 
-/// #369, decision 11: the fallback is on a step of a worker or of a prompt; after the session's
+/// danielrispler/Falinks#369, decision 11: the fallback is on a step of a worker or of a prompt; after the session's
 /// `Stop` there is no prompt, so Daniel's own edit is no one's card.
 #[test]
 fn a_background_helpers_step_after_the_stop_writes_no_card_for_the_session_after_25_minutes() {
@@ -520,7 +520,7 @@ fn a_helpers_edit_in_its_parents_worktree_shows_on_the_parents_card_tagged_with_
     assert_eq!(card.request.changed_by, tagged);
 }
 
-/// #372's gap: the shell now fingerprints a helper's Bash step, so a command that changes its
+/// danielrispler/Falinks#372's gap: the shell now fingerprints a helper's Bash step, so a command that changes its
 /// worktree makes it a worker live, not only in the core's test.
 #[test]
 fn a_helper_whose_command_changes_its_worktree_becomes_a_worker() {
@@ -541,7 +541,7 @@ fn a_helper_whose_command_changes_its_worktree_becomes_a_worker() {
     assert_eq!(kind(&shell), Kind::Worker);
 }
 
-/// #369, decision 6: only a change across the helper's own Bash step counts, not what its parent or
+/// danielrispler/Falinks#369, decision 6: only a change across the helper's own Bash step counts, not what its parent or
 /// Daniel changed in the shared worktree before it.
 #[test]
 fn a_helper_whose_command_changes_nothing_stays_a_helper_after_others_change_its_worktree() {
@@ -737,7 +737,7 @@ fn a_rows_line_is_who_needs_you_then_the_stopped_line_then_who_returned_then_the
     assert_eq!(shell.line(), "Done.");
 }
 
-/// #434, decisions 37 and 38: after a restart the shell's join still knows the helper promoted live
+/// danielrispler/Falinks#434, decisions 37 and 38: after a restart the shell's join still knows the helper promoted live
 /// and the worker cards its session collected, from the store on disk.
 #[test]
 fn after_a_restart_a_promoted_helper_is_a_worker_and_the_stop_writes_its_card_from_the_workers() {
@@ -779,7 +779,7 @@ fn own_changes(shell: &Shell) -> Vec<String> {
     own.map(|kept| kept.request.diff().to_string()).collect()
 }
 
-/// #434, decisions 8 to 10: a base per worktree at the turn's first touch, and one joined card.
+/// danielrispler/Falinks#434, decisions 8 to 10: a base per worktree at the turn's first touch, and one joined card.
 #[test]
 fn a_turn_that_starts_in_one_worktree_and_stops_in_another_gets_one_card_with_both_changes() {
     let mut shell = Shell::new();
@@ -805,7 +805,7 @@ fn a_turn_that_starts_in_one_worktree_and_stops_in_another_gets_one_card_with_bo
     assert!(!change.contains("notes.txt"), "{change}");
 }
 
-/// #434, decision 9: an `Edit` path in another worktree touches it, with no `cd`.
+/// danielrispler/Falinks#434, decision 9: an `Edit` path in another worktree touches it, with no `cd`.
 #[test]
 fn an_edit_into_another_worktree_without_a_cd_puts_its_change_on_the_card() {
     let mut shell = Shell::new();
@@ -827,7 +827,7 @@ fn an_edit_into_another_worktree_without_a_cd_puts_its_change_on_the_card() {
     assert!(change.contains("+fn c() {}"), "{change}");
 }
 
-/// #434, decision 10: a worktree whose worker has its own cards is left out of the session's.
+/// danielrispler/Falinks#434, decision 10: a worktree whose worker has its own cards is left out of the session's.
 #[test]
 fn a_worktree_workers_change_is_on_its_own_cards_only_while_the_session_sits_in_its_worktree() {
     let mut shell = Shell::new();
@@ -858,7 +858,7 @@ fn a_worktree_workers_change_is_on_its_own_cards_only_while_the_session_sits_in_
     assert!(own.iter().all(|c| !c.contains("+++ b/a.rs")), "{own:?}");
 }
 
-/// #434, decision 11: ownership is decided once, by worktree root, at the subagent's first event.
+/// danielrispler/Falinks#434, decision 11: ownership is decided once, by worktree root, at the subagent's first event.
 #[test]
 fn a_helper_in_the_sessions_folder_keeps_the_session_as_its_owner_after_the_session_cds_into_sub() {
     let mut shell = Shell::new();
@@ -884,7 +884,7 @@ fn a_helper_in_the_sessions_folder_keeps_the_session_as_its_owner_after_the_sess
     assert_eq!(card.request.changed_by, tagged);
 }
 
-/// #434, decision 15: "who changed what" keeps only paths inside the owner's folder.
+/// danielrispler/Falinks#434, decision 15: "who changed what" keeps only paths inside the owner's folder.
 #[test]
 fn a_write_outside_the_owners_folder_is_not_in_who_changed_what() {
     let mut shell = Shell::new();
@@ -935,7 +935,7 @@ fn the_helpers_card_is_the_sessions(shell: &Shell) {
     assert!(card.request.diff().contains("+fn a() { b() }"));
 }
 
-/// #434, decision 16: a subagent's end outside a turn writes the session's card, tagged with it.
+/// danielrispler/Falinks#434, decision 16: a subagent's end outside a turn writes the session's card, tagged with it.
 #[test]
 fn a_background_helpers_edits_after_the_stop_get_a_card_tagged_with_it_when_it_ends() {
     let mut shell = Shell::new();
@@ -948,7 +948,7 @@ fn a_background_helpers_edits_after_the_stop_get_a_card_tagged_with_it_when_it_e
     the_helpers_card_is_the_sessions(&shell);
 }
 
-/// #434, decision 17: the next turn's start cards what is still uncarded, before its base.
+/// danielrispler/Falinks#434, decision 17: the next turn's start cards what is still uncarded, before its base.
 #[test]
 fn a_background_helpers_edits_get_a_card_at_the_next_turns_start_if_it_never_ends() {
     let mut shell = Shell::new();
@@ -960,7 +960,7 @@ fn a_background_helpers_edits_get_a_card_at_the_next_turns_start_if_it_never_end
     the_helpers_card_is_the_sessions(&shell);
 }
 
-/// #434, decision 17: such edits in a worktree that the next turn touches only after its start
+/// danielrispler/Falinks#434, decision 17: such edits in a worktree that the next turn touches only after its start
 /// still get their card, so that worktree's base never swallows them.
 #[test]
 fn a_background_helpers_edits_in_another_worktree_get_a_card_when_the_next_turn_moves_there() {

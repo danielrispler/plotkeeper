@@ -1,4 +1,4 @@
-//! The card store (#328, module 6; #369, decisions 15 and 17): cards, their base, Daniel's guesses,
+//! The card store (danielrispler/Falinks#328, module 6; danielrispler/Falinks#369, decisions 15 and 17): cards, their base, Daniel's guesses,
 //! his flags, his ratings and the longer explanations he asked for survive a restart.
 
 use std::{cell::Cell, sync::Mutex};
@@ -296,7 +296,7 @@ fn each_card_records_when_it_was_added_when_its_quiz_showed_and_when_it_was_gues
     );
 }
 
-/// A store written by #374's build, before cards had a quiz.
+/// A store written by danielrispler/Falinks#374's build, before cards had a quiz.
 const STORE_374: &str = r#"[{"request": {"session_id": "5b9e3d71-0c2a-4f8e-b6d4-8a1c3e5f7092",
     "id": "5b9e3d71-0c2a-4f8e-b6d4-8a1c3e5f7092@1761743990000",
     "base": {"head": null, "files": []}, "change": "-old\n+new\n", "check": null},
@@ -324,7 +324,7 @@ fn a_store_from_before_quizzes_opens_with_cards_that_ask_nothing() {
     assert_eq!(kept.guess, None);
 }
 
-/// A store from before #374, with a card on one step.
+/// A store from before danielrispler/Falinks#374, with a card on one step.
 const STORE_V1: &str = r#"[{"request": {"session_id": "5b9e3d71-0c2a-4f8e-b6d4-8a1c3e5f7092",
     "tool_use_id": "toolu_01A", "step": {"tool": "Edit", "detail": "src/lib.rs"},
     "change": "-old\n+new\n"},
@@ -422,9 +422,9 @@ fn a_card_from_before_its_time_was_kept_is_older() {
     assert_eq!(ids(&shown.older), ["toolu_01A"]);
 }
 
-/// #347's checkpoint day (#370's fixture), live, with a change at every `Stop`'s fingerprint: each
-/// card request gets a card at its event's time. Before #371 the pane showed only the cards of the
-/// session prompted last, so the other session's cards seemed deleted (#347 note, "Cards were not
+/// danielrispler/Falinks#347's checkpoint day (danielrispler/Falinks#370's fixture), live, with a change at every `Stop`'s fingerprint: each
+/// card request gets a card at its event's time. Before danielrispler/Falinks#371 the pane showed only the cards of the
+/// session prompted last, so the other session's cards seemed deleted (danielrispler/Falinks#347 note, "Cards were not
 /// deleted").
 #[test]
 fn every_session_of_the_day_shows_all_of_its_cards_whichever_was_prompted_last() {
@@ -475,7 +475,7 @@ fn every_session_of_the_day_shows_all_of_its_cards_whichever_was_prompted_last()
         shown,
         [
             ("596c28a1", 7),
-            // With `0222b62d`'s 4, whose `/clear` continued its row (#474), as `6641e809`'s none
+            // With `0222b62d`'s 4, whose `/clear` continued its row (danielrispler/Falinks#474), as `6641e809`'s none
             // join `5d7f69ab`'s.
             ("5bb84a4a", 8),
             ("2afc85f5", 14),
@@ -610,8 +610,8 @@ fn the_payload_without_diffs() {
     );
 }
 
-/// #434, decision 37: the helpers promoted live, the failed lines Daniel opened and the turns he
-/// saw (#556) survive a restart, and a store from before they were kept opens with none.
+/// danielrispler/Falinks#434, decision 37: the helpers promoted live, the failed lines Daniel opened and the turns he
+/// saw (danielrispler/Falinks#556) survive a restart, and a store from before they were kept opens with none.
 #[test]
 fn the_live_only_facts_survive_a_restart_and_an_older_store_opens_with_none() {
     let data = tempfile::tempdir().unwrap();

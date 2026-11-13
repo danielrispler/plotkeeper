@@ -1,5 +1,5 @@
-// One selection everywhere (#567): what the terminal shows for the selected session, which the rail
-// shows too. Run: `npm test` in apps/studio.
+// One selection everywhere (danielrispler/Falinks#567): what the terminal shows for the selected session, which the rail
+// shows too. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { paneView } from "../../dist/panes.js";

@@ -1,5 +1,5 @@
-// Places (#576): a folded section at the bottom of the list, one row per place with its counts and
-// session count, offering a new session and, for a task, Remove. Run: `npm test` in apps/studio.
+// Places (danielrispler/Falinks#576): a folded section at the bottom of the list, one row per place with its counts and
+// session count, offering a new session and, for a task, Remove. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";

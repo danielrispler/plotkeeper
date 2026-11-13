@@ -1,5 +1,5 @@
 // The session list, on the window's right: one line per session, sorted by state, its status shown
-// by shape (#572), each session's subagents nested under it. When the window is narrow it collapses to
+// by shape (danielrispler/Falinks#572), each session's subagents nested under it. When the window is narrow it collapses to
 // a strip of glyphs and labels, which opens the full list on hover, on click or on ⌘1.
 
 import { age, element, patch, prose, pressable, stepText, text } from "./dom.js";
@@ -19,7 +19,7 @@ export function stripLabel(folder: string): string {
   return /^issue-(\d+)/.exec(folder)?.[1] ?? folder.slice(0, 4);
 }
 
-// What a session is called: Daniel's name for it, else its issue, PR and worktree (#480), else its
+// What a session is called: Daniel's name for it, else its issue, PR and worktree (danielrispler/Falinks#480), else its
 // folder.
 export function sessionName(session: Pick<Session, "name" | "identity" | "folder_name">): string {
   return session.name ?? (session.identity.name || session.folder_name);
@@ -27,7 +27,7 @@ export function sessionName(session: Pick<Session, "name" | "identity" | "folder
 
 const thousands = (n: number) => `${Math.round(n / 1000).toLocaleString("en-US")}k`;
 
-// How full a session's context is (#517, decisions 2 and 3): "context 9%", its tokens such as "85k"
+// How full a session's context is (danielrispler/Falinks#517, decisions 2 and 3): "context 9%", its tokens such as "85k"
 // when the window is unknown, or "" before it is known.
 export function contextText(context: Context | null): string {
   if (!context) return "";
@@ -43,7 +43,7 @@ export function contextTitle(context: Context | null): string {
   return `${used} of ${thousands(context.window)} tokens used · Claude's status line shows this as ${context.left}% left`;
 }
 
-// The muted mark after a row's name: "status only" for another agent's row (#560), so it never reads
+// The muted mark after a row's name: "status only" for another agent's row (danielrispler/Falinks#560), so it never reads
 // as a Claude session with missing data; else the context share.
 export function rowMark(session: Pick<Session, "status_only" | "transcript">): string {
   return session.status_only ? "status only" : contextText(session.transcript.context);
@@ -60,8 +60,8 @@ export function agentState(session: Session, agent: Subagent): [string, string] 
   return session.asker?.agent === agent.id ? [stateLabels.needs_you, "needs_you"] : [agent.status, agent.status];
 }
 
-// A status's shape and its word (#572): a "Needs you" pill, the only colour (#565, decision 1); a
-// spinner while running; a dot at your turn, filled once it finished unseen, idle too (#556); a ring when idle,
+// A status's shape and its word (danielrispler/Falinks#572): a "Needs you" pill, the only colour (danielrispler/Falinks#565, decision 1); a
+// spinner while running; a dot at your turn, filled once it finished unseen, idle too (danielrispler/Falinks#556); a ring when idle,
 // ended or, for a subagent, done.
 export type Glyph = "pill" | "spinner" | "dot" | "filled" | "ring";
 export function status(state: string, unseen = false): [Glyph, string] {
@@ -87,7 +87,7 @@ function glyph(state: string, unseen = false): HTMLElement {
 // A row's second line, only while it runs or needs Daniel: the current step, or the open question's
 // first line, else who asks (a plan or a permission); null otherwise.
 export function secondLine(session: Pick<Session, "state" | "line" | "questions"> & { status_only?: boolean }): string | null {
-  // A status-only row has no step or question to show (#560).
+  // A status-only row has no step or question to show (danielrispler/Falinks#560).
   if (session.status_only) return null;
   if (session.state === "running") return session.line ?? "";
   if (session.state !== "needs_you") return null;
@@ -115,12 +115,12 @@ export function childrenOf(session: Pick<Session, "agents">): Children {
   return children;
 }
 
-// Whether a subagent's line is not drawn: it faded, and nothing below it is drawn (#434, decision 43).
+// Whether a subagent's line is not drawn: it faded, and nothing below it is drawn (danielrispler/Falinks#434, decision 43).
 export function hidden(children: Children, agent: Subagent): boolean {
   return agent.faded && (children.get(agent.id) ?? []).every((child) => hidden(children, child));
 }
 
-// The count of a parent's subagents that faded into its line, workers as helpers (#535).
+// The count of a parent's subagents that faded into its line, workers as helpers (danielrispler/Falinks#535).
 export const doneCount = (all: Children, children: Subagent[] = []) => children.filter((agent) => hidden(all, agent)).length;
 function done(all: Children, children: Subagent[] = []): HTMLElement[] {
   const faded = doneCount(all, children);
@@ -144,7 +144,7 @@ function rowLines(button: HTMLElement, state: string, name: HTMLElement[], below
 }
 
 // A row's button, keyed by what it selects (`patch` keeps it across updates). It selects on the press,
-// so the row shows selected at once (#570); a click without a pointer, from the keyboard, selects too.
+// so the row shows selected at once (danielrispler/Falinks#570); a click without a pointer, from the keyboard, selects too.
 function selecting(id: string, agent: string | null, key = `${id} ${agent ?? ""}`): HTMLButtonElement {
   const button = pressable(document.createElement("button"), isSelected(id, agent), (event: MouseEvent) => event.detail === 0 && select(id, agent));
   button.dataset.key = key;
@@ -172,13 +172,13 @@ function row(session: Session, children: Children): HTMLElement {
   return button;
 }
 
-// The row's clock: the turn time, only on the row being looked at; the rail has all three (#517,
-// decision 4; #571).
+// The row's clock: the turn time, only on the row being looked at; the rail has all three (danielrispler/Falinks#517,
+// decision 4; danielrispler/Falinks#571).
 export function rowTime(session: Pick<Session, "state" | "started_at" | "last_event_at" | "turn_span">, selected: boolean): Time | null {
   return (selected && session.turn_span && times(session, null)[1]) || null;
 }
 
-// A row line as plain text (#571): Markdown's emphasis, headings and links dropped outside code spans.
+// A row line as plain text (danielrispler/Falinks#571): Markdown's emphasis, headings and links dropped outside code spans.
 export function plain(line: string): string {
   return line
     .split("`")
@@ -187,14 +187,14 @@ export function plain(line: string): string {
 }
 
 // A row line as shown, and its hover title: the original line whenever a link's URL or a long path's
-// start is dropped, so the full line stays reachable (#571); else "".
+// start is dropped, so the full line stays reachable (danielrispler/Falinks#571); else "".
 export function rowText(line: string): [shown: string, title: string] {
   const [shown, full] = shortPaths(plain(line));
   return [shown, full || /\]\([^)]*\)/.test(line) ? line : ""];
 }
 
 // A row's line, such as a card summary stored in Hebrew, laid out by its own direction, its code spans
-// cleaned as a card's are (#434, decision 40), its paths shortened with the full line on hover (#571).
+// cleaned as a card's are (danielrispler/Falinks#434, decision 40), its paths shortened with the full line on hover (danielrispler/Falinks#571).
 function rowLine(line: string): HTMLElement {
   const [shown, full] = rowText(line);
   const node = prose("span", shown);
@@ -204,7 +204,7 @@ function rowLine(line: string): HTMLElement {
   return node;
 }
 
-// A subagent row's second line, as a session row's (#572): only while it runs or needs Daniel.
+// A subagent row's second line, as a session row's (danielrispler/Falinks#572): only while it runs or needs Daniel.
 export function agentLine(state: string, details: (string | null)[]): string | null {
   return state === "running" || state === "needs_you" ? details.filter(Boolean).join(" · ") : null;
 }
@@ -248,7 +248,7 @@ function tree(session: Session): HTMLElement[] {
 }
 
 // The strip's labels, one per session, from its name: its issue number, else the name's first
-// letters; sessions whose labels would match are numbered, so none reads "Fali" five times (#572).
+// letters; sessions whose labels would match are numbered, so none reads "Fali" five times (danielrispler/Falinks#572).
 export function stripLabels(sessions: Pick<Session, "name" | "identity" | "folder_name">[]): string[] {
   const base = sessions.map((session) =>
     session.identity.issue === null ? stripLabel(sessionName(session)) : String(session.identity.issue),
@@ -285,7 +285,7 @@ function strip(sessions: Session[]): HTMLElement[] {
 
 // The core sends the sessions sorted by state: needs you, running, your turn, then idle and ended,
 // which collapse at the bottom. The rows above them carry their state by shape, so they have no group
-// heading (#572).
+// heading (danielrispler/Falinks#572).
 export function showSessions(sessions: Session[]) {
   studio.listed = sessions;
   const groups: Session[][] = [];
@@ -294,7 +294,7 @@ export function showSessions(sessions: Session[]) {
     if (last?.[0].state === session.state) last.push(session);
     else groups.push([session]);
   }
-  // Patched, not rebuilt, so focus and text selection survive the update (#570).
+  // Patched, not rebuilt, so focus and text selection survive the update (danielrispler/Falinks#570).
   patch(element("groups"), groups.map((rows) => {
       const state = rows[0].state;
       const title = `${stateLabels[state]} · ${rows.length}`;

@@ -1,4 +1,4 @@
-//! #561: an agent other than Claude Code comes back from revival with its own resume command.
+//! danielrispler/Falinks#561: an agent other than Claude Code comes back from revival with its own resume command.
 
 use studio_workbench::{resume, resumes_latest};
 

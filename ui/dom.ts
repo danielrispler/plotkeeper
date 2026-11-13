@@ -33,7 +33,7 @@ export function age(from: number, to = Date.now()): string {
   return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h`;
 }
 
-// A button: the one button component (#566), its type, pressed state and click.
+// A button: the one button component (danielrispler/Falinks#566), its type, pressed state and click.
 export function pressable<T extends HTMLElement>(button: T, pressed: boolean, click: (event: MouseEvent) => void): T {
   button.classList.add("btn");
   button.setAttribute("type", "button");
@@ -43,7 +43,7 @@ export function pressable<T extends HTMLElement>(button: T, pressed: boolean, cl
 }
 
 // Makes `parent`'s children match `next`, keeping each node that stays, so the focused element and
-// the text selection survive an update (#570). A node stays when its tag and `data-key` match, and
+// the text selection survive an update (danielrispler/Falinks#570). A node stays when its tag and `data-key` match, and
 // takes the new one's attributes and text. Give a node with a listener a key that pins what the
 // listener does, such as its session's id.
 export function patch(parent: Node, next: Node[]) {

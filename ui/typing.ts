@@ -1,4 +1,4 @@
-// Typing into a pane (#544), by herdr's rules (herdr-core `input.rs`): the studio is the only
+// Typing into a pane (danielrispler/Falinks#544), by herdr's rules (herdr-core `input.rs`): the studio is the only
 // typist besides Daniel, so it waits for his draft, never answers a session's dialog, and pastes
 // before it presses Enter. Every text the studio types into a terminal goes through `typeInto`.
 

@@ -1,4 +1,4 @@
-// The decision history's words (#479): what Daniel answered and where. Run: `npm test` in apps/studio.
+// The decision history's words (danielrispler/Falinks#479): what Daniel answered and where. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { answerText, kindText, sourceText } from "../../dist/decisions.js";

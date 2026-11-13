@@ -1,4 +1,4 @@
-//! Seam 1 (#369, Testing Decisions) for agent questions (#379): replay hook events through the core
+//! Seam 1 (danielrispler/Falinks#369, Testing Decisions) for agent questions (danielrispler/Falinks#379): replay hook events through the core
 //! and check each session's questions: what was asked, who asks, and whether Daniel answered it in
 //! the terminal.
 

@@ -1,4 +1,4 @@
-//! Seam 1 (#474, #461 decision 18): `/clear` keeps the session's row. Claude Code ends the session
+//! Seam 1 (danielrispler/Falinks#474, danielrispler/Falinks#461 decision 18): `/clear` keeps the session's row. Claude Code ends the session
 //! with reason `clear` and starts a new one, under a new id, with source `clear`. The new one continues
 //! the row on the same studio terminal, or in the same folder outside studio terminals.
 
@@ -149,7 +149,7 @@ fn a_session_end_with_another_reason_still_ends_the_row() {
     assert_eq!(studio.session(NEW).unwrap().name, None);
 }
 
-/// The checkpoint day's log (#370) holds two real clears, each a `SessionEnd` then a `SessionStart`
+/// The checkpoint day's log (danielrispler/Falinks#370) holds two real clears, each a `SessionEnd` then a `SessionStart`
 /// about 60 ms later, in the main checkout and outside studio terminals.
 #[test]
 fn the_checkpoint_days_clears_each_keep_their_row() {
@@ -171,7 +171,7 @@ fn the_checkpoint_days_clears_each_keep_their_row() {
     }
 }
 
-/// #522: after a `/clear`, the new conversation's `Stop` notifies "your turn" under the row's id,
+/// danielrispler/Falinks#522: after a `/clear`, the new conversation's `Stop` notifies "your turn" under the row's id,
 /// the one the selection names, so the setting for notifying while focused still skips the session
 /// Daniel looks at.
 #[test]

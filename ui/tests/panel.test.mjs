@@ -1,4 +1,4 @@
-// The terminal panel (#542), run on the `tsc` output. Run: `npm test` in apps/studio.
+// The terminal panel (danielrispler/Falinks#542), run on the `tsc` output. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";

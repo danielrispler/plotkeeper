@@ -2,11 +2,11 @@
 
 // `detail` is a command's description, else what the step works on; `command` a command's full text.
 export type Step = { tool: string; detail: string | null; command?: string | null };
-// What the transcript says of the latest turn (#472): the agent's latest line, the steps since it,
+// What the transcript says of the latest turn (danielrispler/Falinks#472): the agent's latest line, the steps since it,
 // its full texts, and why the transcript cannot be read, when it cannot.
 // `context`: as Claude Code's status line measures it, from its snapshot: the tokens, the window,
-// the percent used and left; with no snapshot, the transcript's tokens only (#517, decisions 1 and 2; #519).
-// `model` and `effort`: what the session runs at, null when the transcript names none (#517, decision 8).
+// the percent used and left; with no snapshot, the transcript's tokens only (danielrispler/Falinks#517, decisions 1 and 2; danielrispler/Falinks#519).
+// `model` and `effort`: what the session runs at, null when the transcript names none (danielrispler/Falinks#517, decision 8).
 export type Context = { tokens: number; window: number | null; share: number | null; left: number | null };
 export type Transcript = {
   intention: string | null;
@@ -18,20 +18,20 @@ export type Transcript = {
   model: string | null;
   effort: string | null;
 };
-// What names a session (#480): its issue, branch, PR and worktree, and the name derived from them.
+// What names a session (danielrispler/Falinks#480): its issue, branch, PR and worktree, and the name derived from them.
 export type Identity = { issue: number | null; branch: string | null; pr: number | null; worktree: string; name: string };
 export type SessionState = "needs_you" | "running" | "your_turn" | "idle" | "ended";
 // When something started and ended, in Unix milliseconds; `end` is null while it runs.
 export type Span = { start: number; end: number | null };
 // A check that runs or ran, oldest first: a pass or fail line once it ends. `passed` is null when its
-// exit code is masked, and while it runs. `typical_ms` is its typical duration when it started (#473).
+// exit code is masked, and while it runs. `typical_ms` is its typical duration when it started (danielrispler/Falinks#473).
 export type CheckLine = {
   command: string;
   passed: boolean | null;
   started_at: number;
   ended_at: number | null;
   typical_ms: number | null;
-  // The turn it started in, an index into `Session.turns` (#574).
+  // The turn it started in, an index into `Session.turns` (danielrispler/Falinks#574).
   turn: number | null;
 };
 // Who spawned a subagent: the session's own agent, another subagent, or no known spawn.
@@ -42,7 +42,7 @@ export type Subagent = {
   kind: "worker" | "helper";
   // Its spawn's description, else its short id: the core's one name for it.
   name: string;
-  // The first line of its spawn's prompt, which the rail's history shows under its name (#535).
+  // The first line of its spawn's prompt, which the rail's history shows under its name (danielrispler/Falinks#535).
   asked: string | null;
   agent_type: string | null;
   // "running", then its wake-up's status, such as "completed" or "killed".
@@ -72,7 +72,7 @@ export type Choice = { label: string; description?: string };
 export type Asked = { question: string; header?: string; multiSelect?: boolean; options: Choice[] };
 export type Answer = "open" | "not_answered" | { answered: Record<string, string> };
 export type Question = { tool_use_id: string; agent: string | null; questions: Asked[]; answer: Answer; turn: number | null };
-// A turn, a block in the rail's feed (#574): its prompt's first line, or "worker <name> returned";
+// A turn, a block in the rail's feed (danielrispler/Falinks#574): its prompt's first line, or "worker <name> returned";
 // `id` names its card and summary once its `Stop` came; `message` is its final reply's first line.
 export type Turn = { started_at: number; ended_at: number | null; prompt: string; id: string | null; message: string | null };
 export type Session = {
@@ -82,23 +82,23 @@ export type Session = {
   folder_name: string;
   // The studio terminal it runs in, its `STUDIO_TERMINAL_ID`; null when it runs outside the studio.
   terminal: string | null;
-  // Another agent than Claude Code, from its terminal's OSC 7501 status only (#560): no intention,
+  // Another agent than Claude Code, from its terminal's OSC 7501 status only (danielrispler/Falinks#560): no intention,
   // card, brief, estimate or decisions. Its id is its terminal's.
   status_only: boolean;
-  // Daniel's name for it from the studio (#469); null for its folder's.
+  // Daniel's name for it from the studio (danielrispler/Falinks#469); null for its folder's.
   name: string | null;
-  // The id `claude --resume` takes: its latest conversation's; a `/clear` changes it, not `id` (#474).
+  // The id `claude --resume` takes: its latest conversation's; a `/clear` changes it, not `id` (danielrispler/Falinks#474).
   resume_id: string;
-  // Claude Code's permission mode from its latest event that names one, null before (#541).
+  // Claude Code's permission mode from its latest event that names one, null before (danielrispler/Falinks#541).
   permission_mode: string | null;
-  // The mode it started in, from its first event that names one, which a resume keeps (#541).
+  // The mode it started in, from its first event that names one, which a resume keeps (danielrispler/Falinks#541).
   started_mode: string | null;
   // When each `/clear` continued the row, in Unix ms: its "cleared" markers.
   cleared: number[];
-  // Closing its terminal asks first: it is in a turn or has background tasks (#469).
+  // Closing its terminal asks first: it is in a turn or has background tasks (danielrispler/Falinks#469).
   asks_before_closing: boolean;
   last_step: Step | null;
-  // When its first and latest events came, its latest turn's and its last step's times (#473).
+  // When its first and latest events came, its latest turn's and its last step's times (danielrispler/Falinks#473).
   started_at: number;
   last_event_at: number;
   turn_span: Span | null;
@@ -114,16 +114,16 @@ export type Session = {
   returned: string | null;
   transcript: Transcript;
   identity: Identity;
-  // Its phases and the estimate (#475).
+  // Its phases and the estimate (danielrispler/Falinks#475).
   work: Work;
   // In the session list only: what its row says, built by the card store.
   line?: string;
-  // Its turn finished and Daniel has not looked at it since; #556 sets it (#572 draws it).
+  // Its turn finished and Daniel has not looked at it since; danielrispler/Falinks#556 sets it (danielrispler/Falinks#572 draws it).
   unseen?: boolean;
 };
 // The shell sends a card's request without its diff and base, which the pane never reads. `agent`
 // is the worker whose card it is; `changed_by` holds the files other subagents edited in its
-// worktree, by subagent. `check` is the command of the check whose start requested the card (#476).
+// worktree, by subagent. `check` is the command of the check whose start requested the card (danielrispler/Falinks#476).
 export type CardRequest = {
   session_id: string;
   id: string;
@@ -147,7 +147,7 @@ export type Card = {
   quiz: Quiz | null;
 };
 // Daniel's tap on a quiz, graded by the writer's key; on a check's card by its result, so `right`
-// is null until the result settles it, and stays null when the result does not say (#476).
+// is null until the result settles it, and stays null when the result does not say (danielrispler/Falinks#476).
 export type Guess = { option: number; right: boolean | null; at: number };
 // Daniel's rating of a card's explanation. His fifth reason, "the key is wrong", is `key_wrong`, the
 // one record the quiz's flag also sets.
@@ -167,7 +167,7 @@ export type StoredCard = {
 };
 // The selected session's brief, and its cards, split at 30 minutes by the shell's tick, each oldest
 // first.
-// An answered question, plan or permission in the session's decision history (#479): the call's input,
+// An answered question, plan or permission in the session's decision history (danielrispler/Falinks#479): the call's input,
 // Daniel's answers by question text or "allow"/"deny", when, and where he answered.
 export type Decision = {
   call: string;
@@ -178,7 +178,7 @@ export type Decision = {
   at: number;
   source: "card" | "terminal";
 };
-// A turn's summary (#526) and, unless the turn has a card, its learning section, as the store keeps
+// A turn's summary (danielrispler/Falinks#526) and, unless the turn has a card, its learning section, as the store keeps
 // it.
 export type TurnSummary = { summary: { summary: string; learning: { idea: string; question: Quiz } | null } };
 export type SessionCards = { brief: string | null; recent: StoredCard[]; older: StoredCard[]; decisions: Decision[] };
@@ -191,11 +191,11 @@ export const askKind = (tool: string): AskKind =>
 // view then shows its own line.
 export type Selection = { session: Session; agent: string | null };
 
-// Where a session can start (#467): the main checkout and the tasks under `.claude/worktrees/`, with
+// Where a session can start (danielrispler/Falinks#467): the main checkout and the tasks under `.claude/worktrees/`, with
 // the count of `agent-*` worktrees hidden. `branch` is null at a detached HEAD.
 export type Place = { path: string; branch: string | null };
 export type Places = { main: Place; tasks: Place[]; hidden: number };
-// A place's counts (#576): commits ahead of and behind its base, null with no base, and changed files.
+// A place's counts (danielrispler/Falinks#576): commits ahead of and behind its base, null with no base, and changed files.
 export type Counts ={ ahead_behind: [number, number] | null; changed: number };
 export type Losses = { uncommitted: string[]; unpushed: string[] };
 
@@ -207,7 +207,7 @@ export const stateLabels: Record<SessionState, string> = {
   ended: "Ended",
 };
 
-// A phase of a session's work on a ticket, in the usual order (#475).
+// A phase of a session's work on a ticket, in the usual order (danielrispler/Falinks#475).
 export type Phase =
   | "orienting"
   | "designing"

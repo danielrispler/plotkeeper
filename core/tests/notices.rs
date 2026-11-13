@@ -1,11 +1,11 @@
-//! Seam 1 (#369, Testing Decisions) for notifications (#380): replay hook events live through the
+//! Seam 1 (danielrispler/Falinks#369, Testing Decisions) for notifications (danielrispler/Falinks#380): replay hook events live through the
 //! core and check its notices. Each belongs to a top-level session and names the subagent it comes
-//! from (#369, decision 22).
+//! from (danielrispler/Falinks#369, decision 22).
 
 use std::time::Duration;
 use studio_core::{Notifications, Output, State, Studio};
 
-/// The scripted session of `record-subagent-run.sh` (#370): a worktree worker completes, and a
+/// The scripted session of `record-subagent-run.sh` (danielrispler/Falinks#370): a worktree worker completes, and a
 /// helper is stopped mid-step (line 25 says `killed`).
 const RUN: &str = include_str!("fixtures/subagent-run.jsonl");
 const RUN_SESSION: &str = "40e8e6ef-9b2f-4467-9b55-87c2d053b616";
@@ -42,7 +42,7 @@ fn a_failed_worker_raises_one_notice_on_its_sessions_line_naming_it() {
     );
 }
 
-/// Hand-written (#379): a background helper asks a question across its session's `Stop`.
+/// Hand-written (danielrispler/Falinks#379): a background helper asks a question across its session's `Stop`.
 const CHILD: &str = include_str!("fixtures/child-question.jsonl");
 
 #[test]
@@ -106,7 +106,7 @@ fn a_folder_ending_in_a_slash_shows_its_whole_cwd() {
 }
 
 /// `ms` milliseconds after the app started, on the monotonic clock the notices are combined on
-/// (#434, decision 28).
+/// (danielrispler/Falinks#434, decision 28).
 fn at(ms: u64) -> Duration {
     Duration::from_millis(ms)
 }

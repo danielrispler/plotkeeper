@@ -1,4 +1,4 @@
-//! Seam 1 (#461, decision 8): replay hook events through the core and check that each session
+//! Seam 1 (danielrispler/Falinks#461, decision 8): replay hook events through the core and check that each session
 //! carries its studio terminal, `STUDIO_TERMINAL_ID` as the hook records it, so a row maps to the
 //! terminal its pane shows.
 
@@ -55,7 +55,7 @@ fn a_session_resumed_in_a_new_terminal_maps_to_the_new_one() {
     assert_eq!(terminal(&studio, IN_STUDIO), None);
 }
 
-/// One selection everywhere (#567): the pane and the rail both read the one selection, so the
+/// One selection everywhere (danielrispler/Falinks#567): the pane and the rail both read the one selection, so the
 /// selected session names the terminal the pane shows.
 #[test]
 fn selecting_a_session_sets_one_selection_that_names_its_terminal() {
@@ -69,7 +69,7 @@ fn selecting_a_session_sets_one_selection_that_names_its_terminal() {
 }
 
 /// A session Daniel starts from the studio is selected once its first event names its terminal, so
-/// the rail follows the new pane; until then nothing is selected (#567).
+/// the rail follows the new pane; until then nothing is selected (danielrispler/Falinks#567).
 #[test]
 fn a_session_started_in_a_new_terminal_is_selected_when_it_arrives() {
     let lines: Vec<&str> = include_str!("fixtures/two-sessions.jsonl")
@@ -108,7 +108,7 @@ fn a_click_before_the_new_session_arrives_keeps_the_selection() {
     );
 }
 
-/// A session Daniel started that resumes another drops its throwaway startup id (#562); the
+/// A session Daniel started that resumes another drops its throwaway startup id (danielrispler/Falinks#562); the
 /// selection follows to the resumed session, so it stays live and visible.
 #[test]
 fn a_resume_in_a_new_terminal_moves_the_selection_to_the_resumed_session() {

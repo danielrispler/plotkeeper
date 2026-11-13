@@ -1,4 +1,4 @@
-// Spike for #322: terminals inside the Tauri app that survive restarts. Throwaway.
+// Spike for danielrispler/Falinks#322: terminals inside the Tauri app that survive restarts. Throwaway.
 // One binary: `--daemon` runs the background terminal process (Orca's model); anything else runs the app.
 mod app;
 mod daemon;

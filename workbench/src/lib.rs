@@ -1,6 +1,6 @@
-//! Workbench git (#328, module 7; #461, decision 8): the places a session can start in, read live
+//! Workbench git (danielrispler/Falinks#328, module 7; danielrispler/Falinks#461, decision 8): the places a session can start in, read live
 //! from `git worktree list --porcelain` with no stored copy, and the `claude` command a studio
-//! terminal runs. Beside them, creating and removing tasks (#468; #461, decision 9): no call passes
+//! terminal runs. Beside them, creating and removing tasks (danielrispler/Falinks#468; danielrispler/Falinks#461, decision 9): no call passes
 //! git's force option, so git refuses whatever would lose work, and its message is shown as it is.
 
 use serde::Serialize;
@@ -64,7 +64,7 @@ pub fn places(repo: &Path) -> Result<Places, String> {
     })
 }
 
-/// Where a place's branch stands (#576, after #559): its commits ahead of and behind its base, `None`
+/// Where a place's branch stands (danielrispler/Falinks#576, after danielrispler/Falinks#559): its commits ahead of and behind its base, `None`
 /// with no base, and how many files `git status` lists as changed.
 #[derive(Debug, PartialEq, Serialize)]
 pub struct Counts {
@@ -113,8 +113,8 @@ pub fn counts(repo: &Path, path: &str) -> Result<Counts, String> {
 /// sets `CLAUDE_CODE_PLUGIN_DIRS` to the studio plugin at `plugin` alone, as the README loads it,
 /// so a profile that sets it too never loads the hooks twice, and `CLAUDE_CLIENT_PRESENCE_FILE` to
 /// `presence`, which the shell keeps while the window is focused, so Remote Control skips a phone
-/// push then (#522). The daemon runs it under a login shell with the terminal's `STUDIO_TERMINAL_ID`.
-/// `auto` runs it in Claude Code's auto mode (#541), which still asks when its classifier blocks a
+/// push then (danielrispler/Falinks#522). The daemon runs it under a login shell with the terminal's `STUDIO_TERMINAL_ID`.
+/// `auto` runs it in Claude Code's auto mode (danielrispler/Falinks#541), which still asks when its classifier blocks a
 /// step; bypass mode is never offered.
 pub fn claude(plugin: &Path, presence: &Path, resume: Option<&str>, auto: bool) -> Vec<String> {
     let mut argv = vec![
@@ -134,7 +134,7 @@ pub fn claude(plugin: &Path, presence: &Path, resume: Option<&str>, auto: bool) 
     argv
 }
 
-/// The command that brings back an agent other than Claude Code (#561), by the name of the program a
+/// The command that brings back an agent other than Claude Code (danielrispler/Falinks#561), by the name of the program a
 /// revived terminal had in its foreground: conversation `id` when it is known, else the latest one
 /// in the terminal's folder. `None` for any other program, which revives as a plain shell. Checked
 /// from each tool's `--help`: `agy` 1.4.7 and `codex` 0.167.0 (2026-11-11). Cursor's `agent` was not
@@ -159,7 +159,7 @@ pub fn resumes_latest(argv: &[String]) -> bool {
 }
 
 /// `--settings` that make the session's status line the studio's wrapper, `workbench/statusline.sh`
-/// beside the plugin (#521; #517, decision 5): it saves the usage snapshot, then runs the user's own
+/// beside the plugin (danielrispler/Falinks#521; danielrispler/Falinks#517, decision 5): it saves the usage snapshot, then runs the user's own
 /// status line. The path is single-quoted, as Claude Code runs the command in a shell.
 fn status_line(plugin: &Path) -> String {
     let wrapper = plugin.with_file_name("workbench").join("statusline.sh");
@@ -167,7 +167,7 @@ fn status_line(plugin: &Path) -> String {
     serde_json::json!({ "statusLine": { "type": "command", "command": quoted } }).to_string()
 }
 
-/// The plan's usage (#481; #461, decision 19): the `rate_limits` of the newest `*.json` snapshot in
+/// The plan's usage (danielrispler/Falinks#481; danielrispler/Falinks#461, decision 19): the `rate_limits` of the newest `*.json` snapshot in
 /// `dir`, where Daniel's status line command saves its stdin, one file per session, by temp file and
 /// rename. `None` when there is no snapshot, it has no limits yet, or it does not parse.
 pub fn plan_usage(dir: &Path) -> Option<serde_json::Value> {
@@ -182,7 +182,7 @@ pub fn plan_usage(dir: &Path) -> Option<serde_json::Value> {
 }
 
 /// The `context_window` of session `id`'s status line snapshot in `dir`: its window size, current
-/// usage and percentages (#517, decision 1; #519). `None` when there is no snapshot, it has no window
+/// usage and percentages (danielrispler/Falinks#517, decision 1; danielrispler/Falinks#519). `None` when there is no snapshot, it has no window
 /// size, or `id` is no plain session id, as the status line saves only those.
 pub fn context_window(dir: &Path, id: &str) -> Option<serde_json::Value> {
     let plain = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-';
@@ -245,7 +245,7 @@ fn branch_taken(repo: &Path, name: &str) -> bool {
     taken(format!("refs/heads/{name}")) || taken(format!("refs/remotes/origin/{name}"))
 }
 
-/// Creates a task named after `request`, what Daniel asks a new session for: issue `#123` (or
+/// Creates a task named after `request`, what Daniel asks a new session for: issue `danielrispler/Falinks#123` (or
 /// `123`) gives `123-<its title>`, or `issue-123` when `gh` cannot read the title; a file of the
 /// main checkout, such as a spec, gives its file name; any other text, a prompt, gives its first
 /// words. A taken name gets the next free number, `-2` and on.
@@ -364,7 +364,7 @@ fn merged_heads(repo: &Path, branch: &str) -> Vec<String> {
 }
 
 /// [`delete_merged_branch`] with the merged pull requests' `heads` given. A squash merge leaves the
-/// branch's commits off `main` (#461, decision 9's one exception): a tip a merged pull request had
+/// branch's commits off `main` (danielrispler/Falinks#461, decision 9's one exception): a tip a merged pull request had
 /// loses nothing, and `update-ref` deletes it only while the branch still points there.
 pub fn delete_branch_merged_at(repo: &Path, branch: &str, heads: &[String]) -> Result<(), String> {
     let refused = match git(repo, &["branch", "-d", branch]) {

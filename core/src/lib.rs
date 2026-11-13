@@ -1,4 +1,4 @@
-//! The studio core (#328, module 3): plain Rust with no I/O but the transcript reader
+//! The studio core (danielrispler/Falinks#328, module 3): plain Rust with no I/O but the transcript reader
 //! (`transcript.rs`), which reads the sessions' transcripts. It takes hook events one at a time, in
 //! event log order, and keeps the state the app shows. App start replays the whole log through
 //! `replay`; live events go through `apply`, which updates state the same way and also returns what
@@ -25,35 +25,35 @@ pub struct Studio {
     /// The subagent of it whose line he opened since, whose own view shows instead.
     viewed: Option<String>,
     /// The studio terminal of a session Daniel started, which is selected when its first event
-    /// names that terminal (#567).
+    /// names that terminal (danielrispler/Falinks#567).
     awaiting: Option<String>,
     /// The session Daniel marked unseen, which looking at it does not see until he selects it
-    /// again (#556).
+    /// again (danielrispler/Falinks#556).
     held: Option<String>,
     /// The shell's latest tick, in Unix milliseconds.
     now: u64,
     roots: Roots,
     /// The turns the replay saw end with both trees, for `backfill`.
     ended: Vec<Backfill>,
-    /// How long each check ran when it did not fail, by `check_key`, oldest first (#461, decision 13).
+    /// How long each check ran when it did not fail, by `check_key`, oldest first (danielrispler/Falinks#461, decision 13).
     durations: HashMap<String, Vec<u64>>,
-    /// The row of each session that continues another after a `/clear`, by its own id (#461,
+    /// The row of each session that continues another after a `/clear`, by its own id (danielrispler/Falinks#461,
     /// decision 18). A session not here is its own row.
     rows: HashMap<String, String>,
     /// Summaries are written when Daniel opens a turn, not at its end, so they move no intention
-    /// (#517, decisions 13 and 16), from the settings.
+    /// (danielrispler/Falinks#517, decisions 13 and 16), from the settings.
     summaries_on_open: bool,
     /// Since when each Claude session's hook state and its terminal's OSC 7501 state disagree, and
-    /// whether that disagreement was logged (#560).
+    /// whether that disagreement was logged (danielrispler/Falinks#560).
     mismatched: HashMap<String, (u64, bool)>,
     /// Whether `terminals` has had its first list: the rows that list finds tell nothing, as Claude
-    /// sessions replayed at start tell nothing (#522).
+    /// sessions replayed at start tell nothing (danielrispler/Falinks#522).
     listed: bool,
 }
 
 type FindRoot = dyn Fn(&str) -> Option<String> + Send;
 
-/// Each folder's worktree root (#434, decision 11), found once per folder by the shell's lookup. With
+/// Each folder's worktree root (danielrispler/Falinks#434, decision 11), found once per folder by the shell's lookup. With
 /// none found, a folder is its own root.
 #[derive(Default)]
 struct Roots {
@@ -95,19 +95,19 @@ pub struct Session {
     /// The last segment of `cwd`, or the whole `cwd` when that segment is empty.
     pub folder_name: String,
     /// The studio terminal it runs in, its `STUDIO_TERMINAL_ID` from its latest event, `None` when
-    /// it runs outside the studio (#461, decision 8).
+    /// it runs outside the studio (danielrispler/Falinks#461, decision 8).
     pub terminal: Option<String>,
-    /// Daniel's name for it, from the studio's latest rename line in the log (#469); `None` for its
+    /// Daniel's name for it, from the studio's latest rename line in the log (danielrispler/Falinks#469); `None` for its
     /// folder's.
     pub name: Option<String>,
     /// The id `claude --resume` takes: its latest conversation's, which a `/clear` changes while the
-    /// row keeps its first id (#461, decision 18).
+    /// row keeps its first id (danielrispler/Falinks#461, decision 18).
     pub resume_id: String,
-    /// Claude Code's permission mode, from its latest event that names one (#541): `default`,
+    /// Claude Code's permission mode, from its latest event that names one (danielrispler/Falinks#541): `default`,
     /// `auto`, `plan` and the like; `None` until one does, as `SessionStart` does not.
     pub permission_mode: Option<String>,
     /// The permission mode it started in, from its first event that names one, which a resume keeps
-    /// (#541); `None` until one does.
+    /// (danielrispler/Falinks#541); `None` until one does.
     pub started_mode: Option<String>,
     /// When each `/clear` continued it, oldest first: the "cleared" markers in its history.
     pub cleared: Vec<u64>,
@@ -117,7 +117,7 @@ pub struct Session {
     clearing: bool,
     pub state: State,
     /// Whether closing its terminal asks first: it is in a turn, or its latest `Stop` listed
-    /// background tasks (#469).
+    /// background tasks (danielrispler/Falinks#469).
     pub asks_before_closing: bool,
     /// Daniel deleted it: the list leaves it out until it starts again.
     #[serde(skip)]
@@ -125,13 +125,13 @@ pub struct Session {
     /// Its latest `Stop` listed background tasks.
     #[serde(skip)]
     background: bool,
-    /// The checks that ran, oldest first: pass or fail lines in the session's timeline (#369,
+    /// The checks that ran, oldest first: pass or fail lines in the session's timeline (danielrispler/Falinks#369,
     /// decision 14).
     pub checks: Vec<CheckLine>,
     /// The tool calls whose `PreToolUse` landed and whose `PostToolUse` has not.
     #[serde(skip)]
     running: Vec<Call>,
-    /// What blocks it on Daniel, so that it needs you, oldest first (#434, decision 24).
+    /// What blocks it on Daniel, so that it needs you, oldest first (danielrispler/Falinks#434, decision 24).
     #[serde(skip)]
     blocks: Vec<Block>,
     #[serde(skip)]
@@ -141,38 +141,38 @@ pub struct Session {
     /// Whether a `Stop` of it requested Claude Code's version.
     #[serde(skip)]
     versioned: bool,
-    /// Its subagents at any depth, in the order they were first seen (#369, decision 5).
+    /// Its subagents at any depth, in the order they were first seen (danielrispler/Falinks#369, decision 5).
     #[serde(serialize_with = "serialize_agents")]
     pub agents: Vec<Subagent>,
     /// Who asks Daniel, and since when, while it needs him.
     pub asker: Option<Asker>,
-    /// Its prompts, oldest first, each marked with who sent it (#369, decision 7).
+    /// Its prompts, oldest first, each marked with who sent it (danielrispler/Falinks#369, decision 7).
     pub prompts: Vec<Prompt>,
-    /// Its turns, oldest first: the rail's feed (#574). Its checks, subagents and questions name the
+    /// Its turns, oldest first: the rail's feed (danielrispler/Falinks#574). Its checks, subagents and questions name the
     /// turn they started in.
     pub turns: Vec<Turn>,
-    /// At your turn, or idle since, with a turn Daniel has not seen (#556): its row's filled dot and
+    /// At your turn, or idle since, with a turn Daniel has not seen (danielrispler/Falinks#556): its row's filled dot and
     /// bold name.
     pub unseen: bool,
-    /// How many of its turns Daniel has seen, which the card store keeps (#556).
+    /// How many of its turns Daniel has seen, which the card store keeps (danielrispler/Falinks#556).
     #[serde(skip)]
     seen: usize,
     /// The ids of its background tasks, commands included, from their responses and `Stop`'s
     /// `background_tasks`. With its subagents' ids, they are the task ids a wake-up can name.
     #[serde(skip)]
     tasks: BTreeSet<String>,
-    /// The questions its agents asked, oldest first (#369, decision 21).
+    /// The questions its agents asked, oldest first (danielrispler/Falinks#369, decision 21).
     pub questions: Vec<Question>,
-    /// Its answered questions, plans and permissions, oldest first: its decision history (#461,
+    /// Its answered questions, plans and permissions, oldest first: its decision history (danielrispler/Falinks#461,
     /// decision 17). The card store keeps them across restarts and gives them to the pane.
     #[serde(skip)]
     pub decisions: Vec<Decision>,
     /// The questions answered on the studio card, by call, whose result has not landed yet.
     #[serde(skip)]
     carded: BTreeSet<String>,
-    /// When its latest turn started and ended (#461, decision 13).
+    /// When its latest turn started and ended (danielrispler/Falinks#461, decision 13).
     pub turn_span: Option<Span>,
-    /// Its latest `Stop`, until its next prompt (#369, decision 19).
+    /// Its latest `Stop`, until its next prompt (danielrispler/Falinks#369, decision 19).
     pub stopped: Option<Stopped>,
     /// When its latest turn ended, which took its workers' cards since its last card.
     #[serde(skip)]
@@ -180,43 +180,43 @@ pub struct Session {
     /// Whether its turn was opened by a wake-up and has had no prompt of Daniel's since.
     #[serde(skip)]
     woken: bool,
-    /// Claude Code's prompt id of its latest turn (#434, decision 3), `None` until an event of its
+    /// Claude Code's prompt id of its latest turn (danielrispler/Falinks#434, decision 3), `None` until an event of its
     /// own agent carries one.
     #[serde(skip)]
     turn: Option<String>,
     /// The prompts that arrived during its turn, queued or typed after an interrupt: the next turn's
-    /// (#434, decision 4).
+    /// (danielrispler/Falinks#434, decision 4).
     #[serde(skip)]
     queued: Vec<Prompt>,
-    /// The worktree roots its latest turn touched, each with its base from the first touch (#434,
+    /// The worktree roots its latest turn touched, each with its base from the first touch (danielrispler/Falinks#434,
     /// decision 9).
     #[serde(skip)]
     touched: BTreeSet<String>,
-    /// The tree the hook recorded at its latest turn's first touch of each worktree, by root (#486).
+    /// The tree the hook recorded at its latest turn's first touch of each worktree, by root (danielrispler/Falinks#486).
     #[serde(skip)]
     trees: BTreeMap<String, String>,
     /// "worker <name> returned", from its latest wake-up until its own next step or Daniel's next
-    /// prompt (#410, decision 27).
+    /// prompt (danielrispler/Falinks#410, decision 27).
     pub returned: Option<String>,
     /// What its transcript says of its latest turn: the intention, the agent's texts, or why it
-    /// cannot be read (#461, decision 12).
+    /// cannot be read (danielrispler/Falinks#461, decision 12).
     pub transcript: Transcript,
     #[serde(skip)]
     transcript_file: transcript::TranscriptFile,
-    /// Its issue, PR and worktree, which name it unless Daniel renamed it (#461, decision 19).
+    /// Its issue, PR and worktree, which name it unless Daniel renamed it (danielrispler/Falinks#461, decision 19).
     pub identity: Identity,
-    /// Its work on its ticket: its kind, its phases and how long its agent worked (#461, decision
+    /// Its work on its ticket: its kind, its phases and how long its agent worked (danielrispler/Falinks#461, decision
     /// 14).
     pub work: Work,
-    /// A row of another agent than Claude Code, from its terminal's OSC 7501 status only (#560): it
+    /// A row of another agent than Claude Code, from its terminal's OSC 7501 status only (danielrispler/Falinks#560): it
     /// has no intention, card, brief, estimate or decisions. Its id is its terminal's.
     pub status_only: bool,
-    /// A status-only row's terminal `turn` at the last list (#560).
+    /// A status-only row's terminal `turn` at the last list (danielrispler/Falinks#560).
     #[serde(skip)]
     reported_turn: u64,
 }
 
-/// What names a session (#461, decision 19): the issue of its `issue-<n>-…` branch, else the one
+/// What names a session (danielrispler/Falinks#461, decision 19): the issue of its `issue-<n>-…` branch, else the one
 /// it claimed with `wayfinder-startup --claim <n>`, the PR the shell finds for its branch, and its
 /// worktree's folder.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
@@ -227,7 +227,7 @@ pub struct Identity {
     pub pr: Option<u64>,
     /// The last segment of its folder's worktree root.
     pub worktree: String,
-    /// The derived name: "#480 · PR #490 · agent-a1b2", "fix-typo · agent-a1b2" or "main · Falinks".
+    /// The derived name: "danielrispler/Falinks#480 · PR danielrispler/Falinks#490 · agent-a1b2", "fix-typo · agent-a1b2" or "main · Falinks".
     pub name: String,
     #[serde(skip)]
     claim: Option<u64>,
@@ -285,7 +285,7 @@ pub struct Terminal {
     pub foreground: Option<String>,
     #[serde(default)]
     pub processes: Vec<Process>,
-    /// Its program's OSC 7501 root status (#555): `working`, `blocked`, `done` and the like; `None`
+    /// Its program's OSC 7501 root status (danielrispler/Falinks#555): `working`, `blocked`, `done` and the like; `None`
     /// until it reports and after `clear` or its exit.
     #[serde(default)]
     pub state: Option<String>,
@@ -295,7 +295,7 @@ pub struct Terminal {
     /// When the state last changed, in Unix milliseconds.
     #[serde(default)]
     pub status_ms: Option<u64>,
-    /// How often its program left `working`: a turn ended each time it went up (#555).
+    /// How often its program left `working`: a turn ended each time it went up (danielrispler/Falinks#555).
     #[serde(default)]
     pub turn: u64,
 }
@@ -320,7 +320,7 @@ pub struct Revive {
 }
 
 /// What happened in a worktree since the last card on it: a session's own, or a subagent's that
-/// works in a folder of its own (#369, decisions 10 and 11).
+/// works in a folder of its own (danielrispler/Falinks#369, decisions 10 and 11).
 #[derive(Clone, Debug, Default, PartialEq)]
 struct Since {
     /// When that card, or else the first base, was taken.
@@ -331,10 +331,10 @@ struct Since {
     cards: Vec<String>,
 }
 
-/// 20 minutes, a starting guess (#369, decision 11 and Further Notes).
+/// 20 minutes, a starting guess (danielrispler/Falinks#369, decision 11 and Further Notes).
 const FALLBACK_MS: u64 = 20 * 60 * 1000;
 
-/// 2 minutes, a starting guess (#461, decision 22): a check that usually runs longer gets a card at
+/// 2 minutes, a starting guess (danielrispler/Falinks#461, decision 22): a check that usually runs longer gets a card at
 /// its start (decision 15).
 const LONG_CHECK_MS: u64 = 2 * 60 * 1000;
 
@@ -346,23 +346,23 @@ struct CheckStart {
 }
 
 impl CheckStart {
-    /// It usually takes over 2 minutes, so it gets a card at its start (#461, decision 15).
+    /// It usually takes over 2 minutes, so it gets a card at its start (danielrispler/Falinks#461, decision 15).
     fn long(&self) -> bool {
         self.typical.is_some_and(|ms| ms > LONG_CHECK_MS)
     }
 }
 
-/// A prompt of a session (#369, decision 7), received at `at`.
+/// A prompt of a session (danielrispler/Falinks#369, decision 7), received at `at`.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Prompt {
     pub at: u64,
     pub sender: Sender,
-    /// What it says, which the brief's rewrite reads (#369, decision 16); the pane never shows it.
+    /// What it says, which the brief's rewrite reads (danielrispler/Falinks#369, decision 16); the pane never shows it.
     #[serde(skip)]
     pub text: String,
 }
 
-/// A session's `Stop`, which its row tells about while its turn is over (#369, decision 19).
+/// A session's `Stop`, which its row tells about while its turn is over (danielrispler/Falinks#369, decision 19).
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Stopped {
     /// The id a card on it has (`CardRequest::id`).
@@ -373,7 +373,7 @@ pub struct Stopped {
     pub message: Option<String>,
 }
 
-/// A turn of a session, a block in the rail's feed (#574): from what opened it until it ended.
+/// A turn of a session, a block in the rail's feed (danielrispler/Falinks#574): from what opened it until it ended.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct Turn {
     pub started_at: u64,
@@ -408,10 +408,10 @@ impl Sender {
     }
 }
 
-/// An `AskUserQuestion` call, which Daniel answers in the terminal (#369, decision 21).
+/// An `AskUserQuestion` call, which Daniel answers in the terminal (danielrispler/Falinks#369, decision 21).
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Question {
-    /// The call's id, which the answer hook's request names (#461, decision 16).
+    /// The call's id, which the answer hook's request names (danielrispler/Falinks#461, decision 16).
     tool_use_id: String,
     /// The subagent that asks, `None` for the session's own agent.
     pub agent: Option<String>,
@@ -428,13 +428,13 @@ pub enum Answer {
     /// Asked, with no result yet.
     Open,
     /// Daniel's choice for each question, keyed by its text: the `PostToolUse`'s `answers`, kept only
-    /// when it is an object of strings (#434, decision 42).
+    /// when it is an object of strings (danielrispler/Falinks#434, decision 42).
     Answered(Value),
     /// Its call failed or was interrupted, or its turn or its agent ended first.
     NotAnswered,
 }
 
-/// An answered question, plan or permission in its session's decision history (#461, decision 17).
+/// An answered question, plan or permission in its session's decision history (danielrispler/Falinks#461, decision 17).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Decision {
     /// The call it decided, which keys it in the store.
@@ -460,7 +460,7 @@ pub enum Source {
     Terminal,
 }
 
-/// A subagent of a session (#369, decisions 5, 6 and 8).
+/// A subagent of a session (danielrispler/Falinks#369, decisions 5, 6 and 8).
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct Subagent {
     /// Its `agent_id`, last step, first and latest events, and worktree since.
@@ -480,10 +480,10 @@ pub struct Subagent {
     pub ended_at: Option<u64>,
     /// The first line of its last message, from its `SubagentStop`.
     pub result: Option<String>,
-    /// Its whole last message, which its summary reads (#535); the pane never shows it.
+    /// Its whole last message, which its summary reads (danielrispler/Falinks#535); the pane never shows it.
     #[serde(skip)]
     pub message: String,
-    /// Daniel opened its line after it failed (#434, decision 39).
+    /// Daniel opened its line after it failed (danielrispler/Falinks#434, decision 39).
     pub opened: bool,
     /// The turn of its session it was first seen in (`Session::turns`).
     pub turn: Option<usize>,
@@ -491,7 +491,7 @@ pub struct Subagent {
     #[serde(skip)]
     pub folder: Option<String>,
     /// Its folder's worktree root, and the owner key of the cards on its changes there, decided at
-    /// its first folder and never again (#434, decision 11).
+    /// its first folder and never again (danielrispler/Falinks#434, decision 11).
     #[serde(skip)]
     root: String,
     #[serde(skip)]
@@ -504,7 +504,7 @@ pub struct Subagent {
     spawn: Option<(String, Option<String>)>,
 }
 
-/// The state a session's own agent and each subagent share (#410, decision 22). Its id is the owner
+/// The state a session's own agent and each subagent share (danielrispler/Falinks#410, decision 22). Its id is the owner
 /// key of its card stream.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct Agent {
@@ -514,7 +514,7 @@ pub struct Agent {
     /// milliseconds.
     pub started_at: u64,
     pub last_event_at: u64,
-    /// When its last step started, and ended at its result or its turn's end (#461, decision 13).
+    /// When its last step started, and ended at its result or its turn's end (danielrispler/Falinks#461, decision 13).
     pub step_span: Option<Span>,
     /// The last step's `tool_use_id`, whose result ends it.
     #[serde(skip)]
@@ -580,7 +580,7 @@ impl Subagent {
     }
 
     /// A subagent that succeeded, or one that failed and Daniel opened, folds into its parent's line
-    /// (#369, story 18), a worker as a helper does (#535). A failed child stays visible until he
+    /// (danielrispler/Falinks#369, story 18), a worker as a helper does (danielrispler/Falinks#535). A failed child stays visible until he
     /// opens it.
     pub fn faded(&self) -> bool {
         self.status == Status::Completed || self.failed() && self.opened
@@ -624,7 +624,7 @@ impl Serialize for Status {
 }
 
 /// Each subagent with its computed `failed` and `faded`, and its prompt's first line, `asked`, which
-/// the rail's history shows under its name (#535).
+/// the rail's history shows under its name (danielrispler/Falinks#535).
 fn serialize_agents<S: serde::Serializer>(
     agents: &[Subagent],
     serializer: S,
@@ -657,7 +657,7 @@ pub enum Parent {
 }
 
 /// A worker is spawned with its own worktree, or changes files; any other subagent is a helper
-/// (#369, decision 6).
+/// (danielrispler/Falinks#369, decision 6).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Kind {
@@ -668,7 +668,7 @@ pub enum Kind {
 
 impl Session {
     fn update_unseen(&mut self) {
-        // Going idle keeps the mark: only Daniel seeing the session clears it (#556).
+        // Going idle keeps the mark: only Daniel seeing the session clears it (danielrispler/Falinks#556).
         self.unseen =
             matches!(self.state, State::YourTurn | State::Idle) && self.turns.len() > self.seen;
     }
@@ -678,7 +678,7 @@ impl Session {
         self.agents.iter().find(|a| a.agent.id == id)
     }
 
-    /// The name of subagent `id`: its own, or else the first 5 characters of `id` (#410, decision 26).
+    /// The name of subagent `id`: its own, or else the first 5 characters of `id` (danielrispler/Falinks#410, decision 26).
     pub fn agent_name<'a>(&'a self, id: &'a str) -> &'a str {
         self.subagent(id).map_or(short(id, 5), |a| &a.name)
     }
@@ -712,7 +712,7 @@ impl Session {
         }
     }
 
-    /// The running subagents that `event` ends (#434, decision 18), each with its status, `None`
+    /// The running subagents that `event` ends (danielrispler/Falinks#434, decision 18), each with its status, `None`
     /// when the signal tells none, and when it ended.
     fn ends(&self, event: &Event) -> Vec<(String, Option<String>, u64)> {
         let at = event.studio_received_ms;
@@ -728,7 +728,7 @@ impl Session {
         };
         match event.hook_event_name.as_str() {
             "SubagentStop" => event.agent_id.iter().for_each(|id| end(id, None, at)),
-            // A wake-up names the task it reports on, and how it ended (#370 note).
+            // A wake-up names the task it reports on, and how it ended (danielrispler/Falinks#370 note).
             "UserPromptSubmit" => reported(&event.prompt).for_each(|(id, s)| end(id, Some(s), at)),
             // A foreground spawn's response comes at its end.
             "PostToolUse"
@@ -837,7 +837,7 @@ impl Session {
                 agent.root = root;
             }
             // A changed file promotes a helper at that step: an `Edit` or `Write` that succeeded, or
-            // a command that changed its worktree and either succeeded or ran and failed (#434,
+            // a command that changed its worktree and either succeeded or ran and failed (danielrispler/Falinks#434,
             // decision 21).
             let ran =
                 event.hook_event_name == "PostToolUse" || event.error.starts_with("Exit code");
@@ -952,7 +952,7 @@ impl Session {
     }
 
     /// Whether worktree `root` is a running worker's with cards of its own, which the session's
-    /// cards leave out (#434, decision 10).
+    /// cards leave out (danielrispler/Falinks#434, decision 10).
     fn workers_own(&self, root: &str) -> bool {
         let running = self.agents.iter().filter(|a| a.ended_at.is_none());
         running
@@ -967,7 +967,7 @@ impl Session {
     }
 
     /// Its subagents in its own worktree that ran since its last card and its turn's end: the
-    /// between-turn card's tags (#434, decisions 16 and 17).
+    /// between-turn card's tags (danielrispler/Falinks#434, decisions 16 and 17).
     fn between_turns(&self, at: u64) -> Vec<String> {
         let after = self.agent.since.at.max(self.stopped_at);
         let own = self.agents.iter().filter(|a| a.owner == self.agent.id);
@@ -1020,7 +1020,7 @@ impl Session {
         !self.turn_ended && !self.ended
     }
 
-    /// Whether `event` starts a turn by its prompt id (#434, decision 3): an event of the session's
+    /// Whether `event` starts a turn by its prompt id (danielrispler/Falinks#434, decision 3): an event of the session's
     /// own agent with a new prompt id, or a prompt with the last turn's id once that turn ended. A
     /// start, an end or a notice never starts one: in the day log they carry ids no turn ran under.
     /// An event with no prompt id starts none; a prompt then opens a wait by the old rule (decision 6).
@@ -1045,7 +1045,7 @@ impl Session {
         self.stopped = None;
     }
 
-    /// Whether `event` ends its turn, keyed by a prompt id, without a `Stop` (#434, decision 5): the
+    /// Whether `event` ends its turn, keyed by a prompt id, without a `Stop` (danielrispler/Falinks#434, decision 5): the
     /// next turn starts, or Claude Code says the agent waits for input. Esc fires no `Stop`.
     fn ends_turn_early(&self, event: &Event) -> bool {
         let idle = event.agent_id.is_none()
@@ -1147,7 +1147,7 @@ impl Session {
             .collect()
     }
 
-    /// Adds a block by `agent` on the running calls it holds (#434, decisions 25 and 26), so that
+    /// Adds a block by `agent` on the running calls it holds (danielrispler/Falinks#434, decisions 25 and 26), so that
     /// their `PostToolUse` clears it. A named block takes its agent's latest such call. A notice or a
     /// request for input with no agent names none: it takes every such call of the agents still
     /// running. With none, its call's `PreToolUse` may still land (the hooks are async); otherwise
@@ -1184,7 +1184,7 @@ impl Session {
         });
     }
 
-    /// Clears the blocks of the session's own agent and those that name no agent (#328, module 3,
+    /// Clears the blocks of the session's own agent and those that name no agent (danielrispler/Falinks#328, module 3,
     /// "Needs you": Daniel's `UserPromptSubmit`, not a wake-up; a turn's end; `SessionEnd`). The
     /// turn's calls end with it, so a call that never reported back takes no later block. Subagents run
     /// past their session's turn, so their own blocks stay.
@@ -1203,7 +1203,7 @@ fn outside_turns(name: &str) -> bool {
     matches!(name, "SessionStart" | "SessionEnd" | "Notification")
 }
 
-/// What blocks a session on Daniel, so that it needs you (#434, decisions 24 to 26): what asks,
+/// What blocks a session on Daniel, so that it needs you (danielrispler/Falinks#434, decisions 24 to 26): what asks,
 /// and the calls it holds.
 #[derive(Clone, Debug, PartialEq)]
 struct Block {
@@ -1246,12 +1246,12 @@ impl Block {
     }
 }
 
-/// A session's state (#369, decision 4). Each has a named clearer: an event, or the tick for idle.
+/// A session's state (danielrispler/Falinks#369, decision 4). Each has a named clearer: an event, or the tick for idle.
 /// The order is the session list's: needs you first, then the groups the list collapses.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum State {
-    /// Waiting on Daniel (#328, module 3, "Needs you"), until the step that asks resolves, a prompt
+    /// Waiting on Daniel (danielrispler/Falinks#328, module 3, "Needs you"), until the step that asks resolves, a prompt
     /// of Daniel's, `Stop` or `SessionEnd`.
     NeedsYou,
     /// In a turn, from a prompt until `Stop` or `SessionEnd`.
@@ -1266,10 +1266,10 @@ pub enum State {
 }
 
 /// How long a Claude session's hook state and its OSC 7501 state may disagree before the mismatch log
-/// gets a line (#560); a starting guess.
+/// gets a line (danielrispler/Falinks#560); a starting guess.
 const MISMATCH_AFTER_MS: u64 = 5_000;
 
-/// The state an OSC 7501 root state shows (#560): `working` is running, `blocked` and `error` need
+/// The state an OSC 7501 root state shows (danielrispler/Falinks#560): `working` is running, `blocked` and `error` need
 /// Daniel, and a turn that ended (`done`) or a program waiting (`idle`) is his turn; `None` for a
 /// state the protocol does not list.
 fn shown_state(reported: &str) -> Option<State> {
@@ -1281,7 +1281,7 @@ fn shown_state(reported: &str) -> Option<State> {
     }
 }
 
-/// 2 hours, a starting guess (#369, decision 4).
+/// 2 hours, a starting guess (danielrispler/Falinks#369, decision 4).
 const IDLE_AFTER_MS: u64 = 2 * 60 * 60 * 1000;
 
 /// A tool call the agent made, as the "now" line names it.
@@ -1290,7 +1290,7 @@ pub struct Step {
     pub tool: String,
     /// What it works on (`step_detail`): a command's `description`, else its first line.
     pub detail: Option<String>,
-    /// A command's full text, one click away in the session view (#461, decision 12).
+    /// A command's full text, one click away in the session view (danielrispler/Falinks#461, decision 12).
     #[serde(default)]
     pub command: Option<String>,
 }
@@ -1312,38 +1312,38 @@ pub enum Output {
     /// did; ask the card writer.
     Card(CardRequest),
     /// A session woken by its workers changed nothing itself since its last card: its brief only
-    /// takes in its workers' cards (#369, decision 11).
+    /// takes in its workers' cards (danielrispler/Falinks#369, decision 11).
     Brief(CardRequest),
     /// A session newly needs Daniel: its own agent asks, or `agent`, a subagent at any depth, whose
-    /// notice goes on its session's line (#369, decision 22).
+    /// notice goes on its session's line (danielrispler/Falinks#369, decision 22).
     NeedsYou {
         session_id: String,
         agent: Option<String>,
     },
-    /// A session newly reached your turn: its turn ended, with nothing blocked on Daniel (#517,
+    /// A session newly reached your turn: its turn ended, with nothing blocked on Daniel (danielrispler/Falinks#517,
     /// decision 6).
     YourTurn { session_id: String },
     /// Worker `agent` of a session, at any depth, newly failed. A failed helper raises none.
     Failed { session_id: String, agent: String },
     /// Helper `agent` became a worker, which the card store keeps, since a replay takes no
-    /// fingerprint to see its command's change (#434, decision 37).
+    /// fingerprint to see its command's change (danielrispler/Falinks#434, decision 37).
     Promoted { agent: String },
     /// A prompt named a known task id in markup the studio does not know: drift in Claude Code's
-    /// wake-ups, for stderr (#369, decision 7).
+    /// wake-ups, for stderr (danielrispler/Falinks#369, decision 7).
     Unrecognised { session_id: String, task_id: String },
     /// A session's turn ended with a long reply or by asking Daniel something: its turn summary
-    /// (#517, decisions 12 and 13).
+    /// (danielrispler/Falinks#517, decisions 12 and 13).
     Summary(SummaryRequest),
     /// A Claude session's hook state and its OSC 7501 state disagreed past `MISMATCH_AFTER_MS`:
-    /// `line` goes to the local mismatch log, for debugging (#560).
+    /// `line` goes to the local mismatch log, for debugging (danielrispler/Falinks#560).
     Mismatch { line: String },
     /// A session's first `Stop`: read Claude Code's version from its transcript, and nothing else
-    /// (#369, decision 9).
+    /// (danielrispler/Falinks#369, decision 9).
     Version { transcript_path: String },
 }
 
 /// What the live app learned that the event log does not hold, which the card store keeps as it
-/// happens and the core applies after the replay (#434, decision 37).
+/// happens and the core applies after the replay (danielrispler/Falinks#434, decision 37).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct LiveFacts {
     /// The helpers promoted to workers (`Output::Promoted`).
@@ -1352,12 +1352,12 @@ pub struct LiveFacts {
     /// The failed lines Daniel opened (`Studio::open`).
     #[serde(default)]
     pub opened: BTreeSet<String>,
-    /// How many turns of each session Daniel has seen, by its row's id (#556).
+    /// How many turns of each session Daniel has seen, by its row's id (danielrispler/Falinks#556).
     #[serde(default)]
     pub seen: BTreeMap<String, usize>,
 }
 
-/// A session's change since its last card (#369, decision 10), with what the card writer needs: the
+/// A session's change since its last card (danielrispler/Falinks#369, decision 10), with what the card writer needs: the
 /// diff, not the payloads. The card store keeps it with its card.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct CardRequest {
@@ -1373,25 +1373,25 @@ pub struct CardRequest {
     pub change: Option<String>,
     /// When the hook received the prompt of Daniel's that the card belongs to: its session's latest
     /// prompt that is not a wake-up; for a worker's card, when the worker started. `None` in cards
-    /// stored before #377.
+    /// stored before danielrispler/Falinks#377.
     #[serde(default)]
     pub prompt: Option<u64>,
     /// The worker whose card it is, `None` for its session's own.
     #[serde(default)]
     pub agent: Option<String>,
-    /// The files other subagents edited or wrote in its worktree, by subagent (#369, story 20).
+    /// The files other subagents edited or wrote in its worktree, by subagent (danielrispler/Falinks#369, story 20).
     #[serde(default)]
     pub changed_by: BTreeMap<String, BTreeSet<String>>,
     /// A session's workers' cards since its last card, at any depth.
     #[serde(default)]
     pub workers: Vec<String>,
-    /// The command of the check whose start requested it, which the card is on (#461, decision 15);
+    /// The command of the check whose start requested it, which the card is on (danielrispler/Falinks#461, decision 15);
     /// `None` for any other card.
     #[serde(default)]
     pub check: Option<String>,
 }
 
-/// A turn that gets a summary (#517, decisions 12, 13 and 15): what the summary writer reads of it.
+/// A turn that gets a summary (danielrispler/Falinks#517, decisions 12, 13 and 15): what the summary writer reads of it.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct SummaryRequest {
     pub session_id: String,
@@ -1408,7 +1408,7 @@ pub struct SummaryRequest {
     pub card: Option<String>,
 }
 
-/// A reply of at least this many words gets a summary (#517, decision 12).
+/// A reply of at least this many words gets a summary (danielrispler/Falinks#517, decision 12).
 const SUMMARY_WORDS: usize = 150;
 
 /// Whether a turn whose final reply is `reply` gets a summary: the reply is long, or the turn ends
@@ -1419,7 +1419,7 @@ pub fn wants_summary(reply: &str, asks: bool) -> bool {
         || last.is_some_and(|l| l.ends_with('?'))
 }
 
-/// A turn that ended with no card, as the replay saw it (#486): its card request with no change,
+/// A turn that ended with no card, as the replay saw it (danielrispler/Falinks#486): its card request with no change,
 /// and its worktrees' trees, whose diffs the shell joins into the change.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Backfill {
@@ -1465,12 +1465,12 @@ pub struct CheckLine {
     /// command masks the check's exit code (`exit_code_counts`). `None` otherwise, and while it runs.
     pub passed: Option<bool>,
     /// When it started, and when it ended: its result, or for a command in the background its
-    /// `<task-notification>`; `None` while it runs (#461, decision 13).
+    /// `<task-notification>`; `None` while it runs (danielrispler/Falinks#461, decision 13).
     pub started_at: u64,
     pub ended_at: Option<u64>,
     /// Its typical duration when it started, from the checks that ran before (`Studio::typical`).
     pub typical_ms: Option<u64>,
-    /// The card its start requested, when it usually takes over 2 minutes (#461, decision 15),
+    /// The card its start requested, when it usually takes over 2 minutes (danielrispler/Falinks#461, decision 15),
     /// whose guess its result settles.
     pub card: Option<String>,
     /// The turn of its session it started in (`Session::turns`).
@@ -1528,7 +1528,7 @@ fn median(runs: &[u64]) -> Option<u64> {
     runs.get(runs.len().checked_sub(1)? / 2).copied()
 }
 
-/// The worktree a card's change starts from (#369, decision 10): the session's previous card, or its
+/// The worktree a card's change starts from (danielrispler/Falinks#369, decision 10): the session's previous card, or its
 /// prompt.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Base {
@@ -1548,7 +1548,7 @@ pub struct Change {
     pub head: Option<String>,
 }
 
-/// What a fingerprint is for (#410, decision 23). Its record becomes the next change's base for
+/// What a fingerprint is for (danielrispler/Falinks#410, decision 23). Its record becomes the next change's base for
 /// every purpose but `Commit`, which keeps it only when `HEAD` moved.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Purpose {
@@ -1559,12 +1559,12 @@ pub enum Purpose {
     /// otherwise stays for the card at its next commit, its end or its fallback.
     Commit,
     /// A card when the worktree changed, such as a worker's end, or a session's change between its
-    /// turns (#434, decisions 16 and 17).
+    /// turns (danielrispler/Falinks#434, decisions 16 and 17).
     Card,
     /// 20 minutes or more after the worktree's last card or its last quiet fallback: a card when
-    /// it changed, else a new 20-minute wait (#369, decision 11, as #410 changes it).
+    /// it changed, else a new 20-minute wait (danielrispler/Falinks#369, decision 11, as danielrispler/Falinks#410 changes it).
     Fallback,
-    /// A turn's end, at its `Stop` or without one (#434, decision 5): its change, or else its
+    /// A turn's end, at its `Stop` or without one (danielrispler/Falinks#434, decision 5): its change, or else its
     /// workers' cards, makes its card or brief.
     TurnEnd,
 }
@@ -1580,14 +1580,14 @@ struct Call {
 }
 
 /// Who a session that needs Daniel waits for: its oldest block's asker, a subagent or `None` for the
-/// session's own agent, and since when, in Unix milliseconds (#369, decision 21).
+/// session's own agent, and since when, in Unix milliseconds (danielrispler/Falinks#369, decision 21).
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Asker {
     pub agent: Option<String>,
     pub since: u64,
 }
 
-/// The four fields of a tool response the core reads (#410, decision 20). The rest, file contents
+/// The four fields of a tool response the core reads (danielrispler/Falinks#410, decision 20). The rest, file contents
 /// included, is skipped without building a JSON tree.
 #[derive(Default, Deserialize)]
 struct ToolResponse {
@@ -1655,7 +1655,7 @@ struct Event {
     duration_ms: Option<u64>,
     /// The terminal the session runs in, which the hook records from `STUDIO_TERMINAL_ID`.
     studio_terminal_id: Option<String>,
-    /// The trees the hook recorded at a turn's first touch of each worktree, by root (#486).
+    /// The trees the hook recorded at a turn's first touch of each worktree, by root (danielrispler/Falinks#486).
     #[serde(default)]
     studio_turn_start: BTreeMap<String, String>,
     /// The trees the hook recorded at the end of the turn this event ends, by root.
@@ -1670,7 +1670,7 @@ struct Event {
     studio_answer: Value,
 }
 
-/// The event the shell appends to the log when Daniel renames a session (#469). The log is what a
+/// The event the shell appends to the log when Daniel renames a session (danielrispler/Falinks#469). The log is what a
 /// restart replays, so the name survives it.
 pub const RENAME: &str = "StudioRename";
 
@@ -1678,13 +1678,13 @@ pub const RENAME: &str = "StudioRename";
 /// at once and after a restart, until a `SessionStart` of it brings it back. Its cards stay.
 pub const DELETE: &str = "StudioDelete";
 
-/// The line the answer hook appends when Daniel answers from the studio card (#478): the call's hook
+/// The line the answer hook appends when Daniel answers from the studio card (danielrispler/Falinks#478): the call's hook
 /// payload under this name, with `studio_asked_by` (the event that asked) and `studio_answer`. An
 /// answer in the terminal leaves none.
 pub const STUDIO_ANSWER: &str = "StudioAnswer";
 
 /// The tasks a wake-up reports on, each with how it ended: its `<task-id>` and its `<status>`
-/// (#370 note).
+/// (danielrispler/Falinks#370 note).
 fn reported(prompt: &str) -> impl Iterator<Item = (&str, &str)> {
     let notices = prompt.split("<task-notification>").skip(1);
     notices.filter_map(|notice| Some((tag(notice, "task-id")?, tag(notice, "status")?)))
@@ -1697,7 +1697,7 @@ fn tag<'a>(text: &'a str, name: &str) -> Option<&'a str> {
 }
 
 /// The tool input that says what a step works on: a command's `description`, which the agent sets
-/// on every Bash call (#461, decision 12), else its first line; a path relative to the session's
+/// on every Bash call (danielrispler/Falinks#461, decision 12), else its first line; a path relative to the session's
 /// folder, the first question asked, or a search pattern, URL, query or task description.
 fn step_detail(input: &Value, cwd: &str) -> Option<String> {
     if let Some(command) = input["command"].as_str() {
@@ -1727,7 +1727,7 @@ fn relative<'a>(path: &'a str, folder: &str) -> &'a str {
     relative.unwrap_or(path)
 }
 
-/// A command that runs a check from the check list (#328, module 3): `cargo
+/// A command that runs a check from the check list (danielrispler/Falinks#328, module 3): `cargo
 /// test|nextest|clippy|check|build`, `ci-checks`, `go test|vet`, with any flags or toolchain before
 /// the subcommand (`cargo +nightly test`). Quoted text is not run, so a PR body that names `cargo
 /// test` is no check.
@@ -1766,7 +1766,7 @@ fn is_check(command: &str) -> bool {
         })
 }
 
-/// Whether a check's exit code says whether it passed (#328, module 4). A command exits with its
+/// Whether a check's exit code says whether it passed (danielrispler/Falinks#328, module 4). A command exits with its
 /// last statement's code, so the check must be the last statement, and nothing in it may mask the
 /// code: `|| true` exits 0, `!` flips it, `&` runs the check in the background, and a pipe exits
 /// with its last command's code unless an earlier `set` turns on `pipefail`.
@@ -1790,7 +1790,7 @@ fn exit_code_counts(command: &str) -> bool {
 }
 
 impl Studio {
-    /// A studio that finds a folder's worktree root with `find` (#434, decision 11), such as the
+    /// A studio that finds a folder's worktree root with `find` (danielrispler/Falinks#434, decision 11), such as the
     /// shell's `git` lookup. `Studio::default` takes each folder as its own root.
     pub fn with_roots(find: impl Fn(&str) -> Option<String> + Send + 'static) -> Self {
         let roots = Roots {
@@ -1803,7 +1803,7 @@ impl Studio {
         }
     }
 
-    /// The worktree roots that `event` of a session's own agent touches (#434, decision 9): its
+    /// The worktree roots that `event` of a session's own agent touches (danielrispler/Falinks#434, decision 9): its
     /// folder's, and an `Edit` or `Write` path's, but those of its running workers with cards. A
     /// start, an end or a notice touches none.
     // shortcut: a Bash write through a path, without a `cd`, is not seen; parse commands for paths
@@ -1834,8 +1834,8 @@ impl Studio {
         roots
     }
 
-    /// The worktrees the shell fingerprints before it applies this live line (#328, module 5), each
-    /// with its own key: none, one, or at a wake-up also its workers' ends (#369, decisions 6, 8, 10
+    /// The worktrees the shell fingerprints before it applies this live line (danielrispler/Falinks#328, module 5), each
+    /// with its own key: none, one, or at a wake-up also its workers' ends (danielrispler/Falinks#369, decisions 6, 8, 10
     /// and 11).
     pub fn fingerprint_folders(&self, line: &str) -> Vec<Fingerprint> {
         let event = serde_json::from_str::<Event>(line);
@@ -1850,8 +1850,8 @@ impl Studio {
     }
 
     /// The row `event` belongs to: its session's, or for a start from `/clear`, the cleared session's
-    /// on the same terminal, or in the same folder outside studio terminals (#461, decision 18); for a
-    /// start from a fork, the live session with a prompt on the same terminal (#562).
+    /// on the same terminal, or in the same folder outside studio terminals (danielrispler/Falinks#461, decision 18); for a
+    /// start from a fork, the live session with a prompt on the same terminal (danielrispler/Falinks#562).
     // shortcut: a start that lands before its clear's `SessionEnd` makes a new row; match both ways
     // if the async hooks show it.
     fn row(&self, event: &Event) -> String {
@@ -1869,7 +1869,7 @@ impl Studio {
                 return s.agent.id.clone();
             }
         }
-        // A fork mid-conversation goes on in the same `claude`, so on the same terminal (#562).
+        // A fork mid-conversation goes on in the same `claude`, so on the same terminal (danielrispler/Falinks#562).
         if fresh && event.hook_event_name == "SessionStart" && event.source == "fork" {
             let forked = self.sessions.values().filter(|s| {
                 s.terminal.is_some()
@@ -1885,7 +1885,7 @@ impl Studio {
     }
 
     /// The fingerprints before `event`: its own (`look`), and the end of each worker with cards that
-    /// it ends, by any signal (#434, decision 19).
+    /// it ends, by any signal (danielrispler/Falinks#434, decision 19).
     fn looks(&self, event: &Event, long_check: bool) -> Vec<Fingerprint> {
         let mut looks = self.look(event, long_check);
         let Some(session) = self.sessions.get(&event.session_id) else {
@@ -1895,7 +1895,7 @@ impl Studio {
             let Some(agent) = session.subagent(&id) else {
                 continue;
             };
-            // One in its session's worktree, outside a turn, ends with the session's card (#434,
+            // One in its session's worktree, outside a turn, ends with the session's card (danielrispler/Falinks#434,
             // decision 16).
             let key = &session.agent.id;
             if agent.owner == *key && !session.in_turn() {
@@ -1926,9 +1926,9 @@ impl Studio {
         looks
     }
 
-    /// The fingerprints before `event`. A session's own, one per worktree (#434, decisions 8 to
+    /// The fingerprints before `event`. A session's own, one per worktree (danielrispler/Falinks#434, decisions 8 to
     /// 10): at a turn's first touch of a worktree, its base, so what Daniel changed himself before
-    /// does not count; at a turn's end, its `Stop` or the next turn's first event (#434, decision 5),
+    /// does not count; at a turn's end, its `Stop` or the next turn's first event (danielrispler/Falinks#434, decision 5),
     /// every worktree it touched, whose change since its base is the card's, and whose record is
     /// the next turn's base. A turn that starts after the last one ended first cards what its
     /// subagents changed between them (decision 17). A subagent's: its first event's, its base; a
@@ -1957,7 +1957,7 @@ impl Studio {
             let key = &event.session_id;
             let ends = s.ends_turn_early(event) || name == "Stop";
             let opens = s.opens_turn(event);
-            // A turn's end, and a due fallback, look at every worktree it touched (#434, decision
+            // A turn's end, and a due fallback, look at every worktree it touched (danielrispler/Falinks#434, decision
             // 10).
             let mut closing = s.closing();
             // A turn seen only from its end, such as one the log starts in, ends where it ends.
@@ -1966,7 +1966,7 @@ impl Studio {
             }
             let purpose = match ends {
                 true => Some(Purpose::TurnEnd),
-                // A long check's start cards the change so far, as a fallback would (#461,
+                // A long check's start cards the change so far, as a fallback would (danielrispler/Falinks#461,
                 // decision 15).
                 false => {
                     (session.is_some_and(session_due) || long_check).then_some(Purpose::Fallback)
@@ -1978,7 +1978,7 @@ impl Studio {
                 .collect();
             // Each worktree a turn touches first gets its base, which a turn's end just took. A
             // turn that starts after the last one ended first cards what subagents changed
-            // between them (#434, decision 17).
+            // between them (danielrispler/Falinks#434, decision 17).
             if opens || s.in_turn() && name != "Stop" {
                 let between = match opens && !s.in_turn() {
                     true => s.between_turns(event.studio_received_ms),
@@ -2020,7 +2020,7 @@ impl Studio {
         // A helper's base right before its command, so only a change across it promotes it.
         // shortcut: the hooks are async, so a command that ends before the shell reads its
         // `PreToolUse` line is absorbed into this base and never promotes its helper; make the
-        // hook synchronous if a live run shows missed promotions matter (#434, decision 23).
+        // hook synchronous if a live run shows missed promotions matter (danielrispler/Falinks#434, decision 23).
         if bash && name == "PreToolUse" && agent.is_some_and(|a| !worker(a)) {
             return look(id, folder, Purpose::Base).into_iter().collect();
         }
@@ -2050,7 +2050,7 @@ impl Studio {
             }
             _ => Vec::new(),
         };
-        // A due fallback's look comes beside a helper's own (#434, decision 22).
+        // A due fallback's look comes beside a helper's own (danielrispler/Falinks#434, decision 22).
         let helper =
             look(id, folder, Purpose::Commit).filter(|_| bash && agent.is_some_and(|a| !worker(a)));
         let helper = helper.filter(|h| fallback.iter().all(|f| f.key != h.key));
@@ -2111,7 +2111,7 @@ impl Studio {
         if event.session_id != own_id {
             self.rows.insert(own_id.clone(), event.session_id.clone());
         }
-        // A resume or fork in a `claude` replaces the id it started under, which had no prompt (#562).
+        // A resume or fork in a `claude` replaces the id it started under, which had no prompt (danielrispler/Falinks#562).
         if event.hook_event_name == "SessionStart"
             && ["resume", "fork"].contains(&event.source.as_str())
             && event.studio_terminal_id.is_some()
@@ -2293,7 +2293,7 @@ impl Studio {
                     .or_insert_with(|| tree.clone());
             }
         }
-        // Who changed what (#369, story 20): a subagent's edit in a worktree whose cards are another's.
+        // Who changed what (danielrispler/Falinks#369, story 20): a subagent's edit in a worktree whose cards are another's.
         if let Some(agent) = &event.agent_id
             && name == "PostToolUse"
             && matches!(tool.as_str(), "Edit" | "Write")
@@ -2302,7 +2302,7 @@ impl Studio {
             let (owner, root) = session
                 .subagent(agent)
                 .map_or_default(|a| (a.owner.clone(), a.root.clone()));
-            // Only a path inside the owner's worktree (#434, decision 15).
+            // Only a path inside the owner's worktree (danielrispler/Falinks#434, decision 15).
             let inside = path.strip_prefix(&root).and_then(|p| p.strip_prefix('/'));
             if owner != *agent
                 && let Some(inside) = inside.filter(|_| !root.is_empty())
@@ -2312,7 +2312,7 @@ impl Studio {
             }
         }
         // A worker's card at its commit, seen after its Bash step, or at its end, and any worktree's
-        // after 20 minutes: when its worktree changed since its last card (#369, decision 11). The
+        // after 20 minutes: when its worktree changed since its last card (danielrispler/Falinks#369, decision 11). The
         // session's own look at a prompt is its base, and at `Stop` its card's change, below.
         for look in &looks {
             let found = match look.purpose {
@@ -2328,7 +2328,7 @@ impl Studio {
                 continue;
             };
             let worker = look.key != session.agent.id;
-            // A session's card between turns is tagged with the subagents that ran then (#434,
+            // A session's card between turns is tagged with the subagents that ran then (danielrispler/Falinks#434,
             // decisions 16 and 17).
             if !worker && look.purpose == Purpose::Card {
                 for agent in session.between_turns(at) {
@@ -2391,7 +2391,7 @@ impl Studio {
                     sender,
                     text: event.prompt,
                 };
-                // A prompt with its running turn's id is the next turn's (#434, decision 4).
+                // A prompt with its running turn's id is the next turn's (danielrispler/Falinks#434, decision 4).
                 if event.prompt_id.is_some() && !starts && in_turn {
                     session.queued.push(prompt);
                 } else {
@@ -2407,7 +2407,7 @@ impl Studio {
             }
             "Stop" => {
                 // A reply that asks in text blocks nothing, so the turn ends on your turn unless a
-                // subagent's block outlasts it (#540).
+                // subagent's block outlasts it (danielrispler/Falinks#540).
                 let in_turn = session.in_turn();
                 let tasks = event.background_tasks.as_array();
                 session.background = tasks.is_some_and(|tasks| !tasks.is_empty());
@@ -2487,7 +2487,7 @@ impl Studio {
                     let step = Step::new(&tool, &event.tool_input, &event.cwd);
                     session.agent.step(step, &event.tool_use_id, at);
                     session.work.call(&tool, &event.tool_input, at);
-                    // A check's line runs from its start (#461, decision 13).
+                    // A check's line runs from its start (danielrispler/Falinks#461, decision 13).
                     if let Some(start) = &start {
                         let call = &event.tool_use_id;
                         let mut line = CheckLine::new(&start.command, call, at, start.typical);
@@ -2513,7 +2513,7 @@ impl Studio {
                 }
                 // The hooks are async, so a block on this call may have landed first.
                 // shortcut: a block whose call ended before the block landed stays until the turn
-                // ends; remember ended calls if auto-denied calls (#322) show it.
+                // ends; remember ended calls if auto-denied calls (danielrispler/Falinks#322) show it.
                 if let Some(id) = &call.id {
                     let unbound = session.blocks.iter_mut();
                     let unbound = unbound.filter(|w| w.calls.is_empty() && w.takes(&call));
@@ -2547,7 +2547,7 @@ impl Studio {
                 }
             }
             "Elicitation" => session.block("Elicitation".into(), Value::Null, event.agent_id, at),
-            // Daniel decided a plan or a permission from the studio card (#478): it waits on him no
+            // Daniel decided a plan or a permission from the studio card (danielrispler/Falinks#478): it waits on him no
             // more, though its result comes only when the call ends, or for a denial maybe never. A
             // question's result carries its answer, so its block waits for it.
             STUDIO_ANSWER if event.studio_answer.get("decision").is_some() => {
@@ -2607,7 +2607,7 @@ impl Studio {
                 if !failed
                     && let Some(question) = asked.find(|q| q.tool_use_id == event.tool_use_id)
                 {
-                    // Only an object of strings is kept, so the pane can read it (#434, decision 42).
+                    // Only an object of strings is kept, so the pane can read it (danielrispler/Falinks#434, decision 42).
                     let answers = &event.tool_response.answers;
                     let strings = answers
                         .as_object()
@@ -2671,7 +2671,7 @@ impl Studio {
             }
             _ => {}
         }
-        // The worktrees its turn touched, each with its base from `looks` (#434, decision 9).
+        // The worktrees its turn touched, each with its base from `looks` (danielrispler/Falinks#434, decision 9).
         if session.in_turn() {
             session.touched.extend(touches);
         }
@@ -2722,7 +2722,7 @@ impl Studio {
     }
 
     /// Sets session `id`'s estimate from the start of its phase, from the sessions of its kind that
-    /// started before it and have ended (#461, decision 14): a paused session's time may be cut short.
+    /// started before it and have ended (danielrispler/Falinks#461, decision 14): a paused session's time may be cut short.
     fn estimate(&mut self, id: &str) {
         let Some(session) = self.sessions.get(id) else {
             return;
@@ -2762,7 +2762,7 @@ impl Studio {
     }
 
     /// After the replay, the turns that ended in the 24 hours before `now` with a change between
-    /// the hook's trees and no card among `cards` (#486). Each is returned once.
+    /// the hook's trees and no card among `cards` (danielrispler/Falinks#486). Each is returned once.
     pub fn backfill(&mut self, now: u64, cards: &[CardRequest]) -> Vec<Backfill> {
         let since = now.saturating_sub(24 * 60 * 60 * 1000);
         let ended = std::mem::take(&mut self.ended).into_iter();
@@ -2772,7 +2772,7 @@ impl Studio {
             .collect()
     }
 
-    /// Applies, after the replay, what the live app learned before a restart (#434, decisions 37 and
+    /// Applies, after the replay, what the live app learned before a restart (danielrispler/Falinks#434, decisions 37 and
     /// 38): the card store's live-only `facts`, and its `cards`' requests.
     pub fn restore(&mut self, facts: &LiveFacts, cards: &[CardRequest]) {
         let agents = self.sessions.values_mut().flat_map(|s| &mut s.agents);
@@ -2826,7 +2826,7 @@ impl Studio {
     }
 
     /// The keys of the sessions that have not ended and of their subagents: the shell drops the
-    /// fingerprint records and writer queues of every other key (#410, decision 18).
+    /// fingerprint records and writer queues of every other key (danielrispler/Falinks#410, decision 18).
     pub fn live_keys(&self) -> std::collections::HashSet<String> {
         let live = self.sessions.values().filter(|s| !s.ended);
         live.flat_map(|s| std::iter::once(&s.agent.id).chain(s.agents.iter().map(|a| &a.agent.id)))
@@ -2842,7 +2842,7 @@ impl Studio {
     /// How each terminal of `terms` that has not exited comes back in a new daemon: a terminal spawned
     /// with an argv, a Claude terminal, reopens its latest session with `claude --resume`, whether or
     /// not the hangup ended it. A shell whose foreground program, or else its 7501 `app`, is another
-    /// agent with a resume command (`studio_workbench::resume`, #561) comes back as that agent, rerun
+    /// agent with a resume command (`studio_workbench::resume`, danielrispler/Falinks#561) comes back as that agent, rerun
     /// the same way at the next revival; any other shell restarts in its folder. `busy` says what
     /// runs in it now.
     pub fn revival(&self, terms: &[Terminal]) -> Vec<Revive> {
@@ -2861,7 +2861,7 @@ impl Studio {
                 if at_prompt { None } else { program() }
             } else {
                 match latest {
-                    // The rule a close asks by (#469).
+                    // The rule a close asks by (danielrispler/Falinks#469).
                     Some(s) if s.in_turn() => Some("a turn".into()),
                     Some(s) if s.asks_before_closing => Some("background tasks".into()),
                     Some(s) if !s.ended => None,
@@ -2888,7 +2888,7 @@ impl Studio {
         running.map(revive).collect()
     }
 
-    /// The daemon's `list` at `now` (#560). A terminal that has not exited, whose program reports OSC
+    /// The daemon's `list` at `now` (danielrispler/Falinks#560). A terminal that has not exited, whose program reports OSC
     /// 7501 and is not Claude Code, gets a status-only row named by its `app`, else its foreground
     /// program, and its folder; the row goes when the status clears or the terminal does. A Claude
     /// session keeps its hook state; when its terminal's 7501 state disagrees past
@@ -2961,7 +2961,7 @@ impl Studio {
             let program = t.app.as_ref().or(t.foreground.as_ref());
             let program = program.map_or("a program", String::as_str);
             row.identity.name = format!("{program} · {}", row.folder_name);
-            // Revival resumed the folder's latest conversation, which may not be the one it had (#561).
+            // Revival resumed the folder's latest conversation, which may not be the one it had (danielrispler/Falinks#561).
             if studio_workbench::resumes_latest(&t.argv) {
                 row.identity.name.push_str(" · latest conversation");
             }
@@ -3007,7 +3007,7 @@ impl Studio {
     }
 
     /// Reads what was added to the transcripts of the sessions that have not ended, and of the
-    /// selected one, since the last call (#461, decision 12). `log` gets one line when a session's
+    /// selected one, since the last call (danielrispler/Falinks#461, decision 12). `log` gets one line when a session's
     /// transcript becomes unavailable. A session is read only from its first step or `Stop`, as its
     /// transcript may not exist before. Returns whether any session's transcript changed.
     pub fn follow_transcripts(&mut self, mut log: impl FnMut(String)) -> bool {
@@ -3057,7 +3057,7 @@ impl Studio {
     }
 
     /// The summary of turn `id` of session `session_id` arrived, whose first line is `line`: its
-    /// turn-end intention switches to it once (#517, decision 16). Nothing changes when summaries
+    /// turn-end intention switches to it once (danielrispler/Falinks#517, decision 16). Nothing changes when summaries
     /// are written on open, or when the session has moved past that turn. Returns whether it did.
     pub fn summarized(&mut self, session_id: &str, id: &str, line: &str) -> bool {
         let Some(session) = self.sessions.get_mut(session_id) else {
@@ -3072,7 +3072,7 @@ impl Studio {
         true
     }
 
-    /// The whole final reply of turn `index` of session `session_id` (#574), which the rail shows
+    /// The whole final reply of turn `index` of session `session_id` (danielrispler/Falinks#574), which the rail shows
     /// folded; `None` when there is no such turn.
     pub fn turn_reply(&self, session_id: &str, index: usize) -> Option<String> {
         let turn = self.sessions.get(session_id)?.turns.get(index)?;
@@ -3080,7 +3080,7 @@ impl Studio {
     }
 
     /// The folder and branch of each session that has not ended, and of the selected one, one per
-    /// branch: what the shell asks `gh pr view` about, off the poll (#461, decision 19).
+    /// branch: what the shell asks `gh pr view` about, off the poll (danielrispler/Falinks#461, decision 19).
     pub fn branches(&self) -> Vec<(String, String)> {
         let mut seen = BTreeMap::new();
         for session in self.sessions.values() {
@@ -3111,7 +3111,7 @@ impl Studio {
     }
 
     /// The shell read `snapshot`, the `context_window` of session `id`'s status line snapshot, `None`
-    /// with no snapshot (#517, decisions 1 and 2; #519); returns whether it changed, and with it
+    /// with no snapshot (danielrispler/Falinks#517, decisions 1 and 2; danielrispler/Falinks#519); returns whether it changed, and with it
     /// maybe the context's tokens or percentages.
     pub fn set_snapshot(&mut self, id: &str, snapshot: Option<serde_json::Value>) -> bool {
         let context = self
@@ -3128,7 +3128,7 @@ impl Studio {
     }
 
     /// The typical duration of check `command`, in milliseconds: the median of how long its earlier
-    /// runs took when they did not fail, its backgrounded runs included (#461, decisions 13 to 15).
+    /// runs took when they did not fail, its backgrounded runs included (danielrispler/Falinks#461, decisions 13 to 15).
     /// `None` when it never ran. Runs group by `check_key`.
     pub fn typical(&self, command: &str) -> Option<u64> {
         median(self.durations.get(&check_key(command))?)
@@ -3157,7 +3157,7 @@ impl Studio {
 
     /// The session list: every session Daniel has not deleted, grouped in `State` order, the newest first in each group.
     /// A session with no prompt is no row while its terminal's live session has prompts: a session
-    /// loaded beside it, as by the `/resume` picker backed out of, until its first prompt (#562).
+    /// loaded beside it, as by the `/resume` picker backed out of, until its first prompt (danielrispler/Falinks#562).
     pub fn sessions(&self) -> Vec<&Session> {
         let beside_live = |s: &Session| {
             s.prompts.is_empty()
@@ -3185,7 +3185,7 @@ impl Studio {
         self.held = None;
     }
 
-    /// Daniel looks at the selected session (#556): while it is unseen, and only if `shown`, the
+    /// Daniel looks at the selected session (danielrispler/Falinks#556): while it is unseen, and only if `shown`, the
     /// window focused with the story rail showing it, its ended turns count as seen. Returns its row's id and the turns seen when that
     /// changed, for the card store to keep.
     pub fn see_selected(&mut self, shown: bool) -> Option<(String, usize)> {
@@ -3199,7 +3199,7 @@ impl Studio {
         Some((id, session.seen))
     }
 
-    /// Daniel marked session `id` unseen (#556): its last turn is unseen again, until he selects it
+    /// Daniel marked session `id` unseen (danielrispler/Falinks#556): its last turn is unseen again, until he selects it
     /// again and looks. Returns its row's id and the turns seen, for the card store to keep.
     pub fn mark_unseen(&mut self, id: &str) -> Option<(String, usize)> {
         let id = self.session(id)?.agent.id.clone();
@@ -3211,7 +3211,7 @@ impl Studio {
     }
 
     /// Daniel started a session in studio terminal `terminal`: nothing is selected until its first
-    /// event names that terminal, and then it is (#567). The pane and the rail never show two sessions.
+    /// event names that terminal, and then it is (danielrispler/Falinks#567). The pane and the rail never show two sessions.
     pub fn select_terminal(&mut self, terminal: &str) {
         self.selected = None;
         self.viewed = None;
@@ -3220,7 +3220,7 @@ impl Studio {
 
     /// Daniel opened subagent `id`'s line, so its view shows, with its own cards and brief, and a
     /// failed helper folds into its parent's line. Returns whether the opening counts, which the
-    /// card store records: only a line whose agent had already failed (#434, decision 39).
+    /// card store records: only a line whose agent had already failed (danielrispler/Falinks#434, decision 39).
     pub fn open(&mut self, id: &str) -> bool {
         self.viewed = Some(id.into());
         let agents = self.sessions.values_mut().flat_map(|s| &mut s.agents);
@@ -3282,7 +3282,7 @@ fn short(id: &str, n: usize) -> &str {
     id.get(..n).unwrap_or(id)
 }
 
-/// 3 seconds, a starting guess for "a few seconds" (#369, decision 22 and Further Notes).
+/// 3 seconds, a starting guess for "a few seconds" (danielrispler/Falinks#369, decision 22 and Further Notes).
 const COMBINE: Duration = Duration::from_secs(3);
 
 /// A notice not shown yet: its title and body, and for "needs you" or "your turn" the session it is
@@ -3297,16 +3297,16 @@ struct Pending {
 /// The notices the shell has not shown yet. Those that come within `COMBINE` of the first show as
 /// one notification, so a burst never floods Daniel and no notice waits longer than that. Times are
 /// on a monotonic clock, time since the app started, so a clock change never holds them back
-/// (#434, decision 28).
+/// (danielrispler/Falinks#434, decision 28).
 pub struct Notifications {
     pending: Vec<Pending>,
     first_at: Duration,
     /// The pending needs-you already sounded, with its toast, before `COMBINE` passed.
     sounded: bool,
     /// The setting that also shows "your turn" while the window is focused, for any session but
-    /// the selected one; off by default (#517, decision 6).
+    /// the selected one; off by default (danielrispler/Falinks#517, decision 6).
     pub while_focused: bool,
-    /// The `sounds` setting, on by default (#556).
+    /// The `sounds` setting, on by default (danielrispler/Falinks#556).
     pub sounds: bool,
 }
 
@@ -3322,7 +3322,7 @@ impl Default for Notifications {
     }
 }
 
-/// A sound the shell plays (#556).
+/// A sound the shell plays (danielrispler/Falinks#556).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Sound {
     NeedsYou,
@@ -3342,12 +3342,12 @@ impl Notifications {
     }
 
     /// A "needs you" notice on session `session_id`, which shows only if the session still needs
-    /// Daniel when it is due (#434, decision 27).
+    /// Daniel when it is due (danielrispler/Falinks#434, decision 27).
     pub fn push_needs_you(&mut self, session_id: &str, body: String, now: Duration) {
         self.queue("Needs you", body, Some(session_id.into()), None, now);
     }
 
-    /// A "your turn" notice on session `session_id` (#517, decision 6).
+    /// A "your turn" notice on session `session_id` (danielrispler/Falinks#517, decision 6).
     pub fn push_your_turn(&mut self, session_id: &str, body: String, now: Duration) {
         self.queue("Your turn", body, None, Some(session_id.into()), now);
     }
@@ -3376,8 +3376,8 @@ impl Notifications {
     /// has passed since the first, less the "needs you" ones whose session `needs_you` says no
     /// longer needs Daniel. A focused window drops them, since
     /// Daniel sees the list; with `while_focused` on, it keeps "your turn" on any session but the
-    /// one `selected` names. The sound (#556), with `sounds` on: focused, only for needs you on a
-    /// session `selected` does not name, at once, with the toast that shows it (#565, decision 3),
+    /// one `selected` names. The sound (danielrispler/Falinks#556), with `sounds` on: focused, only for needs you on a
+    /// session `selected` does not name, at once, with the toast that shows it (danielrispler/Falinks#565, decision 3),
     /// so a block that clears quickly sounds as it toasts; else only with a notification of needs
     /// you or your turn.
     pub fn due(

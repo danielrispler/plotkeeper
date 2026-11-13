@@ -1,11 +1,11 @@
-//! The transcript reader (#461, decision 12): a tolerant reader of a session's transcript at the
+//! The transcript reader (danielrispler/Falinks#461, decision 12): a tolerant reader of a session's transcript at the
 //! hook's `transcript_path`, for what the session is doing and why. It reads the lines of its own
 //! agent and skips line types it does not know. A line that does not parse, or a user or assistant
 //! line without `message.content`, makes the transcript unavailable: the session view falls back to
-//! step text only. The Claude Code version notice (#373) is the early warning of a format change.
+//! step text only. The Claude Code version notice (danielrispler/Falinks#373) is the early warning of a format change.
 //!
 //! It is the one place the core reads a file, and it opens only a `.jsonl` path, so a payload that
-//! names a credential file is never read (`apps/studio/AGENTS.md`, "Hard rules").
+//! names a credential file is never read (`AGENTS.md`, "Hard rules").
 
 use serde::Serialize;
 use serde_json::Value;
@@ -19,7 +19,7 @@ use std::{
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct Transcript {
     /// The intention: the last line of the agent's latest text while the turn runs, its first line
-    /// once the turn ended (#517, decision 16), so a plugin's footer is never the intention.
+    /// once the turn ended (danielrispler/Falinks#517, decision 16), so a plugin's footer is never the intention.
     pub intention: Option<String>,
     /// The steps (tool calls) the agent made since that text.
     pub steps_ago: usize,
@@ -27,18 +27,18 @@ pub struct Transcript {
     pub responses: Vec<String>,
     /// Why the transcript cannot be read, `None` while it can.
     pub unavailable: Option<String>,
-    /// How full the context is, from the agent's latest message (#461, decision 19); kept across
+    /// How full the context is, from the agent's latest message (danielrispler/Falinks#461, decision 19); kept across
     /// turns.
     pub context: Option<Context>,
     /// The git branch of the session's folder, from its latest line; kept across turns.
     pub branch: Option<String>,
-    /// The model the session runs at, from the agent's latest message (#517, decision 8); kept
+    /// The model the session runs at, from the agent's latest message (danielrispler/Falinks#517, decision 8); kept
     /// across turns.
     pub model: Option<String>,
-    /// The session's effort, from its latest line that carries one (#517, decision 8); kept across
+    /// The session's effort, from its latest line that carries one (danielrispler/Falinks#517, decision 8); kept across
     /// turns.
     pub effort: Option<String>,
-    /// The first line of the turn's summary, once it arrived (#526): the turn-end intention then.
+    /// The first line of the turn's summary, once it arrived (danielrispler/Falinks#526): the turn-end intention then.
     pub summary: Option<String>,
     /// Whether the session's turn has ended, which the core sets from its hooks; kept across turns.
     #[serde(skip)]
@@ -47,7 +47,7 @@ pub struct Transcript {
 
 /// How full the context is, as Claude Code's status line measures it: from the session's status line
 /// snapshot when there is one, else the input tokens of the agent's latest message with no share
-/// (#517, decisions 1 and 2; #519).
+/// (danielrispler/Falinks#517, decisions 1 and 2; danielrispler/Falinks#519).
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Context {
     pub tokens: u64,
@@ -175,7 +175,7 @@ impl Transcript {
     }
 
     /// Notes whether the session's turn has `ended`, which picks the latest response's line, or
-    /// the summary's once the turn ended with one (#517, decision 16).
+    /// the summary's once the turn ended with one (danielrispler/Falinks#517, decision 16).
     pub(crate) fn end(&mut self, ended: bool) {
         self.ended = ended;
         if let Some(text) = self.responses.last() {

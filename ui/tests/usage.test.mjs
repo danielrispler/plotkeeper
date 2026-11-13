@@ -1,5 +1,5 @@
-// The plan's usage in the top bar (#481): the snapshot's rate limits as the window shows them. Run:
-// `npm test` in apps/studio.
+// The plan's usage in the top bar (danielrispler/Falinks#481): the snapshot's rate limits as the window shows them. Run:
+// `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { usageText } from "../../dist/usage.js";

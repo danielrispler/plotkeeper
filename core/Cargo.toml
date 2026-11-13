@@ -7,5 +7,5 @@ publish = false
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
-# The resume commands of agents other than Claude Code (#561).
+# The resume commands of agents other than Claude Code (danielrispler/Falinks#561).
 studio-workbench = { path = "../workbench" }

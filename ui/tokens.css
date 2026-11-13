@@ -1,6 +1,6 @@
-/* The tokens (#566): every size, spacing step, colour and motion the window uses. style.css uses only
-   these; `ui/tests/frame.test.mjs` greps it for raw values. The start is the #463 pick, mockup C; the
-   frame, fills and edges follow herdr's derived greys. Colour only for "needs you" (#565, decision 1). */
+/* The tokens (danielrispler/Falinks#566): every size, spacing step, colour and motion the window uses. style.css uses only
+   these; `ui/tests/frame.test.mjs` greps it for raw values. The start is the danielrispler/Falinks#463 pick, mockup C; the
+   frame, fills and edges follow herdr's derived greys. Colour only for "needs you" (danielrispler/Falinks#565, decision 1). */
 :root {
   /* Colour. The frame (top bar, list, rail) is darkest; the terminal is the stage, a step lighter; the
      surfaces hold cards and pop-overs. */

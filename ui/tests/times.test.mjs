@@ -1,5 +1,4 @@
-// Times (#473): durations, the session view's times line and a check's "of usually". Run: `npm test`
-// in apps/studio.
+// Times (danielrispler/Falinks#473): durations, the session view's times line and a check's "of usually". Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { checkTime, duration, estimateText, times } from "../../dist/times.js";

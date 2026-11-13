@@ -1,4 +1,4 @@
-//! Seam 1 (#461, Testing Decisions) for the decision history (#479, decision 17): an answered
+//! Seam 1 (danielrispler/Falinks#461, Testing Decisions) for the decision history (danielrispler/Falinks#479, decision 17): an answered
 //! question, plan or permission leaves the open list and enters its session's history, with what it
 //! asked, the answer, when, and whether the studio card or the terminal answered it.
 
@@ -9,7 +9,7 @@ const ASKER: &str = "2d8a6f41-c95e-4b37-a1d0-7e3f8b2c6a95";
 const PROBE: &str = "7f3c2a9e-4b1d-4c8e-9a2f-1d6b5e8c0a31";
 
 /// The answer hook's `StudioAnswer` line for `line`'s call: Daniel's `answer` from the studio card
-/// (#478), 1 ms after the line.
+/// (danielrispler/Falinks#478), 1 ms after the line.
 fn card_answer(line: &str, answer: Value) -> String {
     let mut event: Value = serde_json::from_str(line).unwrap();
     event["studio_asked_by"] = event["hook_event_name"].clone();

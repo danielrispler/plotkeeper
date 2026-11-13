@@ -1,4 +1,4 @@
-//! #481: the one line added to Daniel's status line script, right after `input=$(cat)`, saves the
+//! danielrispler/Falinks#481: the one line added to Daniel's status line script, right after `input=$(cat)`, saves the
 //! status line's stdin as the session's usage snapshot and leaves what the status line prints as it
 //! was. Needs `bash` and `jq`, as the script does.
 

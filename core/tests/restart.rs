@@ -1,4 +1,4 @@
-//! Seam 1 (#434, Testing Decisions) for what survives a restart (#434, decisions 37 to 39): lines
+//! Seam 1 (danielrispler/Falinks#434, Testing Decisions) for what survives a restart (danielrispler/Falinks#434, decisions 37 to 39): lines
 //! taken live, then the same lines replayed into a new core with the card store's live-only facts and
 //! cards applied, as the shell does at start, then the rest live.
 
@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use studio_core::{Base, CardRequest, Change, Kind, LiveFacts, Output, Purpose, Studio};
 
-/// The scripted run of `record-subagent-run.sh` (#370): its worktree worker commits (line 15) and
+/// The scripted run of `record-subagent-run.sh` (danielrispler/Falinks#370): its worktree worker commits (line 15) and
 /// ends (line 18); its helper runs a command (lines 16 and 17) and is reported killed (line 25).
 const RUN: &str = include_str!("fixtures/subagent-run.jsonl");
 const RUN_SESSION: &str = "40e8e6ef-9b2f-4467-9b55-87c2d053b616";

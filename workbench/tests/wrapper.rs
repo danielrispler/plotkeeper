@@ -1,4 +1,4 @@
-//! #521 (#517, decision 5): the status line wrapper of sessions the studio starts, as a black box.
+//! danielrispler/Falinks#521 (danielrispler/Falinks#517, decision 5): the status line wrapper of sessions the studio starts, as a black box.
 //! It gets the status line's JSON on stdin and a fake `HOME` holding a fake Claude Code settings
 //! file; it saves the snapshot, then runs the user's own `statusLine.command`. Needs `bash` and
 //! `jq`, as the wrapper does.

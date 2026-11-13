@@ -1,4 +1,4 @@
-//! The event log (#328, module 2): one append-only JSON Lines file, the only source of session state.
+//! The event log (danielrispler/Falinks#328, module 2): one append-only JSON Lines file, the only source of session state.
 
 pub mod answer;
 
@@ -30,9 +30,9 @@ pub fn append(log: &Path, event: &serde_json::Value) -> std::io::Result<()> {
     log.write_all(&line)
 }
 
-/// What the hook knows of a session's latest turn, kept between its runs (#486): its prompt id, the
+/// What the hook knows of a session's latest turn, kept between its runs (danielrispler/Falinks#486): its prompt id, the
 /// worktrees it recorded a start tree of, and whether it ended. It follows the core's turn rules
-/// (#434, decisions 3 to 5).
+/// (danielrispler/Falinks#434, decisions 3 to 5).
 #[derive(Debug, PartialEq)]
 pub struct Turn {
     pub prompt_id: Option<String>,
@@ -85,7 +85,7 @@ pub fn worktree_root(folder: &Path) -> Option<String> {
 }
 
 /// The root of the git worktree that holds `folder`, or its nearest existing parent, and the git
-/// tree of its files as they are now, untracked ones included and ignored ones not (#486). `None`
+/// tree of its files as they are now, untracked ones included and ignored ones not (danielrispler/Falinks#486). `None`
 /// outside a worktree or when `git` fails. It writes the tree through a throwaway index, so the
 /// working tree, the real index and `git status` stay as they were.
 pub fn record_tree(folder: &Path) -> Option<(String, String)> {

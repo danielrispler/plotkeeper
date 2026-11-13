@@ -1,4 +1,4 @@
-# Terminal spike (#322), throwaway
+# Terminal spike (danielrispler/Falinks#322), throwaway
 
 A Tauri 2 window with xterm.js tabs over three ways to keep terminals alive outside the app. Like the v0 spike, it is
 not the studio's stack: the frontend is plain HTML and JS with no build step, and the hook logger is a shell script
@@ -6,7 +6,7 @@ that needs `jq`. Nothing here is a decision.
 
 ## Run
 
-    cd apps/studio/terminal-spike
+    cd terminal-spike
     npm install          # copies xterm.js into dist/vendor
     cargo run
 

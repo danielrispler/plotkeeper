@@ -1,4 +1,4 @@
-//! Seam 1 (#461, Testing Decisions) for the intention and step line (#472, decision 12): hook events
+//! Seam 1 (danielrispler/Falinks#461, Testing Decisions) for the intention and step line (danielrispler/Falinks#472, decision 12): hook events
 //! through the core, with transcript fixtures whose content is scrubbed (shape kept, text made up).
 
 use studio_core::{Step, Studio};

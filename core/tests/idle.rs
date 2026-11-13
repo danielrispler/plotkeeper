@@ -1,5 +1,5 @@
-//! Seam 1 (#470): hook events replayed through the core, with the daemon's `list` of terminals, give
-//! the upgrade's idle rule (#322 resolution, point 4): idle exactly when no shell runs a program and
+//! Seam 1 (danielrispler/Falinks#470): hook events replayed through the core, with the daemon's `list` of terminals, give
+//! the upgrade's idle rule (danielrispler/Falinks#322 resolution, point 4): idle exactly when no shell runs a program and
 //! no Claude session is in a turn or has background tasks. The same answer names how each terminal
 //! comes back: a Claude terminal with `claude --resume <session_id>`, a shell as a shell.
 
@@ -157,7 +157,7 @@ fn a_claude_terminal_comes_back_resumed_and_a_shell_as_a_shell() {
 
 #[test]
 fn a_shell_that_ran_another_agent_comes_back_as_that_agent_and_any_other_as_a_shell() {
-    // #561: the dead daemon's record keeps each shell's foreground program.
+    // danielrispler/Falinks#561: the dead daemon's record keeps each shell's foreground program.
     let studio = replayed(&[]);
     let lost: Vec<Terminal> = serde_json::from_value(json!([
         { "id": "t-agy", "argv": [], "cwd": "/tmp", "foreground": "agy" },
@@ -173,7 +173,7 @@ fn a_shell_that_ran_another_agent_comes_back_as_that_agent_and_any_other_as_a_sh
 
 #[test]
 fn a_shell_whose_agent_shows_as_node_comes_back_by_its_7501_app() {
-    // #561: a node-launched CLI's foreground is `node`; the record keeps the name it reports itself by.
+    // danielrispler/Falinks#561: a node-launched CLI's foreground is `node`; the record keeps the name it reports itself by.
     let studio = replayed(&[]);
     let lost: Vec<Terminal> = serde_json::from_value(json!([
         { "id": "t-codex", "argv": [], "cwd": "/tmp", "foreground": "node", "app": "codex" },

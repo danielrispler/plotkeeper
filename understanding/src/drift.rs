@@ -1,4 +1,4 @@
-//! Drift in Claude Code under the studio (#369, decisions 7, 9 and 23): its version, read from a
+//! Drift in Claude Code under the studio (danielrispler/Falinks#369, decisions 7, 9 and 23): its version, read from a
 //! session's transcript at its first `Stop` and kept beside the event log, so that a change asks
 //! Daniel to re-record the subagent fixture; and the wake-ups the studio does not recognise.
 
@@ -33,7 +33,7 @@ impl Versions {
             return Ok(None);
         };
         let mut seen = self.seen();
-        // A version seen before, such as another terminal's older one, is no change (#434,
+        // A version seen before, such as another terminal's older one, is no change (danielrispler/Falinks#434,
         // decision 29).
         if seen.iter().any(|(_, seen)| *seen == version) {
             return Ok(None);
@@ -64,7 +64,7 @@ impl Versions {
 
 /// The version on the first line of `transcript` that carries one (`"version":"2.1.309"`). Only a
 /// `.jsonl` transcript is opened, so a payload that names a credential file or a CLI's config, such
-/// as `~/.claude.json`, reads nothing (`apps/studio/AGENTS.md`, "Hard rules").
+/// as `~/.claude.json`, reads nothing (`AGENTS.md`, "Hard rules").
 fn transcript_version(transcript: &Path) -> Option<String> {
     if transcript.extension()? != "jsonl" {
         return None;

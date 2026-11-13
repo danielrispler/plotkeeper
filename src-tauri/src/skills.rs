@@ -1,7 +1,7 @@
-//! The skills browser (#528): every skill in Daniel's skills folder, the project's `.claude/skills`
+//! The skills browser (danielrispler/Falinks#528): every skill in Daniel's skills folder, the project's `.claude/skills`
 //! and the installed plugins, with its `SKILL.md`. Besides `SKILL.md` files and folder lists, it reads
 //! Claude Code's `installed_plugins.json` and only the `enabledPlugins` key of its settings files,
-//! which may hold tokens (`apps/studio/AGENTS.md`).
+//! which may hold tokens (`AGENTS.md`).
 
 use serde_json::{Value, json};
 use std::{
@@ -129,7 +129,7 @@ fn enabled(home: &Path, project: &Path) -> std::collections::HashMap<String, boo
     enabled
 }
 
-/// The one key of a Claude Code settings file the studio reads (#592); serde skips the rest unread.
+/// The one key of a Claude Code settings file the studio reads (danielrispler/Falinks#592); serde skips the rest unread.
 #[derive(serde::Deserialize)]
 struct Settings {
     #[serde(default, rename = "enabledPlugins")]

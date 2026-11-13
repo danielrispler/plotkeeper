@@ -1,5 +1,5 @@
-// Auto mode (#541): a session starts in it from the picker, keeps it when revived, and the rail's
-// one line always shows it. Run: `npm test` in apps/studio.
+// Auto mode (danielrispler/Falinks#541): a session starts in it from the picker, keeps it when revived, and the rail's
+// one line always shows it. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";

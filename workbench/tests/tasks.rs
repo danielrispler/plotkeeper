@@ -1,4 +1,4 @@
-//! Seam 2 (#328 and #461, Testing Decisions): creating and removing tasks (#468) with real `git`
+//! Seam 2 (danielrispler/Falinks#328 and danielrispler/Falinks#461, Testing Decisions): creating and removing tasks (danielrispler/Falinks#468) with real `git`
 //! in temporary repositories that have a bare `origin`.
 
 use std::{path::Path, process::Command};
@@ -235,7 +235,7 @@ fn a_squash_merged_branch_goes_only_at_its_pull_requests_head() {
     assert!(branches.is_empty(), "{branches}");
 }
 
-/// Places' counts (#576, after #559): a task against `origin`'s default branch, the main checkout
+/// Places' counts (danielrispler/Falinks#576, after danielrispler/Falinks#559): a task against `origin`'s default branch, the main checkout
 /// against its upstream, and the files `git status` lists.
 #[test]
 fn a_place_counts_commits_ahead_and_behind_its_base_and_its_changed_files() {
@@ -271,7 +271,7 @@ fn a_place_counts_commits_ahead_and_behind_its_base_and_its_changed_files() {
     assert_eq!(counts(&repos.main, &clean.path), counted(0, 0, 0));
 }
 
-/// No code path forces git (#461, decision 9): the studio's own sources, the workbench, the shell
+/// No code path forces git (danielrispler/Falinks#461, decision 9): the studio's own sources, the workbench, the shell
 /// and the UI, never spell git's force option.
 #[test]
 fn no_code_path_passes_force() {

@@ -1,4 +1,4 @@
-// The story rail, on the window's left (#574). One header line: the verdict and the phase, with the
+// The story rail, on the window's left (danielrispler/Falinks#574). One header line: the verdict and the phase, with the
 // times and the model on hover, and a "⋯" menu. Then "now": the open question, docked, or else the
 // newest card; the current intention, boxed; the latest turn's summary. Below, a feed of turns,
 // newest first, each with its prompt, summary, learning question, cards, questions, subagents,
@@ -57,7 +57,7 @@ export function showView(selected: Selection | null) {
   element("phase").textContent = agent === null ? estimateText(session.work) : "";
   // A subagent runs in its session's mode.
   element("mode").textContent = modeText(session.permission_mode);
-  // The model and effort the session runs at (#517, decision 8); none for a subagent, whose transcript the studio does not read.
+  // The model and effort the session runs at (danielrispler/Falinks#517, decision 8); none for a subagent, whose transcript the studio does not read.
   const { model, effort } = session.transcript;
   const runsAt = agent === null ? [model, effort && `effort ${effort}`].filter(Boolean).join(" · ") : "";
   element("headline").onmouseenter = () => {
@@ -68,7 +68,7 @@ export function showView(selected: Selection | null) {
   // "Open" resumes an ended session in a new terminal, in its folder, where Claude Code keeps it.
   element("reopen").hidden = agent !== null || session.state !== "ended";
   element("reopen").onclick = () => startClaude(session.cwd, session.resume_id, "", resumesAuto(session)).catch((e) => console.warn(e));
-  // Another agent's row (#560) has no name of its own to keep, nor turns to mark, and comes back
+  // Another agent's row (danielrispler/Falinks#560) has no name of its own to keep, nor turns to mark, and comes back
   // with its status if dropped.
   const own = agent === null && !session.status_only;
   element("rename").hidden = !own;
@@ -91,7 +91,7 @@ export function showView(selected: Selection | null) {
   showIntention(storyOf(session, agent));
   showQuestions(session.questions.filter((question) => question.agent === (agent?.id ?? null)));
   showCleared(agent === null ? session.cleared : []);
-  // A subagent's view has no intention of its own: its written summary takes that line (#535).
+  // A subagent's view has no intention of its own: its written summary takes that line (danielrispler/Falinks#535).
   if ((agent?.id ?? null) !== shownAgent) {
     shownAgent = agent?.id ?? null;
     failed.clear();
@@ -108,12 +108,12 @@ export function showView(selected: Selection | null) {
   drawFeed();
 }
 
-// The session's permission mode on the rail's line (#541), never only on hover, as it is a safety
+// The session's permission mode on the rail's line (danielrispler/Falinks#541), never only on hover, as it is a safety
 // fact; nothing for the default mode, or before an event names one.
 const modes: Record<string, string> = { auto: "auto mode", plan: "plan mode", acceptEdits: "accept edits", bypassPermissions: "bypass permissions" };
 export const modeText = (mode: string | null) => (!mode || mode === "default" ? "" : (modes[mode] ?? mode));
 
-// The subagent summaries the writer gave (#535), by subagent id, those being written, and those
+// The subagent summaries the writer gave (danielrispler/Falinks#535), by subagent id, those being written, and those
 // whose call failed while the subagent stays open, so a redraw does not ask again.
 const agentSummaries = new Map<string, string>();
 const writing = new Set<string>();
@@ -142,7 +142,7 @@ function summarize(id: string) {
 
 export type HistoryEntry = { agent: string; purpose: string; asked: string; result: string; details: string };
 
-// A session's subagent history (#535): every subagent it ran, newest first, faded ones too. Each
+// A session's subagent history (danielrispler/Falinks#535): every subagent it ran, newest first, faded ones too. Each
 // entry's purpose is its name and its prompt's first line; its result is its written summary, else
 // its last message's first line, or its status when it failed or has none yet.
 export function subagentHistory(session: Pick<Session, "agents">, summaries: Map<string, string>, now = Date.now()): HistoryEntry[] {
@@ -168,7 +168,7 @@ function historyElement(session: string, entry: HistoryEntry): HTMLElement {
   return item;
 }
 
-// After this many steps the intention dims, as it may no longer say what the agent does (#472).
+// After this many steps the intention dims, as it may no longer say what the agent does (danielrispler/Falinks#472).
 const FRESH_STEPS = 5;
 
 // The intention, boxed as the anchor of "now" (mockup C), its age, and the mark when the transcript is
@@ -183,11 +183,11 @@ function showIntention(story: Session["transcript"] | null) {
 }
 
 // The transcript the rail tells: none for a subagent's, which the studio does not read, nor for
-// another agent's status-only row (#560).
+// another agent's status-only row (danielrispler/Falinks#560).
 export const storyOf = (session: Session, agent: unknown) => (agent === null && !session.status_only ? session.transcript : null);
 
 // What the rail draws for `selected`: "now"'s card and latest turn, and the feed. A status-only row
-// (#560) has no turns or cards to show.
+// (danielrispler/Falinks#560) has no turns or cards to show.
 export function railOf({ session, agent }: Selection, docked: boolean, all: StoredCard[]) {
   if (session.status_only) return { top: null, latest: null, blocks: [] };
   const top = railTop(docked, all);
@@ -225,7 +225,7 @@ export type FeedTurn = {
   questions: Question[];
 };
 
-// The feed (#574): one block per turn, newest first, each holding the cards written in it (by their
+// The feed (danielrispler/Falinks#574): one block per turn, newest first, each holding the cards written in it (by their
 // id's time), and the checks, subagents and questions the core put in it. What has no turn goes in
 // one last block, so nothing is lost.
 export function feedTurns(
@@ -256,9 +256,9 @@ export function railTop(docked: boolean, cards: StoredCard[]): StoredCard | null
   return docked ? null : (cards.at(-1) ?? null);
 }
 
-// The turn summaries the store gave (#526), by turn id, null for a turn with none yet, and those
+// The turn summaries the store gave (danielrispler/Falinks#526), by turn id, null for a turn with none yet, and those
 // being asked for. With summaries written on open, asking writes a waiting turn's summary, a
-// `claude -p` call, so the asks go one at a time (#574). Those whose write failed wait for the next
+// `claude -p` call, so the asks go one at a time (danielrispler/Falinks#574). Those whose write failed wait for the next
 // opening of their session, not the next redraw.
 const summaries = new Map<string, TurnSummary | null>();
 const asking = new Set<string>();
@@ -331,7 +331,7 @@ function folded(key: string, title: string, body: HTMLElement[], onOpen?: () => 
   return node;
 }
 
-// The learning section (#526): the turn's main idea and one question, graded at the tap by the
+// The learning section (danielrispler/Falinks#526): the turn's main idea and one question, graded at the tap by the
 // writer's key, each option's reason shown after it.
 function learningElement(id: string, learning: NonNullable<TurnSummary["summary"]["learning"]>): HTMLElement {
   const picked = learned.get(id) ?? null;
@@ -456,9 +456,9 @@ export function drawFeed() {
   drawNow(session, latest, top);
   element("feed").replaceChildren(...blocks.map((block, i) => turnElement(session, block, own && i === 0 && block.index !== null)));
 }
-// Rename (#469): the row's name, kept in the event log, and `/rename` typed into the session while
+// Rename (danielrispler/Falinks#469): the row's name, kept in the event log, and `/rename` typed into the session while
 // its claude runs, so Claude Code shows the same name. An empty name gives the row its folder's again.
-// The command waits for Daniel's draft and never answers a session that needs him (#544).
+// The command waits for Daniel's draft and never answers a session that needs him (danielrispler/Falinks#544).
 function askName(session: Session) {
   const dialog = element("rename-dialog") as HTMLDialogElement;
   const field = element("rename-field") as HTMLInputElement;
@@ -484,7 +484,7 @@ function askName(session: Session) {
   dialog.showModal();
 }
 
-// Close (#469): ends the session's terminal, asking first while it works or has background tasks.
+// Close (danielrispler/Falinks#469): ends the session's terminal, asking first while it works or has background tasks.
 function askClose(session: Session) {
   const close = () => closePane(session.terminal!).catch((e) => console.warn(e));
   if (!session.asks_before_closing) return close();
@@ -556,8 +556,8 @@ export async function removeWorktree(worktree: string) {
 
 
 // The open question of the viewed agent, docked at the top of the rail, newest first; a plan or a
-// permission the answer hook waits on docks too, whichever agent asks (#478). A question never
-// answered shows in its turn; an answered one is in the decision history (#479).
+// permission the answer hook waits on docks too, whichever agent asks (danielrispler/Falinks#478). A question never
+// answered shows in its turn; an answered one is in the decision history (danielrispler/Falinks#479).
 function showQuestions(questions: Question[]) {
   const open = [...questions].reverse().filter((question) => question.answer === "open");
   const decision = openDecision();

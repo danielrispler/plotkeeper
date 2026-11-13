@@ -1,5 +1,5 @@
-// The session's decision history (#479): its answered questions, plans and permissions, and its
-// "cleared" markers (#474), newest first, in a collapsed section above the turns. The decisions come
+// The session's decision history (danielrispler/Falinks#479): its answered questions, plans and permissions, and its
+// "cleared" markers (danielrispler/Falinks#474), newest first, in a collapsed section above the turns. The decisions come
 // with the cards, from the store; the markers come with the selection.
 
 import { code, element, prose, text } from "./dom.js";

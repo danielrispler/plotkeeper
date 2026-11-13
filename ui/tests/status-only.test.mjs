@@ -1,5 +1,5 @@
-// Status-only rows (#560): another agent's session, from its terminal's OSC 7501 status, says so
-// plainly and shows no step, intention or card. Run: `npm test` in apps/studio.
+// Status-only rows (danielrispler/Falinks#560): another agent's session, from its terminal's OSC 7501 status, says so
+// plainly and shows no step, intention or card. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { rowMark, secondLine, sessionName } from "../../dist/list.js";

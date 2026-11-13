@@ -1,5 +1,5 @@
-//! Seam 1 (#328, Testing Decisions) for checks: replay hook events through the core and check the
-//! session's check lines (#369, decision 14). The fixture follows the real payload shapes of the
+//! Seam 1 (danielrispler/Falinks#328, Testing Decisions) for checks: replay hook events through the core and check the
+//! session's check lines (danielrispler/Falinks#369, decision 14). The fixture follows the real payload shapes of the
 //! other fixtures; a check that fails comes as `PostToolUseFailure` with its exit code in `error`.
 
 use studio_core::{CheckLine, Output, Studio};
@@ -34,7 +34,7 @@ fn lines(log: &str) -> Vec<CheckLine> {
         .map_or_else(Vec::new, |s| s.checks.clone())
 }
 
-/// Before #375 the wait's first check asked "Will it pass?" (#343).
+/// Before danielrispler/Falinks#375 the wait's first check asked "Will it pass?" (danielrispler/Falinks#343).
 #[test]
 fn a_check_that_passes_or_fails_shows_as_a_line_and_raises_no_guess_or_card() {
     let line = |passed| (COMMAND.to_string(), passed);
@@ -121,7 +121,7 @@ fn a_check_whose_result_lands_before_its_start_gets_its_line() {
     assert_eq!(passed, [Some(true)]);
 }
 
-/// Before #473 a check run in the background got no line. Now it runs until the notification that
+/// Before danielrispler/Falinks#473 a check run in the background got no line. Now it runs until the notification that
 /// names its task (`times.rs`), which this log lacks.
 #[test]
 fn a_check_run_in_the_background_runs_until_its_notification() {

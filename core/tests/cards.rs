@@ -1,4 +1,4 @@
-//! Seam 1 (#369, Testing Decisions) for cards (#369, decisions 10 and 11): a card covers a prompt's
+//! Seam 1 (danielrispler/Falinks#369, Testing Decisions) for cards (danielrispler/Falinks#369, decisions 10 and 11): a card covers a prompt's
 //! whole change, at its `Stop`. The shell fingerprints the worktree where the core asks it to and
 //! passes in what changed; these tests play the shell's part.
 
@@ -184,7 +184,7 @@ fn the_shell_fingerprints_at_the_prompt_and_at_the_stop() {
 }
 
 /// An interrupt fires no `Stop`, so the next prompt, with a new prompt id, ends the interrupted turn
-/// (#434, decision 5): its look is the interrupted turn's end, and the `Stop` covers the next turn.
+/// (danielrispler/Falinks#434, decision 5): its look is the interrupted turn's end, and the `Stop` covers the next turn.
 #[test]
 fn a_prompt_after_an_interrupt_ends_the_interrupted_turn() {
     let log = include_str!("fixtures/interrupt-then-prompt.jsonl");
@@ -205,13 +205,13 @@ fn after_a_replay_the_shell_fingerprints_the_prompts_still_open() {
     assert_eq!(waiting(LOG.lines().count()), []);
 }
 
-/// The scripted run of `record-subagent-run.sh` (#370): its worktree worker writes `hello.txt`,
+/// The scripted run of `record-subagent-run.sh` (danielrispler/Falinks#370): its worktree worker writes `hello.txt`,
 /// commits it (line 15) and ends (line 18); the session's own worktree never changes.
 const RUN: &str = include_str!("fixtures/subagent-run.jsonl");
 const RUN_SESSION: &str = "40e8e6ef-9b2f-4467-9b55-87c2d053b616";
 const RUN_WORKER: &str = "add0c7bbaced40ed0";
 
-/// #369, decision 11: a worker's card at its commit and at its end, each on its own worktree, and a
+/// danielrispler/Falinks#369, decision 11: a worker's card at its commit and at its end, each on its own worktree, and a
 /// parent that changed nothing itself gets one card from its workers' cards, not their diffs.
 #[test]
 fn the_runs_worker_gets_a_card_at_its_commit_and_its_end_and_its_session_one_from_those_cards() {

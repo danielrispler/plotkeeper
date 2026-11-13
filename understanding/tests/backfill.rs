@@ -1,4 +1,4 @@
-//! Seam 2 (#461, Testing Decisions) for the backfill (#486): the hook's tree of a worktree, and the
+//! Seam 2 (danielrispler/Falinks#461, Testing Decisions) for the backfill (danielrispler/Falinks#486): the hook's tree of a worktree, and the
 //! diff between two of them, against real `git` in a temporary repository.
 
 use std::{fs, path::Path, process::Command};

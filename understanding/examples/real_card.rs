@@ -1,11 +1,11 @@
-//! Real `claude -p` cards on two fixture changes, one per prompt of a session (#375's and #377's
-//! checks, #369's Testing Decisions): a structural change, then one that is not. For each it prints
+//! Real `claude -p` cards on two fixture changes, one per prompt of a session (danielrispler/Falinks#375's and danielrispler/Falinks#377's
+//! checks, danielrispler/Falinks#369's Testing Decisions): a structural change, then one that is not. For each it prints
 //! the writer's raw reply, then the card and the brief parsed from it; the second card updates the
 //! first one's brief. Then it prints a rewrite of the brief from the two prompts, the two summaries
-//! and a diffstat, the second card's "explain more" (#376), and a parent's card and brief from its
-//! workers' card summaries, with no diff (#378). It runs the writer as the app does, in
-//! the app's neutral folder, and reads no credential file. Run it outside auto mode, from
-//! `apps/studio`:
+//! and a diffstat, the second card's "explain more" (danielrispler/Falinks#376), and a parent's card and brief from its
+//! workers' card summaries, with no diff (danielrispler/Falinks#378). It runs the writer as the app does, in
+//! the app's neutral folder, and reads no credential file. Run it outside auto mode, from the
+//! repository's root:
 //!
 //! `cargo run -q -p studio-understanding --example real_card`
 
@@ -54,7 +54,7 @@ const STRUCTURAL: &str = r#"--- a/apps/studio/understanding/src/lib.rs
 const CHANGE: &str = r#"--- a/apps/studio/core/src/lib.rs
 +++ b/apps/studio/core/src/lib.rs
 @@ -334,14 +334,22 @@
- /// Whether a check's exit code says whether it passed (#328, module 4). A command exits with its
+ /// Whether a check's exit code says whether it passed (danielrispler/Falinks#328, module 4). A command exits with its
  /// last statement's code, so the check must be the last statement, and nothing in it may mask the
 -/// code: `|| true` exits 0 and `!` flips it.
 +/// code: `|| true` exits 0, `!` flips it, and a pipe exits with its last command's code unless an
@@ -82,8 +82,8 @@ const PROMPTS: [&str; 2] = [
 ];
 
 const DIFFSTAT: &str = " apps/studio/core/src/lib.rs              | 12 ++++++++++--
- apps/studio/understanding/src/brief.rs   | 14 ++++++++++++++
- apps/studio/understanding/src/lib.rs     | 18 ++----------------
+ understanding/src/brief.rs   | 14 ++++++++++++++
+ understanding/src/lib.rs     | 18 ++----------------
  3 files changed, 26 insertions(+), 18 deletions(-)
 ";
 
@@ -128,7 +128,7 @@ impl CardWriter for Printing {
     }
 }
 
-/// What two workers of a parent that changed nothing itself did, as the app gives it (#378).
+/// What two workers of a parent that changed nothing itself did, as the app gives it (danielrispler/Falinks#378).
 const WORKERS: &str = "No diff: the agent changed nothing itself since its last card. Its workers, \
 each with its status and the summaries of its cards since then:
 - `Implement #377` (completed): הבריף של הסשן נכתב מחדש בכל עדכון חמישי. החלק של המבנה עבר ל־`brief.rs`.

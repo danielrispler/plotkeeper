@@ -1,10 +1,10 @@
-//! The studio app's shell (#328, module 9). At start it replays the whole event log through the
+//! The studio app's shell (danielrispler/Falinks#328, module 9). At start it replays the whole event log through the
 //! core, then feeds it each new line live and hands the core's card requests to the card writer. The
-//! window lists every session (#369, decision 18) and shows the one Daniel selected: its cards, with
+//! window lists every session (danielrispler/Falinks#369, decision 18) and shows the one Daniel selected: its cards, with
 //! their quizzes, his guesses, his ratings and the longer explanations he asked for, which the card
 //! store keeps on disk, and its check lines. A session that newly needs Daniel or reaches your turn,
 //! a new card and a failed worker raise a macOS notification while the window is not focused, and
-//! the Dock badge counts the sessions that need him (#369, decision 22; #517, decision 6).
+//! the Dock badge counts the sessions that need him (danielrispler/Falinks#369, decision 22; danielrispler/Falinks#517, decision 6).
 
 use std::{
     collections::HashMap,
@@ -46,7 +46,7 @@ type Cards = Mutex<CardStore>;
 /// The notices not shown yet, which the log thread and the card writer's threads add to.
 type Notices = Mutex<Notifications>;
 
-/// The summary writer's setup, from the settings the window sends (#526), and the turns whose
+/// The summary writer's setup, from the settings the window sends (danielrispler/Falinks#526), and the turns whose
 /// summary waits for Daniel to open it while summaries are written on open, by turn id.
 // shortcut: the waiting turns live in memory, so a restart loses them; keep them in the store if
 // that bites.
@@ -56,7 +56,7 @@ struct Summaries {
     waiting: Mutex<HashMap<String, SummaryRequest>>,
 }
 
-/// The settings' `summaries` (#517, decision 17): the writer's model and effort, and whether a
+/// The settings' `summaries` (danielrispler/Falinks#517, decision 17): the writer's model and effort, and whether a
 /// summary is written when Daniel opens its turn instead of at the turn's end.
 #[tauri::command]
 fn summary_settings(
@@ -70,7 +70,7 @@ fn summary_settings(
     studio.lock().unwrap().set_summaries_on_open(on_open);
 }
 
-/// Daniel opened turn `id` (#526): its summary, written now when it waits for him, which takes
+/// Daniel opened turn `id` (danielrispler/Falinks#526): its summary, written now when it waits for him, which takes
 /// seconds, so the command runs off the main thread. `None` when the turn has none. A failed write
 /// keeps the turn waiting and is an error, so the window asks again only at the next opening.
 #[tauri::command(async)]
@@ -99,14 +99,14 @@ fn turn_summary(
     Ok(cards.lock().unwrap().turn_summary(&id).cloned())
 }
 
-/// The whole final reply of turn `index` of session `id` (#574), which the rail fetches when Daniel
+/// The whole final reply of turn `index` of session `id` (danielrispler/Falinks#574), which the rail fetches when Daniel
 /// opens that turn's folded response; the session list never carries it.
 #[tauri::command]
 fn turn_reply(id: String, index: usize, studio: State<Mutex<Studio>>) -> Option<String> {
     studio.lock().unwrap().turn_reply(&id, index)
 }
 
-/// Daniel opened subagent `agent_id` (#535): the summary of its purpose and result, written now
+/// Daniel opened subagent `agent_id` (danielrispler/Falinks#535): the summary of its purpose and result, written now
 /// when it has none and has ended, which takes seconds, so the command runs off the main thread.
 /// `None` while it runs or when the call failed, and the rail keeps its first line.
 #[tauri::command(async)]
@@ -156,7 +156,7 @@ fn select(id: String, studio: State<Mutex<Studio>>) -> serde_json::Value {
 }
 
 /// Daniel started a session in studio terminal `terminal`; returns the selection, `null` until the
-/// session's first event names that terminal and selects it (#567).
+/// session's first event names that terminal and selects it (danielrispler/Falinks#567).
 #[tauri::command]
 fn select_terminal(terminal: String, studio: State<Mutex<Studio>>) -> serde_json::Value {
     let mut studio = studio.lock().unwrap();
@@ -200,7 +200,7 @@ fn cards(studio: State<Mutex<Studio>>, cards: State<Cards>) -> SessionCards {
 }
 
 /// The plan's 5-hour and weekly usage from the status line's newest snapshot in the `usage` folder
-/// beside the event log, `null` when there is none (#481).
+/// beside the event log, `null` when there is none (danielrispler/Falinks#481).
 #[tauri::command]
 fn usage() -> Option<serde_json::Value> {
     studio_workbench::plan_usage(&studio_hook::data_dir(&std::env::home_dir()?).join("usage"))
@@ -284,7 +284,7 @@ fn guess(id: String, option: usize, studio: State<Mutex<Studio>>, cards: State<C
     unsaved(store.guess(&id, option, millis()));
 }
 
-/// Settles the guesses on the cards of the checks that ended (#461, decision 15). Takes the core's
+/// Settles the guesses on the cards of the checks that ended (danielrispler/Falinks#461, decision 15). Takes the core's
 /// lock before the store's, as the read loop does.
 fn settle_checks(studio: &Studio, store: &mut CardStore) {
     for session in studio.sessions() {
@@ -312,7 +312,7 @@ fn explain_more(id: String, cards: State<Cards>, writer: State<Writer>) -> Optio
     studio_understanding::explain_more(&cards, &**writer, &id, log)
 }
 
-/// Daniel's side `question` on `item`, a response, card or intention of session `session` (#461,
+/// Daniel's side `question` on `item`, a response, card or intention of session `session` (danielrispler/Falinks#461,
 /// decision 20): the writer's answer, read with the turn's intentions, or why there is none, which
 /// the window shows with a retry. It takes seconds, so it runs off the main thread; nothing reaches
 /// the session.
@@ -343,7 +343,7 @@ fn ask(
 }
 
 /// Daniel renamed session `id`: a `StudioRename` line in the event log, which the log thread then
-/// applies and a restart replays (#469). An empty `name` gives the row its folder's again.
+/// applies and a restart replays (danielrispler/Falinks#469). An empty `name` gives the row its folder's again.
 #[tauri::command(async)]
 fn rename(id: String, name: String) -> Result<(), String> {
     append(&[serde_json::json!({
@@ -365,7 +365,7 @@ fn delete_session(id: String) -> Result<(), String> {
     })])
 }
 
-/// Daniel closed terminal `terminal` (#461, story 15 and decision 8): a `SessionEnd` line in the event
+/// Daniel closed terminal `terminal` (danielrispler/Falinks#461, story 15 and decision 8): a `SessionEnd` line in the event
 /// log for each session in it that has not ended, as its `claude` may die before its own hook runs.
 /// A real `SessionEnd` after it changes nothing.
 #[tauri::command(async)]
@@ -402,7 +402,7 @@ fn append(lines: &[serde_json::Value]) -> Result<(), String> {
     log.write_all(text.as_bytes()).map_err(|e| e.to_string())
 }
 
-/// The daemon's `list` (#560): the core's status-only rows and mismatch lines follow its terminals'
+/// The daemon's `list` (danielrispler/Falinks#560): the core's status-only rows and mismatch lines follow its terminals'
 /// OSC 7501 status. A row's notices go out as a Claude session's do.
 fn listed(app: &AppHandle, terms: Vec<studio_core::Terminal>) {
     let outputs = app
@@ -423,7 +423,7 @@ fn listed(app: &AppHandle, terms: Vec<studio_core::Terminal>) {
     LIST_CHANGED.store(true, Ordering::Release);
 }
 
-/// Appends `line` to the mismatch log beside the event log, local and only for debugging (#560).
+/// Appends `line` to the mismatch log beside the event log, local and only for debugging (danielrispler/Falinks#560).
 fn mismatch(line: &str) {
     let Some(home) = std::env::home_dir() else {
         return;
@@ -446,7 +446,7 @@ fn unsaved(saved: io::Result<()>) {
 /// not run `claude -p`.
 type Writer = Arc<dyn CardWriter + Send + Sync>;
 
-/// Whether a navigation stays on the app's own pages (#525, decision 21): a backstop, as a rendered
+/// Whether a navigation stays on the app's own pages (danielrispler/Falinks#525, decision 21): a backstop, as a rendered
 /// link opens in the browser through `open_link` and never navigates the window.
 fn in_app(url: &tauri::Url) -> bool {
     url.scheme() == "tauri" || url.host_str() == Some("tauri.localhost")
@@ -463,7 +463,7 @@ fn main() {
         _ => Arc::new(ClaudeWriter::beside(&log).expect("create the card writer's folder")),
     };
     tauri::Builder::default()
-        // First, so a second instance exits before it sets anything up (#470).
+        // First, so a second instance exits before it sets anything up (danielrispler/Falinks#470).
         .plugin(tauri_plugin_single_instance::init(restart::second_instance))
         .plugin(tauri_plugin_notification::init())
         .plugin(
@@ -555,7 +555,7 @@ fn main() {
 /// Reads the log from its start, then from where it stopped. A line counts once it ends in a newline,
 /// so a line the hook is still writing waits for the next read. The lines there at start are
 /// replayed, so steps that ran while the app was down get no cards and no notifications, but for the
-/// turns of the last 24 hours with no card, which get one on the hook's trees (#486). Live lines
+/// turns of the last 24 hours with no card, which get one on the hook's trees (danielrispler/Falinks#486). Live lines
 /// get the worktree fingerprint the core asks for; replayed ones get none. Each pass ends with a
 /// tick, the first right after the replay.
 // shortcut: polls every 200 ms; switch to file-system events if the delay or the wake-ups matter.
@@ -605,7 +605,7 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                 let store = app.state::<Cards>();
                 let store = store.lock().unwrap();
                 store.restore(&mut studio);
-                // The turns that ended while the app was down get their cards now (#486).
+                // The turns that ended while the app was down get their cards now (danielrispler/Falinks#486).
                 let requests: Vec<CardRequest> =
                     store.cards().iter().map(|k| k.request.clone()).collect();
                 let backfill = studio.backfill(millis(), &requests);
@@ -647,7 +647,7 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                          task {task_id} in markup the studio does not know"
                     ),
                     Output::Mismatch { line } => mismatch(&line),
-                    // Reads the transcript's lines and nothing else (`apps/studio/AGENTS.md`).
+                    // Reads the transcript's lines and nothing else (`AGENTS.md`).
                     Output::Version { transcript_path } => {
                         match versions.check(Path::new(&transcript_path), millis()) {
                             Ok(Some(notice)) => {
@@ -666,7 +666,7 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                 let keys = state.lock().unwrap().live_keys();
                 fingerprints.retain(|key, _| keys.contains(key));
                 queues.retain(|key, _| keys.contains(key));
-                // The decision history goes to the store, which keeps it across restarts (#479).
+                // The decision history goes to the store, which keeps it across restarts (danielrispler/Falinks#479).
                 let studio = state.lock().unwrap();
                 let mut store = app.state::<Cards>().inner().lock().unwrap();
                 for session in studio.sessions() {
@@ -675,10 +675,10 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                 settle_checks(&studio, &mut store);
             }
         }
-        // Reads the transcripts' lines and nothing else (`apps/studio/AGENTS.md`).
+        // Reads the transcripts' lines and nothing else (`AGENTS.md`).
         let log = |line: String| eprintln!("studio: {line}");
         let transcripts_changed = state.lock().unwrap().follow_transcripts(log);
-        // Each live session's context, from its status line snapshot (#517, decision 1; #519); the
+        // Each live session's context, from its status line snapshot (danielrispler/Falinks#517, decision 1; danielrispler/Falinks#519); the
         // snapshot is named by the conversation's id, which a `/clear` changes.
         let running: Vec<_> = (state.lock().unwrap().sessions().into_iter())
             .filter(|s| s.state != Ended && !s.status_only)
@@ -692,7 +692,7 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
         });
         let list_changed = LIST_CHANGED.swap(false, Ordering::AcqRel);
         let changed = read || transcripts_changed || windows_changed || list_changed;
-        // The open request goes in the same pass as the list that shows "needs you" (#569).
+        // The open request goes in the same pass as the list that shows "needs you" (danielrispler/Falinks#569).
         if let Ok(data) = answer::data()
             && let Some(ask) = app
                 .state::<Mutex<answer::Watching>>()
@@ -707,7 +707,7 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
             let window = app.get_webview_window("main");
             window.and_then(|w| w.is_focused().ok()) == Some(true)
         };
-        // Daniel sees the selected session in a focused window while the story rail shows it (#556);
+        // Daniel sees the selected session in a focused window while the story rail shows it (danielrispler/Falinks#556);
         // the window is asked only while it is unseen, and not under the core's lock, which the main
         // thread's commands take.
         let unseen = state.lock().unwrap().selected().is_some_and(|s| s.unseen);
@@ -751,7 +751,7 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
 static LIST_CHANGED: AtomicBool = AtomicBool::new(false);
 
 /// Whether the story rail shows, as the UI last said: not in focus mode, behind a closed overlay or
-/// under the skills browser, when a turn on it is not seen (#556).
+/// under the skills browser, when a turn on it is not seen (danielrispler/Falinks#556).
 static RAIL_SHOWN: AtomicBool = AtomicBool::new(true);
 
 /// The UI's rail showed or hid.
@@ -760,7 +760,7 @@ fn rail_shown(shown: bool) {
     RAIL_SHOWN.store(shown, Ordering::Release);
 }
 
-/// Finds the PR of each session's branch with `gh pr view` (#461, decision 19), on its own thread so
+/// Finds the PR of each session's branch with `gh pr view` (danielrispler/Falinks#461, decision 19), on its own thread so
 /// the read loop never waits on the network, and asks again after 5 minutes. `gh` runs as Daniel
 /// with its own login; no credential file is read.
 fn prs(app: &AppHandle) {
@@ -861,7 +861,7 @@ fn write(
 }
 
 /// Writes the summary of `request`'s turn on its session's queue, after the turn's card, then
-/// switches the turn's intention to its first line (#517, decision 16). While summaries are written
+/// switches the turn's intention to its first line (danielrispler/Falinks#517, decision 16). While summaries are written
 /// on open, the turn waits for Daniel instead (`turn_summary`).
 fn summarize(
     app: &AppHandle,
@@ -932,14 +932,14 @@ enum Notice<'a> {
     Titled(&'a str),
 }
 
-/// The setting that also notifies "your turn" while the window is focused (#517, decision 6), from
+/// The setting that also notifies "your turn" while the window is focused (danielrispler/Falinks#517, decision 6), from
 /// `settings.json`, which the window parses.
 #[tauri::command]
 fn notify_while_focused(on: bool, notices: State<Notices>) {
     notices.lock().unwrap().while_focused = on;
 }
 
-/// Daniel marked session `id` unseen (#556), from the rail's menu.
+/// Daniel marked session `id` unseen (danielrispler/Falinks#556), from the rail's menu.
 #[tauri::command(async)]
 fn mark_unseen(id: String, studio: State<Mutex<Studio>>, cards: State<Cards>) {
     if let Some((id, turns)) = studio.lock().unwrap().mark_unseen(&id) {
@@ -948,13 +948,13 @@ fn mark_unseen(id: String, studio: State<Mutex<Studio>>, cards: State<Cards>) {
     }
 }
 
-/// The `sounds` setting (#556), from `settings.json`, which the window parses.
+/// The `sounds` setting (danielrispler/Falinks#556), from `settings.json`, which the window parses.
 #[tauri::command]
 fn sounds(on: bool, notices: State<Notices>) {
     notices.lock().unwrap().sounds = on;
 }
 
-/// Plays a macOS system sound, so the studio bundles none (#556).
+/// Plays a macOS system sound, so the studio bundles none (danielrispler/Falinks#556).
 fn play(sound: Sound) {
     let name = match sound {
         Sound::NeedsYou => "Glass",
@@ -969,7 +969,7 @@ fn play(sound: Sound) {
     });
 }
 
-/// Time since the app started, a monotonic clock for combining notices (#434, decision 28).
+/// Time since the app started, a monotonic clock for combining notices (danielrispler/Falinks#434, decision 28).
 fn uptime() -> Duration {
     static STARTED: LazyLock<Instant> = LazyLock::new(Instant::now);
     STARTED.elapsed()

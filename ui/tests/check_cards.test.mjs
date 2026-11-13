@@ -1,5 +1,4 @@
-// The verdict on a check's card (#476): the check's result settles the guess. Run: `npm test` in
-// apps/studio.
+// The verdict on a check's card (danielrispler/Falinks#476): the check's result settles the guess. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { checkVerdict, quizState } from "../../dist/cards.js";

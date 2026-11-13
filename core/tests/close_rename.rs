@@ -1,4 +1,4 @@
-//! Seam 1 (#469): replay hook events through the core and check what closing and renaming a session
+//! Seam 1 (danielrispler/Falinks#469): replay hook events through the core and check what closing and renaming a session
 //! rest on. The studio asks before closing exactly when the session runs or has background tasks
 //! (`Stop`'s `background_tasks`), and a session's name is a line of the event log, so a restart,
 //! which replays the log, keeps it.

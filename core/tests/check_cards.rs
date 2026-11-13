@@ -1,4 +1,4 @@
-//! Seam 1 for the card while a check runs (#461, decision 15): at a check's `PreToolUse`, a check
+//! Seam 1 for the card while a check runs (danielrispler/Falinks#461, decision 15): at a check's `PreToolUse`, a check
 //! whose typical duration is over 2 minutes requests one card on the change so far, which names the
 //! check; a shorter or unknown one requests none. The check's result settles the guess on it.
 

@@ -1,5 +1,5 @@
-// Typing into a pane (#544): the studio waits for Daniel's draft, never types into a session that
-// needs him, and pastes before it presses Enter. Run: `npm test` in apps/studio.
+// Typing into a pane (danielrispler/Falinks#544): the studio waits for Daniel's draft, never types into a session that
+// needs him, and pastes before it presses Enter. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { noteKeys, typeInto } from "../../dist/typing.js";

@@ -1,4 +1,4 @@
-// The rail opens on "now", as a feed of turns (#574). Run: `npm test` in apps/studio.
+// The rail opens on "now", as a feed of turns (danielrispler/Falinks#574). Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";

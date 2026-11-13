@@ -1,4 +1,4 @@
-//! The card writer (#328 and #369, Testing Decisions): the real `claude -p` command is checked
+//! The card writer (danielrispler/Falinks#328 and danielrispler/Falinks#369, Testing Decisions): the real `claude -p` command is checked
 //! without running it, the cards, their quizzes and the updated brief come from its reply, and a
 //! fake that fails is retried.
 
@@ -330,7 +330,7 @@ fn the_real_writer_runs_claude_on_the_subscription_in_its_neutral_folder() {
         .map(|arg| arg.to_str().unwrap())
         .collect();
     // The change is untrusted text: no tools and no MCP servers, and safe mode keeps Daniel's
-    // plugins, hooks, skills and CLAUDE.md out (#517, decision 9). The prompt goes on standard input.
+    // plugins, hooks, skills and CLAUDE.md out (danielrispler/Falinks#517, decision 9). The prompt goes on standard input.
     assert_eq!(
         args,
         ["--tools", "", "--strict-mcp-config", "--safe-mode", "-p"]
@@ -654,7 +654,7 @@ fn a_change_holding_nul_bytes_reaches_the_writer_on_standard_input_and_gets_a_ca
     );
 }
 
-// The turn summary (#526; #517, decisions 13 to 15).
+// The turn summary (danielrispler/Falinks#526; danielrispler/Falinks#517, decisions 13 to 15).
 
 /// A turn of session `session`, named by `n`, that gets a summary.
 fn turn(session: &str, n: u64) -> SummaryRequest {
@@ -724,9 +724,9 @@ fn the_summary_call_runs_in_safe_mode_with_the_settings_model_effort_and_its_own
         ]
     );
     assert!(s.contains("turn summary"), "{s}");
-    // The answer stays out of the options (#517, decision 14).
+    // The answer stays out of the options (danielrispler/Falinks#517, decision 14).
     assert!(s.contains("Never mark the right option"), "{s}");
-    // The question tests understanding, and only when the turn has something to teach (#583).
+    // The question tests understanding, and only when the turn has something to teach (danielrispler/Falinks#583).
     for rule in [
         "why something works or how a mechanism behaves",
         "a mistake a developer could really make",
@@ -880,7 +880,7 @@ fn a_reply_with_a_null_learning_section_gives_the_summary_alone_and_logs_nothing
 fn a_reply_whose_key_is_much_longer_than_its_wrong_options_is_asked_once_more() {
     let dir = tempfile::tempdir().unwrap();
     let store = summaries(dir.path());
-    // The lengths of a real guessable reply (#583): a key of 100 characters, the longest wrong 77.
+    // The lengths of a real guessable reply (danielrispler/Falinks#583): a key of 100 characters, the longest wrong 77.
     let writer = recording(summary_reply(
         "Rewrote the parser.",
         [&"k".repeat(100), &"w".repeat(77), &"w".repeat(66)],
@@ -901,7 +901,7 @@ fn a_reply_whose_key_is_much_longer_than_its_wrong_options_is_asked_once_more() 
 fn a_reply_whose_options_are_of_similar_length_passes_on_the_first_call() {
     let dir = tempfile::tempdir().unwrap();
     let store = summaries(dir.path());
-    // A real reply whose key is the shortest (#583): 97 characters, the wrong ones up to 114.
+    // A real reply whose key is the shortest (danielrispler/Falinks#583): 97 characters, the wrong ones up to 114.
     let writer = recording(summary_reply(
         "Rewrote the parser.",
         [&"k".repeat(97), &"w".repeat(114), &"w".repeat(101)],
@@ -1006,7 +1006,7 @@ fn a_turn_with_a_card_gets_its_summary_only() {
     assert!(input.contains("has a card"), "{input}");
 }
 
-// The subagent summary, written when Daniel opens a subagent (#535).
+// The subagent summary, written when Daniel opens a subagent (danielrispler/Falinks#535).
 
 const SPAWNED: &str = "Review the parser change.\nLook for off-by-ones.";
 const LAST: &str = "Done.\nThe parser change is fine: the bounds hold.";

@@ -1,4 +1,4 @@
-//! Seam 1 (#369, Testing Decisions) for wake-ups (#373): replay hook events through the core and
+//! Seam 1 (danielrispler/Falinks#369, Testing Decisions) for wake-ups (danielrispler/Falinks#373): replay hook events through the core and
 //! check which of a session's prompts Claude Code sent to wake it, and which are Daniel's.
 
 use serde_json::json;
@@ -8,7 +8,7 @@ fn replay(log: &str) -> Studio {
     Studio::replayed(log.lines())
 }
 
-/// The checkpoint day of #347, scrubbed (#370).
+/// The checkpoint day of danielrispler/Falinks#347, scrubbed (danielrispler/Falinks#370).
 const DAY: &str = include_str!("fixtures/checkpoint-day.jsonl");
 /// The day's `implement-spec` session.
 const IMPLEMENT_SPEC: &str = "5d7f69ab-91ca-427e-9d9c-9180c2c0c74b";
@@ -81,7 +81,7 @@ fn a_wake_up_is_the_rows_text_until_the_sessions_next_step() {
         "<task-notification><task-id>a1191df87fb730aa0</task-id><status>completed</status></task-notification>",
     ));
 
-    // The row reads "worker Implement #355 relocation returned", and the last step stays true.
+    // The row reads "worker Implement danielrispler/Falinks#355 relocation returned", and the last step stays true.
     let woken = session(&studio);
     assert_eq!(woken.agent.last_step, before);
     assert_eq!(
@@ -193,7 +193,7 @@ fn a_known_id_under_a_tag_the_studio_does_not_know_is_drift_not_a_wake_up() {
 }
 
 /// The glossary: a wake-up never counts as Daniel's prompt, so the permission the session waits on
-/// still needs him until its step resolves (#369, story 12).
+/// still needs him until its step resolves (danielrispler/Falinks#369, story 12).
 #[test]
 fn a_wake_up_leaves_the_session_needing_daniel_until_the_step_that_asks_resolves() {
     let mut studio = Studio::default();
@@ -227,7 +227,7 @@ fn a_wake_up_leaves_the_session_needing_daniel_until_the_step_that_asks_resolves
     assert_eq!(state(&studio), State::Running);
 }
 
-/// A reply that ends with a question blocks nothing (#540), so a wake-up turn after it runs. The row
+/// A reply that ends with a question blocks nothing (danielrispler/Falinks#540), so a wake-up turn after it runs. The row
 /// groups the session's subagents under it, so they never sit in **Needs you** either.
 #[test]
 fn a_wake_up_after_a_reply_that_asks_runs_and_its_stop_is_your_turn() {

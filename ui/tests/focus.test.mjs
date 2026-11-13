@@ -1,4 +1,4 @@
-// Focus mode and the needs-you toast (#573). Run: `npm test` in apps/studio.
+// Focus mode and the needs-you toast (danielrispler/Falinks#573). Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";

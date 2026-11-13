@@ -1,4 +1,4 @@
-//! Drift in Claude Code (#369, decisions 7, 9 and 23): its version, read from a session's transcript
+//! Drift in Claude Code (danielrispler/Falinks#369, decisions 7, 9 and 23): its version, read from a session's transcript
 //! and kept beside the event log, and the wake-ups the studio does not recognise, as `weekly` reports
 //! them.
 

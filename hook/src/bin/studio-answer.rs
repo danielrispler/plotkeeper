@@ -1,4 +1,4 @@
-//! The answer hook's command (#461, decision 16; see `studio_hook::answer`). It prints a decision on
+//! The answer hook's command (danielrispler/Falinks#461, decision 16; see `studio_hook::answer`). It prints a decision on
 //! stdout only when Daniel answers from the studio card; otherwise it prints nothing, so the terminal
 //! asks as today. It always exits 0.
 

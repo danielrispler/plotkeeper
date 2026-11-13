@@ -1,4 +1,4 @@
-//! Can macOS kill the terminal daemon when the app ends (#543)? A reproduction that never touches the
+//! Can macOS kill the terminal daemon when the app ends (danielrispler/Falinks#543)? A reproduction that never touches the
 //! live daemon, socket or data folder. It launches a separately built app, with its own bundle
 //! identifier, through LaunchServices (`open`), so the app is in its own coalition as Daniel's is; a
 //! plain child process would prove nothing. The app gets its own `HOME` in `/tmp`, so its data
@@ -9,7 +9,7 @@
 //! the app; then checks that the daemon and both terminals' programs are alive. It prints JSON on
 //! standard output and its progress on standard error, and copies the daemon's log into `--out`.
 //! Memory pressure cannot be forced reliably, so it is not tried. It refuses to run against the
-//! live home or the live bundle identifier. Run it outside auto mode, from `apps/studio`, as
+//! live home or the live bundle identifier. Run it outside auto mode, from the repository's root, as
 //! `real-calls.sh` does:
 //!
 //! `cargo run -q -p studio-terminal-daemon --example kill_repro -- --app <Repro.app> --out <dir>`
@@ -71,7 +71,12 @@ fn run() -> Result<(), String> {
     std::fs::create_dir_all(&home).map_err(|e| e.to_string())?;
     // An empty `.zshrc` keeps zsh's first-run prompt out of the login shells.
     std::fs::write(home.join(".zshrc"), "").map_err(|e| e.to_string())?;
-    let socket = home.join("Library/Application Support/dev.falinks.studio/terminal-daemon.sock");
+    let data = home.join("Library/Application Support/dev.falinks.studio");
+    std::fs::create_dir_all(&data).map_err(|e| e.to_string())?;
+    // The configured repository is the sandbox home, as the live one is the live `settings.json`'s.
+    let settings = json!({ "repository": home });
+    std::fs::write(data.join("settings.json"), settings.to_string()).map_err(|e| e.to_string())?;
+    let socket = data.join("terminal-daemon.sock");
 
     let mut cases = Vec::new();
     for (case, signal) in [
@@ -117,12 +122,7 @@ fn one_case(
         .arg("-n")
         .arg("-a")
         .arg(app)
-        .args([
-            "--env",
-            &env("HOME", home),
-            "--env",
-            &env("STUDIO_REPO", home),
-        ])
+        .args(["--env", &env("HOME", home)])
         .args(["--env", "STUDIO_CARD_WRITER=fake"])
         .status()
         .map_err(|e| e.to_string())?;

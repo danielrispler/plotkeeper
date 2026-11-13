@@ -10,7 +10,7 @@ libc = "0.2"
 portable-pty = "0.9"
 serde_json = "1"
 
-# The #543 reproduction's guard has a unit test, which `cargo test` runs without launching the app.
+# The danielrispler/Falinks#543 reproduction's guard has a unit test, which `cargo test` runs without launching the app.
 [[example]]
 name = "kill_repro"
 test = true

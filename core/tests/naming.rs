@@ -1,4 +1,4 @@
-//! Seam 1 (#461, Testing Decisions) for naming and context share (#480, decision 19; #517,
+//! Seam 1 (danielrispler/Falinks#461, Testing Decisions) for naming and context share (danielrispler/Falinks#480, decision 19; danielrispler/Falinks#517,
 //! decisions 1 and 2): hook events through the core, with a made-up transcript fixture (generator in
 //! the PR's notes).
 
@@ -94,7 +94,7 @@ fn the_context_follows_the_last_assistant_messages_token_counts() {
 
 #[test]
 fn with_a_snapshot_the_context_is_claudes_status_line_view() {
-    // #517, measurement 1's turn: the snapshot counts 2 + 4,901 + 84,899 = 89,802 tokens, its 9% used
+    // danielrispler/Falinks#517, measurement 1's turn: the snapshot counts 2 + 4,901 + 84,899 = 89,802 tokens, its 9% used
     // and 91% left, whatever the transcript's latest message says.
     let (mut studio, path) = session("snapshot", TASK, &first(3), "gh issue view 480");
     follow(&mut studio);

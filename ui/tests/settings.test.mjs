@@ -1,4 +1,4 @@
-// Settings and keymap (#524), run on the `tsc` output. Run: `npm test` in apps/studio.
+// Settings and keymap (danielrispler/Falinks#524), run on the `tsc` output. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { initial, reload, zoomed } from "../../dist/settings.js";
@@ -120,4 +120,13 @@ test("the editor is an argv template, none by default, and anything else is repo
   const shell = reload(initial, { settings: `{ "editor": "code -g {path}" }`, keymap: null });
   assert.equal(shell.settings.editor, null);
   assert.deepEqual(shell.errors, ['settings.json: editor: expected an array of strings, such as ["code", "-g", "{path}:{line}:{column}"]']);
+});
+
+test("the repository is a path, the studio's checkout by default, and anything else is reported (danielrispler/Falinks#605)", () => {
+  assert.equal(reload(initial, { settings: null, keymap: null }).settings.repository, null);
+  const set = reload(initial, { settings: `{ "repository": "/Users/d/work/Falinks" }`, keymap: null });
+  assert.equal(set.settings.repository, "/Users/d/work/Falinks");
+  const wrong = reload(initial, { settings: `{ "repository": 3 }`, keymap: null });
+  assert.equal(wrong.settings.repository, null);
+  assert.deepEqual(wrong.errors, ["settings.json: repository: expected a string"]);
 });

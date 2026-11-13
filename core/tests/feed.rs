@@ -1,4 +1,4 @@
-//! Seam 1 (#434, Testing Decisions) for the rail's feed of turns (#574): each turn of a session,
+//! Seam 1 (danielrispler/Falinks#434, Testing Decisions) for the rail's feed of turns (danielrispler/Falinks#574): each turn of a session,
 //! with the checks, subagents and questions that started in it. The fixture is a replayed day of
 //! ordinary tickets; session 477b6b89 has 9 prompts, wake-ups among them, checks, subagents and
 //! questions.

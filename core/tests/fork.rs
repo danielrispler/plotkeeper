@@ -1,4 +1,4 @@
-//! Seam 1 (#562): one conversation is one row. "herdr grilling" showed as 4 rows. Claude Code
+//! Seam 1 (danielrispler/Falinks#562): one conversation is one row. "herdr grilling" showed as 4 rows. Claude Code
 //! forked it mid-turn into a new id (`SessionStart` from `fork`), after a throwaway `startup` id on
 //! the same terminal, and the old id went on sending late events. A `/resume` from a fresh `claude`
 //! leaves a throwaway `startup` id too, which ends with reason `resume`.

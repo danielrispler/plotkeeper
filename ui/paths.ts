@@ -1,5 +1,5 @@
 // File paths in the terminal pane and in rendered replies: the text a click opens in Daniel's editor
-// (#557), and a dropped file's path as typed.
+// (danielrispler/Falinks#557), and a dropped file's path as typed.
 
 import { invoke } from "./dom.js";
 import { studio } from "./state.js";
@@ -27,7 +27,7 @@ export function pathLinks(line: string): { text: string; start: number }[] {
     .filter((link) => /[A-Za-z]/.test(link.text));
 }
 
-// Whether inline code in a reply is a whole file path (#581): its last segment has a file extension,
+// Whether inline code in a reply is a whole file path (danielrispler/Falinks#581): its last segment has a file extension,
 // with no `@`, and either a folder whose first segment is no host name, or a line suffix and a source
 // extension. So `src/a.rs`, `src/a.rs:42` and `a.rs:42` are; `origin/main:3`, `@types/node`,
 // `git@github.com:22`, `example.com/index.html`, `std.io:3` and `localhost:8080` are not.
@@ -49,7 +49,7 @@ export function worktreeOf(cwd: string): string | null {
   return cwd.match(/^(.*\/\.claude\/worktrees\/[^/]+)/)?.[1] ?? null;
 }
 
-// A path's last 2 segments, such as `scratchpad/map266.md` (#571); the full path goes on hover.
+// A path's last 2 segments, such as `scratchpad/map266.md` (danielrispler/Falinks#571); the full path goes on hover.
 export const shortPath = (p: string) => p.split("/").filter(Boolean).slice(-2).join("/");
 
 // `line` with each path of more than 2 segments shortened, and the full line for its hover, or "" when

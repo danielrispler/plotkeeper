@@ -4,7 +4,7 @@ version = "0.0.0"
 edition = "2021"
 publish = false
 
-# Throwaway spike for #315; kept out of the root workspace.
+# Throwaway spike for danielrispler/Falinks#315; kept out of the root workspace.
 [workspace]
 
 [dependencies]

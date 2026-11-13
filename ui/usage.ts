@@ -1,4 +1,4 @@
-// The plan's usage in the top bar (#481): the `rate_limits` Claude Code gives the status line, from
+// The plan's usage in the top bar (danielrispler/Falinks#481): the `rate_limits` Claude Code gives the status line, from
 // the newest snapshot the status line saved. Each window has `used_percentage` (0 to 100) and
 // `resets_at` (Unix seconds); Claude Code drops a window once it resets, and so does this.
 

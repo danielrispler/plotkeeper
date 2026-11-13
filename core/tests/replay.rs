@@ -1,4 +1,4 @@
-//! Seam 1 (#328, Testing Decisions): replay JSON Lines fixtures of hook events through the core and
+//! Seam 1 (danielrispler/Falinks#328, Testing Decisions): replay JSON Lines fixtures of hook events through the core and
 //! check what the pane would show. The fixtures follow the real v0 payload sequences
 //! (https://github.com/danielrispler/Falinks/issues/321#issuecomment-6492980442, "Hook payloads").
 
@@ -41,8 +41,8 @@ fn a_permission_prompt_keeps_the_step_it_asks_about() {
     assert_eq!(probe.agent.last_step, step("Write", Some("probe.txt")));
 }
 
-/// Before #371 the pane followed the session prompted last (#328, user story 33). Now only Daniel's
-/// click changes it (#369, decision 20).
+/// Before danielrispler/Falinks#371 the pane followed the session prompted last (danielrispler/Falinks#328, user story 33). Now only Daniel's
+/// click changes it (danielrispler/Falinks#369, decision 20).
 #[test]
 fn the_selection_holds_when_another_session_is_prompted() {
     let log = include_str!("fixtures/two-sessions.jsonl");
@@ -109,7 +109,7 @@ fn lines_that_are_not_hook_events_are_skipped() {
     );
 }
 
-/// The two recorded logs (#370), scrubbed of their content: the checkpoint day's events, and the
+/// The two recorded logs (danielrispler/Falinks#370), scrubbed of their content: the checkpoint day's events, and the
 /// scripted session that spawns a worker and a helper (`record-subagent-run.sh`). Each line names a
 /// session, and the core holds every session named.
 #[test]
@@ -141,7 +141,7 @@ fn nothing_is_selected_until_daniel_clicks() {
     assert_eq!(studio.selected().map(|s| s.agent.id.as_str()), Some(PROBE));
 }
 
-/// Only four fields of a tool response are read, and lazily (#410, decision 20). A response that is
+/// Only four fields of a tool response are read, and lazily (danielrispler/Falinks#410, decision 20). A response that is
 /// not a JSON object yields none of them and still counts as an event.
 #[test]
 fn a_tool_response_that_is_a_string_still_updates_its_session() {

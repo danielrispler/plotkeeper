@@ -1,4 +1,4 @@
-//! Seam 1 for #556: a your-turn session stays unseen until Daniel looks at it in a focused window,
+//! Seam 1 for danielrispler/Falinks#556: a your-turn session stays unseen until Daniel looks at it in a focused window,
 //! and the sounds that go with needs you and your turn.
 
 use std::time::Duration;

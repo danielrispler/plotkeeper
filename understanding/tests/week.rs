@@ -1,4 +1,4 @@
-//! The weekly check on the questions (#328, module 6; #369, decision 23): the last 7 days' rates,
+//! The weekly check on the questions (danielrispler/Falinks#328, module 6; danielrispler/Falinks#369, decision 23): the last 7 days' rates,
 //! from Daniel's guesses on the cards' quizzes, and his ratings by level and reason.
 
 use studio_core::{Base, CardRequest};

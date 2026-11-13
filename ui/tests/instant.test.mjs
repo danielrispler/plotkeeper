@@ -1,5 +1,5 @@
-// Instant feedback (#570): a pressed row shows selected before the shell replies, and an update keeps
-// the nodes that stay, so focus and text selection survive it. Run: `npm test` in apps/studio.
+// Instant feedback (danielrispler/Falinks#570): a pressed row shows selected before the shell replies, and an update keeps
+// the nodes that stay, so focus and text selection survive it. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { patch } from "../../dist/dom.js";

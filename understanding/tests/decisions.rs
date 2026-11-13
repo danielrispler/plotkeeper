@@ -1,5 +1,5 @@
-//! The decision history in the card store (#461, decision 17): it survives a restart, and one that
-//! does not parse stops the app as a card store that does not parse does (#345).
+//! The decision history in the card store (danielrispler/Falinks#461, decision 17): it survives a restart, and one that
+//! does not parse stops the app as a card store that does not parse does (danielrispler/Falinks#345).
 
 use studio_core::{Decision, Studio};
 use studio_understanding::CardStore;

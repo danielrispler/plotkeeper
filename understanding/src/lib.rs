@@ -1,7 +1,7 @@
-//! The understanding layer's I/O, which the core leaves to the shell: the card writer (#328,
-//! module 4), which also writes the briefs (#369, decision 16), the worktree fingerprint (module 5),
+//! The understanding layer's I/O, which the core leaves to the shell: the card writer (danielrispler/Falinks#328,
+//! module 4), which also writes the briefs (danielrispler/Falinks#369, decision 16), the worktree fingerprint (module 5),
 //! the card store with its briefs and its weekly rates (module 6), and the drift in Claude Code
-//! (#369, decisions 7, 9 and 23).
+//! (danielrispler/Falinks#369, decisions 7, 9 and 23).
 use serde::{Deserialize, Serialize};
 use std::{
     hash::{BuildHasher, Hasher, RandomState},
@@ -33,12 +33,12 @@ pub use week::{Rate, Ratings, Week, week};
 /// backticks. It opens with its quiz; the rest shows when Daniel taps an option.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Card {
-    /// What the change does and why. Cards stored before #375 call it `answer`.
+    /// What the change does and why. Cards stored before danielrispler/Falinks#375 call it `answer`.
     #[serde(alias = "answer")]
     pub explanation: String,
     // The fields below default to empty, so cards stored before they existed still load.
     /// What the change did, in one line: the session's row while its turn is over, and the brief's
-    /// rewrite (#369, decisions 16 and 19).
+    /// rewrite (danielrispler/Falinks#369, decisions 16 and 19).
     #[serde(default)]
     pub summary: String,
     /// The files the change touched.
@@ -51,16 +51,16 @@ pub struct Card {
     pub why_it_matters: String,
     #[serde(default)]
     pub not_checked: String,
-    /// How the change alters the code's structure, when it does (#369, decision 12); `None` when the
+    /// How the change alters the code's structure, when it does (danielrispler/Falinks#369, decision 12); `None` when the
     /// writer answered `structural: none`.
     #[serde(default)]
     pub architecture: Option<String>,
-    /// `None` when the writer's quiz was missing or unusable, and in cards stored before #375.
+    /// `None` when the writer's quiz was missing or unusable, and in cards stored before danielrispler/Falinks#375.
     #[serde(default)]
     pub quiz: Option<Quiz>,
 }
 
-/// A card's multiple-choice question on the change's logic or design (#369, decision 13), named
+/// A card's multiple-choice question on the change's logic or design (danielrispler/Falinks#369, decision 13), named
 /// apart from an agent's question (`AskUserQuestion`). The writer's key grades Daniel's tap.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Quiz {
@@ -79,7 +79,7 @@ pub struct Choice {
 
 impl Quiz {
     /// The quiz in `value`, its options shuffled with the key and reasons moving with them, as the
-    /// writer places the right one unevenly (#434, decision 36); or why it is unusable: it does not
+    /// writer places the right one unevenly (danielrispler/Falinks#434, decision 36); or why it is unusable: it does not
     /// parse, or its key names none of two or more options.
     fn from_value(value: serde_json::Value) -> Result<Quiz, String> {
         let mut quiz: Quiz = serde_json::from_value(value).map_err(|e| e.to_string())?;
@@ -127,7 +127,7 @@ impl Card {
 pub trait CardWriter {
     /// The writer's reply on `request`'s change, or one line for the log when it gave none. It reads
     /// the change with `earlier`, the summaries of the earlier cards of the prompt the change belongs
-    /// to, oldest first, and `brief`, the session's brief so far, which it updates (#369, decision
+    /// to, oldest first, and `brief`, the session's brief so far, which it updates (danielrispler/Falinks#369, decision
     /// 12).
     fn reply(
         &self,
@@ -136,11 +136,11 @@ pub trait CardWriter {
         brief: &str,
     ) -> Result<String, String>;
 
-    /// The writer's longer explanation of `card` on `request`'s change, for "explain more" (#369,
+    /// The writer's longer explanation of `card` on `request`'s change, for "explain more" (danielrispler/Falinks#369,
     /// decision 15), or one line for the log when it gave none.
     fn more(&self, request: &CardRequest, card: &Card) -> Result<String, String>;
 
-    /// The writer's reply with a session's brief rewritten from scratch (#369, decision 16), or one
+    /// The writer's reply with a session's brief rewritten from scratch (danielrispler/Falinks#369, decision 16), or one
     /// line for the log when it gave none. It reads only `prompts`, Daniel's, `summaries`, those of
     /// the session's cards, both oldest first, and `diffstat`, `git diff --stat` since the session
     /// began.
@@ -152,19 +152,19 @@ pub trait CardWriter {
     ) -> Result<String, String>;
 
     /// The writer's reply with `brief` updated from `workers`, what a session's workers did since its
-    /// last card, from their cards' summaries (#369, decision 11), or one line for the log when it
+    /// last card, from their cards' summaries (danielrispler/Falinks#369, decision 11), or one line for the log when it
     /// gave none.
     fn update(&self, brief: &str, workers: &str) -> Result<String, String>;
 
     /// The writer's reply to Daniel's side `question` on `item`, a response, card or intention, read
-    /// with `intentions`, those of the item's turn, oldest first (#461, decision 20), or one line
+    /// with `intentions`, those of the item's turn, oldest first (danielrispler/Falinks#461, decision 20), or one line
     /// when it gave none. A writer that answers no questions says so.
     fn ask(&self, _item: &str, _intentions: &[String], _question: &str) -> Result<String, String> {
         Err("this writer answers no questions".into())
     }
 
     /// The writer's reply with the summary of `request`'s turn, read with `earlier`, the session's
-    /// latest summaries, oldest first, at `setup`'s model and effort (#526), or one line when it
+    /// latest summaries, oldest first, at `setup`'s model and effort (danielrispler/Falinks#526), or one line when it
     /// gave none. A writer that writes no summaries says so.
     fn summarize(
         &self,
@@ -176,7 +176,7 @@ pub trait CardWriter {
     }
 
     /// The writer's reply with the summary of a subagent's purpose and result, from its spawn's
-    /// `prompt` and its last `message`, at `setup`'s model and effort (#535), or one line when it
+    /// `prompt` and its last `message`, at `setup`'s model and effort (danielrispler/Falinks#535), or one line when it
     /// gave none. A writer that writes no summaries says so.
     fn summarize_agent(
         &self,
@@ -188,16 +188,16 @@ pub trait CardWriter {
     }
 }
 
-/// Every 5th update of a brief rewrites it from scratch (#369, decision 16), a starting guess.
+/// Every 5th update of a brief rewrites it from scratch (danielrispler/Falinks#369, decision 16), a starting guess.
 const REWRITE_EVERY: u32 = 5;
 
-/// The card on a session's or a worker's change and its brief (#369, decisions 11, 12 and 16), from
+/// The card on a session's or a worker's change and its brief (danielrispler/Falinks#369, decisions 11, 12 and 16), from
 /// `session`'s state. `writer` writes the card on `request` with the summaries of the earlier cards
 /// of its prompt and the brief of its owner, the worker or else the session, which the same reply
 /// updates, and both go in `store`. A card with no change is a session's that changed nothing
 /// itself: it is written from its workers' card summaries instead (`workers`). Every 5th update then
 /// rewrites the brief from scratch (`rebrief`), after `stored` runs on the card stored, so the
-/// shell sends the list and the "New card" notice first (#434, decision 32). The store is not
+/// shell sends the list and the "New card" notice first (danielrispler/Falinks#434, decision 32). The store is not
 /// locked while the writer runs, which takes seconds. Each problem is one line for `log`. Returns
 /// whether a card was added.
 pub fn write_stop(
@@ -252,7 +252,7 @@ pub fn write_stop(
 }
 
 /// A session's brief updated from its workers' cards since its last card, `request.workers`, when a
-/// turn a wake-up opened changed nothing itself: no card (#369, decision 11). Every 5th update
+/// turn a wake-up opened changed nothing itself: no card (danielrispler/Falinks#369, decision 11). Every 5th update
 /// rewrites it from scratch (`rebrief`). Each problem is one line for `log`. Returns whether the
 /// brief changed.
 pub fn write_brief(
@@ -307,7 +307,7 @@ fn workers(store: &CardStore, request: &CardRequest, session: &Session) -> Optio
         let of = cards
             .iter()
             .filter(|kept| kept.request.owner() == agent.agent.id);
-        // A card with no summary adds nothing (#434, decision 35).
+        // A card with no summary adds nothing (danielrispler/Falinks#434, decision 35).
         let summaries: Vec<String> = of.filter_map(|kept| summary(kept)).collect();
         let running = agent.status == Status::Running && agent.kind == Kind::Worker;
         let name = &agent.name;
@@ -383,7 +383,7 @@ fn rebrief(
     }
 }
 
-/// The answer to Daniel's side `question` on `item` (#461, decision 20), from one call to `writer`
+/// The answer to Daniel's side `question` on `item` (danielrispler/Falinks#461, decision 20), from one call to `writer`
 /// with the intentions of `transcript`'s turn, one per response. It stays in the studio: the session
 /// never sees it. Why there is none when the call failed or its reply holds no answer.
 pub fn ask_about(
@@ -430,7 +430,7 @@ fn brief_in(reply: &str) -> Result<String, String> {
 }
 
 /// The longer explanation of card `id` in `store`: the one kept, or else one more call to `writer`,
-/// whose text is kept with the card (#369, decision 15). The store is not locked while the writer
+/// whose text is kept with the card (danielrispler/Falinks#369, decision 15). The store is not locked while the writer
 /// runs, which takes seconds. A writer that gives no text logs one line to `log`, and nothing is kept.
 pub fn explain_more(
     store: &Mutex<CardStore>,
@@ -470,7 +470,7 @@ pub fn explain_more(
 }
 
 /// The card on `request` from `writer`'s reply, which is asked once more when it gives no card
-/// (#369, decision 12), and `brief` updated with it. The writer reads `earlier`, the summaries of the
+/// (danielrispler/Falinks#369, decision 12), and `brief` updated with it. The writer reads `earlier`, the summaries of the
 /// earlier cards of the prompt `request` belongs to. Each problem is one line for `log`: no card
 /// after the retry, or a card with no quiz or no brief, which is kept without asking again.
 pub fn write_card(
@@ -483,7 +483,7 @@ pub fn write_card(
     let card = || {
         let reply = writer.reply(request, earlier, brief)?;
         let (mut card, mut problem) = Card::from_reply(&reply)?;
-        // A check's card asks whether the check passes, which its result settles (#461, decision
+        // A check's card asks whether the check passes, which its result settles (danielrispler/Falinks#461, decision
         // 15), so its quiz is the app's, with the writer's reasons.
         if let Some(check) = &request.check {
             card.quiz = Some(check_quiz(check, &reply));
@@ -646,7 +646,7 @@ pub struct ClaudeWriter {
     /// The `claude` program, from `find_claude`.
     program: PathBuf,
     folder: PathBuf,
-    /// How long a call may run before it fails and is stopped (#434, decision 30).
+    /// How long a call may run before it fails and is stopped (danielrispler/Falinks#434, decision 30).
     timeout: Duration,
 }
 
@@ -705,7 +705,7 @@ impl ClaudeWriter {
             summaries => summaries.iter().map(|s| format!("- {s}\n")).collect(),
         };
         let brief = so_far(brief);
-        // A check's card is on what the check verifies against the change (#461, decision 15).
+        // A check's card is on what the check verifies against the change (danielrispler/Falinks#461, decision 15).
         let instructions = match &request.check {
             Some(check) => format!("{CHECK}\nThe check's command:\n{check}\n"),
             None => PROMPT.into(),
@@ -744,7 +744,7 @@ impl ClaudeWriter {
             cut => format!(" (the {cut} oldest cut)"),
         };
         let mut kept = prompts[cut..].concat();
-        // The newest prompt alone over the budget is shortened, not dropped (#434, decision 33),
+        // The newest prompt alone over the budget is shortened, not dropped (danielrispler/Falinks#434, decision 33),
         // keeping its start even when the summaries fill the budget.
         if size > MAX_CHANGE
             && let Some(newest) = newest
@@ -814,12 +814,12 @@ impl ClaudeWriter {
     }
 
     /// The `claude -p` run on `prompt`. Without the two variables and without `--bare`, `claude`
-    /// uses the subscription login (#320, "Fact"); the studio never reads that login itself. The
+    /// uses the subscription login (danielrispler/Falinks#320, "Fact"); the studio never reads that login itself. The
     /// prompt holds untrusted text, a change or Daniel's prompts, so the run has no tools and no MCP
     /// servers, whatever Daniel's settings allow. It also runs without the studio plugin, so its
     /// session sends no hook events, and in safe mode, so none of Daniel's plugins, hooks, skills or
-    /// CLAUDE.md reach it (#517, decision 9). The prompt goes on standard input without its NUL bytes, which
-    /// `claude` could not take in an argument either (#434, decision 31).
+    /// CLAUDE.md reach it (danielrispler/Falinks#517, decision 9). The prompt goes on standard input without its NUL bytes, which
+    /// `claude` could not take in an argument either (danielrispler/Falinks#434, decision 31).
     fn run(&self, prompt: &str) -> (Command, String) {
         self.run_with(&[], prompt)
     }
@@ -841,7 +841,7 @@ impl ClaudeWriter {
 
     /// What a run printed, or one line for the log when the call failed: it did not start, exited
     /// with an error, printed nothing, or ran past the timeout, which stops it and every process it
-    /// started, all in its own process group (#434, decision 30).
+    /// started, all in its own process group (danielrispler/Falinks#434, decision 30).
     fn stdout(&self, (mut command, prompt): (Command, String)) -> Result<String, String> {
         let mut child = command
             .stdin(Stdio::piped())
@@ -991,7 +991,7 @@ When the change is not a diff but the agent's workers with the summaries of thei
 "#
 );
 
-/// The card writer's instructions for a check's card (#461, decision 15), written while the check
+/// The card writer's instructions for a check's card (danielrispler/Falinks#461, decision 15), written while the check
 /// runs: on what the check verifies against the change so far. The app asks whether it passes.
 const CHECK: &str = concat!(
     r#"A coding agent just started a check, a command that tests or verifies its code, which usually runs for minutes. You write one card that teaches the developer who waits on it what this check verifies against the change the agent made since the previous card, so he can guess whether it will pass. The card asks him "Will it pass?"; once the check ends, it shows whether he was right and your two reasons. You also update the session's brief, which he reads to resume the session.
@@ -1018,7 +1018,7 @@ Reply with one JSON object and nothing else:
 );
 
 /// The writer's instructions for a brief updated from a session's workers' cards when it changed
-/// nothing itself (#369, decision 11): no card, so a worker's return adds no thin card.
+/// nothing itself (danielrispler/Falinks#369, decision 11): no card, so a worker's return adds no thin card.
 const UPDATE: &str = concat!(
     r#"You update the brief of a coding agent's session, which the developer who runs it reads to resume the session: what the session set out to do, what it has done, oldest first, and what is still open, in a few short lines. Since the brief, the agent changed nothing itself; its workers did.
 
@@ -1032,7 +1032,7 @@ Reply with one JSON object and nothing else: {"brief": string}
 "#
 );
 
-/// The writer's instructions for a brief rewritten from scratch (#369, decision 16): from Daniel's
+/// The writer's instructions for a brief rewritten from scratch (danielrispler/Falinks#369, decision 16): from Daniel's
 /// prompts, the card summaries and the diffstat, never a diff, so errors in the rolling brief do not
 /// compound.
 const REWRITE: &str = concat!(
@@ -1048,7 +1048,7 @@ Reply with one JSON object and nothing else: {"brief": string}
 "#
 );
 
-/// The writer's instructions for "explain more" (#369, decision 15): one more call on the card's
+/// The writer's instructions for "explain more" (danielrispler/Falinks#369, decision 15): one more call on the card's
 /// change, which also reads the card's explanation, so it goes deeper instead of repeating it.
 const MORE: &str = concat!(
     r#"A developer read a card that explains a change a coding agent made to his code, and asked for more. Explain the change in more depth than the card: how the changed code works, step by step, and why it was done this way and not another. Do not repeat the card.
@@ -1065,7 +1065,7 @@ Reply with the explanation only, in at most three short paragraphs: no JSON and 
 "#
 );
 
-/// The writer's instructions for "ask about this" (#461, decision 20): a side question on one item
+/// The writer's instructions for "ask about this" (danielrispler/Falinks#461, decision 20): a side question on one item
 /// of a session, which the session never sees.
 const ASK: &str = concat!(
     r#"A developer watches a coding agent work and asks a side question about one item of its session: one of the agent's responses, one of its intentions (the last line of a response, which says what it does next and why, or the first line of a finished turn's final response, which says what it did), or a card that explains a change it made. The agent never sees the question or your answer. Answer so that he understands the agent's work.

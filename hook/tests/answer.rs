@@ -1,4 +1,4 @@
-// Seam 4 (#461): the answer hook's contract. The binary gets a hook payload on stdin, a scratch `HOME`
+// Seam 4 (danielrispler/Falinks#461): the answer hook's contract. The binary gets a hook payload on stdin, a scratch `HOME`
 // in which the test plays the studio (its watching file and its answer file), and is checked on
 // stdout.
 use serde_json::{Value, json};

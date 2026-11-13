@@ -1,5 +1,5 @@
-// Each fact once (#571): rows show no raw Markdown, long paths show their last 2 segments with the
-// full path on hover, and no clock or estimate says nothing. Run: `npm test` in apps/studio.
+// Each fact once (danielrispler/Falinks#571): rows show no raw Markdown, long paths show their last 2 segments with the
+// full path on hover, and no clock or estimate says nothing. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { plain, rowText, rowTime } from "../../dist/list.js";

@@ -1,5 +1,5 @@
-// Answering from the card (#461, decision 16): the hook waits only while the waiting item's card
-// shows. Run: `npm test` in apps/studio.
+// Answering from the card (danielrispler/Falinks#461, decision 16): the hook waits only while the waiting item's card
+// shows. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -30,7 +30,7 @@ test("a call asks a question, a plan or a permission, by its tool", () => {
   assert.equal(askKind("Bash"), "permission");
 });
 
-// #569: the shell pushes the open request as an `ask` event in its read loop; no timer polls for it.
+// danielrispler/Falinks#569: the shell pushes the open request as an `ask` event in its read loop; no timer polls for it.
 // The one timer only tells the shell the window is alive.
 test("the window takes open requests from the shell's ask event, with no poll", () => {
   const source = readFileSync(new URL("../answer.ts", import.meta.url), "utf8");

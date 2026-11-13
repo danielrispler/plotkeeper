@@ -123,7 +123,7 @@ A question, plan or permission Daniel answered, with his answer and where he gav
 _Avoid_: Verdict (only a plan's or a permission's allow or deny)
 
 **Identity**:
-The name an agent session gets from its work: its issue, its PR and its worktree, such as "#480 · PR #490 · agent-a1b2". A name Daniel gives it replaces it.
+The name an agent session gets from its work: its issue, its PR and its worktree, such as "danielrispler/Falinks#480 · PR danielrispler/Falinks#490 · agent-a1b2". A name Daniel gives it replaces it.
 
 **Context share**:
 How much of its context window an agent session uses, as a percentage. It is measured as Claude Code's status line measures it, from the session's status line snapshot: its tokens, its window size, and its own percent used and left. Without a snapshot, the control room shows the latest turn's tokens only.
@@ -208,4 +208,4 @@ Daniel's shortcuts for the studio, kept in `keymap.json` beside the settings, in
 _Avoid_: Keybindings, shortcuts file
 
 **Explanation language**:
-The human language of cards and questions: English for now, no longer Hebrew (#463), in plain words at Daniel's level. Code terms are in backticks.
+The human language of cards and questions: English for now, no longer Hebrew (danielrispler/Falinks#463), in plain words at Daniel's level. Code terms are in backticks.

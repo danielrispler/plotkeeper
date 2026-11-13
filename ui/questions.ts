@@ -1,7 +1,7 @@
 // An agent's question, laid out as its choices, the one Daniel chose marked. While the answer hook
-// waits for it (#461, decision 16), its choices are buttons, chosen by click or Enter, and "Answer in
+// waits for it (danielrispler/Falinks#461, decision 16), its choices are buttons, chosen by click or Enter, and "Answer in
 // the terminal" hands it back to the TUI; otherwise answering stays in the terminal. A plan or a
-// permission the hook waits on gets the same card with allow and deny (#478).
+// permission the hook waits on gets the same card with allow and deny (danielrispler/Falinks#478).
 
 import { askFor, sendAnswer, type Ask } from "./answer.js";
 import { code, pressable, prose, text } from "./dom.js";
@@ -68,7 +68,7 @@ export function questionElement(question: Question): HTMLElement {
           button.append(...content);
           item.append(button);
         } else item.append(...content);
-        // A label may hold a comma, so only a multi-select answer is split (#434, decision 41).
+        // A label may hold a comma, so only a multi-select answer is split (danielrispler/Falinks#434, decision 41).
         const labels = asked.multiSelect ? chosen?.split(", ") : [chosen];
         item.classList.toggle("chosen", pickedNow || (labels?.includes(choice.label) ?? false));
         return item;
@@ -82,7 +82,7 @@ export function questionElement(question: Question): HTMLElement {
   return block;
 }
 
-// A plan or a permission the answer hook waits on (#478): what it asks, then allow or deny.
+// A plan or a permission the answer hook waits on (danielrispler/Falinks#478): what it asks, then allow or deny.
 export function decisionElement(ask: Ask): HTMLElement {
   const block = document.createElement("article");
   block.className = "question decision";

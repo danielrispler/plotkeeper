@@ -1,4 +1,4 @@
-// v0 for #315: the guess-and-card loop.
+// v0 for danielrispler/Falinks#315: the guess-and-card loop.
 // Tails ../hook/events.jsonl (written by event-hook.sh). At most one guess per wait, which a new prompt resets:
 // the first Bash, Edit/Write or ExitPlanMode opens it, and ExitPlanMode replaces a guess not yet submitted.
 // Edits and Writes to plan files (any path containing /.claude/plans/) never open one.

@@ -1,7 +1,7 @@
-// The picker (#467): where a new session starts. It lists the configured repository's main checkout
+// The picker (danielrispler/Falinks#467): where a new session starts. It lists the configured repository's main checkout
 // and its tasks, read live from git each time it opens, with `agent-*` worktrees hidden and counted
 // on the main checkout. Choosing one starts `claude` there in a new terminal.
-// Creating a task by its branch name and removing one (#468) live in Places (#576), at the list's foot.
+// Creating a task by its branch name and removing one (danielrispler/Falinks#468) live in Places (danielrispler/Falinks#576), at the list's foot.
 // The quick start, first: an issue, a spec or a prompt names a new task, and its session starts on it;
 // left empty, a session starts in the main checkout with no prompt.
 
@@ -21,7 +21,7 @@ function failed(error: unknown) {
 
 // A field whose Enter or button makes a task with `create`, then starts a session there, given
 // `prompt` of the field's text as its first prompt. Only a `prompt` field passes an empty text on.
-// Errors go to `report`: the picker's foot, or Places' (#576).
+// Errors go to `report`: the picker's foot, or Places' (danielrispler/Falinks#576).
 export function newTask(
   placeholder: string,
   label: string,
@@ -63,7 +63,7 @@ export function newTask(
 const quickStart = (main: Place, auto: () => boolean) =>
   newTask("Issue #, spec path or prompt; empty for main", "Start", async (request) => request ? invoke<Place>("create_named_task", { request }) : main, true, failed, auto);
 
-// The Auto mode choice (#541): off each time the picker opens; the session starts in Claude Code's
+// The Auto mode choice (danielrispler/Falinks#541): off each time the picker opens; the session starts in Claude Code's
 // auto mode when on. Bypass mode is never offered.
 function autoChoice(): [HTMLElement, () => boolean] {
   const box = Object.assign(document.createElement("input"), { type: "checkbox" });
@@ -81,7 +81,7 @@ function placeRow(name: string, place: Place, auto: () => boolean): HTMLElement 
   button.classList.add("row");
   const first = text("span", "", "l1");
   first.append(text("span", name, "name"));
-  const second = Object.assign(text("span", shortPath(place.path), "l2"), { title: place.path }); // #571
+  const second = Object.assign(text("span", shortPath(place.path), "l2"), { title: place.path }); // danielrispler/Falinks#571
   button.append(first, second);
   return button;
 }
@@ -111,7 +111,7 @@ function closed(label: string): boolean {
   return shows;
 }
 
-// The palette (#575), in the picker's box: every action with its keys, filtered by what Daniel types;
+// The palette (danielrispler/Falinks#575), in the picker's box: every action with its keys, filtered by what Daniel types;
 // Enter or a click runs one, from where the focus was. Opening it again closes it.
 // shortcut: Tab moves between the rows, not ↑ and ↓.
 export function showPalette(entries: Entry[], run: (binding: Binding) => void) {
@@ -157,7 +157,7 @@ export function showPalette(entries: Entry[], run: (binding: Binding) => void) {
 export async function showPicker() {
   const picker = element("picker");
   if (closed("New session")) return;
-  // It opens once its rows are read, so no placeholder flashes first in another box (#570).
+  // It opens once its rows are read, so no placeholder flashes first in another box (danielrispler/Falinks#570).
   try {
     picker.replaceChildren(...picked(await invoke<Places>("places")));
   } catch (e) {

@@ -1,4 +1,4 @@
-//! Seam 1 (#517, Testing Decisions) for the turn summary (#526; #517, decisions 12, 13 and 16):
+//! Seam 1 (danielrispler/Falinks#517, Testing Decisions) for the turn summary (danielrispler/Falinks#526; danielrispler/Falinks#517, decisions 12, 13 and 16):
 //! which turns get one, and the turn-end intention's one switch to its first line.
 
 use studio_core::{Change, Output, Studio, SummaryRequest};

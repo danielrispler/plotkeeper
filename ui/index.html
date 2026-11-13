@@ -19,14 +19,14 @@
   <!-- The grid runs right to left: the list on the right, the terminal in the centre, the rail on the left. -->
   <div class="app">
     <header class="top" data-tauri-drag-region="deep">
-      <!-- The selected session's name and context share are on its row only (#571). -->
+      <!-- The selected session's name and context share are on its row only (danielrispler/Falinks#571). -->
       <span class="sp"></span>
-      <!-- How many sessions need Daniel (#572), shown whenever any do; it selects the first. -->
+      <!-- How many sessions need Daniel (danielrispler/Falinks#572), shown whenever any do; it selects the first. -->
       <button id="needs-you" class="btn small chip" type="button" hidden></button>
       <button id="new-session" class="btn small" type="button">New session</button>
-      <!-- Usage: context, 5h and week (#480, #481). -->
+      <!-- Usage: context, 5h and week (danielrispler/Falinks#480, danielrispler/Falinks#481). -->
       <span id="usage" class="usage"></span>
-      <!-- While the rail is an overlay: the selected session's state and open question (#573). -->
+      <!-- While the rail is an overlay: the selected session's state and open question (danielrispler/Falinks#573). -->
       <span id="slim" class="slim" hidden></span>
       <button id="rail-toggle" class="btn small" type="button" hidden>Story ⌘2</button>
     </header>
@@ -35,43 +35,43 @@
       <div class="full">
         <p id="no-sessions" class="empty">No session yet.</p>
         <div id="groups"></div>
-        <!-- Places (#576): the main checkout and each task, with their counts; folded. -->
+        <!-- Places (danielrispler/Falinks#576): the main checkout and each task, with their counts; folded. -->
         <details id="places" class="places"><summary id="places-title">Places</summary><div id="places-rows"></div></details>
       </div>
       <div id="strip" class="strip"></div>
     </nav>
 
-    <!-- The picker (#467): where a new session starts. Creating and removing tasks is #468. -->
+    <!-- The picker (danielrispler/Falinks#467): where a new session starts. Creating and removing tasks is danielrispler/Falinks#468. -->
     <div id="picker" class="picker" role="dialog" aria-label="New session" hidden></div>
 
-    <!-- The terminal panes (#466, #467) draw into #terminal-body. -->
+    <!-- The terminal panes (danielrispler/Falinks#466, danielrispler/Falinks#467) draw into #terminal-body. -->
     <section id="terminal" class="term" aria-label="Terminal">
       <div id="terminal-head" class="term-h"><span id="terminal-title">terminal</span></div>
-      <!-- A new build to restart into, or the daemon upgrade's wait (#470). -->
+      <!-- A new build to restart into, or the daemon upgrade's wait (danielrispler/Falinks#470). -->
       <div id="restart" class="restart" role="status" hidden></div>
-      <!-- A split (#529) shows two panes, the divider between them. -->
+      <!-- A split (danielrispler/Falinks#529) shows two panes, the divider between them. -->
       <div id="terminal-body" class="term-body"><div id="split-divider" class="split-divider" hidden></div></div>
-      <!-- The terminal panel (#542): a shell in the shown session's folder, a band under the panes. -->
+      <!-- The terminal panel (danielrispler/Falinks#542): a shell in the shown session's folder, a band under the panes. -->
       <div id="panel" class="term-body panel" hidden><div id="panel-divider" class="split-divider stacked" role="separator" aria-orientation="horizontal" aria-label="Resize the terminal panel"></div></div>
-      <!-- The needs-you toast (#573): over the terminal's top-right corner, never focused. -->
+      <!-- The needs-you toast (danielrispler/Falinks#573): over the terminal's top-right corner, never focused. -->
       <div id="toast" class="toast" role="status" hidden></div>
-      <!-- A program that failed at start (#558): over the terminal's bottom-right corner, never focused. -->
+      <!-- A program that failed at start (danielrispler/Falinks#558): over the terminal's bottom-right corner, never focused. -->
       <div id="start-toast" class="toast start" role="status" hidden></div>
     </section>
 
     <aside class="rail" aria-label="Session story">
-      <!-- One line (#574): the verdict, the permission mode unless default (#541), always shown, and
-           the phase (#475); the times (#473) and the model show on hover. Rename, Close and Delete
+      <!-- One line (danielrispler/Falinks#574): the verdict, the permission mode unless default (danielrispler/Falinks#541), always shown, and
+           the phase (danielrispler/Falinks#475); the times (danielrispler/Falinks#473) and the model show on hover. Rename, Close and Delete
            wait in the "⋯" menu. -->
       <div class="rail-h">
         <p id="headline" class="headline"><span id="state" class="state"></span> <span id="mode" class="mode"></span> <span id="phase" class="phase"></span></p>
         <button id="rail-more" class="btn small" type="button" popovertarget="rail-actions" aria-label="More actions" hidden>⋯</button>
         <div id="rail-actions" class="menu" popover>
-          <!-- An ended session opens again with `claude --resume` (#467). -->
+          <!-- An ended session opens again with `claude --resume` (danielrispler/Falinks#467). -->
           <button id="reopen" class="btn small" type="button" hidden>Open</button>
-          <!-- Rename and close (#469). -->
+          <!-- Rename and close (danielrispler/Falinks#469). -->
           <button id="rename" class="btn small" type="button" hidden>Rename</button>
-          <!-- Unseen (#556): the row's mark comes back until Daniel selects it again. -->
+          <!-- Unseen (danielrispler/Falinks#556): the row's mark comes back until Daniel selects it again. -->
           <button id="mark-unseen" class="btn small" type="button" hidden>Mark unseen</button>
           <button id="close" class="btn small" type="button" hidden>Close</button>
           <button id="open-all" class="btn small" type="button">Open all</button>
@@ -85,32 +85,32 @@
         <p id="notice" role="status" hidden></p>
         <p id="empty" class="empty">Pick a session in the list.</p>
         <section id="view" hidden>
-          <!-- Else the newest card (#574). -->
+          <!-- Else the newest card (danielrispler/Falinks#574). -->
           <section id="now-card"></section>
-          <!-- The intention, boxed as the anchor (mockup C), and the step line (#472). -->
+          <!-- The intention, boxed as the anchor (mockup C), and the step line (danielrispler/Falinks#472). -->
           <div id="intention" class="intention">
             <p><span id="intention-text"></span> <span id="intention-age" class="age"></span></p>
             <details id="unavailable" class="unavailable" hidden><summary>Steps only</summary><span id="unavailable-why"></span></details>
             <details id="step" class="step"><summary><span id="tool" class="tool-name"></span> <span id="detail"></span></summary><code id="command"></code></details>
           </div>
-          <!-- The latest turn's summary (#526). -->
+          <!-- The latest turn's summary (danielrispler/Falinks#526). -->
           <section id="now-summary"></section>
           <!-- The feed of turns, newest first: each with its prompt, summary, learning question, cards,
-               subagents (#535), checks and folded response. -->
+               subagents (danielrispler/Falinks#535), checks and folded response. -->
           <ol id="feed" class="feed"></ol>
           <details id="brief-fold" class="decisions" hidden><summary>Brief</summary><section id="brief" class="brief"></section></details>
-          <!-- Decision history (#479), folded under the feed. -->
+          <!-- Decision history (danielrispler/Falinks#479), folded under the feed. -->
           <details id="decisions" class="decisions" hidden><summary id="decisions-title"></summary><ol id="decisions-list"></ol></details>
         </section>
       </div>
-      <!-- The skills browser (#528), in the rail's place while open; Esc returns. -->
+      <!-- The skills browser (danielrispler/Falinks#528), in the rail's place while open; Esc returns. -->
       <section id="skills" class="story skills" aria-label="Skills"></section>
     </aside>
   </div>
   <!-- The dividers: drag to resize the list and the rail. -->
   <div id="list-divider" class="divider" role="separator" aria-orientation="vertical" aria-label="Resize the session list"></div>
   <div id="rail-divider" class="divider" role="separator" aria-orientation="vertical" aria-label="Resize the story rail"></div>
-  <!-- The questions of rename and close (#469). -->
+  <!-- The questions of rename and close (danielrispler/Falinks#469). -->
   <dialog id="rename-dialog" class="ask">
     <form method="dialog">
       <label for="rename-field">Name this session</label>
@@ -144,7 +144,7 @@
       <div class="ask-buttons"><button class="btn" value="remove">Remove anyway</button><button class="btn" value="keep" autofocus>Keep the worktree</button></div>
     </form>
   </dialog>
-  <!-- The daemon upgrade's question (#470, #322 resolution point 4). -->
+  <!-- The daemon upgrade's question (danielrispler/Falinks#470, danielrispler/Falinks#322 resolution point 4). -->
   <dialog id="upgrade" class="upgrade" aria-labelledby="upgrade-title">
     <form method="dialog">
       <h1 id="upgrade-title">Restart the terminal daemon?</h1>

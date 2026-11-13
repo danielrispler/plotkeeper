@@ -1,4 +1,4 @@
-// OSC 7501, the Program Status Protocol (#555): a terminal's root status from the reports its program writes, and
+// OSC 7501, the Program Status Protocol (danielrispler/Falinks#555): a terminal's root status from the reports its program writes, and
 // the reply to the program's query. The protocol and herdr-core's `turn` rule are in `docs/studio/research/herdr.md`,
 // "Agent status: OSC 7501".
 use serde_json::{Value, json};
@@ -133,7 +133,7 @@ impl Status {
         self.root = None;
     }
 
-    /// The program's name for itself in its root status, for the record (#561).
+    /// The program's name for itself in its root status, for the record (danielrispler/Falinks#561).
     pub fn app(&self) -> Option<&str> {
         self.root.as_ref()?.app.as_deref()
     }

@@ -1,5 +1,5 @@
-//! The weekly check on the questions (#328, module 6; resolution, "Understanding layer", point 7;
-//! #369, decision 23): whether the questions make Daniel think, and how he rated the cards. Only the
+//! The weekly check on the questions (danielrispler/Falinks#328, module 6; resolution, "Understanding layer", point 7;
+//! danielrispler/Falinks#369, decision 23): whether the questions make Daniel think, and how he rated the cards. Only the
 //! weekly command prints these; the app shows no rate. The thresholds are starting guesses.
 
 use crate::{Level, Reason, StoredCard};
@@ -28,7 +28,7 @@ pub struct Week {
     pub ratings: Ratings,
 }
 
-/// Daniel's ratings of the week's cards, by level and by reason (#369, decision 23).
+/// Daniel's ratings of the week's cards, by level and by reason (danielrispler/Falinks#369, decision 23).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Ratings {
     /// The week's cards, rated or not.

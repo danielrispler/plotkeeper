@@ -1,5 +1,5 @@
-// One-line rows (#572): status by shape, a word with every glyph, colour only for needs you, distinct
-// strip labels and the needs-you chip. Run: `npm test` in apps/studio.
+// One-line rows (danielrispler/Falinks#572): status by shape, a word with every glyph, colour only for needs you, distinct
+// strip labels and the needs-you chip. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -11,7 +11,7 @@ test("each state has its glyph and a word for its title and accessible name", ()
   assert.deepEqual(status("your_turn"), ["dot", "Your turn"]);
   assert.deepEqual(status("your_turn", true), ["filled", "Your turn, not seen"]);
   assert.deepEqual(status("idle"), ["ring", "Idle"]);
-  // An unseen turn keeps its mark once the session goes idle (#556).
+  // An unseen turn keeps its mark once the session goes idle (danielrispler/Falinks#556).
   assert.deepEqual(status("idle", true), ["filled", "Idle, not seen"]);
   assert.deepEqual(status("ended"), ["ring", "Ended"]);
   // A subagent's own status, such as "completed", is its word.

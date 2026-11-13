@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Every step round 5 needs (#517) that cannot run in auto mode, in one run: real model calls, and
+# Every step round 5 needs (danielrispler/Falinks#517) that cannot run in auto mode, in one run: real model calls, and
 # steps that launch and kill an app build. Daniel runs it outside auto mode, from any checkout:
-# `apps/studio/real-calls.sh`. Each step's output goes to one folder in `local-evidence/`, with the
+# `real-calls.sh`. Each step's output goes to one folder in `local-evidence/`, with the
 # script's own terminal output in `run.log`; a step whose code is not built yet is skipped and says
 # so. The model calls use Daniel's subscription.
 set -uo pipefail
@@ -26,16 +26,16 @@ step() {
 }
 example() { [ -f "understanding/examples/$1.rs" ]; }
 
-# #518: 5 timed cards in safe mode, beside #471's median 20.1 s and slowest 24.4 s.
-step "#518 writer timing" 518-writer-timing.json cargo run -q -p studio-understanding --example writer_timing -- --runs 5
-# #518: real cards, explain more and a brief; check their text carries no plugin footer.
+# danielrispler/Falinks#518: 5 timed cards in safe mode, beside danielrispler/Falinks#471's median 20.1 s and slowest 24.4 s.
+step "danielrispler/Falinks#518 writer timing" 518-writer-timing.json cargo run -q -p studio-understanding --example writer_timing -- --runs 5
+# danielrispler/Falinks#518: real cards, explain more and a brief; check their text carries no plugin footer.
 real_card=0
-step "#518 real card" 518-real-card.txt cargo run -q -p studio-understanding --example real_card || real_card=$?
-# #526: turn summaries on 3 real turns, for Daniel to judge.
+step "danielrispler/Falinks#518 real card" 518-real-card.txt cargo run -q -p studio-understanding --example real_card || real_card=$?
+# danielrispler/Falinks#526: turn summaries on 3 real turns, for Daniel to judge.
 if example summary_trial; then
-  step "#526 summaries" 526-summaries.md cargo run -q -p studio-understanding --example summary_trial -- --turns 3
+  step "danielrispler/Falinks#526 summaries" 526-summaries.md cargo run -q -p studio-understanding --example summary_trial -- --turns 3
 else
-  echo "== #526 summaries: skipped, summary_trial is not built yet"
+  echo "== danielrispler/Falinks#526 summaries: skipped, summary_trial is not built yet"
 fi
 
 # Lines a plugin footer would start with, so a footer in a card stands out. A failed step leaves an
@@ -48,7 +48,7 @@ else
   echo "== no footer in 518-real-card.txt"
 fi
 
-# #543: can macOS kill the terminal daemon when the app quits, is force quit or crashes? A separate
+# danielrispler/Falinks#543: can macOS kill the terminal daemon when the app quits, is force quit or crashes? A separate
 # build, `StudioRepro`, with its own identifier, home, socket and data folder, so the live app,
 # daemon and terminals are never touched. A crash may show macOS's "quit unexpectedly" dialog.
 repro_app="$studio/target/release/bundle/macos/StudioRepro.app"
@@ -56,8 +56,8 @@ build_repro() {
   { [ -d node_modules ] || npm ci; } &&
     npx tauri build --config '{"identifier":"dev.falinks.studio-repro","productName":"StudioRepro"}'
 }
-if step "#543 repro build" 543-build.txt build_repro; then
-  step "#543 daemon kill" 543-daemon-kill.json cargo run -q -p studio-terminal-daemon --example kill_repro -- --app "$repro_app" --out "$out"
+if step "danielrispler/Falinks#543 repro build" 543-build.txt build_repro; then
+  step "danielrispler/Falinks#543 daemon kill" 543-daemon-kill.json cargo run -q -p studio-terminal-daemon --example kill_repro -- --app "$repro_app" --out "$out"
 else
-  echo "== #543 daemon kill: skipped, the repro build failed"
+  echo "== danielrispler/Falinks#543 daemon kill: skipped, the repro build failed"
 fi

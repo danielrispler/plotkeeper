@@ -1,4 +1,4 @@
-//! The studio's terminal daemon (#322, #464): a background process that owns the PTYs, so terminals outlive the app.
+//! The studio's terminal daemon (danielrispler/Falinks#322, danielrispler/Falinks#464): a background process that owns the PTYs, so terminals outlive the app.
 //! It is its own crate and binary, so rebuilding the app never rebuilds or restarts it.
 //!
 //! # Protocol
@@ -17,7 +17,7 @@
 //!   scrollback_bytes, rss_kb, processes: [{pid, command, rss_kb}]}]}`. `processes` is every live process of the
 //!   terminal's session, so after `exited` is set it lists what was left behind; `rss_kb` is their sum. `cwd` is
 //!   the folder its leader is in now, such as where its shell `cd`-ed to, until it exits. Each row also carries the
-//!   program's OSC 7501 root status (#555): `state`, `kind`, `app` and `status_ms` (when the state last changed),
+//!   program's OSC 7501 root status (danielrispler/Falinks#555): `state`, `kind`, `app` and `status_ms` (when the state last changed),
 //!   all null until it reports and after `clear` or its exit, and `turn`, which goes up each time the root leaves
 //!   `working`.
 //!
@@ -31,8 +31,8 @@
 //!
 //! Beside the socket, the daemon keeps a record of the terminals it runs, `[{id, argv, cwd, foreground, app}]`
 //! ([`record`]), rewritten at each spawn, exit, forget and `list`, with `cwd` as `list` gives it, `foreground` as
-//! `list` last saw it and `app` as its OSC 7501 status names it now (#561). It outlives the daemon, so after a
-//! crash, a reboot or [`stop`] it lists the terminals that were lost (#470).
+//! `list` last saw it and `app` as its OSC 7501 status names it now (danielrispler/Falinks#561). It outlives the daemon, so after a
+//! crash, a reboot or [`stop`] it lists the terminals that were lost (danielrispler/Falinks#470).
 use base64::{Engine, engine::general_purpose::STANDARD as B64};
 use serde_json::Value;
 use std::{
@@ -53,13 +53,13 @@ pub fn record(socket: &Path) -> PathBuf {
     socket.with_extension("terminals.json")
 }
 
-/// The studio's presence file for Remote Control (#522), which the daemon deletes when the app's connection drops
-/// (#555). The socket lives in the studio's data folder, `studio_hook::data_dir`, beside `present`.
+/// The studio's presence file for Remote Control (danielrispler/Falinks#522), which the daemon deletes when the app's connection drops
+/// (danielrispler/Falinks#555). The socket lives in the studio's data folder, `studio_hook::data_dir`, beside `present`.
 pub fn presence(socket: &Path) -> PathBuf {
     socket.with_file_name("present")
 }
 
-/// Stops the daemon on `socket`, whatever its protocol, for an upgrade (#322 resolution, point 4): `SIGTERM`, then
+/// Stops the daemon on `socket`, whatever its protocol, for an upgrade (danielrispler/Falinks#322 resolution, point 4): `SIGTERM`, then
 /// the hangup and, after 500 ms, `SIGKILL` to every process of its terminals, as `kill` does. Its record stays.
 pub fn stop(socket: &Path) -> io::Result<()> {
     let mut client = Client::connect(socket, 0)?;

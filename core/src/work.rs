@@ -1,4 +1,4 @@
-//! Phases and the estimate (#461, decision 14): which phase of its work on a ticket a session is in,
+//! Phases and the estimate (danielrispler/Falinks#461, decision 14): which phase of its work on a ticket a session is in,
 //! from the skills its agent invokes and the commands it runs, and how long its remaining work
 //! typically takes, from the sessions of the same kind before it.
 
@@ -110,7 +110,7 @@ impl Work {
     }
 }
 
-/// How many past sessions of a kind an estimate needs (#461, decision 22).
+/// How many past sessions of a kind an estimate needs (danielrispler/Falinks#461, decision 22).
 pub const MIN_HISTORY: usize = 20;
 
 /// The range of the remaining work from the start of `phase`, from how long it took in `past`

@@ -1,4 +1,4 @@
-// Settings and keymap (#524, #517 decision 17): `settings.json` and `keymap.json` in the studio's
+// Settings and keymap (danielrispler/Falinks#524, danielrispler/Falinks#517 decision 17): `settings.json` and `keymap.json` in the studio's
 // data folder, in Zed's format (JSON with comments and trailing commas). The shell sends both files'
 // text at start and each time one is saved; a file that does not parse is reported and the last good
 // one stays in effect.
@@ -25,14 +25,16 @@ export interface Settings {
   // writes its summary.
   summaries: { model: string; effort: string; on_open: boolean };
   // Whether "your turn" also notifies while the window is focused, for any session but the selected
-  // one (#517, decision 6).
+  // one (danielrispler/Falinks#517, decision 6).
   notifications: { while_focused: boolean };
-  // The needs-you and your-turn sounds (#556).
+  // The needs-you and your-turn sounds (danielrispler/Falinks#556).
   sounds: boolean;
   doctor: DoctorEntry[];
-  // The command that opens a file at its line (#557), an argv with `{path}`, `{line}` and `{column}`,
+  // The command that opens a file at its line (danielrispler/Falinks#557), an argv with `{path}`, `{line}` and `{column}`,
   // never a shell string. null: the shell's default, Zed's CLI when installed, else `open`.
   editor: string[] | null;
+  // The configured repository (danielrispler/Falinks#605), which the shell reads from the file itself. null: the studio's checkout.
+  repository: string | null;
 }
 
 // Both settings files, parsed: the settings and keymap in effect.
@@ -58,7 +60,7 @@ const FONT_MAX = 40;
 const defaultSettings: Settings = {
   zoom: 1,
   terminal: { font_size: null },
-  // Haiku at its default effort (#517, decision 14).
+  // Haiku at its default effort (danielrispler/Falinks#517, decision 14).
   summaries: { model: "haiku", effort: "", on_open: false },
   notifications: { while_focused: false },
   sounds: true,
@@ -67,25 +69,26 @@ const defaultSettings: Settings = {
     { label: "Full checkup", command: "/doctor", kind: "session" },
   ],
   editor: null,
+  repository: null,
 };
 
 // Today's shortcuts. The terminal's Cmd+C and Cmd+V stay the Edit menu's (`keys.ts`). "List" holds
-// the keys of the session list while it has focus, over the window's (#575).
+// the keys of the session list while it has focus, over the window's (danielrispler/Falinks#575).
 const defaultKeymap: Keymap = {
   Workspace: {
     "cmd-1": "studio::ToggleList",
     "cmd-2": "studio::ToggleRail",
     escape: "studio::Dismiss",
-    // Focus mode (#573), in `MODIFIERS` order, as the lookup reads it.
+    // Focus mode (danielrispler/Falinks#573), in `MODIFIERS` order, as the lookup reads it.
     "shift-cmd-enter": "studio::ToggleFocus",
-    // Split terminals (#529): the pane shown stays beside the next one selected.
+    // Split terminals (danielrispler/Falinks#529): the pane shown stays beside the next one selected.
     "cmd-d": "studio::ToggleSplit",
-    // The terminal panel (#542), as in VS Code; it works from inside a terminal too (`keys.ts`).
+    // The terminal panel (danielrispler/Falinks#542), as in VS Code; it works from inside a terminal too (`keys.ts`).
     "ctrl-`": "studio::TogglePanel",
     "cmd-=": "studio::ZoomIn",
     "cmd--": "studio::ZoomOut",
     "cmd-0": "studio::ResetZoom",
-    // The keyboard spine (#565, decision 7).
+    // The keyboard spine (danielrispler/Falinks#565, decision 7).
     "cmd-]": "studio::NextSession",
     "cmd-[": "studio::PreviousSession",
     "cmd-j": "studio::NextNeedsYou",
@@ -159,6 +162,7 @@ function readSettings(json: unknown, report: Report): Settings {
         })
       : d.doctor,
     editor: readEditor(json.editor, report),
+    repository: pick("repository", json.repository ?? undefined, "") || null,
   };
 }
 

@@ -1,4 +1,4 @@
-//! Seam 1 (#461, Testing Decisions) for times (#461, decision 13): replay a scrubbed fixture and check
+//! Seam 1 (danielrispler/Falinks#461, Testing Decisions) for times (danielrispler/Falinks#461, decision 13): replay a scrubbed fixture and check
 //! the session's, turn's and step's times, a backgrounded check's real duration, and typical check
 //! durations from history. `times.jsonl` holds an earlier session that ran the checks in 6 and 8
 //! minutes, then a session that runs them in the foreground in 7, in the background in 8.5 (launch

@@ -1,6 +1,6 @@
 // The selection: only Daniel's click, or a session he starts (`startClaude`), changes the selected
 // session, and the subagent of it whose view shows, if any. The core decides; this draws the one
-// selection it returns in the list, the rail and the terminal (#567).
+// selection it returns in the list, the rail and the terminal (danielrispler/Falinks#567).
 
 import { rewatch } from "./answer.js";
 import { showCards } from "./cards.js";
@@ -19,7 +19,7 @@ export async function refreshCards() {
 
 // Whether row `session`, or its subagent `agent`'s line, shows selected: the one Daniel just pressed
 // until the shell replies, else the shell's selection, so a reply that disagrees moves the mark back
-// (#570). With no `agent`, any of the session's lines counts, as the strip shows.
+// (danielrispler/Falinks#570). With no `agent`, any of the session's lines counts, as the strip shows.
 export function isSelected(session: string, agent?: string | null): boolean {
   const shown = studio.pending ?? (studio.selection && { id: studio.selection.session.id, agent: studio.selection.agent });
   return shown?.id === session && (agent === undefined || shown.agent === agent);
@@ -38,7 +38,7 @@ export async function select(id: string, agent: string | null = null) {
       selected = await invoke<Selection>("open", { agentId: agent });
       studio.listed = await invoke<Session[]>("sessions");
     }
-    // The cards come first, so the rail draws the new session once, with its cards (#567).
+    // The cards come first, so the rail draws the new session once, with its cards (danielrispler/Falinks#567).
     const cards = await invoke<SessionCards>("cards");
     if (studio.pending === pressed) {
       studio.pending = null;

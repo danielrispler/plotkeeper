@@ -1,4 +1,4 @@
-// The quiet frame (#566): named tokens and one button component. Run: `npm test` in apps/studio.
+// The quiet frame (danielrispler/Falinks#566): named tokens and one button component. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -16,7 +16,7 @@ test("the token file names sizes, spacing and colours", () => {
 
 test("no style outside the token file uses a raw size, spacing or colour", () => {
   const offending = [
-    // Comments go first: they cite issues, such as #463, which read as colours.
+    // Comments go first: they cite issues, such as danielrispler/Falinks#463, which read as colours.
     ...read("style.css").replace(/\/\*[\s\S]*?\*\//g, "").split("\n").map((line) => ["style.css", line]),
     ...read("index.html").split("\n").filter((line) => /style=/.test(line)).map((line) => ["index.html", line]),
     ...scripts.flatMap((name) => read(name).split("\n").map((line, i) => [`${name}:${i + 1}`, line]))

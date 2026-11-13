@@ -1,4 +1,4 @@
-// The daemon itself, built from the #322 spike (`terminal-spike/src/daemon.rs`). It owns the PTYs, keeps each
+// The daemon itself, built from the danielrispler/Falinks#322 spike (`terminal-spike/src/daemon.rs`). It owns the PTYs, keeps each
 // terminal's raw output as scrollback, and serves clients over the socket (protocol in lib.rs).
 use crate::{PROTOCOL, decode, encode, status::Status};
 use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
@@ -62,12 +62,12 @@ struct Term {
     rows: u16,
     exited: Option<String>,
     status: Status,
-    /// The program in its foreground as `list` last saw it, for the record (#561).
+    /// The program in its foreground as `list` last saw it, for the record (danielrispler/Falinks#561).
     foreground: Option<String>,
 }
 
 impl Term {
-    // The folder its leader is in now, such as where a shell `cd`-ed to, so a revived shell starts there (#470); the
+    // The folder its leader is in now, such as where a shell `cd`-ed to, so a revived shell starts there (danielrispler/Falinks#470); the
     // spawn's folder once it exited, as its pid may name another process by then.
     fn cwd(&self) -> String {
         let pid = self.pty.pid.filter(|_| self.exited.is_none());
@@ -151,7 +151,7 @@ impl State {
 }
 
 // The record of the terminals (`crate::record`), written outside the state lock so output never waits on disk
-// (#555, row 6). Only the newest copy is written: a writer takes whatever is newest when its turn comes.
+// (danielrispler/Falinks#555, row 6). Only the newest copy is written: a writer takes whatever is newest when its turn comes.
 #[derive(Default)]
 struct Record {
     path: PathBuf,
@@ -184,7 +184,7 @@ pub fn serve(socket: &Path) -> Result<(), String> {
         libc::signal(libc::SIGHUP, libc::SIG_IGN);
         libc::signal(libc::SIGPIPE, libc::SIG_IGN);
     }
-    // Only Daniel's account may reach the socket (#555): the folder is 0700, also when it already existed.
+    // Only Daniel's account may reach the socket (danielrispler/Falinks#555): the folder is 0700, also when it already existed.
     if let Some(dir) = socket.parent() {
         std::fs::create_dir_all(dir)
             .and_then(|()| std::fs::set_permissions(dir, Permissions::from_mode(0o700)))
@@ -403,7 +403,7 @@ fn serve_conn(n: usize, stream: UnixStream, state: Shared) {
     }
     let s = &mut *state.lock().unwrap();
     s.conns.remove(&n);
-    // The app quit or crashed, so nobody is looking at the studio (#555). An app dropped for lag
+    // The app quit or crashed, so nobody is looking at the studio (danielrispler/Falinks#555). An app dropped for lag
     // reconnects, and its window may still be focused.
     if app && !lagged.load(Ordering::Relaxed) {
         let _ = std::fs::remove_file(&s.presence);

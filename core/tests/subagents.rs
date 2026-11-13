@@ -1,4 +1,4 @@
-//! Seam 1 (#369, Testing Decisions) for the subagent tree (#372): replay hook events through the core
+//! Seam 1 (danielrispler/Falinks#369, Testing Decisions) for the subagent tree (danielrispler/Falinks#372): replay hook events through the core
 //! and check each session's subagents: who spawned them, worker or helper, their status and result,
 //! and the waits they raise on their session.
 
@@ -16,7 +16,7 @@ fn replay(log: &str) -> Studio {
     Studio::replayed(log.lines())
 }
 
-/// The checkpoint day of #347, scrubbed (#370).
+/// The checkpoint day of danielrispler/Falinks#347, scrubbed (danielrispler/Falinks#370).
 const DAY: &str = include_str!("fixtures/checkpoint-day.jsonl");
 
 #[test]
@@ -41,7 +41,7 @@ fn the_days_subagents_are_5_workers_7_helpers_and_1_unattached_agent() {
             ("2afc85f5", "aaf57", Worker, session()),
             ("596c28a1", "a66b1", Helper, session()),
             ("596c28a1", "a6838", Helper, session()),
-            // `0222b62d`'s, whose `/clear` continued `5bb84a4a`'s row (#474).
+            // `0222b62d`'s, whose `/clear` continued `5bb84a4a`'s row (danielrispler/Falinks#474).
             ("5bb84a4a", "a5532", Helper, session()),
             ("5bb84a4a", "ac32f", Helper, session()),
             ("5d7f69ab", "a1191", Worker, session()),
@@ -55,7 +55,7 @@ fn the_days_subagents_are_5_workers_7_helpers_and_1_unattached_agent() {
     );
 }
 
-/// The scripted session of `record-subagent-run.sh` (#370): a worktree worker writes and commits a
+/// The scripted session of `record-subagent-run.sh` (danielrispler/Falinks#370): a worktree worker writes and commits a
 /// file, and a helper is stopped mid-step.
 const RUN: &str = include_str!("fixtures/subagent-run.jsonl");
 const RUN_SESSION: &str = "40e8e6ef-9b2f-4467-9b55-87c2d053b616";
@@ -122,7 +122,7 @@ fn the_runs_worker_completes_with_its_last_message_and_its_killed_helper_stays_v
     assert!(agent(&studio, RUN_SESSION, RUN_HELPER).faded());
 }
 
-/// #434, decision 39: opening a running subagent's line records nothing, so a helper opened while it
+/// danielrispler/Falinks#434, decision 39: opening a running subagent's line records nothing, so a helper opened while it
 /// ran and then killed stays on its parent's line as failed.
 #[test]
 fn a_helper_opened_while_running_and_then_killed_stays_visible_and_failed() {
@@ -170,11 +170,11 @@ fn a_helper_or_worker_that_succeeds_fades() {
     assert_eq!(
         (worker.status.to_string().as_str(), worker.faded()),
         ("completed", true),
-        "a finished worker folds into its parent's line too (#535)"
+        "a finished worker folds into its parent's line too (danielrispler/Falinks#535)"
     );
 }
 
-/// #535: a failed worker stays visible until Daniel opens it, as a failed helper does.
+/// danielrispler/Falinks#535: a failed worker stays visible until Daniel opens it, as a failed helper does.
 #[test]
 fn a_failed_worker_stays_visible_until_it_is_opened() {
     let killed = RUN.replace(
@@ -357,7 +357,7 @@ fn a_childs_permission_request_makes_its_session_need_you_until_its_step_resolve
     expected.extend(vec![(YourTurn, None); 6]);
     assert_eq!(states, expected);
 
-    // One notice, on the session's line, naming the grandchild who asks (#369, decision 22). The
+    // One notice, on the session's line, naming the grandchild who asks (danielrispler/Falinks#369, decision 22). The
     // `Stop` while it waits gives no second one.
     let mut studio = Studio::default();
     let notices = TREE.lines().flat_map(|line| studio.apply(line));
@@ -448,7 +448,7 @@ fn the_wire_keeps_each_subagents_status_failed_and_faded() {
     );
 }
 
-/// Decision 18 of #410: a session's live keys last until its `SessionEnd`, and come back when it
+/// Decision 18 of danielrispler/Falinks#410: a session's live keys last until its `SessionEnd`, and come back when it
 /// starts again.
 #[test]
 fn a_session_and_its_subagents_are_live_until_it_ends_and_again_once_it_resumes() {
@@ -662,7 +662,7 @@ fn a_killed_worker_that_its_sessions_stop_ended_first_still_gets_its_end_look() 
     assert!(looks.contains(&end), "{looks:?}");
 }
 
-/// #535: the rail's history of a session's subagents reads each one off the wire, faded or not: its
+/// danielrispler/Falinks#535: the rail's history of a session's subagents reads each one off the wire, faded or not: its
 /// purpose (its name and its prompt's first line), its result, type, times and kind. The summary
 /// call reads its whole prompt and last message.
 #[test]
@@ -785,7 +785,7 @@ fn changed(key: &str) -> BTreeMap<String, Change> {
     BTreeMap::from([(key.into(), change)])
 }
 
-/// #434, decision 21: a failed command that ran changed files all the same.
+/// danielrispler/Falinks#434, decision 21: a failed command that ran changed files all the same.
 #[test]
 fn a_helper_whose_failed_command_changed_its_worktree_is_a_worker() {
     let mut studio = helper_in_turn(1_000);
@@ -808,7 +808,7 @@ fn a_helper_whose_edit_failed_stays_a_helper() {
     assert_eq!(agent(&studio, "s1", "h1").kind, Helper);
 }
 
-/// #434, decision 22: the due fallback's look comes beside the helper's own.
+/// danielrispler/Falinks#434, decision 22: the due fallback's look comes beside the helper's own.
 #[test]
 fn a_helper_whose_command_changed_its_worktree_while_the_fallback_was_due_is_a_worker() {
     let late = 21 * 60 * 1000;

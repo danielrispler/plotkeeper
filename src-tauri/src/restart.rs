@@ -1,4 +1,4 @@
-//! Restarts (#470): one app instance at a time, a "restart into the new build" step, and the core's
+//! Restarts (danielrispler/Falinks#470): one app instance at a time, a "restart into the new build" step, and the core's
 //! answer on the daemon's terminals, idle and how each comes back (`Studio::revival`).
 
 use std::{

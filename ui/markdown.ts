@@ -1,6 +1,6 @@
-// Responses render as Markdown (#525, decision 21): tables, lists, code and links. The text is
+// Responses render as Markdown (danielrispler/Falinks#525, decision 21): tables, lists, code and links. The text is
 // untrusted and the page can call the shell, so raw HTML stays text, only `http(s)` and file links
-// (#557) become links, and an image shows its alt text. marked loads as a plain script from `vendor/`.
+// (danielrispler/Falinks#557) become links, and an image shows its alt text. marked loads as a plain script from `vendor/`.
 
 import { invoke } from "./dom.js";
 import { codePath, fileTarget, openFile } from "./paths.js";
@@ -20,7 +20,7 @@ const create = () =>
     renderer: {
       html: ({ text, block }) => (block ? `<p>${escape(text)}</p>` : escape(text)),
       image: ({ text }) => escape(text),
-      // Inline code that is a whole file path links to the editor (#581), unless it is a link's text.
+      // Inline code that is a whole file path links to the editor (danielrispler/Falinks#581), unless it is a link's text.
       codespan({ text }) {
         const code = `<code>${escape(text)}</code>`;
         return !inLink && codePath(text) ? `<a href="${escape(text)}" data-file>${code}</a>` : code;

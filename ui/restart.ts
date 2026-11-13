@@ -1,4 +1,4 @@
-// Restarts (#470): the offer to restart into a new build, and the daemon upgrade (#322 resolution,
+// Restarts (danielrispler/Falinks#470): the offer to restart into a new build, and the daemon upgrade (danielrispler/Falinks#322 resolution,
 // point 4). A daemon below this app's protocol stays in use until every terminal is idle; then the
 // app asks Daniel, listing what each terminal loses, and never restarts it on its own. On yes, the
 // shell stops the old daemon, and the daemon's loss revives each terminal (`panes.ts`).

@@ -1,9 +1,9 @@
-//! The writer's timing (#471's harness, kept for #518): `--runs` timed `write_card` calls with the
+//! The writer's timing (danielrispler/Falinks#471's harness, kept for danielrispler/Falinks#518): `--runs` timed `write_card` calls with the
 //! real `ClaudeWriter`, as the app runs it in its neutral folder, on `real_card.rs`'s structural
 //! change with an empty brief. It prints JSON on standard output: each run's seconds and whether it
 //! returned a card, the failed runs' count, then the median and the slowest of the runs that
 //! returned a card. It exits non-zero when any run failed. The writer's log lines go to standard error.
-//! It reads no credential file. Run it outside auto mode, from `apps/studio`:
+//! It reads no credential file. Run it outside auto mode, from the repository's root:
 //!
 //! `cargo run -q -p studio-understanding --example writer_timing -- --runs 5`
 

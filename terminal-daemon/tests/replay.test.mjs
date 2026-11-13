@@ -1,5 +1,5 @@
-// Seam 3 (#461): a terminal's recorded bytes, replayed into a headless xterm of another size with the resize sent,
-// render the same screen as a terminal started at that size. Run: `npm test` in apps/studio.
+// Seam 3 (danielrispler/Falinks#461): a terminal's recorded bytes, replayed into a headless xterm of another size with the resize sent,
+// render the same screen as a terminal started at that size. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";

@@ -1,13 +1,13 @@
-// The terminal panes (#467): one per daemon terminal, in `#terminal-body`, one shown at a time. The
+// The terminal panes (danielrispler/Falinks#467): one per daemon terminal, in `#terminal-body`, one shown at a time. The
 // login shell `shell` in the configured repository shows while no session is selected. A session
 // started from the studio runs `claude` in its own terminal, whose fresh id reaches its hooks as
 // `STUDIO_TERMINAL_ID`, so the core links its row to the pane (`Session.terminal`).
-// `closePane` ends a terminal and drops its pane (#469).
-// #470: at start every running terminal is attached, its screen replayed, and the terminals a dead
+// `closePane` ends a terminal and drops its pane (danielrispler/Falinks#469).
+// danielrispler/Falinks#470: at start every running terminal is attached, its screen replayed, and the terminals a dead
 // daemon ran come back (`revive`); so after a crash, a reboot or an upgrade, the same way.
-// #529: a split pins the pane shown to the column's second half while the selection drives the first;
+// danielrispler/Falinks#529: a split pins the pane shown to the column's second half while the selection drives the first;
 // while both are the same terminal, one pane shows.
-// #542: the terminal panel's shells (`panel.ts`) live in the panel, not here; this follows the
+// danielrispler/Falinks#542: the terminal panel's shells (`panel.ts`) live in the panel, not here; this follows the
 // selection's folder for it and reattaches them after a lost daemon.
 
 import type * as Xterm from "@xterm/xterm";
@@ -62,7 +62,7 @@ async function revive(outdated: boolean) {
   const lost = await invoke<Listed[]>("terminal_lost");
   for (const r of await invoke<Revive[]>("revival", { terms: lost })) {
     // A revived conversation keeps its terminal's id, on purpose: its session stays linked to the
-    // pane it had. Only a new conversation gets a fresh id (`startClaude`, #467).
+    // pane it had. Only a new conversation gets a fresh id (`startClaude`, danielrispler/Falinks#467).
     const argv = r.session ? await invoke<string[]>("claude_argv", { resume: r.session, auto: startedAuto(r.argv) }) : r.argv;
     const term = panes.get(r.id)?.term ?? panelTerm(r.id);
     await request({ op: "spawn", id: r.id, argv, cwd: r.cwd, cols: term?.cols ?? 80, rows: term?.rows ?? 24 });
@@ -118,7 +118,7 @@ function draw(id: string, open: () => Xterm.Terminal | null): Pane {
   return pane;
 }
 
-// The selected session's name is on its row only (#571), so the header hides while one is selected and
+// The selected session's name is on its row only (danielrispler/Falinks#571), so the header hides while one is selected and
 // the terminal takes its height; with nothing selected, the shell or a pane just started keeps the
 // title its program sets. The grid size is on the header's hover.
 function header({ term, title }: Pane) {
@@ -126,7 +126,7 @@ function header({ term, title }: Pane) {
   element("terminal-head").title = term ? `${term.cols} × ${term.rows}` : "";
 }
 
-// Ends terminal `id`'s whole process group (#322, point 3), then forgets it and drops its pane; the
+// Ends terminal `id`'s whole process group (danielrispler/Falinks#322, point 3), then forgets it and drops its pane; the
 // shell shows in its place.
 export async function closePane(id: string) {
   await request({ op: "kill", id });
@@ -200,15 +200,15 @@ export function dragSplit() {
 
 // Starts `claude` in `cwd` in a new terminal, with `prompt` as its first prompt, or
 // `claude --resume <resume>` for an ended session, and shows its pane, in auto mode when `auto`
-// (#541). Nothing is selected until the session's first event names its terminal; then the core
-// selects it, so the rail follows (#567).
+// (danielrispler/Falinks#541). Nothing is selected until the session's first event names its terminal; then the core
+// selects it, so the rail follows (danielrispler/Falinks#567).
 let starting: string | null = null;
 export async function startClaude(cwd: string, resume: string | null = null, prompt = "", auto = false) {
   const argv = [...(await invoke<string[]>("claude_argv", { resume, auto })), ...(prompt ? ["--", prompt] : [])]; // `--`: a prompt like "-p x" is no flag
   await startTerminal(`claude-${crypto.randomUUID()}`, cwd, argv);
 }
 
-// A Doctor entry (#527) in a new terminal in the selected session's folder, else the configured
+// A Doctor entry (danielrispler/Falinks#527) in a new terminal in the selected session's folder, else the configured
 // repository. `shell` runs its command under the login shell, then leaves a shell for reading and
 // rerunning; `session` starts `claude` with the command as its first prompt.
 export function runDoctor({ label, command, kind }: DoctorEntry) {
@@ -237,13 +237,13 @@ async function startTerminal(id: string, cwd: string, argv: string[]) {
   showSelection(await invoke<Selection | null>("select_terminal", { terminal: id }));
 }
 
-// Whether a terminal's spawn `argv` started Claude Code in auto mode (#541), so its revival keeps it.
+// Whether a terminal's spawn `argv` started Claude Code in auto mode (danielrispler/Falinks#541), so its revival keeps it.
 export const startedAuto = (argv: string[]) => argv[argv.indexOf("--permission-mode") + 1] === "auto";
-// Whether "Open here" or "Open" resumes a session in auto mode: only when it started in it (#541),
+// Whether "Open here" or "Open" resumes a session in auto mode: only when it started in it (danielrispler/Falinks#541),
 // whatever mode it ended in, so a later switch never carries over; never bypass.
 export const resumesAuto = (session: Pick<Session, "started_mode">) => session.started_mode === "auto";
 
-// What the terminal shows for the selected session (#567): its own terminal while the daemon runs
+// What the terminal shows for the selected session (danielrispler/Falinks#567): its own terminal while the daemon runs
 // it, else a message with "Open here", never the login shell, which may run another session. The
 // shell shows only while nothing is selected.
 export type PaneView = "shell" | { terminal: string } | { message: string };
@@ -291,7 +291,7 @@ export async function showSession(session: Session | null, clicked = false) {
 }
 const ELSEWHERE = "elsewhere";
 
-// A program that failed at start (#558), a session's, a Doctor entry's or a revived one: a toast names
+// A program that failed at start (danielrispler/Falinks#558), a session's, a Doctor entry's or a revived one: a toast names
 // the session, else the program, and the code, with "Show output", which shows its pane. When its pane
 // is the shown one, the message box also takes its place, with its last lines; a hidden one only toasts.
 export const failureTakesPane = (failed: string, current: string) => failed === current;

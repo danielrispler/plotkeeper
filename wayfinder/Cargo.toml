@@ -1,0 +1,14 @@
+# `wayfinder-startup`, copied from Falinks' `scripts/wayfinder_startup.rs` (danielrispler/Falinks#605) for this repository.
+[package]
+name = "studio-wayfinder"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "wayfinder-startup"
+path = "src/main.rs"
+
+[dependencies]
+libc = "0.2"
+serde_json = "1"

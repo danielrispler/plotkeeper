@@ -6,7 +6,7 @@
   "app": {
     "withGlobalTauri": true,
     "security": { "csp": null },
-    "windows": [ { "label": "main", "title": "Terminal spike (#322)", "width": 1100, "height": 720 } ]
+    "windows": [ { "label": "main", "title": "Terminal spike (danielrispler/Falinks#322)", "width": 1100, "height": 720 } ]
   },
   "bundle": { "active": false }
 }

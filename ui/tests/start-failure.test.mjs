@@ -1,4 +1,4 @@
-// A program that fails at start (#558): its code, its last lines and a notice. Run: `npm test` in apps/studio.
+// A program that fails at start (danielrispler/Falinks#558): its code, its last lines and a notice. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import xterm from "@xterm/headless";

@@ -1,6 +1,6 @@
-//! Seam 1 (#461, Testing Decisions) for phases and the estimate (#461, decision 14): replay real
+//! Seam 1 (danielrispler/Falinks#461, Testing Decisions) for phases and the estimate (danielrispler/Falinks#461, decision 14): replay real
 //! sessions, scrubbed (`ordinary-tickets.jsonl`: seven `/implement` ticket sessions and one
-//! `/wayfinder` session of #338's, every text replaced by "…", commands kept only as the phase
+//! `/wayfinder` session of danielrispler/Falinks#338's, every text replaced by "…", commands kept only as the phase
 //! signals they carry), and check the phases each passes through and the estimate it shows.
 
 use studio_core::{Phase, Studio, Work};

@@ -3,7 +3,7 @@
 import { initial } from "./settings.js";
 import type { Selection, Session, SessionCards } from "./types.js";
 
-// `pending` is the row Daniel just pressed, shown selected until the shell replies (#570).
+// `pending` is the row Daniel just pressed, shown selected until the shell replies (danielrispler/Falinks#570).
 export const studio = {
   listed: [] as Session[],
   selection: null as Selection | null,
@@ -12,7 +12,7 @@ export const studio = {
   missed: false,
   // The selected session's brief, cards and decisions, as the shell last sent them.
   cards: { brief: null, recent: [], older: [], decisions: [] } as SessionCards,
-  // Focus mode (#573): the list and the rail folded, the terminal takes the window.
+  // Focus mode (danielrispler/Falinks#573): the list and the rail folded, the terminal takes the window.
   focus: false,
   files: initial,
 };

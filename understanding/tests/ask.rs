@@ -1,4 +1,4 @@
-//! "Ask about this" (#461, decision 20): a side question on a response, card or intention, answered
+//! "Ask about this" (danielrispler/Falinks#461, decision 20): a side question on a response, card or intention, answered
 //! by the card writer's own call with the turn's intentions; the session never sees it.
 
 use std::cell::RefCell;

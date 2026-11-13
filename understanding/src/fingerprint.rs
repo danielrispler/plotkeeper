@@ -1,11 +1,11 @@
-//! The worktree fingerprint (#328, module 5; #369, decision 10): `HEAD`, and the files `git status
+//! The worktree fingerprint (danielrispler/Falinks#328, module 5; danielrispler/Falinks#369, decision 10): `HEAD`, and the files `git status
 //! --porcelain` lists in a worktree, with their content. The worktree changed when a file listed
 //! before or now, or one a commit since changed, has other content, or now exists or is gone.
 //! Ignored files are never listed, and a commit alone leaves every file's content as it was. A file
 //! over 1 MiB is compared by size and modification time, and its diff is one line that names it, so
 //! neither the record nor the card writer gets it. Only the agent's own commits count; a pull, a
-//! rebase, a checkout, a reset or a merge moves the base instead (#434, decisions 12 to 14). Files
-//! the operating system writes, such as `.DS_Store`, are never listed (#568).
+//! rebase, a checkout, a reset or a merge moves the base instead (danielrispler/Falinks#434, decisions 12 to 14). Files
+//! the operating system writes, such as `.DS_Store`, are never listed (danielrispler/Falinks#568).
 
 use similar::TextDiff;
 use std::{
@@ -47,7 +47,7 @@ fn read(path: &Path) -> Option<Content> {
 
 /// Takes the fingerprints `looks` asks for, each in its key's own `Fingerprints` in `prints`, and
 /// returns the changes they found by key, as `Studio::apply_with_changes` takes them. A key's
-/// changes in several worktrees join into one, with the first one's base (#434, decision 10); a
+/// changes in several worktrees join into one, with the first one's base (danielrispler/Falinks#434, decision 10); a
 /// base's change is no one's, so it is left out.
 pub fn fingerprint_changes(
     looks: Vec<Fingerprint>,
@@ -168,7 +168,7 @@ fn moves(root: &Path, from: u64) -> Vec<(String, String, String)> {
 }
 
 /// The change in the worktree at `root` from record `previous`, its base, to `record`. Only the
-/// agent's own commits count (#434, decisions 12 to 14): any other move of `HEAD` since the base
+/// agent's own commits count (danielrispler/Falinks#434, decisions 12 to 14): any other move of `HEAD` since the base
 /// moves the base to where it left `HEAD`, keeping the change of the agent's commits before it, and
 /// a conflicted merge adds its resolution.
 fn change(root: &Path, previous: &Record, record: &Record) -> Option<Change> {
@@ -231,7 +231,7 @@ fn change(root: &Path, previous: &Record, record: &Record) -> Option<Change> {
     (!diff.is_empty()).then_some(Change { base, diff, head })
 }
 
-/// The card request of a turn the app was down for (#486), with the diffs between its worktrees'
+/// The card request of a turn the app was down for (danielrispler/Falinks#486), with the diffs between its worktrees'
 /// trees joined as its change; `None` when nothing differs.
 pub fn backfilled(backfill: Backfill) -> Option<CardRequest> {
     let trees = backfill.trees.iter();
@@ -273,14 +273,14 @@ fn between(root: &Path, from: Option<&str>, to: &str) -> String {
 }
 
 /// `git diff --stat` in `folder`'s worktree from commit `since` to the files as they are now, for the
-/// brief's rewrite (#369, decision 16); empty when `git` fails.
+/// brief's rewrite (danielrispler/Falinks#369, decision 16); empty when `git` fails.
 pub(crate) fn diff_stat(folder: &Path, since: &str) -> String {
     let stat = git(folder, &["diff", "--stat", since]).unwrap_or_default();
     String::from_utf8_lossy(&stat).into()
 }
 
 /// The paths in `git`'s `-z` output, each after `skip` bytes, without the operating system's own
-/// files, which are not the agent's work (#568).
+/// files, which are not the agent's work (danielrispler/Falinks#568).
 fn split_paths(out: &[u8], skip: usize) -> impl Iterator<Item = String> {
     let entries = out.split(|&byte| byte == 0);
     let entries = entries.filter_map(move |entry| entry.get(skip..).filter(|p| !p.is_empty()));

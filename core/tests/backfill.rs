@@ -1,4 +1,4 @@
-//! Seam 1 (#461, Testing Decisions) for the backfill (#486): the hook records each worktree's git
+//! Seam 1 (danielrispler/Falinks#461, Testing Decisions) for the backfill (danielrispler/Falinks#486): the hook records each worktree's git
 //! tree at a turn's start and end, so a turn that ended while the app was down gets its card request
 //! after the replay. The shell turns the two trees into the card's diff.
 

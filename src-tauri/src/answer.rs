@@ -1,7 +1,7 @@
-//! Answering from the card (#461, decision 16): the shell's side of the answer hook's files
+//! Answering from the card (danielrispler/Falinks#461, decision 16): the shell's side of the answer hook's files
 //! (`studio_hook::answer`). The window calls `watch` when the session whose view shows changes; each
 //! pass of the read loop then keeps the watching file's heartbeat fresh and sends that session's open
-//! request as an `ask` event when it changes, in the same pass as the session list (#569). The
+//! request as an `ask` event when it changes, in the same pass as the session list (danielrispler/Falinks#569). The
 //! window calls `alive` every second, and the heartbeat stops once it has been silent for
 //! `STALE_MS`, so a frozen window hands the question to the terminal. `answer` writes the reply that
 //! echoes the request's nonce.
@@ -95,7 +95,7 @@ pub fn alive(watching: State<Mutex<Watching>>) {
 
 /// Daniel answered `session`'s request `nonce` from its card: for a question, `answers` maps each
 /// question to a label, or a multi-select's to its labels; for a plan or a permission, `decision` is
-/// `allow` or `deny` (#478). Neither answers in the terminal.
+/// `allow` or `deny` (danielrispler/Falinks#478). Neither answers in the terminal.
 #[tauri::command]
 pub fn answer(
     session: String,
@@ -123,7 +123,7 @@ mod tests {
     use serde_json::{Value, json};
     use studio_hook::answer;
 
-    /// #569: the read loop's pass that reads the request carries it to the window, so a question
+    /// danielrispler/Falinks#569: the read loop's pass that reads the request carries it to the window, so a question
     /// docks within the loop's delay; a pass with nothing new sends nothing.
     #[test]
     fn a_pass_sends_the_watched_sessions_request_once_it_appears() {
@@ -146,7 +146,7 @@ mod tests {
         );
     }
 
-    /// #569: once the answer hook's request and the `PreToolUse` line are both there, the read loop's
+    /// danielrispler/Falinks#569: once the answer hook's request and the `PreToolUse` line are both there, the read loop's
     /// pass that reads the line, and sets needs you, also carries the request to the window.
     #[test]
     fn an_open_question_reaches_the_window_in_the_pass_that_sets_needs_you() {
@@ -183,7 +183,7 @@ mod tests {
         assert_eq!(sent, Some(ask));
     }
 
-    /// #569: the read loop keeps the heartbeat only while the window shows life, so a frozen window
+    /// danielrispler/Falinks#569: the read loop keeps the heartbeat only while the window shows life, so a frozen window
     /// hands a question to the terminal after `STALE_MS`, not after the hook's whole timeout.
     #[test]
     fn a_window_that_stops_answering_stops_the_hook_waiting() {

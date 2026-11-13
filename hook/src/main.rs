@@ -1,6 +1,6 @@
-//! The hook plugin's command (#328, module 1): appends the hook payload on stdin as one line to the
+//! The hook plugin's command (danielrispler/Falinks#328, module 1): appends the hook payload on stdin as one line to the
 //! event log, with the terminal's `STUDIO_TERMINAL_ID` when set and the time it received the event.
-//! At a turn's start and end it also records the git tree of each worktree the turn touched (#486).
+//! At a turn's start and end it also records the git tree of each worktree the turn touched (danielrispler/Falinks#486).
 //! It does nothing else. It prints nothing on stdout and always exits 0, so it never blocks the agent.
 
 use serde_json::{Map, Value, json};
@@ -42,7 +42,7 @@ fn append() -> Result<(), Box<dyn Error>> {
 
 /// Adds to `event` the trees of the turn it ends, `studio_turn_end`, and of the worktrees its turn
 /// touches first with it, `studio_turn_start`, each by worktree root. Like the core, it takes a
-/// session's own events, and its folder and an `Edit` or `Write` path as what it touches (#434,
+/// session's own events, and its folder and an `Edit` or `Write` path as what it touches (danielrispler/Falinks#434,
 /// decision 9). What it knows of the turn is kept in `turns/` in the data directory `data`, until the
 /// session ends or, if its end never comes, for 7 days.
 fn trees(event: &mut Map<String, Value>, data: &Path) -> Result<(), Box<dyn Error>> {

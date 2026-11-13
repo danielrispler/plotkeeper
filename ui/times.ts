@@ -1,4 +1,4 @@
-// Times (#473): how long a session, its turn, its step and its checks have run, from the core's
+// Times (danielrispler/Falinks#473): how long a session, its turn, its step and its checks have run, from the core's
 // timestamps. Running times count up once a second.
 
 import type { CheckLine, Phase, Session, Span, Work } from "./types.js";
@@ -12,7 +12,7 @@ export function duration(ms: number): string {
   return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m`;
 }
 
-// A clock at minute level (#571): nothing in its first minute, so no "Step 0s", and no second ticks.
+// A clock at minute level (danielrispler/Falinks#571): nothing in its first minute, so no "Step 0s", and no second ticks.
 const clock = (label: string, span: Span) => (now: number) => {
   const ms = (span.end ?? now) - span.start;
   return ms < 60_000 ? "" : `${label} ${duration(ms)}`;
@@ -21,7 +21,7 @@ const clock = (label: string, span: Span) => (now: number) => {
 // A time: its hover, and how to draw it at a time, such as "Turn 12m".
 export type Time = [title: string, draw: (now: number) => string];
 
-// The session's, its latest turn's and the step's times, each labelled with hover text (#517,
+// The session's, its latest turn's and the step's times, each labelled with hover text (danielrispler/Falinks#517,
 // decision 4), such as "Session 2h 05m", "Turn 12m" and "Step 3m", each empty in its first minute.
 // An ended session's time stops at its last event.
 export function times(session: Pick<Session, "state" | "started_at" | "last_event_at" | "turn_span">, step: Span | null): Time[] {
@@ -53,9 +53,9 @@ const phaseNames: Record<Phase, string> = {
   merged: "Merged",
 };
 
-// The phase and the estimate (#475), such as "Implementing · est. 16m–29m left", or
+// The phase and the estimate (danielrispler/Falinks#475), such as "Implementing · est. 16m–29m left", or
 // "Implementing · depends on you" in place of a time while the session waits on Daniel; the phase
-// alone with no estimate yet (#571); empty before the first phase.
+// alone with no estimate yet (danielrispler/Falinks#571); empty before the first phase.
 export function estimateText(work: Pick<Work, "phases" | "estimate">): string {
   const phase = work.phases.at(-1)?.phase;
   if (phase === undefined) return "";

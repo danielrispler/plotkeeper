@@ -1,6 +1,6 @@
-// The terminal panel (#542): a login shell in the folder of the session shown, in a band under the
+// The terminal panel (danielrispler/Falinks#542): a login shell in the folder of the session shown, in a band under the
 // terminal column, below its pane or both panes of a split; `ctrl-\`` shows and hides it. The band is
-// at most 40 % of the column's height and costs no width (#565, decision 5). One shell per folder,
+// at most 40 % of the column's height and costs no width (danielrispler/Falinks#565, decision 5). One shell per folder,
 // kept in the daemon under a fixed id, so switching folders and back, or restarting the app, finds
 // the same shell with its scrollback; a dead daemon's shell revives like any other (`panes.ts`).
 
@@ -42,7 +42,7 @@ export function togglePanel(focusAbove: () => void) {
   else focusAbove();
 }
 
-// Opens the panel on its shell `id`, as a start failure's "Show output" asks (#558).
+// Opens the panel on its shell `id`, as a start failure's "Show output" asks (danielrispler/Falinks#558).
 export function showPanelShell(id: string, focusAbove: () => void) {
   current = { id, cwd: id.slice(PANEL.length) };
   if (open) draw(true);

@@ -1,4 +1,4 @@
-// Safe Markdown rendering (#525, decision 21), run on the `tsc` output. Run: `npm test` in apps/studio.
+// Safe Markdown rendering (danielrispler/Falinks#525, decision 21), run on the `tsc` output. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
@@ -35,7 +35,7 @@ test("raw HTML, a javascript: link and an event handler come out as inert text",
   assert.doesNotMatch(html, /<a[^>]*>click/);
 });
 
-test("a file link renders as a link the editor opens, an http(s) link as one the browser opens (#557)", () => {
+test("a file link renders as a link the editor opens, an http(s) link as one the browser opens (danielrispler/Falinks#557)", () => {
   const html = markdown("[keys](apps/studio/ui/keys.ts#L12) [abs](file:///Users/d/a.rs) [web](https://e.com) [no](javascript:x())");
   assert.match(html, /<a href="apps\/studio\/ui\/keys.ts#L12" data-file>keys<\/a>/);
   assert.match(html, /<a href="file:\/\/\/Users\/d\/a.rs" data-file>abs<\/a>/);
@@ -43,31 +43,31 @@ test("a file link renders as a link the editor opens, an http(s) link as one the
   assert.doesNotMatch(html, /<a[^>]*>no/);
 });
 
-test("inline code that is a whole file path links to the editor, keeping its code look (#581)", () => {
+test("inline code that is a whole file path links to the editor, keeping its code look (danielrispler/Falinks#581)", () => {
   const html = markdown("`src/foo.rs:42` `src/foo.rs` `foo.rs:42` `apps/a.ts#L5`");
   for (const p of ["src/foo.rs:42", "src/foo.rs", "foo.rs:42", "apps/a.ts#L5"])
     assert.ok(html.includes(`<a href="${p}" data-file><code>${p}</code></a>`), p);
 });
 
-test("inline code that only looks like a path, and fenced code, stay plain code (#581)", () => {
+test("inline code that only looks like a path, and fenced code, stay plain code (danielrispler/Falinks#581)", () => {
   const spans = ["origin/main", "std::fs", "@types/node", "apps/studio", "see src/foo.rs:42 here", "https://e.com/a.rs", "localhost:8080", "1/2"];
   const html = markdown(spans.map((s) => `\`${s}\``).join(" ") + "\n\n```\nsrc/foo.rs:42\n```");
   assert.doesNotMatch(html, /<a\b/);
   assert.match(html, /<pre><code>src\/foo.rs:42\n<\/code><\/pre>/);
 });
 
-test("inline code stays escaped, linked or not (#581)", () => {
+test("inline code stays escaped, linked or not (danielrispler/Falinks#581)", () => {
   const html = markdown('`a<b "c" & d` `src/a&b.rs`');
   assert.match(html, /<code>a&lt;b &quot;c&quot; &amp; d<\/code>/);
   assert.doesNotMatch(html, /<a\b/);
 });
 
-test("inline code shaped like a host, a module or a ref stays plain code (#581)", () => {
+test("inline code shaped like a host, a module or a ref stays plain code (danielrispler/Falinks#581)", () => {
   const spans = ["example.com:443", "api.example.com:8080", "git@github.com:22", "Foo.bar:12", "std.io:3", "example.com/index.html", "origin/main:3"];
   for (const s of spans) assert.doesNotMatch(markdown(`\`${s}\``), /<a\b/, s);
 });
 
-test("inline code inside a Markdown link is not linked again (#581)", () => {
+test("inline code inside a Markdown link is not linked again (danielrispler/Falinks#581)", () => {
   const html = markdown("[`src/a.rs`](https://x.com)");
   assert.equal(html.match(/<a\b/g)?.length, 1, html);
   assert.match(html, /<a href="https:\/\/x.com"><code>src\/a.rs<\/code><\/a>/);

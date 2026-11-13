@@ -1,4 +1,4 @@
-// The terminal pane's key mapping (#466), run on the `tsc` output. Run: `npm test` in apps/studio.
+// The terminal pane's key mapping (danielrispler/Falinks#466), run on the `tsc` output. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { bound, doctorEntries, keyAction, keyLabel, keystroke, nextNeedsYou, paletteEntries, run, stepSession, windowBinding } from "../../dist/keys.js";
@@ -107,7 +107,7 @@ test("while typing, a window shortcut without Cmd leaves the key to the field, e
   assert.equal(windowBinding(keymap, key("Equal", { metaKey: true }, "="), true), "studio::ZoomIn");
 });
 
-// The keyboard spine and the palette (#575).
+// The keyboard spine and the palette (danielrispler/Falinks#575).
 const press = (code, mods = {}) => windowBinding(initial.keymap, key(code, mods), false, false, true);
 
 test("each default key of the spine runs its action", () => {
@@ -254,7 +254,7 @@ test("every default window action has a title and a key in the palette", () => {
   assert.deepEqual(entries.find((entry) => entry.title === "Toggle panel").keys, ["⌃`"]);
 });
 
-// The terminal panel (#542): its key works from inside a terminal too, as in VS Code.
+// The terminal panel (danielrispler/Falinks#542): its key works from inside a terminal too, as in VS Code.
 test("ctrl-` toggles the panel, from the terminal too; a rebound key toggles it and the old one does not", () => {
   const backquote = key("Backquote", { ctrlKey: true }, "`");
   assert.equal(windowBinding(initial.keymap, backquote, true), "studio::TogglePanel");

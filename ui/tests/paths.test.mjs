@@ -1,5 +1,5 @@
-// File paths in the terminal pane (#466): which text is a clickable path, and how a dropped file's
-// path is typed. Run: `npm test` in apps/studio.
+// File paths in the terminal pane (danielrispler/Falinks#466): which text is a clickable path, and how a dropped file's
+// path is typed. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fileTarget, pathLinks, quotePath, worktreeOf } from "../../dist/paths.js";

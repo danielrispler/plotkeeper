@@ -1,4 +1,4 @@
-// `attach <terminal>`: the escape hatch (#322, point 2). Connects the terminal it runs in, any terminal app, to a
+// `attach <terminal>`: the escape hatch (danielrispler/Falinks#322, point 2). Connects the terminal it runs in, any terminal app, to a
 // daemon terminal, so a studio build that cannot start never cuts Daniel off from running agents.
 use crate::{Client, PROTOCOL, decode, encode};
 use serde_json::json;

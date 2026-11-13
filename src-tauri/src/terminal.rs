@@ -1,10 +1,10 @@
-//! The shell's terminal daemon client (#466). The window connects with `terminal_connect`, which
+//! The shell's terminal daemon client (danielrispler/Falinks#466). The window connects with `terminal_connect`, which
 //! starts the daemon from beside the app's own executable when none is running (a Dock launch has
 //! no useful `PATH`), then sends the daemon's requests with `terminal_send` and gets every daemon
 //! event as a `terminal` event, `{"ev":"lost"}` once the daemon is gone. The protocol is in
 //! `terminal-daemon/src/lib.rs`.
 //!
-//! #470: a daemon below this app's protocol is still connected to, so its terminals work while the
+//! danielrispler/Falinks#470: a daemon below this app's protocol is still connected to, so its terminals work while the
 //! window waits for idle; `terminal_connect` says it is `outdated`, and `terminal_upgrade` stops it
 //! once Daniel says yes. When the app starts the daemon itself, after a crash, a reboot or an
 //! upgrade, the old daemon's record of its terminals is kept for `terminal_lost`.
@@ -41,7 +41,7 @@ pub fn terminal_connect(app: AppHandle, daemon: State<Daemon>) -> Result<Value, 
     let mut writer = daemon.writer.lock().unwrap();
     if writer.is_none() {
         let (mut client, lost) = connect()?;
-        // So the daemon deletes the presence file if the app crashes (#555); an older daemon ignores it.
+        // So the daemon deletes the presence file if the app crashes (danielrispler/Falinks#555); an older daemon ignores it.
         client
             .send(&json!({ "op": "app" }))
             .map_err(|e| format!("the terminal daemon: {e}"))?;
@@ -56,7 +56,7 @@ pub fn terminal_connect(app: AppHandle, daemon: State<Daemon>) -> Result<Value, 
         thread::spawn(move || {
             for line in reader.lines().map_while(Result::ok) {
                 if let Ok(event) = serde_json::from_str::<Value>(&line) {
-                    // Each `list`'s OSC 7501 status goes to the core (#560).
+                    // Each `list`'s OSC 7501 status goes to the core (danielrispler/Falinks#560).
                     if event["ev"] == "list"
                         && let Ok(terms) = serde_json::from_value(event["terms"].clone())
                     {
@@ -77,7 +77,7 @@ pub fn terminal_connect(app: AppHandle, daemon: State<Daemon>) -> Result<Value, 
 static POLLING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Asks the daemon for its `list` every second while connected, so the core follows each terminal's
-/// OSC 7501 status (#560); the read loop hands the reply to the core.
+/// OSC 7501 status (danielrispler/Falinks#560); the read loop hands the reply to the core.
 // shortcut: polls; have the daemon push status changes if the delay or the traffic matters.
 fn poll(app: AppHandle) {
     loop {
@@ -112,19 +112,19 @@ pub fn terminal_send(msg: Value, daemon: State<Daemon>) -> Result<(), String> {
 }
 
 /// The picker's places: the configured repository's main checkout and its tasks, read live from git
-/// (#461, decision 8).
+/// (danielrispler/Falinks#461, decision 8).
 #[tauri::command(async)]
 pub fn places() -> Result<studio_workbench::Places, String> {
     studio_workbench::places(Path::new(&repo()))
 }
 
-/// Places' counts for the place at `path` (#576): ahead and behind its base, and changed files.
+/// Places' counts for the place at `path` (danielrispler/Falinks#576): ahead and behind its base, and changed files.
 #[tauri::command(async)]
 pub fn place_counts(path: String) -> Result<studio_workbench::Counts, String> {
     studio_workbench::counts(Path::new(&repo()), &path)
 }
 
-/// Creates task `name` in the configured repository (#468) and returns its place.
+/// Creates task `name` in the configured repository (danielrispler/Falinks#468) and returns its place.
 #[tauri::command(async)]
 pub fn create_task(name: String) -> Result<studio_workbench::Place, String> {
     studio_workbench::create_task(Path::new(&repo()), &name)
@@ -151,13 +151,13 @@ pub fn delete_merged_branch(branch: String) -> Result<(), String> {
     studio_workbench::delete_merged_branch(Path::new(&repo()), &branch)
 }
 
-/// The command a session's terminal runs: `claude` with the studio plugin of the configured
-/// repository's checkout, whose hooks run its `studio-hook`, or `claude --resume <resume>` for an
-/// ended session. From the repository, not the build folder, so a moved bundle still finds it.
-/// `auto` starts it in auto mode (#541).
+/// The command a session's terminal runs: `claude` with the studio plugin of the studio's own
+/// checkout, whose hooks run its `studio-hook`, or `claude --resume <resume>` for an ended session.
+/// From the checkout, not the build folder, so a moved bundle still finds it.
+/// `auto` starts it in auto mode (danielrispler/Falinks#541).
 #[tauri::command]
 pub fn claude_argv(resume: Option<String>, auto: bool) -> Vec<String> {
-    let plugin = Path::new(&repo()).join("apps/studio/plugin");
+    let plugin = checkout().unwrap_or_default().join("plugin");
     let presence = crate::presence::path().unwrap_or_default();
     studio_workbench::claude(&plugin, &presence, resume.as_deref(), auto)
 }
@@ -176,7 +176,7 @@ pub fn open_link(target: String) -> Result<(), String> {
 /// Zed's command-line tool, the default editor when installed.
 const ZED: &str = "/Applications/Zed.app/Contents/MacOS/cli";
 
-/// The one opener for files (#557): opens `path` in Daniel's editor at `line` and `column`. A
+/// The one opener for files (danielrispler/Falinks#557): opens `path` in Daniel's editor at `line` and `column`. A
 /// relative path resolves in `cwd`, the folder of the session that printed it, else the configured
 /// repository. `editor` is `settings.json`'s argv template, never a shell string (`editor_argv`). A
 /// file that could run when opened is revealed in Finder instead (`reveals`).
@@ -345,27 +345,32 @@ fn start(log: &Path) -> io::Result<()> {
     Ok(())
 }
 
-/// The configured repository: `STUDIO_REPO`, else the main checkout of the repository the app was
-/// built in (#461, decision 3), else the home folder.
+/// The configured repository: `settings.json`'s `repository` (danielrispler/Falinks#605), else the studio's own
+/// checkout (danielrispler/Falinks#461, decision 3), else the home folder.
 pub(crate) fn repo() -> String {
-    if let Ok(repo) = std::env::var("STUDIO_REPO") {
-        return repo;
-    }
+    crate::settings::repository()
+        .map(PathBuf::from)
+        .or_else(checkout)
+        .or_else(std::env::home_dir)
+        .unwrap_or_default()
+        .display()
+        .to_string()
+}
+
+/// The main checkout of the repository the app was built in, so a build in a worktree still finds
+/// the main checkout's plugin and release hooks.
+fn checkout() -> Option<PathBuf> {
     let common = Command::new("git")
         .args(["rev-parse", "--path-format=absolute", "--git-common-dir"])
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .output();
-    let main = match common {
+    match common {
         Ok(out) if out.status.success() => {
             let dir = PathBuf::from(String::from_utf8_lossy(&out.stdout).trim());
             dir.parent().map(Path::to_path_buf)
         }
         _ => None,
-    };
-    main.or_else(std::env::home_dir)
-        .unwrap_or_default()
-        .display()
-        .to_string()
+    }
 }
 
 #[cfg(test)]

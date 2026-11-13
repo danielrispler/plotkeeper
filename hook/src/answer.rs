@@ -1,4 +1,4 @@
-//! The answer hook (#461, decision 16): a synchronous hook that lets Daniel answer from the studio card.
+//! The answer hook (danielrispler/Falinks#461, decision 16): a synchronous hook that lets Daniel answer from the studio card.
 //! While the studio watches the asking session, the hook leaves a request in `asks/<session>.json`
 //! with a one-time nonce and waits for `asks/<session>.answer.json` echoing it. It returns no decision,
 //! so the terminal asks as today, when nobody watches, the watching goes stale, Daniel answers in the
@@ -10,7 +10,7 @@
 //! - `asks/<session>.json`, by the hook: `{"nonce", "hook_event_name", "tool_name", "tool_use_id",
 //!   "tool_input", "asked_ms"}`.
 //! - `asks/<session>.answer.json`, by the studio: for a question `{"nonce", "answers"}`, each answer a
-//!   label or, for a multi-select, a list of labels; for a plan or a permission (#478)
+//!   label or, for a multi-select, a list of labels; for a plan or a permission (danielrispler/Falinks#478)
 //!   `{"nonce", "decision"}`, `allow` or `deny`. With neither, Daniel answers in the terminal.
 //!
 //! A card answer that decides the call is also appended to the event log as a `StudioAnswer` line
@@ -54,7 +54,7 @@ impl Kind {
     }
 }
 
-/// Daniel's verdict on a plan or a permission from its card (#478), `allow` or `deny` in JSON.
+/// Daniel's verdict on a plan or a permission from its card (danielrispler/Falinks#478), `allow` or `deny` in JSON.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Verdict {
@@ -194,7 +194,7 @@ fn decide(payload: &Value, kind: Kind, verdict: Verdict) -> Value {
     json!({ "hookSpecificOutput": out })
 }
 
-/// The event log line that records Daniel's card answer to `payload` (#461, decision 17): the
+/// The event log line that records Daniel's card answer to `payload` (danielrispler/Falinks#461, decision 17): the
 /// payload as `StudioAnswer`, with the event that asked, the answer without its nonce, the terminal
 /// and the time, as the logging hook adds them. An answer in the terminal leaves no such line.
 pub fn answered_line(payload: &Value, answer: &Value) -> Value {

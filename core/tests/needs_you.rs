@@ -1,4 +1,4 @@
-//! Seam 1 (#328, Testing Decisions) for "needs you" (#349): replay hook events through the core and
+//! Seam 1 (danielrispler/Falinks#328, Testing Decisions) for "needs you" (danielrispler/Falinks#349): replay hook events through the core and
 //! check each session's state after every line, and the notices only live events give. The fixtures
 //! follow the real v0 payload sequences
 //! (https://github.com/danielrispler/Falinks/issues/321#issuecomment-6492980442, "Hook payloads").
@@ -49,7 +49,7 @@ fn each_time_a_session_newly_needs_you_gives_one_notice() {
         live(background),
         [notice("c41d8e27-6a3f-4b90-8e15-2f7a9b0c3d64")]
     );
-    // AskUserQuestion, ExitPlanMode; the Stop that asks in text gives none (#540).
+    // AskUserQuestion, ExitPlanMode; the Stop that asks in text gives none (danielrispler/Falinks#540).
     assert_eq!(live(ask_then_plan), [asker, asker].map(notice));
     assert_eq!(live(include_str!("fixtures/failing-bash.jsonl")), []);
 }
@@ -252,8 +252,8 @@ fn after_stop(message: &str) -> State {
         .unwrap()
 }
 
-// A reply that asks Daniel in text blocks nothing, so it is your turn (#540, reversing #328's story
-// 36). The messages follow the shapes in #321's evidence ("Transcripts").
+// A reply that asks Daniel in text blocks nothing, so it is your turn (danielrispler/Falinks#540, reversing danielrispler/Falinks#328's story
+// 36). The messages follow the shapes in danielrispler/Falinks#321's evidence ("Transcripts").
 
 #[test]
 fn a_reply_that_ends_with_a_question_is_your_turn() {
@@ -271,7 +271,7 @@ Which do you want?";
     assert_eq!(after_stop(issue), YourTurn);
 }
 
-// Needs you across agents (#434, decisions 24 to 26): the four cases of #434's first version (B4) and
+// Needs you across agents (danielrispler/Falinks#434, decisions 24 to 26): the four cases of danielrispler/Falinks#434's first version (B4) and
 // the dead call (B3), hand-written in the day log's shapes.
 
 /// Session `s1`'s event `name` at `at`, by subagent `agent` (`None` for its own agent), with `fields`.
@@ -387,7 +387,7 @@ fn a_second_agents_notice_is_kept_while_another_agent_asks() {
     );
 }
 
-/// #434, decision 26: the session's open spawn of a foreground subagent waits on no permission.
+/// danielrispler/Falinks#434, decision 26: the session's open spawn of a foreground subagent waits on no permission.
 #[test]
 fn a_notice_does_not_wait_on_the_open_spawn_of_the_subagent_that_asks() {
     let mut studio = started();
@@ -410,7 +410,7 @@ fn a_notice_does_not_wait_on_the_open_spawn_of_the_subagent_that_asks() {
     );
 }
 
-/// #434, story 29: a notice that names its agent echoes only that agent's request.
+/// danielrispler/Falinks#434, story 29: a notice that names its agent echoes only that agent's request.
 #[test]
 fn a_notice_naming_one_agent_is_not_taken_as_another_agents_echo() {
     let mut studio = started();
@@ -537,7 +537,7 @@ fn a_call_that_never_reported_back_holds_no_wait_past_its_sessions_turn() {
 }
 
 /// The answer hook's `StudioAnswer` line for `line`'s call: Daniel's `answer` from the studio card
-/// (#478).
+/// (danielrispler/Falinks#478).
 fn card_answer(line: &str, answer: serde_json::Value) -> String {
     let mut event: serde_json::Value = serde_json::from_str(line).unwrap();
     event["studio_asked_by"] = event["hook_event_name"].clone();

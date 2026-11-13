@@ -1,4 +1,4 @@
-//! Seam 1 (#560): replay hook events and scripted daemon `list` status through the core. A terminal
+//! Seam 1 (danielrispler/Falinks#560): replay hook events and scripted daemon `list` status through the core. A terminal
 //! whose program is not Claude Code and reports OSC 7501 gets a status-only row; a Claude session
 //! keeps its hook state, and a lasting disagreement with its 7501 state appends one mismatch line.
 
@@ -70,7 +70,7 @@ fn a_codex_like_terminal_shows_running_then_needs_you_then_your_turn() {
         T0 + 1_000,
     );
     assert_eq!(state(&studio, "t-7"), Some(State::NeedsYou));
-    // Needs you notifies as a Claude session's does (#522).
+    // Needs you notifies as a Claude session's does (danielrispler/Falinks#522).
     assert!(blocked.contains(&Output::NeedsYou {
         session_id: "t-7".into(),
         agent: None
@@ -108,7 +108,7 @@ fn with_no_app_the_row_is_named_by_its_foreground_program() {
 
 #[test]
 fn an_agent_revived_into_its_latest_conversation_says_so_on_its_row() {
-    // #561: revival with no known conversation id resumes the folder's latest one.
+    // danielrispler/Falinks#561: revival with no known conversation id resumes the folder's latest one.
     let mut studio = Studio::default();
     let mut latest = term("t-9", Some("idle"), Some("codex"), T0);
     latest.argv = vec!["codex".into(), "resume".into(), "--last".into()];
@@ -175,7 +175,7 @@ fn a_turn_that_ends_and_restarts_between_two_lists_is_your_turn() {
 
 #[test]
 fn a_row_already_blocked_at_start_is_quiet_and_one_appearing_later_needs_you() {
-    // As Claude sessions, which replay quietly at start (#522), rows the first list finds tell nothing.
+    // As Claude sessions, which replay quietly at start (danielrispler/Falinks#522), rows the first list finds tell nothing.
     let mut studio = Studio::default();
     let blocked = |id| term(id, Some("blocked"), Some("codex"), T0);
 

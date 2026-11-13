@@ -1,6 +1,6 @@
-// The needs-you toast (#565, decision 3). While the rail's dock cannot show a block, in focus mode or
+// The needs-you toast (danielrispler/Falinks#565, decision 3). While the rail's dock cannot show a block, in focus mode or
 // while the rail is an overlay, the toast floats over the terminal's top-right corner; the shell plays
-// the needs-you sound (#556). It never resizes anything and never takes keyboard focus. Several blocks share it,
+// the needs-you sound (danielrispler/Falinks#556). It never resizes anything and never takes keyboard focus. Several blocks share it,
 // with a count, and it stays until Daniel acts on them or dismisses it. The session in the focused
 // terminal, the selected one, gets none: its prompt is already there. While the rail is an overlay,
 // the top bar's slim header shows the selected session's state and open question.
@@ -63,7 +63,7 @@ export function showToast() {
   }
 }
 
-// The start-failure toast (#558, herdr's pattern): `message` names the session, else the program, and
+// The start-failure toast (danielrispler/Falinks#558, herdr's pattern): `message` names the session, else the program, and
 // the code; "Show output" runs `open`, which shows the failed pane. Like the needs-you toast it never
 // takes focus or space, and it stays until Daniel acts on it or dismisses it. Each failure is its own
 // row, stacked under the earlier ones, so a second never hides the first.

@@ -1,10 +1,10 @@
-// The terminal daemon, through the shell (#466): the requests and events of the protocol in
+// The terminal daemon, through the shell (danielrispler/Falinks#466): the requests and events of the protocol in
 // `terminal-daemon/src/lib.rs`, with terminal bytes base64-encoded in `data`.
 
 import { invoke, listen } from "./dom.js";
 
 // What the shell answers on connect: the configured repository, where new terminals start.
-// `outdated` when the daemon is below this app's protocol (#470).
+// `outdated` when the daemon is below this app's protocol (danielrispler/Falinks#470).
 export interface Config {
   repo: string;
   outdated: boolean;

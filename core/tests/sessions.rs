@@ -1,4 +1,4 @@
-//! Seam 1 (#369, Testing Decisions) for the session list (#371): replay hook events through the core,
+//! Seam 1 (danielrispler/Falinks#369, Testing Decisions) for the session list (danielrispler/Falinks#371): replay hook events through the core,
 //! with the shell's ticks at explicit times, and check each session's state, the list and the
 //! selection.
 
@@ -71,7 +71,7 @@ fn an_idle_sessions_next_event_brings_it_back() {
     assert_eq!(state(&prompted, PROBE), Some(Running));
 }
 
-/// The checkpoint day of #347, scrubbed (#370): 8 sessions, 5 of them with a `SessionEnd`, cut at
+/// The checkpoint day of danielrispler/Falinks#347, scrubbed (danielrispler/Falinks#370): 8 sessions, 5 of them with a `SessionEnd`, cut at
 /// midnight, 2026-10-31 00:00 in Israel.
 const DAY: &str = include_str!("fixtures/checkpoint-day.jsonl");
 const MIDNIGHT: u64 = 1_793_397_600_000;
@@ -122,10 +122,10 @@ fn the_days_sessions_change_state_only_by_their_named_setters_and_clearers() {
         // A session starts at your turn, before its first prompt.
         (None, YourTurn, "SessionStart"),
         (Some(YourTurn), Running, "UserPromptSubmit"),
-        // A queued prompt's turn starts at its first step, under a new prompt id (#434, decision 3).
+        // A queued prompt's turn starts at its first step, under a new prompt id (danielrispler/Falinks#434, decision 3).
         (Some(YourTurn), Running, "PreToolUse"),
         (Some(Running), YourTurn, "Stop"),
-        // An `AskUserQuestion`, `ExitPlanMode` or permission; a `Stop` that asks in text does not (#540).
+        // An `AskUserQuestion`, `ExitPlanMode` or permission; a `Stop` that asks in text does not (danielrispler/Falinks#540).
         (Some(Running), NeedsYou, "PreToolUse"),
         // The step that asked resolves.
         (Some(NeedsYou), Running, "PostToolUse"),
@@ -134,7 +134,7 @@ fn the_days_sessions_change_state_only_by_their_named_setters_and_clearers() {
         (Some(Idle), Running, "UserPromptSubmit"),
         (Some(Idle), YourTurn, "Notification"),
         (Some(YourTurn), Ended, "SessionEnd"),
-        // A `/clear` continues the row it ended (#474).
+        // A `/clear` continues the row it ended (danielrispler/Falinks#474).
         (Some(Ended), YourTurn, "SessionStart"),
     ];
     let named: [Change; 11] = named.map(|(from, to, cause)| (from, to, cause.into()));
@@ -175,7 +175,7 @@ fn at_midnight_the_days_6_rows_are_3_ended_2_at_your_turn_and_1_idle() {
         states,
         [
             ("596c28a1", YourTurn),
-            // Its `/clear` started `0222b62d`, which continues its row (#474), as `6641e809`
+            // Its `/clear` started `0222b62d`, which continues its row (danielrispler/Falinks#474), as `6641e809`
             // continues `5d7f69ab`'s.
             ("5bb84a4a", YourTurn),
             ("2afc85f5", Idle),
@@ -233,7 +233,7 @@ fn the_selection_holds_all_day_while_its_session_changes_group_and_others_are_pr
     );
 }
 
-/// A session's permission mode (#541) is its latest event's, so the rail can always show auto mode;
+/// A session's permission mode (danielrispler/Falinks#541) is its latest event's, so the rail can always show auto mode;
 /// `None` until an event carries one, as `SessionStart` does not.
 #[test]
 fn a_session_shows_the_permission_mode_its_latest_event_names() {
@@ -252,7 +252,7 @@ fn a_session_shows_the_permission_mode_its_latest_event_names() {
     // An event without one keeps it.
     studio.apply(&event(PROBE, "Notification", PROBE_STOPPED_AT + 2).to_string());
     assert_eq!(mode(&studio).as_deref(), Some("auto"));
-    // The mode it started in stays, for a resume (#541).
+    // The mode it started in stays, for a resume (danielrispler/Falinks#541).
     let started = studio.session(PROBE).unwrap().started_mode.clone();
     assert_eq!(started.as_deref(), Some("default"));
 

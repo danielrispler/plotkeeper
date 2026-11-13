@@ -1,4 +1,4 @@
-//! The card store (#328, module 6): the cards, Daniel's guesses and their records, and each
+//! The card store (danielrispler/Falinks#328, module 6): the cards, Daniel's guesses and their records, and each
 //! session's brief, on disk in the studio's data directory, so a restart neither loses nor re-asks
 //! them.
 
@@ -30,17 +30,17 @@ pub struct StoredCard {
     /// Daniel's tap on the quiz; `None` while the card shows only its quiz.
     #[serde(default)]
     pub guess: Option<Guess>,
-    /// Daniel flagged that the writer's key is wrong (#369, decision 13), from the quiz or from his
+    /// Daniel flagged that the writer's key is wrong (danielrispler/Falinks#369, decision 13), from the quiz or from his
     /// rating: one record.
     #[serde(default)]
     pub key_wrong: bool,
-    /// The writer's longer explanation, from Daniel's first "explain more" (#369, decision 15).
+    /// The writer's longer explanation, from Daniel's first "explain more" (danielrispler/Falinks#369, decision 15).
     #[serde(default)]
     pub more: Option<String>,
-    /// Daniel's rating of the explanation (#369, decision 15); `None` until he rates it.
+    /// Daniel's rating of the explanation (danielrispler/Falinks#369, decision 15); `None` until he rates it.
     #[serde(default)]
     pub rating: Option<Rating>,
-    /// The result of the check whose start requested the card (#461, decision 15), which settles
+    /// The result of the check whose start requested the card (danielrispler/Falinks#461, decision 15), which settles
     /// its guess; `None` while it runs, and on a card no check requested.
     #[serde(default)]
     pub check_result: Option<CheckResult>,
@@ -56,7 +56,7 @@ pub enum CheckResult {
     NotCounted,
 }
 
-/// A turn summary in the store (#526), with the turn it is on and when it arrived.
+/// A turn summary in the store (danielrispler/Falinks#526), with the turn it is on and when it arrived.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StoredSummary {
     pub request: SummaryRequest,
@@ -91,15 +91,15 @@ pub enum Reason {
     TooEasy,
 }
 
-/// Daniel's tap on a card's quiz, graded by the writer's key (#369, decision 13), or on a check's card
-/// by the check's result (#461, decision 15).
+/// Daniel's tap on a card's quiz, graded by the writer's key (danielrispler/Falinks#369, decision 13), or on a check's card
+/// by the check's result (danielrispler/Falinks#461, decision 15).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Guess {
     /// The option he tapped, counting from 0.
     pub option: usize,
     /// Whether it is the key. On a check's card, whether it called the check's result: `None` until
     /// the result settles it, and for good when the result does not say (`StoredCard::check_result`).
-    /// A store from before #476 holds a plain `true` or `false`, which loads as `Some`.
+    /// A store from before danielrispler/Falinks#476 holds a plain `true` or `false`, which loads as `Some`.
     pub right: Option<bool>,
     /// When, in Unix milliseconds.
     pub at: u64,
@@ -113,7 +113,7 @@ pub struct Row {
     pub line: String,
 }
 
-/// A session's or a worker's rolling brief (#369, decision 16).
+/// A session's or a worker's rolling brief (danielrispler/Falinks#369, decision 16).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Brief {
     pub text: String,
@@ -121,7 +121,7 @@ pub struct Brief {
     pub updates: u32,
 }
 
-/// One session's brief and its cards in the session view's two groups (#369, decision 18), each
+/// One session's brief and its cards in the session view's two groups (danielrispler/Falinks#369, decision 18), each
 /// oldest first.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct SessionCards {
@@ -132,7 +132,7 @@ pub struct SessionCards {
     /// The cards added before, or before the store kept the time.
     #[serde(serialize_with = "without_diffs")]
     pub older: Vec<StoredCard>,
-    /// Its decision history, oldest first (#461, decision 17).
+    /// Its decision history, oldest first (danielrispler/Falinks#461, decision 17).
     pub decisions: Vec<Decision>,
 }
 
@@ -184,7 +184,7 @@ fn without_diffs<S: serde::Serializer>(cards: &[StoredCard], s: S) -> Result<S::
     }))
 }
 
-/// The last 30 minutes (#369, decision 18).
+/// The last 30 minutes (danielrispler/Falinks#369, decision 18).
 const RECENT_MS: u64 = 30 * 60 * 1000;
 
 /// Now, in Unix milliseconds, as the store's records keep time.
@@ -193,7 +193,7 @@ pub fn millis() -> u64 {
 }
 
 /// The store's cards, and its briefs by session or worker, kept in memory and written to their files on each
-/// change: the briefs to `briefs.json` beside the cards (#369, decision 17).
+/// change: the briefs to `briefs.json` beside the cards (danielrispler/Falinks#369, decision 17).
 // shortcut: rewrites the whole file on each change, which suits a few cards a day; switch to
 // appended lines if it grows to thousands of cards.
 pub struct CardStore {
@@ -201,14 +201,14 @@ pub struct CardStore {
     cards: Vec<StoredCard>,
     briefs: BTreeMap<String, Brief>,
     /// What the live app learned that the event log does not hold, in `live-facts.json` beside the
-    /// cards (#434, decision 37).
+    /// cards (danielrispler/Falinks#434, decision 37).
     facts: LiveFacts,
-    /// Each session's decision history, by its row's id, in `decisions.json` beside the cards (#461,
+    /// Each session's decision history, by its row's id, in `decisions.json` beside the cards (danielrispler/Falinks#461,
     /// decision 17).
     decisions: BTreeMap<String, Vec<Decision>>,
-    /// The turn summaries, oldest first, in `summaries.json` beside the cards (#526).
+    /// The turn summaries, oldest first, in `summaries.json` beside the cards (danielrispler/Falinks#526).
     summaries: Vec<StoredSummary>,
-    /// The subagent summaries, by subagent id, in `agent-summaries.json` beside the cards (#535).
+    /// The subagent summaries, by subagent id, in `agent-summaries.json` beside the cards (danielrispler/Falinks#535).
     agent_summaries: BTreeMap<String, String>,
     /// Rises on every change, briefs included, so the shell sends the cards only when it moves.
     revision: u64,
@@ -248,7 +248,7 @@ impl CardStore {
     }
 
     /// Reads the store the app keeps beside the event log `log`, in the studio's data directory. The
-    /// store from before cards covered a prompt's whole change (#369, decision 17) is moved aside to
+    /// store from before cards covered a prompt's whole change (danielrispler/Falinks#369, decision 17) is moved aside to
     /// `cards-v1.json` on first start, and never over one already there.
     pub fn open_beside(log: &Path) -> io::Result<Self> {
         let (old, aside) = (
@@ -271,7 +271,7 @@ impl CardStore {
         &self.cards
     }
 
-    /// The cards and brief of `owner`, a session's id, or a worker's for its own (#369, decision 11),
+    /// The cards and brief of `owner`, a session's id, or a worker's for its own (danielrispler/Falinks#369, decision 11),
     /// split 30 minutes before `now`, the shell's tick.
     pub fn session_cards(&self, owner: &str, now: u64) -> SessionCards {
         let cards = self
@@ -296,7 +296,7 @@ impl CardStore {
         }
     }
 
-    /// What `session`'s row says at `now`, in Unix milliseconds (#410, decision 27): while it needs
+    /// What `session`'s row says at `now`, in Unix milliseconds (danielrispler/Falinks#410, decision 27): while it needs
     /// Daniel, who asks and for how long; once its turn is over, the stopped line; after a wake-up
     /// with no step since, which worker returned; else its last step, else "No step yet".
     pub fn line(&self, session: &Session, now: u64) -> String {
@@ -327,7 +327,7 @@ impl CardStore {
             .unwrap_or(step)
     }
 
-    /// What `session`'s row says while its turn is over (#369, decision 19): the summary of the card
+    /// What `session`'s row says while its turn is over (danielrispler/Falinks#369, decision 19): the summary of the card
     /// on its `Stop`; the first line of the agent's last message until that card arrives; the brief's
     /// latest line when the `Stop` requested no card. `None` in a turn.
     fn stopped_line(&self, session: &Session) -> Option<String> {
@@ -413,7 +413,7 @@ impl CardStore {
         Ok(())
     }
 
-    /// Settles the guess on card `id`, a check's, with the check's result (#461, decision 15):
+    /// Settles the guess on card `id`, a check's, with the check's result (danielrispler/Falinks#461, decision 15):
     /// `passed`, or `None` when its exit code does not say. Its quiz's key becomes the option the
     /// result names, "It passes" or "It fails", and saves the store. A card no check requested, or
     /// one settled before, is left as it is.
@@ -427,8 +427,8 @@ impl CardStore {
         kept.check_result = Some(match passed {
             Some(true) => CheckResult::Passed,
             Some(false) => CheckResult::Failed,
-            // shortcut: an exit code that does not say leaves the guess not counted, where #343 let
-            // the writer's `passed` settle it: the core skips a check's output (#410), and the
+            // shortcut: an exit code that does not say leaves the guess not counted, where danielrispler/Falinks#343 let
+            // the writer's `passed` settle it: the core skips a check's output (danielrispler/Falinks#410), and the
             // check's card took the change, so often no later card comes to read it. Ask the writer
             // on the output at the check's end if `cargo test 2>&1 | tail` checks leave many unscored.
             None => CheckResult::NotCounted,
@@ -576,7 +576,7 @@ impl CardStore {
         Ok(())
     }
 
-    /// Applies the live-only facts and the cards to `studio` after its replay (#434, decisions 37
+    /// Applies the live-only facts and the cards to `studio` after its replay (danielrispler/Falinks#434, decisions 37
     /// and 38).
     pub fn restore(&self, studio: &mut Studio) {
         let requests: Vec<CardRequest> = self.cards.iter().map(|k| k.request.clone()).collect();

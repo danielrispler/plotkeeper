@@ -1,4 +1,4 @@
-// "Ask about this" (#461, decision 20): a side question on a response, card or intention. The shell
+// "Ask about this" (danielrispler/Falinks#461, decision 20): a side question on a response, card or intention. The shell
 // answers it with the card writer's own call, read with the turn's intentions; the answer stays here
 // and the session never sees it. A failed call or a reply with no answer shows why, with a retry.
 

@@ -1,4 +1,4 @@
-//! Seam 2 (#328 and #461, Testing Decisions): the picker's places from real `git` in temporary
+//! Seam 2 (danielrispler/Falinks#328 and danielrispler/Falinks#461, Testing Decisions): the picker's places from real `git` in temporary
 //! repositories, as the engine's tests do (`src/lib.rs`, `retention_checks_every_blob_of_a_snapshot`).
 
 use std::{path::Path, process::Command};
@@ -87,7 +87,7 @@ fn the_listing_from_inside_a_task_still_names_the_main_checkout() {
 }
 
 /// With no `origin` there is no base: neither the main checkout, with no upstream, nor a task shows
-/// ahead and behind (#576).
+/// ahead and behind (danielrispler/Falinks#576).
 #[test]
 fn a_branch_with_no_base_has_no_ahead_and_behind() {
     let (dir, _) = repo();
@@ -107,7 +107,7 @@ fn a_branch_with_no_base_has_no_ahead_and_behind() {
     assert_eq!(counts(dir.path(), &found.tasks[0].path), none);
 }
 
-/// Counts run git only in a place of the repository (#576).
+/// Counts run git only in a place of the repository (danielrispler/Falinks#576).
 #[test]
 fn counts_refuse_a_folder_that_is_not_a_place() {
     let (dir, _) = repo();
@@ -124,13 +124,13 @@ fn a_folder_outside_git_is_an_error() {
     assert!(places(dir.path()).is_err());
 }
 
-/// The studio's status line wrapper beside the plugin (#521), quoted for the shell that runs it.
+/// The studio's status line wrapper beside the plugin (danielrispler/Falinks#521), quoted for the shell that runs it.
 const STATUS_LINE: &str =
     r#"{"statusLine":{"command":"'/r/apps/studio/workbench/statusline.sh'","type":"command"}}"#;
 
 /// `claude` runs with the studio plugin alone, set the way the README loads it, so a profile that
 /// also sets `CLAUDE_CODE_PLUGIN_DIRS` never loads its hooks twice. It names the presence file, so
-/// Remote Control skips a phone push while the studio is focused (#522).
+/// Remote Control skips a phone push while the studio is focused (danielrispler/Falinks#522).
 #[test]
 fn claude_starts_with_the_studio_plugin_and_resumes_by_session_id() {
     let plugin = Path::new("/r/apps/studio/plugin");
@@ -162,7 +162,7 @@ fn claude_starts_with_the_studio_plugin_and_resumes_by_session_id() {
     );
 }
 
-/// Auto mode (#541) is Claude Code's `--permission-mode auto`, added only when asked, for a new
+/// Auto mode (danielrispler/Falinks#541) is Claude Code's `--permission-mode auto`, added only when asked, for a new
 /// session and for a resumed one, which keeps the mode it was started with. Never bypass.
 #[test]
 fn claude_runs_in_auto_mode_only_when_asked() {

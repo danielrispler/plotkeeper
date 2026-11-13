@@ -1,10 +1,10 @@
-//! The turn summary on real turns (#526): the last `--turns` turns that get a summary (#517,
+//! The turn summary on real turns (danielrispler/Falinks#526): the last `--turns` turns that get a summary (danielrispler/Falinks#517,
 //! decision 12) from Daniel's most recent Falinks transcripts in `~/.claude/projects/`, each run
 //! through `write_summary` at the settings' defaults (Haiku at its default effort), as the app runs
 //! it: with its retry, and a throwaway store in a temporary folder. It prints Markdown on standard
 //! output: each turn's prompt, summary, learning section, any logged problem lines, calls, seconds
 //! and `total_cost_usd`. It reads transcripts and no credential file. Run it outside auto mode,
-//! from `apps/studio`:
+//! from the repository's root:
 //!
 //! `cargo run -q -p studio-understanding --example summary_trial -- --turns 3`
 

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Spike for #322: scripted survival check with plain shells, no claude. Crashes, rebuilds and quits the app, and
+# Spike for danielrispler/Falinks#322: scripted survival check with plain shells, no claude. Crashes, rebuilds and quits the app, and
 # shows after each step whether every backend's terminals still run and whether the app reattached.
 # Run from a normal terminal: ./probe.sh. It opens the app window a few times.
 set -u

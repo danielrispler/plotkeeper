@@ -1,11 +1,10 @@
-// Finished subagents leave the list; the rail keeps their history (#535). Run: `npm test` in
-// apps/studio.
+// Finished subagents leave the list; the rail keeps their history (danielrispler/Falinks#535). Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { agentLine, childrenOf, doneCount, hidden } from "../../dist/list.js";
 import { subagentHistory } from "../../dist/story.js";
 
-test("a subagent row has a second line only while it runs or needs you (#572)", () => {
+test("a subagent row has a second line only while it runs or needs you (danielrispler/Falinks#572)", () => {
   assert.equal(agentLine("running", ["Read", null]), "Read");
   assert.equal(agentLine("needs_you", ["Explore", "2m"]), "Explore · 2m");
   assert.equal(agentLine("done", ["Explore", "2m", "Found it"]), null);

@@ -1,6 +1,6 @@
-// Answering from the card (#461, decision 16). While a session's view shows and the window is
+// Answering from the card (danielrispler/Falinks#461, decision 16). While a session's view shows and the window is
 // visible, the shell watches it, so the answer hook waits for the card; the shell sends the session's
-// open request in its read loop (#569), and the answer echoes its nonce. The hook waits only while the
+// open request in its read loop (danielrispler/Falinks#569), and the answer echoes its nonce. The hook waits only while the
 // request's card shows: a question asked in a view that is not shown is handed to the terminal.
 
 import { invoke, listen } from "./dom.js";
@@ -8,7 +8,7 @@ import { studio } from "./state.js";
 import { askKind, type Question } from "./types.js";
 
 // The answer hook's request (`hook/src/answer.rs`): a question or a plan at its `PreToolUse`, or a
-// permission request, which names no call (#478). `agent_id` is the asking subagent's, null for the
+// permission request, which names no call (danielrispler/Falinks#478). `agent_id` is the asking subagent's, null for the
 // session's own agent.
 export type Ask = {
   nonce: string;
@@ -36,7 +36,7 @@ let sent = "";
 export const askFor = (question: Question) =>
   current?.ask.tool_use_id === question.tool_use_id ? current.ask : null;
 
-// The open plan or permission request, if any (#478): the core keeps no question for either.
+// The open plan or permission request, if any (danielrispler/Falinks#478): the core keeps no question for either.
 export const openDecision = () =>
   current !== null && askKind(current.ask.tool_name) !== "question" ? current.ask : null;
 
@@ -50,7 +50,7 @@ let watched = "";
 const shown = () => {
   const selection = document.visibilityState === "visible" ? studio.selection : null;
   const selected = selection?.session;
-  // The hook's payload names the latest conversation, which a `/clear` changes, not the row (#474).
+  // The hook's payload names the latest conversation, which a `/clear` changes, not the row (danielrispler/Falinks#474).
   const session = selected ? selected.resume_id || selected.id : null;
   return { session, agent: selection?.agent ?? null };
 };
@@ -72,7 +72,7 @@ async function take(ask: Ask | null) {
   redraw();
 }
 
-// Tells the shell which session's view shows, when that changed (#569): the shell keeps the
+// Tells the shell which session's view shows, when that changed (danielrispler/Falinks#569): the shell keeps the
 // heartbeat and sends the session's open request as an `ask` event, with no poll here.
 export async function rewatch() {
   const { session, agent } = shown();
@@ -88,7 +88,7 @@ export function startWatching(draw: () => void) {
   document.addEventListener("visibilitychange", rewatch);
   rewatch();
   // Shows the shell the window is alive, so a frozen window lets the hook hand a question to the
-  // terminal within seconds (#569). It asks for nothing; the open request still comes as an event.
+  // terminal within seconds (danielrispler/Falinks#569). It asks for nothing; the open request still comes as an event.
   setInterval(() => {
     if (shown().session !== null) invoke("alive").catch(() => {});
   }, 1000);
