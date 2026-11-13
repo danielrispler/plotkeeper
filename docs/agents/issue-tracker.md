@@ -27,7 +27,7 @@ Used by `/wayfinder`. The **map** is one issue. Its **child** issues are the tic
    - Without a number it uses the newest open issue labelled `wayfinder:map`.
    - With no open map it exits non-zero and lists recent maps. It never falls back to a closed map.
    - An explicit closed or missing map is an error.
-   - The studio tickets (the control-room effort, titled `Studio:` and labelled `studio`) are children of map MAP, the newest open map, so no number is needed.
+   - The studio tickets (the control-room effort, titled `Studio:` and labelled `studio`) are children of map #3, the newest open map, so no number is needed.
    - It reads the map once, then the open children in map order. Each row shows the assignees, the open blocker numbers (`blocked_by`) and `frontier`. This repo uses native GitHub sub-issues and dependencies; missing blocker metadata is an error.
    - It prints the map title and URL, then the rows. Add `--body` to append the map body, which holds Decisions-so-far and the implementation progress log.
 2. Use the named ticket, or the first row with `frontier: true`. Claim it before any work (see **Claim** below). Then work in the worktree path it prints.
