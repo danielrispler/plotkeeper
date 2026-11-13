@@ -184,3 +184,18 @@ fn a_shell_whose_agent_shows_as_node_comes_back_by_its_7501_app() {
     let codex: Vec<String> = ["codex", "resume", "--last"].map(String::from).into();
     assert_eq!(argvs, [codex, vec![]]);
 }
+
+#[test]
+fn a_claude_terminal_no_session_links_to_does_not_come_back() {
+    // #17: its `claude` never sent an event, such as one stopped at the folder-trust prompt, so no
+    // row shows it and it has no conversation to resume; revived as it was, it hid forever.
+    let studio = replayed(&started());
+    let mut unlinked = claude();
+    unlinked.id = "claude-2".into();
+    let revival = studio.revival(&[shell("-zsh"), claude(), unlinked]);
+    let back: Vec<(&str, bool)> = revival.iter().map(|r| (r.id.as_str(), r.revives)).collect();
+    assert_eq!(
+        back,
+        [("shell", true), ("claude-1", true), ("claude-2", false)]
+    );
+}
