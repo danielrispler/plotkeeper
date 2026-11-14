@@ -342,3 +342,75 @@ When the turn holds no idea that carries over beyond this session, such as orche
 When the input says the turn has a card, reply with {"summary": string} only.
 "#
 );
+
+/// How many words a session's name may have at most.
+const NAME_WORDS: usize = 6;
+
+/// The name of a session from `writer`, on Daniel's first `prompt` and, for a bare slash command,
+/// the turn's final `response`: the reply's `name`, cut to a few words. One line goes to `log`
+/// when the call gives none.
+pub fn write_name(
+    writer: &(impl CardWriter + ?Sized),
+    setup: &SummarySetup,
+    prompt: &str,
+    response: Option<&str>,
+    mut log: impl FnMut(String),
+) -> Option<String> {
+    let name = writer.name(setup, prompt, response).and_then(|reply| {
+        let value: serde_json::Value = serde_json::from_str(object(&reply)).unwrap_or_default();
+        let name = value["name"].as_str().unwrap_or_default();
+        let words: Vec<&str> = name.split_whitespace().take(NAME_WORDS).collect();
+        match words.is_empty() {
+            true => Err(format!(
+                "the reply holds none: {:?}",
+                reply.chars().take(300).collect::<String>()
+            )),
+            false => Ok(words.join(" ")),
+        }
+    });
+    name.map_err(|line| log(format!("no session name: {line}")))
+        .ok()
+}
+
+impl ClaudeWriter {
+    /// The `claude -p` run for a session's name, at `setup`'s model and effort with the studio's
+    /// own system prompt, on Daniel's first `prompt` and the final `response`, each cut at
+    /// `MAX_CHANGE`.
+    pub fn name_command(
+        &self,
+        setup: &SummarySetup,
+        prompt: &str,
+        response: Option<&str>,
+    ) -> (Command, String) {
+        let cut = |text: &str| text[..text.floor_char_boundary(MAX_CHANGE)].to_string();
+        let response = response.map_or(String::new(), |r| {
+            format!(
+                "\n\nThe agent's final response to it:\n<response>\n{}\n</response>",
+                cut(r)
+            )
+        });
+        self.run_with(
+            &options(setup, NAME),
+            &format!(
+                "The developer's first prompt:\n<prompt>\n{}\n</prompt>{response}",
+                cut(prompt)
+            ),
+        )
+    }
+}
+
+/// The session name writer's system prompt, which replaces Claude Code's own.
+const NAME: &str = concat!(
+    r#"You name one session of a coding agent in a few words, so that the developer who runs it can tell it from his other sessions in a list.
+
+Answer from the input: his first prompt and, when the prompt is only a slash command, the agent's final response to it. Use only this input: do not use tools or read files. Name what the session is about, not the command.
+
+"#,
+    explanation_language!(),
+    r#"
+
+Reply with one JSON object and nothing else:
+{"name": string}
+- name: at most 6 words, with no issue number and no quotes.
+"#
+);
