@@ -1090,3 +1090,49 @@ fn a_failed_subagent_summary_keeps_nothing_and_logs_one_line() {
         None
     );
 }
+
+/// A writer on `program` whose availability notices go to the returned list: `Some(text)` when no
+/// call can start, `None` when one works again (danielrispler/plotkeeper#51).
+fn watched(
+    program: &Path,
+    dir: &Path,
+) -> (ClaudeWriter, std::sync::Arc<Mutex<Vec<Option<String>>>>) {
+    let heard = std::sync::Arc::new(Mutex::new(Vec::new()));
+    let sink = heard.clone();
+    let writer = ClaudeWriter::new(program.into(), dir.into())
+        .with_timeout(Duration::from_secs(1))
+        .on_availability(move |notice| sink.lock().unwrap().push(notice));
+    (writer, heard)
+}
+
+#[test]
+fn a_writer_that_cannot_start_gives_one_notice_until_a_call_works() {
+    let dir = tempfile::tempdir().unwrap();
+    let program = dir.path().join("claude");
+    let (writer, heard) = watched(&program, dir.path());
+
+    for _ in 0..3 {
+        assert!(writer.reply(&edit(), &[], "").is_err());
+    }
+    {
+        let heard = heard.lock().unwrap();
+        assert_eq!(heard.len(), 1, "{heard:?}");
+        let text = heard[0].as_deref().unwrap();
+        assert!(text.contains("cards and briefs are off"), "{text}");
+    }
+
+    shell(dir.path(), "claude", "echo ok");
+    assert_eq!(writer.reply(&edit(), &[], "").unwrap().trim(), "ok");
+    assert_eq!(heard.lock().unwrap().last(), Some(&None));
+    assert_eq!(heard.lock().unwrap().len(), 2);
+}
+
+#[test]
+fn a_writer_that_starts_and_fails_raises_no_notice() {
+    let dir = tempfile::tempdir().unwrap();
+    let claude = shell(dir.path(), "claude", "exit 3");
+    let (writer, heard) = watched(&claude, dir.path());
+
+    assert!(writer.reply(&edit(), &[], "").is_err());
+    assert!(heard.lock().unwrap().is_empty());
+}

@@ -4,6 +4,7 @@
 // decides what the window shows; this file wires the shell's events to the regions and lays the
 // columns out by the width rule in `layout.ts`.
 
+import { withWriterNotice } from "./writer-notice.js";
 import { startWatching } from "./answer.js";
 import { markShown, showCards } from "./cards.js";
 import { element, invoke, listen } from "./dom.js";
@@ -256,6 +257,12 @@ listen<SessionCards>("cards", (cards) => (studio.pending ? (studio.missed = true
 listen<string>("notice", (notice) => {
   element("notice").textContent = notice;
   element("notice").hidden = false;
+});
+// No card writer can run, or one can again (danielrispler/plotkeeper#51).
+listen<string | null>("writer-notice", (notice) => {
+  const line = element("notice");
+  line.textContent = withWriterNotice(line.textContent ?? "", notice);
+  line.hidden = !line.textContent;
 });
 invoke<SessionCards>("cards").then(showCards);
 // The answer hook waits for the card only while its session shows (danielrispler/Falinks#461, decision 16).
