@@ -21,13 +21,13 @@ test("Home lists the sessions that need Daniel first, then the unseen ones", () 
   ]);
   assert.deepEqual(sections.map((s) => [s.title, ids(s)]), [
     ["Needs you", ["b", "e"]],
-    ["Not seen", ["a", "d"]],
+    ["Unseen", ["a", "d"]],
   ]);
 });
 
 test("a section with no session is absent", () => {
   assert.deepEqual(homeSections([session("c", "running")]), []);
-  assert.deepEqual(homeSections([session("d", "idle", true)]).map((s) => s.title), ["Not seen"]);
+  assert.deepEqual(homeSections([session("d", "idle", true)]).map((s) => s.title), ["Unseen"]);
 });
 
 test("one row per project, named by its folder", () => {
@@ -61,7 +61,6 @@ test("landed sessions come after needs-you and unseen, and a session that is not
   ]);
   assert.deepEqual(sections.map((s) => [s.title, ids(s)]), [
     ["Needs you", ["b"]],
-    ["Not seen", ["c"]],
-    ["Landed", ["a", "d"]],
+    ["Landed", ["a", "c", "d"]],
   ]);
 });

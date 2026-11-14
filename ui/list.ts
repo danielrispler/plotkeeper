@@ -90,11 +90,6 @@ export function status(state: string, unseen = false, landed = false): [Glyph, s
   return ["ring", label];
 }
 
-// The check mark alone, for a Workspaces row.
-export function landedMark(): HTMLElement {
-  return glyph("idle", false, true);
-}
-
 // A status's glyph, named by its word, so the shape is never alone. The pill shows its word.
 export function glyph(state: string, unseen = false, landed = false): HTMLElement {
   const [shape, word] = status(state, unseen, landed);
@@ -206,7 +201,7 @@ function selecting(id: string, agent: string | null, key = `${id} ${agent ?? ""}
 
 // One row: the session's name, its mark and its status glyph; while it runs or needs
 // Daniel, what it is doing and, on the row being looked at, the turn's clock.
-function row(session: Session, children: Children): HTMLElement {
+export function row(session: Session, children: Children): HTMLElement {
   const button = selecting(session.id, null);
   button.classList.add("row", "session-row");
   const line = secondLine(session);
@@ -297,7 +292,7 @@ function icon(name: string, path: string, click: () => void): HTMLElement {
 
 // A row in the list: its toggle, when anything is drawn under it, then the row, then its delete. They
 // are the row's siblings, as a button holds no button, so pressing them does not select the row.
-function item(key: string, depth: number, toggle: { open: boolean; hiding: number } | null, row: HTMLElement, remove: HTMLElement | null) {
+export function item(key: string, depth: number, toggle: { open: boolean; hiding: number } | null, row: HTMLElement, remove: HTMLElement | null) {
   const node = document.createElement("div");
   node.className = "item";
   node.dataset.key = key;

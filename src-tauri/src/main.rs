@@ -7,7 +7,7 @@
 //! the Dock badge counts the sessions that need him (danielrispler/Falinks#369, decision 22; danielrispler/Falinks#517, decision 6).
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs::{File, OpenOptions},
     io::{self, BufRead, BufReader, Seek, SeekFrom, Write},
     path::Path,
@@ -138,7 +138,7 @@ fn sessions(studio: State<Mutex<Studio>>, cards: State<Cards>) -> Vec<Row> {
     let studio = studio.lock().unwrap();
     let now = studio.now();
     let list: Vec<Session> = studio.sessions().into_iter().cloned().collect();
-    let landed: Vec<String> = (list.iter())
+    let landed: HashSet<String> = (list.iter())
         .filter(|s| studio.landed(s))
         .map(|s| s.agent.id.clone())
         .collect();
@@ -843,22 +843,23 @@ fn refresh_landed(app: &AppHandle, session: Option<String>) {
     let app = app.clone();
     thread::spawn(move || {
         let studio = app.state::<Mutex<Studio>>();
-        let mut tasks = studio.lock().unwrap().task_queries();
-        if let Some(session) = session {
-            let cwd = studio
-                .lock()
-                .unwrap()
-                .session(&session)
-                .map(|s| s.cwd.clone());
-            tasks.retain(|t| cwd.as_deref().is_some_and(|cwd| cwd.starts_with(&t.path)));
-        }
+        let tasks = {
+            let mut studio = studio.lock().unwrap();
+            studio.forget_gone_tasks();
+            let mut tasks = studio.task_queries();
+            if let Some(session) = session {
+                let path = studio.task_of(&session);
+                tasks.retain(|t| Some(&t.path) == path.as_ref());
+            }
+            tasks
+        };
         let gh = gh_path();
         for task in tasks {
-            let facts = lookup_task(&gh, &task);
-            let changed = studio
-                .lock()
-                .unwrap()
-                .set_task_facts(&task.path, Some(facts));
+            // A removed worktree has no facts.
+            let facts = Path::new(&task.path)
+                .exists()
+                .then(|| lookup_task(&gh, &task));
+            let changed = studio.lock().unwrap().set_task_facts(&task.path, facts);
             if changed {
                 LIST_CHANGED.store(true, Ordering::Release);
             }
