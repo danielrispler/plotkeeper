@@ -558,10 +558,12 @@ fn a_reply_that_does_not_parse_gives_no_card_and_one_log_line() {
     }
 }
 
-/// The writer on a stub `claude` in `dir` that runs `script`, stopped after one second.
+/// The writer on a stub `claude` in `dir` that runs `script`. Its timeout is long: a stub that has
+/// to start and finish is not racing a clock, however loaded the machine is; a test of the timeout
+/// itself sets a short one.
 fn stub(dir: &Path, script: &str) -> ClaudeWriter {
     let claude = shell(dir, "claude", script);
-    ClaudeWriter::new(claude, dir.into()).with_timeout(Duration::from_secs(1))
+    ClaudeWriter::new(claude, dir.into()).with_timeout(Duration::from_secs(30))
 }
 
 /// A store in `dir` that holds `good_card()` on `edit()`.
@@ -600,9 +602,8 @@ fn a_claude_that_fails_prints_nothing_or_hangs_gives_nothing_keeps_nothing_and_l
         let store = stored(dir.path());
         let mut lines = Vec::new();
 
-        let more = explain_more(&store, &stub(dir.path(), script), &edit().id, |l| {
-            lines.push(l)
-        });
+        let writer = stub(dir.path(), script).with_timeout(Duration::from_secs(1));
+        let more = explain_more(&store, &writer, &edit().id, |l| lines.push(l));
 
         assert_eq!(more, None, "{script}");
         assert_eq!(store.lock().unwrap().cards()[0].more, None, "{script}");
