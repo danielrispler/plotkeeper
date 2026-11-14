@@ -317,6 +317,9 @@ pub struct Revive {
     pub session: Option<String>,
     /// What runs in it that a restart would end: a program, "a turn" or "background tasks".
     pub busy: Option<String>,
+    /// Whether it comes back: not a Claude terminal no session links to (#17). Its `claude` never
+    /// sent an event, so no row shows it and it has no conversation to resume.
+    pub revives: bool,
 }
 
 /// What happened in a worktree since the last card on it: a session's own, or a subagent's that
@@ -2843,8 +2846,8 @@ impl Studio {
     /// with an argv, a Claude terminal, reopens its latest session with `claude --resume`, whether or
     /// not the hangup ended it. A shell whose foreground program, or else its 7501 `app`, is another
     /// agent with a resume command (`studio_workbench::resume`, danielrispler/Falinks#561) comes back as that agent, rerun
-    /// the same way at the next revival; any other shell restarts in its folder. `busy` says what
-    /// runs in it now.
+    /// the same way at the next revival; any other shell restarts in its folder. A Claude terminal
+    /// no session links to does not come back (#17). `busy` says what runs in it now.
     pub fn revival(&self, terms: &[Terminal]) -> Vec<Revive> {
         let running = terms.iter().filter(|t| t.exited.is_none());
         let revive = |t: &Terminal| {
@@ -2883,6 +2886,7 @@ impl Studio {
                     .then(|| latest.map(|s| s.resume_id.clone()))
                     .flatten(),
                 busy,
+                revives: latest.is_some() || !t.argv.iter().any(|a| a == "claude"),
             }
         };
         running.map(revive).collect()

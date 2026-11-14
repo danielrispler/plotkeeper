@@ -14,6 +14,7 @@ export interface Revive {
   argv: string[];
   session: string | null;
   busy: string | null;
+  revives: boolean;
 }
 
 const folder = (cwd: string) => cwd.split("/").filter(Boolean).pop() ?? cwd;
