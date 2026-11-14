@@ -79,6 +79,12 @@ pub struct GitState {
     /// What a half-done operation is: "rebase", "merge", "cherry-pick", "revert" or "conflicts"
     /// (files unmerged with none of those); `None` when nothing is in progress (#31).
     pub operation: Option<String>,
+    /// Commits `origin`'s default branch has that this branch lacks; `None` when level with it or
+    /// when `origin/HEAD` is not set (#30).
+    pub main_behind: Option<u32>,
+    /// Whether the branch is the default branch itself, where main distance is the upstream
+    /// distance and shows once.
+    pub on_default: bool,
 }
 
 /// The git state of the place at `path`, one of the places of `repo`; any other path is refused, so
@@ -102,11 +108,24 @@ pub fn git_state(repo: &Path, path: &str) -> Result<GitState, String> {
     });
     let changed = git(dir, &["status", "--porcelain"])?.lines().count();
     let operation = operation(dir)?;
+    let default = git(
+        dir,
+        &["symbolic-ref", "--short", "-q", "refs/remotes/origin/HEAD"],
+    )
+    .ok();
+    let on_default =
+        matches!((&branch, &default), (Some(b), Some(d)) if d.strip_prefix("origin/") == Some(b));
+    let main_behind = default
+        .and_then(|d| git(dir, &["rev-list", "--count", &format!("HEAD..{d}")]).ok())
+        .and_then(|n| n.parse().ok())
+        .filter(|n| *n > 0);
     Ok(GitState {
         branch,
         upstream,
         changed,
         operation,
+        main_behind,
+        on_default,
     })
 }
 

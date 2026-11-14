@@ -18,9 +18,9 @@ const places = {
   hidden: 0,
 };
 const states = [
-  { branch: "main", upstream: [0, 0], changed: 0 },
+  { branch: "main", upstream: [0, 0], changed: 0, main_behind: null, on_default: false },
   { branch: "issue-1", upstream: [2, 1], changed: 3 },
-  { branch: null, upstream: null, changed: 0 },
+  { branch: null, upstream: null, changed: 0, main_behind: null, on_default: false },
 ];
 const sessions = ["/r", "/r/.claude/worktrees/issue-1", "/r/.claude/worktrees/issue-1/apps", "/elsewhere"].map((cwd) => ({ cwd }));
 const texts = (state) => gitTokens(state).map((t) => t.text);
@@ -49,9 +49,9 @@ test("a row shows the same tokens as the Git line for the same place", () => {
 });
 
 test("tokens that say nothing are hidden, and the rest come in order: branch, upstream, uncommitted", () => {
-  assert.deepEqual(texts({ branch: "main", upstream: [0, 0], changed: 0 }), ["main"]);
+  assert.deepEqual(texts({ branch: "main", upstream: [0, 0], changed: 0, main_behind: null, on_default: false }), ["main"]);
   assert.deepEqual(texts({ branch: "t", upstream: [0, 4], changed: 1 }), ["t", "↑0 ↓4", "●1"]);
-  assert.deepEqual(texts({ branch: "t", upstream: [2, 0], changed: 0 }), ["t", "↑2 ↓0"]);
+  assert.deepEqual(texts({ branch: "t", upstream: [2, 0], changed: 0, main_behind: null, on_default: false }), ["t", "↑2 ↓0"]);
 });
 
 test("a branch with no upstream says not pushed; a detached HEAD says detached and not not pushed", () => {
@@ -137,4 +137,16 @@ test("the new-session picker no longer creates or removes tasks", () => {
   const picker = read("picker.ts");
   assert.doesNotMatch(picker, /create_task"|remove_task|Remove/);
   assert.match(read("places.ts"), /create_task"/);
+});
+
+test("main ↓N shows only when behind, after the upstream distance and before the uncommitted count", () => {
+  const state = { branch: "t", upstream: [2, 0], changed: 1, on_default: false };
+  assert.deepEqual(texts({ ...state, main_behind: 5 }), ["t", "↑2 ↓0", "main ↓5", "●1"]);
+  assert.deepEqual(texts({ ...state, main_behind: null }), ["t", "↑2 ↓0", "●1"]);
+  assert.equal(gitTokens({ ...state, main_behind: 5 })[2].title, "5 commits behind origin's default branch");
+});
+
+test("on the default branch the distance shows once, as the upstream distance", () => {
+  const main = { branch: "main", upstream: [0, 3], changed: 0, main_behind: 3, on_default: true };
+  assert.deepEqual(texts(main), ["main", "↑0 ↓3"]);
 });

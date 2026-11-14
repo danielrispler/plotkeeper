@@ -197,7 +197,7 @@ export type Place = { path: string; branch: string | null };
 export type Places = { main: Place; tasks: Place[]; hidden: number };
 // A place's git state (#29): its branch, null at a detached HEAD; commits ahead of and behind its upstream, null with
 // none; and changed files.
-export type GitState = { branch: string | null; upstream: [number, number] | null; changed: number; operation?: string | null };
+export type GitState = { branch: string | null; upstream: [number, number] | null; changed: number; main_behind: number | null; on_default: boolean; operation?: string | null };
 export type Losses = { uncommitted: string[]; unpushed: string[] };
 
 export const stateLabels: Record<SessionState, string> = {

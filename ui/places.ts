@@ -17,7 +17,7 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 export type Token = { text: string; title: string };
 
 // A place's git tokens, left to right, each hidden when it says nothing (#26): its branch or
-// "detached", the upstream distance "↑2 ↓1" or "not pushed", and "●3" uncommitted files. The hover
+// "detached", the upstream distance "↑2 ↓1" or "not pushed", "main ↓5" when behind origin's default branch (not on it, where the upstream distance is the same), and "●3" uncommitted files. The hover
 // title says each in words. The one function for the Git line and for Places rows.
 export function gitTokens(state: GitState | null): Token[] {
   if (!state) return [];
@@ -31,6 +31,9 @@ export function gitTokens(state: GitState | null): Token[] {
     }
   } else if (state.branch) {
     tokens.push({ text: "not pushed", title: "The branch has no upstream: never pushed" });
+  }
+  if (state.main_behind && !state.on_default) {
+    tokens.push({ text: `main ↓${state.main_behind}`, title: `${plural(state.main_behind, "commit")} behind origin's default branch` });
   }
   if (state.changed) tokens.push({ text: `●${state.changed}`, title: plural(state.changed, "uncommitted file") });
   if (state.operation) {
