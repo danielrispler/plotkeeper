@@ -151,6 +151,8 @@ const actions: Actions = {
   "studio::NewSession": showPicker,
   // Fetches the repository now (#33); the workspaces' states follow.
   "studio::Fetch": () => void fetchNow(),
+  // Asks GitHub again which tasks have landed (#53); it is otherwise asked at a turn's end and at the window's focus.
+  "studio::RefreshLanded": () => void invoke("refresh_landed_tasks").catch((e) => console.warn(e)),
   "studio::OpenSettings": () => void invoke("open_settings", { editor: studio.files.settings.editor }).catch((e) => console.warn(e)),
   // The skills browser (danielrispler/Falinks#528), in the rail's place; it leaves focus mode, which hides the rail.
   "studio::Skills": () => {
@@ -216,6 +218,7 @@ element("close-all").addEventListener("click", () => blocks().forEach((block) =>
 element("rail-actions").addEventListener("click", () => element("rail-actions").hidePopover());
 
 document.addEventListener("visibilitychange", markShown);
+window.addEventListener("focus", () => actions["studio::RefreshLanded"]());
 
 // A login shell in the configured repository, then a pane per session terminal (danielrispler/Falinks#467).
 startPanes().catch((e) => element("terminal-body").append(`No terminal: ${e}`));

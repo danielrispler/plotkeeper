@@ -49,6 +49,29 @@ pub struct Studio {
     /// Whether `terminals` has had its first list: the rows that list finds tell nothing, as Claude
     /// sessions replayed at start tell nothing (danielrispler/Falinks#522).
     listed: bool,
+    /// What the shell last found about each task's work, by the task's worktree folder: its files,
+    /// its PR and its issue, asked at a turn's end, at the window's focus and on a refresh. The main
+    /// checkout is never here, so it never lands.
+    tasks: HashMap<String, TaskFacts>,
+}
+
+/// What the shell found about a task, for **Landed**. A lookup that failed is `false`.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TaskFacts {
+    /// Nothing uncommitted and nothing unpushed.
+    pub safe: bool,
+    /// Its PR is merged.
+    pub merged: bool,
+    /// Its issue is closed; only read when a session of the task has an issue.
+    pub issue_closed: bool,
+}
+
+/// What the shell looks up about a task: its worktree folder, its branch, its issue.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TaskQuery {
+    pub path: String,
+    pub branch: Option<String>,
+    pub issue: Option<u64>,
 }
 
 type FindRoot = dyn Fn(&str) -> Option<String> + Send;
@@ -119,6 +142,8 @@ pub struct Session {
     /// Whether closing its terminal asks first: it is in a turn, or its latest `Stop` listed
     /// background tasks (danielrispler/Falinks#469).
     pub asks_before_closing: bool,
+    /// Its task has landed; the shell sets it from `Studio::landed` as it sends the list.
+    pub landed: bool,
     /// Daniel deleted it: the list leaves it out until it starts again.
     #[serde(skip)]
     deleted: bool,
@@ -253,6 +278,15 @@ impl Identity {
         ];
         self.name = parts.into_iter().flatten().collect::<Vec<_>>().join(" · ");
     }
+}
+
+/// The worktree folder of the task that `cwd` is in: the path through the folder under
+/// `.claude/worktrees/`; `None` outside one, as in a main checkout.
+fn task_path(cwd: &str) -> Option<String> {
+    const MARK: &str = "/.claude/worktrees/";
+    let at = cwd.find(MARK)? + MARK.len();
+    let name = cwd[at..].split('/').next().filter(|n| !n.is_empty())?;
+    Some(format!("{}{name}", &cwd[..at]))
 }
 
 /// The issue a `wayfinder-startup … --claim <n>` command claims.
@@ -3121,6 +3155,58 @@ impl Studio {
         seen.into_iter()
             .map(|(branch, cwd)| (cwd, branch))
             .collect()
+    }
+
+    /// The tasks the shell looks up for **Landed**: each worktree of a listed session that is under
+    /// `.claude/worktrees/`, once, with its branch and issue.
+    pub fn task_queries(&self) -> Vec<TaskQuery> {
+        let mut queries = BTreeMap::<String, TaskQuery>::new();
+        for session in self.sessions() {
+            let Some(path) = task_path(&session.cwd) else {
+                continue;
+            };
+            let query = queries.entry(path.clone()).or_insert(TaskQuery {
+                path,
+                branch: None,
+                issue: None,
+            });
+            query.branch = query.branch.take().or(session.identity.branch.clone());
+            query.issue = query.issue.or(session.identity.issue);
+        }
+        queries.into_values().collect()
+    }
+
+    /// The shell looked a task up: `None` when it could not, which leaves the task not landed.
+    /// Returns whether the facts changed.
+    pub fn set_task_facts(&mut self, path: &str, facts: Option<TaskFacts>) -> bool {
+        let before = self.tasks.get(path).copied();
+        match facts {
+            Some(facts) => self.tasks.insert(path.into(), facts),
+            None => self.tasks.remove(path),
+        };
+        before != facts
+    }
+
+    /// Whether `session`'s task has landed: its work has shipped, so removing its worktree loses
+    /// nothing. Nothing uncommitted or unpushed, its PR merged, its issue closed when a session
+    /// there has one, and none of the sessions listed in the worktree running or needing Daniel.
+    pub fn landed(&self, session: &Session) -> bool {
+        let Some(path) = task_path(&session.cwd) else {
+            return false;
+        };
+        let Some(facts) = self.tasks.get(&path) else {
+            return false;
+        };
+        let there: Vec<&Session> = (self.sessions().into_iter())
+            .filter(|s| task_path(&s.cwd).as_deref() == Some(path.as_str()))
+            .collect();
+        let has_issue = there.iter().any(|s| s.identity.issue.is_some());
+        facts.safe
+            && facts.merged
+            && (!has_issue || facts.issue_closed)
+            && there
+                .iter()
+                .all(|s| !matches!(s.state, State::Running | State::NeedsYou))
     }
 
     /// The shell found `pr` for `branch`; returns whether any session's name changed.

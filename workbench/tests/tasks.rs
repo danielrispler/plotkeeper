@@ -4,7 +4,7 @@
 use std::{path::Path, process::Command};
 use studio_workbench::{
     GitState, Losses, Workspace, create_named_task, create_task, delete_branch_merged_at,
-    delete_merged_branch, git_state, remove_task, workspaces,
+    delete_merged_branch, git_state, losses, remove_task, workspaces,
 };
 
 /// Runs `git` in `dir`, away from Daniel's own git config, and returns its trimmed output.
@@ -146,6 +146,31 @@ fn removing_a_clean_pushed_task_removes_its_worktree_and_keeps_its_branch() {
 
     assert!(!path.exists());
     assert_eq!(git(&repos.main, &["rev-parse", "done"]), work);
+}
+
+#[test]
+fn losses_are_empty_for_a_clean_pushed_task_and_list_new_work() {
+    let repos = repos();
+    let task = create_task(&repos.main, "shipped").unwrap();
+    let path = Path::new(&task.path);
+    git(path, &["commit", "-q", "--allow-empty", "-m", "Work"]);
+    git(path, &["push", "-q", "origin", "shipped"]);
+    let nothing = Losses {
+        uncommitted: vec![],
+        unpushed: vec![],
+    };
+    assert_eq!(losses(path), Ok(nothing));
+
+    // New work after the push shows at once: a commit, then a file.
+    git(path, &["commit", "-q", "--allow-empty", "-m", "More"]);
+    assert_eq!(losses(path).unwrap().unpushed.len(), 1);
+    git(path, &["push", "-q", "origin", "shipped"]);
+    std::fs::write(path.join("new.txt"), "x").unwrap();
+    let found = losses(path).unwrap();
+    assert_eq!(
+        (found.uncommitted, found.unpushed),
+        (vec!["?? new.txt".into()], vec![])
+    );
 }
 
 #[test]
