@@ -154,6 +154,102 @@ pub fn repo_tickets(pages: &Value) -> Result<Vec<Value>> {
     rows.sort_by_key(|row| row["number"].as_u64());
     Ok(rows)
 }
+/// The paths in the `**Files:**` line of a ticket's `## Touches`: its backticked spans. No such line, none.
+pub fn touched_files(body: &str) -> Vec<String> {
+    let Some(line) = body.lines().find(|line| line.contains("**Files:**")) else {
+        return vec![];
+    };
+    let after = line.split_once("**Files:**").map_or("", |(_, rest)| rest);
+    // Odd-numbered pieces between backticks are the spans.
+    after
+        .split('`')
+        .skip(1)
+        .step_by(2)
+        .map(|path| path.trim().to_owned())
+        .filter(|path| !path.is_empty())
+        .collect()
+}
+
+/// Two open tickets that may edit the same files at once.
+#[derive(Debug)]
+pub struct Overlap {
+    pub first: u64,
+    pub second: u64,
+    pub files: Vec<String>,
+}
+
+impl Overlap {
+    pub fn warning(&self) -> String {
+        format!(
+            "warning: #{} and #{} both touch {}",
+            self.first,
+            self.second,
+            self.files.join(", ")
+        )
+    }
+}
+
+/// The paths both lists name; a directory (ending in `/`) shares every path under it.
+fn shared_files(a: &[String], b: &[String]) -> Vec<String> {
+    let mut shared = std::collections::BTreeSet::new();
+    for (x, y) in a.iter().flat_map(|x| b.iter().map(move |y| (x, y))) {
+        if x == y || (x.ends_with('/') && y.starts_with(x.as_str())) {
+            shared.insert(y.clone());
+        } else if y.ends_with('/') && x.starts_with(y.as_str()) {
+            shared.insert(x.clone());
+        }
+    }
+    shared.into_iter().collect()
+}
+
+/// Pairs of open tickets, claimed or ready, that share a Touches file and are either in different
+/// specs or in one spec with no blocking edge between them. Tickets with no Touches line are skipped.
+pub fn overlaps(pages: &Value) -> Result<Vec<Overlap>> {
+    let mut bodies = std::collections::HashMap::new();
+    for page in pages.as_array().ok_or("expected paginated issues")? {
+        for issue in page["data"]["repository"]["issues"]["nodes"]
+            .as_array()
+            .ok_or("expected an issue page")?
+        {
+            bodies.insert(
+                issue["number"].as_u64().ok_or("missing issue number")?,
+                touched_files(issue["body"].as_str().unwrap_or("")),
+            );
+        }
+    }
+    let rows = repo_tickets(pages)?;
+    let numbers = |row: &Value, key: &str| -> Vec<u64> {
+        row[key].as_array().map_or(vec![], |list| {
+            list.iter().filter_map(Value::as_u64).collect()
+        })
+    };
+    let active: Vec<&Value> = rows
+        .iter()
+        .filter(|row| {
+            let number = row["number"].as_u64().unwrap_or(0);
+            !bodies[&number].is_empty()
+                && (!numbers(row, "assignees").is_empty() || numbers(row, "blocked_by").is_empty())
+        })
+        .collect();
+    let mut found = vec![];
+    for (i, a) in active.iter().enumerate() {
+        for b in &active[i + 1..] {
+            let (x, y) = (a["number"].as_u64().unwrap(), b["number"].as_u64().unwrap());
+            let same_spec = !a["parent"].is_null() && a["parent"] == b["parent"];
+            let ordered =
+                numbers(a, "blocked_by").contains(&y) || numbers(b, "blocked_by").contains(&x);
+            let files = shared_files(&bodies[&x], &bodies[&y]);
+            if !files.is_empty() && !(same_spec && ordered) {
+                found.push(Overlap {
+                    first: x,
+                    second: y,
+                    files,
+                });
+            }
+        }
+    }
+    Ok(found)
+}
 fn list_maps(maps: &[&Value]) -> String {
     if maps.is_empty() {
         return " none".into();
@@ -514,6 +610,14 @@ fn claim(number: u64) -> Result<()> {
             )?;
         }
     }
+    // Only a warning: a failed lookup or an overlap never blocks the claim.
+    match open_issue_pages().and_then(|pages| overlaps(&pages)) {
+        Ok(found) => found
+            .iter()
+            .filter(|overlap| overlap.first == number || overlap.second == number)
+            .for_each(|overlap| eprintln!("{}", overlap.warning())),
+        Err(error) => eprintln!("could not check for overlapping tickets: {error}"),
+    }
     println!("{}", plan.path);
     Ok(())
 }
@@ -570,12 +674,22 @@ fn done(number: u64) -> Result<()> {
 }
 const USAGE: &str =
     "usage: wayfinder-startup [map-number] [--body] | --all | --claim <issue> | --done <issue>";
-const OPEN_ISSUES: &str = "query($endCursor: String) { repository(owner: \"danielrispler\", name: \"plotkeeper\") { issues(states: OPEN, first: 100, after: $endCursor) { pageInfo { hasNextPage endCursor } nodes { number title url parent { number } assignees(first: 20) { totalCount nodes { login } } blockedBy(first: 50) { totalCount nodes { number state } } } } } }";
+fn open_issue_pages() -> Result<Value> {
+    gh(&[
+        "api",
+        "graphql",
+        "--paginate",
+        "--slurp",
+        "-f",
+        &format!("query={OPEN_ISSUES}"),
+    ])
+}
+const OPEN_ISSUES: &str = "query($endCursor: String) { repository(owner: \"danielrispler\", name: \"plotkeeper\") { issues(states: OPEN, first: 100, after: $endCursor) { pageInfo { hasNextPage endCursor } nodes { number title url body parent { number } assignees(first: 20) { totalCount nodes { login } } blockedBy(first: 50) { totalCount nodes { number state } } } } } }";
 fn run() -> Result<()> {
     let args = env::args().skip(1).collect::<Vec<_>>();
     if args == ["--help"] {
         println!(
-            "{USAGE}\nDefault map: newest open issue labelled wayfinder:map. The map listing only reads GitHub; it prints the map title, URL and ticket rows, and --body appends the map body.\n--all lists every open issue repo-wide, by number, with its parent, assignees, open blockers and frontier, from one paginated GraphQL query.\n--claim <issue> refuses closed, blocked or otherwise-assigned tickets, assigns the issue to you, reuses its worktree, or checks out its local or origin branch, or creates branch issue-<n>-<slug> from origin/main, under .claude/worktrees/, and prints the path.\n--done <issue> runs after merge, from outside the ticket's worktree: it removes that worktree and the ticket's one local issue-<n>-* branch, only if a merged PR ended on the branch's commit and the worktree has no uncommitted, untracked or ignored files apart from target/."
+            "{USAGE}\nDefault map: newest open issue labelled wayfinder:map. The map listing only reads GitHub; it prints the map title, URL and ticket rows, and --body appends the map body.\n--all lists every open issue repo-wide, by number, with its parent, assignees, open blockers and frontier, from one paginated GraphQL query. It also warns on stderr, once per pair, when two claimed or ready tickets share a file in their Touches Files line and are in different specs or in one spec with no blocking edge between them.\n--claim <issue> refuses closed, blocked or otherwise-assigned tickets, assigns the issue to you, reuses its worktree, or checks out its local or origin branch, or creates branch issue-<n>-<slug> from origin/main, under .claude/worktrees/, and prints the path. It warns on stderr, never blocking, when another claimed or ready ticket's Touches files overlap this one's.\n--done <issue> runs after merge, from outside the ticket's worktree: it removes that worktree and the ticket's one local issue-<n>-* branch, only if a merged PR ended on the branch's commit and the worktree has no uncommitted, untracked or ignored files apart from target/."
         );
         return Ok(());
     }
@@ -591,16 +705,13 @@ fn run() -> Result<()> {
         return write(number.parse().map_err(|_| USAGE)?);
     }
     if args == ["--all"] {
-        let pages = gh(&[
-            "api",
-            "graphql",
-            "--paginate",
-            "--slurp",
-            "-f",
-            &format!("query={OPEN_ISSUES}"),
-        ])?;
+        let pages = open_issue_pages()?;
         for row in repo_tickets(&pages)? {
             println!("{row}");
+        }
+        // Warnings go to stderr, beside the JSON rows; they never fail the listing.
+        for overlap in overlaps(&pages)? {
+            eprintln!("{}", overlap.warning());
         }
         return Ok(());
     }
@@ -1060,6 +1171,119 @@ mod done_tests {
         assert_eq!(
             leftovers("!! target/\n!! .env\n!! target.bak/\n?? target/\n M src/lib.rs\n"),
             ["!! .env", "!! target.bak/", "?? target/", " M src/lib.rs"]
+        );
+    }
+}
+#[cfg(test)]
+mod touches_tests {
+    use super::*;
+    fn issue(
+        number: u64,
+        parent: Option<u64>,
+        assignee: bool,
+        blockers: &[u64],
+        body: &str,
+    ) -> Value {
+        let logins = if assignee {
+            vec![json!({"login":"dev"})]
+        } else {
+            vec![]
+        };
+        let blocked: Vec<Value> = blockers
+            .iter()
+            .map(|n| json!({"number":n,"state":"OPEN"}))
+            .collect();
+        json!({"number":number,"title":"T","url":"u","parent":parent.map(|n| json!({"number":n})),"body":body,
+            "assignees":{"totalCount":logins.len(),"nodes":logins},
+            "blockedBy":{"totalCount":blocked.len(),"nodes":blocked}})
+    }
+    fn pages(issues: Vec<Value>) -> Value {
+        json!([{"data":{"repository":{"issues":{"nodes":issues}}}}])
+    }
+    fn touches(files: &str) -> String {
+        format!("## Touches\n\n- **Files:** {files}\n- **Session:** auto mode\n")
+    }
+    fn found(pages: &Value) -> Vec<(u64, u64, Vec<String>)> {
+        overlaps(pages)
+            .unwrap()
+            .into_iter()
+            .map(|o| (o.first, o.second, o.files))
+            .collect()
+    }
+
+    #[test]
+    fn the_files_line_lists_its_backticked_paths() {
+        let body = touches("`wayfinder/` (the bin), `docs/agents/issue-tracker.md`, fixtures");
+        assert_eq!(
+            touched_files(&body),
+            ["wayfinder/", "docs/agents/issue-tracker.md"]
+        );
+    }
+    #[test]
+    fn a_body_with_no_touches_line_has_no_files() {
+        assert!(touched_files("## What to build\n\nSomething.").is_empty());
+    }
+    #[test]
+    fn tickets_of_different_specs_sharing_a_file_overlap_once() {
+        let a = issue(
+            46,
+            Some(43),
+            true,
+            &[],
+            &touches("`core/src/lib.rs`, `a.rs`"),
+        );
+        let b = issue(
+            57,
+            Some(53),
+            false,
+            &[],
+            &touches("`b.rs`, `core/src/lib.rs`"),
+        );
+        assert_eq!(
+            found(&pages(vec![a, b])),
+            [(46, 57, vec!["core/src/lib.rs".to_owned()])]
+        );
+    }
+    #[test]
+    fn a_directory_overlaps_the_files_under_it() {
+        let a = issue(1, Some(9), false, &[], &touches("`wayfinder/`"));
+        let b = issue(2, Some(8), false, &[], &touches("`wayfinder/src/main.rs`"));
+        assert_eq!(
+            found(&pages(vec![a, b])),
+            [(1, 2, vec!["wayfinder/src/main.rs".to_owned()])]
+        );
+    }
+    #[test]
+    fn same_spec_tickets_overlap_unless_one_blocks_the_other() {
+        let a = issue(1, Some(9), true, &[], &touches("`x.rs`"));
+        let b = issue(2, Some(9), true, &[], &touches("`x.rs`"));
+        assert_eq!(found(&pages(vec![a, b])).len(), 1);
+        let a = issue(1, Some(9), true, &[], &touches("`x.rs`"));
+        let b = issue(2, Some(9), true, &[1], &touches("`x.rs`"));
+        assert!(found(&pages(vec![a, b])).is_empty());
+    }
+    #[test]
+    fn a_ticket_that_is_blocked_and_unclaimed_is_not_compared() {
+        let a = issue(1, Some(9), false, &[], &touches("`x.rs`"));
+        let b = issue(2, Some(8), false, &[5], &touches("`x.rs`"));
+        assert!(found(&pages(vec![a, b])).is_empty());
+    }
+    #[test]
+    fn tickets_without_a_touches_line_are_skipped() {
+        let a = issue(1, Some(9), true, &[], "no touches here");
+        let b = issue(2, Some(8), true, &[], &touches("`x.rs`"));
+        assert!(found(&pages(vec![a, b])).is_empty());
+    }
+    #[test]
+    fn warnings_name_both_tickets_and_the_files() {
+        let overlap = Overlap {
+            first: 46,
+            second: 57,
+            files: vec!["a.rs".into(), "b.rs".into()],
+        };
+        assert_eq!(
+            overlap.warning(),
+            "warning: #46 and #57 both touch a.rs, b.rs"
         );
     }
 }
