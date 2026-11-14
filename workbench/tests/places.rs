@@ -102,6 +102,8 @@ fn a_branch_with_no_upstream_has_no_distance() {
             branch: Some(branch.into()),
             upstream: None,
             changed: 0,
+            main_behind: None,
+            on_default: false,
         })
     };
 
@@ -154,6 +156,8 @@ fn upstream_distance_counts_unpushed_and_unpulled_commits() {
             branch: Some("main".into()),
             upstream: Some((2, 1)),
             changed: 1,
+            main_behind: Some(1),
+            on_default: true,
         })
     );
 }
@@ -170,6 +174,8 @@ fn a_detached_head_has_no_branch() {
             branch: None,
             upstream: None,
             changed: 0,
+            main_behind: None,
+            on_default: false,
         })
     );
 }
@@ -272,4 +278,46 @@ fn claude_runs_in_auto_mode_only_when_asked() {
         ["--permission-mode", "auto", "--resume", "9e0b5f13"]
     );
     assert!(tail(claude(plugin, presence, None, false)).is_empty());
+}
+
+/// Main distance is against `origin`'s default branch: a task behind it reports how far, one level
+/// with it reports none, and the default branch itself is flagged so the window shows one distance (#30).
+#[test]
+fn main_distance_counts_commits_origins_default_branch_has_that_the_branch_lacks() {
+    let (dir, main, origin) = pushed();
+    git(dir.path(), &["remote", "set-head", "origin", "main"]);
+    git(
+        dir.path(),
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "t",
+            ".claude/worktrees/t",
+            "origin/main",
+        ],
+    );
+    let task = places(dir.path()).unwrap().tasks[0].path.clone();
+    let level = git_state(dir.path(), &task).unwrap();
+    assert_eq!((level.main_behind, level.on_default), (None, false));
+
+    // Another clone pushes two commits to main; this one fetches them.
+    let other = tempfile::tempdir().unwrap();
+    git(
+        other.path(),
+        &["clone", "-q", origin.to_str().unwrap(), "c"],
+    );
+    let clone = other.path().join("c");
+    for message in ["Theirs", "More"] {
+        git(&clone, &["commit", "-q", "--allow-empty", "-m", message]);
+    }
+    git(&clone, &["push", "-q", "origin", "main"]);
+    git(dir.path(), &["fetch", "-q", "origin"]);
+
+    let behind = git_state(dir.path(), &task).unwrap();
+    assert_eq!((behind.main_behind, behind.on_default), (Some(2), false));
+    let on_main = git_state(dir.path(), &main).unwrap();
+    assert!(on_main.on_default);
+    assert_eq!(on_main.upstream, Some((0, 2)));
 }

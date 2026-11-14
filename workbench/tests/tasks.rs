@@ -258,6 +258,8 @@ fn a_place_reads_its_upstream_distance_and_its_changed_files() {
             branch: Some(branch.into()),
             upstream,
             changed,
+            main_behind: None,
+            on_default: false,
         })
     };
 
