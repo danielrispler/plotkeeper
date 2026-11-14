@@ -7,7 +7,7 @@
 //! the Dock badge counts the sessions that need him (danielrispler/Falinks#369, decision 22; danielrispler/Falinks#517, decision 6).
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs::{File, OpenOptions},
     io::{self, BufRead, BufReader, Seek, SeekFrom, Write},
     path::Path,
@@ -21,14 +21,14 @@ use std::{
     time::{Duration, Instant},
 };
 use studio_core::{
-    CardRequest, Notifications, Output, Session, Sound,
+    CardRequest, NameRequest, Notifications, Output, Session, Sound,
     State::{Ended, NeedsYou},
-    Studio, SummaryRequest,
+    Studio, SummaryRequest, TaskFacts, TaskQuery,
 };
 use studio_understanding::{
     CardStore, CardWriter, ClaudeWriter, FakeWriter, Fingerprints, Rating, Row, SessionCards,
     StoredSummary, SummarySetup, Versions, backfilled, fingerprint_changes, millis, worktree_root,
-    write_agent_summary, write_brief, write_stop, write_summary,
+    write_agent_summary, write_brief, write_name, write_stop, write_summary,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
@@ -138,20 +138,31 @@ fn sessions(studio: State<Mutex<Studio>>, cards: State<Cards>) -> Vec<Row> {
     let studio = studio.lock().unwrap();
     let now = studio.now();
     let list: Vec<Session> = studio.sessions().into_iter().cloned().collect();
+    let landed: HashSet<String> = (list.iter())
+        .filter(|s| studio.landed(s))
+        .map(|s| s.agent.id.clone())
+        .collect();
     drop(studio);
     let cards = cards.lock().unwrap();
-    let row = |session: Session| Row {
+    let row = |mut session: Session| Row {
         line: cards.line(&session, now),
-        session,
+        session: {
+            session.landed = landed.contains(&session.agent.id);
+            session
+        },
     };
     list.into_iter().map(row).collect()
 }
 
-/// Daniel clicked session `id`'s row; returns the selection, which no longer names a subagent.
+/// Daniel clicked session `id`'s row, or, with no `id`, went Home; returns the selection, which no
+/// longer names a subagent, and is `null` at Home.
 #[tauri::command]
-fn select(id: String, studio: State<Mutex<Studio>>) -> serde_json::Value {
+fn select(id: Option<String>, studio: State<Mutex<Studio>>) -> serde_json::Value {
     let mut studio = studio.lock().unwrap();
-    studio.select(&id);
+    match id {
+        Some(id) => studio.select(&id),
+        None => studio.select_none(),
+    }
     selection(&studio)
 }
 
@@ -535,6 +546,7 @@ fn main() {
             notify_while_focused,
             mark_unseen,
             rail_shown,
+            refresh_landed_tasks,
             sounds
         ])
         .on_window_event(|window, event| {
@@ -651,10 +663,12 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                     Output::Card(request) => write(app, writer, &mut queues, request, true),
                     Output::Brief(request) => write(app, writer, &mut queues, request, false),
                     Output::Summary(request) => summarize(app, writer, &mut queues, request),
+                    Output::Name(request) => name(app, writer, &mut queues, request),
                     Output::NeedsYou { session_id, agent } => {
                         tell(app, Notice::NeedsYou, &session_id, agent.as_deref());
                     }
                     Output::YourTurn { session_id } => {
+                        refresh_landed(app, Some(session_id.clone()));
                         tell(app, Notice::YourTurn, &session_id, None);
                     }
                     Output::Failed { session_id, agent } => {
@@ -789,20 +803,96 @@ fn rail_shown(shown: bool) {
     RAIL_SHOWN.store(shown, Ordering::Release);
 }
 
+/// The `gh` to run: the first on Daniel's login shell's `PATH`, found once.
+fn gh_path() -> String {
+    static GH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    GH.get_or_init(|| {
+        // An app started from the Dock gets launchd's `PATH`, which lacks Homebrew's folder.
+        let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/zsh".into());
+        let found = Command::new(shell).args(["-lc", "command -v gh"]).output();
+        let found = found.ok().filter(|o| o.status.success()).map(|o| o.stdout);
+        found
+            .as_deref()
+            .map(String::from_utf8_lossy)
+            .and_then(|out| out.lines().last().map(str::to_owned))
+            .filter(|path| path.starts_with('/'))
+            .unwrap_or_else(|| "gh".into())
+    })
+    .clone()
+}
+
+/// The `state` of the pull request or issue that `gh <args>` shows, run in `cwd`: `MERGED`, `CLOSED`
+/// and the like; `None` when `gh` fails, is missing or is offline.
+fn gh_state(gh: &str, cwd: &str, args: &[&str]) -> Option<String> {
+    let output = Command::new(gh)
+        .args(args)
+        .args(["--json", "state", "--jq", ".state"])
+        .current_dir(cwd)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())?;
+    Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// What git and GitHub say about `task`, for **Landed**; every fact that cannot be found is false.
+fn lookup_task(gh: &str, task: &TaskQuery) -> TaskFacts {
+    let safe = studio_workbench::losses(Path::new(&task.path))
+        .is_ok_and(|l| l.uncommitted.is_empty() && l.unpushed.is_empty());
+    let merged = task.branch.as_deref().is_some_and(|branch| {
+        gh_state(gh, &task.path, &["pr", "view", branch]).as_deref() == Some("MERGED")
+    });
+    let issue_closed = task.issue.is_some_and(|n| {
+        gh_state(gh, &task.path, &["issue", "view", &n.to_string()]).as_deref() == Some("CLOSED")
+    });
+    TaskFacts {
+        safe,
+        merged,
+        issue_closed,
+    }
+}
+
+/// Looks up each task of the list, or only the one that holds `session`, on its own thread so the
+/// read loop never waits on the network. Asked at a turn's end, at the window's focus and on the
+/// palette's refresh, never on a timer.
+fn refresh_landed(app: &AppHandle, session: Option<String>) {
+    let app = app.clone();
+    thread::spawn(move || {
+        let studio = app.state::<Mutex<Studio>>();
+        let tasks = {
+            let mut studio = studio.lock().unwrap();
+            studio.forget_gone_tasks();
+            let mut tasks = studio.task_queries();
+            if let Some(session) = session {
+                let path = studio.task_of(&session);
+                tasks.retain(|t| Some(&t.path) == path.as_ref());
+            }
+            tasks
+        };
+        let gh = gh_path();
+        for task in tasks {
+            // A removed worktree has no facts.
+            let facts = Path::new(&task.path)
+                .exists()
+                .then(|| lookup_task(&gh, &task));
+            let changed = studio.lock().unwrap().set_task_facts(&task.path, facts);
+            if changed {
+                LIST_CHANGED.store(true, Ordering::Release);
+            }
+        }
+    });
+}
+
+/// The window gained focus, or Daniel chose the palette's refresh: ask about every task again.
+#[tauri::command]
+fn refresh_landed_tasks(app: AppHandle) {
+    refresh_landed(&app, None);
+}
+
 /// Finds the PR of each session's branch with `gh pr view` (danielrispler/Falinks#461, decision 19), on its own thread so
 /// the read loop never waits on the network, and asks again after 5 minutes. `gh` runs as Daniel
 /// with its own login; no credential file is read.
 fn prs(app: &AppHandle) {
-    // An app started from the Dock gets launchd's `PATH`, which lacks Homebrew's folder.
-    let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/zsh".into());
-    let found = Command::new(shell).args(["-lc", "command -v gh"]).output();
-    let found = found.ok().filter(|o| o.status.success()).map(|o| o.stdout);
-    let gh = found
-        .as_deref()
-        .map(String::from_utf8_lossy)
-        .and_then(|out| out.lines().last().map(str::to_owned))
-        .filter(|path| path.starts_with('/'))
-        .unwrap_or_else(|| "gh".into());
+    let gh = gh_path();
     let mut asked = HashMap::<String, Instant>::new();
     loop {
         let branches = app.state::<Mutex<Studio>>().lock().unwrap().branches();
@@ -922,6 +1012,37 @@ fn summarize(
         let studio = app.state::<Mutex<Studio>>();
         if studio.lock().unwrap().summarized(&session, &turn, first) {
             let _ = app.emit("sessions", sessions(app.state(), app.state()));
+        }
+    };
+    queue(queues, id).send(Box::new(job)).ok();
+}
+
+/// Names the session of `request` on its queue, from Daniel's first prompt, at the summary writer's
+/// model and effort. The name is a `StudioPromptName` line in the event log, which the log thread
+/// applies and a restart replays.
+fn name(
+    app: &AppHandle,
+    writer: &Writer,
+    queues: &mut HashMap<String, mpsc::Sender<Job>>,
+    request: NameRequest,
+) {
+    let (app, writer) = (app.clone(), writer.clone());
+    let id = request.session_id.clone();
+    let job = move || {
+        let log = |line: String| eprintln!("studio: {line}");
+        let setup = app.state::<Summaries>().setup.lock().unwrap().clone();
+        let response = request.response.as_deref();
+        let Some(name) = write_name(&*writer, &setup, &request.prompt, response, log) else {
+            return;
+        };
+        let line = serde_json::json!({
+            "session_id": request.session_id,
+            "hook_event_name": studio_core::PROMPT_NAME,
+            "studio_name": name,
+            "studio_received_ms": millis(),
+        });
+        if let Err(e) = append(&[line]) {
+            eprintln!("studio: save the name of {}: {e}", request.session_id);
         }
     };
     queue(queues, id).send(Box::new(job)).ok();

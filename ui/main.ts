@@ -10,8 +10,9 @@ import { markShown, showCards } from "./cards.js";
 import { element, invoke, listen } from "./dom.js";
 import { type Actions, doctorEntries, nextNeedsYou, paletteEntries, run, stepSession, windowBinding } from "./keys.js";
 import { arrange, defaultWidths, type LayoutMode, railShown, resized, type Widths } from "./layout.js";
+import { listSpace } from "./home.js";
 import { showSessions } from "./list.js";
-import { select, show } from "./selection.js";
+import { goHome, select, show } from "./selection.js";
 import { dragPanel, placePanel, togglePanel } from "./panel.js";
 import { dragSplit, focusPane, placePanes, runDoctor, split, startPanes, toggleSplit } from "./panes.js";
 import { showPalette, showPicker } from "./picker.js";
@@ -150,8 +151,12 @@ const actions: Actions = {
   "studio::SelectPrevious": () => moveInList(-1),
   "studio::Answer": (n) => answer(Number(n)),
   "studio::NewSession": showPicker,
+  // Home, in the terminal column: selects no session.
+  "studio::GoHome": () => void goHome(),
   // Fetches the repository now (#33); the workspaces' states follow.
   "studio::Fetch": () => void fetchNow(),
+  // Asks GitHub again which tasks have landed (#53); it is otherwise asked at a turn's end and at the window's focus.
+  "studio::RefreshLanded": () => void invoke("refresh_landed_tasks").catch((e) => console.warn(e)),
   "studio::OpenSettings": () => void invoke("open_settings", { editor: studio.files.settings.editor }).catch((e) => console.warn(e)),
   // The skills browser (danielrispler/Falinks#528), in the rail's place; it leaves focus mode, which hides the rail.
   "studio::Skills": () => {
@@ -217,12 +222,15 @@ element("close-all").addEventListener("click", () => blocks().forEach((block) =>
 element("rail-actions").addEventListener("click", () => element("rail-actions").hidePopover());
 
 document.addEventListener("visibilitychange", markShown);
+window.addEventListener("focus", () => actions["studio::RefreshLanded"]());
 
 // A login shell in the configured repository, then a pane per session terminal (danielrispler/Falinks#467).
 startPanes().catch((e) => element("terminal-body").append(`No terminal: ${e}`));
 dragSplit();
 dragPanel();
 element("new-session").addEventListener("click", showPicker);
+// A click on the session list's empty space selects none and shows Home.
+document.querySelector(".list")!.addEventListener("click", (event) => listSpace(event.target as HTMLElement) && void goHome());
 // The needs-you chip (danielrispler/Falinks#572) selects the first session that needs Daniel.
 element("needs-you").addEventListener("click", () => {
   const first = studio.listed.find((session) => session.state === "needs_you");

@@ -30,7 +30,9 @@ pub use store::{
     Brief, CardStore, CheckResult, Guess, Level, Rating, Reason, Row, SessionCards, StoredCard,
     StoredSummary, millis,
 };
-pub use summary::{Learning, SummarySetup, TurnSummary, write_agent_summary, write_summary};
+pub use summary::{
+    Learning, SummarySetup, TurnSummary, write_agent_summary, write_name, write_summary,
+};
 pub use week::{Rate, Ratings, Week, week};
 
 /// A card on a change, in the explanation language; code inside its text is in
@@ -187,6 +189,18 @@ pub trait CardWriter {
         _setup: &SummarySetup,
         _prompt: &str,
         _message: &str,
+    ) -> Result<String, String> {
+        Err("this writer writes no summaries".into())
+    }
+
+    /// The writer's reply with a session's name, from Daniel's first `prompt` and, when it was a
+    /// bare slash command, the turn's final `response`, at `setup`'s model and effort, or one line
+    /// when it gave none. A writer that writes no summaries says so.
+    fn name(
+        &self,
+        _setup: &SummarySetup,
+        _prompt: &str,
+        _response: Option<&str>,
     ) -> Result<String, String> {
         Err("this writer writes no summaries".into())
     }
@@ -642,6 +656,10 @@ impl CardWriter for FakeWriter {
         );
         Ok(serde_json::json!({ "summary": summary }).to_string())
     }
+
+    fn name(&self, _: &SummarySetup, _: &str, _: Option<&str>) -> Result<String, String> {
+        Ok(serde_json::json!({ "name": "Sample session name" }).to_string())
+    }
 }
 
 /// Writes the card with `claude -p` on Daniel's subscription, in a neutral folder that holds none of
@@ -992,6 +1010,15 @@ impl CardWriter for ClaudeWriter {
         message: &str,
     ) -> Result<String, String> {
         self.stdout(self.agent_summary_command(setup, prompt, message))
+    }
+
+    fn name(
+        &self,
+        setup: &SummarySetup,
+        prompt: &str,
+        response: Option<&str>,
+    ) -> Result<String, String> {
+        self.stdout(self.name_command(setup, prompt, response))
     }
 }
 

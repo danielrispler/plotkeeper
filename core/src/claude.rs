@@ -22,7 +22,7 @@ const PLAN_TOOL: &str = "ExitPlanMode";
 
 /// The line the shell appends when Daniel renames a session (`crate::RENAME`), deletes one
 /// (`crate::DELETE`), or answers from a card (`crate::STUDIO_ANSWER`).
-use crate::{DELETE, RENAME, STUDIO_ANSWER};
+use crate::{DELETE, PROMPT_NAME, RENAME, STUDIO_ANSWER};
 
 /// The four fields of a tool response the core reads (danielrispler/Falinks#410, decision 20). The rest, file contents
 /// included, is skipped without building a JSON tree.
@@ -224,6 +224,7 @@ fn adapt(raw: Raw) -> Event {
         }),
         "Elicitation" => happened.push(Happened::ElicitationAsked),
         RENAME => happened.push(Happened::Renamed(raw.studio_name.clone())),
+        PROMPT_NAME => happened.push(Happened::PromptNamed(raw.studio_name.clone())),
         DELETE => happened.push(Happened::Deleted),
         STUDIO_ANSWER => happened.push(Happened::Answered {
             tool: tool(&raw),

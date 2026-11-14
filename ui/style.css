@@ -117,12 +117,19 @@ h1 { margin: 0 0 var(--sp-4); }
    on hover or focus. Every row keeps both columns, so names and glyphs stay aligned. */
 .item { position: relative; }
 .item > .row.session-row { padding-inline-start: calc(var(--sp-4) + var(--indent)); }
-.item > .row { padding-inline-end: calc(var(--sp-4) + var(--sp-6)); }
-.item .fold, .item .delete { position: absolute; top: var(--sp-2); padding: 0 var(--sp-1); background: none;
-                             font-size: var(--size-xs); color: var(--muted); white-space: nowrap; }
+.item > .row { padding-inline-end: calc(var(--sp-4) + var(--control)); }
+.item .fold, .item .delete { position: absolute; top: var(--sp-1); display: grid; place-items: center; width: var(--control); height: var(--control);
+                             padding: 0; border-radius: var(--radius-small); background: none; color: var(--muted); }
+.item .fold svg, .item .delete svg { width: var(--icon); height: var(--icon); }
+.item .fold svg { transition: transform var(--motion); }
+.item .fold[aria-expanded="true"] svg { transform: rotate(90deg); }
+.item .fold:dir(rtl) svg { transform: scaleX(-1); }
+.item .fold[aria-expanded="true"]:dir(rtl) svg { transform: scaleX(-1) rotate(90deg); }
 .item .delete { inset-inline-end: var(--sp-2); visibility: hidden; }
-.item:hover .delete, .item:focus-within .delete { visibility: visible; }
-.item .fold:hover, .item .delete:hover { color: var(--fg); }
+.item:hover .delete, .item:focus-within .delete, .item:has(> .row[aria-pressed="true"]) .delete { visibility: visible; }
+.item .fold:hover, .item .delete:hover { color: var(--fg); background: var(--hover); }
+/* A landed task's session: a monochrome check mark, no colour (#53). */
+.glyph[data-glyph="check"]::after { content: "✓"; color: var(--muted); font-size: var(--size-xs); line-height: 1; }
 /* Status by shape (danielrispler/Falinks#572): a spinner while running, a dot at your turn, a filled dot once unseen, a ring
    when idle or ended, and the "Needs you" pill, the only colour. */
 .glyph { flex: none; width: var(--glyph); height: var(--glyph); border-radius: 50%; display: grid; place-items: center; }
@@ -161,6 +168,12 @@ h1 { margin: 0 0 var(--sp-4); }
    fitted to the body and a switch shows it as it is, with no resize and redraw after (danielrispler/Falinks#570). A new
    pane stays invisible until its first replay is written and fitted. */
 .pane { position: absolute; inset: var(--sp-3); }
+/* Home (spec #53): in the terminal column while no session is selected; rows as the list's, in a column of readable width. */
+.pane.home { overflow-y: auto; padding: var(--sp-5) var(--sp-6); max-width: var(--dialog); margin: 0 auto; }
+.pane.home h1 { margin: var(--sp-6) var(--sp-4) var(--sp-2); }
+.pane.home .row:hover { background: var(--hover); }
+/* A landed row's Delete is the point of the section, so it shows without hover. */
+.pane.home .item .delete { visibility: visible; }
 .pane[hidden] { display: block; }
 .pane[hidden], .pane.fitting { visibility: hidden; }
 /* A split's divider (danielrispler/Falinks#529), in the gap between its two panes. */

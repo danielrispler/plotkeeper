@@ -121,8 +121,18 @@ pub fn workspaces() -> Result<studio_workbench::Workspaces, String> {
 /// The git state of the workspace at `path` (#26): branch, upstream distance, changed files, distance
 /// from origin's default branch, and the operation in progress.
 #[tauri::command(async)]
-pub fn workspace_git_state(path: String) -> Result<studio_workbench::GitState, String> {
-    studio_workbench::git_state(Path::new(&repo()), &path)
+pub fn workspace_git_state(
+    path: String,
+    studio: State<Mutex<studio_core::Studio>>,
+) -> Result<studio_workbench::GitState, String> {
+    let state = studio_workbench::git_state(Path::new(&repo()), &path)?;
+    // The same read tells **Landed** whether the task's files are still safe; local git only, never GitHub.
+    let safe = studio_workbench::losses(Path::new(&path))
+        .is_ok_and(|l| l.uncommitted.is_empty() && l.unpushed.is_empty());
+    if studio.lock().unwrap().set_task_safe(&path, safe) {
+        crate::LIST_CHANGED.store(true, std::sync::atomic::Ordering::Release);
+    }
+    Ok(state)
 }
 
 /// Fetches the configured repository once (#33); the window reads every workspace's state again after.

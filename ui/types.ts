@@ -87,6 +87,8 @@ export type Session = {
   status_only: boolean;
   // Daniel's name for it from the studio (danielrispler/Falinks#469); null for its folder's.
   name: string | null;
+  // A few words on what it is about, written from Daniel's first prompt; null before it arrives.
+  prompt_name: string | null;
   // The id `claude --resume` takes: its latest conversation's; a `/clear` changes it, not `id` (danielrispler/Falinks#474).
   resume_id: string;
   // Claude Code's permission mode from its latest event that names one, null before (danielrispler/Falinks#541).
@@ -97,6 +99,8 @@ export type Session = {
   cleared: number[];
   // Closing its terminal asks first: it is in a turn or has background tasks (danielrispler/Falinks#469).
   asks_before_closing: boolean;
+  // Its task has landed (the core's rule): shown as a check mark once the session is at your turn, idle or ended.
+  landed: boolean;
   last_step: Step | null;
   // When its first and latest events came, its latest turn's and its last step's times (danielrispler/Falinks#473).
   started_at: number;

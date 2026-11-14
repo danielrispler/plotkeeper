@@ -5,6 +5,7 @@
 import { age, element, patch, prose, pressable, stepText, text } from "./dom.js";
 import { counts, times, type Time } from "./times.js";
 import { shortPaths } from "./paths.js";
+import { redrawHome } from "./panes.js";
 import { isSelected, select } from "./selection.js";
 import { studio } from "./state.js";
 import { stateLabels, type Context, type Session, type SessionState, type Subagent } from "./types.js";
@@ -20,10 +21,15 @@ export function stripLabel(folder: string): string {
   return /^issue-(\d+)/.exec(folder)?.[1] ?? folder.slice(0, 4);
 }
 
-// What a session is called: Daniel's name for it, else its issue, PR and worktree (danielrispler/Falinks#480), else its
-// folder.
-export function sessionName(session: Pick<Session, "name" | "identity" | "folder_name">): string {
-  return session.name ?? (session.identity.name || session.folder_name);
+// What a session is called: Daniel's name for it, else the name written from its first prompt with
+// the identity's issue in front ("#37 · One event internal"), else its issue, PR and worktree
+// (danielrispler/Falinks#480), else its folder.
+export function sessionName(
+  session: Pick<Session, "name" | "identity" | "folder_name"> & { prompt_name?: string | null },
+): string {
+  if (session.name) return session.name;
+  if (session.prompt_name) return session.identity.issue === null ? session.prompt_name : `#${session.identity.issue} · ${session.prompt_name}`;
+  return session.identity.name || session.folder_name;
 }
 
 const thousands = (n: number) => `${Math.round(n / 1000).toLocaleString("en-US")}k`;
@@ -50,6 +56,11 @@ export function rowMark(session: Pick<Session, "status_only" | "transcript">): s
   return session.status_only ? "status only" : contextText(session.transcript.context);
 }
 
+// The name's hover: the identity's PR and worktree, which a prompt name leaves out.
+function nameTitle(session: Session): string {
+  return session.name || !session.prompt_name ? "" : session.identity.name;
+}
+
 // The mark's node, with the context share's hover.
 function markNode(session: Session): HTMLElement {
   const title = session.status_only ? "Another agent, followed by its reported status only" : contextTitle(session.transcript.context);
@@ -64,9 +75,13 @@ export function agentState(session: Session, agent: Subagent): [string, string] 
 // A status's shape and its word (danielrispler/Falinks#572): a "Needs you" pill, the only colour (danielrispler/Falinks#565, decision 1); a
 // spinner while running; a dot at your turn, filled once it finished unseen, idle too (danielrispler/Falinks#556); a ring when idle,
 // ended or, for a subagent, done.
-export type Glyph = "pill" | "spinner" | "dot" | "filled" | "ring";
-export function status(state: string, unseen = false): [Glyph, string] {
+export type Glyph = "pill" | "spinner" | "dot" | "filled" | "ring" | "check";
+// A landed task's session at your turn, idle or ended shows a check mark and these words instead (#53, Landed).
+export const landedWord = "Landed — safe to delete";
+export const showsLanded = (state: string, landed: boolean) => landed && ["your_turn", "idle", "ended"].includes(state);
+export function status(state: string, unseen = false, landed = false): [Glyph, string] {
   const label = stateLabels[state as SessionState] ?? state;
+  if (showsLanded(state, landed)) return ["check", landedWord];
   if (state === "needs_you") return ["pill", label];
   if (state === "running") return ["spinner", label];
   // The core marks a turn unseen only at your turn and once idle after it, which keeps the mark.
@@ -76,12 +91,13 @@ export function status(state: string, unseen = false): [Glyph, string] {
 }
 
 // A status's glyph, named by its word, so the shape is never alone. The pill shows its word.
-function glyph(state: string, unseen = false): HTMLElement {
-  const [shape, word] = status(state, unseen);
+export function glyph(state: string, unseen = false, landed = false): HTMLElement {
+  const [shape, word] = status(state, unseen, landed);
   const node = text("span", shape === "pill" ? word : "", "glyph");
   node.dataset.glyph = shape;
   node.setAttribute("role", "img");
   node.setAttribute("aria-label", word);
+  if (shape === "check") node.title = word;
   return node;
 }
 
@@ -160,11 +176,11 @@ function done(all: Children, children: Subagent[] = []): HTMLElement[] {
 
 // A row's lines: its name and status glyph, then, if any, what it is doing, muted. Its title pairs
 // the name with the status's word.
-function rowLines(button: HTMLElement, state: string, name: HTMLElement[], below: HTMLElement[] | null, unseen = false) {
+function rowLines(button: HTMLElement, state: string, name: HTMLElement[], below: HTMLElement[] | null, unseen = false, landed = false) {
   const first = text("span", "", "l1");
-  first.append(...name, glyph(state, unseen));
+  first.append(...name, glyph(state, unseen, landed));
   button.append(first);
-  button.title = `${name[0].textContent} · ${status(state, unseen)[1]}`;
+  button.title = `${name[0].textContent} · ${status(state, unseen, landed)[1]}`;
   button.classList.toggle("unseen", unseen);
   if (below) {
     const second = text("span", "", "l2");
@@ -185,7 +201,7 @@ function selecting(id: string, agent: string | null, key = `${id} ${agent ?? ""}
 
 // One row: the session's name, its mark and its status glyph; while it runs or needs
 // Daniel, what it is doing and, on the row being looked at, the turn's clock.
-function row(session: Session, children: Children): HTMLElement {
+export function row(session: Session, children: Children): HTMLElement {
   const button = selecting(session.id, null);
   button.classList.add("row", "session-row");
   const line = secondLine(session);
@@ -194,11 +210,12 @@ function row(session: Session, children: Children): HTMLElement {
   rowLines(
     button,
     session.state,
-    [text("span", sessionName(session), "name"), markNode(session)],
+    [Object.assign(text("span", sessionName(session), "name"), { title: nameTitle(session) }), markNode(session)],
     line === null
       ? null
       : [...done(children, children.get("session")), rowLine(line), ...(turn ? [Object.assign(counts(clock, turn[1]), { title: turn[0] })] : [])],
     session.unseen,
+    session.landed,
   );
   return button;
 }
@@ -263,19 +280,28 @@ function agentRow(session: Session, children: Children, agent: Subagent, depth: 
   return button;
 }
 
+// A row control's icon: a 14px inline SVG on the current colour, in a 20x20 button (the tokens' --control and --icon).
+const CHEVRON = '<path d="M5 3l4 4-4 4"/>';
+const CROSS = '<path d="M3.5 3.5l7 7M10.5 3.5l-7 7"/>';
+function icon(name: string, path: string, click: () => void): HTMLElement {
+  const button = pressable(text("button", "", name), false, click);
+  button.removeAttribute("aria-pressed");
+  button.innerHTML = `<svg viewBox="0 0 14 14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${path}</svg>`;
+  return button;
+}
+
 // A row in the list: its toggle, when anything is drawn under it, then the row, then its delete. They
 // are the row's siblings, as a button holds no button, so pressing them does not select the row.
-function item(key: string, depth: number, toggle: { open: boolean; hiding: number } | null, row: HTMLElement, remove: HTMLElement | null) {
+export function item(key: string, depth: number, toggle: { open: boolean; hiding: number } | null, row: HTMLElement, remove: HTMLElement | null) {
   const node = document.createElement("div");
   node.className = "item";
   node.dataset.key = key;
   if (toggle) {
-    const fold = pressable(text("button", toggle.open ? "▾" : "▸", "fold"), false, () => {
+    const fold = icon("fold", CHEVRON, () => {
       if (!folded.delete(key)) folded.add(key);
       showSessions(studio.listed);
     });
     fold.title = toggle.open ? "Collapse subagents" : "Expand subagents";
-    fold.removeAttribute("aria-pressed");
     fold.setAttribute("aria-expanded", String(toggle.open));
     // The count goes after the name, as the toggle's column has room only for its chevron.
     if (toggle.hiding) row.querySelector(".name")?.after(text("span", `${toggle.hiding} hidden`, "id"));
@@ -287,13 +313,12 @@ function item(key: string, depth: number, toggle: { open: boolean; hiding: numbe
 }
 
 // A session row's delete (decision of the session list's fold and delete): the rail's dialog, asked from the row.
-function deleting(session: Session): HTMLElement | null {
+export function deleting(session: Session): HTMLElement | null {
   if (session.status_only) return null;
   // `patch` keeps the first button and its listener, so the press reads the session as it is now.
   const now = () => studio.listed.find((listed) => listed.id === session.id) ?? session;
-  const button = pressable(text("button", "×", "delete"), false, () => void askDelete(now()).catch(report));
+  const button = icon("delete", CROSS, () => void askDelete(now()).catch(report));
   button.title = "Delete…";
-  button.removeAttribute("aria-pressed");
   button.setAttribute("aria-label", `Delete ${sessionName(session)}…`);
   return button;
 }
@@ -344,8 +369,8 @@ function strip(sessions: Session[]): HTMLElement[] {
     ...shown.map((session, i) => {
       const button = selecting(session.id, null, `strip ${session.id}`);
       button.setAttribute("aria-pressed", String(isSelected(session.id)));
-      button.title = `${sessionName(session)} · ${status(session.state, session.unseen)[1]}`;
-      button.append(glyph(session.state, session.unseen), labels[i]);
+      button.title = `${sessionName(session)} · ${status(session.state, session.unseen, session.landed)[1]}`;
+      button.append(glyph(session.state, session.unseen, session.landed), labels[i]);
       return button;
     }),
     ...(rest ? [Object.assign(pressable(text("button", String(rest)), false, toggle), { title: "Idle and ended" })] : []),
@@ -357,6 +382,7 @@ function strip(sessions: Session[]): HTMLElement[] {
 // heading (danielrispler/Falinks#572).
 export function showSessions(sessions: Session[]) {
   studio.listed = sessions;
+  redrawHome();
   const groups: Session[][] = [];
   for (const session of sessions) {
     const last = groups[groups.length - 1];

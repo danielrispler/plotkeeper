@@ -54,6 +54,29 @@ pub struct Studio {
     /// Whether `terminals` has had its first list: the rows that list finds tell nothing, as Claude
     /// sessions replayed at start tell nothing (danielrispler/Falinks#522).
     listed: bool,
+    /// What the shell last found about each task's work, by the task's worktree folder: its files,
+    /// its PR and its issue, asked at a turn's end, at the window's focus and on a refresh. The main
+    /// checkout is never here, so it never lands.
+    tasks: HashMap<String, TaskFacts>,
+}
+
+/// What the shell found about a task, for **Landed**. A lookup that failed is `false`.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TaskFacts {
+    /// Nothing uncommitted and nothing unpushed.
+    pub safe: bool,
+    /// Its PR is merged.
+    pub merged: bool,
+    /// Its issue is closed; only read when a session of the task has an issue.
+    pub issue_closed: bool,
+}
+
+/// What the shell looks up about a task: its worktree folder, its branch, its issue.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TaskQuery {
+    pub path: String,
+    pub branch: Option<String>,
+    pub issue: Option<u64>,
 }
 
 type FindRoot = dyn Fn(&str) -> Option<String> + Send;
@@ -105,6 +128,15 @@ pub struct Session {
     /// Daniel's name for it, from the studio's latest rename line in the log (danielrispler/Falinks#469); `None` for its
     /// folder's.
     pub name: Option<String>,
+    /// A few words on what it is about, written from Daniel's first prompt and logged as a
+    /// `StudioPromptName` line; shown after his name and before the identity's.
+    pub prompt_name: Option<String>,
+    /// Whether Daniel's first prompt arrived, which asks for the prompt name once.
+    #[serde(skip)]
+    name_asked: bool,
+    /// His first prompt, a bare slash command, whose name waits for its turn's end.
+    #[serde(skip)]
+    name_after: Option<String>,
     /// The id `claude --resume` takes: its latest conversation's, which a `/clear` changes while the
     /// row keeps its first id (danielrispler/Falinks#461, decision 18).
     pub resume_id: String,
@@ -124,6 +156,8 @@ pub struct Session {
     /// Whether closing its terminal asks first: it is in a turn, or its latest `Stop` listed
     /// background tasks (danielrispler/Falinks#469).
     pub asks_before_closing: bool,
+    /// Its task has landed; the shell sets it from `Studio::landed` as it sends the list.
+    pub landed: bool,
     /// Daniel deleted it: the list leaves it out until it starts again.
     #[serde(skip)]
     deleted: bool,
@@ -258,6 +292,15 @@ impl Identity {
         ];
         self.name = parts.into_iter().flatten().collect::<Vec<_>>().join(" · ");
     }
+}
+
+/// The worktree folder of the task that `cwd` is in: the path through the folder under
+/// `.claude/worktrees/`; `None` outside one, as in a main checkout.
+fn task_path(cwd: &str) -> Option<String> {
+    const MARK: &str = "/.claude/worktrees/";
+    let at = cwd.find(MARK)? + MARK.len();
+    let name = cwd[at..].split('/').next().filter(|n| !n.is_empty())?;
+    Some(format!("{}{name}", &cwd[..at]))
 }
 
 /// The issue a `wayfinder-startup … --claim <n>` command claims.
@@ -1361,6 +1404,9 @@ pub enum Output {
     /// A session's turn ended with a long reply or by asking Daniel something: its turn summary
     /// (danielrispler/Falinks#517, decisions 12 and 13).
     Summary(SummaryRequest),
+    /// Daniel's first prompt of a session arrived, or its turn ended when that prompt was a bare
+    /// slash command: its prompt name.
+    Name(NameRequest),
     /// A Claude session's hook state and its OSC 7501 state disagreed past `MISMATCH_AFTER_MS`:
     /// `line` goes to the local mismatch log, for debugging (danielrispler/Falinks#560).
     Mismatch { line: String },
@@ -1433,6 +1479,22 @@ pub struct SummaryRequest {
     /// The card its `Stop` requested, which the learning section points to instead of a question.
     #[serde(default)]
     pub card: Option<String>,
+}
+
+/// What the writer reads to name a session from its first prompt.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct NameRequest {
+    pub session_id: String,
+    /// Daniel's first prompt.
+    pub prompt: String,
+    /// The final response of its turn, for a prompt that is a bare slash command; `None` otherwise.
+    pub response: Option<String>,
+}
+
+/// Whether `prompt` is a slash command with nothing after it, such as `/wayfinder`.
+fn is_bare_command(prompt: &str) -> bool {
+    let prompt = prompt.trim();
+    prompt.starts_with('/') && !prompt.contains(char::is_whitespace)
 }
 
 /// A reply of at least this many words gets a summary (danielrispler/Falinks#517, decision 12).
@@ -1619,6 +1681,10 @@ pub struct Asker {
 /// restart replays, so the name survives it.
 pub const RENAME: &str = "StudioRename";
 
+/// The line the shell appends when the writer named a session from its first prompt: its
+/// `studio_name`. The log is what a restart replays, so the name survives it.
+pub const PROMPT_NAME: &str = "StudioPromptName";
+
 /// The event the shell appends to the log when Daniel deletes a session: its row leaves the list,
 /// at once and after a restart, until a `SessionStart` of it brings it back. Its cards stay.
 pub const DELETE: &str = "StudioDelete";
@@ -1769,9 +1835,14 @@ impl Studio {
     /// and 11).
     pub fn fingerprint_folders(&self, line: &str) -> Vec<Fingerprint> {
         let event = claude::parse(line);
-        let event = event
-            .ok()
-            .filter(|e| !e.has(|h| matches!(h, Happened::Renamed(_) | Happened::Deleted)));
+        let event = event.ok().filter(|e| {
+            !e.has(|h| {
+                matches!(
+                    h,
+                    Happened::Renamed(_) | Happened::PromptNamed(_) | Happened::Deleted
+                )
+            })
+        });
         event.map_or_else(Vec::new, |mut event| {
             event.session_id = self.row(&event);
             let long_check = self.check_start(&event).is_some_and(|start| start.long());
@@ -2068,6 +2139,16 @@ impl Studio {
             }
             return Vec::new();
         }
+        if let Some(name) = event.happened.iter().find_map(|h| match h {
+            Happened::PromptNamed(name) => Some(name),
+            _ => None,
+        }) {
+            if let Some(session) = self.sessions.get_mut(&event.session_id) {
+                session.prompt_name = Some(name.trim().to_owned()).filter(|n| !n.is_empty());
+                session.name_after = None;
+            }
+            return Vec::new();
+        }
         // So does a delete, which also drops the selection when it was this session.
         if event.has(|h| matches!(h, Happened::Deleted)) {
             if let Some(session) = self.sessions.get_mut(&event.session_id) {
@@ -2305,6 +2386,19 @@ impl Studio {
                         }),
                         Sender::Daniel => {}
                     }
+                    // Daniel's first prompt asks for a name; a bare slash command waits for its turn's end.
+                    if sender.is_daniels() && !session.name_asked {
+                        session.name_asked = true;
+                        if is_bare_command(prompt) {
+                            session.name_after = Some(prompt.clone());
+                        } else if !replay {
+                            outputs.push(Output::Name(NameRequest {
+                                session_id: session.agent.id.clone(),
+                                prompt: prompt.clone(),
+                                response: None,
+                            }));
+                        }
+                    }
                     // A background check ends at the notification that names its task.
                     for (task, status) in event.reported() {
                         let (task, status) = (task.as_str(), status.as_str());
@@ -2376,6 +2470,15 @@ impl Studio {
                                 Some(Output::Card(card)) => Some(card.id.clone()),
                                 _ => None,
                             },
+                        }));
+                    }
+                    if let Some(prompt) = session.name_after.take()
+                        && !replay
+                    {
+                        outputs.push(Output::Name(NameRequest {
+                            session_id: session.agent.id.clone(),
+                            prompt,
+                            response: Some(reply.into()),
                         }));
                     }
                     let mut lines = event.reply().lines().map(str::trim);
@@ -3052,6 +3155,79 @@ impl Studio {
             .collect()
     }
 
+    /// The tasks the shell looks up for **Landed**: each worktree of a listed session that is under
+    /// `.claude/worktrees/`, once, with its branch and issue.
+    pub fn task_queries(&self) -> Vec<TaskQuery> {
+        let mut queries = BTreeMap::<String, TaskQuery>::new();
+        for session in self.sessions() {
+            let Some(path) = task_path(&session.cwd) else {
+                continue;
+            };
+            let query = queries.entry(path.clone()).or_insert(TaskQuery {
+                path,
+                branch: None,
+                issue: None,
+            });
+            query.branch = query.branch.take().or(session.identity.branch.clone());
+            query.issue = query.issue.or(session.identity.issue);
+        }
+        queries.into_values().collect()
+    }
+
+    /// The shell looked a task up: `None` when it could not, which leaves the task not landed.
+    /// Returns whether the facts changed.
+    pub fn set_task_facts(&mut self, path: &str, facts: Option<TaskFacts>) -> bool {
+        let before = self.tasks.get(path).copied();
+        match facts {
+            Some(facts) => self.tasks.insert(path.into(), facts),
+            None => self.tasks.remove(path),
+        };
+        before != facts
+    }
+
+    /// The git half of a task's facts, read again with its workspace's git state (no GitHub): a new
+    /// commit or file clears the mark at once. A task never looked up has no facts to change.
+    /// Returns whether the facts changed.
+    pub fn set_task_safe(&mut self, path: &str, safe: bool) -> bool {
+        let Some(facts) = self.tasks.get_mut(path) else {
+            return false;
+        };
+        std::mem::replace(&mut facts.safe, safe) != safe
+    }
+
+    /// Drops the facts of tasks no listed session works in any more, whose worktree is gone with them.
+    pub fn forget_gone_tasks(&mut self) {
+        let kept: Vec<String> = self.task_queries().into_iter().map(|q| q.path).collect();
+        self.tasks.retain(|path, _| kept.contains(path));
+    }
+
+    /// The task folder session `id` works in, `None` in the main checkout or for no such session.
+    pub fn task_of(&self, id: &str) -> Option<String> {
+        task_path(&self.sessions.get(id)?.cwd)
+    }
+
+    /// Whether `session`'s task has landed: its work has shipped, so removing its worktree loses
+    /// nothing. Nothing uncommitted or unpushed, its PR merged, its issue closed when a session
+    /// there has one, and none of the sessions listed in the worktree running or needing Daniel.
+    pub fn landed(&self, session: &Session) -> bool {
+        let Some(path) = task_path(&session.cwd) else {
+            return false;
+        };
+        let Some(facts) = self.tasks.get(&path) else {
+            return false;
+        };
+        let there: Vec<&Session> = (self.sessions().into_iter())
+            .filter(|s| task_path(&s.cwd).as_deref() == Some(path.as_str()))
+            .collect();
+        let has_issue = there.iter().any(|s| s.identity.issue.is_some());
+        facts.safe
+            && facts.merged
+            && (!has_issue || facts.issue_closed)
+            && there
+                .iter()
+                .all(|s| !matches!(s.state, State::Running | State::NeedsYou))
+    }
+
     /// The shell found `pr` for `branch`; returns whether any session's name changed.
     pub fn set_pr(&mut self, branch: &str, pr: Option<u64>) -> bool {
         let mut changed = false;
@@ -3137,6 +3313,14 @@ impl Studio {
     /// (`select_terminal`) change the selection.
     pub fn select(&mut self, id: &str) {
         self.selected = Some(id.into());
+        self.viewed = None;
+        self.awaiting = None;
+        self.held = None;
+    }
+
+    /// Daniel went Home (spec #53): no session is selected or viewed.
+    pub fn select_none(&mut self) {
+        self.selected = None;
         self.viewed = None;
         self.awaiting = None;
         self.held = None;

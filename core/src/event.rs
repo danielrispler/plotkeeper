@@ -92,6 +92,8 @@ pub(crate) enum Happened {
 
     // The studio's own lines.
     Renamed(String),
+    /// A name the studio made from Daniel's first prompt.
+    PromptNamed(String),
     Deleted,
     /// Daniel answered from the studio's card.
     Answered {

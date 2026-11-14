@@ -10,13 +10,13 @@ import { select } from "./selection.js";
 import { askElement } from "./ask.js";
 import { rendered } from "./markdown.js";
 import { encode, request } from "./daemon.js";
-import { agentState, sessionName } from "./list.js";
+import { agentState, sessionName, showsLanded } from "./list.js";
 import { closePane, resumesAuto, startClaude } from "./panes.js";
 import { openDecision } from "./answer.js";
 import { cardNode } from "./cards.js";
 import { showCleared } from "./decisions.js";
 import { decisionElement, questionElement } from "./questions.js";
-import { shortPaths, worktreeOf } from "./paths.js";
+import { removeWorktreeByDefault, shortPaths, worktreeOf } from "./paths.js";
 import { checkTime, counts, estimateText, times } from "./times.js";
 import { studio } from "./state.js";
 import { typeInto } from "./typing.js";
@@ -52,7 +52,8 @@ export function showView(selected: Selection | null) {
   const step = (agent ?? session).last_step;
   const stepSpan = (agent ?? session).step_span;
   // One line: the verdict and the phase; the times and the model show on hover, counted at the hover.
-  element("state").textContent = label;
+  // A landed task's session at your turn, idle or ended says so in words (#53, Landed).
+  element("state").textContent = agent === null && showsLanded(state, session.landed) ? "Landed" : label;
   element("state").dataset.state = state;
   element("phase").textContent = agent === null ? estimateText(session.work) : "";
   // A subagent runs in its session's mode.
@@ -518,7 +519,7 @@ export async function askDelete(session: Session) {
   const dialog = element("delete-dialog") as HTMLDialogElement;
   const worktree = worktreeOf(session.cwd);
   const ticked = element("delete-worktree") as HTMLInputElement;
-  ticked.checked = false;
+  ticked.checked = removeWorktreeByDefault(session, studio.listed);
   element("delete-name").textContent = sessionName(session);
   element("delete-working").hidden = !(session.terminal !== null && session.asks_before_closing);
   element("delete-worktree-option").hidden = worktree === null;

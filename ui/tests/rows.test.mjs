@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { chipText, secondLine, status, stripLabels } from "../../dist/list.js";
+import { chipText, landedWord, secondLine, showsLanded, status, stripLabels } from "../../dist/list.js";
 
 test("each state has its glyph and a word for its title and accessible name", () => {
   assert.deepEqual(status("needs_you"), ["pill", "Needs you"]);
@@ -60,4 +60,25 @@ test("the chip counts needs you only, and hides at zero", () => {
   assert.equal(chipText([{ state: "needs_you" }, { state: "running" }, { state: "your_turn" }]), "1 needs you");
   assert.equal(chipText([{ state: "needs_you" }, { state: "needs_you" }]), "2 need you");
   assert.equal(chipText([{ state: "running" }]), "");
+});
+
+test("a landed task's session at your turn, idle or ended shows a check mark and its word instead of its dot or ring", () => {
+  assert.equal(landedWord, "Landed — safe to delete");
+  for (const state of ["your_turn", "idle", "ended"]) {
+    assert.deepEqual(status(state, false, true), ["check", "Landed — safe to delete"]);
+    // Even unseen: the mark replaces the filled dot.
+    assert.deepEqual(status(state, true, true), ["check", "Landed — safe to delete"]);
+    assert.ok(showsLanded(state, true));
+  }
+  // Running and needs-you keep their own glyphs, and an unlanded row is as before.
+  assert.deepEqual(status("running", false, true), ["spinner", "Running"]);
+  assert.deepEqual(status("needs_you", false, true), ["pill", "Needs you"]);
+  assert.deepEqual(status("idle", false, false), ["ring", "Idle"]);
+  assert.ok(!showsLanded("idle", false));
+});
+
+test("the check mark is monochrome", () => {
+  const css = fs.readFileSync(new URL("../style.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const rule = css.match(/\.glyph\[data-glyph="check"\][^{]*\{([^}]*)\}/)[1];
+  assert.doesNotMatch(rule, /needs-you/);
 });
