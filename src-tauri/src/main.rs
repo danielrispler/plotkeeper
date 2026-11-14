@@ -23,7 +23,7 @@ use std::{
 use studio_core::{
     CardRequest, Notifications, Output, Session, Sound,
     State::{Ended, NeedsYou},
-    Studio, SummaryRequest,
+    Studio, SummaryRequest, TaskFacts, TaskQuery,
 };
 use studio_understanding::{
     CardStore, CardWriter, ClaudeWriter, FakeWriter, Fingerprints, Rating, Row, SessionCards,
@@ -138,11 +138,18 @@ fn sessions(studio: State<Mutex<Studio>>, cards: State<Cards>) -> Vec<Row> {
     let studio = studio.lock().unwrap();
     let now = studio.now();
     let list: Vec<Session> = studio.sessions().into_iter().cloned().collect();
+    let landed: Vec<String> = (list.iter())
+        .filter(|s| studio.landed(s))
+        .map(|s| s.agent.id.clone())
+        .collect();
     drop(studio);
     let cards = cards.lock().unwrap();
-    let row = |session: Session| Row {
+    let row = |mut session: Session| Row {
         line: cards.line(&session, now),
-        session,
+        session: {
+            session.landed = landed.contains(&session.agent.id);
+            session
+        },
     };
     list.into_iter().map(row).collect()
 }
@@ -527,6 +534,7 @@ fn main() {
             notify_while_focused,
             mark_unseen,
             rail_shown,
+            refresh_landed_tasks,
             sounds
         ])
         .on_window_event(|window, event| {
@@ -640,6 +648,7 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                         tell(app, Notice::NeedsYou, &session_id, agent.as_deref());
                     }
                     Output::YourTurn { session_id } => {
+                        refresh_landed(app, Some(session_id.clone()));
                         tell(app, Notice::YourTurn, &session_id, None);
                     }
                     Output::Failed { session_id, agent } => {
@@ -774,20 +783,95 @@ fn rail_shown(shown: bool) {
     RAIL_SHOWN.store(shown, Ordering::Release);
 }
 
+/// The `gh` to run: the first on Daniel's login shell's `PATH`, found once.
+fn gh_path() -> String {
+    static GH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    GH.get_or_init(|| {
+        // An app started from the Dock gets launchd's `PATH`, which lacks Homebrew's folder.
+        let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/zsh".into());
+        let found = Command::new(shell).args(["-lc", "command -v gh"]).output();
+        let found = found.ok().filter(|o| o.status.success()).map(|o| o.stdout);
+        found
+            .as_deref()
+            .map(String::from_utf8_lossy)
+            .and_then(|out| out.lines().last().map(str::to_owned))
+            .filter(|path| path.starts_with('/'))
+            .unwrap_or_else(|| "gh".into())
+    })
+    .clone()
+}
+
+/// The `state` of the pull request or issue that `gh <args>` shows, run in `cwd`: `MERGED`, `CLOSED`
+/// and the like; `None` when `gh` fails, is missing or is offline.
+fn gh_state(gh: &str, cwd: &str, args: &[&str]) -> Option<String> {
+    let output = Command::new(gh)
+        .args(args)
+        .args(["--json", "state", "--jq", ".state"])
+        .current_dir(cwd)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())?;
+    Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// What git and GitHub say about `task`, for **Landed**; every fact that cannot be found is false.
+fn lookup_task(gh: &str, task: &TaskQuery) -> TaskFacts {
+    let safe = studio_workbench::losses(Path::new(&task.path))
+        .is_ok_and(|l| l.uncommitted.is_empty() && l.unpushed.is_empty());
+    let merged = task.branch.as_deref().is_some_and(|branch| {
+        gh_state(gh, &task.path, &["pr", "view", branch]).as_deref() == Some("MERGED")
+    });
+    let issue_closed = task.issue.is_some_and(|n| {
+        gh_state(gh, &task.path, &["issue", "view", &n.to_string()]).as_deref() == Some("CLOSED")
+    });
+    TaskFacts {
+        safe,
+        merged,
+        issue_closed,
+    }
+}
+
+/// Looks up each task of the list, or only the one that holds `session`, on its own thread so the
+/// read loop never waits on the network. Asked at a turn's end, at the window's focus and on the
+/// palette's refresh, never on a timer.
+fn refresh_landed(app: &AppHandle, session: Option<String>) {
+    let app = app.clone();
+    thread::spawn(move || {
+        let studio = app.state::<Mutex<Studio>>();
+        let mut tasks = studio.lock().unwrap().task_queries();
+        if let Some(session) = session {
+            let cwd = studio
+                .lock()
+                .unwrap()
+                .session(&session)
+                .map(|s| s.cwd.clone());
+            tasks.retain(|t| cwd.as_deref().is_some_and(|cwd| cwd.starts_with(&t.path)));
+        }
+        let gh = gh_path();
+        for task in tasks {
+            let facts = lookup_task(&gh, &task);
+            let changed = studio
+                .lock()
+                .unwrap()
+                .set_task_facts(&task.path, Some(facts));
+            if changed {
+                LIST_CHANGED.store(true, Ordering::Release);
+            }
+        }
+    });
+}
+
+/// The window gained focus, or Daniel chose the palette's refresh: ask about every task again.
+#[tauri::command]
+fn refresh_landed_tasks(app: AppHandle) {
+    refresh_landed(&app, None);
+}
+
 /// Finds the PR of each session's branch with `gh pr view` (danielrispler/Falinks#461, decision 19), on its own thread so
 /// the read loop never waits on the network, and asks again after 5 minutes. `gh` runs as Daniel
 /// with its own login; no credential file is read.
 fn prs(app: &AppHandle) {
-    // An app started from the Dock gets launchd's `PATH`, which lacks Homebrew's folder.
-    let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/zsh".into());
-    let found = Command::new(shell).args(["-lc", "command -v gh"]).output();
-    let found = found.ok().filter(|o| o.status.success()).map(|o| o.stdout);
-    let gh = found
-        .as_deref()
-        .map(String::from_utf8_lossy)
-        .and_then(|out| out.lines().last().map(str::to_owned))
-        .filter(|path| path.starts_with('/'))
-        .unwrap_or_else(|| "gh".into());
+    let gh = gh_path();
     let mut asked = HashMap::<String, Instant>::new();
     loop {
         let branches = app.state::<Mutex<Studio>>().lock().unwrap().branches();

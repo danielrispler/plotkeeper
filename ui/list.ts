@@ -64,9 +64,13 @@ export function agentState(session: Session, agent: Subagent): [string, string] 
 // A status's shape and its word (danielrispler/Falinks#572): a "Needs you" pill, the only colour (danielrispler/Falinks#565, decision 1); a
 // spinner while running; a dot at your turn, filled once it finished unseen, idle too (danielrispler/Falinks#556); a ring when idle,
 // ended or, for a subagent, done.
-export type Glyph = "pill" | "spinner" | "dot" | "filled" | "ring";
-export function status(state: string, unseen = false): [Glyph, string] {
+export type Glyph = "pill" | "spinner" | "dot" | "filled" | "ring" | "check";
+// A landed task's session at your turn, idle or ended shows a check mark and these words instead (#53, Landed).
+export const landedWord = "Landed — safe to delete";
+export const showsLanded = (state: string, landed: boolean) => landed && ["your_turn", "idle", "ended"].includes(state);
+export function status(state: string, unseen = false, landed = false): [Glyph, string] {
   const label = stateLabels[state as SessionState] ?? state;
+  if (showsLanded(state, landed)) return ["check", landedWord];
   if (state === "needs_you") return ["pill", label];
   if (state === "running") return ["spinner", label];
   // The core marks a turn unseen only at your turn and once idle after it, which keeps the mark.
@@ -75,13 +79,19 @@ export function status(state: string, unseen = false): [Glyph, string] {
   return ["ring", label];
 }
 
+// The check mark alone, for a Workspaces row.
+export function landedMark(): HTMLElement {
+  return glyph("idle", false, true);
+}
+
 // A status's glyph, named by its word, so the shape is never alone. The pill shows its word.
-function glyph(state: string, unseen = false): HTMLElement {
-  const [shape, word] = status(state, unseen);
+function glyph(state: string, unseen = false, landed = false): HTMLElement {
+  const [shape, word] = status(state, unseen, landed);
   const node = text("span", shape === "pill" ? word : "", "glyph");
   node.dataset.glyph = shape;
   node.setAttribute("role", "img");
   node.setAttribute("aria-label", word);
+  if (shape === "check") node.title = word;
   return node;
 }
 
@@ -160,11 +170,11 @@ function done(all: Children, children: Subagent[] = []): HTMLElement[] {
 
 // A row's lines: its name and status glyph, then, if any, what it is doing, muted. Its title pairs
 // the name with the status's word.
-function rowLines(button: HTMLElement, state: string, name: HTMLElement[], below: HTMLElement[] | null, unseen = false) {
+function rowLines(button: HTMLElement, state: string, name: HTMLElement[], below: HTMLElement[] | null, unseen = false, landed = false) {
   const first = text("span", "", "l1");
-  first.append(...name, glyph(state, unseen));
+  first.append(...name, glyph(state, unseen, landed));
   button.append(first);
-  button.title = `${name[0].textContent} · ${status(state, unseen)[1]}`;
+  button.title = `${name[0].textContent} · ${status(state, unseen, landed)[1]}`;
   button.classList.toggle("unseen", unseen);
   if (below) {
     const second = text("span", "", "l2");
@@ -199,6 +209,7 @@ function row(session: Session, children: Children): HTMLElement {
       ? null
       : [...done(children, children.get("session")), rowLine(line), ...(turn ? [Object.assign(counts(clock, turn[1]), { title: turn[0] })] : [])],
     session.unseen,
+    session.landed,
   );
   return button;
 }
@@ -352,8 +363,8 @@ function strip(sessions: Session[]): HTMLElement[] {
     ...shown.map((session, i) => {
       const button = selecting(session.id, null, `strip ${session.id}`);
       button.setAttribute("aria-pressed", String(isSelected(session.id)));
-      button.title = `${sessionName(session)} · ${status(session.state, session.unseen)[1]}`;
-      button.append(glyph(session.state, session.unseen), labels[i]);
+      button.title = `${sessionName(session)} · ${status(session.state, session.unseen, session.landed)[1]}`;
+      button.append(glyph(session.state, session.unseen, session.landed), labels[i]);
       return button;
     }),
     ...(rest ? [Object.assign(pressable(text("button", String(rest)), false, toggle), { title: "Idle and ended" })] : []),

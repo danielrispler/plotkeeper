@@ -177,3 +177,9 @@ test("Fetch is a palette action, and the 5-minute fetch runs only while the wind
   assert.match(read("main.ts"), /"studio::Fetch": \(\) =>/);
   assert.match(read("workspaces.ts"), /document\.hasFocus\(\) && void fetchNow\(\)[^]*5 \* 60_000/);
 });
+
+test("a task's row shows the landed mark when a session in it has landed; the main checkout never does", () => {
+  const landed = [{ cwd: "/r", landed: true }, { cwd: "/r/.claude/worktrees/issue-1/apps", landed: true }];
+  assert.deepEqual(workspaceRows(workspaces, states, landed).map((row) => row.landed), [false, true, false]);
+  assert.deepEqual(workspaceRows(workspaces, states, sessions).map((row) => row.landed), [false, false, false]);
+});

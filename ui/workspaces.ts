@@ -6,6 +6,7 @@
 // loss check of a session's Delete. Creating a task is here too, not in the new-session picker.
 
 import { element, invoke, patch, pressable, text } from "./dom.js";
+import { landedMark } from "./list.js";
 import { startClaude } from "./panes.js";
 import { newTask } from "./picker.js";
 import { studio } from "./state.js";
@@ -61,15 +62,19 @@ const workspaceOf = (all: Workspace[], cwd: string): Workspace | undefined =>
     .filter(({ path }) => cwd === path || cwd.startsWith(`${path}/`))
     .sort((a, b) => b.path.length - a.path.length)[0];
 
-export type WorkspaceRow = { workspace: Workspace; name: string; facts: string; actions: string[] };
+export type WorkspaceRow = { workspace: Workspace; name: string; facts: string; actions: string[]; landed: boolean };
 
 // The rows: the main checkout, then the tasks, each with its tokens and session count.
-export function workspaceRows(found: Workspaces, states: (GitState | null)[], sessions: Pick<Session, "cwd">[]): WorkspaceRow[] {
+export function workspaceRows(found: Workspaces, states: (GitState | null)[], sessions: (Pick<Session, "cwd"> & { landed?: boolean })[]): WorkspaceRow[] {
   const all = allWorkspaces(found);
   const working = all.map(() => 0);
-  for (const { cwd } of sessions) {
+  // A task is landed when the core says so for its sessions (#53): the mark is the list's, on the task's row.
+  const landed = all.map(() => false);
+  for (const { cwd, landed: shipped } of sessions) {
     const workspace = workspaceOf(all, cwd);
-    if (workspace) working[all.indexOf(workspace)]++;
+    if (!workspace) continue;
+    working[all.indexOf(workspace)]++;
+    if (shipped) landed[all.indexOf(workspace)] = true;
   }
   const folder = (workspace: Workspace) => workspace.path.split("/").pop() ?? workspace.path;
   return all.map((workspace, i) => ({
@@ -79,6 +84,7 @@ export function workspaceRows(found: Workspaces, states: (GitState | null)[], se
       .filter(Boolean)
       .join("  "),
     actions: i === 0 ? ["New session here"] : ["New session here", "Remove"],
+    landed: i > 0 && landed[i],
   }));
 }
 
@@ -98,7 +104,7 @@ function failed(error: unknown) {
 }
 
 // A workspace's row: its name, then its facts; a click shows or hides its actions under it.
-function workspaceRow({ workspace, name, facts, actions }: WorkspaceRow): HTMLElement {
+function workspaceRow({ workspace, name, facts, actions, landed }: WorkspaceRow): HTMLElement {
   const row = document.createElement("div");
   row.dataset.key = workspace.path;
   const button = pressable(document.createElement("button"), false, () => {
@@ -110,6 +116,7 @@ function workspaceRow({ workspace, name, facts, actions }: WorkspaceRow): HTMLEl
   button.setAttribute("aria-expanded", String(opened.has(workspace.path)));
   const line = text("span", "", "l1");
   line.append(text("span", name, "name"));
+  if (landed) line.append(landedMark());
   // The facts go under the name, so a long branch name is not cut for them.
   button.append(line, ...(facts ? [text("span", facts, "l2")] : []));
   row.append(button);

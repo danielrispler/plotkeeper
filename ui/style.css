@@ -128,6 +128,8 @@ h1 { margin: 0 0 var(--sp-4); }
 .item .delete { inset-inline-end: var(--sp-2); visibility: hidden; }
 .item:hover .delete, .item:focus-within .delete, .item:has(> .row[aria-pressed="true"]) .delete { visibility: visible; }
 .item .fold:hover, .item .delete:hover { color: var(--fg); background: var(--hover); }
+/* A landed task's session: a monochrome check mark, no colour (#53). */
+.glyph[data-glyph="check"]::after { content: "✓"; color: var(--muted); font-size: var(--size-xs); line-height: 1; }
 /* Status by shape (danielrispler/Falinks#572): a spinner while running, a dot at your turn, a filled dot once unseen, a ring
    when idle or ended, and the "Needs you" pill, the only colour. */
 .glyph { flex: none; width: var(--glyph); height: var(--glyph); border-radius: 50%; display: grid; place-items: center; }

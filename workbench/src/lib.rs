@@ -501,21 +501,26 @@ pub struct Losses {
     pub unpushed: Vec<String>,
 }
 
+/// What removing the worktree `task` would lose: its uncommitted changes and its unpushed commits.
+/// Read-only; the same two checks tell removal and **Landed** that nothing is at risk.
+pub fn losses(task: &Path) -> Result<Losses, String> {
+    let lines = |text: String| text.lines().map(String::from).collect::<Vec<_>>();
+    Ok(Losses {
+        uncommitted: lines(git(task, &["status", "--short"])?),
+        unpushed: lines(git(
+            task,
+            &["log", "--format=%h %s", "HEAD", "--not", "--remotes"],
+        )?),
+    })
+}
+
 /// Removes the worktree at `path` with `git worktree remove`, never forced; its branch stays.
 /// Unless `confirmed`, a worktree with uncommitted changes or unpushed commits is left as it is and
 /// they are returned, for Daniel to confirm. Confirmed, git still refuses to drop uncommitted
 /// changes, and its message is the error.
 pub fn remove_task(repo: &Path, path: &str, confirmed: bool) -> Result<Option<Losses>, String> {
     if !confirmed {
-        let task = Path::new(path);
-        let lines = |text: String| text.lines().map(String::from).collect::<Vec<_>>();
-        let losses = Losses {
-            uncommitted: lines(git(task, &["status", "--short"])?),
-            unpushed: lines(git(
-                task,
-                &["log", "--format=%h %s", "HEAD", "--not", "--remotes"],
-            )?),
-        };
+        let losses = losses(Path::new(path))?;
         if !losses.uncommitted.is_empty() || !losses.unpushed.is_empty() {
             return Ok(Some(losses));
         }

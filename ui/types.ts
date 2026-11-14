@@ -97,6 +97,8 @@ export type Session = {
   cleared: number[];
   // Closing its terminal asks first: it is in a turn or has background tasks (danielrispler/Falinks#469).
   asks_before_closing: boolean;
+  // Its task has landed (the core's rule): shown as a check mark once the session is at your turn, idle or ended.
+  landed: boolean;
   last_step: Step | null;
   // When its first and latest events came, its latest turn's and its last step's times (danielrispler/Falinks#473).
   started_at: number;
