@@ -529,9 +529,20 @@ fn main() {
             rail_shown,
             sounds
         ])
-        .on_window_event(|_, event| {
+        .on_window_event(|window, event| {
             if let Some(path) = presence::path() {
                 presence::window_event(&path, event);
+            }
+            // Leaving full screen, tao queues making its own view first responder, a view wry took
+            // out of the window, so no ⌘ key reached the page (#23). The resize that follows
+            // queues the webview's focus after it.
+            if let tauri::WindowEvent::Resized(_) = event {
+                let webviews = window.webviews();
+                dispatch2::DispatchQueue::main().exec_async(move || {
+                    for webview in webviews {
+                        let _ = webview.set_focus();
+                    }
+                });
             }
         })
         .setup(move |app| {
