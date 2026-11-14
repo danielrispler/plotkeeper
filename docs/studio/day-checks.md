@@ -237,9 +237,9 @@ Run one `/implement-spec` (or any run with workers and helpers) in the studio.
 - [ ] **danielrispler/Falinks#535:** open a finished subagent. Within seconds, its written summary shows on its intention line, and on the entry when you go back. Opening it again writes no new summary (no new `claude -p` run).
 - [ ] **danielrispler/Falinks#562:** if Claude Code forks the session mid-conversation, the list keeps one row under the session's name, and it does not stay "Running" after the turn ends. Delete a row: only that row goes.
 
-### Tasks, Places and file links (danielrispler/Falinks#599)
+### Tasks, Workspaces and file links (danielrispler/Falinks#599)
 
-- [ ] **danielrispler/Falinks#576:** open Places at the bottom of the list. It lists the main checkout and each task, one row each; the sessions stay in the list above. Each row's session count matches the sessions in that folder.
+- [ ] **danielrispler/Falinks#576:** open Workspaces at the bottom of the list. It lists the main checkout and each task, one row each; the sessions stay in the list above. Each row's session count matches the sessions in that folder.
 - [ ] **#29:** on a real task with commits and edits, the row's tokens match git, run in that task's folder:
 
   ```sh
@@ -248,9 +248,9 @@ Run one `/implement-spec` (or any run with workers and helpers) in the studio.
   ```
 
   A branch never pushed shows `not pushed`; a detached `HEAD` shows `detached`; a clean pushed branch shows just its name.
-- [ ] **#29:** the Git line in the top bar shows the selected session's place, its branch and the same tokens as that place's Places row. Select a session in another task: the line follows. Select none (or have no session): it shows the main checkout. Turn focus mode on: the Git line stays in the top bar. Hovering it says each count in words. While an agent commits in its task, its tokens follow within a few seconds.
+- [ ] **#29:** the Git line in the top bar shows the selected session's workspace, its branch and the same tokens as that workspace's Workspaces row. Select a session in another task: the line follows. Select none (or have no session): it shows the main checkout. Turn focus mode on: the Git line stays in the top bar. Hovering it says each count in words. While an agent commits in its task, its tokens follow within a few seconds.
 - [ ] **#33:** the studio fetches every 5 minutes while the window is focused, and not while blurred. Watch `.git/FETCH_HEAD`'s time (`stat -f %Sm .git/FETCH_HEAD` in the main checkout) over 10 minutes focused: it moves about every 5 minutes. Blur the window for 10 minutes: it does not move. Hover the Git line: it says how long ago the last fetch was. Run **Fetch** from the palette (Cmd+Shift+P): the time moves at once and the tokens follow. Turn the network off and run **Fetch**: the hover says the latest fetch failed, with git's message, and the numbers stay.
-- [ ] **danielrispler/Falinks#576:** create a task from Places' field: a session starts in it and its row appears. Click a task: "New session here" starts a session in it. Remove asks first when it would lose work, then removes the worktree.
+- [ ] **danielrispler/Falinks#576:** create a task from Workspaces' field: a session starts in it and its row appears. Click a task: "New session here" starts a session in it. Remove asks first when it would lose work, then removes the worktree.
 - [ ] **danielrispler/Falinks#557:** from a task session, clicking `path:line` in the terminal and a file link in the rail opens that worktree's file, not the main checkout's, at that line in Zed.
 - [ ] **danielrispler/Falinks#581:** in a rail reply from a task session, inline code such as `` `src/foo.rs:42` `` looks like plain code until hovered, and a click opens that worktree's file at that line. `` `origin/main` `` is not a link.
 
@@ -289,7 +289,7 @@ Save everything in a new folder: `local-evidence/<date>-ui-ux-recheck/` (for exa
   - the full window, maximised;
   - half width;
   - the rail on a session with a long turn;
-  - Places, open;
+  - Workspaces, open;
   - the palette (⌘⇧P);
   - focus mode with a needs-you toast showing.
 - [ ] One recording (⇧⌘5, with **Options → Show Mouse Clicks** on): switch between 3 sessions, press ⌘2 to open the rail where it is an overlay, open a card, then start a new session and wait until Claude's prompt is ready.

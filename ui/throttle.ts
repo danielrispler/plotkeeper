@@ -1,4 +1,4 @@
-// A place's git reads are throttled (#26, Freshness, local state): the first event reads at once,
+// A workspace's git reads are throttled (#26, Freshness, local state): the first event reads at once,
 // then at most one read per `ms` while events keep coming, and always one read after the last event.
 // `clock` and `schedule` are injected, so a test moves time.
 

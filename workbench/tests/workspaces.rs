@@ -1,8 +1,10 @@
-//! Seam 2 (danielrispler/Falinks#328 and danielrispler/Falinks#461, Testing Decisions): the picker's places from real `git` in temporary
+//! Seam 2 (danielrispler/Falinks#328 and danielrispler/Falinks#461, Testing Decisions): the picker's workspaces from real `git` in temporary
 //! repositories, as the engine's tests do (`src/lib.rs`, `retention_checks_every_blob_of_a_snapshot`).
 
 use std::{path::Path, process::Command};
-use studio_workbench::{GitState, Place, claude, fetch, git_state, merge_tree_runs, places};
+use studio_workbench::{
+    GitState, Workspace, claude, fetch, git_state, merge_tree_runs, workspaces,
+};
 
 /// Runs `git` in `repo`, away from Daniel's own git config.
 fn git(repo: &Path, args: &[&str]) {
@@ -34,8 +36,8 @@ fn repo() -> (tempfile::TempDir, String) {
     (dir, main)
 }
 
-fn place(path: &str, branch: Option<&str>) -> Place {
-    Place {
+fn workspace(path: &str, branch: Option<&str>) -> Workspace {
+    Workspace {
         path: path.into(),
         branch: branch.map(Into::into),
     }
@@ -57,16 +59,16 @@ fn worktrees_under_claude_worktrees_are_listed_and_agent_ones_hidden_and_counted
         elsewhere.path().join("w").to_str().unwrap(),
     ]);
 
-    let found = places(dir.path()).unwrap();
+    let found = workspaces(dir.path()).unwrap();
 
-    assert_eq!(found.main, place(&main, Some("main")));
+    assert_eq!(found.main, workspace(&main, Some("main")));
     let tasks = format!("{main}/.claude/worktrees");
     assert_eq!(
         found.tasks,
         [
-            place(&format!("{tasks}/issue-1"), Some("issue-1")),
+            workspace(&format!("{tasks}/issue-1"), Some("issue-1")),
             // A detached HEAD has no branch; the picker shows its folder.
-            place(&format!("{tasks}/look"), None),
+            workspace(&format!("{tasks}/look"), None),
         ]
     );
     assert_eq!(found.hidden, 2);
@@ -80,9 +82,9 @@ fn the_listing_from_inside_a_task_still_names_the_main_checkout() {
         &["worktree", "add", "-q", "-b", "t", ".claude/worktrees/t"],
     );
 
-    let found = places(&dir.path().join(".claude/worktrees/t")).unwrap();
+    let found = workspaces(&dir.path().join(".claude/worktrees/t")).unwrap();
 
-    assert_eq!(found.main, place(&main, Some("main")));
+    assert_eq!(found.main, workspace(&main, Some("main")));
     assert_eq!(found.tasks.len(), 1);
 }
 
@@ -96,7 +98,7 @@ fn a_branch_with_no_upstream_has_no_distance() {
     );
     // The tasks' folder is not a change of the main checkout's.
     std::fs::write(dir.path().join(".git/info/exclude"), ".claude/\n").unwrap();
-    let found = places(dir.path()).unwrap();
+    let found = workspaces(dir.path()).unwrap();
     let state = |branch: &str| {
         Ok(GitState {
             branch: Some(branch.into()),
@@ -186,7 +188,7 @@ fn a_detached_head_has_no_branch() {
     );
 }
 
-/// Reading a place's state never rewrites the index, which would take `index.lock` against an agent's commit (#27).
+/// Reading a workspace's state never rewrites the index, which would take `index.lock` against an agent's commit (#27).
 #[test]
 fn git_state_leaves_the_index_untouched_even_when_its_stat_info_is_stale() {
     let (dir, main) = repo();
@@ -212,9 +214,9 @@ fn git_state_leaves_the_index_untouched_even_when_its_stat_info_is_stale() {
     assert_eq!(before, after);
 }
 
-/// The git state is read only in a place of the repository (danielrispler/Falinks#576).
+/// The git state is read only in a workspace of the repository (danielrispler/Falinks#576).
 #[test]
-fn git_state_refuses_a_folder_that_is_not_a_place() {
+fn git_state_refuses_a_folder_that_is_not_a_workspace() {
     let (dir, _) = repo();
     let other = tempfile::tempdir().unwrap();
 
@@ -226,7 +228,7 @@ fn git_state_refuses_a_folder_that_is_not_a_place() {
 fn a_folder_outside_git_is_an_error() {
     let dir = tempfile::tempdir().unwrap();
 
-    assert!(places(dir.path()).is_err());
+    assert!(workspaces(dir.path()).is_err());
 }
 
 /// The studio's status line wrapper beside the plugin (danielrispler/Falinks#521), quoted for the shell that runs it.
@@ -342,7 +344,7 @@ fn main_distance_counts_commits_origins_default_branch_has_that_the_branch_lacks
             "origin/main",
         ],
     );
-    let task = places(dir.path()).unwrap().tasks[0].path.clone();
+    let task = workspaces(dir.path()).unwrap().tasks[0].path.clone();
     let level = git_state(dir.path(), &task).unwrap();
     assert_eq!((level.main_behind, level.on_default), (None, false));
 
@@ -366,7 +368,7 @@ fn main_distance_counts_commits_origins_default_branch_has_that_the_branch_lacks
     assert_eq!(on_main.upstream, Some((0, 2)));
 }
 
-/// A fetch brings `origin`'s new commits, and the place's distance follows (#33).
+/// A fetch brings `origin`'s new commits, and the workspace's distance follows (#33).
 #[test]
 fn a_fetch_moves_origins_default_branch_and_the_distances() {
     let (dir, main, origin) = pushed();
@@ -434,7 +436,7 @@ fn task_and_a_clone() -> (
             "origin/main",
         ],
     );
-    let task = places(dir.path()).unwrap().tasks[0].path.clone();
+    let task = workspaces(dir.path()).unwrap().tasks[0].path.clone();
     let other = tempfile::tempdir().unwrap();
     git(
         other.path(),

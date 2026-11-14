@@ -73,7 +73,7 @@ pub fn set_zoom(zoom: f64, window: WebviewWindow) -> Result<(), String> {
     window.set_zoom(zoom).map_err(|e| e.to_string())
 }
 
-/// The `repository` setting (danielrispler/Falinks#605): the folder the shell, Places and the picker start in. Read from
+/// The `repository` setting (danielrispler/Falinks#605): the folder the shell, Workspaces and the picker start in. Read from
 /// the file on each call, so a saved change takes effect; `None` when unset, empty or not a string.
 pub fn repository() -> Option<String> {
     let [settings, _] = paths()?;
