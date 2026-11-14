@@ -1,7 +1,7 @@
 // Finished subagents leave the list; the rail keeps their history (danielrispler/Falinks#535). Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { agentLine, childrenOf, doneCount, hidden } from "../../dist/list.js";
+import { agentLine, childrenOf, doneCount, drawn, folds, hidden } from "../../dist/list.js";
 import { subagentHistory } from "../../dist/story.js";
 
 test("a subagent row has a second line only while it runs or needs you (danielrispler/Falinks#572)", () => {
@@ -62,4 +62,32 @@ test("a written summary takes the place of the first line", () => {
   const session = { agents: [agent("w1", { status: "completed", ended_at: MIN, result: "Done." })] };
   const [entry] = subagentHistory(session, new Map([["w1", "Added the parser; its tests pass."]]), MIN);
   assert.equal(entry.result, "Added the parser; its tests pass.");
+});
+
+// A collapsed row hides what it spawned, but not a subagent that needs you or failed unopened.
+const tree = {
+  asker: { agent: "h2" },
+  agents: [
+    agent("w1"),
+    agent("h1", { kind: "helper", parent: { agent: "w1" } }),
+    agent("h2", { kind: "helper", parent: { agent: "w1" } }),
+    agent("h3", { kind: "helper", parent: { agent: "w1" }, status: "killed", failed: true }),
+    agent("h4", { kind: "helper", parent: { agent: "w1" }, status: "killed", failed: true, opened: true }),
+    agent("w2"),
+  ],
+};
+const rows = (folded) => drawn(tree, childrenOf(tree), "session", 1, folded).map(({ agent, depth }) => `${agent.id}@${depth}`);
+
+test("an open row draws its subagents under it", () => {
+  assert.deepEqual(rows(new Set()), ["w1@1", "h1@2", "h2@2", "h3@2", "h4@2", "w2@1"]);
+});
+
+test("a collapsed row hides its subagents, except one that needs you or failed unopened", () => {
+  assert.deepEqual(rows(new Set(["w1"])), ["w1@1", "h2@2", "h3@2", "w2@1"]);
+  assert.deepEqual(folds(tree, childrenOf(tree), ["w1"], new Set(["w1"])), { open: false, hiding: 2 });
+});
+
+test("a row folds only when it has subagents drawn under it", () => {
+  assert.deepEqual(folds(tree, childrenOf(tree), ["w1"], new Set()), { open: true, hiding: 0 });
+  assert.equal(folds(tree, childrenOf(tree), ["w2"], new Set()), null);
 });

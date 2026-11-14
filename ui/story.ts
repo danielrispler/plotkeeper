@@ -496,7 +496,7 @@ function askClose(session: Session) {
 }
 
 // Shows a failed delete's reason over the story.
-function report(error: unknown) {
+export function report(error: unknown) {
   element("notice").textContent = String(error);
   element("notice").hidden = false;
 }
@@ -513,7 +513,7 @@ function choice(dialog: HTMLDialogElement): Promise<string> {
 // Delete: ends the session's terminal, removes its worktree when ticked, asking first when that would
 // lose work, and its branch when the main checkout holds it, then drops its row. A branch git keeps
 // is reported, and the row goes anyway.
-async function askDelete(session: Session) {
+export async function askDelete(session: Session) {
   const dialog = element("delete-dialog") as HTMLDialogElement;
   const worktree = worktreeOf(session.cwd);
   const ticked = element("delete-worktree") as HTMLInputElement;

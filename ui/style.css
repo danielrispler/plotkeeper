@@ -112,7 +112,17 @@ h1 { margin: 0 0 var(--sp-4); }
    stands out by weight, since colour is only for "needs you". */
 .row.helper { font-size: var(--size-small); }
 .row .failed { font-weight: 600; color: var(--fg); }
-.unattached { margin: var(--sp-1) 0 0; padding-inline-start: calc(var(--sp-7) + var(--sp-5)); font-size: var(--size-small); color: var(--muted); }
+.unattached { margin: var(--sp-1) 0 0; padding-inline-start: calc(var(--sp-4) + var(--indent) * 3); font-size: var(--size-small); color: var(--muted); }
+/* A list row with its fold toggle in a column before the name and its delete after the glyph, shown
+   on hover or focus. Every row keeps both columns, so names and glyphs stay aligned. */
+.item { position: relative; }
+.item > .row.session-row { padding-inline-start: calc(var(--sp-4) + var(--indent)); }
+.item > .row { padding-inline-end: calc(var(--sp-4) + var(--sp-6)); }
+.item .fold, .item .delete { position: absolute; top: var(--sp-2); padding: 0 var(--sp-1); background: none;
+                             font-size: var(--size-xs); color: var(--muted); white-space: nowrap; }
+.item .delete { inset-inline-end: var(--sp-2); visibility: hidden; }
+.item:hover .delete, .item:focus-within .delete { visibility: visible; }
+.item .fold:hover, .item .delete:hover { color: var(--fg); }
 /* Status by shape (danielrispler/Falinks#572): a spinner while running, a dot at your turn, a filled dot once unseen, a ring
    when idle or ended, and the "Needs you" pill, the only colour. */
 .glyph { flex: none; width: var(--glyph); height: var(--glyph); border-radius: 50%; display: grid; place-items: center; }
