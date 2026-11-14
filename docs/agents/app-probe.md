@@ -38,3 +38,15 @@ The probe is done when the same command goes red on the bug and green on the fix
 - **An inactive app gets no keys.** WebKit drops synthetic `NSEvent`s sent to an app that is not active, so assert on the state that decides delivery (first responder, a command reaching Rust), not on `keydown`. A probe that needs real key delivery must activate the app, which takes Daniel's focus: ask him before running it.
 - **Keys from outside are blocked.** `CGEvent.postToPid` from another process needs Accessibility permission, which the terminal lacks.
 - **Full screen switches Daniel's Space** even when the window is invisible. Reproduce the call that full screen makes instead. #23 queued tao's `makeFirstResponder` and then resized the window.
+
+## Screenshots without the app
+
+To show how the UI draws a given state, such as a ticket's screenshot criterion, use `npm run snap` rather than a probe. It renders `dist/` in headless Chrome against a stub Tauri API fed by a fixture, so it needs no Rust build, no running Studio and takes no focus. It shows what the page draws from state, not native behaviour: no terminal, no AppKit, no keys. For those, use a probe.
+
+```sh
+npm run build                                  # snap renders dist/, so build first
+npm run snap -- home out/home.png              # Home with every section
+npm run snap -- list out/list.png              # the list with a nested, a selected and a landed row
+```
+
+The fixtures are in `scripts/snap/fixtures.mjs`: a fixture maps each Tauri command to its reply, so add one there for a new state. The stub is injected into a temp copy of `dist/`, never the shipped app. `npm run check` does not run Chrome; set `CHROME` to use another binary than the default macOS Chrome. Look at the PNG yourself, to check that it shows what the fixture claims.
