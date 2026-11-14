@@ -503,6 +503,8 @@ fn main() {
             terminal::places,
             terminal::place_counts,
             terminal::claude_argv,
+            terminal::plugin_setup,
+            terminal::fix_plugin_setup,
             terminal::create_task,
             terminal::create_named_task,
             terminal::remove_task,

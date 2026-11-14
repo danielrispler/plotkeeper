@@ -44,6 +44,23 @@ export const offerBuilds = () =>
     say("A new build is ready.", [["Restart into it", () => invoke("restart_into", { exe })]]),
   );
 
+// A profile that does not load the studio plugin (#21): sessions started outside the studio would get
+// no row. "Fix it" points its `CLAUDE_CODE_PLUGIN_DIRS` at the data folder's link, after a backup.
+// The bar is shared, so a build or upgrade offer already on it wins; a link that failed has no fix.
+export async function offerPluginFix() {
+  const problem = await invoke<string | null>("plugin_setup").catch((e) => {
+    if (element("restart").hidden) say(`${e}`, [["Dismiss", () => say(null)]]);
+    return null;
+  });
+  if (!problem || !element("restart").hidden) return;
+  const fix = () =>
+    invoke("fix_plugin_setup").then(
+      () => say("Fixed. Shells and claude sessions started from now on load the studio plugin; ~/.zshrc.studio-backup has the old profile."),
+      (e) => say(`${e}`),
+    );
+  say(problem, [["Fix it", fix], ["Not now", () => say(null)]]);
+}
+
 const plan = async () => invoke<Revive[]>("revival", { terms: await list() });
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 

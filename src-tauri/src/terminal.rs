@@ -162,6 +162,108 @@ pub fn claude_argv(resume: Option<String>, auto: bool) -> Vec<String> {
     studio_workbench::claude(&plugin, &presence, resume.as_deref(), auto)
 }
 
+/// `CLAUDE_CODE_PLUGIN_DIRS`'s entry for the plugin through the data folder's `checkout` link (#21),
+/// as the profile writes it.
+fn plugin_entry() -> String {
+    let data = studio_hook::data_dir(Path::new(""));
+    format!("$HOME/{}", data.join("checkout/plugin").display())
+}
+
+/// At the window's start (#21): points the data folder's `checkout` at this checkout, then reads
+/// `CLAUDE_CODE_PLUGIN_DIRS` as a new interactive login shell sets it. `None` when it loads this
+/// checkout's plugin, or when the shell gives no answer within 10 s; else what is wrong, for the
+/// bar's "Fix it". An error when the link cannot be made, which "Fix it" cannot mend.
+// shortcut: a profile that `exec`s another program, such as tmux, gives no answer, so it counts as
+// loaded; ask a non-interactive shell too if that hides a stale path.
+#[tauri::command(async)]
+pub fn plugin_setup() -> Result<Option<String>, String> {
+    let (Some(home), Some(checkout)) = (std::env::home_dir(), checkout()) else {
+        return Ok(None);
+    };
+    studio_workbench::link_checkout(&studio_hook::data_dir(&home), &checkout)
+        .map_err(|e| format!("The studio could not link its checkout: {e}."))?;
+    let shell = std::env::var("SHELL").unwrap_or("/bin/zsh".into());
+    // Markers, as a profile may print its own lines; the app's own value must not count.
+    let Ok(mut child) = Command::new(&shell)
+        .args([
+            "-lic",
+            r#"printf '\n<studio>%s</studio>' "$CLAUDE_CODE_PLUGIN_DIRS""#,
+        ])
+        .env_remove("CLAUDE_CODE_PLUGIN_DIRS")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return Ok(None);
+    };
+    // A profile that waits on a prompt or the network must not hold the check forever.
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while child.try_wait().is_ok_and(|done| done.is_none()) {
+        if std::time::Instant::now() > deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Ok(None);
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    let Ok(out) = child.wait_with_output() else {
+        return Ok(None);
+    };
+    let out = String::from_utf8_lossy(&out.stdout);
+    let Some(dirs) = out
+        .rsplit_once("<studio>")
+        .and_then(|(_, rest)| rest.strip_suffix("</studio>"))
+    else {
+        return Ok(None);
+    };
+    if studio_workbench::loads_plugin(dirs, &checkout.join("plugin")) {
+        return Ok(None);
+    }
+    Ok(Some(if dirs.is_empty() {
+        "Sessions you start yourself get no row: your profile does not load the studio plugin."
+            .into()
+    } else {
+        format!(
+            "Sessions you start yourself get no row: CLAUDE_CODE_PLUGIN_DIRS is {dirs}, not the studio plugin."
+        )
+    }))
+}
+
+/// "Fix it" (#21): `~/.zshrc` with its `CLAUDE_CODE_PLUGIN_DIRS` pointed at the `checkout` link. The
+/// first fix copies it to `~/.zshrc.studio-backup`, and a later one keeps that copy. Written in
+/// place, so a profile that is a link stays one.
+// shortcut: always `~/.zshrc`, never `$ZDOTDIR`'s; read the shell's `ZDOTDIR` when a profile moves.
+#[tauri::command(async)]
+pub fn fix_plugin_setup() -> Result<(), String> {
+    let by_hand = || {
+        format!(
+            "Add this line to your profile: export CLAUDE_CODE_PLUGIN_DIRS=\"{}\"",
+            plugin_entry()
+        )
+    };
+    if !std::env::var("SHELL").unwrap_or_default().ends_with("/zsh") {
+        return Err(format!("Only zsh's profile is fixed here. {}", by_hand()));
+    }
+    let home = std::env::home_dir().ok_or("no home folder")?;
+    let profile = home.join(".zshrc");
+    let old = match std::fs::read_to_string(&profile) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
+        read => read.map_err(|e| format!("could not read {}: {e}", profile.display()))?,
+    };
+    let new = studio_workbench::fixed_profile(&old, &plugin_entry(), &home).ok_or_else(|| {
+        format!(
+            "~/.zshrc builds CLAUDE_CODE_PLUGIN_DIRS with an expansion, so it is left alone. {}",
+            by_hand()
+        )
+    })?;
+    let backup = profile.with_file_name(".zshrc.studio-backup");
+    if !backup.exists() {
+        std::fs::write(&backup, &old).map_err(|e| format!("could not back up the profile: {e}"))?;
+    }
+    std::fs::write(&profile, new).map_err(|e| format!("could not write {}: {e}", profile.display()))
+}
+
 /// Opens an `http(s)` URL Daniel clicked, in a terminal or a rendered reply, in the browser. A file
 /// goes through `open_file`.
 #[tauri::command]

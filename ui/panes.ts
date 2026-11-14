@@ -15,7 +15,7 @@ import { connect, list, onEvent, request, type Listed } from "./daemon.js";
 import { element, invoke, pressable, text } from "./dom.js";
 import { type Box, paneBoxes } from "./layout.js";
 import { isPanel, panelTerm, showPanel, showPanelShell } from "./panel.js";
-import { offerBuilds, upgrade, type Revive } from "./restart.js";
+import { offerBuilds, offerPluginFix, upgrade, type Revive } from "./restart.js";
 import { show as showSelection } from "./selection.js";
 import type { DoctorEntry } from "./settings.js";
 import { studio } from "./state.js";
@@ -42,6 +42,7 @@ let laidSplit = false;
 // again each time the daemon is lost.
 export function startPanes(): Promise<void> {
   offerBuilds();
+  offerPluginFix().catch((e) => console.warn(e));
   ready = connect().then((config) => {
     repo = config.repo;
     showPanel(null, repo);
