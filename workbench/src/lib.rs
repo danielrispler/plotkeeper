@@ -4,7 +4,10 @@
 //! git's force option, so git refuses whatever would lose work, and its message is shown as it is.
 
 use serde::Serialize;
-use std::{path::Path, process::Command};
+use std::{
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 /// A main checkout or a task's worktree: its folder, and its branch, `None` at a detached `HEAD`.
 #[derive(Debug, PartialEq, Serialize)]
@@ -132,6 +135,84 @@ pub fn claude(plugin: &Path, presence: &Path, resume: Option<&str>, auto: bool) 
         argv.extend(["--resume".into(), id.into()]);
     }
     argv
+}
+
+/// Points `checkout` in the studio's data folder `data` at `checkout` (#21), so a profile that names
+/// the plugin through it survives a moved checkout; returns that plugin path. The hooks'
+/// `"${CLAUDE_PLUGIN_ROOT}"/../target` resolves through the link into the real checkout. A real
+/// folder there is never replaced.
+pub fn link_checkout(data: &Path, checkout: &Path) -> std::io::Result<PathBuf> {
+    let link = data.join("checkout");
+    std::fs::create_dir_all(data)?;
+    if link
+        .symlink_metadata()
+        .is_ok_and(|m| !m.file_type().is_symlink())
+    {
+        return Err(std::io::Error::other(format!(
+            "{} is no link",
+            link.display()
+        )));
+    }
+    // A new link renamed over the old, so a session starting meanwhile never finds none.
+    let next = data.join("checkout.next");
+    let _ = std::fs::remove_file(&next);
+    std::os::unix::fs::symlink(checkout, &next)?;
+    std::fs::rename(&next, &link)?;
+    Ok(link.join("plugin"))
+}
+
+/// Whether `CLAUDE_CODE_PLUGIN_DIRS`, colon-separated as Claude Code reads it, has an entry whose
+/// real folder is `plugin`'s.
+pub fn loads_plugin(dirs: &str, plugin: &Path) -> bool {
+    let Ok(ours) = std::fs::canonicalize(plugin) else {
+        return false;
+    };
+    dirs.split(':')
+        .filter(|d| !d.is_empty())
+        .any(|d| std::fs::canonicalize(d).is_ok_and(|d| d == ours))
+}
+
+/// `profile` with each `export CLAUDE_CODE_PLUGIN_DIRS=` line ending in `link` (#21). It drops the
+/// entries that are another studio plugin, with `~` or `$HOME` read as `home`, so the hooks never
+/// load twice, and keeps every other entry as written, a missing one too, since Claude Code skips it.
+/// With no such line, one is appended. `None` when such a line uses `${`, `$(` or a backtick, which a
+/// split on `:` could break.
+// shortcut: reads `export NAME=value` lines only, quoted or bare, with no trailing comment, and
+// writes LF line endings; parse more when a profile sets the variable another way.
+pub fn fixed_profile(profile: &str, link: &str, home: &Path) -> Option<String> {
+    const EXPORT: &str = "export CLAUDE_CODE_PLUGIN_DIRS=";
+    let studio = |dir: &str| {
+        let dir = ["$HOME/", "${HOME}/", "~/"]
+            .iter()
+            .find_map(|prefix| dir.strip_prefix(prefix))
+            .map_or_else(|| PathBuf::from(dir), |rest| home.join(rest));
+        std::fs::read_to_string(dir.join(".claude-plugin/plugin.json"))
+            .is_ok_and(|m| m.contains(r#""falinks-studio""#))
+    };
+    let mut found = false;
+    let mut lines = Vec::new();
+    for line in profile.lines() {
+        let indent = &line[..line.len() - line.trim_start().len()];
+        let Some(value) = line.trim_start().strip_prefix(EXPORT) else {
+            lines.push(line.to_string());
+            continue;
+        };
+        if ["${", "$(", "`"].iter().any(|s| value.contains(s)) {
+            return None;
+        }
+        found = true;
+        let value = value.trim().trim_matches(|c| c == '"' || c == '\'');
+        let kept = value
+            .split(':')
+            .filter(|d| !d.is_empty() && *d != link && !studio(d));
+        let dirs: Vec<&str> = kept.chain([link]).collect();
+        lines.push(format!("{indent}{EXPORT}\"{}\"", dirs.join(":")));
+    }
+    if !found {
+        lines.push("# The studio plugin's hooks, for every claude session (#21).".into());
+        lines.push(format!("{EXPORT}\"{link}\""));
+    }
+    Some(lines.join("\n") + "\n")
 }
 
 /// The command that brings back an agent other than Claude Code (danielrispler/Falinks#561), by the name of the program a
