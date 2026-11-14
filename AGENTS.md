@@ -25,6 +25,8 @@ Before handing off a change, run `npm ci` once, then `npm run check` from the re
 
 The app embeds `dist/` when it is built, so a merged change reaches Daniel's open Studio only after a rebuild. After merging a change to the app, tell him to quit Studio and run `npm run start` from the main checkout.
 
+To prove native window or key behaviour without Daniel pressing keys, read `docs/agents/app-probe.md`: a background debug build that never takes his focus.
+
 In a worktree, share the main checkout's cargo target dir so the build starts warm: prefix cargo and `npm run check` with `CARGO_TARGET_DIR="$(git rev-parse --path-format=absolute --git-common-dir)/../target"`. Parallel workers sharing it wait briefly on cargo's lock but still finish sooner than cold builds (danielrispler/Falinks#549).
 
 ## Agent skills
