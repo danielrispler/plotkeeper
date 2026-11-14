@@ -5,7 +5,7 @@
 use serde_json::json;
 use std::{fs, path::Path};
 use studio_core::Studio;
-use studio_understanding::{Versions, drift};
+use studio_understanding::{Versions, drift, dropped_events};
 
 /// 2025-10-29, 13:20 UTC.
 const NOW: u64 = 1_761_744_000_000;
@@ -149,4 +149,21 @@ fn weekly_counts_the_last_7_days_unrecognised_wake_ups_and_no_other_prompt() {
         drift(&studio, &versions, NOW).to_string(),
         "unrecognised wake-ups: 1\n"
     );
+}
+
+#[test]
+fn weekly_counts_the_events_the_hook_dropped_in_the_last_7_days() {
+    let data = tempfile::tempdir().unwrap();
+    let log = data.path().join("events.jsonl");
+    assert_eq!(dropped_events(&log, NOW), 0);
+
+    let day = |days| NOW - days * DAY;
+    let lines = [
+        format!("{} PostToolUse t-1", day(8)),
+        format!("{} Stop t-1", day(2)),
+        format!("{} PreToolUse -", day(1)),
+    ];
+    fs::write(studio_hook::drops_file(&log), lines.join("\n") + "\n").unwrap();
+
+    assert_eq!(dropped_events(&log, NOW), 2);
 }

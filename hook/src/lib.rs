@@ -6,6 +6,8 @@ use std::{
     env, fs,
     path::{Path, PathBuf},
     process::{self, Command},
+    thread,
+    time::{Duration, Instant},
 };
 
 /// The studio's data directory, which is Tauri's app data directory for the identifier in
@@ -19,15 +21,50 @@ pub fn event_log(home: &Path) -> PathBuf {
     data_dir(home).join("events.jsonl")
 }
 
+/// How long the hook waits for the log's lock before it drops the event (#43, decision 11).
+pub const PATIENCE: Duration = Duration::from_secs(5);
+
+/// The drops file beside the log `log`: a line `<Unix ms> <event> <terminal>` for each event the
+/// hook dropped.
+pub fn drops_file(log: &Path) -> PathBuf {
+    log.with_file_name("drops.txt")
+}
+
 /// Appends `event` to the log at `log` as one line, with one write under an exclusive lock, so hooks
-/// that fire together never interleave their lines.
-pub fn append(log: &Path, event: &serde_json::Value) -> std::io::Result<()> {
-    use std::io::Write;
+/// that fire together never interleave their lines. Waits up to `patience` for the lock; returns
+/// `false`, having written nothing, when it never came.
+pub fn append(log: &Path, event: &serde_json::Value, patience: Duration) -> std::io::Result<bool> {
+    use std::{fs::TryLockError, io::Write};
     let mut line = serde_json::to_vec(event)?;
     line.push(b'\n');
     let mut log = fs::OpenOptions::new().create(true).append(true).open(log)?;
-    log.lock()?;
-    log.write_all(&line)
+    let deadline = Instant::now() + patience;
+    loop {
+        match log.try_lock() {
+            Ok(()) => break,
+            Err(TryLockError::WouldBlock) if Instant::now() < deadline => {
+                thread::sleep(Duration::from_millis(20));
+            }
+            Err(TryLockError::WouldBlock) => return Ok(false),
+            Err(TryLockError::Error(e)) => return Err(e),
+        }
+    }
+    log.write_all(&line)?;
+    Ok(true)
+}
+
+/// Notes in the drops file beside `log` that the hook dropped `event` of `terminal` at `at`, in Unix
+/// milliseconds, with no lock and one small write.
+pub fn drop_event(log: &Path, at: u64, event: &str, terminal: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    // The fields are space-separated, so none may hold whitespace.
+    let plain = |text: &str| text.split_whitespace().collect::<Vec<_>>().join("_");
+    let line = format!("{at} {} {}\n", plain(event), plain(terminal));
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(drops_file(log))?;
+    file.write_all(line.as_bytes())
 }
 
 /// What the hook knows of a session's latest turn, kept between its runs (danielrispler/Falinks#486): its prompt id, the
