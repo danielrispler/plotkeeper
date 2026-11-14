@@ -1,15 +1,15 @@
-// Places (danielrispler/Falinks#576) and the Git line (#29): a folded section at the bottom of the list, one row per place with
+// Workspaces (danielrispler/Falinks#576) and the Git line (#29): a folded section at the bottom of the list, one row per workspace with
 // its git tokens and session count, offering a new session and, for a task, Remove. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { fetchNote, gitTokens, placeRows } from "../../dist/places.js";
+import { fetchNote, gitTokens, workspaceRows } from "../../dist/workspaces.js";
 import { throttle } from "../../dist/throttle.js";
 
 const ui = new URL("../", import.meta.url);
 const read = (name) => fs.readFileSync(new URL(name, ui), "utf8");
 
-const places = {
+const workspaces = {
   main: { path: "/r", branch: "main" },
   tasks: [
     { path: "/r/.claude/worktrees/issue-1", branch: "issue-1" },
@@ -25,13 +25,13 @@ const states = [
 const sessions = ["/r", "/r/.claude/worktrees/issue-1", "/r/.claude/worktrees/issue-1/apps", "/elsewhere"].map((cwd) => ({ cwd }));
 const texts = (state) => gitTokens(state).map((t) => t.text);
 
-test("Places is folded", () => {
-  const html = read("index.html").match(/<details id="places"[^>]*>/)[0];
+test("Workspaces is folded", () => {
+  const html = read("index.html").match(/<details id="workspaces"[^>]*>/)[0];
   assert.doesNotMatch(html, /\sopen/);
 });
 
-test("each place has its name, its git tokens and its session count, and offers a new session and, for a task, Remove", () => {
-  const rows = placeRows(places, states, sessions);
+test("each workspace has its name, its git tokens and its session count, and offers a new session and, for a task, Remove", () => {
+  const rows = workspaceRows(workspaces, states, sessions);
   assert.deepEqual(
     rows.map(({ name, facts, actions }) => [name, facts, actions]),
     [
@@ -43,8 +43,8 @@ test("each place has its name, its git tokens and its session count, and offers 
   );
 });
 
-test("a row shows the same tokens as the Git line for the same place", () => {
-  const rows = placeRows(places, states, []);
+test("a row shows the same tokens as the Git line for the same workspace", () => {
+  const rows = workspaceRows(workspaces, states, []);
   rows.forEach((row, i) => assert.equal(row.facts, texts(states[i]).join("  ")));
 });
 
@@ -136,7 +136,7 @@ test("throttle: an event after a quiet spell reads at once", () => {
 test("the new-session picker no longer creates or removes tasks", () => {
   const picker = read("picker.ts");
   assert.doesNotMatch(picker, /create_task"|remove_task|Remove/);
-  assert.match(read("places.ts"), /create_task"/);
+  assert.match(read("workspaces.ts"), /create_task"/);
 });
 
 test("main ↓N shows only when behind, after the upstream distance and before the uncommitted count", () => {
@@ -175,5 +175,5 @@ test("the fetch note: never, its age, and a failure with git's message", () => {
 
 test("Fetch is a palette action, and the 5-minute fetch runs only while the window is focused", () => {
   assert.match(read("main.ts"), /"studio::Fetch": \(\) =>/);
-  assert.match(read("places.ts"), /document\.hasFocus\(\) && void fetchNow\(\)[^]*5 \* 60_000/);
+  assert.match(read("workspaces.ts"), /document\.hasFocus\(\) && void fetchNow\(\)[^]*5 \* 60_000/);
 });

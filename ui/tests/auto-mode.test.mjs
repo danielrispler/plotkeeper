@@ -43,7 +43,7 @@ test("the picker's Auto mode choice is off by default and reaches the start comm
   assert.match(picker, /type: "checkbox" }\)/);
   assert.doesNotMatch(picker, /checked: true/);
   // Both ways to start from the picker pass the choice on.
-  assert.match(picker, /startClaude\(place\.path, null, "", auto\(\)\)/);
+  assert.match(picker, /startClaude\(workspace\.path, null, "", auto\(\)\)/);
   assert.match(picker, /startClaude\(task\.path, null, prompt \? value : "", auto\(\)\)/);
-  assert.match(picker, /quickStart\(places\.main, auto\)/);
+  assert.match(picker, /quickStart\(workspaces\.main, auto\)/);
 });

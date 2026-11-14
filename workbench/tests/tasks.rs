@@ -3,8 +3,8 @@
 
 use std::{path::Path, process::Command};
 use studio_workbench::{
-    GitState, Losses, Place, create_named_task, create_task, delete_branch_merged_at,
-    delete_merged_branch, git_state, places, remove_task,
+    GitState, Losses, Workspace, create_named_task, create_task, delete_branch_merged_at,
+    delete_merged_branch, git_state, remove_task, workspaces,
 };
 
 /// Runs `git` in `dir`, away from Daniel's own git config, and returns its trimmed output.
@@ -78,7 +78,7 @@ fn a_task_branches_from_origins_default_branch_after_a_fetch_even_when_local_is_
     let path = task_path(&repos, "issue-1");
     assert_eq!(
         task,
-        Place {
+        Workspace {
             path: path.display().to_string(),
             branch: Some("issue-1".into()),
         }
@@ -238,7 +238,7 @@ fn a_squash_merged_branch_goes_only_at_its_pull_requests_head() {
 /// A task's branch has no upstream until pushed; the main checkout's is `origin/trunk`; both count
 /// the files `git status` lists (#29, after danielrispler/Falinks#576).
 #[test]
-fn a_place_reads_its_upstream_distance_and_its_changed_files() {
+fn a_workspace_reads_its_upstream_distance_and_its_changed_files() {
     let repos = repos();
     let busy = create_task(&repos.main, "busy").unwrap();
     let path = Path::new(&busy.path);
@@ -252,7 +252,7 @@ fn a_place_reads_its_upstream_distance_and_its_changed_files() {
     git(&repos.main, &["fetch", "-q", "origin"]);
     // The tasks' folder is not a change of the main checkout's.
     std::fs::write(repos.main.join(".git/info/exclude"), ".claude/\n").unwrap();
-    let main = places(&repos.main).unwrap().main;
+    let main = workspaces(&repos.main).unwrap().main;
     let state = |branch: &str, upstream, changed, main_behind, on_default| {
         Ok(GitState {
             branch: Some(branch.into()),

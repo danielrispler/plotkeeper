@@ -1,4 +1,4 @@
-//! Workbench git (danielrispler/Falinks#328, module 7; danielrispler/Falinks#461, decision 8): the places a session can start in, read live
+//! Workbench git (danielrispler/Falinks#328, module 7; danielrispler/Falinks#461, decision 8): the workspaces a session can start in, read live
 //! from `git worktree list --porcelain` with no stored copy, and the `claude` command a studio
 //! terminal runs. Beside them, creating and removing tasks (danielrispler/Falinks#468; danielrispler/Falinks#461, decision 9): no call passes
 //! git's force option, so git refuses whatever would lose work, and its message is shown as it is.
@@ -13,7 +13,7 @@ use std::{
 
 /// A main checkout or a task's worktree: its folder, and its branch, `None` at a detached `HEAD`.
 #[derive(Debug, PartialEq, Serialize)]
-pub struct Place {
+pub struct Workspace {
     pub path: String,
     pub branch: Option<String>,
 }
@@ -21,14 +21,14 @@ pub struct Place {
 /// The repository's main checkout, its tasks, the worktrees under `.claude/worktrees/` in `git`'s
 /// order, and how many `agent-*` worktrees there were hidden.
 #[derive(Debug, PartialEq, Serialize)]
-pub struct Places {
-    pub main: Place,
-    pub tasks: Vec<Place>,
+pub struct Workspaces {
+    pub main: Workspace,
+    pub tasks: Vec<Workspace>,
     pub hidden: usize,
 }
 
-/// The places of the repository that holds `repo`, which may be any of its worktrees.
-pub fn places(repo: &Path) -> Result<Places, String> {
+/// The workspaces of the repository that holds `repo`, which may be any of its worktrees.
+pub fn workspaces(repo: &Path) -> Result<Workspaces, String> {
     let output = Command::new("git")
         .args(["worktree", "list", "--porcelain"])
         .current_dir(repo)
@@ -41,35 +41,35 @@ pub fn places(repo: &Path) -> Result<Places, String> {
     // Each worktree is a block of lines; the main checkout's comes first.
     let text = String::from_utf8_lossy(&output.stdout);
     let mut listed = text.split("\n\n").filter_map(|block| {
-        let mut place = Place {
+        let mut workspace = Workspace {
             path: String::new(),
             branch: None,
         };
         for line in block.lines() {
             if let Some(path) = line.strip_prefix("worktree ") {
-                place.path = path.into();
+                workspace.path = path.into();
             } else if let Some(branch) = line.strip_prefix("branch ") {
-                place.branch = Some(branch.trim_start_matches("refs/heads/").into());
+                workspace.branch = Some(branch.trim_start_matches("refs/heads/").into());
             } else if line == "bare" || line.starts_with("prunable") {
                 // A bare repository has no files, and a prunable worktree's folder is gone.
                 return None;
             }
         }
-        (!place.path.is_empty()).then_some(place)
+        (!workspace.path.is_empty()).then_some(workspace)
     });
     let main = listed.next().ok_or("git listed no main checkout")?;
     let under = format!("{}/.claude/worktrees/", main.path);
-    let (agents, tasks): (Vec<Place>, Vec<Place>) = listed
-        .filter(|place| place.path.starts_with(&under))
-        .partition(|place| place.path[under.len()..].starts_with("agent-"));
-    Ok(Places {
+    let (agents, tasks): (Vec<Workspace>, Vec<Workspace>) = listed
+        .filter(|workspace| workspace.path.starts_with(&under))
+        .partition(|workspace| workspace.path[under.len()..].starts_with("agent-"));
+    Ok(Workspaces {
         main,
         tasks,
         hidden: agents.len(),
     })
 }
 
-/// A place's git state (#26, #29): its branch, `None` at a detached `HEAD`; its distance from its
+/// A workspace's git state (#26, #29): its branch, `None` at a detached `HEAD`; its distance from its
 /// upstream, commits ahead and behind, `None` with no upstream (never pushed, or detached); and how
 /// many files `git status` lists as changed; how far it is behind `origin`'s default branch and
 /// whether a rebase onto it would conflict; and the operation in progress.
@@ -92,12 +92,12 @@ pub struct GitState {
     pub would_conflict: bool,
 }
 
-/// The git state of the place at `path`, one of the places of `repo`; any other path is refused, so
+/// The git state of the workspace at `path`, one of the workspaces of `repo`; any other path is refused, so
 /// the window cannot run git in an arbitrary folder. Read-only, and with no optional locks.
 pub fn git_state(repo: &Path, path: &str) -> Result<GitState, String> {
-    let known = places(repo)?;
+    let known = workspaces(repo)?;
     if known.main.path != path && !known.tasks.iter().any(|task| task.path == path) {
-        return Err(format!("not a place of this repository: {path}"));
+        return Err(format!("not a workspace of this repository: {path}"));
     }
     let dir = Path::new(path);
     let branch = git(dir, &["symbolic-ref", "--short", "-q", "HEAD"]).ok();
@@ -140,7 +140,7 @@ pub fn git_state(repo: &Path, path: &str) -> Result<GitState, String> {
     })
 }
 
-/// What a place's would-conflict check last said, with the tips it said it for and how often the
+/// What a workspace's would-conflict check last said, with the tips it said it for and how often the
 /// check ran.
 struct Checked {
     head: String,
@@ -151,14 +151,14 @@ struct Checked {
 
 static CHECKED: Mutex<BTreeMap<String, Checked>> = Mutex::new(BTreeMap::new());
 
-/// How many times the would-conflict check ran for the place at `path` (#32); a test reads it.
+/// How many times the would-conflict check ran for the workspace at `path` (#32); a test reads it.
 pub fn merge_tree_runs(path: &str) -> usize {
     let checked = CHECKED.lock().unwrap();
     checked.get(path).map_or(0, |c| c.runs)
 }
 
 /// Whether rebasing `HEAD` onto `default` would conflict, predicted by `git merge-tree
-/// --write-tree`, which touches no worktree, index or ref. Cached per place on the pair (`HEAD`
+/// --write-tree`, which touches no worktree, index or ref. Cached per workspace on the pair (`HEAD`
 /// sha, default branch sha), so it runs again only when either moves (#32).
 fn would_conflict(dir: &Path, default: &str) -> bool {
     let (Ok(head), Ok(tip)) = (
@@ -191,7 +191,7 @@ fn would_conflict(dir: &Path, default: &str) -> bool {
     conflicts
 }
 
-/// The operation in progress in the place at `dir`, from the files its repository keeps while one is stopped.
+/// The operation in progress in the workspace at `dir`, from the files its repository keeps while one is stopped.
 fn operation(dir: &Path) -> Result<Option<String>, String> {
     let marked = |name: &str| -> Result<bool, String> {
         let path = git(dir, &["rev-parse", "--git-path", name])?;
@@ -387,10 +387,10 @@ pub fn context_window(dir: &Path, id: &str) -> Option<serde_json::Value> {
 /// Creates task `name`: after a `git fetch`, branch `name` from `origin`'s default branch, checked
 /// out in `.claude/worktrees/<name>` of the main checkout. A name already taken, by a branch here or
 /// at `origin` or by a folder, is refused and nothing is created.
-pub fn create_task(repo: &Path, name: &str) -> Result<Place, String> {
+pub fn create_task(repo: &Path, name: &str) -> Result<Workspace, String> {
     // A valid branch name has no `..` part, so the folder stays under `.claude/worktrees/`.
     git(repo, &["check-ref-format", "--branch", name])?;
-    let main = places(repo)?.main.path;
+    let main = workspaces(repo)?.main.path;
     let path = format!("{main}/.claude/worktrees/{name}");
     git(repo, &["fetch", "--quiet", "origin"])?;
     // `origin/HEAD` names the default branch; a clone sets it, `set-head` asks `origin` otherwise.
@@ -420,7 +420,7 @@ pub fn create_task(repo: &Path, name: &str) -> Result<Place, String> {
         &base,
     ];
     git(repo, &add)?;
-    Ok(Place {
+    Ok(Workspace {
         path,
         branch: Some(name.into()),
     })
@@ -437,9 +437,9 @@ fn branch_taken(repo: &Path, name: &str) -> bool {
 /// `123`) gives `123-<its title>`, or `issue-123` when `gh` cannot read the title; a file of the
 /// main checkout, such as a spec, gives its file name; any other text, a prompt, gives its first
 /// words. A taken name gets the next free number, `-2` and on.
-pub fn create_named_task(repo: &Path, request: &str) -> Result<Place, String> {
+pub fn create_named_task(repo: &Path, request: &str) -> Result<Workspace, String> {
     let request = request.trim();
-    let main = places(repo)?.main.path;
+    let main = workspaces(repo)?.main.path;
     let spec = Path::new(&main).join(request);
     let number = request.strip_prefix('#').unwrap_or(request);
     let words = if !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit()) {

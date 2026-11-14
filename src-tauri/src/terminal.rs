@@ -111,35 +111,35 @@ pub fn terminal_send(msg: Value, daemon: State<Daemon>) -> Result<(), String> {
     writeln!(stream, "{msg}").map_err(|e| e.to_string())
 }
 
-/// The picker's places: the configured repository's main checkout and its tasks, read live from git
+/// The picker's workspaces: the configured repository's main checkout and its tasks, read live from git
 /// (danielrispler/Falinks#461, decision 8).
 #[tauri::command(async)]
-pub fn places() -> Result<studio_workbench::Places, String> {
-    studio_workbench::places(Path::new(&repo()))
+pub fn workspaces() -> Result<studio_workbench::Workspaces, String> {
+    studio_workbench::workspaces(Path::new(&repo()))
 }
 
-/// The git state of the place at `path` (#26): branch, upstream distance, changed files, distance
+/// The git state of the workspace at `path` (#26): branch, upstream distance, changed files, distance
 /// from origin's default branch, and the operation in progress.
 #[tauri::command(async)]
-pub fn place_git_state(path: String) -> Result<studio_workbench::GitState, String> {
+pub fn workspace_git_state(path: String) -> Result<studio_workbench::GitState, String> {
     studio_workbench::git_state(Path::new(&repo()), &path)
 }
 
-/// Fetches the configured repository once (#33); the window reads every place's state again after.
+/// Fetches the configured repository once (#33); the window reads every workspace's state again after.
 #[tauri::command(async)]
 pub fn fetch_repository() -> Result<(), String> {
     studio_workbench::fetch(Path::new(&repo()))
 }
 
-/// Creates task `name` in the configured repository (danielrispler/Falinks#468) and returns its place.
+/// Creates task `name` in the configured repository (danielrispler/Falinks#468) and returns its workspace.
 #[tauri::command(async)]
-pub fn create_task(name: String) -> Result<studio_workbench::Place, String> {
+pub fn create_task(name: String) -> Result<studio_workbench::Workspace, String> {
     studio_workbench::create_task(Path::new(&repo()), &name)
 }
 
-/// Creates a task named after `request`, an issue, a spec or a prompt, and returns its place.
+/// Creates a task named after `request`, an issue, a spec or a prompt, and returns its workspace.
 #[tauri::command(async)]
-pub fn create_named_task(request: String) -> Result<studio_workbench::Place, String> {
+pub fn create_named_task(request: String) -> Result<studio_workbench::Workspace, String> {
     studio_workbench::create_named_task(Path::new(&repo()), &request)
 }
 

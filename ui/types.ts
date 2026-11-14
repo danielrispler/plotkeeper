@@ -193,9 +193,9 @@ export type Selection = { session: Session; agent: string | null };
 
 // Where a session can start (danielrispler/Falinks#467): the main checkout and the tasks under `.claude/worktrees/`, with
 // the count of `agent-*` worktrees hidden. `branch` is null at a detached HEAD.
-export type Place = { path: string; branch: string | null };
-export type Places = { main: Place; tasks: Place[]; hidden: number };
-// A place's git state (#26): its branch, null at a detached HEAD; commits ahead of and behind its upstream, null with
+export type Workspace = { path: string; branch: string | null };
+export type Workspaces = { main: Workspace; tasks: Workspace[]; hidden: number };
+// A workspace's git state (#26): its branch, null at a detached HEAD; commits ahead of and behind its upstream, null with
 // none; changed files; commits behind origin's default branch, null when level with it or it is unknown; whether the
 // branch is the default branch; whether a rebase onto it would conflict; and the operation in progress, null with none.
 export type GitState = { branch: string | null; upstream: [number, number] | null; changed: number; main_behind: number | null; on_default: boolean; would_conflict: boolean; operation: string | null };

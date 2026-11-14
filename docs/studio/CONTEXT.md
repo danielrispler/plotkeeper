@@ -72,33 +72,35 @@ A check card's guess whose check ended with an exit code that does not say wheth
 A rolling account of an agent session's or a worker's work so far, at the top of its view, so that Daniel can resume a session he lost track of. Each new card updates it.
 
 **Workbench**:
-The part of the control room where agent work happens: terminals, tasks and Places. It works without the understanding layer.
+The part of the control room where agent work happens: terminals, tasks and Workspaces. It works without the understanding layer.
 
 **Task**:
 One piece of agent work with its own git worktree and branch, and the terminals and agent sessions running in it.
 _Avoid_: Ticket (an issue on the tracker; a ticket may become a task)
 
 **Main checkout**:
-A project's original working copy, outside any task. It appears in Places and can host terminals and agent sessions, but it is not a task.
+A project's original working copy, outside any task. It appears in Workspaces and can host terminals and agent sessions, but it is not a task.
 
-**Place**:
-A folder where Daniel can start an agent session or a terminal: a project's main checkout or a task's worktree.
-_Avoid_: Location, workspace
+**Workspace**:
+A folder where Daniel can start an agent session or a terminal: a project's main checkout or a task's worktree. The name tools like Conductor, herdr and Antigravity give the same unit. It is not the keymap's `Workspace` context, which is Zed's name for the window.
+_Formerly_: Place
+_Avoid_: Location
 
-**Places**:
-The folded section at the bottom of the session list, the home of tasks: one row per place, with its branch, its **upstream** and **main distance**, its uncommitted files and its number of sessions. Clicking a place offers a new session there and, for a task, Remove; tasks are created here too. The sessions themselves show only in the list.
-_Avoid_: Board (an earlier plan for a view of its own, which Places replaces)
+**Workspaces**:
+The folded section at the bottom of the session list, the home of tasks: one row per workspace, with its branch, its **upstream** and **main distance**, its uncommitted files and its number of sessions. Clicking a workspace offers a new session there and, for a task, Remove; tasks are created here too. The sessions themselves show only in the list.
+_Formerly_: Places
+_Avoid_: Board (an earlier plan for a view of its own, which Workspaces replaces)
 
 **Upstream**:
-A place's branch as `origin` has it. Its distance says whether Daniel's work is pushed: commits not pushed yet and commits not pulled yet. A branch never pushed has none, and shows "not pushed".
+A workspace's branch as `origin` has it. Its distance says whether Daniel's work is pushed: commits not pushed yet and commits not pulled yet. A branch never pushed has none, and shows "not pushed".
 _Avoid_: Sync, remote (alone)
 
 **Main distance**:
-How far a place's branch is from `origin`'s default branch: the commits it adds, and the commits it is behind, which a rebase would take in. On the default branch itself, it is the upstream distance.
+How far a workspace's branch is from `origin`'s default branch: the commits it adds, and the commits it is behind, which a rebase would take in. On the default branch itself, it is the upstream distance.
 _Avoid_: Base (a card's starting point)
 
 **Git line**:
-The line in the top bar on the git state of the selected session's place, or the main checkout's with none: its place and branch, its upstream and main distance, its uncommitted files and any operation in progress. The tokens that say nothing are hidden. Places rows carry the same tokens.
+The line in the top bar on the git state of the selected session's workspace, or the main checkout's with none: its workspace and branch, its upstream and main distance, its uncommitted files and any operation in progress. The tokens that say nothing are hidden. Workspaces rows carry the same tokens.
 _Avoid_: Git panel (a view of its own, which the studio does not have), status bar
 
 **Terminal daemon**:

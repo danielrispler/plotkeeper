@@ -1,7 +1,7 @@
 // The picker (danielrispler/Falinks#467): where a new session starts. It lists the configured repository's main checkout
 // and its tasks, read live from git each time it opens, with `agent-*` worktrees hidden and counted
 // on the main checkout. Choosing one starts `claude` there in a new terminal.
-// Creating a task by its branch name and removing one (danielrispler/Falinks#468) live in Places (danielrispler/Falinks#576), at the list's foot.
+// Creating a task by its branch name and removing one (danielrispler/Falinks#468) live in Workspaces (danielrispler/Falinks#576), at the list's foot.
 // The quick start, first: an issue, a spec or a prompt names a new task, and its session starts on it;
 // left empty, a session starts in the main checkout with no prompt.
 
@@ -9,9 +9,9 @@ import { element, invoke, pressable, text } from "./dom.js";
 import type { Entry } from "./keys.js";
 import { startClaude } from "./panes.js";
 import { shortPath } from "./paths.js";
-import { placeRows } from "./places.js";
+import { workspaceRows } from "./workspaces.js";
 import type { Binding } from "./settings.js";
-import type { Place, Places } from "./types.js";
+import type { Workspace, Workspaces } from "./types.js";
 
 // Git's error, or any other, at the picker's foot.
 function failed(error: unknown) {
@@ -21,11 +21,11 @@ function failed(error: unknown) {
 
 // A field whose Enter or button makes a task with `create`, then starts a session there, given
 // `prompt` of the field's text as its first prompt. Only a `prompt` field passes an empty text on.
-// Errors go to `report`: the picker's foot, or Places' (danielrispler/Falinks#576).
+// Errors go to `report`: the picker's foot, or Workspaces' (danielrispler/Falinks#576).
 export function newTask(
   placeholder: string,
   label: string,
-  create: (value: string) => Promise<Place>,
+  create: (value: string) => Promise<Workspace>,
   prompt: boolean,
   report: (error: unknown) => void = failed,
   auto: () => boolean = () => false,
@@ -60,8 +60,8 @@ export function newTask(
 
 // The quick start: a task named after an issue, a spec or a prompt, whose session starts on it, or,
 // empty, the main checkout.
-const quickStart = (main: Place, auto: () => boolean) =>
-  newTask("Issue #, spec path or prompt; empty for main", "Start", async (request) => request ? invoke<Place>("create_named_task", { request }) : main, true, failed, auto);
+const quickStart = (main: Workspace, auto: () => boolean) =>
+  newTask("Issue #, spec path or prompt; empty for main", "Start", async (request) => request ? invoke<Workspace>("create_named_task", { request }) : main, true, failed, auto);
 
 // The Auto mode choice (danielrispler/Falinks#541): off each time the picker opens; the session starts in Claude Code's
 // auto mode when on. Bypass mode is never offered.
@@ -72,28 +72,28 @@ function autoChoice(): [HTMLElement, () => boolean] {
   return [label, () => box.checked];
 }
 
-// A place's row: its name, then its folder.
-function placeRow(name: string, place: Place, auto: () => boolean): HTMLElement {
+// A workspace's row: its name, then its folder.
+function workspaceRow(name: string, workspace: Workspace, auto: () => boolean): HTMLElement {
   const button = pressable(document.createElement("button"), false, () => {
     element("picker").hidden = true;
-    startClaude(place.path, null, "", auto()).catch((e) => console.warn(e));
+    startClaude(workspace.path, null, "", auto()).catch((e) => console.warn(e));
   });
   button.classList.add("row");
   const first = text("span", "", "l1");
   first.append(text("span", name, "name"));
-  const second = Object.assign(text("span", shortPath(place.path), "l2"), { title: place.path }); // danielrispler/Falinks#571
+  const second = Object.assign(text("span", shortPath(workspace.path), "l2"), { title: workspace.path }); // danielrispler/Falinks#571
   button.append(first, second);
   return button;
 }
 
-function picked(places: Places): HTMLElement[] {
-  const { hidden } = places;
+function picked(workspaces: Workspaces): HTMLElement[] {
+  const { hidden } = workspaces;
   const count = hidden ? [text("p", `${hidden} agent worktree${hidden === 1 ? "" : "s"} hidden`, "hidden-count")] : [];
   const [choice, auto] = autoChoice();
-  const [main, ...tasks] = placeRows(places, [], []).map(({ name, place }) => placeRow(name, place, auto));
+  const [main, ...tasks] = workspaceRows(workspaces, [], []).map(({ name, workspace }) => workspaceRow(name, workspace, auto));
   return [
     text("h1", "New session in its own task"),
-    quickStart(places.main, auto),
+    quickStart(workspaces.main, auto),
     choice,
     text("h1", "Start a session in"),
     main,
@@ -171,7 +171,7 @@ export async function showPicker() {
   if (closed("New session")) return;
   // It opens once its rows are read, so no placeholder flashes first in another box (danielrispler/Falinks#570).
   try {
-    picker.replaceChildren(...picked(await invoke<Places>("places")));
+    picker.replaceChildren(...picked(await invoke<Workspaces>("workspaces")));
   } catch (e) {
     picker.replaceChildren(text("p", `No worktrees: ${e}`, "empty"));
   }
