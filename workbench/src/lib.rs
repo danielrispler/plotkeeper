@@ -105,6 +105,13 @@ pub fn git_state(repo: &Path, path: &str) -> Result<GitState, String> {
     })
 }
 
+/// Fetches `origin` once for the repository that holds `repo` (#33), whichever of its worktrees that
+/// is: the refs are shared. A failure returns git's message and leaves the refs as they were. It
+/// writes `refs/remotes/*` and `FETCH_HEAD` only, never a branch, the index or a worktree's files.
+pub fn fetch(repo: &Path) -> Result<(), String> {
+    git(repo, &["fetch", "--quiet", "origin"]).map(drop)
+}
+
 /// The command a studio terminal runs for a new session, or for `resume`, an ended session's id. It
 /// sets `CLAUDE_CODE_PLUGIN_DIRS` to the studio plugin at `plugin` alone, as the README loads it,
 /// so a profile that sets it too never loads the hooks twice, and `CLAUDE_CLIENT_PRESENCE_FILE` to
@@ -464,6 +471,8 @@ fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
     // No optional locks: a read never holds `index.lock` against an agent's commit (#27).
     let output = Command::new("git")
         .arg("--no-optional-locks")
+        // A fetch that wants a password fails, rather than waiting on a prompt nobody sees.
+        .env("GIT_TERMINAL_PROMPT", "0")
         .args(args)
         .current_dir(dir)
         .output()

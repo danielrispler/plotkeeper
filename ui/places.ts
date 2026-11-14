@@ -124,7 +124,7 @@ function drawLine() {
   const repo = read.main.path.split("/").pop();
   const name = place === read.main ? repo : `${repo} › ${place.path.split("/").pop()}`;
   const tokens = gitTokens(states.get(place.path) ?? null);
-  line.title = tokens.map((token) => token.title).join("\n");
+  line.title = [...tokens.map((token) => token.title), fetchNote(fetched, Date.now())].join("\n");
   line.replaceChildren(text("span", name ?? "", "git-place"), ...tokens.map((token) => Object.assign(text("span", token.text), { title: token.title })));
 }
 
@@ -204,5 +204,44 @@ export function showPlaces() {
   touchShown();
 }
 
-// While the window is focused, every shown place is read every 5 s; started by `main.ts`, not on import.
-export const watchPlaces = () => setInterval(() => document.hasFocus() && touchShown(), 5000);
+// The repository's fetch, once for all its places (#33): when it last succeeded, and git's message
+// if the latest failed. A failed fetch leaves the refs as they were, so the old numbers stay.
+export type FetchState = { at: number | null; error: string | null };
+const fetched: FetchState = { at: null, error: null };
+let fetching = false;
+
+// The Git line's hover on the fetch, from `now` in ms.
+export function fetchNote({ at, error }: FetchState, now: number): string {
+  const lines = ["Not fetched yet"];
+  if (at !== null) {
+    const minutes = Math.floor((now - at) / 60_000);
+    const hours = Math.floor(minutes / 60);
+    lines[0] = `Last fetch: ${minutes < 1 ? "just now" : hours < 1 ? `${plural(minutes, "minute")} ago` : `${plural(hours, "hour")} ago`}`;
+  }
+  if (error) lines.push(`The latest fetch failed: ${error}`);
+  return lines.join("\n");
+}
+
+// Fetches now, then reads every place again; the palette's Fetch and the 5-minute timer. One at a time.
+export async function fetchNow() {
+  if (fetching) return;
+  fetching = true;
+  try {
+    await invoke("fetch_repository");
+    fetched.at = Date.now();
+    fetched.error = null;
+  } catch (e) {
+    fetched.error = String(e);
+  } finally {
+    fetching = false;
+  }
+  if (read) for (const place of [read.main, ...read.tasks]) touch(place.path);
+  draw();
+}
+
+// While the window is focused, every shown place is read every 5 s and the repository is fetched
+// every 5 minutes; started by `main.ts`, not on import.
+export function watchPlaces() {
+  setInterval(() => document.hasFocus() && touchShown(), 5000);
+  setInterval(() => document.hasFocus() && void fetchNow(), 5 * 60_000);
+}

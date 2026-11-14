@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { gitTokens, placeRows } from "../../dist/places.js";
+import { fetchNote, gitTokens, placeRows } from "../../dist/places.js";
 import { throttle } from "../../dist/throttle.js";
 
 const ui = new URL("../", import.meta.url);
@@ -128,4 +128,23 @@ test("the new-session picker no longer creates or removes tasks", () => {
   const picker = read("picker.ts");
   assert.doesNotMatch(picker, /create_task"|remove_task|Remove/);
   assert.match(read("places.ts"), /create_task"/);
+});
+
+// The Git line's hover says how long ago the last successful fetch was, and that the latest failed (#33).
+test("the fetch note: never, its age, and a failure with git's message", () => {
+  const minute = 60_000;
+  assert.equal(fetchNote({ at: null, error: null }, 0), "Not fetched yet");
+  assert.equal(fetchNote({ at: 0, error: null }, 30_000), "Last fetch: just now");
+  assert.equal(fetchNote({ at: 0, error: null }, 3 * minute), "Last fetch: 3 minutes ago");
+  assert.equal(fetchNote({ at: 0, error: null }, 61 * minute), "Last fetch: 1 hour ago");
+  assert.equal(
+    fetchNote({ at: 0, error: "fatal: 'origin' does not appear to be a git repository" }, 3 * minute),
+    "Last fetch: 3 minutes ago\nThe latest fetch failed: fatal: 'origin' does not appear to be a git repository",
+  );
+  assert.equal(fetchNote({ at: null, error: "offline" }, 0), "Not fetched yet\nThe latest fetch failed: offline");
+});
+
+test("Fetch is a palette action, and the 5-minute fetch runs only while the window is focused", () => {
+  assert.match(read("main.ts"), /"studio::Fetch": \(\) =>/);
+  assert.match(read("places.ts"), /document\.hasFocus\(\) && void fetchNow\(\)[^]*5 \* 60_000/);
 });

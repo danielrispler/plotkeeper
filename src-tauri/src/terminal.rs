@@ -124,6 +124,12 @@ pub fn place_git_state(path: String) -> Result<studio_workbench::GitState, Strin
     studio_workbench::git_state(Path::new(&repo()), &path)
 }
 
+/// Fetches the configured repository once (#33); the window reads every place's state again after.
+#[tauri::command(async)]
+pub fn fetch_repository() -> Result<(), String> {
+    studio_workbench::fetch(Path::new(&repo()))
+}
+
 /// Creates task `name` in the configured repository (danielrispler/Falinks#468) and returns its place.
 #[tauri::command(async)]
 pub fn create_task(name: String) -> Result<studio_workbench::Place, String> {
