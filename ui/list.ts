@@ -263,6 +263,16 @@ function agentRow(session: Session, children: Children, agent: Subagent, depth: 
   return button;
 }
 
+// A row control's icon: a 14px inline SVG on the current colour, in a 20x20 button (the tokens' --control and --icon).
+const CHEVRON = '<path d="M5 3l4 4-4 4"/>';
+const CROSS = '<path d="M3.5 3.5l7 7M10.5 3.5l-7 7"/>';
+function icon(name: string, path: string, click: () => void): HTMLElement {
+  const button = pressable(text("button", "", name), false, click);
+  button.removeAttribute("aria-pressed");
+  button.innerHTML = `<svg viewBox="0 0 14 14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${path}</svg>`;
+  return button;
+}
+
 // A row in the list: its toggle, when anything is drawn under it, then the row, then its delete. They
 // are the row's siblings, as a button holds no button, so pressing them does not select the row.
 function item(key: string, depth: number, toggle: { open: boolean; hiding: number } | null, row: HTMLElement, remove: HTMLElement | null) {
@@ -270,12 +280,11 @@ function item(key: string, depth: number, toggle: { open: boolean; hiding: numbe
   node.className = "item";
   node.dataset.key = key;
   if (toggle) {
-    const fold = pressable(text("button", toggle.open ? "▾" : "▸", "fold"), false, () => {
+    const fold = icon("fold", CHEVRON, () => {
       if (!folded.delete(key)) folded.add(key);
       showSessions(studio.listed);
     });
     fold.title = toggle.open ? "Collapse subagents" : "Expand subagents";
-    fold.removeAttribute("aria-pressed");
     fold.setAttribute("aria-expanded", String(toggle.open));
     // The count goes after the name, as the toggle's column has room only for its chevron.
     if (toggle.hiding) row.querySelector(".name")?.after(text("span", `${toggle.hiding} hidden`, "id"));
@@ -291,9 +300,8 @@ function deleting(session: Session): HTMLElement | null {
   if (session.status_only) return null;
   // `patch` keeps the first button and its listener, so the press reads the session as it is now.
   const now = () => studio.listed.find((listed) => listed.id === session.id) ?? session;
-  const button = pressable(text("button", "×", "delete"), false, () => void askDelete(now()).catch(report));
+  const button = icon("delete", CROSS, () => void askDelete(now()).catch(report));
   button.title = "Delete…";
-  button.removeAttribute("aria-pressed");
   button.setAttribute("aria-label", `Delete ${sessionName(session)}…`);
   return button;
 }
