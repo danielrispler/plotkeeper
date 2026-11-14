@@ -7,6 +7,12 @@ use std::{
 };
 use studio_terminal_daemon::Client;
 
+/// How long a test waits for the daemon to do something it does by itself: start, flood a terminal
+/// until a client lags or the scrollback is full, or answer. Each of these ends by progress, not by
+/// a clock, and on a loaded machine a dozen `yes` floods share the CPU, so the wait is long. A
+/// daemon that is stuck still fails, a minute late.
+const PATIENCE: Duration = Duration::from_secs(60);
+
 struct Daemon {
     child: Child,
     dir: PathBuf,
@@ -32,7 +38,7 @@ impl Daemon {
             .spawn()
             .unwrap();
         let d = Daemon { child, dir };
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + PATIENCE;
         // The socket file appears at `bind`, before `listen`, so wait for a connection, not the file.
         while std::os::unix::net::UnixStream::connect(d.socket()).is_err() {
             assert!(
@@ -71,7 +77,7 @@ fn spawn(c: &mut Client, id: &str, argv: &[&str]) {
 // Reads events until the terminal's output, decoded, contains `needle`; returns everything seen.
 fn output_until(c: &mut Client, id: &str, needle: &str) -> String {
     let mut seen = Vec::new();
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + PATIENCE;
     while !String::from_utf8_lossy(&seen).contains(needle) {
         assert!(
             Instant::now() < deadline,
@@ -101,7 +107,7 @@ fn term<'a>(list: &'a Value, id: &str) -> &'a Value {
 }
 
 fn wait_for(what: &str, mut ok: impl FnMut() -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + PATIENCE;
     while !ok() {
         assert!(Instant::now() < deadline, "timed out waiting for {what}");
         std::thread::sleep(Duration::from_millis(50));
@@ -446,7 +452,7 @@ fn a_client_that_stops_reading_leaves_the_other_terminals_flowing() {
         let _ = done.send(());
     });
     finished
-        .recv_timeout(Duration::from_secs(10))
+        .recv_timeout(PATIENCE)
         .expect("the other terminal stalled behind a client that stopped reading");
     // The stalled client is dropped once its queue fills, and the daemon shuts its socket, so a write fails. Reading
     // first would let it catch up, so it would never be dropped and the read would follow `yes` forever.
