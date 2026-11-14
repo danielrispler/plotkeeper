@@ -7,7 +7,7 @@ import { initial } from "../../dist/settings.js";
 import { windowBinding } from "../../dist/keys.js";
 import { listSpace } from "../../dist/home.js";
 
-const session = (id, state, unseen = false) => ({ id, state, unseen });
+const session = (id, state, unseen = false, landed = false) => ({ id, state, unseen, landed });
 const ids = (section) => section.sessions.map((s) => s.id);
 const key = (code, k, mods = {}) => ({ key: k, code, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...mods });
 
@@ -25,7 +25,7 @@ test("Home lists the sessions that need Daniel first, then the unseen ones", () 
   ]);
 });
 
-test("a section with no session is absent, and there is no landed section yet", () => {
+test("a section with no session is absent", () => {
   assert.deepEqual(homeSections([session("c", "running")]), []);
   assert.deepEqual(homeSections([session("d", "idle", true)]).map((s) => s.title), ["Not seen"]);
 });
@@ -48,4 +48,20 @@ test("a click on the list's empty space goes home; a click on a row, a heading o
   assert.equal(listSpace(target("summary")), false);
   assert.equal(listSpace(target("#workspaces")), false);
   assert.equal(listSpace(target("button")), false);
+});
+
+test("landed sessions come after needs-you and unseen, and a session that is not landed never appears there", () => {
+  const sections = homeSections([
+    session("a", "idle", false, true),
+    session("b", "needs_you"),
+    session("c", "your_turn", true, true),
+    session("d", "ended", false, true),
+    session("e", "idle"),
+    session("f", "running", false, true),
+  ]);
+  assert.deepEqual(sections.map((s) => [s.title, ids(s)]), [
+    ["Needs you", ["b"]],
+    ["Not seen", ["c"]],
+    ["Landed", ["a", "d"]],
+  ]);
 });

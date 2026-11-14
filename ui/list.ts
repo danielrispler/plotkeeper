@@ -318,7 +318,7 @@ function item(key: string, depth: number, toggle: { open: boolean; hiding: numbe
 }
 
 // A session row's delete (decision of the session list's fold and delete): the rail's dialog, asked from the row.
-function deleting(session: Session): HTMLElement | null {
+export function deleting(session: Session): HTMLElement | null {
   if (session.status_only) return null;
   // `patch` keeps the first button and its listener, so the press reads the session as it is now.
   const now = () => studio.listed.find((listed) => listed.id === session.id) ?? session;
