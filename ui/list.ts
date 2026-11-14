@@ -21,10 +21,15 @@ export function stripLabel(folder: string): string {
   return /^issue-(\d+)/.exec(folder)?.[1] ?? folder.slice(0, 4);
 }
 
-// What a session is called: Daniel's name for it, else its issue, PR and worktree (danielrispler/Falinks#480), else its
-// folder.
-export function sessionName(session: Pick<Session, "name" | "identity" | "folder_name">): string {
-  return session.name ?? (session.identity.name || session.folder_name);
+// What a session is called: Daniel's name for it, else the name written from its first prompt with
+// the identity's issue in front ("#37 · One event internal"), else its issue, PR and worktree
+// (danielrispler/Falinks#480), else its folder.
+export function sessionName(
+  session: Pick<Session, "name" | "identity" | "folder_name"> & { prompt_name?: string | null },
+): string {
+  if (session.name) return session.name;
+  if (session.prompt_name) return session.identity.issue === null ? session.prompt_name : `#${session.identity.issue} · ${session.prompt_name}`;
+  return session.identity.name || session.folder_name;
 }
 
 const thousands = (n: number) => `${Math.round(n / 1000).toLocaleString("en-US")}k`;
@@ -49,6 +54,11 @@ export function contextTitle(context: Context | null): string {
 // as a Claude session with missing data; else the context share.
 export function rowMark(session: Pick<Session, "status_only" | "transcript">): string {
   return session.status_only ? "status only" : contextText(session.transcript.context);
+}
+
+// The name's hover: the identity's PR and worktree, which a prompt name leaves out.
+function nameTitle(session: Session): string {
+  return session.name || !session.prompt_name ? "" : session.identity.name;
 }
 
 // The mark's node, with the context share's hover.
@@ -195,7 +205,7 @@ function row(session: Session, children: Children): HTMLElement {
   rowLines(
     button,
     session.state,
-    [text("span", sessionName(session), "name"), markNode(session)],
+    [Object.assign(text("span", sessionName(session), "name"), { title: nameTitle(session) }), markNode(session)],
     line === null
       ? null
       : [...done(children, children.get("session")), rowLine(line), ...(turn ? [Object.assign(counts(clock, turn[1]), { title: turn[0] })] : [])],
