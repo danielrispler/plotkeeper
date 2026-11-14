@@ -144,3 +144,30 @@ fn the_shell_looks_up_each_task_once_with_its_issue() {
         (TASK, Some(59))
     );
 }
+
+#[test]
+fn the_git_half_alone_clears_and_restores_the_mark() {
+    let mut studio = Studio::default();
+    at_your_turn(&mut studio, "a", TASK);
+    assert!(!studio.set_task_safe(TASK, true), "no facts to change yet");
+    studio.set_task_facts(TASK, Some(SHIPPED));
+    assert!(studio.set_task_safe(TASK, false), "a new commit or file");
+    assert!(!landed(&studio, "a"));
+    assert!(studio.set_task_safe(TASK, true));
+    assert!(landed(&studio, "a"));
+    assert!(!studio.set_task_safe(TASK, true));
+}
+
+#[test]
+fn facts_of_a_task_no_session_works_in_are_dropped() {
+    let mut studio = Studio::default();
+    at_your_turn(&mut studio, "a", TASK);
+    let other = "/work/plotkeeper/.claude/worktrees/issue-5";
+    studio.set_task_facts(TASK, Some(SHIPPED));
+    studio.set_task_facts(other, Some(SHIPPED));
+    studio.forget_gone_tasks();
+    assert!(!studio.set_task_safe(other, false), "dropped");
+    assert!(studio.set_task_safe(TASK, false), "kept");
+    assert_eq!(studio.task_of("a").as_deref(), Some(TASK));
+    assert_eq!(studio.task_of("nobody"), None);
+}

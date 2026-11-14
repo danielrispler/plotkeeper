@@ -3249,6 +3249,27 @@ impl Studio {
         before != facts
     }
 
+    /// The git half of a task's facts, read again with its workspace's git state (no GitHub): a new
+    /// commit or file clears the mark at once. A task never looked up has no facts to change.
+    /// Returns whether the facts changed.
+    pub fn set_task_safe(&mut self, path: &str, safe: bool) -> bool {
+        let Some(facts) = self.tasks.get_mut(path) else {
+            return false;
+        };
+        std::mem::replace(&mut facts.safe, safe) != safe
+    }
+
+    /// Drops the facts of tasks no listed session works in any more, whose worktree is gone with them.
+    pub fn forget_gone_tasks(&mut self) {
+        let kept: Vec<String> = self.task_queries().into_iter().map(|q| q.path).collect();
+        self.tasks.retain(|path, _| kept.contains(path));
+    }
+
+    /// The task folder session `id` works in, `None` in the main checkout or for no such session.
+    pub fn task_of(&self, id: &str) -> Option<String> {
+        task_path(&self.sessions.get(id)?.cwd)
+    }
+
     /// Whether `session`'s task has landed: its work has shipped, so removing its worktree loses
     /// nothing. Nothing uncommitted or unpushed, its PR merged, its issue closed when a session
     /// there has one, and none of the sessions listed in the worktree running or needing Daniel.

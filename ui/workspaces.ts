@@ -6,7 +6,7 @@
 // loss check of a session's Delete. Creating a task is here too, not in the new-session picker.
 
 import { element, invoke, patch, pressable, text } from "./dom.js";
-import { landedMark } from "./list.js";
+import { glyph } from "./list.js";
 import { startClaude } from "./panes.js";
 import { newTask } from "./picker.js";
 import { studio } from "./state.js";
@@ -116,7 +116,7 @@ function workspaceRow({ workspace, name, facts, actions, landed }: WorkspaceRow)
   button.setAttribute("aria-expanded", String(opened.has(workspace.path)));
   const line = text("span", "", "l1");
   line.append(text("span", name, "name"));
-  if (landed) line.append(landedMark());
+  if (landed) line.append(glyph("idle", false, true));
   // The facts go under the name, so a long branch name is not cut for them.
   button.append(line, ...(facts ? [text("span", facts, "l2")] : []));
   row.append(button);
