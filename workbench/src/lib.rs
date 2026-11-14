@@ -468,7 +468,9 @@ pub fn delete_branch_merged_at(repo: &Path, branch: &str, heads: &[String]) -> R
 
 /// Runs `git` in `dir` and returns its output, or git's own error message.
 fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
+    // No optional locks: a read never holds `index.lock` against an agent's commit (#27).
     let output = Command::new("git")
+        .arg("--no-optional-locks")
         .args(args)
         .current_dir(dir)
         .output()

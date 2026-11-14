@@ -107,6 +107,32 @@ fn a_branch_with_no_base_has_no_ahead_and_behind() {
     assert_eq!(counts(dir.path(), &found.tasks[0].path), none);
 }
 
+/// Reading counts never rewrites the index, which would take `index.lock` against an agent's commit (#27).
+#[test]
+fn counts_leave_the_index_untouched_even_when_its_stat_info_is_stale() {
+    let (dir, main) = repo();
+    let file = dir.path().join("a.txt");
+    std::fs::write(&file, "a").unwrap();
+    git(dir.path(), &["add", "a.txt"]);
+    git(dir.path(), &["commit", "-q", "-m", "Add a"]);
+    // Same bytes, new mtime: the index's stat info is stale and a plain `git status` refreshes it.
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    std::fs::write(&file, "a").unwrap();
+    let index = dir.path().join(".git/index");
+    let before = (
+        std::fs::read(&index).unwrap(),
+        std::fs::metadata(&index).unwrap().modified().unwrap(),
+    );
+
+    counts(dir.path(), &main).unwrap();
+
+    let after = (
+        std::fs::read(&index).unwrap(),
+        std::fs::metadata(&index).unwrap().modified().unwrap(),
+    );
+    assert_eq!(before, after);
+}
+
 /// Counts run git only in a place of the repository (danielrispler/Falinks#576).
 #[test]
 fn counts_refuse_a_folder_that_is_not_a_place() {
