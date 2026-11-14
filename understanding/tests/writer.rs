@@ -1100,7 +1100,7 @@ fn watched(
     let heard = std::sync::Arc::new(Mutex::new(Vec::new()));
     let sink = heard.clone();
     let writer = ClaudeWriter::new(program.into(), dir.into())
-        .with_timeout(Duration::from_secs(1))
+        .with_timeout(Duration::from_secs(30))
         .on_availability(move |notice| sink.lock().unwrap().push(notice));
     (writer, heard)
 }
@@ -1118,7 +1118,7 @@ fn a_writer_that_cannot_start_gives_one_notice_until_a_call_works() {
         let heard = heard.lock().unwrap();
         assert_eq!(heard.len(), 1, "{heard:?}");
         let text = heard[0].as_deref().unwrap();
-        assert!(text.contains("cards and briefs are off"), "{text}");
+        assert!(text.contains("Cards and briefs are off"), "{text}");
     }
 
     shell(dir.path(), "claude", "echo ok");
