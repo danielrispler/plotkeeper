@@ -161,6 +161,10 @@ h1 { margin: 0 0 var(--sp-4); }
    fitted to the body and a switch shows it as it is, with no resize and redraw after (danielrispler/Falinks#570). A new
    pane stays invisible until its first replay is written and fitted. */
 .pane { position: absolute; inset: var(--sp-3); }
+/* Home (spec #53): in the terminal column while no session is selected; rows as the list's, in a column of readable width. */
+.pane.home { overflow-y: auto; padding: var(--sp-5) var(--sp-6); max-width: var(--dialog); margin: 0 auto; }
+.pane.home h1 { margin: var(--sp-6) var(--sp-4) var(--sp-2); }
+.pane.home .row:hover { background: var(--hover); }
 .pane[hidden] { display: block; }
 .pane[hidden], .pane.fitting { visibility: hidden; }
 /* A split's divider (danielrispler/Falinks#529), in the gap between its two panes. */

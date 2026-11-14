@@ -58,6 +58,22 @@ export async function select(id: string, agent: string | null = null) {
   await catchUp();
 }
 
+// Selects no session, which shows Home: the core clears the selection and what is viewed.
+export async function goHome() {
+  studio.pending = null;
+  try {
+    const selected = await invoke<Selection | null>("select", { id: null });
+    const cards = await invoke<SessionCards>("cards");
+    if (studio.pending) return; // a press since wins
+    document.body.classList.remove("list-open");
+    show(selected);
+    showCards(cards);
+    showSession(null, true);
+  } catch (e) {
+    console.warn(e);
+  }
+}
+
 // Draws the selection and cards that events sent while a press waited; fetched again, since an
 // event held back may predate the press's reply.
 async function catchUp() {
