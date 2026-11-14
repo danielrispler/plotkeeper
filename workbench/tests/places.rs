@@ -2,7 +2,7 @@
 //! repositories, as the engine's tests do (`src/lib.rs`, `retention_checks_every_blob_of_a_snapshot`).
 
 use std::{path::Path, process::Command};
-use studio_workbench::{GitState, Place, claude, git_state, places};
+use studio_workbench::{GitState, Place, claude, fetch, git_state, places};
 
 /// Runs `git` in `repo`, away from Daniel's own git config.
 fn git(repo: &Path, args: &[&str]) {
@@ -361,4 +361,45 @@ fn main_distance_counts_commits_origins_default_branch_has_that_the_branch_lacks
     let on_main = git_state(dir.path(), &main).unwrap();
     assert!(on_main.on_default);
     assert_eq!(on_main.upstream, Some((0, 2)));
+}
+
+/// A fetch brings `origin`'s new commits, and the place's distance follows (#33).
+#[test]
+fn a_fetch_moves_origins_default_branch_and_the_distances() {
+    let (dir, main, origin) = pushed();
+    let other = tempfile::tempdir().unwrap();
+    git(
+        other.path(),
+        &["clone", "-q", origin.to_str().unwrap(), "c"],
+    );
+    let clone = other.path().join("c");
+    git(&clone, &["commit", "-q", "--allow-empty", "-m", "Theirs"]);
+    git(&clone, &["push", "-q", "origin", "main"]);
+    let behind = |n| assert_eq!(git_state(dir.path(), &main).unwrap().upstream, Some((0, n)));
+    behind(0);
+
+    fetch(dir.path()).unwrap();
+
+    behind(1);
+}
+
+/// A failed fetch says why and leaves the refs as they were (#33).
+#[test]
+fn a_fetch_from_a_missing_remote_fails_with_gits_message_and_keeps_the_refs() {
+    let (dir, _main, origin) = pushed();
+    let refs = || {
+        let out = Command::new("git")
+            .args(["for-each-ref"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let before = refs();
+    std::fs::rename(&origin, dir.path().join(".git/gone.git")).unwrap();
+
+    let error = fetch(dir.path()).unwrap_err();
+
+    assert!(error.contains("origin.git"), "{error}");
+    assert_eq!(refs(), before);
 }

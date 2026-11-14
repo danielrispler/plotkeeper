@@ -502,6 +502,7 @@ fn main() {
             skills::skills,
             terminal::places,
             terminal::place_git_state,
+            terminal::fetch_repository,
             terminal::claude_argv,
             terminal::plugin_setup,
             terminal::fix_plugin_setup,
