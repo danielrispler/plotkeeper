@@ -87,6 +87,8 @@ export type Session = {
   status_only: boolean;
   // Daniel's name for it from the studio (danielrispler/Falinks#469); null for its folder's.
   name: string | null;
+  // A few words on what it is about, written from Daniel's first prompt; null before it arrives.
+  prompt_name: string | null;
   // The id `claude --resume` takes: its latest conversation's; a `/clear` changes it, not `id` (danielrispler/Falinks#474).
   resume_id: string;
   // Claude Code's permission mode from its latest event that names one, null before (danielrispler/Falinks#541).

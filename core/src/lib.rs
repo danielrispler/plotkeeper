@@ -123,6 +123,15 @@ pub struct Session {
     /// Daniel's name for it, from the studio's latest rename line in the log (danielrispler/Falinks#469); `None` for its
     /// folder's.
     pub name: Option<String>,
+    /// A few words on what it is about, written from Daniel's first prompt and logged as a
+    /// `StudioPromptName` line; shown after his name and before the identity's.
+    pub prompt_name: Option<String>,
+    /// Whether Daniel's first prompt arrived, which asks for the prompt name once.
+    #[serde(skip)]
+    name_asked: bool,
+    /// His first prompt, a bare slash command, whose name waits for its turn's end.
+    #[serde(skip)]
+    name_after: Option<String>,
     /// The id `claude --resume` takes: its latest conversation's, which a `/clear` changes while the
     /// row keeps its first id (danielrispler/Falinks#461, decision 18).
     pub resume_id: String,
@@ -1394,6 +1403,9 @@ pub enum Output {
     /// A session's turn ended with a long reply or by asking Daniel something: its turn summary
     /// (danielrispler/Falinks#517, decisions 12 and 13).
     Summary(SummaryRequest),
+    /// Daniel's first prompt of a session arrived, or its turn ended when that prompt was a bare
+    /// slash command: its prompt name.
+    Name(NameRequest),
     /// A Claude session's hook state and its OSC 7501 state disagreed past `MISMATCH_AFTER_MS`:
     /// `line` goes to the local mismatch log, for debugging (danielrispler/Falinks#560).
     Mismatch { line: String },
@@ -1466,6 +1478,22 @@ pub struct SummaryRequest {
     /// The card its `Stop` requested, which the learning section points to instead of a question.
     #[serde(default)]
     pub card: Option<String>,
+}
+
+/// What the writer reads to name a session from its first prompt.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct NameRequest {
+    pub session_id: String,
+    /// Daniel's first prompt.
+    pub prompt: String,
+    /// The final response of its turn, for a prompt that is a bare slash command; `None` otherwise.
+    pub response: Option<String>,
+}
+
+/// Whether `prompt` is a slash command with nothing after it, such as `/wayfinder`.
+fn is_bare_command(prompt: &str) -> bool {
+    let prompt = prompt.trim();
+    prompt.starts_with('/') && !prompt.contains(char::is_whitespace)
 }
 
 /// A reply of at least this many words gets a summary (danielrispler/Falinks#517, decision 12).
@@ -1734,6 +1762,10 @@ struct Event {
 /// restart replays, so the name survives it.
 pub const RENAME: &str = "StudioRename";
 
+/// The line the shell appends when the writer named a session from its first prompt: its
+/// `studio_name`. The log is what a restart replays, so the name survives it.
+pub const PROMPT_NAME: &str = "StudioPromptName";
+
 /// The event the shell appends to the log when Daniel deletes a session: its row leaves the list,
 /// at once and after a restart, until a `SessionStart` of it brings it back. Its cards stay.
 pub const DELETE: &str = "StudioDelete";
@@ -1901,7 +1933,7 @@ impl Studio {
         let event = serde_json::from_str::<Event>(line);
         let event = event
             .ok()
-            .filter(|e| ![RENAME, DELETE].contains(&e.hook_event_name.as_str()));
+            .filter(|e| ![RENAME, PROMPT_NAME, DELETE].contains(&e.hook_event_name.as_str()));
         event.map_or_else(Vec::new, |mut event| {
             event.session_id = self.row(&event);
             let long_check = self.check_start(&event).is_some_and(|start| start.long());
@@ -2196,6 +2228,14 @@ impl Studio {
             }
             return Vec::new();
         }
+        if event.hook_event_name == PROMPT_NAME {
+            if let Some(session) = self.sessions.get_mut(&event.session_id) {
+                session.prompt_name =
+                    Some(event.studio_name.trim().to_owned()).filter(|n| !n.is_empty());
+                session.name_after = None;
+            }
+            return Vec::new();
+        }
         // So does a delete, which also drops the selection when it was this session.
         if event.hook_event_name == DELETE {
             if let Some(session) = self.sessions.get_mut(&event.session_id) {
@@ -2434,6 +2474,19 @@ impl Studio {
                     }),
                     Sender::Daniel => {}
                 }
+                // Daniel's first prompt asks for a name; a bare slash command waits for its turn's end.
+                if sender.is_daniels() && !session.name_asked {
+                    session.name_asked = true;
+                    if is_bare_command(&event.prompt) {
+                        session.name_after = Some(event.prompt.clone());
+                    } else if !replay {
+                        outputs.push(Output::Name(NameRequest {
+                            session_id: session.agent.id.clone(),
+                            prompt: event.prompt.clone(),
+                            response: None,
+                        }));
+                    }
+                }
                 // A background check ends at the notification that names its task.
                 for (task, status) in reported(&event.prompt) {
                     let running = session.checks.iter_mut().filter(|l| l.ended_at.is_none());
@@ -2504,6 +2557,15 @@ impl Studio {
                             Some(Output::Card(card)) => Some(card.id.clone()),
                             _ => None,
                         },
+                    }));
+                }
+                if let Some(prompt) = session.name_after.take()
+                    && !replay
+                {
+                    outputs.push(Output::Name(NameRequest {
+                        session_id: session.agent.id.clone(),
+                        prompt,
+                        response: Some(reply.into()),
                     }));
                 }
                 let mut lines = event.last_assistant_message.lines().map(str::trim);

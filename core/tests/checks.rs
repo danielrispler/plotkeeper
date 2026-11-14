@@ -19,7 +19,12 @@ fn live(log: &str) -> Vec<Vec<Output>> {
     let mut studio = Studio::default();
     let mut outputs = |line| {
         let mut outputs = studio.apply(line);
-        outputs.retain(|o| !matches!(o, Output::Version { .. } | Output::YourTurn { .. }));
+        outputs.retain(|o| {
+            !matches!(
+                o,
+                Output::Version { .. } | Output::YourTurn { .. } | Output::Name(_)
+            )
+        });
         outputs
     };
     log.lines().map(&mut outputs).collect()

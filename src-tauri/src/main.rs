@@ -21,14 +21,14 @@ use std::{
     time::{Duration, Instant},
 };
 use studio_core::{
-    CardRequest, Notifications, Output, Session, Sound,
+    CardRequest, NameRequest, Notifications, Output, Session, Sound,
     State::{Ended, NeedsYou},
     Studio, SummaryRequest, TaskFacts, TaskQuery,
 };
 use studio_understanding::{
     CardStore, CardWriter, ClaudeWriter, FakeWriter, Fingerprints, Rating, Row, SessionCards,
     StoredSummary, SummarySetup, Versions, backfilled, fingerprint_changes, millis, worktree_root,
-    write_agent_summary, write_brief, write_stop, write_summary,
+    write_agent_summary, write_brief, write_name, write_stop, write_summary,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
@@ -648,6 +648,7 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                     Output::Card(request) => write(app, writer, &mut queues, request, true),
                     Output::Brief(request) => write(app, writer, &mut queues, request, false),
                     Output::Summary(request) => summarize(app, writer, &mut queues, request),
+                    Output::Name(request) => name(app, writer, &mut queues, request),
                     Output::NeedsYou { session_id, agent } => {
                         tell(app, Notice::NeedsYou, &session_id, agent.as_deref());
                     }
@@ -995,6 +996,37 @@ fn summarize(
         let studio = app.state::<Mutex<Studio>>();
         if studio.lock().unwrap().summarized(&session, &turn, first) {
             let _ = app.emit("sessions", sessions(app.state(), app.state()));
+        }
+    };
+    queue(queues, id).send(Box::new(job)).ok();
+}
+
+/// Names the session of `request` on its queue, from Daniel's first prompt, at the summary writer's
+/// model and effort. The name is a `StudioPromptName` line in the event log, which the log thread
+/// applies and a restart replays.
+fn name(
+    app: &AppHandle,
+    writer: &Writer,
+    queues: &mut HashMap<String, mpsc::Sender<Job>>,
+    request: NameRequest,
+) {
+    let (app, writer) = (app.clone(), writer.clone());
+    let id = request.session_id.clone();
+    let job = move || {
+        let log = |line: String| eprintln!("studio: {line}");
+        let setup = app.state::<Summaries>().setup.lock().unwrap().clone();
+        let response = request.response.as_deref();
+        let Some(name) = write_name(&*writer, &setup, &request.prompt, response, log) else {
+            return;
+        };
+        let line = serde_json::json!({
+            "session_id": request.session_id,
+            "hook_event_name": studio_core::PROMPT_NAME,
+            "studio_name": name,
+            "studio_received_ms": millis(),
+        });
+        if let Err(e) = append(&[line]) {
+            eprintln!("studio: save the name of {}: {e}", request.session_id);
         }
     };
     queue(queues, id).send(Box::new(job)).ok();
