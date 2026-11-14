@@ -16,7 +16,7 @@ import { openDecision } from "./answer.js";
 import { cardNode } from "./cards.js";
 import { showCleared } from "./decisions.js";
 import { decisionElement, questionElement } from "./questions.js";
-import { shortPaths, worktreeOf } from "./paths.js";
+import { removeWorktreeByDefault, shortPaths, worktreeOf } from "./paths.js";
 import { checkTime, counts, estimateText, times } from "./times.js";
 import { studio } from "./state.js";
 import { typeInto } from "./typing.js";
@@ -519,7 +519,7 @@ export async function askDelete(session: Session) {
   const dialog = element("delete-dialog") as HTMLDialogElement;
   const worktree = worktreeOf(session.cwd);
   const ticked = element("delete-worktree") as HTMLInputElement;
-  ticked.checked = false;
+  ticked.checked = removeWorktreeByDefault(session, studio.listed);
   element("delete-name").textContent = sessionName(session);
   element("delete-working").hidden = !(session.terminal !== null && session.asks_before_closing);
   element("delete-worktree-option").hidden = worktree === null;
