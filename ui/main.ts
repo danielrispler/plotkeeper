@@ -9,8 +9,9 @@ import { markShown, showCards } from "./cards.js";
 import { element, invoke, listen } from "./dom.js";
 import { type Actions, doctorEntries, nextNeedsYou, paletteEntries, run, stepSession, windowBinding } from "./keys.js";
 import { arrange, defaultWidths, type LayoutMode, railShown, resized, type Widths } from "./layout.js";
+import { listSpace } from "./home.js";
 import { showSessions } from "./list.js";
-import { select, show } from "./selection.js";
+import { goHome, select, show } from "./selection.js";
 import { dragPanel, placePanel, togglePanel } from "./panel.js";
 import { dragSplit, focusPane, placePanes, runDoctor, split, startPanes, toggleSplit } from "./panes.js";
 import { showPalette, showPicker } from "./picker.js";
@@ -149,6 +150,8 @@ const actions: Actions = {
   "studio::SelectPrevious": () => moveInList(-1),
   "studio::Answer": (n) => answer(Number(n)),
   "studio::NewSession": showPicker,
+  // Home, in the terminal column: selects no session.
+  "studio::GoHome": () => void goHome(),
   // Fetches the repository now (#33); the workspaces' states follow.
   "studio::Fetch": () => void fetchNow(),
   "studio::OpenSettings": () => void invoke("open_settings", { editor: studio.files.settings.editor }).catch((e) => console.warn(e)),
@@ -222,6 +225,8 @@ startPanes().catch((e) => element("terminal-body").append(`No terminal: ${e}`));
 dragSplit();
 dragPanel();
 element("new-session").addEventListener("click", showPicker);
+// A click on the session list's empty space selects none and shows Home.
+document.querySelector(".list")!.addEventListener("click", (event) => listSpace(event.target as HTMLElement) && void goHome());
 // The needs-you chip (danielrispler/Falinks#572) selects the first session that needs Daniel.
 element("needs-you").addEventListener("click", () => {
   const first = studio.listed.find((session) => session.state === "needs_you");

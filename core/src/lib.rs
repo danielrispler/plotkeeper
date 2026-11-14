@@ -3212,6 +3212,14 @@ impl Studio {
         self.held = None;
     }
 
+    /// Daniel went Home (spec #53): no session is selected or viewed.
+    pub fn select_none(&mut self) {
+        self.selected = None;
+        self.viewed = None;
+        self.awaiting = None;
+        self.held = None;
+    }
+
     /// Daniel looks at the selected session (danielrispler/Falinks#556): while it is unseen, and only if `shown`, the
     /// window focused with the story rail showing it, its ended turns count as seen. Returns its row's id and the turns seen when that
     /// changed, for the card store to keep.
