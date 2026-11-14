@@ -102,6 +102,7 @@ fn a_branch_with_no_upstream_has_no_distance() {
             branch: Some(branch.into()),
             upstream: None,
             changed: 0,
+            operation: None,
         })
     };
 
@@ -154,6 +155,7 @@ fn upstream_distance_counts_unpushed_and_unpulled_commits() {
             branch: Some("main".into()),
             upstream: Some((2, 1)),
             changed: 1,
+            operation: None,
         })
     );
 }
@@ -170,6 +172,7 @@ fn a_detached_head_has_no_branch() {
             branch: None,
             upstream: None,
             changed: 0,
+            operation: None,
         })
     );
 }
@@ -272,4 +275,42 @@ fn claude_runs_in_auto_mode_only_when_asked() {
         ["--permission-mode", "auto", "--resume", "9e0b5f13"]
     );
     assert!(tail(claude(plugin, presence, None, false)).is_empty());
+}
+
+/// An operation left half-done shows until it is over (#31): a rebase stopped on a conflict
+/// reports a rebase, and none after `git rebase --abort`.
+#[test]
+fn a_rebase_stopped_on_a_conflict_is_in_progress_until_aborted() {
+    let (dir, main) = repo();
+    let write = |text: &str| std::fs::write(dir.path().join("f"), text).unwrap();
+    write("base\n");
+    git(dir.path(), &["add", "f"]);
+    git(dir.path(), &["commit", "-q", "-m", "Base"]);
+    git(dir.path(), &["checkout", "-q", "-b", "t"]);
+    write("theirs\n");
+    git(dir.path(), &["commit", "-q", "-am", "Theirs"]);
+    git(dir.path(), &["checkout", "-q", "main"]);
+    write("ours\n");
+    git(dir.path(), &["commit", "-q", "-am", "Ours"]);
+    git(dir.path(), &["checkout", "-q", "t"]);
+    assert_eq!(git_state(dir.path(), &main).unwrap().operation, None);
+
+    // The rebase stops on the conflict, so `git` exits non-zero.
+    let stopped = Command::new("git")
+        .args(["rebase", "main"])
+        .current_dir(dir.path())
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_COMMITTER_NAME", "Studio")
+        .env("GIT_COMMITTER_EMAIL", "studio@example.com")
+        .output()
+        .unwrap();
+    assert!(!stopped.status.success());
+    assert_eq!(
+        git_state(dir.path(), &main).unwrap().operation.as_deref(),
+        Some("rebase")
+    );
+
+    git(dir.path(), &["rebase", "--abort"]);
+    assert_eq!(git_state(dir.path(), &main).unwrap().operation, None);
 }

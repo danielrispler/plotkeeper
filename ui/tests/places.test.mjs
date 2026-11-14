@@ -67,6 +67,15 @@ test("the hover says each count in words", () => {
   assert.equal(gitTokens({ branch: "t", upstream: null, changed: 1 })[1].title, "The branch has no upstream: never pushed");
 });
 
+test("an operation in progress shows last as a warning, and is hidden with none", () => {
+  const state = { branch: "t", upstream: [0, 0], changed: 2 };
+  const last = gitTokens({ ...state, operation: "rebase" }).at(-1);
+  assert.equal(last.text, "⚠ rebase");
+  assert.equal(last.title, "A rebase is in progress");
+  assert.equal(gitTokens({ ...state, operation: "conflicts" }).at(-1).title, "Files have unresolved conflicts");
+  for (const operation of [null, undefined]) assert.ok(!texts({ ...state, operation }).some((t) => t.includes("⚠")));
+});
+
 // A clock the test moves, and the timers set against it.
 function fakeClock() {
   const timers = [];

@@ -76,6 +76,9 @@ pub struct GitState {
     pub branch: Option<String>,
     pub upstream: Option<(u32, u32)>,
     pub changed: usize,
+    /// What a half-done operation is: "rebase", "merge", "cherry-pick", "revert" or "conflicts"
+    /// (files unmerged with none of those); `None` when nothing is in progress (#31).
+    pub operation: Option<String>,
 }
 
 /// The git state of the place at `path`, one of the places of `repo`; any other path is refused, so
@@ -98,11 +101,34 @@ pub fn git_state(repo: &Path, path: &str) -> Result<GitState, String> {
         Some((ahead.parse().ok()?, behind.parse().ok()?))
     });
     let changed = git(dir, &["status", "--porcelain"])?.lines().count();
+    let operation = operation(dir)?;
     Ok(GitState {
         branch,
         upstream,
         changed,
+        operation,
     })
+}
+
+/// The operation in progress in the place at `dir`, from the files its repository keeps while one is stopped.
+fn operation(dir: &Path) -> Result<Option<String>, String> {
+    let marked = |name: &str| -> Result<bool, String> {
+        let path = git(dir, &["rev-parse", "--git-path", name])?;
+        Ok(dir.join(path).exists())
+    };
+    for (name, operation) in [
+        ("rebase-merge", "rebase"),
+        ("rebase-apply", "rebase"),
+        ("MERGE_HEAD", "merge"),
+        ("CHERRY_PICK_HEAD", "cherry-pick"),
+        ("REVERT_HEAD", "revert"),
+    ] {
+        if marked(name)? {
+            return Ok(Some(operation.into()));
+        }
+    }
+    let unmerged = !git(dir, &["ls-files", "--unmerged"])?.is_empty();
+    Ok(unmerged.then(|| "conflicts".into()))
 }
 
 /// The command a studio terminal runs for a new session, or for `resume`, an ended session's id. It

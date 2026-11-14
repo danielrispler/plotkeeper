@@ -33,6 +33,10 @@ export function gitTokens(state: GitState | null): Token[] {
     tokens.push({ text: "not pushed", title: "The branch has no upstream: never pushed" });
   }
   if (state.changed) tokens.push({ text: `●${state.changed}`, title: plural(state.changed, "uncommitted file") });
+  if (state.operation) {
+    const title = state.operation === "conflicts" ? "Files have unresolved conflicts" : `A ${state.operation} is in progress`;
+    tokens.push({ text: `⚠ ${state.operation}`, title });
+  }
   return tokens;
 }
 
