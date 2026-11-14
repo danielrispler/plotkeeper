@@ -331,9 +331,9 @@ function folded(key: string, title: string, body: HTMLElement[], onOpen?: () => 
   return node;
 }
 
-// The learning section (danielrispler/Falinks#526): the turn's main idea and one question, graded at the tap by the
-// writer's key, each option's reason shown after it.
-function learningElement(id: string, learning: NonNullable<TurnSummary["summary"]["learning"]>): HTMLElement {
+// The learning section (danielrispler/Falinks#526): one question, graded at the tap by the writer's key. The turn's
+// main idea and each option's reason show only after the pick, since the idea often gives the answer away.
+export function learningElement(id: string, learning: NonNullable<TurnSummary["summary"]["learning"]>): HTMLElement {
   const picked = learned.get(id) ?? null;
   const { question } = learning;
   const options = document.createElement("ol");
@@ -359,8 +359,9 @@ function learningElement(id: string, learning: NonNullable<TurnSummary["summary"
   box.className = "card learning";
   const quiz = prose("p", question.text);
   quiz.className = "quiz";
-  box.append(prose("p", learning.idea), quiz, options);
-  return folded(`${id} learning`, "Learning: the main idea, and one question", [box]);
+  box.append(quiz, options);
+  if (picked !== null) box.append(prose("p", learning.idea));
+  return folded(`${id} learning`, "Learning: one question", [box]);
 }
 
 // The latest turn's summary, at the top, and the newest card when no question is docked.
