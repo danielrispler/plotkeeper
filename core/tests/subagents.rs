@@ -20,7 +20,7 @@ fn replay(log: &str) -> Studio {
 const DAY: &str = include_str!("fixtures/checkpoint-day.jsonl");
 
 #[test]
-fn the_days_subagents_are_5_workers_7_helpers_and_1_unattached_agent() {
+fn the_days_subagents_are_5_workers_and_7_helpers_and_no_unattached_agent() {
     let studio = replay(DAY);
 
     let mut tree: Vec<(&str, &str, Kind, Parent)> = studio
@@ -32,7 +32,8 @@ fn the_days_subagents_are_5_workers_7_helpers_and_1_unattached_agent() {
     tree.sort();
 
     // By decision 6: 4 workers by their worktree, and the research helper of `2afc85f5` by its Write.
-    // `a4376` has one Bash step and no known spawn.
+    // `a4376` has one Bash step and no known spawn, in the worktree of worker `a96cd`: an internal fork
+    // of it (danielrispler/plotkeeper#37), so it gets no row.
     let session = || Parent::Session;
     assert_eq!(
         tree,
@@ -47,7 +48,6 @@ fn the_days_subagents_are_5_workers_7_helpers_and_1_unattached_agent() {
             ("5d7f69ab", "a1191", Worker, session()),
             ("5d7f69ab", "a2526", Worker, session()),
             ("5d7f69ab", "a3c3f", Helper, session()),
-            ("5d7f69ab", "a4376", Helper, Parent::Unattached),
             ("5d7f69ab", "a96cd", Worker, session()),
             ("5d7f69ab", "ac088", Worker, session()),
             ("5d7f69ab", "aed99", Helper, session()),
@@ -595,18 +595,23 @@ fn a_turn_that_ends_without_its_stop_ends_its_foreground_subagents_not_its_backg
 
 #[test]
 fn a_sessions_subagents_end_at_its_session_end() {
-    let studio = replay(DAY);
-
-    // `a4376` has one Bash step and no known spawn; its session ends at line 816.
+    // An unknown id with one Bash step in no subagent's worktree stays unattached; the session ends at
+    // line 816.
+    let stray = json!({"agent_id": "astray", "cwd": "/Users/danielrispler/work/Falinks",
+        "hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_use_id": "stray-1",
+        "tool_input": {"command": "sleep 60"}, "studio_received_ms": 1793385974000_u64,
+        "session_id": "5d7f69ab-91ca-427e-9d9c-9180c2c0c74b"})
+    .to_string();
+    let mut lines: Vec<&str> = DAY.lines().collect();
+    lines.insert(815, &stray);
+    let studio = Studio::replayed(lines);
     let session = studio
         .sessions()
         .into_iter()
         .find(|s| s.agent.id.starts_with("5d7f69ab"))
         .unwrap();
-    let orphan = session
-        .agents
-        .iter()
-        .find(|a| a.agent.id.starts_with("a4376"));
+    let orphan = session.agents.iter().find(|a| a.agent.id == "astray");
+    assert_eq!(orphan.unwrap().parent, Parent::Unattached);
     assert!(orphan.unwrap().ended_at.is_some());
     assert!(session.agents.iter().all(|a| a.ended_at.is_some()));
 }
@@ -824,4 +829,23 @@ fn a_helper_whose_command_changed_its_worktree_while_the_fallback_was_due_is_a_w
 
     assert_eq!(agent(&studio, "s1", "h1").kind, Worker);
     assert!(outputs.iter().any(|o| matches!(o, Output::Card(_))));
+}
+
+/// danielrispler/plotkeeper#37: Claude Code runs a short internal fork of a worktree subagent under
+/// an `agent_id` of its own, with no spawn. It draws no row, while an unknown id outside any
+/// subagent's worktree stays unattached.
+#[test]
+fn an_unknown_id_in_a_subagents_worktree_is_its_fork_and_gets_no_row() {
+    let mut studio = Studio::default();
+    studio.apply(&ev("UserPromptSubmit", 1, "p1", json!({"prompt": "Do it"})));
+    let worktree = json!({"isolation": "worktree"});
+    studio.apply(&launched(2, "t1", None, "w1", worktree));
+    studio.apply(&step(3, "w1", "/w/.claude/worktrees/w1"));
+
+    studio.apply(&step(4, "fork1", "/w/.claude/worktrees/w1"));
+    studio.apply(&step(5, "stray1", "/elsewhere"));
+
+    let session = studio.session("s1").expect("the session");
+    assert!(session.subagent("fork1").is_none());
+    assert_eq!(agent(&studio, "s1", "stray1").parent, Parent::Unattached);
 }

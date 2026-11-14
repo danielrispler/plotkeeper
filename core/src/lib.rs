@@ -792,6 +792,25 @@ impl Session {
         ends
     }
 
+    /// Whether `id` is an internal fork of a subagent (danielrispler/plotkeeper#37): an unknown id
+    /// that matches no open spawn call, whose first event is in a worktree that another subagent
+    /// owns. Claude Code runs it under an `agent_id` of its own, and it gets no subagent.
+    fn is_fork(&self, id: &str, event: &Event, roots: &Roots) -> bool {
+        let root = roots.of(&event.cwd);
+        let bound = |call: &Option<String>| {
+            let mut spawns = self.agents.iter().filter_map(|a| a.spawn.as_ref());
+            spawns.any(|(id, _)| Some(id) == call.as_ref())
+        };
+        let mut open = self.running.iter().filter(|c| c.tool == "Agent");
+        self.subagent(id).is_none()
+            && !root.is_empty()
+            && !open.any(|c| c.agent.as_deref() != Some(id) && !bound(&c.id))
+            && self
+                .agents
+                .iter()
+                .any(|a| a.root == root && a.owner == a.agent.id)
+    }
+
     /// Updates the subagent tree with one event. A spawn's response names its child (`agentId`),
     /// and every child event names its agent (`agent_id`).
     fn track_agents(&mut self, event: &Event, worktree_changed: bool, roots: &Roots) {
@@ -800,7 +819,11 @@ impl Session {
         for (id, status, at) in self.ends(event) {
             self.agent(&id, at).end(status.as_deref(), at);
         }
-        if let Some(id) = &event.agent_id {
+        if let Some(id) = event
+            .agent_id
+            .as_ref()
+            .filter(|id| !self.is_fork(id, event, roots))
+        {
             // A child's first event matches it to the oldest open spawn call with no child yet.
             // shortcut: no event names both a child and its spawn's call until the spawn's response,
             // so two spawns open at once may swap; match by a shared field if a recording shows one.
