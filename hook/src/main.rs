@@ -36,7 +36,20 @@ fn append() -> Result<(), Box<dyn Error>> {
     if let Err(e) = trees(&mut event, data) {
         eprintln!("studio-hook: record the trees: {e}");
     }
-    studio_hook::append(&path, &event.into())?;
+    // A lock that never comes must not hold the agent: the event is dropped, with a trace (#43,
+    // decision 11).
+    let text = |key: &str| event.get(key)?.as_str().map(str::to_owned);
+    let name = text("hook_event_name").or_else(|| text("hookEventName"));
+    let terminal = text("studio_terminal_id");
+    if !studio_hook::append(&path, &event.into(), studio_hook::PATIENCE)? {
+        let (name, terminal) = (name.as_deref(), terminal.as_deref());
+        studio_hook::drop_event(
+            &path,
+            received_ms,
+            name.unwrap_or("-"),
+            terminal.unwrap_or("-"),
+        )?;
+    }
     Ok(())
 }
 

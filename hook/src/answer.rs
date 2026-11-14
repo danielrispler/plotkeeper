@@ -248,8 +248,10 @@ pub fn run(payload: &Value, data: &Path, timeout: Duration) -> io::Result<Option
     if out.is_some() {
         // The decision stands even if its line cannot be logged.
         let line = answered_line(payload, &answer);
-        if let Err(e) = crate::append(&data.join("events.jsonl"), &line) {
-            eprintln!("studio-answer: log the answer: {e}");
+        match crate::append(&data.join("events.jsonl"), &line, crate::PATIENCE) {
+            Ok(true) => {}
+            Ok(false) => eprintln!("studio-answer: log the answer: the log stayed locked"),
+            Err(e) => eprintln!("studio-answer: log the answer: {e}"),
         }
     }
     Ok(out)
