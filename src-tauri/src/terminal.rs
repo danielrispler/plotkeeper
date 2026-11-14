@@ -20,22 +20,22 @@ use std::{
     thread,
     time::Duration,
 };
-use studio_terminal_daemon::{Client, PROTOCOL, default_socket};
+use studio_terminal_daemon::{Client, default_socket};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 #[derive(Default)]
 pub struct Daemon {
     /// The connection's writing half, `None` before the first connect and after the daemon is lost.
     writer: Mutex<Option<UnixStream>>,
-    /// Whether the daemon is below `PROTOCOL`.
+    /// Whether the daemon is older than this build (protocol or build id).
     outdated: Mutex<bool>,
     /// The terminals a dead daemon left in its record.
     lost: Mutex<Vec<Value>>,
 }
 
 /// Connects to the daemon, once per app run until it is lost, and returns `{repo, outdated}`: the
-/// configured repository, where the pane's shell starts, and whether the daemon is below this
-/// app's protocol.
+/// configured repository, where the pane's shell starts, and whether the daemon is older than
+/// this app's build.
 #[tauri::command(async)]
 pub fn terminal_connect(app: AppHandle, daemon: State<Daemon>) -> Result<Value, String> {
     let mut writer = daemon.writer.lock().unwrap();
@@ -45,7 +45,7 @@ pub fn terminal_connect(app: AppHandle, daemon: State<Daemon>) -> Result<Value, 
         client
             .send(&json!({ "op": "app" }))
             .map_err(|e| format!("the terminal daemon: {e}"))?;
-        *daemon.outdated.lock().unwrap() = client.protocol < PROTOCOL;
+        *daemon.outdated.lock().unwrap() = client.outdated();
         daemon.lost.lock().unwrap().extend(lost);
         let (reader, stream) = client.split();
         *writer = Some(stream);

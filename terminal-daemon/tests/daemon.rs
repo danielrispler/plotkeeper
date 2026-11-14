@@ -596,3 +596,11 @@ fn an_app_dropped_for_lag_keeps_the_presence_file() {
     std::thread::sleep(Duration::from_millis(300));
     assert!(present.exists(), "a lag drop deleted the presence file");
 }
+
+#[test]
+fn the_hello_carries_the_build_so_a_daemon_of_this_build_is_not_outdated() {
+    let d = Daemon::start("build");
+    let client = Client::connect(&d.socket(), 0).unwrap();
+    assert_eq!(client.build.as_deref(), Some(studio_terminal_daemon::BUILD));
+    assert!(!client.outdated());
+}
