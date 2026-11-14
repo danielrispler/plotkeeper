@@ -1,6 +1,7 @@
 // The terminal pane's key mapping (danielrispler/Falinks#466), run on the `tsc` output. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { bound, doctorEntries, keyAction, keyLabel, keystroke, nextNeedsYou, paletteEntries, run, stepSession, windowBinding } from "../../dist/keys.js";
 import { initial, reload } from "../../dist/settings.js";
 
@@ -279,4 +280,14 @@ test("the Doctor's entries are palette actions, each warned by its kind, and the
   // The warning comes from the kind, not the label or the command.
   const [own] = doctorEntries([{ label: "Audit", command: "claude doctor", kind: "session" }]);
   assert.equal(own.note, "starts a Claude session, spends tokens");
+});
+
+test("↑ and ↓ move the palette's highlighted row, and the window's keys leave them to its field (#24)", () => {
+  // The palette's field is an input outside the list, where the window binds neither key.
+  assert.equal(windowBinding(initial.keymap, key("ArrowDown"), true), undefined);
+  assert.equal(windowBinding(initial.keymap, key("ArrowUp"), true), undefined);
+  const picker = fs.readFileSync(new URL("../picker.ts", import.meta.url), "utf8");
+  assert.match(picker, /\{ ArrowDown: 1, ArrowUp: -1 \}\[event\.key\]/);
+  assert.match(picker, /const entry = shown\(\)\[highlighted\];/);
+  assert.doesNotMatch(picker, /shortcut: Tab moves between the rows/);
 });
