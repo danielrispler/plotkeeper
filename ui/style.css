@@ -117,15 +117,19 @@ h1 { margin: 0 0 var(--sp-4); }
    on hover or focus. Every row keeps both columns, so names and glyphs stay aligned. */
 .item { position: relative; }
 .item > .row.session-row { padding-inline-start: calc(var(--sp-4) + var(--indent)); }
-.item > .row { padding-inline-end: calc(var(--sp-4) + var(--sp-6)); }
-.item .fold, .item .delete { position: absolute; top: var(--sp-2); padding: 0 var(--sp-1); background: none;
-                             font-size: var(--size-xs); color: var(--muted); white-space: nowrap; }
+.item > .row { padding-inline-end: calc(var(--sp-4) + var(--control)); }
+.item .fold, .item .delete { position: absolute; top: var(--sp-1); display: grid; place-items: center; width: var(--control); height: var(--control);
+                             padding: 0; border-radius: var(--radius-small); background: none; color: var(--muted); }
+.item .fold svg, .item .delete svg { width: var(--icon); height: var(--icon); }
+.item .fold svg { transition: transform var(--motion); }
+.item .fold[aria-expanded="true"] svg { transform: rotate(90deg); }
+.item .fold:dir(rtl) svg { transform: scaleX(-1); }
+.item .fold[aria-expanded="true"]:dir(rtl) svg { transform: scaleX(-1) rotate(90deg); }
 .item .delete { inset-inline-end: var(--sp-2); visibility: hidden; }
-.item:hover .delete, .item:focus-within .delete { visibility: visible; }
-.item .fold:hover, .item .delete:hover { color: var(--fg); }
+.item:hover .delete, .item:focus-within .delete, .item:has(> .row[aria-pressed="true"]) .delete { visibility: visible; }
+.item .fold:hover, .item .delete:hover { color: var(--fg); background: var(--hover); }
 /* A landed task's session: a monochrome check mark, no colour (#53). */
 .glyph[data-glyph="check"]::after { content: "✓"; color: var(--muted); font-size: var(--size-xs); line-height: 1; }
-
 /* Status by shape (danielrispler/Falinks#572): a spinner while running, a dot at your turn, a filled dot once unseen, a ring
    when idle or ended, and the "Needs you" pill, the only colour. */
 .glyph { flex: none; width: var(--glyph); height: var(--glyph); border-radius: 50%; display: grid; place-items: center; }
