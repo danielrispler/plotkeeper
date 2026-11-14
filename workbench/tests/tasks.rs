@@ -253,27 +253,31 @@ fn a_place_reads_its_upstream_distance_and_its_changed_files() {
     // The tasks' folder is not a change of the main checkout's.
     std::fs::write(repos.main.join(".git/info/exclude"), ".claude/\n").unwrap();
     let main = places(&repos.main).unwrap().main;
-    let state = |branch: &str, upstream, changed| {
+    let state = |branch: &str, upstream, changed, main_behind, on_default| {
         Ok(GitState {
             branch: Some(branch.into()),
             upstream,
             changed,
             operation: None,
-            main_behind: None,
-            on_default: false,
+            main_behind,
+            on_default,
         })
     };
 
-    assert_eq!(git_state(&repos.main, &busy.path), state("busy", None, 3));
+    // `busy` branched before the third commit reached `origin/trunk`, so it is one behind it.
+    assert_eq!(
+        git_state(&repos.main, &busy.path),
+        state("busy", None, 3, Some(1), false)
+    );
     // The main checkout's `trunk` is two behind `origin/trunk`, its upstream.
     assert_eq!(
         git_state(&repos.main, &main.path),
-        state("trunk", Some((0, 2)), 0)
+        state("trunk", Some((0, 2)), 0, Some(2), true)
     );
     git(path, &["push", "-q", "-u", "origin", "busy"]);
     assert_eq!(
         git_state(&repos.main, &busy.path),
-        state("busy", Some((0, 0)), 3)
+        state("busy", Some((0, 0)), 3, Some(1), false)
     );
 }
 
