@@ -9,7 +9,11 @@ use std::{
     os::unix::process::CommandExt,
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::{Mutex, mpsc},
+    sync::{
+        Mutex,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -20,7 +24,7 @@ mod fingerprint;
 mod store;
 mod summary;
 mod week;
-pub use drift::{Drift, Versions, drift};
+pub use drift::{Drift, Versions, drift, dropped_events};
 pub use fingerprint::{Fingerprints, backfilled, fingerprint_changes, worktree_root};
 pub use store::{
     Brief, CardStore, CheckResult, Guess, Level, Rating, Reason, Row, SessionCards, StoredCard,
@@ -666,6 +670,39 @@ pub struct ClaudeWriter {
     folder: PathBuf,
     /// How long a call may run before it fails and is stopped (danielrispler/Falinks#434, decision 30).
     timeout: Duration,
+    /// Told when no call can start and when one works again (danielrispler/plotkeeper#51).
+    availability: Availability,
+}
+
+/// Whether the writer's program starts, and who hears when that changes.
+#[derive(Default)]
+struct Availability {
+    off: AtomicBool,
+    on_change: Option<Box<dyn Fn(Option<String>) + Send + Sync>>,
+}
+
+impl Availability {
+    /// The program did not start: tells once until a call works.
+    fn failed(&self, error: &std::io::Error) {
+        if !self.off.swap(true, Ordering::SeqCst) {
+            self.tell(Some(format!(
+                "Cards and briefs are off: `claude` did not start ({error}). Install Claude Code, or fix its path."
+            )));
+        }
+    }
+
+    /// A call worked: clears the notice, if one was told.
+    fn worked(&self) {
+        if self.off.swap(false, Ordering::SeqCst) {
+            self.tell(None);
+        }
+    }
+
+    fn tell(&self, notice: Option<String>) {
+        if let Some(on_change) = &self.on_change {
+            on_change(notice);
+        }
+    }
 }
 
 /// The `claude` program, as login shell `shell` finds it, or `claude` when it answers no path. An
@@ -692,7 +729,18 @@ impl ClaudeWriter {
             program,
             folder,
             timeout,
+            availability: Availability::default(),
         }
+    }
+
+    /// The writer that calls `on_change` with a notice when no call can start (a missing `claude`),
+    /// once, and with `None` when a call works again. A call that starts and fails is no notice.
+    pub fn on_availability(
+        mut self,
+        on_change: impl Fn(Option<String>) + Send + Sync + 'static,
+    ) -> Self {
+        self.availability.on_change = Some(Box::new(on_change));
+        self
     }
 
     /// The writer with each call stopped after `timeout` instead of 5 minutes.
@@ -866,7 +914,10 @@ impl ClaudeWriter {
             .stdout(Stdio::piped())
             .process_group(0)
             .spawn()
-            .map_err(|e| format!("`claude -p` did not start: {e}"))?;
+            .map_err(|e| {
+                self.availability.failed(&e);
+                format!("`claude -p` did not start: {e}")
+            })?;
         let (mut stdin, mut stdout) = (child.stdin.take(), child.stdout.take());
         // Threads, so a call that reads no input or never ends cannot hold back the timeout.
         thread::spawn(move || stdin.as_mut().map(|i| i.write_all(prompt.as_bytes())));
@@ -903,7 +954,10 @@ impl ClaudeWriter {
         match (status.success(), head.is_empty()) {
             (false, _) => Err(format!("`claude -p` failed ({status}): {head:?}")),
             (true, true) => Err("`claude -p` printed nothing".into()),
-            (true, false) => Ok(out.into()),
+            (true, false) => {
+                self.availability.worked();
+                Ok(out.into())
+            }
         }
     }
 }

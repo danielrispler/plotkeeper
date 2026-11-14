@@ -100,6 +100,16 @@ pub fn drift(studio: &Studio, versions: &Versions, now: u64) -> Drift {
     }
 }
 
+/// The events the hook dropped in the 7 days to `now`, from the drops file beside the event log
+/// `log` (#43, decision 11); none when the file is missing.
+pub fn dropped_events(log: &Path, now: u64) -> usize {
+    let text = fs::read_to_string(studio_hook::drops_file(log)).unwrap_or_default();
+    let times = text
+        .lines()
+        .filter_map(|line| line.split(' ').next()?.parse().ok());
+    times.filter(|at: &u64| at + WEEK >= now).count()
+}
+
 impl fmt::Display for Drift {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(f, "unrecognised wake-ups: {}", self.unrecognised_wake_ups)?;

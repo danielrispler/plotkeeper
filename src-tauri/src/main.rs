@@ -469,9 +469,17 @@ fn main() {
     // The store sits beside the log, in the studio's data directory.
     let store = CardStore::open_beside(&log).expect("read the card store");
     let studio = Studio::with_roots(worktree_root);
+    // The window does not exist yet, so the writer's notices wait here for the setup to forward them.
+    let (writer_notices, writer_notice_reader) = mpsc::channel::<Option<String>>();
     let writer: Writer = match std::env::var("STUDIO_CARD_WRITER").as_deref() {
         Ok("fake") => Arc::new(FakeWriter),
-        _ => Arc::new(ClaudeWriter::beside(&log).expect("create the card writer's folder")),
+        _ => {
+            let writer = ClaudeWriter::beside(&log).expect("create the card writer's folder");
+            let writer_notices = Mutex::new(writer_notices);
+            Arc::new(writer.on_availability(move |notice| {
+                let _ = writer_notices.lock().unwrap().send(notice);
+            }))
+        }
     };
     tauri::Builder::default()
         // First, so a second instance exits before it sets anything up (danielrispler/Falinks#470).
@@ -566,6 +574,13 @@ fn main() {
             settings::watch(app.clone());
             let prs_app = app.clone();
             thread::spawn(move || prs(&prs_app));
+            let notice_app = app.clone();
+            thread::spawn(move || {
+                for notice in writer_notice_reader {
+                    eprintln!("studio: writer: {notice:?}");
+                    let _ = notice_app.emit("writer-notice", notice);
+                }
+            });
             thread::spawn(move || follow(&app, &log, &writer));
             Ok(())
         })
