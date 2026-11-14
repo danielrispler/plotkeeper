@@ -1,6 +1,6 @@
 // The daemon itself, built from the danielrispler/Falinks#322 spike (`terminal-spike/src/daemon.rs`). It owns the PTYs, keeps each
 // terminal's raw output as scrollback, and serves clients over the socket (protocol in lib.rs).
-use crate::{BUILD, PROTOCOL, decode, encode, status::Status};
+use crate::{BUILD_ID, PROTOCOL, decode, encode, status::Status};
 use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use serde_json::{Value, json};
 use std::{
@@ -286,7 +286,7 @@ fn serve_conn(n: usize, stream: UnixStream, state: Shared) {
         attached: HashSet::new(),
         lagged: lagged.clone(),
     };
-    conn.send(&json!({ "ev": "hello", "protocol": PROTOCOL, "build": BUILD, "daemon_pid": std::process::id() }));
+    conn.send(&json!({ "ev": "hello", "protocol": PROTOCOL, "build": BUILD_ID, "daemon_pid": std::process::id() }));
     state.lock().unwrap().conns.insert(n, conn);
     let mut app = false;
     for line in BufReader::new(stream).lines() {

@@ -601,6 +601,9 @@ fn an_app_dropped_for_lag_keeps_the_presence_file() {
 fn the_hello_carries_the_build_so_a_daemon_of_this_build_is_not_outdated() {
     let d = Daemon::start("build");
     let client = Client::connect(&d.socket(), 0).unwrap();
-    assert_eq!(client.build.as_deref(), Some(studio_terminal_daemon::BUILD));
+    assert_eq!(
+        client.build.as_deref(),
+        Some(studio_terminal_daemon::BUILD_ID)
+    );
     assert!(!client.outdated());
 }

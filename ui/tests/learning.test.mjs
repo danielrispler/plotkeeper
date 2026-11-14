@@ -56,7 +56,8 @@ test("the question and options come first; the main idea and reasons wait for a 
   assert.match(before.text, /The scores/);
   assert.doesNotMatch(before.text, /frozen before scoring/);
   assert.doesNotMatch(before.text, /Scores come later/);
-  assert.doesNotMatch(before.text, /^Learning: the main idea/);
+  // The folded label says a question, not the idea.
+  assert.equal(before.find("summary")[0].text, "Learning: one question");
 
   before.find("button")[0].listeners.click();
   const after = learningElement("t1", learning);

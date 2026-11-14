@@ -8,9 +8,9 @@
 //! ignores) keep `N`; the app accepts any daemon whose `N` is at or above its minimum ([`Client::connect`]).
 //!
 //! Two numbers say when to upgrade a running daemon. `protocol` is bumped by hand, only for a change an older app
-//! cannot read; the app refuses a daemon below its minimum. `build` is a hash of this crate's sources, set by
-//! `build.rs`, so nobody bumps it: any change to what the daemon does changes it. The app offers an upgrade
-//! (danielrispler/Falinks#470) when the daemon's `protocol` is below its own or its `build` differs; a daemon that
+//! cannot read; the app refuses a daemon below its minimum. `build` is a hash of this crate's `.rs` sources,
+//! `Cargo.toml`, `build.rs` and the workspace `Cargo.lock`, set by `build.rs`, so nobody bumps it: any change to what
+//! the daemon does, or to a dependency, changes it. The app offers an upgrade (danielrispler/Falinks#470) when the daemon's `protocol` is below its own or its `build` differs; a daemon that
 //! sends no `build` is outdated ([`is_outdated`]). A rebuild that changes no daemon code keeps the same `build`, so
 //! the running daemon is left alone (danielrispler/Falinks#464).
 //!
@@ -54,16 +54,16 @@ mod status;
 
 /// The protocol version this daemon speaks. Bump it by hand only for a change an older app cannot read (a renamed
 /// or removed field, a request whose reply changed shape). A change in what the daemon does, or an additive change,
-/// needs no bump: [`BUILD`] changes by itself and the app offers the upgrade.
+/// needs no bump: [`BUILD_ID`] changes by itself and the app offers the upgrade.
 pub const PROTOCOL: u64 = 1;
 
-/// A hash of this crate's sources and `Cargo.toml`, computed by `build.rs`; the daemon sends it in `hello`.
-pub const BUILD: &str = env!("DAEMON_BUILD");
+/// A hash of this crate's `.rs` sources, `Cargo.toml`, `build.rs` and the workspace `Cargo.lock`, computed by `build.rs`; the daemon sends it in `hello`.
+pub const BUILD_ID: &str = env!("DAEMON_BUILD_ID");
 
 /// Whether a daemon that said `protocol` and `build` in its `hello` is older than this build and should be offered
 /// the upgrade. A daemon that sent no `build` is.
 pub fn is_outdated(protocol: u64, build: Option<&str>) -> bool {
-    protocol < PROTOCOL || build != Some(BUILD)
+    protocol < PROTOCOL || build != Some(BUILD_ID)
 }
 
 /// The record of the terminals the daemon on `socket` runs.
@@ -134,7 +134,7 @@ pub struct Client {
     pub protocol: u64,
     /// The daemon's pid, from its `hello`.
     pub daemon_pid: u32,
-    /// The daemon's [`BUILD`], from its `hello`; `None` from a daemon that predates it.
+    /// The daemon's [`BUILD_ID`], from its `hello`; `None` from a daemon that predates it.
     pub build: Option<String>,
 }
 
@@ -143,9 +143,7 @@ impl Client {
     pub fn outdated(&self) -> bool {
         is_outdated(self.protocol, self.build.as_deref())
     }
-}
 
-impl Client {
     /// Connects and refuses a daemon older than `min_protocol`.
     pub fn connect(socket: &Path, min_protocol: u64) -> io::Result<Client> {
         let writer = UnixStream::connect(socket)?;
@@ -209,7 +207,7 @@ mod tests {
 
     #[test]
     fn a_daemon_from_the_same_build_is_not_outdated() {
-        assert!(!is_outdated(PROTOCOL, Some(BUILD)));
+        assert!(!is_outdated(PROTOCOL, Some(BUILD_ID)));
     }
 
     #[test]
@@ -219,6 +217,6 @@ mod tests {
 
     #[test]
     fn a_daemon_below_the_protocol_is_outdated_whatever_its_build() {
-        assert!(is_outdated(PROTOCOL - 1, Some(BUILD)));
+        assert!(is_outdated(PROTOCOL - 1, Some(BUILD_ID)));
     }
 }
