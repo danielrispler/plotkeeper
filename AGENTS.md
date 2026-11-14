@@ -15,6 +15,11 @@ Raw evidence from finished real runs (run directories, screenshots, terminal out
 - **Never open scored runs** (`"scored": true` in `result.json`), per danielrispler/Falinks#228. This is stricter than the engine's lifted "Scored-batch inspection" rule; the studio follows the stricter rule.
 - **Never read, copy or send credential files or tokens of any CLI** (Claude Code, `gh`, Codex, `gcloud` and the like). Running a CLI as a normal user (for example `gh issue list`) is fine. Reading its stored credentials or config that may hold tokens (such as `~/.claude.json`, `~/.claude/.credentials.json`, the keychain, `~/.config/gh/hosts.yml`) is not. This binds agents and the studio's code alike, and covers key-scoped reads (such as `jq '.someKey'`) of those files too. The one exception: the studio's skills browser reads only the `enabledPlugins` key of Claude Code's settings files (danielrispler/Falinks#592).
 
+## Workflow
+
+- **Grill, spec, ticket, then build.** By default, work moves through `$grilling`, then `$to-spec`, then `$to-tickets`, and only then to implementation, of one ticket or a whole spec.
+- **Implement in a worktree.** Each change gets its own worktree under `.claude/worktrees/`, on a new branch from `origin/main`; the main checkout stays on `main`. Work in the main checkout only when Daniel says so.
+
 ## Implementation language
 
 The Tauri 2 stack is a settled decision ([scope decision](https://github.com/danielrispler/Falinks/issues/320#issuecomment-6465695482), "Stays as decided"); don't propose switching.
