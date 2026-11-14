@@ -5,6 +5,7 @@
 import { age, element, patch, prose, pressable, stepText, text } from "./dom.js";
 import { counts, times, type Time } from "./times.js";
 import { shortPaths } from "./paths.js";
+import { redrawHome } from "./panes.js";
 import { isSelected, select } from "./selection.js";
 import { studio } from "./state.js";
 import { stateLabels, type Context, type Session, type SessionState, type Subagent } from "./types.js";
@@ -85,7 +86,7 @@ export function landedMark(): HTMLElement {
 }
 
 // A status's glyph, named by its word, so the shape is never alone. The pill shows its word.
-function glyph(state: string, unseen = false, landed = false): HTMLElement {
+export function glyph(state: string, unseen = false, landed = false): HTMLElement {
   const [shape, word] = status(state, unseen, landed);
   const node = text("span", shape === "pill" ? word : "", "glyph");
   node.dataset.glyph = shape;
@@ -376,6 +377,7 @@ function strip(sessions: Session[]): HTMLElement[] {
 // heading (danielrispler/Falinks#572).
 export function showSessions(sessions: Session[]) {
   studio.listed = sessions;
+  redrawHome();
   const groups: Session[][] = [];
   for (const session of sessions) {
     const last = groups[groups.length - 1];
