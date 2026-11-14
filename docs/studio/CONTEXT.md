@@ -86,8 +86,20 @@ A folder where Daniel can start an agent session or a terminal: a project's main
 _Avoid_: Location, workspace
 
 **Places**:
-The folded section at the bottom of the session list, the home of tasks: one row per place, with its branch, its commits ahead of and behind its base, its uncommitted files and its number of sessions. A task's base is its repository's default branch; the main checkout's is its upstream. Clicking a place offers a new session there and, for a task, Remove; tasks are created here too. The sessions themselves show only in the list.
+The folded section at the bottom of the session list, the home of tasks: one row per place, with its branch, its **upstream** and **main distance**, its uncommitted files and its number of sessions. Clicking a place offers a new session there and, for a task, Remove; tasks are created here too. The sessions themselves show only in the list.
 _Avoid_: Board (an earlier plan for a view of its own, which Places replaces)
+
+**Upstream**:
+A place's branch as `origin` has it. Its distance says whether Daniel's work is pushed: commits not pushed yet and commits not pulled yet. A branch never pushed has none, and shows "not pushed".
+_Avoid_: Sync, remote (alone)
+
+**Main distance**:
+How far a place's branch is from `origin`'s default branch: the commits it adds, and the commits it is behind, which a rebase would take in. On the default branch itself, it is the upstream distance.
+_Avoid_: Base (a card's starting point)
+
+**Git line**:
+The line in the top bar on the git state of the selected session's place, or the main checkout's with none: its place and branch, its upstream and main distance, its uncommitted files and any operation in progress. The tokens that say nothing are hidden. Places rows carry the same tokens.
+_Avoid_: Git panel (a view of its own, which the studio does not have), status bar
 
 **Terminal daemon**:
 The background process that owns the workbench's terminals, so they outlive the app. The app connects to it over a socket.

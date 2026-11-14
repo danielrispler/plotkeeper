@@ -60,6 +60,11 @@ body[data-layout="focus"] #rail-divider { display: none; }
    window drags, and its start keeps room for the traffic lights. */
 .top { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--sp-5); padding: 0 var(--sp-5) 0 var(--lights);
        white-space: nowrap; overflow: hidden; }
+/* The Git line: the place's name, then its tokens (#29). */
+.git-line { display: flex; gap: var(--sp-4); align-items: baseline; min-width: 0; overflow: hidden; font-size: var(--size-small); color: var(--muted); }
+.git-line .git-place { color: inherit; font-weight: 600; }
+.git-line .git-bad { color: var(--conflict); }
+.places .row .l2 { white-space: pre; }
 .usage { font-size: var(--size-small); color: var(--muted); }
 /* The rail's slim header while it is an overlay (danielrispler/Falinks#573): the selected session's state and open question. */
 .slim { display: flex; gap: var(--sp-4); align-items: baseline; min-width: 0; overflow: hidden; font-size: var(--size-small); }

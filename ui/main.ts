@@ -14,7 +14,7 @@ import { select, show } from "./selection.js";
 import { dragPanel, placePanel, togglePanel } from "./panel.js";
 import { dragSplit, focusPane, placePanes, runDoctor, split, startPanes, toggleSplit } from "./panes.js";
 import { showPalette, showPicker } from "./picker.js";
-import { readPlaces, showPlaces } from "./places.js";
+import { fetchNow, readPlaces, showPlaces, watchPlaces } from "./places.js";
 import { reload, type SettingsFiles, zoomed } from "./settings.js";
 import { studio } from "./state.js";
 import { showSkills } from "./skills.js";
@@ -149,6 +149,8 @@ const actions: Actions = {
   "studio::SelectPrevious": () => moveInList(-1),
   "studio::Answer": (n) => answer(Number(n)),
   "studio::NewSession": showPicker,
+  // Fetches the repository now (#33); the places' states follow.
+  "studio::Fetch": () => void fetchNow(),
   "studio::OpenSettings": () => void invoke("open_settings", { editor: studio.files.settings.editor }).catch((e) => console.warn(e)),
   // The skills browser (danielrispler/Falinks#528), in the rail's place; it leaves focus mode, which hides the rail.
   "studio::Skills": () => {
@@ -236,8 +238,9 @@ const showList = (sessions: Session[]) => {
   showPlaces();
   showToast();
 };
-// Opening Places reads git's counts at once (danielrispler/Falinks#576).
+// Opening Places reads every place's git state at once (#26).
 element("places").addEventListener("toggle", () => void ((element("places") as HTMLDetailsElement).open && readPlaces(true)));
+watchPlaces();
 listen<Session[]>("sessions", showList);
 invoke<Session[]>("sessions").then(showList);
 // A press on the toast jumps to its session; the press itself keeps the terminal's keyboard focus.

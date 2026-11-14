@@ -5,8 +5,10 @@
 
 use serde::Serialize;
 use std::{
+    collections::BTreeMap,
     path::{Path, PathBuf},
     process::Command,
+    sync::Mutex,
 };
 
 /// A main checkout or a task's worktree: its folder, and its branch, `None` at a detached `HEAD`.
@@ -67,38 +69,42 @@ pub fn places(repo: &Path) -> Result<Places, String> {
     })
 }
 
-/// Where a place's branch stands (danielrispler/Falinks#576, after danielrispler/Falinks#559): its commits ahead of and behind its base, `None`
-/// with no base, and how many files `git status` lists as changed.
+/// A place's git state (#26, #29): its branch, `None` at a detached `HEAD`; its distance from its
+/// upstream, commits ahead and behind, `None` with no upstream (never pushed, or detached); and how
+/// many files `git status` lists as changed; how far it is behind `origin`'s default branch and
+/// whether a rebase onto it would conflict; and the operation in progress.
 #[derive(Debug, PartialEq, Serialize)]
-pub struct Counts {
-    pub ahead_behind: Option<(u32, u32)>,
+pub struct GitState {
+    pub branch: Option<String>,
+    pub upstream: Option<(u32, u32)>,
     pub changed: usize,
+    /// What a half-done operation is: "rebase", "merge", "cherry-pick", "revert" or "conflicts"
+    /// (files unmerged with none of those); `None` when nothing is in progress (#31).
+    pub operation: Option<String>,
+    /// Commits `origin`'s default branch has that this branch lacks; `None` when level with it or
+    /// when `origin/HEAD` is not set (#30).
+    pub main_behind: Option<u32>,
+    /// Whether the branch is the default branch itself, where main distance is the upstream
+    /// distance and shows once.
+    pub on_default: bool,
+    /// Whether rebasing the branch onto `origin`'s default branch would conflict; `false` when it
+    /// is not behind it (#32).
+    pub would_conflict: bool,
 }
 
-/// The counts of the place at `path`, one of the places of `repo`; any other path is refused, so the
-/// window cannot run git in an arbitrary folder. A task's base is `origin`'s default branch, which
-/// tasks start from; the main checkout's is its branch's upstream.
-pub fn counts(repo: &Path, path: &str) -> Result<Counts, String> {
+/// The git state of the place at `path`, one of the places of `repo`; any other path is refused, so
+/// the window cannot run git in an arbitrary folder. Read-only, and with no optional locks.
+pub fn git_state(repo: &Path, path: &str) -> Result<GitState, String> {
     let known = places(repo)?;
-    let main = known.main.path == path;
-    if !main && !known.tasks.iter().any(|task| task.path == path) {
+    if known.main.path != path && !known.tasks.iter().any(|task| task.path == path) {
         return Err(format!("not a place of this repository: {path}"));
     }
     let dir = Path::new(path);
-    let base = if main {
-        "@{upstream}"
-    } else {
-        "refs/remotes/origin/HEAD"
-    };
-    // git fails when there is no such base, as at a detached `HEAD` or with no `origin`.
-    let ahead_behind = git(
+    let branch = git(dir, &["symbolic-ref", "--short", "-q", "HEAD"]).ok();
+    // git fails when there is no upstream, as at a detached `HEAD` or on a branch never pushed.
+    let upstream = git(
         dir,
-        &[
-            "rev-list",
-            "--left-right",
-            "--count",
-            &format!("HEAD...{base}"),
-        ],
+        &["rev-list", "--left-right", "--count", "HEAD...@{upstream}"],
     )
     .ok()
     .and_then(|line| {
@@ -106,10 +112,111 @@ pub fn counts(repo: &Path, path: &str) -> Result<Counts, String> {
         Some((ahead.parse().ok()?, behind.parse().ok()?))
     });
     let changed = git(dir, &["status", "--porcelain"])?.lines().count();
-    Ok(Counts {
-        ahead_behind,
+    let operation = operation(dir)?;
+    let default = git(
+        dir,
+        &["symbolic-ref", "--short", "-q", "refs/remotes/origin/HEAD"],
+    )
+    .ok();
+    let on_default =
+        matches!((&branch, &default), (Some(b), Some(d)) if d.strip_prefix("origin/") == Some(b));
+    let main_behind = default
+        .as_ref()
+        .and_then(|d| git(dir, &["rev-list", "--count", &format!("HEAD..{d}")]).ok())
+        .and_then(|n| n.parse().ok())
+        .filter(|n| *n > 0);
+    let would_conflict = match (&default, on_default, main_behind) {
+        (Some(d), false, Some(_)) => would_conflict(dir, d),
+        _ => false,
+    };
+    Ok(GitState {
+        branch,
+        upstream,
         changed,
+        operation,
+        main_behind,
+        on_default,
+        would_conflict,
     })
+}
+
+/// What a place's would-conflict check last said, with the tips it said it for and how often the
+/// check ran.
+struct Checked {
+    head: String,
+    default: String,
+    conflicts: bool,
+    runs: usize,
+}
+
+static CHECKED: Mutex<BTreeMap<String, Checked>> = Mutex::new(BTreeMap::new());
+
+/// How many times the would-conflict check ran for the place at `path` (#32); a test reads it.
+pub fn merge_tree_runs(path: &str) -> usize {
+    let checked = CHECKED.lock().unwrap();
+    checked.get(path).map_or(0, |c| c.runs)
+}
+
+/// Whether rebasing `HEAD` onto `default` would conflict, predicted by `git merge-tree
+/// --write-tree`, which touches no worktree, index or ref. Cached per place on the pair (`HEAD`
+/// sha, default branch sha), so it runs again only when either moves (#32).
+fn would_conflict(dir: &Path, default: &str) -> bool {
+    let (Ok(head), Ok(tip)) = (
+        git(dir, &["rev-parse", "HEAD"]),
+        git(dir, &["rev-parse", default]),
+    ) else {
+        return false;
+    };
+    let mut checked = CHECKED.lock().unwrap();
+    let key = dir.display().to_string();
+    if let Some(c) = checked.get(&key)
+        && c.head == head
+        && c.default == tip
+    {
+        return c.conflicts;
+    }
+    // Exit status 1 is a conflict; any other failure is not a prediction.
+    let conflicts = run(dir, &["merge-tree", "--write-tree", "--quiet", &head, &tip])
+        .is_ok_and(|output| output.status.code() == Some(1));
+    let runs = checked.get(&key).map_or(0, |c| c.runs) + 1;
+    checked.insert(
+        key,
+        Checked {
+            head,
+            default: tip,
+            conflicts,
+            runs,
+        },
+    );
+    conflicts
+}
+
+/// The operation in progress in the place at `dir`, from the files its repository keeps while one is stopped.
+fn operation(dir: &Path) -> Result<Option<String>, String> {
+    let marked = |name: &str| -> Result<bool, String> {
+        let path = git(dir, &["rev-parse", "--git-path", name])?;
+        Ok(dir.join(path).exists())
+    };
+    for (name, operation) in [
+        ("rebase-merge", "rebase"),
+        ("rebase-apply", "rebase"),
+        ("MERGE_HEAD", "merge"),
+        ("CHERRY_PICK_HEAD", "cherry-pick"),
+        ("REVERT_HEAD", "revert"),
+    ] {
+        if marked(name)? {
+            return Ok(Some(operation.into()));
+        }
+    }
+    let unmerged = !git(dir, &["ls-files", "--unmerged"])?.is_empty();
+    Ok(unmerged.then(|| "conflicts".into()))
+}
+
+/// Fetches `origin` once for the repository that holds `repo` (#33), whichever of its worktrees that
+/// is: the refs are shared. A failure returns git's message and leaves the refs as they were. It
+/// writes `refs/remotes/*` and `FETCH_HEAD` only, never a branch, the index or a worktree's files.
+pub fn fetch(repo: &Path) -> Result<(), String> {
+    git(repo, &["fetch", "--quiet", "origin"]).map(drop)
 }
 
 /// The command a studio terminal runs for a new session, or for `resume`, an ended session's id. It
@@ -468,14 +575,23 @@ pub fn delete_branch_merged_at(repo: &Path, branch: &str, heads: &[String]) -> R
 
 /// Runs `git` in `dir` and returns its output, or git's own error message.
 fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
-    let output = Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .map_err(|e| format!("git {}: {e}", args[0]))?;
+    let output = run(dir, args)?;
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().into());
     }
     // Only the end: a status line may start with a space.
     Ok(String::from_utf8_lossy(&output.stdout).trim_end().into())
+}
+
+/// Runs `git` in `dir` and returns its output whatever its exit status, for a caller that reads the status.
+fn run(dir: &Path, args: &[&str]) -> Result<std::process::Output, String> {
+    // No optional locks: a read never holds `index.lock` against an agent's commit (#27).
+    Command::new("git")
+        .arg("--no-optional-locks")
+        // A fetch that wants a password fails, rather than waiting on a prompt nobody sees.
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .map_err(|e| format!("git {}: {e}", args[0]))
 }
