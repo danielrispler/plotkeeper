@@ -5,8 +5,10 @@
 
 use serde::Serialize;
 use std::{
+    collections::BTreeMap,
     path::{Path, PathBuf},
     process::Command,
+    sync::Mutex,
 };
 
 /// A main checkout or a task's worktree: its folder, and its branch, `None` at a detached `HEAD`.
@@ -85,6 +87,9 @@ pub struct GitState {
     /// Whether the branch is the default branch itself, where main distance is the upstream
     /// distance and shows once.
     pub on_default: bool,
+    /// Whether rebasing the branch onto `origin`'s default branch would conflict; `false` when it
+    /// is not behind it (#32).
+    pub would_conflict: bool,
 }
 
 /// The git state of the place at `path`, one of the places of `repo`; any other path is refused, so
@@ -115,6 +120,10 @@ pub fn git_state(repo: &Path, path: &str) -> Result<GitState, String> {
     .ok();
     let on_default =
         matches!((&branch, &default), (Some(b), Some(d)) if d.strip_prefix("origin/") == Some(b));
+    let would_conflict = match (&default, on_default) {
+        (Some(d), false) => would_conflict(dir, d),
+        _ => false,
+    };
     let main_behind = default
         .and_then(|d| git(dir, &["rev-list", "--count", &format!("HEAD..{d}")]).ok())
         .and_then(|n| n.parse().ok())
@@ -126,7 +135,61 @@ pub fn git_state(repo: &Path, path: &str) -> Result<GitState, String> {
         operation,
         main_behind,
         on_default,
+        would_conflict,
     })
+}
+
+/// What a place's would-conflict check last said, with the tips it said it for and how often the
+/// check ran.
+struct Checked {
+    head: String,
+    default: String,
+    conflicts: bool,
+    runs: usize,
+}
+
+static CHECKED: Mutex<BTreeMap<String, Checked>> = Mutex::new(BTreeMap::new());
+
+/// How many times the would-conflict check ran for the place at `path` (#32); a test reads it.
+pub fn merge_tree_runs(path: &str) -> usize {
+    let checked = CHECKED.lock().unwrap();
+    checked.get(path).map_or(0, |c| c.runs)
+}
+
+/// Whether rebasing `HEAD` onto `default` would conflict, predicted by `git merge-tree
+/// --write-tree`, which touches no worktree, index or ref. Cached per place on the pair (`HEAD`
+/// sha, default branch sha), so it runs again only when either moves (#32).
+fn would_conflict(dir: &Path, default: &str) -> bool {
+    let (Ok(head), Ok(tip)) = (
+        git(dir, &["rev-parse", "HEAD"]),
+        git(dir, &["rev-parse", default]),
+    ) else {
+        return false;
+    };
+    let mut checked = CHECKED.lock().unwrap();
+    let key = dir.display().to_string();
+    if let Some(c) = checked.get(&key)
+        && c.head == head
+        && c.default == tip
+    {
+        return c.conflicts;
+    }
+    // A conflict exits 1 with its report on stdout and nothing on stderr; a failure has a message.
+    let conflicts = matches!(
+        git(dir, &["merge-tree", "--write-tree", "--quiet", &head, &tip]),
+        Err(message) if message.is_empty()
+    );
+    let runs = checked.get(&key).map_or(0, |c| c.runs) + 1;
+    checked.insert(
+        key,
+        Checked {
+            head,
+            default: tip,
+            conflicts,
+            runs,
+        },
+    );
+    conflicts
 }
 
 /// The operation in progress in the place at `dir`, from the files its repository keeps while one is stopped.

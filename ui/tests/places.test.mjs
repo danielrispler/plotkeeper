@@ -146,6 +146,14 @@ test("main ↓N shows only when behind, after the upstream distance and before t
   assert.equal(gitTokens({ ...state, main_behind: 5 })[2].title, "5 commits behind origin's default branch");
 });
 
+test("main ↓N is marked, and says why in words, when rebasing onto it would conflict", () => {
+  const state = { branch: "t", upstream: [2, 0], changed: 0, on_default: false, main_behind: 5 };
+  assert.equal(gitTokens(state)[2].bad, undefined);
+  const token = gitTokens({ ...state, would_conflict: true })[2];
+  assert.equal(token.bad, true);
+  assert.match(token.title, /rebasing onto it would conflict/);
+});
+
 test("on the default branch the distance shows once, as the upstream distance", () => {
   const main = { branch: "main", upstream: [0, 3], changed: 0, main_behind: 3, on_default: true };
   assert.deepEqual(texts(main), ["main", "↑0 ↓3"]);

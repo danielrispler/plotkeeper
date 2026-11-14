@@ -63,6 +63,7 @@ body[data-layout="focus"] #rail-divider { display: none; }
 /* The Git line: the place's name, then its tokens (#29). */
 .git-line { display: flex; gap: var(--sp-4); align-items: baseline; min-width: 0; overflow: hidden; font-size: var(--size-small); color: var(--muted); }
 .git-line .git-place { color: inherit; font-weight: 600; }
+.git-line .git-bad { color: var(--conflict); }
 .places .row .l2 { white-space: pre; }
 .usage { font-size: var(--size-small); color: var(--muted); }
 /* The rail's slim header while it is an overlay (danielrispler/Falinks#573): the selected session's state and open question. */

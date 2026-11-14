@@ -261,6 +261,7 @@ fn a_place_reads_its_upstream_distance_and_its_changed_files() {
             operation: None,
             main_behind,
             on_default,
+            would_conflict: false,
         })
     };
 

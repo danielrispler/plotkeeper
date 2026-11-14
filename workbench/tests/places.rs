@@ -2,7 +2,7 @@
 //! repositories, as the engine's tests do (`src/lib.rs`, `retention_checks_every_blob_of_a_snapshot`).
 
 use std::{path::Path, process::Command};
-use studio_workbench::{GitState, Place, claude, fetch, git_state, places};
+use studio_workbench::{GitState, Place, claude, fetch, git_state, merge_tree_runs, places};
 
 /// Runs `git` in `repo`, away from Daniel's own git config.
 fn git(repo: &Path, args: &[&str]) {
@@ -105,6 +105,7 @@ fn a_branch_with_no_upstream_has_no_distance() {
             operation: None,
             main_behind: None,
             on_default: false,
+            would_conflict: false,
         })
     };
 
@@ -160,6 +161,7 @@ fn upstream_distance_counts_unpushed_and_unpulled_commits() {
             operation: None,
             main_behind: Some(1),
             on_default: true,
+            would_conflict: false,
         })
     );
 }
@@ -179,6 +181,7 @@ fn a_detached_head_has_no_branch() {
             operation: None,
             main_behind: None,
             on_default: false,
+            would_conflict: false,
         })
     );
 }
@@ -402,4 +405,118 @@ fn a_fetch_from_a_missing_remote_fails_with_gits_message_and_keeps_the_refs() {
 
     assert!(error.contains("origin.git"), "{error}");
     assert_eq!(refs(), before);
+}
+
+/// A pushed repository with a task `t` and a second clone for pushing to `origin`'s default
+/// branch: `(repo, clone's folder, task path, clone)`.
+fn task_and_a_clone() -> (
+    tempfile::TempDir,
+    tempfile::TempDir,
+    String,
+    std::path::PathBuf,
+) {
+    let (dir, _main, origin) = pushed();
+    std::fs::write(dir.path().join("a.txt"), "one\ntwo\n").unwrap();
+    std::fs::write(dir.path().join("b.txt"), "x\n").unwrap();
+    git(dir.path(), &["add", "."]);
+    git(dir.path(), &["commit", "-q", "-m", "Files"]);
+    git(dir.path(), &["push", "-q", "origin", "main"]);
+    git(dir.path(), &["remote", "set-head", "origin", "main"]);
+    git(
+        dir.path(),
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "t",
+            ".claude/worktrees/t",
+            "origin/main",
+        ],
+    );
+    let task = places(dir.path()).unwrap().tasks[0].path.clone();
+    let other = tempfile::tempdir().unwrap();
+    git(
+        other.path(),
+        &["clone", "-q", origin.to_str().unwrap(), "c"],
+    );
+    let clone = other.path().join("c");
+    (dir, other, task, clone)
+}
+
+/// Commits `content` to `file` in `repo`.
+fn commit_file(repo: &Path, file: &str, content: &str) {
+    std::fs::write(repo.join(file), content).unwrap();
+    git(repo, &["commit", "-q", "-am", "Edit"]);
+}
+
+/// A branch that edits the line `origin`'s default branch edited would conflict in a rebase onto
+/// it; one that edits another file would not (#32).
+#[test]
+fn a_branch_editing_the_same_line_as_origins_default_branch_would_conflict() {
+    let (dir, _other, task, clone) = task_and_a_clone();
+    commit_file(Path::new(&task), "a.txt", "one\nmine\n");
+    commit_file(&clone, "a.txt", "one\ntheirs\n");
+    git(&clone, &["push", "-q", "origin", "main"]);
+    git(dir.path(), &["fetch", "-q", "origin"]);
+    let read = |args: &[&str]| {
+        Command::new("git")
+            .args(args)
+            .current_dir(&task)
+            .output()
+            .unwrap()
+            .stdout
+    };
+    let before = (read(&["for-each-ref"]), read(&["ls-files", "-s"]));
+    let state = git_state(dir.path(), &task).unwrap();
+    assert_eq!(state.main_behind, Some(1));
+    assert!(state.would_conflict);
+
+    // The check changed no ref, no index entry and no file.
+    assert_eq!((read(&["for-each-ref"]), read(&["ls-files", "-s"])), before);
+    assert_eq!(read(&["status", "--porcelain"]), b"");
+    assert_eq!(
+        std::fs::read_to_string(Path::new(&task).join("a.txt")).unwrap(),
+        "one\nmine\n"
+    );
+}
+
+#[test]
+fn a_branch_editing_another_file_would_not_conflict() {
+    let (dir, _other, task, clone) = task_and_a_clone();
+    commit_file(Path::new(&task), "a.txt", "one\nmine\n");
+    commit_file(&clone, "b.txt", "y\n");
+    git(&clone, &["push", "-q", "origin", "main"]);
+    git(dir.path(), &["fetch", "-q", "origin"]);
+    let state = git_state(dir.path(), &task).unwrap();
+    assert_eq!(state.main_behind, Some(1));
+    assert!(!state.would_conflict);
+}
+
+/// The check runs once per pair of (`HEAD`, default branch) tips: not while only the files change,
+/// once more when either tip moves (#32).
+#[test]
+fn would_conflict_is_recomputed_only_when_head_or_the_default_branch_moves() {
+    let (dir, _other, task, clone) = task_and_a_clone();
+    commit_file(&clone, "b.txt", "y\n");
+    git(&clone, &["push", "-q", "origin", "main"]);
+    git(dir.path(), &["fetch", "-q", "origin"]);
+    assert_eq!(merge_tree_runs(&task), 0);
+    git_state(dir.path(), &task).unwrap();
+    assert_eq!(merge_tree_runs(&task), 1);
+
+    std::fs::write(Path::new(&task).join("a.txt"), "edited\n").unwrap();
+    git_state(dir.path(), &task).unwrap();
+    git_state(dir.path(), &task).unwrap();
+    assert_eq!(merge_tree_runs(&task), 1);
+
+    commit_file(Path::new(&task), "a.txt", "committed\n");
+    git_state(dir.path(), &task).unwrap();
+    assert_eq!(merge_tree_runs(&task), 2);
+
+    commit_file(&clone, "b.txt", "z\n");
+    git(&clone, &["push", "-q", "origin", "main"]);
+    git(dir.path(), &["fetch", "-q", "origin"]);
+    git_state(dir.path(), &task).unwrap();
+    assert_eq!(merge_tree_runs(&task), 3);
 }

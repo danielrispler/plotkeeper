@@ -11,6 +11,7 @@
   --hover: #ffffff0e; --selected: #ffffff17; --pressed: #ffffff21; --edge: #ffffff17; --line: #31343a;
   --focus: #8b887f;
   --needs-you: #ff8f5e; --needs-you-bg: #3a2318; --needs-you-line: #6b3a24;
+  --conflict: #ff6b6b;
   --shadow: 0 8px 24px #0008; --shadow-start: -8px 0 24px #0008; --shadow-end: 8px 0 24px #0008; --backdrop: #0008;
 
   /* Type: five sizes. */

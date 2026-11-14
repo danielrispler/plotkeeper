@@ -14,7 +14,7 @@ import type { GitState, Place, Places, Session } from "./types.js";
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
-export type Token = { text: string; title: string };
+export type Token = { text: string; title: string; bad?: boolean };
 
 // A place's git tokens, left to right, each hidden when it says nothing (#26): its branch or
 // "detached", the upstream distance "↑2 ↓1" or "not pushed", "main ↓5" when behind origin's default branch (not on it, where the upstream distance is the same), and "●3" uncommitted files. The hover
@@ -33,7 +33,12 @@ export function gitTokens(state: GitState | null): Token[] {
     tokens.push({ text: "not pushed", title: "The branch has no upstream: never pushed" });
   }
   if (state.main_behind && !state.on_default) {
-    tokens.push({ text: `main ↓${state.main_behind}`, title: `${plural(state.main_behind, "commit")} behind origin's default branch` });
+    const behind = `${plural(state.main_behind, "commit")} behind origin's default branch`;
+    tokens.push({
+      text: `main ↓${state.main_behind}`,
+      title: state.would_conflict ? `${behind}; rebasing onto it would conflict` : behind,
+      ...(state.would_conflict && { bad: true }),
+    });
   }
   if (state.changed) tokens.push({ text: `●${state.changed}`, title: plural(state.changed, "uncommitted file") });
   if (state.operation) {
@@ -132,7 +137,7 @@ function drawLine() {
   const name = place === read.main ? repo : `${repo} › ${place.path.split("/").pop()}`;
   const tokens = gitTokens(states.get(place.path) ?? null);
   line.title = [...tokens.map((token) => token.title), fetchNote(fetched, Date.now())].join("\n");
-  line.replaceChildren(text("span", name ?? "", "git-place"), ...tokens.map((token) => Object.assign(text("span", token.text), { title: token.title })));
+  line.replaceChildren(text("span", name ?? "", "git-place"), ...tokens.map((token) => Object.assign(text("span", token.text, token.bad ? "git-bad" : ""), { title: token.title })));
 }
 
 const shownPlace = ({ main, tasks }: Places) => placeOf([main, ...tasks], studio.selection?.session.cwd ?? main.path) ?? main;
