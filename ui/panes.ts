@@ -1,5 +1,5 @@
-// The terminal panes (danielrispler/Falinks#467): one per daemon terminal, in `#terminal-body`, one shown at a time. The
-// login shell `shell` in the configured repository shows while no session is selected. A session
+// The terminal panes (danielrispler/Falinks#467): one per daemon terminal, in `#terminal-body`, one shown at a time. Home
+// shows while no session is selected. A session
 // started from the studio runs `claude` in its own terminal, whose fresh id reaches its hooks as
 // `STUDIO_TERMINAL_ID`, so the core links its row to the pane (`Session.terminal`).
 // `closePane` ends a terminal and drops its pane (danielrispler/Falinks#469).
@@ -12,6 +12,7 @@
 
 import type * as Xterm from "@xterm/xterm";
 import { connect, list, onEvent, request, type Listed } from "./daemon.js";
+import { drawHome } from "./home.js";
 import { element, invoke, pressable, text } from "./dom.js";
 import { type Box, paneBoxes } from "./layout.js";
 import { isPanel, panelTerm, showPanel, showPanelShell } from "./panel.js";
@@ -38,7 +39,7 @@ let stacked = false;
 let cell = 8;
 let laidSplit = false;
 
-// Connects, shows the login shell in the configured repository, then brings back every terminal;
+// Connects, shows Home, then brings back every terminal;
 // again each time the daemon is lost.
 export function startPanes(): Promise<void> {
   offerBuilds();
@@ -46,7 +47,7 @@ export function startPanes(): Promise<void> {
   ready = connect().then((config) => {
     repo = config.repo;
     showPanel(null, repo);
-    show("shell", () => openPane(box("shell"), "shell", repo));
+    showHome();
     revived = revive(config.outdated);
   });
   window.addEventListener("start-failed", (e) => failedAtStart((e as CustomEvent).detail));
@@ -129,7 +130,7 @@ function header({ term, title }: Pane) {
 }
 
 // Ends terminal `id`'s whole process group (danielrispler/Falinks#322, point 3), then forgets it and drops its pane; the
-// shell shows in its place.
+// Home shows in its place.
 export async function closePane(id: string) {
   await request({ op: "kill", id });
   await request({ op: "forget", id });
@@ -141,8 +142,22 @@ export async function closePane(id: string) {
   panes.delete(id);
   const wasPinned = pinned === id;
   if (wasPinned) pinned = null;
-  if (shown === id) show("shell", () => openPane(box("shell"), "shell", repo));
+  if (shown === id) showHome();
   else if (wasPinned) show(shown, () => null);
+}
+
+// Home (`home.ts`) takes the column while no session is selected; the login shell lives in the
+// terminal panel.
+const HOME = "home";
+export function showHome() {
+  show(HOME, () => null);
+  drawHome(box(HOME), studio.listed, repo);
+  element("terminal-head").hidden = true;
+}
+
+// Draws Home again when the list changed under it.
+export function redrawHome() {
+  if (shown === HOME) drawHome(box(HOME), studio.listed, repo);
 }
 
 // Gives the keyboard back to the pane shown, as the panel hides.
@@ -246,11 +261,11 @@ export const startedAuto = (argv: string[]) => argv[argv.indexOf("--permission-m
 export const resumesAuto = (session: Pick<Session, "started_mode">) => session.started_mode === "auto";
 
 // What the terminal shows for the selected session (danielrispler/Falinks#567): its own terminal while the daemon runs
-// it, else a message with "Open here", never the login shell, which may run another session. The
-// shell shows only while nothing is selected.
-export type PaneView = "shell" | { terminal: string } | { message: string };
+// it, else a message with "Open here", never the login shell, which may run another session. Home
+// shows while nothing is selected.
+export type PaneView = "home" | { terminal: string } | { message: string };
 export function paneView(session: Pick<Session, "terminal" | "state"> | null, running: boolean): PaneView {
-  if (!session) return "shell";
+  if (!session) return "home";
   if (session.terminal && running) return { terminal: session.terminal };
   return { message: session.state === "ended" ? "Ended. Open here resumes it." : "Runs in another terminal. Open here resumes it." };
 }
@@ -261,7 +276,7 @@ export function paneView(session: Pick<Session, "terminal" | "state"> | null, ru
 let selected: string | null = null;
 export async function showSession(session: Session | null, clicked = false) {
   const key = session ? `${session.id} ${session.terminal ?? ""} ${session.state === "ended"}` : null;
-  element("terminal-head").hidden = session !== null;
+  element("terminal-head").hidden = session !== null || shown === HOME;
   const pane = panes.get(shown);
   if (pane) header(pane);
   if (key === selected && !clicked) return;
@@ -274,7 +289,7 @@ export async function showSession(session: Session | null, clicked = false) {
   showPanel(session, repo);
   if (!session) {
     // A pane Daniel just started stays until its session arrives.
-    if (starting !== shown) show("shell", () => openPane(box("shell"), "shell", repo));
+    if (starting !== shown) showHome();
     return;
   }
   // A terminal of an earlier app run: attach when the daemon still runs it. Opening an exited or
@@ -284,7 +299,7 @@ export async function showSession(session: Session | null, clicked = false) {
   const terminal = id && !own ? (await list()).find((t) => t.id === id && t.exited === null) : undefined;
   if (!current()) return;
   const view = paneView(session, Boolean(own || terminal));
-  if (view === "shell") return;
+  if (view === "home") return;
   if ("terminal" in view) return show(view.terminal, () => openPane(box(view.terminal), view.terminal, terminal!.cwd, terminal!.argv));
   const resume = () => startClaude(session.cwd, session.resume_id, "", resumesAuto(session)).catch((e) => console.warn(e));
   box(ELSEWHERE).classList.add("elsewhere");

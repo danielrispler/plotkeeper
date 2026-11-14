@@ -147,11 +147,15 @@ fn sessions(studio: State<Mutex<Studio>>, cards: State<Cards>) -> Vec<Row> {
     list.into_iter().map(row).collect()
 }
 
-/// Daniel clicked session `id`'s row; returns the selection, which no longer names a subagent.
+/// Daniel clicked session `id`'s row, or, with no `id`, went Home; returns the selection, which no
+/// longer names a subagent, and is `null` at Home.
 #[tauri::command]
-fn select(id: String, studio: State<Mutex<Studio>>) -> serde_json::Value {
+fn select(id: Option<String>, studio: State<Mutex<Studio>>) -> serde_json::Value {
     let mut studio = studio.lock().unwrap();
-    studio.select(&id);
+    match id {
+        Some(id) => studio.select(&id),
+        None => studio.select_none(),
+    }
     selection(&studio)
 }
 

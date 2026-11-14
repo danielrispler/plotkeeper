@@ -23,6 +23,6 @@ test("an ended session says it ended, not that it runs elsewhere", () => {
   assert.deepEqual(paneView(session("a", null, "ended"), false), { message: "Ended. Open here resumes it." });
 });
 
-test("the login shell shows only while nothing is selected", () => {
-  assert.equal(paneView(null, false), "shell");
+test("Home shows while nothing is selected, not the login shell", () => {
+  assert.equal(paneView(null, false), "home");
 });
