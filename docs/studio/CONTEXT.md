@@ -85,9 +85,17 @@ A project's original working copy, outside any task. It appears in Places and ca
 A folder where Daniel can start an agent session or a terminal: a project's main checkout or a task's worktree.
 _Avoid_: Location, workspace
 
+**Home**:
+The view in the terminal column while no session is selected, such as after a delete: the sessions that need Daniel or are unseen, then the landed ones, then one row per project to start a session there. Places stays the home of tasks.
+_Avoid_: Dashboard, board
+
 **Places**:
 The folded section at the bottom of the session list, the home of tasks: one row per place, with its branch, its **upstream** and **main distance**, its uncommitted files and its number of sessions. Clicking a place offers a new session there and, for a task, Remove; tasks are created here too. The sessions themselves show only in the list.
 _Avoid_: Board (an earlier plan for a view of its own, which Places replaces)
+
+**Landed**:
+The state of a task whose work has shipped, so removing its worktree loses nothing: nothing uncommitted, nothing unpushed, its PR merged, and its issue closed when it has one, while none of its sessions is running or needs you. Once its PR is merged, its CI is not checked. Only tasks land, never the main checkout. The control room asks GitHub when a turn ends, when the window gains focus, or on a refresh, never on a timer. It shows as "Landed — safe to delete".
+_Avoid_: Done (a turn's end), finished
 
 **Upstream**:
 A place's branch as `origin` has it. Its distance says whether Daniel's work is pushed: commits not pushed yet and commits not pulled yet. A branch never pushed has none, and shows "not pushed".
@@ -137,6 +145,10 @@ _Avoid_: Verdict (only a plan's or a permission's allow or deny)
 **Identity**:
 The name an agent session gets from its work: its issue, its PR and its worktree, such as "danielrispler/Falinks#480 · PR danielrispler/Falinks#490 · agent-a1b2". A name Daniel gives it replaces it.
 
+**Session name**:
+What the list and the rail call an agent session: the name Daniel gave it, else its prompt name, else its identity. The prompt name is a few words a writer call makes from Daniel's first prompt, so wake-ups never name a session; it keeps the identity's issue in front, such as "#37 · One event internal".
+_Avoid_: Title
+
 **Context share**:
 How much of its context window an agent session uses, as a percentage. It is measured as Claude Code's status line measures it, from the session's status line snapshot: its tokens, its window size, and its own percent used and left. Without a snapshot, the control room shows the latest turn's tokens only.
 
@@ -179,7 +191,7 @@ A subagent that is not a worker, such as a review or a search. It shows as one l
 A prompt that Claude Code sends, not Daniel, to wake an agent when a subagent or a background command it started returns. It names the returning task's id in markup. It never counts as Daniel's prompt.
 
 **Session list**:
-The list of every agent session, one row each, sorted by state: needs you, running, your turn, then idle and ended sessions collapsed last. A row is one line, its name then its state's shape: a "Needs you" pill (the only colour), a spinner while running, a dot at your turn (filled, with a bold name, while **unseen**), a ring when idle or ended. Only a running or needs-you row adds a second, muted line: its current step, or its question's first line. Running subagents nest under the agent that spawned them. When the window is narrow the list is a **strip** of the same shapes, each with a short label from the session's name, distinct between sessions; hovering it opens the list over the terminal. The top bar's needs-you chip counts the sessions that need Daniel. A finished subagent leaves the list and counts in its parent's "N done"; a failed one stays until Daniel opens it. A **status-only row** is a session of another agent than Claude Code, such as Codex, in a studio terminal whose program reports its status (OSC 7501): it shows running, needs you or your turn from that status, its name from the program and its folder, and a "status only" mark instead of a second line, as it has no intention, card, brief, estimate or decisions. It notifies as a Claude session does, and goes when its status clears or its terminal ends. Only Daniel's own actions change the session he looks at: a click or key on a row, or starting a session, which selects it once it reports its terminal.
+The list of every agent session, one row each, sorted by state: needs you, running, your turn, then idle and ended sessions collapsed last. A row is one line, its name then its state's shape: a "Needs you" pill (the only colour), a spinner while running, a dot at your turn (filled, with a bold name, while **unseen**), a ring when idle or ended, a check mark instead when its task is **landed**. Only a running or needs-you row adds a second, muted line: its current step, or its question's first line. Running subagents nest under the agent that spawned them. When the window is narrow the list is a **strip** of the same shapes, each with a short label from the session's name, distinct between sessions; hovering it opens the list over the terminal. The top bar's needs-you chip counts the sessions that need Daniel. A finished subagent leaves the list and counts in its parent's "N done"; a failed one stays until Daniel opens it. A **status-only row** is a session of another agent than Claude Code, such as Codex, in a studio terminal whose program reports its status (OSC 7501): it shows running, needs you or your turn from that status, its name from the program and its folder, and a "status only" mark instead of a second line, as it has no intention, card, brief, estimate or decisions. It notifies as a Claude session does, and goes when its status clears or its terminal ends. Only Daniel's own actions change the session he looks at: a click or key on a row, a click on the list's empty space, which selects none and shows **Home**, or starting a session, which selects it once it reports its terminal.
 
 **Story rail**:
 The column on the window's left that tells the selected session's or subagent's story. It opens on "now": one header line (the verdict and the phase, with the times and the model on hover, and a "⋯" menu for Rename, Close and Delete), then the open question docked under it, or else the newest card, then the current intention, boxed, then the latest turn's summary. Below is a feed of turns, newest first. A turn is one block: its prompt in one line, its summary, its learning question, its cards, the subagents and checks it ran, and its full response, folded, with one "ask about this". The brief and the decision history are folded under the feed.
