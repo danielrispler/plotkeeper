@@ -32,7 +32,7 @@ The app embeds `dist/` when it is built, so a merged change reaches Daniel's ope
 
 To prove native window or key behaviour without Daniel pressing keys, read `docs/agents/app-probe.md`: a background debug build that never takes his focus.
 
-In a worktree, share the main checkout's cargo target dir so the build starts warm: prefix cargo and `npm run check` with `CARGO_TARGET_DIR="$(git rev-parse --path-format=absolute --git-common-dir)/../target"`. Parallel workers sharing it wait briefly on cargo's lock but still finish sooner than cold builds (danielrispler/Falinks#549).
+In a worktree, share the main checkout's cargo target dir so the build starts warm: prefix cargo and `npm run check` with `CARGO_TARGET_DIR="$(git rev-parse --path-format=absolute --git-common-dir)/../target"`. Parallel workers sharing it wait briefly on cargo's lock but still finish sooner than cold builds (danielrispler/Falinks#549). Parallel workers of one `/implement-spec` run (implementers and mergers) each use their own `CARGO_TARGET_DIR`: in spec #53's run (PR #63), workers that changed shared crates (`studio-core`, `studio-workbench`) got stale builds from each other (`Output::Name(_) not covered`, `no method landed`) and one merger pushed a red tree, while private dirs built cleanly. #549 measured workers that did not change the same crates.
 
 ## Agent skills
 
