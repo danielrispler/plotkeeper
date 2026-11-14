@@ -49,6 +49,13 @@ export function worktreeOf(cwd: string): string | null {
   return cwd.match(/^(.*\/\.claude\/worktrees\/[^/]+)/)?.[1] ?? null;
 }
 
+// Whether the delete dialog opens with "remove worktree" ticked: the session is in a task worktree and
+// no other listed session that hasn't ended is in it.
+export function removeWorktreeByDefault(session: { id: string; cwd: string }, listed: { id: string; state: string; cwd: string }[]): boolean {
+  const worktree = worktreeOf(session.cwd);
+  return worktree !== null && !listed.some((s) => s.id !== session.id && s.state !== "ended" && worktreeOf(s.cwd) === worktree);
+}
+
 // A path's last 2 segments, such as `scratchpad/map266.md` (danielrispler/Falinks#571); the full path goes on hover.
 export const shortPath = (p: string) => p.split("/").filter(Boolean).slice(-2).join("/");
 
