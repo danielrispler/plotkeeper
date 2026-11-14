@@ -67,38 +67,30 @@ pub fn places(repo: &Path) -> Result<Places, String> {
     })
 }
 
-/// Where a place's branch stands (danielrispler/Falinks#576, after danielrispler/Falinks#559): its commits ahead of and behind its base, `None`
-/// with no base, and how many files `git status` lists as changed.
+/// A place's git state (#26, #29): its branch, `None` at a detached `HEAD`; its distance from its
+/// upstream, commits ahead and behind, `None` with no upstream (never pushed, or detached); and how
+/// many files `git status` lists as changed. Later tickets add main distance and the operation in
+/// progress here.
 #[derive(Debug, PartialEq, Serialize)]
-pub struct Counts {
-    pub ahead_behind: Option<(u32, u32)>,
+pub struct GitState {
+    pub branch: Option<String>,
+    pub upstream: Option<(u32, u32)>,
     pub changed: usize,
 }
 
-/// The counts of the place at `path`, one of the places of `repo`; any other path is refused, so the
-/// window cannot run git in an arbitrary folder. A task's base is `origin`'s default branch, which
-/// tasks start from; the main checkout's is its branch's upstream.
-pub fn counts(repo: &Path, path: &str) -> Result<Counts, String> {
+/// The git state of the place at `path`, one of the places of `repo`; any other path is refused, so
+/// the window cannot run git in an arbitrary folder. Read-only, and with no optional locks.
+pub fn git_state(repo: &Path, path: &str) -> Result<GitState, String> {
     let known = places(repo)?;
-    let main = known.main.path == path;
-    if !main && !known.tasks.iter().any(|task| task.path == path) {
+    if known.main.path != path && !known.tasks.iter().any(|task| task.path == path) {
         return Err(format!("not a place of this repository: {path}"));
     }
     let dir = Path::new(path);
-    let base = if main {
-        "@{upstream}"
-    } else {
-        "refs/remotes/origin/HEAD"
-    };
-    // git fails when there is no such base, as at a detached `HEAD` or with no `origin`.
-    let ahead_behind = git(
+    let branch = git(dir, &["symbolic-ref", "--short", "-q", "HEAD"]).ok();
+    // git fails when there is no upstream, as at a detached `HEAD` or on a branch never pushed.
+    let upstream = git(
         dir,
-        &[
-            "rev-list",
-            "--left-right",
-            "--count",
-            &format!("HEAD...{base}"),
-        ],
+        &["rev-list", "--left-right", "--count", "HEAD...@{upstream}"],
     )
     .ok()
     .and_then(|line| {
@@ -106,8 +98,9 @@ pub fn counts(repo: &Path, path: &str) -> Result<Counts, String> {
         Some((ahead.parse().ok()?, behind.parse().ok()?))
     });
     let changed = git(dir, &["status", "--porcelain"])?.lines().count();
-    Ok(Counts {
-        ahead_behind,
+    Ok(GitState {
+        branch,
+        upstream,
         changed,
     })
 }

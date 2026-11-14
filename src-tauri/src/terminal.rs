@@ -120,8 +120,8 @@ pub fn places() -> Result<studio_workbench::Places, String> {
 
 /// Places' counts for the place at `path` (danielrispler/Falinks#576): ahead and behind its base, and changed files.
 #[tauri::command(async)]
-pub fn place_counts(path: String) -> Result<studio_workbench::Counts, String> {
-    studio_workbench::counts(Path::new(&repo()), &path)
+pub fn place_git_state(path: String) -> Result<studio_workbench::GitState, String> {
+    studio_workbench::git_state(Path::new(&repo()), &path)
 }
 
 /// Creates task `name` in the configured repository (danielrispler/Falinks#468) and returns its place.

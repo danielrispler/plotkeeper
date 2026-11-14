@@ -20,6 +20,8 @@
   <div class="app">
     <header class="top" data-tauri-drag-region="deep">
       <!-- The selected session's name and context share are on its row only (danielrispler/Falinks#571). -->
+      <!-- The Git line (#29): the selected session's place and its git tokens, or the main checkout's; stays in focus mode. -->
+      <span id="git-line" class="git-line" hidden></span>
       <span class="sp"></span>
       <!-- How many sessions need Daniel (danielrispler/Falinks#572), shown whenever any do; it selects the first. -->
       <button id="needs-you" class="btn small chip" type="button" hidden></button>

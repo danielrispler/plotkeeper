@@ -240,15 +240,15 @@ Run one `/implement-spec` (or any run with workers and helpers) in the studio.
 ### Tasks, Places and file links (danielrispler/Falinks#599)
 
 - [ ] **danielrispler/Falinks#576:** open Places at the bottom of the list. It lists the main checkout and each task, one row each; the sessions stay in the list above. Each row's session count matches the sessions in that folder.
-- [ ] **danielrispler/Falinks#576:** on a real task with commits and edits, the counts match git, run in that task's folder:
+- [ ] **#29:** on a real task with commits and edits, the row's tokens match git, run in that task's folder:
 
   ```sh
-  git status --porcelain | wc -l                                  # changed
-  git rev-list --left-right --count HEAD...origin/HEAD            # ahead, behind (a task)
-  git rev-list --left-right --count HEAD...@{upstream}            # ahead, behind (the main checkout)
+  git status --porcelain | wc -l                                  # ●N
+  git rev-list --left-right --count HEAD...@{upstream}            # ↑N ↓M
   ```
 
-  A clean task level with `main` shows no counts.
+  A branch never pushed shows `not pushed`; a detached `HEAD` shows `detached`; a clean pushed branch shows just its name.
+- [ ] **#29:** the Git line in the top bar shows the selected session's place, its branch and the same tokens as that place's Places row. Select a session in another task: the line follows. Select none (or have no session): it shows the main checkout. Turn focus mode on: the Git line stays in the top bar. Hovering it says each count in words. While an agent commits in its task, its tokens follow within a few seconds.
 - [ ] **danielrispler/Falinks#576:** create a task from Places' field: a session starts in it and its row appears. Click a task: "New session here" starts a session in it. Remove asks first when it would lose work, then removes the worktree.
 - [ ] **danielrispler/Falinks#557:** from a task session, clicking `path:line` in the terminal and a file link in the rail opens that worktree's file, not the main checkout's, at that line in Zed.
 - [ ] **danielrispler/Falinks#581:** in a rail reply from a task session, inline code such as `` `src/foo.rs:42` `` looks like plain code until hovered, and a click opens that worktree's file at that line. `` `origin/main` `` is not a link.

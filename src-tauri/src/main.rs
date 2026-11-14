@@ -501,7 +501,7 @@ fn main() {
             terminal::open_file,
             skills::skills,
             terminal::places,
-            terminal::place_counts,
+            terminal::place_git_state,
             terminal::claude_argv,
             terminal::plugin_setup,
             terminal::fix_plugin_setup,

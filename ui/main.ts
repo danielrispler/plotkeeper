@@ -14,7 +14,7 @@ import { select, show } from "./selection.js";
 import { dragPanel, placePanel, togglePanel } from "./panel.js";
 import { dragSplit, focusPane, placePanes, runDoctor, split, startPanes, toggleSplit } from "./panes.js";
 import { showPalette, showPicker } from "./picker.js";
-import { readPlaces, showPlaces } from "./places.js";
+import { readPlaces, showPlaces, watchPlaces } from "./places.js";
 import { reload, type SettingsFiles, zoomed } from "./settings.js";
 import { studio } from "./state.js";
 import { showSkills } from "./skills.js";
@@ -238,6 +238,7 @@ const showList = (sessions: Session[]) => {
 };
 // Opening Places reads git's counts at once (danielrispler/Falinks#576).
 element("places").addEventListener("toggle", () => void ((element("places") as HTMLDetailsElement).open && readPlaces(true)));
+watchPlaces();
 listen<Session[]>("sessions", showList);
 invoke<Session[]>("sessions").then(showList);
 // A press on the toast jumps to its session; the press itself keeps the terminal's keyboard focus.
