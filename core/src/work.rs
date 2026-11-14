@@ -2,8 +2,8 @@
 //! from the skills its agent invokes and the commands it runs, and how long its remaining work
 //! typically takes, from the sessions of the same kind before it.
 
+use crate::event::{Tool, ToolKind};
 use serde::Serialize;
-use serde_json::Value;
 
 /// A recognisable stretch of a session's work on a ticket, in the usual order (`docs/studio/CONTEXT.md`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -79,9 +79,12 @@ impl Work {
         }
     }
 
-    /// The session's own agent started a call of `tool` with `input` at `at`.
-    pub(crate) fn call(&mut self, tool: &str, input: &Value, at: u64) {
-        let skill = (tool == "Skill").then(|| input["skill"].as_str()).flatten();
+    /// The session's own agent started a call of `tool` at `at`.
+    pub(crate) fn call(&mut self, tool: &Tool, at: u64) {
+        let skill = match &tool.kind {
+            ToolKind::Skill(skill) => skill.as_deref(),
+            _ => None,
+        };
         if let Some(skill) = skill
             && self.kind.is_none()
         {
@@ -90,9 +93,11 @@ impl Work {
         let Some(current) = self.phase() else {
             return;
         };
-        let next = match (tool, skill) {
+        let next = match (&tool.kind, skill) {
             (_, Some(skill)) => skill_phase(without_plugin(skill)),
-            ("Bash", _) => command_phase(input["command"].as_str().unwrap_or_default(), current),
+            (ToolKind::Command, _) => {
+                command_phase(tool.command.as_deref().unwrap_or_default(), current)
+            }
             _ => None,
         };
         if let Some(next) = next.filter(|next| *next > current) {
