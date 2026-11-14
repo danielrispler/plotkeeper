@@ -118,7 +118,8 @@ pub fn places() -> Result<studio_workbench::Places, String> {
     studio_workbench::places(Path::new(&repo()))
 }
 
-/// Places' counts for the place at `path` (danielrispler/Falinks#576): ahead and behind its base, and changed files.
+/// The git state of the place at `path` (#26): branch, upstream distance, changed files, distance
+/// from origin's default branch, and the operation in progress.
 #[tauri::command(async)]
 pub fn place_git_state(path: String) -> Result<studio_workbench::GitState, String> {
     studio_workbench::git_state(Path::new(&repo()), &path)

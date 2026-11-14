@@ -238,7 +238,7 @@ const showList = (sessions: Session[]) => {
   showPlaces();
   showToast();
 };
-// Opening Places reads git's counts at once (danielrispler/Falinks#576).
+// Opening Places reads every place's git state at once (#26).
 element("places").addEventListener("toggle", () => void ((element("places") as HTMLDetailsElement).open && readPlaces(true)));
 watchPlaces();
 listen<Session[]>("sessions", showList);

@@ -520,3 +520,17 @@ fn would_conflict_is_recomputed_only_when_head_or_the_default_branch_moves() {
     git_state(dir.path(), &task).unwrap();
     assert_eq!(merge_tree_runs(&task), 3);
 }
+
+/// A branch level with the default branch, or only ahead of it, is not behind it, so the check
+/// does not run (#32).
+#[test]
+fn would_conflict_does_not_run_when_the_branch_is_not_behind_the_default_branch() {
+    let (dir, _other, task, _clone) = task_and_a_clone();
+    git_state(dir.path(), &task).unwrap();
+    assert_eq!(merge_tree_runs(&task), 0);
+
+    commit_file(Path::new(&task), "a.txt", "ahead\n");
+    let state = git_state(dir.path(), &task).unwrap();
+    assert!(!state.would_conflict);
+    assert_eq!(merge_tree_runs(&task), 0);
+}

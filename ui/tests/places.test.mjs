@@ -18,9 +18,9 @@ const places = {
   hidden: 0,
 };
 const states = [
-  { branch: "main", upstream: [0, 0], changed: 0, main_behind: null, on_default: false },
+  { branch: "main", upstream: [0, 0], changed: 0, main_behind: null, on_default: false, would_conflict: false, operation: null },
   { branch: "issue-1", upstream: [2, 1], changed: 3 },
-  { branch: null, upstream: null, changed: 0, main_behind: null, on_default: false },
+  { branch: null, upstream: null, changed: 0, main_behind: null, on_default: false, would_conflict: false, operation: null },
 ];
 const sessions = ["/r", "/r/.claude/worktrees/issue-1", "/r/.claude/worktrees/issue-1/apps", "/elsewhere"].map((cwd) => ({ cwd }));
 const texts = (state) => gitTokens(state).map((t) => t.text);
@@ -49,9 +49,9 @@ test("a row shows the same tokens as the Git line for the same place", () => {
 });
 
 test("tokens that say nothing are hidden, and the rest come in order: branch, upstream, uncommitted", () => {
-  assert.deepEqual(texts({ branch: "main", upstream: [0, 0], changed: 0, main_behind: null, on_default: false }), ["main"]);
+  assert.deepEqual(texts({ branch: "main", upstream: [0, 0], changed: 0, main_behind: null, on_default: false, would_conflict: false, operation: null }), ["main"]);
   assert.deepEqual(texts({ branch: "t", upstream: [0, 4], changed: 1 }), ["t", "↑0 ↓4", "●1"]);
-  assert.deepEqual(texts({ branch: "t", upstream: [2, 0], changed: 0, main_behind: null, on_default: false }), ["t", "↑2 ↓0"]);
+  assert.deepEqual(texts({ branch: "t", upstream: [2, 0], changed: 0, main_behind: null, on_default: false, would_conflict: false, operation: null }), ["t", "↑2 ↓0"]);
 });
 
 test("a branch with no upstream says not pushed; a detached HEAD says detached and not not pushed", () => {
@@ -68,12 +68,12 @@ test("the hover says each count in words", () => {
 });
 
 test("an operation in progress shows last as a warning, and is hidden with none", () => {
-  const state = { branch: "t", upstream: [0, 0], changed: 2 };
+  const state = { branch: "t", upstream: [0, 0], changed: 2, main_behind: null, on_default: false, would_conflict: false };
   const last = gitTokens({ ...state, operation: "rebase" }).at(-1);
   assert.equal(last.text, "⚠ rebase");
   assert.equal(last.title, "A rebase is in progress");
   assert.equal(gitTokens({ ...state, operation: "conflicts" }).at(-1).title, "Files have unresolved conflicts");
-  for (const operation of [null, undefined]) assert.ok(!texts({ ...state, operation }).some((t) => t.includes("⚠")));
+  assert.ok(!texts({ ...state, operation: null }).some((t) => t.includes("⚠")));
 });
 
 // A clock the test moves, and the timers set against it.
@@ -140,22 +140,22 @@ test("the new-session picker no longer creates or removes tasks", () => {
 });
 
 test("main ↓N shows only when behind, after the upstream distance and before the uncommitted count", () => {
-  const state = { branch: "t", upstream: [2, 0], changed: 1, on_default: false };
+  const state = { branch: "t", upstream: [2, 0], changed: 1, on_default: false, would_conflict: false, operation: null };
   assert.deepEqual(texts({ ...state, main_behind: 5 }), ["t", "↑2 ↓0", "main ↓5", "●1"]);
   assert.deepEqual(texts({ ...state, main_behind: null }), ["t", "↑2 ↓0", "●1"]);
   assert.equal(gitTokens({ ...state, main_behind: 5 })[2].title, "5 commits behind origin's default branch");
 });
 
 test("main ↓N is marked, and says why in words, when rebasing onto it would conflict", () => {
-  const state = { branch: "t", upstream: [2, 0], changed: 0, on_default: false, main_behind: 5 };
-  assert.equal(gitTokens(state)[2].bad, undefined);
+  const state = { branch: "t", upstream: [2, 0], changed: 0, on_default: false, would_conflict: false, operation: null, main_behind: 5 };
+  assert.equal(gitTokens(state)[2].bad, false);
   const token = gitTokens({ ...state, would_conflict: true })[2];
   assert.equal(token.bad, true);
   assert.match(token.title, /rebasing onto it would conflict/);
 });
 
 test("on the default branch the distance shows once, as the upstream distance", () => {
-  const main = { branch: "main", upstream: [0, 3], changed: 0, main_behind: 3, on_default: true };
+  const main = { branch: "main", upstream: [0, 3], changed: 0, main_behind: 3, on_default: true, would_conflict: false, operation: null };
   assert.deepEqual(texts(main), ["main", "↑0 ↓3"]);
 });
 

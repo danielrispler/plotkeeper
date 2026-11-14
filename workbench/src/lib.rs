@@ -71,8 +71,8 @@ pub fn places(repo: &Path) -> Result<Places, String> {
 
 /// A place's git state (#26, #29): its branch, `None` at a detached `HEAD`; its distance from its
 /// upstream, commits ahead and behind, `None` with no upstream (never pushed, or detached); and how
-/// many files `git status` lists as changed. Later tickets add main distance and the operation in
-/// progress here.
+/// many files `git status` lists as changed; how far it is behind `origin`'s default branch and
+/// whether a rebase onto it would conflict; and the operation in progress.
 #[derive(Debug, PartialEq, Serialize)]
 pub struct GitState {
     pub branch: Option<String>,
@@ -120,14 +120,15 @@ pub fn git_state(repo: &Path, path: &str) -> Result<GitState, String> {
     .ok();
     let on_default =
         matches!((&branch, &default), (Some(b), Some(d)) if d.strip_prefix("origin/") == Some(b));
-    let would_conflict = match (&default, on_default) {
-        (Some(d), false) => would_conflict(dir, d),
-        _ => false,
-    };
     let main_behind = default
+        .as_ref()
         .and_then(|d| git(dir, &["rev-list", "--count", &format!("HEAD..{d}")]).ok())
         .and_then(|n| n.parse().ok())
         .filter(|n| *n > 0);
+    let would_conflict = match (&default, on_default, main_behind) {
+        (Some(d), false, Some(_)) => would_conflict(dir, d),
+        _ => false,
+    };
     Ok(GitState {
         branch,
         upstream,
@@ -174,11 +175,9 @@ fn would_conflict(dir: &Path, default: &str) -> bool {
     {
         return c.conflicts;
     }
-    // A conflict exits 1 with its report on stdout and nothing on stderr; a failure has a message.
-    let conflicts = matches!(
-        git(dir, &["merge-tree", "--write-tree", "--quiet", &head, &tip]),
-        Err(message) if message.is_empty()
-    );
+    // Exit status 1 is a conflict; any other failure is not a prediction.
+    let conflicts = run(dir, &["merge-tree", "--write-tree", "--quiet", &head, &tip])
+        .is_ok_and(|output| output.status.code() == Some(1));
     let runs = checked.get(&key).map_or(0, |c| c.runs) + 1;
     checked.insert(
         key,
@@ -576,18 +575,23 @@ pub fn delete_branch_merged_at(repo: &Path, branch: &str, heads: &[String]) -> R
 
 /// Runs `git` in `dir` and returns its output, or git's own error message.
 fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
+    let output = run(dir, args)?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().into());
+    }
+    // Only the end: a status line may start with a space.
+    Ok(String::from_utf8_lossy(&output.stdout).trim_end().into())
+}
+
+/// Runs `git` in `dir` and returns its output whatever its exit status, for a caller that reads the status.
+fn run(dir: &Path, args: &[&str]) -> Result<std::process::Output, String> {
     // No optional locks: a read never holds `index.lock` against an agent's commit (#27).
-    let output = Command::new("git")
+    Command::new("git")
         .arg("--no-optional-locks")
         // A fetch that wants a password fails, rather than waiting on a prompt nobody sees.
         .env("GIT_TERMINAL_PROMPT", "0")
         .args(args)
         .current_dir(dir)
         .output()
-        .map_err(|e| format!("git {}: {e}", args[0]))?;
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().into());
-    }
-    // Only the end: a status line may start with a space.
-    Ok(String::from_utf8_lossy(&output.stdout).trim_end().into())
+        .map_err(|e| format!("git {}: {e}", args[0]))
 }

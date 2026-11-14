@@ -1,8 +1,9 @@
-// Places (danielrispler/Falinks#576; danielrispler/Falinks#565, decision 6): the home of tasks, a folded section at the bottom of the list. One
-// row per place, the main checkout and each task, with its git tokens (branch, upstream distance,
-// uncommitted files; the same as the Git line's, #29) and how many sessions work in it; the sessions themselves stay
-// in the list. The Git line in the top bar shows the tokens of the selected session's place. Clicking a place offers a new session there and, for a task, Remove, with the loss
-// check of a session's Delete. Creating a task is here too, not in the new-session picker.
+// Places (danielrispler/Falinks#576; danielrispler/Falinks#565, decision 6): the home of tasks, a
+// folded section at the bottom of the list. One row per place, the main checkout and each task, with
+// its git tokens (the same as the Git line's, #26) and how many sessions work in it; the sessions
+// themselves stay in the list. The Git line in the top bar shows the tokens of the selected
+// session's place. Clicking a place offers a new session there and, for a task, Remove, with the
+// loss check of a session's Delete. Creating a task is here too, not in the new-session picker.
 
 import { element, invoke, patch, pressable, text } from "./dom.js";
 import { startClaude } from "./panes.js";
@@ -17,8 +18,10 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 export type Token = { text: string; title: string; bad?: boolean };
 
 // A place's git tokens, left to right, each hidden when it says nothing (#26): its branch or
-// "detached", the upstream distance "↑2 ↓1" or "not pushed", "main ↓5" when behind origin's default branch (not on it, where the upstream distance is the same), and "●3" uncommitted files. The hover
-// title says each in words. The one function for the Git line and for Places rows.
+// "detached", the upstream distance "↑2 ↓1" or "not pushed", "main ↓5" when behind origin's default
+// branch (not on it, where the upstream distance is the same), "●3" uncommitted files, and "⚠" with
+// an operation in progress. The hover title says each in words. The one function for the Git line
+// and for Places rows.
 export function gitTokens(state: GitState | null): Token[] {
   if (!state) return [];
   const tokens: Token[] = [
@@ -37,7 +40,7 @@ export function gitTokens(state: GitState | null): Token[] {
     tokens.push({
       text: `main ↓${state.main_behind}`,
       title: state.would_conflict ? `${behind}; rebasing onto it would conflict` : behind,
-      ...(state.would_conflict && { bad: true }),
+      bad: state.would_conflict,
     });
   }
   if (state.changed) tokens.push({ text: `●${state.changed}`, title: plural(state.changed, "uncommitted file") });
@@ -47,6 +50,9 @@ export function gitTokens(state: GitState | null): Token[] {
   }
   return tokens;
 }
+
+// Every place, the main checkout first.
+const allPlaces = ({ main, tasks }: Places): Place[] => [main, ...tasks];
 
 // The place a session in `cwd` works in: the deepest one its folder is in, so a session in a task
 // is not counted for the main checkout around it too.
@@ -58,8 +64,8 @@ const placeOf = (all: Place[], cwd: string): Place | undefined =>
 export type PlaceRow = { place: Place; name: string; facts: string; actions: string[] };
 
 // The rows: the main checkout, then the tasks, each with its tokens and session count.
-export function placeRows({ main, tasks }: Places, states: (GitState | null)[], sessions: Pick<Session, "cwd">[]): PlaceRow[] {
-  const all = [main, ...tasks];
+export function placeRows(found: Places, states: (GitState | null)[], sessions: Pick<Session, "cwd">[]): PlaceRow[] {
+  const all = allPlaces(found);
   const working = all.map(() => 0);
   for (const { cwd } of sessions) {
     const place = placeOf(all, cwd);
@@ -140,12 +146,12 @@ function drawLine() {
   line.replaceChildren(text("span", name ?? "", "git-place"), ...tokens.map((token) => Object.assign(text("span", token.text, token.bad ? "git-bad" : ""), { title: token.title })));
 }
 
-const shownPlace = ({ main, tasks }: Places) => placeOf([main, ...tasks], studio.selection?.session.cwd ?? main.path) ?? main;
+const shownPlace = (places: Places) => placeOf(allPlaces(places), studio.selection?.session.cwd ?? places.main.path) ?? places.main;
 
 function draw() {
   if (!read) return;
   drawLine();
-  const all = [read.main, ...read.tasks];
+  const all = allPlaces(read);
   const rows = placeRows(read, all.map(({ path }) => states.get(path) ?? null), studio.listed);
   element("places-title").textContent = `Places · ${rows.length}`;
   // Patched, so the new task's field keeps its text and focus as the list updates.
@@ -175,7 +181,7 @@ function touch(path: string) {
 function touchShown() {
   if (!read) return;
   const open = (element("places") as HTMLDetailsElement).open;
-  for (const place of open ? [read.main, ...read.tasks] : [shownPlace(read)]) touch(place.path);
+  for (const place of open ? allPlaces(read) : [shownPlace(read)]) touch(place.path);
 }
 
 // Reads the places from git. At most one read at a time and, unless `now`, one per 10 s, as the list
@@ -210,7 +216,7 @@ export function showPlaces() {
   draw();
   readPlaces();
   if (!read) return;
-  const all = [read.main, ...read.tasks];
+  const all = allPlaces(read);
   const working = new Set(studio.listed.map(({ cwd }) => placeOf(all, cwd)?.path));
   for (const place of all) if (working.has(place.path)) touch(place.path);
   touchShown();
@@ -247,13 +253,15 @@ export async function fetchNow() {
   } finally {
     fetching = false;
   }
-  if (read) for (const place of [read.main, ...read.tasks]) touch(place.path);
+  if (read) for (const place of allPlaces(read)) touch(place.path);
   draw();
 }
 
-// While the window is focused, every shown place is read every 5 s and the repository is fetched
+// The repository is fetched once as watching starts, so the first distances are not stale. Then,
+// while the window is focused, every shown place is read every 5 s and the repository is fetched
 // every 5 minutes; started by `main.ts`, not on import.
 export function watchPlaces() {
+  void fetchNow();
   setInterval(() => document.hasFocus() && touchShown(), 5000);
   setInterval(() => document.hasFocus() && void fetchNow(), 5 * 60_000);
 }
