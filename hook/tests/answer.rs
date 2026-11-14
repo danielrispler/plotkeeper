@@ -14,6 +14,12 @@ use studio_hook::answer;
 
 const SESSION: &str = "s-1";
 
+/// How long a hook waits for an answer in a test that answers it. Long, so a test that has the hook
+/// return "at once" can tell that from waiting out the timeout however slowly a loaded machine
+/// starts a process: it checks the hook came back in under `PROMPTLY`, half of it.
+const WAIT_MS: u64 = 60_000;
+const PROMPTLY: Duration = Duration::from_millis(WAIT_MS / 2);
+
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -32,9 +38,16 @@ fn data(home: &Path) -> PathBuf {
     studio_hook::event_log(home).parent().unwrap().to_owned()
 }
 
-/// The studio watches `session`: its pid and a heartbeat `age_ms` old.
+/// The studio watches `session`: its pid and a heartbeat `age_ms` old. An age of 0 is a heartbeat
+/// that stays fresh for the whole test, however slowly a loaded machine runs it: a test can take
+/// longer than the staleness limit, and it is not testing that limit.
 fn watch(home: &Path, session: &str, pid: u32, age_ms: u64) {
-    let watching = json!({ "session_id": session, "pid": pid, "heartbeat_ms": now_ms() - age_ms });
+    let heartbeat = if age_ms == 0 {
+        now_ms() + 600_000
+    } else {
+        now_ms() - age_ms
+    };
+    let watching = json!({ "session_id": session, "pid": pid, "heartbeat_ms": heartbeat });
     answer::write_private(&answer::watching_file(&data(home)), &watching).unwrap();
 }
 
@@ -92,7 +105,7 @@ fn answered(name: &str, payload: &Value, answer: Value) -> String {
     let home = scratch(name);
     watch(&home, SESSION, std::process::id(), 0);
     let since = Instant::now();
-    let child = start(&home, 10_000, payload);
+    let child = start(&home, WAIT_MS, payload);
     let mut answer = answer;
     answer["nonce"] = request(&home)["nonce"].clone();
     reply(&home, answer);
@@ -128,7 +141,7 @@ fn finish(child: Child, since: Instant) -> (String, Duration) {
 /// The request the hook leaves for the studio, once it appears.
 fn request(home: &Path) -> Value {
     let path = answer::ask_file(&data(home), SESSION);
-    let until = Instant::now() + Duration::from_secs(5);
+    let until = Instant::now() + PROMPTLY;
     while Instant::now() < until {
         if let Ok(text) = fs::read_to_string(&path) {
             assert_eq!(
@@ -151,7 +164,7 @@ fn an_answer_allows_the_call_with_the_questions_and_each_chosen_label() {
     let home = scratch("answer");
     watch(&home, SESSION, std::process::id(), 0);
     let since = Instant::now();
-    let child = start(&home, 10_000, &asked());
+    let child = start(&home, WAIT_MS, &asked());
     let ask = request(&home);
     assert_eq!(ask["tool_input"], asked()["tool_input"]);
     let answers = json!({ "Which framework?": "React", "Which checks?": ["Lint", "Tests"] });
@@ -229,14 +242,14 @@ fn a_card_answer_goes_in_the_event_log_and_a_terminal_one_does_not() {
     let log = studio_hook::event_log(&home);
     for payload in [permission(), planned(), asked()] {
         let since = Instant::now();
-        let child = start(&home, 10_000, &payload);
+        let child = start(&home, WAIT_MS, &payload);
         reply(&home, json!({ "nonce": request(&home)["nonce"] }));
         finish(child, since);
     }
     assert!(!log.exists(), "a terminal answer was logged");
 
     let since = Instant::now();
-    let child = start(&home, 10_000, &permission());
+    let child = start(&home, WAIT_MS, &permission());
     let nonce = request(&home)["nonce"].clone();
     reply(&home, json!({ "nonce": nonce, "decision": "deny" }));
     finish(child, since);
@@ -279,12 +292,9 @@ fn nobody_watching_or_a_stale_watching_file_returns_at_once_with_no_decision() {
         }
         for (kind, payload, _) in kinds() {
             let since = Instant::now();
-            let (out, took) = finish(start(&home, 10_000, &payload), since);
+            let (out, took) = finish(start(&home, WAIT_MS, &payload), since);
             assert_eq!(out, "", "{kind}, {case}");
-            assert!(
-                took < Duration::from_secs(2),
-                "{kind}, {case}: took {took:?}"
-            );
+            assert!(took < PROMPTLY, "{kind}, {case}: took {took:?}");
             let ask = answer::ask_file(&data(&home), SESSION);
             assert!(!ask.exists(), "{kind}, {case}");
         }
@@ -306,14 +316,14 @@ fn a_timeout_or_answer_in_the_terminal_returns_no_decision() {
         );
 
         let since = Instant::now();
-        let child = start(&home, 10_000, &payload);
+        let child = start(&home, WAIT_MS, &payload);
         let ask = request(&home);
         assert_eq!(ask["hook_event_name"], payload["hook_event_name"], "{kind}");
         assert_eq!(ask["tool_input"], payload["tool_input"], "{kind}");
         reply(&home, json!({ "nonce": ask["nonce"] }));
         let (out, took) = finish(child, since);
         assert_eq!(out, "", "{kind}");
-        assert!(took < Duration::from_secs(5), "{kind}");
+        assert!(took < PROMPTLY, "{kind}");
     }
     let _ = fs::remove_dir_all(&home);
 }
@@ -393,9 +403,9 @@ fn other_calls_pass_through_at_once() {
     notice["hook_event_name"] = "Notification".into();
     for payload in [bash, planning, notice] {
         let since = Instant::now();
-        let (out, took) = finish(start(&home, 10_000, &payload), since);
+        let (out, took) = finish(start(&home, WAIT_MS, &payload), since);
         assert_eq!(out, "", "{payload}");
-        assert!(took < Duration::from_secs(2), "{payload}");
+        assert!(took < PROMPTLY, "{payload}");
     }
     let _ = fs::remove_dir_all(&home);
 }
