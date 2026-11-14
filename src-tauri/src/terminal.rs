@@ -118,10 +118,17 @@ pub fn places() -> Result<studio_workbench::Places, String> {
     studio_workbench::places(Path::new(&repo()))
 }
 
-/// Places' counts for the place at `path` (danielrispler/Falinks#576): ahead and behind its base, and changed files.
+/// The git state of the place at `path` (#26): branch, upstream distance, changed files, distance
+/// from origin's default branch, and the operation in progress.
 #[tauri::command(async)]
-pub fn place_counts(path: String) -> Result<studio_workbench::Counts, String> {
-    studio_workbench::counts(Path::new(&repo()), &path)
+pub fn place_git_state(path: String) -> Result<studio_workbench::GitState, String> {
+    studio_workbench::git_state(Path::new(&repo()), &path)
+}
+
+/// Fetches the configured repository once (#33); the window reads every place's state again after.
+#[tauri::command(async)]
+pub fn fetch_repository() -> Result<(), String> {
+    studio_workbench::fetch(Path::new(&repo()))
 }
 
 /// Creates task `name` in the configured repository (danielrispler/Falinks#468) and returns its place.

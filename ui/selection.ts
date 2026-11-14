@@ -7,6 +7,7 @@ import { showCards } from "./cards.js";
 import { invoke } from "./dom.js";
 import { showSessions } from "./list.js";
 import { showSession } from "./panes.js";
+import { showPlaces } from "./places.js";
 import { studio } from "./state.js";
 import { showView } from "./story.js";
 import { showToast } from "./toast.js";
@@ -71,6 +72,7 @@ async function catchUp() {
 export function show(selected: Selection | null) {
   studio.selection = selected;
   showSessions(studio.listed);
+  showPlaces();
   showToast();
   showView(selected);
   showSession(selected?.session ?? null);

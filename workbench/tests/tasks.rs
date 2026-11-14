@@ -3,8 +3,8 @@
 
 use std::{path::Path, process::Command};
 use studio_workbench::{
-    Counts, Losses, Place, counts, create_named_task, create_task, delete_branch_merged_at,
-    delete_merged_branch, places, remove_task,
+    GitState, Losses, Place, create_named_task, create_task, delete_branch_merged_at,
+    delete_merged_branch, git_state, places, remove_task,
 };
 
 /// Runs `git` in `dir`, away from Daniel's own git config, and returns its trimmed output.
@@ -235,16 +235,14 @@ fn a_squash_merged_branch_goes_only_at_its_pull_requests_head() {
     assert!(branches.is_empty(), "{branches}");
 }
 
-/// Places' counts (danielrispler/Falinks#576, after danielrispler/Falinks#559): a task against `origin`'s default branch, the main checkout
-/// against its upstream, and the files `git status` lists.
+/// A task's branch has no upstream until pushed; the main checkout's is `origin/trunk`; both count
+/// the files `git status` lists (#29, after danielrispler/Falinks#576).
 #[test]
-fn a_place_counts_commits_ahead_and_behind_its_base_and_its_changed_files() {
+fn a_place_reads_its_upstream_distance_and_its_changed_files() {
     let repos = repos();
     let busy = create_task(&repos.main, "busy").unwrap();
-    let clean = create_task(&repos.main, "clean").unwrap();
     let path = Path::new(&busy.path);
     git(path, &["commit", "-q", "--allow-empty", "-m", "One"]);
-    git(path, &["commit", "-q", "--allow-empty", "-m", "Two"]);
     for file in ["a.txt", "b.txt", "c.txt"] {
         std::fs::write(path.join(file), "draft").unwrap();
     }
@@ -255,20 +253,33 @@ fn a_place_counts_commits_ahead_and_behind_its_base_and_its_changed_files() {
     // The tasks' folder is not a change of the main checkout's.
     std::fs::write(repos.main.join(".git/info/exclude"), ".claude/\n").unwrap();
     let main = places(&repos.main).unwrap().main;
-    let counted = |ahead, behind, changed| {
-        Ok(Counts {
-            ahead_behind: Some((ahead, behind)),
+    let state = |branch: &str, upstream, changed, main_behind, on_default| {
+        Ok(GitState {
+            branch: Some(branch.into()),
+            upstream,
             changed,
+            operation: None,
+            main_behind,
+            on_default,
+            would_conflict: false,
         })
     };
 
-    assert_eq!(counts(&repos.main, &busy.path), counted(2, 1, 3));
-    assert_eq!(counts(&repos.main, &clean.path), counted(0, 1, 0));
+    // `busy` branched before the third commit reached `origin/trunk`, so it is one behind it.
+    assert_eq!(
+        git_state(&repos.main, &busy.path),
+        state("busy", None, 3, Some(1), false)
+    );
     // The main checkout's `trunk` is two behind `origin/trunk`, its upstream.
-    assert_eq!(counts(&repos.main, &main.path), counted(0, 2, 0));
-    let clean_path = Path::new(&clean.path);
-    git(clean_path, &["merge", "-q", "--ff-only", "origin/trunk"]);
-    assert_eq!(counts(&repos.main, &clean.path), counted(0, 0, 0));
+    assert_eq!(
+        git_state(&repos.main, &main.path),
+        state("trunk", Some((0, 2)), 0, Some(2), true)
+    );
+    git(path, &["push", "-q", "-u", "origin", "busy"]);
+    assert_eq!(
+        git_state(&repos.main, &busy.path),
+        state("busy", Some((0, 0)), 3, Some(1), false)
+    );
 }
 
 /// No code path forces git (danielrispler/Falinks#461, decision 9): the studio's own sources, the workbench, the shell
