@@ -428,7 +428,8 @@ fn spawn(
         })
         .map_err(|e| e.to_string())?;
     // Everything runs under a login shell, so the profile sets `PATH` even when the studio was started from the Dock
-    // with launchd's bare one.
+    // with launchd's bare one. It is not interactive, so zsh reads `~/.zprofile` and `~/.zshenv` but not `~/.zshrc`
+    // (#20): tools such as nvm's `node` and `npm` must be set up in the first two.
     let shell = std::env::var("SHELL").unwrap_or("/bin/zsh".into());
     let mut cmd = CommandBuilder::new(&shell);
     cmd.arg("-l");
