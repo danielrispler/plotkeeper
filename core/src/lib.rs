@@ -12,8 +12,13 @@ use std::{
     time::Duration,
 };
 
+mod claude;
+mod event;
 mod transcript;
 mod work;
+pub use claude::CAPABILITIES as CLAUDE_CAPABILITIES;
+pub use event::Capabilities;
+use event::{Event, Happened, Start, ToolKind};
 pub use transcript::{Context, Transcript};
 pub use work::{Estimate, MIN_HISTORY, Phase, PhaseStart, Work, range};
 
@@ -762,7 +767,6 @@ impl Session {
     /// when the signal tells none, and when it ended.
     fn ends(&self, event: &Event) -> Vec<(String, Option<String>, u64)> {
         let at = event.studio_received_ms;
-        let tool = event.tool_name.as_deref().unwrap_or_default();
         let mut ends: Vec<(String, Option<String>, u64)> = Vec::new();
         let mut end = |id: &str, status: Option<&str>, at| {
             ends.push((id.into(), status.map(Into::into), at));
@@ -772,37 +776,40 @@ impl Session {
             let call = call.to_string();
             agents.filter(move |a| a.spawn.as_ref().is_some_and(|(id, _)| *id == call))
         };
-        match event.hook_event_name.as_str() {
-            "SubagentStop" => event.agent_id.iter().for_each(|id| end(id, None, at)),
-            // A wake-up names the task it reports on, and how it ended (danielrispler/Falinks#370 note).
-            "UserPromptSubmit" => reported(&event.prompt).for_each(|(id, s)| end(id, Some(s), at)),
-            // A foreground spawn's response comes at its end.
-            "PostToolUse"
-                if tool == "Agent"
-                    && event.tool_response.status.as_deref() == Some("completed") =>
-            {
-                let child = event.tool_response.agent_id.iter();
-                child.for_each(|id| end(id, None, at));
+        for happened in &event.happened {
+            match happened {
+                Happened::SubagentEnd => event.agent_id.iter().for_each(|id| end(id, None, at)),
+                // A wake-up names the task it reports on, and how it ended (danielrispler/Falinks#370 note).
+                Happened::TasksReported(tasks) => {
+                    tasks.iter().for_each(|(id, s)| end(id, Some(s), at));
+                }
+                // A foreground spawn's response comes at its end.
+                Happened::SubagentSpawned(spawned) if spawned.finished => {
+                    end(&spawned.child, None, at);
+                }
+                Happened::ToolEnd {
+                    tool,
+                    id,
+                    failed: true,
+                } if tool.kind == ToolKind::Spawn => {
+                    let children = spawned_by(id);
+                    children.for_each(|a| end(&a.agent.id, Some("interrupted"), at));
+                }
+                // The running tasks that a turn's end lists: a child of the session's own agent
+                // that it no longer lists has ended, at its last event.
+                // shortcut: only the session's own children, since whether it lists their children is
+                // unseen; widen it if a recorded log shows it does.
+                Happened::TurnEnd { .. } if event.agent_id.is_none() => {
+                    if let Some(tasks) = event.background_tasks() {
+                        let listed = |id: &str| tasks.iter().any(|task| task == id);
+                        let children = self.agents.iter().filter(|a| a.parent == Parent::Session);
+                        let gone = children.filter(|a| !listed(&a.agent.id));
+                        gone.for_each(|a| end(&a.agent.id, None, a.agent.last_event_at));
+                    }
+                }
+                Happened::SessionEnd => self.agents.iter().for_each(|a| end(&a.agent.id, None, at)),
+                _ => {}
             }
-            "PostToolUseFailure" if tool == "Agent" => {
-                let children = spawned_by(&event.tool_use_id);
-                children.for_each(|a| end(&a.agent.id, Some("interrupted"), at));
-            }
-            // `background_tasks` lists only the running tasks, so a child of the session's own agent
-            // that it no longer lists has ended, at its last event.
-            // shortcut: only the session's own children, since whether it lists their children is
-            // unseen; widen it if a recorded log shows it does.
-            "Stop"
-                if event.agent_id.is_none()
-                    && let Some(tasks) = event.background_tasks.as_array() =>
-            {
-                let listed = |id: &str| tasks.iter().any(|task| task["id"] == id);
-                let children = self.agents.iter().filter(|a| a.parent == Parent::Session);
-                let gone = children.filter(|a| !listed(&a.agent.id));
-                gone.for_each(|a| end(&a.agent.id, None, a.agent.last_event_at));
-            }
-            "SessionEnd" => self.agents.iter().for_each(|a| end(&a.agent.id, None, at)),
-            _ => {}
         }
         // A turn that ends without its `Stop` ends the subagents it runs in the foreground: their
         // spawn calls are still open. A background spawn's call closes at its launch.
@@ -810,7 +817,7 @@ impl Session {
             let own = self
                 .running
                 .iter()
-                .filter(|c| c.agent.is_none() && c.tool == "Agent");
+                .filter(|c| c.agent.is_none() && c.kind == ToolKind::Spawn);
             let calls = own.filter_map(|c| c.id.as_deref());
             let children = calls.flat_map(spawned_by);
             children.for_each(|a| end(&a.agent.id, Some("interrupted"), at));
@@ -844,7 +851,7 @@ impl Session {
             let mut spawns = self.agents.iter().filter_map(|a| a.spawn.as_ref());
             spawns.any(|(id, _)| Some(id) == call.as_ref())
         };
-        let mut open = self.running.iter().filter(|c| c.tool == "Agent");
+        let mut open = self.running.iter().filter(|c| c.kind == ToolKind::Spawn);
         self.subagent(id).is_none()
             && !root.is_empty()
             && !open.any(|c| c.agent.as_deref() != Some(id) && !bound(&c.id))
@@ -858,7 +865,6 @@ impl Session {
     /// and every child event names its agent (`agent_id`).
     fn track_agents(&mut self, event: &Event, worktree_changed: bool, roots: &Roots) {
         let at = event.studio_received_ms;
-        let tool = event.tool_name.as_deref().unwrap_or_default();
         for (id, status, at) in self.ends(event) {
             self.agent(&id, at).end(status.as_deref(), at);
         }
@@ -875,7 +881,7 @@ impl Session {
                     let mut spawns = self.agents.iter().filter_map(|a| a.spawn.as_ref());
                     spawns.any(|(id, _)| Some(id) == call.as_ref())
                 };
-                let open = self.running.iter().filter(|c| c.tool == "Agent");
+                let open = self.running.iter().filter(|c| c.kind == ToolKind::Spawn);
                 let call = open
                     .filter(|c| c.agent.as_ref() != Some(id))
                     .find(|c| !bound(&c.id));
@@ -908,83 +914,80 @@ impl Session {
             // A changed file promotes a helper at that step: an `Edit` or `Write` that succeeded, or
             // a command that changed its worktree and either succeeded or ran and failed (danielrispler/Falinks#434,
             // decision 21).
-            let ran =
-                event.hook_event_name == "PostToolUse" || event.error.starts_with("Exit code");
-            let changed = matches!(tool, "Edit" | "Write")
-                && event.hook_event_name == "PostToolUse"
-                || tool == "Bash" && worktree_changed && ran;
-            match event.hook_event_name.as_str() {
-                // A step after its end means its parent continued it (`SendMessage`).
-                "PreToolUse" => {
-                    let step = Step::new(tool, &event.tool_input, &event.cwd);
-                    agent.agent.step(step, &event.tool_use_id, at);
-                    agent.status = Status::Running;
-                    agent.ended_at = None;
+            let kind = event.tool().map(|t| &t.kind);
+            let changed = kind == Some(&ToolKind::Edit) && event.tool_succeeds()
+                || kind == Some(&ToolKind::Command) && worktree_changed && event.ran();
+            for happened in &event.happened {
+                match happened {
+                    // A step after its end means its parent continued it (`SendMessage`).
+                    Happened::ToolStart { tool, id } => {
+                        let step = Step::new(&tool.name, &tool.input, &event.cwd);
+                        agent.agent.step(step, id, at);
+                        agent.status = Status::Running;
+                        agent.ended_at = None;
+                    }
+                    Happened::ToolEnd { id, .. } => {
+                        agent.agent.step_done(id, at);
+                        if changed {
+                            agent.kind = Kind::Worker;
+                        }
+                    }
+                    Happened::SubagentEnd => {
+                        let mut lines = event.reply().lines().map(str::trim);
+                        agent.result = lines.find(|line| !line.is_empty()).map(Into::into);
+                        agent.message = event.reply().into();
+                        agent.end(None, at);
+                    }
+                    _ => {}
                 }
-                "PostToolUse" | "PostToolUseFailure" => {
-                    agent.agent.step_done(&event.tool_use_id, at);
-                    if changed {
+            }
+        }
+        if let Some(task) = event.background_task() {
+            self.tasks.insert(task.into());
+        }
+        self.tasks
+            .extend(event.background_tasks().into_iter().flatten().cloned());
+        for happened in &event.happened {
+            match happened {
+                Happened::SubagentSpawned(spawned) => {
+                    let parent = event
+                        .agent_id
+                        .clone()
+                        .map_or(Parent::Session, Parent::Agent);
+                    let call = spawned.call.clone();
+                    for agent in &mut self.agents {
+                        if agent.spawn.as_ref().is_some_and(|(id, _)| *id == call) {
+                            agent.spawn = None;
+                        }
+                    }
+                    let agent = self.agent(&spawned.child, at);
+                    agent.spawn = Some((call, event.agent_id.clone()));
+                    agent.parent = parent;
+                    if let Some(name) = &spawned.name {
+                        agent.name.clone_from(name);
+                    }
+                    agent.prompt.clone_from(&spawned.prompt);
+                    if agent.agent_type.is_none() {
+                        agent.agent_type.clone_from(&spawned.agent_type);
+                    }
+                    if spawned.worktree {
                         agent.kind = Kind::Worker;
                     }
+                    // A foreground spawn's response comes at its end.
+                    if spawned.finished {
+                        agent.end(None, at);
+                    }
                 }
-                "SubagentStop" => {
-                    let mut lines = event.last_assistant_message.lines().map(str::trim);
-                    agent.result = lines.find(|line| !line.is_empty()).map(Into::into);
-                    agent.message = event.last_assistant_message.clone();
-                    agent.end(None, at);
+                // A wake-up's status overrides how another signal ended its task.
+                Happened::TasksReported(tasks) => {
+                    for (id, status) in tasks {
+                        if let Some(agent) = self.agents.iter_mut().find(|a| a.agent.id == *id) {
+                            agent.end(Some(status), at);
+                        }
+                    }
                 }
                 _ => {}
             }
-        }
-        if let Some(task) = event.tool_response.background_task_id.as_deref() {
-            self.tasks.insert(task.into());
-        }
-        let listed = event.background_tasks.as_array().into_iter().flatten();
-        let ids = listed.filter_map(|task| task["id"].as_str());
-        self.tasks.extend(ids.map(Into::into));
-        match event.hook_event_name.as_str() {
-            "PostToolUse"
-                if tool == "Agent"
-                    && let Some(child) = event.tool_response.agent_id.as_deref() =>
-            {
-                let parent = event
-                    .agent_id
-                    .clone()
-                    .map_or(Parent::Session, Parent::Agent);
-                let input = &event.tool_input;
-                let call = event.tool_use_id.clone();
-                for agent in &mut self.agents {
-                    if agent.spawn.as_ref().is_some_and(|(id, _)| *id == call) {
-                        agent.spawn = None;
-                    }
-                }
-                let agent = self.agent(child, at);
-                agent.spawn = Some((call, event.agent_id.clone()));
-                agent.parent = parent;
-                if let Some(description) = input["description"].as_str() {
-                    agent.name = description.into();
-                }
-                agent.prompt = input["prompt"].as_str().unwrap_or_default().into();
-                if agent.agent_type.is_none() {
-                    agent.agent_type = input["subagent_type"].as_str().map(Into::into);
-                }
-                if input["isolation"] == "worktree" {
-                    agent.kind = Kind::Worker;
-                }
-                // A foreground spawn's response comes at its end.
-                if event.tool_response.status.as_deref() == Some("completed") {
-                    agent.end(None, at);
-                }
-            }
-            // A wake-up's status overrides how another signal ended its task.
-            "UserPromptSubmit" => {
-                for (id, status) in reported(&event.prompt) {
-                    if let Some(agent) = self.agents.iter_mut().find(|a| a.agent.id == id) {
-                        agent.end(Some(status), at);
-                    }
-                }
-            }
-            _ => {}
         }
         // A subagent that ended asks Daniel nothing, and its calls never resolve.
         let ended = self.agents.iter().filter(|a| a.ended_at.is_some());
@@ -1002,13 +1005,12 @@ impl Session {
         let known = self.agents.iter().map(|a| &a.agent.id).chain(&self.tasks);
         let mut unrecognised = None;
         for id in known {
-            if prompt.contains(&format!("<agent-message from=\"{id}\""))
-                || prompt.contains(&format!("<task-id>{id}</task-id>"))
-            {
-                return Sender::WakeUp(id.clone());
-            }
-            if prompt.contains(&format!("=\"{id}\"")) || prompt.contains(&format!(">{id}</")) {
-                unrecognised.get_or_insert_with(|| id.clone());
+            match claude::names(prompt, id) {
+                claude::Names::WakeUp => return Sender::WakeUp(id.clone()),
+                claude::Names::Unrecognised => {
+                    unrecognised.get_or_insert_with(|| id.clone());
+                }
+                claude::Names::No => {}
             }
         }
         unrecognised.map_or(Sender::Daniel, Sender::Unrecognised)
@@ -1094,18 +1096,17 @@ impl Session {
     /// start, an end or a notice never starts one: in the day log they carry ids no turn ran under.
     /// An event with no prompt id starts none; a prompt then opens a wait by the old rule (decision 6).
     fn starts_turn(&self, event: &Event) -> bool {
-        let name = event.hook_event_name.as_str();
         let Some(id) = &event.prompt_id else {
             return false;
         };
         event.agent_id.is_none()
-            && !outside_turns(name)
-            && (self.turn.as_ref() != Some(id) || name == "UserPromptSubmit" && !self.in_turn())
+            && !event.outside_turns()
+            && (self.turn.as_ref() != Some(id) || event.prompt().is_some() && !self.in_turn())
     }
 
     /// Whether `event` opens a turn: it starts one by its prompt id, or it is a prompt outside one.
     fn opens_turn(&self, event: &Event) -> bool {
-        self.starts_turn(event) || event.hook_event_name == "UserPromptSubmit" && !self.in_turn()
+        self.starts_turn(event) || event.prompt().is_some() && !self.in_turn()
     }
 
     /// Puts it back in a turn, with no stopped line.
@@ -1117,14 +1118,9 @@ impl Session {
     /// Whether `event` ends its turn, keyed by a prompt id, without a `Stop` (danielrispler/Falinks#434, decision 5): the
     /// next turn starts, or Claude Code says the agent waits for input. Esc fires no `Stop`.
     fn ends_turn_early(&self, event: &Event) -> bool {
-        let idle = event.agent_id.is_none()
-            && event.hook_event_name == "Notification"
-            && event.notification_type == "idle_prompt";
+        let idle = event.agent_id.is_none() && event.has(|h| matches!(h, Happened::IdlePrompt));
         let keyed = self.turn.is_some();
-        keyed
-            && self.in_turn()
-            && event.hook_event_name != "Stop"
-            && (idle || self.starts_turn(event))
+        keyed && self.in_turn() && !event.turn_ends() && (idle || self.starts_turn(event))
     }
 
     /// Takes `prompt` as a prompt of its turn; `opens` when it opened the turn. The turn's first
@@ -1221,9 +1217,10 @@ impl Session {
     /// request for input with no agent names none: it takes every such call of the agents still
     /// running. With none, its call's `PreToolUse` may still land (the hooks are async); otherwise
     /// it lasts until its turn ends.
-    fn block(&mut self, tool: String, input: Value, agent: Option<String>, at: u64) {
-        let named = agent.is_some() || !matches!(tool.as_str(), "Notification" | "Elicitation");
+    fn block(&mut self, cause: Cause, tool: String, input: Value, agent: Option<String>, at: u64) {
+        let named = agent.is_some() || cause == Cause::Call;
         let mut block = Block {
+            cause,
             tool,
             input,
             agent,
@@ -1263,19 +1260,12 @@ impl Session {
     }
 }
 
-/// Tools that ask Daniel in any permission mode, before any `PermissionRequest`.
-const ASKING_TOOLS: [&str; 2] = ["AskUserQuestion", "ExitPlanMode"];
-
-/// Whether hook event `name` is a start, an end or a notice: one that never starts a turn or
-/// touches a worktree, since in the day log they carry ids no turn ran under.
-fn outside_turns(name: &str) -> bool {
-    matches!(name, "SessionStart" | "SessionEnd" | "Notification")
-}
-
 /// What blocks a session on Daniel, so that it needs you (danielrispler/Falinks#434, decisions 24 to 26): what asks,
 /// and the calls it holds.
 #[derive(Clone, Debug, PartialEq)]
 struct Block {
+    cause: Cause,
+    /// The tool it asks for, when its cause is a call.
     tool: String,
     input: Value,
     /// The agent that asks: a subagent, or `None` for the session's own agent or a notice that names
@@ -1291,15 +1281,26 @@ struct Block {
     noticed: bool,
 }
 
+/// What a block waits on.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Cause {
+    /// A tool call that asks, or a permission request for one.
+    Call,
+    /// A notice that a permission waits, which names no call.
+    Notice,
+    /// An external server's request for input.
+    Elicitation,
+}
+
 impl Block {
     /// Whether it waits on tool call `call`: a permission request on the call it names, of its own
     /// agent; an MCP server's request for input on an MCP tool; a permission notice on any call
     /// but an open spawn, which asks for no permission while its subagent runs.
     fn takes(&self, call: &Call) -> bool {
-        let tool = match self.tool.as_str() {
-            "Elicitation" => call.tool.starts_with("mcp__"),
-            "Notification" => call.tool != "Agent",
-            tool => tool == call.tool && self.input == call.input,
+        let tool = match self.cause {
+            Cause::Elicitation => call.kind == ToolKind::External,
+            Cause::Notice => call.kind != ToolKind::Spawn,
+            Cause::Call => self.tool == call.tool && self.input == call.input,
         };
         tool && (!self.named || self.agent == call.agent)
     }
@@ -1663,6 +1664,7 @@ pub enum Purpose {
 struct Call {
     id: Option<String>,
     tool: String,
+    kind: ToolKind,
     input: Value,
     agent: Option<String>,
 }
@@ -1673,89 +1675,6 @@ struct Call {
 pub struct Asker {
     pub agent: Option<String>,
     pub since: u64,
-}
-
-/// The four fields of a tool response the core reads (danielrispler/Falinks#410, decision 20). The rest, file contents
-/// included, is skipped without building a JSON tree.
-#[derive(Default, Deserialize)]
-struct ToolResponse {
-    #[serde(rename = "backgroundTaskId")]
-    background_task_id: Option<String>,
-    /// On an `Agent` call's `PostToolUse`, the child's id and status.
-    #[serde(rename = "agentId")]
-    agent_id: Option<String>,
-    status: Option<String>,
-    #[serde(default)]
-    answers: Value,
-}
-
-/// A response that is not a JSON object yields none of the four, and keeps its event.
-fn tool_response<'de, D: serde::Deserializer<'de>>(d: D) -> Result<ToolResponse, D::Error> {
-    let raw = <&serde_json::value::RawValue>::deserialize(d)?;
-    Ok(serde_json::from_str(raw.get()).unwrap_or_default())
-}
-
-/// The fields of a hook payload the core reads; the rest of the line is ignored.
-#[derive(Deserialize)]
-struct Event {
-    session_id: String,
-    hook_event_name: String,
-    /// The subagent that sent the event, or `None` for the session's own agent.
-    agent_id: Option<String>,
-    agent_type: Option<String>,
-    #[serde(default)]
-    prompt: String,
-    /// On `Stop`, the session's running tasks.
-    #[serde(default)]
-    background_tasks: Value,
-    #[serde(default)]
-    cwd: String,
-    tool_name: Option<String>,
-    #[serde(default)]
-    tool_input: Value,
-    #[serde(default)]
-    tool_use_id: String,
-    #[serde(default, deserialize_with = "tool_response")]
-    tool_response: ToolResponse,
-    /// A failed call's error, which for a command that ran holds its exit code and output.
-    #[serde(default)]
-    error: String,
-    #[serde(default)]
-    last_assistant_message: String,
-    /// The session's transcript, whose lines carry Claude Code's version.
-    #[serde(default)]
-    transcript_path: String,
-    #[serde(default)]
-    notification_type: String,
-    /// Claude Code's id of the prompt the event belongs to, absent until the first user input.
-    prompt_id: Option<String>,
-    /// The start of a session: `startup`, `resume`, `clear` or `compact`.
-    #[serde(default)]
-    source: String,
-    /// The end of a session: `clear`, `logout`, `prompt_input_exit`, `other` and the like.
-    #[serde(default)]
-    reason: String,
-    #[serde(default)]
-    studio_received_ms: u64,
-    /// The session's permission mode, which `SessionStart` leaves out.
-    permission_mode: Option<String>,
-    /// On a tool's result, how long its call took.
-    duration_ms: Option<u64>,
-    /// The terminal the session runs in, which the hook records from `STUDIO_TERMINAL_ID`.
-    studio_terminal_id: Option<String>,
-    /// The trees the hook recorded at a turn's first touch of each worktree, by root (danielrispler/Falinks#486).
-    #[serde(default)]
-    studio_turn_start: BTreeMap<String, String>,
-    /// The trees the hook recorded at the end of the turn this event ends, by root.
-    #[serde(default)]
-    studio_turn_end: BTreeMap<String, String>,
-    /// On the studio's own `StudioRename` line, the session's new name; empty for none.
-    #[serde(default)]
-    studio_name: String,
-    /// On the answer hook's `StudioAnswer` line, Daniel's answer from the card: `answers` for a
-    /// question, `decision` for a plan or a permission.
-    #[serde(default)]
-    studio_answer: Value,
 }
 
 /// The event the shell appends to the log when Daniel renames a session (danielrispler/Falinks#469). The log is what a
@@ -1774,19 +1693,6 @@ pub const DELETE: &str = "StudioDelete";
 /// payload under this name, with `studio_asked_by` (the event that asked) and `studio_answer`. An
 /// answer in the terminal leaves none.
 pub const STUDIO_ANSWER: &str = "StudioAnswer";
-
-/// The tasks a wake-up reports on, each with how it ended: its `<task-id>` and its `<status>`
-/// (danielrispler/Falinks#370 note).
-fn reported(prompt: &str) -> impl Iterator<Item = (&str, &str)> {
-    let notices = prompt.split("<task-notification>").skip(1);
-    notices.filter_map(|notice| Some((tag(notice, "task-id")?, tag(notice, "status")?)))
-}
-
-/// The text of the first `<name>` element in `text`.
-fn tag<'a>(text: &'a str, name: &str) -> Option<&'a str> {
-    let (_, rest) = text.split_once(&format!("<{name}>"))?;
-    Some(rest.split_once(&format!("</{name}>"))?.0)
-}
 
 /// The tool input that says what a step works on: a command's `description`, which the agent sets
 /// on every Bash call (danielrispler/Falinks#461, decision 12), else its first line; a path relative to the session's
@@ -1901,13 +1807,11 @@ impl Studio {
     // shortcut: a Bash write through a path, without a `cd`, is not seen; parse commands for paths
     // if a live run shows cards missing such writes.
     fn touches(&self, event: &Event) -> Vec<String> {
-        let name = event.hook_event_name.as_str();
-        if event.agent_id.is_some() || outside_turns(name) {
+        if event.agent_id.is_some() || event.outside_turns() {
             return Vec::new();
         }
-        let tool = event.tool_name.as_deref();
-        let path = event.tool_input["file_path"].as_str();
-        let path = path.filter(|p| p.starts_with('/') && matches!(tool, Some("Edit" | "Write")));
+        let path = event.tool().and_then(|t| t.path.as_deref());
+        let path = path.filter(|p| p.starts_with('/'));
         let folder = path.and_then(|p| std::path::Path::new(p).parent()?.to_str());
         // With no lookup, a path under the event's folder is in its worktree.
         let below = |f: &&str| f.starts_with(&format!("{}/", event.cwd));
@@ -1930,10 +1834,15 @@ impl Studio {
     /// with its own key: none, one, or at a wake-up also its workers' ends (danielrispler/Falinks#369, decisions 6, 8, 10
     /// and 11).
     pub fn fingerprint_folders(&self, line: &str) -> Vec<Fingerprint> {
-        let event = serde_json::from_str::<Event>(line);
-        let event = event
-            .ok()
-            .filter(|e| ![RENAME, PROMPT_NAME, DELETE].contains(&e.hook_event_name.as_str()));
+        let event = claude::parse(line);
+        let event = event.ok().filter(|e| {
+            !e.has(|h| {
+                matches!(
+                    h,
+                    Happened::Renamed(_) | Happened::PromptNamed(_) | Happened::Deleted
+                )
+            })
+        });
         event.map_or_else(Vec::new, |mut event| {
             event.session_id = self.row(&event);
             let long_check = self.check_start(&event).is_some_and(|start| start.long());
@@ -1951,7 +1860,7 @@ impl Studio {
             return row.clone();
         }
         let fresh = !self.sessions.contains_key(&event.session_id);
-        if fresh && event.hook_event_name == "SessionStart" && event.source == "clear" {
+        if fresh && event.is_start_from(Start::Clear) {
             let same = |s: &&Session| match &event.studio_terminal_id {
                 Some(terminal) => s.terminal.as_ref() == Some(terminal),
                 None => s.terminal.is_none() && s.cwd == event.cwd,
@@ -1962,7 +1871,7 @@ impl Studio {
             }
         }
         // A fork mid-conversation goes on in the same `claude`, so on the same terminal (danielrispler/Falinks#562).
-        if fresh && event.hook_event_name == "SessionStart" && event.source == "fork" {
+        if fresh && event.is_start_from(Start::Fork) {
             let forked = self.sessions.values().filter(|s| {
                 s.terminal.is_some()
                     && s.terminal == event.studio_terminal_id
@@ -2029,8 +1938,7 @@ impl Studio {
     /// the last card of the worktree it is in, that worktree's, for the fallback card; a session's
     /// only in a turn. A helper's look after its Bash step comes beside such a fallback's.
     fn look(&self, event: &Event, long_check: bool) -> Vec<Fingerprint> {
-        let name = event.hook_event_name.as_str();
-        let step = matches!(name, "PostToolUse" | "PostToolUseFailure");
+        let step = event.tool_ends();
         let due = |since: &Since| step && event.studio_received_ms >= since.at + FALLBACK_MS;
         let session = self.sessions.get(&event.session_id);
         // A session's own fallback is on a prompt's steps only, not between its turns.
@@ -2047,7 +1955,7 @@ impl Studio {
             let blank = Session::default();
             let s = session.unwrap_or(&blank);
             let key = &event.session_id;
-            let ends = s.ends_turn_early(event) || name == "Stop";
+            let ends = s.ends_turn_early(event) || event.turn_ends();
             let opens = s.opens_turn(event);
             // A turn's end, and a due fallback, look at every worktree it touched (danielrispler/Falinks#434, decision
             // 10).
@@ -2071,7 +1979,7 @@ impl Studio {
             // Each worktree a turn touches first gets its base, which a turn's end just took. A
             // turn that starts after the last one ended first cards what subagents changed
             // between them (danielrispler/Falinks#434, decision 17).
-            if opens || s.in_turn() && name != "Stop" {
+            if opens || s.in_turn() && !event.turn_ends() {
                 let between = match opens && !s.in_turn() {
                     true => s.between_turns(event.studio_received_ms),
                     false => Vec::new(),
@@ -2108,12 +2016,12 @@ impl Studio {
             return look(id, &event.cwd, Purpose::Base).into_iter().collect();
         };
         let worker = |a: &Subagent| a.kind == Kind::Worker;
-        let bash = event.tool_name.as_deref() == Some("Bash");
+        let bash = event.tool().is_some_and(|t| t.kind == ToolKind::Command);
         // A helper's base right before its command, so only a change across it promotes it.
         // shortcut: the hooks are async, so a command that ends before the shell reads its
         // `PreToolUse` line is absorbed into this base and never promotes its helper; make the
         // hook synchronous if a live run shows missed promotions matter (danielrispler/Falinks#434, decision 23).
-        if bash && name == "PreToolUse" && agent.is_some_and(|a| !worker(a)) {
+        if bash && event.tool_starts() && agent.is_some_and(|a| !worker(a)) {
             return look(id, folder, Purpose::Base).into_iter().collect();
         }
         let bash = step && bash;
@@ -2194,7 +2102,7 @@ impl Studio {
         mut changes: BTreeMap<String, Change>,
         replay: bool,
     ) -> Vec<Output> {
-        let Ok(mut event) = serde_json::from_str::<Event>(line) else {
+        let Ok(mut event) = claude::parse(line) else {
             return Vec::new();
         };
         let own_id = event.session_id.clone();
@@ -2204,8 +2112,8 @@ impl Studio {
             self.rows.insert(own_id.clone(), event.session_id.clone());
         }
         // A resume or fork in a `claude` replaces the id it started under, which had no prompt (danielrispler/Falinks#562).
-        if event.hook_event_name == "SessionStart"
-            && ["resume", "fork"].contains(&event.source.as_str())
+        if event.session_starts()
+            && matches!(event.started_from(), Some(Start::Resume | Start::Fork))
             && event.studio_terminal_id.is_some()
         {
             let throwaway = |s: &&mut Session| {
@@ -2222,22 +2130,27 @@ impl Studio {
             }
         }
         // A rename names a known session and is none of its events.
-        if event.hook_event_name == RENAME {
+        if let Some(name) = event.happened.iter().find_map(|h| match h {
+            Happened::Renamed(name) => Some(name),
+            _ => None,
+        }) {
             if let Some(session) = self.sessions.get_mut(&event.session_id) {
-                session.name = Some(event.studio_name).filter(|name| !name.is_empty());
+                session.name = Some(name.clone()).filter(|name| !name.is_empty());
             }
             return Vec::new();
         }
-        if event.hook_event_name == PROMPT_NAME {
+        if let Some(name) = event.happened.iter().find_map(|h| match h {
+            Happened::PromptNamed(name) => Some(name),
+            _ => None,
+        }) {
             if let Some(session) = self.sessions.get_mut(&event.session_id) {
-                session.prompt_name =
-                    Some(event.studio_name.trim().to_owned()).filter(|n| !n.is_empty());
+                session.prompt_name = Some(name.trim().to_owned()).filter(|n| !n.is_empty());
                 session.name_after = None;
             }
             return Vec::new();
         }
         // So does a delete, which also drops the selection when it was this session.
-        if event.hook_event_name == DELETE {
+        if event.has(|h| matches!(h, Happened::Deleted)) {
             if let Some(session) = self.sessions.get_mut(&event.session_id) {
                 session.deleted = true;
             }
@@ -2254,7 +2167,8 @@ impl Studio {
         // The card a long check's start requests, which its line keeps.
         let mut check_card = None;
         let touches = self.touches(&event);
-        let typical = self.typical(event.tool_input["command"].as_str().unwrap_or_default());
+        let command = event.tool().and_then(|t| t.command.as_deref());
+        let typical = self.typical(command.unwrap_or_default());
         let roots = &self.roots;
         let session = self
             .sessions
@@ -2268,15 +2182,15 @@ impl Studio {
                 }
             });
         // A deleted session that starts again, by a resume, is back in the list; a late end is not.
-        session.deleted &= event.hook_event_name != "SessionStart";
+        session.deleted &= !event.session_starts();
         // The hooks are async, so the latest event can land before an earlier one.
         session.agent.last_event_at = session.agent.last_event_at.max(event.studio_received_ms);
         // Every event of a `claude` process carries its terminal, so a resume elsewhere moves it.
         session.terminal.clone_from(&event.studio_terminal_id);
-        if event.permission_mode.is_some() {
-            session.permission_mode.clone_from(&event.permission_mode);
+        if let Some(mode) = event.permission_mode() {
+            session.permission_mode = Some(mode.into());
             if session.started_mode.is_none() {
-                session.started_mode.clone_from(&event.permission_mode);
+                session.started_mode = Some(mode.into());
             }
         }
         // The session Daniel started in a new terminal takes the selection, so the rail follows its pane.
@@ -2289,10 +2203,10 @@ impl Studio {
         session.work.passes(event.studio_received_ms, working);
         let phases_before = session.work.phases.len();
         // The old id of a fork goes on sending late events, but the fork is what `--resume` takes.
-        if session.resume_id.is_empty() || event.hook_event_name == "SessionStart" {
+        if session.resume_id.is_empty() || event.session_starts() {
             session.resume_id = own_id.clone();
         }
-        if continues && event.source == "clear" {
+        if continues && event.started_from() == Some(Start::Clear) {
             session.cleared.push(event.studio_received_ms);
         }
         let failed_before = session.failed_workers();
@@ -2319,8 +2233,7 @@ impl Studio {
             let root = roots.of(&event.cwd);
             let last = root.rsplit('/').next().unwrap_or_default();
             session.identity.worktree = if last.is_empty() { &root } else { last }.into();
-            let command = event.tool_input["command"].as_str().unwrap_or_default();
-            if let Some(issue) = claimed(command) {
+            if let Some(issue) = claimed(command.unwrap_or_default()) {
                 session.identity.claim = Some(issue);
             }
             session.identity.named();
@@ -2351,10 +2264,8 @@ impl Studio {
         outputs.extend(promoted.map(|agent| Output::Promoted { agent }));
         let blocked_before = session.needs_you();
         let state_before = session.state;
-        let tool = event.tool_name.unwrap_or_default();
-        let id = Some(event.tool_use_id.clone()).filter(|id| !id.is_empty());
+        let id = Some(event.call_id().to_string()).filter(|id| !id.is_empty());
         let at = event.studio_received_ms;
-        let name = event.hook_event_name.as_str();
         // The turn this event ends, then the one it starts, with the prompts queued for it.
         if ends_early {
             let change = changes.remove(&session.agent.id);
@@ -2395,9 +2306,8 @@ impl Studio {
         }
         // Who changed what (danielrispler/Falinks#369, story 20): a subagent's edit in a worktree whose cards are another's.
         if let Some(agent) = &event.agent_id
-            && name == "PostToolUse"
-            && matches!(tool.as_str(), "Edit" | "Write")
-            && let Some(path) = event.tool_input["file_path"].as_str()
+            && event.tool_succeeds()
+            && let Some(path) = event.tool().and_then(|t| t.path.as_deref())
         {
             let (owner, root) = session
                 .subagent(agent)
@@ -2457,341 +2367,367 @@ impl Studio {
             session.agent.since.at = at;
             session.agent.since.by.clear();
         }
-        match name {
-            // A prompt opens a wait, also after an interrupt, which fires no `Stop`.
-            "UserPromptSubmit" => {
-                let sender = session.sender(&event.prompt);
-                let wake_up = !sender.is_daniels();
-                match &sender {
-                    // The row says which worker returned until the session's next step.
-                    Sender::WakeUp(task_id) => {
-                        let returned = format!("worker {} returned", session.agent_name(task_id));
-                        session.returned = Some(returned);
+        for happened in &event.happened {
+            match happened {
+                // A prompt opens a wait, also after an interrupt, which fires no `Stop`.
+                Happened::TurnStart { prompt } => {
+                    let sender = session.sender(prompt);
+                    let wake_up = !sender.is_daniels();
+                    match &sender {
+                        // The row says which worker returned until the session's next step.
+                        Sender::WakeUp(task_id) => {
+                            let returned =
+                                format!("worker {} returned", session.agent_name(task_id));
+                            session.returned = Some(returned);
+                        }
+                        Sender::Unrecognised(task_id) => outputs.push(Output::Unrecognised {
+                            session_id: event.session_id.clone(),
+                            task_id: task_id.clone(),
+                        }),
+                        Sender::Daniel => {}
                     }
-                    Sender::Unrecognised(task_id) => outputs.push(Output::Unrecognised {
-                        session_id: event.session_id.clone(),
-                        task_id: task_id.clone(),
-                    }),
-                    Sender::Daniel => {}
-                }
-                // Daniel's first prompt asks for a name; a bare slash command waits for its turn's end.
-                if sender.is_daniels() && !session.name_asked {
-                    session.name_asked = true;
-                    if is_bare_command(&event.prompt) {
-                        session.name_after = Some(event.prompt.clone());
-                    } else if !replay {
-                        outputs.push(Output::Name(NameRequest {
-                            session_id: session.agent.id.clone(),
-                            prompt: event.prompt.clone(),
-                            response: None,
-                        }));
-                    }
-                }
-                // A background check ends at the notification that names its task.
-                for (task, status) in reported(&event.prompt) {
-                    let running = session.checks.iter_mut().filter(|l| l.ended_at.is_none());
-                    let mut lines = running.filter(|l| l.task.as_deref() == Some(task));
-                    if let Some(line) = lines.next() {
-                        line.end(status != "completed", at, &mut self.durations);
-                        if !matches!(status, "completed" | "failed") {
-                            line.passed = None;
+                    // Daniel's first prompt asks for a name; a bare slash command waits for its turn's end.
+                    if sender.is_daniels() && !session.name_asked {
+                        session.name_asked = true;
+                        if is_bare_command(prompt) {
+                            session.name_after = Some(prompt.clone());
+                        } else if !replay {
+                            outputs.push(Output::Name(NameRequest {
+                                session_id: session.agent.id.clone(),
+                                prompt: prompt.clone(),
+                                response: None,
+                            }));
                         }
                     }
-                }
-                session.work.prompt(&event.prompt, at);
-                let prompt = Prompt {
-                    at,
-                    sender,
-                    text: event.prompt,
-                };
-                // A prompt with its running turn's id is the next turn's (danielrispler/Falinks#434, decision 4).
-                if event.prompt_id.is_some() && !starts && in_turn {
-                    session.queued.push(prompt);
-                } else {
-                    session.take_prompt(prompt, starts || !in_turn);
-                    // Daniel's prompt answers what asked him; a wake-up is not his, so it answers
-                    // nothing.
-                    if !wake_up {
-                        session.returned = None;
-                        session.unblock();
+                    // A background check ends at the notification that names its task.
+                    for (task, status) in event.reported() {
+                        let (task, status) = (task.as_str(), status.as_str());
+                        let running = session.checks.iter_mut().filter(|l| l.ended_at.is_none());
+                        let mut lines = running.filter(|l| l.task.as_deref() == Some(task));
+                        if let Some(line) = lines.next() {
+                            line.end(status != "completed", at, &mut self.durations);
+                            if !matches!(status, "completed" | "failed") {
+                                line.passed = None;
+                            }
+                        }
                     }
-                    session.reopen_turn();
-                }
-            }
-            "Stop" => {
-                // A reply that asks in text blocks nothing, so the turn ends on your turn unless a
-                // subagent's block outlasts it (danielrispler/Falinks#540).
-                let in_turn = session.in_turn();
-                let tasks = event.background_tasks.as_array();
-                session.background = tasks.is_some_and(|tasks| !tasks.is_empty());
-                let output = session.end_turn(changes.remove(&session.agent.id), at);
-                if replay && in_turn {
-                    self.ended
-                        .extend(session.backfill(&event.studio_turn_end, at));
-                }
-                if !session.versioned && !event.transcript_path.is_empty() {
-                    session.versioned = true;
-                    outputs.push(Output::Version {
-                        transcript_path: event.transcript_path,
-                    });
-                }
-                let reply = event.last_assistant_message.trim();
-                if !replay && wants_summary(reply, session.needs_you()) {
-                    // shortcut: the transcript may lag the `Stop` by one poll, so the final reply
-                    // is taken from the `Stop`; read the transcript first if earlier texts go missing.
-                    let mut turn = session.transcript.clone();
-                    if !reply.is_empty() && turn.responses.last().map(String::as_str) != Some(reply)
-                    {
-                        turn.responses.push(reply.into());
-                    }
-                    turn.ended = true;
-                    turn.summary = None;
-                    let daniels = session.prompts.iter().rfind(|p| p.sender.is_daniels());
-                    outputs.push(Output::Summary(SummaryRequest {
-                        session_id: session.agent.id.clone(),
-                        id: card_id(&event.session_id, at),
-                        prompt: daniels.map(|p| p.text.clone()).unwrap_or_default(),
-                        intentions: turn.intentions(),
-                        responses: turn.responses,
-                        card: match &output {
-                            Some(Output::Card(card)) => Some(card.id.clone()),
-                            _ => None,
-                        },
-                    }));
-                }
-                if let Some(prompt) = session.name_after.take()
-                    && !replay
-                {
-                    outputs.push(Output::Name(NameRequest {
-                        session_id: session.agent.id.clone(),
-                        prompt,
-                        response: Some(reply.into()),
-                    }));
-                }
-                let mut lines = event.last_assistant_message.lines().map(str::trim);
-                let stopped = Stopped {
-                    card: card_id(&event.session_id, at),
-                    requested: matches!(output, Some(Output::Card(_))),
-                    message: lines.find(|line| !line.is_empty()).map(Into::into),
-                };
-                if let Some(turn) = session.turns.last_mut().filter(|_| in_turn) {
-                    turn.id = Some(stopped.card.clone());
-                    turn.message.clone_from(&stopped.message);
-                    turn.reply = event.last_assistant_message.trim().into();
-                }
-                session.stopped = Some(stopped);
-                outputs.extend(output);
-            }
-            "SessionEnd" => {
-                session.unblock();
-                // Its subagents end with it.
-                session.blocks.clear();
-                session.running.clear();
-                if session.in_turn() {
-                    session.close_spans(at);
-                    if let Some(turn) = session.turns.last_mut().filter(|t| t.ended_at.is_none()) {
-                        turn.ended_at = Some(at);
-                    }
-                }
-                session.turn_ended = true;
-                session.ended = true;
-                session.clearing = event.reason == "clear";
-            }
-            // A resumed session keeps its id; a compaction keeps the turn it happens in.
-            "SessionStart" => {
-                session.ended = false;
-                session.clearing = false;
-                session.turn_ended |= event.source != "compact";
-            }
-            "PreToolUse" => {
-                if own {
-                    session.returned = None;
-                    let step = Step::new(&tool, &event.tool_input, &event.cwd);
-                    session.agent.step(step, &event.tool_use_id, at);
-                    session.work.call(&tool, &event.tool_input, at);
-                    // A check's line runs from its start (danielrispler/Falinks#461, decision 13).
-                    if let Some(start) = &start {
-                        let call = &event.tool_use_id;
-                        let mut line = CheckLine::new(&start.command, call, at, start.typical);
-                        line.card = check_card.take();
-                        line.turn = session.current_turn();
-                        session.checks.push(line);
-                    }
-                }
-                let call = Call {
-                    id,
-                    tool,
-                    input: event.tool_input,
-                    agent: event.agent_id.clone(),
-                };
-                if call.tool == "AskUserQuestion" {
-                    session.questions.push(Question {
-                        tool_use_id: event.tool_use_id.clone(),
-                        agent: call.agent.clone(),
-                        questions: call.input["questions"].clone(),
-                        answer: Answer::Open,
-                        turn: session.current_turn(),
-                    });
-                }
-                // The hooks are async, so a block on this call may have landed first.
-                // shortcut: a block whose call ended before the block landed stays until the turn
-                // ends; remember ended calls if auto-denied calls (danielrispler/Falinks#322) show it.
-                if let Some(id) = &call.id {
-                    let unbound = session.blocks.iter_mut();
-                    let unbound = unbound.filter(|w| w.calls.is_empty() && w.takes(&call));
-                    unbound.for_each(|w| w.calls.push((id.clone(), call.agent.clone())));
-                }
-                let asks = ASKING_TOOLS.contains(&call.tool.as_str());
-                let (tool, input, agent) =
-                    (call.tool.clone(), call.input.clone(), call.agent.clone());
-                session.running.push(call);
-                if asks {
-                    session.block(tool, input, agent, at);
-                }
-            }
-            // It has no `tool_use_id`, so it names its call by tool and input. With no agent, it is
-            // the session's own agent's.
-            "PermissionRequest" if !ASKING_TOOLS.contains(&tool.as_str()) => {
-                session.block(tool, event.tool_input, event.agent_id, at);
-            }
-            // A permission notice echoes a block, of the agent it names if any, that has not had its
-            // notice yet. A sandboxed command's network request, and a subagent's prompt, fire
-            // only the notice.
-            "Notification" if event.notification_type == "permission_prompt" => {
-                let agent = &event.agent_id;
-                let mut blocks = session.blocks.iter_mut();
-                let echoed = |w: &&mut Block| {
-                    !w.noticed && w.tool != "Notification" && (agent.is_none() || w.agent == *agent)
-                };
-                match blocks.find(echoed) {
-                    Some(block) => block.noticed = true,
-                    None => session.block("Notification".into(), Value::Null, event.agent_id, at),
-                }
-            }
-            "Elicitation" => session.block("Elicitation".into(), Value::Null, event.agent_id, at),
-            // Daniel decided a plan or a permission from the studio card (danielrispler/Falinks#478): it waits on him no
-            // more, though its result comes only when the call ends, or for a denial maybe never. A
-            // question's result carries its answer, so its block waits for it.
-            STUDIO_ANSWER if event.studio_answer.get("decision").is_some() => {
-                let input = &event.tool_input;
-                let decided =
-                    |w: &Block| w.tool == tool && w.input == *input && w.agent == event.agent_id;
-                if let Some(block) = session.blocks.iter().find(|w| decided(w)) {
-                    let call = block.calls.first().map(|(call, _)| call.clone());
-                    session.decisions.push(Decision {
-                        call: call.unwrap_or(event.tool_use_id),
-                        agent: block.agent.clone(),
-                        tool: tool.clone(),
-                        input: block.input.clone(),
-                        answer: event.studio_answer["decision"].clone(),
+                    session.work.prompt(prompt, at);
+                    let prompt = Prompt {
                         at,
-                        source: Source::Card,
-                    });
-                }
-                session.blocks.retain(|w| !decided(w));
-            }
-            // A question answered on the card: its result, which carries the answer, is the card's.
-            STUDIO_ANSWER => {
-                session.carded.insert(event.tool_use_id);
-            }
-            "PostToolUse" | "PostToolUseFailure" => {
-                session.running.retain(|c| c.id != id);
-                let failed = event.hook_event_name == "PostToolUseFailure";
-                // A plan or a permission that still waited on Daniel was decided in the terminal:
-                // allowed if its call went on, denied if Daniel rejected it.
-                // shortcut: a call that failed for another reason, such as an Edit whose text was
-                // not found, records no decision; read its error if that loses real ones.
-                let held = session.blocks.iter().find(|w| {
-                    w.tool == tool && w.calls.iter().any(|(call, _)| Some(call) == id.as_ref())
-                });
-                let answer = match failed {
-                    false => Some("allow"),
-                    true if event.error.contains("doesn't want to proceed") => Some("deny"),
-                    true => None,
-                };
-                if let (Some(block), Some(answer), Some(call)) = (held, answer, &id)
-                    && tool != "AskUserQuestion"
-                {
-                    session.decisions.push(Decision {
-                        call: call.clone(),
-                        agent: block.agent.clone(),
-                        tool: tool.clone(),
-                        input: block.input.clone(),
-                        answer: answer.into(),
-                        at,
-                        source: Source::Terminal,
-                    });
-                }
-                session.resolve(|(call, _)| Some(call) == id.as_ref());
-                let input = &event.tool_input;
-                // The hooks are async, so an answer that lands after its turn's `Stop` still counts.
-                let mut asked = session.questions.iter_mut();
-                if !failed
-                    && let Some(question) = asked.find(|q| q.tool_use_id == event.tool_use_id)
-                {
-                    // Only an object of strings is kept, so the pane can read it (danielrispler/Falinks#434, decision 42).
-                    let answers = &event.tool_response.answers;
-                    let strings = answers
-                        .as_object()
-                        .is_some_and(|a| a.values().all(Value::is_string));
-                    question.answer = match strings {
-                        true => Answer::Answered(answers.clone()),
-                        false => Answer::NotAnswered,
+                        sender,
+                        text: prompt.clone(),
                     };
-                    if strings {
-                        let card = session.carded.remove(&event.tool_use_id);
-                        session.decisions.push(Decision {
-                            call: event.tool_use_id.clone(),
-                            agent: question.agent.clone(),
-                            tool: tool.clone(),
-                            input: input.clone(),
-                            answer: answers.clone(),
-                            at,
-                            source: if card { Source::Card } else { Source::Terminal },
+                    // A prompt with its running turn's id is the next turn's (danielrispler/Falinks#434, decision 4).
+                    if event.prompt_id.is_some() && !starts && in_turn {
+                        session.queued.push(prompt);
+                    } else {
+                        session.take_prompt(prompt, starts || !in_turn);
+                        // Daniel's prompt answers what asked him; a wake-up is not his, so it answers
+                        // nothing.
+                        if !wake_up {
+                            session.returned = None;
+                            session.unblock();
+                        }
+                        session.reopen_turn();
+                    }
+                }
+                Happened::TurnEnd { background_pending } => {
+                    // A reply that asks in text blocks nothing, so the turn ends on your turn unless a
+                    // subagent's block outlasts it (danielrispler/Falinks#540).
+                    let in_turn = session.in_turn();
+                    session.background = *background_pending;
+                    let output = session.end_turn(changes.remove(&session.agent.id), at);
+                    if replay && in_turn {
+                        self.ended
+                            .extend(session.backfill(&event.studio_turn_end, at));
+                    }
+                    if !session.versioned && !event.transcript_path.is_empty() {
+                        session.versioned = true;
+                        outputs.push(Output::Version {
+                            transcript_path: event.transcript_path.clone(),
                         });
                     }
-                }
-                // A denied or interrupted call, or a failed Edit or Write, changed nothing: only a
-                // command that ran and failed has its exit code in its error.
-                let ran = !failed || event.error.starts_with("Exit code");
-                if own {
-                    session.agent.step_done(&event.tool_use_id, at);
-                }
-                // A check gets its line whether it passed or failed; one that did not run loses
-                // the line its start gave it. A child's checks are its own, so they add no line.
-                let command = input["command"].as_str().unwrap_or_default();
-                if own && tool == "Bash" && is_check(command) {
-                    let index = session
-                        .checks
-                        .iter()
-                        .position(|l| l.call == event.tool_use_id);
-                    let index = match index {
-                        _ if !ran => {
-                            session.checks.retain(|l| l.call != event.tool_use_id);
-                            None
+                    let reply = event.reply().trim();
+                    if !replay && wants_summary(reply, session.needs_you()) {
+                        // shortcut: the transcript may lag the `Stop` by one poll, so the final reply
+                        // is taken from the `Stop`; read the transcript first if earlier texts go missing.
+                        let mut turn = session.transcript.clone();
+                        if !reply.is_empty()
+                            && turn.responses.last().map(String::as_str) != Some(reply)
+                        {
+                            turn.responses.push(reply.into());
                         }
-                        Some(index) => Some(index),
-                        // The hooks are async, so its result can land before its start.
-                        None => {
-                            let start = at.saturating_sub(event.duration_ms.unwrap_or_default());
-                            let mut line =
-                                CheckLine::new(command, &event.tool_use_id, start, typical);
+                        turn.ended = true;
+                        turn.summary = None;
+                        let daniels = session.prompts.iter().rfind(|p| p.sender.is_daniels());
+                        outputs.push(Output::Summary(SummaryRequest {
+                            session_id: session.agent.id.clone(),
+                            id: card_id(&event.session_id, at),
+                            prompt: daniels.map(|p| p.text.clone()).unwrap_or_default(),
+                            intentions: turn.intentions(),
+                            responses: turn.responses,
+                            card: match &output {
+                                Some(Output::Card(card)) => Some(card.id.clone()),
+                                _ => None,
+                            },
+                        }));
+                    }
+                    if let Some(prompt) = session.name_after.take()
+                        && !replay
+                    {
+                        outputs.push(Output::Name(NameRequest {
+                            session_id: session.agent.id.clone(),
+                            prompt,
+                            response: Some(reply.into()),
+                        }));
+                    }
+                    let mut lines = event.reply().lines().map(str::trim);
+                    let stopped = Stopped {
+                        card: card_id(&event.session_id, at),
+                        requested: matches!(output, Some(Output::Card(_))),
+                        message: lines.find(|line| !line.is_empty()).map(Into::into),
+                    };
+                    if let Some(turn) = session.turns.last_mut().filter(|_| in_turn) {
+                        turn.id = Some(stopped.card.clone());
+                        turn.message.clone_from(&stopped.message);
+                        turn.reply = event.reply().trim().into();
+                    }
+                    session.stopped = Some(stopped);
+                    outputs.extend(output);
+                }
+                Happened::SessionEnd => {
+                    session.unblock();
+                    // Its subagents end with it.
+                    session.blocks.clear();
+                    session.running.clear();
+                    if session.in_turn() {
+                        session.close_spans(at);
+                        if let Some(turn) =
+                            session.turns.last_mut().filter(|t| t.ended_at.is_none())
+                        {
+                            turn.ended_at = Some(at);
+                        }
+                    }
+                    session.turn_ended = true;
+                    session.ended = true;
+                    session.clearing = event.has(|h| matches!(h, Happened::EndedByClear));
+                }
+                // A resumed session keeps its id; a compaction keeps the turn it happens in.
+                Happened::SessionStart => {
+                    session.ended = false;
+                    session.clearing = false;
+                    session.turn_ended |= event.started_from() != Some(Start::Compact);
+                }
+                Happened::ToolStart { tool, .. } => {
+                    if own {
+                        session.returned = None;
+                        let step = Step::new(&tool.name, &tool.input, &event.cwd);
+                        session.agent.step(step, event.call_id(), at);
+                        session.work.call(tool, at);
+                        // A check's line runs from its start (danielrispler/Falinks#461, decision 13).
+                        if let Some(start) = &start {
+                            let call = event.call_id();
+                            let mut line = CheckLine::new(&start.command, call, at, start.typical);
+                            line.card = check_card.take();
                             line.turn = session.current_turn();
                             session.checks.push(line);
-                            Some(session.checks.len() - 1)
                         }
+                    }
+                    let call = Call {
+                        id: id.clone(),
+                        tool: tool.name.clone(),
+                        kind: tool.kind.clone(),
+                        input: tool.input.clone(),
+                        agent: event.agent_id.clone(),
                     };
-                    let task = event.tool_response.background_task_id.clone();
-                    if let Some(line) = index.map(|i| &mut session.checks[i]) {
-                        // In the background it runs on until its notification.
-                        match task {
-                            Some(task) => line.task = Some(task),
-                            None => line.end(failed, at, &mut self.durations),
+                    if tool.kind == ToolKind::Question {
+                        session.questions.push(Question {
+                            tool_use_id: event.call_id().into(),
+                            agent: call.agent.clone(),
+                            questions: call.input["questions"].clone(),
+                            answer: Answer::Open,
+                            turn: session.current_turn(),
+                        });
+                    }
+                    // The hooks are async, so a block on this call may have landed first.
+                    // shortcut: a block whose call ended before the block landed stays until the turn
+                    // ends; remember ended calls if auto-denied calls (danielrispler/Falinks#322) show it.
+                    if let Some(id) = &call.id {
+                        let unbound = session.blocks.iter_mut();
+                        let unbound = unbound.filter(|w| w.calls.is_empty() && w.takes(&call));
+                        unbound.for_each(|w| w.calls.push((id.clone(), call.agent.clone())));
+                    }
+                    let asks = tool.asks();
+                    let (tool, input, agent) =
+                        (call.tool.clone(), call.input.clone(), call.agent.clone());
+                    session.running.push(call);
+                    if asks {
+                        session.block(Cause::Call, tool, input, agent, at);
+                    }
+                }
+                // It has no `tool_use_id`, so it names its call by tool and input. With no agent, it is
+                // the session's own agent's.
+                Happened::PermissionAsked { tool } if !tool.asks() => {
+                    let (name, input) = (tool.name.clone(), tool.input.clone());
+                    session.block(Cause::Call, name, input, event.agent_id.clone(), at);
+                }
+                // A permission notice echoes a block, of the agent it names if any, that has not had its
+                // notice yet. A sandboxed command's network request, and a subagent's prompt, fire
+                // only the notice.
+                Happened::PermissionNotice => {
+                    let agent = &event.agent_id;
+                    let mut blocks = session.blocks.iter_mut();
+                    let echoed = |w: &&mut Block| {
+                        !w.noticed
+                            && w.cause != Cause::Notice
+                            && (agent.is_none() || w.agent == *agent)
+                    };
+                    match blocks.find(echoed) {
+                        Some(block) => block.noticed = true,
+                        None => session.block(
+                            Cause::Notice,
+                            String::new(),
+                            Value::Null,
+                            agent.clone(),
+                            at,
+                        ),
+                    }
+                }
+                Happened::ElicitationAsked => {
+                    let agent = event.agent_id.clone();
+                    session.block(Cause::Elicitation, String::new(), Value::Null, agent, at);
+                }
+                // Daniel decided a plan or a permission from the studio card (danielrispler/Falinks#478): it waits on him no
+                // more, though its result comes only when the call ends, or for a denial maybe never. A
+                // question's result carries its answer, so its block waits for it.
+                Happened::Answered {
+                    tool,
+                    id: call_id,
+                    answer,
+                } if answer.get("decision").is_some() => {
+                    let input = &tool.input;
+                    let decided = |w: &Block| {
+                        w.tool == tool.name && w.input == *input && w.agent == event.agent_id
+                    };
+                    if let Some(block) = session.blocks.iter().find(|w| decided(w)) {
+                        let call = block.calls.first().map(|(call, _)| call.clone());
+                        session.decisions.push(Decision {
+                            call: call.unwrap_or(call_id.clone()),
+                            agent: block.agent.clone(),
+                            tool: tool.name.clone(),
+                            input: block.input.clone(),
+                            answer: answer["decision"].clone(),
+                            at,
+                            source: Source::Card,
+                        });
+                    }
+                    session.blocks.retain(|w| !decided(w));
+                }
+                // A question answered on the card: its result, which carries the answer, is the card's.
+                Happened::Answered { id: call_id, .. } => {
+                    session.carded.insert(call_id.clone());
+                }
+                Happened::ToolEnd { tool, failed, .. } => {
+                    session.running.retain(|c| c.id != id);
+                    let failed = *failed;
+                    // A plan or a permission that still waited on Daniel was decided in the terminal:
+                    // allowed if its call went on, denied if Daniel rejected it.
+                    // shortcut: a call that failed for another reason, such as an Edit whose text was
+                    // not found, records no decision; read its error if that loses real ones.
+                    let held = session.blocks.iter().find(|w| {
+                        w.tool == tool.name
+                            && w.calls.iter().any(|(call, _)| Some(call) == id.as_ref())
+                    });
+                    let answer = match failed {
+                        false => Some("allow"),
+                        true if event.rejected() => Some("deny"),
+                        true => None,
+                    };
+                    if let (Some(block), Some(answer), Some(call)) = (held, answer, &id)
+                        && tool.kind != ToolKind::Question
+                    {
+                        session.decisions.push(Decision {
+                            call: call.clone(),
+                            agent: block.agent.clone(),
+                            tool: tool.name.clone(),
+                            input: block.input.clone(),
+                            answer: answer.into(),
+                            at,
+                            source: Source::Terminal,
+                        });
+                    }
+                    session.resolve(|(call, _)| Some(call) == id.as_ref());
+                    let input = &tool.input;
+                    // The hooks are async, so an answer that lands after its turn's `Stop` still counts.
+                    let mut asked = session.questions.iter_mut();
+                    if !failed
+                        && let Some(question) = asked.find(|q| q.tool_use_id == event.call_id())
+                    {
+                        // Only an object of strings is kept, so the pane can read it (danielrispler/Falinks#434, decision 42).
+                        let null = Value::Null;
+                        let answers = event.answers().unwrap_or(&null);
+                        let strings = answers
+                            .as_object()
+                            .is_some_and(|a| a.values().all(Value::is_string));
+                        question.answer = match strings {
+                            true => Answer::Answered(answers.clone()),
+                            false => Answer::NotAnswered,
+                        };
+                        if strings {
+                            let card = session.carded.remove(event.call_id());
+                            session.decisions.push(Decision {
+                                call: event.call_id().into(),
+                                agent: question.agent.clone(),
+                                tool: tool.name.clone(),
+                                input: input.clone(),
+                                answer: answers.clone(),
+                                at,
+                                source: if card { Source::Card } else { Source::Terminal },
+                            });
+                        }
+                    }
+                    // A denied or interrupted call, or a failed Edit or Write, changed nothing: only a
+                    // command that ran and failed has its exit code in its error.
+                    let ran = event.ran();
+                    if own {
+                        session.agent.step_done(event.call_id(), at);
+                    }
+                    // A check gets its line whether it passed or failed; one that did not run loses
+                    // the line its start gave it. A child's checks are its own, so they add no line.
+                    let command = tool.command.as_deref().unwrap_or_default();
+                    if own && tool.kind == ToolKind::Command && is_check(command) {
+                        let index = session
+                            .checks
+                            .iter()
+                            .position(|l| l.call == event.call_id());
+                        let index = match index {
+                            _ if !ran => {
+                                session.checks.retain(|l| l.call != event.call_id());
+                                None
+                            }
+                            Some(index) => Some(index),
+                            // The hooks are async, so its result can land before its start.
+                            None => {
+                                let start = at.saturating_sub(event.took().unwrap_or_default());
+                                let mut line =
+                                    CheckLine::new(command, event.call_id(), start, typical);
+                                line.turn = session.current_turn();
+                                session.checks.push(line);
+                                Some(session.checks.len() - 1)
+                            }
+                        };
+                        let task = event.background_task().map(String::from);
+                        if let Some(line) = index.map(|i| &mut session.checks[i]) {
+                            // In the background it runs on until its notification.
+                            match task {
+                                Some(task) => line.task = Some(task),
+                                None => line.end(failed, at, &mut self.durations),
+                            }
                         }
                     }
                 }
+                _ => {}
             }
-            _ => {}
         }
         // The worktrees its turn touched, each with its base from `looks` (danielrispler/Falinks#434, decision 9).
         if session.in_turn() {
@@ -2832,7 +2768,7 @@ impl Studio {
         }
         // A fresh session also starts at your turn, from its default `Running`, but has nothing to tell.
         let reached = matches!(state_before, State::Running | State::NeedsYou);
-        if reached && session.state == State::YourTurn && name != "SessionStart" {
+        if reached && session.state == State::YourTurn && !event.session_starts() {
             outputs.push(Output::YourTurn {
                 session_id: event.session_id.clone(),
             });
@@ -3333,16 +3269,17 @@ impl Studio {
     /// The check `event` starts: a new Bash call of its session's own agent that runs a check. A
     /// subagent's checks are not recorded, so they get no line and no card.
     fn check_start(&self, event: &Event) -> Option<CheckStart> {
-        let command = event.tool_input["command"].as_str()?;
+        let tool = event.tool()?;
+        let command = tool.command.as_deref()?;
         let session = self.sessions.get(&event.session_id);
-        let known = session.is_some_and(|s| s.checks.iter().any(|l| l.call == event.tool_use_id));
-        let start = event.hook_event_name == "PreToolUse" && event.agent_id.is_none();
-        (start && event.tool_name.as_deref() == Some("Bash") && is_check(command) && !known).then(
-            || CheckStart {
+        let known = session.is_some_and(|s| s.checks.iter().any(|l| l.call == event.call_id()));
+        let start = event.tool_starts() && event.agent_id.is_none();
+        (start && tool.kind == ToolKind::Command && is_check(command) && !known).then(|| {
+            CheckStart {
                 command: command.into(),
                 typical: self.typical(command),
-            },
-        )
+            }
+        })
     }
 
     /// Session `id`'s row: its own, or the row it continues after a `/clear`.
