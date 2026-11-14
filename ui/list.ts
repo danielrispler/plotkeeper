@@ -8,6 +8,7 @@ import { shortPaths } from "./paths.js";
 import { isSelected, select } from "./selection.js";
 import { studio } from "./state.js";
 import { stateLabels, type Context, type Session, type SessionState, type Subagent } from "./types.js";
+import { askDelete, report } from "./story.js";
 
 // The collapsed groups Daniel opened, which stay open when the list is drawn again.
 const collapsed: SessionState[] = ["idle", "ended"];
@@ -122,6 +123,36 @@ export function hidden(children: Children, agent: Subagent): boolean {
 
 // The count of a parent's subagents that faded into its line, workers as helpers (danielrispler/Falinks#535).
 export const doneCount = (all: Children, children: Subagent[] = []) => children.filter((agent) => hidden(all, agent)).length;
+// Whether a subagent shows under a collapsed row: it needs Daniel, or it failed and he has not opened it.
+const standsOut = (session: Pick<Session, "asker">, agent: Subagent) =>
+  session.asker?.agent === agent.id || (agent.failed && !agent.opened);
+
+// The rows collapsed, by session id then "session" or a subagent's id, kept while the app runs.
+const folded = new Set<string>();
+type Folded = { has(id: string): boolean };
+const foldedIn = (session: Pick<Session, "id">): Folded => ({ has: (id) => folded.has(`${session.id} ${id}`) });
+
+// The subagents drawn under `parent`, at any depth, each with its depth. Under a collapsed row only
+// those that stand out are drawn, at their own depth.
+export type Drawn = { agent: Subagent; depth: number };
+export function drawn(session: Pick<Session, "asker">, children: Children, parent: string, depth: number, shut: Folded, under = false): Drawn[] {
+  return (children.get(parent) ?? []).flatMap((agent) => {
+    const below = drawn(session, children, agent.id, depth + 1, shut, under || shut.has(agent.id));
+    const shown = !hidden(children, agent) && (!under || standsOut(session, agent));
+    return [...(shown ? [{ agent, depth }] : []), ...below];
+  });
+}
+
+// A row's fold toggle, for the row keyed `parents[0]` whose subagents spawn from `parents`: whether it
+// is open and how many rows it hides; null when nothing is drawn under it.
+export function folds(session: Pick<Session, "asker">, children: Children, parents: string[], shut: Folded): { open: boolean; hiding: number } | null {
+  const count = (under: boolean) => parents.flatMap((parent) => drawn(session, children, parent, 0, shut, under)).length;
+  const all = count(false);
+  if (!all) return null;
+  const open = !shut.has(parents[0]);
+  return { open, hiding: open ? 0 : all - count(true) };
+}
+
 function done(all: Children, children: Subagent[] = []): HTMLElement[] {
   const faded = doneCount(all, children);
   return faded ? [text("span", `${faded} done`, "id")] : [];
@@ -156,7 +187,7 @@ function selecting(id: string, agent: string | null, key = `${id} ${agent ?? ""}
 // Daniel, what it is doing and, on the row being looked at, the turn's clock.
 function row(session: Session, children: Children): HTMLElement {
   const button = selecting(session.id, null);
-  button.classList.add("row");
+  button.classList.add("row", "session-row");
   const line = secondLine(session);
   const turn = line === null ? null : rowTime(session, isSelected(session.id));
   const clock = text("span", "", "clock");
@@ -215,7 +246,7 @@ export function agentLine(state: string, details: (string | null)[]): string | n
 function agentRow(session: Session, children: Children, agent: Subagent, depth: number): HTMLElement {
   const button = selecting(session.id, agent.id);
   button.classList.add("row", agent.kind);
-  button.style.paddingInlineStart = `calc(var(--sp-4) + var(--indent) * ${depth})`;
+  button.style.paddingInlineStart = `calc(var(--sp-4) + var(--indent) * ${depth + 1})`;
   const [, stateName] = agentState(session, agent);
   const details =
     agent.kind === "worker"
@@ -232,19 +263,57 @@ function agentRow(session: Session, children: Children, agent: Subagent, depth: 
   return button;
 }
 
+// A row in the list: its toggle, when anything is drawn under it, then the row, then its delete. They
+// are the row's siblings, as a button holds no button, so pressing them does not select the row.
+function item(key: string, depth: number, toggle: { open: boolean; hiding: number } | null, row: HTMLElement, remove: HTMLElement | null) {
+  const node = document.createElement("div");
+  node.className = "item";
+  node.dataset.key = key;
+  if (toggle) {
+    const fold = pressable(text("button", toggle.open ? "▾" : "▸", "fold"), false, () => {
+      if (!folded.delete(key)) folded.add(key);
+      showSessions(studio.listed);
+    });
+    fold.title = toggle.open ? "Collapse subagents" : "Expand subagents";
+    fold.removeAttribute("aria-pressed");
+    fold.setAttribute("aria-expanded", String(toggle.open));
+    // The count goes after the name, as the toggle's column has room only for its chevron.
+    if (toggle.hiding) row.querySelector(".name")?.after(text("span", `${toggle.hiding} hidden`, "id"));
+    fold.style.insetInlineStart = `calc(var(--indent) * ${depth})`;
+    node.append(fold);
+  }
+  node.append(row, ...(remove ? [remove] : []));
+  return node;
+}
+
+// A session row's delete (decision of the session list's fold and delete): the rail's dialog, asked from the row.
+function deleting(session: Session): HTMLElement | null {
+  if (session.status_only) return null;
+  // `patch` keeps the first button and its listener, so the press reads the session as it is now.
+  const now = () => studio.listed.find((listed) => listed.id === session.id) ?? session;
+  const button = pressable(text("button", "×", "delete"), false, () => void askDelete(now()).catch(report));
+  button.title = "Delete…";
+  button.removeAttribute("aria-pressed");
+  button.setAttribute("aria-label", `Delete ${sessionName(session)}…`);
+  return button;
+}
+
 // A session's row, then its subagents under the agent that spawned them, at any depth, and those
 // with no known spawn under "Unattached". A faded subagent is not drawn, and its parent's line counts
-// it, unless anything below it is drawn: then it keeps its line, so its children stay under it.
+// it, unless anything below it is drawn: then it keeps its line, so its children stay under it. A
+// collapsed row hides its subagents, but not one that needs Daniel or failed unopened.
 function tree(session: Session): HTMLElement[] {
   const children = childrenOf(session);
-  const nested = (parent: string, depth: number): HTMLElement[] =>
-    (children.get(parent) ?? []).flatMap((agent) => {
-      const below = nested(agent.id, depth + 1);
-      return [...(hidden(children, agent) ? [] : [agentRow(session, children, agent, depth)]), ...below];
-    });
-  const unattached = nested("unattached", 2);
+  const shut = foldedIn(session);
+  const rows = (parent: string, depth: number, under: boolean) =>
+    drawn(session, children, parent, depth, shut, under).map(({ agent, depth }) =>
+      item(`${session.id} ${agent.id}`, depth, folds(session, children, [agent.id], shut), agentRow(session, children, agent, depth), null),
+    );
+  const under = shut.has("session");
+  const unattached = rows("unattached", 2, under);
   const label = text("p", "Unattached", "unattached");
-  return [row(session, children), ...nested("session", 1), ...(unattached.length ? [label, ...unattached] : [])];
+  const top = item(`${session.id} session`, 0, folds(session, children, ["session", "unattached"], shut), row(session, children), deleting(session));
+  return [top, ...rows("session", 1, under), ...(unattached.length ? [label, ...unattached] : [])];
 }
 
 // The strip's labels, one per session, from its name: its issue number, else the name's first
