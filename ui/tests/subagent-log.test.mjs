@@ -41,7 +41,9 @@ test("with no log the pane says Starting while the subagent runs, else that the 
   assert.equal(logNote(null, "running"), "Starting…");
   assert.equal(logNote(null, "completed"), "The log isn't on disk.");
   assert.equal(logNote(null, "killed"), "The log isn't on disk.");
-  assert.equal(logNote({ entries: [], offset: 0 }, "running"), null);
+  assert.equal(logNote({ entries: [], offset: 0 }, "running"), "Starting…");
+  assert.equal(logNote({ entries: [], offset: 0 }, "completed"), "The log isn't on disk.");
+  assert.equal(logNote({ entries: [{ kind: "prompt", text: "Go." }], offset: 3 }, "running"), null);
 });
 
 test("the header's state is the core's status", () => {
@@ -79,4 +81,17 @@ test("reading on finds a log that did not exist at first, and keeps what was sho
 test("a tool row reads `Tool · detail`, with no dot when there is no detail", () => {
   assert.equal(callTitle({ tool: "Read", detail: "a.rs" }), "Read · a.rs");
   assert.equal(callTitle({ tool: "Agent", detail: null }), "Agent");
+});
+
+import { opensAtBottom, scrollAfter } from "../../dist/log.js";
+
+test("a running subagent's log opens at the bottom, a finished one at the top", () => {
+  assert.equal(opensAtBottom("running"), true);
+  assert.equal(opensAtBottom("completed"), false);
+  assert.equal(opensAtBottom("killed"), false);
+});
+
+test("a redraw keeps Daniel's scroll position unless the view was at the bottom", () => {
+  assert.equal(scrollAfter({ scrollTop: 300, clientHeight: 400, scrollHeight: 1000 }, 1500), 300);
+  assert.equal(scrollAfter({ scrollTop: 600, clientHeight: 400, scrollHeight: 1000 }, 1500), 1500);
 });
