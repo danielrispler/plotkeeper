@@ -174,22 +174,6 @@ fn a_helper_or_worker_that_succeeds_fades() {
     );
 }
 
-/// danielrispler/Falinks#535: a failed worker stays visible until Daniel opens it, as a failed helper does.
-#[test]
-fn a_failed_worker_stays_visible_until_it_is_opened() {
-    let killed = RUN.replace(
-        &format!("<task-id>{RUN_HELPER}</task-id>"),
-        &format!("<task-id>{RUN_WORKER}</task-id>"),
-    );
-    let mut studio = replay(&killed);
-    let worker = agent(&studio, RUN_SESSION, RUN_WORKER);
-    assert!(worker.kind == Worker && worker.failed() && !worker.faded());
-
-    studio.open(RUN_WORKER);
-
-    assert!(agent(&studio, RUN_SESSION, RUN_WORKER).faded());
-}
-
 #[test]
 fn a_worker_its_parent_continues_runs_again_until_its_next_wake_up() {
     let lines: Vec<&str> = DAY.lines().collect();

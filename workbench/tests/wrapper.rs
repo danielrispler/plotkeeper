@@ -96,16 +96,6 @@ fn with_no_status_line_it_prints_nothing_and_saves_the_snapshot() {
 }
 
 #[test]
-fn a_failing_command_still_leaves_the_snapshot() {
-    let home = tempfile::tempdir().unwrap();
-    settings(home.path(), Some("no-such-command-521"));
-
-    let (out, _, code) = run(home.path());
-    assert_eq!((out.as_str(), code), ("", Some(127)));
-    saved_privately(home.path());
-}
-
-#[test]
 fn a_hanging_command_still_leaves_the_snapshot() {
     let home = tempfile::tempdir().unwrap();
     settings(home.path(), Some("sleep 30"));

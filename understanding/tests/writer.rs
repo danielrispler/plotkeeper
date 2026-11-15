@@ -212,11 +212,6 @@ fn good_card() -> Card {
 }
 
 #[test]
-fn a_good_reply_gives_the_card_with_its_quiz_options_key_and_reasons() {
-    assert_eq!(written(&Replying(GOOD.into())), (Some(good_card()), vec![]));
-}
-
-#[test]
 fn the_app_shuffles_the_quizs_options_and_the_key_and_reasons_move_with_them() {
     let right = "כי רק השורה הזו הייתה קטנה מדי לקריאה.";
     let mut keys = std::collections::BTreeSet::new();

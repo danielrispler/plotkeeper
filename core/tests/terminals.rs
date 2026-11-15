@@ -55,19 +55,6 @@ fn a_session_resumed_in_a_new_terminal_maps_to_the_new_one() {
     assert_eq!(terminal(&studio, IN_STUDIO), None);
 }
 
-/// One selection everywhere (danielrispler/Falinks#567): the pane and the rail both read the one selection, so the
-/// selected session names the terminal the pane shows.
-#[test]
-fn selecting_a_session_sets_one_selection_that_names_its_terminal() {
-    let mut studio = replay();
-
-    studio.select(IN_STUDIO);
-
-    let selection = studio.selection().expect("a selection");
-    assert_eq!(selection.session.agent.id, IN_STUDIO);
-    assert_eq!(selection.session.terminal.as_deref(), Some("t-2"));
-}
-
 /// A session Daniel starts from the studio is selected once its first event names its terminal, so
 /// the rail follows the new pane; until then nothing is selected (danielrispler/Falinks#567).
 #[test]

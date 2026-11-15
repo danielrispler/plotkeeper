@@ -17,10 +17,15 @@ fn turn_at(session: &Session, at: u64) -> Option<usize> {
     session.turns.iter().rposition(|t| t.started_at <= at)
 }
 
+/// One replay of the day, three views of the feed: how a prompt opens a turn; how a stopped turn
+/// ends (its end, card id and the first line of its reply); and how the checks, subagents and
+/// questions group under the turns by when they started.
 #[test]
-fn each_prompt_opens_a_turn_named_by_its_first_line_or_by_the_worker_that_returned() {
+fn the_feed_of_turns_opens_by_prompts_ends_by_stops_and_groups_what_started_in_each() {
     let studio = Studio::replayed(DAY.lines());
     let session = session(&studio);
+
+    // Each prompt opens a turn named by its first line or by the worker that returned.
     let starts: Vec<u64> = session.turns.iter().map(|t| t.started_at).collect();
     let prompts: Vec<u64> = session.prompts.iter().map(|p| p.at).collect();
     assert_eq!(starts, prompts);
@@ -32,12 +37,8 @@ fn each_prompt_opens_a_turn_named_by_its_first_line_or_by_the_worker_that_return
         session.turns[1].prompt
     );
     assert!(session.turns[1].prompt.ends_with(" returned"));
-}
 
-#[test]
-fn a_stopped_turn_has_its_end_its_card_id_and_its_replys_first_line() {
-    let studio = Studio::replayed(DAY.lines());
-    let session = session(&studio);
+    // A stopped turn has its end, its card id and its reply's first line.
     let last = session.turns.last().expect("a turn");
     let stopped = session.stopped.as_ref().expect("its latest Stop");
     assert_eq!(last.id.as_ref(), Some(&stopped.card));
@@ -49,12 +50,8 @@ fn a_stopped_turn_has_its_end_its_card_id_and_its_replys_first_line() {
     }
     let reply = studio.turn_reply(SESSION, session.turns.len() - 1).unwrap();
     assert!(reply.starts_with(last.message.as_deref().unwrap()));
-}
 
-#[test]
-fn turns_group_their_checks_subagents_and_questions_by_when_they_started() {
-    let studio = Studio::replayed(DAY.lines());
-    let session = session(&studio);
+    // Turns group their checks, subagents and questions by when they started.
     assert_eq!(session.checks.len(), 9);
     for check in &session.checks {
         assert_eq!(

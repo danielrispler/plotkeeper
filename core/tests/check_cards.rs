@@ -62,7 +62,7 @@ fn check_cards(log: &[String]) -> (Studio, Vec<(usize, CardRequest)>) {
 
 #[test]
 fn a_check_over_2_minutes_requests_one_card_at_its_start_on_the_change_so_far_and_a_shorter_none() {
-    let (_, cards) = check_cards(&log());
+    let (studio, cards) = check_cards(&log());
 
     let [(line, request)] = &cards[..] else {
         panic!("one check card: {cards:?}");
@@ -73,15 +73,8 @@ fn a_check_over_2_minutes_requests_one_card_at_its_start_on_the_change_so_far_an
     assert_eq!(request.check.as_deref(), Some(COMMAND));
     assert_eq!(request.diff(), DIFF);
     assert_eq!(request.session_id, SESSION);
-}
 
-#[test]
-fn the_checks_result_settles_the_guess_on_its_card() {
-    let (studio, cards) = check_cards(&log());
-    let [(_, request)] = &cards[..] else {
-        panic!("one check card: {cards:?}");
-    };
-
+    // The check's result settles the guess on its card.
     let checks = &studio.session(SESSION).unwrap().checks;
     let carded: Vec<_> = checks.iter().filter(|l| l.card.is_some()).collect();
     let [line] = &carded[..] else {

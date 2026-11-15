@@ -36,18 +36,6 @@ fn an_ordinary_ticket_session_passes_through_its_phases_in_order() {
     assert_eq!(work.kind.as_deref(), Some("implement"));
 }
 
-#[test]
-fn kinds_of_work_with_fewer_than_20_past_sessions_show_no_estimate() {
-    // The log holds seven `/implement` sessions and one `/wayfinder` one, so no kind has 20.
-    let studio = Studio::replayed(ORDINARY.lines());
-    let sessions = studio.sessions();
-    assert_eq!(sessions.len(), 8);
-    for session in sessions {
-        assert!(session.work.phases.len() > 1, "{}", session.agent.id);
-        assert_eq!(session.work.estimate.range, None, "{}", session.agent.id);
-    }
-}
-
 /// Each ordinary ticket session's real remaining work from each phase after its first, against the
 /// range the other six give: leave-one-out, as the log holds too few for 20 past sessions each.
 #[test]

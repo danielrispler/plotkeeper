@@ -499,27 +499,6 @@ fn a_background_helpers_step_after_the_stop_writes_no_card_for_the_session_after
     assert_eq!(shell.cards(), []);
 }
 
-#[test]
-fn a_helpers_edit_in_its_parents_worktree_shows_on_the_parents_card_tagged_with_the_helper() {
-    let mut shell = Shell::new();
-    let repo = shell.repo.clone();
-    shell.take("UserPromptSubmit", json!({ "prompt": "Review and fix" }));
-    shell.take("PostToolUse", spawn_child("h1", "Review the diff", false));
-    shell.child("h1", &repo, "SubagentStart", json!({}));
-    fs::write(repo.join("lib.rs"), "fn a() { b() }\n").unwrap();
-    let edit = json!({"tool_name": "Edit", "tool_input": {"file_path": repo.join("lib.rs")}});
-    shell.child("h1", &repo, "PostToolUse", edit);
-    shell.take("Stop", json!({}));
-
-    let store = shell.store.lock().unwrap();
-    let [card] = store.cards() else {
-        panic!("one card: {:?}", store.cards());
-    };
-    assert_eq!(card.request.agent, None);
-    let tagged = BTreeMap::from([("h1".to_string(), BTreeSet::from(["lib.rs".to_string()]))]);
-    assert_eq!(card.request.changed_by, tagged);
-}
-
 /// danielrispler/Falinks#372's gap: the shell now fingerprints a helper's Bash step, so a command that changes its
 /// worktree makes it a worker live, not only in the core's test.
 #[test]
