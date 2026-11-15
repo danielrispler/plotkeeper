@@ -650,6 +650,18 @@ pub mod agy_plugin {
         Ok(if same { Status::Current } else { Status::Stale })
     }
 
+    /// Whether agy accepts the installed copy: it skips an invalid `hooks.json` silently, so a copy
+    /// equal to the source can still read as current while doing nothing.
+    pub fn installed_is_valid(agy: &Path, home: &Path) -> bool {
+        Command::new(agy)
+            .args(["plugin", "validate"])
+            .arg(installed(home))
+            .env("HOME", home)
+            .stdin(Stdio::null())
+            .output()
+            .is_ok_and(|o| o.status.success())
+    }
+
     /// Installs the plugin of `source` for `hook` with `agy` (the command), for `home`: validates a
     /// rendered copy first, as install does not and skips an invalid `hooks.json` silently, then
     /// replaces any installed copy.
