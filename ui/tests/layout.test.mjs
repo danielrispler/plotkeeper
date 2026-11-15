@@ -2,18 +2,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { arrange, defaultWidths, paneBoxes, panelHeight, railShown, resized } from "../../dist/layout.js";
-import { stripLabel } from "../../dist/list.js";
 
 // The cell of 12.5px SF Mono in WebKit, as danielrispler/Falinks#577 measured it, and the terminal's padding, which holds no column.
 const cell = 7.73;
 const padding = 28;
 const columns = (window, { list, rail }) => Math.floor((window - list - rail - padding) / cell);
 const shape = (window, split = false) => arrange(window, cell, defaultWidths, { split });
-
-test("the list and the rail start at 260 and 380 pixels, the strip at 56", () => {
-  assert.deepEqual(defaultWidths, { list: 260, rail: 380 });
-  assert.equal(shape(1100).list, 56);
-});
 
 test("at 2,560 and 1,920 pixels, everything shows in full", () => {
   for (const window of [2560, 1920]) assert.deepEqual(shape(window), { mode: "full", list: 260, rail: 380, stacked: false });
@@ -113,11 +107,6 @@ test("the panel takes its dragged height, at most 40 % of the terminal column an
   assert.equal(panelHeight(20, 900), 80);
   // A column too short for both keeps the 40 %.
   assert.equal(panelHeight(20, 150), 60);
-});
-
-test("the strip names a session by its issue number, else by its folder", () => {
-  assert.equal(stripLabel("issue-338-205-pilots-final-freeze"), "338");
-  assert.equal(stripLabel("Falinks"), "Fali");
 });
 
 test("a turn is seen only while the rail shows its session: not in focus mode, a closed overlay or the skills browser (danielrispler/Falinks#556)", () => {

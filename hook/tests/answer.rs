@@ -308,10 +308,10 @@ fn a_timeout_or_answer_in_the_terminal_returns_no_decision() {
     for (kind, payload, _) in kinds() {
         watch(&home, SESSION, std::process::id(), 0);
         let since = Instant::now();
-        let (out, took) = finish(start(&home, 600, &payload), since);
+        let (out, took) = finish(start(&home, 150, &payload), since);
         assert_eq!(out, "", "{kind}");
         assert!(
-            took >= Duration::from_millis(600),
+            took >= Duration::from_millis(150),
             "{kind}: returned before its timeout: {took:?}"
         );
 
@@ -331,42 +331,52 @@ fn a_timeout_or_answer_in_the_terminal_returns_no_decision() {
 #[test]
 fn an_answer_with_a_wrong_nonce_or_open_to_others_is_refused() {
     let home = scratch("nonce");
+    let path = answer::answer_file(&data(&home), SESSION);
     for (kind, payload, answer) in kinds() {
         // A fresh heartbeat, as the studio's every second.
         watch(&home, SESSION, std::process::id(), 0);
         let since = Instant::now();
-        let child = start(&home, 1_500, &payload);
+        let child = start(&home, WAIT_MS, &payload);
         let ask = request(&home);
         assert_ne!(ask["nonce"], "", "{kind}");
         let mut wrong = answer.clone();
         wrong["nonce"] = "0123456789abcdef0123456789abcdef".into();
         reply(&home, wrong);
-        assert_eq!(finish(child, since).0, "", "{kind}");
+        // The hook removes each answer it reads, accepted or not, so a refused one is gone while the
+        // hook still waits; a wrongly accepted one would end the wait with a decision.
+        removed(&path, kind);
 
         // The right nonce in a file others may write is refused too.
-        let since = Instant::now();
-        let child = start(&home, 1_500, &payload);
         let mut open = answer;
-        open["nonce"] = request(&home)["nonce"].clone();
-        let path = answer::answer_file(&data(&home), SESSION);
+        open["nonce"] = ask["nonce"].clone();
         let temp = path.with_extension("open");
         fs::write(&temp, open.to_string()).unwrap();
         fs::set_permissions(&temp, fs::Permissions::from_mode(0o644)).unwrap();
         fs::rename(&temp, &path).unwrap();
-        assert_eq!(finish(child, since).0, "", "{kind}");
+        removed(&path, kind);
 
         // So is a link to a private file, which could point anywhere.
-        let since = Instant::now();
-        let child = start(&home, 1_500, &payload);
         let mut linked = answer_with(&payload);
-        linked["nonce"] = request(&home)["nonce"].clone();
+        linked["nonce"] = ask["nonce"].clone();
         let target = path.with_extension("target");
         answer::write_private(&target, &linked).unwrap();
         std::os::unix::fs::symlink(&target, &path).unwrap();
+        removed(&path, kind);
+
+        // The hook is still waiting; a nonce-only answer ends it with no decision.
+        reply(&home, json!({ "nonce": ask["nonce"] }));
         assert_eq!(finish(child, since).0, "", "{kind}");
-        let _ = fs::remove_file(&path);
     }
     let _ = fs::remove_dir_all(&home);
+}
+
+/// Waits until the hook has removed the answer file `path`, a link included.
+fn removed(path: &Path, kind: &str) {
+    let until = Instant::now() + PROMPTLY;
+    while path.symlink_metadata().is_ok() {
+        assert!(Instant::now() < until, "{kind}: the answer was not removed");
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 /// The card's answer that decides `payload`, as `kinds` gives it.
@@ -383,9 +393,11 @@ fn a_request_names_the_agent_that_asks_so_the_studio_can_tell_whose_card_it_is()
     for (payload, agent) in [(subagent, json!("a-7")), (asked(), Value::Null)] {
         watch(&home, SESSION, std::process::id(), 0);
         let since = Instant::now();
-        let child = start(&home, 1_000, &payload);
-        assert_eq!(request(&home)["agent_id"], agent);
-        finish(child, since);
+        let child = start(&home, WAIT_MS, &payload);
+        let ask = request(&home);
+        assert_eq!(ask["agent_id"], agent);
+        reply(&home, json!({ "nonce": ask["nonce"] }));
+        assert_eq!(finish(child, since).0, "");
     }
     let _ = fs::remove_dir_all(&home);
 }

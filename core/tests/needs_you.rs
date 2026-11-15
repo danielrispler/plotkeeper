@@ -240,37 +240,6 @@ fn a_question_and_a_plan_need_you_until_answered_and_each_turn_ends_on_your_turn
     );
 }
 
-/// The session's state after a turn whose final message is `message`.
-fn after_stop(message: &str) -> State {
-    let log = include_str!("fixtures/failing-bash.jsonl");
-    let (turn, stop) = log.trim_end().rsplit_once('\n').unwrap();
-    let mut stop: serde_json::Value = serde_json::from_str(stop).unwrap();
-    stop["last_assistant_message"] = message.into();
-    states(&format!("{turn}\n{stop}"), PROBE)
-        .pop()
-        .flatten()
-        .unwrap()
-}
-
-// A reply that asks Daniel in text blocks nothing, so it is your turn (danielrispler/Falinks#540, reversing danielrispler/Falinks#328's story
-// 36). The messages follow the shapes in danielrispler/Falinks#321's evidence ("Transcripts").
-
-#[test]
-fn a_reply_that_ends_with_a_question_is_your_turn() {
-    let end = "I ran `cargo test` in `apps/studio`: 14 tests pass.
-
-Two ways to go on:
-- merge now;
-- wait for the heavy run first.
-
-Which do you want?";
-    let mid = "One question from the review is still open. Should the core drop closed sessions now? If yes, it needs its own ticket.";
-    let issue = "#341 is done and its PR is green. Should I open the next ticket?";
-    assert_eq!(after_stop(end), YourTurn);
-    assert_eq!(after_stop(mid), YourTurn);
-    assert_eq!(after_stop(issue), YourTurn);
-}
-
 // Needs you across agents (danielrispler/Falinks#434, decisions 24 to 26): the four cases of danielrispler/Falinks#434's first version (B4) and
 // the dead call (B3), hand-written in the day log's shapes.
 

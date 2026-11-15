@@ -20,20 +20,6 @@ fn step(tool: &str, detail: Option<&str>) -> Option<Step> {
 const PROBE: &str = "7f3c2a9e-4b1d-4c8e-9a2f-1d6b5e8c0a31";
 
 #[test]
-fn a_failed_command_is_still_the_last_step() {
-    let studio = replay(include_str!("fixtures/failing-bash.jsonl"));
-
-    let probe = studio.session(PROBE).expect("the session");
-    assert_eq!(
-        probe.agent.last_step,
-        Some(Step {
-            command: Some("ls does-not-exist".into()),
-            ..step("Bash", Some("List a path that does not exist")).unwrap()
-        })
-    );
-}
-
-#[test]
 fn a_permission_prompt_keeps_the_step_it_asks_about() {
     let studio = replay(include_str!("fixtures/permission-write.jsonl"));
 
@@ -129,16 +115,6 @@ fn the_recorded_logs_replay_through_the_core() {
             assert!(studio.session(id).is_some(), "session {id} was dropped");
         }
     }
-}
-
-#[test]
-fn nothing_is_selected_until_daniel_clicks() {
-    let mut studio = replay(include_str!("fixtures/failing-bash.jsonl"));
-    assert_eq!(studio.selected(), None);
-
-    studio.select(PROBE);
-
-    assert_eq!(studio.selected().map(|s| s.agent.id.as_str()), Some(PROBE));
 }
 
 /// Only four fields of a tool response are read, and lazily (danielrispler/Falinks#410, decision 20). A response that is

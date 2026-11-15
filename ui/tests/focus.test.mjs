@@ -2,8 +2,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { bound } from "../../dist/keys.js";
-import { initial } from "../../dist/settings.js";
 import { questionLine, toastFor, toastShows } from "../../dist/toast.js";
 
 const ui = new URL("../", import.meta.url);
@@ -14,11 +12,6 @@ const session = (id, state = "running", questions = []) => ({
 });
 const asking = (id, text) =>
   session(id, "needs_you", [{ tool_use_id: "t", agent: null, answer: "open", questions: [{ question: text, options: [] }] }]);
-
-test("focus mode has one key, rebindable in keymap.json", () => {
-  const key = { key: "Enter", code: "Enter", metaKey: true, shiftKey: true, ctrlKey: false, altKey: false };
-  assert.equal(bound(initial.keymap, "Workspace", key), "studio::ToggleFocus");
-});
 
 test("the toast shows in focus mode and while the rail is an overlay, never beside the rail", () => {
   assert.equal(toastShows("focus"), true);

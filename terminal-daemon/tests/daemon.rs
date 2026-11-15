@@ -183,6 +183,17 @@ fn resize_reaches_the_program_and_list_shows_size_program_and_exit_code() {
     wait_for("sleep in the foreground", || {
         term(&list(&mut c), "t1")["foreground"] == "sleep"
     });
+    // danielrispler/Falinks#561: the record keeps each terminal's foreground program as `list` last saw it, so a shell
+    // that ran another agent can come back as that agent.
+    let record = std::fs::read_to_string(studio_terminal_daemon::record(&d.socket())).unwrap();
+    let terms: Value = serde_json::from_str(&record).unwrap();
+    let t1 = terms
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"] == "t1")
+        .unwrap();
+    assert_eq!(t1["foreground"], "sleep");
     let t = term(&list(&mut c), "t1").clone();
     assert_eq!(
         (t["cols"].as_u64(), t["rows"].as_u64(), t["cwd"].as_str()),
@@ -282,11 +293,24 @@ fn an_app_whose_minimum_protocol_is_older_works_with_a_newer_daemon() {
 
     let too_new = Client::connect(&d.socket(), studio_terminal_daemon::PROTOCOL + 1);
     assert!(too_new.is_err());
+
+    // The hello carries the build, so a daemon of this build is not outdated.
+    assert_eq!(
+        old_app.build.as_deref(),
+        Some(studio_terminal_daemon::BUILD_ID)
+    );
+    assert!(!old_app.outdated());
 }
 
 #[test]
 fn only_one_daemon_serves_a_socket() {
+    use std::os::unix::fs::PermissionsExt;
     let d = Daemon::start("single");
+    // danielrispler/Falinks#555, row 7: only Daniel's account can reach the socket. These run before the
+    // second daemon starts.
+    let mode = |p: PathBuf| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode(d.dir.clone()), 0o700);
+    assert_eq!(mode(d.socket()), 0o600);
     let second = Command::new(env!("CARGO_BIN_EXE_studio-terminal-daemon"))
         .args(["serve", "--socket"])
         .arg(d.socket())
@@ -428,21 +452,6 @@ fn list_and_the_record_give_the_folder_a_shell_moved_to() {
     );
 }
 
-// danielrispler/Falinks#561: the record keeps each terminal's foreground program as `list` last saw it, so a shell that ran
-// another agent can come back as that agent.
-#[test]
-fn the_record_keeps_the_foreground_program_list_last_saw() {
-    let d = Daemon::start("fg");
-    let mut c = d.client();
-    spawn(&mut c, "t1", &["sh", "-c", "sleep 1000"]);
-    wait_for("sleep in the foreground", || {
-        term(&list(&mut c), "t1")["foreground"] == "sleep"
-    });
-    let record = std::fs::read_to_string(studio_terminal_daemon::record(&d.socket())).unwrap();
-    let terms: Value = serde_json::from_str(&record).unwrap();
-    assert_eq!(terms[0]["foreground"], "sleep");
-}
-
 // danielrispler/Falinks#561: the record keeps the name a program reports itself by in OSC 7501, as a node-launched agent's
 // foreground is `node`.
 #[test]
@@ -497,16 +506,6 @@ fn a_client_that_stops_reading_leaves_the_other_terminals_flowing() {
     wait_for("the stalled client to be dropped", || {
         stalled.send(&json!({ "op": "list" })).is_err()
     });
-}
-
-// danielrispler/Falinks#555, row 7: only Daniel's account can reach the socket.
-#[test]
-fn the_daemons_folder_is_private_and_its_socket_owner_only() {
-    use std::os::unix::fs::PermissionsExt;
-    let d = Daemon::start("perms");
-    let mode = |p: PathBuf| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
-    assert_eq!(mode(d.dir.clone()), 0o700);
-    assert_eq!(mode(d.socket()), 0o600);
 }
 
 // danielrispler/Falinks#555, row 1: Claude Code and Antigravity report their status only to a terminal that answers the
@@ -615,7 +614,7 @@ fn the_presence_file_goes_when_the_app_disconnects_not_a_cli_attach() {
     app.send(&json!({ "op": "app" })).unwrap();
     list(&mut app);
     // Time for the daemon to see the CLI's drop.
-    std::thread::sleep(Duration::from_millis(300));
+    std::thread::sleep(Duration::from_millis(100));
     assert!(present.exists(), "a CLI attach's disconnect deleted it");
 
     drop(app);
@@ -637,17 +636,6 @@ fn an_app_dropped_for_lag_keeps_the_presence_file() {
     wait_for("the lagging app to be dropped", || {
         app.send(&json!({ "op": "list" })).is_err()
     });
-    std::thread::sleep(Duration::from_millis(300));
+    std::thread::sleep(Duration::from_millis(100));
     assert!(present.exists(), "a lag drop deleted the presence file");
-}
-
-#[test]
-fn the_hello_carries_the_build_so_a_daemon_of_this_build_is_not_outdated() {
-    let d = Daemon::start("build");
-    let client = Client::connect(&d.socket(), 0).unwrap();
-    assert_eq!(
-        client.build.as_deref(),
-        Some(studio_terminal_daemon::BUILD_ID)
-    );
-    assert!(!client.outdated());
 }

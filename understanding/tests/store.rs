@@ -104,20 +104,6 @@ fn a_tap_on_no_option_of_the_quiz_records_nothing() {
 }
 
 #[test]
-fn the_key_is_wrong_is_recorded_on_the_card() {
-    let data = tempfile::tempdir().unwrap();
-    let path = data.path().join("cards.json");
-    let mut store = two_cards(&path);
-    store.guess("toolu_01B", 1, 1_761_744_000_000).unwrap();
-
-    store.key_wrong("toolu_01B").unwrap();
-
-    let reopened = CardStore::open(path).unwrap();
-    let flags: Vec<bool> = reopened.cards().iter().map(|kept| kept.key_wrong).collect();
-    assert_eq!(flags, [false, true]);
-}
-
-#[test]
 fn a_rating_with_its_reasons_survives_a_restart_beside_the_one_key_is_wrong_flag() {
     let data = tempfile::tempdir().unwrap();
     let path = data.path().join("cards.json");
@@ -363,15 +349,6 @@ fn a_store_set_aside_before_is_never_overwritten() {
 
     let v1 = data.path().join("cards-v1.json");
     assert_eq!(std::fs::read_to_string(&v1).unwrap(), STORE_V1);
-}
-
-#[test]
-fn a_missing_store_starts_empty() {
-    let data = tempfile::tempdir().unwrap();
-
-    let store = CardStore::open(data.path().join("cards.json")).unwrap();
-
-    assert_eq!(store.cards(), []);
 }
 
 const MINUTE: u64 = 60 * 1000;

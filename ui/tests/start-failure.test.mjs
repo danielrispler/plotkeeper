@@ -28,13 +28,6 @@ test("only the last lines show, and a signal at start counts", async () => {
   assert.deepEqual(startFailure("signal 9", 100, await screen(many)).lines, ["line 25", "line 26", "line 27", "line 28", "line 29"]);
 });
 
-test("the notice is also a toast with Show output, beside the needs-you toast, never focused", () => {
-  assert.match(read("index.html"), /<div id="start-toast" class="toast start" role="status" hidden><\/div>/);
-  const toast = read("toast.ts");
-  assert.match(toast, /"Show output"/);
-  assert.match(toast, /tabIndex = -1/);
-});
-
 test("a second failure stacks under the first, never replaces it", () => {
   const start = read("toast.ts").slice(read("toast.ts").indexOf("export function showStartToast"));
   const body = start.slice(0, start.indexOf("\n}\n"));

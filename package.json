@@ -7,8 +7,9 @@
     "tauri": "tauri",
     "snap": "node scripts/snap/snap.mjs",
     "start": "tauri build && open target/release/bundle/macos/Studio.app",
-    "test": "tsc && node --test terminal-daemon/tests/replay.test.mjs ui/tests/*.test.mjs",
-    "check": "npm run build && npm test && cargo fmt --all --check && cargo clippy --locked --workspace --all-targets -- -D warnings && cargo test --locked --workspace"
+    "test": "tsc && npm run test:node",
+    "test:node": "node --test terminal-daemon/tests/replay.test.mjs ui/tests/*.test.mjs",
+    "check": "cargo fmt --all --check && npm run build && cargo clippy --locked --workspace --all-targets -- -D warnings && cargo test --locked --workspace && npm run test:node"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.12.3",

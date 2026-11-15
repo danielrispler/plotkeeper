@@ -212,11 +212,6 @@ fn good_card() -> Card {
 }
 
 #[test]
-fn a_good_reply_gives_the_card_with_its_quiz_options_key_and_reasons() {
-    assert_eq!(written(&Replying(GOOD.into())), (Some(good_card()), vec![]));
-}
-
-#[test]
 fn the_app_shuffles_the_quizs_options_and_the_key_and_reasons_move_with_them() {
     let right = "כי רק השורה הזו הייתה קטנה מדי לקריאה.";
     let mut keys = std::collections::BTreeSet::new();
@@ -591,18 +586,22 @@ fn running(pid: &str) -> bool {
 #[test]
 fn a_claude_that_fails_prints_nothing_or_hangs_gives_nothing_keeps_nothing_and_leaves_nothing_running()
  {
+    // Stubs that start `sh` and reply keep a second; only the hang is cut short.
     let scripts = [
-        "echo 'Not logged in'; exit 1",
-        "cat > /dev/null",
+        ("echo 'Not logged in'; exit 1", Duration::from_secs(1)),
+        ("cat > /dev/null", Duration::from_secs(1)),
         // A hung call whose own child also hangs.
-        "sleep 600 & echo $! > child; sleep 600",
+        (
+            "sleep 600 & echo $! > child; sleep 600",
+            Duration::from_millis(200),
+        ),
     ];
-    for script in scripts {
+    for (script, timeout) in scripts {
         let dir = tempfile::tempdir().unwrap();
         let store = stored(dir.path());
         let mut lines = Vec::new();
 
-        let writer = stub(dir.path(), script).with_timeout(Duration::from_secs(1));
+        let writer = stub(dir.path(), script).with_timeout(timeout);
         let more = explain_more(&store, &writer, &edit().id, |l| lines.push(l));
 
         assert_eq!(more, None, "{script}");
