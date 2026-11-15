@@ -89,9 +89,16 @@ pub fn stop(socket: &Path) -> io::Result<()> {
         .filter_map(|p| p["pid"].as_i64())
         .map(|p| p as i32)
         .collect();
-    unsafe { libc::kill(client.daemon_pid as i32, libc::SIGTERM) };
+    let pid = client.daemon_pid;
+    // `kill(0, …)` would signal the app's own process group.
+    if pid == 0 {
+        return Err(io::Error::other("the daemon did not say its pid"));
+    }
+    unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+    // The app starts a new daemon on the socket as soon as the old one is gone (#74), so wait until the
+    // socket is no longer served by this pid, not until nothing answers on it.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while UnixStream::connect(socket).is_ok() {
+    while Client::connect(socket, 0).is_ok_and(|c| c.daemon_pid == pid) {
         if std::time::Instant::now() > deadline {
             return Err(io::Error::other("the daemon did not stop"));
         }

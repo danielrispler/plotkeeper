@@ -191,6 +191,22 @@ export type SessionCards = { brief: string | null; recent: StoredCard[]; older: 
 export type AskKind = "question" | "plan" | "permission";
 export const askKind = (tool: string): AskKind =>
   tool === "AskUserQuestion" ? "question" : tool === "ExitPlanMode" ? "plan" : "permission";
+// An entry of a subagent's log, as the core reads it from the log file, and what one read returned: the entries
+// after the offset asked for, and the offset read to.
+export type LogEntry =
+  | { kind: "prompt"; text: string }
+  | { kind: "reply"; text: string }
+  | { kind: "call"; id: string; tool: string; detail: string | null }
+  | { kind: "result"; id: string; text: string; failed: boolean; cut: boolean };
+export type SubagentLog = { entries: LogEntry[]; offset: number };
+// A log as drawn: each call with its result, null while it runs.
+export type LogResult = { text: string; failed: boolean; cut: boolean };
+export type LogRow =
+  | { kind: "prompt"; text: string }
+  | { kind: "reply"; text: string }
+  | LogCall;
+export type LogCall = { kind: "call"; id: string; tool: string; detail: string | null; result: LogResult | null };
+
 // The selection is the core's: the session Daniel selected and the subagent of it he opened, whose
 // view then shows its own line.
 export type Selection = { session: Session; agent: string | null };
