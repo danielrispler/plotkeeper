@@ -36,6 +36,9 @@ test("the header shows each session's model by its agent's mark, none for status
   assert.equal(modelLine(codex), "");
   assert.equal(modelLine({ ...agy, model: null }), "");
   assert.equal(modelLine({ ...claude, transcript: { model: "claude-haiku-5" } }), "Claude · Haiku 5");
+  assert.equal(modelLine({ ...claude, transcript: { model: "claude-3-5-sonnet-20241022" } }), "Claude · Sonnet 3.5");
+  assert.equal(modelLine({ ...claude, transcript: { model: "claude-sonnet-4-20250514" } }), "Claude · Sonnet 4");
+  assert.equal(modelLine({ ...claude, transcript: { model: "claude-opus-5-5[1m]" } }), "Claude · Opus 5.5");
 });
 
 test("an agy session at needs you has no question text, so its row shows its line", () => {
