@@ -7,15 +7,21 @@ import { age, element, patch, prose, pressable, stepText, text } from "./dom.js"
 import { counts, times, type Time } from "./times.js";
 import { shortPaths } from "./paths.js";
 import { historyLink } from "./history.js";
+import { knownProjects, projects } from "./projects.js";
+import { projectGroups, foundWorkspaces, tokenOf, workspaceSection, type ProjectGroup } from "./workspaces.js";
 import { redrawHistory, redrawHome, showHistory } from "./panes.js";
 import { isSelected, select } from "./selection.js";
 import { studio } from "./state.js";
 import { stateLabels, type Context, type Session, type SessionState, type Subagent } from "./types.js";
 import { askDelete, report } from "./story.js";
 
-// The collapsed groups Daniel opened, which stay open when the list is drawn again.
+// The state groups folded in a project, idle only, and the idle groups Daniel opened, by project and state,
+// which stay open when the list is drawn again.
 const collapsed: SessionState[] = ["idle"];
-const opened = new Set<SessionState>();
+const opened = new Set<string>();
+// The projects whose group Daniel folded: its header stays, with its rollup.
+const shut = new Set<string>();
+export const projectOpen = (key: string) => !shut.has(key);
 
 // What the strip calls a session: the issue number of an `issue-<n>-…` folder, else its folder's
 // first letters.
@@ -211,7 +217,7 @@ function selecting(id: string, agent: string | null, key = `${id} ${agent ?? ""}
 
 // One row: the session's name, its mark and its status glyph; while it runs or needs
 // Daniel, what it is doing and, on the row being looked at, the turn's clock.
-export function row(session: Session, children: Children): HTMLElement {
+export function row(session: Session, children: Children, token: string | null = null): HTMLElement {
   const button = selecting(session.id, null);
   button.classList.add("row", "session-row");
   const line = secondLine(session);
@@ -220,7 +226,7 @@ export function row(session: Session, children: Children): HTMLElement {
   rowLines(
     button,
     session.state,
-    [Object.assign(text("span", sessionName(session), "name"), { title: nameTitle(session) }), markNode(session)],
+    [Object.assign(text("span", sessionName(session), "name"), { title: nameTitle(session) }), markNode(session), ...(token ? [text("span", token, "id token")] : [])],
     line === null
       ? null
       : [...done(children, children.get("session")), rowLine(line), ...(turn ? [Object.assign(counts(clock, turn[1]), { title: turn[0] })] : [])],
@@ -309,7 +315,7 @@ export function item(key: string, depth: number, toggle: { open: boolean; hiding
   if (toggle) {
     const fold = icon("fold", CHEVRON, () => {
       if (!folded.delete(key)) folded.add(key);
-      showSessions(studio.listed);
+      drawSidebar();
     });
     fold.title = toggle.open ? "Collapse subagents" : "Expand subagents";
     fold.setAttribute("aria-expanded", String(toggle.open));
@@ -337,7 +343,7 @@ export function deleting(session: Session): HTMLElement | null {
 // with no known spawn under "Unattached". A faded subagent is not drawn, and its parent's line counts
 // it, unless anything below it is drawn: then it keeps its line, so its children stay under it. A
 // collapsed row hides its subagents, but not one that needs Daniel or failed unopened.
-function tree(session: Session): HTMLElement[] {
+function tree(session: Session, token: string | null): HTMLElement[] {
   const children = childrenOf(session);
   const shut = foldedIn(session);
   const rows = (parent: string, depth: number, under: boolean) =>
@@ -347,7 +353,7 @@ function tree(session: Session): HTMLElement[] {
   const under = shut.has("session");
   const unattached = rows("unattached", 2, under);
   const label = text("p", "Unattached", "unattached");
-  const top = item(`${session.id} session`, 0, folds(session, children, ["session", "unattached"], shut), row(session, children), deleting(session));
+  const top = item(`${session.id} session`, 0, folds(session, children, ["session", "unattached"], shut), row(session, children, token), deleting(session));
   return [top, ...rows("session", 1, under), ...(unattached.length ? [label, ...unattached] : [])];
 }
 
@@ -390,39 +396,82 @@ function strip(sessions: Session[]): HTMLElement[] {
 // The sessions the list shows: all but the ended ones, which are in History (#94).
 export const sidebarSessions = <T extends Pick<Session, "state">>(sessions: T[]): T[] => sessions.filter((session) => session.state !== "ended");
 
-// The core sends the sessions sorted by state: needs you, running, your turn, idle, then ended. Idle
-// ones collapse at the bottom; ended ones are in History. The rows above them carry their state by shape, so they have no group
-// heading (danielrispler/Falinks#572).
+// A project's header (#97): its name and, even while folded, its most urgent state: needs you over running. The
+// header is where the project's own actions will go (#98).
+function projectHead(group: ProjectGroup<Session>): HTMLElement {
+  const head = document.createElement("div");
+  head.className = "project-head";
+  head.dataset.key = "head";
+  const toggle = pressable(text("button", "", "project-toggle"), false, () => {
+    if (!shut.delete(group.key)) shut.add(group.key);
+    drawSidebar();
+  });
+  toggle.removeAttribute("aria-pressed");
+  toggle.setAttribute("aria-expanded", String(projectOpen(group.key)));
+  toggle.title = group.key;
+  toggle.append(text("span", group.name, "name"));
+  if (group.rollup) toggle.append(glyph(group.rollup));
+  head.append(toggle);
+  return head;
+}
+
+// A project's group: its header, then, unless folded, its live sessions by state and its workspace rows. A group for a
+// folder outside every project is dimmed and has no workspaces.
+function projectNode(group: ProjectGroup<Session>): HTMLElement {
+  const node = document.createElement("section");
+  node.className = group.project ? "project" : "project outside";
+  node.dataset.key = group.key;
+  node.append(projectHead(group));
+  if (!projectOpen(group.key)) return node;
+  const body = document.createElement("div");
+  body.className = "project-body";
+  body.dataset.key = "body";
+  for (const { state, sessions } of group.states) {
+    const rows = sessions.flatMap((session) => tree(session, group.project ? tokenOf(group.key, session.cwd) : null));
+    if (!collapsed.includes(state)) {
+      const states = document.createElement("div");
+      states.dataset.key = state;
+      states.append(...rows);
+      body.append(states);
+      continue;
+    }
+    const folded = document.createElement("details");
+    folded.dataset.key = state;
+    const id = `${group.key} ${state}`;
+    folded.open = opened.has(id);
+    folded.addEventListener("toggle", () => (folded.open ? opened.add(id) : opened.delete(id)));
+    folded.append(text("summary", `${stateLabels[state]} · ${sessions.length}`), ...rows);
+    body.append(folded);
+  }
+  if (group.project) {
+    const workspaces = document.createElement("div");
+    workspaces.className = "project-workspaces";
+    workspaces.dataset.key = "workspaces";
+    workspaces.append(...workspaceSection(group.key, studio.listed.filter((session) => session.state !== "ended")));
+    body.append(workspaces);
+  }
+  node.append(body);
+  return node;
+}
+
+// The project groups (#97): one per project, in order, then one dimmed group for each folder outside every project.
+// Patched, not rebuilt, so focus and text selection survive the update (danielrispler/Falinks#570).
+export function drawSidebar() {
+  const paths = knownProjects();
+  patch(element("groups"), projectGroups(paths, foundWorkspaces(), sidebarSessions(studio.listed)).map(projectNode));
+}
+
+// The sessions are grouped by project, then by state: needs you, running, your turn, idle; the idle ones
+// fold. Ended ones are in History. The rows carry their state by shape, so the groups have no heading
+// (danielrispler/Falinks#572).
 export function showSessions(sessions: Session[]) {
   studio.listed = sessions;
   redrawHome();
   redrawHistory();
-  // Ended sessions are in History, not here.
   const live = sidebarSessions(sessions);
-  const groups: Session[][] = [];
-  for (const session of live) {
-    const last = groups[groups.length - 1];
-    if (last?.[0].state === session.state) last.push(session);
-    else groups.push([session]);
-  }
-  // Patched, not rebuilt, so focus and text selection survive the update (danielrispler/Falinks#570).
-  patch(element("groups"), groups.map((rows) => {
-      const state = rows[0].state;
-      const title = `${stateLabels[state]} · ${rows.length}`;
-      if (!collapsed.includes(state)) {
-        const group = document.createElement("section");
-        group.dataset.key = state;
-        group.append(...rows.flatMap(tree));
-        return group;
-      }
-      const group = document.createElement("details");
-      group.dataset.key = state;
-      group.open = opened.has(state);
-      group.addEventListener("toggle", () => (group.open ? opened.add(state) : opened.delete(state)));
-      group.append(text("summary", title), ...rows.flatMap(tree));
-      return group;
-    }),
-  );
+  drawSidebar();
+  // The projects are read once; until then the groups draw with none.
+  if (!knownProjects().length) void projects().then(drawSidebar, () => {});
   patch(element("history-link"), historyLink(sessions, showHistory));
   patch(element("strip"), strip(live));
   element("no-sessions").hidden = sessions.length > 0;

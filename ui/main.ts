@@ -16,7 +16,7 @@ import { goHome, select, show } from "./selection.js";
 import { dragPanel, placePanel, togglePanel } from "./panel.js";
 import { dragSplit, focusPane, placePanes, runDoctor, showHistory, split, startPanes, toggleSplit } from "./panes.js";
 import { showBranches, showPalette, showPicker } from "./picker.js";
-import { fetchNow, readWorkspaces, showWorkspaces, watchWorkspaces } from "./workspaces.js";
+import { fetchNow, showWorkspaces, watchWorkspaces } from "./workspaces.js";
 import { reload, type SettingsFiles, zoomed } from "./settings.js";
 import { studio } from "./state.js";
 import { showSkills } from "./skills.js";
@@ -255,8 +255,6 @@ const showList = (sessions: Session[]) => {
   showWorkspaces();
   showToast();
 };
-// Opening Workspaces reads every workspace's git state at once (#26).
-element("workspaces").addEventListener("toggle", () => void ((element("workspaces") as HTMLDetailsElement).open && readWorkspaces(true)));
 watchWorkspaces();
 listen<Session[]>("sessions", showList);
 invoke<Session[]>("sessions").then(showList);

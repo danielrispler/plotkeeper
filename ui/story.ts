@@ -7,7 +7,6 @@
 
 import { modelLine, reports } from "./capabilities.js";
 import { age, code, element, invoke, pressable, prose, text } from "./dom.js";
-import { mainProject } from "./projects.js";
 import { select } from "./selection.js";
 import { askElement } from "./ask.js";
 import { rendered } from "./markdown.js";
@@ -22,6 +21,7 @@ import { removeWorktreeByDefault, shortPaths, worktreeOf } from "./paths.js";
 import { checkTime, counts, estimateText, times } from "./times.js";
 import { studio } from "./state.js";
 import { typeInto } from "./typing.js";
+import { projectOfPath } from "./workspaces.js";
 import {
   stateLabels,
   type CheckLine,
@@ -535,14 +535,13 @@ export async function askDelete(session: Session) {
   element("delete-shared").hidden = worktree === null || others.length === 0;
   if ((await choice(dialog)) !== "delete") return;
   if (session.terminal !== null) await closePane(session.terminal);
-  if (worktree !== null && ticked.checked) await removeWorktree(worktree);
+  if (worktree !== null && ticked.checked) await removeWorktree(worktree, await projectOfPath(worktree));
   await invoke("delete_session", { id: session.id });
 }
 
 // The branch is git's, read before the worktree goes: a session with no turn yet has none in its
 // transcript.
-export async function removeWorktree(worktree: string) {
-  const project = await mainProject();
+export async function removeWorktree(worktree: string, project: string) {
   const { tasks } = await invoke<Workspaces>("workspaces", { project });
   const branch = tasks.find((task) => task.path === worktree)?.branch ?? null;
   const losses = await invoke<Losses | null>("remove_task", { project, path: worktree, confirmed: false });

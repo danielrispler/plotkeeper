@@ -3,7 +3,9 @@
 
 import { patch, pressable, text } from "./dom.js";
 import { deleting, item, row, childrenOf, sessionName } from "./list.js";
+import { knownProjects } from "./projects.js";
 import { studio } from "./state.js";
+import { foundWorkspaces, sessionProjectName } from "./workspaces.js";
 import type { Session } from "./types.js";
 
 type Searched = Pick<Session, "name" | "identity" | "folder_name" | "cwd" | "transcript"> & { prompt_name?: string | null };
@@ -13,12 +15,8 @@ export function endedSessions<T extends Pick<Session, "state" | "last_event_at">
   return sessions.filter((s) => s.state === "ended").sort((a, b) => b.last_event_at - a.last_event_at);
 }
 
-// The project a session belongs to, until the projects store lands (#90): its repository's name (the folder holding
-// `.claude/worktrees` for a task's worktree), else its folder's name.
-export function projectName(session: Pick<Session, "cwd" | "folder_name">): string {
-  const main = /^(.*)\/\.claude\/worktrees\/[^/]+/.exec(session.cwd)?.[1];
-  return main ? main.split("/").pop() || session.folder_name : session.folder_name;
-}
+// The project a session belongs to, else the name of the group outside every project it sits in (#97).
+export const projectName = (session: Pick<Session, "cwd">): string => sessionProjectName(knownProjects(), foundWorkspaces(), session);
 
 // A session's branch: the transcript's, else the identity's; "" when unknown.
 export const branchOf = (session: Pick<Session, "identity" | "transcript">) => session.transcript?.branch ?? session.identity?.branch ?? "";

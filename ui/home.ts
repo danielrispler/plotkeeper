@@ -31,9 +31,9 @@ export function homeProjects(paths: string[]): HomeProject[] {
 }
 
 // Whether a click on `target`, inside the session list, is on its empty space: not on a row, a group
-// heading, Workspaces or any button.
+// or project heading, a workspace or any button.
 export function listSpace(target: { closest(selector: string): unknown }): boolean {
-  return ![".item", "summary", "#workspaces", "button"].some((selector) => target.closest(selector));
+  return ![".item", "summary", ".project-head", ".project-workspaces", "button"].some((selector) => target.closest(selector));
 }
 
 // A session's row, the list's, with its Delete beside it on a landed one.

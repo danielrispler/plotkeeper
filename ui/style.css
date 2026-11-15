@@ -66,7 +66,7 @@ body[data-layout="focus"] #rail-divider { display: none; }
 .git-line .git-bad { color: var(--conflict); }
 .git-line .git-branch { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
 .git-line .git-branch:hover { text-decoration: underline; }
-.workspaces .row .l2 { white-space: pre; }
+.project-workspaces .row .l2 { white-space: pre; }
 .usage { font-size: var(--size-small); color: var(--muted); }
 /* The rail's slim header while it is an overlay (danielrispler/Falinks#573): the selected session's state and open question. */
 .slim { display: flex; gap: var(--sp-4); align-items: baseline; min-width: 0; overflow: hidden; font-size: var(--size-small); }
@@ -115,6 +115,14 @@ h1 { margin: 0 0 var(--sp-4); }
 .row.helper { font-size: var(--size-small); }
 .row .failed { font-weight: 600; color: var(--fg); }
 .unattached { margin: var(--sp-1) 0 0; padding-inline-start: calc(var(--sp-4) + var(--indent) * 3); font-size: var(--size-small); color: var(--muted); }
+/* A project's group (#97): its header, always shown, with its most urgent state; a folder outside every project is dimmed. */
+.project-head { display: flex; align-items: center; margin-top: var(--sp-4); }
+.project-toggle { display: flex; flex: 1; gap: var(--sp-3); align-items: center; min-width: 0; padding: var(--sp-2) var(--sp-4); font-size: var(--size-xs); font-weight: 500; color: var(--muted); text-align: start; }
+.project-toggle .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-toggle .glyph { margin-inline-start: auto; }
+.project.outside { opacity: 0.6; }
+.project-workspaces { margin-top: var(--sp-3); }
+.row .token { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 /* A list row with its fold toggle in a column before the name and its delete after the glyph, shown
    on hover or focus. Every row keeps both columns, so names and glyphs stay aligned. */
 .item { position: relative; }
@@ -368,14 +376,14 @@ body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; to
 .picker .auto-mode { display: block; font-size: var(--size-small); margin: var(--sp-2) var(--sp-4) var(--sp-3); }
 .picker .row:disabled { opacity: 0.5; cursor: default; }
 .picker .hidden-count { color: var(--faint); font-size: var(--size-small); margin: var(--sp-1) var(--sp-4) var(--sp-3); }
-:is(.picker, .workspaces) .new-task { display: flex; gap: var(--sp-3); margin: var(--sp-4) var(--sp-2) var(--sp-1); padding-top: var(--sp-4); }
-:is(.picker, .workspaces) .new-task input { flex: 1; min-width: 0; font: var(--size-small) var(--mono); color: inherit; background: var(--bg);
+:is(.picker, .project-workspaces) .new-task { display: flex; gap: var(--sp-3); margin: var(--sp-4) var(--sp-2) var(--sp-1); padding-top: var(--sp-4); }
+:is(.picker, .project-workspaces) .new-task input { flex: 1; min-width: 0; font: var(--size-small) var(--mono); color: inherit; background: var(--bg);
                                         border: var(--hair) solid var(--edge); border-radius: var(--radius); padding: var(--sp-1) var(--sp-3); }
-:is(.picker, .workspaces) .new-task .btn { margin: 0; }
+:is(.picker, .project-workspaces) .new-task .btn { margin: 0; }
 .picker .new-task:first-of-type { margin-top: var(--sp-1); padding-top: 0; }
-:is(.picker, .workspaces) .picker-error { white-space: pre-wrap; font: var(--size-small) var(--mono); color: var(--needs-you); margin: var(--sp-3) var(--sp-2); }
+:is(.picker, .project-workspaces) .picker-error { white-space: pre-wrap; font: var(--size-small) var(--mono); color: var(--needs-you); margin: var(--sp-3) var(--sp-2); }
 /* Workspaces (danielrispler/Falinks#576): a clicked workspace's actions, under its row. */
-.workspaces .workspace-actions { display: flex; gap: var(--sp-3); padding: var(--sp-1) var(--sp-4) var(--sp-3); }
+.project-workspaces .workspace-actions { display: flex; gap: var(--sp-3); padding: var(--sp-1) var(--sp-4) var(--sp-3); }
 /* The questions of rename and close (danielrispler/Falinks#469). */
 .ask { background: var(--surface); color: var(--fg); border: 0; border-radius: var(--radius); box-shadow: var(--shadow);
        padding: var(--sp-5); width: var(--popover); }
