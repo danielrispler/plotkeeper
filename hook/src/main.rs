@@ -25,7 +25,13 @@ fn append() -> Result<(), Box<dyn Error>> {
     let mut payload = Vec::new();
     std::io::stdin().read_to_end(&mut payload)?;
     let mut event: Map<String, Value> = serde_json::from_slice(&payload)?;
-    if let Ok(terminal) = env::var("STUDIO_TERMINAL_ID") {
+    let terminal = env::var("STUDIO_TERMINAL_ID");
+    // agy's plugin is global, so its hooks fire for every agy on the machine: outside the studio's
+    // terminals an agy event (camelCase `hookEventName`) is not ours (#43, decision 9).
+    if terminal.is_err() && event.contains_key("hookEventName") {
+        return Ok(());
+    }
+    if let Ok(terminal) = terminal {
         event.insert("studio_terminal_id".into(), terminal.into());
     }
     event.insert("studio_received_ms".into(), received_ms.into());

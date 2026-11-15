@@ -61,6 +61,19 @@ export async function offerPluginFix() {
   say(problem, [["Fix it", fix], ["Not now", () => say(null)]]);
 }
 
+// The same for agy's copy of the studio plugin (#49): agy copies it on install, so a changed plugin
+// or a moved `studio-hook` needs an install again.
+export async function offerAgyPluginFix() {
+  const problem = await invoke<string | null>("agy_plugin_setup").catch(() => null);
+  if (!problem || !element("restart").hidden) return;
+  const fix = () =>
+    invoke("fix_agy_plugin_setup").then(
+      () => say("Installed. agy sessions started from now on send their events to the studio."),
+      (e) => say(`${e}`),
+    );
+  say(problem, [["Install it", fix], ["Not now", () => say(null)]]);
+}
+
 const plan = async () => invoke<Revive[]>("revival", { terms: await list() });
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 

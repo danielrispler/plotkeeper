@@ -600,3 +600,96 @@ fn run(dir: &Path, args: &[&str]) -> Result<std::process::Output, String> {
         .output()
         .map_err(|e| format!("git {}: {e}", args[0]))
 }
+
+/// The studio's plugin for agy (#43, decisions 8 and 9; #49). `agy plugin install` copies the
+/// folder, so the app renders the shipped `plugin-agy/` with `studio-hook`'s path, compares it with
+/// the installed copy and installs again when they differ.
+pub mod agy_plugin {
+    use std::path::{Path, PathBuf};
+    use std::process::{Command, Stdio};
+
+    /// The plugin's name in `plugin.json`, and its folder under `~/.gemini/config/plugins/`.
+    const NAME: &str = "studio";
+    const PLACEHOLDER: &str = "__STUDIO_HOOK__";
+
+    #[derive(Debug, PartialEq, Eq)]
+    pub enum Status {
+        Current,
+        Missing,
+        Stale,
+    }
+
+    /// The plugin's two files as installed: `source`'s, with `hook` where the hooks name it.
+    fn rendered(source: &Path, hook: &Path) -> Result<[(&'static str, String); 2], String> {
+        let read = |name: &str| {
+            std::fs::read_to_string(source.join(name))
+                .map_err(|e| format!("could not read {}/{name}: {e}", source.display()))
+        };
+        // The path sits in a JSON string, so it is escaped as one.
+        let path = serde_json::to_string(&hook.display().to_string()).map_err(|e| e.to_string())?;
+        let path = &path[1..path.len() - 1];
+        Ok([
+            ("plugin.json", read("plugin.json")?),
+            ("hooks.json", read("hooks.json")?.replace(PLACEHOLDER, path)),
+        ])
+    }
+
+    fn installed(home: &Path) -> PathBuf {
+        home.join(".gemini/config/plugins").join(NAME)
+    }
+
+    /// Whether the copy in `home`'s agy config is the plugin of `source` for `hook`.
+    pub fn status(source: &Path, hook: &Path, home: &Path) -> Result<Status, String> {
+        let dir = installed(home);
+        if !dir.join("hooks.json").exists() {
+            return Ok(Status::Missing);
+        }
+        let same = rendered(source, hook)?
+            .iter()
+            .all(|(name, text)| std::fs::read_to_string(dir.join(name)).is_ok_and(|t| &t == text));
+        Ok(if same { Status::Current } else { Status::Stale })
+    }
+
+    /// Installs the plugin of `source` for `hook` with `agy` (the command), for `home`: validates a
+    /// rendered copy first, as install does not and skips an invalid `hooks.json` silently, then
+    /// replaces any installed copy.
+    pub fn install(agy: &Path, source: &Path, hook: &Path, home: &Path) -> Result<(), String> {
+        let scratch = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let dir = scratch.path().join(NAME);
+        std::fs::create_dir(&dir).map_err(|e| e.to_string())?;
+        for (name, text) in rendered(source, hook)? {
+            std::fs::write(dir.join(name), text).map_err(|e| e.to_string())?;
+        }
+        let run = |args: &[&str]| {
+            Command::new(agy)
+                .args(["plugin"])
+                .args(args)
+                .arg(&dir)
+                .env("HOME", home)
+                .stdin(Stdio::null())
+                .output()
+                .map_err(|e| format!("could not run agy: {e}"))
+        };
+        let valid = run(&["validate"])?;
+        if !valid.status.success() {
+            return Err(format!(
+                "agy did not validate the studio plugin: {}",
+                String::from_utf8_lossy(&valid.stdout)
+            ));
+        }
+        // An uninstall of what is not there fails, and that is fine.
+        let _ = Command::new(agy)
+            .args(["plugin", "uninstall", NAME])
+            .env("HOME", home)
+            .stdin(Stdio::null())
+            .output();
+        let done = run(&["install"])?;
+        if !done.status.success() {
+            return Err(format!(
+                "agy plugin install failed: {}",
+                String::from_utf8_lossy(&done.stderr)
+            ));
+        }
+        Ok(())
+    }
+}
