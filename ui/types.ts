@@ -75,8 +75,22 @@ export type Question = { tool_use_id: string; agent: string | null; questions: A
 // A turn, a block in the rail's feed (danielrispler/Falinks#574): its prompt's first line, or "worker <name> returned";
 // `id` names its card and summary once its `Stop` came; `message` is its final reply's first line.
 export type Turn = { started_at: number; ended_at: number | null; prompt: string; id: string | null; message: string | null };
+// What the session's agent adapter reports, which decides what its view shows (danielrispler/plotkeeper#43, decision 4);
+// `agent` is its mark's name, empty for a status-only row.
+export type Capabilities = {
+  agent: string;
+  asks: boolean;
+  background_tasks: boolean;
+  replies: boolean;
+  permission_mode: boolean;
+  durations: boolean;
+  transcript_version: boolean;
+};
 export type Session = {
   id: string;
+  capabilities: Capabilities;
+  // The model its agent's hooks name (agy's), null otherwise; Claude's is `transcript.model`.
+  model: string | null;
   // The folder it works in, from its latest event; `folder_name` is its last segment.
   cwd: string;
   folder_name: string;

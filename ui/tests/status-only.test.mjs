@@ -15,6 +15,7 @@ const codex = (state) => ({
   questions: [],
   transcript: { context: null, intention: null },
   status_only: true,
+  capabilities: { agent: "" },
   turns: [],
   checks: [],
   agents: [],
@@ -28,7 +29,7 @@ test("a status-only row shows its name and \"status only\", and no step, intenti
     assert.equal(secondLine(row), null);
   }
   // A Claude session's mark is its context share, and its running row keeps its step.
-  const claude = { ...codex("running"), status_only: false, transcript: { context: { tokens: 9000, share: 9 } } };
+  const claude = { ...codex("running"), status_only: false, capabilities: { agent: "claude" }, transcript: { context: { tokens: 9000, share: 9 } } };
   assert.equal(rowMark(claude), "context 9%");
   assert.equal(secondLine(claude), "No step yet");
 });

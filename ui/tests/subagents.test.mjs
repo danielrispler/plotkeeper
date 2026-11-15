@@ -44,6 +44,7 @@ test("a finished worker draws no row and counts in its parent's \"N done\"", () 
 
 test("the rail's history lists every subagent newest first, with its purpose, result and details", () => {
   const session = {
+    capabilities: { agent: "claude", replies: true },
     agents: [
       agent("w1", { status: "completed", ended_at: 7 * MIN, faded: true, asked: "Implement #9.", agent_type: "implementer", result: "Done." }),
       agent("h1", { kind: "helper", started_at: MIN, status: "killed", ended_at: 2 * MIN, failed: true }),
@@ -59,7 +60,7 @@ test("the rail's history lists every subagent newest first, with its purpose, re
 });
 
 test("a written summary takes the place of the first line", () => {
-  const session = { agents: [agent("w1", { status: "completed", ended_at: MIN, result: "Done." })] };
+  const session = { capabilities: { agent: "claude", replies: true }, agents: [agent("w1", { status: "completed", ended_at: MIN, result: "Done." })] };
   const [entry] = subagentHistory(session, new Map([["w1", "Added the parser; its tests pass."]]), MIN);
   assert.equal(entry.result, "Added the parser; its tests pass.");
 });

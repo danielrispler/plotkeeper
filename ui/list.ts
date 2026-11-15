@@ -2,6 +2,7 @@
 // by shape (danielrispler/Falinks#572), each session's subagents nested under it. When the window is narrow it collapses to
 // a strip of glyphs and labels, which opens the full list on hover, on click or on ⌘1.
 
+import { agentMark } from "./capabilities.js";
 import { age, element, patch, prose, pressable, stepText, text } from "./dom.js";
 import { counts, times, type Time } from "./times.js";
 import { shortPaths } from "./paths.js";
@@ -52,8 +53,9 @@ export function contextTitle(context: Context | null): string {
 
 // The muted mark after a row's name: "status only" for another agent's row (danielrispler/Falinks#560), so it never reads
 // as a Claude session with missing data; else the context share.
-export function rowMark(session: Pick<Session, "status_only" | "transcript">): string {
-  return session.status_only ? "status only" : contextText(session.transcript.context);
+export function rowMark(session: Pick<Session, "status_only" | "transcript" | "capabilities">): string {
+  if (session.status_only) return "status only";
+  return agentMark(session) || contextText(session.transcript.context);
 }
 
 // The name's hover: the identity's PR and worktree, which a prompt name leaves out.
@@ -63,7 +65,11 @@ function nameTitle(session: Session): string {
 
 // The mark's node, with the context share's hover.
 function markNode(session: Session): HTMLElement {
-  const title = session.status_only ? "Another agent, followed by its reported status only" : contextTitle(session.transcript.context);
+  const title = session.status_only
+    ? "Another agent, followed by its reported status only"
+    : agentMark(session)
+      ? `${agentMark(session)}: followed by what it reports, which has no context share`
+      : contextTitle(session.transcript.context);
   return Object.assign(text("span", rowMark(session), "id"), { title });
 }
 
