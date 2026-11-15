@@ -8,11 +8,11 @@
 import { element, invoke, patch, pressable, text } from "./dom.js";
 import { mainProject } from "./projects.js";
 import { glyph } from "./list.js";
-import { newTask, startLast } from "./picker.js";
+import { newTask, showBranches, startLast } from "./picker.js";
 import { studio } from "./state.js";
 import { removeWorktree } from "./story.js";
 import { throttle } from "./throttle.js";
-import type { GitState, Workspace, Workspaces, Session } from "./types.js";
+import type { Branch, GitState, Workspace, Workspaces, Session } from "./types.js";
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
@@ -88,6 +88,28 @@ export function workspaceRows(found: Workspaces, states: (GitState | null)[], se
   }));
 }
 
+// Why the main checkout's branch cannot be switched now (#95), or null when it can: a session working in
+// the main checkout itself, not in a task's worktree, is running or needs Daniel, so its files must not change
+// under it. A pure function of the listed sessions.
+export function branchBlocked(found: Workspaces, sessions: Pick<Session, "cwd" | "state">[]): string | null {
+  const all = allWorkspaces(found);
+  const here = sessions.filter(({ cwd }) => workspaceOf(all, cwd) === found.main);
+  if (here.some(({ state }) => state === "needs_you")) return "a session here needs you";
+  if (here.some(({ state }) => state === "running")) return "a session here is running";
+  return null;
+}
+
+export type BranchOption = { branch: Branch; label: string; note: string; disabled: boolean };
+
+// The branch picker's rows: every branch, disabled all together by `blocked`, and one a task holds or the
+// main checkout is on by its own reason (#95).
+export function branchOptions(branches: Branch[], blocked: string | null): BranchOption[] {
+  return branches.map((branch) => {
+    const note = branch.task ? `in task ${branch.task}` : branch.current ? "current" : branch.remote ? "at origin" : "";
+    return { branch, label: branch.name, note, disabled: blocked !== null || branch.task !== null || branch.current };
+  });
+}
+
 // The last workspaces read, each workspace's git state by path, and the workspaces whose actions show.
 let read: Workspaces | null = null;
 const states = new Map<string, GitState | null>();
@@ -150,7 +172,14 @@ function drawLine() {
   const name = workspace === read.main ? repo : `${repo} › ${workspace.path.split("/").pop()}`;
   const tokens = gitTokens(states.get(workspace.path) ?? null);
   line.title = [...tokens.map((token) => token.title), fetchNote(fetched, Date.now())].join("\n");
-  line.replaceChildren(text("span", name ?? "", "git-workspace"), ...tokens.map((token) => Object.assign(text("span", token.text, token.bad ? "git-bad" : ""), { title: token.title })));
+  // The main checkout's branch token opens the branch picker (#95); a task's worktree keeps its branch.
+  const shown = tokens.map((token, i) => {
+    if (i > 0 || workspace !== read?.main) return Object.assign(text("span", token.text, token.bad ? "git-bad" : ""), { title: token.title });
+    const button = pressable(text("button", token.text, "git-branch"), false, () => void showBranches());
+    button.title = `${token.title}\nSwitch branch`;
+    return button;
+  });
+  line.replaceChildren(text("span", name ?? "", "git-workspace"), ...shown);
 }
 
 const shownWorkspace = (workspaces: Workspaces) => workspaceOf(allWorkspaces(workspaces), studio.selection?.session.cwd ?? workspaces.main.path) ?? workspaces.main;
@@ -228,6 +257,12 @@ export function showWorkspaces() {
   const working = new Set(studio.listed.map(({ cwd }) => workspaceOf(all, cwd)?.path));
   for (const workspace of all) if (working.has(workspace.path)) touch(workspace.path);
   touchShown();
+}
+
+// After a branch switch: Workspaces and the main checkout's git state are read again at once.
+export async function refreshAfterSwitch() {
+  await readWorkspaces(true);
+  if (read) touch(read.main.path);
 }
 
 // The repository's fetch, once for all its workspaces (#33): when it last succeeded, and git's message

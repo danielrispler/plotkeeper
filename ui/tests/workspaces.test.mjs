@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { fetchNote, gitTokens, workspaceRows } from "../../dist/workspaces.js";
+import { branchBlocked, branchOptions, fetchNote, gitTokens, workspaceRows } from "../../dist/workspaces.js";
 import { throttle } from "../../dist/throttle.js";
 
 const ui = new URL("../", import.meta.url);
@@ -160,4 +160,40 @@ test("a task's row shows the landed mark when a session in it has landed; the ma
   const landed = [{ cwd: "/r", landed: true }, { cwd: "/r/.claude/worktrees/issue-1/apps", landed: true }];
   assert.deepEqual(workspaceRows(workspaces, states, landed).map((row) => row.landed), [false, true, false]);
   assert.deepEqual(workspaceRows(workspaces, states, sessions).map((row) => row.landed), [false, false, false]);
+});
+
+// The branch picker (#95): disabled while a session in the main checkout runs or needs Daniel.
+test("the branch picker is disabled, with the reason, while a main-checkout session is running or needs you", () => {
+  const at = (cwd, state) => ({ cwd, state });
+  assert.equal(branchBlocked(workspaces, []), null);
+  assert.equal(branchBlocked(workspaces, [at("/r", "idle"), at("/r", "your_turn"), at("/r", "ended")]), null);
+  assert.equal(branchBlocked(workspaces, [at("/r", "running")]), "a session here is running");
+  assert.equal(branchBlocked(workspaces, [at("/r/apps", "running"), at("/r", "needs_you")]), "a session here needs you");
+});
+
+test("a session in a task, or in another folder, does not disable the branch picker", () => {
+  const at = (cwd, state) => ({ cwd, state });
+  const others = [at("/r/.claude/worktrees/issue-1", "running"), at("/r/.claude/worktrees/issue-1/apps", "needs_you"), at("/elsewhere", "running")];
+  assert.equal(branchBlocked(workspaces, others), null);
+});
+
+test("the branch options grey out a task's branch as 'in task X' and the current one, and all of them when blocked", () => {
+  const branches = [
+    { name: "main", remote: false, task: null, current: true },
+    { name: "issue-1", remote: false, task: "issue-1", current: false },
+    { name: "teammate", remote: true, task: null, current: false },
+  ];
+  const shown = (blocked) => branchOptions(branches, blocked).map(({ label, note, disabled }) => [label, note, disabled]);
+  assert.deepEqual(shown(null), [
+    ["main", "current", true],
+    ["issue-1", "in task issue-1", true],
+    ["teammate", "at origin", false],
+  ]);
+  assert.deepEqual(shown("a session here is running").map((row) => row[2]), [true, true, true]);
+});
+
+test("the picker is the main checkout's only: its token and the palette action open it, and it has no New branch", () => {
+  assert.match(read("main.ts"), /"studio::SwitchBranch": \(\) => void showBranches\(\)/);
+  assert.match(read("workspaces.ts"), /workspace !== read\?\.main/);
+  assert.doesNotMatch(read("picker.ts"), /New branch/);
 });

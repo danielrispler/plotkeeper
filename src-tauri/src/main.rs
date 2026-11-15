@@ -552,6 +552,8 @@ fn main() {
             terminal::create_named_task,
             terminal::remove_task,
             terminal::delete_merged_branch,
+            terminal::branches,
+            terminal::switch_branch,
             terminal::terminal_lost,
             terminal::terminal_upgrade,
             restart::revival,

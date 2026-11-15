@@ -15,7 +15,7 @@ import { showSessions } from "./list.js";
 import { goHome, select, show } from "./selection.js";
 import { dragPanel, placePanel, togglePanel } from "./panel.js";
 import { dragSplit, focusPane, placePanes, runDoctor, showHistory, split, startPanes, toggleSplit } from "./panes.js";
-import { showPalette, showPicker } from "./picker.js";
+import { showBranches, showPalette, showPicker } from "./picker.js";
 import { fetchNow, readWorkspaces, showWorkspaces, watchWorkspaces } from "./workspaces.js";
 import { reload, type SettingsFiles, zoomed } from "./settings.js";
 import { studio } from "./state.js";
@@ -152,6 +152,8 @@ const actions: Actions = {
   "studio::Answer": (n) => answer(Number(n)),
   "studio::NewSession": () => void showPicker(),
   "studio::NewTerminal": () => void showPicker("terminal"),
+  // The main checkout's branch picker (#95).
+  "studio::SwitchBranch": () => void showBranches(),
   // Home, in the terminal column: selects no session.
   "studio::JumpToUnseen": () => void go(newestUnseen(studio.listed)),
   "studio::GoHome": () => void goHome(),
