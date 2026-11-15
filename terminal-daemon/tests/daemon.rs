@@ -371,6 +371,44 @@ fn stopping_the_daemon_ends_its_terminals_and_leaves_the_record_of_the_running_o
     assert_eq!(recorded(&d), running);
 }
 
+// #74: the app starts a new daemon on the socket as soon as the old one is gone, so `stop` must wait for the old
+// daemon's process, not for the socket to go quiet, and still kill what ignored the hangup.
+#[test]
+fn stop_succeeds_when_the_app_starts_a_new_daemon_on_the_socket() {
+    let d = Daemon::start("restart");
+    let mut c = d.client();
+    spawn(
+        &mut c,
+        "t1",
+        &["sh", "-c", "trap '' HUP; sleep 1004 & exit 0"],
+    );
+    wait_for("the exit", || {
+        term(&list(&mut c), "t1")["exited"] == "code 0"
+    });
+    let pid = term(&list(&mut c), "t1")["processes"][0]["pid"]
+        .as_i64()
+        .unwrap() as i32;
+    let old = d.child.id() as i32;
+    let socket = d.socket();
+    let restarted = std::thread::spawn(move || {
+        // The app's read loop sees the daemon go, its reaper reaps it, and the UI reconnects at once.
+        while c.recv().is_ok() {}
+        unsafe { libc::waitpid(old, std::ptr::null_mut(), 0) };
+        Command::new(env!("CARGO_BIN_EXE_studio-terminal-daemon"))
+            .args(["serve", "--socket"])
+            .arg(&socket)
+            .spawn()
+            .unwrap()
+    });
+
+    let stopped = studio_terminal_daemon::stop(&d.socket());
+    let mut new = restarted.join().unwrap();
+    let _ = new.kill();
+    let _ = new.wait();
+    stopped.unwrap();
+    wait_for("t1's process to end", || unsafe { libc::kill(pid, 0) } != 0);
+}
+
 // danielrispler/Falinks#470: a shell comes back in the folder it moved to, not the one it started in.
 #[test]
 fn list_and_the_record_give_the_folder_a_shell_moved_to() {
