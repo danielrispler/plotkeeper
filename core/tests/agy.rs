@@ -318,3 +318,70 @@ fn an_agy_sessions_first_stop_asks_for_agys_version_once() {
     let second = studio.apply(&line("s", "Stop", 5, json!({})));
     assert_eq!((asked(first), asked(second)), (1, 0));
 }
+
+#[test]
+fn a_json_line_with_no_conversation_or_event_name_counts_as_drift() {
+    let mut studio = Studio::default();
+    studio.replay(&json!({ "studio_received_ms": 5, "hookEventName": "Stop" }).to_string());
+    studio.replay(&json!({ "studio_received_ms": 6, "conversationId": "s" }).to_string());
+
+    let seen: Vec<_> = studio.agy_drift().iter().map(|d| (d.at, d.kind)).collect();
+    assert_eq!(
+        seen,
+        [(5, AgyDriftKind::HookEvent), (6, AgyDriftKind::HookEvent)]
+    );
+}
+
+#[test]
+fn a_child_ends_when_its_files_state_changes_with_no_stop() {
+    let dir = tempfile::tempdir().unwrap();
+    let generated = dir.path().join("p/.system_generated");
+    std::fs::create_dir_all(generated.join("subagents")).unwrap();
+    let file = generated.join("subagents/c.json");
+    let write = |state: &str| {
+        let body = json!({ "subagentDescriptor": { "typeName": "self", "role": "Runner" }, "state": state, "spawnStepIndex": 5 });
+        std::fs::write(&file, body.to_string()).unwrap();
+    };
+    let with = |session: &str, event: &str, at: u64, fields: Value| {
+        let mut l: Value = serde_json::from_str(&line(session, event, at, fields)).unwrap();
+        l["transcriptPath"] = format!(
+            "{}/{session}/.system_generated/logs/transcript_full.jsonl",
+            dir.path().display()
+        )
+        .into();
+        l.to_string()
+    };
+    let mut studio = Studio::default();
+    write("ALIVE");
+    studio.replay(&with("p", "SessionStart", 1, json!({})));
+    studio.replay(&with("c", "SessionStart", 2, json!({})));
+    studio.replay(&with("p", "Stop", 3, json!({ "fullyIdle": false })));
+    assert_eq!(
+        studio.session("p").unwrap().agents[0].status,
+        Status::Running
+    );
+
+    write("COMPLETED");
+    studio.replay(&with("p", "Stop", 4, json!({ "fullyIdle": true })));
+
+    let child = &studio.session("p").unwrap().agents[0];
+    assert_eq!(child.status, Status::Completed);
+    assert!(child.ended_at.is_some());
+}
+
+#[test]
+fn a_blocked_agy_session_stops_needing_you_when_its_terminal_goes_or_stops_reporting() {
+    let silent = || {
+        let mut t = terminal("blocked");
+        t.state = None;
+        t
+    };
+    for gone in [vec![], vec![silent()]] {
+        let mut studio = Studio::replayed(fixture());
+        studio.terminals(&[terminal("blocked")], 10);
+        assert_eq!(studio.session(PARENT).unwrap().state, State::NeedsYou);
+
+        studio.terminals(&gone, 20);
+        assert_eq!(studio.session(PARENT).unwrap().state, State::YourTurn);
+    }
+}

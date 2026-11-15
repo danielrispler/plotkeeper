@@ -6,7 +6,9 @@
 //! in its payload, a turn's origin is read from the transcript once, and hooks that arrive out of
 //! order are tolerated by remembering which steps ended.
 
-use crate::event::{Capabilities, Event, Happened, Origin, Spawned, Start, Tool, ToolKind};
+use crate::event::{
+    Capabilities, Event, Happened, Origin, Spawned, Start, Tool, ToolKind, TranscriptFormat,
+};
 use serde::Serialize;
 use serde_json::{Map, Value};
 use std::{
@@ -26,6 +28,7 @@ pub const CAPABILITIES: Capabilities = Capabilities {
     permission_mode: false,
     durations: false,
     transcript_version: false,
+    transcript_format: TranscriptFormat::Agy,
 };
 
 /// The record types of agy's transcript the studio knows (`transcript_full.jsonl`).
@@ -40,7 +43,7 @@ const RECORDS: [&str; 4] = [
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DriftKind {
-    /// A hook event name outside agy's six.
+    /// A hook event name outside agy's six, or a line with no event name or conversation.
     HookEvent,
     /// A transcript record that does not parse or has a type the studio does not know.
     Record,
@@ -56,6 +59,38 @@ pub struct Drift {
     pub kind: DriftKind,
 }
 
+/// A turn's start: its `initialNumSteps` and where it came from.
+#[derive(Clone, Copy)]
+struct Turn {
+    initial: u64,
+    origin: Origin,
+}
+
+/// agy's six hook events.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Hook {
+    SessionStart,
+    PreInvocation,
+    PostInvocation,
+    PreToolUse,
+    PostToolUse,
+    Stop,
+}
+
+impl Hook {
+    fn named(name: &str) -> Option<Hook> {
+        Some(match name {
+            "SessionStart" => Hook::SessionStart,
+            "PreInvocation" => Hook::PreInvocation,
+            "PostInvocation" => Hook::PostInvocation,
+            "PreToolUse" => Hook::PreToolUse,
+            "PostToolUse" => Hook::PostToolUse,
+            "Stop" => Hook::Stop,
+            _ => return None,
+        })
+    }
+}
+
 /// One conversation: a session's own, or a subagent's.
 #[derive(Clone, Default)]
 struct Conversation {
@@ -67,8 +102,8 @@ struct Conversation {
     transcript: String,
     cwd: String,
     terminal: Option<String>,
-    /// The open turn's start: its `initialNumSteps`, `lastUserInput` and origin.
-    turn: Option<(u64, Origin)>,
+    /// The open turn's start.
+    turn: Option<Turn>,
     last_input: String,
     /// The calls (by `stepIdx`) that started and that ended.
     open: HashSet<String>,
@@ -88,41 +123,19 @@ pub(crate) struct Adapter {
 }
 
 impl Adapter {
-    /// The events of hook line `line`, or `None` when it is no agy line.
+    /// The events of hook line `line`, or `None` when it is no JSON.
     pub fn events(&mut self, line: &str) -> Option<Vec<Event>> {
         let raw: Value = serde_json::from_str(line).ok()?;
-        let id = raw["conversationId"].as_str()?.to_owned();
-        let name = raw["hookEventName"].as_str()?.to_owned();
         let at = raw["studio_received_ms"].as_u64().unwrap_or_default();
-        if !matches!(
-            name.as_str(),
-            "SessionStart"
-                | "PreInvocation"
-                | "PostInvocation"
-                | "PreToolUse"
-                | "PostToolUse"
-                | "Stop"
-        ) {
-            self.drift.push(Drift {
-                at,
-                kind: DriftKind::HookEvent,
-            });
+        let named = (raw["conversationId"].as_str()).zip(raw["hookEventName"].as_str());
+        let Some((id, hook)) = named.and_then(|(id, name)| Some((id, Hook::named(name)?))) else {
+            // A line of the hook's with neither agent's shape, or an event of agy's the studio
+            // does not know: the payload changed.
+            self.drift(at, DriftKind::HookEvent);
             return Some(Vec::new());
-        }
-        let terminal = raw["studio_terminal_id"].as_str().map(str::to_owned);
-        if !self.conversations.contains_key(&id) {
-            let parent = terminal.as_ref().and_then(|t| self.sessions.get(t));
-            let child = parent.is_some_and(|p| *p != id);
-            let conversation = Conversation {
-                parent: parent.filter(|_| child).cloned(),
-                terminal: terminal.clone(),
-                ..Conversation::default()
-            };
-            if !child && let Some(t) = &terminal {
-                self.sessions.insert(t.clone(), id.clone());
-            }
-            self.conversations.insert(id.clone(), conversation);
-        }
+        };
+        let id = id.to_owned();
+        self.know(&id, raw["studio_terminal_id"].as_str());
         let conversation = self.conversations.get_mut(&id)?;
         if let Some(text) = raw["transcriptPath"].as_str().filter(|t| !t.is_empty()) {
             conversation.transcript = text.into();
@@ -130,97 +143,41 @@ impl Adapter {
         if let Some(text) = raw["cwd"].as_str().filter(|t| !t.is_empty()) {
             conversation.cwd = text.into();
         }
-        let parent_id = conversation.parent.clone();
+        let parent = conversation.parent.clone();
+        let own = parent.is_none();
         let mut events = Vec::new();
         // A child of a session whose file names it goes under it by its own spawn event, which
         // the session's own agent sends.
-        if parent_id.is_some() {
-            events.extend(self.attach(&id, &raw, at));
+        if parent.is_some() {
+            events.extend(self.attach(&id, at));
         }
-        let session = parent_id.clone().unwrap_or_else(|| id.clone());
-        let mut event = Event {
-            session_id: session,
-            agent_id: parent_id.as_ref().map(|_| id.clone()),
-            agent_type: None,
-            cwd: raw["cwd"].as_str().unwrap_or_default().into(),
-            transcript_path: raw["transcriptPath"].as_str().unwrap_or_default().into(),
-            prompt_id: None,
-            studio_received_ms: at,
-            studio_terminal_id: terminal,
-            studio_turn_start: map(&raw["studio_turn_start"]),
-            studio_turn_end: map(&raw["studio_turn_end"]),
-            capabilities: CAPABILITIES,
-            happened: Vec::new(),
-        };
-        let own = parent_id.is_none();
+        let session = parent.clone().unwrap_or_else(|| id.clone());
+        let mut event = frame(
+            &self.conversations[&id],
+            session,
+            parent.map(|_| id.clone()),
+            at,
+        );
+        event.studio_turn_start = strings(&raw["studio_turn_start"]);
+        event.studio_turn_end = strings(&raw["studio_turn_end"]);
         if own && let Some(model) = raw["modelName"].as_str().filter(|m| !m.is_empty()) {
             event.happened.push(Happened::Model(model.into()));
         }
-        match name.as_str() {
-            "SessionStart" if own => {
+        match hook {
+            Hook::SessionStart if own => {
                 event.happened.push(Happened::SessionStart);
                 event.happened.push(Happened::StartedFrom(Start::Other));
                 event
                     .happened
                     .extend(branch(&event.cwd).map(Happened::Branch));
             }
-            "PreInvocation" if own && raw["invocationNum"] == 0 => {
-                let conversation = self.conversations.get_mut(&id)?;
-                let initial = raw["initialNumSteps"].as_u64().unwrap_or_default();
-                let input = raw["lastUserInput"].as_str().unwrap_or_default();
-                let origin = turn_origin(&conversation.transcript, initial).unwrap_or(
-                    if input == conversation.last_input && !input.is_empty() {
-                        Origin::WakeUp
-                    } else {
-                        Origin::Daniel
-                    },
-                );
-                conversation.turn = Some((initial, origin));
-                conversation.last_input = input.into();
-                event.happened.push(Happened::TurnStart {
-                    prompt: match origin {
-                        Origin::Daniel => input.into(),
-                        Origin::WakeUp => String::new(),
-                    },
-                    origin: Some(origin),
-                });
-                event
-                    .happened
-                    .extend(branch(&event.cwd).map(Happened::Branch));
+            Hook::PreInvocation if own && raw["invocationNum"] == 0 => {
+                self.turn_starts(&id, &raw, &mut event);
             }
-            "PreToolUse" | "PostToolUse" => {
-                let call = &raw["toolCall"];
-                let step = raw["stepIdx"].as_u64();
-                let (Some(tool), Some(step)) = (call["name"].as_str(), step) else {
-                    self.drift.push(Drift {
-                        at,
-                        kind: DriftKind::ToolShape,
-                    });
-                    return Some(vec![event]);
-                };
-                let step = step.to_string();
-                let tool = tool_of(tool, &call["args"]);
-                let conversation = self.conversations.get_mut(&id)?;
-                if name == "PreToolUse" {
-                    // A start that lands after its end is dropped, not reopened.
-                    if conversation.done.contains(&step) {
-                        return Some(vec![event]);
-                    }
-                    conversation.open.insert(step.clone());
-                    event.happened.push(Happened::ToolStart { tool, id: step });
-                } else {
-                    // An end with no open step closes nothing, and keeps a late start out.
-                    conversation.open.remove(&step);
-                    conversation.done.insert(step.clone());
-                    let failed = raw["error"].as_str().is_some_and(|e| !e.is_empty());
-                    event.happened.push(Happened::ToolEnd {
-                        tool,
-                        id: step,
-                        failed,
-                    });
-                }
+            Hook::PreToolUse | Hook::PostToolUse => {
+                self.tool_event(&id, hook, &raw, &mut event);
             }
-            "Stop" => {
+            Hook::Stop => {
                 let idle = raw["fullyIdle"].as_bool().unwrap_or(true);
                 if own {
                     event.happened.push(Happened::TurnEnd {
@@ -237,18 +194,131 @@ impl Adapter {
             }
             _ => {}
         }
-        if own && matches!(name.as_str(), "PreInvocation" | "Stop") {
+        if own && matches!(hook, Hook::PreInvocation | Hook::Stop) {
             events.extend(self.refresh(&id, at));
         }
         events.push(event);
         Some(events)
     }
 
+    /// The main event of `line` with the adapter's state left as it is: only the conversation of
+    /// the line, its parent's and its terminal's session are copied, so it costs the same however
+    /// many sessions there are.
+    pub fn peek(&self, line: &str) -> Option<Event> {
+        let raw: Value = serde_json::from_str(line).ok()?;
+        let id = raw["conversationId"].as_str()?;
+        let terminal = raw["studio_terminal_id"].as_str();
+        let session = terminal.and_then(|t| self.sessions.get(t));
+        let parent = self.conversations.get(id).and_then(|c| c.parent.as_ref());
+        let mut scratch = Adapter::default();
+        for known in [
+            Some(id),
+            parent.map(String::as_str),
+            session.map(String::as_str),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if let Some(conversation) = self.conversations.get(known) {
+                scratch
+                    .conversations
+                    .insert(known.into(), conversation.clone());
+            }
+        }
+        if let (Some(t), Some(session)) = (terminal, session) {
+            scratch.sessions.insert(t.into(), session.clone());
+        }
+        scratch.events(line)?.pop()
+    }
+
+    fn drift(&mut self, at: u64, kind: DriftKind) {
+        self.drift.push(Drift { at, kind });
+    }
+
+    /// Notes conversation `id`, first seen on `terminal`: a subagent of the session last seen on
+    /// that terminal, or else a session itself.
+    fn know(&mut self, id: &str, terminal: Option<&str>) {
+        if self.conversations.contains_key(id) {
+            return;
+        }
+        let parent = terminal.and_then(|t| self.sessions.get(t));
+        let parent = parent.filter(|p| *p != id).cloned();
+        if let (None, Some(t)) = (&parent, terminal) {
+            self.sessions.insert(t.into(), id.into());
+        }
+        self.conversations.insert(
+            id.into(),
+            Conversation {
+                parent,
+                terminal: terminal.map(Into::into),
+                ..Conversation::default()
+            },
+        );
+    }
+
+    /// A session's first `PreInvocation` of a turn: where the turn came from, decided once.
+    fn turn_starts(&mut self, id: &str, raw: &Value, event: &mut Event) {
+        let Some(conversation) = self.conversations.get_mut(id) else {
+            return;
+        };
+        let initial = raw["initialNumSteps"].as_u64().unwrap_or_default();
+        let input = raw["lastUserInput"].as_str().unwrap_or_default();
+        let origin = turn_origin(&conversation.transcript, initial).unwrap_or(
+            if input == conversation.last_input && !input.is_empty() {
+                Origin::WakeUp
+            } else {
+                Origin::Daniel
+            },
+        );
+        conversation.turn = Some(Turn { initial, origin });
+        conversation.last_input = input.into();
+        event.happened.push(Happened::TurnStart {
+            prompt: match origin {
+                Origin::Daniel => input.into(),
+                Origin::WakeUp => String::new(),
+            },
+            origin: Some(origin),
+        });
+        event
+            .happened
+            .extend(branch(&event.cwd).map(Happened::Branch));
+    }
+
+    /// A tool's start or end. The two may arrive in either order: a start that lands after its end
+    /// is dropped, and an end with no open step closes nothing.
+    fn tool_event(&mut self, id: &str, hook: Hook, raw: &Value, event: &mut Event) {
+        let call = &raw["toolCall"];
+        let (Some(name), Some(step)) = (call["name"].as_str(), raw["stepIdx"].as_u64()) else {
+            self.drift(event.studio_received_ms, DriftKind::ToolShape);
+            return;
+        };
+        let step = step.to_string();
+        let tool = tool_of(name, &call["args"]);
+        let Some(conversation) = self.conversations.get_mut(id) else {
+            return;
+        };
+        if hook == Hook::PreToolUse {
+            if !conversation.done.contains(&step) {
+                conversation.open.insert(step.clone());
+                event.happened.push(Happened::ToolStart { tool, id: step });
+            }
+        } else {
+            conversation.open.remove(&step);
+            conversation.done.insert(step.clone());
+            let failed = raw["error"].as_str().is_some_and(|e| !e.is_empty());
+            event.happened.push(Happened::ToolEnd {
+                tool,
+                id: step,
+                failed,
+            });
+        }
+    }
+
     /// Looks for child `id`'s file in its parent's `subagents/` folder, and when it is there the
     /// first time, returns the spawn the session's own agent reports. A child whose file is not
     /// there yet is tried again at each of its events, until its `Stop`; a child that ends with none
     /// stays unattached (decision 7). A child's end by its file's `state` changing is told here too.
-    fn attach(&mut self, id: &str, raw: &Value, at: u64) -> Option<Event> {
+    fn attach(&mut self, id: &str, at: u64) -> Option<Event> {
         let conversation = self.conversations.get(id)?;
         let parent = conversation.parent.clone()?;
         if conversation.state.is_some() {
@@ -269,22 +339,10 @@ impl Adapter {
             worktree: false,
             finished: false,
         };
-        self.conversations.get_mut(id)?.state = Some(state(&file).unwrap_or_default());
-        let parent_conversation = self.conversations.get(&parent)?;
-        Some(Event {
-            session_id: parent.clone(),
-            agent_id: None,
-            agent_type: None,
-            cwd: parent_conversation.cwd.clone(),
-            transcript_path: parent_conversation.transcript.clone(),
-            prompt_id: None,
-            studio_received_ms: raw["studio_received_ms"].as_u64().unwrap_or(at),
-            studio_terminal_id: parent_conversation.terminal.clone(),
-            studio_turn_start: BTreeMap::new(),
-            studio_turn_end: BTreeMap::new(),
-            capabilities: CAPABILITIES,
-            happened: vec![Happened::SubagentSpawned(spawn)],
-        })
+        self.conversations.get_mut(id)?.state = Some(file_state(&file).unwrap_or_default());
+        let mut event = self.bare(&parent, None, at);
+        event.happened.push(Happened::SubagentSpawned(spawn));
+        Some(event)
     }
 
     /// The subagents of `parent` whose file `state` changed since it was first seen have ended.
@@ -298,7 +356,9 @@ impl Adapter {
         let mut events = Vec::new();
         for child in children {
             let seen = self.conversations[&child].state.clone();
-            let now = self.subagent_file(parent, &child).and_then(|f| state(&f));
+            let now = self
+                .subagent_file(parent, &child)
+                .and_then(|f| file_state(&f));
             if now.is_some() && now != seen {
                 let conversation = self.conversations.get_mut(&child).expect("known");
                 conversation.ended = true;
@@ -312,21 +372,12 @@ impl Adapter {
 
     /// An event of conversation `session`'s session with nothing in it yet.
     fn bare(&self, session: &str, agent: Option<&str>, at: u64) -> Event {
-        let conversation = &self.conversations[session];
-        Event {
-            session_id: session.into(),
-            agent_id: agent.map(Into::into),
-            agent_type: None,
-            cwd: conversation.cwd.clone(),
-            transcript_path: conversation.transcript.clone(),
-            prompt_id: None,
-            studio_received_ms: at,
-            studio_terminal_id: conversation.terminal.clone(),
-            studio_turn_start: BTreeMap::new(),
-            studio_turn_end: BTreeMap::new(),
-            capabilities: CAPABILITIES,
-            happened: Vec::new(),
-        }
+        frame(
+            &self.conversations[session],
+            session.into(),
+            agent.map(Into::into),
+            at,
+        )
     }
 
     /// The `.system_generated` folder of conversation `id`, from its transcript's path.
@@ -359,14 +410,12 @@ impl Adapter {
         let Some(conversation) = self.conversations.get_mut(id) else {
             return;
         };
-        let Some((initial, origin)) = conversation.turn.take() else {
+        let Some(turn) = conversation.turn.take() else {
             return;
         };
-        if turn_origin(&conversation.transcript, initial).is_some_and(|now| now != origin) {
-            self.drift.push(Drift {
-                at,
-                kind: DriftKind::TurnOrigin,
-            });
+        let now = turn_origin(&conversation.transcript, turn.initial);
+        if now.is_some_and(|now| now != turn.origin) {
+            self.drift(at, DriftKind::TurnOrigin);
         }
     }
 
@@ -393,7 +442,8 @@ impl Adapter {
     }
 }
 
-fn map(value: &Value) -> BTreeMap<String, String> {
+/// The string fields of the object `value`.
+fn strings(value: &Value) -> BTreeMap<String, String> {
     value
         .as_object()
         .map(|m| {
@@ -404,8 +454,27 @@ fn map(value: &Value) -> BTreeMap<String, String> {
         .unwrap_or_default()
 }
 
-fn state(file: &Value) -> Option<String> {
+/// The `state` of a subagent's file.
+fn file_state(file: &Value) -> Option<String> {
     file["state"].as_str().map(Into::into)
+}
+
+/// An event of `session`, from `conversation`'s place and files, with nothing in it yet.
+fn frame(conversation: &Conversation, session: String, agent_id: Option<String>, at: u64) -> Event {
+    Event {
+        session_id: session,
+        agent_id,
+        agent_type: None,
+        cwd: conversation.cwd.clone(),
+        transcript_path: conversation.transcript.clone(),
+        prompt_id: None,
+        studio_received_ms: at,
+        studio_terminal_id: conversation.terminal.clone(),
+        studio_turn_start: BTreeMap::new(),
+        studio_turn_end: BTreeMap::new(),
+        capabilities: CAPABILITIES,
+        happened: Vec::new(),
+    }
 }
 
 /// A `.jsonl` file's text. Only a `.jsonl` path is opened, so a payload that names a credential

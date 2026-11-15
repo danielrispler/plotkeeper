@@ -310,11 +310,16 @@ fn agy_plugin_parts() -> Option<(PathBuf, PathBuf, PathBuf, PathBuf)> {
 /// plugin on install, so a changed plugin or a moved `studio-hook` shows as stale.
 #[tauri::command(async)]
 pub fn agy_plugin_setup() -> Result<Option<String>, String> {
-    let Some((_, source, hook, home)) = agy_plugin_parts() else {
+    let Some((agy, source, hook, home)) = agy_plugin_parts() else {
         return Ok(None);
     };
-    use studio_workbench::agy_plugin::{Status, status};
-    Ok(match status(&source, &hook, &home)? {
+    use studio_workbench::agy_plugin::{Status, installed_is_valid, status};
+    let status = match status(&source, &hook, &home)? {
+        // A copy agy rejects does nothing, whatever it matches.
+        Status::Current if !installed_is_valid(&agy, &home) => Status::Stale,
+        other => other,
+    };
+    Ok(match status {
         Status::Current => None,
         Status::Missing => {
             Some("agy sessions get no row: the studio plugin is not installed in agy.".into())

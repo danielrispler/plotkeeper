@@ -7,6 +7,7 @@
 //! It is the one place the core reads a file, and it opens only a `.jsonl` path, so a payload that
 //! names a credential file is never read (`AGENTS.md`, "Hard rules").
 
+use crate::event::TranscriptFormat;
 use serde::Serialize;
 use serde_json::Value;
 use std::{
@@ -237,8 +238,8 @@ fn line_of(text: &str, first: bool) -> Option<&str> {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct TranscriptFile {
     pub(crate) path: String,
-    /// Whether it is agy's transcript, whose records differ from Claude Code's.
-    pub(crate) agy: bool,
+    /// The format of its records, which differ between agents.
+    pub(crate) format: TranscriptFormat,
     read_to: u64,
 }
 
@@ -284,9 +285,9 @@ impl TranscriptFile {
         {
             self.read_to += line.len() as u64;
             let text = String::from_utf8_lossy(&line);
-            match self.agy {
-                true => transcript.read_agy(&text)?,
-                false => transcript.read(&text)?,
+            match self.format {
+                TranscriptFormat::Agy => transcript.read_agy(&text)?,
+                TranscriptFormat::Claude => transcript.read(&text)?,
             }
             line.clear();
         }

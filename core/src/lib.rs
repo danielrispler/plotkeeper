@@ -19,7 +19,7 @@ mod transcript;
 mod work;
 pub use agy::{CAPABILITIES as AGY_CAPABILITIES, Drift as AgyDrift, DriftKind as AgyDriftKind};
 pub use claude::CAPABILITIES as CLAUDE_CAPABILITIES;
-pub use event::Capabilities;
+pub use event::{Capabilities, TranscriptFormat};
 use event::{Event, Happened, Origin, Start, ToolKind};
 pub use transcript::{Context, LogEntry, SubagentLog, Transcript};
 pub use work::{Estimate, MIN_HISTORY, Phase, PhaseStart, Work, range};
@@ -1863,7 +1863,7 @@ impl Studio {
     /// with its own key: none, one, or at a wake-up also its workers' ends (danielrispler/Falinks#369, decisions 6, 8, 10
     /// and 11).
     pub fn fingerprint_folders(&self, line: &str) -> Vec<Fingerprint> {
-        let event = self.peek(line).pop();
+        let event = self.peek(line);
         let event = event.filter(|e| {
             !e.has(|h| {
                 matches!(
@@ -2147,11 +2147,11 @@ impl Studio {
         }
     }
 
-    /// The events `line` would give, with agy's state left as it is.
-    fn peek(&self, line: &str) -> Vec<Event> {
+    /// The main event `line` would give, with agy's state left as it is.
+    fn peek(&self, line: &str) -> Option<Event> {
         match claude::parse(line) {
-            Ok(event) => vec![event],
-            Err(_) => self.agy.clone().events(line).unwrap_or_default(),
+            Ok(event) => Some(event),
+            Err(_) => self.agy.peek(line),
         }
     }
 
@@ -2256,7 +2256,7 @@ impl Studio {
         if let Some(branch) = event.branch() {
             session.transcript.branch = Some(branch.into());
         }
-        session.transcript_file.agy = !event.capabilities.transcript_version;
+        session.transcript_file.format = event.capabilities.transcript_format;
         // The session Daniel started in a new terminal takes the selection, so the rail follows its pane.
         if self.awaiting.is_some() && session.terminal == self.awaiting {
             self.awaiting = None;
@@ -2313,7 +2313,7 @@ impl Studio {
                 .transcript_file
                 .path
                 .clone_from(&event.transcript_path);
-            session.transcript_file.agy = !event.capabilities.transcript_version;
+            session.transcript_file.format = event.capabilities.transcript_format;
             session.transcript = Transcript::default();
         }
         let failed = session.failed_workers().into_iter();
@@ -3090,6 +3090,21 @@ impl Studio {
             }
         }
         self.mismatched.retain(|id, _| disagreeing.contains(id));
+        // A terminal that is gone, or reports no state, no longer says `blocked`.
+        let silent: Vec<String> = self
+            .sessions
+            .iter()
+            .filter(|(_, s)| s.terminal_blocked)
+            .filter(|(_, s)| {
+                !reporting
+                    .iter()
+                    .any(|(t, _)| s.terminal.as_deref() == Some(&t.id))
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in silent {
+            outputs.extend(self.terminal_blocks(&id, false));
+        }
         // Everyone else's terminal: a status-only row.
         let mut rows = BTreeSet::new();
         let at_start = !std::mem::replace(&mut self.listed, true);

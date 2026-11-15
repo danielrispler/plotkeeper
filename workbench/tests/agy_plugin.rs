@@ -9,7 +9,7 @@ use std::{
     process::{Command, Stdio},
     time::{Duration, Instant},
 };
-use studio_workbench::agy_plugin::{Status, install, status};
+use studio_workbench::agy_plugin::{Status, install, installed_is_valid, status};
 
 fn shipped() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../plugin-agy")
@@ -184,4 +184,17 @@ fn the_wrapper_hands_the_payload_on_intact() {
         assert!(Instant::now() < deadline, "payload never arrived");
         std::thread::sleep(Duration::from_millis(20));
     }
+}
+
+#[test]
+fn an_installed_copy_that_fails_validation_is_stale_though_it_matches_the_source() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let agy = fake_agy(tmp.path());
+    install(&agy, &shipped(), &hook(), &home).unwrap();
+    assert_eq!(status(&shipped(), &hook(), &home).unwrap(), Status::Current);
+    assert!(installed_is_valid(&agy, &home));
+    // agy now rejects the copy, and would skip it silently.
+    fs::write(tmp.path().join("fail-validate"), "").unwrap();
+    assert!(!installed_is_valid(&agy, &home));
 }
