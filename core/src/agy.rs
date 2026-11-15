@@ -40,7 +40,7 @@ const RECORDS: [&str; 4] = [
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DriftKind {
-    /// A hook event name outside agy's six.
+    /// A hook event name outside agy's six, or a line with no event name or conversation.
     HookEvent,
     /// A transcript record that does not parse or has a type the studio does not know.
     Record,
@@ -91,9 +91,17 @@ impl Adapter {
     /// The events of hook line `line`, or `None` when it is no agy line.
     pub fn events(&mut self, line: &str) -> Option<Vec<Event>> {
         let raw: Value = serde_json::from_str(line).ok()?;
-        let id = raw["conversationId"].as_str()?.to_owned();
-        let name = raw["hookEventName"].as_str()?.to_owned();
         let at = raw["studio_received_ms"].as_u64().unwrap_or_default();
+        let (Some(id), Some(name)) = (raw["conversationId"].as_str(), raw["hookEventName"].as_str())
+        else {
+            // A line of the hook's with neither agent's shape: the payload changed.
+            self.drift.push(Drift {
+                at,
+                kind: DriftKind::HookEvent,
+            });
+            return Some(Vec::new());
+        };
+        let (id, name) = (id.to_owned(), name.to_owned());
         if !matches!(
             name.as_str(),
             "SessionStart"

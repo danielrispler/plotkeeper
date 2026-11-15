@@ -318,3 +318,16 @@ fn an_agy_sessions_first_stop_asks_for_agys_version_once() {
     let second = studio.apply(&line("s", "Stop", 5, json!({})));
     assert_eq!((asked(first), asked(second)), (1, 0));
 }
+
+#[test]
+fn a_json_line_with_no_conversation_or_event_name_counts_as_drift() {
+    let mut studio = Studio::default();
+    studio.replay(&json!({ "studio_received_ms": 5, "hookEventName": "Stop" }).to_string());
+    studio.replay(&json!({ "studio_received_ms": 6, "conversationId": "s" }).to_string());
+
+    let seen: Vec<_> = studio.agy_drift().iter().map(|d| (d.at, d.kind)).collect();
+    assert_eq!(
+        seen,
+        [(5, AgyDriftKind::HookEvent), (6, AgyDriftKind::HookEvent)]
+    );
+}
