@@ -47,7 +47,12 @@ fn append() -> Result<(), Box<dyn Error>> {
     let text = |key: &str| event.get(key)?.as_str().map(str::to_owned);
     let name = text("hook_event_name").or_else(|| text("hookEventName"));
     let terminal = text("studio_terminal_id");
-    if !studio_hook::append(&path, &event.into(), studio_hook::PATIENCE)? {
+    // Tests shorten the 5 seconds.
+    let patience = env::var("STUDIO_HOOK_PATIENCE_MS")
+        .ok()
+        .and_then(|ms| ms.parse().ok())
+        .map_or(studio_hook::PATIENCE, Duration::from_millis);
+    if !studio_hook::append(&path, &event.into(), patience)? {
         let (name, terminal) = (name.as_deref(), terminal.as_deref());
         studio_hook::drop_event(
             &path,
