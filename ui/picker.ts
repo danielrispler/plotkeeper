@@ -8,12 +8,11 @@
 
 import { AGENT_NAMES, agentChoice, kept, type Kind, showsAuto } from "./agents.js";
 import { element, invoke, pressable, text } from "./dom.js";
-import { mainProject } from "./projects.js";
 import type { Entry } from "./keys.js";
 import { startAgent } from "./panes.js";
 import { shortPath } from "./paths.js";
 import { studio } from "./state.js";
-import { branchBlocked, branchOptions, refreshAfterSwitch, workspaceRows } from "./workspaces.js";
+import { branchBlocked, branchOptions, refreshAfterSwitch, shownProject, workspaceRows } from "./workspaces.js";
 import type { Binding } from "./settings.js";
 import type { Branch, Workspace, Workspaces } from "./types.js";
 
@@ -85,7 +84,7 @@ export function newTask(
 // The quick start: a task named after an issue, a spec or a prompt, whose session starts on it, or,
 // empty, the main checkout.
 const quickStart = (main: Workspace, start: Start) =>
-  newTask("Issue #, spec path or prompt; empty for main", "Start", async (request) => request ? invoke<Workspace>("create_named_task", { project: await mainProject(), request }) : main, true, failed, start);
+  newTask("Issue #, spec path or prompt; empty for main", "Start", async (request) => request ? invoke<Workspace>("create_named_task", { project: await shownProject(), request }) : main, true, failed, start);
 
 // The Auto mode choice (danielrispler/Falinks#541): off each time the picker opens; the session starts in Claude Code's
 // auto mode when on. Bypass mode is never offered.
@@ -224,7 +223,7 @@ export async function showPicker(kind: Kind = "session") {
   if (closed(kind === "terminal" ? "New terminal" : "New session")) return;
   // It opens once its rows are read, so no placeholder flashes first in another box (danielrispler/Falinks#570).
   try {
-    const [workspaces, agents] = await Promise.all([mainProject().then((project) => invoke<Workspaces>("workspaces", { project })), offeredAgents()]);
+    const [workspaces, agents] = await Promise.all([shownProject().then((project) => invoke<Workspaces>("workspaces", { project })), offeredAgents()]);
     picker.replaceChildren(...picked(workspaces, agents, kind));
   } catch (e) {
     picker.replaceChildren(text("p", `No worktrees: ${e}`, "empty"));
@@ -237,11 +236,11 @@ export async function showPicker(kind: Kind = "session") {
 // pick runs `git switch`, and git's refusal shows as it is. Disabled with its reason while a session in the
 // main checkout is running or needs Daniel; a branch a task holds is greyed out as "in task X". Opening it
 // again closes it.
-export async function showBranches() {
+export async function showBranches(from?: string) {
   const picker = element("picker");
   if (closed("Switch branch")) return;
   try {
-    const project = await mainProject();
+    const project = from ?? (await shownProject());
     const [workspaces, branches] = await Promise.all([invoke<Workspaces>("workspaces", { project }), invoke<Branch[]>("branches", { project })]);
     const blocked = branchBlocked(workspaces, studio.listed);
     const rows = branchOptions(branches, blocked).map(({ branch, label, note, disabled }) => {
@@ -249,7 +248,7 @@ export async function showBranches() {
         invoke("switch_branch", { project, branch: branch.name, remote: branch.remote })
           .then(() => {
             picker.hidden = true;
-            return refreshAfterSwitch();
+            return refreshAfterSwitch(project);
           })
           .catch(failed);
       });

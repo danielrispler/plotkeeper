@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { branchBlocked, branchOptions, fetchNote, gitTokens, workspaceRows } from "../../dist/workspaces.js";
+import { branchBlocked, branchOptions, fetchNote, gitTokens, outsideName, projectGroups, sessionProjectName, workspaceRows, workspaceToken } from "../../dist/workspaces.js";
 import { throttle } from "../../dist/throttle.js";
 
 const ui = new URL("../", import.meta.url);
@@ -194,6 +194,70 @@ test("the branch options grey out a task's branch as 'in task X' and the current
 
 test("the picker is the main checkout's only: its token and the palette action open it, and it has no New branch", () => {
   assert.match(read("main.ts"), /"studio::SwitchBranch": \(\) => void showBranches\(\)/);
-  assert.match(read("workspaces.ts"), /workspace !== read\?\.main/);
+  assert.match(read("workspaces.ts"), /workspace !== workspaces\.main/);
   assert.doesNotMatch(read("picker.ts"), /New branch/);
+});
+
+// The project groups (#97, spec #90, Sidebar).
+const live = (id, state, cwd) => ({ id, state, cwd });
+const found = new Map([["/r", workspaces], ["/q", { main: { path: "/q", branch: "dev" }, tasks: [], hidden: 0 }]]);
+const grouped = (sessions, paths = ["/r", "/q"]) => projectGroups(paths, found, sessions);
+
+test("a session is under the project whose workspace holds its folder, a task's worktree too", () => {
+  const groups = grouped([live("a", "idle", "/r"), live("b", "running", "/r/.claude/worktrees/issue-1/apps"), live("c", "idle", "/q/sub")]);
+  assert.deepEqual(groups.map((g) => [g.name, g.project, g.states.flatMap((s) => s.sessions.map((x) => x.id))]), [
+    ["r", true, ["b", "a"]],
+    ["q", true, ["c"]],
+  ]);
+});
+
+test("the projects keep their order, empty ones too, and a folder outside every project gets a dimmed group after them", () => {
+  const groups = grouped([live("a", "idle", "/x/Falinks"), live("b", "idle", "/x/Falinks/.claude/worktrees/t"), live("c", "idle", "/y/notes")], ["/q", "/r"]);
+  assert.deepEqual(groups.map((g) => [g.name, g.project]), [["q", true], ["r", true], ["Falinks", false], ["notes", false]]);
+  assert.deepEqual(groups[2].states[0].sessions.map((s) => s.id), ["a", "b"]);
+});
+
+test("an outside group is named after its repository's main checkout, else its folder, else ~", () => {
+  assert.equal(outsideName("/w/Falinks/.claude/worktrees/issue-9"), "Falinks");
+  assert.equal(outsideName("/w/notes"), "notes");
+  assert.equal(outsideName(""), "~");
+  assert.equal(outsideName("/"), "~");
+  assert.equal(sessionProjectName(["/r"], found, { cwd: "/r/.claude/worktrees/look" }), "r");
+  assert.equal(sessionProjectName(["/r"], found, { cwd: "/w/Falinks/.claude/worktrees/t" }), "Falinks");
+});
+
+test("a header's rollup is its most urgent state: needs you over running, none otherwise", () => {
+  const rollup = (...states) => grouped(states.map((state, i) => live(String(i), state, "/r")))[0].rollup;
+  assert.equal(rollup("running", "needs_you", "idle"), "needs_you");
+  assert.equal(rollup("idle", "running", "your_turn"), "running");
+  assert.equal(rollup("idle", "your_turn"), null);
+  assert.equal(rollup(), null);
+});
+
+test("inside a group the sessions are by state: needs you, running, your turn, idle; ended ones are left out", () => {
+  const [group] = grouped([live("a", "idle", "/r"), live("b", "ended", "/r"), live("c", "needs_you", "/r"), live("d", "your_turn", "/r"), live("e", "running", "/r"), live("f", "needs_you", "/r")]);
+  assert.deepEqual(group.states.map((s) => [s.state, s.sessions.map((x) => x.id)]), [
+    ["needs_you", ["c", "f"]],
+    ["running", ["e"]],
+    ["your_turn", ["d"]],
+    ["idle", ["a"]],
+  ]);
+});
+
+test("a row's token is the main checkout's branch, or a task's name and branch", () => {
+  assert.equal(workspaceToken(workspaces, "/r/src"), "main");
+  assert.equal(workspaceToken(workspaces, "/r/.claude/worktrees/issue-1"), "issue-1");
+  assert.equal(workspaceToken({ ...workspaces, tasks: [{ path: "/r/.claude/worktrees/t", branch: "fix-x" }] }, "/r/.claude/worktrees/t"), "t · fix-x");
+  assert.equal(workspaceToken(workspaces, "/r/.claude/worktrees/look"), "look");
+  assert.equal(workspaceToken(workspaces, "/elsewhere"), null);
+  // The git line's branch wins when the state is known.
+  assert.equal(workspaceToken(workspaces, "/r", () => states[1]), "issue-1");
+});
+
+test("the sidebar draws no Workspaces section, and only needs you is coloured in the project headers", () => {
+  assert.equal(/id="workspaces/.test(read("index.html")), false);
+  const css = read("style.css").replace(/\/\*[\s\S]*?\*\//g, "");
+  const rules = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].filter(([, selector]) => /^\.project/.test(selector.trim()));
+  assert.ok(rules.length > 3);
+  assert.deepEqual(rules.filter(([, , body]) => /--needs-you/.test(body)).map(([, selector]) => selector.trim()), []);
 });

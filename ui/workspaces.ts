@@ -1,18 +1,18 @@
-// Workspaces (danielrispler/Falinks#576; danielrispler/Falinks#565, decision 6): the home of tasks, a
-// folded section at the bottom of the list. One row per workspace, the main checkout and each task, with
+// Workspaces (danielrispler/Falinks#576; danielrispler/Falinks#565, decision 6; #97): the home of tasks, the
+// rows under each project's sessions in the sidebar. One row per workspace, the main checkout and each task, with
 // its git tokens (the same as the Git line's, #26) and how many sessions work in it; the sessions
-// themselves stay in the list. The Git line in the top bar shows the tokens of the selected
+// themselves stay in their project's group. The Git line in the top bar shows the tokens of the selected
 // session's workspace. Clicking a workspace offers a new session there and, for a task, Remove, with the
 // loss check of a session's Delete. Creating a task is here too, not in the new-session picker.
 
 import { element, invoke, patch, pressable, text } from "./dom.js";
-import { mainProject } from "./projects.js";
-import { glyph } from "./list.js";
+import { knownProjects, mainProject, projects } from "./projects.js";
+import { drawSidebar, glyph, projectOpen } from "./list.js";
 import { newTask, showBranches, startLast } from "./picker.js";
 import { studio } from "./state.js";
 import { removeWorktree } from "./story.js";
 import { throttle } from "./throttle.js";
-import type { Branch, GitState, Workspace, Workspaces, Session } from "./types.js";
+import type { Branch, GitState, Workspace, Workspaces, Session, SessionState } from "./types.js";
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
@@ -88,6 +88,94 @@ export function workspaceRows(found: Workspaces, states: (GitState | null)[], se
   }));
 }
 
+// The sidebar's groups (#97, spec #90, Sidebar): a pure function of the projects, each project's workspaces
+// and the listed sessions. A session belongs to the project with the deepest workspace holding its `cwd`;
+// one group for each other folder, named after its repository's main checkout, else its folder, else "~", after the projects.
+// Inside a group the sessions are by state, and the header's rollup is its most urgent state. Ended sessions are in History.
+export const liveStates: SessionState[] = ["needs_you", "running", "your_turn", "idle"];
+export type Rollup = "needs_you" | "running" | null;
+export type StateGroup<S> = { state: SessionState; sessions: S[] };
+export type ProjectGroup<S> = {
+  // The project's path, or the outside folder's.
+  key: string;
+  name: string;
+  // False for a folder outside every project.
+  project: boolean;
+  workspaces: Workspaces | null;
+  rollup: Rollup;
+  states: StateGroup<S>[];
+};
+
+const lastSegment = (path: string) => path.split("/").filter(Boolean).pop() ?? "";
+
+// The main checkout a task's worktree path names, else the folder itself.
+const repositoryOf = (cwd: string) => /^(.*)\/\.claude\/worktrees\/[^/]+/.exec(cwd)?.[1] || cwd;
+
+// The name of a folder outside every project: its repository's main checkout, else its folder, else "~".
+export const outsideName = (cwd: string) => lastSegment(repositoryOf(cwd)) || "~";
+
+const lone = (path: string): Workspaces => ({ main: { path, branch: null }, tasks: [], hidden: 0 });
+
+// The project whose workspace holds `cwd`, the deepest of them, with that workspace; null outside every project.
+function ownerOf(paths: string[], found: Map<string, Workspaces>, cwd: string): { project: string; workspaces: Workspaces; workspace: Workspace } | null {
+  let best: { project: string; workspaces: Workspaces; workspace: Workspace } | null = null;
+  for (const project of paths) {
+    const workspaces = found.get(project) ?? lone(project);
+    const workspace = workspaceOf(allWorkspaces(workspaces), cwd);
+    if (workspace && (!best || workspace.path.length > best.workspace.path.length)) best = { project, workspaces, workspace };
+  }
+  return best;
+}
+
+// The name of the project a session belongs to, else its outside group's.
+export function sessionProjectName(paths: string[], found: Map<string, Workspaces>, session: Pick<Session, "cwd">): string {
+  const owner = ownerOf(paths, found, session.cwd);
+  return owner ? lastSegment(owner.project) || owner.project : outsideName(session.cwd);
+}
+
+// A session row's workspace-and-branch token (#97): the main checkout's branch, or a task's name and branch.
+// The branch is the git line's first token when the workspace's state is known, else the worktree list's.
+export function workspaceToken(workspaces: Workspaces, cwd: string, state: (path: string) => GitState | null = () => null): string | null {
+  const workspace = workspaceOf(allWorkspaces(workspaces), cwd);
+  if (!workspace) return null;
+  const branch = (state(workspace.path) ? gitTokens(state(workspace.path))[0]?.text : workspace.branch) ?? "detached";
+  if (workspace === workspaces.main) return branch;
+  const name = lastSegment(workspace.path);
+  return branch === name || branch === "detached" ? name : `${name} · ${branch}`;
+}
+
+const urgency = (sessions: Pick<Session, "state">[]): Rollup =>
+  sessions.some(({ state }) => state === "needs_you") ? "needs_you" : sessions.some(({ state }) => state === "running") ? "running" : null;
+
+export function projectGroups<S extends Pick<Session, "cwd" | "state">>(paths: string[], found: Map<string, Workspaces>, sessions: S[]): ProjectGroup<S>[] {
+  const live = sessions.filter(({ state }) => liveStates.includes(state));
+  const inProject = new Map<string, S[]>(paths.map((path) => [path, []]));
+  const outside = new Map<string, S[]>();
+  for (const session of live) {
+    const owner = ownerOf(paths, found, session.cwd);
+    if (owner) inProject.get(owner.project)!.push(session);
+    else {
+      const key = repositoryOf(session.cwd);
+      outside.set(key, [...(outside.get(key) ?? []), session]);
+    }
+  }
+  const group = (key: string, name: string, project: boolean, members: S[]): ProjectGroup<S> => ({
+    key,
+    name,
+    project,
+    workspaces: found.get(key) ?? null,
+    rollup: urgency(members),
+    states: liveStates.flatMap((state) => {
+      const here = members.filter((session) => session.state === state);
+      return here.length ? [{ state, sessions: here }] : [];
+    }),
+  });
+  return [
+    ...paths.map((path) => group(path, lastSegment(path) || path, true, inProject.get(path)!)),
+    ...[...outside].map(([key, members]) => group(key, outsideName(key), false, members)),
+  ];
+}
+
 // Why the main checkout's branch cannot be switched now (#95), or null when it can: a session working in
 // the main checkout itself, not in a task's worktree, is running or needs Daniel, so its files must not change
 // under it. A pure function of the listed sessions.
@@ -110,28 +198,51 @@ export function branchOptions(branches: Branch[], blocked: string | null): Branc
   });
 }
 
-// The last workspaces read, each workspace's git state by path, and the workspaces whose actions show.
-let read: Workspaces | null = null;
+// The last workspaces read of each project, each workspace's git state by path, and the workspaces whose actions show.
+const read = new Map<string, Workspaces>();
 const states = new Map<string, GitState | null>();
+// A project's latest error, git's or any other, shown in its group until the next one.
+const failures = new Map<string, string>();
 let reading = false;
 // A forced read asked for while one runs: one more read follows it.
 let again = false;
 let readAt = 0;
 const opened = new Set<string>();
 
-// Git's error, or any other, at the section's foot, until the next one.
-function failed(error: unknown) {
-  element("workspaces").querySelector(".picker-error")?.remove();
-  element("workspaces").append(text("pre", String(error), "picker-error"));
+const fail = (project: string) => (error: unknown) => {
+  failures.set(project, String(error));
+  drawSidebar();
+};
+
+// The workspace rows of a project's group (#97): its Workspaces, then the new-task field and its error.
+export function workspaceSection(project: string, sessions: Pick<Session, "cwd" | "landed">[]): HTMLElement[] {
+  const found = read.get(project);
+  if (!found) return [];
+  const rows = workspaceRows(found, allWorkspaces(found).map(({ path }) => states.get(path) ?? null), sessions);
+  const error = failures.get(project);
+  const message = text("pre", error ?? "", "picker-error");
+  message.dataset.key = "error";
+  return [...rows.map((row) => workspaceRow(project, row)), creating(project), ...(error ? [message] : [])];
 }
 
+// The workspaces of the known projects as last read, by project.
+export const foundWorkspaces = (): Map<string, Workspaces> =>
+  new Map(knownProjects().flatMap((path) => { const found = read.get(path); return found ? [[path, found] as const] : []; }));
+
+// The token of a session row: its workspace and branch.
+export const tokenOf = (project: string, cwd: string): string | null => {
+  const found = read.get(project);
+  return found ? workspaceToken(found, cwd, (path) => states.get(path) ?? null) : null;
+};
+
 // A workspace's row: its name, then its facts; a click shows or hides its actions under it.
-function workspaceRow({ workspace, name, facts, actions, landed }: WorkspaceRow): HTMLElement {
+function workspaceRow(project: string, { workspace, name, facts, actions, landed }: WorkspaceRow): HTMLElement {
   const row = document.createElement("div");
+  row.className = "workspace";
   row.dataset.key = workspace.path;
   const button = pressable(document.createElement("button"), false, () => {
     if (!opened.delete(workspace.path)) opened.add(workspace.path);
-    draw();
+    drawSidebar();
   });
   button.classList.add("row");
   button.title = workspace.path;
@@ -146,8 +257,8 @@ function workspaceRow({ workspace, name, facts, actions, landed }: WorkspaceRow)
   const act = (label: string) =>
     pressable(text("button", label, "small"), false, () => {
       opened.delete(workspace.path);
-      const done = label === "Remove" ? removeWorktree(workspace.path).then(() => readWorkspaces(true)) : startLast(workspace.path, "");
-      done.catch(failed);
+      const done = label === "Remove" ? removeWorktree(workspace.path, project).then(() => readWorkspaces(true)) : startLast(workspace.path, "");
+      done.catch(fail(project));
     });
   const buttons = text("div", "", "workspace-actions");
   buttons.append(...actions.map(act));
@@ -155,54 +266,65 @@ function workspaceRow({ workspace, name, facts, actions, landed }: WorkspaceRow)
   return row;
 }
 
-// A new task, named by its branch; a session starts in it.
-function creating(): HTMLElement {
-  const form = newTask("New task: branch name", "Create", async (name) => invoke<Workspace>("create_task", { project: await mainProject(), name }).finally(() => readWorkspaces(true)), false, failed);
+// A new task in a project, named by its branch; a session starts in it.
+function creating(project: string): HTMLElement {
+  const form = newTask("New task: branch name", "Create", async (name) => invoke<Workspace>("create_task", { project, name }).finally(() => readWorkspaces(true)), false, fail(project));
   form.dataset.key = "new-task";
   return form;
+}
+
+// The workspace the Git line shows, with its project: that of the selected session, or the first project's main checkout with none.
+function shown(): { project: string; workspaces: Workspaces; workspace: Workspace } | null {
+  const cwd = studio.selection?.session.cwd;
+  const owner = cwd ? ownerOf([...read.keys()], read, cwd) : null;
+  if (owner) return owner;
+  const [first] = read;
+  return first ? { project: first[0], workspaces: first[1], workspace: first[1].main } : null;
+}
+
+// The project the Git line shows, else the first one: where the palette's Switch branch works.
+export const shownProject = async (): Promise<string> => shown()?.project ?? mainProject();
+
+// The project whose workspace is at `path`: a task to remove, else the project holding the folder.
+export async function projectOfPath(path: string): Promise<string> {
+  const paths = await projects();
+  return ownerOf(paths, read, path)?.project ?? mainProject();
 }
 
 // The Git line: the workspace of the selected session, or the main checkout's with none, and its tokens.
 function drawLine() {
   const line = element("git-line");
-  line.hidden = !read;
-  if (!read) return;
-  const workspace = shownWorkspace(read);
-  const repo = read.main.path.split("/").pop();
-  const name = workspace === read.main ? repo : `${repo} › ${workspace.path.split("/").pop()}`;
+  const now = shown();
+  line.hidden = !now;
+  if (!now) return;
+  const { project, workspaces, workspace } = now;
+  const repo = workspaces.main.path.split("/").pop();
+  const name = workspace === workspaces.main ? repo : `${repo} › ${workspace.path.split("/").pop()}`;
   const tokens = gitTokens(states.get(workspace.path) ?? null);
-  line.title = [...tokens.map((token) => token.title), fetchNote(fetched, Date.now())].join("\n");
+  line.title = [...tokens.map((token) => token.title), fetchNote(fetched.get(project) ?? { at: null, error: null }, Date.now())].join("\n");
   // The main checkout's branch token opens the branch picker (#95); a task's worktree keeps its branch.
-  const shown = tokens.map((token, i) => {
-    if (i > 0 || workspace !== read?.main) return Object.assign(text("span", token.text, token.bad ? "git-bad" : ""), { title: token.title });
-    const button = pressable(text("button", token.text, "git-branch"), false, () => void showBranches());
+  const shownTokens = tokens.map((token, i) => {
+    if (i > 0 || workspace !== workspaces.main) return Object.assign(text("span", token.text, token.bad ? "git-bad" : ""), { title: token.title });
+    const button = pressable(text("button", token.text, "git-branch"), false, () => void showBranches(project));
     button.title = `${token.title}\nSwitch branch`;
     return button;
   });
-  line.replaceChildren(text("span", name ?? "", "git-workspace"), ...shown);
+  line.replaceChildren(text("span", name ?? "", "git-workspace"), ...shownTokens);
 }
 
-const shownWorkspace = (workspaces: Workspaces) => workspaceOf(allWorkspaces(workspaces), studio.selection?.session.cwd ?? workspaces.main.path) ?? workspaces.main;
-
 function draw() {
-  if (!read) return;
   drawLine();
-  const all = allWorkspaces(read);
-  const rows = workspaceRows(read, all.map(({ path }) => states.get(path) ?? null), studio.listed);
-  element("workspaces-title").textContent = `Workspaces · ${rows.length}`;
-  // Patched, so the new task's field keeps its text and focus as the list updates.
-  patch(element("workspaces-rows"), [...rows.map(workspaceRow), creating()]);
+  drawSidebar();
 }
 
 // A workspace's state is read behind a throttle each (#26, Freshness, local state): at once on the first
 // event, then once per 2 s while events keep coming, and once after the last.
 const throttles = new Map<string, () => void>();
-function touch(path: string) {
+function touch(project: string, path: string) {
   let event = throttles.get(path);
   if (!event) {
     const readState = () =>
-      mainProject()
-        .then((project) => invoke<GitState>("workspace_git_state", { project, path }))
+      invoke<GitState>("workspace_git_state", { project, path })
         .catch(() => states.get(path) ?? null)
         .then((state) => {
           states.set(path, state);
@@ -214,14 +336,14 @@ function touch(path: string) {
   event();
 }
 
-// The workspaces whose state shows: every workspace while the section is open, else the Git line's.
+// The workspaces whose state shows: every workspace of a project that is not collapsed, and the Git line's.
 function touchShown() {
-  if (!read) return;
-  const open = (element("workspaces") as HTMLDetailsElement).open;
-  for (const workspace of open ? allWorkspaces(read) : [shownWorkspace(read)]) touch(workspace.path);
+  const now = shown();
+  if (now) touch(now.project, now.workspace.path);
+  for (const [project, found] of read) if (projectOpen(project)) for (const workspace of allWorkspaces(found)) touch(project, workspace.path);
 }
 
-// Reads the workspaces from git. At most one read at a time and, unless `now`, one per 10 s, as the list
+// Reads the workspaces of every project from git. At most one read at a time and, unless `now`, one per 10 s, as the list
 // redraws on every hook event. A `now` during a read is not dropped: the read after it sees the
 // change, such as a new task.
 export async function readWorkspaces(now = false) {
@@ -233,11 +355,18 @@ export async function readWorkspaces(now = false) {
   reading = true;
   readAt = Date.now();
   try {
-    read = await invoke<Workspaces>("workspaces", { project: await mainProject() });
+    await Promise.all(
+      (await projects()).map(async (project) => {
+        try {
+          read.set(project, await invoke<Workspaces>("workspaces", { project }));
+          failures.delete(project);
+        } catch (e) {
+          failures.set(project, String(e));
+        }
+      }),
+    );
     draw();
     touchShown();
-  } catch (e) {
-    failed(e);
   } finally {
     reading = false;
   }
@@ -250,25 +379,26 @@ export async function readWorkspaces(now = false) {
 // The list was drawn, or the selection changed: the session counts follow at once, and the state of
 // every workspace a session works in is read behind its throttle, a hook event having come.
 export function showWorkspaces() {
-  draw();
+  drawLine();
   readWorkspaces();
-  if (!read) return;
-  const all = allWorkspaces(read);
-  const working = new Set(studio.listed.map(({ cwd }) => workspaceOf(all, cwd)?.path));
-  for (const workspace of all) if (working.has(workspace.path)) touch(workspace.path);
+  if (!read.size) return;
+  const paths = [...read.keys()];
+  const working = new Set(studio.listed.map(({ cwd }) => ownerOf(paths, read, cwd)?.workspace.path));
+  for (const [project, found] of read) for (const workspace of allWorkspaces(found)) if (working.has(workspace.path)) touch(project, workspace.path);
   touchShown();
 }
 
 // After a branch switch: Workspaces and the main checkout's git state are read again at once.
-export async function refreshAfterSwitch() {
+export async function refreshAfterSwitch(project: string) {
   await readWorkspaces(true);
-  if (read) touch(read.main.path);
+  const found = read.get(project);
+  if (found) touch(project, found.main.path);
 }
 
-// The repository's fetch, once for all its workspaces (#33): when it last succeeded, and git's message
+// A repository's fetch, once for all its workspaces (#33): when it last succeeded, and git's message
 // if the latest failed. A failed fetch leaves the refs as they were, so the old numbers stay.
 export type FetchState = { at: number | null; error: string | null };
-const fetched: FetchState = { at: null, error: null };
+const fetched = new Map<string, FetchState>();
 let fetching = false;
 
 // The Git line's hover on the fetch, from `now` in ms.
@@ -283,25 +413,30 @@ export function fetchNote({ at, error }: FetchState, now: number): string {
   return lines.join("\n");
 }
 
-// Fetches now, then reads every workspace again; the palette's Fetch and the 5-minute timer. One at a time.
+// Fetches every project now, then reads every workspace again; the palette's Fetch and the 5-minute timer. One at a time.
 export async function fetchNow() {
   if (fetching) return;
   fetching = true;
   try {
-    await invoke("fetch_repository", { project: await mainProject() });
-    fetched.at = Date.now();
-    fetched.error = null;
-  } catch (e) {
-    fetched.error = String(e);
+    await Promise.all(
+      (await projects()).map(async (project) => {
+        try {
+          await invoke("fetch_repository", { project });
+          fetched.set(project, { at: Date.now(), error: null });
+        } catch (e) {
+          fetched.set(project, { at: fetched.get(project)?.at ?? null, error: String(e) });
+        }
+      }),
+    );
   } finally {
     fetching = false;
   }
-  if (read) for (const workspace of allWorkspaces(read)) touch(workspace.path);
+  for (const [project, found] of read) for (const workspace of allWorkspaces(found)) touch(project, workspace.path);
   draw();
 }
 
-// The repository is fetched once as watching starts, so the first distances are not stale. Then,
-// while the window is focused, every shown workspace is read every 5 s and the repository is fetched
+// The repositories are fetched once as watching starts, so the first distances are not stale. Then,
+// while the window is focused, every shown workspace is read every 5 s and the repositories are fetched
 // every 5 minutes; started by `main.ts`, not on import.
 export function watchWorkspaces() {
   void fetchNow();

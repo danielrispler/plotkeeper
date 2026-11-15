@@ -49,7 +49,7 @@ test("a click on the list's empty space goes home; a click on a row, a heading o
   assert.equal(listSpace(target()), true);
   assert.equal(listSpace(target(".item")), false);
   assert.equal(listSpace(target("summary")), false);
-  assert.equal(listSpace(target("#workspaces")), false);
+  assert.equal(listSpace(target(".project-workspaces")), false);
   assert.equal(listSpace(target("button")), false);
 });
 
