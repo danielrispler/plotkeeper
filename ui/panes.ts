@@ -12,6 +12,7 @@
 
 import type * as Xterm from "@xterm/xterm";
 import { connect, list, onEvent, request, type Listed } from "./daemon.js";
+import { drawHistory } from "./history.js";
 import { drawHome } from "./home.js";
 import { element, invoke, pressable, text } from "./dom.js";
 import { projects } from "./projects.js";
@@ -168,6 +169,20 @@ export function showHome() {
 // Draws Home again when the list changed under it.
 export function redrawHome() {
   if (shown === HOME) drawHome(box(HOME), studio.listed, projectPaths);
+}
+
+// History (`history.ts`), a view like Home in the terminal column: the ended sessions, searchable. Clicking a row selects
+// the session, which takes the column.
+const HISTORY = "history";
+export function showHistory() {
+  show(HISTORY, () => null);
+  drawHistory(box(HISTORY), studio.listed);
+  element("terminal-head").hidden = true;
+}
+
+// Draws History again when the list changed under it.
+export function redrawHistory() {
+  if (shown === HISTORY) drawHistory(box(HISTORY), studio.listed);
 }
 
 // Gives the keyboard back to the pane shown, as the panel hides.

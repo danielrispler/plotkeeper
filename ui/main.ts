@@ -14,7 +14,7 @@ import { listSpace } from "./home.js";
 import { showSessions } from "./list.js";
 import { goHome, select, show } from "./selection.js";
 import { dragPanel, placePanel, togglePanel } from "./panel.js";
-import { dragSplit, focusPane, placePanes, runDoctor, split, startPanes, toggleSplit } from "./panes.js";
+import { dragSplit, focusPane, placePanes, runDoctor, showHistory, split, startPanes, toggleSplit } from "./panes.js";
 import { showPalette, showPicker } from "./picker.js";
 import { fetchNow, readWorkspaces, showWorkspaces, watchWorkspaces } from "./workspaces.js";
 import { reload, type SettingsFiles, zoomed } from "./settings.js";
@@ -155,6 +155,8 @@ const actions: Actions = {
   // Home, in the terminal column: selects no session.
   "studio::JumpToUnseen": () => void go(newestUnseen(studio.listed)),
   "studio::GoHome": () => void goHome(),
+  // History (#94), in the terminal column: the ended sessions, searchable.
+  "studio::ShowHistory": () => showHistory(),
   // Fetches the repository now (#33); the workspaces' states follow.
   "studio::Fetch": () => void fetchNow(),
   // Asks GitHub again which tasks have landed (#53); it is otherwise asked at a turn's end and at the window's focus.
