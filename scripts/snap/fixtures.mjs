@@ -29,7 +29,30 @@ const common = {
   revival: [],
 };
 
+// A subagent's log pane: the subagent's line selected, its log from the stubbed `subagent_log`.
+const logFixture = (status) => {
+  const agent = { ...subagent("a1", "Review the diff"), agent_type: "Explore", status, ended_at: status === "running" ? null : Date.now() - 60e3 };
+  const sessions = [session("s1", "#56 · Row controls", "running", { agents: [agent] })];
+  const entries = [
+    { kind: "prompt", text: "Review the diff on this branch and list anything that breaks the token rules.\nReport file and line." },
+    { kind: "reply", text: "I'll start with the changed files, then check each style rule against the tokens." },
+    { kind: "call", id: "c1", tool: "Bash", detail: "git diff --stat" },
+    { kind: "result", id: "c1", text: " ui/log.ts | 30 ++++\n ui/style.css | 26 ++++\n 2 files changed", failed: false, cut: false },
+    { kind: "call", id: "c2", tool: "Read", detail: "ui/missing.ts" },
+    { kind: "result", id: "c2", text: "File does not exist.", failed: true, cut: false },
+    { kind: "reply", text: "The diff is small. Checking the stylesheet for raw colours next." },
+    { kind: "call", id: "c3", tool: "Grep", detail: "#[0-9a-f]{3,8} ui/style.css" },
+    ...(status === "running" ? [] : [
+      { kind: "result", id: "c3", text: Array.from({ length: 30 }, (_, i) => `ui/style.css:${i + 1}: no match`).join("\n"), failed: false, cut: false },
+      { kind: "reply", text: "No raw colours: every colour in the diff is a theme token." },
+    ]),
+  ];
+  return { ...common, sessions, selected: { session: sessions[0], agent: agent.id }, subagent_log: { entries, offset: 1 } };
+};
+
 export const fixtures = {
+  logRunning: () => logFixture("running"),
+  logDone: () => logFixture("completed"),
   // The list with a nested row (a session with subagents), the selected row and a landed one.
   list() {
     const sessions = [
