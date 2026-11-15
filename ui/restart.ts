@@ -99,7 +99,8 @@ export async function upgrade() {
     say(null);
     if (await ask(await plan())) {
       say("Restarting the terminals on the new version…");
-      await invoke("terminal_upgrade").catch((e) => say(`${e}`));
+      // The new daemon is this build's, so nothing shows the bar again unless the stop failed.
+      await invoke("terminal_upgrade").then(() => say(null), (e) => say(`${e}`));
       return;
     }
   }
