@@ -303,7 +303,7 @@ Save everything in a new folder: `local-evidence/<date>-ui-ux-recheck/` (for exa
   cd /Users/danielrispler/work/plotkeeper && npm start
   ```
 
-  Choose "Restart into it". No session is lost, the "needs you" state is still there, and the panel's shell is back with its scrollback (danielrispler/Falinks#542).
+  Choose "Restart to update" in the top bar. No session is lost, the "needs you" state is still there, and the panel's shell is back with its scrollback (danielrispler/Falinks#542).
 
 - [ ] **danielrispler/Falinks#561 (danielrispler/Falinks#598):** run `agy` in a studio terminal and tell it a word to remember. Revival happens only when the terminal daemon dies, so end it as a crash would:
 

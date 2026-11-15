@@ -25,6 +25,8 @@
       <span class="sp"></span>
       <!-- How many sessions need Daniel (danielrispler/Falinks#572), shown whenever any do; it selects the first. -->
       <button id="needs-you" class="btn small chip" type="button" hidden></button>
+      <!-- A new build to restart into (danielrispler/Falinks#470); sessions live in the daemon, so they stay. -->
+      <button id="new-build" class="btn small" type="button" title="A new build is ready. Sessions keep running." hidden>Restart to update</button>
       <button id="new-session" class="btn small" type="button">New session</button>
       <!-- Usage: context, 5h and week (danielrispler/Falinks#480, danielrispler/Falinks#481). -->
       <span id="usage" class="usage"></span>
@@ -49,7 +51,7 @@
     <!-- The terminal panes (danielrispler/Falinks#466, danielrispler/Falinks#467) draw into #terminal-body. -->
     <section id="terminal" class="term" aria-label="Terminal">
       <div id="terminal-head" class="term-h"><span id="terminal-title">terminal</span></div>
-      <!-- A new build to restart into, or the daemon upgrade's wait (danielrispler/Falinks#470). -->
+      <!-- The daemon upgrade's offer and the plugin fix (danielrispler/Falinks#470, #21). -->
       <div id="restart" class="restart" role="status" hidden></div>
       <!-- A split (danielrispler/Falinks#529) shows two panes, the divider between them. -->
       <div id="terminal-body" class="term-body"><div id="split-divider" class="split-divider" hidden></div></div>
@@ -149,10 +151,10 @@
   <!-- The daemon upgrade's question (danielrispler/Falinks#470, danielrispler/Falinks#322 resolution point 4). -->
   <dialog id="upgrade" class="upgrade" aria-labelledby="upgrade-title">
     <form method="dialog">
-      <h1 id="upgrade-title">Restart the terminal daemon?</h1>
-      <p>The daemon is older than this app. Every terminal is idle. A restart ends each terminal and brings it back:</p>
+      <h1 id="upgrade-title">Restart your terminals on the new version?</h1>
+      <p>Studio was updated, but your terminals still run on the old version. A restart ends each terminal and brings it back:</p>
       <ul id="upgrade-terms"></ul>
-      <p class="actions"><button class="btn" value="no">Not now</button> <button class="btn primary" value="yes">Restart the daemon</button></p>
+      <p class="actions"><button class="btn" value="no">Not now</button> <button class="btn primary" value="yes">Restart terminals</button></p>
     </form>
   </dialog>
   <span id="probe" aria-hidden="true">MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM</span>
