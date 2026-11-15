@@ -197,6 +197,17 @@ pub struct Capabilities {
     pub durations: bool,
     /// Its transcript carries the agent's version.
     pub transcript_version: bool,
+    /// How its transcript's lines read.
+    pub transcript_format: TranscriptFormat,
+}
+
+/// The record format of an agent's transcript.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TranscriptFormat {
+    #[default]
+    Claude,
+    Agy,
 }
 
 impl Event {
@@ -352,9 +363,7 @@ impl Event {
             _ => None,
         })
     }
-}
 
-impl Event {
     pub fn model(&self) -> Option<&str> {
         self.find(|h| match h {
             Happened::Model(model) => Some(model.as_str()),

@@ -2,7 +2,9 @@
 //! (danielrispler/plotkeeper#43, decisions 2 and 3). Claude's event names, tool names and markup
 //! stay here.
 
-use crate::event::{Capabilities, Event, Happened, Spawned, Start, Tool, ToolKind};
+use crate::event::{
+    Capabilities, Event, Happened, Spawned, Start, Tool, ToolKind, TranscriptFormat,
+};
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -16,6 +18,7 @@ pub const CAPABILITIES: Capabilities = Capabilities {
     permission_mode: true,
     durations: true,
     transcript_version: true,
+    transcript_format: TranscriptFormat::Claude,
 };
 
 /// Tools that ask Daniel in any permission mode, before any `PermissionRequest`.

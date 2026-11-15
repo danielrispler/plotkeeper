@@ -356,7 +356,10 @@ fn a_child_ends_when_its_files_state_changes_with_no_stop() {
     studio.replay(&with("p", "SessionStart", 1, json!({})));
     studio.replay(&with("c", "SessionStart", 2, json!({})));
     studio.replay(&with("p", "Stop", 3, json!({ "fullyIdle": false })));
-    assert_eq!(studio.session("p").unwrap().agents[0].status, Status::Running);
+    assert_eq!(
+        studio.session("p").unwrap().agents[0].status,
+        Status::Running
+    );
 
     write("COMPLETED");
     studio.replay(&with("p", "Stop", 4, json!({ "fullyIdle": true })));
