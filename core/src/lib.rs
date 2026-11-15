@@ -1435,6 +1435,9 @@ pub enum Output {
     /// A session's first `Stop`: read Claude Code's version from its transcript, and nothing else
     /// (danielrispler/Falinks#369, decision 9).
     Version { transcript_path: String },
+    /// An agy session's first `Stop`: the shell runs `agy --version` (agy's payloads and transcript
+    /// carry no version) and compares it with the fixture's (#43, decision 14).
+    AgyVersion,
 }
 
 /// What the live app learned that the event log does not hold, which the card store keeps as it
@@ -2511,6 +2514,10 @@ impl Studio {
                         outputs.push(Output::Version {
                             transcript_path: event.transcript_path.clone(),
                         });
+                    }
+                    if !replay && !session.versioned && !event.capabilities.transcript_version {
+                        session.versioned = true;
+                        outputs.push(Output::AgyVersion);
                     }
                     let reply = event.reply().trim();
                     if !replay && wants_summary(reply, session.needs_you()) {
