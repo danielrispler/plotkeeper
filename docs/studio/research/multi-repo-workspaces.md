@@ -28,7 +28,7 @@ Studio terms follow `docs/studio/CONTEXT.md`. Other tools' words (thread, worksp
 
 Patterns worth adopting:
 
-1. **One list across repos, grouped by repo, with attention rolled up onto the group header** when it is collapsed. Zed (waiting count and icon on collapsed headers), herdr (most-urgent status wins), Conductor (counts on collapsed groups).
+1. **One list across repos, grouped by repo, with attention rolled up onto the group header** when it is collapsed. Zed (waiting count and icon on collapsed headers), herdr (most-urgent status wins), Conductor (counts on collapsed groups), T3 Code (a closed folder shows its most urgent state), AgentsRoom (project tile badge: red waiting, orange working, green idle). See "Benchmark tools".
 2. **Attention outside the list too:** a toast or sound that jumps to the session when clicked, skipped if the user is already looking. herdr, Zed, Superset.
 3. **Separate "waiting on you" from "finished while you were away."** Zed's two icons; herdr's `done` becomes `idle` once seen.
 4. **Group by repo identity, not by folder.** Cursor's remote-URL grouping merges clones and worktrees; users complained it hid worktrees. Zed and herdr keep worktrees as nested rows under the repo.
@@ -72,7 +72,7 @@ Patterns worth adopting:
 
 1. **Picker in a persistent header or status bar, plus a palette command.** VS Code (status bar + Checkout to), Zed (title bar + `git: switch`).
 2. **Avoid in-place switching by giving each branch its own folder.** Zed, Conductor, Vibe Kanban, Superset, Claude Squad. The main checkout then stays on one branch.
-3. **Rely on git's refusal and offer stash**, rather than a custom dirty check. VS Code, Zed.
+3. **Rely on git's refusal and offer stash**, rather than a custom dirty check. VS Code, Zed. Workmux does the same for worktrees: dirty trees need `--force`.
 
 ## 4. Config versus UI state
 
@@ -91,7 +91,7 @@ Patterns worth adopting:
 1. **Two stores: a hand-edited file the app only reads, and a machine-owned store for UI state.** Zed (settings.json vs SQLite), VS Code (settings.json vs `state.vscdb`).
 2. **Persist only what the user changed.** Zed saves sidebar width only when set by the user, so a new default still applies to everyone else.
 3. **Per-project config beside the project, global state in the app dir.** Zed `.zed/settings.json`, VS Code `.vscode` and `.code-workspace`.
-4. **Put the opt-in "restore on start" choice in the config file**, and the thing restored in the state store. Zed's `restore_on_startup`.
+4. **Put the opt-in "restore on start" choice in the config file**, and the thing restored in the state store. Zed's `restore_on_startup`. cmux splits the same way: `cmux.json` for settings, snapshots under `Application Support` (see "Benchmark tools").
 
 ## 5. Grouping, filtering and search at scale
 
@@ -109,7 +109,7 @@ Patterns worth adopting:
 1. **Fuzzy search over title, repo and branch, one box**, which overrides collapse while typing. Zed, Vibe Kanban, Conductor.
 2. **Status ordering puts finished work last** instead of removing it. Linear; Vibe Kanban accordion.
 3. **Group by repo as the top level, status inside.** Zed, Conductor, herdr.
-4. **Archive view for the long tail**, so the live list stays short at 70+ items. Zed, Conductor, Vibe Kanban.
+4. **Archive view for the long tail**, so the live list stays short at 70+ items. Zed, Conductor, Vibe Kanban, T3 Code (archived threads leave the sidebar; a settings panel lists, unarchives and deletes them).
 
 ## Implications for #16
 
@@ -239,3 +239,65 @@ Patterns worth adopting:
 - **Unknown folders.** Needs its own decision: ungrouped row named from the folder, or auto-add. Both are unsupported by a documented precedent beyond herdr's naming rule.
 - **Badge.** Name text is the only documented form. Colour or initials would be new.
 - **Order.** Manual drag order stored in `projects.json` matches herdr and costs one array.
+
+## Benchmark tools: cmux, Workmux, AgentsRoom, T3 Code
+
+How each name was identified. Each is the terminal or desktop orchestrator for coding agents, not a namesake:
+- **cmux** is `manaflow-ai/cmux`, a native macOS terminal on Ghostty "for AI coding agents" ([README](https://raw.githubusercontent.com/manaflow-ai/cmux/main/README.md)). Search also returns many forks and unrelated repos called cmux; I used the Manaflow one.
+- **Workmux** is `raine/workmux`: git worktrees plus tmux windows for parallel agents ([README](https://raw.githubusercontent.com/raine/workmux/main/README.md)). Other copies are forks.
+- **AgentsRoom** is the Electron desktop app at [agentsroom.dev](https://agentsroom.dev/docs/multi-project-multi-agent). Vendor pages only.
+- **T3 Code** is `pingdotgg/t3code`, an Electron and web control surface for Claude Code, Codex and others ([README](https://raw.githubusercontent.com/pingdotgg/t3code/main/README.md)). Read from source files, not docs.
+
+Unverified means the docs or source I read are silent. Nothing was run.
+
+### 1. Hierarchy, attention rollup, cross-project surfacing
+
+| Tool | Hierarchy | Live vs finished | Rollup on collapsed groups | Cross-project "needs input" |
+| --- | --- | --- | --- | --- |
+| cmux | Flat workspace rows by default. Each row shows branch, PR, folder, ports and last notification text ([README](https://raw.githubusercontent.com/manaflow-ai/cmux/main/README.md)). "Workspace groups" nest rows in collapsible named sections ([groups](https://raw.githubusercontent.com/manaflow-ai/cmux/main/docs/workspace-groups.md)). A sample sidebar extension groups by project root with a "No Folder" bucket ([example](https://github.com/manaflow-ai/cmux/blob/main/Examples/CmuxExtensionSidebarExamples/Sources/CmuxExtensionSidebarExamples/ProjectWorktreeSidebar.swift)); it is sample code, not the default ([custom sidebars](https://raw.githubusercontent.com/manaflow-ai/cmux/main/docs/custom-sidebars.md)). | No finished list. Agents are terminals; none documented. | Not covered by the groups doc. | Yes. Panes get "a blue ring", and `Cmd+Shift+U` jumps to the latest unread; `cmux jump-to-unread` in the CLI ([notifications](https://raw.githubusercontent.com/manaflow-ai/cmux/main/docs/notifications.md)). A notification panel is the durable record. |
+| Workmux | Worktree = tmux window. The dashboard TUI lists "all active AI agents across all tmux sessions", with sort modes (priority, project, recency), filters and a Worktrees tab ([README](https://raw.githubusercontent.com/raine/workmux/main/README.md)). | Working, waiting, finished icons; finished "clears when the window is focused". No finished list. | Not applicable (flat). | The dashboard is the cross-project view, sortable by priority. |
+| AgentsRoom | Sidebar "lists every project grouped by zone"; inside a project, agents sit under Needs you, To review, Working, Available, Inactive ([doc](https://agentsroom.dev/docs/multi-project-multi-agent)). | Inactive is a group. No separate history. | Yes: project tiles show a red badge when an agent waits, orange while one works, green when idle. | Via the tile badges and sounds on "needs input"; a top-level list: unverified. |
+| T3 Code | Project folder, then threads. Sections inside: snoozed, settled, pinned, active ([Sidebar.logic.ts](https://raw.githubusercontent.com/pingdotgg/t3code/main/apps/web/src/components/Sidebar.logic.ts)). | Archived threads leave the sidebar. | Yes: a closed folder shows its most urgent state, in order attention, failed, unread, working. | Not found. |
+
+### 2. Adding, removing, folders outside any project
+
+- **cmux:** `Cmd+N` new local workspace, `Cmd+Shift+W` closes one ([README](https://raw.githubusercontent.com/manaflow-ai/cmux/main/README.md)). No project object. A workspace outside any folder is a normal row; the sample sidebar files it under "No Folder".
+- **Workmux:** no project list. The project is the repository you run `workmux add` in; per-project config is `.workmux.yaml` ([README](https://raw.githubusercontent.com/raine/workmux/main/README.md)). Agents outside tmux do not show: the dashboard "requires agent status tracking".
+- **AgentsRoom:** `Cmd+N` for a new project. Drag a project to another zone; dropping on a new zone name creates it. The close cross "asks for confirmation first" when work is still running; cancel keeps everything running ([doc](https://agentsroom.dev/docs/multi-project-multi-agent)). Folders outside a project: unverified.
+- **T3 Code:** the mobile app has add-project routes for a local folder, a repository and a new project ([source](https://github.com/pingdotgg/t3code/tree/main/apps/mobile/src/features/projects)). Grouping modes are "Group by repository", "Group by repository path" and "Keep separate", with per-project override, so clones of one repo can merge ([sidebarProjectGrouping.ts](https://raw.githubusercontent.com/pingdotgg/t3code/main/apps/web/src/sidebarProjectGrouping.ts)). `groupSidebarThreadsByProject` drops "threads whose project is in no group" (read through the reader, so treat as unverified). Pin and archive exist on projects (migration `076_ProjectionProjectsPinArchive`, file name only).
+
+### 3. Worktree and branch ergonomics
+
+- **Workmux (the reference here).** All from the [README](https://raw.githubusercontent.com/raine/workmux/main/README.md):
+  - `add` creates a worktree and a matching window and switches to it; `--headless` makes the worktree with no window.
+  - `open` switches to an existing worktree's window; `list` shows worktrees with agent, window and merge status.
+  - `merge` checks for uncommitted changes and "errors if found, unless `--ignore-uncommitted`". It then removes the worktree, window and local branch.
+  - `remove` deletes without merging. A dirty worktree "still require[s] `--force`". It prompts on unmerged commits; `confirm_unmerged_removal: false` skips that.
+  - No guard against a running agent is documented.
+  - There is no in-place branch switch; a branch is a worktree.
+- **cmux.** The README shows the branch in the sidebar and says nothing about worktrees. Source has worktree seeding and an extension prototype ([tree](https://github.com/manaflow-ai/cmux/tree/main/Packages/macOS/CMUXAgentLaunch/Sources/CMUXAgentLaunch/WorktreeSeed)). The user-facing flow, keys and guards: unverified.
+- **AgentsRoom.** One setting: "Enable a git worktree per agent so each works in its own copy and branch" ([doc](https://agentsroom.dev/docs/multi-project-multi-agent)). Picker and guards: unverified.
+- **T3 Code.** "Each thread can work in its own worktree" ([README](https://raw.githubusercontent.com/pingdotgg/t3code/main/README.md)). Source has worktree removal and "restore missing worktree" code ([worktreeRemoval.ts](https://github.com/pingdotgg/t3code/blob/main/apps/server/src/vcs/worktreeRemoval.ts)). Branch picker and dirty-tree guard: unverified.
+
+### 4. Archive and history
+
+- **T3 Code:** archived threads are excluded from the sidebar, and a settings page lists them with Unarchive and Delete ([panel](https://github.com/pingdotgg/t3code/blob/main/apps/web/src/components/settings/ArchivedThreadsPanel.tsx)). The closest match to the decided separate History view.
+- **AgentsRoom:** no history section; "Sessions live in memory with their scrollback". A "Recent agents" row lists open agents ([doc](https://agentsroom.dev/docs/multi-project-multi-agent)).
+- **cmux:** no archive. Quit saves a snapshot; relaunch restores layout, folders and best-effort scrollback, but "does not checkpoint arbitrary live process state" ([README](https://raw.githubusercontent.com/manaflow-ai/cmux/main/README.md)).
+- **Workmux:** no archive or history. `merge` and `remove` end the worktree. State files are read from `~/.local/state/workmux/agents/`.
+
+### 5. UI state versus config
+
+- **cmux:** user config `~/.config/cmux/cmux.json` (sidebar, tabs, behaviour) plus the Ghostty config; snapshots in `~/Library/Application Support/cmux/`; agent session mappings in `~/.cmuxterm/` ([README](https://raw.githubusercontent.com/manaflow-ai/cmux/main/README.md)). The closest match to the decided split.
+- **Workmux:** config `~/.config/workmux/config.yaml` and per-repo `.workmux.yaml`; runtime state under `~/.local/state/workmux/` (XDG split).
+- **AgentsRoom:** shortcut settings follow the account; disk layout of projects: unverified.
+- **T3 Code:** a desktop client-settings module exists in source (`apps/desktop/src/settings/DesktopClientSettings.ts`); what it holds and where: unverified.
+
+### Does the benchmark set agree on project-first?
+
+Mostly, among tools with a project concept.
+- **Project-first:** herdr (worktree spaces nest under their repo; [guide](https://raw.githubusercontent.com/herdrdev/herdr-app/b721deda985270ec8256552692729a4add389b2a/defaults/AGENTS.md)), AgentsRoom (projects, status inside), T3 Code (folders, status as dots and sections), Zed, and Cursor's Agents Window (by repo; [forum](https://forum.cursor.com/t/worktrees-in-agent-sidebar/156637)).
+- **Not project-first:** cmux (flat workspace rows; groups are manual, and a status "Agents Board" template is in its beta sidebars) and Workmux (a flat dashboard sorted by priority, project or recency). Both have no project object.
+- **Cursor "background agents" as a separate list:** unverified. Only the Agents Window was read.
+- **Status inside project:** the projects that group by project keep status as a section or colour inside, and roll the worst status up to the header (herdr, AgentsRoom, T3 Code, Zed). None found does the reverse, status groups containing projects, except Conductor's optional mode and Vibe Kanban's accordion (see `agent-session-ui-research.md`).
+- **Cross-project jump:** cmux and Workmux solve cross-project attention with a global jump or dashboard because they lack a project header. A project-first sidebar with a rollup covers the same need, and cmux's `Cmd+Shift+U` is a cheap addition.
