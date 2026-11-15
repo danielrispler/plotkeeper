@@ -241,11 +241,12 @@ export async function showBranches() {
   const picker = element("picker");
   if (closed("Switch branch")) return;
   try {
-    const [workspaces, branches] = await Promise.all([invoke<Workspaces>("workspaces"), invoke<Branch[]>("branches")]);
+    const project = await mainProject();
+    const [workspaces, branches] = await Promise.all([invoke<Workspaces>("workspaces", { project }), invoke<Branch[]>("branches", { project })]);
     const blocked = branchBlocked(workspaces, studio.listed);
     const rows = branchOptions(branches, blocked).map(({ branch, label, note, disabled }) => {
       const button = pressable(document.createElement("button"), false, () => {
-        invoke("switch_branch", { branch: branch.name, remote: branch.remote })
+        invoke("switch_branch", { project, branch: branch.name, remote: branch.remote })
           .then(() => {
             picker.hidden = true;
             return refreshAfterSwitch();
