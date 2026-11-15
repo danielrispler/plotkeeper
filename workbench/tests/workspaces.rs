@@ -197,8 +197,14 @@ fn git_state_leaves_the_index_untouched_even_when_its_stat_info_is_stale() {
     git(dir.path(), &["add", "a.txt"]);
     git(dir.path(), &["commit", "-q", "-m", "Add a"]);
     // Same bytes, new mtime: the index's stat info is stale and a plain `git status` refreshes it.
-    std::thread::sleep(std::time::Duration::from_millis(1100));
     std::fs::write(&file, "a").unwrap();
+    let old = std::time::SystemTime::now() - std::time::Duration::from_secs(10);
+    std::fs::File::options()
+        .write(true)
+        .open(&file)
+        .unwrap()
+        .set_modified(old)
+        .unwrap();
     let index = dir.path().join(".git/index");
     let before = (
         std::fs::read(&index).unwrap(),

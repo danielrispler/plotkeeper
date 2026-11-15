@@ -591,18 +591,22 @@ fn running(pid: &str) -> bool {
 #[test]
 fn a_claude_that_fails_prints_nothing_or_hangs_gives_nothing_keeps_nothing_and_leaves_nothing_running()
  {
+    // Stubs that start `sh` and reply keep a second; only the hang is cut short.
     let scripts = [
-        "echo 'Not logged in'; exit 1",
-        "cat > /dev/null",
+        ("echo 'Not logged in'; exit 1", Duration::from_secs(1)),
+        ("cat > /dev/null", Duration::from_secs(1)),
         // A hung call whose own child also hangs.
-        "sleep 600 & echo $! > child; sleep 600",
+        (
+            "sleep 600 & echo $! > child; sleep 600",
+            Duration::from_millis(200),
+        ),
     ];
-    for script in scripts {
+    for (script, timeout) in scripts {
         let dir = tempfile::tempdir().unwrap();
         let store = stored(dir.path());
         let mut lines = Vec::new();
 
-        let writer = stub(dir.path(), script).with_timeout(Duration::from_secs(1));
+        let writer = stub(dir.path(), script).with_timeout(timeout);
         let more = explain_more(&store, &writer, &edit().id, |l| lines.push(l));
 
         assert_eq!(more, None, "{script}");
