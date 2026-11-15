@@ -365,3 +365,20 @@ fn a_child_ends_when_its_files_state_changes_with_no_stop() {
     assert_eq!(child.status, Status::Completed);
     assert!(child.ended_at.is_some());
 }
+
+#[test]
+fn a_blocked_agy_session_stops_needing_you_when_its_terminal_goes_or_stops_reporting() {
+    let silent = || {
+        let mut t = terminal("blocked");
+        t.state = None;
+        t
+    };
+    for gone in [vec![], vec![silent()]] {
+        let mut studio = Studio::replayed(fixture());
+        studio.terminals(&[terminal("blocked")], 10);
+        assert_eq!(studio.session(PARENT).unwrap().state, State::NeedsYou);
+
+        studio.terminals(&gone, 20);
+        assert_eq!(studio.session(PARENT).unwrap().state, State::YourTurn);
+    }
+}

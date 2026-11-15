@@ -3090,6 +3090,17 @@ impl Studio {
             }
         }
         self.mismatched.retain(|id, _| disagreeing.contains(id));
+        // A terminal that is gone, or reports no state, no longer says `blocked`.
+        let silent: Vec<String> = self
+            .sessions
+            .iter()
+            .filter(|(_, s)| s.terminal_blocked)
+            .filter(|(_, s)| !reporting.iter().any(|(t, _)| s.terminal.as_deref() == Some(&t.id)))
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in silent {
+            outputs.extend(self.terminal_blocks(&id, false));
+        }
         // Everyone else's terminal: a status-only row.
         let mut rows = BTreeSet::new();
         let at_start = !std::mem::replace(&mut self.listed, true);
