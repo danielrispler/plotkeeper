@@ -331,3 +331,37 @@ fn a_json_line_with_no_conversation_or_event_name_counts_as_drift() {
         [(5, AgyDriftKind::HookEvent), (6, AgyDriftKind::HookEvent)]
     );
 }
+
+#[test]
+fn a_child_ends_when_its_files_state_changes_with_no_stop() {
+    let dir = tempfile::tempdir().unwrap();
+    let generated = dir.path().join("p/.system_generated");
+    std::fs::create_dir_all(generated.join("subagents")).unwrap();
+    let file = generated.join("subagents/c.json");
+    let write = |state: &str| {
+        let body = json!({ "subagentDescriptor": { "typeName": "self", "role": "Runner" }, "state": state, "spawnStepIndex": 5 });
+        std::fs::write(&file, body.to_string()).unwrap();
+    };
+    let with = |session: &str, event: &str, at: u64, fields: Value| {
+        let mut l: Value = serde_json::from_str(&line(session, event, at, fields)).unwrap();
+        l["transcriptPath"] = format!(
+            "{}/{session}/.system_generated/logs/transcript_full.jsonl",
+            dir.path().display()
+        )
+        .into();
+        l.to_string()
+    };
+    let mut studio = Studio::default();
+    write("ALIVE");
+    studio.replay(&with("p", "SessionStart", 1, json!({})));
+    studio.replay(&with("c", "SessionStart", 2, json!({})));
+    studio.replay(&with("p", "Stop", 3, json!({ "fullyIdle": false })));
+    assert_eq!(studio.session("p").unwrap().agents[0].status, Status::Running);
+
+    write("COMPLETED");
+    studio.replay(&with("p", "Stop", 4, json!({ "fullyIdle": true })));
+
+    let child = &studio.session("p").unwrap().agents[0];
+    assert_eq!(child.status, Status::Completed);
+    assert!(child.ended_at.is_some());
+}
