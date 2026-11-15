@@ -172,6 +172,12 @@ h1 { margin: 0 0 var(--sp-4); }
 .pane.home { overflow-y: auto; padding: var(--sp-5) var(--sp-6); max-width: var(--dialog); margin: 0 auto; }
 .pane.home h1 { margin: var(--sp-6) var(--sp-4) var(--sp-2); }
 .pane.home .row:hover { background: var(--hover); }
+/* History (#94): as Home, with its search box above the rows; it adds no colour. */
+.pane.history { overflow-y: auto; padding: var(--sp-5) var(--sp-6); max-width: var(--dialog); margin: 0 auto; }
+.pane.history input { width: 100%; box-sizing: border-box; margin-bottom: var(--sp-3); font: inherit; padding: var(--sp-3); background: var(--raised); color: var(--fg); border: var(--hair) solid var(--edge); border-radius: var(--radius-small); }
+.pane.history .row:hover { background: var(--hover); }
+.pane.history .item .delete { visibility: visible; }
+.history-link { display: block; margin: var(--sp-3) var(--sp-4); color: var(--muted); }
 /* A landed row's Delete is the point of the section, so it shows without hover. */
 .pane.home .item .delete { visibility: visible; }
 .pane[hidden] { display: block; }

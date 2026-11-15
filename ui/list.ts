@@ -6,14 +6,15 @@ import { agentMark } from "./capabilities.js";
 import { age, element, patch, prose, pressable, stepText, text } from "./dom.js";
 import { counts, times, type Time } from "./times.js";
 import { shortPaths } from "./paths.js";
-import { redrawHome } from "./panes.js";
+import { historyLink } from "./history.js";
+import { redrawHistory, redrawHome, showHistory } from "./panes.js";
 import { isSelected, select } from "./selection.js";
 import { studio } from "./state.js";
 import { stateLabels, type Context, type Session, type SessionState, type Subagent } from "./types.js";
 import { askDelete, report } from "./story.js";
 
 // The collapsed groups Daniel opened, which stay open when the list is drawn again.
-const collapsed: SessionState[] = ["idle", "ended"];
+const collapsed: SessionState[] = ["idle"];
 const opened = new Set<SessionState>();
 
 // What the strip calls a session: the issue number of an `issue-<n>-…` folder, else its folder's
@@ -382,18 +383,24 @@ function strip(sessions: Session[]): HTMLElement[] {
       button.append(glyph(session.state, session.unseen, session.landed), labels[i]);
       return button;
     }),
-    ...(rest ? [Object.assign(pressable(text("button", String(rest)), false, toggle), { title: "Idle and ended" })] : []),
+    ...(rest ? [Object.assign(pressable(text("button", String(rest)), false, toggle), { title: "Idle" })] : []),
   ];
 }
 
-// The core sends the sessions sorted by state: needs you, running, your turn, then idle and ended,
-// which collapse at the bottom. The rows above them carry their state by shape, so they have no group
+// The sessions the list shows: all but the ended ones, which are in History (#94).
+export const sidebarSessions = <T extends Pick<Session, "state">>(sessions: T[]): T[] => sessions.filter((session) => session.state !== "ended");
+
+// The core sends the sessions sorted by state: needs you, running, your turn, idle, then ended. Idle
+// ones collapse at the bottom; ended ones are in History. The rows above them carry their state by shape, so they have no group
 // heading (danielrispler/Falinks#572).
 export function showSessions(sessions: Session[]) {
   studio.listed = sessions;
   redrawHome();
+  redrawHistory();
+  // Ended sessions are in History, not here.
+  const live = sidebarSessions(sessions);
   const groups: Session[][] = [];
-  for (const session of sessions) {
+  for (const session of live) {
     const last = groups[groups.length - 1];
     if (last?.[0].state === session.state) last.push(session);
     else groups.push([session]);
@@ -416,7 +423,8 @@ export function showSessions(sessions: Session[]) {
       return group;
     }),
   );
-  patch(element("strip"), strip(sessions));
+  patch(element("history-link"), historyLink(sessions, showHistory));
+  patch(element("strip"), strip(live));
   element("no-sessions").hidden = sessions.length > 0;
   const chip = element("needs-you");
   chip.textContent = chipText(sessions);
