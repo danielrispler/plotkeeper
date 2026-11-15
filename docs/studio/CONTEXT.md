@@ -243,5 +243,5 @@ _Avoid_: Keybindings, shortcuts file
 The human language of cards and questions: English for now, no longer Hebrew (danielrispler/Falinks#463), in plain words at Daniel's level. Code terms are in backticks.
 
 **Prior art**:
-How established tools already solve a studio problem: first agent-first IDEs and multi-agent orchestrators, such as herdr, Conductor, Vibe Kanban, claudecodeui, Cursor's Agents Window and Superset; then Zed, for classic workspace, branch-picker and config-versus-state patterns; then other editors and Linear. Every option for an IDE, layout or workflow decision starts from it and cites it, adapted to the studio's principles, rather than being designed from scratch. Prior-art notes live in `docs/studio/research/`.
+How the benchmark tools already solve a standard shell or workspace problem, such as sidebar hierarchy, worktree navigation, branch switching or history. The benchmark tools are herdr, cmux, Workmux, AgentsRoom, T3 Code and Cursor's parallel background agents, with Zed second for editor chrome. The studio copies their proven pattern for these decisions and keeps its own design for the understanding layer. Prior-art notes live in `docs/studio/research/`.
 _Avoid_: Competitor analysis (the point is proven patterns to adopt, not a market comparison)
