@@ -2,8 +2,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { bound } from "../../dist/keys.js";
-import { initial } from "../../dist/settings.js";
 import { questionLine, toastFor, toastShows } from "../../dist/toast.js";
 
 const ui = new URL("../", import.meta.url);

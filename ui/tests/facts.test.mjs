@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { plain, rowText, rowTime } from "../../dist/list.js";
 import { shortPath, shortPaths } from "../../dist/paths.js";
-import { estimateText, times } from "../../dist/times.js";
+import { times } from "../../dist/times.js";
 
 const MIN = 60_000;
 

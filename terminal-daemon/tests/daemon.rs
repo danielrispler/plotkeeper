@@ -187,7 +187,13 @@ fn resize_reaches_the_program_and_list_shows_size_program_and_exit_code() {
     // that ran another agent can come back as that agent.
     let record = std::fs::read_to_string(studio_terminal_daemon::record(&d.socket())).unwrap();
     let terms: Value = serde_json::from_str(&record).unwrap();
-    assert_eq!(terms[0]["foreground"], "sleep");
+    let t1 = terms
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"] == "t1")
+        .unwrap();
+    assert_eq!(t1["foreground"], "sleep");
     let t = term(&list(&mut c), "t1").clone();
     assert_eq!(
         (t["cols"].as_u64(), t["rows"].as_u64(), t["cwd"].as_str()),

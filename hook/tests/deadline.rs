@@ -43,7 +43,7 @@ fn event() -> serde_json::Value {
 }
 
 #[test]
-fn a_held_lock_gives_a_drops_line_and_no_log_line_within_about_5_seconds() {
+fn a_held_lock_gives_a_drops_line_and_no_log_line_once_its_patience_runs_out() {
     let home = scratch("held");
     let log = studio_hook::event_log(&home);
     let held = fs::File::create(&log).unwrap();
