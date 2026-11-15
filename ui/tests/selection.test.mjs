@@ -13,9 +13,7 @@ test("selecting a session shows its own terminal, and the next one switches it",
 
 test("a session started outside the studio shows the message and Open here, not a shell", () => {
   assert.deepEqual(paneView(session("a", null), false), { message: "Runs in another terminal. Open here resumes it." });
-});
-
-test("a session whose terminal is gone shows the same message", () => {
+  // A terminal that is not running shows the same message.
   assert.deepEqual(paneView(session("a", "claude-a"), false), { message: "Runs in another terminal. Open here resumes it." });
 });
 
