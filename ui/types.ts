@@ -191,8 +191,6 @@ export type SessionCards = { brief: string | null; recent: StoredCard[]; older: 
 export type AskKind = "question" | "plan" | "permission";
 export const askKind = (tool: string): AskKind =>
   tool === "AskUserQuestion" ? "question" : tool === "ExitPlanMode" ? "plan" : "permission";
-// The selection is the core's: the session Daniel selected and the subagent of it he opened, whose
-// view then shows its own line.
 // An entry of a subagent's log, as the core reads it from the log file, and what one read returned: the entries
 // after the offset asked for, and the offset read to.
 export type LogEntry =
@@ -209,6 +207,8 @@ export type LogRow =
   | LogCall;
 export type LogCall = { kind: "call"; id: string; tool: string; detail: string | null; result: LogResult | null };
 
+// The selection is the core's: the session Daniel selected and the subagent of it he opened, whose
+// view then shows its own line.
 export type Selection = { session: Session; agent: string | null };
 
 // Where a session can start (danielrispler/Falinks#467): the main checkout and the tasks under `.claude/worktrees/`, with

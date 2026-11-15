@@ -1,6 +1,6 @@
-// A subagent's log in the pane's place (danielrispler/plotkeeper#54): read-only, plain for now. The core reads the log
-// file from an offset and the pane keeps that offset, so reading on (#76) and the structured look (#77) extend
-// this module. The header's name and state come from the core's tracking, never from the log.
+// A subagent's log in the pane's place (danielrispler/plotkeeper#54): read-only. The core reads the log file from an
+// offset and the pane keeps that offset, reading on when the shell re-sends the selection. Tool calls show as rows,
+// folded once they have a result. The header's name and state come from the core's tracking, never from the log.
 
 import { element, invoke, pressable, text } from "./dom.js";
 import type { LogCall, LogEntry, LogResult, LogRow, Subagent, SubagentLog } from "./types.js";
@@ -25,7 +25,7 @@ export function logRows(entries: LogEntry[]): LogRow[] {
 
 // What the pane says in place of a log the core could not find: it may not exist yet while the subagent runs.
 export const logNote = (log: SubagentLog | null, status: string): string | null =>
-  log ? null : status === "running" ? "Starting…" : "The log isn't on disk.";
+  log && log.entries.length > 0 ? null : status === "running" ? "Starting…" : "The log isn't on disk.";
 
 // The header's state: `running` or `done` (`completed`), else the core's own word, such as `killed`.
 export const stateLabel = (status: string) => (status === "completed" ? "done" : status);
@@ -45,6 +45,22 @@ export function readOn(shown: ShownLog, read: SubagentLog | null): ShownLog {
 export const followsBottom = (v: { scrollTop: number; clientHeight: number; scrollHeight: number }) =>
   v.scrollHeight - v.scrollTop - v.clientHeight <= 4;
 
+// Where the view opens: a running subagent's log at the bottom, so following works; a finished one at the top.
+export const opensAtBottom = (status: string) => status === "running";
+
+// The scroll position after a redraw: the bottom if the view was there, else where Daniel had it.
+export const scrollAfter = (before: { scrollTop: number; clientHeight: number; scrollHeight: number }, height: number) =>
+  followsBottom(before) ? height : before.scrollTop;
+
+// The calls whose rows are open, by id: a redraw (reading on) keeps each row as Daniel left it.
+const expanded = new Set<string>();
+
+// Draws the log view of a subagent the session does not have: the no-log state, never the previous pane.
+export function showMissing(place: HTMLElement, toParent: () => void) {
+  Object.assign(shownLog, { session: "", agent: "", log: null });
+  drawLog(place, null, null, toParent);
+}
+
 // Reads subagent `agent`'s log from the start and draws it in `place`. `toParent` shows the parent's terminal.
 export async function showLog(place: HTMLElement, session: string, agent: Subagent, toParent: () => void) {
   expanded.clear();
@@ -54,6 +70,7 @@ export async function showLog(place: HTMLElement, session: string, agent: Subage
   if (shownLog.session !== session || shownLog.agent !== agent.id || shownLog.log) return; // a newer selection took over
   shownLog.log = log;
   drawLog(place, agent, shownLog.log, toParent);
+  place.scrollTop = opensAtBottom(agent.status) ? place.scrollHeight : 0;
 }
 
 // Reads on from the offset when the shell re-sends the selection of the subagent shown, and draws it, following
@@ -64,30 +81,27 @@ export async function followLog(place: HTMLElement, session: string, agent: Suba
   const read = await invoke<SubagentLog | null>("subagent_log", { session, agentId: agent.id, offset: from });
   // Another read or selection since: the offset moved, or it is another log.
   if (shownLog.session !== session || shownLog.agent !== agent.id || (shownLog.log?.offset ?? 0) !== from) return;
-  if (!read) return;
-  const atBottom = followsBottom(place);
+  if (!read || read.entries.length === 0) return; // nothing new: no redraw
+  const before = { scrollTop: place.scrollTop, clientHeight: place.clientHeight, scrollHeight: place.scrollHeight };
   Object.assign(shownLog, readOn(shownLog, read));
   drawLog(place, agent, shownLog.log, toParent);
-  if (atBottom) place.scrollTop = place.scrollHeight;
+  place.scrollTop = scrollAfter(before, place.scrollHeight);
 }
 
 // A tool row's title: `Tool · detail`.
 export const callTitle = (call: { tool: string; detail: string | null }) => (call.detail ? `${call.tool} · ${call.detail}` : call.tool);
 
-// The calls whose rows are open, by id: a redraw (reading on) keeps each row as Daniel left it.
-const expanded = new Set<string>();
-
-function drawLog(place: HTMLElement, agent: Subagent, log: SubagentLog | null, toParent: () => void) {
+// `agent` is null for a subagent the session does not have.
+function drawLog(place: HTMLElement, agent: Subagent | null, log: SubagentLog | null, toParent: () => void) {
   place.className = "pane subagent-log";
   const head = document.createElement("header");
-  const state = text("span", stateLabel(agent.status), `log-state ${agent.status === "running" ? "running" : "done"}`);
   head.append(
-    text("span", agent.name, "log-title"),
-    ...(agent.agent_type ? [text("span", agent.agent_type, "log-type")] : []),
-    state,
+    text("span", agent?.name ?? "Subagent", "log-title"),
+    ...(agent?.agent_type ? [text("span", agent.agent_type, "log-type")] : []),
+    ...(agent ? [text("span", stateLabel(agent.status), `log-state ${agent.status === "running" ? "running" : "done"}`)] : []),
     pressable(text("button", "Parent's terminal"), false, toParent),
   );
-  const note = logNote(log, agent.status);
+  const note = logNote(log, agent?.status ?? "");
   const body = note ? [text("p", note, "empty")] : logRows(log!.entries).map(drawRow);
   place.replaceChildren(head, ...body);
 }

@@ -14,7 +14,7 @@ import type * as Xterm from "@xterm/xterm";
 import { connect, list, onEvent, request, type Listed } from "./daemon.js";
 import { drawHome } from "./home.js";
 import { element, invoke, pressable, text } from "./dom.js";
-import { followLog, showLog } from "./log.js";
+import { followLog, showLog, showMissing } from "./log.js";
 import { type Box, paneBoxes } from "./layout.js";
 import { isPanel, panelTerm, showPanel, showPanelShell } from "./panel.js";
 import { offerBuilds, offerPluginFix, upgrade, type Revive } from "./restart.js";
@@ -302,21 +302,20 @@ export async function showSession(session: Session | null, clicked = false, agen
   }
   // A terminal of an earlier app run: attach when the daemon still runs it. Opening an exited or
   // unknown id would start a new program under it.
-  if (agent) {
-    const subagent = session.agents.find((a) => a.id === agent);
-    if (!subagent) return;
-    box(LOG).classList.add("pane");
-    show(LOG, () => null);
-    await showLog(box(LOG), session.id, subagent, () => void select(session.id));
-    return;
-  }
-  const id = session.terminal;
+  const id = agent ? null : session.terminal;
   const own = id ? panes.get(id)?.term : null;
   const terminal = id && !own ? (await list()).find((t) => t.id === id && t.exited === null) : undefined;
   if (!current()) return;
-  const view = paneView(session, Boolean(own || terminal));
+  const view = paneView(session, Boolean(own || terminal), agent);
   if (view === "home") return;
-  if ("log" in view) return;
+  if ("log" in view) {
+    const subagent = session.agents.find((a) => a.id === view.log);
+    const toParent = () => void select(session.id);
+    show(LOG, () => null);
+    if (subagent) await showLog(box(LOG), session.id, subagent, toParent);
+    else showMissing(box(LOG), toParent);
+    return;
+  }
   if ("terminal" in view) return show(view.terminal, () => openPane(box(view.terminal), view.terminal, terminal!.cwd, terminal!.argv));
   const resume = () => startClaude(session.cwd, session.resume_id, "", resumesAuto(session)).catch((e) => console.warn(e));
   box(ELSEWHERE).classList.add("elsewhere");
