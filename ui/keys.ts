@@ -80,6 +80,11 @@ export function nextNeedsYou(sessions: { id: string; state: string; unseen?: boo
   return (order.find((session) => session.state === "needs_you") ?? order.find((session) => session.unseen))?.id ?? null;
 }
 
+// The unseen session with the newest `last_event_at`, in any project; none when none is unseen.
+export function newestUnseen(sessions: { id: string; unseen?: boolean; last_event_at: number }[]): string | null {
+  return sessions.filter((session) => session.unseen).reduce<typeof sessions[number] | null>((best, s) => (!best || s.last_event_at > best.last_event_at ? s : best), null)?.id ?? null;
+}
+
 const symbols: Record<string, string> = { ctrl: "⌃", alt: "⌥", shift: "⇧", cmd: "⌘", up: "↑", down: "↓", left: "←", right: "→", escape: "Esc", enter: "↩", backspace: "⌫", tab: "⇥", space: "Space" };
 
 // A keystroke as macOS menus show it: "cmd-shift-p" is "⇧⌘P".
