@@ -14,6 +14,7 @@ pub const CAPABILITIES: Capabilities = Capabilities {
     replies: true,
     permission_mode: true,
     durations: true,
+    transcript_version: true,
 };
 
 /// Tools that ask Daniel in any permission mode, before any `PermissionRequest`.
@@ -159,6 +160,7 @@ fn adapt(raw: Raw) -> Event {
         "UserPromptSubmit" => {
             happened.push(Happened::TurnStart {
                 prompt: raw.prompt.clone(),
+                origin: None,
             });
             let reported: Vec<(String, String)> = reported(&raw.prompt)
                 .map(|(id, status)| (id.into(), status.into()))
@@ -257,6 +259,7 @@ fn adapt(raw: Raw) -> Event {
         studio_terminal_id: raw.studio_terminal_id,
         studio_turn_start: raw.studio_turn_start,
         studio_turn_end: raw.studio_turn_end,
+        capabilities: CAPABILITIES,
         happened,
     }
 }

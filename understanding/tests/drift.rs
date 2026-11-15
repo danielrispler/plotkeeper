@@ -167,3 +167,20 @@ fn weekly_counts_the_events_the_hook_dropped_in_the_last_7_days() {
 
     assert_eq!(dropped_events(&log, NOW), 2);
 }
+
+#[test]
+fn weekly_counts_what_the_agy_adapter_did_not_recognise() {
+    let at = NOW - DAY;
+    let line = |event: &str| {
+        json!({ "conversationId": "a1", "hookEventName": event, "studio_received_ms": at })
+            .to_string()
+    };
+    let studio = Studio::replayed([line("Teleport"), line("Teleport")]);
+    let data = tempfile::tempdir().unwrap();
+    let versions = Versions::beside(&data.path().join("events.jsonl"));
+
+    assert_eq!(
+        drift(&studio, &versions, NOW).to_string(),
+        "unrecognised wake-ups: 0\nunknown agy hook events: 2\n"
+    );
+}

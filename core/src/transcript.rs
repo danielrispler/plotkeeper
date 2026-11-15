@@ -101,6 +101,31 @@ fn input_tokens(usage: &Value) -> u64 {
 }
 
 impl Transcript {
+    /// Takes in a line of agy's `transcript_full.jsonl`: the agent's texts (`PLANNER_RESPONSE`) and
+    /// its tool calls, which the session view reads as the intention and the steps since. Any other
+    /// record is skipped; the adapter counts the ones it does not know.
+    pub(crate) fn read_agy(&mut self, line: &str) -> Result<(), String> {
+        let line: Value =
+            serde_json::from_str(line).map_err(|e| format!("a line does not parse: {e}"))?;
+        match line["type"].as_str() {
+            Some("USER_INPUT") => self.new_turn(),
+            Some("PLANNER_RESPONSE") => {
+                if let Some(model) = line["model"].as_str() {
+                    self.model = Some(model.into());
+                }
+                let text = line["content"].as_str().unwrap_or_default().trim();
+                if !text.is_empty() {
+                    self.intention = line_of(text, self.ended).map(Into::into);
+                    self.steps_ago = 0;
+                    self.responses.push(text.into());
+                }
+                self.steps_ago += line["tool_calls"].as_array().map_or(0, Vec::len);
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     /// Takes in transcript line `line`, or says why it cannot.
     pub fn read(&mut self, line: &str) -> Result<(), String> {
         let line: Value =
@@ -212,6 +237,8 @@ fn line_of(text: &str, first: bool) -> Option<&str> {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct TranscriptFile {
     pub(crate) path: String,
+    /// Whether it is agy's transcript, whose records differ from Claude Code's.
+    pub(crate) agy: bool,
     read_to: u64,
 }
 
@@ -256,7 +283,11 @@ impl TranscriptFile {
             && line.ends_with(b"\n")
         {
             self.read_to += line.len() as u64;
-            transcript.read(&String::from_utf8_lossy(&line))?;
+            let text = String::from_utf8_lossy(&line);
+            match self.agy {
+                true => transcript.read_agy(&text)?,
+                false => transcript.read(&text)?,
+            }
             line.clear();
         }
         Ok(())
