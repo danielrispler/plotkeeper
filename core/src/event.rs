@@ -353,14 +353,6 @@ impl Event {
 }
 
 impl Event {
-    /// Where the turn it starts came from, when its adapter says.
-    pub fn origin(&self) -> Option<Origin> {
-        self.find(|h| match h {
-            Happened::TurnStart { origin, .. } => *origin,
-            _ => None,
-        })
-    }
-
     pub fn model(&self) -> Option<&str> {
         self.find(|h| match h {
             Happened::Model(model) => Some(model.as_str()),

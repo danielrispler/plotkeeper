@@ -12,18 +12,22 @@ use std::{
     time::Duration,
 };
 
+mod agy;
 mod claude;
 mod event;
 mod transcript;
 mod work;
+pub use agy::{CAPABILITIES as AGY_CAPABILITIES, Drift as AgyDrift, DriftKind as AgyDriftKind};
 pub use claude::CAPABILITIES as CLAUDE_CAPABILITIES;
 pub use event::Capabilities;
-use event::{Event, Happened, Start, ToolKind};
+use event::{Event, Happened, Origin, Start, ToolKind};
 pub use transcript::{Context, LogEntry, SubagentLog, Transcript};
 pub use work::{Estimate, MIN_HISTORY, Phase, PhaseStart, Work, range};
 
 #[derive(Default)]
 pub struct Studio {
+    /// The agy adapter, which keeps its conversations (`agy.rs`).
+    agy: agy::Adapter,
     sessions: HashMap<String, Session>,
     /// The session Daniel clicked last, which the session view shows.
     selected: Option<String>,
@@ -242,6 +246,11 @@ pub struct Session {
     pub transcript: Transcript,
     #[serde(skip)]
     transcript_file: transcript::TranscriptFile,
+    /// What its agent's adapter reports, which decides what its view shows (decision 4).
+    pub capabilities: Capabilities,
+    /// The model it runs at, where its agent's hooks say (agy's `modelName`); Claude's is in
+    /// `transcript.model`.
+    pub model: Option<String>,
     /// Its issue, PR and worktree, which name it unless Daniel renamed it (danielrispler/Falinks#461, decision 19).
     pub identity: Identity,
     /// Its work on its ticket: its kind, its phases and how long its agent worked (danielrispler/Falinks#461, decision
@@ -1001,6 +1010,14 @@ impl Session {
         self.blocks.retain(|w| !(w.named && ended(&w.agent)));
         self.running.retain(|call| !ended(&call.agent));
         self.resolve(|(_, agent)| ended(agent));
+    }
+
+    /// The subagent a wake-up with no markup is taken to be from: the one that sent the latest
+    /// event, as its report is what wakes the session (its `Stop` may land after the wake-up);
+    /// empty when there is none.
+    fn woken_by(&self) -> String {
+        let last = self.agents.iter().max_by_key(|a| a.agent.last_event_at);
+        last.map(|a| a.agent.id.clone()).unwrap_or_default()
     }
 
     /// Who sent `prompt`. A wake-up names a known task id of the session in markup the studio
@@ -1839,8 +1856,8 @@ impl Studio {
     /// with its own key: none, one, or at a wake-up also its workers' ends (danielrispler/Falinks#369, decisions 6, 8, 10
     /// and 11).
     pub fn fingerprint_folders(&self, line: &str) -> Vec<Fingerprint> {
-        let event = claude::parse(line);
-        let event = event.ok().filter(|e| {
+        let event = self.peek(line).pop();
+        let event = event.filter(|e| {
             !e.has(|h| {
                 matches!(
                     h,
@@ -2107,9 +2124,36 @@ impl Studio {
         mut changes: BTreeMap<String, Change>,
         replay: bool,
     ) -> Vec<Output> {
-        let Ok(mut event) = claude::parse(line) else {
-            return Vec::new();
-        };
+        let events = self.events(line);
+        let mut outputs = Vec::new();
+        for event in events {
+            outputs.extend(self.take_event(event, &mut changes, replay));
+        }
+        outputs
+    }
+
+    /// The events of one log line: Claude's, or else agy's.
+    fn events(&mut self, line: &str) -> Vec<Event> {
+        match claude::parse(line) {
+            Ok(event) => vec![event],
+            Err(_) => self.agy.events(line).unwrap_or_default(),
+        }
+    }
+
+    /// The events `line` would give, with agy's state left as it is.
+    fn peek(&self, line: &str) -> Vec<Event> {
+        match claude::parse(line) {
+            Ok(event) => vec![event],
+            Err(_) => self.agy.clone().events(line).unwrap_or_default(),
+        }
+    }
+
+    fn take_event(
+        &mut self,
+        mut event: Event,
+        changes: &mut BTreeMap<String, Change>,
+        replay: bool,
+    ) -> Vec<Output> {
         let own_id = event.session_id.clone();
         event.session_id = self.row(&event);
         let continues = event.session_id != own_id && !self.rows.contains_key(&own_id);
@@ -2198,6 +2242,14 @@ impl Studio {
                 session.started_mode = Some(mode.into());
             }
         }
+        session.capabilities = event.capabilities;
+        if let Some(model) = event.model() {
+            session.model = Some(model.into());
+        }
+        if let Some(branch) = event.branch() {
+            session.transcript.branch = Some(branch.into());
+        }
+        session.transcript_file.agy = !event.capabilities.transcript_version;
         // The session Daniel started in a new terminal takes the selection, so the rail follows its pane.
         if self.awaiting.is_some() && session.terminal == self.awaiting {
             self.awaiting = None;
@@ -2254,6 +2306,7 @@ impl Studio {
                 .transcript_file
                 .path
                 .clone_from(&event.transcript_path);
+            session.transcript_file.agy = !event.capabilities.transcript_version;
             session.transcript = Transcript::default();
         }
         let failed = session.failed_workers().into_iter();
@@ -2375,8 +2428,12 @@ impl Studio {
         for happened in &event.happened {
             match happened {
                 // A prompt opens a wait, also after an interrupt, which fires no `Stop`.
-                Happened::TurnStart { prompt } => {
-                    let sender = session.sender(prompt);
+                Happened::TurnStart { prompt, origin } => {
+                    let sender = match origin {
+                        Some(Origin::Daniel) => Sender::Daniel,
+                        Some(Origin::WakeUp) => Sender::WakeUp(session.woken_by()),
+                        None => session.sender(prompt),
+                    };
                     let wake_up = !sender.is_daniels();
                     match &sender {
                         // The row says which worker returned until the session's next step.
@@ -2446,7 +2503,10 @@ impl Studio {
                         self.ended
                             .extend(session.backfill(&event.studio_turn_end, at));
                     }
-                    if !session.versioned && !event.transcript_path.is_empty() {
+                    if !session.versioned
+                        && event.capabilities.transcript_version
+                        && !event.transcript_path.is_empty()
+                    {
                         session.versioned = true;
                         outputs.push(Output::Version {
                             transcript_path: event.transcript_path.clone(),
@@ -3109,6 +3169,11 @@ impl Studio {
             changed |= session.transcript != before;
         }
         changed
+    }
+
+    /// What the agy adapter did not recognise, for `weekly` (decisions 6 and 15).
+    pub fn agy_drift(&self) -> &[AgyDrift] {
+        &self.agy.drift
     }
 
     /// Whether summaries are written when Daniel opens a turn (`summaries.on_open` in the settings).

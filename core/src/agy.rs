@@ -28,7 +28,12 @@ pub const CAPABILITIES: Capabilities = Capabilities {
 };
 
 /// The record types of agy's transcript the studio knows (`transcript_full.jsonl`).
-const RECORDS: [&str; 4] = ["USER_INPUT", "PLANNER_RESPONSE", "GENERIC", "SYSTEM_MESSAGE"];
+const RECORDS: [&str; 4] = [
+    "USER_INPUT",
+    "PLANNER_RESPONSE",
+    "GENERIC",
+    "SYSTEM_MESSAGE",
+];
 
 /// What the adapter did not recognise, which `weekly` counts (decisions 6 and 15).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -55,8 +60,6 @@ pub struct Drift {
 struct Conversation {
     /// The conversation it is a subagent of, once found.
     parent: Option<String>,
-    /// Whether it is a child, so the lookup of its parent's file goes on until its `Stop`.
-    child: bool,
     /// The child's file `state` when first seen.
     state: Option<String>,
     ended: bool,
@@ -92,7 +95,12 @@ impl Adapter {
         let at = raw["studio_received_ms"].as_u64().unwrap_or_default();
         if !matches!(
             name.as_str(),
-            "SessionStart" | "PreInvocation" | "PostInvocation" | "PreToolUse" | "PostToolUse" | "Stop"
+            "SessionStart"
+                | "PreInvocation"
+                | "PostInvocation"
+                | "PreToolUse"
+                | "PostToolUse"
+                | "Stop"
         ) {
             self.drift.push(Drift {
                 at,
@@ -105,7 +113,6 @@ impl Adapter {
             let parent = terminal.as_ref().and_then(|t| self.sessions.get(t));
             let child = parent.is_some_and(|p| *p != id);
             let conversation = Conversation {
-                child,
                 parent: parent.filter(|_| child).cloned(),
                 terminal: terminal.clone(),
                 ..Conversation::default()
@@ -152,7 +159,9 @@ impl Adapter {
             "SessionStart" if own => {
                 event.happened.push(Happened::SessionStart);
                 event.happened.push(Happened::StartedFrom(Start::Other));
-                event.happened.extend(branch(&event.cwd).map(Happened::Branch));
+                event
+                    .happened
+                    .extend(branch(&event.cwd).map(Happened::Branch));
             }
             "PreInvocation" if own && raw["invocationNum"] == 0 => {
                 let conversation = self.conversations.get_mut(&id)?;
@@ -174,7 +183,9 @@ impl Adapter {
                     },
                     origin: Some(origin),
                 });
-                event.happened.extend(branch(&event.cwd).map(Happened::Branch));
+                event
+                    .happened
+                    .extend(branch(&event.cwd).map(Happened::Branch));
             }
             "PreToolUse" | "PostToolUse" => {
                 let call = &raw["toolCall"];
@@ -324,16 +335,20 @@ impl Adapter {
     }
 
     fn subagent_file(&self, parent: &str, child: &str) -> Option<Value> {
-        let path = self.generated(parent)?.join(format!("subagents/{child}.json"));
+        let path = self
+            .generated(parent)?
+            .join(format!("subagents/{child}.json"));
         serde_json::from_str(&fs::read_to_string(path).ok()?).ok()
     }
 
     /// The prompt of the `invoke_subagent` call at step `step` of `parent`'s transcript.
     fn spawn_prompt(&self, parent: &str, step: u64) -> Option<String> {
         let transcript = &self.conversations.get(parent)?.transcript;
+        // The call's step comes after the response that made it.
+        let before = step.checked_sub(1)?;
         records(transcript)?
             .into_iter()
-            .find(|r| r["step_index"] == step)?["tool_calls"][0]["args"]["Prompt"]
+            .find(|r| r["step_index"] == before)?["tool_calls"][0]["args"]["Prompt"]
             .as_str()
             .map(Into::into)
     }
@@ -404,14 +419,19 @@ fn read_jsonl(path: &str) -> Option<String> {
 
 fn records(path: &str) -> Option<Vec<Value>> {
     let text = read_jsonl(path)?;
-    Some(text.lines().filter_map(|l| serde_json::from_str(l).ok()).collect())
+    Some(
+        text.lines()
+            .filter_map(|l| serde_json::from_str(l).ok())
+            .collect(),
+    )
 }
 
 /// Where the turn that starts after `initial` steps came from: Daniel's prompt is a `USER_INPUT` at
 /// the step before, and a wake-up has none (decision 6). `None` when the transcript cannot be read.
 fn turn_origin(transcript: &str, initial: u64) -> Option<Origin> {
     let records = records(transcript)?;
-    let last = records.iter().find(|r| r["step_index"] == initial.checked_sub(1)?);
+    let before = initial.checked_sub(1)?;
+    let last = records.iter().find(|r| r["step_index"] == before);
     Some(match last {
         Some(r) if r["type"] == "USER_INPUT" => Origin::Daniel,
         _ => Origin::WakeUp,
@@ -478,10 +498,7 @@ fn branch(cwd: &str) -> Option<String> {
             continue;
         };
         let head = fs::read_to_string(head).ok()?;
-        return head
-            .trim()
-            .strip_prefix("ref: refs/heads/")
-            .map(Into::into);
+        return head.trim().strip_prefix("ref: refs/heads/").map(Into::into);
     }
     None
 }

@@ -10,7 +10,7 @@ use std::{
     io::{self, BufRead, BufReader, Write},
     path::{Path, PathBuf},
 };
-use studio_core::{Sender, Studio};
+use studio_core::{AgyDriftKind, Sender, Studio};
 
 /// The versions of Claude Code seen, in `claude-versions.txt` beside the event log: a line
 /// `<Unix ms> <version>` for each version when first seen, oldest first.
@@ -83,6 +83,8 @@ pub struct Drift {
     pub unrecognised_wake_ups: usize,
     /// Each version change: when it was seen, the old version and the new one.
     pub version_changes: Vec<(u64, String, String)>,
+    /// What the agy adapter did not recognise, by kind (#43, decisions 6 and 15).
+    pub agy: Vec<(AgyDriftKind, usize)>,
 }
 
 /// The drift in the 7 days to `now`, from the replayed event log and the versions kept.
@@ -92,7 +94,15 @@ pub fn drift(studio: &Studio, versions: &Versions, now: u64) -> Drift {
     let unrecognised = prompts.filter(|p| matches!(p.sender, Sender::Unrecognised(_)));
     let seen = versions.seen();
     let changes = seen.windows(2).filter(|pair| recent(pair[1].0));
+    let mut agy: Vec<(AgyDriftKind, usize)> = Vec::new();
+    for found in studio.agy_drift().iter().filter(|d| recent(d.at)) {
+        match agy.iter_mut().find(|(kind, _)| *kind == found.kind) {
+            Some((_, count)) => *count += 1,
+            None => agy.push((found.kind, 1)),
+        }
+    }
     Drift {
+        agy,
         unrecognised_wake_ups: unrecognised.filter(|p| recent(p.at)).count(),
         version_changes: changes
             .map(|pair| (pair[1].0, pair[0].1.clone(), pair[1].1.clone()))
@@ -119,6 +129,15 @@ impl fmt::Display for Drift {
                 "Claude Code changed from {from} to {to} on {}",
                 date(*at)
             )?;
+        }
+        for (kind, count) in &self.agy {
+            let what = match kind {
+                AgyDriftKind::HookEvent => "unknown agy hook events",
+                AgyDriftKind::Record => "unknown agy transcript records",
+                AgyDriftKind::ToolShape => "unknown agy tool-call shapes",
+                AgyDriftKind::TurnOrigin => "agy turn origins that disagreed at the stop",
+            };
+            writeln!(f, "{what}: {count}")?;
         }
         Ok(())
     }

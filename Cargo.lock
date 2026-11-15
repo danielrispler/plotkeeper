@@ -3387,6 +3387,7 @@ dependencies = [
  "serde",
  "serde_json",
  "studio-workbench",
+ "tempfile",
 ]
 
 [[package]]
