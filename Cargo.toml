@@ -5,3 +5,14 @@ members = ["core", "wayfinder", "hook", "understanding", "terminal-daemon", "wor
 # `npm run tauri build` builds it.
 default-members = ["core", "wayfinder", "hook", "understanding", "terminal-daemon", "workbench"]
 resolver = "3"
+
+# Lighter debug info links faster; line tables keep file and line in backtraces.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+# Parses the big fixtures in the replay tests.
+[profile.dev.package.serde_json]
+opt-level = 3
