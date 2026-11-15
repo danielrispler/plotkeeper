@@ -849,3 +849,26 @@ fn an_unknown_id_in_a_subagents_worktree_is_its_fork_and_gets_no_row() {
     assert!(session.subagent("fork1").is_none());
     assert_eq!(agent(&studio, "s1", "stray1").parent, Parent::Unattached);
 }
+
+/// danielrispler/plotkeeper#67: an unknown id seen once, in the session's own folder, with no spawn:
+/// a merger's check command, and its interim `SubagentHandback`s. The session's `Stop` lists no such
+/// task, so its row ends there, at its last event; one that the `Stop` lists keeps running.
+#[test]
+fn an_unattached_subagent_that_its_sessions_stop_does_not_list_ends_at_its_last_event() {
+    let mut studio = Studio::default();
+    studio.apply(&ev("UserPromptSubmit", 1, "p1", json!({"prompt": "Do it"})));
+    studio.apply(&step(2, "stray1", "/w"));
+    let handback = json!({"agent_id": "stray2", "tool_name": "SubagentHandback",
+        "tool_use_id": "h1", "tool_input": {"message": "Interim status: not finished."}});
+    studio.apply(&ev("PreToolUse", 3, "p1", handback));
+    studio.apply(&step(4, "live1", "/w"));
+    assert_eq!(status(&studio, "stray2"), ("running".into(), None));
+
+    let tasks = json!({"background_tasks": [{"id": "live1", "type": "subagent"}]});
+    studio.apply(&ev("Stop", 8, "p1", tasks));
+
+    assert_eq!(agent(&studio, "s1", "stray1").parent, Parent::Unattached);
+    assert_eq!(status(&studio, "stray1").1, Some(2));
+    assert_eq!(status(&studio, "stray2").1, Some(3));
+    assert_eq!(status(&studio, "live1"), ("running".into(), None));
+}
