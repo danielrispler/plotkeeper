@@ -9,11 +9,13 @@
 import { AGENT_NAMES, agentChoice, kept, type Kind, showsAuto } from "./agents.js";
 import { element, invoke, pressable, text } from "./dom.js";
 import type { Entry } from "./keys.js";
+import { setProjects } from "./projects.js";
 import { startAgent } from "./panes.js";
 import { shortPath } from "./paths.js";
-import { workspaceRows } from "./workspaces.js";
+import { studio } from "./state.js";
+import { branchBlocked, branchOptions, refreshAfterSwitch, shownProject, workspaceRows } from "./workspaces.js";
 import type { Binding } from "./settings.js";
-import type { Workspace, Workspaces } from "./types.js";
+import type { Branch, Workspace, Workspaces } from "./types.js";
 
 // Git's error, or any other, at the picker's foot.
 function failed(error: unknown) {
@@ -83,7 +85,7 @@ export function newTask(
 // The quick start: a task named after an issue, a spec or a prompt, whose session starts on it, or,
 // empty, the main checkout.
 const quickStart = (main: Workspace, start: Start) =>
-  newTask("Issue #, spec path or prompt; empty for main", "Start", async (request) => request ? invoke<Workspace>("create_named_task", { request }) : main, true, failed, start);
+  newTask("Issue #, spec path or prompt; empty for main", "Start", async (request) => request ? invoke<Workspace>("create_named_task", { project: await shownProject(), request }) : main, true, failed, start);
 
 // The Auto mode choice (danielrispler/Falinks#541): off each time the picker opens; the session starts in Claude Code's
 // auto mode when on. Bypass mode is never offered.
@@ -222,11 +224,93 @@ export async function showPicker(kind: Kind = "session") {
   if (closed(kind === "terminal" ? "New terminal" : "New session")) return;
   // It opens once its rows are read, so no placeholder flashes first in another box (danielrispler/Falinks#570).
   try {
-    const [workspaces, agents] = await Promise.all([invoke<Workspaces>("workspaces"), offeredAgents()]);
+    const [workspaces, agents] = await Promise.all([shownProject().then((project) => invoke<Workspaces>("workspaces", { project })), offeredAgents()]);
     picker.replaceChildren(...picked(workspaces, agents, kind));
   } catch (e) {
     picker.replaceChildren(text("p", `No worktrees: ${e}`, "empty"));
   }
   picker.hidden = false;
   picker.querySelector("input")?.focus();
+}
+
+// The branch picker (#95), for the main checkout only: its local branches and the remote-only ones, one
+// pick runs `git switch`, and git's refusal shows as it is. Disabled with its reason while a session in the
+// main checkout is running or needs Daniel; a branch a task holds is greyed out as "in task X". Opening it
+// again closes it.
+export async function showBranches(from?: string) {
+  const picker = element("picker");
+  if (closed("Switch branch")) return;
+  try {
+    const project = from ?? (await shownProject());
+    const [workspaces, branches] = await Promise.all([invoke<Workspaces>("workspaces", { project }), invoke<Branch[]>("branches", { project })]);
+    const blocked = branchBlocked(workspaces, studio.listed);
+    const rows = branchOptions(branches, blocked).map(({ branch, label, note, disabled }) => {
+      const button = pressable(document.createElement("button"), false, () => {
+        invoke("switch_branch", { project, branch: branch.name, remote: branch.remote })
+          .then(() => {
+            picker.hidden = true;
+            return refreshAfterSwitch(project);
+          })
+          .catch(failed);
+      });
+      button.classList.add("row");
+      button.disabled = disabled;
+      const line = text("span", "", "l1");
+      line.append(text("span", label, "name"), ...(note ? [text("span", note, "row-state")] : []));
+      button.append(line);
+      return button;
+    });
+    picker.replaceChildren(...(blocked ? [text("p", `Switching is off: ${blocked}`, "empty")] : []), ...rows);
+  } catch (e) {
+    picker.replaceChildren(text("p", `No branches: ${e}`, "empty"));
+  }
+  picker.hidden = false;
+}
+
+// Adds the repository holding `folder` as a project (#98), at the end; a refusal, such as a folder git does not
+// recognise or a repository already listed, shows in the picker's box as the message it is.
+export async function addProject(folder: string) {
+  try {
+    setProjects(await invoke<string[]>("add_project", { folder }));
+    element("picker").hidden = true;
+  } catch (e) {
+    refuse(e);
+  }
+}
+
+// A refused add, remove or reorder of a project, as a message in the picker's box.
+export function refuse(error: unknown) {
+  const picker = element("picker");
+  picker.ariaLabel = "Add project";
+  picker.replaceChildren(text("p", String(error), "empty"));
+  picker.hidden = false;
+}
+
+// Add project (#98): the native folder dialog, and below it the repositories where listed sessions ran, newest
+// first, that are not projects yet. Opening it again closes it.
+export async function showAddProject() {
+  const picker = element("picker");
+  if (closed("Add project")) return;
+  const choose = pressable(text("button", "Choose folder…", "name"), false, () => {
+    invoke<string | null>("choose_folder")
+      .then((folder) => (folder ? addProject(folder) : undefined))
+      .catch(failed);
+  });
+  choose.classList.add("row");
+  picker.replaceChildren(choose);
+  picker.hidden = false;
+  try {
+    const cwds = [...studio.listed].sort((a, b) => b.last_event_at - a.last_event_at).map(({ cwd }) => cwd);
+    const suggested = await invoke<string[]>("suggest_projects", { cwds });
+    if (picker.hidden || picker.ariaLabel !== "Add project") return;
+    const rows = suggested.map((path) => {
+      const row = pressable(document.createElement("button"), false, () => void addProject(path));
+      row.classList.add("row");
+      row.append(text("span", shortPath(path), "name"));
+      return row;
+    });
+    picker.append(...(rows.length ? [text("p", "Repositories where sessions ran", "empty"), ...rows] : []));
+  } catch (e) {
+    failed(e);
+  }
 }

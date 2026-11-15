@@ -8,15 +8,15 @@ import { withWriterNotice } from "./writer-notice.js";
 import { startWatching } from "./answer.js";
 import { markShown, showCards } from "./cards.js";
 import { element, invoke, listen } from "./dom.js";
-import { type Actions, doctorEntries, nextNeedsYou, paletteEntries, run, stepSession, windowBinding } from "./keys.js";
+import { type Actions, doctorEntries, newestUnseen, nextNeedsYou, paletteEntries, run, stepSession, windowBinding } from "./keys.js";
 import { arrange, defaultWidths, type LayoutMode, railShown, resized, type Widths } from "./layout.js";
 import { listSpace } from "./home.js";
 import { showSessions } from "./list.js";
 import { goHome, select, show } from "./selection.js";
 import { dragPanel, placePanel, togglePanel } from "./panel.js";
-import { dragSplit, focusPane, placePanes, runDoctor, split, startPanes, toggleSplit } from "./panes.js";
-import { showPalette, showPicker } from "./picker.js";
-import { fetchNow, readWorkspaces, showWorkspaces, watchWorkspaces } from "./workspaces.js";
+import { dragSplit, focusPane, placePanes, runDoctor, showHistory, split, startPanes, toggleSplit } from "./panes.js";
+import { showAddProject, showBranches, showPalette, showPicker } from "./picker.js";
+import { fetchNow, showWorkspaces, watchWorkspaces } from "./workspaces.js";
 import { reload, type SettingsFiles, zoomed } from "./settings.js";
 import { studio } from "./state.js";
 import { showSkills } from "./skills.js";
@@ -152,8 +152,15 @@ const actions: Actions = {
   "studio::Answer": (n) => answer(Number(n)),
   "studio::NewSession": () => void showPicker(),
   "studio::NewTerminal": () => void showPicker("terminal"),
+  // The main checkout's branch picker (#95).
+  "studio::SwitchBranch": () => void showBranches(),
+  // Add project (#98): the folder dialog and the suggested repositories.
+  "studio::AddProject": () => void showAddProject(),
   // Home, in the terminal column: selects no session.
+  "studio::JumpToUnseen": () => void go(newestUnseen(studio.listed)),
   "studio::GoHome": () => void goHome(),
+  // History (#94), in the terminal column: the ended sessions, searchable.
+  "studio::ShowHistory": () => showHistory(),
   // Fetches the repository now (#33); the workspaces' states follow.
   "studio::Fetch": () => void fetchNow(),
   // Asks GitHub again which tasks have landed (#53); it is otherwise asked at a turn's end and at the window's focus.
@@ -230,6 +237,7 @@ startPanes().catch((e) => element("terminal-body").append(`No terminal: ${e}`));
 dragSplit();
 dragPanel();
 element("new-session").addEventListener("click", () => void showPicker());
+element("add-project").addEventListener("click", () => void showAddProject());
 element("new-terminal").addEventListener("click", () => void showPicker("terminal"));
 // A click on the session list's empty space selects none and shows Home.
 document.querySelector(".list")!.addEventListener("click", (event) => listSpace(event.target as HTMLElement) && void goHome());
@@ -241,7 +249,7 @@ element("needs-you").addEventListener("click", () => {
 // A click outside the picker, but not on its own buttons, closes it.
 document.addEventListener("pointerdown", (event) => {
   const target = event.target as Node;
-  const opener = ["new-session", "new-terminal"].some((id) => element(id).contains(target));
+  const opener = ["new-session", "new-terminal", "add-project"].some((id) => element(id).contains(target));
   if (!element("picker").contains(target) && !opener) element("picker").hidden = true;
 }, true); // capture: the terminal must not swallow it
 
@@ -250,8 +258,6 @@ const showList = (sessions: Session[]) => {
   showWorkspaces();
   showToast();
 };
-// Opening Workspaces reads every workspace's git state at once (#26).
-element("workspaces").addEventListener("toggle", () => void ((element("workspaces") as HTMLDetailsElement).open && readWorkspaces(true)));
 watchWorkspaces();
 listen<Session[]>("sessions", showList);
 invoke<Session[]>("sessions").then(showList);

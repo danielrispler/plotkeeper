@@ -130,21 +130,77 @@ pub fn terminal_send(msg: Value, daemon: State<Daemon>) -> Result<(), String> {
     writeln!(stream, "{msg}").map_err(|e| e.to_string())
 }
 
-/// The picker's workspaces: the configured repository's main checkout and its tasks, read live from git
+/// The studio's projects, from `projects.json` in the data folder (#93). With no file it is made
+/// from `settings.json`'s `repository`, else the studio's own checkout, else nothing; then the file decides.
+#[tauri::command(async)]
+pub fn projects() -> Result<Vec<String>, String> {
+    studio_workbench::projects(&projects_file()?, seed)
+}
+
+fn projects_file() -> Result<PathBuf, String> {
+    let home = std::env::home_dir().ok_or("no home folder")?;
+    Ok(studio_hook::data_dir(&home).join("projects.json"))
+}
+
+/// The first project of a studio with no `projects.json` yet: every command on the projects gives it.
+fn seed() -> Option<String> {
+    crate::settings::repository().or_else(|| checkout().map(|c| c.display().to_string()))
+}
+
+/// The main checkout of the repository holding `folder`, `None` when it is not in one (#98).
+#[tauri::command(async)]
+pub fn repository_of(folder: String) -> Option<String> {
+    studio_workbench::main_checkout(Path::new(&folder)).ok()
+}
+
+/// Opens the native folder dialog; the folder Daniel picked, `None` when he cancelled (#98).
+#[tauri::command(async)]
+pub fn choose_folder(app: tauri::AppHandle) -> Option<String> {
+    use tauri_plugin_dialog::DialogExt;
+    let picked = app.dialog().file().blocking_pick_folder()?;
+    picked.into_path().ok().map(|p| p.display().to_string())
+}
+
+/// Adds the repository holding `folder`, as its main checkout, at the end of the projects (#98).
+#[tauri::command(async)]
+pub fn add_project(folder: String) -> Result<Vec<String>, String> {
+    studio_workbench::add_project(&projects_file()?, seed, Path::new(&folder))
+}
+
+/// Takes a project out of the list; its worktrees, branches and sessions stay (#98).
+#[tauri::command(async)]
+pub fn remove_project(project: String) -> Result<Vec<String>, String> {
+    studio_workbench::remove_project(&projects_file()?, seed, &project)
+}
+
+/// Writes the projects in a new order (#98).
+#[tauri::command(async)]
+pub fn reorder_projects(order: Vec<String>) -> Result<Vec<String>, String> {
+    studio_workbench::reorder_projects(&projects_file()?, seed, order)
+}
+
+/// The repositories of `cwds`, newest first, that are not projects yet (#98).
+#[tauri::command(async)]
+pub fn suggest_projects(cwds: Vec<String>) -> Result<Vec<String>, String> {
+    studio_workbench::suggest_projects(&projects_file()?, seed, &cwds)
+}
+
+/// A project's workspaces: its main checkout and its tasks, read live from git
 /// (danielrispler/Falinks#461, decision 8).
 #[tauri::command(async)]
-pub fn workspaces() -> Result<studio_workbench::Workspaces, String> {
-    studio_workbench::workspaces(Path::new(&repo()))
+pub fn workspaces(project: String) -> Result<studio_workbench::Workspaces, String> {
+    studio_workbench::workspaces(Path::new(&project))
 }
 
 /// The git state of the workspace at `path` (#26): branch, upstream distance, changed files, distance
 /// from origin's default branch, and the operation in progress.
 #[tauri::command(async)]
 pub fn workspace_git_state(
+    project: String,
     path: String,
     studio: State<Mutex<studio_core::Studio>>,
 ) -> Result<studio_workbench::GitState, String> {
-    let state = studio_workbench::git_state(Path::new(&repo()), &path)?;
+    let state = studio_workbench::git_state(Path::new(&project), &path)?;
     // The same read tells **Landed** whether the task's files are still safe; local git only, never GitHub.
     let safe = studio_workbench::losses(Path::new(&path))
         .is_ok_and(|l| l.uncommitted.is_empty() && l.unpushed.is_empty());
@@ -154,37 +210,53 @@ pub fn workspace_git_state(
     Ok(state)
 }
 
-/// Fetches the configured repository once (#33); the window reads every workspace's state again after.
+/// Fetches the project once (#33); the window reads every workspace's state again after.
 #[tauri::command(async)]
-pub fn fetch_repository() -> Result<(), String> {
-    studio_workbench::fetch(Path::new(&repo()))
+pub fn fetch_repository(project: String) -> Result<(), String> {
+    studio_workbench::fetch(Path::new(&project))
 }
 
-/// Creates task `name` in the configured repository (danielrispler/Falinks#468) and returns its workspace.
+/// Creates task `name` in the project (danielrispler/Falinks#468) and returns its workspace.
 #[tauri::command(async)]
-pub fn create_task(name: String) -> Result<studio_workbench::Workspace, String> {
-    studio_workbench::create_task(Path::new(&repo()), &name)
+pub fn create_task(project: String, name: String) -> Result<studio_workbench::Workspace, String> {
+    studio_workbench::create_task(Path::new(&project), &name)
 }
 
 /// Creates a task named after `request`, an issue, a spec or a prompt, and returns its workspace.
 #[tauri::command(async)]
-pub fn create_named_task(request: String) -> Result<studio_workbench::Workspace, String> {
-    studio_workbench::create_named_task(Path::new(&repo()), &request)
+pub fn create_named_task(
+    project: String,
+    request: String,
+) -> Result<studio_workbench::Workspace, String> {
+    studio_workbench::create_named_task(Path::new(&project), &request)
 }
 
 /// Removes the task's worktree at `path`, or, unless `confirmed`, returns what that would lose.
 #[tauri::command(async)]
 pub fn remove_task(
+    project: String,
     path: String,
     confirmed: bool,
 ) -> Result<Option<studio_workbench::Losses>, String> {
-    studio_workbench::remove_task(Path::new(&repo()), &path, confirmed)
+    studio_workbench::remove_task(Path::new(&project), &path, confirmed)
 }
 
-/// Deletes branch `branch` of the configured repository when its main checkout holds it.
+/// Deletes branch `branch` of the project when its main checkout holds it.
 #[tauri::command(async)]
-pub fn delete_merged_branch(branch: String) -> Result<(), String> {
-    studio_workbench::delete_merged_branch(Path::new(&repo()), &branch)
+pub fn delete_merged_branch(project: String, branch: String) -> Result<(), String> {
+    studio_workbench::delete_merged_branch(Path::new(&project), &branch)
+}
+
+/// The branches the project's main checkout can switch to.
+#[tauri::command(async)]
+pub fn branches(project: String) -> Result<Vec<studio_workbench::Branch>, String> {
+    studio_workbench::branches(Path::new(&project))
+}
+
+/// Switches the project's main checkout to `branch`, git's refusal as the error.
+#[tauri::command(async)]
+pub fn switch_branch(project: String, branch: String, remote: bool) -> Result<(), String> {
+    studio_workbench::switch_branch(Path::new(&project), &branch, remote)
 }
 
 /// The command a session's terminal runs: `claude` with the studio plugin of the studio's own
@@ -571,7 +643,7 @@ fn start(log: &Path) -> io::Result<()> {
     Ok(())
 }
 
-/// The configured repository: `settings.json`'s `repository` (danielrispler/Falinks#605), else the studio's own
+/// Where the shell starts: `settings.json`'s `repository` (danielrispler/Falinks#605), else the studio's own
 /// checkout (danielrispler/Falinks#461, decision 3), else the home folder.
 pub(crate) fn repo() -> String {
     crate::settings::repository()

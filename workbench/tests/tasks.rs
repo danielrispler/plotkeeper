@@ -3,8 +3,9 @@
 
 use std::{path::Path, process::Command};
 use studio_workbench::{
-    GitState, Losses, Workspace, create_named_task, create_task, delete_branch_merged_at,
-    delete_merged_branch, git_state, losses, remove_task, workspaces,
+    Branch, GitState, Losses, Workspace, branches, create_named_task, create_task,
+    delete_branch_merged_at, delete_merged_branch, git_state, losses, remove_task, switch_branch,
+    workspaces,
 };
 
 /// Runs `git` in `dir`, away from Daniel's own git config, and returns its trimmed output.
@@ -327,4 +328,93 @@ fn no_code_path_passes_force() {
         }
     }
     assert!(checked > 5, "only {checked} files checked");
+}
+
+#[test]
+fn the_branch_list_has_local_and_remote_only_branches_with_the_ones_a_task_holds_marked() {
+    let repos = repos();
+    let main = &repos.main;
+    let seed = repos.origin.with_file_name("seed");
+    git(&seed, &["push", "-q", "origin", "HEAD:teammate"]);
+    git(&seed, &["push", "-q", "origin", "HEAD:both"]);
+    git(main, &["branch", "both", "HEAD"]);
+    git(main, &["branch", "spare", "HEAD"]);
+    create_task(main, "issue-1").unwrap();
+    git(main, &["fetch", "-q", "origin"]);
+
+    let list = branches(main).unwrap();
+
+    let row = |name: &str, remote, task: Option<&str>, current| Branch {
+        name: name.into(),
+        remote,
+        task: task.map(String::from),
+        current,
+    };
+    assert_eq!(
+        list,
+        [
+            row("both", false, None, false),
+            row("issue-1", false, Some("issue-1"), false),
+            row("spare", false, None, false),
+            row("trunk", false, None, true),
+            // `both` is at origin too, but a local branch of its name is in the list; `HEAD` is no branch.
+            row("teammate", true, None, false),
+        ]
+    );
+}
+
+#[test]
+fn a_local_branch_is_switched_to_and_a_remote_only_one_is_tracked() {
+    let repos = repos();
+    let main = &repos.main;
+    let seed = repos.origin.with_file_name("seed");
+    git(&seed, &["push", "-q", "origin", "HEAD:teammate"]);
+    git(main, &["fetch", "-q", "origin"]);
+    git(main, &["branch", "spare", "HEAD"]);
+
+    switch_branch(main, "spare", false).unwrap();
+    assert_eq!(git(main, &["branch", "--show-current"]), "spare");
+
+    switch_branch(main, "teammate", true).unwrap();
+    assert_eq!(git(main, &["branch", "--show-current"]), "teammate");
+    assert_eq!(
+        git(main, &["rev-parse", "--abbrev-ref", "@{upstream}"]),
+        "origin/teammate"
+    );
+    // Asked from a task, it still switches the main checkout and leaves the task alone.
+    let task = create_task(main, "issue-1").unwrap();
+    switch_branch(Path::new(&task.path), "trunk", false).unwrap();
+    assert_eq!(git(main, &["branch", "--show-current"]), "trunk");
+    assert_eq!(
+        git(Path::new(&task.path), &["branch", "--show-current"]),
+        "issue-1"
+    );
+}
+
+#[test]
+fn a_switch_git_refuses_shows_its_message_and_leaves_the_branch_and_the_file_alone() {
+    let repos = repos();
+    let main = &repos.main;
+    std::fs::write(main.join("f.txt"), "on trunk\n").unwrap();
+    git(main, &["add", "f.txt"]);
+    git(main, &["commit", "-q", "-m", "f on trunk"]);
+    git(main, &["switch", "-q", "-c", "other", "HEAD~1"]);
+    std::fs::write(main.join("f.txt"), "on other\n").unwrap();
+    git(main, &["add", "f.txt"]);
+    git(main, &["commit", "-q", "-m", "f on other"]);
+    std::fs::write(main.join("f.txt"), "dirty\n").unwrap();
+
+    let refused = switch_branch(main, "trunk", false).unwrap_err();
+
+    assert!(refused.contains("f.txt"), "{refused}");
+    assert!(refused.contains("overwritten"), "{refused}");
+    assert_eq!(git(main, &["branch", "--show-current"]), "other");
+    assert_eq!(
+        std::fs::read_to_string(main.join("f.txt")).unwrap(),
+        "dirty\n"
+    );
+    assert_eq!(git(main, &["stash", "list"]), "");
+    // A name that is no branch, or a flag, is refused too.
+    assert!(switch_branch(main, "--detach", false).is_err());
+    assert!(switch_branch(main, "nope", false).is_err());
 }

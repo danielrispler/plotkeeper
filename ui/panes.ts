@@ -12,8 +12,10 @@
 
 import type * as Xterm from "@xterm/xterm";
 import { connect, list, onEvent, request, type Listed } from "./daemon.js";
+import { drawHistory } from "./history.js";
 import { drawHome } from "./home.js";
 import { element, invoke, pressable, text } from "./dom.js";
+import { onProjects, projects } from "./projects.js";
 import { followLog, showLog, showMissing } from "./log.js";
 import { type Box, paneBoxes } from "./layout.js";
 import { isPanel, panelTerm, showPanel, showPanelShell } from "./panel.js";
@@ -29,6 +31,7 @@ import type { Selection, Session } from "./types.js";
 type Pane = { box: HTMLElement; term: Xterm.Terminal | null; title: string };
 const panes = new Map<string, Pane>();
 let repo = "";
+let projectPaths: string[] = [];
 let shown = "";
 let ready: Promise<void> | null = null;
 let revived: Promise<void> = Promise.resolve();
@@ -50,8 +53,19 @@ export function startPanes(): Promise<void> {
   ready = connect().then((config) => {
     repo = config.repo;
     showPanel(null, repo);
-    showHome();
-    revived = revive(config.outdated);
+    return projects()
+      .catch(() => [])
+      .then((paths) => {
+        projectPaths = paths;
+        showHome();
+        revived = revive(config.outdated);
+      });
+  });
+  onProjects(() => {
+    void projects().then((paths) => {
+      projectPaths = paths;
+      redrawHome();
+    });
   });
   window.addEventListener("start-failed", (e) => failedAtStart((e as CustomEvent).detail));
   onEvent((event) => {
@@ -154,13 +168,27 @@ export async function closePane(id: string) {
 const HOME = "home";
 export function showHome() {
   show(HOME, () => null);
-  drawHome(box(HOME), studio.listed, repo);
+  drawHome(box(HOME), studio.listed, projectPaths);
   element("terminal-head").hidden = true;
 }
 
 // Draws Home again when the list changed under it.
 export function redrawHome() {
-  if (shown === HOME) drawHome(box(HOME), studio.listed, repo);
+  if (shown === HOME) drawHome(box(HOME), studio.listed, projectPaths);
+}
+
+// History (`history.ts`), a view like Home in the terminal column: the ended sessions, searchable. Clicking a row selects
+// the session, which takes the column.
+const HISTORY = "history";
+export function showHistory() {
+  show(HISTORY, () => null);
+  drawHistory(box(HISTORY), studio.listed);
+  element("terminal-head").hidden = true;
+}
+
+// Draws History again when the list changed under it.
+export function redrawHistory() {
+  if (shown === HISTORY) drawHistory(box(HISTORY), studio.listed);
 }
 
 // Gives the keyboard back to the pane shown, as the panel hides.

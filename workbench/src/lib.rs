@@ -27,6 +27,113 @@ pub struct Workspaces {
     pub hidden: usize,
 }
 
+/// The studio's projects (#93), from `file`: an ordered list of main-checkout paths. With no file
+/// it is created from `seed`, one entry or none, and from then on the file decides. Written by a
+/// temporary file and a rename, as the card store does.
+pub fn projects(file: &Path, seed: impl FnOnce() -> Option<String>) -> Result<Vec<String>, String> {
+    match std::fs::read_to_string(file) {
+        Ok(text) => serde_json::from_str(&text)
+            .map_err(|e| format!("{} does not parse: {e}", file.display())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            let list: Vec<String> = seed().into_iter().collect();
+            write_projects(file, &list)?;
+            Ok(list)
+        }
+        Err(e) => Err(format!("{}: {e}", file.display())),
+    }
+}
+
+fn write_projects(file: &Path, list: &[String]) -> Result<(), String> {
+    let dir = file.parent().ok_or("no folder for projects.json")?;
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let mut temp = tempfile::NamedTempFile::new_in(dir).map_err(|e| e.to_string())?;
+    serde_json::to_writer_pretty(&mut temp, list).map_err(|e| e.to_string())?;
+    temp.persist(file).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// The main checkout of the repository that holds `folder`, which may be any of its worktrees: the parent
+/// of git's common dir. A folder git does not recognise is refused with a message.
+pub fn main_checkout(folder: &Path) -> Result<String, String> {
+    let common = git(
+        folder,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )
+    .map_err(|_| format!("{} is not in a git repository", folder.display()))?;
+    Path::new(&common)
+        .parent()
+        .map(|main| main.display().to_string())
+        .ok_or_else(|| format!("{} is not in a git repository", folder.display()))
+}
+
+/// Adds the repository holding `folder` to the projects in `file`, at the end, as its main checkout, and
+/// returns the new list. `seed` is as for `projects`, for a file not made yet. A folder git does not recognise and a repository already listed are refused.
+pub fn add_project(
+    file: &Path,
+    seed: impl FnOnce() -> Option<String>,
+    folder: &Path,
+) -> Result<Vec<String>, String> {
+    let mut list = projects(file, seed)?;
+    let main = main_checkout(folder)?;
+    if list.contains(&main) {
+        return Err(format!("{main} is already a project"));
+    }
+    list.push(main);
+    write_projects(file, &list)?;
+    Ok(list)
+}
+
+/// Takes `path` out of the projects in `file` and returns the new list. Only the entry goes: the
+/// repository's worktrees, branches and sessions are not touched.
+pub fn remove_project(
+    file: &Path,
+    seed: impl FnOnce() -> Option<String>,
+    path: &str,
+) -> Result<Vec<String>, String> {
+    let mut list = projects(file, seed)?;
+    list.retain(|project| project != path);
+    write_projects(file, &list)?;
+    Ok(list)
+}
+
+/// Writes the projects of `file` in `order`, which must hold the same projects, and returns the list.
+pub fn reorder_projects(
+    file: &Path,
+    seed: impl FnOnce() -> Option<String>,
+    order: Vec<String>,
+) -> Result<Vec<String>, String> {
+    let mut have = projects(file, seed)?;
+    let mut want = order.clone();
+    have.sort();
+    want.sort();
+    if have != want {
+        return Err("the new order does not hold the same projects".into());
+    }
+    write_projects(file, &order)?;
+    Ok(order)
+}
+
+/// The repositories to suggest as projects: the main checkout of each of `cwds`, newest first as given,
+/// each once, without those already in the projects of `file`. A folder that is gone or not in a
+/// repository is skipped.
+pub fn suggest_projects(
+    file: &Path,
+    seed: impl FnOnce() -> Option<String>,
+    cwds: &[String],
+) -> Result<Vec<String>, String> {
+    let listed = projects(file, seed)?;
+    let mut found: Vec<String> = Vec::new();
+    for cwd in cwds {
+        if let Ok(main) = main_checkout(Path::new(cwd))
+            && !listed.contains(&main)
+            && !found.contains(&main)
+        {
+            found.push(main);
+        }
+    }
+    Ok(found)
+}
+
 /// The workspaces of the repository that holds `repo`, which may be any of its worktrees.
 pub fn workspaces(repo: &Path) -> Result<Workspaces, String> {
     let output = Command::new("git")
@@ -594,6 +701,79 @@ pub fn delete_branch_merged_at(repo: &Path, branch: &str, heads: &[String]) -> R
         &["update-ref", "-d", &format!("refs/heads/{branch}"), &tip],
     )
     .map(drop)
+}
+
+/// A branch the main checkout can switch to: a local branch, or one at `origin` with no local branch
+/// of its name (`remote`). `task` is the folder name of the task's worktree that holds it, which
+/// git would refuse; `current` marks the main checkout's own branch.
+#[derive(Debug, PartialEq, Serialize)]
+pub struct Branch {
+    pub name: String,
+    pub remote: bool,
+    pub task: Option<String>,
+    pub current: bool,
+}
+
+/// The branches the main checkout of the repository that holds `repo` can switch to: local branches
+/// in name order, then the remote-only ones.
+pub fn branches(repo: &Path) -> Result<Vec<Branch>, String> {
+    let found = workspaces(repo)?;
+    let main = Path::new(&found.main.path);
+    let names = |prefix: &str| -> Result<Vec<String>, String> {
+        let listed = git(main, &["for-each-ref", "--format=%(refname)", prefix])?;
+        Ok(listed
+            .lines()
+            .filter_map(|line| line.strip_prefix(prefix))
+            .map(String::from)
+            .collect())
+    };
+    let local = names("refs/heads/")?;
+    // `origin/HEAD` is a pointer, not a branch.
+    let remote: Vec<String> = names("refs/remotes/origin/")?
+        .into_iter()
+        .filter(|name| name != "HEAD" && !local.contains(name))
+        .collect();
+    let held = |name: &str| {
+        let task = found
+            .tasks
+            .iter()
+            .find(|task| task.branch.as_deref() == Some(name))?;
+        Path::new(&task.path)
+            .file_name()
+            .map(|folder| folder.to_string_lossy().into_owned())
+    };
+    Ok(local
+        .iter()
+        .map(|name| Branch {
+            name: name.clone(),
+            remote: false,
+            task: held(name),
+            current: found.main.branch.as_deref() == Some(name),
+        })
+        .chain(remote.into_iter().map(|name| Branch {
+            name,
+            remote: true,
+            task: None,
+            current: false,
+        }))
+        .collect())
+}
+
+/// Switches the main checkout of the repository that holds `repo` to `branch` with `git switch`: a
+/// local branch, or, with `remote`, a new local branch tracking `origin/<branch>`. No stash and no
+/// force or discard option, so git refuses a switch that would lose uncommitted work, and its
+/// message is the error.
+pub fn switch_branch(repo: &Path, branch: &str, remote: bool) -> Result<(), String> {
+    // A valid branch name never starts with `-`, so git reads it as a branch.
+    git(repo, &["check-ref-format", "--branch", branch])?;
+    let main = workspaces(repo)?.main.path;
+    let target = format!("origin/{branch}");
+    let args: &[&str] = if remote {
+        &["switch", "--track", &target]
+    } else {
+        &["switch", branch]
+    };
+    git(Path::new(&main), args).map(drop)
 }
 
 /// Runs `git` in `dir` and returns its output, or git's own error message.
