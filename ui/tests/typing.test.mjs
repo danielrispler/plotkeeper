@@ -40,14 +40,6 @@ test("with a draft being typed, the rename waits, and types once the draft is se
   assert.equal(sent[0][1], "\x1b[200~/rename parser\x1b[201~");
 });
 
-test("a draft cleared with backspaces counts as cleared", async () => {
-  noteKeys("t2", "ab", 0);
-  const { io, sent } = fake([[500, "t2", "\x7f\x7f"]]);
-
-  assert.equal(await typeInto("t2", "/rename x", () => false, io), true);
-  assert.equal(sent.length, 2);
-});
-
 test("a draft left in the prompt is never typed over: after 60 s a notice shows instead", async () => {
   noteKeys("t3", "half a thought", 0);
   const { io, sent, notices } = fake();
@@ -105,4 +97,10 @@ test("Option-Backspace takes a word off the draft", async () => {
   noteKeys("t8", "\x1b\x7f\x1b\x7f", 100);
   const cleared = fake();
   assert.equal(await typeInto("t8", "/rename x", () => false, cleared.io), true);
+
+  // A draft cleared with plain backspaces counts as cleared too.
+  noteKeys("t9", "ab", 0);
+  const plain = fake([[500, "t9", "\x7f\x7f"]]);
+  assert.equal(await typeInto("t9", "/rename x", () => false, plain.io), true);
+  assert.equal(plain.sent.length, 2);
 });

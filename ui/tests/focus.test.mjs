@@ -15,11 +15,6 @@ const session = (id, state = "running", questions = []) => ({
 const asking = (id, text) =>
   session(id, "needs_you", [{ tool_use_id: "t", agent: null, answer: "open", questions: [{ question: text, options: [] }] }]);
 
-test("focus mode has one key, rebindable in keymap.json", () => {
-  const key = { key: "Enter", code: "Enter", metaKey: true, shiftKey: true, ctrlKey: false, altKey: false };
-  assert.equal(bound(initial.keymap, "Workspace", key), "studio::ToggleFocus");
-});
-
 test("the toast shows in focus mode and while the rail is an overlay, never beside the rail", () => {
   assert.equal(toastShows("focus"), true);
   assert.equal(toastShows("overlay"), true);

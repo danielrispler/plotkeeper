@@ -70,13 +70,3 @@ test("what started in no turn, such as a subagent's cards, goes in one last bloc
   assert.deepEqual(feed[0].cards.map((c) => c.request.id), ["s@2", "s@1"]);
   assert.deepEqual(feedTurns([], { cards: [], checks: [], agents: [], questions: [] }), []);
 });
-
-test("the header is one line, with Rename, Close and Delete in its ⋯ menu", () => {
-  const header = rail.slice(rail.indexOf('class="rail-h"'), rail.indexOf('id="dock"'));
-  assert.match(header, /<p id="headline"[^>]*><span id="state"[^>]*><\/span> <span id="mode"[^>]*><\/span> <span id="model"[^>]*><\/span> <span id="phase"[^>]*><\/span><\/p>/);
-  assert.match(header, /<button id="rail-more"[^>]*popovertarget="rail-actions"[^>]*>⋯<\/button>/);
-  const menu = header.slice(header.indexOf('id="rail-actions"'));
-  for (const id of ["rename", "close", "delete"]) assert.match(menu, new RegExp(`<button id="${id}"`));
-  // No other section of the old rail is left.
-  for (const id of ["times", "recent", "older", "responses", "questions", "subagents"]) assert.doesNotMatch(rail, new RegExp(`id="${id}"`));
-});

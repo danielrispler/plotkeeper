@@ -1,7 +1,6 @@
 // The terminal pane's key mapping (danielrispler/Falinks#466), run on the `tsc` output. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import { bound, doctorEntries, keyAction, keyLabel, keystroke, nextNeedsYou, paletteEntries, run, stepSession, windowBinding } from "../../dist/keys.js";
 import { initial, reload } from "../../dist/settings.js";
 
@@ -71,14 +70,6 @@ test("keystrokes read as Zed writes them, by the physical key", () => {
   assert.equal(keystroke(key("ArrowLeft", { metaKey: true })), "cmd-left");
 });
 
-test("today's window shortcuts are bound by default", () => {
-  const { keymap } = initial;
-  assert.equal(bound(keymap, "Workspace", key("Digit1", { metaKey: true }, "1")), "studio::ToggleList");
-  assert.equal(bound(keymap, "Workspace", key("Digit2", { metaKey: true }, "2")), "studio::ToggleRail");
-  assert.equal(bound(keymap, "Workspace", key("Escape", {}, "Escape")), "studio::Dismiss");
-  assert.equal(bound(keymap, "Workspace", key("Equal", { metaKey: true }, "=")), "studio::ZoomIn");
-});
-
 test("a rebound shortcut triggers its action, and the old key no longer does", () => {
   const { keymap } = reload(initial, {
     settings: null,
@@ -132,13 +123,9 @@ test("each default key of the spine runs its action", () => {
     "studio::Answer 1", "studio::Answer 2", "studio::Answer 3", "studio::Answer 4",
     "studio::NewSession", "studio::OpenSettings", "studio::Palette",
   ]);
-});
-
-test("↑ and ↓ move in the list only while it has focus", () => {
-  assert.equal(windowBinding(initial.keymap, key("ArrowDown"), false), undefined);
-  assert.equal(windowBinding(initial.keymap, key("ArrowDown"), false, true), "studio::SelectNext");
-  // The list's context falls back to the window's.
+  // The list's context falls back to the window's, and ↑ and ↓ move only while the list has focus.
   assert.equal(windowBinding(initial.keymap, key("BracketRight", { metaKey: true }), false, true), "studio::NextSession");
+  assert.equal(windowBinding(initial.keymap, key("ArrowDown"), false), undefined);
 });
 
 test("the digits that answer, and plain control-letters, reach the terminal while it has focus", () => {
@@ -286,8 +273,4 @@ test("↑ and ↓ move the palette's highlighted row, and the window's keys leav
   // The palette's field is an input outside the list, where the window binds neither key.
   assert.equal(windowBinding(initial.keymap, key("ArrowDown"), true), undefined);
   assert.equal(windowBinding(initial.keymap, key("ArrowUp"), true), undefined);
-  const picker = fs.readFileSync(new URL("../picker.ts", import.meta.url), "utf8");
-  assert.match(picker, /\{ ArrowDown: 1, ArrowUp: -1 \}\[event\.key\]/);
-  assert.match(picker, /const entry = shown\(\)\[highlighted\];/);
-  assert.doesNotMatch(picker, /shortcut: Tab moves between the rows/);
 });

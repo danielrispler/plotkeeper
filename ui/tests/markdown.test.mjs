@@ -49,13 +49,6 @@ test("inline code that is a whole file path links to the editor, keeping its cod
     assert.ok(html.includes(`<a href="${p}" data-file><code>${p}</code></a>`), p);
 });
 
-test("inline code that only looks like a path, and fenced code, stay plain code (danielrispler/Falinks#581)", () => {
-  const spans = ["origin/main", "std::fs", "@types/node", "apps/studio", "see src/foo.rs:42 here", "https://e.com/a.rs", "localhost:8080", "1/2"];
-  const html = markdown(spans.map((s) => `\`${s}\``).join(" ") + "\n\n```\nsrc/foo.rs:42\n```");
-  assert.doesNotMatch(html, /<a\b/);
-  assert.match(html, /<pre><code>src\/foo.rs:42\n<\/code><\/pre>/);
-});
-
 test("inline code stays escaped, linked or not (danielrispler/Falinks#581)", () => {
   const html = markdown('`a<b "c" & d` `src/a&b.rs`');
   assert.match(html, /<code>a&lt;b &quot;c&quot; &amp; d<\/code>/);
@@ -65,6 +58,11 @@ test("inline code stays escaped, linked or not (danielrispler/Falinks#581)", () 
 test("inline code shaped like a host, a module or a ref stays plain code (danielrispler/Falinks#581)", () => {
   const spans = ["example.com:443", "api.example.com:8080", "git@github.com:22", "Foo.bar:12", "std.io:3", "example.com/index.html", "origin/main:3"];
   for (const s of spans) assert.doesNotMatch(markdown(`\`${s}\``), /<a\b/, s);
+  // Inline code that only looks like a path, and fenced code, stay plain code.
+  const pathLike = ["origin/main", "std::fs", "@types/node", "apps/studio", "see src/foo.rs:42 here", "https://e.com/a.rs", "localhost:8080", "1/2"];
+  const html = markdown(pathLike.map((s) => `\`${s}\``).join(" ") + "\n\n```\nsrc/foo.rs:42\n```");
+  assert.doesNotMatch(html, /<a\b/);
+  assert.match(html, /<pre><code>src\/foo.rs:42\n<\/code><\/pre>/);
 });
 
 test("inline code inside a Markdown link is not linked again (danielrispler/Falinks#581)", () => {

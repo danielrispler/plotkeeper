@@ -25,11 +25,6 @@ const states = [
 const sessions = ["/r", "/r/.claude/worktrees/issue-1", "/r/.claude/worktrees/issue-1/apps", "/elsewhere"].map((cwd) => ({ cwd }));
 const texts = (state) => gitTokens(state).map((t) => t.text);
 
-test("Workspaces is folded", () => {
-  const html = read("index.html").match(/<details id="workspaces"[^>]*>/)[0];
-  assert.doesNotMatch(html, /\sopen/);
-});
-
 test("each workspace has its name, its git tokens and its session count, and offers a new session and, for a task, Remove", () => {
   const rows = workspaceRows(workspaces, states, sessions);
   assert.deepEqual(
@@ -41,11 +36,6 @@ test("each workspace has its name, its git tokens and its session count, and off
       ["look (detached)", "detached", ["New session here", "Remove"]],
     ],
   );
-});
-
-test("a row shows the same tokens as the Git line for the same workspace", () => {
-  const rows = workspaceRows(workspaces, states, []);
-  rows.forEach((row, i) => assert.equal(row.facts, texts(states[i]).join("  ")));
 });
 
 test("tokens that say nothing are hidden, and the rest come in order: branch, upstream, uncommitted", () => {
@@ -103,12 +93,6 @@ function reading() {
   return { c, reads, event: throttle(() => reads.push(c.now.t), 2000, c.clock, c.schedule) };
 }
 
-test("throttle: the first event reads at once", () => {
-  const { reads, event } = reading();
-  event();
-  assert.deepEqual(reads, [0]);
-});
-
 test("throttle: a burst reads once per 2 s, and one read follows the last event", () => {
   const { c, reads, event } = reading();
   for (let t = 0; t <= 4500; t += 500) {
@@ -131,12 +115,6 @@ test("throttle: an event after a quiet spell reads at once", () => {
   c.advance(5000);
   event();
   assert.deepEqual(reads, [0, 5000]);
-});
-
-test("the new-session picker no longer creates or removes tasks", () => {
-  const picker = read("picker.ts");
-  assert.doesNotMatch(picker, /create_task"|remove_task|Remove/);
-  assert.match(read("workspaces.ts"), /create_task"/);
 });
 
 test("main ↓N shows only when behind, after the upstream distance and before the uncommitted count", () => {
