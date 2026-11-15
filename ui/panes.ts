@@ -228,6 +228,14 @@ export async function startClaude(cwd: string, resume: string | null = null, pro
   await startTerminal(`claude-${crypto.randomUUID()}`, cwd, argv);
 }
 
+// Starts `agent` in `cwd` in a new terminal, with `prompt` as its first prompt: Claude Code (in auto mode when
+// `auto`), agy or Codex, or, for "terminal", a plain login shell with no prompt, which gets a row of its own.
+export async function startAgent(agent: string, cwd: string, prompt = "", auto = false) {
+  if (agent === "claude") return startClaude(cwd, null, prompt, auto);
+  if (agent === "terminal") return startTerminal(`shell-${crypto.randomUUID()}`, cwd, []);
+  await startTerminal(`${agent}-${crypto.randomUUID()}`, cwd, await invoke<string[]>("agent_argv", { agent, prompt }));
+}
+
 // A Doctor entry (danielrispler/Falinks#527) in a new terminal in the selected session's folder, else the configured
 // repository. `shell` runs its command under the login shell, then leaves a shell for reading and
 // rerunning; `session` starts `claude` with the command as its first prompt.

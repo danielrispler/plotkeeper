@@ -259,6 +259,9 @@ pub struct Session {
     /// A row of another agent than Claude Code, from its terminal's OSC 7501 status only (danielrispler/Falinks#560): it
     /// has no intention, card, brief, estimate or decisions. Its id is its terminal's.
     pub status_only: bool,
+    /// A status-only row of a plain terminal that New terminal started, while no agent in it reports
+    /// a status or links a session: it has no state of its own. Its id is its terminal's.
+    pub shell: bool,
     /// Its terminal's OSC 7501 state is `blocked`, for an agent that reports no permission or question of its own
     /// (agy, decision 5): it needs Daniel, with no text.
     #[serde(skip)]
@@ -305,6 +308,12 @@ impl Identity {
         ];
         self.name = parts.into_iter().flatten().collect::<Vec<_>>().join(" · ");
     }
+}
+
+/// The last segment of `cwd`, a list row's folder name; `cwd` itself when it has none.
+fn folder_name(cwd: &str) -> String {
+    let last = cwd.rsplit('/').next().unwrap_or_default();
+    if last.is_empty() { cwd } else { last }.into()
 }
 
 /// The worktree folder of the task that `cwd` is in: the path through the folder under
@@ -3009,11 +3018,21 @@ impl Studio {
             // A node-launched agent's foreground is `node`: its 7501 `app` names it then.
             let resume = |program: &str| studio_workbench::resume(program, None);
             let argv = agent.and_then(|p| resume(p).or_else(|| t.app.as_deref().and_then(resume)));
+            // An agent the picker started (agy, Codex) resumes by its own command: its linked
+            // session's conversation, else the folder's latest, as a status-only row has no id.
+            // Only Claude's is `claude --resume`.
+            let claude = t.argv.iter().any(|a| a == "claude");
+            let picked = t.argv.first().filter(|_| !claude).and_then(|program| {
+                let id = latest
+                    .map(|s| s.resume_id.as_str())
+                    .filter(|id| !id.is_empty());
+                studio_workbench::resume(program, id)
+            });
             Revive {
                 id: t.id.clone(),
                 cwd: t.cwd.clone(),
-                argv: argv.unwrap_or_else(|| t.argv.clone()),
-                session: (!t.argv.is_empty())
+                argv: argv.or(picked).unwrap_or_else(|| t.argv.clone()),
+                session: claude
                     .then(|| latest.map(|s| s.resume_id.clone()))
                     .flatten(),
                 busy,
@@ -3049,8 +3068,10 @@ impl Studio {
     /// 7501 and is not Claude Code, gets a status-only row named by its `app`, else its foreground
     /// program, and its folder; the row goes when the status clears or the terminal does. A Claude
     /// session keeps its hook state; when its terminal's 7501 state disagrees past
-    /// `MISMATCH_AFTER_MS`, one `Output::Mismatch` line says so. Returns the notices a status-only
-    /// row raises, as a Claude session's would.
+    /// `MISMATCH_AFTER_MS`, one `Output::Mismatch` line says so. A plain terminal New terminal
+    /// started (`shell-…`) gets a shell row, named "terminal · <folder>", while nothing in it reports
+    /// a status or links a session. Returns the notices a status-only row raises, as a Claude
+    /// session's would.
     pub fn terminals(&mut self, terms: &[Terminal], now: u64) -> Vec<Output> {
         let mut outputs = Vec::new();
         let reporting = terms.iter().filter(|t| t.exited.is_none());
@@ -3113,6 +3134,10 @@ impl Studio {
             if claude || claude_on(&self.sessions, &t.id).is_some() {
                 continue;
             }
+            // An agent typed into a plain terminal turns its row into the agent's.
+            if self.sessions.get(&t.id).is_some_and(|s| s.shell) {
+                self.sessions.remove(&t.id);
+            }
             let shown = shown_state(reported);
             // An unknown state leaves a row as it was, and makes none.
             let Some(state) = shown.or(self.sessions.get(&t.id).map(|s| s.state)) else {
@@ -3132,9 +3157,8 @@ impl Studio {
                     reported_turn: t.turn,
                     ..Session::default()
                 });
-            let last = t.cwd.rsplit('/').next().unwrap_or_default();
             row.cwd.clone_from(&t.cwd);
-            row.folder_name = if last.is_empty() { &t.cwd } else { last }.into();
+            row.folder_name = folder_name(&t.cwd);
             let program = t.app.as_ref().or(t.foreground.as_ref());
             let program = program.map_or("a program", String::as_str);
             row.identity.name = format!("{program} · {}", row.folder_name);
@@ -3178,8 +3202,42 @@ impl Studio {
                 _ => {}
             }
         }
+        // A plain terminal New terminal started, with no row of its own yet: a shell row.
+        let shells = terms
+            .iter()
+            .filter(|t| t.exited.is_none() && t.id.starts_with("shell-"));
+        for t in shells {
+            if rows.contains(&t.id) || claude_on(&self.sessions, &t.id).is_some() {
+                continue;
+            }
+            rows.insert(t.id.clone());
+            // An agent that quit leaves the plain terminal's row again.
+            if self.sessions.get(&t.id).is_some_and(|s| !s.shell) {
+                self.sessions.remove(&t.id);
+            }
+            let row = self
+                .sessions
+                .entry(t.id.clone())
+                .or_insert_with(|| Session {
+                    agent: Agent::new(&t.id, now),
+                    terminal: Some(t.id.clone()),
+                    status_only: true,
+                    shell: true,
+                    state: State::YourTurn,
+                    ..Session::default()
+                });
+            row.cwd.clone_from(&t.cwd);
+            row.folder_name = folder_name(&t.cwd);
+            row.identity.name = format!("terminal · {}", row.folder_name);
+        }
         self.sessions
             .retain(|id, s| !s.status_only || rows.contains(id));
+        // A row from the list, not a hook event, for the terminal Daniel just started takes the
+        // selection, as a session's first event does (danielrispler/Falinks#567).
+        if let Some(id) = self.awaiting.take_if(|id| rows.contains(id)) {
+            self.selected = Some(id);
+            self.viewed = None;
+        }
         outputs
     }
 

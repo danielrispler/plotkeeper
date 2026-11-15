@@ -1,13 +1,15 @@
 // The picker (danielrispler/Falinks#467): where a new session starts. It lists the configured repository's main checkout
 // and its tasks, read live from git each time it opens, with `agent-*` worktrees hidden and counted
-// on the main checkout. Choosing one starts `claude` there in a new terminal.
+// on the main checkout. Choosing one starts the chosen agent there in a new terminal, or, from New
+// terminal, a plain terminal (`agents.ts`).
 // Creating a task by its branch name and removing one (danielrispler/Falinks#468) live in Workspaces (danielrispler/Falinks#576), at the list's foot.
 // The quick start, first: an issue, a spec or a prompt names a new task, and its session starts on it;
 // left empty, a session starts in the main checkout with no prompt.
 
+import { AGENT_NAMES, agentChoice, kept, type Kind, showsAuto } from "./agents.js";
 import { element, invoke, pressable, text } from "./dom.js";
 import type { Entry } from "./keys.js";
-import { startClaude } from "./panes.js";
+import { startAgent } from "./panes.js";
 import { shortPath } from "./paths.js";
 import { workspaceRows } from "./workspaces.js";
 import type { Binding } from "./settings.js";
@@ -19,16 +21,36 @@ function failed(error: unknown) {
   element("picker").append(text("pre", String(error), "picker-error"));
 }
 
-// A field whose Enter or button makes a task with `create`, then starts a session there, given
-// `prompt` of the field's text as its first prompt. Only a `prompt` field passes an empty text on.
-// Errors go to `report`: the picker's foot, or Workspaces' (danielrispler/Falinks#576).
+// The agent New session starts, kept across runs; Claude Code until Daniel picks another.
+export function lastAgent(): string {
+  try {
+    return localStorage.getItem("agent") ?? "claude";
+  } catch {
+    return "claude";
+  }
+}
+function keepAgent(picked: string) {
+  try {
+    localStorage.setItem("agent", kept(picked, lastAgent()));
+  } catch {
+    // Not kept: the next picker opens on Claude Code.
+  }
+}
+
+// Starts what `start` says in `cwd`, with `prompt` as its first prompt; by default the last agent.
+type Start = (cwd: string, prompt: string) => Promise<void>;
+export const startLast: Start = (cwd, prompt) => startAgent(lastAgent(), cwd, prompt);
+
+// A field whose Enter or button makes a task with `create`, then starts a session there with
+// `start`, given `prompt` of the field's text as its first prompt. Only a `prompt` field passes an
+// empty text on. Errors go to `report`: the picker's foot, or Workspaces' (danielrispler/Falinks#576).
 export function newTask(
   placeholder: string,
   label: string,
   create: (value: string) => Promise<Workspace>,
   prompt: boolean,
   report: (error: unknown) => void = failed,
-  auto: () => boolean = () => false,
+  start: Start = startLast,
 ): HTMLElement {
   const form = document.createElement("form");
   form.className = "new-task";
@@ -47,7 +69,7 @@ export function newTask(
     try {
       const task = await create(value);
       element("picker").hidden = true;
-      await startClaude(task.path, null, prompt ? value : "", auto());
+      await start(task.path, prompt ? value : "");
     } catch (e) {
       report(e);
     } finally {
@@ -60,8 +82,8 @@ export function newTask(
 
 // The quick start: a task named after an issue, a spec or a prompt, whose session starts on it, or,
 // empty, the main checkout.
-const quickStart = (main: Workspace, auto: () => boolean) =>
-  newTask("Issue #, spec path or prompt; empty for main", "Start", async (request) => request ? invoke<Workspace>("create_named_task", { request }) : main, true, failed, auto);
+const quickStart = (main: Workspace, start: Start) =>
+  newTask("Issue #, spec path or prompt; empty for main", "Start", async (request) => request ? invoke<Workspace>("create_named_task", { request }) : main, true, failed, start);
 
 // The Auto mode choice (danielrispler/Falinks#541): off each time the picker opens; the session starts in Claude Code's
 // auto mode when on. Bypass mode is never offered.
@@ -72,11 +94,35 @@ function autoChoice(): [HTMLElement, () => boolean] {
   return [label, () => box.checked];
 }
 
+// The agents on Daniel's `PATH`, asked once per run, as his login shell is slow to start.
+let installed: Promise<string[]> | null = null;
+const offeredAgents = () => (installed ??= invoke<string[]>("agents").catch(() => ["claude"]));
+
+// The agent choice: one button per agent, the chosen one pressed; Auto mode shows with Claude Code only.
+function agentRow(offered: string[], chosen: string, auto: HTMLElement): [HTMLElement, () => string] {
+  const row = text("div", "", "agent-choice");
+  let current = chosen;
+  const draw = () => {
+    auto.hidden = !showsAuto(current);
+    row.replaceChildren(
+      ...offered.map((agent) => {
+        return pressable(text("button", AGENT_NAMES[agent] ?? agent, "btn small"), agent === current, () => {
+          current = agent;
+          keepAgent(agent);
+          draw();
+        });
+      }),
+    );
+  };
+  draw();
+  return [row, () => current];
+}
+
 // A workspace's row: its name, then its folder.
-function workspaceRow(name: string, workspace: Workspace, auto: () => boolean): HTMLElement {
+function workspaceRow(name: string, workspace: Workspace, start: Start): HTMLElement {
   const button = pressable(document.createElement("button"), false, () => {
     element("picker").hidden = true;
-    startClaude(workspace.path, null, "", auto()).catch((e) => console.warn(e));
+    start(workspace.path, "").catch((e) => console.warn(e));
   });
   button.classList.add("row");
   const first = text("span", "", "l1");
@@ -86,16 +132,20 @@ function workspaceRow(name: string, workspace: Workspace, auto: () => boolean): 
   return button;
 }
 
-function picked(workspaces: Workspaces): HTMLElement[] {
+function picked(workspaces: Workspaces, agents: string[], kind: Kind): HTMLElement[] {
   const { hidden } = workspaces;
   const count = hidden ? [text("p", `${hidden} agent worktree${hidden === 1 ? "" : "s"} hidden`, "hidden-count")] : [];
   const [choice, auto] = autoChoice();
-  const [main, ...tasks] = workspaceRows(workspaces, [], []).map(({ name, workspace }) => workspaceRow(name, workspace, auto));
+  const { offered, chosen } = agentChoice(agents, lastAgent(), kind);
+  const [agentButtons, agent] = agentRow(offered, chosen, choice);
+  const start: Start = (cwd, prompt) => startAgent(agent(), cwd, prompt, auto());
+  const [main, ...tasks] = workspaceRows(workspaces, [], []).map(({ name, workspace }) => workspaceRow(name, workspace, start));
   return [
-    text("h1", "New session in its own task"),
-    quickStart(workspaces.main, auto),
+    agentButtons,
+    text("h1", "In its own task"),
+    quickStart(workspaces.main, start),
     choice,
-    text("h1", "Start a session in"),
+    text("h1", "Start in"),
     main,
     ...count,
     ...tasks,
@@ -165,13 +215,15 @@ export function showPalette(entries: Entry[], run: (binding: Binding) => void) {
   field.focus();
 }
 
-// Opens the picker, or closes it when open.
-export async function showPicker() {
+// Opens the picker, on the last agent for New session or on a plain terminal for New terminal, or
+// closes it when open.
+export async function showPicker(kind: Kind = "session") {
   const picker = element("picker");
-  if (closed("New session")) return;
+  if (closed(kind === "terminal" ? "New terminal" : "New session")) return;
   // It opens once its rows are read, so no placeholder flashes first in another box (danielrispler/Falinks#570).
   try {
-    picker.replaceChildren(...picked(await invoke<Workspaces>("workspaces")));
+    const [workspaces, agents] = await Promise.all([invoke<Workspaces>("workspaces"), offeredAgents()]);
+    picker.replaceChildren(...picked(workspaces, agents, kind));
   } catch (e) {
     picker.replaceChildren(text("p", `No worktrees: ${e}`, "empty"));
   }

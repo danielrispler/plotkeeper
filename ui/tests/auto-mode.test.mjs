@@ -42,8 +42,8 @@ test("the picker's Auto mode choice is off by default and reaches the start comm
   const picker = fs.readFileSync(new URL("../picker.ts", import.meta.url), "utf8");
   assert.match(picker, /type: "checkbox" }\)/);
   assert.doesNotMatch(picker, /checked: true/);
-  // Both ways to start from the picker pass the choice on.
-  assert.match(picker, /startClaude\(workspace\.path, null, "", auto\(\)\)/);
-  assert.match(picker, /startClaude\(task\.path, null, prompt \? value : "", auto\(\)\)/);
-  assert.match(picker, /quickStart\(workspaces\.main, auto\)/);
+  // Both ways to start from the picker start the chosen agent with the choice.
+  assert.match(picker, /startAgent\(agent\(\), cwd, prompt, auto\(\)\)/);
+  assert.match(picker, /workspaceRow\(name, workspace, start\)/);
+  assert.match(picker, /quickStart\(workspaces\.main, start\)/);
 });

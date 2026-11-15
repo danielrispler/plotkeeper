@@ -150,7 +150,8 @@ const actions: Actions = {
   "studio::SelectNext": () => moveInList(1),
   "studio::SelectPrevious": () => moveInList(-1),
   "studio::Answer": (n) => answer(Number(n)),
-  "studio::NewSession": showPicker,
+  "studio::NewSession": () => void showPicker(),
+  "studio::NewTerminal": () => void showPicker("terminal"),
   // Home, in the terminal column: selects no session.
   "studio::GoHome": () => void goHome(),
   // Fetches the repository now (#33); the workspaces' states follow.
@@ -228,7 +229,8 @@ window.addEventListener("focus", () => actions["studio::RefreshLanded"]());
 startPanes().catch((e) => element("terminal-body").append(`No terminal: ${e}`));
 dragSplit();
 dragPanel();
-element("new-session").addEventListener("click", showPicker);
+element("new-session").addEventListener("click", () => void showPicker());
+element("new-terminal").addEventListener("click", () => void showPicker("terminal"));
 // A click on the session list's empty space selects none and shows Home.
 document.querySelector(".list")!.addEventListener("click", (event) => listSpace(event.target as HTMLElement) && void goHome());
 // The needs-you chip (danielrispler/Falinks#572) selects the first session that needs Daniel.
@@ -236,10 +238,11 @@ element("needs-you").addEventListener("click", () => {
   const first = studio.listed.find((session) => session.state === "needs_you");
   if (first) select(first.id);
 });
-// A click outside the picker, but not on its own button, closes it.
+// A click outside the picker, but not on its own buttons, closes it.
 document.addEventListener("pointerdown", (event) => {
   const target = event.target as Node;
-  if (!element("picker").contains(target) && !element("new-session").contains(target)) element("picker").hidden = true;
+  const opener = ["new-session", "new-terminal"].some((id) => element(id).contains(target));
+  if (!element("picker").contains(target) && !opener) element("picker").hidden = true;
 }, true); // capture: the terminal must not swallow it
 
 const showList = (sessions: Session[]) => {

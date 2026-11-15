@@ -7,8 +7,7 @@
 
 import { element, invoke, patch, pressable, text } from "./dom.js";
 import { glyph } from "./list.js";
-import { startClaude } from "./panes.js";
-import { newTask } from "./picker.js";
+import { newTask, startLast } from "./picker.js";
 import { studio } from "./state.js";
 import { removeWorktree } from "./story.js";
 import { throttle } from "./throttle.js";
@@ -124,7 +123,7 @@ function workspaceRow({ workspace, name, facts, actions, landed }: WorkspaceRow)
   const act = (label: string) =>
     pressable(text("button", label, "small"), false, () => {
       opened.delete(workspace.path);
-      const done = label === "Remove" ? removeWorktree(workspace.path).then(() => readWorkspaces(true)) : startClaude(workspace.path);
+      const done = label === "Remove" ? removeWorktree(workspace.path).then(() => readWorkspaces(true)) : startLast(workspace.path, "");
       done.catch(failed);
     });
   const buttons = text("div", "", "workspace-actions");

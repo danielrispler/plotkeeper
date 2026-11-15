@@ -85,7 +85,9 @@ export function showView(selected: Selection | null) {
   element("close").onclick = () => askClose(session);
   element("delete").hidden = !own;
   element("delete").onclick = () => askDelete(session).catch(report);
-  element("tool").textContent = session.status_only
+  element("tool").textContent = session.shell
+    ? "A plain terminal"
+    : session.status_only
     ? "Status only: another agent, with no steps, intention, cards or brief"
     : (step?.tool ?? (agent === null ? session.returned : null) ?? "No step yet");
   const [detail, fullDetail] = shortPaths(step?.detail ?? "");
