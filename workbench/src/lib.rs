@@ -52,6 +52,72 @@ fn write_projects(file: &Path, list: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// The main checkout of the repository that holds `folder`, which may be any of its worktrees: the parent
+/// of git's common dir. A folder git does not recognise is refused with a message.
+pub fn main_checkout(folder: &Path) -> Result<String, String> {
+    let common = git(
+        folder,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )
+    .map_err(|_| format!("{} is not in a git repository", folder.display()))?;
+    Path::new(&common)
+        .parent()
+        .map(|main| main.display().to_string())
+        .ok_or_else(|| format!("{} is not in a git repository", folder.display()))
+}
+
+/// Adds the repository holding `folder` to the projects in `file`, at the end, as its main checkout, and
+/// returns the new list. A folder git does not recognise and a repository already listed are refused.
+pub fn add_project(file: &Path, folder: &Path) -> Result<Vec<String>, String> {
+    let mut list = projects(file, || None)?;
+    let main = main_checkout(folder)?;
+    if list.contains(&main) {
+        return Err(format!("{main} is already a project"));
+    }
+    list.push(main);
+    write_projects(file, &list)?;
+    Ok(list)
+}
+
+/// Takes `path` out of the projects in `file` and returns the new list. Only the entry goes: the
+/// repository's worktrees, branches and sessions are not touched.
+pub fn remove_project(file: &Path, path: &str) -> Result<Vec<String>, String> {
+    let mut list = projects(file, || None)?;
+    list.retain(|project| project != path);
+    write_projects(file, &list)?;
+    Ok(list)
+}
+
+/// Writes the projects of `file` in `order`, which must hold the same projects, and returns the list.
+pub fn reorder_projects(file: &Path, order: Vec<String>) -> Result<Vec<String>, String> {
+    let mut have = projects(file, || None)?;
+    let mut want = order.clone();
+    have.sort();
+    want.sort();
+    if have != want {
+        return Err("the new order does not hold the same projects".into());
+    }
+    write_projects(file, &order)?;
+    Ok(order)
+}
+
+/// The repositories to suggest as projects: the main checkout of each of `cwds`, newest first as given,
+/// each once, without those already in the projects of `file`. A folder that is gone or not in a
+/// repository is skipped.
+pub fn suggest_projects(file: &Path, cwds: &[String]) -> Result<Vec<String>, String> {
+    let listed = projects(file, || None)?;
+    let mut found: Vec<String> = Vec::new();
+    for cwd in cwds {
+        if let Ok(main) = main_checkout(Path::new(cwd))
+            && !listed.contains(&main)
+            && !found.contains(&main)
+        {
+            found.push(main);
+        }
+    }
+    Ok(found)
+}
+
 /// The workspaces of the repository that holds `repo`, which may be any of its worktrees.
 pub fn workspaces(repo: &Path) -> Result<Workspaces, String> {
     let output = Command::new("git")

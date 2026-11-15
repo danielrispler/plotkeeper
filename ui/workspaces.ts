@@ -6,7 +6,7 @@
 // loss check of a session's Delete. Creating a task is here too, not in the new-session picker.
 
 import { element, invoke, patch, pressable, text } from "./dom.js";
-import { knownProjects, mainProject, projects } from "./projects.js";
+import { knownProjects, mainProject, onProjects, projects } from "./projects.js";
 import { drawSidebar, glyph, projectOpen } from "./list.js";
 import { newTask, showBranches, startLast } from "./picker.js";
 import { studio } from "./state.js";
@@ -375,6 +375,9 @@ export async function readWorkspaces(now = false) {
     await readWorkspaces(true);
   }
 }
+
+// A project added or removed: every project's workspaces are read again at once.
+onProjects(() => void readWorkspaces(true));
 
 // The list was drawn, or the selection changed: the session counts follow at once, and the state of
 // every workspace a session works in is read behind its throttle, a hook event having come.

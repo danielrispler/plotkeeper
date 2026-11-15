@@ -120,6 +120,9 @@ h1 { margin: 0 0 var(--sp-4); }
 .project-toggle { display: flex; flex: 1; gap: var(--sp-3); align-items: center; min-width: 0; padding: var(--sp-2) var(--sp-4); font-size: var(--size-xs); font-weight: 500; color: var(--muted); text-align: start; }
 .project-toggle .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-toggle .glyph { margin-inline-start: auto; }
+.project-head[draggable="true"] { cursor: grab; }
+.project-action { flex: none; padding: var(--sp-1) var(--sp-3); font-size: var(--size-xs); color: var(--muted); }
+.add-project { margin: var(--sp-4) var(--sp-2); }
 .project.outside { opacity: 0.6; }
 .project-workspaces { margin-top: var(--sp-3); }
 .row .token { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; min-width: 0; }

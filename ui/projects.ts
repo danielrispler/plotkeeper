@@ -1,5 +1,5 @@
 // The studio's projects (#93): the main-checkout paths in `projects.json`, in order. Read once per
-// run; the add and remove flows (#98) will update it. The sidebar (#97) shows one group per project.
+// run, then replaced by `setProjects` after an add, remove or reorder (#98). The sidebar (#97) shows one group per project.
 
 import { invoke } from "./dom.js";
 
@@ -8,6 +8,17 @@ let loaded: Promise<string[]> | null = null;
 let known: string[] = [];
 
 export const projects = (): Promise<string[]> => (loaded ??= invoke<string[]>("projects").then((paths) => (known = paths)));
+
+const listeners: (() => void)[] = [];
+// Runs `listener` each time the projects change.
+export const onProjects = (listener: () => void) => void listeners.push(listener);
+
+// The projects after Daniel added, removed or reordered one: what the commands return.
+export function setProjects(paths: string[]) {
+  known = paths;
+  loaded = Promise.resolve(paths);
+  listeners.forEach((listener) => listener());
+}
 
 // The projects as last read: empty until `projects()` has resolved.
 export const knownProjects = (): string[] => known;
