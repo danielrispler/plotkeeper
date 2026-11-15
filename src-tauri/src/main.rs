@@ -186,6 +186,22 @@ fn open(agent_id: String, studio: State<Mutex<Studio>>, cards: State<Cards>) -> 
     selection(&studio)
 }
 
+/// The log of subagent `agent_id` of session `session` from byte `offset`: its entries after it and
+/// the offset read to, `null` when there is no log (danielrispler/plotkeeper#54). Not pushed on events: the pane
+/// asks when the selection changes, and reads on from the offset it kept.
+#[tauri::command]
+fn subagent_log(
+    session: String,
+    agent_id: String,
+    offset: u64,
+    studio: State<Mutex<Studio>>,
+) -> Option<studio_core::SubagentLog> {
+    studio
+        .lock()
+        .unwrap()
+        .subagent_log(&session, &agent_id, offset)
+}
+
 /// The session Daniel selected and the subagent of it he opened, or `null` before his first click.
 #[tauri::command]
 fn selected(studio: State<Mutex<Studio>>) -> serde_json::Value {
@@ -503,6 +519,7 @@ fn main() {
             select_terminal,
             open,
             selected,
+            subagent_log,
             cards,
             shown,
             guess,
