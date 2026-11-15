@@ -277,7 +277,9 @@ fn an_agy_session_needs_you_while_its_terminal_reports_blocked() {
     let session = studio.session(PARENT).unwrap();
     assert_eq!(session.state, State::NeedsYou);
     assert!(session.questions.is_empty());
-    assert!(out.iter().any(|o| matches!(o, studio_core::Output::NeedsYou { session_id, .. } if session_id == PARENT)));
+    assert!(out.iter().any(
+        |o| matches!(o, studio_core::Output::NeedsYou { session_id, .. } if session_id == PARENT)
+    ));
 
     studio.terminals(&[terminal("done")], 20);
     assert_eq!(studio.session(PARENT).unwrap().state, State::YourTurn);
