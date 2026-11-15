@@ -241,3 +241,7 @@ _Avoid_: Keybindings, shortcuts file
 
 **Explanation language**:
 The human language of cards and questions: English for now, no longer Hebrew (danielrispler/Falinks#463), in plain words at Daniel's level. Code terms are in backticks.
+
+**Prior art**:
+How established editors and multi-agent tools, such as Zed, VS Code, Cursor, Linear, Conductor, herdr, claudecodeui and Vibe Kanban, already solve a studio problem. Every option for an IDE, layout or workflow decision starts from it and cites it, adapted to the studio's principles, rather than being designed from scratch. Prior-art notes live in `docs/studio/research/`.
+_Avoid_: Competitor analysis (the point is proven patterns to adopt, not a market comparison)

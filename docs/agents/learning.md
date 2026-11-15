@@ -12,6 +12,8 @@ Begin each session with a brief orientation: the current state, relevant settled
 
 Apply this teaching approach during grilling, Wayfinder, and ordinary planning, including before implementation exists. Establish background and intuition using the project's vocabulary before technical alternatives. For each decision question, explain the dilemma, why it matters, the viable options and their consequences, a concrete scenario or failure that makes the difference visible, and the recommendation with its reasoning. Make clear what the answer will decide or unblock.
 
+**Prior art first.** Before proposing options for any IDE, layout or studio workflow decision, inspect how established editors and multi-agent tools solve it (Zed, VS Code, Cursor, Linear, Conductor, herdr, claudecodeui, Vibe Kanban and the like; see **Prior art** in `docs/studio/CONTEXT.md`). Read the existing notes in `docs/studio/research/` first, and save new findings there. Each option then names the tools that use its pattern and how it is adapted to the studio, rather than being designed from scratch.
+
 Support deeper discovery through predictions, experiments, and hints. Give Daniel an opportunity to reason about a scenario before revealing its outcome when useful; provide a direct explanation when requested. Build shared understanding before asking Daniel to choose. Batch independent questions with sufficient context for each; questions dependent on unanswered choices wait for a later round. Find environmental facts yourself rather than turning them into questions for Daniel.
 
 ## Ticket workflow
