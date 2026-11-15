@@ -798,15 +798,15 @@ impl Session {
                 // The running tasks that a turn's end lists: a child of the session's own agent
                 // that it no longer lists has ended, at its last event.
                 // shortcut: only the session's own children, since whether it lists their children is
-                // unseen; widen it if a recorded log shows it does. An unattached subagent with no
-                // spawn call ends too (danielrispler/plotkeeper#67): an id that Claude Code names in
-                // one stray event lists in no `Stop`, and a step after its end runs it again.
+                // unseen; widen it if a recorded log shows it does. An unattached subagent with
+                // no spawn call ends too (danielrispler/plotkeeper#67): an id that Claude Code
+                // names in one stray event lists in no `Stop`. A step after its end runs it again.
                 Happened::TurnEnd { .. } if event.agent_id.is_none() => {
                     if let Some(tasks) = event.background_tasks() {
                         let listed = |id: &str| tasks.iter().any(|task| task == id);
                         let children = self.agents.iter().filter(|a| {
                             a.parent == Parent::Session
-                                || a.parent == Parent::Unattached && a.spawn.is_none()
+                                || (a.parent == Parent::Unattached && a.spawn.is_none())
                         });
                         let gone = children.filter(|a| !listed(&a.agent.id));
                         gone.for_each(|a| end(&a.agent.id, None, a.agent.last_event_at));

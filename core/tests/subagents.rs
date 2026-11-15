@@ -854,7 +854,7 @@ fn an_unknown_id_in_a_subagents_worktree_is_its_fork_and_gets_no_row() {
 /// a merger's check command, and its interim `SubagentHandback`s. The session's `Stop` lists no such
 /// task, so its row ends there, at its last event; one that the `Stop` lists keeps running.
 #[test]
-fn an_unattached_subagent_its_sessions_stop_does_not_list_ends_at_its_last_event() {
+fn an_unattached_subagent_that_its_sessions_stop_does_not_list_ends_at_its_last_event() {
     let mut studio = Studio::default();
     studio.apply(&ev("UserPromptSubmit", 1, "p1", json!({"prompt": "Do it"})));
     studio.apply(&step(2, "stray1", "/w"));

@@ -106,8 +106,9 @@ fn a_queued_prompts_text_is_the_prompt_of_the_turn_it_starts() {
         [
             // The turn before, whose prompt is not in the cut.
             (received(lines[2]), None),
-            // The worker's end card: its spawn is not in the cut, and the wake-up turn's `Stop`
-            // lists it no longer (danielrispler/plotkeeper#67). It belongs to the turn it was first seen in.
+            // The wake-up turn's `Stop` gives two cards: the worker's end card first, since the
+            // `Stop` lists it no longer and its spawn is not in the cut (danielrispler/plotkeeper#67).
+            // It belongs to the turn it was first seen in.
             (received(lines[9]), Some(received(lines[0]))),
             (received(lines[9]), None),
             (received(lines[14]), Some(received(lines[8]))),
