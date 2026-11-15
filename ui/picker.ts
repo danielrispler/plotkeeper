@@ -8,6 +8,7 @@
 
 import { AGENT_NAMES, agentChoice, kept, type Kind, showsAuto } from "./agents.js";
 import { element, invoke, pressable, text } from "./dom.js";
+import { mainProject } from "./projects.js";
 import type { Entry } from "./keys.js";
 import { startAgent } from "./panes.js";
 import { shortPath } from "./paths.js";
@@ -83,7 +84,7 @@ export function newTask(
 // The quick start: a task named after an issue, a spec or a prompt, whose session starts on it, or,
 // empty, the main checkout.
 const quickStart = (main: Workspace, start: Start) =>
-  newTask("Issue #, spec path or prompt; empty for main", "Start", async (request) => request ? invoke<Workspace>("create_named_task", { request }) : main, true, failed, start);
+  newTask("Issue #, spec path or prompt; empty for main", "Start", async (request) => request ? invoke<Workspace>("create_named_task", { project: await mainProject(), request }) : main, true, failed, start);
 
 // The Auto mode choice (danielrispler/Falinks#541): off each time the picker opens; the session starts in Claude Code's
 // auto mode when on. Bypass mode is never offered.
@@ -222,7 +223,7 @@ export async function showPicker(kind: Kind = "session") {
   if (closed(kind === "terminal" ? "New terminal" : "New session")) return;
   // It opens once its rows are read, so no placeholder flashes first in another box (danielrispler/Falinks#570).
   try {
-    const [workspaces, agents] = await Promise.all([invoke<Workspaces>("workspaces"), offeredAgents()]);
+    const [workspaces, agents] = await Promise.all([mainProject().then((project) => invoke<Workspaces>("workspaces", { project })), offeredAgents()]);
     picker.replaceChildren(...picked(workspaces, agents, kind));
   } catch (e) {
     picker.replaceChildren(text("p", `No worktrees: ${e}`, "empty"));

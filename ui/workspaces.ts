@@ -6,6 +6,7 @@
 // loss check of a session's Delete. Creating a task is here too, not in the new-session picker.
 
 import { element, invoke, patch, pressable, text } from "./dom.js";
+import { mainProject } from "./projects.js";
 import { glyph } from "./list.js";
 import { newTask, startLast } from "./picker.js";
 import { studio } from "./state.js";
@@ -134,7 +135,7 @@ function workspaceRow({ workspace, name, facts, actions, landed }: WorkspaceRow)
 
 // A new task, named by its branch; a session starts in it.
 function creating(): HTMLElement {
-  const form = newTask("New task: branch name", "Create", (name) => invoke<Workspace>("create_task", { name }).finally(() => readWorkspaces(true)), false, failed);
+  const form = newTask("New task: branch name", "Create", async (name) => invoke<Workspace>("create_task", { project: await mainProject(), name }).finally(() => readWorkspaces(true)), false, failed);
   form.dataset.key = "new-task";
   return form;
 }
@@ -171,7 +172,8 @@ function touch(path: string) {
   let event = throttles.get(path);
   if (!event) {
     const readState = () =>
-      invoke<GitState>("workspace_git_state", { path })
+      mainProject()
+        .then((project) => invoke<GitState>("workspace_git_state", { project, path }))
         .catch(() => states.get(path) ?? null)
         .then((state) => {
           states.set(path, state);
@@ -202,7 +204,7 @@ export async function readWorkspaces(now = false) {
   reading = true;
   readAt = Date.now();
   try {
-    read = await invoke<Workspaces>("workspaces");
+    read = await invoke<Workspaces>("workspaces", { project: await mainProject() });
     draw();
     touchShown();
   } catch (e) {
@@ -251,7 +253,7 @@ export async function fetchNow() {
   if (fetching) return;
   fetching = true;
   try {
-    await invoke("fetch_repository");
+    await invoke("fetch_repository", { project: await mainProject() });
     fetched.at = Date.now();
     fetched.error = null;
   } catch (e) {

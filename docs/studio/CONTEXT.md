@@ -87,7 +87,7 @@ _Formerly_: Place
 _Avoid_: Location
 
 **Home**:
-The view in the terminal column while no session is selected, such as after a delete: the sessions that need Daniel or are unseen, then the landed ones, then one row per project to start a session there. Workspaces stays the home of tasks.
+The view in the terminal column while no session is selected, such as after a delete: the sessions that need Daniel or are unseen, then the landed ones, then one row per project, in project order, to start a session there. Workspaces stays the home of tasks.
 _Avoid_: Dashboard, board
 
 **Workspaces**:

@@ -7,6 +7,7 @@
 
 import { modelLine, reports } from "./capabilities.js";
 import { age, code, element, invoke, pressable, prose, text } from "./dom.js";
+import { mainProject } from "./projects.js";
 import { select } from "./selection.js";
 import { askElement } from "./ask.js";
 import { rendered } from "./markdown.js";
@@ -541,9 +542,10 @@ export async function askDelete(session: Session) {
 // The branch is git's, read before the worktree goes: a session with no turn yet has none in its
 // transcript.
 export async function removeWorktree(worktree: string) {
-  const { tasks } = await invoke<Workspaces>("workspaces");
+  const project = await mainProject();
+  const { tasks } = await invoke<Workspaces>("workspaces", { project });
   const branch = tasks.find((task) => task.path === worktree)?.branch ?? null;
-  const losses = await invoke<Losses | null>("remove_task", { path: worktree, confirmed: false });
+  const losses = await invoke<Losses | null>("remove_task", { project, path: worktree, confirmed: false });
   if (losses) {
     const list = (title: string, lines: string[]) => {
       if (!lines.length) return [];
@@ -556,10 +558,10 @@ export async function removeWorktree(worktree: string) {
       ...list("Commits not on origin (they stay on the branch)", losses.unpushed),
     );
     if ((await choice(element("delete-losses") as HTMLDialogElement)) !== "remove") return;
-    await invoke("remove_task", { path: worktree, confirmed: true });
+    await invoke("remove_task", { project, path: worktree, confirmed: true });
   }
   if (branch === null) return;
-  await invoke("delete_merged_branch", { branch }).catch((e) => report(`Branch ${branch} kept: ${e}`));
+  await invoke("delete_merged_branch", { project, branch }).catch((e) => report(`Branch ${branch} kept: ${e}`));
 }
 
 

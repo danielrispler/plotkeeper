@@ -30,9 +30,12 @@ test("a section with no session is absent", () => {
   assert.deepEqual(homeSections([session("d", "idle", true)]).map((s) => s.title), ["Unseen"]);
 });
 
-test("one row per project, named by its folder", () => {
-  assert.deepEqual(homeProjects("/Users/d/work/plotkeeper"), [{ name: "plotkeeper", path: "/Users/d/work/plotkeeper" }]);
-  assert.deepEqual(homeProjects(""), []);
+test("one row per project, named by its folder, in projects.json order", () => {
+  assert.deepEqual(homeProjects(["/Users/d/work/plotkeeper", "/Users/d/work/api"]), [
+    { name: "plotkeeper", path: "/Users/d/work/plotkeeper" },
+    { name: "api", path: "/Users/d/work/api" },
+  ]);
+  assert.deepEqual(homeProjects([]), []);
 });
 
 test("Go home has a default key, which keymap.json can rebind", () => {

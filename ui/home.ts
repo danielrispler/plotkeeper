@@ -25,9 +25,9 @@ export function homeSections(sessions: Session[]): HomeSection[] {
 
 export type HomeProject = { name: string; path: string };
 
-// The projects Home offers: the configured repository.
-export function homeProjects(repo: string): HomeProject[] {
-  return repo ? [{ name: repo.split("/").pop() || repo, path: repo }] : [];
+// The projects Home offers: one per entry of `projects.json`, in its order.
+export function homeProjects(paths: string[]): HomeProject[] {
+  return paths.map((path) => ({ name: path.split("/").pop() || path, path }));
 }
 
 // Whether a click on `target`, inside the session list, is on its empty space: not on a row, a group
@@ -53,7 +53,7 @@ function projectRow({ name, path }: HomeProject): HTMLElement {
 }
 
 // Draws Home into `box`, patched, so focus survives the list's updates.
-export function drawHome(box: HTMLElement, sessions: Session[], repo: string) {
+export function drawHome(box: HTMLElement, sessions: Session[], projects: string[]) {
   box.classList.add("home");
   const sections = homeSections(sessions);
   const keyed = (node: HTMLElement, key: string) => {
@@ -65,6 +65,6 @@ export function drawHome(box: HTMLElement, sessions: Session[], repo: string) {
     ...(sections.length ? [] : [keyed(text("p", "Nothing needs you.", "empty"), "none")]),
     ...sections.flatMap((section) => [heading(section.title, `h ${section.key}`), ...section.sessions.map((session) => sessionRow(session, section.key === "landed"))]),
     heading("Start a session in", "h projects"),
-    ...homeProjects(repo).map(projectRow),
+    ...homeProjects(projects).map(projectRow),
   ]);
 }
