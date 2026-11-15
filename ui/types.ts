@@ -265,3 +265,7 @@ export type Work = {
   agent_ms: number;
   estimate: { range: [number, number] | null; depends_on_you: boolean };
 };
+
+// A branch the main checkout can switch to (#95): `remote` when only `origin` has it, `task` the folder of the task
+// whose worktree holds it, `current` the main checkout's own.
+export type Branch = { name: string; remote: boolean; task: string | null; current: boolean };

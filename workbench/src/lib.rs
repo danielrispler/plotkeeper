@@ -596,6 +596,79 @@ pub fn delete_branch_merged_at(repo: &Path, branch: &str, heads: &[String]) -> R
     .map(drop)
 }
 
+/// A branch the main checkout can switch to: a local branch, or one at `origin` with no local branch
+/// of its name (`remote`). `task` is the folder name of the task's worktree that holds it, which
+/// git would refuse; `current` marks the main checkout's own branch.
+#[derive(Debug, PartialEq, Serialize)]
+pub struct Branch {
+    pub name: String,
+    pub remote: bool,
+    pub task: Option<String>,
+    pub current: bool,
+}
+
+/// The branches the main checkout of the repository that holds `repo` can switch to: local branches
+/// in name order, then the remote-only ones.
+pub fn branches(repo: &Path) -> Result<Vec<Branch>, String> {
+    let found = workspaces(repo)?;
+    let main = Path::new(&found.main.path);
+    let names = |prefix: &str| -> Result<Vec<String>, String> {
+        let listed = git(main, &["for-each-ref", "--format=%(refname)", prefix])?;
+        Ok(listed
+            .lines()
+            .filter_map(|line| line.strip_prefix(prefix))
+            .map(String::from)
+            .collect())
+    };
+    let local = names("refs/heads/")?;
+    // `origin/HEAD` is a pointer, not a branch.
+    let remote: Vec<String> = names("refs/remotes/origin/")?
+        .into_iter()
+        .filter(|name| name != "HEAD" && !local.contains(name))
+        .collect();
+    let held = |name: &str| {
+        let task = found
+            .tasks
+            .iter()
+            .find(|task| task.branch.as_deref() == Some(name))?;
+        Path::new(&task.path)
+            .file_name()
+            .map(|folder| folder.to_string_lossy().into_owned())
+    };
+    Ok(local
+        .iter()
+        .map(|name| Branch {
+            name: name.clone(),
+            remote: false,
+            task: held(name),
+            current: found.main.branch.as_deref() == Some(name),
+        })
+        .chain(remote.into_iter().map(|name| Branch {
+            name,
+            remote: true,
+            task: None,
+            current: false,
+        }))
+        .collect())
+}
+
+/// Switches the main checkout of the repository that holds `repo` to `branch` with `git switch`: a
+/// local branch, or, with `remote`, a new local branch tracking `origin/<branch>`. No stash and no
+/// force or discard option, so git refuses a switch that would lose uncommitted work, and its
+/// message is the error.
+pub fn switch_branch(repo: &Path, branch: &str, remote: bool) -> Result<(), String> {
+    // A valid branch name never starts with `-`, so git reads it as a branch.
+    git(repo, &["check-ref-format", "--branch", branch])?;
+    let main = workspaces(repo)?.main.path;
+    let target = format!("origin/{branch}");
+    let args: &[&str] = if remote {
+        &["switch", "--track", &target]
+    } else {
+        &["switch", branch]
+    };
+    git(Path::new(&main), args).map(drop)
+}
+
 /// Runs `git` in `dir` and returns its output, or git's own error message.
 fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
     let output = run(dir, args)?;

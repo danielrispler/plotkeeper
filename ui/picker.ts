@@ -11,9 +11,10 @@ import { element, invoke, pressable, text } from "./dom.js";
 import type { Entry } from "./keys.js";
 import { startAgent } from "./panes.js";
 import { shortPath } from "./paths.js";
-import { workspaceRows } from "./workspaces.js";
+import { studio } from "./state.js";
+import { branchBlocked, branchOptions, refreshAfterSwitch, workspaceRows } from "./workspaces.js";
 import type { Binding } from "./settings.js";
-import type { Workspace, Workspaces } from "./types.js";
+import type { Branch, Workspace, Workspaces } from "./types.js";
 
 // Git's error, or any other, at the picker's foot.
 function failed(error: unknown) {
@@ -229,4 +230,37 @@ export async function showPicker(kind: Kind = "session") {
   }
   picker.hidden = false;
   picker.querySelector("input")?.focus();
+}
+
+// The branch picker (#95), for the main checkout only: its local branches and the remote-only ones, one
+// pick runs `git switch`, and git's refusal shows as it is. Disabled with its reason while a session in the
+// main checkout is running or needs Daniel; a branch a task holds is greyed out as "in task X". Opening it
+// again closes it.
+export async function showBranches() {
+  const picker = element("picker");
+  if (closed("Switch branch")) return;
+  try {
+    const [workspaces, branches] = await Promise.all([invoke<Workspaces>("workspaces"), invoke<Branch[]>("branches")]);
+    const blocked = branchBlocked(workspaces, studio.listed);
+    const rows = branchOptions(branches, blocked).map(({ branch, label, note, disabled }) => {
+      const button = pressable(document.createElement("button"), false, () => {
+        invoke("switch_branch", { branch: branch.name, remote: branch.remote })
+          .then(() => {
+            picker.hidden = true;
+            return refreshAfterSwitch();
+          })
+          .catch(failed);
+      });
+      button.classList.add("row");
+      button.disabled = disabled;
+      const line = text("span", "", "l1");
+      line.append(text("span", label, "name"), ...(note ? [text("span", note, "row-state")] : []));
+      button.append(line);
+      return button;
+    });
+    picker.replaceChildren(...(blocked ? [text("p", `Switching is off: ${blocked}`, "empty")] : []), ...rows);
+  } catch (e) {
+    picker.replaceChildren(text("p", `No branches: ${e}`, "empty"));
+  }
+  picker.hidden = false;
 }

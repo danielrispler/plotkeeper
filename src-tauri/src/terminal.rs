@@ -187,6 +187,18 @@ pub fn delete_merged_branch(branch: String) -> Result<(), String> {
     studio_workbench::delete_merged_branch(Path::new(&repo()), &branch)
 }
 
+/// The branches the configured repository's main checkout can switch to.
+#[tauri::command(async)]
+pub fn branches() -> Result<Vec<studio_workbench::Branch>, String> {
+    studio_workbench::branches(Path::new(&repo()))
+}
+
+/// Switches the configured repository's main checkout to `branch`, git's refusal as the error.
+#[tauri::command(async)]
+pub fn switch_branch(branch: String, remote: bool) -> Result<(), String> {
+    studio_workbench::switch_branch(Path::new(&repo()), &branch, remote)
+}
+
 /// The command a session's terminal runs: `claude` with the studio plugin of the studio's own
 /// checkout, whose hooks run its `studio-hook`, or `claude --resume <resume>` for an ended session.
 /// From the checkout, not the build folder, so a moved bundle still finds it.
