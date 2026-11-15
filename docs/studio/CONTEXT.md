@@ -241,3 +241,7 @@ _Avoid_: Keybindings, shortcuts file
 
 **Explanation language**:
 The human language of cards and questions: English for now, no longer Hebrew (danielrispler/Falinks#463), in plain words at Daniel's level. Code terms are in backticks.
+
+**Prior art**:
+How the benchmark tools already solve a standard shell or workspace problem, such as sidebar hierarchy, worktree navigation, branch switching or history. The benchmark tools are herdr, cmux, Workmux, AgentsRoom, T3 Code and Cursor's parallel background agents, with Zed second for editor chrome. The studio copies their proven pattern for these decisions and keeps its own design for the understanding layer. Prior-art notes live in `docs/studio/research/`.
+_Avoid_: Competitor analysis (the point is proven patterns to adopt, not a market comparison)
