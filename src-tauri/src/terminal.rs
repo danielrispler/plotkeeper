@@ -1,8 +1,8 @@
 //! The shell's terminal daemon client (danielrispler/Falinks#466). The window connects with `terminal_connect`, which
 //! starts the daemon from beside the app's own executable when none is running (a Dock launch has
 //! no useful `PATH`), then sends the daemon's requests with `terminal_send` and gets every daemon
-//! event as a `terminal` event, `{"ev":"lost"}` once the daemon is gone. The protocol is in
-//! `terminal-daemon/src/lib.rs`.
+//! event as a `terminal` event, but the replies to the shell's own `list` (`poll`), and
+//! `{"ev":"lost"}` once the daemon is gone. The protocol is in `terminal-daemon/src/lib.rs`.
 //!
 //! danielrispler/Falinks#470: a daemon below this app's protocol is still connected to, so its terminals work while the
 //! window waits for idle; `terminal_connect` says it is `outdated`, and `terminal_upgrade` stops it
@@ -11,6 +11,7 @@
 
 use serde_json::{Value, json};
 use std::{
+    collections::VecDeque,
     fs::File,
     io::{self, BufRead, Write},
     os::unix::net::UnixStream,
@@ -31,6 +32,9 @@ pub struct Daemon {
     outdated: Mutex<bool>,
     /// The terminals a dead daemon left in its record.
     lost: Mutex<Vec<Value>>,
+    /// Who asked for each `list` the daemon has yet to answer, oldest first: `true` for `poll`,
+    /// `false` for the window. The daemon answers a connection's requests in order.
+    polled: Mutex<VecDeque<bool>>,
 }
 
 /// Connects to the daemon, once per app run until it is lost, and returns `{repo, outdated}`: the
@@ -49,6 +53,8 @@ pub fn terminal_connect(app: AppHandle, daemon: State<Daemon>) -> Result<Value, 
         daemon.lost.lock().unwrap().extend(lost);
         let (reader, stream) = client.split();
         *writer = Some(stream);
+        // The lost daemon answers nothing more.
+        daemon.polled.lock().unwrap().clear();
         if !POLLING.swap(true, std::sync::atomic::Ordering::AcqRel) {
             let app = app.clone();
             thread::spawn(move || poll(app));
@@ -61,6 +67,13 @@ pub fn terminal_connect(app: AppHandle, daemon: State<Daemon>) -> Result<Value, 
                         && let Ok(terms) = serde_json::from_value(event["terms"].clone())
                     {
                         crate::listed(&app, terms);
+                    }
+                    // A reply to `poll` stops here: the window takes the next `list` as the answer to
+                    // its own request, and one asked for before it revived its terminals lacks them.
+                    if event["ev"] == "list"
+                        && app.state::<Daemon>().polled.lock().unwrap().pop_front() == Some(true)
+                    {
+                        continue;
                     }
                     let _ = app.emit("terminal", event);
                 }
@@ -77,12 +90,15 @@ pub fn terminal_connect(app: AppHandle, daemon: State<Daemon>) -> Result<Value, 
 static POLLING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Asks the daemon for its `list` every second while connected, so the core follows each terminal's
-/// OSC 7501 status (danielrispler/Falinks#560); the read loop hands the reply to the core.
+/// OSC 7501 status (danielrispler/Falinks#560); the read loop hands the reply to the core, not to
+/// the window.
 // shortcut: polls; have the daemon push status changes if the delay or the traffic matters.
 fn poll(app: AppHandle) {
     loop {
         thread::sleep(Duration::from_secs(1));
-        if let Some(stream) = app.state::<Daemon>().writer.lock().unwrap().as_mut() {
+        let daemon = app.state::<Daemon>();
+        if let Some(stream) = daemon.writer.lock().unwrap().as_mut() {
+            daemon.polled.lock().unwrap().push_back(true);
             let _ = writeln!(stream, "{}", json!({ "op": "list" }));
         }
     }
@@ -108,6 +124,9 @@ pub fn terminal_send(msg: Value, daemon: State<Daemon>) -> Result<(), String> {
     let stream = writer
         .as_mut()
         .ok_or("not connected to the terminal daemon")?;
+    if msg["op"] == "list" {
+        daemon.polled.lock().unwrap().push_back(false);
+    }
     writeln!(stream, "{msg}").map_err(|e| e.to_string())
 }
 
