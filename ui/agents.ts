@@ -5,10 +5,11 @@
 export type Kind = "session" | "terminal";
 
 // What the picker offers and which it opens on; a last choice no longer installed falls back to
-// Claude Code.
+// Claude Code, else the first agent installed.
 export function agentChoice(installed: string[], last: string | null, kind: Kind) {
   const offered = [...installed, "terminal"];
-  const chosen = kind === "terminal" ? "terminal" : last && installed.includes(last) ? last : "claude";
+  const fallback = installed.includes("claude") ? "claude" : offered[0];
+  const chosen = kind === "terminal" ? "terminal" : last && installed.includes(last) ? last : fallback;
   return { offered, chosen };
 }
 

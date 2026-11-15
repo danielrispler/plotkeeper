@@ -10,9 +10,10 @@ test("the picker offers the installed agents, then a terminal", () => {
   assert.deepEqual(agentChoice(["claude", "agy", "codex"], "agy", "terminal").chosen, "terminal");
 });
 
-test("a last choice that is no longer installed falls back to Claude Code", () => {
+test("a last choice that is no longer installed falls back to Claude Code, else the first installed", () => {
   assert.equal(agentChoice(["claude", "agy"], "codex", "session").chosen, "claude");
   assert.equal(agentChoice(["claude"], null, "session").chosen, "claude");
+  assert.equal(agentChoice(["agy", "codex"], null, "session").chosen, "agy");
 });
 
 test("a terminal is never kept as the choice; an agent is", () => {

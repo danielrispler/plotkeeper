@@ -310,6 +310,12 @@ impl Identity {
     }
 }
 
+/// The last segment of `cwd`, a list row's folder name; `cwd` itself when it has none.
+fn folder_name(cwd: &str) -> String {
+    let last = cwd.rsplit('/').next().unwrap_or_default();
+    if last.is_empty() { cwd } else { last }.into()
+}
+
 /// The worktree folder of the task that `cwd` is in: the path through the folder under
 /// `.claude/worktrees/`; `None` outside one, as in a main checkout.
 fn task_path(cwd: &str) -> Option<String> {
@@ -3013,16 +3019,19 @@ impl Studio {
             let resume = |program: &str| studio_workbench::resume(program, None);
             let argv = agent.and_then(|p| resume(p).or_else(|| t.app.as_deref().and_then(resume)));
             // An agent the picker started (agy, Codex) resumes by its own command: its linked
-            // session's conversation, else the folder's latest. Only Claude's is `claude --resume`.
+            // session's conversation, else the folder's latest, as a status-only row has no id.
+            // Only Claude's is `claude --resume`.
             let claude = t.argv.iter().any(|a| a == "claude");
-            let started = t.argv.first().filter(|_| !claude).and_then(|program| {
-                let id = latest.map(|s| s.resume_id.as_str());
+            let picked = t.argv.first().filter(|_| !claude).and_then(|program| {
+                let id = latest
+                    .map(|s| s.resume_id.as_str())
+                    .filter(|id| !id.is_empty());
                 studio_workbench::resume(program, id)
             });
             Revive {
                 id: t.id.clone(),
                 cwd: t.cwd.clone(),
-                argv: argv.or(started).unwrap_or_else(|| t.argv.clone()),
+                argv: argv.or(picked).unwrap_or_else(|| t.argv.clone()),
                 session: claude
                     .then(|| latest.map(|s| s.resume_id.clone()))
                     .flatten(),
@@ -3148,9 +3157,8 @@ impl Studio {
                     reported_turn: t.turn,
                     ..Session::default()
                 });
-            let last = t.cwd.rsplit('/').next().unwrap_or_default();
             row.cwd.clone_from(&t.cwd);
-            row.folder_name = if last.is_empty() { &t.cwd } else { last }.into();
+            row.folder_name = folder_name(&t.cwd);
             let program = t.app.as_ref().or(t.foreground.as_ref());
             let program = program.map_or("a program", String::as_str);
             row.identity.name = format!("{program} · {}", row.folder_name);
@@ -3218,13 +3226,18 @@ impl Studio {
                     state: State::YourTurn,
                     ..Session::default()
                 });
-            let last = t.cwd.rsplit('/').next().unwrap_or_default();
             row.cwd.clone_from(&t.cwd);
-            row.folder_name = if last.is_empty() { &t.cwd } else { last }.into();
+            row.folder_name = folder_name(&t.cwd);
             row.identity.name = format!("terminal · {}", row.folder_name);
         }
         self.sessions
             .retain(|id, s| !s.status_only || rows.contains(id));
+        // A row from the list, not a hook event, for the terminal Daniel just started takes the
+        // selection, as a session's first event does (danielrispler/Falinks#567).
+        if let Some(id) = self.awaiting.take_if(|id| rows.contains(id)) {
+            self.selected = Some(id);
+            self.viewed = None;
+        }
         outputs
     }
 

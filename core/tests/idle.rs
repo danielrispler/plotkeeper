@@ -208,6 +208,24 @@ fn an_agent_the_picker_started_comes_back_by_its_own_resume_command() {
 }
 
 #[test]
+fn a_codex_terminal_with_its_status_row_comes_back_with_the_latest_conversation() {
+    // Its status-only row links the terminal but has no conversation id to resume by.
+    let mut studio = replayed(&[]);
+    let codex: Terminal = serde_json::from_value(json!({
+        "id": "codex-1", "argv": ["codex"], "cwd": "/tmp", "exited": null, "state": "working", "app": "codex",
+    }))
+    .unwrap();
+    studio.terminals(std::slice::from_ref(&codex), 1);
+    let argv: Vec<Vec<String>> = studio
+        .revival(&[codex])
+        .into_iter()
+        .map(|r| r.argv)
+        .collect();
+    let words: Vec<String> = ["codex", "resume", "--last"].map(String::from).into();
+    assert_eq!(argv, [words]);
+}
+
+#[test]
 fn a_claude_terminal_no_session_links_to_does_not_come_back() {
     // #17: its `claude` never sent an event, such as one stopped at the folder-trust prompt, so no
     // row shows it and it has no conversation to resume; revived as it was, it hid forever.

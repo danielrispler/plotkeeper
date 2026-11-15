@@ -53,7 +53,7 @@ export function contextTitle(context: Context | null): string {
 
 // The muted mark after a row's name: "terminal" for a plain terminal's row, "status only" for another agent's row
 // (danielrispler/Falinks#560), so it never reads as a Claude session with missing data; else the context share.
-export function rowMark(session: Pick<Session, "status_only" | "transcript" | "capabilities"> & { shell?: boolean }): string {
+export function rowMark(session: Pick<Session, "shell" | "status_only" | "transcript" | "capabilities">): string {
   if (session.shell) return "terminal";
   if (session.status_only) return "status only";
   return agentMark(session) || contextText(session.transcript.context);

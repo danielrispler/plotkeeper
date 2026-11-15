@@ -338,3 +338,26 @@ fn a_plain_terminal_new_terminal_started_has_a_shell_row_until_an_agent_in_it_re
     listed(&mut studio, &[], T0 + 3_000);
     assert!(studio.session("shell-1").is_none());
 }
+
+#[test]
+fn a_terminal_or_codex_daniel_starts_is_selected_when_its_row_arrives() {
+    // Its row comes from the list, not a hook event, so the list hands it the selection (danielrispler/Falinks#567).
+    let mut studio = Studio::default();
+    studio.select_terminal("shell-1");
+    listed(&mut studio, &[term("shell-1", None, None, T0)], T0);
+    assert_eq!(
+        studio.selected().map(|s| s.agent.id.as_str()),
+        Some("shell-1")
+    );
+
+    studio.select_terminal("codex-1");
+    listed(
+        &mut studio,
+        &[term("codex-1", Some("working"), Some("codex"), T0 + 1_000)],
+        T0 + 1_000,
+    );
+    assert_eq!(
+        studio.selected().map(|s| s.agent.id.as_str()),
+        Some("codex-1")
+    );
+}
