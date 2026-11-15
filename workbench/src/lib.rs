@@ -27,6 +27,31 @@ pub struct Workspaces {
     pub hidden: usize,
 }
 
+/// The studio's projects (#93), from `file`: an ordered list of main-checkout paths. With no file
+/// it is created from `seed`, one entry or none, and from then on the file decides. Written by a
+/// temporary file and a rename, as the card store does.
+pub fn projects(file: &Path, seed: impl FnOnce() -> Option<String>) -> Result<Vec<String>, String> {
+    match std::fs::read_to_string(file) {
+        Ok(text) => serde_json::from_str(&text)
+            .map_err(|e| format!("{} does not parse: {e}", file.display())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            let list: Vec<String> = seed().into_iter().collect();
+            write_projects(file, &list)?;
+            Ok(list)
+        }
+        Err(e) => Err(format!("{}: {e}", file.display())),
+    }
+}
+
+fn write_projects(file: &Path, list: &[String]) -> Result<(), String> {
+    let dir = file.parent().ok_or("no folder for projects.json")?;
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let mut temp = tempfile::NamedTempFile::new_in(dir).map_err(|e| e.to_string())?;
+    serde_json::to_writer_pretty(&mut temp, list).map_err(|e| e.to_string())?;
+    temp.persist(file).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// The workspaces of the repository that holds `repo`, which may be any of its worktrees.
 pub fn workspaces(repo: &Path) -> Result<Workspaces, String> {
     let output = Command::new("git")

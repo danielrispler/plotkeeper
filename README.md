@@ -94,6 +94,8 @@ Every shortcut here but Cmd+C and Cmd+V can be rebound in `keymap.json` (see Set
 
 ## Settings files
 
+The studio's projects, the main checkouts Home and Workspaces list, are an ordered list in `projects.json` beside them (#93). With no file, the first launch creates it with one entry, `repository` below, else this checkout; after that the file decides, and `repository` is the starting project only.
+
 `settings.json` and `keymap.json` sit in the studio's data folder, `~/Library/Application Support/dev.falinks.studio/`, in Zed's format: JSON with comments and trailing commas (danielrispler/Falinks#524). The app reloads them when either is saved. A file that does not parse is reported in the notice line, and the last good one stays in effect. Missing keys keep their defaults; a key of the wrong type is reported in the same line and keeps its default. Each `doctor` entry is a palette action, "Doctor: <label>", marked with its kind's cost and run in a new terminal in the selected session's folder (danielrispler/Falinks#527): a `shell` one runs its command ("no tokens"), a `session` one starts `claude` with it as the prompt ("starts a Claude session, spends tokens"). A keymap can bind one as `["studio::Doctor", "<command>"]`:
 
 ```jsonc
@@ -103,7 +105,7 @@ Every shortcut here but Cmd+C and Cmd+V can be rebound in `keymap.json` (see Set
   "summaries": { "model": "haiku", "effort": "low", "on_open": false },
   "notifications": { "while_focused": false }, // also notify "your turn" while focused, but not for the selected session
   "sounds": true,                // false: no needs-you or your-turn sound
-  "repository": "/Users/danielrispler/work/Falinks", // where the shell, Workspaces and the picker start; default: this checkout
+  "repository": "/Users/danielrispler/work/Falinks", // the starting project only, and where the shell starts; default: this checkout
   "doctor": [
     { "label": "Check the installation", "command": "claude doctor", "kind": "shell" },
     { "label": "Full checkup", "command": "/doctor", "kind": "session" }

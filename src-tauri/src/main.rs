@@ -537,6 +537,7 @@ fn main() {
             terminal::open_link,
             terminal::open_file,
             skills::skills,
+            terminal::projects,
             terminal::workspaces,
             terminal::workspace_git_state,
             terminal::fetch_repository,

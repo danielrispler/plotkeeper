@@ -3,7 +3,7 @@
 
 use std::{path::Path, process::Command};
 use studio_workbench::{
-    GitState, Workspace, claude, fetch, git_state, merge_tree_runs, workspaces,
+    GitState, Workspace, claude, fetch, git_state, merge_tree_runs, projects, workspaces,
 };
 
 /// Runs `git` in `repo`, away from Daniel's own git config.
@@ -541,4 +541,36 @@ fn would_conflict_does_not_run_when_the_branch_is_not_behind_the_default_branch(
     let state = git_state(dir.path(), &task).unwrap();
     assert!(!state.would_conflict);
     assert_eq!(merge_tree_runs(&task), 0);
+}
+
+#[test]
+fn projects_are_seeded_once_then_the_file_wins() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("data/projects.json");
+    // First launch: the seed is the only project, and the file now exists.
+    assert_eq!(projects(&file, || Some("/a".into())).unwrap(), ["/a"]);
+    assert!(file.exists());
+    // Daniel removes it and adds two others; a restart with `repository` still naming /a keeps the file's list.
+    std::fs::write(&file, r#"["/c", "/b"]"#).unwrap();
+    assert_eq!(projects(&file, || Some("/a".into())).unwrap(), ["/c", "/b"]);
+    // An emptied list stays empty, the seed not coming back.
+    std::fs::write(&file, "[]").unwrap();
+    assert!(projects(&file, || Some("/a".into())).unwrap().is_empty());
+}
+
+#[test]
+fn with_nothing_to_seed_the_file_starts_empty() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("projects.json");
+    assert!(projects(&file, || None).unwrap().is_empty());
+    assert_eq!(std::fs::read_to_string(&file).unwrap().trim(), "[]");
+}
+
+#[test]
+fn a_file_that_does_not_parse_is_reported_not_replaced() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("projects.json");
+    std::fs::write(&file, "nope").unwrap();
+    assert!(projects(&file, || Some("/a".into())).is_err());
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "nope");
 }
