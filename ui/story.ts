@@ -5,6 +5,7 @@
 // checks and folded response, and one "ask about this". A subagent's view shows its own line,
 // questions, brief and cards in one block.
 
+import { modelLine, reports } from "./capabilities.js";
 import { age, code, element, invoke, pressable, prose, text } from "./dom.js";
 import { select } from "./selection.js";
 import { askElement } from "./ask.js";
@@ -42,6 +43,7 @@ export function showView(selected: Selection | null) {
     element("state").textContent = "";
     element("phase").textContent = "";
     element("mode").textContent = "";
+    element("model").textContent = "";
     showQuestions([]);
     showCleared([]);
     return;
@@ -57,7 +59,9 @@ export function showView(selected: Selection | null) {
   element("state").dataset.state = state;
   element("phase").textContent = agent === null ? estimateText(session.work) : "";
   // A subagent runs in its session's mode.
-  element("mode").textContent = modeText(session.permission_mode);
+  element("mode").textContent = reports(session, "permission_mode") ? modeText(session.permission_mode) : "";
+  // The session's model, by its agent's mark; none for a subagent or a status-only row.
+  element("model").textContent = agent === null ? modelLine(session) : "";
   // The model and effort the session runs at (danielrispler/Falinks#517, decision 8); none for a subagent, whose transcript the studio does not read.
   const { model, effort } = session.transcript;
   const runsAt = agent === null ? [model, effort && `effort ${effort}`].filter(Boolean).join(" · ") : "";
@@ -90,7 +94,7 @@ export function showView(selected: Selection | null) {
   element("command").textContent = step?.command ?? "";
   element("step").classList.toggle("has-command", Boolean(step?.command));
   showIntention(storyOf(session, agent));
-  showQuestions(session.questions.filter((question) => question.agent === (agent?.id ?? null)));
+  showQuestions(reports(session, "asks") ? session.questions.filter((question) => question.agent === (agent?.id ?? null)) : []);
   showCleared(agent === null ? session.cleared : []);
   // A subagent's view has no intention of its own: its written summary takes that line (danielrispler/Falinks#535).
   if ((agent?.id ?? null) !== shownAgent) {
@@ -146,14 +150,14 @@ export type HistoryEntry = { agent: string; purpose: string; asked: string; resu
 // A session's subagent history (danielrispler/Falinks#535): every subagent it ran, newest first, faded ones too. Each
 // entry's purpose is its name and its prompt's first line; its result is its written summary, else
 // its last message's first line, or its status when it failed or has none yet.
-export function subagentHistory(session: Pick<Session, "agents">, summaries: Map<string, string>, now = Date.now()): HistoryEntry[] {
+export function subagentHistory(session: Pick<Session, "agents" | "capabilities">, summaries: Map<string, string>, now = Date.now()): HistoryEntry[] {
   return [...session.agents]
     .sort((a, b) => b.started_at - a.started_at)
     .map((a) => ({
       agent: a.id,
       purpose: a.name,
       asked: a.asked ?? "",
-      result: summaries.get(a.id) ?? ((a.failed ? null : a.result) || a.status),
+      result: summaries.get(a.id) ?? ((a.failed || !reports(session, "replies") ? null : a.result) || a.status),
       details: [a.agent_type, age(a.started_at, a.ended_at ?? now), a.kind].filter(Boolean).join(" · "),
     }));
 }
@@ -402,7 +406,7 @@ function turnElement(session: Session, block: FeedTurn, newest: boolean): HTMLEl
   if (block.agents.length) {
     const list = document.createElement("ol");
     list.className = "subagents";
-    const entries = subagentHistory({ agents: block.agents }, agentSummaries);
+    const entries = subagentHistory({ agents: block.agents, capabilities: session.capabilities }, agentSummaries);
     list.append(...entries.map((entry) => historyElement(session.id, entry)));
     node.append(list);
   }

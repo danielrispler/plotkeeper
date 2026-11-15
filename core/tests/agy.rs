@@ -259,6 +259,41 @@ fn an_unknown_transcript_record_counts_as_drift() {
     assert_eq!(kinds, [AgyDriftKind::Record]);
 }
 
+fn terminal(state: &str) -> studio_core::Terminal {
+    serde_json::from_value(json!({
+        "id": "fixture-terminal", "argv": [], "cwd": "/tmp", "pid": 1, "exited": null,
+        "foreground": "agy", "processes": [], "state": state, "app": "agy",
+        "status_ms": 1, "turn": 0,
+    }))
+    .unwrap()
+}
+
+#[test]
+fn an_agy_session_needs_you_while_its_terminal_reports_blocked() {
+    let mut studio = Studio::replayed(fixture());
+    assert_eq!(studio.session(PARENT).unwrap().state, State::YourTurn);
+
+    let out = studio.terminals(&[terminal("blocked")], 10);
+    let session = studio.session(PARENT).unwrap();
+    assert_eq!(session.state, State::NeedsYou);
+    assert!(session.questions.is_empty());
+    assert!(out.iter().any(
+        |o| matches!(o, studio_core::Output::NeedsYou { session_id, .. } if session_id == PARENT)
+    ));
+
+    studio.terminals(&[terminal("done")], 20);
+    assert_eq!(studio.session(PARENT).unwrap().state, State::YourTurn);
+}
+
+#[test]
+fn a_session_names_its_agent_for_its_mark() {
+    assert_eq!(studio_core::AGY_CAPABILITIES.agent, "agy");
+    assert_eq!(studio_core::CLAUDE_CAPABILITIES.agent, "claude");
+    let json = serde_json::to_value(Studio::replayed(fixture()).session(PARENT).unwrap()).unwrap();
+    assert_eq!(json["capabilities"]["agent"], "agy");
+    assert_eq!(json["capabilities"]["asks"], false);
+}
+
 #[test]
 fn an_agy_sessions_first_stop_asks_for_agys_version_once() {
     let mut studio = Studio::default();

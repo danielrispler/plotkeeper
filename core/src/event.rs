@@ -183,6 +183,8 @@ pub(crate) struct Spawned {
 /// What an adapter reports, which decides what its sessions' views show (decision 4).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub struct Capabilities {
+    /// The agent's name, for its mark: `claude` or `agy`. Nothing in a view hides by it.
+    pub agent: &'static str,
     /// It reports a permission or a question that waits on Daniel, with its text.
     pub asks: bool,
     /// It names the tasks running in the background.

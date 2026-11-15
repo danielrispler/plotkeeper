@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 
 /// What Claude Code reports: everything the core reads today.
 pub const CAPABILITIES: Capabilities = Capabilities {
+    agent: "claude",
     asks: true,
     background_tasks: true,
     replies: true,
