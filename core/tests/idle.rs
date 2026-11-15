@@ -186,6 +186,28 @@ fn a_shell_whose_agent_shows_as_node_comes_back_by_its_7501_app() {
 }
 
 #[test]
+fn an_agent_the_picker_started_comes_back_by_its_own_resume_command() {
+    // Not `claude --resume`: only a Claude terminal resumes by its session's id.
+    let studio = replayed(&[]);
+    let lost: Vec<Terminal> = serde_json::from_value(json!([
+        { "id": "agy-1", "argv": ["agy", "--prompt-interactive=fix it"], "cwd": "/tmp" },
+        { "id": "codex-1", "argv": ["codex"], "cwd": "/tmp" },
+    ]))
+    .unwrap();
+    let revival = studio.revival(&lost);
+    let found: Vec<(Vec<String>, Option<String>)> =
+        revival.into_iter().map(|r| (r.argv, r.session)).collect();
+    let words = |w: &[&str]| w.iter().map(|w| w.to_string()).collect::<Vec<_>>();
+    assert_eq!(
+        found,
+        [
+            (words(&["agy", "--continue"]), None),
+            (words(&["codex", "resume", "--last"]), None)
+        ]
+    );
+}
+
+#[test]
 fn a_claude_terminal_no_session_links_to_does_not_come_back() {
     // #17: its `claude` never sent an event, such as one stopped at the folder-trust prompt, so no
     // row shows it and it has no conversation to resume; revived as it was, it hid forever.

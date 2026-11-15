@@ -179,6 +179,37 @@ pub fn claude_argv(resume: Option<String>, auto: bool) -> Vec<String> {
     studio_workbench::claude(&plugin, &presence, resume.as_deref(), auto)
 }
 
+/// The command a new terminal runs for `agent`, agy or Codex, with `prompt` as its first prompt.
+#[tauri::command]
+pub fn agent_argv(agent: String, prompt: String) -> Result<Vec<String>, String> {
+    studio_workbench::start(&agent, &prompt).ok_or_else(|| format!("no agent {agent}"))
+}
+
+/// The picker's agents that are on Daniel's `PATH`, as his login shell sets it, so a Dock-started
+/// app finds them; Claude Code alone when the shell gives no answer.
+#[tauri::command(async)]
+pub fn agents() -> Vec<String> {
+    let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/zsh".into());
+    let names = studio_workbench::AGENTS.join(" ");
+    let script = format!("for a in {names}; do command -v $a >/dev/null && echo $a; done");
+    let found = std::process::Command::new(shell)
+        .args(["-lc", &script])
+        .output();
+    let found = found.map(|out| String::from_utf8_lossy(&out.stdout).into_owned());
+    let found: Vec<String> = found
+        .unwrap_or_default()
+        .lines()
+        .map(str::trim)
+        .filter(|a| studio_workbench::AGENTS.contains(a))
+        .map(String::from)
+        .collect();
+    if found.is_empty() {
+        vec!["claude".into()]
+    } else {
+        found
+    }
+}
+
 /// `CLAUDE_CODE_PLUGIN_DIRS`'s entry for the plugin through the data folder's `checkout` link (#21),
 /// as the profile writes it.
 fn plugin_entry() -> String {

@@ -51,9 +51,10 @@ export function contextTitle(context: Context | null): string {
   return `${used} of ${thousands(context.window)} tokens used · Claude's status line shows this as ${context.left}% left`;
 }
 
-// The muted mark after a row's name: "status only" for another agent's row (danielrispler/Falinks#560), so it never reads
-// as a Claude session with missing data; else the context share.
-export function rowMark(session: Pick<Session, "status_only" | "transcript" | "capabilities">): string {
+// The muted mark after a row's name: "terminal" for a plain terminal's row, "status only" for another agent's row
+// (danielrispler/Falinks#560), so it never reads as a Claude session with missing data; else the context share.
+export function rowMark(session: Pick<Session, "status_only" | "transcript" | "capabilities"> & { shell?: boolean }): string {
+  if (session.shell) return "terminal";
   if (session.status_only) return "status only";
   return agentMark(session) || contextText(session.transcript.context);
 }
@@ -65,7 +66,9 @@ function nameTitle(session: Session): string {
 
 // The mark's node, with the context share's hover.
 function markNode(session: Session): HTMLElement {
-  const title = session.status_only
+  const title = session.shell
+    ? "A plain terminal"
+    : session.status_only
     ? "Another agent, followed by its reported status only"
     : agentMark(session)
       ? `${agentMark(session)}: followed by what it reports, which has no context share`

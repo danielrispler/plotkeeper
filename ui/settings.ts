@@ -97,6 +97,7 @@ const defaultKeymap: Keymap = {
     "3": ["studio::Answer", "3"],
     "4": ["studio::Answer", "4"],
     "cmd-n": "studio::NewSession",
+    "cmd-t": "studio::NewTerminal",
     "shift-cmd-h": "studio::GoHome",
     "cmd-,": "studio::OpenSettings",
     // Modifiers in `MODIFIERS` order, as a keystroke reads.

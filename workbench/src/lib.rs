@@ -340,6 +340,24 @@ pub fn resume(program: &str, id: Option<&str>) -> Option<Vec<String>> {
     Some(argv.iter().copied().chain(id).map(String::from).collect())
 }
 
+/// The agents the picker offers, by command, Claude Code first.
+pub const AGENTS: [&str; 3] = ["claude", "agy", "codex"];
+
+/// The command that starts a new conversation of an agent other than Claude Code, with `prompt` as
+/// its first prompt when not empty. `None` for an agent it does not know. From each tool's `--help`:
+/// `agy` 1.4.7's `--prompt-interactive`, `codex` 0.167.0's `[PROMPT]` (2026-11-15).
+pub fn start(program: &str, prompt: &str) -> Option<Vec<String>> {
+    let mut argv = vec![program.to_string()];
+    match program {
+        "agy" if !prompt.is_empty() => argv.push(format!("--prompt-interactive={prompt}")),
+        // `--`: a prompt like "-p x" is no flag.
+        "codex" if !prompt.is_empty() => argv.extend(["--".into(), prompt.into()]),
+        "agy" | "codex" => {}
+        _ => return None,
+    }
+    Some(argv)
+}
+
 /// Whether `argv` is `resume`'s command for an agent's latest conversation, not a known one.
 pub fn resumes_latest(argv: &[String]) -> bool {
     argv.first()

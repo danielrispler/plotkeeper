@@ -4,7 +4,7 @@
 
 import { patch, pressable, text } from "./dom.js";
 import { childrenOf, deleting, item, row, showsLanded } from "./list.js";
-import { startClaude } from "./panes.js";
+import { startLast } from "./picker.js";
 import type { Session } from "./types.js";
 
 export type HomeSection = { key: string; title: string; sessions: Session[] };
@@ -42,7 +42,7 @@ function sessionRow(session: Session, landed: boolean): HTMLElement {
 }
 
 function projectRow({ name, path }: HomeProject): HTMLElement {
-  const button = pressable(document.createElement("button"), false, () => void startClaude(path).catch((e) => console.warn(e)));
+  const button = pressable(document.createElement("button"), false, () => void startLast(path, "").catch((e) => console.warn(e)));
   button.dataset.key = `project ${path}`;
   button.classList.add("row");
   button.title = `Start a session in ${path}`;

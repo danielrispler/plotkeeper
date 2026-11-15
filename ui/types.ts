@@ -99,6 +99,8 @@ export type Session = {
   // Another agent than Claude Code, from its terminal's OSC 7501 status only (danielrispler/Falinks#560): no intention,
   // card, brief, estimate or decisions. Its id is its terminal's.
   status_only: boolean;
+  // A status-only row of a plain terminal New terminal started, while no agent in it reports a status.
+  shell: boolean;
   // Daniel's name for it from the studio (danielrispler/Falinks#469); null for its folder's.
   name: string | null;
   // A few words on what it is about, written from Daniel's first prompt; null before it arrives.

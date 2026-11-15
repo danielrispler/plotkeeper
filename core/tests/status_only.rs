@@ -294,3 +294,47 @@ fn a_lasting_disagreement_appends_one_mismatch_line_and_a_brief_one_none() {
     assert!(lines[0].contains(IN_STUDIO), "{}", lines[0]);
     assert!(lines[0].contains(&format!("7501 {other}")), "{}", lines[0]);
 }
+
+#[test]
+fn a_plain_terminal_new_terminal_started_has_a_shell_row_until_an_agent_in_it_reports() {
+    let mut studio = Studio::default();
+
+    listed(&mut studio, &[term("shell-1", None, None, T0)], T0);
+    let row = studio.session("shell-1").expect("a shell row");
+    assert!(row.shell && row.status_only);
+    assert_eq!(row.identity.name, "terminal · other-project");
+    assert_eq!(row.terminal.as_deref(), Some("shell-1"));
+    // Any other plain terminal, such as the panel's, gets none.
+    listed(
+        &mut studio,
+        &[
+            term("shell-1", None, None, T0),
+            term("panel-1", None, None, T0),
+        ],
+        T0,
+    );
+    assert!(studio.session("panel-1").is_none());
+
+    // Codex typed into it: the row is Codex's.
+    listed(
+        &mut studio,
+        &[term("shell-1", Some("working"), Some("codex"), T0 + 1_000)],
+        T0 + 1_000,
+    );
+    let row = studio.session("shell-1").unwrap();
+    assert!(!row.shell);
+    assert_eq!(
+        (row.state, row.identity.name.as_str()),
+        (State::Running, "codex · other-project")
+    );
+
+    // Codex quit: a shell row again; the terminal gone: no row.
+    listed(
+        &mut studio,
+        &[term("shell-1", None, None, T0 + 2_000)],
+        T0 + 2_000,
+    );
+    assert!(studio.session("shell-1").unwrap().shell);
+    listed(&mut studio, &[], T0 + 3_000);
+    assert!(studio.session("shell-1").is_none());
+}

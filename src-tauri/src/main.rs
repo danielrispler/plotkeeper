@@ -541,6 +541,8 @@ fn main() {
             terminal::workspace_git_state,
             terminal::fetch_repository,
             terminal::claude_argv,
+            terminal::agent_argv,
+            terminal::agents,
             terminal::plugin_setup,
             terminal::fix_plugin_setup,
             terminal::agy_plugin_setup,

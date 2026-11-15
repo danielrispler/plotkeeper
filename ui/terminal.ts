@@ -108,7 +108,7 @@ export function openPane(place: HTMLElement, id: string, cwd: string, argv: stri
       const name = argv[0]?.split("/").pop() ?? "the shell";
       if (failure) window.dispatchEvent(new CustomEvent("start-failed", { detail: { id, name, ...failure } }));
     });
-    note(argv.length ? `claude exited: ${status}; Open in the story starts it again` : `exited: ${status}; press a key for a new shell`);
+    note(argv.length ? `${argv.includes("claude") ? "claude" : argv[0]} exited: ${status}; Open in the story starts it again` : `exited: ${status}; press a key for a new shell`);
   };
   const input = (data: string) => {
     if (quiet) return;
