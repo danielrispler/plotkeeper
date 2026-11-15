@@ -293,3 +293,28 @@ fn a_session_names_its_agent_for_its_mark() {
     assert_eq!(json["capabilities"]["agent"], "agy");
     assert_eq!(json["capabilities"]["asks"], false);
 }
+
+#[test]
+fn an_agy_sessions_first_stop_asks_for_agys_version_once() {
+    let mut studio = Studio::default();
+    let at = |n| {
+        line(
+            "s",
+            "PreInvocation",
+            n,
+            json!({ "invocationNum": 0, "initialNumSteps": 1, "lastUserInput": "go" }),
+        )
+    };
+    let asked = |outputs: Vec<studio_core::Output>| {
+        outputs
+            .iter()
+            .filter(|o| matches!(o, studio_core::Output::AgyVersion))
+            .count()
+    };
+    studio.apply(&line("s", "SessionStart", 1, json!({})));
+    studio.apply(&at(2));
+    let first = studio.apply(&line("s", "Stop", 3, json!({})));
+    studio.apply(&at(4));
+    let second = studio.apply(&line("s", "Stop", 5, json!({})));
+    assert_eq!((asked(first), asked(second)), (1, 0));
+}

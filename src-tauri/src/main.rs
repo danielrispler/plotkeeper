@@ -26,9 +26,10 @@ use studio_core::{
     Studio, SummaryRequest, TaskFacts, TaskQuery,
 };
 use studio_understanding::{
-    CardStore, CardWriter, ClaudeWriter, FakeWriter, Fingerprints, Rating, Row, SessionCards,
-    StoredSummary, SummarySetup, Versions, backfilled, fingerprint_changes, millis, worktree_root,
-    write_agent_summary, write_brief, write_name, write_stop, write_summary,
+    AGY_FIXTURE_VERSION, AgyVersions, CardStore, CardWriter, ClaudeWriter, FakeWriter,
+    Fingerprints, Rating, Row, SessionCards, StoredSummary, SummarySetup, Versions, backfilled,
+    fingerprint_changes, millis, worktree_root, write_agent_summary, write_brief, write_name,
+    write_stop, write_summary,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
@@ -629,6 +630,7 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
     // its workers' cards, and two cards never update one brief at once.
     let mut queues = HashMap::<String, mpsc::Sender<Job>>::new();
     let versions = Versions::beside(log);
+    let agy_versions = AgyVersions::beside(log);
     let mut sent = Sent::default();
     loop {
         let state = app.state::<Mutex<Studio>>();
@@ -709,6 +711,19 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                          task {task_id} in markup the studio does not know"
                     ),
                     Output::Mismatch { line } => mismatch(&line),
+                    Output::AgyVersion => match agy_version() {
+                        Some(version) => {
+                            match agy_versions.check(&version, AGY_FIXTURE_VERSION, millis()) {
+                                Ok(Some(notice)) => {
+                                    eprintln!("studio: {notice}");
+                                    let _ = app.emit("notice", &notice);
+                                }
+                                Ok(None) => {}
+                                Err(e) => eprintln!("studio: keep agy's version: {e}"),
+                            }
+                        }
+                        None => eprintln!("studio: agy's version: `agy --version` did not run"),
+                    },
                     // Reads the transcript's lines and nothing else (`AGENTS.md`).
                     Output::Version { transcript_path } => {
                         match versions.check(Path::new(&transcript_path), millis()) {
@@ -838,6 +853,19 @@ fn gh_path() -> String {
             .unwrap_or_else(|| "gh".into())
     })
     .clone()
+}
+
+/// agy's version, from `agy --version` run in Daniel's login shell, so a Dock-started app finds it
+/// on his `PATH`; `None` when agy is missing or fails.
+fn agy_version() -> Option<String> {
+    let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/zsh".into());
+    let out = Command::new(shell)
+        .args(["-lc", "agy --version"])
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let version = text.lines().last()?.trim();
+    (out.status.success() && !version.is_empty()).then(|| version.to_owned())
 }
 
 /// The `state` of the pull request or issue that `gh <args>` shows, run in `cwd`: `MERGED`, `CLOSED`
