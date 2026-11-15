@@ -134,16 +134,23 @@ pub fn terminal_send(msg: Value, daemon: State<Daemon>) -> Result<(), String> {
 /// from `settings.json`'s `repository`, else the studio's own checkout, else nothing; then the file decides.
 #[tauri::command(async)]
 pub fn projects() -> Result<Vec<String>, String> {
-    let home = std::env::home_dir().ok_or("no home folder")?;
-    let file = studio_hook::data_dir(&home).join("projects.json");
-    studio_workbench::projects(&file, || {
-        crate::settings::repository().or_else(|| checkout().map(|c| c.display().to_string()))
-    })
+    studio_workbench::projects(&projects_file()?, seed)
 }
 
 fn projects_file() -> Result<PathBuf, String> {
     let home = std::env::home_dir().ok_or("no home folder")?;
     Ok(studio_hook::data_dir(&home).join("projects.json"))
+}
+
+/// The first project of a studio with no `projects.json` yet: every command on the projects gives it.
+fn seed() -> Option<String> {
+    crate::settings::repository().or_else(|| checkout().map(|c| c.display().to_string()))
+}
+
+/// The main checkout of the repository holding `folder`, `None` when it is not in one (#98).
+#[tauri::command(async)]
+pub fn repository_of(folder: String) -> Option<String> {
+    studio_workbench::main_checkout(Path::new(&folder)).ok()
 }
 
 /// Opens the native folder dialog; the folder Daniel picked, `None` when he cancelled (#98).
@@ -157,25 +164,25 @@ pub fn choose_folder(app: tauri::AppHandle) -> Option<String> {
 /// Adds the repository holding `folder`, as its main checkout, at the end of the projects (#98).
 #[tauri::command(async)]
 pub fn add_project(folder: String) -> Result<Vec<String>, String> {
-    studio_workbench::add_project(&projects_file()?, Path::new(&folder))
+    studio_workbench::add_project(&projects_file()?, seed, Path::new(&folder))
 }
 
 /// Takes a project out of the list; its worktrees, branches and sessions stay (#98).
 #[tauri::command(async)]
 pub fn remove_project(project: String) -> Result<Vec<String>, String> {
-    studio_workbench::remove_project(&projects_file()?, &project)
+    studio_workbench::remove_project(&projects_file()?, seed, &project)
 }
 
 /// Writes the projects in a new order (#98).
 #[tauri::command(async)]
 pub fn reorder_projects(order: Vec<String>) -> Result<Vec<String>, String> {
-    studio_workbench::reorder_projects(&projects_file()?, order)
+    studio_workbench::reorder_projects(&projects_file()?, seed, order)
 }
 
 /// The repositories of `cwds`, newest first, that are not projects yet (#98).
 #[tauri::command(async)]
 pub fn suggest_projects(cwds: Vec<String>) -> Result<Vec<String>, String> {
-    studio_workbench::suggest_projects(&projects_file()?, &cwds)
+    studio_workbench::suggest_projects(&projects_file()?, seed, &cwds)
 }
 
 /// A project's workspaces: its main checkout and its tasks, read live from git

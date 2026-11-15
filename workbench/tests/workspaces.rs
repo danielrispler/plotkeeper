@@ -589,7 +589,7 @@ fn adding_a_project_goes_at_the_end_and_a_worktree_adds_its_main_checkout() {
     );
     let worktree = dir.path().join(".claude/worktrees/t");
     assert_eq!(
-        add_project(&file, &worktree).unwrap(),
+        add_project(&file, || None, &worktree).unwrap(),
         [other_main.clone(), main.clone()]
     );
     assert_eq!(projects(&file, || None).unwrap(), [other_main, main]);
@@ -600,17 +600,17 @@ fn a_folder_git_does_not_know_and_a_listed_repository_are_refused() {
     let (dir, main) = repo();
     let plain = tempfile::tempdir().unwrap();
     let file = plain.path().join("projects.json");
-    let error = add_project(&file, plain.path()).unwrap_err();
+    let error = add_project(&file, || None, plain.path()).unwrap_err();
     assert!(error.contains("not in a git repository"), "{error}");
-    add_project(&file, dir.path()).unwrap();
-    let error = add_project(&file, dir.path()).unwrap_err();
+    add_project(&file, || None, dir.path()).unwrap();
+    let error = add_project(&file, || None, dir.path()).unwrap_err();
     assert!(error.contains("already a project"), "{error}");
     // A worktree of a listed repository is the same project.
     git(
         dir.path(),
         &["worktree", "add", "-q", "-b", "t", ".claude/worktrees/t"],
     );
-    assert!(add_project(&file, &dir.path().join(".claude/worktrees/t")).is_err());
+    assert!(add_project(&file, || None, &dir.path().join(".claude/worktrees/t")).is_err());
     assert_eq!(projects(&file, || None).unwrap(), [main]);
 }
 
@@ -622,12 +622,12 @@ fn removing_a_project_leaves_its_worktrees_and_branches_and_adding_it_back_shows
         &["worktree", "add", "-q", "-b", "t", ".claude/worktrees/t"],
     );
     let file = dir.path().join("projects.json");
-    add_project(&file, dir.path()).unwrap();
-    assert!(remove_project(&file, &main).unwrap().is_empty());
+    add_project(&file, || None, dir.path()).unwrap();
+    assert!(remove_project(&file, || None, &main).unwrap().is_empty());
     assert!(projects(&file, || None).unwrap().is_empty());
     assert!(dir.path().join(".claude/worktrees/t").is_dir());
     assert_eq!(workspaces(dir.path()).unwrap().tasks.len(), 1);
-    add_project(&file, dir.path()).unwrap();
+    add_project(&file, || None, dir.path()).unwrap();
     assert_eq!(workspaces(Path::new(&main)).unwrap().tasks.len(), 1);
 }
 
@@ -636,12 +636,15 @@ fn reordering_keeps_the_same_projects_and_is_kept() {
     let (a, a_main) = repo();
     let (b, b_main) = repo();
     let file = a.path().join("projects.json");
-    add_project(&file, a.path()).unwrap();
-    add_project(&file, b.path()).unwrap();
+    add_project(&file, || None, a.path()).unwrap();
+    add_project(&file, || None, b.path()).unwrap();
     let order = vec![b_main.clone(), a_main.clone()];
-    assert_eq!(reorder_projects(&file, order.clone()).unwrap(), order);
+    assert_eq!(
+        reorder_projects(&file, || None, order.clone()).unwrap(),
+        order
+    );
     assert_eq!(projects(&file, || None).unwrap(), order);
-    assert!(reorder_projects(&file, vec![a_main]).is_err());
+    assert!(reorder_projects(&file, || None, vec![a_main]).is_err());
 }
 
 #[test]
@@ -655,7 +658,7 @@ fn suggestions_are_main_checkouts_once_newest_first_without_projects() {
         &["worktree", "add", "-q", "-b", "t", ".claude/worktrees/t"],
     );
     let file = a.path().join("projects.json");
-    add_project(&file, a.path()).unwrap();
+    add_project(&file, || None, a.path()).unwrap();
     let cwds: Vec<String> = [
         b.path().join(".claude/worktrees/t"),
         a.path().to_path_buf(),
@@ -667,6 +670,35 @@ fn suggestions_are_main_checkouts_once_newest_first_without_projects() {
     .iter()
     .map(|p| p.display().to_string())
     .collect();
-    assert_eq!(suggest_projects(&file, &cwds).unwrap(), [b_main, c_main]);
+    assert_eq!(
+        suggest_projects(&file, || None, &cwds).unwrap(),
+        [b_main, c_main]
+    );
     assert!(!a_main.is_empty());
+}
+
+#[test]
+fn a_project_command_before_any_seeding_keeps_the_seed() {
+    let (dir, main) = repo();
+    let (_other, other_main) = repo();
+    let config = tempfile::tempdir().unwrap();
+    let seed = || Some(other_main.clone());
+    let file = config.path().join("add.json");
+    assert_eq!(
+        add_project(&file, seed, dir.path()).unwrap(),
+        [other_main.clone(), main.clone()]
+    );
+    let file = config.path().join("remove.json");
+    assert_eq!(
+        remove_project(&file, seed, "/x").unwrap(),
+        vec![other_main.clone()]
+    );
+    let file = config.path().join("reorder.json");
+    assert!(reorder_projects(&file, seed, vec![other_main.clone()]).is_ok());
+    let file = config.path().join("suggest.json");
+    assert_eq!(
+        suggest_projects(&file, seed, &[dir.path().display().to_string()]).unwrap(),
+        [main]
+    );
+    assert_eq!(projects(&file, || None).unwrap(), [other_main]);
 }

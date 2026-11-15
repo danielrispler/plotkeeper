@@ -106,7 +106,7 @@ export type ProjectGroup<S> = {
   states: StateGroup<S>[];
 };
 
-const lastSegment = (path: string) => path.split("/").filter(Boolean).pop() ?? "";
+export const lastSegment = (path: string) => path.split("/").filter(Boolean).pop() ?? "";
 
 // The main checkout a task's worktree path names, else the folder itself.
 const repositoryOf = (cwd: string) => /^(.*)\/\.claude\/worktrees\/[^/]+/.exec(cwd)?.[1] || cwd;
@@ -209,6 +209,15 @@ let again = false;
 let readAt = 0;
 const opened = new Set<string>();
 
+// Drops what `maps` hold for a project no longer in `paths`, so a removed project's git line, fetch and workspaces go.
+export function keepProjects(paths: string[], ...maps: Map<string, unknown>[]) {
+  for (const map of maps) for (const key of [...map.keys()]) if (!paths.includes(key)) map.delete(key);
+}
+const pruneRemoved = () => keepProjects(knownProjects(), read, failures, fetched);
+
+// The first of `paths`, in project order, that `found` has: where the Git line looks with no selection.
+export const firstProject = (paths: string[], found: Map<string, unknown>): string | undefined => paths.find((path) => found.has(path));
+
 const fail = (project: string) => (error: unknown) => {
   failures.set(project, String(error));
   drawSidebar();
@@ -278,8 +287,9 @@ function shown(): { project: string; workspaces: Workspaces; workspace: Workspac
   const cwd = studio.selection?.session.cwd;
   const owner = cwd ? ownerOf([...read.keys()], read, cwd) : null;
   if (owner) return owner;
-  const [first] = read;
-  return first ? { project: first[0], workspaces: first[1], workspace: first[1].main } : null;
+  const project = firstProject(knownProjects(), read);
+  const workspaces = project === undefined ? undefined : read.get(project);
+  return project !== undefined && workspaces ? { project, workspaces, workspace: workspaces.main } : null;
 }
 
 // The project the Git line shows, else the first one: where the palette's Switch branch works.
@@ -298,8 +308,8 @@ function drawLine() {
   line.hidden = !now;
   if (!now) return;
   const { project, workspaces, workspace } = now;
-  const repo = workspaces.main.path.split("/").pop();
-  const name = workspace === workspaces.main ? repo : `${repo} › ${workspace.path.split("/").pop()}`;
+  const repo = lastSegment(workspaces.main.path);
+  const name = workspace === workspaces.main ? repo : `${repo} › ${lastSegment(workspace.path)}`;
   const tokens = gitTokens(states.get(workspace.path) ?? null);
   line.title = [...tokens.map((token) => token.title), fetchNote(fetched.get(project) ?? { at: null, error: null }, Date.now())].join("\n");
   // The main checkout's branch token opens the branch picker (#95); a task's worktree keeps its branch.
@@ -309,7 +319,7 @@ function drawLine() {
     button.title = `${token.title}\nSwitch branch`;
     return button;
   });
-  line.replaceChildren(text("span", name ?? "", "git-workspace"), ...shownTokens);
+  line.replaceChildren(text("span", name, "git-workspace"), ...shownTokens);
 }
 
 function draw() {
@@ -355,8 +365,10 @@ export async function readWorkspaces(now = false) {
   reading = true;
   readAt = Date.now();
   try {
+    const paths = await projects();
+    pruneRemoved();
     await Promise.all(
-      (await projects()).map(async (project) => {
+      paths.map(async (project) => {
         try {
           read.set(project, await invoke<Workspaces>("workspaces", { project }));
           failures.delete(project);
@@ -365,6 +377,7 @@ export async function readWorkspaces(now = false) {
         }
       }),
     );
+    pruneRemoved();
     draw();
     touchShown();
   } finally {
@@ -377,7 +390,10 @@ export async function readWorkspaces(now = false) {
 }
 
 // A project added or removed: every project's workspaces are read again at once.
-onProjects(() => void readWorkspaces(true));
+onProjects(() => {
+  pruneRemoved();
+  void readWorkspaces(true);
+});
 
 // The list was drawn, or the selection changed: the session counts follow at once, and the state of
 // every workspace a session works in is read behind its throttle, a hook event having come.

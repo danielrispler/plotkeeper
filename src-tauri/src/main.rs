@@ -544,6 +544,7 @@ fn main() {
             terminal::remove_project,
             terminal::reorder_projects,
             terminal::suggest_projects,
+            terminal::repository_of,
             terminal::workspaces,
             terminal::workspace_git_state,
             terminal::fetch_repository,

@@ -67,9 +67,13 @@ pub fn main_checkout(folder: &Path) -> Result<String, String> {
 }
 
 /// Adds the repository holding `folder` to the projects in `file`, at the end, as its main checkout, and
-/// returns the new list. A folder git does not recognise and a repository already listed are refused.
-pub fn add_project(file: &Path, folder: &Path) -> Result<Vec<String>, String> {
-    let mut list = projects(file, || None)?;
+/// returns the new list. `seed` is as for `projects`, for a file not made yet. A folder git does not recognise and a repository already listed are refused.
+pub fn add_project(
+    file: &Path,
+    seed: impl FnOnce() -> Option<String>,
+    folder: &Path,
+) -> Result<Vec<String>, String> {
+    let mut list = projects(file, seed)?;
     let main = main_checkout(folder)?;
     if list.contains(&main) {
         return Err(format!("{main} is already a project"));
@@ -81,16 +85,24 @@ pub fn add_project(file: &Path, folder: &Path) -> Result<Vec<String>, String> {
 
 /// Takes `path` out of the projects in `file` and returns the new list. Only the entry goes: the
 /// repository's worktrees, branches and sessions are not touched.
-pub fn remove_project(file: &Path, path: &str) -> Result<Vec<String>, String> {
-    let mut list = projects(file, || None)?;
+pub fn remove_project(
+    file: &Path,
+    seed: impl FnOnce() -> Option<String>,
+    path: &str,
+) -> Result<Vec<String>, String> {
+    let mut list = projects(file, seed)?;
     list.retain(|project| project != path);
     write_projects(file, &list)?;
     Ok(list)
 }
 
 /// Writes the projects of `file` in `order`, which must hold the same projects, and returns the list.
-pub fn reorder_projects(file: &Path, order: Vec<String>) -> Result<Vec<String>, String> {
-    let mut have = projects(file, || None)?;
+pub fn reorder_projects(
+    file: &Path,
+    seed: impl FnOnce() -> Option<String>,
+    order: Vec<String>,
+) -> Result<Vec<String>, String> {
+    let mut have = projects(file, seed)?;
     let mut want = order.clone();
     have.sort();
     want.sort();
@@ -104,8 +116,12 @@ pub fn reorder_projects(file: &Path, order: Vec<String>) -> Result<Vec<String>, 
 /// The repositories to suggest as projects: the main checkout of each of `cwds`, newest first as given,
 /// each once, without those already in the projects of `file`. A folder that is gone or not in a
 /// repository is skipped.
-pub fn suggest_projects(file: &Path, cwds: &[String]) -> Result<Vec<String>, String> {
-    let listed = projects(file, || None)?;
+pub fn suggest_projects(
+    file: &Path,
+    seed: impl FnOnce() -> Option<String>,
+    cwds: &[String],
+) -> Result<Vec<String>, String> {
+    let listed = projects(file, seed)?;
     let mut found: Vec<String> = Vec::new();
     for cwd in cwds {
         if let Ok(main) = main_checkout(Path::new(cwd))

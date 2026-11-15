@@ -7,7 +7,19 @@ let loaded: Promise<string[]> | null = null;
 // The list once read, for the code that draws without waiting.
 let known: string[] = [];
 
-export const projects = (): Promise<string[]> => (loaded ??= invoke<string[]>("projects").then((paths) => (known = paths)));
+export const projects = (): Promise<string[]> => {
+  if (!loaded) {
+    const reading: Promise<string[]> = invoke<string[]>("projects").then(
+      (paths) => (known = paths),
+      (error) => {
+        if (loaded === reading) loaded = null;
+        throw error;
+      },
+    );
+    loaded = reading;
+  }
+  return loaded;
+};
 
 const listeners: (() => void)[] = [];
 // Runs `listener` each time the projects change.

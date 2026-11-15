@@ -4,6 +4,7 @@
 
 import { patch, pressable, text } from "./dom.js";
 import { childrenOf, deleting, item, row, showsLanded } from "./list.js";
+import { lastSegment } from "./workspaces.js";
 import { startLast } from "./picker.js";
 import type { Session } from "./types.js";
 
@@ -27,7 +28,7 @@ export type HomeProject = { name: string; path: string };
 
 // The projects Home offers: one per entry of `projects.json`, in its order.
 export function homeProjects(paths: string[]): HomeProject[] {
-  return paths.map((path) => ({ name: path.split("/").pop() || path, path }));
+  return paths.map((path) => ({ name: lastSegment(path) || path, path }));
 }
 
 // Whether a click on `target`, inside the session list, is on its empty space: not on a row, a group

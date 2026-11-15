@@ -270,15 +270,20 @@ export async function showBranches(from?: string) {
 // Adds the repository holding `folder` as a project (#98), at the end; a refusal, such as a folder git does not
 // recognise or a repository already listed, shows in the picker's box as the message it is.
 export async function addProject(folder: string) {
-  const picker = element("picker");
   try {
     setProjects(await invoke<string[]>("add_project", { folder }));
-    picker.hidden = true;
+    element("picker").hidden = true;
   } catch (e) {
-    picker.ariaLabel = "Add project";
-    picker.replaceChildren(text("p", String(e), "empty"));
-    picker.hidden = false;
+    refuse(e);
   }
+}
+
+// A refused add, remove or reorder of a project, as a message in the picker's box.
+export function refuse(error: unknown) {
+  const picker = element("picker");
+  picker.ariaLabel = "Add project";
+  picker.replaceChildren(text("p", String(error), "empty"));
+  picker.hidden = false;
 }
 
 // Add project (#98): the native folder dialog, and below it the repositories where listed sessions ran, newest

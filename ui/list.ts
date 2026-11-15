@@ -8,7 +8,7 @@ import { counts, times, type Time } from "./times.js";
 import { shortPaths } from "./paths.js";
 import { historyLink } from "./history.js";
 import { knownProjects, onProjects, projects, setProjects } from "./projects.js";
-import { addProject } from "./picker.js";
+import { addProject, refuse } from "./picker.js";
 import { projectGroups, foundWorkspaces, tokenOf, workspaceSection, type ProjectGroup } from "./workspaces.js";
 import { redrawHistory, redrawHome, showHistory } from "./panes.js";
 import { isSelected, select } from "./selection.js";
@@ -397,6 +397,23 @@ function strip(sessions: Session[]): HTMLElement[] {
 // The sessions the list shows: all but the ended ones, which are in History (#94).
 export const sidebarSessions = <T extends Pick<Session, "state">>(sessions: T[]): T[] => sessions.filter((session) => session.state !== "ended");
 
+// Whether a folder outside every project is in a git repository (#98), asked once each: only then its group offers
+// Add as project. Unknown until the answer comes, when the sidebar is drawn again.
+const repositories = new Map<string, boolean>();
+function repositoryOf(folder: string): boolean {
+  const known = repositories.get(folder);
+  if (known === undefined) {
+    repositories.set(folder, false);
+    invoke<string | null>("repository_of", { folder }).then((main) => {
+      if (main) {
+        repositories.set(folder, true);
+        drawSidebar();
+      }
+    }, () => {});
+  }
+  return known ?? false;
+}
+
 // A project's header (#97): its name and, even while folded, its most urgent state: needs you over running. The
 // header carries the project's own actions (#98): Remove, and Add as project on a folder outside every project; a
 // project's header is dragged to reorder the projects.
@@ -424,9 +441,9 @@ function projectHead(group: ProjectGroup<Session>): HTMLElement {
   };
   if (group.project) {
     act("×", "Remove project: its worktrees and branches stay", () => {
-      invoke<string[]>("remove_project", { project: group.key }).then(setProjects, (e) => console.warn(e));
+      invoke<string[]>("remove_project", { project: group.key }).then(setProjects, refuse);
     });
-  } else {
+  } else if (repositoryOf(group.key)) {
     act("Add as project", `Add ${group.key} as a project`, () => void addProject(group.key));
   }
   return head;
@@ -453,9 +470,11 @@ function dragProjects(groups: HTMLElement) {
     const box = head.getBoundingClientRect();
     const after = event.clientY > box.top + box.height / 2;
     const rest = knownProjects().filter((path) => path !== dragged);
-    rest.splice(rest.indexOf(over) + (after ? 1 : 0), 0, dragged);
+    const at = rest.indexOf(over);
+    if (at < 0) return;
+    rest.splice(at + (after ? 1 : 0), 0, dragged);
     dragged = null;
-    invoke<string[]>("reorder_projects", { order: rest }).then(setProjects, (e) => console.warn(e));
+    invoke<string[]>("reorder_projects", { order: rest }).then(setProjects, refuse);
   });
   groups.addEventListener("dragend", () => (dragged = null));
 }
@@ -502,10 +521,10 @@ function projectNode(group: ProjectGroup<Session>): HTMLElement {
 
 // The project groups (#97): one per project, in order, then one dimmed group for each folder outside every project.
 // Patched, not rebuilt, so focus and text selection survive the update (danielrispler/Falinks#570).
-let dragging = false;
+let listening = false;
 export function drawSidebar() {
-  if (!dragging) dragProjects(element("groups"));
-  dragging = true;
+  if (!listening) dragProjects(element("groups"));
+  listening = true;
   const paths = knownProjects();
   patch(element("groups"), projectGroups(paths, foundWorkspaces(), sidebarSessions(studio.listed)).map(projectNode));
 }
