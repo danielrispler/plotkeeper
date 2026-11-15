@@ -24,7 +24,7 @@ mod fingerprint;
 mod store;
 mod summary;
 mod week;
-pub use drift::{Drift, Versions, drift, dropped_events};
+pub use drift::{AGY_FIXTURE_VERSION, AgyVersions, Drift, Versions, drift, dropped_events};
 pub use fingerprint::{Fingerprints, backfilled, fingerprint_changes, worktree_root};
 pub use store::{
     Brief, CardStore, CheckResult, Guess, Level, Rating, Reason, Row, SessionCards, StoredCard,

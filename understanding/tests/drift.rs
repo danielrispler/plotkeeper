@@ -5,7 +5,7 @@
 use serde_json::json;
 use std::{fs, path::Path};
 use studio_core::Studio;
-use studio_understanding::{Versions, drift, dropped_events};
+use studio_understanding::{AgyVersions, Versions, drift, dropped_events};
 
 /// 2025-10-29, 13:20 UTC.
 const NOW: u64 = 1_761_744_000_000;
@@ -166,4 +166,40 @@ fn weekly_counts_the_events_the_hook_dropped_in_the_last_7_days() {
     fs::write(studio_hook::drops_file(&log), lines.join("\n") + "\n").unwrap();
 
     assert_eq!(dropped_events(&log, NOW), 2);
+}
+
+#[test]
+fn weekly_counts_what_the_agy_adapter_did_not_recognise() {
+    let at = NOW - DAY;
+    let line = |event: &str| {
+        json!({ "conversationId": "a1", "hookEventName": event, "studio_received_ms": at })
+            .to_string()
+    };
+    let studio = Studio::replayed([line("Teleport"), line("Teleport")]);
+    let data = tempfile::tempdir().unwrap();
+    let versions = Versions::beside(&data.path().join("events.jsonl"));
+
+    assert_eq!(
+        drift(&studio, &versions, NOW).to_string(),
+        "unrecognised wake-ups: 0\nunknown agy hook events: 2\n"
+    );
+}
+
+#[test]
+fn an_agy_version_equal_to_the_fixtures_gives_no_notice_and_a_different_one_gives_one() {
+    let data = tempfile::tempdir().unwrap();
+    let log = data.path().join("events.jsonl");
+    let versions = AgyVersions::beside(&log);
+
+    assert_eq!(versions.check("1.5.9", "1.5.9\n", NOW - DAY).unwrap(), None);
+    let notice = versions.check("1.6.0", "1.5.9\n", NOW).unwrap();
+    assert_eq!(
+        notice.as_deref(),
+        Some("agy is 1.6.0, the fixture was recorded with 1.5.9: re-record the agy fixture")
+    );
+    // Seen again, also after a restart: no second notice, no second line.
+    let reopened = AgyVersions::beside(&log);
+    assert_eq!(reopened.check("1.6.0", "1.5.9\n", NOW).unwrap(), None);
+    let kept = fs::read_to_string(data.path().join("agy-versions.txt")).unwrap();
+    assert_eq!(kept, format!("{} 1.5.9\n{NOW} 1.6.0\n", NOW - DAY));
 }

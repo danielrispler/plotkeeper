@@ -12,18 +12,22 @@ use std::{
     time::Duration,
 };
 
+mod agy;
 mod claude;
 mod event;
 mod transcript;
 mod work;
+pub use agy::{CAPABILITIES as AGY_CAPABILITIES, Drift as AgyDrift, DriftKind as AgyDriftKind};
 pub use claude::CAPABILITIES as CLAUDE_CAPABILITIES;
-pub use event::Capabilities;
-use event::{Event, Happened, Start, ToolKind};
+pub use event::{Capabilities, TranscriptFormat};
+use event::{Event, Happened, Origin, Start, ToolKind};
 pub use transcript::{Context, LogEntry, SubagentLog, Transcript};
 pub use work::{Estimate, MIN_HISTORY, Phase, PhaseStart, Work, range};
 
 #[derive(Default)]
 pub struct Studio {
+    /// The agy adapter, which keeps its conversations (`agy.rs`).
+    agy: agy::Adapter,
     sessions: HashMap<String, Session>,
     /// The session Daniel clicked last, which the session view shows.
     selected: Option<String>,
@@ -242,6 +246,11 @@ pub struct Session {
     pub transcript: Transcript,
     #[serde(skip)]
     transcript_file: transcript::TranscriptFile,
+    /// What its agent's adapter reports, which decides what its view shows (decision 4).
+    pub capabilities: Capabilities,
+    /// The model it runs at, where its agent's hooks say (agy's `modelName`); Claude's is in
+    /// `transcript.model`.
+    pub model: Option<String>,
     /// Its issue, PR and worktree, which name it unless Daniel renamed it (danielrispler/Falinks#461, decision 19).
     pub identity: Identity,
     /// Its work on its ticket: its kind, its phases and how long its agent worked (danielrispler/Falinks#461, decision
@@ -250,6 +259,10 @@ pub struct Session {
     /// A row of another agent than Claude Code, from its terminal's OSC 7501 status only (danielrispler/Falinks#560): it
     /// has no intention, card, brief, estimate or decisions. Its id is its terminal's.
     pub status_only: bool,
+    /// Its terminal's OSC 7501 state is `blocked`, for an agent that reports no permission or question of its own
+    /// (agy, decision 5): it needs Daniel, with no text.
+    #[serde(skip)]
+    terminal_blocked: bool,
     /// A status-only row's terminal `turn` at the last list (danielrispler/Falinks#560).
     #[serde(skip)]
     reported_turn: u64,
@@ -1003,6 +1016,14 @@ impl Session {
         self.resolve(|(_, agent)| ended(agent));
     }
 
+    /// The subagent a wake-up with no markup is taken to be from: the one that sent the latest
+    /// event, as its report is what wakes the session (its `Stop` may land after the wake-up);
+    /// empty when there is none.
+    fn woken_by(&self) -> String {
+        let last = self.agents.iter().max_by_key(|a| a.agent.last_event_at);
+        last.map(|a| a.agent.id.clone()).unwrap_or_default()
+    }
+
     /// Who sent `prompt`. A wake-up names a known task id of the session in markup the studio
     /// knows: `<agent-message from="…">` or `<task-id>…</task-id>`. A known id in other markup is
     /// drift, and one in plain text is Daniel's.
@@ -1205,7 +1226,7 @@ impl Session {
     }
 
     fn needs_you(&self) -> bool {
-        !self.blocks.is_empty()
+        !self.blocks.is_empty() || self.terminal_blocked
     }
 
     /// Its workers that failed: they ended with a status other than `completed`, such as `killed`.
@@ -1418,6 +1439,9 @@ pub enum Output {
     /// A session's first `Stop`: read Claude Code's version from its transcript, and nothing else
     /// (danielrispler/Falinks#369, decision 9).
     Version { transcript_path: String },
+    /// An agy session's first `Stop`: the shell runs `agy --version` (agy's payloads and transcript
+    /// carry no version) and compares it with the fixture's (#43, decision 14).
+    AgyVersion,
 }
 
 /// What the live app learned that the event log does not hold, which the card store keeps as it
@@ -1839,8 +1863,8 @@ impl Studio {
     /// with its own key: none, one, or at a wake-up also its workers' ends (danielrispler/Falinks#369, decisions 6, 8, 10
     /// and 11).
     pub fn fingerprint_folders(&self, line: &str) -> Vec<Fingerprint> {
-        let event = claude::parse(line);
-        let event = event.ok().filter(|e| {
+        let event = self.peek(line);
+        let event = event.filter(|e| {
             !e.has(|h| {
                 matches!(
                     h,
@@ -2107,9 +2131,36 @@ impl Studio {
         mut changes: BTreeMap<String, Change>,
         replay: bool,
     ) -> Vec<Output> {
-        let Ok(mut event) = claude::parse(line) else {
-            return Vec::new();
-        };
+        let events = self.events(line);
+        let mut outputs = Vec::new();
+        for event in events {
+            outputs.extend(self.take_event(event, &mut changes, replay));
+        }
+        outputs
+    }
+
+    /// The events of one log line: Claude's, or else agy's.
+    fn events(&mut self, line: &str) -> Vec<Event> {
+        match claude::parse(line) {
+            Ok(event) => vec![event],
+            Err(_) => self.agy.events(line).unwrap_or_default(),
+        }
+    }
+
+    /// The main event `line` would give, with agy's state left as it is.
+    fn peek(&self, line: &str) -> Option<Event> {
+        match claude::parse(line) {
+            Ok(event) => Some(event),
+            Err(_) => self.agy.peek(line),
+        }
+    }
+
+    fn take_event(
+        &mut self,
+        mut event: Event,
+        changes: &mut BTreeMap<String, Change>,
+        replay: bool,
+    ) -> Vec<Output> {
         let own_id = event.session_id.clone();
         event.session_id = self.row(&event);
         let continues = event.session_id != own_id && !self.rows.contains_key(&own_id);
@@ -2198,6 +2249,14 @@ impl Studio {
                 session.started_mode = Some(mode.into());
             }
         }
+        session.capabilities = event.capabilities;
+        if let Some(model) = event.model() {
+            session.model = Some(model.into());
+        }
+        if let Some(branch) = event.branch() {
+            session.transcript.branch = Some(branch.into());
+        }
+        session.transcript_file.format = event.capabilities.transcript_format;
         // The session Daniel started in a new terminal takes the selection, so the rail follows its pane.
         if self.awaiting.is_some() && session.terminal == self.awaiting {
             self.awaiting = None;
@@ -2254,6 +2313,7 @@ impl Studio {
                 .transcript_file
                 .path
                 .clone_from(&event.transcript_path);
+            session.transcript_file.format = event.capabilities.transcript_format;
             session.transcript = Transcript::default();
         }
         let failed = session.failed_workers().into_iter();
@@ -2375,8 +2435,12 @@ impl Studio {
         for happened in &event.happened {
             match happened {
                 // A prompt opens a wait, also after an interrupt, which fires no `Stop`.
-                Happened::TurnStart { prompt } => {
-                    let sender = session.sender(prompt);
+                Happened::TurnStart { prompt, origin } => {
+                    let sender = match origin {
+                        Some(Origin::Daniel) => Sender::Daniel,
+                        Some(Origin::WakeUp) => Sender::WakeUp(session.woken_by()),
+                        None => session.sender(prompt),
+                    };
                     let wake_up = !sender.is_daniels();
                     match &sender {
                         // The row says which worker returned until the session's next step.
@@ -2446,11 +2510,18 @@ impl Studio {
                         self.ended
                             .extend(session.backfill(&event.studio_turn_end, at));
                     }
-                    if !session.versioned && !event.transcript_path.is_empty() {
+                    if !session.versioned
+                        && event.capabilities.transcript_version
+                        && !event.transcript_path.is_empty()
+                    {
                         session.versioned = true;
                         outputs.push(Output::Version {
                             transcript_path: event.transcript_path.clone(),
                         });
+                    }
+                    if !replay && !session.versioned && !event.capabilities.transcript_version {
+                        session.versioned = true;
+                        outputs.push(Output::AgyVersion);
                     }
                     let reply = event.reply().trim();
                     if !replay && wants_summary(reply, session.needs_you()) {
@@ -2952,6 +3023,28 @@ impl Studio {
         running.map(revive).collect()
     }
 
+    /// Sets whether session `id`'s terminal reports it blocked, and moves its state with it.
+    fn terminal_blocks(&mut self, id: &str, blocked: bool) -> Option<Output> {
+        let session = self.sessions.get_mut(id)?;
+        if std::mem::replace(&mut session.terminal_blocked, blocked) == blocked || session.ended {
+            return None;
+        }
+        let before = session.state;
+        session.state = if session.needs_you() {
+            State::NeedsYou
+        } else if session.turn_ended {
+            State::YourTurn
+        } else {
+            State::Running
+        };
+        session.update_unseen();
+        session.work.estimate.depends_on_you = session.state == State::NeedsYou;
+        (before != State::NeedsYou && session.state == State::NeedsYou).then(|| Output::NeedsYou {
+            session_id: id.into(),
+            agent: None,
+        })
+    }
+
     /// The daemon's `list` at `now` (danielrispler/Falinks#560). A terminal that has not exited, whose program reports OSC
     /// 7501 and is not Claude Code, gets a status-only row named by its `app`, else its foreground
     /// program, and its folder; the row goes when the status clears or the terminal does. A Claude
@@ -2974,6 +3067,11 @@ impl Studio {
             let Some(id) = claude_on(&self.sessions, &t.id) else {
                 continue;
             };
+            // An agent with no permission hook of its own needs Daniel while its terminal says `blocked`.
+            if !self.sessions[&id].capabilities.asks {
+                outputs.extend(self.terminal_blocks(&id, *reported == "blocked"));
+                continue;
+            }
             let hook = self.sessions[&id].state;
             let hook_shown = if hook == State::Idle {
                 State::YourTurn
@@ -2992,6 +3090,21 @@ impl Studio {
             }
         }
         self.mismatched.retain(|id, _| disagreeing.contains(id));
+        // A terminal that is gone, or reports no state, no longer says `blocked`.
+        let silent: Vec<String> = self
+            .sessions
+            .iter()
+            .filter(|(_, s)| s.terminal_blocked)
+            .filter(|(_, s)| {
+                !reporting
+                    .iter()
+                    .any(|(t, _)| s.terminal.as_deref() == Some(&t.id))
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in silent {
+            outputs.extend(self.terminal_blocks(&id, false));
+        }
         // Everyone else's terminal: a status-only row.
         let mut rows = BTreeSet::new();
         let at_start = !std::mem::replace(&mut self.listed, true);
@@ -3109,6 +3222,11 @@ impl Studio {
             changed |= session.transcript != before;
         }
         changed
+    }
+
+    /// What the agy adapter did not recognise, for `weekly` (decisions 6 and 15).
+    pub fn agy_drift(&self) -> &[AgyDrift] {
+        &self.agy.drift
     }
 
     /// Whether summaries are written when Daniel opens a turn (`summaries.on_open` in the settings).

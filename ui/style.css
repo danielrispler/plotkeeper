@@ -213,6 +213,7 @@ body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; to
 .phase { color: var(--muted); font-size: var(--size-small); }
 /* The permission mode (danielrispler/Falinks#541): a safety fact, so it reads at a glance, before the phase. */
 .mode { font-size: var(--size-small); font-weight: 600; }
+.model { color: var(--muted); font-size: var(--size-small); }
 /* The "⋯" menu: Open, Rename, Close, Open all, Close all and Delete, under the button, over the story. */
 .menu { position: fixed; inset: auto; top: calc(var(--bar) + var(--sp-7) + var(--sp-5)); left: calc(var(--rail) - var(--menu) - var(--sp-5));
         width: var(--menu); margin: 0; border: 0; padding: var(--sp-3); background: var(--surface); color: var(--fg);

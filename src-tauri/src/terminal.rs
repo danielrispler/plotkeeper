@@ -281,6 +281,63 @@ pub fn fix_plugin_setup() -> Result<(), String> {
     std::fs::write(&profile, new).map_err(|e| format!("could not write {}: {e}", profile.display()))
 }
 
+/// Where `agy` is: a GUI app's `PATH` lacks Homebrew's, so the usual folders are tried too.
+fn agy_command(home: &Path) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    let mut dirs: Vec<PathBuf> = std::env::split_paths(&path).collect();
+    dirs.extend([
+        "/opt/homebrew/bin".into(),
+        "/usr/local/bin".into(),
+        home.join(".local/bin"),
+    ]);
+    dirs.into_iter()
+        .map(|d| d.join("agy"))
+        .find(|p| p.is_file())
+}
+
+/// The studio's agy plugin (#49) as `agy_plugin_setup` and its fix need it: agy's command, the
+/// shipped plugin, `studio-hook` through the data folder's `checkout` link (so a moved checkout keeps
+/// the installed copy current) and the home folder.
+fn agy_plugin_parts() -> Option<(PathBuf, PathBuf, PathBuf, PathBuf)> {
+    let home = std::env::home_dir()?;
+    let agy = agy_command(&home)?;
+    let hook = studio_hook::data_dir(&home).join("checkout/target/release/studio-hook");
+    Some((agy, checkout()?.join("plugin-agy"), hook, home))
+}
+
+/// At the window's start (#49): what is wrong with the studio's agy plugin, for the bar's "Install
+/// it". `None` when agy is not installed or the plugin's installed copy is current. agy copies a
+/// plugin on install, so a changed plugin or a moved `studio-hook` shows as stale.
+#[tauri::command(async)]
+pub fn agy_plugin_setup() -> Result<Option<String>, String> {
+    let Some((agy, source, hook, home)) = agy_plugin_parts() else {
+        return Ok(None);
+    };
+    use studio_workbench::agy_plugin::{Status, installed_is_valid, status};
+    let status = match status(&source, &hook, &home)? {
+        // A copy agy rejects does nothing, whatever it matches.
+        Status::Current if !installed_is_valid(&agy, &home) => Status::Stale,
+        other => other,
+    };
+    Ok(match status {
+        Status::Current => None,
+        Status::Missing => {
+            Some("agy sessions get no row: the studio plugin is not installed in agy.".into())
+        }
+        Status::Stale => Some(
+            "agy sessions may get no row: the studio plugin installed in agy is out of date."
+                .into(),
+        ),
+    })
+}
+
+/// "Install it" (#49): installs the studio's agy plugin, replacing an out-of-date copy.
+#[tauri::command(async)]
+pub fn fix_agy_plugin_setup() -> Result<(), String> {
+    let (agy, source, hook, home) = agy_plugin_parts().ok_or("agy was not found")?;
+    studio_workbench::agy_plugin::install(&agy, &source, &hook, &home)
+}
+
 /// Opens an `http(s)` URL Daniel clicked, in a terminal or a rendered reply, in the browser. A file
 /// goes through `open_file`.
 #[tauri::command]

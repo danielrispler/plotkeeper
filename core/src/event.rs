@@ -26,6 +26,8 @@ pub(crate) struct Event {
     pub studio_turn_start: BTreeMap<String, String>,
     /// The trees the hook recorded at the end of the turn this event ends, by root.
     pub studio_turn_end: BTreeMap<String, String>,
+    /// What the adapter that read the line reports.
+    pub capabilities: Capabilities,
     /// What happened, the line's main event first. A line the adapter does not know has none.
     pub happened: Vec<Happened>,
 }
@@ -38,6 +40,9 @@ pub(crate) enum Happened {
     /// A turn starts, by Daniel's prompt or a wake-up.
     TurnStart {
         prompt: String,
+        /// Where the turn came from, when the adapter can tell from the agent's own record. `None`
+        /// leaves it to the prompt's text, as Claude's wake-ups name a task the session knows.
+        origin: Option<Origin>,
     },
     /// A turn ends; `background_pending` when work goes on in the background.
     TurnEnd {
@@ -56,6 +61,10 @@ pub(crate) enum Happened {
     SubagentSpawned(Spawned),
     /// The subagent that sent the line ended.
     SubagentEnd,
+    /// The model the session runs at, as the agent last said.
+    Model(String),
+    /// The git branch of the session's workspace.
+    Branch(String),
 
     // Claude only.
     /// How a session started.
@@ -101,6 +110,13 @@ pub(crate) enum Happened {
         id: String,
         answer: Value,
     },
+}
+
+/// Where a turn came from, where an adapter can tell.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Origin {
+    Daniel,
+    WakeUp,
 }
 
 /// How a session started, where an agent says.
@@ -165,8 +181,10 @@ pub(crate) struct Spawned {
 }
 
 /// What an adapter reports, which decides what its sessions' views show (decision 4).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub struct Capabilities {
+    /// The agent's name, for its mark: `claude` or `agy`. Nothing in a view hides by it.
+    pub agent: &'static str,
     /// It reports a permission or a question that waits on Daniel, with its text.
     pub asks: bool,
     /// It names the tasks running in the background.
@@ -177,6 +195,19 @@ pub struct Capabilities {
     pub permission_mode: bool,
     /// It reports how long a call took.
     pub durations: bool,
+    /// Its transcript carries the agent's version.
+    pub transcript_version: bool,
+    /// How its transcript's lines read.
+    pub transcript_format: TranscriptFormat,
+}
+
+/// The record format of an agent's transcript.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TranscriptFormat {
+    #[default]
+    Claude,
+    Agy,
 }
 
 impl Event {
@@ -199,7 +230,7 @@ impl Event {
     /// The prompt of the turn it starts.
     pub fn prompt(&self) -> Option<&str> {
         self.find(|h| match h {
-            Happened::TurnStart { prompt } => Some(prompt.as_str()),
+            Happened::TurnStart { prompt, .. } => Some(prompt.as_str()),
             _ => None,
         })
     }
@@ -329,6 +360,20 @@ impl Event {
     pub fn permission_mode(&self) -> Option<&str> {
         self.find(|h| match h {
             Happened::PermissionMode(mode) => Some(mode.as_str()),
+            _ => None,
+        })
+    }
+
+    pub fn model(&self) -> Option<&str> {
+        self.find(|h| match h {
+            Happened::Model(model) => Some(model.as_str()),
+            _ => None,
+        })
+    }
+
+    pub fn branch(&self) -> Option<&str> {
+        self.find(|h| match h {
+            Happened::Branch(branch) => Some(branch.as_str()),
             _ => None,
         })
     }

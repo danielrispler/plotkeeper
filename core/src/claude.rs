@@ -2,18 +2,23 @@
 //! (danielrispler/plotkeeper#43, decisions 2 and 3). Claude's event names, tool names and markup
 //! stay here.
 
-use crate::event::{Capabilities, Event, Happened, Spawned, Start, Tool, ToolKind};
+use crate::event::{
+    Capabilities, Event, Happened, Spawned, Start, Tool, ToolKind, TranscriptFormat,
+};
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::BTreeMap;
 
 /// What Claude Code reports: everything the core reads today.
 pub const CAPABILITIES: Capabilities = Capabilities {
+    agent: "claude",
     asks: true,
     background_tasks: true,
     replies: true,
     permission_mode: true,
     durations: true,
+    transcript_version: true,
+    transcript_format: TranscriptFormat::Claude,
 };
 
 /// Tools that ask Daniel in any permission mode, before any `PermissionRequest`.
@@ -159,6 +164,7 @@ fn adapt(raw: Raw) -> Event {
         "UserPromptSubmit" => {
             happened.push(Happened::TurnStart {
                 prompt: raw.prompt.clone(),
+                origin: None,
             });
             let reported: Vec<(String, String)> = reported(&raw.prompt)
                 .map(|(id, status)| (id.into(), status.into()))
@@ -257,6 +263,7 @@ fn adapt(raw: Raw) -> Event {
         studio_terminal_id: raw.studio_terminal_id,
         studio_turn_start: raw.studio_turn_start,
         studio_turn_end: raw.studio_turn_end,
+        capabilities: CAPABILITIES,
         happened,
     }
 }
