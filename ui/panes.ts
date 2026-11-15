@@ -14,7 +14,7 @@ import type * as Xterm from "@xterm/xterm";
 import { connect, list, onEvent, request, type Listed } from "./daemon.js";
 import { drawHome } from "./home.js";
 import { element, invoke, pressable, text } from "./dom.js";
-import { showLog } from "./log.js";
+import { followLog, showLog } from "./log.js";
 import { type Box, paneBoxes } from "./layout.js";
 import { isPanel, panelTerm, showPanel, showPanelShell } from "./panel.js";
 import { offerBuilds, offerPluginFix, upgrade, type Revive } from "./restart.js";
@@ -282,7 +282,12 @@ export async function showSession(session: Session | null, clicked = false, agen
   element("terminal-head").hidden = session !== null || shown === HOME;
   const pane = panes.get(shown);
   if (pane) header(pane);
-  if (key === selected && !clicked) return;
+  if (key === selected && !clicked) {
+    // The shell re-sends the selection when a hook event about the subagent changed it: read its log on.
+    const subagent = agent && session?.agents.find((a) => a.id === agent);
+    if (session && subagent && shown === LOG) void followLog(box(LOG), session.id, subagent, () => void select(session.id));
+    return;
+  }
   selected = key;
   if (session) starting = null;
   const connected = await ready?.then(() => true, () => false);

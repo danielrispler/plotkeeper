@@ -49,3 +49,29 @@ test("the header's state is the core's status", () => {
   assert.equal(stateLabel("completed"), "done");
   assert.equal(stateLabel("killed"), "killed");
 });
+
+import { followsBottom, readOn } from "../../dist/log.js";
+
+test("the view follows the bottom only while it was at the bottom before the new entries", () => {
+  assert.equal(followsBottom({ scrollTop: 600, clientHeight: 400, scrollHeight: 1000 }), true);
+  assert.equal(followsBottom({ scrollTop: 598, clientHeight: 400, scrollHeight: 1000 }), true); // a pixel or two short
+  assert.equal(followsBottom({ scrollTop: 300, clientHeight: 400, scrollHeight: 1000 }), false);
+  assert.equal(followsBottom({ scrollTop: 0, clientHeight: 400, scrollHeight: 400 }), true); // nothing to scroll
+});
+
+test("reading on adds only the new entries; a running call takes its result when it arrives", () => {
+  const first = { session: "s", agent: "a", log: { entries: [{ kind: "prompt", text: "Go." }, call("c1")], offset: 10 } };
+  assert.deepEqual(logRows(first.log.entries)[1].result, null);
+  const next = readOn(first, { entries: [result("c1", "done"), { kind: "reply", text: "Ok." }], offset: 30 });
+  assert.equal(next.log.offset, 30);
+  assert.equal(next.log.entries.length, 4);
+  assert.deepEqual(logRows(next.log.entries).map((r) => r.kind), ["prompt", "call", "reply"]);
+  assert.equal(logRows(next.log.entries)[1].result.text, "done");
+});
+
+test("reading on finds a log that did not exist at first, and keeps what was shown when the log vanishes", () => {
+  const starting = { session: "s", agent: "a", log: null };
+  const found = readOn(starting, { entries: [{ kind: "prompt", text: "Go." }], offset: 5 });
+  assert.deepEqual(found.log, { entries: [{ kind: "prompt", text: "Go." }], offset: 5 });
+  assert.equal(readOn(found, null), found);
+});
