@@ -14,10 +14,11 @@ import type * as Xterm from "@xterm/xterm";
 import { connect, list, onEvent, request, type Listed } from "./daemon.js";
 import { drawHome } from "./home.js";
 import { element, invoke, pressable, text } from "./dom.js";
+import { showLog } from "./log.js";
 import { type Box, paneBoxes } from "./layout.js";
 import { isPanel, panelTerm, showPanel, showPanelShell } from "./panel.js";
 import { offerBuilds, offerPluginFix, upgrade, type Revive } from "./restart.js";
-import { show as showSelection } from "./selection.js";
+import { select, show as showSelection } from "./selection.js";
 import type { DoctorEntry } from "./settings.js";
 import { studio } from "./state.js";
 import { sessionName } from "./list.js";
@@ -262,10 +263,12 @@ export const resumesAuto = (session: Pick<Session, "started_mode">) => session.s
 
 // What the terminal shows for the selected session (danielrispler/Falinks#567): its own terminal while the daemon runs
 // it, else a message with "Open here", never the login shell, which may run another session. Home
-// shows while nothing is selected.
-export type PaneView = "home" | { terminal: string } | { message: string };
-export function paneView(session: Pick<Session, "terminal" | "state"> | null, running: boolean): PaneView {
+// shows while nothing is selected. A selected subagent has no terminal of its own: its log shows instead
+// (danielrispler/plotkeeper#54).
+export type PaneView = "home" | { terminal: string } | { message: string } | { log: string };
+export function paneView(session: Pick<Session, "terminal" | "state"> | null, running: boolean, agent: string | null = null): PaneView {
   if (!session) return "home";
+  if (agent) return { log: agent };
   if (session.terminal && running) return { terminal: session.terminal };
   return { message: session.state === "ended" ? "Ended. Open here resumes it." : "Runs in another terminal. Open here resumes it." };
 }
@@ -274,8 +277,8 @@ export function paneView(session: Pick<Session, "terminal" | "state"> | null, ru
 // the selection switch the pane only when the session, its terminal or its end changed, so they
 // never take away a pane Daniel just started.
 let selected: string | null = null;
-export async function showSession(session: Session | null, clicked = false) {
-  const key = session ? `${session.id} ${session.terminal ?? ""} ${session.state === "ended"}` : null;
+export async function showSession(session: Session | null, clicked = false, agent: string | null = null) {
+  const key = session ? `${session.id} ${session.terminal ?? ""} ${session.state === "ended"} ${agent ?? ""}` : null;
   element("terminal-head").hidden = session !== null || shown === HOME;
   const pane = panes.get(shown);
   if (pane) header(pane);
@@ -294,12 +297,21 @@ export async function showSession(session: Session | null, clicked = false) {
   }
   // A terminal of an earlier app run: attach when the daemon still runs it. Opening an exited or
   // unknown id would start a new program under it.
+  if (agent) {
+    const subagent = session.agents.find((a) => a.id === agent);
+    if (!subagent) return;
+    box(LOG).classList.add("pane");
+    show(LOG, () => null);
+    await showLog(box(LOG), session.id, subagent, () => void select(session.id));
+    return;
+  }
   const id = session.terminal;
   const own = id ? panes.get(id)?.term : null;
   const terminal = id && !own ? (await list()).find((t) => t.id === id && t.exited === null) : undefined;
   if (!current()) return;
   const view = paneView(session, Boolean(own || terminal));
   if (view === "home") return;
+  if ("log" in view) return;
   if ("terminal" in view) return show(view.terminal, () => openPane(box(view.terminal), view.terminal, terminal!.cwd, terminal!.argv));
   const resume = () => startClaude(session.cwd, session.resume_id, "", resumesAuto(session)).catch((e) => console.warn(e));
   box(ELSEWHERE).classList.add("elsewhere");
@@ -307,6 +319,7 @@ export async function showSession(session: Session | null, clicked = false) {
   show(ELSEWHERE, () => null);
 }
 const ELSEWHERE = "elsewhere";
+const LOG = "subagent-log";
 
 // A program that failed at start (danielrispler/Falinks#558), a session's, a Doctor entry's or a revived one: a toast names
 // the session, else the program, and the code, with "Show output", which shows its pane. When its pane

@@ -46,7 +46,7 @@ export async function select(id: string, agent: string | null = null) {
       document.body.classList.remove("list-open");
       show(selected);
       showCards(cards);
-      showSession(selected.session, true);
+      showSession(selected.session, true, selected.agent);
     }
   } catch (e) {
     if (studio.pending === pressed) {
@@ -91,6 +91,6 @@ export function show(selected: Selection | null) {
   showWorkspaces();
   showToast();
   showView(selected);
-  showSession(selected?.session ?? null);
+  showSession(selected?.session ?? null, false, selected?.agent ?? null);
   rewatch();
 }

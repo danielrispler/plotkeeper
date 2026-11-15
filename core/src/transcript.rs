@@ -264,3 +264,118 @@ impl TranscriptFile {
 }
 
 const GONE: &str = "the transcript file is gone";
+
+/// How many characters of a tool result a log entry keeps; the rest is marked as cut.
+const RESULT_CAP: usize = 4000;
+
+/// One entry of a subagent's log (danielrispler/plotkeeper#54).
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum LogEntry {
+    /// The task the subagent was given.
+    Prompt { text: String },
+    /// A text block of the subagent's own.
+    Reply { text: String },
+    /// A tool call: its id, the tool, and the one-line detail the rail's step line shows.
+    Call {
+        id: String,
+        tool: String,
+        detail: Option<String>,
+    },
+    /// The result of call `id`, capped at `RESULT_CAP` characters with `cut` set beyond that.
+    Result {
+        id: String,
+        text: String,
+        failed: bool,
+        cut: bool,
+    },
+}
+
+/// The entries of a subagent's log after an offset, and the offset they were read to.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct SubagentLog {
+    pub entries: Vec<LogEntry>,
+    /// The byte offset after the last complete line read: pass it back to read on.
+    pub offset: u64,
+}
+
+/// Reads the complete lines of the log at `path` from byte `from` that belong to subagent `agent`
+/// (by `agentId`, never `sessionId`), or `None` when the file is missing or is no `.jsonl`. A line
+/// that does not parse is skipped. `cwd` shortens the paths of the calls' details.
+pub(crate) fn read_subagent_log(
+    path: &Path,
+    agent: &str,
+    from: u64,
+    cwd: &str,
+) -> Option<SubagentLog> {
+    if path.extension().is_none_or(|e| e != "jsonl") {
+        return None;
+    }
+    let mut file = File::open(path).ok()?;
+    file.seek(SeekFrom::Start(from)).ok()?;
+    let mut reader = BufReader::new(file);
+    let (mut entries, mut offset, mut line) = (Vec::new(), from, Vec::new());
+    while reader.read_until(b'\n', &mut line).ok()? > 0 && line.ends_with(b"\n") {
+        offset += line.len() as u64;
+        if let Ok(value) = serde_json::from_slice::<Value>(&line)
+            && value["agentId"] == agent
+        {
+            log_entries(&value, cwd, &mut entries);
+        }
+        line.clear();
+    }
+    Some(SubagentLog { entries, offset })
+}
+
+fn log_entries(line: &Value, cwd: &str, entries: &mut Vec<LogEntry>) {
+    let kind = line["type"].as_str().unwrap_or_default();
+    if !matches!(kind, "user" | "assistant") || line["isMeta"] == true {
+        return;
+    }
+    let content = &line["message"]["content"];
+    if let Value::String(text) = content {
+        if kind == "user" {
+            entries.push(LogEntry::Prompt { text: text.clone() });
+        }
+        return;
+    }
+    for block in content.as_array().into_iter().flatten() {
+        let text = || {
+            block["text"]
+                .as_str()
+                .unwrap_or_default()
+                .trim()
+                .to_string()
+        };
+        match (kind, block["type"].as_str()) {
+            ("user", Some("text")) => entries.push(LogEntry::Prompt { text: text() }),
+            ("assistant", Some("text")) if !text().is_empty() => {
+                entries.push(LogEntry::Reply { text: text() });
+            }
+            ("assistant", Some("tool_use")) => entries.push(LogEntry::Call {
+                id: block["id"].as_str().unwrap_or_default().into(),
+                tool: block["name"].as_str().unwrap_or_default().into(),
+                detail: crate::step_detail(&block["input"], cwd),
+            }),
+            ("user", Some("tool_result")) => {
+                let full = match &block["content"] {
+                    Value::String(text) => text.clone(),
+                    Value::Array(parts) => parts
+                        .iter()
+                        .filter_map(|p| p["text"].as_str())
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                    _ => String::new(),
+                };
+                let cut = full.chars().count() > RESULT_CAP;
+                entries.push(LogEntry::Result {
+                    id: block["tool_use_id"].as_str().unwrap_or_default().into(),
+                    text: full.chars().take(RESULT_CAP).collect(),
+                    failed: block["is_error"] == true,
+                    cut,
+                });
+            }
+            _ => {}
+        }
+    }
+}
