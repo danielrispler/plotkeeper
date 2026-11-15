@@ -145,3 +145,97 @@ Options, not decisions. The studio today: one repository, a sorted live list, th
 - Zed's persistence page and DB path (404 on fetch).
 - Whether Conductor and Cursor surface attention across repos (no official text found).
 - Any tool guarding branch switch against a running agent (none found, which may only mean undocumented).
+
+## Round 2: adding, removing, labelling and ordering projects
+
+Taken as decided: several repos visible, live sessions on top with a project badge, a never-folded Projects section, a separate History view, a UI-owned `projects.json`, and a branch picker for the main checkout only. Same rules as above. Weak spots: Conductor, Superset and Cursor docs are thin here. Superset's detail comes from a third-party mirror. Most "unverified" cells below mean the official docs are silent, not that the feature is absent.
+
+### 6. Adding a project
+
+| Tool | Ways to add | Auto-add when a session starts in a folder? |
+| --- | --- | --- |
+| Vibe Kanban | Three ways when creating a workspace: recent repositories, "Browse repos on disk", "Create new repo on disk" ([creating](https://vibekanban.com/docs/workspaces/creating-workspaces.md)). Clone from URL: not on that page. | No. A workspace is made from a chosen repo. |
+| Conductor | "Open project" (local repo), "Open GitHub project", "Quick start" (new repo) ([first workspace](https://www.conductor.build/docs/first-workspace)). No generic Git URL found ([search result](https://www.conductor.build/docs/concepts/workflow)). | No. Sessions are created inside workspaces it made. |
+| claudecodeui | Auto-discovery: "all your existing sessions are discovered automatically" from `~/.claude` ([README](https://raw.githubusercontent.com/siteboon/claudecodeui/main/README.md)). Also a creation wizard with a folder browser and GitHub auth, and a clone service ([source tree](https://github.com/siteboon/claudecodeui/tree/main/src/modules/project-creation-wizard), [clone service](https://github.com/siteboon/claudecodeui/blob/main/server/modules/projects/services/project-clone.service.ts)). | Yes in effect: a session in any folder under Claude Code appears as a project. Whether that is a scan or a live hook: unverified. |
+| Cursor Agents Window | Pick a workspace in a selector; the staff-confirmed gap is that it cannot select worktrees made outside Cursor ([forum](https://forum.cursor.com/t/cursor-agents-workspace-selector-is-unhelpful/156600/4.md)). `cursor <dir>` should open the window there but "doesn't currently" ([same post](https://forum.cursor.com/t/cursor-agents-workspace-selector-is-unhelpful/156600/4.md)). Docs say only "multi-workspace" ([docs](https://cursor.com/docs/agent/agents-window)). | Unverified. |
+| Superset | "add a repository from your computer or clone one" ([README](https://github.com/superset-sh/superset)). A third-party mirror says Cmd+Shift+O opens an existing directory and "adds the project ... without creating a worktree" ([mirror](https://mintlify.wiki/superset-sh/superset/guides/workspace-management), unverified as official). | No. |
+| herdr | No project list. A space is named after its first terminal's repo or folder ([README](https://raw.githubusercontent.com/herdrdev/herdr-app/b721deda985270ec8256552692729a4add389b2a/README.md)). | Yes by design: a new terminal in a folder makes or joins a space ([guide](https://raw.githubusercontent.com/herdrdev/herdr-app/b721deda985270ec8256552692729a4add389b2a/defaults/AGENTS.md)). |
+| Zed | "Add Project" button, with recent projects, Add Local Folders and Add Remote Folder ([parallel agents](https://zed.dev/docs/ai/parallel-agents.md)). Open Recent, drag a folder in, `zed ~/project`, and `zed --add` "Add to the current window's threads sidebar" ([windows](https://zed.dev/docs/windows-and-projects.md)). | Opening a folder puts it in the sidebar. |
+
+Patterns worth adopting:
+1. **Folder browse plus a recents list as the main path.** Vibe Kanban, Conductor, Zed, Superset.
+2. **A CLI or drag-drop route into the same list.** Zed (`zed --add`, drag). Cheap for a user who lives in terminals.
+3. **Auto-add is a deliberate choice, not a default.** Only claudecodeui and herdr do it; the orchestrators that own worktrees all require an explicit add.
+4. **"Add" does not create a worktree.** Superset's mirror and Zed's folder open both add the project alone.
+
+### 7. Removing a project that has live sessions or worktrees
+
+| Tool | Behaviour |
+| --- | --- |
+| claudecodeui | Soft by default: `isArchived` is set on the project row, "hide from the active list; DB only". `force` deletes the session transcript files, session rows and the project row. Archived projects can be restored. No refusal for live sessions in the code read ([delete service](https://github.com/siteboon/claudecodeui/blob/main/server/modules/projects/services/project-delete.service.ts)). |
+| Superset | Deleting a workspace "runs teardown scripts, removes the worktree, and deletes workspace-specific data" (mirror, [workspace management](https://mintlify.wiki/superset-sh/superset/guides/workspace-management)). Removing a project: not found. |
+| Conductor | Docs describe archiving, not deleting. Archived workspaces are restorable "from the History pane ... including its chat history" ([workflow](https://www.conductor.build/docs/concepts/workflow)). Removing a repo: not found. |
+| Vibe Kanban | Repo removal not documented. Scripts run "when a workspace closes" ([settings](https://vibekanban.com/docs/settings/projects-repositories.md)). |
+| Zed | Project removal not documented. Archiving a worktree thread saves git state and deletes the checkout; running threads cannot be archived ([parallel agents](https://zed.dev/docs/ai/parallel-agents.md)). |
+| herdr | Closing the last tab closes the space, which "stays in `recent`"; asks for confirmation unless confirmed ([guide](https://raw.githubusercontent.com/herdrdev/herdr-app/b721deda985270ec8256552692729a4add389b2a/defaults/AGENTS.md)). |
+| Cursor | Unverified. |
+
+Finding: no tool documents refusing removal while sessions run. Two models appear: hide-but-keep (claudecodeui, Conductor, herdr) and destructive delete behind a confirm (Superset, claudecodeui force).
+
+Patterns worth adopting:
+1. **Remove means hide, with the record kept and restorable.** claudecodeui archive, Conductor History, herdr `recent`.
+2. **A hard delete is a separate, named action** that says what it deletes (claudecodeui `force`, Superset's teardown).
+3. **Archiving frees the worktree, keeps the transcript.** Zed, Conductor.
+4. **Refusing while something runs has Zed precedent** for archive ("running threads cannot be moved to history"), but not for project removal.
+
+### 8. Sessions in a folder that belongs to no added project
+
+- **claudecodeui:** moot; every folder becomes a project (README above).
+- **herdr:** moot; every folder gets a space. An unnamed space is named from the repo, else the folder, else `~` ([README](https://raw.githubusercontent.com/herdrdev/herdr-app/b721deda985270ec8256552692729a4add389b2a/README.md)).
+- **Zed:** every session is under a project; a worktree thread joins its main worktree's project ([parallel agents](https://zed.dev/docs/ai/parallel-agents.md)). The sidebar source also has a `ThreadEntryWorkspace::Closed { folder_paths, project_group_key }` case for threads whose workspace is not open ([sidebar.rs](https://raw.githubusercontent.com/zed-industries/zed/main/crates/sidebar/src/sidebar.rs)).
+- **Conductor, Vibe Kanban, Superset, Cursor:** sessions exist only inside a workspace they created, so the case does not arise. Cursor's staff reply says worktrees made outside it are not selectable ([forum](https://forum.cursor.com/t/cursor-agents-workspace-selector-is-unhelpful/156600/4.md)).
+- No tool documents an "Other" or "ungrouped" bucket.
+
+Patterns worth adopting:
+1. **Show it, never hide it.** Every tool that can see such a session lists it; none drops it.
+2. **Name it from its folder** (herdr: repo, else folder, else `~`).
+3. **Offer a one-click "add as project"** on that row. No tool documents it, so this is a gap, not a pattern.
+
+### 9. The per-row project badge
+
+- **Zed:** no per-row badge. The project is a group header, and rows show title, status icon and agent ([parallel agents](https://zed.dev/docs/ai/parallel-agents.md)). Search matches group labels, so typing the project name works ([sidebar.rs](https://raw.githubusercontent.com/zed-industries/zed/main/crates/sidebar/src/sidebar.rs)).
+- **Vibe Kanban:** the Repository Panel lists "Repository name" with a status indicator ([multi-repo](https://vibekanban.com/docs/workspaces/multi-repo-sessions.md)). Workspace rows: Pinned, Dev Server, PR Status badges ([interface](https://vibekanban.com/docs/workspaces/interface.md)).
+- **claudecodeui:** project `displayName` comes from `package.json` `name`, else the last folder segment ([source](https://github.com/siteboon/claudecodeui/blob/main/server/modules/projects/services/projects-with-sessions-fetch.service.ts)).
+- **Cursor:** the section is named after the repo; the selector shows paths that make "similarly-named directories" hard to tell apart ([forum](https://forum.cursor.com/t/cursor-agents-workspace-selector-is-unhelpful/156600/4.md)).
+- **herdr:** the space name is the label, sticky once renamed ([README](https://raw.githubusercontent.com/herdrdev/herdr-app/b721deda985270ec8256552692729a4add389b2a/README.md)).
+- **Conductor, Superset:** colour, initials or icon per repo: unverified.
+- **Colour per project setting:** none found in any tool.
+
+Patterns worth adopting:
+1. **Name text first.** Every documented example labels by name; none documents a colour or an icon.
+2. **Derive the display name, allow an override.** claudecodeui's `package.json` then folder name; herdr's sticky rename.
+3. **Disambiguate duplicates.** Cursor's path complaint is the failure to avoid when two repos share a folder name.
+
+### 10. Ordering projects
+
+| Tool | Order |
+| --- | --- |
+| claudecodeui | Has a star flag (`isStarred`) toggled per project ([star service](https://github.com/siteboon/claudecodeui/blob/main/server/modules/projects/services/project-star.service.ts)). Sort order itself: unverified. |
+| herdr | Local machine first, then machines by name; drag to reorder spaces within a machine ([guide](https://raw.githubusercontent.com/herdrdev/herdr-app/b721deda985270ec8256552692729a4add389b2a/defaults/AGENTS.md)). |
+| Conductor | Group by repo (0.35.2, title only). Pin keeps workspaces on top ([changelog](https://www.conductor.build/changelog)). Repo order: unverified. |
+| Vibe Kanban | Pinned workspaces "regardless of their last activity time" ([managing](https://vibekanban.com/docs/workspaces/managing-workspaces.md)). Project order: unverified. |
+| Zed | Threads newest first within a group ([sidebar.rs](https://raw.githubusercontent.com/zed-industries/zed/main/crates/sidebar/src/sidebar.rs)). Project order: not documented. |
+| Cursor, Superset | Unverified. |
+
+Patterns worth adopting:
+1. **Manual drag order that persists**, with new projects appended. herdr.
+2. **Pin or star to float a few to the top.** claudecodeui, Conductor, Vibe Kanban.
+3. **Recency inside a group, not between groups**, so the list does not jump. Zed.
+
+### Implications for the decided design
+
+- **Adding.** Folder dialog plus recents covers every tool. A palette or CLI add is a cheap second route. Auto-add on session start is rare (claudecodeui, herdr); the studio's section 8 case could instead show an "add project" action on the row.
+- **Removing.** Hide-and-keep fits `projects.json` and the never-lose-history stance. Refusal while sessions run has only archive precedent (Zed); the branch picker's "disabled while a session runs" has none.
+- **Unknown folders.** Needs its own decision: ungrouped row named from the folder, or auto-add. Both are unsupported by a documented precedent beyond herdr's naming rule.
+- **Badge.** Name text is the only documented form. Colour or initials would be new.
+- **Order.** Manual drag order stored in `projects.json` matches herdr and costs one array.
