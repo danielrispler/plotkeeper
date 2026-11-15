@@ -19,6 +19,7 @@ use std::{
 /// on a stop, no permission mode and no call durations; its transcript carries no version
 /// (`agy --version` does).
 pub const CAPABILITIES: Capabilities = Capabilities {
+    agent: "agy",
     asks: false,
     background_tasks: false,
     replies: false,

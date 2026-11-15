@@ -259,6 +259,10 @@ pub struct Session {
     /// A row of another agent than Claude Code, from its terminal's OSC 7501 status only (danielrispler/Falinks#560): it
     /// has no intention, card, brief, estimate or decisions. Its id is its terminal's.
     pub status_only: bool,
+    /// Its terminal's OSC 7501 state is `blocked`, for an agent that reports no permission or question of its own
+    /// (agy, decision 5): it needs Daniel, with no text.
+    #[serde(skip)]
+    terminal_blocked: bool,
     /// A status-only row's terminal `turn` at the last list (danielrispler/Falinks#560).
     #[serde(skip)]
     reported_turn: u64,
@@ -1222,7 +1226,7 @@ impl Session {
     }
 
     fn needs_you(&self) -> bool {
-        !self.blocks.is_empty()
+        !self.blocks.is_empty() || self.terminal_blocked
     }
 
     /// Its workers that failed: they ended with a status other than `completed`, such as `killed`.
@@ -3012,6 +3016,28 @@ impl Studio {
         running.map(revive).collect()
     }
 
+    /// Sets whether session `id`'s terminal reports it blocked, and moves its state with it.
+    fn terminal_blocks(&mut self, id: &str, blocked: bool) -> Option<Output> {
+        let session = self.sessions.get_mut(id)?;
+        if std::mem::replace(&mut session.terminal_blocked, blocked) == blocked || session.ended {
+            return None;
+        }
+        let before = session.state;
+        session.state = if session.needs_you() {
+            State::NeedsYou
+        } else if session.turn_ended {
+            State::YourTurn
+        } else {
+            State::Running
+        };
+        session.update_unseen();
+        session.work.estimate.depends_on_you = session.state == State::NeedsYou;
+        (before != State::NeedsYou && session.state == State::NeedsYou).then(|| Output::NeedsYou {
+            session_id: id.into(),
+            agent: None,
+        })
+    }
+
     /// The daemon's `list` at `now` (danielrispler/Falinks#560). A terminal that has not exited, whose program reports OSC
     /// 7501 and is not Claude Code, gets a status-only row named by its `app`, else its foreground
     /// program, and its folder; the row goes when the status clears or the terminal does. A Claude
@@ -3034,6 +3060,11 @@ impl Studio {
             let Some(id) = claude_on(&self.sessions, &t.id) else {
                 continue;
             };
+            // An agent with no permission hook of its own needs Daniel while its terminal says `blocked`.
+            if !self.sessions[&id].capabilities.asks {
+                outputs.extend(self.terminal_blocks(&id, *reported == "blocked"));
+                continue;
+            }
             let hook = self.sessions[&id].state;
             let hook_shown = if hook == State::Idle {
                 State::YourTurn
