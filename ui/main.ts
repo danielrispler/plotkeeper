@@ -15,7 +15,7 @@ import { showSessions } from "./list.js";
 import { goHome, select, show } from "./selection.js";
 import { dragPanel, placePanel, togglePanel } from "./panel.js";
 import { dragSplit, focusPane, placePanes, runDoctor, showHistory, split, startPanes, toggleSplit } from "./panes.js";
-import { showBranches, showPalette, showPicker } from "./picker.js";
+import { showAddProject, showBranches, showPalette, showPicker } from "./picker.js";
 import { fetchNow, showWorkspaces, watchWorkspaces } from "./workspaces.js";
 import { reload, type SettingsFiles, zoomed } from "./settings.js";
 import { studio } from "./state.js";
@@ -154,6 +154,8 @@ const actions: Actions = {
   "studio::NewTerminal": () => void showPicker("terminal"),
   // The main checkout's branch picker (#95).
   "studio::SwitchBranch": () => void showBranches(),
+  // Add project (#98): the folder dialog and the suggested repositories.
+  "studio::AddProject": () => void showAddProject(),
   // Home, in the terminal column: selects no session.
   "studio::JumpToUnseen": () => void go(newestUnseen(studio.listed)),
   "studio::GoHome": () => void goHome(),
@@ -235,6 +237,7 @@ startPanes().catch((e) => element("terminal-body").append(`No terminal: ${e}`));
 dragSplit();
 dragPanel();
 element("new-session").addEventListener("click", () => void showPicker());
+element("add-project").addEventListener("click", () => void showAddProject());
 element("new-terminal").addEventListener("click", () => void showPicker("terminal"));
 // A click on the session list's empty space selects none and shows Home.
 document.querySelector(".list")!.addEventListener("click", (event) => listSpace(event.target as HTMLElement) && void goHome());
@@ -246,7 +249,7 @@ element("needs-you").addEventListener("click", () => {
 // A click outside the picker, but not on its own buttons, closes it.
 document.addEventListener("pointerdown", (event) => {
   const target = event.target as Node;
-  const opener = ["new-session", "new-terminal"].some((id) => element(id).contains(target));
+  const opener = ["new-session", "new-terminal", "add-project"].some((id) => element(id).contains(target));
   if (!element("picker").contains(target) && !opener) element("picker").hidden = true;
 }, true); // capture: the terminal must not swallow it
 

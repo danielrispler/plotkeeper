@@ -9,6 +9,7 @@
 import { AGENT_NAMES, agentChoice, kept, type Kind, showsAuto } from "./agents.js";
 import { element, invoke, pressable, text } from "./dom.js";
 import type { Entry } from "./keys.js";
+import { setProjects } from "./projects.js";
 import { startAgent } from "./panes.js";
 import { shortPath } from "./paths.js";
 import { studio } from "./state.js";
@@ -264,4 +265,47 @@ export async function showBranches(from?: string) {
     picker.replaceChildren(text("p", `No branches: ${e}`, "empty"));
   }
   picker.hidden = false;
+}
+
+// Adds the repository holding `folder` as a project (#98), at the end; a refusal, such as a folder git does not
+// recognise or a repository already listed, shows in the picker's box as the message it is.
+export async function addProject(folder: string) {
+  const picker = element("picker");
+  try {
+    setProjects(await invoke<string[]>("add_project", { folder }));
+    picker.hidden = true;
+  } catch (e) {
+    picker.ariaLabel = "Add project";
+    picker.replaceChildren(text("p", String(e), "empty"));
+    picker.hidden = false;
+  }
+}
+
+// Add project (#98): the native folder dialog, and below it the repositories where listed sessions ran, newest
+// first, that are not projects yet. Opening it again closes it.
+export async function showAddProject() {
+  const picker = element("picker");
+  if (closed("Add project")) return;
+  const choose = pressable(text("button", "Choose folder…", "name"), false, () => {
+    invoke<string | null>("choose_folder")
+      .then((folder) => (folder ? addProject(folder) : undefined))
+      .catch(failed);
+  });
+  choose.classList.add("row");
+  picker.replaceChildren(choose);
+  picker.hidden = false;
+  try {
+    const cwds = [...studio.listed].sort((a, b) => b.last_event_at - a.last_event_at).map(({ cwd }) => cwd);
+    const suggested = await invoke<string[]>("suggest_projects", { cwds });
+    if (picker.hidden || picker.ariaLabel !== "Add project") return;
+    const rows = suggested.map((path) => {
+      const row = pressable(document.createElement("button"), false, () => void addProject(path));
+      row.classList.add("row");
+      row.append(text("span", shortPath(path), "name"));
+      return row;
+    });
+    picker.append(...(rows.length ? [text("p", "Repositories where sessions ran", "empty"), ...rows] : []));
+  } catch (e) {
+    failed(e);
+  }
 }

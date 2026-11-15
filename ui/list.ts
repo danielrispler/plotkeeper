@@ -3,11 +3,12 @@
 // a strip of glyphs and labels, which opens the full list on hover, on click or on ⌘1.
 
 import { agentMark } from "./capabilities.js";
-import { age, element, patch, prose, pressable, stepText, text } from "./dom.js";
+import { age, element, invoke, patch, prose, pressable, stepText, text } from "./dom.js";
 import { counts, times, type Time } from "./times.js";
 import { shortPaths } from "./paths.js";
 import { historyLink } from "./history.js";
-import { knownProjects, projects } from "./projects.js";
+import { knownProjects, onProjects, projects, setProjects } from "./projects.js";
+import { addProject } from "./picker.js";
 import { projectGroups, foundWorkspaces, tokenOf, workspaceSection, type ProjectGroup } from "./workspaces.js";
 import { redrawHistory, redrawHome, showHistory } from "./panes.js";
 import { isSelected, select } from "./selection.js";
@@ -397,11 +398,14 @@ function strip(sessions: Session[]): HTMLElement[] {
 export const sidebarSessions = <T extends Pick<Session, "state">>(sessions: T[]): T[] => sessions.filter((session) => session.state !== "ended");
 
 // A project's header (#97): its name and, even while folded, its most urgent state: needs you over running. The
-// header is where the project's own actions will go (#98).
+// header carries the project's own actions (#98): Remove, and Add as project on a folder outside every project; a
+// project's header is dragged to reorder the projects.
 function projectHead(group: ProjectGroup<Session>): HTMLElement {
   const head = document.createElement("div");
   head.className = "project-head";
-  head.dataset.key = "head";
+  head.dataset.key = `head ${group.key}`;
+  head.dataset.project = group.key;
+  head.draggable = group.project;
   const toggle = pressable(text("button", "", "project-toggle"), false, () => {
     if (!shut.delete(group.key)) shut.add(group.key);
     drawSidebar();
@@ -412,8 +416,50 @@ function projectHead(group: ProjectGroup<Session>): HTMLElement {
   toggle.append(text("span", group.name, "name"));
   if (group.rollup) toggle.append(glyph(group.rollup));
   head.append(toggle);
+  const act = (label: string, title: string, run: () => void) => {
+    const button = pressable(text("button", label, "project-action"), false, run);
+    button.removeAttribute("aria-pressed");
+    button.title = title;
+    head.append(button);
+  };
+  if (group.project) {
+    act("×", "Remove project: its worktrees and branches stay", () => {
+      invoke<string[]>("remove_project", { project: group.key }).then(setProjects, (e) => console.warn(e));
+    });
+  } else {
+    act("Add as project", `Add ${group.key} as a project`, () => void addProject(group.key));
+  }
   return head;
 }
+
+// Dragging a project's header onto another moves it before that one, or after it from the lower half of the target;
+// the order is written to `projects.json` and kept.
+function dragProjects(groups: HTMLElement) {
+  let dragged: string | null = null;
+  const target = (event: DragEvent) => (event.target as HTMLElement).closest<HTMLElement>(".project-head[draggable=true]");
+  groups.addEventListener("dragstart", (event) => {
+    const head = target(event);
+    dragged = head?.dataset.project ?? null;
+    if (head && event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+  });
+  groups.addEventListener("dragover", (event) => {
+    if (dragged && target(event)) event.preventDefault();
+  });
+  groups.addEventListener("drop", (event) => {
+    const head = target(event);
+    const over = head?.dataset.project;
+    if (!head || !over || !dragged || over === dragged) return;
+    event.preventDefault();
+    const box = head.getBoundingClientRect();
+    const after = event.clientY > box.top + box.height / 2;
+    const rest = knownProjects().filter((path) => path !== dragged);
+    rest.splice(rest.indexOf(over) + (after ? 1 : 0), 0, dragged);
+    dragged = null;
+    invoke<string[]>("reorder_projects", { order: rest }).then(setProjects, (e) => console.warn(e));
+  });
+  groups.addEventListener("dragend", () => (dragged = null));
+}
+onProjects(() => drawSidebar());
 
 // A project's group: its header, then, unless folded, its live sessions by state and its workspace rows. A group for a
 // folder outside every project is dimmed and has no workspaces.
@@ -456,7 +502,10 @@ function projectNode(group: ProjectGroup<Session>): HTMLElement {
 
 // The project groups (#97): one per project, in order, then one dimmed group for each folder outside every project.
 // Patched, not rebuilt, so focus and text selection survive the update (danielrispler/Falinks#570).
+let dragging = false;
 export function drawSidebar() {
+  if (!dragging) dragProjects(element("groups"));
+  dragging = true;
   const paths = knownProjects();
   patch(element("groups"), projectGroups(paths, foundWorkspaces(), sidebarSessions(studio.listed)).map(projectNode));
 }

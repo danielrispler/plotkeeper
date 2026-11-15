@@ -501,6 +501,7 @@ fn main() {
     tauri::Builder::default()
         // First, so a second instance exits before it sets anything up (danielrispler/Falinks#470).
         .plugin(tauri_plugin_single_instance::init(restart::second_instance))
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(
             tauri::plugin::Builder::<_, ()>::new("navigation")
@@ -538,6 +539,11 @@ fn main() {
             terminal::open_file,
             skills::skills,
             terminal::projects,
+            terminal::choose_folder,
+            terminal::add_project,
+            terminal::remove_project,
+            terminal::reorder_projects,
+            terminal::suggest_projects,
             terminal::workspaces,
             terminal::workspace_git_state,
             terminal::fetch_repository,

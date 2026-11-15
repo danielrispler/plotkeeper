@@ -15,7 +15,7 @@ import { connect, list, onEvent, request, type Listed } from "./daemon.js";
 import { drawHistory } from "./history.js";
 import { drawHome } from "./home.js";
 import { element, invoke, pressable, text } from "./dom.js";
-import { projects } from "./projects.js";
+import { onProjects, projects } from "./projects.js";
 import { followLog, showLog, showMissing } from "./log.js";
 import { type Box, paneBoxes } from "./layout.js";
 import { isPanel, panelTerm, showPanel, showPanelShell } from "./panel.js";
@@ -60,6 +60,12 @@ export function startPanes(): Promise<void> {
         showHome();
         revived = revive(config.outdated);
       });
+  });
+  onProjects(() => {
+    void projects().then((paths) => {
+      projectPaths = paths;
+      redrawHome();
+    });
   });
   window.addEventListener("start-failed", (e) => failedAtStart((e as CustomEvent).detail));
   onEvent((event) => {

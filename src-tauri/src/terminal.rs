@@ -141,6 +141,43 @@ pub fn projects() -> Result<Vec<String>, String> {
     })
 }
 
+fn projects_file() -> Result<PathBuf, String> {
+    let home = std::env::home_dir().ok_or("no home folder")?;
+    Ok(studio_hook::data_dir(&home).join("projects.json"))
+}
+
+/// Opens the native folder dialog; the folder Daniel picked, `None` when he cancelled (#98).
+#[tauri::command(async)]
+pub fn choose_folder(app: tauri::AppHandle) -> Option<String> {
+    use tauri_plugin_dialog::DialogExt;
+    let picked = app.dialog().file().blocking_pick_folder()?;
+    picked.into_path().ok().map(|p| p.display().to_string())
+}
+
+/// Adds the repository holding `folder`, as its main checkout, at the end of the projects (#98).
+#[tauri::command(async)]
+pub fn add_project(folder: String) -> Result<Vec<String>, String> {
+    studio_workbench::add_project(&projects_file()?, Path::new(&folder))
+}
+
+/// Takes a project out of the list; its worktrees, branches and sessions stay (#98).
+#[tauri::command(async)]
+pub fn remove_project(project: String) -> Result<Vec<String>, String> {
+    studio_workbench::remove_project(&projects_file()?, &project)
+}
+
+/// Writes the projects in a new order (#98).
+#[tauri::command(async)]
+pub fn reorder_projects(order: Vec<String>) -> Result<Vec<String>, String> {
+    studio_workbench::reorder_projects(&projects_file()?, order)
+}
+
+/// The repositories of `cwds`, newest first, that are not projects yet (#98).
+#[tauri::command(async)]
+pub fn suggest_projects(cwds: Vec<String>) -> Result<Vec<String>, String> {
+    studio_workbench::suggest_projects(&projects_file()?, &cwds)
+}
+
 /// A project's workspaces: its main checkout and its tasks, read live from git
 /// (danielrispler/Falinks#461, decision 8).
 #[tauri::command(async)]
