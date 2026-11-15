@@ -38,15 +38,17 @@ function say(message: string | null, actions: [string, () => void][] = []) {
 }
 
 // A rebuild, or a second instance of another build: sessions live in the daemon, so a restart keeps
-// them.
+// them. The offer is a button in the top bar, beside New session.
 export const offerBuilds = () =>
-  listen<string>("new-build", (exe) =>
-    say("A new build is ready.", [["Restart into it", () => invoke("restart_into", { exe })]]),
-  );
+  listen<string>("new-build", (exe) => {
+    const button = element("new-build");
+    button.hidden = false;
+    button.onclick = () => invoke("restart_into", { exe });
+  });
 
 // A profile that does not load the studio plugin (#21): sessions started outside the studio would get
 // no row. "Fix it" points its `CLAUDE_CODE_PLUGIN_DIRS` at the data folder's link, after a backup.
-// The bar is shared, so a build or upgrade offer already on it wins; a link that failed has no fix.
+// The bar is shared, so an upgrade offer already on it wins; a link that failed has no fix.
 export async function offerPluginFix() {
   const problem = await invoke<string | null>("plugin_setup").catch((e) => {
     if (element("restart").hidden) say(`${e}`, [["Dismiss", () => say(null)]]);
