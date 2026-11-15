@@ -92,6 +92,7 @@ const defaultKeymap: Keymap = {
     "cmd-]": "studio::NextSession",
     "cmd-[": "studio::PreviousSession",
     "cmd-j": "studio::NextNeedsYou",
+    "shift-cmd-u": "studio::JumpToUnseen",
     "1": ["studio::Answer", "1"],
     "2": ["studio::Answer", "2"],
     "3": ["studio::Answer", "3"],

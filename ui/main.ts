@@ -8,7 +8,7 @@ import { withWriterNotice } from "./writer-notice.js";
 import { startWatching } from "./answer.js";
 import { markShown, showCards } from "./cards.js";
 import { element, invoke, listen } from "./dom.js";
-import { type Actions, doctorEntries, nextNeedsYou, paletteEntries, run, stepSession, windowBinding } from "./keys.js";
+import { type Actions, doctorEntries, newestUnseen, nextNeedsYou, paletteEntries, run, stepSession, windowBinding } from "./keys.js";
 import { arrange, defaultWidths, type LayoutMode, railShown, resized, type Widths } from "./layout.js";
 import { listSpace } from "./home.js";
 import { showSessions } from "./list.js";
@@ -155,6 +155,7 @@ const actions: Actions = {
   // The main checkout's branch picker (#95).
   "studio::SwitchBranch": () => void showBranches(),
   // Home, in the terminal column: selects no session.
+  "studio::JumpToUnseen": () => void go(newestUnseen(studio.listed)),
   "studio::GoHome": () => void goHome(),
   // Fetches the repository now (#33); the workspaces' states follow.
   "studio::Fetch": () => void fetchNow(),
