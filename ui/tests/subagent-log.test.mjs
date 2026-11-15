@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { paneView } from "../../dist/panes.js";
-import { logNote, logRows, stateLabel } from "../../dist/log.js";
+import { callTitle, logNote, logRows, stateLabel } from "../../dist/log.js";
 
 const session = { terminal: "claude-a", state: "working" };
 
@@ -48,4 +48,9 @@ test("the header's state is the core's status", () => {
   assert.equal(stateLabel("running"), "running");
   assert.equal(stateLabel("completed"), "done");
   assert.equal(stateLabel("killed"), "killed");
+});
+
+test("a tool row reads `Tool · detail`, with no dot when there is no detail", () => {
+  assert.equal(callTitle({ tool: "Read", detail: "a.rs" }), "Read · a.rs");
+  assert.equal(callTitle({ tool: "Agent", detail: null }), "Agent");
 });

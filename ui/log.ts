@@ -40,11 +40,19 @@ export async function showLog(place: HTMLElement, session: string, agent: Subage
   drawLog(place, agent, log, toParent);
 }
 
+// A tool row's title: `Tool · detail`.
+export const callTitle = (call: { tool: string; detail: string | null }) => (call.detail ? `${call.tool} · ${call.detail}` : call.tool);
+
 function drawLog(place: HTMLElement, agent: Subagent, log: SubagentLog | null, toParent: () => void) {
   place.className = "pane subagent-log";
   const head = document.createElement("header");
-  const title = [agent.name, agent.agent_type, stateLabel(agent.status)].filter(Boolean).join(" · ");
-  head.append(text("span", title, "log-title"), pressable(text("button", "Parent's terminal"), false, toParent));
+  const state = text("span", stateLabel(agent.status), `log-state ${agent.status === "running" ? "running" : "done"}`);
+  head.append(
+    text("span", agent.name, "log-title"),
+    ...(agent.agent_type ? [text("span", agent.agent_type, "log-type")] : []),
+    state,
+    pressable(text("button", "Parent's terminal"), false, toParent),
+  );
   const note = logNote(log, agent.status);
   const body = note ? [text("p", note, "empty")] : logRows(log!.entries).map(drawRow);
   place.replaceChildren(head, ...body);
@@ -53,14 +61,12 @@ function drawLog(place: HTMLElement, agent: Subagent, log: SubagentLog | null, t
 function drawRow(row: LogRow): HTMLElement {
   if (row.kind === "prompt") return text("pre", row.text, "log-prompt");
   if (row.kind === "reply") return text("p", row.text, "log-reply");
-  const line = text("div", `${row.tool}${row.detail ? ` ${row.detail}` : ""}`, "log-call");
-  if (!row.result) {
-    line.classList.add("running");
-    return line;
-  }
-  const out = text("pre", row.result.text + (row.result.cut ? "\n… cut" : ""), row.result.failed ? "log-result failed" : "log-result");
-  const wrap = document.createElement("div");
-  wrap.append(line, out);
-  return wrap;
+  if (!row.result) return text("div", callTitle(row), "log-call running");
+  const { failed, text: out, cut } = row.result;
+  const fold = document.createElement("details");
+  fold.className = failed ? "log-call failed" : "log-call";
+  const summary = text("summary", callTitle(row));
+  if (failed) summary.append(text("span", "error", "log-error"));
+  fold.append(summary, text("pre", out + (cut ? "\n… cut" : ""), "log-result"));
+  return fold;
 }
-
