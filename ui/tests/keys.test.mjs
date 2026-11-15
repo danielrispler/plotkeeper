@@ -1,7 +1,7 @@
 // The terminal pane's key mapping (danielrispler/Falinks#466), run on the `tsc` output. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { bound, doctorEntries, keyAction, keyLabel, keystroke, nextNeedsYou, paletteEntries, run, stepSession, windowBinding } from "../../dist/keys.js";
+import { bound, doctorEntries, keyAction, keyLabel, keystroke, newestUnseen, nextNeedsYou, paletteEntries, run, stepSession, windowBinding } from "../../dist/keys.js";
 import { initial, reload } from "../../dist/settings.js";
 
 const key = (code, mods = {}, key = "") => ({
@@ -177,6 +177,20 @@ test("the next needs-you comes after the selected session, wrapping", () => {
   assert.equal(nextNeedsYou(sessions, "b"), "c");
   assert.equal(nextNeedsYou(sessions, null), "a");
   assert.equal(nextNeedsYou([{ id: "b", state: "running" }], "b"), null);
+});
+
+test("shift-cmd-u is bound by default and jumps to the newest unseen session, in any project", () => {
+  const binding = press("KeyU", { metaKey: true, shiftKey: true });
+  assert.equal(binding, "studio::JumpToUnseen");
+  assert.equal(press("KeyJ", { metaKey: true }), "studio::NextNeedsYou");
+  const listed = [
+    { id: "a", unseen: true, last_event_at: 5 },
+    { id: "b", unseen: true, last_event_at: 9 },
+    { id: "c", unseen: false, last_event_at: 20 },
+  ];
+  assert.equal(newestUnseen(listed), "b");
+  assert.equal(newestUnseen([listed[2]]), null);
+  assert.equal(newestUnseen([]), null);
 });
 
 test("with no needs-you, the next unseen comes after the selected session", () => {
