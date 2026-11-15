@@ -30,18 +30,52 @@ export const logNote = (log: SubagentLog | null, status: string): string | null 
 // The header's state: `running` or `done` (`completed`), else the core's own word, such as `killed`.
 export const stateLabel = (status: string) => (status === "completed" ? "done" : status);
 
-// The log being shown: whose, what was read, and the offset it was read to, for reading on.
-export const shownLog = { session: "", agent: "", entries: [] as LogEntry[], offset: 0 };
+// The log being shown: whose, and what has been read of it (null while it has no file), for reading on.
+export type ShownLog = { session: string; agent: string; log: SubagentLog | null };
+export const shownLog: ShownLog = { session: "", agent: "", log: null };
+
+// The shown log with a read from its offset added: only new entries, so a call's result pairs with it when it
+// arrives. A read that found no file changes nothing.
+export function readOn(shown: ShownLog, read: SubagentLog | null): ShownLog {
+  if (!read) return shown;
+  return { ...shown, log: { entries: [...(shown.log?.entries ?? []), ...read.entries], offset: read.offset } };
+}
+
+// Whether the view was at the bottom, so new entries take it along; a pixel or two short still counts.
+export const followsBottom = (v: { scrollTop: number; clientHeight: number; scrollHeight: number }) =>
+  v.scrollHeight - v.scrollTop - v.clientHeight <= 4;
 
 // Reads subagent `agent`'s log from the start and draws it in `place`. `toParent` shows the parent's terminal.
 export async function showLog(place: HTMLElement, session: string, agent: Subagent, toParent: () => void) {
+  expanded.clear();
+  const mine = { session, agent: agent.id, log: null as SubagentLog | null };
+  Object.assign(shownLog, mine);
   const log = await invoke<SubagentLog | null>("subagent_log", { session, agentId: agent.id, offset: 0 });
-  Object.assign(shownLog, { session, agent: agent.id, entries: log?.entries ?? [], offset: log?.offset ?? 0 });
-  drawLog(place, agent, log, toParent);
+  if (shownLog.session !== session || shownLog.agent !== agent.id || shownLog.log) return; // a newer selection took over
+  shownLog.log = log;
+  drawLog(place, agent, shownLog.log, toParent);
+}
+
+// Reads on from the offset when the shell re-sends the selection of the subagent shown, and draws it, following
+// the bottom only if the view was there.
+export async function followLog(place: HTMLElement, session: string, agent: Subagent, toParent: () => void) {
+  if (shownLog.session !== session || shownLog.agent !== agent.id) return;
+  const from = shownLog.log?.offset ?? 0;
+  const read = await invoke<SubagentLog | null>("subagent_log", { session, agentId: agent.id, offset: from });
+  // Another read or selection since: the offset moved, or it is another log.
+  if (shownLog.session !== session || shownLog.agent !== agent.id || (shownLog.log?.offset ?? 0) !== from) return;
+  if (!read) return;
+  const atBottom = followsBottom(place);
+  Object.assign(shownLog, readOn(shownLog, read));
+  drawLog(place, agent, shownLog.log, toParent);
+  if (atBottom) place.scrollTop = place.scrollHeight;
 }
 
 // A tool row's title: `Tool · detail`.
 export const callTitle = (call: { tool: string; detail: string | null }) => (call.detail ? `${call.tool} · ${call.detail}` : call.tool);
+
+// The calls whose rows are open, by id: a redraw (reading on) keeps each row as Daniel left it.
+const expanded = new Set<string>();
 
 function drawLog(place: HTMLElement, agent: Subagent, log: SubagentLog | null, toParent: () => void) {
   place.className = "pane subagent-log";
@@ -64,6 +98,8 @@ function drawRow(row: LogRow): HTMLElement {
   if (!row.result) return text("div", callTitle(row), "log-call running");
   const { failed, text: out, cut } = row.result;
   const fold = document.createElement("details");
+  fold.open = expanded.has(row.id);
+  fold.addEventListener("toggle", () => (fold.open ? expanded.add(row.id) : expanded.delete(row.id)));
   fold.className = failed ? "log-call failed" : "log-call";
   const summary = text("summary", callTitle(row));
   if (failed) summary.append(text("span", "error", "log-error"));
