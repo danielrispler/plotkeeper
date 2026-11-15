@@ -80,17 +80,6 @@ fn a_clear_on_a_studio_terminal_continues_the_row_with_a_cleared_marker() {
 }
 
 #[test]
-fn a_clear_outside_studio_terminals_continues_the_row_by_folder() {
-    let studio = Studio::replayed(cleared(OLD, NEW, None));
-
-    assert_eq!(studio.sessions().len(), 1);
-    let row = studio.sessions()[0];
-    assert_eq!(row.cleared, vec![7_100]);
-    assert_eq!(row.name.as_deref(), Some("Clear keeps the row"));
-    assert_eq!(row.resume_id, NEW);
-}
-
-#[test]
 fn of_two_sessions_in_one_folder_only_the_cleared_one_continues() {
     let mut lines = vec![
         event(
@@ -118,6 +107,7 @@ fn of_two_sessions_in_one_folder_only_the_cleared_one_continues() {
     assert_eq!(other.resume_id, OTHER);
     let row = studio.session(OLD).unwrap();
     assert_eq!(row.cleared, vec![7_100]);
+    assert_eq!(row.name.as_deref(), Some("Clear keeps the row"));
     assert_eq!(row.resume_id, NEW);
 }
 

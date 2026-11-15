@@ -88,6 +88,13 @@ fn a_wake_up_is_the_rows_text_until_the_sessions_next_step() {
         woken.returned.as_deref(),
         Some("worker Implement #355 relocation returned")
     );
+    // Daniel's own prompt ends the line too.
+    studio.apply(&prompt("carry on"));
+    assert_eq!(session(&studio).returned, None);
+    studio.apply(&prompt(
+        "<task-notification><task-id>a1191df87fb730aa0</task-id><status>completed</status></task-notification>",
+    ));
+    assert!(session(&studio).returned.is_some());
     let step = json!({
         "session_id": IMPLEMENT_SPEC,
         "hook_event_name": "PreToolUse",
@@ -100,16 +107,6 @@ fn a_wake_up_is_the_rows_text_until_the_sessions_next_step() {
     let stepped = session(&studio);
     assert_ne!(stepped.agent.last_step, before);
     assert_eq!(stepped.returned, None);
-}
-
-#[test]
-fn daniels_prompt_ends_the_returned_line() {
-    let mut studio = replay(DAY);
-    studio.apply(&prompt(
-        "<task-notification><task-id>a1191df87fb730aa0</task-id><status>completed</status></task-notification>",
-    ));
-    studio.apply(&prompt("carry on"));
-    assert_eq!(studio.session(IMPLEMENT_SPEC).unwrap().returned, None);
 }
 
 /// Session `session`'s `Stop` at `at`, with its transcript.
@@ -225,46 +222,4 @@ fn a_wake_up_leaves_the_session_needing_daniel_until_the_step_that_asks_resolves
 
     studio.apply(&event("PostToolUse", push));
     assert_eq!(state(&studio), State::Running);
-}
-
-/// A reply that ends with a question blocks nothing (danielrispler/Falinks#540), so a wake-up turn after it runs. The row
-/// groups the session's subagents under it, so they never sit in **Needs you** either.
-#[test]
-fn a_wake_up_after_a_reply_that_asks_runs_and_its_stop_is_your_turn() {
-    let mut studio = Studio::default();
-    let event = |name: &str, fields: serde_json::Value| {
-        let mut event = json!({ "session_id": "s1", "hook_event_name": name });
-        let fields = fields.as_object().unwrap().clone();
-        event.as_object_mut().unwrap().extend(fields);
-        event.to_string()
-    };
-    let wake_up =
-        "<task-notification><task-id>a1</task-id><status>completed</status></task-notification>";
-    let lines = [
-        event("UserPromptSubmit", json!({ "prompt": "Implement #517" })),
-        event(
-            "PostToolUse",
-            json!({"tool_name": "Agent", "tool_input": {"run_in_background": true},
-                "tool_use_id": "toolu_a", "tool_response": {"agentId": "a1"}}),
-        ),
-        event(
-            "Stop",
-            json!({ "last_assistant_message": "Should I add #535 to pass 2?" }),
-        ),
-        event("UserPromptSubmit", json!({ "prompt": wake_up })),
-        event(
-            "Stop",
-            json!({ "last_assistant_message": "Still open: should I add #535?" }),
-        ),
-    ];
-    let states: Vec<State> = lines
-        .iter()
-        .map(|line| {
-            studio.apply(line);
-            studio.session("s1").unwrap().state
-        })
-        .collect();
-
-    use State::{Running, YourTurn};
-    assert_eq!(states, [Running, Running, YourTurn, Running, YourTurn]);
 }

@@ -51,23 +51,6 @@ pub fn run_event(path: &Path, event: &tauri::RunEvent) {
 
 #[cfg(test)]
 mod tests {
-    use super::set;
-
-    #[test]
-    fn focus_creates_the_file_and_blur_deletes_it() {
-        let path = std::env::temp_dir().join(format!("studio-present-{}", std::process::id()));
-
-        set(&path, true);
-        assert!(path.exists());
-        set(&path, true);
-        assert!(path.exists());
-        set(&path, false);
-        assert!(!path.exists());
-        // At start, with no file left, deleting it is no error.
-        set(&path, false);
-        assert!(!path.exists());
-    }
-
     /// The shell's wiring: start deletes a file a crash left, focus creates it, blur and the app's
     /// exit delete it, and other events leave it.
     #[test]
@@ -80,8 +63,13 @@ mod tests {
         assert!(!path.exists());
         super::window_event(&path, &WindowEvent::Focused(true));
         assert!(path.exists());
+        super::window_event(&path, &WindowEvent::Focused(true));
+        assert!(path.exists());
         super::window_event(&path, &WindowEvent::Destroyed);
         assert!(path.exists());
+        super::window_event(&path, &WindowEvent::Focused(false));
+        assert!(!path.exists());
+        // With no file left, deleting it is no error.
         super::window_event(&path, &WindowEvent::Focused(false));
         assert!(!path.exists());
         super::window_event(&path, &WindowEvent::Focused(true));

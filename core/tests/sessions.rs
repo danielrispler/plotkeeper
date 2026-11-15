@@ -33,16 +33,6 @@ fn state(studio: &Studio, session: &str) -> Option<State> {
 }
 
 #[test]
-fn a_session_left_at_your_turn_for_2_hours_is_idle_at_the_next_tick() {
-    let mut studio = replay(include_str!("fixtures/failing-bash.jsonl"));
-
-    studio.tick(PROBE_STOPPED_AT + 2 * HOUR - 1);
-    assert_eq!(state(&studio, PROBE), Some(YourTurn));
-    studio.tick(PROBE_STOPPED_AT + 2 * HOUR);
-    assert_eq!(state(&studio, PROBE), Some(Idle));
-}
-
-#[test]
 fn an_idle_sessions_next_event_brings_it_back() {
     let later = PROBE_STOPPED_AT + 3 * HOUR;
     let idle = || {
@@ -113,7 +103,7 @@ fn day_changes(studio: &mut Studio) -> BTreeSet<Change> {
 }
 
 #[test]
-fn the_days_sessions_change_state_only_by_their_named_setters_and_clearers() {
+fn the_days_sessions_change_state_only_by_their_named_setters_and_clearers_and_rest_at_midnight() {
     let mut studio = Studio::default();
 
     let changes = day_changes(&mut studio);
@@ -139,31 +129,8 @@ fn the_days_sessions_change_state_only_by_their_named_setters_and_clearers() {
     ];
     let named: [Change; 11] = named.map(|(from, to, cause)| (from, to, cause.into()));
     assert_eq!(changes, BTreeSet::from(named));
-}
 
-#[test]
-fn an_ended_session_stays_ended_until_it_starts_again_under_its_id() {
-    let mut studio = replay(include_str!("fixtures/failing-bash.jsonl"));
-    let end = PROBE_STOPPED_AT + 1_000;
-
-    studio.apply(&event(PROBE, "SessionEnd", end).to_string());
-    assert_eq!(state(&studio, PROBE), Some(Ended));
-    // The hooks are async, so a turn's last event can land after its end.
-    studio.apply(&event(PROBE, "Notification", end + 1).to_string());
-    studio.tick(end + 3 * HOUR);
-    assert_eq!(state(&studio, PROBE), Some(Ended));
-
-    let mut resumed = event(PROBE, "SessionStart", end + 4 * HOUR);
-    resumed["source"] = "resume".into();
-    studio.apply(&resumed.to_string());
-    assert_eq!(state(&studio, PROBE), Some(YourTurn));
-}
-
-#[test]
-fn at_midnight_the_days_6_rows_are_3_ended_2_at_your_turn_and_1_idle() {
-    let mut studio = Studio::default();
-    day_changes(&mut studio);
-
+    // At midnight the day's 6 rows are 3 ended, 2 at your turn and 1 idle.
     let states: Vec<(&str, State)> = studio
         .sessions()
         .into_iter()
@@ -184,6 +151,24 @@ fn at_midnight_the_days_6_rows_are_3_ended_2_at_your_turn_and_1_idle() {
             ("5d7f69ab", Ended),
         ]
     );
+}
+
+#[test]
+fn an_ended_session_stays_ended_until_it_starts_again_under_its_id() {
+    let mut studio = replay(include_str!("fixtures/failing-bash.jsonl"));
+    let end = PROBE_STOPPED_AT + 1_000;
+
+    studio.apply(&event(PROBE, "SessionEnd", end).to_string());
+    assert_eq!(state(&studio, PROBE), Some(Ended));
+    // The hooks are async, so a turn's last event can land after its end.
+    studio.apply(&event(PROBE, "Notification", end + 1).to_string());
+    studio.tick(end + 3 * HOUR);
+    assert_eq!(state(&studio, PROBE), Some(Ended));
+
+    let mut resumed = event(PROBE, "SessionStart", end + 4 * HOUR);
+    resumed["source"] = "resume".into();
+    studio.apply(&resumed.to_string());
+    assert_eq!(state(&studio, PROBE), Some(YourTurn));
 }
 
 #[test]

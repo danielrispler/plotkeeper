@@ -410,7 +410,7 @@ fn a_folder_that_becomes_a_repository_is_fingerprinted_from_then_on() {
 /// danielrispler/Falinks#568: files the operating system writes are not the agent's work, so a turn that changed only
 /// them gets no card.
 #[test]
-fn changing_only_os_files_is_no_change() {
+fn changing_only_os_files_is_no_change_and_a_change_leaves_them_out_beside_it() {
     let (dir, mut prints) = repo();
 
     fs::write(dir.path().join(".DS_Store"), [0u8, 1, 2]).unwrap();
@@ -423,13 +423,8 @@ fn changing_only_os_files_is_no_change() {
     fs::write(dir.path().join(".Trashes/old"), "x\n").unwrap();
 
     assert_eq!(diff(&mut prints, dir.path()), None);
-}
 
-#[test]
-fn a_change_leaves_out_the_os_files_beside_it() {
-    let (dir, mut prints) = repo();
-
-    fs::write(dir.path().join(".DS_Store"), [0u8, 1, 2]).unwrap();
+    // A change leaves out the OS files beside it.
     fs::write(dir.path().join("lib.rs"), "fn a() {}\nfn b() {}\n").unwrap();
 
     let change = "--- a/lib.rs\n+++ b/lib.rs\n@@ -1 +1,2 @@\n fn a() {}\n+fn b() {}\n";
