@@ -314,7 +314,6 @@ body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
 .turn:not(:hover) > .ask-about:not([open]):not(:focus-within) { visibility: hidden; }
 .fold > summary { font-size: var(--size); color: var(--muted); cursor: pointer; }
 .fold .response { margin: var(--sp-4) 0 0; }
-.fold .learning { margin: var(--sp-4) 0 0; }
 /* Rendered Markdown (danielrispler/Falinks#525): responses and "ask about this" replies. */
 .markdown { font-size: var(--size-read); overflow-wrap: anywhere; }
 .markdown > :first-child { margin-top: 0; }

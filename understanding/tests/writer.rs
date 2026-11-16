@@ -153,9 +153,9 @@ const GOOD: &str = concat!(
     r#""not_checked": "לא נבדק אם הכרטיס עדיין נכנס בחלונית צרה.", "#,
     r#""architecture": "structural: none", "#,
     r#""quiz": {"text": "למה השינוי נוגע רק ב־`.unchecked`?", "options": ["#,
-    r#"{"text": "כי רק השורה הזו הייתה קטנה מדי לקריאה.", "why": "נכון: שאר הכרטיס כבר היה ב־`15px`."}, "#,
-    r#"{"text": "כי `.unchecked` קובע את גודל הגופן של כל הכרטיס.", "why": "לא: הכלל חל רק על השורה עצמה."}, "#,
-    r#"{"text": "כי גודל הגופן של הכרטיס בא מהגדרות המערכת.", "why": "לא: הגודל קבוע ב־`style.css`."}"#,
+    r#"{"text": "כי רק השורה הזו הייתה קטנה מדי לקריאה.", "why": "נכון: שאר הכרטיס כבר היה ב־`15px`.", "right": true}, "#,
+    r#"{"text": "כי `.unchecked` קובע את גודל הגופן של כל הכרטיס.", "why": "לא: הכלל חל רק על השורה עצמה.", "right": false}, "#,
+    r#"{"text": "כי גודל הגופן של הכרטיס בא מהגדרות המערכת.", "why": "לא: הגודל קבוע ב־`style.css`.", "right": false}"#,
     r#"], "key": 0}, "#,
     r#""brief": "הסשן מתקן את עיצוב הכרטיס.\nשורת „לא נבדק” גדלה ל־`15px`."}"#,
     "\n```\n",
@@ -300,6 +300,155 @@ fn a_quiz_with_no_key_or_one_that_does_not_parse_logs_one_line_and_the_card_has_
         assert!(line.contains(&edit().id), "{line}");
     }
 }
+
+/// `GOOD` with its three options' texts, reasons and marks replaced by `options`, the key its first.
+fn good_with(options: [(&str, &str, bool); 3]) -> String {
+    let quiz: Vec<_> = (options.iter())
+        .map(|(text, why, right)| serde_json::json!({ "text": text, "why": why, "right": right }))
+        .collect();
+    let start = GOOD.find(r#""options": ["#).unwrap();
+    let end = GOOD.find(r#"], "key": 0}"#).unwrap();
+    let options = serde_json::to_string(&quiz).unwrap();
+    format!(
+        "{}\"options\": {options}{}",
+        &GOOD[..start],
+        &GOOD[end + 1..]
+    )
+}
+
+#[test]
+fn a_quiz_that_breaks_a_rule_is_rejected_and_the_card_keeps_no_quiz() {
+    let ten = "one two three four five six seven eight nine ten";
+    let eleven = "one two three four five six seven eight nine ten eleven";
+    // An option of 10 words passes.
+    assert!(
+        Card::from_reply(&good_with([
+            ("b", "Why.", true),
+            (ten, "No.", false),
+            ("c", "No.", false)
+        ]))
+        .unwrap()
+        .1
+        .is_none()
+    );
+    let broken = [
+        // An option of 11 words.
+        good_with([
+            ("short", "Why.", true),
+            (eleven, "No.", false),
+            ("b", "No.", false),
+        ]),
+        // The key is the longest option.
+        good_with([
+            ("a long right option", "Why.", true),
+            ("b", "No.", false),
+            ("c", "No.", false),
+        ]),
+        // The key is not the option marked right.
+        good_with([
+            ("a", "Why.", false),
+            ("bbb", "No.", true),
+            ("cc", "No.", false),
+        ]),
+        // Two options marked right.
+        good_with([
+            ("a", "Why.", true),
+            ("bbb", "Yes.", true),
+            ("cc", "No.", false),
+        ]),
+        // No option marked right.
+        good_with([
+            ("a", "Why.", false),
+            ("bbb", "No.", false),
+            ("cc", "No.", false),
+        ]),
+        // A missing reason.
+        good_with([
+            ("a", "Why.", true),
+            ("bbb", "", false),
+            ("cc", "No.", false),
+        ]),
+        // A missing mark.
+        GOOD.replace(r#", "right": false"#, ""),
+    ];
+    for reply in broken {
+        let (card, problem) = Card::from_reply(&reply).unwrap();
+        assert_eq!(card.quiz, None, "{reply}");
+        assert!(problem.is_some(), "{reply}");
+    }
+}
+
+/// A fake writer that gives `replies` in turn, the last again and again, and counts its calls.
+struct CardSequence {
+    replies: Vec<String>,
+    calls: Cell<usize>,
+}
+
+impl CardWriter for CardSequence {
+    fn reply(&self, _: &CardRequest, _: &[String], _: &str) -> Result<String, String> {
+        let at = self.calls.get().min(self.replies.len() - 1);
+        self.calls.set(self.calls.get() + 1);
+        Ok(self.replies[at].clone())
+    }
+    fn more(&self, request: &CardRequest, card: &Card) -> Result<String, String> {
+        FakeWriter.more(request, card)
+    }
+    fn rewrite(&self, a: &[&str], b: &[String], c: &str) -> Result<String, String> {
+        FakeWriter.rewrite(a, b, c)
+    }
+    fn update(&self, a: &str, b: &str) -> Result<String, String> {
+        FakeWriter.update(a, b)
+    }
+}
+
+#[test]
+fn a_rejected_quiz_is_asked_for_once_more_and_the_second_rejection_leaves_the_card_with_none() {
+    let longest = good_with([
+        ("a long right option", "Why.", true),
+        ("b", "No.", false),
+        ("c", "No.", false),
+    ]);
+
+    // The second reply is good: its quiz stands.
+    let writer = CardSequence {
+        replies: vec![longest.clone(), GOOD.into()],
+        calls: Cell::new(0),
+    };
+    let (card, brief) = write_card(&writer, &edit(), &[], "", |l| panic!("{l}")).unwrap();
+    assert_eq!(sorted(card), good_card());
+    assert_eq!((writer.calls.get(), brief.is_some()), (2, true));
+
+    // Both are rejected: the card is kept with no quiz, after two calls and no more.
+    let writer = CardSequence {
+        replies: vec![longest],
+        calls: Cell::new(0),
+    };
+    let mut lines = Vec::new();
+    let (card, _) = write_card(&writer, &edit(), &[], "", |l| lines.push(l)).unwrap();
+    assert_eq!(card.quiz, None);
+    assert_eq!(writer.calls.get(), 2);
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(lines[0].contains("longest"), "{lines:?}");
+}
+
+#[test]
+fn the_card_prompt_carries_the_quiz_rules() {
+    let folder = Path::new("/card-writer");
+    let (_, prompt) = ClaudeWriter::new(CLAUDE.into(), folder.into()).command(&edit(), &[], "");
+    for rule in RULES {
+        assert!(prompt.contains(rule), "{rule}: {prompt}");
+    }
+}
+
+/// What both writers' prompts say of the Quiz (`docs/studio/question-rules.md`).
+const RULES: [&str; 6] = [
+    "why this design over the alternative",
+    "cannot be answered from",
+    "the alternative that was considered, the previous behaviour, or a common wrong model",
+    "at most 10 words",
+    "the right option is never the longest",
+    "exactly one option is right",
+];
 
 #[test]
 fn the_real_writer_runs_claude_on_the_subscription_in_its_neutral_folder() {
@@ -684,10 +833,9 @@ fn setup() -> SummarySetup {
     }
 }
 
-/// A summary reply whose learning section's options are `options`, the first the key.
+/// A summary reply whose Quiz's options are `options`, the first the key and right.
 fn summary_reply(summary: &str, options: [&str; 3]) -> String {
-    let option =
-        |text: &str| serde_json::json!({ "text": text, "why": format!("Because of {text}.") });
+    let option = |(i, text): (usize, &str)| serde_json::json!({ "text": text, "why": format!("Because of {text}."), "right": i == 0 });
     let mut lines = summary.lines();
     let headline = lines.next().unwrap_or_default();
     let lines: Vec<_> = lines
@@ -696,13 +844,10 @@ fn summary_reply(summary: &str, options: [&str; 3]) -> String {
     serde_json::json!({
         "headline": headline,
         "lines": lines,
-        "learning": {
-            "idea": "A stack matches nested brackets.",
-            "question": {
-                "text": "Why a stack?",
-                "options": options.map(option),
-                "key": 0,
-            },
+        "quiz": {
+            "text": "Why a stack?",
+            "options": options.into_iter().enumerate().map(option).collect::<Vec<_>>(),
+            "key": 0,
         },
     })
     .to_string()
@@ -736,12 +881,11 @@ fn the_summary_call_runs_in_safe_mode_with_the_settings_model_effort_and_its_own
     // The answer stays out of the options (danielrispler/Falinks#517, decision 14).
     assert!(s.contains("Never mark the right option"), "{s}");
     // The question tests understanding, and only when the turn has something to teach (danielrispler/Falinks#583).
-    for rule in [
-        "why something works or how a mechanism behaves",
-        "a mistake a developer could really make",
-        "keeps its bound or condition",
-        r#""learning": null"#,
-    ] {
+    for rule in ["keeps its bound or condition", r#""quiz": null"#] {
+        assert!(s.contains(rule), "{rule}: {s}");
+    }
+    // The same rules as the card's (`docs/studio/question-rules.md`).
+    for rule in RULES {
         assert!(s.contains(rule), "{rule}: {s}");
     }
     assert!(input.contains("Explain the parser"));
@@ -858,7 +1002,7 @@ fn the_summary_input_holds_the_sessions_last_3_summaries_and_their_questions() {
 }
 
 #[test]
-fn a_summary_reply_gives_the_summary_and_the_learning_section() {
+fn a_summary_reply_gives_the_summary_and_the_quiz() {
     let dir = tempfile::tempdir().unwrap();
     let store = summaries(dir.path());
     let writer = recording(summary_reply(
@@ -873,66 +1017,172 @@ fn a_summary_reply_gives_the_summary_and_the_learning_section() {
     let summary = write_summary(&store, &writer, &setup(), turn("s", 1), |_| {}).unwrap();
 
     assert_eq!(summary.summary, "Rewrote the parser.\nIt keeps a stack.");
-    let learning = summary.learning.expect("a learning section");
-    assert_eq!(learning.idea, "A stack matches nested brackets.");
-    assert_eq!(learning.question.text, "Why a stack?");
-    let key = &learning.question.options[learning.question.key];
-    assert_eq!(key.text, "It matches nesting.");
+    let quiz = summary.quiz.expect("a quiz");
+    assert_eq!(quiz.text, "Why a stack?");
+    assert_eq!(quiz.options[quiz.key].text, "It matches nesting.");
 }
 
 #[test]
-fn a_reply_with_a_null_learning_section_gives_the_summary_alone_and_logs_nothing() {
+fn a_reply_with_a_null_quiz_gives_the_summary_alone_and_logs_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let store = summaries(dir.path());
-    let writer = recording(r#"{"headline": "Merged the lanes.", "learning": null}"#.into());
+    let writer = recording(r#"{"headline": "Merged the lanes.", "quiz": null}"#.into());
     let mut lines = Vec::new();
 
     let summary = write_summary(&store, &writer, &setup(), turn("s", 1), |l| lines.push(l));
 
-    assert_eq!(summary.unwrap().learning, None);
+    assert_eq!(summary.unwrap().quiz, None);
     assert_eq!(lines, Vec::<String>::new());
     assert_eq!(writer.inputs.lock().unwrap().len(), 1, "no retry");
 }
 
+/// A summary reply whose Quiz is `options`, each `(text, why, right)`, with key `key`.
+fn quiz_reply(options: &[(&str, &str, bool)], key: usize) -> String {
+    let options: Vec<_> = (options.iter())
+        .map(|(text, why, right)| serde_json::json!({ "text": text, "why": why, "right": right }))
+        .collect();
+    serde_json::json!({
+        "headline": "Rewrote the parser.",
+        "lines": [],
+        "quiz": { "text": "Why a stack?", "options": options, "key": key },
+    })
+    .to_string()
+}
+
+const ELEVEN: &str = "one two three four five six seven eight nine ten eleven";
+
 #[test]
-fn a_reply_whose_key_is_much_longer_than_its_wrong_options_is_asked_once_more() {
-    let dir = tempfile::tempdir().unwrap();
-    let store = summaries(dir.path());
-    // The lengths of a real guessable reply (danielrispler/Falinks#583): a key of 100 characters, the longest wrong 77.
-    let writer = recording(summary_reply(
-        "Rewrote the parser.",
-        [&"k".repeat(100), &"w".repeat(77), &"w".repeat(66)],
-    ));
-    let mut lines = Vec::new();
+fn a_reply_that_breaks_a_quiz_rule_is_asked_once_more_and_the_second_rejection_leaves_no_quiz() {
+    let broken = [
+        // An option of 11 words.
+        quiz_reply(
+            &[
+                ("a", "Why.", true),
+                (ELEVEN, "No.", false),
+                ("c", "No.", false),
+            ],
+            0,
+        ),
+        // The key is the longest option.
+        quiz_reply(
+            &[
+                ("The longest", "Why.", true),
+                ("b", "No.", false),
+                ("c", "No.", false),
+            ],
+            0,
+        ),
+        // The key is not the option marked right.
+        quiz_reply(
+            &[
+                ("a", "Why.", false),
+                ("bbb", "No.", true),
+                ("cc", "No.", false),
+            ],
+            0,
+        ),
+        // Two options marked right.
+        quiz_reply(
+            &[
+                ("a", "Why.", true),
+                ("bbb", "Yes.", true),
+                ("cc", "No.", false),
+            ],
+            0,
+        ),
+        // A missing reason.
+        quiz_reply(
+            &[
+                ("a", "Why.", true),
+                ("bbb", " ", false),
+                ("cc", "No.", false),
+            ],
+            0,
+        ),
+        // A missing mark.
+        quiz_reply(
+            &[
+                ("a", "Why.", true),
+                ("bbb", "No.", false),
+                ("cc", "No.", false),
+            ],
+            0,
+        )
+        .replace(r#""right":false,"#, ""),
+    ];
+    for reply in broken {
+        let dir = tempfile::tempdir().unwrap();
+        let store = summaries(dir.path());
+        let writer = recording(reply.clone());
+        let mut lines = Vec::new();
 
-    let summary = write_summary(&store, &writer, &setup(), turn("s", 1), |l| lines.push(l));
+        let summary = write_summary(&store, &writer, &setup(), turn("s", 1), |l| lines.push(l));
 
-    let summary = summary.unwrap();
-    assert_eq!(summary.summary, "Rewrote the parser.");
-    assert_eq!(summary.learning, None);
-    assert_eq!(writer.inputs.lock().unwrap().len(), 2, "asked once more");
-    assert_eq!(lines.len(), 1, "{lines:?}");
-    assert!(lines[0].contains("s@1"), "{lines:?}");
+        let summary = summary.unwrap();
+        assert_eq!(summary.summary, "Rewrote the parser.", "{reply}");
+        assert_eq!(summary.quiz, None, "{reply}");
+        assert_eq!(
+            writer.inputs.lock().unwrap().len(),
+            2,
+            "asked once more: {reply}"
+        );
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(lines[0].contains("s@1"), "{lines:?}");
+    }
 }
 
 #[test]
-fn a_reply_whose_options_are_of_similar_length_passes_on_the_first_call() {
-    let dir = tempfile::tempdir().unwrap();
-    let store = summaries(dir.path());
-    // A real reply whose key is the shortest (danielrispler/Falinks#583): 97 characters, the wrong ones up to 114.
-    let writer = recording(summary_reply(
-        "Rewrote the parser.",
-        [&"k".repeat(97), &"w".repeat(114), &"w".repeat(101)],
-    ));
+fn a_rejected_quiz_gives_one_on_the_second_reply_when_that_one_is_good() {
+    let longest = quiz_reply(
+        &[
+            ("The longest", "Why.", true),
+            ("b", "No.", false),
+            ("c", "No.", false),
+        ],
+        0,
+    );
+    let good = summary_reply("Rewrote the parser.", ["a", "bb", "cc"]);
 
-    let summary = write_summary(&store, &writer, &setup(), turn("s", 1), |_| {}).unwrap();
+    let (summary, inputs) = written_by(turn("s", 1), &[longest, good]);
 
-    assert!(summary.learning.is_some());
-    assert_eq!(writer.inputs.lock().unwrap().len(), 1);
+    assert!(summary.quiz.is_some());
+    assert_eq!(inputs.len(), 2);
 }
 
 #[test]
-fn a_reply_with_no_learning_field_gives_the_summary_alone_and_logs_why() {
+fn an_option_of_ten_words_and_a_key_that_is_not_the_longest_pass_on_the_first_call() {
+    let ten = "one two three four five six seven eight nine ten";
+    for options in [
+        [
+            ("a", "Why.", true),
+            (ten, "No.", false),
+            ("c", "No.", false),
+        ],
+        [
+            ("O(n)", "Why.", true),
+            ("O(n log n)", "No.", false),
+            ("O(1)", "No.", false),
+        ],
+        // Equal lengths: the key is not longer than the others.
+        [
+            ("aa", "Why.", true),
+            ("bb", "No.", false),
+            ("cc", "No.", false),
+        ],
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let store = summaries(dir.path());
+        let writer = recording(quiz_reply(&options, 0));
+
+        let summary = write_summary(&store, &writer, &setup(), turn("s", 1), |_| {}).unwrap();
+
+        assert!(summary.quiz.is_some(), "{options:?}");
+        assert_eq!(writer.inputs.lock().unwrap().len(), 1, "{options:?}");
+    }
+}
+
+#[test]
+fn a_reply_with_no_quiz_field_gives_the_summary_alone_and_logs_why() {
     let dir = tempfile::tempdir().unwrap();
     let store = summaries(dir.path());
     let writer = recording(r#"{"headline": "Rewrote the parser."}"#.into());
@@ -940,26 +1190,25 @@ fn a_reply_with_no_learning_field_gives_the_summary_alone_and_logs_why() {
 
     let summary = write_summary(&store, &writer, &setup(), turn("s", 1), |l| lines.push(l));
 
-    assert_eq!(summary.unwrap().learning, None);
+    assert_eq!(summary.unwrap().quiz, None);
     assert_eq!(lines.len(), 1, "only an explicit null is silent: {lines:?}");
     assert_eq!(writer.inputs.lock().unwrap().len(), 1, "no retry");
 }
 
 #[test]
-fn a_short_key_a_little_longer_than_its_wrong_options_passes_on_the_first_call() {
-    for options in [
-        ["O(n log n)", "O(n)", "O(1)"],
-        ["Yes, it blocks", "No", "Only on Linux"],
-    ] {
-        let dir = tempfile::tempdir().unwrap();
-        let store = summaries(dir.path());
-        let writer = recording(summary_reply("Rewrote the parser.", options));
+fn a_learning_section_stored_before_the_quiz_reads_as_a_quiz() {
+    let old = r#"{"summary": "Rewrote the parser.", "learning": {"idea": "A stack.", "question": {"text": "Why a stack?", "options": [{"text": "It nests.", "why": "Yes."}, {"text": "It is fast.", "why": "No."}], "key": 0}}}"#;
 
-        let summary = write_summary(&store, &writer, &setup(), turn("s", 1), |_| {}).unwrap();
+    let summary: TurnSummary = serde_json::from_str(old).unwrap();
+    let quiz = summary.quiz.clone().expect("the question reads as a Quiz");
+    assert_eq!((quiz.text.as_str(), quiz.key), ("Why a stack?", 0));
+    // Stored again, it is a Quiz, which reads back the same.
+    let again: TurnSummary =
+        serde_json::from_str(&serde_json::to_string(&summary).unwrap()).unwrap();
+    assert_eq!(again, summary);
 
-        assert!(summary.learning.is_some(), "{options:?}");
-        assert_eq!(writer.inputs.lock().unwrap().len(), 1, "{options:?}");
-    }
+    let none: TurnSummary = serde_json::from_str(r#"{"summary": "x", "learning": null}"#).unwrap();
+    assert_eq!(none.quiz, None);
 }
 
 #[test]
@@ -977,7 +1226,7 @@ fn a_reply_that_marks_the_answer_inside_the_options_has_the_mark_removed() {
 
     let summary = write_summary(&store, &writer, &setup(), turn("s", 1), |_| {}).unwrap();
 
-    let options = summary.learning.unwrap().question.options.into_iter();
+    let options = summary.quiz.unwrap().options.into_iter();
     let mut options: Vec<String> = options.map(|o| o.text).collect();
     options.sort();
     assert_eq!(
@@ -1019,7 +1268,7 @@ fn a_turn_with_a_card_gets_its_summary_only() {
     let summary = write_summary(&store, &writer, &setup(), request, |_| {}).unwrap();
 
     assert_eq!(summary.summary, "Rewrote the parser.");
-    assert_eq!(summary.learning, None);
+    assert_eq!(summary.quiz, None);
     let input = writer.inputs.lock().unwrap().pop().unwrap();
     assert!(input.contains("has a card"), "{input}");
 }
@@ -1200,7 +1449,7 @@ fn with_facts(checks: Vec<Check>) -> SummaryRequest {
 }
 
 fn reply(headline: &str, lines: serde_json::Value) -> String {
-    serde_json::json!({ "headline": headline, "lines": lines, "learning": null }).to_string()
+    serde_json::json!({ "headline": headline, "lines": lines, "quiz": null }).to_string()
 }
 
 /// The summary `writer` replies for `request`, and the inputs it was given.
@@ -1377,14 +1626,14 @@ fn a_headline_over_16_words_is_asked_for_once_more() {
     assert_eq!(summary.headline.as_deref(), Some("Short."));
     assert_eq!(inputs.len(), 2);
 
-    // A second long one stands, as the learning question's does.
+    // A second long one stands, as the Quiz's does.
     let (summary, _) = written_by(turn("s", 1), &[long.clone(), long]);
     assert_eq!(summary.headline.unwrap().split_whitespace().count(), 17);
 }
 
 #[test]
 fn a_summary_stored_before_the_headline_still_reads() {
-    let old = r#"{"summary": "Rewrote the parser.\nIt keeps a stack.", "learning": null}"#;
+    let old = r#"{"summary": "Rewrote the parser.\nIt keeps a stack.", "quiz": null}"#;
 
     let summary: TurnSummary = serde_json::from_str(old).unwrap();
 

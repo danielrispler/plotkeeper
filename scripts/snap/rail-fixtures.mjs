@@ -1,6 +1,6 @@
 // Fixtures for the story rail (from the design session for #8, danielrispler/plotkeeper#102): one selected session,
 // "#56 · Row controls", in four states (running, at your turn, needing you, idle), with realistic content: 5 turns, summaries as the writer's prompt shapes them (at most 4
-// short lines, the first says what the turn did), a card with its quiz, learning questions,
+// short lines, the first says what the turn did), a card with its quiz, turn Quizzes,
 // subagents, checks, a permission mode, a model, an estimate, a brief and decision history, and a
 // Git line with several tokens. Times are relative to the moment a fixture renders.
 
@@ -9,7 +9,7 @@ const MIN = 60e3;
 const capabilities = { agent: "claude", asks: true, background_tasks: true, replies: true, permission_mode: true, durations: true, transcript_version: true, turn_trees: true };
 const cwd = "/Users/danielrispler/work/plotkeeper/.claude/worktrees/issue-56-row-controls";
 
-const learning = (idea, text, options, key) => ({ idea, question: { text, options, key } });
+const quiz = (text, options, key) => ({ text, options, key });
 
 // What each turn's summary says; its first line is the turn's Headline (the turn-end intention is the final response's first line).
 const summaries = {
@@ -19,13 +19,12 @@ const summaries = {
       "The row's padding now comes from the fold and delete columns (`--control`), so the test reads the token instead of a hard-coded 12px.\n" +
       "Clippy's `needless_borrow` was unrelated to the UI and is fixed with a one-line change.\n" +
       "`npm run check` passes; nobody looked at the rows in a real window.",
-    learning: learning(
-      "Hiding with `visibility: hidden` keeps an element's box in the layout, while `display: none` frees it, so the row would jump when the button appears.",
+    quiz: quiz(
       "Why does the delete button stay in the row's layout while it is hidden?",
       [
-        { text: "Its box is kept, so the name and glyph columns do not shift when it appears", why: "Right: `visibility: hidden` hides the paint but keeps the space." },
-        { text: "The browser reserves space for any element with a hover rule", why: "No rule makes a browser reserve space for a hover rule." },
-        { text: "The row's padding is rounded up to the next control size", why: "Padding is a fixed token here, not rounded." },
+        { text: "Its box is kept, so no column shifts", why: "Right: `visibility: hidden` hides the paint but keeps the space." },
+        { text: "The browser reserves space for any hover rule", why: "No rule makes a browser reserve space for a hover rule." },
+        { text: "The row's padding is rounded up to the control size", why: "Padding is a fixed token here, not rounded." },
       ],
       0,
     ),
@@ -35,20 +34,19 @@ const summaries = {
       "Made the delete button show on hover and on the selected row, and kept its column empty otherwise.\n" +
       "Keyboard users get it through `:focus-within`, so Tab reaches it.\n" +
       "Not checked: the strip, where rows have no delete.",
-    learning: null,
+    quiz: null,
   },
   t1: {
     summary:
       "Added a fold toggle to each session row and moved the delete button into its own column.\n" +
       "The toggle sits at the row's start and is drawn only when subagents show under the row.\n" +
       "Both are siblings of the row button, since a button cannot hold a button.",
-    learning: learning(
-      "A `<button>` may not contain another interactive element, so the controls are siblings placed over the row.",
+    quiz: quiz(
       "Why are the toggle and the delete siblings of the row button, not its children?",
       [
-        { text: "Interactive content inside a button is invalid, and the click would also select the row", why: "Right: the HTML content model forbids it, and the press would bubble." },
+        { text: "A button may not hold interactive content", why: "Right: the HTML content model forbids it, and the press would bubble." },
         { text: "Children of a button cannot take a hover state", why: "They can; hover does not depend on the parent being a button." },
-        { text: "Siblings let the grid place them in the same column as the glyph", why: "The columns come from padding, not the grid." },
+        { text: "Siblings let the grid share the glyph's column", why: "The columns come from padding, not the grid." },
       ],
       0,
     ),
