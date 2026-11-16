@@ -21,7 +21,7 @@ import { removeWorktreeByDefault, shortPaths, worktreeOf } from "./paths.js";
 import { checkTime, counts, estimateText, times } from "./times.js";
 import { studio } from "./state.js";
 import { typeInto } from "./typing.js";
-import { projectOfPath } from "./workspaces.js";
+import { repositoryOfWorktree } from "./workspaces.js";
 import {
   stateLabels,
   type CheckLine,
@@ -524,7 +524,9 @@ function choice(dialog: HTMLDialogElement): Promise<string> {
 // is reported, and the row goes anyway.
 export async function askDelete(session: Session) {
   const dialog = element("delete-dialog") as HTMLDialogElement;
-  const worktree = worktreeOf(session.cwd);
+  const found = worktreeOf(session.cwd);
+  const repository = found === null ? null : await repositoryOfWorktree(found);
+  const worktree = repository === null ? null : found;
   const ticked = element("delete-worktree") as HTMLInputElement;
   ticked.checked = removeWorktreeByDefault(session, studio.listed);
   element("delete-name").textContent = sessionName(session);
@@ -535,7 +537,7 @@ export async function askDelete(session: Session) {
   element("delete-shared").hidden = worktree === null || others.length === 0;
   if ((await choice(dialog)) !== "delete") return;
   if (session.terminal !== null) await closePane(session.terminal);
-  if (worktree !== null && ticked.checked) await removeWorktree(worktree, await projectOfPath(worktree));
+  if (worktree !== null && ticked.checked) await removeWorktree(worktree, repository!);
   await invoke("delete_session", { id: session.id });
 }
 

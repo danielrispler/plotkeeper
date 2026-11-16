@@ -84,8 +84,11 @@ export function newTask(
 
 // The quick start: a task named after an issue, a spec or a prompt, whose session starts on it, or,
 // empty, the main checkout.
-const quickStart = (main: Workspace, start: Start) =>
-  newTask("Issue #, spec path or prompt; empty for main", "Start", async (request) => request ? invoke<Workspace>("create_named_task", { project: await shownProject(), request }) : main, true, failed, start);
+// It creates in `project`, the one the picker opened on, never the one selected by the time Daniel submits.
+export const quickTask = (project: string, main: Workspace, request: string, create: typeof invoke = invoke): Promise<Workspace> =>
+  request ? create<Workspace>("create_named_task", { project, request }) : Promise.resolve(main);
+const quickStart = (project: string, main: Workspace, start: Start) =>
+  newTask("Issue #, spec path or prompt; empty for main", "Start", (request) => quickTask(project, main, request), true, failed, start);
 
 // The Auto mode choice (danielrispler/Falinks#541): off each time the picker opens; the session starts in Claude Code's
 // auto mode when on. Bypass mode is never offered.
@@ -134,7 +137,7 @@ function workspaceRow(name: string, workspace: Workspace, start: Start): HTMLEle
   return button;
 }
 
-function picked(workspaces: Workspaces, agents: string[], kind: Kind): HTMLElement[] {
+function picked(project: string, workspaces: Workspaces, agents: string[], kind: Kind): HTMLElement[] {
   const { hidden } = workspaces;
   const count = hidden ? [text("p", `${hidden} agent worktree${hidden === 1 ? "" : "s"} hidden`, "hidden-count")] : [];
   const [choice, auto] = autoChoice();
@@ -145,7 +148,7 @@ function picked(workspaces: Workspaces, agents: string[], kind: Kind): HTMLEleme
   return [
     agentButtons,
     text("h1", "In its own task"),
-    quickStart(workspaces.main, start),
+    quickStart(project, workspaces.main, start),
     choice,
     text("h1", "Start in"),
     main,
@@ -224,8 +227,9 @@ export async function showPicker(kind: Kind = "session") {
   if (closed(kind === "terminal" ? "New terminal" : "New session")) return;
   // It opens once its rows are read, so no placeholder flashes first in another box (danielrispler/Falinks#570).
   try {
-    const [workspaces, agents] = await Promise.all([shownProject().then((project) => invoke<Workspaces>("workspaces", { project })), offeredAgents()]);
-    picker.replaceChildren(...picked(workspaces, agents, kind));
+    const project = await shownProject();
+    const [workspaces, agents] = await Promise.all([invoke<Workspaces>("workspaces", { project }), offeredAgents()]);
+    picker.replaceChildren(...picked(project, workspaces, agents, kind));
   } catch (e) {
     picker.replaceChildren(text("p", `No worktrees: ${e}`, "empty"));
   }

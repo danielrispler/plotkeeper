@@ -53,13 +53,16 @@ export function startPanes(): Promise<void> {
   ready = connect().then((config) => {
     repo = config.repo;
     showPanel(null, repo);
-    return projects()
-      .catch(() => [])
-      .then((paths) => {
+    // The terminals come back whether or not the projects read does; Home draws as it answers.
+    revived = revive(config.outdated);
+    showHome();
+    projects().then(
+      (paths) => {
         projectPaths = paths;
-        showHome();
-        revived = revive(config.outdated);
-      });
+        redrawHome();
+      },
+      (e) => console.warn(e),
+    );
   });
   onProjects(() => {
     void projects().then((paths) => {

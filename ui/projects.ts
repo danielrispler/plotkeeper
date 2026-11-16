@@ -6,12 +6,22 @@ import { invoke } from "./dom.js";
 let loaded: Promise<string[]> | null = null;
 // The list once read, for the code that draws without waiting.
 let known: string[] = [];
+// Whether the last read failed: the read that then succeeds tells the listeners, as an add does.
+let failed = false;
 
 export const projects = (): Promise<string[]> => {
   if (!loaded) {
     const reading: Promise<string[]> = invoke<string[]>("projects").then(
-      (paths) => (known = paths),
+      (paths) => {
+        known = paths;
+        if (failed) {
+          failed = false;
+          listeners.forEach((listener) => listener());
+        }
+        return paths;
+      },
       (error) => {
+        failed = true;
         if (loaded === reading) loaded = null;
         throw error;
       },
