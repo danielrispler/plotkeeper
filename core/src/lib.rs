@@ -495,10 +495,10 @@ pub struct Turn {
     pub files: Option<TurnFiles>,
     /// The tree the hook recorded of each worktree it touched, at its first touch and at its end,
     /// by root: the start, and the end once it came.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     trees: BTreeMap<String, (String, Option<String>)>,
     /// When the shell was last asked for its files, and whether that was its final ask.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     files_asked: Option<(u64, bool)>,
     /// How its checks ended, its workers' included: each suite's last run (danielrispler/plotkeeper#112).
     pub checks: Vec<Check>,
