@@ -2,7 +2,7 @@
 //! session's brief, on disk in the studio's data directory, so a restart neither loses nor re-asks
 //! them.
 
-use crate::{Answered, Card, OpenItem, TurnSummary, answered};
+use crate::{Answered, Card, DesignLine, OpenItem, TurnSummary, answered};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -123,6 +123,10 @@ pub struct Brief {
     pub goal: Option<String>,
     /// How many prompts the Goal was written from, so that it is written again when one comes.
     pub goal_prompts: u32,
+    /// "Design so far" (danielrispler/plotkeeper#123), and how many sources it was written from, so that it is
+    /// written again when one came.
+    pub design: Vec<DesignLine>,
+    pub design_from: u32,
 }
 
 /// One session's brief and its cards in the session view's two groups (danielrispler/Falinks#369, decision 18), each
@@ -136,6 +140,8 @@ pub struct SessionCards {
     pub goal: Option<String>,
     pub answers: Vec<Answered>,
     pub open: Vec<OpenItem>,
+    /// "Design so far": at most five decisions, each citing its turn or card.
+    pub design: Vec<DesignLine>,
     /// The cards added in the last 30 minutes.
     #[serde(serialize_with = "without_diffs")]
     pub recent: Vec<StoredCard>,
@@ -294,6 +300,7 @@ impl CardStore {
         });
         let brief = self.brief(owner);
         let goal = brief.and_then(|brief| brief.goal.clone());
+        let design = brief.map(|brief| brief.design.clone()).unwrap_or_default();
         let brief = brief
             .map(|brief| brief.text.clone())
             .filter(|text| !text.is_empty());
@@ -308,6 +315,7 @@ impl CardStore {
             goal,
             answers: answered(&decisions),
             open: Vec::new(),
+            design,
             recent,
             older,
             decisions,
@@ -369,6 +377,20 @@ impl CardStore {
     /// The brief of `owner`, a session's id or a worker's, `None` before its first update.
     pub fn brief(&self, owner: &str) -> Option<&Brief> {
         self.briefs.get(owner)
+    }
+
+    /// Sets `owner`'s "Design so far", written from `from` sources, and saves the briefs.
+    pub fn set_design(
+        &mut self,
+        owner: &str,
+        design: Vec<DesignLine>,
+        from: u32,
+    ) -> io::Result<()> {
+        let brief = self.briefs.entry(owner.into()).or_default();
+        brief.design = design;
+        brief.design_from = from;
+        self.revision += 1;
+        write(&self.path.with_file_name("briefs.json"), &self.briefs)
     }
 
     /// Sets `owner`'s Goal, written from `prompts` prompts, and saves the briefs.
@@ -531,6 +553,11 @@ impl CardStore {
         });
         self.revision += 1;
         write(&self.path.with_file_name("summaries.json"), &self.summaries)
+    }
+
+    /// The turn summaries, oldest first.
+    pub fn summaries(&self) -> &[StoredSummary] {
+        &self.summaries
     }
 
     /// The summary of turn `id` (`SummaryRequest::id`), when it was written.

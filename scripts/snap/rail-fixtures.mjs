@@ -223,6 +223,10 @@ const open = [
   { kind: "unpushed", text: "Uncommitted or unpushed work" },
 ];
 
+const design = [
+  { text: "Hide the delete with visibility, because display would move the row's text.", cite: "" },
+];
+
 const decisions = [
   { call: "c1", agent: null, tool: "AskUserQuestion", input: { questions: [{ question: "Hide the delete with display or visibility?", options: [] }] }, answer: { "Hide the delete with display or visibility?": "visibility" }, at: Date.now() - 3 * 60 * MIN, source: "card" },
   { call: "c2", agent: null, tool: "ExitPlanMode", input: { plan: "Add a fold toggle and a delete column to each row." }, answer: "allow", at: Date.now() - 4 * 60 * MIN, source: "card" },
@@ -243,7 +247,7 @@ const build = (state, { ask = null, answered = false, withBrief = false } = {}) 
     ...common,
     sessions,
     selected: { session: s, agent: null },
-    cards: { brief: null, goal: withBrief ? goal : null, answers: withBrief ? answers : [], open: withBrief ? open : [], recent: [], older: [stored], decisions: withBrief ? decisions : [] },
+    cards: { brief: null, goal: withBrief ? goal : null, answers: withBrief ? answers : [], open: withBrief ? open : [], design: withBrief ? design.map((line) => ({ ...line, cite: stored.request.id })) : [], recent: [], older: [stored], decisions: withBrief ? decisions : [] },
     watch: ask,
     ask_facts: {
       sections: [
