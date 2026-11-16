@@ -8,7 +8,7 @@
 //! names a credential file is never read (`AGENTS.md`, "Hard rules").
 
 use crate::event::TranscriptFormat;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     fs::File,
@@ -17,7 +17,7 @@ use std::{
 };
 
 /// What the transcript says of the session's latest turn, which the session view shows.
-#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Transcript {
     /// The intention: the last line of the agent's latest text while the turn runs, its first line
     /// once the turn ended (danielrispler/Falinks#517, decision 16), so a plugin's footer is never the intention.
@@ -42,14 +42,14 @@ pub struct Transcript {
     /// The first line of the turn's summary, once it arrived (danielrispler/Falinks#526): the turn-end intention then.
     pub summary: Option<String>,
     /// Whether the session's turn has ended, which the core sets from its hooks; kept across turns.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     pub ended: bool,
 }
 
 /// How full the context is, as Claude Code's status line measures it: from the session's status line
 /// snapshot when there is one, else the input tokens of the agent's latest message with no share
 /// (danielrispler/Falinks#517, decisions 1 and 2; danielrispler/Falinks#519).
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Context {
     pub tokens: u64,
     pub window: Option<u64>,
@@ -58,10 +58,10 @@ pub struct Context {
     /// The percent left, Claude's own `remaining_percentage`, else `100 - share`.
     pub left: Option<u64>,
     /// The transcript's tokens, which count when the snapshot has no `current_usage` yet.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     pub(crate) measured: u64,
     /// The snapshot's `context_window`, which the shell sets (`Studio::set_snapshot`).
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     pub(crate) snapshot: Option<Value>,
 }
 
@@ -235,7 +235,7 @@ fn line_of(text: &str, first: bool) -> Option<&str> {
 }
 
 /// Where a session's transcript is, and how far it was read.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct TranscriptFile {
     pub(crate) path: String,
     /// The format of its records, which differ between agents.

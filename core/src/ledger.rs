@@ -5,7 +5,7 @@
 //! costs the same on a large log as on a small one.
 
 use crate::event::{Event, Tool};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     collections::HashMap,
@@ -16,14 +16,14 @@ use std::{
 
 /// Where one event's line is in the event log: its byte offset from the file's start, and its byte
 /// length without the line's newline.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Bytes {
     pub offset: u64,
     pub len: u64,
 }
 
 /// How a call ended.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Outcome {
     Succeeded,
@@ -36,7 +36,7 @@ pub enum Outcome {
 }
 
 /// One tool call of a session.
-#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Row {
     /// The call's id (`tool_use_id`), unique among the rows of its agent.
     pub call: String,
@@ -61,10 +61,10 @@ pub struct Row {
     pub start: Option<Bytes>,
     pub end: Option<Bytes>,
     /// When its result was received.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     ended_at: Option<u64>,
     /// What the agent reported as its duration.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     took: Option<u64>,
 }
 
@@ -101,12 +101,37 @@ impl Row {
 }
 
 /// A session's rows, in the order their first event came.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(from = "Vec<Row>", into = "Vec<Row>")]
 pub struct Ledger {
     rows: Vec<Row>,
     /// The row of each call, by its agent and its id. Agy numbers a call by its step in the
     /// conversation, so two agents' ids can be the same.
     index: HashMap<(Option<String>, String), usize>,
+}
+
+impl std::fmt::Debug for Ledger {
+    /// Its rows: the index is made from them.
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.debug_list().entries(&self.rows).finish()
+    }
+}
+
+/// A ledger is saved as its rows (`Studio::save`); the index of its calls is made again from them.
+impl From<Vec<Row>> for Ledger {
+    fn from(rows: Vec<Row>) -> Self {
+        let mut index = HashMap::new();
+        for (i, row) in rows.iter().enumerate().filter(|(_, r)| !r.call.is_empty()) {
+            index.insert((row.agent.clone(), row.call.clone()), i);
+        }
+        Ledger { rows, index }
+    }
+}
+
+impl From<Ledger> for Vec<Row> {
+    fn from(ledger: Ledger) -> Self {
+        ledger.rows
+    }
 }
 
 impl Ledger {

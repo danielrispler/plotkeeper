@@ -10,10 +10,10 @@ use crate::event::{
     Capabilities, Event, Happened, Origin, Spawned, Start, Tool, ToolKind, TranscriptFormat,
 };
 use crate::ledger::Bytes;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
     fs,
     path::Path,
 };
@@ -41,7 +41,7 @@ const RECORDS: [&str; 4] = [
 ];
 
 /// What the adapter did not recognise, which `weekly` counts (decisions 6 and 15).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DriftKind {
     /// A hook event name outside agy's six, or a line with no event name or conversation.
@@ -54,14 +54,14 @@ pub enum DriftKind {
     TurnOrigin,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Drift {
     pub at: u64,
     pub kind: DriftKind,
 }
 
 /// A turn's start: its `initialNumSteps` and where it came from.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Serialize, Deserialize)]
 struct Turn {
     initial: u64,
     origin: Origin,
@@ -93,7 +93,7 @@ impl Hook {
 }
 
 /// One conversation: a session's own, or a subagent's.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 struct Conversation {
     /// The conversation it is a subagent of, once found.
     parent: Option<String>,
@@ -107,14 +107,14 @@ struct Conversation {
     turn: Option<Turn>,
     last_input: String,
     /// The calls (by `stepIdx`) that started and that ended.
-    open: HashSet<String>,
-    done: HashSet<String>,
+    open: BTreeSet<String>,
+    done: BTreeSet<String>,
     /// The transcript lines checked for unknown records.
     scanned: usize,
 }
 
 /// The adapter's state, one per studio.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub(crate) struct Adapter {
     conversations: HashMap<String, Conversation>,
     /// The latest session's conversation on each terminal, which a new conversation there is a
