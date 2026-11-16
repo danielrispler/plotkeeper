@@ -245,15 +245,15 @@ function slotTitle(title: string): HTMLElement {
   return node;
 }
 
-// The session's brief, folded under the feed: each slot with its title and one paragraph per line.
+// The session's brief: each slot with its title and one paragraph per line.
+export const briefNodes = (cards: SessionCards): HTMLElement[] =>
+  briefSlots(cards).flatMap(({ title, lines }) => [...(title ? [slotTitle(title)] : []), ...lines.map((line) => prose("p", line))]);
+
+// The brief, folded under the feed.
 function showBrief(cards: SessionCards) {
-  const slots = briefSlots(cards);
-  const nodes = slots.flatMap(({ title, lines }) => [
-    ...(title ? [slotTitle(title)] : []),
-    ...lines.map((line) => prose("p", line)),
-  ]);
+  const nodes = briefNodes(cards);
   element("brief").replaceChildren(...nodes);
-  element("brief-fold").hidden = slots.length === 0;
+  element("brief-fold").hidden = nodes.length === 0;
 }
 
 // Card `stored`'s node, drawn again only when its record changed.

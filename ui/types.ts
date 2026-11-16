@@ -166,6 +166,8 @@ export type Session = {
   line?: string;
   // Its turn finished and Daniel has not looked at it since; danielrispler/Falinks#556 sets it (danielrispler/Falinks#572 draws it).
   unseen?: boolean;
+  // How many of its turns Daniel has seen (danielrispler/plotkeeper#124).
+  seen: number;
 };
 // The shell sends a card's request without its diff and base, which the pane never reads. `agent`
 // is the worker whose card it is; `changed_by` holds the files other subagents edited in its

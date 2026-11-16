@@ -14,7 +14,8 @@ import { encode, request } from "./daemon.js";
 import { agentState, sessionName, showsLanded } from "./list.js";
 import { closePane, openHere } from "./panes.js";
 import { openDecision, type Ask } from "./answer.js";
-import { cardLine, quizOpen } from "./cards.js";
+import { briefNodes, cardLine, quizOpen } from "./cards.js";
+import { type Banner, bannerElement, bannerFor, bannerLives } from "./banner.js";
 import { evidenceElement, hasEvidence } from "./evidence.js";
 import { showCleared } from "./decisions.js";
 import { decisionElement, questionElement } from "./questions.js";
@@ -51,6 +52,8 @@ export function showView(selected: Selection | null) {
     for (const id of ["state", "block", "mode", "mark", "session-name", "phase", "bar-state", "bar-name"]) element(id).textContent = "";
     showQuestions([]);
     showCleared([]);
+    shownSession = null;
+    banner = null;
     return;
   }
   const session = selected.session;
@@ -121,6 +124,8 @@ export function showView(selected: Selection | null) {
   if (session.id !== shownSession) {
     shownSession = session.id;
     failedTurns.clear();
+    // "Where we were" is decided as the session is selected, and kept while Daniel reads it (danielrispler/plotkeeper#124).
+    banner = bannerFor(session, Date.now());
   }
   if (agent !== null) {
     element("intention-text").textContent = agentSummaries.get(agent.id) ?? "";
@@ -141,6 +146,7 @@ const writing = new Set<string>();
 const failed = new Set<string>();
 let shownAgent: string | null = null;
 let shownSession: string | null = null;
+let banner: Banner | null = null;
 
 // Asks the shell for subagent `id`'s summary: the store's, or one writer call now. A failed call
 // leaves its name and first line, and the next opening asks again.
@@ -562,6 +568,7 @@ export function drawFeed() {
   const all = [...older, ...recent];
   if (selected === null) {
     drawNow(null, null);
+    element("banner-slot").replaceChildren();
     element("feed").replaceChildren();
     return;
   }
@@ -569,6 +576,14 @@ export function drawFeed() {
   const own = selected.agent === null;
   const { latest, blocks } = railOf(selected, all);
   const now = drawNow(session, latest);
+  // The banner sits above the newest turn, and holds the Brief while it shows.
+  const last = session.turns.at(-1);
+  const lives = own && bannerLives(banner, session) && last !== undefined;
+  const cards = studio.cards;
+  element("banner-slot").replaceChildren(
+    ...(lives ? [bannerElement({ headline: headlineOf(last.id ? summaryOf(last.id) : null, last.message).headline, endedAt: last.ended_at, since: banner!.since, open: cards.open, brief: briefNodes(cards) })] : []),
+  );
+  element("brief-fold").hidden = lives || briefNodes(cards).length === 0;
   element("feed").replaceChildren(...blocks.map((block, i) => turnElement(session, block, own && i === 0 && block.index !== null ? now : null)));
 }
 // Rename (danielrispler/Falinks#469): the row's name, kept in the event log, and `/rename` typed into the session while
