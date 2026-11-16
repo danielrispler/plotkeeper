@@ -13,12 +13,19 @@ use std::{
 };
 
 mod agy;
+mod checks;
 mod claude;
 mod event;
 mod ledger;
 mod transcript;
 mod work;
 pub use agy::{CAPABILITIES as AGY_CAPABILITIES, Drift as AgyDrift, DriftKind as AgyDriftKind};
+pub(crate) use checks::is_check;
+pub use checks::{
+    Check, CheckLists, Output as CheckOutput, Run as CheckRun, Status as CheckStatus,
+    output as check_output,
+};
+use checks::{exit_code_counts, matched};
 pub use claude::CAPABILITIES as CLAUDE_CAPABILITIES;
 pub use event::{Capabilities, TranscriptFormat};
 use event::{Event, Happened, Origin, Start, ToolKind};
@@ -44,6 +51,8 @@ pub struct Studio {
     /// The shell's latest tick, in Unix milliseconds.
     now: u64,
     roots: Roots,
+    /// The commands that are checks, per project (danielrispler/plotkeeper#112).
+    check_lists: CheckLists,
     /// Where the next log line starts in the event log, in bytes: every line given to `replay`,
     /// `apply` or `apply_with_changes` moves it, as the shell reads the log from its start.
     log_end: u64,
@@ -426,6 +435,7 @@ const LONG_CHECK_MS: u64 = 2 * 60 * 1000;
 /// (`Studio::typical`).
 struct CheckStart {
     command: String,
+    counts: bool,
     typical: Option<u64>,
 }
 
@@ -472,6 +482,8 @@ pub struct Turn {
     /// Its whole final reply, which the rail fetches when its block opens (`Studio::turn_reply`).
     #[serde(skip)]
     pub reply: String,
+    /// How its checks ended, its workers' included: each suite's last run (danielrispler/plotkeeper#112).
+    pub checks: Vec<Check>,
 }
 
 /// Who sent a prompt: Daniel, or Claude Code waking the session when one of its tasks returns.
@@ -1630,7 +1642,7 @@ pub struct CheckLine {
 }
 
 impl CheckLine {
-    fn new(command: &str, call: &str, at: u64, typical_ms: Option<u64>) -> Self {
+    fn new(command: &str, counts: bool, call: &str, at: u64, typical_ms: Option<u64>) -> Self {
         CheckLine {
             command: command.lines().next().unwrap_or_default().into(),
             passed: None,
@@ -1641,7 +1653,7 @@ impl CheckLine {
             turn: None,
             call: call.into(),
             task: None,
-            counts: exit_code_counts(command),
+            counts,
         }
     }
 
@@ -1778,68 +1790,6 @@ fn step_detail(input: &Value, cwd: &str) -> Option<String> {
 fn relative<'a>(path: &'a str, folder: &str) -> &'a str {
     let relative = path.strip_prefix(folder).and_then(|p| p.strip_prefix('/'));
     relative.unwrap_or(path)
-}
-
-/// A command that runs a check from the check list (danielrispler/Falinks#328, module 3): `cargo
-/// test|nextest|clippy|check|build`, `ci-checks`, `go test|vet`, with any flags or toolchain before
-/// the subcommand (`cargo +nightly test`). Quoted text is not run, so a PR body that names `cargo
-/// test` is no check.
-// shortcut: every session uses the Falinks list; take each project's list from the shell once
-// projects exist.
-fn is_check(command: &str) -> bool {
-    let mut quote = None;
-    let unquoted: String = command
-        .chars()
-        .map(|c| {
-            match quote {
-                None if c == '\'' || c == '"' => quote = Some(c),
-                None => return c,
-                Some(open) if c == open => quote = None,
-                Some(_) => {}
-            }
-            ' '
-        })
-        .collect();
-    let words: Vec<&str> = unquoted
-        .split(|c: char| c.is_whitespace() || ";&|()".contains(c))
-        .filter(|word| !word.is_empty())
-        .collect();
-    words
-        .iter()
-        .any(|word| word.rsplit('/').next() == Some("ci-checks"))
-        || words.iter().enumerate().any(|(i, word)| {
-            let subcommand = words[i + 1..].iter().find(|w| !w.starts_with(['-', '+']));
-            matches!(
-                (*word, subcommand.copied()),
-                (
-                    "cargo",
-                    Some("test" | "nextest" | "clippy" | "check" | "build")
-                ) | ("go", Some("test" | "vet"))
-            )
-        })
-}
-
-/// Whether a check's exit code says whether it passed (danielrispler/Falinks#328, module 4). A command exits with its
-/// last statement's code, so the check must be the last statement, and nothing in it may mask the
-/// code: `|| true` exits 0, `!` flips it, `&` runs the check in the background, and a pipe exits
-/// with its last command's code unless an earlier `set` turns on `pipefail`.
-fn exit_code_counts(command: &str) -> bool {
-    let statements = command.split([';', '\n']).map(str::trim);
-    let Some(last) = statements.clone().rfind(|s| !s.is_empty()) else {
-        return false;
-    };
-    let pipefail = statements
-        .flat_map(|s| s.split("&&"))
-        .any(|s| s.trim().starts_with("set ") && s.contains("pipefail"));
-    let background = ["&&", ">&", "&>"]
-        .iter()
-        .fold(last.to_string(), |rest, and| rest.replace(and, ""))
-        .contains('&');
-    is_check(last)
-        && !last.contains("||")
-        && !last.starts_with('!')
-        && !background
-        && (pipefail || !last.contains('|'))
 }
 
 impl Studio {
@@ -2666,7 +2616,13 @@ impl Studio {
                         // A check's line runs from its start (danielrispler/Falinks#461, decision 13).
                         if let Some(start) = &start {
                             let call = event.call_id();
-                            let mut line = CheckLine::new(&start.command, call, at, start.typical);
+                            let mut line = CheckLine::new(
+                                &start.command,
+                                start.counts,
+                                call,
+                                at,
+                                start.typical,
+                            );
                             line.card = check_card.take();
                             line.turn = session.current_turn();
                             session.checks.push(line);
@@ -2769,6 +2725,17 @@ impl Studio {
                 Happened::ToolEnd { tool, failed, .. } => {
                     let turn = session.ledger_turn(&event.agent_id);
                     session.ledger.end(&event, tool, turn, *failed);
+                    if let Some(turn) = turn.filter(|_| tool.kind == ToolKind::Command) {
+                        let list = self.check_lists.of(&session.cwd);
+                        if tool
+                            .command
+                            .as_deref()
+                            .is_some_and(|c| matched(list, c).is_some())
+                        {
+                            session.turns[turn].checks =
+                                checks::of_turn(&session.ledger, turn, list);
+                        }
+                    }
                     session.running.retain(|c| c.id != id);
                     let failed = *failed;
                     // A plan or a permission that still waited on Daniel was decided in the terminal:
@@ -2836,7 +2803,8 @@ impl Studio {
                     // A check gets its line whether it passed or failed; one that did not run loses
                     // the line its start gave it. A child's checks are its own, so they add no line.
                     let command = tool.command.as_deref().unwrap_or_default();
-                    if own && tool.kind == ToolKind::Command && is_check(command) {
+                    let list = self.check_lists.of(&session.cwd);
+                    if own && tool.kind == ToolKind::Command && matched(list, command).is_some() {
                         let index = session
                             .checks
                             .iter()
@@ -2850,8 +2818,13 @@ impl Studio {
                             // The hooks are async, so its result can land before its start.
                             None => {
                                 let start = at.saturating_sub(event.took().unwrap_or_default());
-                                let mut line =
-                                    CheckLine::new(command, event.call_id(), start, typical);
+                                let mut line = CheckLine::new(
+                                    command,
+                                    exit_code_counts(list, command),
+                                    event.call_id(),
+                                    start,
+                                    typical,
+                                );
                                 line.turn = session.current_turn();
                                 session.checks.push(line);
                                 Some(session.checks.len() - 1)
@@ -3346,6 +3319,18 @@ impl Studio {
         &self.agy.drift
     }
 
+    /// The check lists of the settings, by project folder (`checks` in `settings.json`); a project
+    /// with none uses the default list. Every turn's checks are read again against them.
+    pub fn set_check_lists(&mut self, projects: impl IntoIterator<Item = (String, Vec<String>)>) {
+        self.check_lists.set(projects);
+        for session in self.sessions.values_mut() {
+            let list = self.check_lists.of(&session.cwd);
+            for turn in 0..session.turns.len() {
+                session.turns[turn].checks = checks::of_turn(&session.ledger, turn, list);
+            }
+        }
+    }
+
     /// Whether summaries are written when Daniel opens a turn (`summaries.on_open` in the settings).
     pub fn set_summaries_on_open(&mut self, on: bool) {
         self.summaries_on_open = on;
@@ -3514,11 +3499,12 @@ impl Studio {
         let session = self.sessions.get(&event.session_id);
         let known = session.is_some_and(|s| s.checks.iter().any(|l| l.call == event.call_id()));
         let start = event.tool_starts() && event.agent_id.is_none();
-        (start && tool.kind == ToolKind::Command && is_check(command) && !known).then(|| {
-            CheckStart {
-                command: command.into(),
-                typical: self.typical(command),
-            }
+        let list = self.check_lists.of(session.map_or("", |s| &s.cwd));
+        let is_check = matched(list, command).is_some();
+        (start && tool.kind == ToolKind::Command && is_check && !known).then(|| CheckStart {
+            command: command.into(),
+            counts: exit_code_counts(list, command),
+            typical: self.typical(command),
         })
     }
 
