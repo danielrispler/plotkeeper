@@ -472,7 +472,8 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
     };
     node.append(quizRegion(id, quiz, now ? rest : [], deps));
   }
-  node.append(...block.cards.map(cardLine));
+  const cardTurn = index !== null && turn?.files ? { session: session.id, index, files: turn.files.files } : null;
+  node.append(...block.cards.map((card) => cardLine(card, cardTurn)));
   node.append(...block.questions.filter((q) => q.answer === "not_answered").map(questionElement));
   if (block.agents.length) {
     const list = document.createElement("ol");

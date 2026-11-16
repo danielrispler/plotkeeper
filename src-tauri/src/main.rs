@@ -1302,7 +1302,7 @@ fn write(
     app: &AppHandle,
     writer: &Writer,
     queues: &mut HashMap<String, mpsc::Sender<Job>>,
-    request: CardRequest,
+    mut request: CardRequest,
     card: bool,
 ) {
     let (app, writer) = (app.clone(), writer.clone());
@@ -1319,6 +1319,12 @@ fn write(
     let job = move || {
         let log = |line: String| eprintln!("studio: {line}");
         let store = app.state::<Cards>();
+        // Where the card's code is pulled from: its turn's end trees (danielrispler/plotkeeper#121).
+        request.ends = app
+            .state::<Mutex<Studio>>()
+            .lock()
+            .unwrap()
+            .card_ends(&request);
         let agent = request.agent.clone();
         let sent = || {
             let _ = app.emit("sessions", sessions(app.state(), app.state()));

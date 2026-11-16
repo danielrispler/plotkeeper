@@ -20,6 +20,7 @@ use std::{
 use studio_core::{CardRequest, Kind, Session, Status, SummaryRequest, Transcript};
 
 mod brief;
+mod card_code;
 mod drift;
 mod fingerprint;
 mod grounding;
@@ -34,6 +35,7 @@ pub use brief::{
     Answered, DesignLine, OpenItem, OpenKind, answered, design_lines, design_sources, open_items,
     write_design,
 };
+pub use card_code::{CodeRange, pull_code};
 pub use drift::{AGY_FIXTURE_VERSION, AgyVersions, Drift, Versions, drift, dropped_events};
 pub use fingerprint::{Fingerprints, backfilled, fingerprint_changes, worktree_root};
 use grounding::words;
@@ -66,9 +68,13 @@ pub struct Card {
     /// The files the change touched.
     #[serde(default)]
     pub paths: Vec<String>,
-    /// The change's real code: the lines that matter most.
+    /// The change's real code: the lines that matter most, pulled from git by `ranges` when the card was
+    /// written (danielrispler/plotkeeper#121). Cards stored before that keep the writer's own copy.
     #[serde(default)]
     pub code: String,
+    /// Where the writer said `code` is; `code` is what they hold in the turn's end tree.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ranges: Vec<CodeRange>,
     #[serde(default)]
     pub why_it_matters: String,
     #[serde(default)]
@@ -183,6 +189,8 @@ impl Card {
         let mut value: serde_json::Value = serde_json::from_str(object(reply)).map_err(fail)?;
         let quiz = value.get_mut("quiz").map(serde_json::Value::take);
         let mut card: Card = serde_json::from_value(value).map_err(fail)?;
+        // The writer names ranges, never code: a copy it made anyway is dropped.
+        card.code.clear();
         let structural = |section: &String| !["", NOT_STRUCTURAL].contains(&section.trim());
         card.architecture = card.architecture.filter(structural);
         match Quiz::from_value(quiz.unwrap_or_default()) {
@@ -579,7 +587,10 @@ pub fn write_card(
             if let Some(problem) = problem {
                 log(format!("no quiz on {}: {problem}", request.id));
             }
-            Some(card)
+            Some(Card {
+                code: pull_code(&card.ranges, &request.ends),
+                ..card
+            })
         }
         Err(line) => {
             log(format!("no card on {}: {line}", request.id));
@@ -633,7 +644,7 @@ impl CardWriter for FakeWriter {
             "summary": format!("Sample change to {named}"),
             "explanation": "A sample card from the fake writer, which does not read the code. The change itself is below.",
             "paths": paths,
-            "code": request.diff(),
+            "ranges": paths.iter().map(|path| serde_json::json!({"path": path, "from": 1, "to": 1})).collect::<Vec<_>>(),
             "architecture": architecture,
             "why_it_matters": "Why the change matters goes here, with code inside the text such as `if a <= b {`.",
             "not_checked": "Not checked: nothing, this is a sample card.",
@@ -1127,11 +1138,11 @@ Answer from the input below: the summaries of the earlier cards on the same prom
     r#"
 
 Reply with one JSON object and nothing else:
-{"summary": string, "explanation": string, "paths": [string], "code": string, "why_it_matters": string, "not_checked": string, "architecture": string, "quiz": {"text": string, "options": [{"text": string, "why": string, "right": boolean}], "key": number}}
+{"summary": string, "explanation": string, "paths": [string], "ranges": [{"path": string, "from": number, "to": number}], "why_it_matters": string, "not_checked": string, "architecture": string, "quiz": {"text": string, "options": [{"text": string, "why": string, "right": boolean}], "key": number}}
 - summary: what the change did, in one short line.
 - explanation: what the change does and why, in at most three sentences.
 - paths: the files the change touched.
-- code: the lines of the change that matter most, copied from it, at most 12.
+- ranges: the lines of the change that matter most, as at most 3 of {"path", "from", "to"}: a file of the change and the first and last line, counted from 1, in the file as the change leaves it (the diff's + side), at most 12 lines each. Name the lines, never write them: the studio reads them from git. A range of lines the file does not have is dropped.
 - why_it_matters: what the change does for the code, in one or two sentences.
 - not_checked: one thing the diff does not show.
 - architecture: when the change is structural, a short section on how it changes the code's structure, before and after, and why: modules, types, interfaces or files added, removed, moved or split, or a change in which parts call or depend on which. Read it with the earlier cards' summaries, so that a structural change spread over several cards counts. Otherwise exactly "structural: none".
@@ -1143,7 +1154,7 @@ Reply with one JSON object and nothing else:
     quiz_rules!("your `summary`"),
     r#"
 
-When the change is not a diff but the agent's workers with the summaries of their cards, the agent changed nothing itself and handed the work to them: the card explains what it split up among them, what came back and what is still open, paths and code are empty, and the quiz is on how the work was split.
+When the change is not a diff but the agent's workers with the summaries of their cards, the agent changed nothing itself and handed the work to them: the card explains what it split up among them, what came back and what is still open, paths and ranges are empty, and the quiz is on how the work was split.
 "#
 );
 
@@ -1159,11 +1170,10 @@ Answer from the input below: the check's command, the summaries of the earlier c
     r#"
 
 Reply with one JSON object and nothing else:
-{"summary": string, "explanation": string, "paths": [string], "code": string, "why_it_matters": string, "not_checked": string, "architecture": string, "if_it_passes": string, "if_it_fails": string}
+{"summary": string, "explanation": string, "paths": [string], "why_it_matters": string, "not_checked": string, "architecture": string, "if_it_passes": string, "if_it_fails": string}
 - summary: what the change did, in one short line.
 - explanation: what the check runs and what of the change it verifies, in at most three sentences.
 - paths: the files the change touched.
-- code: the lines of the change the check exercises most, copied from it, at most 12.
 - why_it_matters: what the check's result tells about the change, in one or two sentences.
 - not_checked: one thing in the change the check does not verify.
 - architecture: when the change is structural, a short section on how it changes the code's structure, before and after, and why. Otherwise exactly "structural: none".

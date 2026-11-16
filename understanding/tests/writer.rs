@@ -123,7 +123,7 @@ const GOOD: &str = concat!(
     r#"{"summary": "הגופן של שורת „לא נבדק” גדל ל־`15px`.", "#,
     r#""explanation": "הסוכן הגדיל את `font-size` של `.unchecked` כדי שאפשר יהיה לקרוא את שורת „לא נבדק” בלי מאמץ.", "#,
     r#""paths": ["apps/studio/ui/style.css"], "#,
-    r#""code": "-.unchecked { font-size:12px; }\n+.unchecked { font-size:15px; }", "#,
+    r#""ranges": [], "#,
     r#""why_it_matters": "טקסט משני ב־`12px` היה קטן מדי לקריאה בזמן המתנה.", "#,
     r#""not_checked": "לא נבדק אם הכרטיס עדיין נכנס בחלונית צרה.", "#,
     r#""architecture": "structural: none", "#,
@@ -158,7 +158,8 @@ fn good_card() -> Card {
             "הסוכן הגדיל את `font-size` של `.unchecked` כדי שאפשר יהיה לקרוא את שורת „לא נבדק” בלי מאמץ."
                 .into(),
         paths: vec!["apps/studio/ui/style.css".into()],
-        code: "-.unchecked { font-size:12px; }\n+.unchecked { font-size:15px; }".into(),
+        code: String::new(),
+        ranges: Vec::new(),
         why_it_matters: "טקסט משני ב־`12px` היה קטן מדי לקריאה בזמן המתנה.".into(),
         not_checked: "לא נבדק אם הכרטיס עדיין נכנס בחלונית צרה.".into(),
         architecture: None,
@@ -394,6 +395,25 @@ fn the_card_prompt_carries_the_quiz_rules() {
     for rule in RULES {
         assert!(prompt.contains(rule), "{rule}: {prompt}");
     }
+}
+
+#[test]
+fn the_card_prompts_name_ranges_and_never_ask_for_copied_code() {
+    let writer = ClaudeWriter::new(CLAUDE.into(), "/card-writer".into());
+    let (_, card) = writer.command(&edit(), &[]);
+    assert!(
+        card.contains("\"ranges\"") && !card.contains("copied from it"),
+        "{card}"
+    );
+    let check = CardRequest {
+        check: Some("cargo test".into()),
+        ..edit()
+    };
+    let (_, check) = writer.command(&check, &[]);
+    assert!(
+        !check.contains("copied from it") && !check.contains("\"code\""),
+        "{check}"
+    );
 }
 
 /// What both writers' prompts say of the Quiz (`docs/studio/question-rules.md`).

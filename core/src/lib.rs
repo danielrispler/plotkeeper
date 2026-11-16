@@ -1210,6 +1210,7 @@ impl Session {
             changed_by: since.by,
             workers: since.cards,
             check: None,
+            ends: BTreeMap::new(),
         }
     }
 
@@ -1632,6 +1633,10 @@ pub struct CardRequest {
     /// `None` for any other card.
     #[serde(default)]
     pub check: Option<String>,
+    /// The end tree of each worktree the card's turn touched, by root, which the shell fills in before the
+    /// writer runs: where the card's code is pulled from (danielrispler/plotkeeper#121).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub ends: BTreeMap<String, String>,
 }
 
 /// A turn that gets a summary (danielrispler/Falinks#517, decisions 12, 13 and 15): what the summary writer reads of it.
@@ -3111,6 +3116,17 @@ impl Studio {
             .trees
             .get(root)
             .cloned()
+    }
+
+    /// The end tree of each worktree of the turn that `request`'s card belongs to, by root: the latest turn started
+    /// by the card's time, and only the worktrees it has ended in (danielrispler/plotkeeper#121).
+    pub fn card_ends(&self, request: &CardRequest) -> BTreeMap<String, String> {
+        let at = card_time(&request.id);
+        let turns = self.session(&request.session_id).map(|s| s.turns.iter());
+        let turn = turns.and_then(|mut turns| turns.rfind(|t| t.started_at <= at));
+        let trees = turn.into_iter().flat_map(|t| t.trees.iter());
+        let ends = trees.filter_map(|(root, (_, end))| Some((root.clone(), end.clone()?)));
+        ends.collect()
     }
 
     /// The turns whose files the shell should diff now, newest first, at most `limit`
