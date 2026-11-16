@@ -152,7 +152,9 @@ The hooks run the `studio-hook` built in this checkout, so build before you star
 
 The hooks are async, so Claude Code never waits for them, and they append whether the app runs or not. Two events that fire within a few milliseconds can land in either order.
 
-The log is never rotated. It holds tool inputs and results, file contents included.
+The log holds tool inputs and results: commands and their output, errors, exit codes, the text an edit replaced and its hunks, and a written file's content. It leaves out two fields no reader takes (danielrispler/plotkeeper#132): an Edit's or Write's `originalFile`, the whole file before the change, and a Read's file `content`.
+
+It keeps a session's events for 30 days after its last one. At each start, before the replay, the app moves the events of older sessions to `events-archive.jsonl` beside it, and drops the two fields from the lines it keeps. The app never reads the archive, and never deletes it; their turns stay in the card store. The app also keeps `roots.json` beside the log: the git worktree root of each folder it has looked up, so a start runs `git` only for new folders.
 
 ## Plan usage
 

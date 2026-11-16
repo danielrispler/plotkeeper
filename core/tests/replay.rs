@@ -128,3 +128,33 @@ fn a_tool_response_that_is_a_string_still_updates_its_session() {
     let session = studio.session("s1").expect("the session");
     assert_eq!(session.cwd, "/work");
 }
+
+/// A launch takes the worktree roots the last one found (danielrispler/plotkeeper#132), so a folder
+/// it knows asks `git` nothing, and the replay comes out the same.
+#[test]
+fn known_roots_need_no_lookup_and_replay_the_same() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    let log = include_str!("fixtures/two-sessions.jsonl");
+    let counted = |asked: &Arc<AtomicUsize>| {
+        let asked = asked.clone();
+        move |_: &str| {
+            asked.fetch_add(1, Ordering::Relaxed);
+            Some("/root".to_owned())
+        }
+    };
+    let first_asked = Arc::new(AtomicUsize::new(0));
+    let mut first = Studio::with_roots(counted(&first_asked));
+    log.lines().for_each(|line| first.replay(line));
+    let asked = Arc::new(AtomicUsize::new(0));
+    let mut second = Studio::with_roots(counted(&asked));
+
+    second.know_roots(first.known_roots());
+    log.lines().for_each(|line| second.replay(line));
+
+    assert!(first_asked.load(Ordering::Relaxed) > 0);
+    assert_eq!(asked.load(Ordering::Relaxed), 0);
+    assert_eq!(second.sessions(), first.sessions());
+}

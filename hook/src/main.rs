@@ -52,7 +52,9 @@ fn append() -> Result<(), Box<dyn Error>> {
         .ok()
         .and_then(|ms| ms.parse().ok())
         .map_or(studio_hook::PATIENCE, Duration::from_millis);
-    if !studio_hook::append(&path, &event.into(), patience)? {
+    let mut event = event.into();
+    studio_hook::lighten(&mut event);
+    if !studio_hook::append(&path, &event, patience)? {
         let (name, terminal) = (name.as_deref(), terminal.as_deref());
         studio_hook::drop_event(
             &path,
