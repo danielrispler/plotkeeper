@@ -6,9 +6,9 @@ import { rowMark, secondLine } from "../../dist/list.js";
 import { subagentHistory } from "../../dist/story.js";
 
 const caps = (agent, rest = {}) => ({
-  agent, asks: false, background_tasks: false, replies: false, permission_mode: false, durations: false, transcript_version: false, ...rest,
+  agent, asks: false, background_tasks: false, replies: false, permission_mode: false, durations: false, transcript_version: false, turn_trees: false, ...rest,
 });
-const claude = { capabilities: caps("claude", { asks: true, replies: true, permission_mode: true, transcript_version: true }), model: null, transcript: { context: { tokens: 9000, share: 9 }, model: "claude-opus-5-5" } };
+const claude = { capabilities: caps("claude", { asks: true, replies: true, permission_mode: true, transcript_version: true, turn_trees: true }), model: null, transcript: { context: { tokens: 9000, share: 9 }, model: "claude-opus-5-5" } };
 const agy = { capabilities: caps("agy"), model: "gemini-3.8-flash-high", transcript: { context: null, model: null } };
 const codex = { capabilities: caps(""), model: null, status_only: true, transcript: { context: null, model: null } };
 
@@ -16,6 +16,9 @@ test("a part of the view shows only when the session's capabilities report it", 
   assert.equal(reports(claude, "asks"), true);
   assert.equal(reports(agy, "asks"), false);
   assert.equal(reports(agy, "permission_mode"), false);
+  // Trees give a turn its files; agy reports none (danielrispler/plotkeeper#111).
+  assert.equal(reports(claude, "turn_trees"), true);
+  assert.equal(reports(agy, "turn_trees"), false);
 });
 
 test("an agy row carries the agy mark, a Claude row its context share, a status-only row its own", () => {

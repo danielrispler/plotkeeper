@@ -29,6 +29,7 @@ pub const CAPABILITIES: Capabilities = Capabilities {
     permission_mode: false,
     durations: false,
     transcript_version: false,
+    turn_trees: false,
     transcript_format: TranscriptFormat::Agy,
 };
 

@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { blockKind, cardTime, feedTurns, headlineOf, nowOf, oneAtATime, turnAt } from "../../dist/story.js";
+import { blockKind, cardTime, feedTurns, foldedLine, headlineOf, nowOf, oneAtATime, turnAt } from "../../dist/story.js";
 
 test("summaries on open are written one at a time, in the order asked, newest first", async () => {
   const started = [];
@@ -104,4 +104,16 @@ test("the block a session needs Daniel for is named by its kind", () => {
   assert.equal(blockKind([{ answer: "not_answered" }], null), null);
   assert.equal(blockKind([], { tool_name: "ExitPlanMode" }), "plan");
   assert.equal(blockKind([], { tool_name: "Bash" }), "permission");
+});
+
+test("a folded turn's line holds the prompt and Headline, a dot for an open Quiz, a mark for a failed check", () => {
+  const run = (status) => ({ suite: "check", status, retries: 0, runs: [] });
+  const line = (checks, open, headline = "Fixed the parser") =>
+    foldedLine({ prompt: "  Fix the parser\nand the lexer", checks }, headline, open);
+  assert.deepEqual(line([], true), { prompt: "Fix the parser", headline: "Fixed the parser", unanswered: true, failed: false });
+  assert.deepEqual(line([run("failed")], false), { prompt: "Fix the parser", headline: "Fixed the parser", unanswered: false, failed: true });
+  // A failure the agent fixed ends as passed, with its retry: no mark.
+  assert.equal(line([{ ...run("passed"), retries: 1 }], false).failed, false);
+  assert.deepEqual(line([run("ran")], false, null), { prompt: "Fix the parser", headline: null, unanswered: false, failed: false });
+  assert.equal(foldedLine({ prompt: "", checks: [] }, null, false).prompt, "No prompt");
 });

@@ -2,15 +2,14 @@
 // while the rail is an overlay, the toast floats over the terminal's top-right corner; the shell plays
 // the needs-you sound (danielrispler/Falinks#556). It never resizes anything and never takes keyboard focus. Several blocks share it,
 // with a count, and it stays until Daniel acts on them or dismisses it. The session in the focused
-// terminal, the selected one, gets none: its prompt is already there. While the rail is an overlay,
-// the top bar's slim header shows the selected session's state and open question.
+// terminal, the selected one, gets none: its prompt is already there.
 
 import { element, text } from "./dom.js";
 import type { LayoutMode } from "./layout.js";
 import { sessionName } from "./list.js";
 import { select } from "./selection.js";
 import { studio } from "./state.js";
-import { stateLabels, type Session } from "./types.js";
+import type { Session } from "./types.js";
 
 export type Toast = { session: Session; count: number };
 
@@ -31,7 +30,7 @@ export function toastFor(listed: Session[], focused: string | null, dismissed: S
 const dismissed = new Set<string>();
 let shown: Toast | null = null;
 
-// Draws the toast and the slim header from the list, the selection and the layout.
+// Draws the toast from the list, the selection and the layout.
 export function showToast() {
   const mode = (document.body.dataset.layout ?? "full") as LayoutMode;
   const focused = studio.selection?.session.id ?? null;
@@ -52,14 +51,6 @@ export function showToast() {
     });
     const more = shown.count > 1 ? [text("span", `+${shown.count - 1} more`, "count")] : [];
     toast.replaceChildren(text("strong", sessionName(shown.session), "name"), ...more, close, text("span", questionLine(shown.session), "line"));
-  }
-  const selected = studio.listed.find((s) => s.id === focused) ?? studio.selection?.session;
-  const slim = element("slim");
-  slim.hidden = mode !== "overlay" || !selected;
-  if (selected) {
-    const state = text("span", stateLabels[selected.state], "state");
-    state.dataset.state = selected.state;
-    slim.replaceChildren(state, ...(selected.state === "needs_you" ? [text("span", questionLine(selected), "line")] : []));
   }
 }
 

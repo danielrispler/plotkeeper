@@ -6,6 +6,7 @@
 
 import { withWriterNotice } from "./writer-notice.js";
 import { startWatching } from "./answer.js";
+import { placeBar, watchBar } from "./bar.js";
 import { markShown, showCards } from "./cards.js";
 import { element, invoke, listen } from "./dom.js";
 import { type Actions, doctorEntries, newestUnseen, nextNeedsYou, paletteEntries, run, stepLine, stepSession, windowBinding } from "./keys.js";
@@ -41,7 +42,7 @@ function layout() {
   document.documentElement.style.setProperty("--list", `${widths.list}px`);
   document.documentElement.style.setProperty("--rail", `${rail || widths.rail}px`);
   document.body.dataset.layout = mode;
-  element("rail-toggle").hidden = mode !== "overlay";
+  placeBar();
   placePanel();
   placePanes(stacked, cell());
   showToast();
@@ -225,7 +226,11 @@ function applySettings(files: SettingsFiles) {
 }
 listen<SettingsFiles>("settings-files", applySettings);
 invoke<SettingsFiles>("settings_files").then(applySettings);
-element("rail-toggle").addEventListener("click", () => toggle("rail-open"));
+// The session's header in the top bar toggles the rail, as ⌘2 does (danielrispler/plotkeeper#127).
+element("session-header").addEventListener("click", () => toggle("rail-open"));
+// The top bar's "⋯" menu closes once an item in it is pressed.
+element("bar-menu").addEventListener("click", () => element("bar-menu").hidePopover());
+watchBar();
 // Every block in the story opens or closes, except a card's "explain more", whose first open asks the
 // writer, and the "ask about this" boxes.
 const blocks = () => element("story").querySelectorAll<HTMLDetailsElement>("details:not(.more):not(.ask-about)");

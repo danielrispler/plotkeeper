@@ -6,7 +6,7 @@
 
 const MIN = 60e3;
 
-const capabilities = { agent: "claude", asks: true, background_tasks: true, replies: true, permission_mode: true, durations: true, transcript_version: true };
+const capabilities = { agent: "claude", asks: true, background_tasks: true, replies: true, permission_mode: true, durations: true, transcript_version: true, turn_trees: true };
 const cwd = "/Users/danielrispler/work/plotkeeper/.claude/worktrees/issue-56-row-controls";
 
 const learning = (idea, text, options, key) => ({ idea, question: { text, options, key } });
@@ -126,6 +126,9 @@ const session = (state, { running = false, question = false } = {}) => {
     prompt,
     id: i < 4 || ended ? `t${i}` : null,
     message: "Done.",
+    files: null,
+    // The second turn ends with a failed check, which its folded line marks (#117).
+    checks: [{ suite: "check", status: i === 1 ? "failed" : "passed", retries: 0, runs: [] }],
   }));
   const transcript = {
     intention: ended ? final.split("\n")[0] : intentions[state === "needs_you" ? "needs_you" : "running"],
@@ -240,11 +243,25 @@ const build = (state, { ask = null, answered = false, withBrief = false } = {}) 
   };
 };
 
+// The top bar (#127): no item is cut. Every item in the bar sits whole inside it; the session's header is the one that may
+// ellipsize its name, and only past its own cap.
+const barScript = `
+  const top = document.querySelector(".top");
+  const room = top.getBoundingClientRect().right;
+  for (const item of top.children) {
+    if (item.hidden || item.classList.contains("sp") || item.classList.contains("menu")) continue;
+    const box = item.getBoundingClientRect();
+    if (box.right > room + 0.5) log("snap:fail the bar cuts #" + item.id + " at " + innerWidth);
+    if (item.scrollWidth > item.clientWidth + 1 && item.id !== "session-header") log("snap:fail #" + item.id + " is clipped at " + innerWidth);
+  }
+  if (document.getElementById("session-header").hidden) log("snap:fail the session header is missing");
+  log("bar at " + innerWidth + ": " + [...top.children].filter((i) => !i.hidden && i.id).map((i) => i.id).join(" "));`;
+
 // One fixture per state of the rail. `railStates` is what `npm run snap:rail` renders.
 export const railStates = {
   railRunning: () => build("running"),
-  railYourTurn: () => build("your_turn"),
-  railNeeds: () => build("needs_you", { ask: questionAsk }),
+  railYourTurn: () => ({ ...build("your_turn"), snapScript: barScript }),
+  railNeeds: () => ({ ...build("needs_you", { ask: questionAsk }), snapScript: barScript }),
   railIdle: () => build("idle", { answered: true, withBrief: true }),
 };
 
@@ -256,8 +273,16 @@ const scrollScript = `
   log("rail scrollTop " + story.scrollTop + " of " + (story.scrollHeight - story.clientHeight));`;
 const failScript = `log("snap:fail the sample script fails on purpose");`;
 
+// #117: opens the second earlier turn, as a click does, and logs what stands: one turn open of four folded.
+const openTurnScript = `
+  document.querySelectorAll(".turn.past .turn-line")[1].click();
+  const lines = [...document.querySelectorAll(".turn.past .turn-line")];
+  log("folded turns " + lines.length + ", open " + lines.filter((l) => l.getAttribute("aria-expanded") === "true").length);
+  if (lines.length !== 4 || lines[1].getAttribute("aria-expanded") !== "true") log("snap:fail one turn should be open of four folded");`;
+
 export const railFixtures = {
   ...railStates,
   railIdleScroll: () => ({ ...build("idle", { answered: true, withBrief: true }), snapScript: scrollScript }),
+  railIdleOpened: () => ({ ...build("idle", { answered: true, withBrief: true }), snapScript: openTurnScript }),
   railIdleFail: () => ({ ...build("idle", { answered: true, withBrief: true }), snapScript: failScript }),
 };
