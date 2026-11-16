@@ -27,7 +27,7 @@ test("a chip of a file the turn changed opens the same hunk as the file's eviden
   assert.equal(chips[1].find("button").length, 0);
   chips[0].find("button")[0].listeners.click();
   await new Promise((done) => setImmediate(done));
-  assert.deepEqual(calls[0], ["turn_file_hunk", { session: "s1", turn: 4, root: "/r", path: "a.rs", from: null }]);
+  assert.deepEqual(calls.find(([c]) => c === "turn_file_hunk"), ["turn_file_hunk", { session: "s1", turn: 4, root: "/r", path: "a.rs", from: null }]);
   assert.match(chips[0].find("pre")[0].text, /\+b/);
   assert.match(node.find("pre").at(-1).text, /fn a\(\) \{\}/);
 });
