@@ -551,6 +551,26 @@ function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
   return node;
 }
 
+// The index of the turn a design line's citation `id` names (danielrispler/plotkeeper#123): the turn with that id, or else
+// the turn a card of that id was written in, null when neither is in `turns`.
+export function citedTurn(turns: Pick<Turn, "id" | "started_at">[], id: string): number | null {
+  const own = turns.findIndex((turn) => turn.id === id);
+  return own >= 0 ? own : turnAt(turns, cardTime(id));
+}
+
+// Opens the turn a citation names in the rail: a folded turn opens, and the feed scrolls to it. Only that node changes.
+export function openCitation(id: string) {
+  const selected = studio.selection;
+  if (selected === null || selected.agent !== null) return;
+  const { session } = selected;
+  const index = citedTurn(session.turns, id);
+  if (index === null) return;
+  opened.add(`${session.id} ${index} turn`);
+  drawFeed();
+  const node = element("feed").children[session.turns.length - 1 - index];
+  (node as HTMLElement | undefined)?.scrollIntoView?.({ block: "start" });
+}
+
 const turnElement = (session: Session, block: FeedTurn, now: Now | null) =>
   now || block.index === null ? turnContent(session, block, now) : foldedTurn(session, block);
 

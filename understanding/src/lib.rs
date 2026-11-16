@@ -28,7 +28,10 @@ mod store;
 mod summary;
 mod turn_trees;
 mod week;
-pub use brief::{Answered, OpenItem, OpenKind, answered, open_items};
+pub use brief::{
+    Answered, DesignLine, OpenItem, OpenKind, answered, design_lines, design_sources, open_items,
+    write_design,
+};
 pub use drift::{AGY_FIXTURE_VERSION, AgyVersions, Drift, Versions, drift, dropped_events};
 pub use fingerprint::{Fingerprints, backfilled, fingerprint_changes, worktree_root};
 use grounding::words;
@@ -204,6 +207,13 @@ pub trait CardWriter {
     /// A writer that writes no goals says so.
     fn goal(&self, _prompts: &[&str]) -> Result<String, String> {
         Err("this writer writes no goals".into())
+    }
+
+    /// The writer's reply with "Design so far" of a session from `sources`, each a turn's or a card's
+    /// id and a line of it, oldest first (danielrispler/plotkeeper#123), or one line for the log when it gave none.
+    /// A writer that writes no design says so.
+    fn design(&self, _sources: &[(String, String)]) -> Result<String, String> {
+        Err("this writer writes no design".into())
     }
 
     /// The writer's reply to Daniel's side `question` on `item`, a response, card or intention, read
@@ -644,6 +654,15 @@ impl CardWriter for FakeWriter {
         Ok(serde_json::json!({ "goal": goal }).to_string())
     }
 
+    fn design(&self, sources: &[(String, String)]) -> Result<String, String> {
+        let design: Vec<_> = sources
+            .iter()
+            .take(1)
+            .map(|(id, _)| serde_json::json!({"text": "A sample decision from the fake writer, because it reads nothing.", "cite": id}))
+            .collect();
+        Ok(serde_json::json!({ "design": design }).to_string())
+    }
+
     fn ask(&self, _: &str, intentions: &[String], question: &str) -> Result<String, String> {
         // `STUDIO_FAKE_ASK=fail` makes it fail, so the error and its retry can be seen.
         if std::env::var("STUDIO_FAKE_ASK").as_deref() == Ok("fail") {
@@ -854,6 +873,25 @@ impl ClaudeWriter {
         ))
     }
 
+    /// The `claude -p` run that writes a session's "Design so far" from `sources`. Past `MAX_CHANGE`,
+    /// the oldest are cut first.
+    pub fn design_command(&self, sources: &[(String, String)]) -> (Command, String) {
+        let lines: Vec<String> = sources
+            .iter()
+            .map(|(id, line)| format!("[{id}] {}\n", line.replace('\n', " ")))
+            .collect();
+        let mut size = lines.iter().map(String::len).sum::<usize>();
+        let mut cut = 0;
+        while size > MAX_CHANGE && cut + 1 < lines.len() {
+            size -= lines[cut].len();
+            cut += 1;
+        }
+        self.run(&format!(
+            "{DESIGN}\nThe turns' reasons and the cards' summaries, oldest first:\n{}",
+            lines[cut..].concat()
+        ))
+    }
+
     /// The `claude -p` run for "explain more" on `card`, which the writer reads with its change.
     pub fn more_command(&self, request: &CardRequest, card: &Card) -> (Command, String) {
         let head = format!("{MORE}\nThe card's explanation:\n{}\n", card.explanation);
@@ -984,6 +1022,10 @@ impl CardWriter for ClaudeWriter {
 
     fn goal(&self, prompts: &[&str]) -> Result<String, String> {
         self.stdout(self.goal_command(prompts))
+    }
+
+    fn design(&self, sources: &[(String, String)]) -> Result<String, String> {
+        self.stdout(self.design_command(sources))
     }
 
     fn ask(&self, item: &str, intentions: &[String], question: &str) -> Result<String, String> {
@@ -1128,6 +1170,21 @@ Answer from the input below: the developer's prompts, oldest first. Use only thi
     r#"
 
 Reply with one JSON object and nothing else: {"goal": string}
+"#
+);
+
+/// The writer's instructions for a session's "Design so far" (danielrispler/plotkeeper#123): from the turns' reasons
+/// and the cards' summaries only, each line citing the id it came from.
+const DESIGN: &str = concat!(
+    r#"You write "Design so far" of a coding agent's session, which the developer who runs it reads to build his model of the program: at most five lines, each one design decision of this session with its reason, in one line of at most 25 words, such as "Anchor turn trees under a ref, because git gc would otherwise drop old hunks". Each line cites the id, in square brackets in the input, of the one line it comes from. A decision is a choice between ways to build the program, not a task done. Leave out what the input does not give a reason for. When the input holds no design decision, reply with an empty list.
+
+Answer from the input below: each line is `[id] text`. Use only this input: do not use tools or read files.
+
+"#,
+    explanation_language!(),
+    r#"
+
+Reply with one JSON object and nothing else: {"design": [{"text": string, "cite": string}]}, where cite is an id exactly as in the input, without the brackets.
 "#
 );
 
