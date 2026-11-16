@@ -207,9 +207,6 @@ const read = new Map<string, Workspaces>();
 const states = new Map<string, GitState | null>();
 // A project's latest error, git's or any other, shown in its group until the next one.
 const failures = new Map<string, string>();
-// Why the projects could not be read, shown in the sidebar until a read succeeds.
-let projectsFailure: string | null = null;
-export const projectsError = (): string | null => projectsFailure;
 let reading = false;
 // A forced read asked for while one runs: one more read follows it.
 let again = false;
@@ -359,14 +356,11 @@ function touchShown() {
   for (const [project, found] of read) if (projectOpen(project)) for (const workspace of allWorkspaces(found)) touch(project, workspace.path);
 }
 
-// The configured projects; a failed read is shown in the sidebar until a read succeeds, and gives null.
+// The configured projects, null when the read failed: the sidebar then shows why.
 async function readProjects(): Promise<string[] | null> {
   try {
-    const paths = await projects();
-    projectsFailure = null;
-    return paths;
-  } catch (e) {
-    projectsFailure = String(e);
+    return await projects();
+  } catch {
     drawSidebar();
     return null;
   }

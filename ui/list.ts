@@ -7,9 +7,9 @@ import { age, element, invoke, patch, prose, pressable, stepText, text } from ".
 import { counts, times, type Time } from "./times.js";
 import { shortPaths } from "./paths.js";
 import { historyLink } from "./history.js";
-import { knownProjects, onProjects, projects, setProjects } from "./projects.js";
+import { knownProjects, onProjects, projects, projectsError, setProjects } from "./projects.js";
 import { addProject, refuse } from "./picker.js";
-import { projectGroups, foundWorkspaces, tokenOf, workspaceSection, projectsError, type ProjectGroup } from "./workspaces.js";
+import { projectGroups, foundWorkspaces, tokenOf, workspaceSection, type ProjectGroup } from "./workspaces.js";
 import { redrawHistory, redrawHome, showHistory } from "./panes.js";
 import { isSelected, select } from "./selection.js";
 import { studio } from "./state.js";

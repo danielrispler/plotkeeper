@@ -6,22 +6,22 @@ import { invoke } from "./dom.js";
 let loaded: Promise<string[]> | null = null;
 // The list once read, for the code that draws without waiting.
 let known: string[] = [];
-// Whether the last read failed: the read that then succeeds tells the listeners, as an add does.
-let failed = false;
+// Why the last read failed, null after one succeeds: the read that then succeeds tells the listeners, as an add does.
+let failure: string | null = null;
 
 export const projects = (): Promise<string[]> => {
   if (!loaded) {
     const reading: Promise<string[]> = invoke<string[]>("projects").then(
       (paths) => {
         known = paths;
-        if (failed) {
-          failed = false;
+        if (failure !== null) {
+          failure = null;
           listeners.forEach((listener) => listener());
         }
         return paths;
       },
       (error) => {
-        failed = true;
+        failure = String(error);
         if (loaded === reading) loaded = null;
         throw error;
       },
@@ -41,6 +41,9 @@ export function setProjects(paths: string[]) {
   loaded = Promise.resolve(paths);
   listeners.forEach((listener) => listener());
 }
+
+// Why the projects could not be read, shown in the sidebar until a read succeeds.
+export const projectsError = (): string | null => failure;
 
 // The projects as last read: empty until `projects()` has resolved.
 export const knownProjects = (): string[] => known;

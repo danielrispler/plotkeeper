@@ -42,17 +42,19 @@ test("a worktree resolves to its own repository, never the first project, and to
   assert.equal(await repositoryOfWorktree(worktree, async () => Promise.reject("boom")), null);
 });
 
-test("a read that succeeds after a failure tells the listeners, as an add does; a later read does not", async () => {
+test("Home's project rows appear once a retried projects read succeeds, with no read error left; a later read does not redraw", async () => {
   const mod = await import("../../dist/projects.js?retry");
-  let seen = 0;
-  mod.onProjects(() => seen++);
+  const { homeProjects } = await import("../../dist/home.js");
+  // What a listener (Home, the sidebar) sees when it is told.
+  const seen = [];
+  mod.onProjects(() => seen.push({ rows: homeProjects(mod.knownProjects()), error: mod.projectsError() }));
   fail = true;
   await assert.rejects(mod.projects(), /boom/);
-  assert.equal(seen, 0);
+  assert.equal(mod.projectsError(), "boom");
+  assert.equal(seen.length, 0);
   fail = false;
   assert.deepEqual(await mod.projects(), ["/a"]);
-  assert.deepEqual(mod.knownProjects(), ["/a"]);
-  assert.equal(seen, 1);
+  assert.deepEqual(seen, [{ rows: [{ name: "a", path: "/a" }], error: null }]);
   await mod.projects();
-  assert.equal(seen, 1);
+  assert.equal(seen.length, 1);
 });

@@ -43,6 +43,16 @@ let stacked = false;
 let cell = 8;
 let laidSplit = false;
 
+// Gives Home the projects as they are read; a failed read leaves Home's rows as they were.
+const readHomeProjects = () =>
+  projects().then(
+    (paths) => {
+      projectPaths = paths;
+      redrawHome();
+    },
+    (e) => console.warn(e),
+  );
+
 // Connects, shows Home, then brings back every terminal;
 // again each time the daemon is lost.
 export function startPanes(): Promise<void> {
@@ -56,20 +66,9 @@ export function startPanes(): Promise<void> {
     // The terminals come back whether or not the projects read does; Home draws as it answers.
     revived = revive(config.outdated);
     showHome();
-    projects().then(
-      (paths) => {
-        projectPaths = paths;
-        redrawHome();
-      },
-      (e) => console.warn(e),
-    );
+    void readHomeProjects();
   });
-  onProjects(() => {
-    void projects().then((paths) => {
-      projectPaths = paths;
-      redrawHome();
-    });
-  });
+  onProjects(() => void readHomeProjects());
   window.addEventListener("start-failed", (e) => failedAtStart((e as CustomEvent).detail));
   onEvent((event) => {
     if (event.ev !== "lost") return;
