@@ -6,7 +6,7 @@ import { code, element, prose, invoke, pressable, text } from "./dom.js";
 import { refreshCards } from "./selection.js";
 import { studio } from "./state.js";
 import { showDecisions } from "./decisions.js";
-import { drawFeed, forgetMissingSummaries } from "./story.js";
+import { drawFeed, forgetMissingSummaries, openCitation } from "./story.js";
 import type { CardRequest, CheckResult, Guess, Level, Quiz, Rating, Reason, SessionCards, StoredCard } from "./types.js";
 
 // Records Daniel's tap, his flag on the key or his rating, and draws the cards again at once.
@@ -246,14 +246,22 @@ const drawn = new Map<string, { record: string; node: HTMLElement }>();
 
 // The Brief's slots in order (danielrispler/plotkeeper#122): Goal, Decisions, Open. A brief stored as prose shows as it is,
 // with no title, until the session has a Goal.
-export type BriefSlot = { title: string; lines: string[] };
+export type BriefSlot = { title: string; lines: string[]; cites?: string[] };
 export function briefSlots(cards: SessionCards): BriefSlot[] {
   const slots: BriefSlot[] = [];
   if (cards.goal) slots.push({ title: "Goal", lines: [cards.goal] });
   else if (cards.brief) slots.push({ title: "", lines: cards.brief.split("\n") });
   if (cards.answers.length) slots.push({ title: "Decisions", lines: cards.answers.map((a) => `${a.question} ${a.reply}`) });
   if (cards.open.length) slots.push({ title: "Open", lines: cards.open.map((item) => item.text) });
+  if (cards.design.length) slots.push({ title: "Design so far", lines: cards.design.map((line) => line.text), cites: cards.design.map((line) => line.cite) });
   return slots;
+}
+
+// A design line's citation: a button that opens the turn or card it came from in the rail.
+function citation(id: string): HTMLElement {
+  const button = pressable(text("button", "↗", "cite") as HTMLButtonElement, false, () => openCitation(id));
+  button.title = "Open the turn or card it came from";
+  return button;
 }
 
 function slotTitle(title: string): HTMLElement {
@@ -262,15 +270,23 @@ function slotTitle(title: string): HTMLElement {
   return node;
 }
 
-// The session's brief, folded under the feed: each slot with its title and one paragraph per line.
-function showBrief(cards: SessionCards) {
-  const slots = briefSlots(cards);
-  const nodes = slots.flatMap(({ title, lines }) => [
+// The session's brief: each slot with its title and one paragraph per line.
+export const briefNodes = (cards: SessionCards): HTMLElement[] =>
+  briefSlots(cards).flatMap(({ title, lines, cites }) => [
     ...(title ? [slotTitle(title)] : []),
-    ...lines.map((line) => prose("p", line)),
+    ...lines.map((line, i) => {
+      const node = prose("p", line);
+      const cite = cites?.[i];
+      if (cite) node.append(" ", citation(cite));
+      return node;
+    }),
   ]);
+
+// The brief, folded under the feed.
+function showBrief(cards: SessionCards) {
+  const nodes = briefNodes(cards);
   element("brief").replaceChildren(...nodes);
-  element("brief-fold").hidden = slots.length === 0;
+  element("brief-fold").hidden = nodes.length === 0;
 }
 
 // Card `stored`'s node, drawn again only when its record changed.

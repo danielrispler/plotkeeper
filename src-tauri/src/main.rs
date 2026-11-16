@@ -27,10 +27,10 @@ use studio_core::{
 };
 use studio_understanding::{
     AGY_FIXTURE_VERSION, AgyVersions, CardStore, CardWriter, ClaudeWriter, FakeWriter,
-    Fingerprints, OpenItem, Rating, Row, SessionCards, StoredSummary, SummarySetup, Tap, Versions,
-    add_hunks, backfilled, fingerprint_changes, millis, open_items, turn_diffs, turn_hunk,
-    worktree_root, write_agent_summary, write_goal, write_name, write_retests, write_stop,
-    write_summary,
+    Fingerprints, Offer, OpenItem, Rating, Row, SessionCards, Shape, StoredSummary, SummarySetup,
+    Tap, Versions, add_hunks, backfilled, fingerprint_changes, millis, open_items, turn_diffs,
+    turn_hunk, worktree_root, write_agent_summary, write_design, write_goal, write_name,
+    write_retests, write_stop, write_summary,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
@@ -141,6 +141,7 @@ fn turn_file_hunk(
 fn turn_summary(
     id: String,
     cards: State<Cards>,
+    studio: State<Mutex<Studio>>,
     summaries: State<Summaries>,
     writer: State<Writer>,
 ) -> Result<Option<StoredSummary>, String> {
@@ -160,7 +161,24 @@ fn turn_summary(
             .insert(id.clone(), request);
         return Err(format!("no summary on {id}"));
     }
+    design(&studio, &cards, &**writer, &request.session_id);
     Ok(cards.lock().unwrap().turn_summary(&id).cloned())
+}
+
+/// Writes "Design so far" of session `id` when its sources changed (danielrispler/plotkeeper#123). Returns whether it did.
+fn design(
+    studio: &Mutex<Studio>,
+    cards: &Cards,
+    writer: &(impl CardWriter + ?Sized),
+    id: &str,
+) -> bool {
+    let turns: Vec<String> = match studio.lock().unwrap().session(id) {
+        Some(session) => session.turns.iter().filter_map(|t| t.id.clone()).collect(),
+        None => return false,
+    };
+    write_design(cards, writer, id, &turns, |line| {
+        eprintln!("studio: {line}")
+    })
 }
 
 /// The whole final reply of turn `index` of session `id` (danielrispler/Falinks#574), which the rail fetches when Daniel
@@ -1305,12 +1323,25 @@ fn write(
                 agent.as_deref(),
             );
         };
+        let card_id = request.id.clone();
+        // A turn the table gives no card is written none, but still feeds the design.
         let written = match card {
+            true if !offered(&app, &request) => false,
             true => write_stop(&store, &*writer, request, &session, stored, log),
             false => write_goal(&store, &*writer, &request, &session, log),
         };
+        // A Quiz is never beside a decision (danielrispler/plotkeeper#119).
+        if card && session.needs_you() {
+            unsaved(store.lock().unwrap().drop_card_quiz(&card_id));
+        }
+        let designed = design(
+            &app.state::<Mutex<Studio>>(),
+            &store,
+            &*writer,
+            &session.agent.id,
+        );
         // The brief, which a row's line may show, changed again.
-        if written {
+        if written || designed {
             sent();
         }
     };
@@ -1329,6 +1360,29 @@ fn turn_facts(state: &Mutex<Studio>, id: &str) -> Facts {
     facts
 }
 
+/// What the turn named `id` gets for a Quiz (danielrispler/plotkeeper#119), by its facts, or by `diff`, its card's
+/// change, when an agent reports no trees.
+fn offer_of(state: &Mutex<Studio>, id: &str, diff: &str) -> Offer {
+    let merge = state.lock().unwrap().turn_merged(id);
+    Shape::of(&turn_facts(state, id), diff, merge).offer()
+}
+
+/// Whether the stop card `request` is written: a turn's card only when the table gives it one. A
+/// worker's card and a check's are no turn's and are always written.
+fn offered(app: &AppHandle, request: &CardRequest) -> bool {
+    if request.agent.is_some() || request.check.is_some() {
+        return true;
+    }
+    let offer = offer_of(&app.state(), &request.id, request.diff());
+    if offer != Offer::Card {
+        eprintln!(
+            "studio: no card on {}: its change gets {offer:?}",
+            request.id
+        );
+    }
+    offer == Offer::Card
+}
+
 /// Writes the summary of `request`'s turn on its session's queue, after the turn's card, then
 /// switches the turn's intention to its first line (danielrispler/Falinks#517, decision 16). While summaries are written
 /// on open, the turn waits for Daniel instead (`turn_summary`).
@@ -1338,6 +1392,11 @@ fn summarize(
     queues: &mut HashMap<String, mpsc::Sender<Job>>,
     request: SummaryRequest,
 ) {
+    // A summary asked for the sake of a lone Quiz is dropped when the turn gets none.
+    let lone = |app: &AppHandle| offer_of(&app.state(), &request.id, "") == Offer::Quiz;
+    if !request.wanted && !lone(app) {
+        return;
+    }
     if app
         .state::<Mutex<Studio>>()
         .lock()
@@ -1355,7 +1414,11 @@ fn summarize(
         let setup = app.state::<Summaries>().setup.lock().unwrap().clone();
         let mut request = request;
         request.facts = turn_facts(&app.state::<Mutex<Studio>>(), &request.id);
-        write_summary(&app.state::<Cards>(), &*writer, &setup, request, log);
+        let session = request.session_id.clone();
+        let (studio, cards) = (app.state::<Mutex<Studio>>(), app.state::<Cards>());
+        if write_summary(&cards, &*writer, &setup, request, log).is_some() {
+            design(&studio, &cards, &*writer, &session);
+        }
     };
     queue(queues, id).send(Box::new(job)).ok();
 }

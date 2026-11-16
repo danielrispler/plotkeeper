@@ -22,6 +22,29 @@ A reply that breaks one is asked for once more. A second rejection leaves the tu
 
 A turn with a card has the card's Quiz; the summary's writer is told so and returns none. A turn without one gets its Quiz with the summary. A learning question stored before the Quiz reads as a Quiz and keeps its question; its idea is dropped.
 
+## What a turn gets
+
+By the size of its change, which `Shape::of` reads from the turn's facts (`understanding/src/offer.rs`), or from the card's diff for an agent that reports no trees.
+
+| The turn | Gets |
+| --- | --- |
+| Changed 25 lines or more, or two or more logic files | A card, with its Quiz |
+| Changed 8 non-trivial lines or more, no check ended failed, and is not a test run, bookkeeping, docs or merge turn | A lone Quiz |
+| Anything else | Nothing |
+
+- A **logic file** is a changed file that is not documentation (`.md`, `.mdx`, `.txt`, `.rst`, a `docs/` folder, `README*`, `LICENSE*`), a lockfile (`*.lock`, `package-lock.json`, `pnpm-lock.yaml`, `go.sum`), generated output (`dist/`, `target/`, `node_modules/`, `generated/`, snapshots, minified files) or a fixture (`fixtures/`, `fixture/`, `testdata/`). Test files are logic files. Only logic files count towards the table's lines and files.
+- A **non-trivial line** is an added or removed line of a logic file that is not blank, a comment (`//`, `#`, `/*`, `*`, `--`, `<!--`), an import (`use`, `import`, `from`, `#include`), only brackets or punctuation, or formatting only (the same text, whitespace aside, is also on the other side of the diff).
+- A **test run** turn changed only test files (a `tests/` folder, `*.test.*`, `*.spec.*`, `test_*`, `*_test.*`). A **bookkeeping** or **docs** turn changed no logic file, so it counts no line and gets nothing. A **merge** turn ran `git merge` or `gh pr merge`; the table's first row still reads its size.
+- A turn the table gives no card is not written a card: nothing is stored for it, and its summary carries the lone Quiz if the second row holds. A worker's card and a check's card are no turn's and keep being written.
+
+## The cap
+
+At most 3 Quizzes are offered in any rolling hour, across the studio, answered or not. A card's Quiz comes before a lone Quiz: a lone Quiz is offered only while fewer than 3 were offered in the last hour. A card's Quiz past the cap takes the place of the oldest unanswered lone Quiz of that hour, which loses it; when there is none, the card shows without its Quiz. The summary stays in every case. A lone Quiz is answered when Daniel picked or skipped it (its taps, `quiz_tap`).
+
+## Never beside a decision
+
+A turn that ends with an `ask` line, or in Needs you, has no open Quiz: its summary's Quiz and its card's Quiz are dropped.
+
 ## The retest
 
 A week after a Quiz was offered (answered, skipped or never opened), the studio writes one fresh Quiz on the same decision (`write_retests` in `understanding/src/retest.rs`) and offers it on Home, in a "Retest" section and nowhere else. Nothing interrupts for it.
@@ -42,4 +65,4 @@ Both show on every retest. On a Quiz of "now" they show only during a two-week t
 
 ## What the rules do not decide
 
-When a turn gets a card, a lone Quiz or nothing, the cap on open Quizzes and the Quiz on a turn that asks Daniel something are other tickets of spec #102.
+How a Quiz is shown, answered and stored in the rail is other tickets' of spec #102.

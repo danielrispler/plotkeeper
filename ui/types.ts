@@ -166,6 +166,8 @@ export type Session = {
   line?: string;
   // Its turn finished and Daniel has not looked at it since; danielrispler/Falinks#556 sets it (danielrispler/Falinks#572 draws it).
   unseen?: boolean;
+  // How many of its turns Daniel has seen (danielrispler/plotkeeper#124).
+  seen: number;
 };
 // The shell sends a card's request without its diff and base, which the pane never reads. `agent`
 // is the worker whose card it is; `changed_by` holds the files other subagents edited in its
@@ -251,11 +253,14 @@ export type OpenItem = {
   kind: "question" | "check" | "unchecked" | "open" | "ask" | "unpushed" | "pr";
   text: string;
 };
+// A line of "Design so far" (danielrispler/plotkeeper#123): a decision with its reason, and the id of the turn or card it came from.
+export type DesignLine = { text: string; cite: string };
 export type SessionCards = {
   brief: string | null;
   goal: string | null;
   answers: { question: string; reply: string }[];
   open: OpenItem[];
+  design: DesignLine[];
   recent: StoredCard[];
   older: StoredCard[];
   decisions: Decision[];

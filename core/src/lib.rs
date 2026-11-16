@@ -227,8 +227,9 @@ pub struct Session {
     /// At your turn, or idle since, with a turn Daniel has not seen (danielrispler/Falinks#556): its row's filled dot and
     /// bold name.
     pub unseen: bool,
-    /// How many of its turns Daniel has seen, which the card store keeps (danielrispler/Falinks#556).
-    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
+    /// How many of its turns Daniel has seen, which the card store keeps (danielrispler/Falinks#556). The rail's
+    /// "Where we were" banner counts what happened after them (danielrispler/plotkeeper#124).
+    #[serde(default)]
     seen: usize,
     /// The ids of its background tasks, commands included, from their responses and `Stop`'s
     /// `background_tasks`. With its subagents' ids, they are the task ids a wake-up can name.
@@ -788,7 +789,49 @@ pub enum Kind {
     Helper,
 }
 
+/// What happened in a session since Daniel looked: its turns after the last he saw, the files they changed and how
+/// their checks ended (danielrispler/plotkeeper#124).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SinceSeen {
+    pub turns: usize,
+    /// Distinct files, by worktree and path.
+    pub files: usize,
+    pub passed: usize,
+    pub failed: usize,
+    pub ran: usize,
+}
+
 impl Session {
+    /// How many of its turns Daniel has seen.
+    pub fn seen(&self) -> usize {
+        self.seen
+    }
+
+    /// What its turns after the last one Daniel saw did.
+    pub fn since(&self) -> SinceSeen {
+        let turns = &self.turns[self.seen.min(self.turns.len())..];
+        let files: BTreeSet<(&str, &str)> = turns
+            .iter()
+            .filter_map(|turn| turn.files.as_ref())
+            .flat_map(|found| &found.files)
+            .map(|file| (file.root.as_str(), file.path.as_str()))
+            .collect();
+        let count = |status| {
+            turns
+                .iter()
+                .flat_map(|turn| &turn.checks)
+                .filter(|check| check.status == status)
+                .count()
+        };
+        SinceSeen {
+            turns: turns.len(),
+            files: files.len(),
+            passed: count(CheckStatus::Passed),
+            failed: count(CheckStatus::Failed),
+            ran: count(CheckStatus::Ran),
+        }
+    }
+
     fn update_unseen(&mut self) {
         // Going idle keeps the mark: only Daniel seeing the session clears it (danielrispler/Falinks#556).
         self.unseen =
@@ -1323,7 +1366,7 @@ impl Session {
         }
     }
 
-    fn needs_you(&self) -> bool {
+    pub fn needs_you(&self) -> bool {
         !self.blocks.is_empty() || self.terminal_blocked
     }
 
@@ -1610,6 +1653,18 @@ pub struct SummaryRequest {
     /// shell fills it in, and for an agent that reports no trees.
     #[serde(default)]
     pub facts: Facts,
+    /// Whether the turn's reply is long or asks Daniel something (`wants_summary`), so that its
+    /// summary is wanted for itself; a summary of a turn that only changed code is there for a lone
+    /// Quiz (danielrispler/plotkeeper#119), and is dropped when the turn gets none.
+    #[serde(default = "wanted")]
+    pub wanted: bool,
+    /// Whether the turn ended in Needs you, which keeps a Quiz from showing beside the decision.
+    #[serde(default)]
+    pub asks: bool,
+}
+
+fn wanted() -> bool {
+    true
 }
 
 /// A file a turn changed, with its whole hunk from git.
@@ -2629,7 +2684,9 @@ impl Studio {
                         outputs.push(Output::AgyVersion);
                     }
                     let reply = event.reply().trim();
-                    if !replay && wants_summary(reply, session.needs_you()) {
+                    let wanted = wants_summary(reply, session.needs_you());
+                    // A turn that changed code gets its summary for a lone Quiz (danielrispler/plotkeeper#119).
+                    if !replay && (wanted || matches!(output, Some(Output::Card(_)))) {
                         // shortcut: the transcript may lag the `Stop` by one poll, so the final reply
                         // is taken from the `Stop`; read the transcript first if earlier texts go missing.
                         let mut turn = session.transcript.clone();
@@ -2651,6 +2708,8 @@ impl Studio {
                                 _ => None,
                             },
                             facts: Facts::default(),
+                            wanted,
+                            asks: session.needs_you(),
                         }));
                     }
                     if let Some(prompt) = session.name_after.take()
@@ -3133,6 +3192,21 @@ impl Studio {
             ended: true,
             trees,
         })
+    }
+
+    /// Whether the turn named `id` ran a merge, by `git merge` or `gh pr merge`, which the offer of a
+    /// Quiz leaves out (danielrispler/plotkeeper#119).
+    pub fn turn_merged(&self, id: &str) -> bool {
+        let found = self.sessions.values().find_map(|s| {
+            let at = s.turns.iter().position(|t| t.id.as_deref() == Some(id))?;
+            Some(
+                s.ledger
+                    .turn(at)
+                    .filter_map(|r| r.command.as_deref())
+                    .any(merges),
+            )
+        });
+        found.unwrap_or(false)
     }
 
     /// The facts of the turn `ask` names, from the numstat the shell found (`None` when git could
@@ -3870,6 +3944,14 @@ impl Studio {
         }
         body
     }
+}
+
+/// Whether a shell command merges: `git merge` or `gh pr merge`, alone or in a chain.
+fn merges(command: &str) -> bool {
+    let parts = command.split(['&', ';', '|', '\n']);
+    parts
+        .map(str::trim)
+        .any(|c| c.starts_with("git merge") || c.starts_with("gh pr merge"))
 }
 
 /// The id of `owner`'s card written at `at`, a worker's or else a session's (`CardRequest::id`).

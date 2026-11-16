@@ -518,6 +518,14 @@ body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
 .diff-line.hunk, .diff-line.meta { color: var(--muted); }
 .diff-external { color: var(--muted); font-size: var(--size-small); }
 .evidence-more[hidden] { display: none; }
+
+/* "Where we were" (#124): the banner above the newest turn. */
+.banner { margin: 0 0 var(--sp-4); padding: var(--sp-3) var(--sp-4); border: var(--hair) solid var(--line); border-radius: var(--radius); font-size: var(--size-small); }
+.banner p { margin: 0 0 var(--sp-2); }
+.banner .banner-title { font-weight: 600; }
+.banner .label { color: var(--muted); }
+.banner .age { color: var(--muted); }
+.banner-brief summary { cursor: pointer; color: var(--muted); }
 .ask-why { margin-top: var(--sp-4); }
 .ask-why input { font: inherit; font-size: var(--size-small); margin-right: var(--sp-3); }
 .ask-why .btn { margin-top: 0; }

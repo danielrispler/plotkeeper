@@ -160,7 +160,7 @@ const session = (state, { running = false, question = false } = {}) => {
       helper("a3", "Find where the delete is styled", "Find every rule that styles `.delete`.", "Explore", "Two rules in `ui/style.css`, none in `ui/list.ts`.", 3, 2 * 60 * MIN),
       helper("a1", "Review the diff", "Review the diff on this branch and list anything that breaks the token rules.", "Explore", "No raw colours; two spacing values bypass the tokens.", 4, 30 * MIN, running),
     ]), asker: state === "needs_you" ? { agent: null, since: now - 3 * MIN } : null,
-    prompts: [], turns, returned: null,
+    prompts: [], turns, returned: null, seen: 3, unseen: state === "idle",
     questions: question ? [{
       tool_use_id: "toolu_q1", agent: null, turn: 4, answer: "open",
       questions: [{
@@ -223,6 +223,10 @@ const open = [
   { kind: "unpushed", text: "Uncommitted or unpushed work" },
 ];
 
+const design = [
+  { text: "Hide the delete with visibility, because display would move the row's text.", cite: "" },
+];
+
 const decisions = [
   { call: "c1", agent: null, tool: "AskUserQuestion", input: { questions: [{ question: "Hide the delete with display or visibility?", options: [] }] }, answer: { "Hide the delete with display or visibility?": "visibility" }, at: Date.now() - 3 * 60 * MIN, source: "card" },
   { call: "c2", agent: null, tool: "ExitPlanMode", input: { plan: "Add a fold toggle and a delete column to each row." }, answer: "allow", at: Date.now() - 4 * 60 * MIN, source: "card" },
@@ -243,7 +247,7 @@ const build = (state, { ask = null, answered = false, withBrief = false } = {}) 
     ...common,
     sessions,
     selected: { session: s, agent: null },
-    cards: { brief: null, goal: withBrief ? goal : null, answers: withBrief ? answers : [], open: withBrief ? open : [], recent: [], older: [stored], decisions: withBrief ? decisions : [] },
+    cards: { brief: null, goal: withBrief ? goal : null, answers: withBrief ? answers : [], open: withBrief ? open : [], design: withBrief ? design.map((line) => ({ ...line, cite: stored.request.id })) : [], recent: [], older: [stored], decisions: withBrief ? decisions : [] },
     watch: ask,
     ask_facts: {
       sections: [
@@ -281,6 +285,18 @@ export const railStates = {
   railNeeds: () => ({ ...build("needs_you", { ask: questionAsk }), snapScript: barScript }),
   railIdle: () => build("idle", { answered: true, withBrief: true }),
 };
+
+// #124: the banner opens an idle session, right above the newest turn, with the Brief inside it and not below the feed.
+const bannerScript = `
+  const banner = document.getElementById("banner");
+  if (!banner) log("snap:fail the banner is missing");
+  else {
+    const next = banner.parentElement.nextElementSibling;
+    if (next?.id !== "feed") log("snap:fail the newest turn is not right under the banner");
+    if (!banner.querySelector(".banner-brief .slot-title")) log("snap:fail the Brief is not inside the banner");
+    if (!document.getElementById("brief-fold").hidden) log("snap:fail the Brief shows twice");
+    log("banner: " + [...banner.querySelectorAll("p")].map((p) => p.textContent).join(" | "));
+  }`;
 
 // Sample scripts for a fixture's `snapScript` (see page.mjs): the first scrolls the rail of the five-turn fixture and logs
 // where it stands, the second fails on purpose.
@@ -396,6 +412,7 @@ export const railFixtures = {
   railHunk: () => ({ ...build("your_turn"), snapScript: hunkScript }),
   railEvidence: () => ({ ...build("your_turn"), snapScript: evidenceScript }),
   ...railStates,
+  railBanner: () => ({ ...build("idle", { answered: true, withBrief: true }), snapScript: bannerScript }),
   railIdleScroll: () => ({ ...build("idle", { answered: true, withBrief: true }), snapScript: scrollScript }),
   railIdleOpened: () => ({ ...build("idle", { answered: true, withBrief: true }), snapScript: openTurnScript }),
   railIdleFail: () => ({ ...build("idle", { answered: true, withBrief: true }), snapScript: failScript }),
