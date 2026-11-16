@@ -3,8 +3,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import vm from "node:vm";
-import { snapPage, stubSource } from "../../scripts/snap/page.mjs";
+import { consoleLines, failed, headSource, snapPage, stubSource } from "../../scripts/snap/page.mjs";
 import { fixtures } from "../../scripts/snap/fixtures.mjs";
+import { railStates } from "../../scripts/snap/rail-fixtures.mjs";
 
 const invokeIn = (source, command) => {
   const window = {};
@@ -39,4 +40,120 @@ test("the home fixture has every section: needs you, unseen, landed, and a proje
   assert.ok(f.sessions.some((s) => s.unseen && s.state !== "needs_you" && !s.landed));
   assert.ok(f.sessions.some((s) => s.landed && s.state !== "running"));
   assert.ok(f.terminal_connect.repo);
+});
+
+// The rail's fixtures (#109): each holds what its state needs.
+const selected = (name) => fixtures[name]().selected.session;
+
+test("a rail fixture exists for each state, and all are rendered by `snap:rail`", () => {
+  assert.deepEqual(Object.keys(railStates), ["railRunning", "railYourTurn", "railNeeds", "railIdle"]);
+  for (const name of Object.keys(railStates)) assert.equal(fixtures[name]().selected.session.id, "s1");
+});
+
+test("railRunning: a running turn with an intention, a step and two subagents", () => {
+  const s = selected("railRunning");
+  assert.equal(s.state, "running");
+  assert.ok(s.turn_span.end === null && s.transcript.intention);
+  assert.ok(s.step_span.end === null && s.last_step.tool);
+  assert.equal(s.agents.length, 2);
+  assert.ok(s.agents.some((a) => a.status === "running"));
+});
+
+test("railYourTurn: a summary, an unanswered quiz, and a passed and a failed check", () => {
+  const f = fixtures.railYourTurn();
+  assert.equal(f.selected.session.state, "your_turn");
+  assert.ok(f.turn_summary.values.t4.summary);
+  const [stored] = f.cards.older;
+  assert.ok(stored.card.quiz.options.length > 1);
+  assert.equal(stored.guess, null);
+  const checks = f.selected.session.checks;
+  assert.ok(checks.some((c) => c.passed) && checks.some((c) => !c.passed));
+});
+
+test("railNeeds: the session needs you, with a question docked", () => {
+  const f = fixtures.railNeeds();
+  const s = f.selected.session;
+  assert.equal(s.state, "needs_you");
+  assert.ok(s.asker);
+  assert.equal(s.questions[0].answer, "open");
+  assert.equal(f.watch.tool_name, "AskUserQuestion");
+});
+
+test("railIdle: an idle session with five turns and an answered card", () => {
+  const f = fixtures.railIdle();
+  assert.equal(f.selected.session.state, "idle");
+  assert.equal(f.selected.session.turns.length, 5);
+  assert.equal(f.cards.older[0].guess.right, true);
+});
+
+test("an argument-keyed reply answers by that argument", async () => {
+  const window = {};
+  vm.runInNewContext(stubSource({ turn_summary: { __by: "id", values: { t1: { summary: "x" } } } }), { window, Date });
+  assert.equal(JSON.stringify(await window.__TAURI__.core.invoke("turn_summary", { id: "t1" })), '{"summary":"x"}');
+  assert.equal(await window.__TAURI__.core.invoke("turn_summary", { id: "zz" }), null);
+});
+
+// Runs a page's head script in a stand-in page: `load` fires, then the timers run.
+const runHead = (options) => {
+  const logged = [];
+  const added = [];
+  const handlers = {};
+  const timers = [];
+  const document = { body: { classList: { add: (...names) => added.push(...names) } }, marker: "drawn" };
+  vm.runInNewContext(headSource(options), {
+    document, console: { log: (line) => logged.push(line) },
+    addEventListener: (name, run) => (handlers[name] = run),
+    setTimeout: (run) => timers.push(run),
+  });
+  handlers.DOMContentLoaded?.();
+  handlers.load?.();
+  return Promise.all(timers.map((run) => run())).then(() => ({ logged, added }));
+};
+
+test("a fixture's script runs after load and gets log; what it logs is what snap prints", async () => {
+  const { logged } = await runHead({ script: 'log("rail scrollTop", 120 + 0, document.marker);' });
+  assert.deepEqual(logged, ["rail scrollTop 120 drawn"]);
+});
+
+test("the script does not run at load itself, only after the UI has had time to draw", async () => {
+  const handlers = {};
+  const timers = [];
+  vm.runInNewContext(headSource({ script: 'log("ran")' }), {
+    document: { body: { classList: { add() {} } } }, console: { log() { throw new Error("ran too early"); } },
+    addEventListener: (name, run) => (handlers[name] = run), setTimeout: (run) => timers.push(run),
+  });
+  handlers.load();
+  assert.equal(timers.length, 1);
+});
+
+test("a script that throws logs a snap:fail line, and the body's classes are set from the run", async () => {
+  const { logged, added } = await runHead({ script: 'throw new Error("no rail");', bodyClasses: ["rail-open"] });
+  assert.ok(failed(logged));
+  assert.match(logged[0], /^snap:fail the script threw: Error: no rail/);
+  assert.deepEqual(added, ["rail-open"]);
+});
+
+test("a page without a script has no load handler, and no classes by default", async () => {
+  const { logged, added } = await runHead({});
+  assert.deepEqual([logged, added], [[], []]);
+});
+
+test("snapPage puts a fixture's script in the page, after the stub and before the app", () => {
+  const index = '<head><script type="module" src="main.js"></script></head>';
+  const page = snapPage(index, { snapScript: "log(1)" });
+  assert.ok(page.indexOf("__TAURI__") < page.indexOf("log(1)") && page.indexOf("log(1)") < page.indexOf('src="main.js"'));
+});
+
+test("a log line starting snap:fail fails the run; other lines do not", () => {
+  assert.equal(failed(["rail scrollTop 120", "snap:fail moved"]), true);
+  assert.equal(failed(["rail scrollTop 120", "a snap:fail inside"]), false);
+});
+
+test("consoleLines reads the page's console lines out of Chrome's stderr", () => {
+  const stderr = [
+    '[1116/101010.000:INFO:CONSOLE:5] "rail scrollTop 120", source: http://127.0.0.1:1/index.html (5)',
+    "[1116/101010.000:ERROR:something_else.cc:1] not console",
+    '[1116/101010.000:INFO:CONSOLE:6] "snap:fail it said \\"no\\"", source: http://127.0.0.1:1/index.html (6)',
+  ].join("\n");
+  assert.deepEqual(consoleLines(stderr), ["rail scrollTop 120", 'snap:fail it said "no"']);
 });

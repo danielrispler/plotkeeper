@@ -1,6 +1,8 @@
 // Studio state for `npm run snap`: each fixture maps a Tauri command to what it returns.
 // A fixture is a function so that its times are relative to the moment it renders.
 
+import { railFixtures } from "./rail-fixtures.mjs";
+
 const session = (id, name, state, extra = {}) => {
   const now = Date.now();
   return {
@@ -51,6 +53,7 @@ const logFixture = (status) => {
 };
 
 export const fixtures = {
+  ...railFixtures,
   logRunning: () => logFixture("running"),
   logDone: () => logFixture("completed"),
   // The list with a nested row (a session with subagents), the selected row and a landed one.

@@ -1,42 +1,11 @@
 // The learning section asks its question before it shows the main idea (danielrispler/plotkeeper#10). Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-
-// A just-enough DOM: elements that hold children and text, and run their click listeners.
-class Node {
-  constructor(tag) {
-    this.tag = tag;
-    this.children = [];
-    this.listeners = {};
-    this.classList = { add() {} };
-    this.className = "";
-  }
-  append(...items) {
-    this.children.push(...items);
-  }
-  prepend(...items) {
-    this.children.unshift(...items);
-  }
-  setAttribute() {}
-  addEventListener(name, run) {
-    this.listeners[name] = run;
-  }
-  set textContent(value) {
-    this.children = [value];
-  }
-  get text() {
-    return this.children.map((c) => (typeof c === "string" ? c : c.text)).join("");
-  }
-  find(tag, out = []) {
-    if (this.tag === tag) out.push(this);
-    for (const c of this.children) if (typeof c !== "string") c.find(tag, out);
-    return out;
-  }
-}
+import { El } from "./dom.mjs";
 
 // The fake document is set after the import: times.ts starts a timer when a document exists at load.
 const { learningElement } = await import("../../dist/story.js");
-globalThis.document = { createElement: (tag) => new Node(tag), getElementById: () => Object.assign(new Node("div"), { replaceChildren() {} }) };
+globalThis.document = { createElement: (tag) => new El(tag), getElementById: () => Object.assign(new El("div"), { replaceChildren() {} }) };
 
 const learning = {
   idea: "A gate frozen before scoring fixes the pairs.",
