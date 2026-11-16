@@ -92,7 +92,13 @@ function offer(): Promise<"now" | "later"> {
   (async () => {
     let shown = "";
     while (open) {
-      const busy = (await plan()).filter((r) => r.busy);
+      // A failed poll is logged and the next one retries; the bar waits for one that succeeds.
+      const terms = await plan().catch((e) => (console.warn(`restart offer: ${e}`), null));
+      if (!terms) {
+        await sleep(3000);
+        continue;
+      }
+      const busy = terms.filter((r) => r.busy);
       const message =
         "Studio was updated, but your terminals still run on the old version. Restarting moves them to the new one: Claude sessions reopen, shells restart in their folder." +
         (busy.length ? ` Busy now: ${busy.map(running).join("; ")}.` : "");
