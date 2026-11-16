@@ -14,7 +14,7 @@ import { encode, request } from "./daemon.js";
 import { agentState, sessionName, showsLanded } from "./list.js";
 import { closePane, openHere } from "./panes.js";
 import { openDecision, type Ask } from "./answer.js";
-import { cardNode } from "./cards.js";
+import { cardLine, quizOpen } from "./cards.js";
 import { showCleared } from "./decisions.js";
 import { decisionElement, questionElement } from "./questions.js";
 import { removeWorktreeByDefault, shortPaths, worktreeOf } from "./paths.js";
@@ -202,6 +202,15 @@ export function headlineOf(summary: TurnSummary | null, message: string | null):
   const lines = (summary?.summary.summary ?? "").split("\n").map((line) => line.trim()).filter(Boolean);
   if (lines.length) return { headline: lines[0], body: lines.slice(1).map((text) => ({ kind: "reported", text })) };
   return { headline: message?.trim() || null, body: [] };
+}
+
+// A folded turn's line (danielrispler/plotkeeper#117): Daniel's prompt (its first line, which the style cuts to fit) and the
+// Headline, with two marks: a Quiz he has not answered, and a check that ended failed. A check's status is its last run's,
+// so a failure the agent fixed leaves no mark.
+export type FoldedLine = { prompt: string; headline: string | null; unanswered: boolean; failed: boolean };
+export function foldedLine(turn: Pick<Turn, "prompt" | "checks">, headline: string | null, unanswered: boolean): FoldedLine {
+  const prompt = turn.prompt.split("\n").map((line) => line.trim()).find(Boolean) ?? "No prompt";
+  return { prompt, headline, unanswered, failed: turn.checks.some((check) => check.status === "failed") };
 }
 
 // What "now" holds in each state: one thing per state. While running, what Daniel asked and the intention, boxed.
@@ -430,7 +439,7 @@ function checkElement(line: CheckLine): HTMLElement {
 }
 
 // One block of the feed. The newest turn's summary is at the top, so its block leaves it out.
-function turnElement(session: Session, block: FeedTurn, now: Now | null): HTMLElement {
+function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLElement {
   const { turn, index } = block;
   const node = document.createElement("li");
   node.className = now ? "turn now-turn" : "turn";
@@ -453,7 +462,7 @@ function turnElement(session: Session, block: FeedTurn, now: Now | null): HTMLEl
     }
   } else if (summary) node.append(rendered("div", summary.summary.summary, "summary", session.cwd));
   if (summary?.summary.learning && turn?.id) node.append(learningElement(turn.id, summary.summary.learning));
-  node.append(...block.cards.map(cardNode));
+  node.append(...block.cards.map(cardLine));
   node.append(...block.questions.filter((q) => q.answer === "not_answered").map(questionElement));
   if (block.agents.length) {
     const list = document.createElement("ol");
@@ -499,6 +508,42 @@ function turnElement(session: Session, block: FeedTurn, now: Now | null): HTMLEl
   if (about) node.append(askElement(session.id, about));
   return node;
 }
+
+// A turn before the newest (danielrispler/plotkeeper#117): one line, which opens the turn's block under it and folds it
+// again. Only this node changes, so the others and the scroll position stay; the opened turns outlast a redraw.
+function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
+  const node = document.createElement("li");
+  node.className = "turn past";
+  const key = `${session.id} ${block.index} turn`;
+  const draw = () => {
+    const turn = block.turn!;
+    const summary = turn.id ? summaryOf(turn.id) : null;
+    const { headline } = headlineOf(summary, turn.message);
+    const open = opened.has(key);
+    const line = foldedLine(turn, headline, block.cards.some(quizOpen) || (summary?.summary.learning != null && !learned.has(turn.id!)));
+    const button = pressable(document.createElement("button"), open, () => {
+      if (opened.has(key)) opened.delete(key);
+      else opened.add(key);
+      draw();
+    });
+    button.classList.add("turn-line");
+    button.setAttribute("aria-expanded", String(open));
+    button.append(
+      ...(line.unanswered ? [text("span", "●", "mark quiz-open")] : []),
+      text("span", line.prompt, "prompt"),
+      text("span", line.headline ?? "", "headline-text"),
+      ...(line.failed ? [text("span", "✕", "mark check-failed")] : []),
+    );
+    if (line.unanswered) button.querySelector(".quiz-open")!.setAttribute("title", "A quiz is open");
+    if (line.failed) button.querySelector(".check-failed")!.setAttribute("title", "A check ended failed");
+    node.replaceChildren(button, ...(open ? [...turnContent(session, block, null).children] : []));
+  };
+  draw();
+  return node;
+}
+
+const turnElement = (session: Session, block: FeedTurn, now: Now | null) =>
+  now || block.index === null ? turnContent(session, block, now) : foldedTurn(session, block);
 
 // Draws "now" and the feed from the selection and the cards the shell last sent.
 export function drawFeed() {

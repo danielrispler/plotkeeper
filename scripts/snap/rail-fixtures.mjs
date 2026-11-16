@@ -126,6 +126,8 @@ const session = (state, { running = false, question = false } = {}) => {
     prompt,
     id: i < 4 || ended ? `t${i}` : null,
     message: "Done.",
+    // The second turn ends with a failed check, which its folded line marks (#117).
+    checks: [{ suite: "check", status: i === 1 ? "failed" : "passed", retries: 0, runs: [] }],
   }));
   const transcript = {
     intention: ended ? final.split("\n")[0] : intentions[state === "needs_you" ? "needs_you" : "running"],
@@ -270,8 +272,16 @@ const scrollScript = `
   log("rail scrollTop " + story.scrollTop + " of " + (story.scrollHeight - story.clientHeight));`;
 const failScript = `log("snap:fail the sample script fails on purpose");`;
 
+// #117: opens the second earlier turn, as a click does, and logs what stands: one turn open of four folded.
+const openTurnScript = `
+  document.querySelectorAll(".turn.past .turn-line")[1].click();
+  const lines = [...document.querySelectorAll(".turn.past .turn-line")];
+  log("folded turns " + lines.length + ", open " + lines.filter((l) => l.getAttribute("aria-expanded") === "true").length);
+  if (lines.length !== 4 || lines[1].getAttribute("aria-expanded") !== "true") log("snap:fail one turn should be open of four folded");`;
+
 export const railFixtures = {
   ...railStates,
   railIdleScroll: () => ({ ...build("idle", { answered: true, withBrief: true }), snapScript: scrollScript }),
+  railIdleOpened: () => ({ ...build("idle", { answered: true, withBrief: true }), snapScript: openTurnScript }),
   railIdleFail: () => ({ ...build("idle", { answered: true, withBrief: true }), snapScript: failScript }),
 };
