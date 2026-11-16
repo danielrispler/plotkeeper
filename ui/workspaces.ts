@@ -176,6 +176,10 @@ export function projectGroups<S extends Pick<Session, "cwd" | "state">>(paths: s
   ];
 }
 
+// The sessions in the sidebar's order: project by project, by state, without ended ones. The session keys step over it.
+export const sidebarOrder = <S extends Pick<Session, "cwd" | "state">>(paths: string[], found: Map<string, Workspaces>, sessions: S[]): S[] =>
+  projectGroups(paths, found, sessions).flatMap((group) => group.states.flatMap((state) => state.sessions));
+
 // Why the main checkout's branch cannot be switched now (#95), or null when it can: a session working in
 // the main checkout itself, not in a task's worktree, is running or needs Daniel, so its files must not change
 // under it. A pure function of the listed sessions.

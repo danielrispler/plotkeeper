@@ -64,6 +64,14 @@ export function run(actions: Actions, binding: Binding | undefined): boolean {
   return name in actions;
 }
 
+// The line the arrow keys step to, `by` from the current one, or from the edge when none is current: only session rows and
+// subagent lines count, never a workspace row. Null at the end.
+export function stepLine(lines: { classes: string[]; current: boolean }[], by: 1 | -1): number | null {
+  const steps = lines.flatMap((line, at) => (["session-row", "worker", "helper"].some((c) => line.classes.includes(c)) ? [at] : []));
+  const here = steps.findIndex((at) => lines[at].current);
+  return steps[here === -1 ? (by === 1 ? 0 : steps.length - 1) : here + by] ?? null;
+}
+
 // The session `by` steps from `selected` in the list's order, wrapping; with none selected, the first
 // or the last.
 export function stepSession(sessions: { id: string }[], selected: string | null, by: 1 | -1): string | null {
