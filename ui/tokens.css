@@ -37,5 +37,5 @@
   --divider: 6px; --strip-button: calc(var(--strip) - var(--sp-2)); --dot: 6px; --glyph: 10px;
   /* A row's fold and delete: the button and its icon. */
   --control: 20px; --icon: 14px;
-  --popover: 380px; --dialog: 560px; --find: 220px; --outcome: 52px; --toast: 360px; --menu: 180px; --session-header: 280px;
+  --popover: 380px; --dialog: 560px; --find: 220px; --outcome: 52px; --toast: 360px; --menu: 180px; --session-header: 280px; --layer: 320px; --spine: 14px;
 }

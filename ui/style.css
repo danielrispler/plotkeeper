@@ -81,10 +81,10 @@ body[data-layout="focus"] #rail-divider { display: none; }
 .session-header:hover { background: var(--hover); }
 .session-header .state { margin: 0; font-size: inherit; flex: none; }
 .session-header .name { overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
-.session-header .dot { flex: none; width: var(--dot); height: var(--dot); border-radius: 50%; background: var(--muted); }
-.session-header .dot[data-state="running"] { background: var(--fg); }
-.session-header .dot[data-state="idle"], .session-header .dot[data-state="ended"] { background: none; box-shadow: inset 0 0 0 var(--hair) var(--muted); }
-.session-header .dot[data-state="needs_you"] { background: var(--needs-you); }
+.session-header .dot, .spine .dot { flex: none; width: var(--dot); height: var(--dot); border-radius: 50%; background: var(--muted); }
+.session-header .dot[data-state="running"], .spine .dot[data-state="running"] { background: var(--fg); }
+.session-header .dot[data-state="idle"], .session-header .dot[data-state="ended"], .spine .dot[data-state="idle"], .spine .dot[data-state="ended"] { background: none; box-shadow: inset 0 0 0 var(--hair) var(--muted); }
+.session-header .dot[data-state="needs_you"], .spine .dot[data-state="needs_you"] { background: var(--needs-you); }
 /* The chip stands apart from the header. */
 .top .chip { margin-inline-start: var(--sp-5); }
 /* The needs-you chip (danielrispler/Falinks#572): the count of sessions that need Daniel, in the needs-you colour. */
@@ -98,7 +98,7 @@ body[data-layout="focus"] #rail-divider { display: none; }
 .strip { display: none; flex-direction: column; align-items: center; gap: var(--sp-2); padding: var(--sp-4) 0; }
 body:not([data-layout="full"]) .full { display: none; }
 body:not([data-layout="full"]) .strip { display: flex; }
-body.list-open .full, body:not([data-layout="full"]) .list:hover .full {
+body.list-open .full, body.list-peek:not([data-layout="full"]) .full {
   display: block !important; position: fixed; top: var(--bar); bottom: 0; right: 0; width: var(--list);
   background: var(--surface); box-shadow: var(--shadow-start); overflow-y: auto; z-index: 6; }
 .strip .btn { width: var(--strip-button); padding: var(--sp-2) 0; display: flex; flex-direction: column; align-items: center;
@@ -238,9 +238,19 @@ h1 { margin: 0 0 var(--sp-4); }
 /* The rail (danielrispler/Falinks#574): one header line, the open question docked under it, then the story: "now" and the
    feed of turns. In "overlay" ⌘2 toggles it over the terminal. */
 .rail { display: grid; grid-template-rows: auto auto 1fr; grid-template-columns: minmax(0, 1fr); }
-body[data-layout="overlay"] .rail { display: none; }
-body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; top: var(--bar); bottom: 0; left: 0;
-                                                                width: var(--rail); background: var(--chrome); box-shadow: var(--shadow-end); z-index: 5; }
+/* In "overlay" the rail is a layer over the terminal (danielrispler/plotkeeper#128): 320 px on the lighter surface with an edge line,
+   sliding in over 150 ms and out over 100 ms, no scrim. It opens by a rest on the spine or the session header, by a click, or ⌘2
+   (hover.ts); it is visible only while open, so a closed one takes no pointer. */
+body[data-layout="overlay"] .rail { --rail: var(--layer); position: fixed; top: var(--bar); bottom: 0; left: 0; width: var(--layer);
+                                    background: var(--surface); box-shadow: inset calc(-1 * var(--hair)) 0 0 var(--edge); z-index: 5;
+                                    transform: translateX(-100%); visibility: hidden;
+                                    transition: transform 100ms ease-in, visibility 0s linear 100ms; }
+body[data-layout="overlay"].rail-open .rail { transform: none; visibility: visible; transition: transform 150ms ease-out, visibility 0s; }
+/* The spine (#128): a 14 px target on the window's left edge, under the top bar, with the session's state dot. */
+.spine { display: none; position: fixed; top: var(--bar); bottom: 0; left: 0; width: var(--spine); z-index: 4; justify-content: center;
+         padding-top: var(--sp-5); background: var(--chrome); box-shadow: inset calc(-1 * var(--hair)) 0 0 var(--edge); }
+body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
+.spine .dot { width: var(--dot); height: var(--dot); border-radius: 50%; background: var(--muted); }
 .rail-h { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-4) var(--sp-5); min-height: var(--sp-7); }
 /* Line 1 the verdict, the block's kind, the mode and the agent's mark; line 2 the session's name; line 3 the estimate while it
    runs. They wrap, never cut; the times and the model are the hover text. */

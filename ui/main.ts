@@ -10,6 +10,7 @@ import { placeBar, watchBar } from "./bar.js";
 import { markShown, showCards } from "./cards.js";
 import { element, invoke, listen } from "./dom.js";
 import { type Actions, doctorEntries, newestUnseen, nextNeedsYou, paletteEntries, run, stepLine, stepSession, windowBinding } from "./keys.js";
+import { hover, realClock, shownGate } from "./hover.js";
 import { arrange, defaultWidths, type LayoutMode, railShown, resized, type Widths } from "./layout.js";
 import { listSpace } from "./home.js";
 import { showSessions } from "./list.js";
@@ -49,14 +50,44 @@ function layout() {
 }
 window.addEventListener("resize", layout);
 // The shell counts a turn seen only while the rail shows its session (danielrispler/Falinks#556), so it is told whether it
-// does each time the layout or the body's classes change.
-let railWas: boolean | null = null;
-new MutationObserver(() => {
+// does each time the layout or the body's classes change. A rail that shows as an overlay is told only after it has stayed
+// open 2 seconds, so a peek does not clear the unseen mark (danielrispler/plotkeeper#128).
+const tellShown = shownGate(realClock, (shown) => invoke("rail_shown", { shown }).catch((e) => console.warn(e)));
+// The overlays open on a rest of the pointer (hover.ts): the rail's layer from the spine or the session header, the list's strip
+// over the terminal. A click, ⌘2 and Esc keep working; they change the body's classes, which the observer below hands to the machines.
+const railHover = hover(realClock, (open) => document.body.classList.toggle("rail-open", open));
+const listHover = hover(realClock, (open) => document.body.classList.toggle("list-peek", open));
+const syncHover = () => {
   const { classList, dataset } = document.body;
-  const shown = railShown((dataset.layout ?? "full") as LayoutMode, classList.contains("rail-open"), classList.contains("skills-open"));
-  if (shown !== railWas) invoke("rail_shown", { shown }).catch((e) => console.warn(e));
-  railWas = shown;
-}).observe(document.body, { attributes: true, attributeFilter: ["class", "data-layout"] });
+  for (const [machine, name] of [[railHover, "rail-open"], [listHover, "list-peek"]] as const) {
+    if (classList.contains(name) !== machine.open) classList.contains(name) ? machine.toggle() : machine.dismiss();
+  }
+  const mode = (dataset.layout ?? "full") as LayoutMode;
+  tellShown(railShown(mode, classList.contains("rail-open"), classList.contains("skills-open")), mode === "overlay");
+};
+new MutationObserver(syncHover).observe(document.body, { attributes: true, attributeFilter: ["class", "data-layout"] });
+// A mouse button held down never opens an overlay, so a drag across the edge or a text selection leaves them be.
+const held = (event: PointerEvent) => event.buttons !== 0;
+window.addEventListener("pointerdown", (event) => {
+  railHover.pressed(true);
+  listHover.pressed(true);
+  // A press outside the rail's layer and its targets closes it.
+  const inside = [".rail", "#spine", "#session-header"].some((selector) => (event.target as Element).closest?.(selector));
+  if (!inside && document.body.dataset.layout === "overlay") document.body.classList.remove("rail-open");
+}, true);
+for (const type of ["pointerup", "pointercancel"]) window.addEventListener(type, () => { railHover.pressed(false); listHover.pressed(false); }, true);
+const hoverZone = (machine: typeof railHover, target: Element, zone: string, only?: LayoutMode) => {
+  target.addEventListener("pointerenter", (event) => {
+    if (only && document.body.dataset.layout !== only) return;
+    machine.pressed(held(event as PointerEvent));
+    machine.enter(zone);
+  });
+  target.addEventListener("pointerleave", () => machine.leave(zone));
+};
+hoverZone(railHover, element("spine"), "spine", "overlay");
+hoverZone(railHover, element("session-header"), "header", "overlay");
+hoverZone(railHover, document.querySelector(".rail")!, "layer");
+hoverZone(listHover, document.querySelector(".list")!, "list");
 // Leaving focus mode from the toast, and a split opening or closing (`panes.ts`).
 window.addEventListener("layout", layout);
 layout();
@@ -133,12 +164,12 @@ const actions: Actions = {
   "studio::ToggleList": () => toggle("list-open"),
   "studio::ToggleRail": () => toggle("rail-open"),
   "studio::Dismiss": () => {
-    document.body.classList.remove("list-open", "rail-open", "skills-open");
+    document.body.classList.remove("list-open", "list-peek", "rail-open", "skills-open");
     element("picker").hidden = true;
   },
   "studio::ToggleFocus": () => {
     studio.focus = !studio.focus;
-    document.body.classList.remove("list-open", "rail-open");
+    document.body.classList.remove("list-open", "list-peek", "rail-open");
     layout();
   },
   // A split (danielrispler/Falinks#529) pins the pane shown and shows the next session beside it.
@@ -227,7 +258,9 @@ function applySettings(files: SettingsFiles) {
 listen<SettingsFiles>("settings-files", applySettings);
 invoke<SettingsFiles>("settings_files").then(applySettings);
 // The session's header in the top bar toggles the rail, as ⌘2 does (danielrispler/plotkeeper#127).
-element("session-header").addEventListener("click", () => toggle("rail-open"));
+// In the overlay layout a click pins the layer open, and a click on a pinned one closes it (hover.ts).
+element("session-header").addEventListener("click", () => (document.body.dataset.layout === "overlay" ? railHover.click() : toggle("rail-open")));
+element("spine").addEventListener("click", () => railHover.click());
 // The top bar's "⋯" menu closes once an item in it is pressed.
 element("bar-menu").addEventListener("click", () => element("bar-menu").hidePopover());
 watchBar();

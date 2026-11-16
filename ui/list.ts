@@ -390,7 +390,7 @@ function strip(sessions: Session[]): HTMLElement[] {
       button.append(glyph(session.state, session.unseen, session.landed), labels[i]);
       return button;
     }),
-    ...(rest ? [Object.assign(pressable(text("button", String(rest)), false, toggle), { title: "Idle" })] : []),
+    ...(rest ? [Object.assign(pressable(text("button", `${rest} idle`), false, toggle), { title: "Idle" })] : []),
   ];
 }
 
