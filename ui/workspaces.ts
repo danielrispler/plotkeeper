@@ -207,6 +207,9 @@ const read = new Map<string, Workspaces>();
 const states = new Map<string, GitState | null>();
 // A project's latest error, git's or any other, shown in its group until the next one.
 const failures = new Map<string, string>();
+// Why the projects could not be read, shown in the sidebar until a read succeeds.
+let projectsFailure: string | null = null;
+export const projectsError = (): string | null => projectsFailure;
 let reading = false;
 // A forced read asked for while one runs: one more read follows it.
 let again = false;
@@ -368,7 +371,17 @@ export async function readWorkspaces(now = false) {
   reading = true;
   readAt = Date.now();
   try {
-    const paths = await projects();
+    let paths: string[];
+    try {
+      paths = await projects();
+      projectsFailure = null;
+    } catch (e) {
+      // Shown in the sidebar; the next read tries again, not 10 s later.
+      projectsFailure = String(e);
+      readAt = 0;
+      drawSidebar();
+      return;
+    }
     pruneRemoved();
     await Promise.all(
       paths.map(async (project) => {
@@ -440,8 +453,16 @@ export async function fetchNow() {
   if (fetching) return;
   fetching = true;
   try {
+    let paths: string[];
+    try {
+      paths = await projects();
+    } catch (e) {
+      projectsFailure = String(e);
+      drawSidebar();
+      return;
+    }
     await Promise.all(
-      (await projects()).map(async (project) => {
+      paths.map(async (project) => {
         try {
           await invoke("fetch_repository", { project });
           fetched.set(project, { at: Date.now(), error: null });
