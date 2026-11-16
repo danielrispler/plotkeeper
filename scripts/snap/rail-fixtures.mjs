@@ -243,6 +243,13 @@ const build = (state, { ask = null, answered = false, withBrief = false } = {}) 
     selected: { session: s, agent: null },
     cards: { brief: withBrief ? brief : null, recent: [], older: [stored], decisions: withBrief ? decisions : [] },
     watch: ask,
+    ask_facts: {
+      sections: [
+        { label: "Daniel asked", facts: [{ at: null, text: "Implement the plan, starting with the fold toggle" }] },
+        { label: "Steps that edited it", facts: [{ at: Date.now() - 40 * MIN, text: "Edit by the session's agent" }, { at: Date.now() - 38 * MIN, text: "Edit by Explore the rows" }] },
+        { label: "Read or searched before the first edit", facts: [{ at: Date.now() - 45 * MIN, text: "Read ui/list.ts" }, { at: Date.now() - 44 * MIN, text: "Grep fold" }] },
+      ],
+    },
     check_output: { exit_code: 1, tail: "error: test failed, to rerun pass `-p studio-core --lib`\n\nfailures:\n    rows::fold_toggle_is_a_sibling" },
     turn_file_hunk: { text: ["diff --git a/ui/style.css b/ui/style.css", "--- a/ui/style.css", "+++ b/ui/style.css", "@@ -10,4 +10,6 @@", " .rail {", "-  gap: 4px;", "+  gap: var(--sp-3);", "+  padding: 0;", " }", ""].join("\n"), left_out: 0, binary: false, first_line: 11 },
     turn_summary: { __by: "id", values: Object.fromEntries(Object.entries(turnSummaries).map(([id, summary]) => [id, { summary }])) },
@@ -326,7 +333,45 @@ const hunkScript = `
   log("rail scrollTop " + at + " -> " + story.scrollTop);
   if (story.scrollTop !== at) log("snap:fail the rail's scrollTop moved from " + at + " to " + story.scrollTop);`;
 
+// #131: opens the evidence line, then "Open full diff", and fails when the diff pane does not list a file with its hunk.
+const diffScript = `
+  const wait = () => new Promise((resolve) => setTimeout(resolve, 300));
+  document.querySelector(".evidence-toggle").click();
+  await wait();
+  const open = [...document.querySelectorAll(".evidence-edit")].find((b) => b.textContent === "Open full diff");
+  if (!open) log("snap:fail the opened line has no Open full diff");
+  open.click();
+  await wait();
+  const pane = document.querySelector(".turn-diff");
+  if (!pane || pane.hidden) log("snap:fail the diff pane did not open");
+  log("diff files " + pane.querySelectorAll(".diff-file").length + ", lines " + pane.querySelectorAll(".diff-line").length);
+  if (!pane.querySelector(".diff-line.add") || !pane.querySelector(".diff-line.del")) log("snap:fail the diff has no added and removed lines");`;
+
+// #125: opens the evidence line, a file's Ask, then a failed check's Ask, and fails when the rail's scrollTop moved or no
+// facts show.
+const askScript = (selectors) => `
+  const story = document.getElementById("story");
+  story.scrollTop = Math.min(80, story.scrollHeight - story.clientHeight);
+  const at = story.scrollTop;
+  const wait = () => new Promise((resolve) => setTimeout(resolve, 200));
+  document.querySelector(".evidence-toggle").click();
+  await wait();
+  const open = async (selector) => {
+    const box = document.querySelector(selector + " .ask-about");
+    if (!box) return log("snap:fail there is no Ask on " + selector);
+    box.open = true;
+    await wait();
+    if (!box.querySelector(".ask-facts li")) log("snap:fail Ask on " + selector + " shows no facts");
+  };
+  for (const selector of ${JSON.stringify(selectors)}) await open(selector);
+  log("rail scrollTop " + at + " -> " + story.scrollTop);
+  if (story.scrollTop !== at) log("snap:fail the rail's scrollTop moved from " + at + " to " + story.scrollTop);`;
+
+
 export const railFixtures = {
+  railDiff: () => ({ ...build("your_turn"), snapScript: diffScript }),
+  railAsk: () => ({ ...build("your_turn"), snapScript: askScript([".evidence-file", ".evidence-check"]) }),
+  railAskCheck: () => ({ ...build("your_turn"), snapScript: askScript([".evidence-check"]) }),
   railHunk: () => ({ ...build("your_turn"), snapScript: hunkScript }),
   railEvidence: () => ({ ...build("your_turn"), snapScript: evidenceScript }),
   ...railStates,

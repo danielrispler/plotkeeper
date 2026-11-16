@@ -98,7 +98,19 @@ fn check_output(
         .map_err(|e| e.to_string())
 }
 
-/// A file's hunk of turn `turn` (danielrispler/plotkeeper#114): `git diff` between the turn's two trees of worktree
+/// The recorded facts of an Ask anchor (danielrispler/plotkeeper#125): from the ledger and the event log through its
+/// offsets, with no writer in the call. `None` when the session or the thing is not known.
+#[tauri::command(async)]
+fn ask_facts(
+    session: String,
+    anchor: studio_core::Anchor,
+    studio: State<Mutex<Studio>>,
+) -> Result<Option<studio_core::AskFacts>, String> {
+    let log = studio_hook::event_log(&std::env::home_dir().ok_or("no home folder")?);
+    Ok(studio.lock().unwrap().ask_facts(&session, &anchor, &log))
+}
+
+/// A file's hunk of turn `turn` (danielrispler/plotkeeper#114), whole for the diff pane (#131) when `all`: `git diff` between the turn's two trees of worktree
 /// `root`, off the studio's lock. `None` when the turn has no trees there, or `git` cannot read them.
 #[tauri::command(async)]
 fn turn_file_hunk(
@@ -107,6 +119,7 @@ fn turn_file_hunk(
     root: String,
     path: String,
     from: Option<String>,
+    all: Option<bool>,
     studio: State<Mutex<Studio>>,
 ) -> Option<studio_understanding::Hunk> {
     let (start, end) = studio.lock().unwrap().turn_trees(&session, turn, &root)?;
@@ -116,6 +129,7 @@ fn turn_file_hunk(
         end.as_deref(),
         &path,
         from.as_deref(),
+        all.unwrap_or(false),
     )
 }
 
@@ -682,6 +696,7 @@ fn main() {
             check_lists,
             check_output,
             turn_file_hunk,
+            ask_facts,
             turn_summary,
             turn_reply,
             agent_summary,
