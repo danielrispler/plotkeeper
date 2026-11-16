@@ -36,7 +36,7 @@ Used by `/wayfinder`. The **map** is one issue. Its **child** issues are the tic
 
 ## Frontier
 
-`cargo run --bin wayfinder-startup -- <map-number>` lists the frontier. A row has `frontier: true` when the ticket is open, unassigned and has no open blockers. The first such row in map order wins. The listing run only reads GitHub. For repo-wide planning (what can run now or in parallel, across every spec), run `cargo run --bin wayfinder-startup -- --all`. It makes one GraphQL query and lists every open issue by number, with its `parent`, `assignees`, open `blocked_by` and `frontier`. A row that is another row's `parent` is a spec, not a ticket. It also warns on stderr, once per pair, when two open tickets that are claimed or ready share a file in their `## Touches` **Files** line and are in different specs, or in one spec with no blocking edge between them (a directory such as `wayfinder/` shares every path under it). A ticket with no Touches line is skipped. The warning never blocks anything. Where native relationships are not available, apply the task-list and `Blocked by` conventions in `docs/agents/ticket-authoring.md` by hand.
+`cargo run --bin wayfinder-startup -- <map-number>` lists the frontier. A row has `frontier: true` when the ticket is open, unassigned and has no open blockers. The first such row in map order wins. The listing run only reads GitHub. For repo-wide planning (what can run now or in parallel, across every spec), run `cargo run --bin wayfinder-startup -- --all`. It makes one GraphQL query and lists every open issue by number, with its `parent`, `assignees`, open `blocked_by` and `frontier`. A row that is another row's `parent` is a spec, not a ticket. It also warns on stderr, once per pair, when two open tickets that are claimed or ready share a file in their `## Touches` **Files** line and are in different specs, or in one spec with no blocking edge between them (a directory such as `wayfinder/` shares every path under it). A ticket with no Touches line is skipped. It warns too, once per claimed or ready ticket, when the ticket's Touches names a path that is not in the checkout: refresh that ticket's Touches (`docs/agents/ticket-authoring.md`, Ticket context). A path with `new` right before it is one the ticket creates, and a blocked ticket is skipped, since a blocker may create its files. Paths under `local-evidence/` are not looked up. The warnings never block anything. Where native relationships are not available, apply the task-list and `Blocked by` conventions in `docs/agents/ticket-authoring.md` by hand.
 
 ## Claim
 
@@ -45,7 +45,7 @@ Used by `/wayfinder`. The **map** is one issue. Its **child** issues are the tic
 - It refuses closed tickets, blocked tickets and tickets assigned to someone else.
 - It assigns the issue to you.
 - It reuses the ticket's worktree, or checks out its existing local or `origin` `issue-<n>-*` branch, or creates branch `issue-<n>-<slug>` from `origin/main`. New worktrees go under `.claude/worktrees/`.
-- It warns on stderr, never blocking, when another claimed or ready ticket's Touches files overlap this ticket's (the same check as `--all`).
+- It warns on stderr, never blocking, when another claimed or ready ticket's Touches files overlap this ticket's, or when its own Touches names a path that is not in its worktree (the same checks as `--all`).
 - It prints the worktree path.
 - After the PR merges, `--done <n>` run from the main checkout removes that worktree and branch; `--help` lists what it refuses.
 

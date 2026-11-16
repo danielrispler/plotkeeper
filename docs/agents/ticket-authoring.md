@@ -20,6 +20,16 @@ Before you publish a labelled issue, run the preflight in `docs/agents/triage-la
 
 Synthesize the complete draft independently from the settled conversation and repo evidence. Before publication, confirm the proposed testing seams with one focused question unless they were already explicitly agreed in the current conversation. Show the proposed checks and their limits, and wait for the answer before publishing. This confirmation concerns testing seams; preserve the settled design rather than reopening a design interview. The installed skill remains unchanged.
 
+### Repository-specific `to-tickets`
+
+The installed skill remains unchanged. Where it and this file differ, follow this file:
+
+- **Template.** A ticket has `## Parent`, `## What to build`, `## Acceptance criteria`, `## Reading` and `## Touches` (**Ticket context** below). File paths go in Reading and Touches, where the skill's template has none.
+- **Edges.** Link each ticket to its spec as a sub-issue and add its blockers as native dependencies (**Wayfinder tracker operations** below), in place of the skill's `## Blocked by` section. A ticket waits only for what it uses, whatever its place in the build order.
+- **Agreed breakdown.** When Daniel approved the ticket list and its edges in the current conversation, publish it; the skill's quiz is for a breakdown he has not seen.
+- **Shared docs.** A file that most tickets of a spec would edit, such as `README.md`, goes to one closing ticket blocked by the tickets it describes, so parallel implementers never meet in it.
+- **Labels.** `studio` and `ready-for-agent`; `needs-triage` for a ticket that holds a choice of Daniel's.
+
 ## Spec and ticket constraints
 
 - **Sourcing.** Each number, code reference and decision claim that a decision, scope or estimate depends on cites its source: a `path:line` at a named commit SHA, a comment permalink, or a command that reproduces the number. A decision claim links the resolution comment, not a bare issue number. A decision recorded in a spec body has no resolution comment; cite that spec's section by name instead (e.g. "#45, Out of Scope"). Prose reasoning and background figures that no decision rests on need no citation.
@@ -34,7 +44,7 @@ Every new Wayfinder ticket must include `## Reading` before linking it to the ma
 
 Every new ticket must also include `## Touches`, so parallel planning can spot conflicts without reading the code. List two things, one line each:
 
-- **Files:** the main files or modules it edits. This is a best-effort planning hint, not a scope limit.
+- **Files:** the main files or modules it edits, each in backticks. This is a best-effort planning hint, not a scope limit. Write `new` right before a path the ticket creates (a new `core/src/ledger.rs`): `wayfinder-startup` warns about any other path of a claimed or ready ticket that is not in the checkout.
 - **Session:** `outside auto mode` when it launches nested agents (see **Nested agents** above), else `auto mode`.
 
 Add or refresh `## Touches` alongside `## Reading` before starting an existing ticket.

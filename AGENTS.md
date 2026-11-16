@@ -17,7 +17,7 @@ Raw evidence from finished real runs (run directories, screenshots, terminal out
 
 ## Workflow
 
-- **Grill, spec, ticket, then build.** By default, work moves through `$grilling`, then `$to-spec`, then `$to-tickets`, and only then to implementation, of one ticket or a whole spec.
+- **Grill, spec, ticket, then build.** By default, work moves through `$grilling`, then `$to-spec`, then `$to-tickets`, and only then to implementation, of one ticket or a whole spec. `$to-spec` and `$to-tickets` are user-invoked: they load when Daniel types them. Without them, follow `docs/agents/ticket-authoring.md`.
 - **Implement in a worktree.** Each change gets its own worktree under `.claude/worktrees/`, on a new branch from `origin/main`; the main checkout stays on `main`. Work in the main checkout only when Daniel says so.
 - **Finish with a PR.** When an implementation is done and `npm run check` passes, push its branch and open a PR against `main`, its body written with `$pr`. Daniel reviews and merges it.
 - **Blocked commands go to Daniel.** When auto mode or a permission rule blocks a command you need, give Daniel that command as one line that sends its output to a file in your scratchpad or temp dir (`… > <file> 2>&1`). He runs it in his terminal and tells you when it is done; then read the file and continue.
@@ -40,7 +40,7 @@ In a worktree, share the main checkout's cargo target dir so the build starts wa
 
 ### Learning
 
-Before planning, grilling or explanations, read `docs/agents/learning.md`. During session openings, planning, grilling, decision questions and explanations, it overrides any terse or brevity output mode. Follow its state/goal brief and explanation guidance during grilling, Wayfinder, and ordinary planning. After meaningful tickets, suggest `$dsh-explain-diff` in the final message. Explanations are optional and never block ticket resolution or progress; run the skill only when explicitly invoked.
+Before planning, grilling or explanations, read `docs/agents/learning.md`. During session openings, planning, grilling, decision questions and explanations, it overrides any terse or brevity output mode. Follow its state/goal brief and explanation guidance during grilling, Wayfinder, and ordinary planning. After a meaningful ticket that merges a diff, suggest `$dsh-explain-diff` in the final message. Explanations are optional and never block ticket resolution or progress; run the skill only when explicitly invoked.
 
 ### Issue tracker
 
