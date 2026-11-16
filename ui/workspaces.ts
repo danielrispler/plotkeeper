@@ -176,6 +176,10 @@ export function projectGroups<S extends Pick<Session, "cwd" | "state">>(paths: s
   ];
 }
 
+// The sessions in the sidebar's order: project by project, by state, without ended ones. The session keys step over it.
+export const sidebarOrder = <S extends Pick<Session, "cwd" | "state">>(paths: string[], found: Map<string, Workspaces>, sessions: S[]): S[] =>
+  projectGroups(paths, found, sessions).flatMap((group) => group.states.flatMap((state) => state.sessions));
+
 // Why the main checkout's branch cannot be switched now (#95), or null when it can: a session working in
 // the main checkout itself, not in a task's worktree, is running or needs Daniel, so its files must not change
 // under it. A pure function of the listed sessions.
@@ -295,11 +299,10 @@ function shown(): { project: string; workspaces: Workspaces; workspace: Workspac
 // The project the Git line shows, else the first one: where the palette's Switch branch works.
 export const shownProject = async (): Promise<string> => shown()?.project ?? mainProject();
 
-// The project whose workspace is at `path`: a task to remove, else the project holding the folder.
-export async function projectOfPath(path: string): Promise<string> {
-  const paths = await projects();
-  return ownerOf(paths, read, path)?.project ?? mainProject();
-}
+// The repository a worktree belongs to: its own main checkout, project or not, never another project; null when
+// none is found (so a removal there cannot work).
+export const repositoryOfWorktree = async (path: string, ask: (folder: string) => Promise<string | null> = (folder) => invoke<string | null>("repository_of", { folder })): Promise<string | null> =>
+  (await ask(path).catch(() => null)) || null;
 
 // The Git line: the workspace of the selected session, or the main checkout's with none, and its tokens.
 function drawLine() {
@@ -353,6 +356,16 @@ function touchShown() {
   for (const [project, found] of read) if (projectOpen(project)) for (const workspace of allWorkspaces(found)) touch(project, workspace.path);
 }
 
+// The configured projects, null when the read failed: the sidebar then shows why.
+async function readProjects(): Promise<string[] | null> {
+  try {
+    return await projects();
+  } catch {
+    drawSidebar();
+    return null;
+  }
+}
+
 // Reads the workspaces of every project from git. At most one read at a time and, unless `now`, one per 10 s, as the list
 // redraws on every hook event. A `now` during a read is not dropped: the read after it sees the
 // change, such as a new task.
@@ -365,7 +378,12 @@ export async function readWorkspaces(now = false) {
   reading = true;
   readAt = Date.now();
   try {
-    const paths = await projects();
+    const paths = await readProjects();
+    if (!paths) {
+      // The next read tries again, not 10 s later.
+      readAt = 0;
+      return;
+    }
     pruneRemoved();
     await Promise.all(
       paths.map(async (project) => {
@@ -437,8 +455,10 @@ export async function fetchNow() {
   if (fetching) return;
   fetching = true;
   try {
+    const paths = await readProjects();
+    if (!paths) return;
     await Promise.all(
-      (await projects()).map(async (project) => {
+      paths.map(async (project) => {
         try {
           await invoke("fetch_repository", { project });
           fetched.set(project, { at: Date.now(), error: null });

@@ -24,3 +24,16 @@ test("an ended session says it ended, not that it runs elsewhere", () => {
 test("Home shows while nothing is selected, not the login shell", () => {
   assert.equal(paneView(null, false), "home");
 });
+
+test("Open here shows the live terminal that already runs the conversation, never a second claude (#101)", async () => {
+  const { runningTerminal } = await import("../../dist/panes.js");
+  const term = (id, argv = [], exited = null) => ({ id, argv, cwd: "/tmp", exited });
+  const session = { terminal: "claude-a", resume_id: "conv-1" };
+  // The terminal the row links to.
+  assert.equal(runningTerminal(session, [term("claude-b"), term("claude-a")]).id, "claude-a");
+  // A terminal that resumed the conversation, while the row links to none.
+  const resumed = term("claude-c", ["claude", "--resume", "conv-1"]);
+  assert.equal(runningTerminal({ terminal: null, resume_id: "conv-1" }, [term("claude-b"), resumed]).id, "claude-c");
+  // Nothing runs it: an exited terminal does not count.
+  assert.equal(runningTerminal(session, [term("claude-a", [], "code 0"), term("claude-b", ["claude", "--resume", "other"])]), undefined);
+});

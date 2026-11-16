@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { branchBlocked, branchOptions, fetchNote, gitTokens, outsideName, projectGroups, sessionProjectName, workspaceRows, workspaceToken } from "../../dist/workspaces.js";
+import { branchBlocked, branchOptions, fetchNote, gitTokens, outsideName, projectGroups, sidebarOrder, sessionProjectName, workspaceRows, workspaceToken } from "../../dist/workspaces.js";
 import { throttle } from "../../dist/throttle.js";
 
 const ui = new URL("../", import.meta.url);
@@ -260,4 +260,9 @@ test("the sidebar draws no Workspaces section, and only needs you is coloured in
   const rules = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].filter(([, selector]) => /^\.project/.test(selector.trim()));
   assert.ok(rules.length > 3);
   assert.deepEqual(rules.filter(([, , body]) => /--needs-you/.test(body)).map(([, selector]) => selector.trim()), []);
+});
+
+test("the sidebar's order is project by project, by state, without ended sessions", () => {
+  const order = sidebarOrder(["/q", "/r"], found, [live("a", "idle", "/r"), live("e", "ended", "/q"), live("b", "running", "/r"), live("c", "idle", "/q"), live("d", "needs_you", "/q"), live("o", "idle", "/x/y")]);
+  assert.deepEqual(order.map((s) => s.id), ["d", "c", "b", "a", "o"]);
 });

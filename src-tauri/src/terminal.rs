@@ -98,8 +98,9 @@ fn poll(app: AppHandle) {
         thread::sleep(Duration::from_secs(1));
         let daemon = app.state::<Daemon>();
         if let Some(stream) = daemon.writer.lock().unwrap().as_mut() {
-            daemon.polled.lock().unwrap().push_back(true);
-            let _ = writeln!(stream, "{}", json!({ "op": "list" }));
+            let _ = ask_list(&mut daemon.polled.lock().unwrap(), true, || {
+                writeln!(stream, "{}", json!({ "op": "list" }))
+            });
         }
     }
 }
@@ -125,9 +126,25 @@ pub fn terminal_send(msg: Value, daemon: State<Daemon>) -> Result<(), String> {
         .as_mut()
         .ok_or("not connected to the terminal daemon")?;
     if msg["op"] == "list" {
-        daemon.polled.lock().unwrap().push_back(false);
+        return ask_list(&mut daemon.polled.lock().unwrap(), false, || {
+            writeln!(stream, "{msg}")
+        })
+        .map_err(|e| e.to_string());
     }
     writeln!(stream, "{msg}").map_err(|e| e.to_string())
+}
+
+/// Writes a `list` request and queues who asked (`polled`: `true` for `poll`), only when the write
+/// succeeded, so a failed write leaves no entry to take a later reply. The caller holds the queue's
+/// lock across the call, so the read loop cannot pop before the entry is there.
+fn ask_list(
+    queue: &mut VecDeque<bool>,
+    polled: bool,
+    write: impl FnOnce() -> io::Result<()>,
+) -> io::Result<()> {
+    write()?;
+    queue.push_back(polled);
+    Ok(())
 }
 
 /// The studio's projects, from `projects.json` in the data folder (#93). With no file it is made
@@ -673,7 +690,20 @@ fn checkout() -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, os::unix::fs::PermissionsExt};
+    use std::{collections::VecDeque, fs, io, os::unix::fs::PermissionsExt};
+
+    #[test]
+    fn a_failed_list_write_leaves_no_entry_and_each_reply_reaches_its_asker() {
+        let mut queue = VecDeque::new();
+        super::ask_list(&mut queue, true, || Ok(())).unwrap();
+        let failed = super::ask_list(&mut queue, false, || {
+            Err(io::Error::from(io::ErrorKind::BrokenPipe))
+        });
+        assert!(failed.is_err());
+        super::ask_list(&mut queue, false, || Ok(())).unwrap();
+        let askers: Vec<Option<bool>> = (0..3).map(|_| queue.pop_front()).collect();
+        assert_eq!(askers, [Some(true), Some(false), None]);
+    }
 
     #[test]
     fn a_file_that_could_run_is_revealed_and_any_other_opened() {

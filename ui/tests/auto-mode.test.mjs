@@ -30,12 +30,12 @@ test("an ended session resumes in the mode it started in, not the one it ended i
   assert.equal(resumesAuto({ started_mode: "auto" }), true);
   assert.equal(resumesAuto({ started_mode: "default" }), false);
   assert.equal(resumesAuto({ started_mode: null }), false);
-  // Both "Open" in the rail and "Open here" in the pane resume by it.
-  for (const file of ["story.ts", "panes.ts"]) {
-    const source = fs.readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
-    assert.match(source, /session\.resume_id, "", resumesAuto\(session\)\)/);
-    assert.doesNotMatch(source, /permission_mode === "auto"/);
-  }
+  // Both "Open" in the rail and "Open here" in the pane resume through `openHere`, by it.
+  const panes = fs.readFileSync(new URL("../panes.ts", import.meta.url), "utf8");
+  assert.match(panes, /session\.resume_id, "", resumesAuto\(session\)\)/);
+  const story = fs.readFileSync(new URL("../story.ts", import.meta.url), "utf8");
+  assert.match(story, /openHere\(session\)/);
+  for (const source of [panes, story]) assert.doesNotMatch(source, /permission_mode === "auto"/);
 });
 
 test("the picker's Auto mode choice is off by default and reaches the start command", () => {
@@ -45,5 +45,5 @@ test("the picker's Auto mode choice is off by default and reaches the start comm
   // Both ways to start from the picker start the chosen agent with the choice.
   assert.match(picker, /startAgent\(agent\(\), cwd, prompt, auto\(\)\)/);
   assert.match(picker, /workspaceRow\(name, workspace, start\)/);
-  assert.match(picker, /quickStart\(workspaces\.main, start\)/);
+  assert.match(picker, /quickStart\(project, workspaces\.main, start\)/);
 });
