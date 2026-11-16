@@ -3,7 +3,9 @@
 //! session's last 3 summaries.
 
 use crate::grounding::{HEADLINE_WORDS, agent_says, facts_text, grounded, material, words};
-use crate::{CardStore, CardWriter, ClaudeWriter, MAX_CHANGE, Quiz, object, quiz_rules};
+use crate::{
+    CardStore, CardWriter, ClaudeWriter, MAX_CHANGE, Place, Quiz, millis, object, quiz_rules,
+};
 use serde::{Deserialize, Serialize};
 use std::{process::Command, sync::Mutex};
 
@@ -202,9 +204,20 @@ pub fn write_summary(
     store: &Mutex<CardStore>,
     writer: &(impl CardWriter + ?Sized),
     setup: &SummarySetup,
-    request: SummaryRequest,
+    mut request: SummaryRequest,
     mut log: impl FnMut(String),
 ) -> Option<TurnSummary> {
+    // A card the offer did not write is no card: the turn's summary may carry its Quiz instead.
+    if let Some(card) = &request.card
+        && !store
+            .lock()
+            .unwrap()
+            .cards()
+            .iter()
+            .any(|k| k.request.id == *card)
+    {
+        request.card = None;
+    }
     let earlier = store
         .lock()
         .unwrap()
@@ -224,12 +237,14 @@ pub fn write_summary(
         Ok((_, problem)) => matches!(problem, Some(Unusable::Quiz(_) | Unusable::Headline(_))),
     };
     match if retry { summary().or(first) } else { first } {
-        Ok((summary, problem)) => {
+        Ok((mut summary, problem)) => {
             if let Some(problem) = problem {
                 log(format!("no quiz on {}: {problem}", request.id));
             }
             let id = request.id.clone();
-            if let Err(e) = store.lock().unwrap().add_summary(request, summary.clone()) {
+            let mut store = store.lock().unwrap();
+            quiz_cap(&mut store, &request, &mut summary, &mut log);
+            if let Err(e) = store.add_summary(request, summary.clone()) {
                 log(format!("save the summaries of {id}: {e}"));
             }
             Some(summary)
@@ -238,6 +253,28 @@ pub fn write_summary(
             log(format!("no summary on {}: {line}", request.id));
             None
         }
+    }
+}
+
+/// Holds the Quiz of `summary` and of its turn's card to the rules for when a Quiz shows
+/// (danielrispler/plotkeeper#119): none beside a decision, a turn that asks Daniel something or ended in Needs
+/// you, and at most 3 in an hour, which a lone Quiz past the cap does not get.
+fn quiz_cap(
+    store: &mut CardStore,
+    request: &SummaryRequest,
+    summary: &mut TurnSummary,
+    mut log: impl FnMut(String),
+) {
+    let asks = request.asks || summary.lines.iter().any(|l| l.kind == LineKind::Ask);
+    if asks {
+        summary.quiz = None;
+        if let Some(card) = &request.card
+            && let Err(e) = store.drop_card_quiz(card)
+        {
+            log(format!("save the card store: {e}"));
+        }
+    } else if summary.quiz.is_some() && store.place_quiz(false, millis()) != Place::Offer {
+        summary.quiz = None;
     }
 }
 

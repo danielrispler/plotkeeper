@@ -689,3 +689,157 @@ fn a_cards_skip_and_chips_are_stored_beside_its_guess_and_the_key_flag_is_the_on
     assert_eq!(b.guess.map(|g| (g.option, g.at)), Some((2, 10)));
     assert_eq!(b.taps, []);
 }
+
+/// A store at `path` holding a lone Quiz on turn `t1` whose request carries the file's whole hunk.
+fn quiz_with_hunk(path: &std::path::Path) -> CardStore {
+    use studio_core::{FactFile, Facts, SummaryRequest, TurnFile};
+    let mut store = CardStore::open(path.to_owned()).unwrap();
+    let request = SummaryRequest {
+        id: "t1".into(),
+        session_id: "s1".into(),
+        facts: Facts {
+            files: vec![FactFile {
+                file: TurnFile {
+                    root: "/w".into(),
+                    path: "src/gate.rs".into(),
+                    from: None,
+                    added: Some(1),
+                    removed: Some(1),
+                },
+                hunk: "@@ -1 +1 @@\n-open\n+frozen\n".into(),
+            }],
+            ..Facts::default()
+        },
+        ..Default::default()
+    };
+    let summary: studio_understanding::TurnSummary = serde_json::from_value(serde_json::json!({
+        "summary": "Froze the gate.",
+        "quiz": { "text": "Why?", "key": 0, "options": [
+            { "text": "A", "why": "Because the pairs must not move." }, { "text": "B", "why": "No." }] },
+    }))
+    .unwrap();
+    store.add_summary(request, summary).unwrap();
+    store
+}
+
+const WEEK: u64 = 7 * 24 * 60 * 60 * 1000;
+
+#[test]
+fn a_quiz_offered_seven_days_ago_gets_one_retest_and_one_offered_six_days_ago_gets_none() {
+    let data = tempfile::tempdir().unwrap();
+    let mut store = quiz_with_hunk(&data.path().join("cards.json"));
+    let offered = store.turn_summary("t1").unwrap().added_at;
+
+    assert!(store.due_retests(offered + WEEK - 1).is_empty());
+    let [due] = &store.due_retests(offered + WEEK)[..] else {
+        panic!("one retest is due")
+    };
+    // The writer's input: the turn's stored hunk, and the first Quiz with the key's reason.
+    assert_eq!(due.of, "t1");
+    assert!(due.hunk.contains("src/gate.rs") && due.hunk.contains("+frozen"));
+    assert_eq!(
+        due.first.options[due.first.key].why,
+        "Because the pairs must not move."
+    );
+
+    // Once written, or rejected, it is not due again.
+    let ask = due.clone();
+    store.add_retest(&ask, None, offered + WEEK).unwrap();
+    assert!(store.due_retests(offered + WEEK + WEEK).is_empty());
+}
+
+#[test]
+fn a_retests_confidence_why_and_pick_are_stored_with_their_times_and_survive_a_restart() {
+    use studio_understanding::{Choice, Quiz, QuizTap, Tap};
+    let data = tempfile::tempdir().unwrap();
+    let path = data.path().join("cards.json");
+    let mut store = quiz_with_hunk(&path);
+    let offered = store.turn_summary("t1").unwrap().added_at;
+    let ask = store.due_retests(offered + WEEK).remove(0);
+    let quiz = Quiz {
+        text: "What stays true?".into(),
+        options: vec![
+            Choice {
+                text: "A".into(),
+                why: "Yes.".into(),
+            },
+            Choice {
+                text: "B".into(),
+                why: "No.".into(),
+            },
+        ],
+        key: 0,
+    };
+    store.add_retest(&ask, Some(quiz), offered + WEEK).unwrap();
+    let id = "retest t1";
+    store
+        .quiz_tap(id, Tap::Confidence { sure: false }, 1)
+        .unwrap();
+    store.quiz_tap(id, Tap::Pick { option: 1 }, 2).unwrap();
+    store
+        .quiz_tap(
+            id,
+            Tap::Why {
+                text: "it freezes".into(),
+            },
+            3,
+        )
+        .unwrap();
+    // Only the first of each counts, and no such option records nothing.
+    store
+        .quiz_tap(id, Tap::Confidence { sure: true }, 4)
+        .unwrap();
+    store.quiz_tap(id, Tap::Pick { option: 0 }, 5).unwrap();
+
+    let reopened = CardStore::open(path).unwrap();
+    let [retest] = reopened.retests() else {
+        panic!()
+    };
+    assert_eq!(
+        retest.taps,
+        [
+            QuizTap {
+                tap: Tap::Confidence { sure: false },
+                at: 1
+            },
+            QuizTap {
+                tap: Tap::Pick { option: 1 },
+                at: 2
+            },
+            QuizTap {
+                tap: Tap::Why {
+                    text: "it freezes".into()
+                },
+                at: 3
+            },
+        ]
+    );
+    // The first Quiz's own record is untouched.
+    assert!(reopened.turn_summary("t1").unwrap().taps.is_empty());
+}
+
+#[test]
+fn a_confidence_tap_and_a_why_line_on_a_lone_quiz_are_stored_too() {
+    use studio_understanding::{QuizTap, Tap};
+    let data = tempfile::tempdir().unwrap();
+    let mut store = lone_quiz(&data.path().join("cards.json"));
+    store
+        .quiz_tap("t1", Tap::Confidence { sure: true }, 1)
+        .unwrap();
+    store
+        .quiz_tap("t1", Tap::Why { text: "x".into() }, 2)
+        .unwrap();
+    assert_eq!(
+        store.turn_summary("t1").unwrap().taps,
+        [
+            QuizTap {
+                tap: Tap::Confidence { sure: true },
+                at: 1
+            },
+            QuizTap {
+                tap: Tap::Why { text: "x".into() },
+                at: 2
+            },
+        ]
+    );
+}

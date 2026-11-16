@@ -24,19 +24,27 @@ mod card_code;
 mod drift;
 mod fingerprint;
 mod grounding;
+mod offer;
+mod retest;
 mod store;
 mod summary;
 mod turn_trees;
 mod week;
-pub use brief::{Answered, OpenItem, OpenKind, answered, open_items};
+pub use brief::{
+    Answered, DesignLine, OpenItem, OpenKind, answered, design_lines, design_sources, open_items,
+    write_design,
+};
 pub use card_code::{CodeRange, pull_code};
 pub use drift::{AGY_FIXTURE_VERSION, AgyVersions, Drift, Versions, drift, dropped_events};
 pub use fingerprint::{Fingerprints, backfilled, fingerprint_changes, worktree_root};
 use grounding::words;
+pub use offer::{Changed, Offer, Shape, is_logic};
+pub use retest::{retest_quiz, write_retests};
 pub use store::{
-    Brief, CardStore, CheckResult, Guess, Level, QuizTap, Rating, Reason, Row, SessionCards,
-    StoredCard, StoredSummary, Tap, millis,
+    Brief, CardStore, CheckResult, Guess, Level, QuizTap, Rating, Reason, Retest, RetestAsk, Row,
+    SessionCards, StoredCard, StoredSummary, Tap, millis,
 };
+pub use store::{Place, QUIZZES_PER_HOUR};
 pub use summary::{
     Line, LineKind, SummarySetup, TurnSummary, write_agent_summary, write_name, write_summary,
 };
@@ -211,11 +219,24 @@ pub trait CardWriter {
         Err("this writer writes no goals".into())
     }
 
+    /// The writer's reply with "Design so far" of a session from `sources`, each a turn's or a card's
+    /// id and a line of it, oldest first (danielrispler/plotkeeper#123), or one line for the log when it gave none.
+    /// A writer that writes no design says so.
+    fn design(&self, _sources: &[(String, String)]) -> Result<String, String> {
+        Err("this writer writes no design".into())
+    }
+
     /// The writer's reply to Daniel's side `question` on `item`, a response, card or intention, read
     /// with `intentions`, those of the item's turn, oldest first (danielrispler/Falinks#461, decision 20), or one line
     /// when it gave none. A writer that answers no questions says so.
     fn ask(&self, _item: &str, _intentions: &[String], _question: &str) -> Result<String, String> {
         Err("this writer answers no questions".into())
+    }
+
+    /// The writer's reply with a fresh Quiz on the decision of `ask`'s first Quiz (danielrispler/plotkeeper#129), or one line
+    /// for the log when it gave none. A writer that writes no retests says so.
+    fn retest(&self, _ask: &RetestAsk) -> Result<String, String> {
+        Err("this writer writes no retests".into())
     }
 
     /// The writer's reply with the summary of `request`'s turn, read with `earlier`, the session's
@@ -293,15 +314,40 @@ pub fn write_stop(
         };
         request.change = Some(workers);
     }
-    let Some(card) = write_card(writer, &request, &earlier, &mut log) else {
+    let Some(mut card) = write_card(writer, &request, &earlier, &mut log) else {
         return false;
     };
+    place_card_quiz(store, &request, &mut card, &mut log);
     if let Err(e) = store.lock().unwrap().add(request.clone(), card, millis()) {
         log(format!("save the card store: {e}"));
     }
     stored();
     write_goal(store, writer, &request, session, log);
     true
+}
+
+/// Holds `card`'s Quiz to the cap on Quizzes per hour (danielrispler/plotkeeper#119): past it, a session's
+/// card shows without its Quiz, and takes the place of the oldest unanswered lone Quiz of the hour
+/// when there is one. A worker's card and a check's are no turn's and are left alone.
+fn place_card_quiz(
+    store: &Mutex<CardStore>,
+    request: &CardRequest,
+    card: &mut Card,
+    mut log: impl FnMut(String),
+) {
+    if card.quiz.is_none() || request.agent.is_some() || request.check.is_some() {
+        return;
+    }
+    let mut store = store.lock().unwrap();
+    match store.place_quiz(true, millis()) {
+        Place::Offer => {}
+        Place::Withhold => card.quiz = None,
+        Place::Replace(turn) => {
+            if let Err(e) = store.drop_summary_quiz(&turn) {
+                log(format!("save the summaries: {e}"));
+            }
+        }
+    }
 }
 
 /// The Goal of `request`'s owner, its worker or else `session`, written again when its prompts
@@ -627,6 +673,15 @@ impl CardWriter for FakeWriter {
         Ok(serde_json::json!({ "goal": goal }).to_string())
     }
 
+    fn design(&self, sources: &[(String, String)]) -> Result<String, String> {
+        let design: Vec<_> = sources
+            .iter()
+            .take(1)
+            .map(|(id, _)| serde_json::json!({"text": "A sample decision from the fake writer, because it reads nothing.", "cite": id}))
+            .collect();
+        Ok(serde_json::json!({ "design": design }).to_string())
+    }
+
     fn ask(&self, _: &str, intentions: &[String], question: &str) -> Result<String, String> {
         // `STUDIO_FAKE_ASK=fail` makes it fail, so the error and its retry can be seen.
         if std::env::var("STUDIO_FAKE_ASK").as_deref() == Ok("fail") {
@@ -837,6 +892,25 @@ impl ClaudeWriter {
         ))
     }
 
+    /// The `claude -p` run that writes a session's "Design so far" from `sources`. Past `MAX_CHANGE`,
+    /// the oldest are cut first.
+    pub fn design_command(&self, sources: &[(String, String)]) -> (Command, String) {
+        let lines: Vec<String> = sources
+            .iter()
+            .map(|(id, line)| format!("[{id}] {}\n", line.replace('\n', " ")))
+            .collect();
+        let mut size = lines.iter().map(String::len).sum::<usize>();
+        let mut cut = 0;
+        while size > MAX_CHANGE && cut + 1 < lines.len() {
+            size -= lines[cut].len();
+            cut += 1;
+        }
+        self.run(&format!(
+            "{DESIGN}\nThe turns' reasons and the cards' summaries, oldest first:\n{}",
+            lines[cut..].concat()
+        ))
+    }
+
     /// The `claude -p` run for "explain more" on `card`, which the writer reads with its change.
     pub fn more_command(&self, request: &CardRequest, card: &Card) -> (Command, String) {
         let head = format!("{MORE}\nThe card's explanation:\n{}\n", card.explanation);
@@ -969,8 +1043,16 @@ impl CardWriter for ClaudeWriter {
         self.stdout(self.goal_command(prompts))
     }
 
+    fn design(&self, sources: &[(String, String)]) -> Result<String, String> {
+        self.stdout(self.design_command(sources))
+    }
+
     fn ask(&self, item: &str, intentions: &[String], question: &str) -> Result<String, String> {
         self.stdout(self.ask_command(item, intentions, question))
+    }
+
+    fn retest(&self, ask: &RetestAsk) -> Result<String, String> {
+        self.stdout(self.retest_command(ask))
     }
 
     fn summarize(
@@ -1110,6 +1192,21 @@ Answer from the input below: the developer's prompts, oldest first. Use only thi
     r#"
 
 Reply with one JSON object and nothing else: {"goal": string}
+"#
+);
+
+/// The writer's instructions for a session's "Design so far" (danielrispler/plotkeeper#123): from the turns' reasons
+/// and the cards' summaries only, each line citing the id it came from.
+const DESIGN: &str = concat!(
+    r#"You write "Design so far" of a coding agent's session, which the developer who runs it reads to build his model of the program: at most five lines, each one design decision of this session with its reason, in one line of at most 25 words, such as "Anchor turn trees under a ref, because git gc would otherwise drop old hunks". Each line cites the id, in square brackets in the input, of the one line it comes from. A decision is a choice between ways to build the program, not a task done. Leave out what the input does not give a reason for. When the input holds no design decision, reply with an empty list.
+
+Answer from the input below: each line is `[id] text`. Use only this input: do not use tools or read files.
+
+"#,
+    explanation_language!(),
+    r#"
+
+Reply with one JSON object and nothing else: {"design": [{"text": string, "cite": string}]}, where cite is an id exactly as in the input, without the brackets.
 "#
 );
 

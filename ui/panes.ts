@@ -15,7 +15,7 @@ import { connect, list, onEvent, request, type Listed } from "./daemon.js";
 import { diffRequest, drawDiff, keepsDiff } from "./diff.js";
 import { drawHistory } from "./history.js";
 import { drawHome } from "./home.js";
-import { element, invoke, pressable, text } from "./dom.js";
+import { element, invoke, listen, pressable, text } from "./dom.js";
 import { onProjects, projects } from "./projects.js";
 import { followLog, showLog, showMissing } from "./log.js";
 import { type Box, paneBoxes } from "./layout.js";
@@ -27,12 +27,13 @@ import { studio } from "./state.js";
 import { sessionName } from "./list.js";
 import { FAILED_OSC, openPane, startNotice } from "./terminal.js";
 import { showStartToast } from "./toast.js";
-import type { Selection, Session } from "./types.js";
+import type { Retest, Selection, Session } from "./types.js";
 
 type Pane = { box: HTMLElement; term: Xterm.Terminal | null; title: string };
 const panes = new Map<string, Pane>();
 let repo = "";
 let projectPaths: string[] = [];
+let retests: Retest[] = [];
 let shown = "";
 let ready: Promise<void> | null = null;
 let revived: Promise<void> = Promise.resolve();
@@ -54,6 +55,16 @@ const readHomeProjects = () =>
     (e) => console.warn(e),
   );
 
+// Gives Home the retests as they are read (danielrispler/plotkeeper#129); a failed read leaves them as they were.
+const readRetests = () =>
+  invoke<Retest[]>("retests").then(
+    (found) => {
+      retests = found;
+      redrawHome();
+    },
+    (e) => console.warn(e),
+  );
+
 // Connects, shows Home, then brings back every terminal;
 // again each time the daemon is lost.
 export function startPanes(): Promise<void> {
@@ -68,7 +79,9 @@ export function startPanes(): Promise<void> {
     revived = revive(config.outdated);
     showHome();
     void readHomeProjects();
+    void readRetests();
   });
+  listen<null>("retests", () => void readRetests());
   onProjects(() => void readHomeProjects());
   window.addEventListener("start-failed", (e) => failedAtStart((e as CustomEvent).detail));
   onEvent((event) => {
@@ -171,13 +184,13 @@ export async function closePane(id: string) {
 const HOME = "home";
 export function showHome() {
   show(HOME, () => null);
-  drawHome(box(HOME), studio.listed, projectPaths);
+  drawHome(box(HOME), studio.listed, projectPaths, retests);
   element("terminal-head").hidden = true;
 }
 
 // Draws Home again when the list changed under it.
 export function redrawHome() {
-  if (shown === HOME) drawHome(box(HOME), studio.listed, projectPaths);
+  if (shown === HOME) drawHome(box(HOME), studio.listed, projectPaths, retests);
 }
 
 // History (`history.ts`), a view like Home in the terminal column: the ended sessions, searchable. Clicking a row selects

@@ -2,9 +2,10 @@
 //! history, and Open, computed from what the core recorded. The Goal is the only slot a model writes
 //! (`write_goal`).
 
-use crate::{CardStore, LineKind};
-use serde::Serialize;
-use std::collections::BTreeMap;
+use crate::{CardStore, CardWriter, LineKind};
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Mutex;
 use studio_core::{Answer, CheckStatus, Decision, Session, TaskFacts};
 
 /// A question the agent asked, with Daniel's reply.
@@ -117,4 +118,109 @@ pub fn open_items(session: &Session, task: Option<TaskFacts>, store: &CardStore)
         }
     }
     open
+}
+
+/// The most lines "Design so far" holds.
+const DESIGN_LINES: usize = 5;
+
+/// One line of "Design so far" (danielrispler/plotkeeper#123): a design decision with its reason, and the
+/// id of the turn or card it came from, which the rail opens.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DesignLine {
+    pub text: String,
+    pub cite: String,
+}
+
+/// What the Design writer reads: the `why` lines of the turns of `turns` that have a summary, and the
+/// summaries of `owner`'s cards, each with its id, oldest first.
+pub fn design_sources(store: &CardStore, owner: &str, turns: &[String]) -> Vec<(String, String)> {
+    let mut sources = Vec::new();
+    for id in turns {
+        let Some(kept) = store.turn_summary(id) else {
+            continue;
+        };
+        for line in kept
+            .summary
+            .lines
+            .iter()
+            .filter(|l| l.kind == LineKind::Why)
+        {
+            sources.push((id.clone(), line.text.clone()));
+        }
+    }
+    for kept in store.cards().iter().filter(|k| k.request.owner() == owner) {
+        if !kept.card.summary.is_empty() {
+            sources.push((kept.request.id.clone(), kept.card.summary.clone()));
+        }
+    }
+    sources
+}
+
+/// The lines of a writer's `reply` that cite an id of `known`, the turns and cards of the session,
+/// at most `DESIGN_LINES`. A line with no citation, or one that cites something not in the session,
+/// is dropped, and so is a line past the fifth. Returns the kept lines and how many were dropped.
+pub fn design_lines(reply: &str, known: &BTreeSet<&str>) -> Option<(Vec<DesignLine>, usize)> {
+    let value: serde_json::Value = serde_json::from_str(crate::object(reply)).ok()?;
+    let asked = value["design"].as_array()?;
+    let mut kept = Vec::new();
+    for line in asked {
+        let text = line["text"].as_str().map(str::trim).unwrap_or_default();
+        let cite = line["cite"].as_str().map(str::trim).unwrap_or_default();
+        if !text.is_empty() && known.contains(cite) && kept.len() < DESIGN_LINES {
+            kept.push(DesignLine {
+                text: text.into(),
+                cite: cite.into(),
+            });
+        }
+    }
+    let dropped = asked.len() - kept.len();
+    Some((kept, dropped))
+}
+
+/// Writes "Design so far" of `owner`, a session, from `sources` (`design_sources`) once they changed
+/// since it was written (danielrispler/plotkeeper#123). `turns` are the session's turn ids; a citation must
+/// be one of them or a card of `owner`. A session with no sources has none. Each problem is one line
+/// for `log`. Returns whether the lines changed.
+pub fn write_design(
+    store: &Mutex<CardStore>,
+    writer: &(impl CardWriter + ?Sized),
+    owner: &str,
+    turns: &[String],
+    mut log: impl FnMut(String),
+) -> bool {
+    let (sources, mut known): (_, BTreeSet<String>) = {
+        let store = store.lock().unwrap();
+        let cards = store.cards().iter().filter(|k| k.request.owner() == owner);
+        let ids = cards.map(|kept| kept.request.id.clone());
+        (design_sources(&store, owner, turns), ids.collect())
+    };
+    known.extend(turns.iter().cloned());
+    let written = store.lock().unwrap().brief(owner).map(|b| b.design_from);
+    if sources.is_empty() || written == Some(sources.len() as u32) {
+        return false;
+    }
+    let reply = writer.design(&sources);
+    let known: BTreeSet<&str> = known.iter().map(String::as_str).collect();
+    match reply.and_then(|r| design_lines(&r, &known).ok_or("the reply holds none".to_string())) {
+        Ok((lines, dropped)) => {
+            if dropped > 0 {
+                log(format!("{dropped} design lines of {owner} dropped"));
+            }
+            let saved = store
+                .lock()
+                .unwrap()
+                .set_design(owner, lines, sources.len() as u32);
+            match saved {
+                Ok(()) => true,
+                Err(e) => {
+                    log(format!("save the card store: {e}"));
+                    false
+                }
+            }
+        }
+        Err(line) => {
+            log(format!("no design on {owner}: {line}"));
+            false
+        }
+    }
 }

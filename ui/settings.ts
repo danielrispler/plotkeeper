@@ -38,6 +38,9 @@ export interface Settings {
   // The commands that are checks, per project folder (danielrispler/plotkeeper#112): each a command such as
   // "make verify", matched when a session's command runs it. A project not here uses the studio's list.
   checks: Record<string, string[]>;
+  // The day, as "YYYY-MM-DD", the two-week trial of the confidence tap and the "why?" line on a Quiz of "now" starts
+  // (danielrispler/plotkeeper#129). null: no trial.
+  quiz_trial: string | null;
 }
 
 // Both settings files, parsed: the settings and keymap in effect.
@@ -74,6 +77,7 @@ const defaultSettings: Settings = {
   editor: null,
   repository: null,
   checks: {},
+  quiz_trial: null,
 };
 
 // Today's shortcuts. The terminal's Cmd+C and Cmd+V stay the Edit menu's (`keys.ts`). "List" holds
@@ -171,6 +175,7 @@ function readSettings(json: unknown, report: Report): Settings {
     editor: readEditor(json.editor, report),
     repository: pick("repository", json.repository ?? undefined, "") || null,
     checks: readChecks(json.checks, report),
+    quiz_trial: pick("quiz_trial", json.quiz_trial ?? undefined, "") || null,
   };
 }
 

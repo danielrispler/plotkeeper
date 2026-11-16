@@ -216,8 +216,15 @@ export type StoredCard = {
 };
 // What Daniel did with a Quiz besides a card's pick (danielrispler/plotkeeper#120), each with its time: his pick (a lone Quiz's), "Show
 // the rest anyway", and the three chips.
-export type Tap = { kind: "pick"; option: number } | { kind: "skip" | "understood" | "explain_more" | "key_wrong" };
+// The trial's two (#129): how sure he was before the pick, and one optional line on why after it.
+export type Tap =
+  | { kind: "pick"; option: number }
+  | { kind: "confidence"; sure: boolean }
+  | { kind: "why"; text: string }
+  | { kind: "skip" | "understood" | "explain_more" | "key_wrong" };
 export type QuizTap = Tap & { at: number };
+// A fresh Quiz on the decision of an earlier one, a week after it, which Home offers (#129). `id` names it for `quiz_tap`.
+export type Retest = { id: string; of: string; session_id: string; added_at: number; quiz: Quiz | null; taps: QuizTap[] };
 // The selected session's brief, and its cards, split at 30 minutes by the shell's tick, each oldest
 // first.
 // An answered question, plan or permission in the session's decision history (danielrispler/Falinks#479): the call's input,
@@ -246,11 +253,14 @@ export type OpenItem = {
   kind: "question" | "check" | "unchecked" | "open" | "ask" | "unpushed" | "pr";
   text: string;
 };
+// A line of "Design so far" (danielrispler/plotkeeper#123): a decision with its reason, and the id of the turn or card it came from.
+export type DesignLine = { text: string; cite: string };
 export type SessionCards = {
   brief: string | null;
   goal: string | null;
   answers: { question: string; reply: string }[];
   open: OpenItem[];
+  design: DesignLine[];
   recent: StoredCard[];
   older: StoredCard[];
   decisions: Decision[];
