@@ -39,7 +39,7 @@ By the size of its change, which `Shape::of` reads from the turn's facts (`under
 
 ## The cap
 
-At most 3 Quizzes are offered in any rolling hour, across the studio, answered or not. A card's Quiz comes before a lone Quiz: a lone Quiz is offered only while fewer than 3 were offered in the last hour. A card's Quiz past the cap takes the place of the oldest unanswered lone Quiz of that hour, which loses it; when there is none, the card shows without its Quiz. The summary stays in every case. A lone Quiz's answer is recorded (`pick_quiz`) so that the cap can tell an answered Quiz from an open one.
+At most 3 Quizzes are offered in any rolling hour, across the studio, answered or not. A card's Quiz comes before a lone Quiz: a lone Quiz is offered only while fewer than 3 were offered in the last hour. A card's Quiz past the cap takes the place of the oldest unanswered lone Quiz of that hour, which loses it; when there is none, the card shows without its Quiz. The summary stays in every case. A lone Quiz is answered when Daniel picked or skipped it (its taps, `quiz_tap`).
 
 ## Never beside a decision
 

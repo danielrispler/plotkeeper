@@ -6,7 +6,7 @@ use studio_core::{
     Base, CardRequest, Check, CheckRun, CheckStatus, FactFile, Facts, SummaryRequest, TurnFile,
 };
 use studio_understanding::{
-    Card, CardStore, CardWriter, FakeWriter, Offer, Place, Shape, SummarySetup, TurnSummary,
+    Card, CardStore, CardWriter, FakeWriter, Offer, Place, Shape, SummarySetup, Tap, TurnSummary,
     write_stop, write_summary,
 };
 
@@ -14,17 +14,11 @@ use studio_understanding::{
 struct Canned(&'static str);
 
 impl CardWriter for Canned {
-    fn reply(&self, r: &CardRequest, e: &[String], b: &str) -> Result<String, String> {
-        FakeWriter.reply(r, e, b)
+    fn reply(&self, r: &CardRequest, e: &[String]) -> Result<String, String> {
+        FakeWriter.reply(r, e)
     }
     fn more(&self, r: &CardRequest, c: &Card) -> Result<String, String> {
         FakeWriter.more(r, c)
-    }
-    fn rewrite(&self, p: &[&str], s: &[String], d: &str) -> Result<String, String> {
-        FakeWriter.rewrite(p, s, d)
-    }
-    fn update(&self, b: &str, w: &str) -> Result<String, String> {
-        FakeWriter.update(b, w)
     }
     fn summarize(
         &self,
@@ -143,7 +137,11 @@ fn a_cards_quiz_past_the_cap_replaces_the_oldest_unanswered_lone_quiz() {
         lone(&store, n, 0, false, "why");
     }
     // The first Quiz was answered: the oldest unanswered one is the second.
-    store.lock().unwrap().pick_summary_quiz("s@1", 0).unwrap();
+    store
+        .lock()
+        .unwrap()
+        .quiz_tap("s@1", Tap::Pick { option: 0 }, 1)
+        .unwrap();
     stop(&store, 10);
     assert!(quiz_of_card(&store, 10));
     let kept = |id: &str| {
@@ -167,7 +165,7 @@ fn a_cards_quiz_past_the_cap_with_every_lone_quiz_answered_is_not_offered() {
         store
             .lock()
             .unwrap()
-            .pick_summary_quiz(&format!("s@{n}"), 0)
+            .quiz_tap(&format!("s@{n}"), Tap::Pick { option: 0 }, 1)
             .unwrap();
     }
     stop(&store, 10);

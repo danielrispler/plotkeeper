@@ -10,7 +10,7 @@ import { drawFeed, forgetMissingSummaries } from "./story.js";
 import type { CardRequest, CheckResult, Guess, Level, Quiz, Rating, Reason, SessionCards, StoredCard } from "./types.js";
 
 // Records Daniel's tap, his flag on the key or his rating, and draws the cards again at once.
-async function record(command: "guess" | "key_wrong" | "rate", args: Record<string, unknown>) {
+async function record(command: "guess" | "key_wrong" | "rate" | "quiz_tap", args: Record<string, unknown>) {
   await invoke(command, args);
   await refreshCards();
 }
@@ -30,10 +30,12 @@ export function checkVerdict(result: CheckResult | null, guess: Guess | null): s
 // can be flagged wrong. Any other card is past its quiz at the tap, which the writer's key grades. On
 // a check's card the check's result is the key (danielrispler/Falinks#476): the quiz closes when the check ends, the
 // reasons and the verdict wait for it, and its key cannot be wrong.
-export function quizState({ request, guess, check_result }: StoredCard) {
+export function quizState({ request, guess, check_result, taps }: StoredCard) {
   if (request.check === null) {
+    // "Show the rest anyway" (danielrispler/plotkeeper#120) answers it without a pick, so it has no verdict.
+    const open = guess === null && !taps?.some((tap) => tap.kind === "skip");
     const verdict = guess && (guess.right ? "You were right." : "You were wrong.");
-    return { answered: guess !== null, reasons: guess !== null, keyNamed: true, verdict, flaggable: true };
+    return { answered: !open, reasons: !open, keyNamed: true, verdict, flaggable: true };
   }
   const ended = check_result !== null;
   return {
@@ -49,7 +51,7 @@ export function quizState({ request, guess, check_result }: StoredCard) {
 // under each option, why it is right or wrong, with the right one named; a tapped option stays
 // marked, with no colour, as colour is only for "needs you". On a check's card the check's result
 // is the key, so the reasons and the verdict wait for it.
-function quizElements({ request: { id }, guess }: StoredCard, quiz: Quiz, state: ReturnType<typeof quizState>): HTMLElement[] {
+function quizElements({ request: { id, check }, guess }: StoredCard, quiz: Quiz, state: ReturnType<typeof quizState>): HTMLElement[] {
   const options = document.createElement("ol");
   options.className = "options";
   options.append(
@@ -73,6 +75,11 @@ function quizElements({ request: { id }, guess }: StoredCard, quiz: Quiz, state:
   );
   const title = prose("p", quiz.text);
   title.className = "quiz";
+  if (!state.answered && check === null) {
+    const skip = pressable(prose("button", "Show the rest anyway"), false, () => record("quiz_tap", { id, tap: { kind: "skip" } }));
+    skip.classList.add("quiz-skip");
+    return [title, options, skip];
+  }
   if (!state.verdict) return [title, options];
   const verdict = prose("p", state.verdict);
   verdict.className = "verdict";
@@ -85,7 +92,7 @@ function quizElements({ request: { id }, guess }: StoredCard, quiz: Quiz, state:
 // his rating. A card with no quiz shows the explanation at once. The shell keeps each tap in the card
 // store, so after a restart a guessed card is drawn guessed and rated.
 function cardElement(stored: StoredCard): HTMLElement {
-  const { request, card, key_wrong, more, rating } = stored;
+  const { request, card, key_wrong, more, rating, taps } = stored;
   const node = document.createElement("article");
   node.className = "card";
   const quiz = card.quiz;
@@ -110,7 +117,7 @@ function cardElement(stored: StoredCard): HTMLElement {
     prose("p", card.not_checked),
   );
   const flaggable = quiz && state.flaggable;
-  if (flaggable) node.append(keyWrongButton(request.id, key_wrong));
+  if (flaggable) node.append(understoodButton(request.id, taps), keyWrongButton(request.id, key_wrong));
   node.append(moreElement(request.id, more), ratingElement(request.id, rating, flaggable ? key_wrong : null));
   return node;
 }
@@ -131,10 +138,19 @@ function changedBy({ session_id, changed_by }: CardRequest): HTMLElement[] {
 // "The key is wrong": one record, flagged from the quiz or from the rating, and never undone.
 function keyWrongButton(id: string, keyWrong: boolean): HTMLElement {
   const label = keyWrong ? "You flagged the key as wrong" : "The key is wrong";
-  const flag = pressable(prose("button", label) as HTMLButtonElement, keyWrong, () => record("key_wrong", { id }));
+  // The store sets the one flag and keeps the tap with its time (danielrispler/plotkeeper#120).
+  const flag = pressable(prose("button", label) as HTMLButtonElement, keyWrong, () => record("quiz_tap", { id, tap: { kind: "key_wrong" } }));
   flag.classList.add("key-wrong");
   flag.disabled = keyWrong;
   return flag;
+}
+
+// "I get why": an optional chip under a revealed answer, kept once with its time.
+function understoodButton(id: string, taps: StoredCard["taps"]): HTMLElement {
+  const done = taps?.some((tap) => tap.kind === "understood") ?? false;
+  const chip = pressable(prose("button", "I get why") as HTMLButtonElement, done, () => record("quiz_tap", { id, tap: { kind: "understood" } }));
+  chip.disabled = done;
+  return chip;
 }
 
 // The cards whose longer explanation Daniel opened, and those whose writer call is running; both
@@ -163,6 +179,7 @@ function moreElement(id: string, more: string | null): HTMLElement {
 // gave none, so the next tap asks again.
 async function explainMore(id: string) {
   asking.add(id);
+  invoke("quiz_tap", { id, tap: { kind: "explain_more" } }).catch((e) => console.warn(e));
   const more = await invoke<string | null>("explain_more", { id });
   asking.delete(id);
   if (more === null) moreOpen.delete(id);
@@ -227,10 +244,33 @@ export function markShown() {
 // only when its record changed, such as after a tap, and is moved whole to the older group.
 const drawn = new Map<string, { record: string; node: HTMLElement }>();
 
-// The session's brief, folded under the feed, one paragraph per line.
-function showBrief(brief: string | null) {
-  element("brief").replaceChildren(...(brief ?? "").split("\n").map((line) => prose("p", line)));
-  element("brief-fold").hidden = brief === null;
+// The Brief's slots in order (danielrispler/plotkeeper#122): Goal, Decisions, Open. A brief stored as prose shows as it is,
+// with no title, until the session has a Goal.
+export type BriefSlot = { title: string; lines: string[] };
+export function briefSlots(cards: SessionCards): BriefSlot[] {
+  const slots: BriefSlot[] = [];
+  if (cards.goal) slots.push({ title: "Goal", lines: [cards.goal] });
+  else if (cards.brief) slots.push({ title: "", lines: cards.brief.split("\n") });
+  if (cards.answers.length) slots.push({ title: "Decisions", lines: cards.answers.map((a) => `${a.question} ${a.reply}`) });
+  if (cards.open.length) slots.push({ title: "Open", lines: cards.open.map((item) => item.text) });
+  return slots;
+}
+
+function slotTitle(title: string): HTMLElement {
+  const node = prose("p", title);
+  node.className = "slot-title";
+  return node;
+}
+
+// The session's brief: each slot with its title and one paragraph per line.
+export const briefNodes = (cards: SessionCards): HTMLElement[] =>
+  briefSlots(cards).flatMap(({ title, lines }) => [...(title ? [slotTitle(title)] : []), ...lines.map((line) => prose("p", line))]);
+
+// The brief, folded under the feed.
+function showBrief(cards: SessionCards) {
+  const nodes = briefNodes(cards);
+  element("brief").replaceChildren(...nodes);
+  element("brief-fold").hidden = nodes.length === 0;
 }
 
 // Card `stored`'s node, drawn again only when its record changed.
@@ -246,7 +286,7 @@ export function cardNode(stored: StoredCard): HTMLElement {
 
 export function showCards(cards: SessionCards) {
   studio.cards = cards;
-  showBrief(cards.brief);
+  showBrief(cards);
   showDecisions(cards.decisions);
   const ids = new Set([...cards.recent, ...cards.older].map(({ request }) => request.id));
   for (const id of drawn.keys()) {

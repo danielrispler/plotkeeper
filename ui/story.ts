@@ -14,7 +14,9 @@ import { encode, request } from "./daemon.js";
 import { agentState, sessionName, showsLanded } from "./list.js";
 import { closePane, openHere } from "./panes.js";
 import { openDecision, type Ask } from "./answer.js";
-import { cardLine, quizOpen } from "./cards.js";
+import { briefNodes, cardLine, quizOpen } from "./cards.js";
+import { type Banner, bannerElement, bannerFor, bannerLives } from "./banner.js";
+import { quizAllowed, quizAnswered, quizRegion, seedQuiz } from "./quiz.js";
 import { evidenceElement, hasEvidence } from "./evidence.js";
 import { showCleared } from "./decisions.js";
 import { decisionElement, questionElement } from "./questions.js";
@@ -35,6 +37,7 @@ import {
   type SessionState,
   type Session,
   type StoredCard,
+  type Tap,
   type Subagent,
   type Turn,
   type SummaryLine,
@@ -51,6 +54,8 @@ export function showView(selected: Selection | null) {
     for (const id of ["state", "block", "mode", "mark", "session-name", "phase", "bar-state", "bar-name"]) element(id).textContent = "";
     showQuestions([]);
     showCleared([]);
+    shownSession = null;
+    banner = null;
     return;
   }
   const session = selected.session;
@@ -121,6 +126,8 @@ export function showView(selected: Selection | null) {
   if (session.id !== shownSession) {
     shownSession = session.id;
     failedTurns.clear();
+    // "Where we were" is decided as the session is selected, and kept while Daniel reads it (danielrispler/plotkeeper#124).
+    banner = bannerFor(session, Date.now());
   }
   if (agent !== null) {
     element("intention-text").textContent = agentSummaries.get(agent.id) ?? "";
@@ -141,6 +148,7 @@ const writing = new Set<string>();
 const failed = new Set<string>();
 let shownAgent: string | null = null;
 let shownSession: string | null = null;
+let banner: Banner | null = null;
 
 // Asks the shell for subagent `id`'s summary: the store's, or one writer call now. A failed call
 // leaves its name and first line, and the next opening asks again.
@@ -343,7 +351,10 @@ export function oneAtATime(run: (id: string) => Promise<void>): (id: string) => 
 
 const askSummary = oneAtATime((id) =>
   invoke<TurnSummary | null>("turn_summary", { id })
-    .then((summary) => void summaries.set(id, summary))
+    .then((summary) => {
+      summaries.set(id, summary);
+      if (summary) seedQuiz(id, summary.taps);
+    })
     .catch((e) => {
       failedTurns.add(id);
       console.warn(e);
@@ -372,8 +383,6 @@ export function forgetMissingSummaries() {
 // replies, fetched at their first opening.
 const opened = new Set<string>();
 const replies = new Map<string, string>();
-// The option Daniel picked on each turn's Quiz, by turn id; kept in the window only.
-const learned = new Map<string, number>();
 
 // A folded block keyed `key`, open while Daniel keeps it open; `onOpen` runs at each opening.
 function folded(key: string, title: string, body: HTMLElement[], onOpen?: () => void): HTMLElement {
@@ -389,37 +398,9 @@ function folded(key: string, title: string, body: HTMLElement[], onOpen?: () => 
   return node;
 }
 
-// A turn's Quiz (danielrispler/plotkeeper#118): one question, graded at the tap by the writer's key, open under the Headline.
-// Each option's reason shows only after the pick.
-export function quizElement(id: string, quiz: NonNullable<TurnSummary["summary"]["quiz"]>): HTMLElement {
-  const picked = learned.get(id) ?? null;
-  const options = document.createElement("ol");
-  options.className = "options";
-  options.append(
-    ...quiz.options.map((option, i) => {
-      const item = document.createElement("li");
-      const button = pressable(prose("button", option.text) as HTMLButtonElement, picked === i, () => {
-        learned.set(id, i);
-        invoke("pick_quiz", { id, option: i }).catch(() => {});
-        drawFeed();
-      });
-      button.disabled = picked !== null;
-      item.append(button);
-      if (picked !== null) {
-        const why = prose("p", option.why);
-        if (i === quiz.key) why.prepend(Object.assign(text("span", "The right answer. "), { dir: "ltr" }));
-        item.append(why);
-      }
-      return item;
-    }),
-  );
-  const box = document.createElement("div");
-  box.className = "card quiz-box";
-  const question = prose("p", quiz.text);
-  question.className = "quiz";
-  box.append(question, options);
-  return box;
-}
+// The Quiz as the writer is shown it for "explain more": its question, and each option with its reason.
+const quizItem = (quiz: NonNullable<TurnSummary["summary"]["quiz"]>) =>
+  `A quiz. ${quiz.text}\n${quiz.options.map((o, i) => `${i === quiz.key ? "Right" : "Wrong"}: ${o.text}. ${o.why}`).join("\n")}`;
 
 // "Now" (danielrispler/plotkeeper#116): what the latest turn's state puts above the feed. While running, what Daniel asked;
 // the intention's box shows while running, small as "why it asks" when the session needs him, and not at all once
@@ -457,24 +438,41 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
   }
   if (now?.soFar) node.append(text("p", "So far this turn", "label"));
   const summary = turn?.id ? summaryOf(turn.id) : null;
+  const bodyLine = (line: BodyLine) =>
+    // A `reported` line is the agent's claim, which no recorded fact shows.
+    rendered("li", line.kind === "reported" ? `Agent says: ${line.text}` : line.text, line.kind, session.cwd);
+  const lines = now?.body ?? [];
   if (now) {
     if (now.headline) {
       node.append(rendered("p", now.headline, "headline-text", session.cwd));
       if (index !== null) node.append(askAnchor(session.id, { kind: "headline", turn: index }, "this turn's Headline"));
     }
-    if (now.body.length) {
-      const list = document.createElement("ul");
-      list.className = "body-lines";
-      // A `reported` line is the agent's claim, which no recorded fact shows.
-      list.append(...now.body.map((line) => rendered("li", line.kind === "reported" ? `Agent says: ${line.text}` : line.text, line.kind, session.cwd)));
-      node.append(list);
-    }
   } else if (summary) node.append(rendered("div", summary.summary.summary, "summary", session.cwd));
-  if (summary?.summary.quiz && turn?.id) node.append(quizElement(turn.id, summary.summary.quiz));
-  // The evidence line, under the Headline and the Body lines: a running turn shows only a check that ended failed.
+  // The evidence line, under the Headline: a running turn shows only a check that ended failed.
   if (turn && index !== null && hasEvidence(turn, session.capabilities)) {
     const line = evidenceElement(session.id, index, turn, { only: session.state === "running" && now ? "failed" : "all" });
     if (line) node.append(line);
+  }
+  // `open` and `ask` lines always show; `why` and `reported` wait for the Quiz to be answered or skipped (#120), and show at once
+  // when the turn has none. Its Quiz is never beside a decision: a turn with an `ask` line, or in Needs you, has none open.
+  const quiz = summary?.summary.quiz && turn?.id && quizAllowed(lines, now !== null && session.state === "needs_you") ? summary.summary.quiz : null;
+  const held = block.cards.some(quizOpen) || quiz !== null;
+  const [always, rest] = [lines.filter((l) => l.kind === "open" || l.kind === "ask"), lines.filter((l) => l.kind !== "open" && l.kind !== "ask")];
+  const shown = held ? always : lines;
+  if (shown.length) {
+    const list = document.createElement("ul");
+    list.className = "body-lines";
+    list.append(...shown.map(bodyLine));
+    node.append(list);
+  }
+  if (quiz && turn?.id) {
+    const id = turn.id;
+    const deps = {
+      record: (tap: Tap) => void invoke<TurnSummary | null>("quiz_tap", { id, tap }).catch((e) => console.warn(e)),
+      explain: () => invoke<string>("ask", { session: session.id, item: quizItem(quiz), question: "I did not get this yet. Explain more." }),
+      line: bodyLine,
+    };
+    node.append(quizRegion(id, quiz, now ? rest : [], deps));
   }
   node.append(...block.cards.map(cardLine));
   node.append(...block.questions.filter((q) => q.answer === "not_answered").map(questionElement));
@@ -531,7 +529,7 @@ function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
     const summary = turn.id ? summaryOf(turn.id) : null;
     const { headline } = headlineOf(summary, turn.message);
     const open = opened.has(key);
-    const line = foldedLine(turn, headline, block.cards.some(quizOpen) || (summary?.summary.quiz != null && !learned.has(turn.id!)));
+    const line = foldedLine(turn, headline, block.cards.some(quizOpen) || (summary?.summary.quiz != null && !quizAnswered(turn.id!) && quizAllowed(headlineOf(summary, turn.message).body, false)));
     const button = pressable(document.createElement("button"), open, () => {
       if (opened.has(key)) opened.delete(key);
       else opened.add(key);
@@ -563,6 +561,7 @@ export function drawFeed() {
   const all = [...older, ...recent];
   if (selected === null) {
     drawNow(null, null);
+    element("banner-slot").replaceChildren();
     element("feed").replaceChildren();
     return;
   }
@@ -570,6 +569,14 @@ export function drawFeed() {
   const own = selected.agent === null;
   const { latest, blocks } = railOf(selected, all);
   const now = drawNow(session, latest);
+  // The banner sits above the newest turn, and holds the Brief while it shows.
+  const last = session.turns.at(-1);
+  const lives = own && bannerLives(banner, session) && last !== undefined;
+  const cards = studio.cards;
+  element("banner-slot").replaceChildren(
+    ...(lives ? [bannerElement({ headline: headlineOf(last.id ? summaryOf(last.id) : null, last.message).headline, endedAt: last.ended_at, since: banner!.since, open: cards.open, brief: briefNodes(cards) })] : []),
+  );
+  element("brief-fold").hidden = lives || briefNodes(cards).length === 0;
   element("feed").replaceChildren(...blocks.map((block, i) => turnElement(session, block, own && i === 0 && block.index !== null ? now : null)));
 }
 // Rename (danielrispler/Falinks#469): the row's name, kept in the event log, and `/rename` typed into the session while

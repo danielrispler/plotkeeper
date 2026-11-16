@@ -27,9 +27,10 @@ use studio_core::{
 };
 use studio_understanding::{
     AGY_FIXTURE_VERSION, AgyVersions, CardStore, CardWriter, ClaudeWriter, FakeWriter,
-    Fingerprints, Offer, Rating, Row, SessionCards, Shape, StoredSummary, SummarySetup, Versions,
-    add_hunks, backfilled, fingerprint_changes, millis, turn_diffs, turn_hunk, worktree_root,
-    write_agent_summary, write_brief, write_name, write_stop, write_summary,
+    Fingerprints, Offer, OpenItem, Rating, Row, SessionCards, Shape, StoredSummary, SummarySetup,
+    Tap, Versions, add_hunks, backfilled, fingerprint_changes, millis, open_items, turn_diffs,
+    turn_hunk, worktree_root, write_agent_summary, write_goal, write_name, write_stop,
+    write_summary,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
@@ -279,14 +280,17 @@ fn selection(studio: &Studio) -> serde_json::Value {
 /// latest tick, without each card's diff and base, which the pane never reads.
 #[tauri::command]
 fn cards(studio: State<Mutex<Studio>>, cards: State<Cards>) -> SessionCards {
-    let (viewed, now) = {
-        let studio = studio.lock().unwrap();
-        (studio.viewed().map(String::from), studio.now())
+    let studio = studio.lock().unwrap();
+    let Some(owner) = studio.viewed() else {
+        return SessionCards::default();
     };
-    match viewed {
-        Some(owner) => cards.lock().unwrap().session_cards(&owner, now),
-        None => SessionCards::default(),
+    let cards = cards.lock().unwrap();
+    let mut shown = cards.session_cards(owner, studio.now());
+    // The Open slot is the session's: a worker's view has none.
+    if let Some(session) = studio.session(owner) {
+        shown.open = open_items(session, studio.task_facts(owner), &cards);
     }
+    shown
 }
 
 /// The plan's 5-hour and weekly usage from the status line's newest snapshot in the `usage` folder
@@ -311,6 +315,7 @@ struct CardsKey {
     viewed: Option<String>,
     revision: u64,
     minute: u64,
+    open: Vec<OpenItem>,
 }
 
 /// The turns whose files the core asks for (danielrispler/plotkeeper#111): each is diffed by `git`
@@ -355,11 +360,17 @@ impl Sent {
         let key = {
             let studio = app.state::<Mutex<Studio>>();
             let studio = studio.lock().unwrap();
-            let revision = app.state::<Cards>().lock().unwrap().revision();
+            let cards = app.state::<Cards>();
+            let cards = cards.lock().unwrap();
+            let viewed = studio.viewed();
+            let session = viewed.and_then(|id| studio.session(id));
+            // The Open slot moves with the core's state, not only with the store's.
+            let open = session.map(|s| open_items(s, studio.task_facts(&s.agent.id), &cards));
             CardsKey {
-                viewed: studio.viewed().map(String::from),
-                revision,
+                viewed: viewed.map(String::from),
+                revision: cards.revision(),
                 minute: studio.now() / 60_000,
+                open: open.unwrap_or_default(),
             }
         };
         if self.cards.as_ref() != Some(&key) {
@@ -395,11 +406,13 @@ fn settle_checks(studio: &Studio, store: &mut CardStore) {
     }
 }
 
-/// Daniel tapped option `option` of the Quiz on turn `id`'s summary (danielrispler/plotkeeper#119): an answered
-/// Quiz is not the one a card's Quiz replaces under the cap.
+/// Daniel picked, skipped or tapped a chip on the Quiz of `id`, a card's or a turn's own (danielrispler/plotkeeper#120): the turn's
+/// summary with its taps, for a turn's own Quiz.
 #[tauri::command(async)]
-fn pick_quiz(id: String, option: usize, cards: State<Cards>) {
-    unsaved(cards.lock().unwrap().pick_summary_quiz(&id, option));
+fn quiz_tap(id: String, tap: Tap, cards: State<Cards>) -> Option<StoredSummary> {
+    let mut store = cards.lock().unwrap();
+    unsaved(store.quiz_tap(&id, tap, millis()));
+    store.turn_summary(&id).cloned()
 }
 
 /// Daniel flagged that the key of card `id`'s quiz is wrong.
@@ -450,6 +463,87 @@ fn ask(
         eprintln!("studio: no answer on {session}: {line}");
     }
     answer
+}
+
+/// Daniel's `question` on an Ask anchor (danielrispler/plotkeeper#126): the writer's answer, read with the anchor's recorded
+/// facts and, for a file, its hunk. The facts stay above it in the window; this is the interpretation.
+#[tauri::command(async)]
+fn ask_anchor(
+    session: String,
+    anchor: studio_core::Anchor,
+    what: String,
+    question: String,
+    studio: State<Mutex<Studio>>,
+    writer: State<Writer>,
+) -> Result<String, String> {
+    let log = studio_hook::event_log(&std::env::home_dir().ok_or("no home folder")?);
+    let (facts, transcript, trees) = {
+        let studio = studio.lock().unwrap();
+        let trees = match &anchor {
+            studio_core::Anchor::File { turn, root, .. } => {
+                studio.turn_trees(&session, *turn, root)
+            }
+            _ => None,
+        };
+        let transcript = studio.session(&session).map(|s| s.transcript.clone());
+        (studio.ask_facts(&session, &anchor, &log), transcript, trees)
+    };
+    let facts = facts.ok_or("nothing is recorded about this")?;
+    let hunk = match (&anchor, trees) {
+        (studio_core::Anchor::File { root, path, .. }, Some((start, end))) => turn_hunk(
+            std::path::Path::new(root),
+            &start,
+            end.as_deref(),
+            path,
+            None,
+            false,
+        )
+        .filter(|h| !h.binary)
+        .map(|h| {
+            format!(
+                "{}{}",
+                h.text,
+                if h.left_out > 0 {
+                    format!("... {} more lines", h.left_out)
+                } else {
+                    String::new()
+                }
+            )
+        }),
+        _ => None,
+    };
+    let item = studio_understanding::ask_item(&what, &facts, hunk.as_deref());
+    let answer = studio_understanding::ask_about(
+        &**writer,
+        &transcript.unwrap_or_default(),
+        &item,
+        &question,
+    );
+    if let Err(line) = &answer {
+        eprintln!("studio: no answer on {session}: {line}");
+    }
+    answer
+}
+
+/// "Why didn't it touch `name`?" in turn `turn` (danielrispler/plotkeeper#126): what was recorded about `name`, and the
+/// writer's possible reasons only when something was.
+#[tauri::command(async)]
+fn ask_why_not(
+    session: String,
+    turn: usize,
+    name: String,
+    studio: State<Mutex<Studio>>,
+    writer: State<Writer>,
+) -> Result<studio_understanding::WhyNot, String> {
+    let (facts, transcript) = {
+        let studio = studio.lock().unwrap();
+        (
+            studio.ask_named(&session, turn, &name),
+            studio.session(&session).map(|s| s.transcript.clone()),
+        )
+    };
+    let facts = facts.ok_or("this turn is not known")?;
+    studio_understanding::why_not(&**writer, &transcript.unwrap_or_default(), &name, facts)
 }
 
 /// Daniel renamed session `id`: a `StudioRename` line in the event log, which the log thread then
@@ -653,8 +747,8 @@ fn main() {
             cards,
             shown,
             guess,
-            pick_quiz,
             key_wrong,
+            quiz_tap,
             rate,
             explain_more,
             ask,
@@ -705,6 +799,8 @@ fn main() {
             check_output,
             turn_file_hunk,
             ask_facts,
+            ask_anchor,
+            ask_why_not,
             turn_summary,
             turn_reply,
             agent_summary,
@@ -1188,7 +1284,7 @@ fn write(
         }
         let written = match card {
             true => write_stop(&store, &*writer, request, &session, stored, log),
-            false => write_brief(&store, &*writer, request, &session, log),
+            false => write_goal(&store, &*writer, &request, &session, log),
         };
         // A Quiz is never beside a decision (danielrispler/plotkeeper#119).
         if card && session.needs_you() {

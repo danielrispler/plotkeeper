@@ -2,7 +2,7 @@
 //! session's brief, on disk in the studio's data directory, so a restart neither loses nor re-asks
 //! them.
 
-use crate::{Card, TurnSummary};
+use crate::{Answered, Card, OpenItem, TurnSummary, answered};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -44,6 +44,10 @@ pub struct StoredCard {
     /// its guess; `None` while it runs, and on a card no check requested.
     #[serde(default)]
     pub check_result: Option<CheckResult>,
+    /// What Daniel did with the quiz besides the pick (`guess`): a skip and the chips, each with its time
+    /// (danielrispler/plotkeeper#120).
+    #[serde(default)]
+    pub taps: Vec<QuizTap>,
 }
 
 /// What a check's result says about the guess on its card: it passed, it failed, or its exit code
@@ -62,10 +66,53 @@ pub struct StoredSummary {
     pub request: SummaryRequest,
     pub summary: TurnSummary,
     pub added_at: u64,
-    /// The option Daniel tapped on the summary's Quiz (danielrispler/plotkeeper#119), which the cap on
-    /// open Quizzes needs to tell an answered one from an open one.
+    /// What Daniel did with the turn's own Quiz, each with its time (danielrispler/plotkeeper#120); a turn with a card has
+    /// its taps on the card.
     #[serde(default)]
-    pub picked: Option<usize>,
+    pub taps: Vec<QuizTap>,
+}
+
+/// What Daniel does with a Quiz (danielrispler/plotkeeper#120): a pick, "Show the rest anyway" (a skip, which reveals as a pick
+/// does), and the three chips under the revealed answer.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Tap {
+    Pick { option: usize },
+    Skip,
+    Understood,
+    ExplainMore,
+    KeyWrong,
+}
+
+/// A tap and when, in Unix milliseconds.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct QuizTap {
+    #[serde(flatten)]
+    pub tap: Tap,
+    pub at: u64,
+}
+
+impl QuizTap {
+    /// Whether it answers the Quiz, as a pick or a skip do.
+    fn answers(&self) -> bool {
+        matches!(self.tap, Tap::Pick { .. } | Tap::Skip)
+    }
+}
+
+/// Keeps `tap` at `at` in `taps`: the first answer counts, and each chip once. Whether it was kept.
+fn keep_tap(taps: &mut Vec<QuizTap>, tap: Tap, at: u64) -> bool {
+    let new = QuizTap { tap, at };
+    let taken = taps.iter().any(|kept| {
+        if new.answers() {
+            kept.answers()
+        } else {
+            std::mem::discriminant(&kept.tap) == std::mem::discriminant(&new.tap)
+        }
+    });
+    if !taken {
+        taps.push(new);
+    }
+    !taken
 }
 
 /// Daniel's rating of a card's explanation: a level and the reasons he picked. His fifth reason, "the
@@ -117,19 +164,29 @@ pub struct Row {
     pub line: String,
 }
 
-/// A session's or a worker's rolling brief (danielrispler/Falinks#369, decision 16).
+/// A session's or a worker's brief: its Goal, which a model writes from Daniel's prompts
+/// (danielrispler/plotkeeper#122). A brief stored before the slots is prose in `text`, which shows
+/// until the first Goal.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Brief {
     pub text: String,
-    /// How many times it was updated, so that every 5th update rewrites it.
-    pub updates: u32,
+    pub goal: Option<String>,
+    /// How many prompts the Goal was written from, so that it is written again when one comes.
+    pub goal_prompts: u32,
 }
 
 /// One session's brief and its cards in the session view's two groups (danielrispler/Falinks#369, decision 18), each
 /// oldest first.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct SessionCards {
+    /// A brief stored as prose, which shows while there is no Goal.
     pub brief: Option<String>,
+    /// The Brief's slots (danielrispler/plotkeeper#122): the Goal, the answered questions and the
+    /// computed Open lines, which the shell fills in (`open_items`).
+    pub goal: Option<String>,
+    pub answers: Vec<Answered>,
+    pub open: Vec<OpenItem>,
     /// The cards added in the last 30 minutes.
     #[serde(serialize_with = "without_diffs")]
     pub recent: Vec<StoredCard>,
@@ -153,6 +210,7 @@ struct ShownCard<'a> {
     more: &'a Option<String>,
     rating: &'a Option<Rating>,
     check_result: Option<CheckResult>,
+    taps: &'a [QuizTap],
 }
 
 #[derive(Serialize)]
@@ -185,6 +243,7 @@ fn without_diffs<S: serde::Serializer>(cards: &[StoredCard], s: S) -> Result<S::
         more: &kept.more,
         rating: &kept.rating,
         check_result: kept.check_result,
+        taps: &kept.taps,
     }))
 }
 
@@ -286,17 +345,25 @@ impl CardStore {
             kept.added_at
                 .is_some_and(|at| now.saturating_sub(at) < RECENT_MS)
         });
-        let brief = self.brief(owner).map(|brief| brief.text.clone());
+        let brief = self.brief(owner);
+        let goal = brief.and_then(|brief| brief.goal.clone());
+        let brief = brief
+            .map(|brief| brief.text.clone())
+            .filter(|text| !text.is_empty());
         // A session's history holds its workers' decisions; a worker's, its own.
         let decisions = self.decisions.iter().flat_map(|(session, kept)| {
             let its = move |d: &&Decision| session == owner || d.agent.as_deref() == Some(owner);
             kept.iter().filter(its)
         });
+        let decisions: Vec<Decision> = decisions.cloned().collect();
         SessionCards {
             brief,
+            goal,
+            answers: answered(&decisions),
+            open: Vec::new(),
             recent,
             older,
-            decisions: decisions.cloned().collect(),
+            decisions,
         }
     }
 
@@ -357,11 +424,11 @@ impl CardStore {
         self.briefs.get(owner)
     }
 
-    /// Updates `owner`'s brief to `text`, and saves the briefs.
-    pub fn set_brief(&mut self, owner: &str, text: String) -> io::Result<()> {
+    /// Sets `owner`'s Goal, written from `prompts` prompts, and saves the briefs.
+    pub fn set_goal(&mut self, owner: &str, goal: String, prompts: u32) -> io::Result<()> {
         let brief = self.briefs.entry(owner.into()).or_default();
-        brief.text = text;
-        brief.updates += 1;
+        brief.goal = Some(goal);
+        brief.goal_prompts = prompts;
         self.revision += 1;
         write(&self.path.with_file_name("briefs.json"), &self.briefs)
     }
@@ -378,6 +445,7 @@ impl CardStore {
             more: None,
             rating: None,
             check_result: None,
+            taps: Vec::new(),
         });
         self.save()
     }
@@ -459,6 +527,48 @@ impl CardStore {
         Ok(())
     }
 
+    /// Records Daniel's `tap` at `at` on the Quiz of `id`, a card's or a turn's own (danielrispler/plotkeeper#120), and saves it.
+    /// A card's pick is its guess, and its key flag the same one record; the first answer counts, so a
+    /// pick after a skip, a skip after a pick and a tap on a check's card record nothing.
+    pub fn quiz_tap(&mut self, id: &str, tap: Tap, at: u64) -> io::Result<()> {
+        if let Some(kept) = self.card_mut(id) {
+            let answered = kept.guess.is_some() || kept.taps.iter().any(QuizTap::answers);
+            if kept.card.quiz.is_none() || kept.request.check.is_some() {
+                return Ok(());
+            }
+            return match tap {
+                Tap::Pick { option } if !answered => self.guess(id, option, at),
+                Tap::Pick { .. } => Ok(()),
+                Tap::Skip if answered => Ok(()),
+                _ => {
+                    if keep_tap(&mut kept.taps, tap, at) {
+                        if tap == Tap::KeyWrong {
+                            kept.key_wrong = true;
+                        }
+                        return self.save();
+                    }
+                    Ok(())
+                }
+            };
+        }
+        let Some(kept) = self.summaries.iter_mut().find(|kept| kept.request.id == id) else {
+            return Ok(());
+        };
+        let options = kept
+            .summary
+            .quiz
+            .as_ref()
+            .map_or(0, |quiz| quiz.options.len());
+        if options == 0 || matches!(tap, Tap::Pick { option } if option >= options) {
+            return Ok(());
+        }
+        if keep_tap(&mut kept.taps, tap, at) {
+            self.revision += 1;
+            return write(&self.path.with_file_name("summaries.json"), &self.summaries);
+        }
+        Ok(())
+    }
+
     /// Records Daniel's flag that the key of card `id`'s quiz is wrong, and saves the store.
     pub fn key_wrong(&mut self, id: &str) -> io::Result<()> {
         if let Some(kept) = self.card_mut(id)
@@ -524,7 +634,7 @@ impl CardStore {
             request,
             summary,
             added_at: at,
-            picked: None,
+            taps: Vec::new(),
         });
         self.revision += 1;
         write(&self.path.with_file_name("summaries.json"), &self.summaries)
@@ -653,7 +763,7 @@ impl CardStore {
         }
         let since = now.saturating_sub(HOUR_MS);
         let open = |k: &&StoredSummary| {
-            k.summary.quiz.is_some() && k.picked.is_none() && k.added_at > since
+            k.summary.quiz.is_some() && !k.taps.iter().any(QuizTap::answers) && k.added_at > since
         };
         match self.summaries.iter().find(open) {
             Some(oldest) if card => Place::Replace(oldest.request.id.clone()),
@@ -681,25 +791,6 @@ impl CardStore {
             }
             None => Ok(()),
         }
-    }
-
-    /// Daniel tapped option `option` of the Quiz of turn `id`'s summary; the first tap counts.
-    pub fn pick_summary_quiz(&mut self, id: &str, option: usize) -> io::Result<()> {
-        let found = self.summaries.iter_mut().find(|k| k.request.id == id);
-        let Some(kept) = found.filter(|k| k.picked.is_none()) else {
-            return Ok(());
-        };
-        if kept
-            .summary
-            .quiz
-            .as_ref()
-            .is_some_and(|q| option < q.options.len())
-        {
-            kept.picked = Some(option);
-            self.revision += 1;
-            write(&self.path.with_file_name("summaries.json"), &self.summaries)?;
-        }
-        Ok(())
     }
 }
 

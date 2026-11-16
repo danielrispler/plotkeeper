@@ -227,8 +227,9 @@ pub struct Session {
     /// At your turn, or idle since, with a turn Daniel has not seen (danielrispler/Falinks#556): its row's filled dot and
     /// bold name.
     pub unseen: bool,
-    /// How many of its turns Daniel has seen, which the card store keeps (danielrispler/Falinks#556).
-    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
+    /// How many of its turns Daniel has seen, which the card store keeps (danielrispler/Falinks#556). The rail's
+    /// "Where we were" banner counts what happened after them (danielrispler/plotkeeper#124).
+    #[serde(default)]
     seen: usize,
     /// The ids of its background tasks, commands included, from their responses and `Stop`'s
     /// `background_tasks`. With its subagents' ids, they are the task ids a wake-up can name.
@@ -788,7 +789,49 @@ pub enum Kind {
     Helper,
 }
 
+/// What happened in a session since Daniel looked: its turns after the last he saw, the files they changed and how
+/// their checks ended (danielrispler/plotkeeper#124).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SinceSeen {
+    pub turns: usize,
+    /// Distinct files, by worktree and path.
+    pub files: usize,
+    pub passed: usize,
+    pub failed: usize,
+    pub ran: usize,
+}
+
 impl Session {
+    /// How many of its turns Daniel has seen.
+    pub fn seen(&self) -> usize {
+        self.seen
+    }
+
+    /// What its turns after the last one Daniel saw did.
+    pub fn since(&self) -> SinceSeen {
+        let turns = &self.turns[self.seen.min(self.turns.len())..];
+        let files: BTreeSet<(&str, &str)> = turns
+            .iter()
+            .filter_map(|turn| turn.files.as_ref())
+            .flat_map(|found| &found.files)
+            .map(|file| (file.root.as_str(), file.path.as_str()))
+            .collect();
+        let count = |status| {
+            turns
+                .iter()
+                .flat_map(|turn| &turn.checks)
+                .filter(|check| check.status == status)
+                .count()
+        };
+        SinceSeen {
+            turns: turns.len(),
+            files: files.len(),
+            passed: count(CheckStatus::Passed),
+            failed: count(CheckStatus::Failed),
+            ran: count(CheckStatus::Ran),
+        }
+    }
+
     fn update_unseen(&mut self) {
         // Going idle keeps the mark: only Daniel seeing the session clears it (danielrispler/Falinks#556).
         self.unseen =
@@ -3668,6 +3711,13 @@ impl Studio {
     pub fn forget_gone_tasks(&mut self) {
         let kept: Vec<String> = self.task_queries().into_iter().map(|q| q.path).collect();
         self.tasks.retain(|path, _| kept.contains(path));
+    }
+
+    /// What the shell last found about the task session `id` works in, `None` in the main checkout
+    /// or before the first lookup.
+    pub fn task_facts(&self, id: &str) -> Option<TaskFacts> {
+        let path = task_path(&self.sessions.get(id)?.cwd)?;
+        self.tasks.get(&path).copied()
     }
 
     /// The task folder session `id` works in, `None` in the main checkout or for no such session.
