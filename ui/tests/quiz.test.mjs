@@ -7,6 +7,10 @@ import { El } from "./dom.mjs";
 const { quizElement } = await import("../../dist/story.js");
 globalThis.document = { createElement: (tag) => new El(tag), getElementById: () => Object.assign(new El("div"), { replaceChildren() {} }) };
 
+// The pick goes to the shell, which the cap on Quizzes reads (danielrispler/plotkeeper#119).
+const calls = [];
+globalThis.window = { __TAURI__: { core: { invoke: async (command, args) => void calls.push([command, args]) } } };
+
 const quiz = {
   text: "What does the frozen gate fix?",
   key: 1,
@@ -25,6 +29,7 @@ test("the question and options show open, with no fold or label; the reasons wai
   assert.equal(before.find("summary").length, 0);
 
   before.find("button")[0].listeners.click();
+  assert.deepEqual(calls, [["pick_quiz", { id: "t1", option: 0 }]]);
   const after = quizElement("t1", quiz);
   assert.match(after.text, /Scores come later\./);
   assert.match(after.text, /The right answer\. Right, the set of pairs\./);

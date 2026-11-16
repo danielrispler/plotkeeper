@@ -22,6 +22,7 @@ use studio_core::{CardRequest, Kind, Session, Status, SummaryRequest, Transcript
 mod drift;
 mod fingerprint;
 mod grounding;
+mod offer;
 mod store;
 mod summary;
 mod turn_trees;
@@ -29,10 +30,12 @@ mod week;
 pub use drift::{AGY_FIXTURE_VERSION, AgyVersions, Drift, Versions, drift, dropped_events};
 pub use fingerprint::{Fingerprints, backfilled, fingerprint_changes, worktree_root};
 use grounding::words;
+pub use offer::{Changed, Offer, Shape, is_logic};
 pub use store::{
     Brief, CardStore, CheckResult, Guess, Level, Rating, Reason, Row, SessionCards, StoredCard,
     StoredSummary, millis,
 };
+pub use store::{Place, QUIZZES_PER_HOUR};
 pub use summary::{
     Line, LineKind, SummarySetup, TurnSummary, write_agent_summary, write_name, write_summary,
 };
@@ -303,10 +306,11 @@ pub fn write_stop(
         };
         request.change = Some(workers);
     }
-    let Some((card, updated)) = write_card(writer, &request, &earlier, &brief.text, &mut log)
+    let Some((mut card, updated)) = write_card(writer, &request, &earlier, &brief.text, &mut log)
     else {
         return false;
     };
+    place_card_quiz(store, &request, &mut card, &mut log);
     if let Err(e) = store.lock().unwrap().add(request.clone(), card, millis()) {
         log(format!("save the card store: {e}"));
     }
@@ -321,6 +325,30 @@ pub fn write_stop(
         log,
     );
     true
+}
+
+/// Holds `card`'s Quiz to the cap on Quizzes per hour (danielrispler/plotkeeper#119): past it, a session's
+/// card shows without its Quiz, and takes the place of the oldest unanswered lone Quiz of the hour
+/// when there is one. A worker's card and a check's are no turn's and are left alone.
+fn place_card_quiz(
+    store: &Mutex<CardStore>,
+    request: &CardRequest,
+    card: &mut Card,
+    mut log: impl FnMut(String),
+) {
+    if card.quiz.is_none() || request.agent.is_some() || request.check.is_some() {
+        return;
+    }
+    let mut store = store.lock().unwrap();
+    match store.place_quiz(true, millis()) {
+        Place::Offer => {}
+        Place::Withhold => card.quiz = None,
+        Place::Replace(turn) => {
+            if let Err(e) = store.drop_summary_quiz(&turn) {
+                log(format!("save the summaries: {e}"));
+            }
+        }
+    }
 }
 
 /// A session's brief updated from its workers' cards since its last card, `request.workers`, when a

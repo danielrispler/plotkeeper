@@ -400,6 +400,7 @@ export function quizElement(id: string, quiz: NonNullable<TurnSummary["summary"]
       const item = document.createElement("li");
       const button = pressable(prose("button", option.text) as HTMLButtonElement, picked === i, () => {
         learned.set(id, i);
+        invoke("pick_quiz", { id, option: i }).catch(() => {});
         drawFeed();
       });
       button.disabled = picked !== null;

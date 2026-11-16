@@ -27,8 +27,8 @@ use studio_core::{
 };
 use studio_understanding::{
     AGY_FIXTURE_VERSION, AgyVersions, CardStore, CardWriter, ClaudeWriter, FakeWriter,
-    Fingerprints, Rating, Row, SessionCards, StoredSummary, SummarySetup, Versions, add_hunks,
-    backfilled, fingerprint_changes, millis, turn_diffs, turn_hunk, worktree_root,
+    Fingerprints, Offer, Rating, Row, SessionCards, Shape, StoredSummary, SummarySetup, Versions,
+    add_hunks, backfilled, fingerprint_changes, millis, turn_diffs, turn_hunk, worktree_root,
     write_agent_summary, write_brief, write_name, write_stop, write_summary,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -395,6 +395,13 @@ fn settle_checks(studio: &Studio, store: &mut CardStore) {
     }
 }
 
+/// Daniel tapped option `option` of the Quiz on turn `id`'s summary (danielrispler/plotkeeper#119): an answered
+/// Quiz is not the one a card's Quiz replaces under the cap.
+#[tauri::command(async)]
+fn pick_quiz(id: String, option: usize, cards: State<Cards>) {
+    unsaved(cards.lock().unwrap().pick_summary_quiz(&id, option));
+}
+
 /// Daniel flagged that the key of card `id`'s quiz is wrong.
 #[tauri::command(async)]
 fn key_wrong(id: String, cards: State<Cards>) {
@@ -646,6 +653,7 @@ fn main() {
             cards,
             shown,
             guess,
+            pick_quiz,
             key_wrong,
             rate,
             explain_more,
@@ -1174,10 +1182,18 @@ fn write(
                 agent.as_deref(),
             );
         };
+        let card_id = request.id.clone();
+        if card && !offered(&app, &request) {
+            return;
+        }
         let written = match card {
             true => write_stop(&store, &*writer, request, &session, stored, log),
             false => write_brief(&store, &*writer, request, &session, log),
         };
+        // A Quiz is never beside a decision (danielrispler/plotkeeper#119).
+        if card && session.needs_you() {
+            unsaved(store.lock().unwrap().drop_card_quiz(&card_id));
+        }
         // The brief, which a row's line may show, changed again.
         if written {
             sent();
@@ -1198,6 +1214,29 @@ fn turn_facts(state: &Mutex<Studio>, id: &str) -> Facts {
     facts
 }
 
+/// What the turn named `id` gets for a Quiz (danielrispler/plotkeeper#119), by its facts, or by `diff`, its card's
+/// change, when an agent reports no trees.
+fn offer_of(state: &Mutex<Studio>, id: &str, diff: &str) -> Offer {
+    let merge = state.lock().unwrap().turn_merged(id);
+    Shape::of(&turn_facts(state, id), diff, merge).offer()
+}
+
+/// Whether the stop card `request` is written: a turn's card only when the table gives it one. A
+/// worker's card and a check's are no turn's and are always written.
+fn offered(app: &AppHandle, request: &CardRequest) -> bool {
+    if request.agent.is_some() || request.check.is_some() {
+        return true;
+    }
+    let offer = offer_of(&app.state(), &request.id, request.diff());
+    if offer != Offer::Card {
+        eprintln!(
+            "studio: no card on {}: its change gets {offer:?}",
+            request.id
+        );
+    }
+    offer == Offer::Card
+}
+
 /// Writes the summary of `request`'s turn on its session's queue, after the turn's card, then
 /// switches the turn's intention to its first line (danielrispler/Falinks#517, decision 16). While summaries are written
 /// on open, the turn waits for Daniel instead (`turn_summary`).
@@ -1207,6 +1246,11 @@ fn summarize(
     queues: &mut HashMap<String, mpsc::Sender<Job>>,
     request: SummaryRequest,
 ) {
+    // A summary asked for the sake of a lone Quiz is dropped when the turn gets none.
+    let lone = |app: &AppHandle| offer_of(&app.state(), &request.id, "") == Offer::Quiz;
+    if !request.wanted && !lone(app) {
+        return;
+    }
     if app
         .state::<Mutex<Studio>>()
         .lock()

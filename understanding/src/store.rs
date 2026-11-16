@@ -62,6 +62,10 @@ pub struct StoredSummary {
     pub request: SummaryRequest,
     pub summary: TurnSummary,
     pub added_at: u64,
+    /// The option Daniel tapped on the summary's Quiz (danielrispler/plotkeeper#119), which the cap on
+    /// open Quizzes needs to tell an answered one from an open one.
+    #[serde(default)]
+    pub picked: Option<usize>,
 }
 
 /// Daniel's rating of a card's explanation: a level and the reasons he picked. His fifth reason, "the
@@ -506,10 +510,21 @@ impl CardStore {
 
     /// Keeps `summary` of `request`'s turn, and saves the summaries.
     pub fn add_summary(&mut self, request: SummaryRequest, summary: TurnSummary) -> io::Result<()> {
+        self.add_summary_at(request, summary, millis())
+    }
+
+    /// `add_summary` at `at`, in Unix milliseconds.
+    pub fn add_summary_at(
+        &mut self,
+        request: SummaryRequest,
+        summary: TurnSummary,
+        at: u64,
+    ) -> io::Result<()> {
         self.summaries.push(StoredSummary {
             request,
             summary,
-            added_at: millis(),
+            added_at: at,
+            picked: None,
         });
         self.revision += 1;
         write(&self.path.with_file_name("summaries.json"), &self.summaries)
@@ -596,6 +611,95 @@ impl CardStore {
     fn save(&mut self) -> io::Result<()> {
         self.revision += 1;
         write(&self.path, &self.cards)
+    }
+}
+
+/// At most this many Quizzes are offered in any rolling hour, across the studio (danielrispler/plotkeeper#119).
+pub const QUIZZES_PER_HOUR: usize = 3;
+const HOUR_MS: u64 = 60 * 60 * 1000;
+
+/// Where a Quiz about to be stored goes under the cap.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Place {
+    /// It is offered.
+    Offer,
+    /// It is not: the hour holds its 3 already.
+    Withhold,
+    /// A card's Quiz takes the place of the lone Quiz of the summary of this turn, which loses it.
+    Replace(String),
+}
+
+impl CardStore {
+    /// The Quizzes offered in the hour before `now`: the cards' and the lone ones, a check card's
+    /// apart, answered or not.
+    fn offered(&self, now: u64) -> usize {
+        let since = now.saturating_sub(HOUR_MS);
+        let cards = self.cards.iter().filter(|k| k.request.check.is_none());
+        let cards =
+            cards.filter(|k| k.card.quiz.is_some() && k.added_at.is_some_and(|at| at > since));
+        let lone = self
+            .summaries
+            .iter()
+            .filter(|k| k.summary.quiz.is_some() && k.added_at > since);
+        cards.count() + lone.count()
+    }
+
+    /// Where a Quiz stored at `now` goes: a card's (`card`) comes before a lone one, which is offered
+    /// only while fewer than `QUIZZES_PER_HOUR` were offered in the last hour. A card's past the cap
+    /// takes the place of the oldest unanswered lone Quiz of that hour, and is otherwise not offered.
+    pub fn place_quiz(&self, card: bool, now: u64) -> Place {
+        if self.offered(now) < QUIZZES_PER_HOUR {
+            return Place::Offer;
+        }
+        let since = now.saturating_sub(HOUR_MS);
+        let open = |k: &&StoredSummary| {
+            k.summary.quiz.is_some() && k.picked.is_none() && k.added_at > since
+        };
+        match self.summaries.iter().find(open) {
+            Some(oldest) if card => Place::Replace(oldest.request.id.clone()),
+            _ => Place::Withhold,
+        }
+    }
+
+    /// Takes the Quiz from the summary of turn `id`, and saves the summaries.
+    pub fn drop_summary_quiz(&mut self, id: &str) -> io::Result<()> {
+        let found = self.summaries.iter_mut().find(|k| k.request.id == id);
+        if let Some(kept) = found.filter(|k| k.summary.quiz.is_some()) {
+            kept.summary.quiz = None;
+            self.revision += 1;
+            write(&self.path.with_file_name("summaries.json"), &self.summaries)?;
+        }
+        Ok(())
+    }
+
+    /// Takes the Quiz from card `id`, which then shows without it, and saves the store.
+    pub fn drop_card_quiz(&mut self, id: &str) -> io::Result<()> {
+        match self.card_mut(id).filter(|k| k.card.quiz.is_some()) {
+            Some(kept) => {
+                kept.card.quiz = None;
+                self.save()
+            }
+            None => Ok(()),
+        }
+    }
+
+    /// Daniel tapped option `option` of the Quiz of turn `id`'s summary; the first tap counts.
+    pub fn pick_summary_quiz(&mut self, id: &str, option: usize) -> io::Result<()> {
+        let found = self.summaries.iter_mut().find(|k| k.request.id == id);
+        let Some(kept) = found.filter(|k| k.picked.is_none()) else {
+            return Ok(());
+        };
+        if kept
+            .summary
+            .quiz
+            .as_ref()
+            .is_some_and(|q| option < q.options.len())
+        {
+            kept.picked = Some(option);
+            self.revision += 1;
+            write(&self.path.with_file_name("summaries.json"), &self.summaries)?;
+        }
+        Ok(())
     }
 }
 

@@ -1323,7 +1323,7 @@ impl Session {
         }
     }
 
-    fn needs_you(&self) -> bool {
+    pub fn needs_you(&self) -> bool {
         !self.blocks.is_empty() || self.terminal_blocked
     }
 
@@ -1610,6 +1610,18 @@ pub struct SummaryRequest {
     /// shell fills it in, and for an agent that reports no trees.
     #[serde(default)]
     pub facts: Facts,
+    /// Whether the turn's reply is long or asks Daniel something (`wants_summary`), so that its
+    /// summary is wanted for itself; a summary of a turn that only changed code is there for a lone
+    /// Quiz (danielrispler/plotkeeper#119), and is dropped when the turn gets none.
+    #[serde(default = "wanted")]
+    pub wanted: bool,
+    /// Whether the turn ended in Needs you, which keeps a Quiz from showing beside the decision.
+    #[serde(default)]
+    pub asks: bool,
+}
+
+fn wanted() -> bool {
+    true
 }
 
 /// A file a turn changed, with its whole hunk from git.
@@ -2629,7 +2641,9 @@ impl Studio {
                         outputs.push(Output::AgyVersion);
                     }
                     let reply = event.reply().trim();
-                    if !replay && wants_summary(reply, session.needs_you()) {
+                    let wanted = wants_summary(reply, session.needs_you());
+                    // A turn that changed code gets its summary for a lone Quiz (danielrispler/plotkeeper#119).
+                    if !replay && (wanted || matches!(output, Some(Output::Card(_)))) {
                         // shortcut: the transcript may lag the `Stop` by one poll, so the final reply
                         // is taken from the `Stop`; read the transcript first if earlier texts go missing.
                         let mut turn = session.transcript.clone();
@@ -2651,6 +2665,8 @@ impl Studio {
                                 _ => None,
                             },
                             facts: Facts::default(),
+                            wanted,
+                            asks: session.needs_you(),
                         }));
                     }
                     if let Some(prompt) = session.name_after.take()
@@ -3133,6 +3149,21 @@ impl Studio {
             ended: true,
             trees,
         })
+    }
+
+    /// Whether the turn named `id` ran a merge, by `git merge` or `gh pr merge`, which the offer of a
+    /// Quiz leaves out (danielrispler/plotkeeper#119).
+    pub fn turn_merged(&self, id: &str) -> bool {
+        let found = self.sessions.values().find_map(|s| {
+            let at = s.turns.iter().position(|t| t.id.as_deref() == Some(id))?;
+            Some(
+                s.ledger
+                    .turn(at)
+                    .filter_map(|r| r.command.as_deref())
+                    .any(merges),
+            )
+        });
+        found.unwrap_or(false)
     }
 
     /// The facts of the turn `ask` names, from the numstat the shell found (`None` when git could
@@ -3863,6 +3894,14 @@ impl Studio {
         }
         body
     }
+}
+
+/// Whether a shell command merges: `git merge` or `gh pr merge`, alone or in a chain.
+fn merges(command: &str) -> bool {
+    let parts = command.split(['&', ';', '|', '\n']);
+    parts
+        .map(str::trim)
+        .any(|c| c.starts_with("git merge") || c.starts_with("gh pr merge"))
 }
 
 /// The id of `owner`'s card written at `at`, a worker's or else a session's (`CardRequest::id`).

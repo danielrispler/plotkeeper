@@ -823,6 +823,7 @@ fn turn(session: &str, n: u64) -> SummaryRequest {
         ],
         card: None,
         facts: Facts::default(),
+        ..SummaryRequest::default()
     }
 }
 
@@ -988,7 +989,8 @@ fn the_summary_input_holds_the_sessions_last_3_summaries_and_their_questions() {
             "{input}"
         );
     }
-    assert_eq!(input.matches("Why a stack?").count(), 3, "{input}");
+    // The fourth Quiz within the hour was not offered (danielrispler/plotkeeper#119), so the summary of 4 has none.
+    assert_eq!(input.matches("Why a stack?").count(), 2, "{input}");
     let kept = store.lock().unwrap().turn_summary("s@6").cloned();
     assert_eq!(kept.unwrap().summary.summary, "Summary six.");
     // The store keeps them across restarts.
@@ -1260,6 +1262,20 @@ fn a_turn_with_a_card_gets_its_summary_only() {
     let dir = tempfile::tempdir().unwrap();
     let store = summaries(dir.path());
     let writer = recording(summary_reply("Rewrote the parser.", ["a", "b", "c"]));
+    let on = edit();
+    let card = write_card(&FakeWriter, &on, &[], "", |_| {}).unwrap().0;
+    store
+        .lock()
+        .unwrap()
+        .add(
+            CardRequest {
+                id: "s@1".into(),
+                ..on
+            },
+            card,
+            1,
+        )
+        .unwrap();
     let request = SummaryRequest {
         card: Some("s@1".into()),
         ..turn("s", 1)
@@ -1271,6 +1287,23 @@ fn a_turn_with_a_card_gets_its_summary_only() {
     assert_eq!(summary.quiz, None);
     let input = writer.inputs.lock().unwrap().pop().unwrap();
     assert!(input.contains("has a card"), "{input}");
+}
+
+#[test]
+fn a_card_the_offer_did_not_write_is_no_card_and_the_summary_carries_the_quiz() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = summaries(dir.path());
+    let writer = recording(summary_reply("Rewrote the parser.", ["a", "b", "c"]));
+    let request = SummaryRequest {
+        card: Some("s@1".into()),
+        ..turn("s", 1)
+    };
+
+    let summary = write_summary(&store, &writer, &setup(), request, |_| {}).unwrap();
+
+    assert!(summary.quiz.is_some());
+    let input = writer.inputs.lock().unwrap().pop().unwrap();
+    assert!(!input.contains("has a card"), "{input}");
 }
 
 // The subagent summary, written when Daniel opens a subagent (danielrispler/Falinks#535).
