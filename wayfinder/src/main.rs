@@ -154,19 +154,51 @@ pub fn repo_tickets(pages: &Value) -> Result<Vec<Value>> {
     rows.sort_by_key(|row| row["number"].as_u64());
     Ok(rows)
 }
+/// The backticked spans of the `**Files:**` line of a ticket's `## Touches`, each with the text
+/// before it. No such line, none.
+fn file_spans(body: &str) -> Vec<(&str, &str)> {
+    let line = body.lines().find(|line| line.contains("**Files:**"));
+    let after = line
+        .and_then(|line| line.split_once("**Files:**"))
+        .map_or("", |(_, rest)| rest);
+    // Pieces between backticks alternate: text, span, text, span.
+    let pieces: Vec<&str> = after.split('`').collect();
+    let (pairs, _) = pieces.as_chunks::<2>();
+    pairs
+        .iter()
+        .map(|[before, span]| (*before, span.trim()))
+        .filter(|(_, span)| !span.is_empty())
+        .collect()
+}
 /// The paths in the `**Files:**` line of a ticket's `## Touches`: its backticked spans. No such line, none.
 pub fn touched_files(body: &str) -> Vec<String> {
-    let Some(line) = body.lines().find(|line| line.contains("**Files:**")) else {
-        return vec![];
-    };
-    let after = line.split_once("**Files:**").map_or("", |(_, rest)| rest);
-    // Odd-numbered pieces between backticks are the spans.
-    after
-        .split('`')
-        .skip(1)
-        .step_by(2)
-        .map(|path| path.trim().to_owned())
-        .filter(|path| !path.is_empty())
+    file_spans(body)
+        .into_iter()
+        .map(|(_, span)| span.to_owned())
+        .collect()
+}
+/// The Touches paths of `body` that `exists` does not find. A span is a path when it has a `/` or a
+/// `.`, and no space and no `<placeholder>`. A path the line introduces with the word "new" right
+/// before it is one the ticket creates, so it is skipped, and so is one under `local-evidence/`,
+/// which only the main checkout holds. A glob is looked up by the folder before its first `*`.
+pub fn missing_paths(body: &str, exists: impl Fn(&str) -> bool) -> Vec<String> {
+    file_spans(body)
+        .into_iter()
+        .filter(|(before, span)| {
+            let new = before
+                .split(|c: char| !c.is_alphanumeric())
+                .rfind(|word| !word.is_empty())
+                .is_some_and(|word| word.eq_ignore_ascii_case("new"));
+            let path = span.contains(['/', '.'])
+                && !span.contains(|c: char| c.is_whitespace() || c == '<')
+                && !span.starts_with("local-evidence/");
+            let looked = match span.find('*') {
+                Some(star) => span[..star].rfind('/').map_or("", |slash| &span[..=slash]),
+                None => span,
+            };
+            path && !new && !looked.is_empty() && !exists(looked)
+        })
+        .map(|(_, span)| span.to_owned())
         .collect()
 }
 
@@ -202,9 +234,8 @@ fn shared_files(a: &[String], b: &[String]) -> Vec<String> {
     shared.into_iter().collect()
 }
 
-/// Pairs of open tickets, claimed or ready, that share a Touches file and are either in different
-/// specs or in one spec with no blocking edge between them. Tickets with no Touches line are skipped.
-pub fn overlaps(pages: &Value) -> Result<Vec<Overlap>> {
+/// Each open issue's body, by number.
+fn issue_bodies(pages: &Value) -> Result<std::collections::HashMap<u64, &str>> {
     let mut bodies = std::collections::HashMap::new();
     for page in pages.as_array().ok_or("expected paginated issues")? {
         for issue in page["data"]["repository"]["issues"]["nodes"]
@@ -213,10 +244,61 @@ pub fn overlaps(pages: &Value) -> Result<Vec<Overlap>> {
         {
             bodies.insert(
                 issue["number"].as_u64().ok_or("missing issue number")?,
-                touched_files(issue["body"].as_str().unwrap_or("")),
+                issue["body"].as_str().unwrap_or(""),
             );
         }
     }
+    Ok(bodies)
+}
+/// Whether a `repo_tickets` row is claimed or ready: assigned, or with no open blocker.
+fn active(row: &Value) -> bool {
+    let filled = |key: &str| row[key].as_array().is_some_and(|list| !list.is_empty());
+    filled("assignees") || !filled("blocked_by")
+}
+
+/// A claimed or ready ticket whose Touches names paths that are not in the checkout.
+#[derive(Debug)]
+pub struct Stale {
+    pub ticket: u64,
+    pub paths: Vec<String>,
+}
+
+impl Stale {
+    pub fn warning(&self) -> String {
+        format!(
+            "warning: #{} touches paths that are not in this checkout: {}",
+            self.ticket,
+            self.paths.join(", ")
+        )
+    }
+}
+
+/// The claimed or ready tickets whose Touches names a path `exists` does not find (`missing_paths`).
+/// A blocked ticket is skipped: its files may be ones a blocker creates.
+pub fn stale_touches(pages: &Value, exists: impl Fn(&str) -> bool) -> Result<Vec<Stale>> {
+    let bodies = issue_bodies(pages)?;
+    Ok(repo_tickets(pages)?
+        .iter()
+        .filter(|row| active(row))
+        .filter_map(|row| {
+            let ticket = row["number"].as_u64()?;
+            let paths = missing_paths(bodies[&ticket], &exists);
+            (!paths.is_empty()).then_some(Stale { ticket, paths })
+        })
+        .collect())
+}
+/// Whether `path` is in the checkout at `root`.
+fn in_checkout(root: &str) -> impl Fn(&str) -> bool + '_ {
+    move |path| std::path::Path::new(root).join(path).exists()
+}
+
+/// Pairs of open tickets, claimed or ready, that share a Touches file and are either in different
+/// specs or in one spec with no blocking edge between them. Tickets with no Touches line are skipped.
+pub fn overlaps(pages: &Value) -> Result<Vec<Overlap>> {
+    let bodies: std::collections::HashMap<u64, Vec<String>> = issue_bodies(pages)?
+        .into_iter()
+        .map(|(number, body)| (number, touched_files(body)))
+        .collect();
     let rows = repo_tickets(pages)?;
     let numbers = |row: &Value, key: &str| -> Vec<u64> {
         row[key].as_array().map_or(vec![], |list| {
@@ -227,8 +309,7 @@ pub fn overlaps(pages: &Value) -> Result<Vec<Overlap>> {
         .iter()
         .filter(|row| {
             let number = row["number"].as_u64().unwrap_or(0);
-            !bodies[&number].is_empty()
-                && (!numbers(row, "assignees").is_empty() || numbers(row, "blocked_by").is_empty())
+            !bodies[&number].is_empty() && active(row)
         })
         .collect();
     let mut found = vec![];
@@ -610,13 +691,26 @@ fn claim(number: u64) -> Result<()> {
             )?;
         }
     }
-    // Only a warning: a failed lookup or an overlap never blocks the claim.
-    match open_issue_pages().and_then(|pages| overlaps(&pages)) {
-        Ok(found) => found
+    // Only warnings: a failed lookup, an overlap or a stale path never blocks the claim.
+    let warnings = open_issue_pages().and_then(|pages| {
+        let mut lines: Vec<String> = overlaps(&pages)?
             .iter()
             .filter(|overlap| overlap.first == number || overlap.second == number)
-            .for_each(|overlap| eprintln!("{}", overlap.warning())),
-        Err(error) => eprintln!("could not check for overlapping tickets: {error}"),
+            .map(Overlap::warning)
+            .collect();
+        // The ticket's own worktree is the checkout its implementer will see.
+        let stale = stale_touches(&pages, in_checkout(&plan.path))?;
+        lines.extend(
+            stale
+                .iter()
+                .filter(|stale| stale.ticket == number)
+                .map(Stale::warning),
+        );
+        Ok(lines)
+    });
+    match warnings {
+        Ok(lines) => lines.iter().for_each(|line| eprintln!("{line}")),
+        Err(error) => eprintln!("could not check the ticket's Touches: {error}"),
     }
     println!("{}", plan.path);
     Ok(())
@@ -689,7 +783,7 @@ fn run() -> Result<()> {
     let args = env::args().skip(1).collect::<Vec<_>>();
     if args == ["--help"] {
         println!(
-            "{USAGE}\nDefault map: newest open issue labelled wayfinder:map. The map listing only reads GitHub; it prints the map title, URL and ticket rows, and --body appends the map body.\n--all lists every open issue repo-wide, by number, with its parent, assignees, open blockers and frontier, from one paginated GraphQL query. It also warns on stderr, once per pair, when two claimed or ready tickets share a file in their Touches Files line and are in different specs or in one spec with no blocking edge between them.\n--claim <issue> refuses closed, blocked or otherwise-assigned tickets, assigns the issue to you, reuses its worktree, or checks out its local or origin branch, or creates branch issue-<n>-<slug> from origin/main, under .claude/worktrees/, and prints the path. It warns on stderr, never blocking, when another claimed or ready ticket's Touches files overlap this one's.\n--done <issue> runs after merge, from outside the ticket's worktree: it removes that worktree and the ticket's one local issue-<n>-* branch, only if a merged PR ended on the branch's commit and the worktree has no uncommitted, untracked or ignored files apart from target/."
+            "{USAGE}\nDefault map: newest open issue labelled wayfinder:map. The map listing only reads GitHub; it prints the map title, URL and ticket rows, and --body appends the map body.\n--all lists every open issue repo-wide, by number, with its parent, assignees, open blockers and frontier, from one paginated GraphQL query. It also warns on stderr, once per pair, when two claimed or ready tickets share a file in their Touches Files line and are in different specs or in one spec with no blocking edge between them, and once per claimed or ready ticket whose Touches names a path that is not in this checkout (a path with \"new\" right before it is one the ticket creates).\n--claim <issue> refuses closed, blocked or otherwise-assigned tickets, assigns the issue to you, reuses its worktree, or checks out its local or origin branch, or creates branch issue-<n>-<slug> from origin/main, under .claude/worktrees/, and prints the path. It warns on stderr, never blocking, when another claimed or ready ticket's Touches files overlap this one's, or when its own Touches names a path that is not in its worktree.\n--done <issue> runs after merge, from outside the ticket's worktree: it removes that worktree and the ticket's one local issue-<n>-* branch, only if a merged PR ended on the branch's commit and the worktree has no uncommitted, untracked or ignored files apart from target/."
         );
         return Ok(());
     }
@@ -712,6 +806,10 @@ fn run() -> Result<()> {
         // Warnings go to stderr, beside the JSON rows; they never fail the listing.
         for overlap in overlaps(&pages)? {
             eprintln!("{}", overlap.warning());
+        }
+        let root = stdout("git", &["rev-parse", "--show-toplevel"])?;
+        for stale in stale_touches(&pages, in_checkout(root.trim()))? {
+            eprintln!("{}", stale.warning());
         }
         return Ok(());
     }
@@ -1273,6 +1371,69 @@ mod touches_tests {
         let a = issue(1, Some(9), true, &[], "no touches here");
         let b = issue(2, Some(8), true, &[], &touches("`x.rs`"));
         assert!(found(&pages(vec![a, b])).is_empty());
+    }
+    #[test]
+    fn a_blocked_ticket_that_is_claimed_is_compared() {
+        let a = issue(1, Some(9), false, &[], &touches("`x.rs`"));
+        let b = issue(2, Some(8), true, &[5], &touches("`x.rs`"));
+        assert_eq!(found(&pages(vec![a, b])).len(), 1);
+    }
+    fn missing(files: &str, present: &[&str]) -> Vec<String> {
+        missing_paths(&touches(files), |path| present.contains(&path))
+    }
+    #[test]
+    fn a_path_that_is_not_in_the_checkout_is_missing() {
+        assert_eq!(
+            missing(
+                "`apps/studio/core/src/lib.rs`, `core/src/lib.rs`, `wayfinder/`",
+                &["core/src/lib.rs", "wayfinder/"]
+            ),
+            ["apps/studio/core/src/lib.rs"]
+        );
+    }
+    #[test]
+    fn a_path_introduced_as_new_is_not_missing() {
+        assert!(missing("a new `core/src/ledger.rs`, (or a New `ui/x.ts`)", &[]).is_empty());
+        // "new" earlier in the text is about something else.
+        assert_eq!(
+            missing("a new app under `apps/studio/`", &[]),
+            ["apps/studio/"]
+        );
+    }
+    #[test]
+    fn a_placeholder_and_local_evidence_are_not_looked_up() {
+        assert!(missing("`docs/<topic>.md`, `local-evidence/README.md`", &[]).is_empty());
+    }
+    #[test]
+    fn a_span_that_is_no_path_is_not_looked_up() {
+        assert!(
+            missing(
+                "`core/src/lib.rs` (`is_check`, `npm run check`)",
+                &["core/src/lib.rs"]
+            )
+            .is_empty()
+        );
+    }
+    #[test]
+    fn a_glob_is_looked_up_by_its_folder() {
+        assert!(missing("`ui/tests/*.test.mjs`, `*.md`", &["ui/tests/"]).is_empty());
+        assert_eq!(
+            missing("`ui/gone/*.test.mjs`", &["ui/tests/"]),
+            ["ui/gone/*.test.mjs"]
+        );
+    }
+    #[test]
+    fn stale_touches_names_claimed_or_ready_tickets_only() {
+        let ready = issue(6, Some(4), false, &[], &touches("`apps/studio/ui/`, `ui/`"));
+        let blocked = issue(7, Some(4), false, &[6], &touches("`ui/evidence.ts`"));
+        let fine = issue(8, None, true, &[], &touches("`ui/`"));
+        let stale =
+            stale_touches(&pages(vec![ready, blocked, fine]), |path| path == "ui/").unwrap();
+        assert_eq!(stale.len(), 1);
+        assert_eq!(
+            stale[0].warning(),
+            "warning: #6 touches paths that are not in this checkout: apps/studio/ui/"
+        );
     }
     #[test]
     fn warnings_name_both_tickets_and_the_files() {
