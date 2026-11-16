@@ -28,7 +28,8 @@ fn prompt() -> String {
 
 /// The start and the passing result of a Bash call of `agent` (the session's own when `None`).
 fn passes(ms: u64, id: &str, command: &str, agent: Option<&str>) -> Vec<String> {
-    let call = json!({ "tool_name": "Bash", "tool_input": { "command": command }, "tool_use_id": id });
+    let call =
+        json!({ "tool_name": "Bash", "tool_input": { "command": command }, "tool_use_id": id });
     let mut end = call.clone();
     end["tool_response"] = json!({ "stdout": "ok\nall passed", "stderr": "" });
     if let Some(agent) = agent {
@@ -46,7 +47,8 @@ fn passes(ms: u64, id: &str, command: &str, agent: Option<&str>) -> Vec<String> 
 
 /// The start and the failing result of a Bash call, with `error` as the agent reports it.
 fn fails(ms: u64, id: &str, command: &str, error: &str) -> Vec<String> {
-    let call = json!({ "tool_name": "Bash", "tool_input": { "command": command }, "tool_use_id": id });
+    let call =
+        json!({ "tool_name": "Bash", "tool_input": { "command": command }, "tool_use_id": id });
     let mut end = call.clone();
     end["error"] = error.into();
     vec![
@@ -104,11 +106,17 @@ fn a_failed_run_then_a_passed_one_is_passed_after_one_retry() {
     ]);
 
     assert_eq!(shown(&found), [("cargo test", CheckStatus::Passed, 1)]);
-    let runs: Vec<(CheckStatus, Option<i32>)> =
-        found[0].runs.iter().map(|r| (r.status, r.exit_code)).collect();
+    let runs: Vec<(CheckStatus, Option<i32>)> = found[0]
+        .runs
+        .iter()
+        .map(|r| (r.status, r.exit_code))
+        .collect();
     assert_eq!(
         runs,
-        [(CheckStatus::Failed, Some(101)), (CheckStatus::Passed, Some(0))]
+        [
+            (CheckStatus::Failed, Some(101)),
+            (CheckStatus::Passed, Some(0))
+        ]
     );
 }
 
@@ -155,7 +163,11 @@ fn a_workers_check_counts_in_the_turn_that_spawned_it() {
         json!({ "agent_id": "w1", "agent_type": "general-purpose" }),
     ));
     lines.extend(passes(1_000, "t1", "cargo test", Some("w1")));
-    lines.push(line("Stop", 5_000, json!({ "last_assistant_message": "done" })));
+    lines.push(line(
+        "Stop",
+        5_000,
+        json!({ "last_assistant_message": "done" }),
+    ));
     lines.push(line(
         "UserPromptSubmit",
         6_000,
@@ -165,7 +177,10 @@ fn a_workers_check_counts_in_the_turn_that_spawned_it() {
 
     let turns = &studio.session(SESSION).unwrap().turns;
 
-    assert_eq!(shown(&turns[0].checks), [("cargo test", CheckStatus::Passed, 0)]);
+    assert_eq!(
+        shown(&turns[0].checks),
+        [("cargo test", CheckStatus::Passed, 0)]
+    );
     assert_eq!(turns[0].checks[0].runs[0].agent.as_deref(), Some("w1"));
     assert_eq!(turns[1].checks, []);
 }
