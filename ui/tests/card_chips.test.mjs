@@ -9,7 +9,7 @@ globalThis.window = {
   __TAURI__: { core: { invoke: async (command, args) => (calls.push([command, args]), command === "turn_file_hunk" ? hunk : null) } },
 };
 // The document is set after the import: times.ts starts a timer when one exists at load.
-const { cardLine } = await import("../../dist/cards.js");
+const { cardLine, cardsFor, quizOpen } = await import("../../dist/cards.js");
 globalThis.document = { createElement: (tag) => new El(tag), getElementById: () => new El("div"), visibilityState: "hidden" };
 
 const stored = (card) => ({
@@ -35,4 +35,15 @@ test("a chip of a file the turn changed opens the same hunk as the file's eviden
 test("a card with no code draws no code block", () => {
   const node = cardLine(stored({ code: "", paths: [] }), null);
   assert.equal(node.find("pre").length, 0);
+});
+
+test("a card's Quiz is hidden where a Quiz may not show beside a decision", () => {
+  const quiz = { text: "Why?", key: 0, options: [{ text: "a", why: "b" }, { text: "c", why: "d" }] };
+  const cards = [stored({ quiz })];
+  assert.equal(cards.some(quizOpen), true);
+  assert.equal(cardsFor(cards, true), cards);
+  const hidden = cardsFor(cards, false);
+  assert.equal(hidden.some(quizOpen), false);
+  assert.equal(hidden[0].card.quiz, null);
+  assert.equal(cards[0].card.quiz, quiz);
 });

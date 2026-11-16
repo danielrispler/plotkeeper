@@ -343,6 +343,11 @@ export function showCards(cards: SessionCards) {
 // Whether the card's quiz waits for Daniel's answer.
 export const quizOpen = (stored: StoredCard) => stored.card.quiz !== null && !quizState(stored).answered;
 
+// The cards of a turn whose Quiz may not show beside a decision (`quizAllowed`), without their Quiz: the core drops it only when the
+// card is written, so a Quiz written before the `ask` line or the Needs you state stays in the store.
+export const cardsFor = (cards: StoredCard[], allowed: boolean): StoredCard[] =>
+  allowed ? cards : cards.map((stored) => (stored.card.quiz === null ? stored : { ...stored, card: { ...stored.card, quiz: null } }));
+
 // A card in its turn (danielrispler/plotkeeper#117): an answered card is one line, its quiz, which opens to the card.
 export function cardLine(stored: StoredCard, turn: CardTurn | null = null): HTMLElement {
   const quiz = stored.card.quiz;

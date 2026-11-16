@@ -14,7 +14,7 @@ import { encode, request } from "./daemon.js";
 import { agentState, sessionName, showsLanded } from "./list.js";
 import { closePane, openHere } from "./panes.js";
 import { openDecision, type Ask } from "./answer.js";
-import { briefNodes, cardLine, quizOpen } from "./cards.js";
+import { briefNodes, cardLine, cardsFor, quizOpen } from "./cards.js";
 import { type Banner, bannerElement, bannerFor, bannerLives } from "./banner.js";
 import { quizAllowed, quizAnswered, quizItem, quizRegion, seedQuiz, trialOn } from "./quiz.js";
 import { evidenceElement, hasEvidence } from "./evidence.js";
@@ -452,8 +452,10 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
   // `open` and `ask` lines always show; `why` and `reported` wait for the Quiz to be answered or skipped (#120), and show at once
   // when the turn has none. Its Quiz is never beside a decision: a turn with an `ask` line, or in Needs you, has none open.
   // A body-only turn of the self-test (#130) shows its Body open and no Quiz.
-  const quiz = summary?.summary.quiz && summary.arm !== "body_only" && turn?.id && quizAllowed(lines, now !== null && session.state === "needs_you") ? summary.summary.quiz : null;
-  const held = block.cards.some(quizOpen) || quiz !== null;
+  const allowed = quizAllowed(lines, now !== null && session.state === "needs_you");
+  const quiz = summary?.summary.quiz && summary.arm !== "body_only" && turn?.id && allowed ? summary.summary.quiz : null;
+  const cards = cardsFor(block.cards, allowed);
+  const held = cards.some(quizOpen) || quiz !== null;
   const [always, rest] = [lines.filter((l) => l.kind === "open" || l.kind === "ask"), lines.filter((l) => l.kind !== "open" && l.kind !== "ask")];
   const shown = held ? always : lines;
   if (shown.length) {
@@ -473,7 +475,7 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
     node.append(quizRegion(id, quiz, now ? rest : [], deps));
   }
   const cardTurn = index !== null && turn?.files ? { session: session.id, index, files: turn.files.files } : null;
-  node.append(...block.cards.map((card) => cardLine(card, cardTurn)));
+  node.append(...cards.map((card) => cardLine(card, cardTurn)));
   node.append(...block.questions.filter((q) => q.answer === "not_answered").map(questionElement));
   if (block.agents.length) {
     const list = document.createElement("ol");
@@ -528,7 +530,7 @@ function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
     const summary = turn.id ? summaryOf(turn.id) : null;
     const { headline } = headlineOf(summary, turn.message);
     const open = opened.has(key);
-    const line = foldedLine(turn, headline, block.cards.some(quizOpen) || (summary?.summary.quiz != null && summary.arm !== "body_only" && !quizAnswered(turn.id!) && quizAllowed(headlineOf(summary, turn.message).body, false)));
+    const line = foldedLine(turn, headline, quizAllowed(headlineOf(summary, turn.message).body, false) && (block.cards.some(quizOpen) || (summary?.summary.quiz != null && summary.arm !== "body_only" && !quizAnswered(turn.id!))));
     const button = pressable(document.createElement("button"), open, () => {
       if (opened.has(key)) opened.delete(key);
       else opened.add(key);
