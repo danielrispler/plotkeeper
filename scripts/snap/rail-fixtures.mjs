@@ -95,6 +95,9 @@ const check = (command, passed, startedAgo, tookMs, turn) => ({
   command, passed, started_at: Date.now() - startedAgo, ended_at: Date.now() - startedAgo + tookMs, typical_ms: tookMs, turn,
 });
 
+const file = (path, added, removed) => ({ root: cwd, path, from: null, added, removed });
+const run = (status, call, exit_code) => ({ command: "cargo", status, exit_code, call, agent: null });
+
 const helper = (id, name, asked, type, result, turn, ago, running = false) => ({
   id, parent: "session", kind: "helper", name, asked, agent_type: type, status: running ? "running" : "completed",
   started_at: Date.now() - ago, ended_at: running ? null : Date.now() - ago + 3 * MIN, last_step: running ? { tool: "Grep", detail: "#[0-9a-f]{3,8} ui/style.css" } : null,
@@ -126,9 +129,14 @@ const session = (state, { running = false, question = false } = {}) => {
     prompt,
     id: i < 4 || ended ? `t${i}` : null,
     message: "Done.",
-    files: null,
-    // The second turn ends with a failed check, which its folded line marks (#117).
-    checks: [{ suite: "check", status: i === 1 ? "failed" : "passed", retries: 0, runs: [] }],
+    // The newest turns changed files (#113); the second turn ends with a failed check, which its folded line marks (#117).
+    files: i >= 3 ? { files: [file("ui/style.css", 14, 3), file("ui/list.ts", 22, 9), file("ui/tests/rows.test.mjs", 6, 6)], external: i === 4 ? 2 : 0 } : null,
+    checks: i === 4
+      ? [
+          { suite: "cargo clippy", status: "passed", retries: 1, runs: [run("failed", "k1", 101), run("passed", "k2", 0)] },
+          { suite: "npm run check", status: "failed", retries: 0, runs: [run("failed", "k3", 1)] },
+        ]
+      : [{ suite: "check", status: i === 1 ? "failed" : "passed", retries: 0, runs: [] }],
   }));
   const transcript = {
     intention: ended ? final.split("\n")[0] : intentions[state === "needs_you" ? "needs_you" : "running"],
@@ -237,6 +245,7 @@ const build = (state, { ask = null, answered = false, withBrief = false } = {}) 
     selected: { session: s, agent: null },
     cards: { brief: withBrief ? brief : null, recent: [], older: [stored], decisions: withBrief ? decisions : [] },
     watch: ask,
+    check_output: { exit_code: 1, tail: "error: test failed, to rerun pass `-p studio-core --lib`\n\nfailures:\n    rows::fold_toggle_is_a_sibling" },
     turn_summary: { __by: "id", values: Object.fromEntries(Object.entries(turnSummaries).map(([id, summary]) => [id, { summary }])) },
     turn_reply: { __by: "index", values: { 0: "Plan: a fold toggle and a delete column.\n\nThe toggle is drawn only when subagents show under the row.", 1: "Implemented the toggle and the delete." } },
     agent_summary: { __by: "agentId", values: { a1: "Reviewed the diff: no raw colours, two spacing values bypass the tokens." } },
@@ -280,7 +289,27 @@ const openTurnScript = `
   log("folded turns " + lines.length + ", open " + lines.filter((l) => l.getAttribute("aria-expanded") === "true").length);
   if (lines.length !== 4 || lines[1].getAttribute("aria-expanded") !== "true") log("snap:fail one turn should be open of four folded");`;
 
+// #113: scrolls the rail, opens the evidence line, then a failed check's output, and fails when the rail's scrollTop moved.
+const evidenceScript = `
+  const story = document.getElementById("story");
+  story.scrollTop = Math.min(80, story.scrollHeight - story.clientHeight);
+  const at = story.scrollTop;
+  const wait = () => new Promise((resolve) => setTimeout(resolve, 200));
+  const toggle = document.querySelector(".evidence-toggle");
+  if (!toggle) log("snap:fail there is no evidence line");
+  toggle.click();
+  await wait();
+  const row = document.querySelector(".evidence-fail");
+  if (!row) log("snap:fail the opened line has no failed check");
+  row.click();
+  await wait();
+  const output = document.querySelector(".evidence-output");
+  if (!output || output.hidden || !/exit code 1/.test(output.textContent)) log("snap:fail the failed check's output did not open");
+  log("rail scrollTop " + at + " -> " + story.scrollTop);
+  if (story.scrollTop !== at) log("snap:fail the rail's scrollTop moved from " + at + " to " + story.scrollTop);`;
+
 export const railFixtures = {
+  railEvidence: () => ({ ...build("your_turn"), snapScript: evidenceScript }),
   ...railStates,
   railIdleScroll: () => ({ ...build("idle", { answered: true, withBrief: true }), snapScript: scrollScript }),
   railIdleOpened: () => ({ ...build("idle", { answered: true, withBrief: true }), snapScript: openTurnScript }),

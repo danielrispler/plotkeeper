@@ -74,6 +74,9 @@ A check card's guess whose check ended with an exit code that does not say wheth
 **Step ledger**:
 The index of an agent session's tool calls, workers' included, kept as one row per call: its tool, file, command or pattern, turn, subagent, duration and result or exit code, and where in the event log its start and result lines are. It holds no output; a call's details are read from the log by those offsets.
 
+**Evidence line**:
+The line under a turn's Headline that states what the hooks and git recorded for the turn: the files it changed and each check's last result, such as `3 files · 2 checks passed`. It opens in place to each file with its line counts, the external changes, and each check with its status; a failed check opens its exit code and the tail of its output. It has no model in it, and an agent that reports no trees has none.
+
 **Brief**:
 A rolling account of an agent session's or a worker's work so far, at the top of its view, so that Daniel can resume a session he lost track of. Each new card updates it.
 

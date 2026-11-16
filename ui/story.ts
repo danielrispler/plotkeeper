@@ -15,6 +15,7 @@ import { agentState, sessionName, showsLanded } from "./list.js";
 import { closePane, openHere } from "./panes.js";
 import { openDecision, type Ask } from "./answer.js";
 import { cardLine, quizOpen } from "./cards.js";
+import { evidenceElement, hasEvidence } from "./evidence.js";
 import { showCleared } from "./decisions.js";
 import { decisionElement, questionElement } from "./questions.js";
 import { removeWorktreeByDefault, shortPaths, worktreeOf } from "./paths.js";
@@ -460,6 +461,11 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
     }
   } else if (summary) node.append(rendered("div", summary.summary.summary, "summary", session.cwd));
   if (summary?.summary.learning && turn?.id) node.append(learningElement(turn.id, summary.summary.learning));
+  // The evidence line, under the Headline and the Body lines: a running turn shows only a check that ended failed.
+  if (turn && index !== null && hasEvidence(turn, session.capabilities)) {
+    const line = evidenceElement(session.id, index, turn, { only: session.state === "running" && now ? "failed" : "all" });
+    if (line) node.append(line);
+  }
   node.append(...block.cards.map(cardLine));
   node.append(...block.questions.filter((q) => q.answer === "not_answered").map(questionElement));
   if (block.agents.length) {
