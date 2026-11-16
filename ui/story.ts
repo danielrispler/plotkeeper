@@ -451,7 +451,8 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
   }
   // `open` and `ask` lines always show; `why` and `reported` wait for the Quiz to be answered or skipped (#120), and show at once
   // when the turn has none. Its Quiz is never beside a decision: a turn with an `ask` line, or in Needs you, has none open.
-  const quiz = summary?.summary.quiz && turn?.id && quizAllowed(lines, now !== null && session.state === "needs_you") ? summary.summary.quiz : null;
+  // A body-only turn of the self-test (#130) shows its Body open and no Quiz.
+  const quiz = summary?.summary.quiz && summary.arm !== "body_only" && turn?.id && quizAllowed(lines, now !== null && session.state === "needs_you") ? summary.summary.quiz : null;
   const held = block.cards.some(quizOpen) || quiz !== null;
   const [always, rest] = [lines.filter((l) => l.kind === "open" || l.kind === "ask"), lines.filter((l) => l.kind !== "open" && l.kind !== "ask")];
   const shown = held ? always : lines;
@@ -526,7 +527,7 @@ function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
     const summary = turn.id ? summaryOf(turn.id) : null;
     const { headline } = headlineOf(summary, turn.message);
     const open = opened.has(key);
-    const line = foldedLine(turn, headline, block.cards.some(quizOpen) || (summary?.summary.quiz != null && !quizAnswered(turn.id!) && quizAllowed(headlineOf(summary, turn.message).body, false)));
+    const line = foldedLine(turn, headline, block.cards.some(quizOpen) || (summary?.summary.quiz != null && summary.arm !== "body_only" && !quizAnswered(turn.id!) && quizAllowed(headlineOf(summary, turn.message).body, false)));
     const button = pressable(document.createElement("button"), open, () => {
       if (opened.has(key)) opened.delete(key);
       else opened.add(key);

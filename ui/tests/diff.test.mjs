@@ -41,7 +41,9 @@ test("the pane lists the agent's files with counts, each hunk read whole, and ex
   let back = 0;
   drawDiff(place, { id: "s", turns: [turn([file("a.rs", 1, 0), file("img.png", null, null)], 3)] }, 0, () => back++);
   await new Promise((resolve) => setTimeout(resolve));
-  assert.deepEqual(calls.map(([c, a]) => [c, a.all, a.turn, a.path]), [["turn_file_hunk", true, 0, "a.rs"], ["turn_file_hunk", true, 0, "img.png"]]);
+  assert.deepEqual(calls.filter(([c]) => c === "turn_file_hunk").map(([c, a]) => [c, a.all, a.turn, a.path]), [["turn_file_hunk", true, 0, "a.rs"], ["turn_file_hunk", true, 0, "img.png"]]);
+  // Opening a hunk is told to the self-test (#130).
+  assert.ok(calls.some(([c, a]) => c === "hunk_opened" && a.turn === 0));
   const summaries = place.find("summary").map((s) => s.text);
   assert.deepEqual(summaries, ["a.rs +1 −0", "img.png", "+3 external"]);
   assert.match(place.text, /\+b/);

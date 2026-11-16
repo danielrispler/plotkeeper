@@ -35,6 +35,8 @@ export function homeRetests(retests: Retest[]): Retest[] {
 
 function retestRow(retest: Retest, quiz: NonNullable<Retest["quiz"]>): HTMLElement {
   seedQuiz(retest.id, retest.taps);
+  // The self-test times the pick from the retest's first showing (#130).
+  if (!retest.taps.some((t) => t.kind === "shown")) void invoke("quiz_tap", { id: retest.id, tap: { kind: "shown" } }).catch((e) => console.warn(e));
   answeredHere.add(retest.id);
   const region = quizRegion(retest.id, quiz, [], {
     record: (tap) => void invoke("quiz_tap", { id: retest.id, tap }).catch((e) => console.warn(e)),

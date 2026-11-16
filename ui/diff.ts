@@ -57,6 +57,7 @@ function fileFold(session: string, index: number, file: TurnFile): HTMLElement {
   });
   const edit = pressable(text("button", "Open in editor", "evidence-edit"), false, () => openAt({ path: file.path, line: first, column: 1 }, file.root));
   let first = 1;
+  invoke("hunk_opened", { session, turn: index }).catch((e) => console.warn(e));
   const body = text("div", "Reading the hunk…", "diff-body");
   fold.append(text("summary", `${file.from ? `${file.from} → ` : ""}${file.path}${counts(file)}`), edit, body);
   invoke<{ text: string; binary: boolean; first_line: number } | null>("turn_file_hunk", { session, turn: index, root: file.root, path: file.path, from: file.from, all: true })

@@ -74,6 +74,32 @@ pub struct StoredSummary {
     /// before they were kept, and for a turn with no facts.
     #[serde(default)]
     pub hunk: String,
+    /// The self-test's arm (danielrispler/plotkeeper#130), kept only on a turn with a Quiz that was written while the test ran;
+    /// `None` is quiz-first.
+    #[serde(default)]
+    pub arm: Option<Arm>,
+}
+
+/// How long the self-test assigns arms: 21 days from its start (danielrispler/plotkeeper#130).
+pub const SELF_TEST_MS: u64 = 21 * 24 * 60 * 60 * 1000;
+
+/// A turn's arm in the self-test (danielrispler/plotkeeper#130): quiz-first shows the Quiz open and the Body after a pick;
+/// body-only shows the Body open and no Quiz, though the Quiz is kept for the retest.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Arm {
+    QuizFirst,
+    BodyOnly,
+}
+
+/// A random bit, from the random keys std gives each hasher.
+fn coin() -> bool {
+    use std::hash::{BuildHasher, Hasher};
+    std::collections::hash_map::RandomState::new()
+        .build_hasher()
+        .finish()
+        & 1
+        == 1
 }
 
 /// What Daniel does with a Quiz (danielrispler/plotkeeper#120): a pick, "Show the rest anyway" (a skip, which reveals as a pick
@@ -82,9 +108,18 @@ pub struct StoredSummary {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Tap {
-    Pick { option: usize },
-    Confidence { sure: bool },
-    Why { text: String },
+    Pick {
+        option: usize,
+    },
+    Confidence {
+        sure: bool,
+    },
+    Why {
+        text: String,
+    },
+    /// A retest's first showing, and the first hunk opened on a turn (danielrispler/plotkeeper#130).
+    Shown,
+    Hunk,
     Skip,
     Understood,
     ExplainMore,
@@ -314,6 +349,8 @@ pub struct CardStore {
     agent_summaries: BTreeMap<String, String>,
     /// The retests, in `retests.json` beside the cards (danielrispler/plotkeeper#129).
     retests: Vec<Retest>,
+    /// When the self-test started, in Unix milliseconds, from the settings; kept in memory.
+    self_test: Option<u64>,
     /// Rises on every change, briefs included, so the shell sends the cards only when it moves.
     revision: u64,
 }
@@ -343,6 +380,7 @@ impl CardStore {
         Ok(CardStore {
             path,
             retests,
+            self_test: None,
             cards,
             briefs,
             facts,
@@ -757,6 +795,27 @@ impl CardStore {
         summary: TurnSummary,
         at: u64,
     ) -> io::Result<()> {
+        self.add_summary_with(request, summary, at, coin())
+    }
+
+    /// Starts the self-test at `start`, in Unix milliseconds, or ends it with `None` (danielrispler/plotkeeper#130).
+    pub fn set_self_test(&mut self, start: Option<u64>) {
+        self.self_test = start;
+    }
+
+    /// `add_summary_at` with the self-test's coin given: heads is body-only. A turn with a Quiz written in the test's 21
+    /// days gets an arm; any other turn none, so outside the window no turn is body-only.
+    pub fn add_summary_with(
+        &mut self,
+        request: SummaryRequest,
+        summary: TurnSummary,
+        at: u64,
+        heads: bool,
+    ) -> io::Result<()> {
+        let arm = (self.self_test)
+            .filter(|start| (*start..*start + SELF_TEST_MS).contains(&at))
+            .filter(|_| summary.quiz.is_some())
+            .map(|_| if heads { Arm::BodyOnly } else { Arm::QuizFirst });
         let hunk = (request.facts.files.iter())
             .map(|f| format!("--- {}\n{}", f.file.path, f.hunk))
             .collect();
@@ -766,6 +825,7 @@ impl CardStore {
             added_at: at,
             taps: Vec::new(),
             hunk,
+            arm,
         });
         self.revision += 1;
         write(&self.path.with_file_name("summaries.json"), &self.summaries)
@@ -883,10 +943,9 @@ impl CardStore {
         let cards = self.cards.iter().filter(|k| k.request.check.is_none());
         let cards =
             cards.filter(|k| k.card.quiz.is_some() && k.added_at.is_some_and(|at| at > since));
-        let lone = self
-            .summaries
-            .iter()
-            .filter(|k| k.summary.quiz.is_some() && k.added_at > since);
+        let lone = self.summaries.iter().filter(|k| {
+            k.summary.quiz.is_some() && k.arm != Some(Arm::BodyOnly) && k.added_at > since
+        });
         cards.count() + lone.count()
     }
 

@@ -25,6 +25,7 @@ mod fingerprint;
 mod grounding;
 mod offer;
 mod retest;
+mod self_test;
 mod store;
 mod summary;
 mod turn_trees;
@@ -38,9 +39,10 @@ pub use fingerprint::{Fingerprints, backfilled, fingerprint_changes, worktree_ro
 use grounding::words;
 pub use offer::{Changed, Offer, Shape, is_logic};
 pub use retest::{retest_quiz, write_retests};
+pub use self_test::{ArmReport, SelfTest, self_test};
 pub use store::{
-    Brief, CardStore, CheckResult, Guess, Level, QuizTap, Rating, Reason, Retest, RetestAsk, Row,
-    SessionCards, StoredCard, StoredSummary, Tap, millis,
+    Arm, Brief, CardStore, CheckResult, Guess, Level, QuizTap, Rating, Reason, Retest, RetestAsk,
+    Row, SessionCards, StoredCard, StoredSummary, Tap, millis,
 };
 pub use store::{Place, QUIZZES_PER_HOUR};
 pub use summary::{

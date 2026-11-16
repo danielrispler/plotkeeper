@@ -221,6 +221,7 @@ export type Tap =
   | { kind: "pick"; option: number }
   | { kind: "confidence"; sure: boolean }
   | { kind: "why"; text: string }
+  | { kind: "shown" | "hunk" }
   | { kind: "skip" | "understood" | "explain_more" | "key_wrong" };
 export type QuizTap = Tap & { at: number };
 // A fresh Quiz on the decision of an earlier one, a week after it, which Home offers (#129). `id` names it for `quiz_tap`.
@@ -246,6 +247,8 @@ export type SummaryLine = { kind: "why" | "reported" | "open" | "ask"; text: str
 export type TurnSummary = {
   summary: { summary: string; headline?: string | null; lines?: SummaryLine[]; quiz: Quiz | null };
   taps?: QuizTap[];
+  // The self-test's arm (#130): body-only shows the Body open and no Quiz; absent is quiz-first.
+  arm?: "quiz_first" | "body_only" | null;
 };
 // The Brief's slots (danielrispler/plotkeeper#122): the Goal a model wrote, each answered question with Daniel's reply, and
 // the Open lines the shell computed. `brief` is a brief stored as prose, which shows while there is no Goal.

@@ -843,3 +843,78 @@ fn a_confidence_tap_and_a_why_line_on_a_lone_quiz_are_stored_too() {
         ]
     );
 }
+
+const DAY: u64 = 24 * 60 * 60 * 1000;
+const START: u64 = 1_800_000_000_000;
+
+fn quiz_turn(store: &mut CardStore, id: &str, at: u64, coin: bool) {
+    let request = studio_core::SummaryRequest {
+        id: id.into(),
+        session_id: "s1".into(),
+        ..Default::default()
+    };
+    let summary: studio_understanding::TurnSummary = serde_json::from_value(serde_json::json!({
+        "summary": "Did a thing.",
+        "quiz": { "text": "Why?", "key": 0, "options": [
+            { "text": "A", "why": "Because." }, { "text": "B", "why": "No." }] },
+    }))
+    .unwrap();
+    store.add_summary_with(request, summary, at, coin).unwrap();
+}
+
+#[test]
+fn inside_the_test_each_quiz_turn_gets_an_arm_stored_with_it_and_outside_none_is_body_only() {
+    use studio_understanding::Arm;
+    let data = tempfile::tempdir().unwrap();
+    let path = data.path().join("cards.json");
+    let mut store = CardStore::open(path.clone()).unwrap();
+    // Before the test starts, and with no test set, a turn has no arm.
+    quiz_turn(&mut store, "none", START, true);
+    store.set_self_test(Some(START + DAY));
+    quiz_turn(&mut store, "before", START, true);
+    quiz_turn(&mut store, "first", START + DAY, true);
+    quiz_turn(&mut store, "second", START + DAY, false);
+    quiz_turn(&mut store, "last", START + 22 * DAY - 1, true);
+    quiz_turn(&mut store, "after", START + 22 * DAY, true);
+    let arm = |s: &CardStore, id: &str| s.turn_summary(id).unwrap().arm;
+    assert_eq!(arm(&store, "none"), None);
+    assert_eq!(arm(&store, "before"), None);
+    assert_eq!(arm(&store, "first"), Some(Arm::BodyOnly));
+    assert_eq!(arm(&store, "second"), Some(Arm::QuizFirst));
+    assert_eq!(arm(&store, "last"), Some(Arm::BodyOnly));
+    assert_eq!(arm(&store, "after"), None);
+    assert_eq!(
+        arm(&CardStore::open(path).unwrap(), "first"),
+        Some(Arm::BodyOnly)
+    );
+}
+
+#[test]
+fn the_coin_gives_both_arms_and_a_turn_with_no_quiz_gets_none() {
+    use studio_understanding::Arm;
+    let data = tempfile::tempdir().unwrap();
+    let mut store = lone_quiz(&data.path().join("cards.json"));
+    store.set_self_test(Some(START));
+    for i in 0..40 {
+        let request = studio_core::SummaryRequest {
+            id: format!("r{i}"),
+            ..Default::default()
+        };
+        let summary: studio_understanding::TurnSummary =
+            serde_json::from_value(serde_json::json!({
+                "summary": "Did a thing.",
+                "quiz": { "text": "Why?", "key": 0, "options": [
+                    { "text": "A", "why": "Because." }, { "text": "B", "why": "No." }] },
+            }))
+            .unwrap();
+        store.add_summary_at(request, summary, START + i).unwrap();
+    }
+    let arms: Vec<_> = store.summaries().iter().filter_map(|s| s.arm).collect();
+    assert!(arms.contains(&Arm::BodyOnly) && arms.contains(&Arm::QuizFirst));
+    let plain: studio_understanding::TurnSummary =
+        serde_json::from_value(serde_json::json!({ "summary": "Nothing." })).unwrap();
+    store
+        .add_summary_with(Default::default(), plain, START, true)
+        .unwrap();
+    assert_eq!(store.summaries().last().unwrap().arm, None);
+}

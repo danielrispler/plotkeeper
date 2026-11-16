@@ -65,9 +65,12 @@ fn summary_settings(
     model: String,
     effort: String,
     on_open: bool,
+    self_test: Option<u64>,
     summaries: State<Summaries>,
     studio: State<Mutex<Studio>>,
+    cards: State<Cards>,
 ) {
+    cards.lock().unwrap().set_self_test(self_test);
     *summaries.setup.lock().unwrap() = SummarySetup { model, effort };
     studio.lock().unwrap().set_summaries_on_open(on_open);
 }
@@ -132,6 +135,15 @@ fn turn_file_hunk(
         from.as_deref(),
         all.unwrap_or(false),
     )
+}
+
+/// Daniel opened a hunk of turn `turn` (danielrispler/plotkeeper#130): the self-test counts the turns where he did.
+#[tauri::command(async)]
+fn hunk_opened(session: String, turn: usize, studio: State<Mutex<Studio>>, cards: State<Cards>) {
+    let id = (studio.lock().unwrap().session(&session)).and_then(|s| s.turns.get(turn)?.id.clone());
+    if let Some(id) = id {
+        unsaved(cards.lock().unwrap().quiz_tap(&id, Tap::Hunk, millis()));
+    }
 }
 
 /// Daniel opened turn `id` (danielrispler/Falinks#526): its summary, written now when it waits for him, which takes
@@ -838,6 +850,7 @@ fn main() {
             settings::set_zoom,
             settings::open_settings,
             summary_settings,
+            hunk_opened,
             check_lists,
             check_output,
             turn_file_hunk,

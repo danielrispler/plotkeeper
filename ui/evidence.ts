@@ -131,6 +131,7 @@ function fileRow(session: string, index: number, row: EvidenceRow): HTMLElement 
   const fetch = () => {
     if (hunks.has(key)) return;
     pre.textContent = "Reading the hunk…";
+    invoke("hunk_opened", { session, turn: index }).catch((e) => console.warn(e));
     invoke<Hunk | null>("turn_file_hunk", { session, turn: index, root: file.root, path: file.path, from: file.from })
       .then((h) => {
         hunks.set(key, h);
