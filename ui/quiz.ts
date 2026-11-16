@@ -20,11 +20,34 @@ export const quizView = (stage: QuizStage): QuizView =>
 // Whether a turn shows an open Quiz: never beside a decision, so not when its Body has an `ask` line or the session needs him.
 export const quizAllowed = (body: SummaryLine[], needsYou: boolean): boolean => !needsYou && !body.some((line) => line.kind === "ask");
 
+// The Quiz as the writer is shown it for "explain more": its question, and each option with its reason.
+export const quizItem = (quiz: Quiz) =>
+  `A quiz. ${quiz.text}\n${quiz.options.map((o, i) => `${i === quiz.key ? "Right" : "Wrong"}: ${o.text}. ${o.why}`).join("\n")}`;
+
+// The trial of the confidence tap and the "why?" line runs for two weeks from the day a setting names (#129).
+const TRIAL_MS = 14 * 24 * 60 * 60 * 1000;
+
+// Whether the trial runs at `now` (Unix ms), given `start`, the setting's day as "YYYY-MM-DD"; null: no trial.
+export function trialOn(start: string | null, now: number): boolean {
+  const from = start === null ? NaN : Date.parse(start);
+  return !Number.isNaN(from) && now >= from && now < from + TRIAL_MS;
+}
+
 type Chip = "understood" | "explain_more" | "key_wrong";
-type Kept = { pick: number | null; skipped: boolean; chips: Set<Chip>; more: string | null; asking: boolean };
+type Kept = {
+  pick: number | null;
+  skipped: boolean;
+  chips: Set<Chip>;
+  more: string | null;
+  asking: boolean;
+  // The trial: how sure he was, his line on why, and whether that step is over (sent, or skipped with Enter).
+  sure: boolean | null;
+  why: string | null;
+  whyDone: boolean;
+};
 const kept = new Map<string, Kept>();
 const keptOf = (id: string): Kept => {
-  if (!kept.has(id)) kept.set(id, { pick: null, skipped: false, chips: new Set(), more: null, asking: false });
+  if (!kept.has(id)) kept.set(id, { pick: null, skipped: false, chips: new Set(), more: null, asking: false, sure: null, why: null, whyDone: false });
   return kept.get(id)!;
 };
 
@@ -34,7 +57,11 @@ export function seedQuiz(id: string, taps: QuizTap[] | undefined) {
   for (const tap of taps ?? []) {
     if (tap.kind === "pick") {
       if (one.pick === null && !one.skipped) one.pick = tap.option;
-    } else if (tap.kind === "skip") {
+      // A pick stored before a restart was revealed or is not waited on again.
+      one.whyDone = true;
+    } else if (tap.kind === "confidence") one.sure ??= tap.sure;
+    else if (tap.kind === "why") one.why ??= tap.text;
+    else if (tap.kind === "skip") {
       if (one.pick === null) one.skipped = true;
     } else one.chips.add(tap.kind);
   }
@@ -50,6 +77,9 @@ export type QuizDeps = {
   explain: () => Promise<string>;
   // A Body line, drawn as the rail draws it.
   line: (line: SummaryLine) => HTMLElement;
+  // Whether the trial's confidence tap and "why?" line show on this Quiz (#129): always on a retest, on a Quiz of "now" only
+  // while the trial runs.
+  trial?: boolean;
 };
 
 // The Quiz of turn `id` with its held-back Body lines `held`, in one region that draws itself again on a tap.
@@ -74,7 +104,9 @@ export function quizRegion(id: string, quiz: Quiz, held: SummaryLine[], deps: Qu
   const draw = () => {
     const one = keptOf(id);
     const stage = quizStage(one.pick, one.skipped);
-    const view = quizView(stage);
+    // In the trial the reveal after a pick waits for the "why?" line, which Enter skips.
+    const waiting = deps.trial === true && stage === "picked" && !one.whyDone;
+    const view = waiting ? { reasons: false, rest: false, chips: false, skip: false } : quizView(stage);
     const options = document.createElement("ol");
     options.className = "options";
     options.append(
@@ -90,6 +122,8 @@ export function quizRegion(id: string, quiz: Quiz, held: SummaryLine[], deps: Qu
           const why = prose("p", option.why);
           if (i === quiz.key) why.prepend(Object.assign(text("span", "The right answer. "), { dir: "ltr" }));
           item.append(why);
+          // His own line shows beside the writer's reason; it is not graded.
+          if (one.pick === i && one.why) item.append(prose("p", `Your reason: ${one.why}`));
         }
         return item;
       }),
@@ -98,7 +132,40 @@ export function quizRegion(id: string, quiz: Quiz, held: SummaryLine[], deps: Qu
     question.className = "quiz";
     const box = document.createElement("div");
     box.className = "card quiz-box";
-    box.append(question, options);
+    box.append(question);
+    if (deps.trial && stage === "open") {
+      const row = document.createElement("p");
+      row.className = "quiz-sure";
+      const sure = (value: boolean, label: string) => {
+        const button = pressable(prose("button", label) as HTMLButtonElement, one.sure === value, () => {
+          if (one.sure !== null) return;
+          one.sure = value;
+          tap({ kind: "confidence", sure: value });
+        });
+        button.disabled = one.sure !== null;
+        return button;
+      };
+      row.append(sure(true, "Sure"), sure(false, "Not sure"));
+      box.append(row);
+    }
+    box.append(options);
+    if (waiting) {
+      const input = document.createElement("input");
+      input.type = "text";
+      input.className = "quiz-why";
+      input.placeholder = "In a few words, why?";
+      input.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") return;
+        const line = (event.target as HTMLInputElement).value.trim();
+        one.whyDone = true;
+        if (line) {
+          one.why = line;
+          deps.record({ kind: "why", text: line });
+        }
+        draw();
+      });
+      box.append(input);
+    }
     if (view.skip) {
       const skip = pressable(prose("button", "Show the rest anyway"), false, () => {
         one.skipped = true;

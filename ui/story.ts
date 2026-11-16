@@ -15,7 +15,7 @@ import { agentState, sessionName, showsLanded } from "./list.js";
 import { closePane, openHere } from "./panes.js";
 import { openDecision, type Ask } from "./answer.js";
 import { cardLine, quizOpen } from "./cards.js";
-import { quizAllowed, quizAnswered, quizRegion, seedQuiz } from "./quiz.js";
+import { quizAllowed, quizAnswered, quizItem, quizRegion, seedQuiz, trialOn } from "./quiz.js";
 import { evidenceElement, hasEvidence } from "./evidence.js";
 import { showCleared } from "./decisions.js";
 import { decisionElement, questionElement } from "./questions.js";
@@ -392,10 +392,6 @@ function folded(key: string, title: string, body: HTMLElement[], onOpen?: () => 
   return node;
 }
 
-// The Quiz as the writer is shown it for "explain more": its question, and each option with its reason.
-const quizItem = (quiz: NonNullable<TurnSummary["summary"]["quiz"]>) =>
-  `A quiz. ${quiz.text}\n${quiz.options.map((o, i) => `${i === quiz.key ? "Right" : "Wrong"}: ${o.text}. ${o.why}`).join("\n")}`;
-
 // "Now" (danielrispler/plotkeeper#116): what the latest turn's state puts above the feed. While running, what Daniel asked;
 // the intention's box shows while running, small as "why it asks" when the session needs him, and not at all once
 // the turn ended. A subagent's view and a turn-less session keep the box.
@@ -465,6 +461,7 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
       record: (tap: Tap) => void invoke<TurnSummary | null>("quiz_tap", { id, tap }).catch((e) => console.warn(e)),
       explain: () => invoke<string>("ask", { session: session.id, item: quizItem(quiz), question: "I did not get this yet. Explain more." }),
       line: bodyLine,
+      trial: trialOn(studio.files.settings.quiz_trial, Date.now()),
     };
     node.append(quizRegion(id, quiz, now ? rest : [], deps));
   }

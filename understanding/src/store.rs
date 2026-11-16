@@ -2,7 +2,7 @@
 //! session's brief, on disk in the studio's data directory, so a restart neither loses nor re-asks
 //! them.
 
-use crate::{Answered, Card, OpenItem, TurnSummary, answered};
+use crate::{Answered, Card, OpenItem, Quiz, TurnSummary, answered};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -70,14 +70,21 @@ pub struct StoredSummary {
     /// its taps on the card.
     #[serde(default)]
     pub taps: Vec<QuizTap>,
+    /// The turn's hunks as the writer read them (danielrispler/plotkeeper#129), which its retest is written from; empty
+    /// before they were kept, and for a turn with no facts.
+    #[serde(default)]
+    pub hunk: String,
 }
 
 /// What Daniel does with a Quiz (danielrispler/plotkeeper#120): a pick, "Show the rest anyway" (a skip, which reveals as a pick
-/// does), and the three chips under the revealed answer.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+/// does), and the three chips under the revealed answer. The trial's two (danielrispler/plotkeeper#129): how sure he is
+/// before the pick, and an optional line on why after it, which no model reads.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Tap {
     Pick { option: usize },
+    Confidence { sure: bool },
+    Why { text: String },
     Skip,
     Understood,
     ExplainMore,
@@ -85,7 +92,7 @@ pub enum Tap {
 }
 
 /// A tap and when, in Unix milliseconds.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct QuizTap {
     #[serde(flatten)]
     pub tap: Tap,
@@ -113,6 +120,32 @@ fn keep_tap(taps: &mut Vec<QuizTap>, tap: Tap, at: u64) -> bool {
         taps.push(new);
     }
     !taken
+}
+
+/// How long after a Quiz was offered its retest is due: seven days (danielrispler/plotkeeper#129).
+pub const RETEST_AFTER_MS: u64 = 7 * 24 * 60 * 60 * 1000;
+
+/// A fresh Quiz on the decision of an earlier one, offered on Home a week after it (danielrispler/plotkeeper#129). `quiz`
+/// is `None` when the writer's replies broke the rules twice: the retest is then not asked for again.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Retest {
+    /// What `quiz_tap` names it by: `retest ` and the id of the Quiz it retests, `of`.
+    pub id: String,
+    pub of: String,
+    pub session_id: String,
+    pub added_at: u64,
+    pub quiz: Option<Quiz>,
+    #[serde(default)]
+    pub taps: Vec<QuizTap>,
+}
+
+/// What the retest's writer reads: the turn's stored hunk, and the first Quiz with the reason of its key.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RetestAsk {
+    pub of: String,
+    pub session_id: String,
+    pub hunk: String,
+    pub first: Quiz,
 }
 
 /// Daniel's rating of a card's explanation: a level and the reasons he picked. His fifth reason, "the
@@ -273,6 +306,8 @@ pub struct CardStore {
     summaries: Vec<StoredSummary>,
     /// The subagent summaries, by subagent id, in `agent-summaries.json` beside the cards (danielrispler/Falinks#535).
     agent_summaries: BTreeMap<String, String>,
+    /// The retests, in `retests.json` beside the cards (danielrispler/plotkeeper#129).
+    retests: Vec<Retest>,
     /// Rises on every change, briefs included, so the shell sends the cards only when it moves.
     revision: u64,
 }
@@ -298,8 +333,10 @@ impl CardStore {
         // A cache: a corrupt file costs the summaries again, never the studio's start.
         let agent_summaries =
             read(&path.with_file_name("agent-summaries.json")).unwrap_or_default();
+        let retests = read(&path.with_file_name("retests.json"))?;
         Ok(CardStore {
             path,
+            retests,
             cards,
             briefs,
             facts,
@@ -541,8 +578,9 @@ impl CardStore {
                 Tap::Pick { .. } => Ok(()),
                 Tap::Skip if answered => Ok(()),
                 _ => {
+                    let key_wrong = matches!(tap, Tap::KeyWrong);
                     if keep_tap(&mut kept.taps, tap, at) {
-                        if tap == Tap::KeyWrong {
+                        if key_wrong {
                             kept.key_wrong = true;
                         }
                         return self.save();
@@ -550,6 +588,17 @@ impl CardStore {
                     Ok(())
                 }
             };
+        }
+        if let Some(kept) = self.retests.iter_mut().find(|kept| kept.id == id) {
+            let options = kept.quiz.as_ref().map_or(0, |quiz| quiz.options.len());
+            if options == 0 || matches!(tap, Tap::Pick { option } if option >= options) {
+                return Ok(());
+            }
+            if keep_tap(&mut kept.taps, tap, at) {
+                self.revision += 1;
+                return write(&self.path.with_file_name("retests.json"), &self.retests);
+            }
+            return Ok(());
         }
         let Some(kept) = self.summaries.iter_mut().find(|kept| kept.request.id == id) else {
             return Ok(());
@@ -567,6 +616,62 @@ impl CardStore {
             return write(&self.path.with_file_name("summaries.json"), &self.summaries);
         }
         Ok(())
+    }
+
+    /// The Quizzes offered `RETEST_AFTER_MS` or more before `now`, a card's or a turn's own, that have no retest yet and
+    /// that have a hunk to ask on (danielrispler/plotkeeper#129). `now` is the caller's clock.
+    pub fn due_retests(&self, now: u64) -> Vec<RetestAsk> {
+        let due = |offered: u64| now >= offered.saturating_add(RETEST_AFTER_MS);
+        let cards = self.cards.iter().filter_map(|kept| {
+            let offered = kept.added_at.or(kept.shown_at)?;
+            let quiz = kept
+                .card
+                .quiz
+                .as_ref()
+                .filter(|_| kept.request.check.is_none())?;
+            let ask = (due(offered), kept.request.diff());
+            Some((ask, &kept.request.id, &kept.request.session_id, quiz))
+        });
+        let summaries = self.summaries.iter().filter_map(|kept| {
+            let quiz = kept.summary.quiz.as_ref()?;
+            let ask = (due(kept.added_at), kept.hunk.as_str());
+            Some((ask, &kept.request.id, &kept.request.session_id, quiz))
+        });
+        cards
+            .chain(summaries)
+            .filter(|((due, hunk), of, ..)| {
+                *due && !hunk.trim().is_empty() && self.retests.iter().all(|r| &r.of != *of)
+            })
+            .map(|((_, hunk), of, session, quiz)| RetestAsk {
+                of: of.clone(),
+                session_id: session.clone(),
+                hunk: hunk.into(),
+                first: quiz.clone(),
+            })
+            .collect()
+    }
+
+    /// Keeps the retest of `ask`'s Quiz, `quiz` as the writer wrote it, or `None` when it was rejected, at `at`; and
+    /// saves the retests. A Quiz that has one is not asked again.
+    pub fn add_retest(&mut self, ask: &RetestAsk, quiz: Option<Quiz>, at: u64) -> io::Result<()> {
+        if self.retests.iter().any(|r| r.of == ask.of) {
+            return Ok(());
+        }
+        self.retests.push(Retest {
+            id: format!("retest {}", ask.of),
+            of: ask.of.clone(),
+            session_id: ask.session_id.clone(),
+            added_at: at,
+            quiz,
+            taps: Vec::new(),
+        });
+        self.revision += 1;
+        write(&self.path.with_file_name("retests.json"), &self.retests)
+    }
+
+    /// The retests, oldest first.
+    pub fn retests(&self) -> &[Retest] {
+        &self.retests
     }
 
     /// Records Daniel's flag that the key of card `id`'s quiz is wrong, and saves the store.
@@ -620,11 +725,15 @@ impl CardStore {
 
     /// Keeps `summary` of `request`'s turn, and saves the summaries.
     pub fn add_summary(&mut self, request: SummaryRequest, summary: TurnSummary) -> io::Result<()> {
+        let hunk = (request.facts.files.iter())
+            .map(|f| format!("--- {}\n{}", f.file.path, f.hunk))
+            .collect();
         self.summaries.push(StoredSummary {
             request,
             summary,
             added_at: millis(),
             taps: Vec::new(),
+            hunk,
         });
         self.revision += 1;
         write(&self.path.with_file_name("summaries.json"), &self.summaries)

@@ -29,7 +29,8 @@ use studio_understanding::{
     AGY_FIXTURE_VERSION, AgyVersions, CardStore, CardWriter, ClaudeWriter, FakeWriter,
     Fingerprints, OpenItem, Rating, Row, SessionCards, StoredSummary, SummarySetup, Tap, Versions,
     add_hunks, backfilled, fingerprint_changes, millis, open_items, turn_diffs, turn_hunk,
-    worktree_root, write_agent_summary, write_goal, write_name, write_stop, write_summary,
+    worktree_root, write_agent_summary, write_goal, write_name, write_retests, write_stop,
+    write_summary,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
@@ -414,6 +415,30 @@ fn quiz_tap(id: String, tap: Tap, cards: State<Cards>) -> Option<StoredSummary> 
     store.turn_summary(&id).cloned()
 }
 
+/// The retests that have a Quiz (danielrispler/plotkeeper#129), which Home offers.
+#[tauri::command]
+fn retests(cards: State<Cards>) -> Vec<studio_understanding::Retest> {
+    let store = cards.lock().unwrap();
+    let kept = store.retests().iter();
+    kept.filter(|r| r.quiz.is_some()).cloned().collect()
+}
+
+/// Writes the retests that fell due, once an hour from a minute after the start, off the read loop; Home reads them
+/// again when one was written (danielrispler/plotkeeper#129).
+fn write_due_retests(app: &AppHandle) {
+    thread::sleep(Duration::from_secs(60));
+    loop {
+        let (cards, writer) = (app.state::<Cards>(), app.state::<Writer>());
+        if write_retests(&cards, &**writer, millis(), |line| {
+            eprintln!("studio: {line}")
+        }) > 0
+        {
+            let _ = app.emit("retests", ());
+        }
+        thread::sleep(Duration::from_secs(60 * 60));
+    }
+}
+
 /// Daniel flagged that the key of card `id`'s quiz is wrong.
 #[tauri::command(async)]
 fn key_wrong(id: String, cards: State<Cards>) {
@@ -748,6 +773,7 @@ fn main() {
             guess,
             key_wrong,
             quiz_tap,
+            retests,
             rate,
             explain_more,
             ask,
@@ -834,6 +860,8 @@ fn main() {
             settings::watch(app.clone());
             let prs_app = app.clone();
             thread::spawn(move || prs(&prs_app));
+            let retest_app = app.clone();
+            thread::spawn(move || write_due_retests(&retest_app));
             let notice_app = app.clone();
             thread::spawn(move || {
                 for notice in writer_notice_reader {

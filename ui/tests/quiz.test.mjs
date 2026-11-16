@@ -107,3 +107,63 @@ test("Not yet — explain more asks the writer once and shows its text under the
   chip().listeners.click();
   assert.equal(asked, 1);
 });
+
+// The trial (#129): a confidence tap before the pick and an optional "why?" line after it.
+const trialRegion = (id, record = () => {}) =>
+  quizRegion(id, quiz, held, { record, explain: async () => "", line: (l) => Object.assign(new El("li"), { childNodes: [{ nodeType: 3, text: l.text }] }), trial: true });
+const labelled = (region, pattern) => region.find("button").find((b) => pattern.test(b.text));
+const press = (key, value = "") => ({ key, target: { value }, preventDefault() {} });
+
+test("without the trial a Quiz shows no confidence tap and no why line", () => {
+  const region = make("t0");
+  assert.doesNotMatch(region.text, /Not sure/);
+  region.find("button")[1].listeners.click();
+  assert.equal(region.find("input").length, 0);
+});
+
+test("with the trial, a tap on sure or not sure comes before the pick and is recorded once", () => {
+  const taps = [];
+  const region = trialRegion("t1", (tap) => taps.push(tap));
+  assert.match(region.text, /Sure.*Not sure/);
+  labelled(region, /^Not sure/).listeners.click();
+  labelled(region, /^Sure/).listeners.click();
+  assert.deepEqual(taps, [{ kind: "confidence", sure: false }]);
+  // The pick does not wait for it.
+  region.find("button").find((b) => /pairs/i.test(b.text)).listeners.click();
+  assert.equal(taps.at(-1).kind, "pick");
+});
+
+test("after the pick the reasons wait for one optional line, which Enter skips or sends", () => {
+  const taps = [];
+  const region = trialRegion("t2", (tap) => taps.push(tap));
+  region.find("button").find((b) => b.text === "The pairs").listeners.click();
+  assert.doesNotMatch(region.text, /Scores come later|I get why/);
+  const [input] = region.find("input");
+  assert.equal(input.placeholder, "In a few words, why?");
+  // Enter on an empty line skips it: nothing is recorded, the reasons show.
+  input.listeners.keydown(press("Enter", "  "));
+  assert.deepEqual(taps.map((t) => t.kind), ["pick"]);
+  assert.match(region.text, /Scores come later/);
+  assert.equal(region.find("input").length, 0);
+
+  const typed = trialRegion("t3", (tap) => taps.push(tap));
+  typed.find("button").find((b) => b.text === "The pairs").listeners.click();
+  typed.find("input")[0].listeners.keydown(press("Enter", " it fixes the set "));
+  assert.deepEqual(taps.at(-1), { kind: "why", text: "it fixes the set" });
+  // The line shows beside the writer's reason for the option he picked; it is not graded.
+  assert.match(typed.text, /Right, the set of pairs\./);
+  assert.match(typed.text, /it fixes the set/);
+});
+
+test("a skip needs no why line, and a stored pick reads back revealed with its line", () => {
+  const skipped = trialRegion("t4");
+  skipped.find("button").find((b) => /Show the rest/.test(b.text)).listeners.click();
+  assert.equal(skipped.find("input").length, 0);
+  assert.match(skipped.text, /Scores come later/);
+
+  seedQuiz("t5", [{ kind: "confidence", sure: true, at: 1 }, { kind: "pick", option: 1, at: 2 }, { kind: "why", text: "frozen", at: 3 }]);
+  const back = trialRegion("t5");
+  assert.match(back.text, /Scores come later/);
+  assert.match(back.text, /frozen/);
+  assert.equal(labelled(back, /^Sure/), undefined);
+});

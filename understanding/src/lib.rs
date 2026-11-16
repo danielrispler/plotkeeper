@@ -23,6 +23,7 @@ mod brief;
 mod drift;
 mod fingerprint;
 mod grounding;
+mod retest;
 mod store;
 mod summary;
 mod turn_trees;
@@ -31,9 +32,10 @@ pub use brief::{Answered, OpenItem, OpenKind, answered, open_items};
 pub use drift::{AGY_FIXTURE_VERSION, AgyVersions, Drift, Versions, drift, dropped_events};
 pub use fingerprint::{Fingerprints, backfilled, fingerprint_changes, worktree_root};
 use grounding::words;
+pub use retest::{retest_quiz, write_retests};
 pub use store::{
-    Brief, CardStore, CheckResult, Guess, Level, QuizTap, Rating, Reason, Row, SessionCards,
-    StoredCard, StoredSummary, Tap, millis,
+    Brief, CardStore, CheckResult, Guess, Level, QuizTap, Rating, Reason, Retest, RetestAsk, Row,
+    SessionCards, StoredCard, StoredSummary, Tap, millis,
 };
 pub use summary::{
     Line, LineKind, SummarySetup, TurnSummary, write_agent_summary, write_name, write_summary,
@@ -208,6 +210,12 @@ pub trait CardWriter {
     /// when it gave none. A writer that answers no questions says so.
     fn ask(&self, _item: &str, _intentions: &[String], _question: &str) -> Result<String, String> {
         Err("this writer answers no questions".into())
+    }
+
+    /// The writer's reply with a fresh Quiz on the decision of `ask`'s first Quiz (danielrispler/plotkeeper#129), or one line
+    /// for the log when it gave none. A writer that writes no retests says so.
+    fn retest(&self, _ask: &RetestAsk) -> Result<String, String> {
+        Err("this writer writes no retests".into())
     }
 
     /// The writer's reply with the summary of `request`'s turn, read with `earlier`, the session's
@@ -960,6 +968,10 @@ impl CardWriter for ClaudeWriter {
 
     fn ask(&self, item: &str, intentions: &[String], question: &str) -> Result<String, String> {
         self.stdout(self.ask_command(item, intentions, question))
+    }
+
+    fn retest(&self, ask: &RetestAsk) -> Result<String, String> {
+        self.stdout(self.retest_command(ask))
     }
 
     fn summarize(
