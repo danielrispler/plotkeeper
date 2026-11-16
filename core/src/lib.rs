@@ -17,6 +17,7 @@ mod checks;
 mod claude;
 mod event;
 mod ledger;
+mod saved;
 mod transcript;
 mod turn_files;
 mod work;
@@ -35,7 +36,7 @@ pub use transcript::{Context, LogEntry, SubagentLog, Transcript};
 pub use turn_files::{Numstat, RootDiff, TurnDiff, TurnFile, TurnFiles, TurnTrees};
 pub use work::{Estimate, MIN_HISTORY, Phase, PhaseStart, Work, range};
 
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 pub struct Studio {
     /// The agy adapter, which keeps its conversations (`agy.rs`).
     agy: agy::Adapter,
@@ -51,9 +52,13 @@ pub struct Studio {
     /// again (danielrispler/Falinks#556).
     held: Option<String>,
     /// The shell's latest tick, in Unix milliseconds.
+    #[serde(skip)]
     now: u64,
+    /// The shell's lookup and what it found, which `Studio::resume` keeps (`saved.rs`).
+    #[serde(skip)]
     roots: Roots,
-    /// The commands that are checks, per project (danielrispler/plotkeeper#112).
+    /// The commands that are checks, per project (danielrispler/plotkeeper#112), from the settings.
+    #[serde(skip)]
     check_lists: CheckLists,
     /// Where the next log line starts in the event log, in bytes: every line given to `replay`,
     /// `apply` or `apply_with_changes` moves it, as the shell reads the log from its start.
@@ -67,6 +72,7 @@ pub struct Studio {
     rows: HashMap<String, String>,
     /// Summaries are written when Daniel opens a turn, not at its end, so they move no intention
     /// (danielrispler/Falinks#517, decisions 13 and 16), from the settings.
+    #[serde(skip)]
     summaries_on_open: bool,
     /// Since when each Claude session's hook state and its terminal's OSC 7501 state disagree, and
     /// whether that disagreement was logged (danielrispler/Falinks#560).
@@ -84,7 +90,7 @@ pub struct Studio {
 }
 
 /// What the shell found about a task, for **Landed**. A lookup that failed is `false`.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct TaskFacts {
     /// Nothing uncommitted and nothing unpushed.
     pub safe: bool,
@@ -136,7 +142,7 @@ pub struct Selection<'a> {
     pub agent: Option<&'a str>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Session {
     /// Its own agent: the session id, last step, first and latest events, and worktree since.
     #[serde(flatten)]
@@ -155,13 +161,13 @@ pub struct Session {
     /// `StudioPromptName` line; shown after his name and before the identity's.
     pub prompt_name: Option<String>,
     /// Every tool call of it and its workers (danielrispler/plotkeeper#110).
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     pub ledger: Ledger,
     /// Whether Daniel's first prompt arrived, which asks for the prompt name once.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     name_asked: bool,
     /// His first prompt, a bare slash command, whose name waits for its turn's end.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     name_after: Option<String>,
     /// The id `claude --resume` takes: its latest conversation's, which a `/clear` changes while the
     /// row keeps its first id (danielrispler/Falinks#461, decision 18).
@@ -176,7 +182,7 @@ pub struct Session {
     pub cleared: Vec<u64>,
     /// Its latest `SessionEnd` was a `/clear`, so the next `SessionStart` from `clear` on its
     /// terminal, or in its folder, continues it.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     clearing: bool,
     pub state: State,
     /// Whether closing its terminal asks first: it is in a turn, or its latest `Stop` listed
@@ -185,26 +191,26 @@ pub struct Session {
     /// Its task has landed; the shell sets it from `Studio::landed` as it sends the list.
     pub landed: bool,
     /// Daniel deleted it: the list leaves it out until it starts again.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     deleted: bool,
     /// Its latest `Stop` listed background tasks.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     background: bool,
     /// The checks that ran, oldest first: pass or fail lines in the session's timeline (danielrispler/Falinks#369,
     /// decision 14).
     pub checks: Vec<CheckLine>,
     /// The tool calls whose `PreToolUse` landed and whose `PostToolUse` has not.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     running: Vec<Call>,
     /// What blocks it on Daniel, so that it needs you, oldest first (danielrispler/Falinks#434, decision 24).
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     blocks: Vec<Block>,
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     turn_ended: bool,
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     ended: bool,
     /// Whether a `Stop` of it requested Claude Code's version.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     versioned: bool,
     /// Its subagents at any depth, in the order they were first seen (danielrispler/Falinks#369, decision 5).
     #[serde(serialize_with = "serialize_agents")]
@@ -220,45 +226,45 @@ pub struct Session {
     /// bold name.
     pub unseen: bool,
     /// How many of its turns Daniel has seen, which the card store keeps (danielrispler/Falinks#556).
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     seen: usize,
     /// The ids of its background tasks, commands included, from their responses and `Stop`'s
     /// `background_tasks`. With its subagents' ids, they are the task ids a wake-up can name.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     tasks: BTreeSet<String>,
     /// The questions its agents asked, oldest first (danielrispler/Falinks#369, decision 21).
     pub questions: Vec<Question>,
     /// Its answered questions, plans and permissions, oldest first: its decision history (danielrispler/Falinks#461,
     /// decision 17). The card store keeps them across restarts and gives them to the pane.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     pub decisions: Vec<Decision>,
     /// The questions answered on the studio card, by call, whose result has not landed yet.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     carded: BTreeSet<String>,
     /// When its latest turn started and ended (danielrispler/Falinks#461, decision 13).
     pub turn_span: Option<Span>,
     /// Its latest `Stop`, until its next prompt (danielrispler/Falinks#369, decision 19).
     pub stopped: Option<Stopped>,
     /// When its latest turn ended, which took its workers' cards since its last card.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     stopped_at: u64,
     /// Whether its turn was opened by a wake-up and has had no prompt of Daniel's since.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     woken: bool,
     /// Claude Code's prompt id of its latest turn (danielrispler/Falinks#434, decision 3), `None` until an event of its
     /// own agent carries one.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     turn: Option<String>,
     /// The prompts that arrived during its turn, queued or typed after an interrupt: the next turn's
     /// (danielrispler/Falinks#434, decision 4).
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     queued: Vec<Prompt>,
     /// The worktree roots its latest turn touched, each with its base from the first touch (danielrispler/Falinks#434,
     /// decision 9).
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     touched: BTreeSet<String>,
     /// The tree the hook recorded at its latest turn's first touch of each worktree, by root (danielrispler/Falinks#486).
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     trees: BTreeMap<String, String>,
     /// "worker <name> returned", from its latest wake-up until its own next step or Daniel's next
     /// prompt (danielrispler/Falinks#410, decision 27).
@@ -266,7 +272,7 @@ pub struct Session {
     /// What its transcript says of its latest turn: the intention, the agent's texts, or why it
     /// cannot be read (danielrispler/Falinks#461, decision 12).
     pub transcript: Transcript,
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     transcript_file: transcript::TranscriptFile,
     /// What its agent's adapter reports, which decides what its view shows (decision 4).
     pub capabilities: Capabilities,
@@ -286,17 +292,17 @@ pub struct Session {
     pub shell: bool,
     /// Its terminal's OSC 7501 state is `blocked`, for an agent that reports no permission or question of its own
     /// (agy, decision 5): it needs Daniel, with no text.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     terminal_blocked: bool,
     /// A status-only row's terminal `turn` at the last list (danielrispler/Falinks#560).
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     reported_turn: u64,
 }
 
 /// What names a session (danielrispler/Falinks#461, decision 19): the issue of its `issue-<n>-…` branch, else the one
 /// it claimed with `wayfinder-startup --claim <n>`, the PR the shell finds for its branch, and its
 /// worktree's folder.
-#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Identity {
     pub issue: Option<u64>,
     /// Its folder's branch, from its transcript.
@@ -306,7 +312,7 @@ pub struct Identity {
     pub worktree: String,
     /// The derived name: "danielrispler/Falinks#480 · PR danielrispler/Falinks#490 · agent-a1b2", "fix-typo · agent-a1b2" or "main · Falinks".
     pub name: String,
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     claim: Option<u64>,
 }
 
@@ -416,7 +422,7 @@ pub struct Revive {
 
 /// What happened in a worktree since the last card on it: a session's own, or a subagent's that
 /// works in a folder of its own (danielrispler/Falinks#369, decisions 10 and 11).
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 struct Since {
     /// When that card, or else the first base, was taken.
     at: u64,
@@ -449,17 +455,17 @@ impl CheckStart {
 }
 
 /// A prompt of a session (danielrispler/Falinks#369, decision 7), received at `at`.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Prompt {
     pub at: u64,
     pub sender: Sender,
     /// What it says, which the brief's rewrite reads (danielrispler/Falinks#369, decision 16); the pane never shows it.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     pub text: String,
 }
 
 /// A session's `Stop`, which its row tells about while its turn is over (danielrispler/Falinks#369, decision 19).
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Stopped {
     /// The id a card on it has (`CardRequest::id`).
     pub card: String,
@@ -470,7 +476,7 @@ pub struct Stopped {
 }
 
 /// A turn of a session, a block in the rail's feed (danielrispler/Falinks#574): from what opened it until it ended.
-#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Turn {
     pub started_at: u64,
     pub ended_at: Option<u64>,
@@ -482,24 +488,24 @@ pub struct Turn {
     /// The first line of its final reply, from its `Stop`.
     pub message: Option<String>,
     /// Its whole final reply, which the rail fetches when its block opens (`Studio::turn_reply`).
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     pub reply: String,
     /// The files its agent and workers changed, `None` until the shell has diffed its trees, and
     /// for an agent that reports no trees (danielrispler/plotkeeper#111).
     pub files: Option<TurnFiles>,
     /// The tree the hook recorded of each worktree it touched, at its first touch and at its end,
     /// by root: the start, and the end once it came.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     trees: BTreeMap<String, (String, Option<String>)>,
     /// When the shell was last asked for its files, and whether that was its final ask.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     files_asked: Option<(u64, bool)>,
     /// How its checks ended, its workers' included: each suite's last run (danielrispler/plotkeeper#112).
     pub checks: Vec<Check>,
 }
 
 /// Who sent a prompt: Daniel, or Claude Code waking the session when one of its tasks returns.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Sender {
     Daniel,
@@ -517,7 +523,7 @@ impl Sender {
 }
 
 /// An `AskUserQuestion` call, which Daniel answers in the terminal (danielrispler/Falinks#369, decision 21).
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Question {
     /// The call's id, which the answer hook's request names (danielrispler/Falinks#461, decision 16).
     tool_use_id: String,
@@ -530,7 +536,7 @@ pub struct Question {
     pub turn: Option<usize>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Answer {
     /// Asked, with no result yet.
@@ -569,7 +575,7 @@ pub enum Source {
 }
 
 /// A subagent of a session (danielrispler/Falinks#369, decisions 5, 6 and 8).
-#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Subagent {
     /// Its `agent_id`, last step, first and latest events, and worktree since.
     #[serde(flatten)]
@@ -589,32 +595,32 @@ pub struct Subagent {
     /// The first line of its last message, from its `SubagentStop`.
     pub result: Option<String>,
     /// Its whole last message, which its summary reads (danielrispler/Falinks#535); the pane never shows it.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     pub message: String,
     /// Daniel opened its line after it failed (danielrispler/Falinks#434, decision 39).
     pub opened: bool,
     /// The turn of its session it was first seen in (`Session::turns`).
     pub turn: Option<usize>,
     /// The folder of its first event that has one: its worktree, or its parent's folder.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     pub folder: Option<String>,
     /// Its folder's worktree root, and the owner key of the cards on its changes there, decided at
     /// its first folder and never again (danielrispler/Falinks#434, decision 11).
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     root: String,
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     owner: String,
     /// What its spawn asked it to do, which its brief's rewrite reads; the pane never shows it.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     pub prompt: String,
     /// Its spawn's call, by `tool_use_id`, and the agent that made it, `None` for the session's own.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     spawn: Option<(String, Option<String>)>,
 }
 
 /// The state a session's own agent and each subagent share (danielrispler/Falinks#410, decision 22). Its id is the owner
 /// key of its card stream.
-#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Agent {
     pub id: String,
     pub last_step: Option<Step>,
@@ -625,15 +631,15 @@ pub struct Agent {
     /// When its last step started, and ended at its result or its turn's end (danielrispler/Falinks#461, decision 13).
     pub step_span: Option<Span>,
     /// The last step's `tool_use_id`, whose result ends it.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     step_call: String,
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     since: Since,
 }
 
 /// When something started and ended, in Unix milliseconds as the hook received them; `end` is `None`
 /// while it runs.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Span {
     pub start: u64,
     pub end: Option<u64>,
@@ -725,6 +731,12 @@ impl std::fmt::Display for Status {
     }
 }
 
+impl<'de> Deserialize<'de> for Status {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(Status::from(String::deserialize(deserializer)?.as_str()))
+    }
+}
+
 impl Serialize for Status {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.collect_str(self)
@@ -755,7 +767,7 @@ fn serialize_agents<S: serde::Serializer>(
 }
 
 /// Who spawned a subagent: the session's own agent, another subagent, or no known spawn.
-#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Parent {
     Session,
@@ -766,7 +778,7 @@ pub enum Parent {
 
 /// A worker is spawned with its own worktree, or changes files; any other subagent is a helper
 /// (danielrispler/Falinks#369, decision 6).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Kind {
     Worker,
@@ -1372,7 +1384,7 @@ impl Session {
 
 /// What blocks a session on Daniel, so that it needs you (danielrispler/Falinks#434, decisions 24 to 26): what asks,
 /// and the calls it holds.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 struct Block {
     cause: Cause,
     /// The tool it asks for, when its cause is a call.
@@ -1392,7 +1404,7 @@ struct Block {
 }
 
 /// What a block waits on.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 enum Cause {
     /// A tool call that asks, or a permission request for one.
     Call,
@@ -1428,7 +1440,7 @@ impl Block {
 
 /// A session's state (danielrispler/Falinks#369, decision 4). Each has a named clearer: an event, or the tick for idle.
 /// The order is the session list's: needs you first, then the groups the list collapses.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum State {
     /// Waiting on Daniel (danielrispler/Falinks#328, module 3, "Needs you"), until the step that asks resolves, a prompt
@@ -1623,14 +1635,14 @@ pub fn wants_summary(reply: &str, asks: bool) -> bool {
 
 /// A turn that ended with no card, as the replay saw it (danielrispler/Falinks#486): its card request with no change,
 /// and its worktrees' trees, whose diffs the shell joins into the change.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Backfill {
     pub request: CardRequest,
     pub trees: Vec<Trees>,
 }
 
 /// The git trees the hook recorded for worktree `root` at a turn's start and end, which differ.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Trees {
     pub root: String,
     pub start: String,
@@ -1659,7 +1671,7 @@ pub struct Fingerprint {
 }
 
 /// A check that runs or ran, shown as a pass or fail line once it ends.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CheckLine {
     /// The command's first line.
     pub command: String,
@@ -1678,12 +1690,12 @@ pub struct CheckLine {
     /// The turn of its session it started in (`Session::turns`).
     pub turn: Option<usize>,
     /// Its call's `tool_use_id`, and its background task's id once it moved to the background.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     call: String,
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     task: Option<String>,
     /// Whether its exit code says whether it passed (`exit_code_counts`).
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     counts: bool,
 }
 
@@ -1773,7 +1785,7 @@ pub enum Purpose {
 
 /// One tool call: its `tool_use_id`, and its tool and input, which are all `PermissionRequest`
 /// names it by. Also the subagent that made it, `None` for the session's own agent.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 struct Call {
     id: Option<String>,
     tool: String,
@@ -1784,7 +1796,7 @@ struct Call {
 
 /// Who a session that needs Daniel waits for: its oldest block's asker, a subagent or `None` for the
 /// session's own agent, and since when, in Unix milliseconds (danielrispler/Falinks#369, decision 21).
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Asker {
     pub agent: Option<String>,
     pub since: u64,

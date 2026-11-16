@@ -118,7 +118,7 @@ pub(crate) enum Happened {
 }
 
 /// Where a turn came from, where an adapter can tell.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) enum Origin {
     Daniel,
     WakeUp,
@@ -146,7 +146,7 @@ pub(crate) struct Tool {
     pub path: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) enum ToolKind {
     #[default]
     Other,
@@ -208,8 +208,25 @@ pub struct Capabilities {
     pub transcript_format: TranscriptFormat,
 }
 
+/// Saved state finds its agent's capabilities by the agent's name: the two adapters' constants.
+impl<'de> serde::Deserialize<'de> for Capabilities {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(serde::Deserialize)]
+        struct Named {
+            agent: String,
+        }
+        let Named { agent } = Named::deserialize(deserializer)?;
+        match agent.as_str() {
+            "" => Ok(Capabilities::default()),
+            "claude" => Ok(crate::claude::CAPABILITIES),
+            "agy" => Ok(crate::agy::CAPABILITIES),
+            other => Err(serde::de::Error::custom(format!("unknown agent {other}"))),
+        }
+    }
+}
+
 /// The record format of an agent's transcript.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TranscriptFormat {
     #[default]

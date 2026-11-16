@@ -3,7 +3,7 @@
 //! touched. The rest of the diff is counted as external. The core runs no `git`: it names the trees
 //! to diff (`TurnDiff`), and the shell hands back git's numstat (`RootDiff`).
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
 /// The tools whose call changes the file its input names.
@@ -54,7 +54,7 @@ pub struct RootDiff {
 }
 
 /// A file the agent or its workers changed in a turn.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TurnFile {
     /// Its worktree's root, and its path from there; a rename's new path.
     pub root: String,
@@ -67,7 +67,7 @@ pub struct TurnFile {
 }
 
 /// What a turn changed, as far as the trees say.
-#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct TurnFiles {
     pub files: Vec<TurnFile>,
     /// How many other files the trees differ in, which someone else changed or a shell command did.

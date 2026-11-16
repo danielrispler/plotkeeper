@@ -45,6 +45,7 @@ export function showView(selected: Selection | null) {
   element("view").hidden = selected === null;
   element("rail-more").hidden = selected === null;
   element("session-header").hidden = selected === null;
+  element("spine").hidden = selected === null;
   if (selected === null) {
     for (const id of ["state", "block", "mode", "mark", "session-name", "phase", "bar-state", "bar-name"]) element(id).textContent = "";
     showQuestions([]);
@@ -71,6 +72,7 @@ export function showView(selected: Selection | null) {
   element("bar-state").textContent = element("state").textContent;
   element("bar-state").dataset.state = state;
   element("bar-dot").dataset.state = state;
+  element("spine-dot").dataset.state = state;
   element("bar-name").textContent = sessionName(session);
   element("phase").textContent = agent === null && state === "running" ? estimateText(session.work) : "";
   // The model and effort the session runs at (danielrispler/Falinks#517, decision 8); none for a subagent, whose transcript the studio does not read.

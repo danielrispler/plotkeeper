@@ -45,11 +45,40 @@ fn main() {
     lines.iter().for_each(|line| studio.replay(line));
     let saved = start.elapsed();
 
+    // A launch with saved state (danielrispler/plotkeeper#134): the state the replay above made, taken
+    // back with the last 1% of the log left to replay as a tail.
+    let tail = lines.len() / 100;
+    let mut head = Studio::default();
+    lines[..lines.len() - tail]
+        .iter()
+        .for_each(|line| head.replay(line));
+    let start = Instant::now();
+    let state = head.save();
+    let save = start.elapsed();
+    let len: u64 = lines.iter().map(|l| l.len() as u64 + 1).sum();
+    let start = Instant::now();
+    let mut resumed = Studio::default();
+    let from = resumed.resume(&state, len);
+    let resume = start.elapsed();
+    let start = Instant::now();
+    let mut at = 0;
+    lines.iter().for_each(|line| {
+        if at >= from {
+            resumed.replay(line);
+        }
+        at += line.len() as u64 + 1;
+    });
+    let tail_time = start.elapsed();
+
     println!("{} lines, read in {read:?}", lines.len());
     println!("replay with no root lookup: {plain:?}");
     println!("replay with the git lookup: {looked_up:?} ({lookups} lookups)");
     println!(
         "replay with the roots a launch before saved: {saved:?} ({} lookups)",
         LOOKUPS.load(Ordering::Relaxed)
+    );
+    println!(
+        "saved state: {} bytes, saved in {save:?}, taken in {resume:?} (from byte {from}), then its tail of {tail} lines in {tail_time:?}",
+        state.len()
     );
 }

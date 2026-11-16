@@ -473,6 +473,26 @@ fn saved_roots(log: &Path) -> HashMap<String, String> {
         .unwrap_or_default()
 }
 
+/// Takes the state a launch before saved, when it fits the log, and returns the offset to replay the
+/// log from: 0 when there is none (danielrispler/plotkeeper#134).
+fn resume(studio: &Mutex<Studio>, log: &Path) -> u64 {
+    let Ok(saved) = std::fs::read(studio_hook::state_file(log)) else {
+        return 0;
+    };
+    let len = std::fs::metadata(log).map_or(0, |m| m.len());
+    studio.lock().unwrap().resume(&saved, len)
+}
+
+/// Keeps the replayed state beside the log, through a new file that takes the old one's place.
+fn save_state(log: &Path, state: &[u8]) {
+    let file = studio_hook::state_file(log);
+    let next = file.with_extension("json.next");
+    let saved = std::fs::write(&next, state).and_then(|()| std::fs::rename(&next, &file));
+    if let Err(e) = saved {
+        eprintln!("studio: keep the replayed state: {e}");
+    }
+}
+
 /// Keeps `roots` beside the log, through a new file that takes the old one's place.
 fn save_roots(log: &Path, roots: &HashMap<String, String>) {
     let next = roots_file(log).with_extension("json.next");
@@ -710,7 +730,9 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
         Ok(_) => {}
         Err(e) => eprintln!("studio: prune the event log: {e}"),
     }
-    let mut read_to = 0;
+    // The saved state, when there is one that fits the log, takes the replay from where it stopped
+    // (danielrispler/plotkeeper#134).
+    let mut read_to = resume(&app.state::<Mutex<Studio>>(), log);
     let mut roots_saved = 0;
     let mut live = false;
     // Each session's and each subagent's own, so another's prompt or step in the same worktree moves
@@ -754,6 +776,8 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
             // goes first, so Daniel sees it while `git` runs.
             if !live {
                 let mut studio = state.lock().unwrap();
+                // What the replay made, before the card store's facts and the backfill change it.
+                let replayed = studio.save();
                 let store = app.state::<Cards>();
                 let store = store.lock().unwrap();
                 store.restore(&mut studio);
@@ -762,6 +786,8 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                     store.cards().iter().map(|k| k.request.clone()).collect();
                 let backfill = studio.backfill(millis(), &requests);
                 drop((store, studio));
+                let log = log.to_path_buf();
+                thread::spawn(move || save_state(&log, &replayed));
                 state.lock().unwrap().tick(millis());
                 sent.list(app);
                 let waiting = state.lock().unwrap().waiting_folders();

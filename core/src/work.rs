@@ -3,10 +3,10 @@
 //! typically takes, from the sessions of the same kind before it.
 
 use crate::event::{Tool, ToolKind};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// A recognisable stretch of a session's work on a ticket, in the usual order (`docs/studio/CONTEXT.md`).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Phase {
     #[default]
@@ -22,7 +22,7 @@ pub enum Phase {
 }
 
 /// When a phase started: at a time, and after how much of the agent's work.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PhaseStart {
     pub phase: Phase,
     pub at: u64,
@@ -30,7 +30,7 @@ pub struct PhaseStart {
 }
 
 /// A session's work on its ticket: its kind, its phases and how long its agent has worked.
-#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Work {
     /// The kind of work: the first prompt's slash command, else the first skill its agent invoked,
     /// without any plugin prefix (`implement`, `wayfinder`); `None` before either.
@@ -41,12 +41,12 @@ pub struct Work {
     pub agent_ms: u64,
     pub estimate: Estimate,
     /// Its latest event's time.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     last_at: Option<u64>,
 }
 
 /// How long the agent's remaining work will take, set as each phase starts.
-#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Estimate {
     /// The range of the remaining work, in milliseconds of the agent's time; `None` for "no
     /// estimate".
