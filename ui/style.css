@@ -262,8 +262,6 @@ body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; to
 #intention-label:not([hidden]) + p { font-size: var(--size); font-weight: 400; }
 .headline-text { margin: 0 0 var(--sp-3); font-size: var(--size-large); font-weight: 500; }
 .body-lines { margin: 0 0 var(--sp-4); padding-inline-start: var(--sp-5); }
-.now-turn .subagents button { flex-direction: row; align-items: baseline; gap: var(--sp-4); white-space: nowrap; overflow: hidden; }
-.now-turn .subagents button > :nth-child(2) { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .state[data-state="needs_you"] { color: var(--needs-you); background: var(--needs-you-bg); border-radius: var(--radius);
                                  padding: var(--sp-1) var(--sp-4); display: inline-block; }
 /* The intention, the anchor of "now" (mockup C): boxed, the biggest line, with a bright edge; dim once
@@ -445,3 +443,14 @@ body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; to
 .subagent-log .log-error { margin-left: var(--sp-4); font-size: var(--size-xs); color: var(--conflict); }
 .subagent-log .log-result { font: var(--size-small)/var(--term-line) var(--mono); white-space: pre-wrap; margin: var(--sp-2) 0 var(--sp-4) var(--sp-5); padding: var(--sp-4) var(--sp-5); background: var(--surface); border-radius: var(--radius-small); color: var(--muted); max-height: 12em; overflow: auto; }
 .subagent-log .failed .log-result { color: var(--conflict); }
+
+/* Earlier turns folded to one line (danielrispler/plotkeeper#117): the prompt cut to fit, the Headline, and two marks. */
+.turn.past { padding: var(--sp-2) 0; }
+.turn-line { display: flex; align-items: baseline; gap: var(--sp-4); width: 100%; min-width: 0; text-align: start; background: none; border: 0; padding: var(--sp-2) 0; color: var(--fg); cursor: pointer; }
+.turn-line .prompt { flex: 0 1 35%; min-width: 0; margin: 0; }
+.turn-line .headline-text { flex: 1 1 0; min-width: 0; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: var(--size-small); }
+.turn-line .mark { flex: none; font-size: var(--size-small); color: var(--muted); }
+.turn .subagents button { flex-direction: row; align-items: baseline; gap: var(--sp-4); white-space: nowrap; overflow: hidden; }
+.turn .subagents button > :nth-child(2) { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.answered-card > summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.answered-card > .card { margin-top: var(--sp-3); }

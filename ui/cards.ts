@@ -259,3 +259,23 @@ export function showCards(cards: SessionCards) {
   drawFeed();
   markShown();
 }
+
+// Whether the card's quiz waits for Daniel's answer.
+export const quizOpen = (stored: StoredCard) => stored.card.quiz !== null && !quizState(stored).answered;
+
+// A card in its turn (danielrispler/plotkeeper#117): an answered card is one line, its quiz, which opens to the card.
+export function cardLine(stored: StoredCard): HTMLElement {
+  const quiz = stored.card.quiz;
+  if (!quiz || !quizState(stored).answered) return cardNode(stored);
+  const id = stored.request.id;
+  const node = document.createElement("details");
+  node.className = "fold answered-card";
+  node.open = cardOpen.has(id);
+  node.append(prose("summary", quiz.text), cardNode(stored));
+  node.addEventListener("toggle", () => {
+    if (node.open) cardOpen.add(id);
+    else cardOpen.delete(id);
+  });
+  return node;
+}
+const cardOpen = new Set<string>();
