@@ -1839,6 +1839,18 @@ impl Studio {
         }
     }
 
+    /// Each folder's worktree root found so far, which the shell keeps across launches
+    /// (danielrispler/plotkeeper#132).
+    pub fn known_roots(&self) -> HashMap<String, String> {
+        self.roots.known.borrow().clone()
+    }
+
+    /// Takes the roots a launch before found, so their folders need no lookup: on the real log the
+    /// lookups were most of the replay's time (danielrispler/plotkeeper#132).
+    pub fn know_roots(&mut self, roots: HashMap<String, String>) {
+        self.roots.known.borrow_mut().extend(roots);
+    }
+
     /// The worktree roots that `event` of a session's own agent touches (danielrispler/Falinks#434, decision 9): its
     /// folder's, and an `Edit` or `Write` path's, but those of its running workers with cards. A
     /// start, an end or a notice touches none.

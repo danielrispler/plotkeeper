@@ -34,23 +34,207 @@ pub fn drops_file(log: &Path) -> PathBuf {
 /// that fire together never interleave their lines. Waits up to `patience` for the lock; returns
 /// `false`, having written nothing, when it never came.
 pub fn append(log: &Path, event: &serde_json::Value, patience: Duration) -> std::io::Result<bool> {
-    use std::{fs::TryLockError, io::Write};
+    use std::io::Write;
     let mut line = serde_json::to_vec(event)?;
     line.push(b'\n');
-    let mut log = fs::OpenOptions::new().create(true).append(true).open(log)?;
-    let deadline = Instant::now() + patience;
-    loop {
-        match log.try_lock() {
-            Ok(()) => break,
-            Err(TryLockError::WouldBlock) if Instant::now() < deadline => {
-                thread::sleep(Duration::from_millis(20));
-            }
-            Err(TryLockError::WouldBlock) => return Ok(false),
-            Err(TryLockError::Error(e)) => return Err(e),
-        }
-    }
+    let Some(mut log) = locked(log, patience)? else {
+        return Ok(false);
+    };
     log.write_all(&line)?;
     Ok(true)
+}
+
+/// The log at `log`, open to append under its exclusive lock, which it waits up to `patience` for;
+/// `None` when the lock never came. A prune puts a new file in the log's place while it holds the
+/// lock (danielrispler/plotkeeper#132), so a file replaced while this waited is let go for the new one.
+pub fn locked(log: &Path, patience: Duration) -> std::io::Result<Option<fs::File>> {
+    use std::{fs::TryLockError, os::unix::fs::MetadataExt};
+    let deadline = Instant::now() + patience;
+    loop {
+        let file = fs::OpenOptions::new().create(true).append(true).open(log)?;
+        loop {
+            match file.try_lock() {
+                Ok(()) => break,
+                Err(TryLockError::WouldBlock) if Instant::now() < deadline => {
+                    thread::sleep(Duration::from_millis(20));
+                }
+                Err(TryLockError::WouldBlock) => return Ok(None),
+                Err(TryLockError::Error(e)) => return Err(e),
+            }
+        }
+        let ours = file.metadata().map(|m| (m.dev(), m.ino()))?;
+        if fs::metadata(log).is_ok_and(|m| (m.dev(), m.ino()) == ours) {
+            return Ok(Some(file));
+        }
+    }
+}
+
+/// Leaves out of hook event `event` the two fields no reader takes, a quarter of the log's bytes on
+/// 2026-11-16 (danielrispler/plotkeeper#132): a response's `originalFile`, the whole file an `Edit` or
+/// `Write` changed, and a `Read`'s file `content`. The hunks, output and errors stay. Returns whether
+/// it left anything out.
+pub fn lighten(event: &mut serde_json::Value) -> bool {
+    use serde_json::Value;
+    let read = event.get("tool_name").and_then(Value::as_str) == Some("Read");
+    let response = event
+        .get_mut("tool_response")
+        .and_then(Value::as_object_mut);
+    let Some(response) = response else {
+        return false;
+    };
+    let mut left_out = response.remove("originalFile").is_some();
+    if read && let Some(file) = response.get_mut("file").and_then(Value::as_object_mut) {
+        left_out |= file.remove("content").is_some();
+    }
+    left_out
+}
+
+/// How long a session's events stay in the log after its last one (danielrispler/plotkeeper#132).
+pub const KEEP: Duration = Duration::from_secs(30 * 24 * 60 * 60);
+
+/// The archive beside the log `log`, which a prune appends to and a launch never replays.
+pub fn archive_file(log: &Path) -> PathBuf {
+    log.with_file_name("events-archive.jsonl")
+}
+
+/// What a prune did: the lines it moved to the archive, and the kept lines it lightened.
+#[derive(Debug, Default, PartialEq)]
+pub struct Pruned {
+    pub archived: usize,
+    pub lightened: usize,
+}
+
+/// What a prune reads of a line: its session, Claude Code's or agy's, and when it was received.
+#[derive(Default, serde::Deserialize)]
+struct Stamp {
+    session_id: Option<String>,
+    #[serde(rename = "conversationId")]
+    conversation_id: Option<String>,
+    studio_received_ms: Option<u64>,
+}
+
+impl Stamp {
+    fn of(line: &[u8]) -> Self {
+        serde_json::from_slice(line).unwrap_or_default()
+    }
+
+    fn session(&self) -> Option<&str> {
+        self.session_id
+            .as_deref()
+            .or(self.conversation_id.as_deref())
+    }
+}
+
+/// Moves to the archive the lines of each session whose last event was received more than `KEEP`
+/// before `now`, in Unix milliseconds, and lightens the lines it keeps (danielrispler/plotkeeper#132).
+/// A line of no session goes by its own time; a line with no time stays. A log whose first line is
+/// recent is left as it is, so most launches read one line. The new log takes the old one's place
+/// under its lock, with the lines hooks appended meanwhile.
+pub fn prune(log: &Path, now: u64) -> std::io::Result<Pruned> {
+    use std::{
+        collections::HashMap,
+        io::{self, BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write},
+        os::unix::fs::MetadataExt,
+    };
+    let cutoff = now.saturating_sub(KEEP.as_millis() as u64);
+    let file = match fs::File::open(log) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Pruned::default()),
+        file => file?,
+    };
+    let mut first = Vec::new();
+    BufReader::new(&file).read_until(b'\n', &mut first)?;
+    if Stamp::of(&first)
+        .studio_received_ms
+        .is_some_and(|at| at >= cutoff)
+    {
+        return Ok(Pruned::default());
+    }
+    // Calls `each` with each whole line up to `end`, and returns the bytes they hold: a line a hook
+    // is still writing waits for the tail.
+    let lines = |end: u64, each: &mut dyn FnMut(&[u8]) -> io::Result<()>| -> io::Result<u64> {
+        let mut reader = BufReader::new(fs::File::open(log)?.take(end));
+        let (mut line, mut read) = (Vec::new(), 0);
+        while reader.read_until(b'\n', &mut line)? > 0 && line.ends_with(b"\n") {
+            read += line.len() as u64;
+            each(&line)?;
+            line.clear();
+        }
+        Ok(read)
+    };
+    let mut last = HashMap::<String, u64>::new();
+    let end = lines(u64::MAX, &mut |line| {
+        let stamp = Stamp::of(line);
+        if let (Some(session), Some(at)) = (stamp.session(), stamp.studio_received_ms) {
+            let last = last.entry(session.into()).or_default();
+            *last = (*last).max(at);
+        }
+        Ok(())
+    })?;
+    let name = log.file_name().unwrap_or_default().to_string_lossy();
+    let next = log.with_file_name(format!("{name}.next"));
+    let mut kept = BufWriter::new(fs::File::create(&next)?);
+    let mut archived = Vec::new();
+    let mut pruned = Pruned::default();
+    lines(end, &mut |line| {
+        let stamp = Stamp::of(line);
+        let session = stamp.session().and_then(|s| last.get(s));
+        if session
+            .copied()
+            .or(stamp.studio_received_ms)
+            .is_some_and(|at| at < cutoff)
+        {
+            archived.extend_from_slice(line);
+            pruned.archived += 1;
+        } else if let Some(light) = lightened(line) {
+            kept.write_all(&light)?;
+            pruned.lightened += 1;
+        } else {
+            kept.write_all(line)?;
+        }
+        Ok(())
+    })?;
+    if pruned == Pruned::default() {
+        fs::remove_file(&next)?;
+        return Ok(pruned);
+    }
+    // The archive first: a failure after it leaves a line in both files, never in neither.
+    if !archived.is_empty() {
+        let mut archive = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(archive_file(log))?;
+        archive.write_all(&archived)?;
+        archive.sync_all()?;
+    }
+    let held = locked(log, Duration::from_secs(60))?.ok_or(io::ErrorKind::TimedOut)?;
+    let read = file.metadata().map(|m| (m.dev(), m.ino()))?;
+    if held.metadata().map(|m| (m.dev(), m.ino()))? != read {
+        fs::remove_file(&next)?;
+        return Err(io::Error::other("the log was replaced during the prune"));
+    }
+    let mut tail = fs::File::open(log)?;
+    tail.seek(SeekFrom::Start(end))?;
+    io::copy(&mut tail, &mut kept)?;
+    let kept = kept.into_inner().map_err(io::IntoInnerError::into_error)?;
+    kept.sync_all()?;
+    fs::rename(&next, log)?;
+    drop(held);
+    Ok(pruned)
+}
+
+/// Line `line` lightened, `None` when it has nothing to leave out.
+fn lightened(line: &[u8]) -> Option<Vec<u8>> {
+    let has = |text: &[u8]| line.windows(text.len()).any(|w| w == text);
+    if !has(b"\"originalFile\"") && !has(b"\"content\"") {
+        return None;
+    }
+    let mut event = serde_json::from_slice(line).ok()?;
+    if !lighten(&mut event) {
+        return None;
+    }
+    let mut light = serde_json::to_vec(&event).ok()?;
+    light.push(b'\n');
+    Some(light)
 }
 
 /// Notes in the drops file beside `log` that the hook dropped `event` of `terminal` at `at`, in Unix

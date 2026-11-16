@@ -10,7 +10,7 @@ use std::{
     collections::{HashMap, HashSet},
     fs::{File, OpenOptions},
     io::{self, BufRead, BufReader, Seek, SeekFrom, Write},
-    path::Path,
+    path::{Path, PathBuf},
     process::Command,
     sync::{
         Arc, LazyLock, Mutex,
@@ -417,15 +417,40 @@ fn closed(terminal: String, studio: State<Mutex<Studio>>) -> Result<(), String> 
     append(&lines)
 }
 
+/// The worktree roots file beside the event log `log` (danielrispler/plotkeeper#132).
+fn roots_file(log: &Path) -> PathBuf {
+    log.with_file_name("roots.json")
+}
+
+/// The worktree root of each folder a launch before looked up, none when there is no file or it
+/// does not read.
+// shortcut: a root is kept for good, so a folder looked up before its own worktree existed keeps its
+// parent's root; check the saved ones with `git` if a session ever shows under the wrong worktree.
+fn saved_roots(log: &Path) -> HashMap<String, String> {
+    let saved = std::fs::read(roots_file(log)).ok();
+    saved
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
+}
+
+/// Keeps `roots` beside the log, through a new file that takes the old one's place.
+fn save_roots(log: &Path, roots: &HashMap<String, String>) {
+    let next = roots_file(log).with_extension("json.next");
+    let written = serde_json::to_vec(roots).map_err(io::Error::from);
+    let saved = written.and_then(|bytes| std::fs::write(&next, bytes));
+    if let Err(e) = saved.and_then(|()| std::fs::rename(&next, roots_file(log))) {
+        eprintln!("studio: keep the worktree roots: {e}");
+    }
+}
+
 /// Appends `lines` to the event log in one write under the lock the hook takes, so they never
 /// interleave with a hook's line.
 fn append(lines: &[serde_json::Value]) -> Result<(), String> {
     let home = std::env::home_dir().ok_or("no home directory")?;
-    let open = OpenOptions::new()
-        .append(true)
-        .open(studio_hook::event_log(&home));
-    let mut log = open.map_err(|e| e.to_string())?;
-    log.lock().map_err(|e| e.to_string())?;
+    let locked = studio_hook::locked(&studio_hook::event_log(&home), Duration::from_secs(60));
+    let mut log = locked
+        .map_err(|e| e.to_string())?
+        .ok_or("the event log stayed locked")?;
     let text: String = lines.iter().map(|line| format!("{line}\n")).collect();
     log.write_all(text.as_bytes()).map_err(|e| e.to_string())
 }
@@ -485,7 +510,8 @@ fn main() {
     let log = studio_hook::event_log(&std::env::home_dir().expect("a home directory"));
     // The store sits beside the log, in the studio's data directory.
     let store = CardStore::open_beside(&log).expect("read the card store");
-    let studio = Studio::with_roots(worktree_root);
+    let mut studio = Studio::with_roots(worktree_root);
+    studio.know_roots(saved_roots(&log));
     // The window does not exist yet, so the writer's notices wait here for the setup to forward them.
     let (writer_notices, writer_notice_reader) = mpsc::channel::<Option<String>>();
     let writer: Writer = match std::env::var("STUDIO_CARD_WRITER").as_deref() {
@@ -633,7 +659,17 @@ fn main() {
 /// tick, the first right after the replay.
 // shortcut: polls every 200 ms; switch to file-system events if the delay or the wake-ups matter.
 fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
+    // Before the replay, so it reads none of what the prune moves (danielrispler/plotkeeper#132).
+    match studio_hook::prune(log, millis()) {
+        Ok(pruned) if pruned != studio_hook::Pruned::default() => eprintln!(
+            "studio: pruned the event log: {} lines archived, {} lightened",
+            pruned.archived, pruned.lightened
+        ),
+        Ok(_) => {}
+        Err(e) => eprintln!("studio: prune the event log: {e}"),
+    }
     let mut read_to = 0;
+    let mut roots_saved = 0;
     let mut live = false;
     // Each session's and each subagent's own, so another's prompt or step in the same worktree moves
     // no base.
@@ -752,6 +788,11 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
             read = read_to > read_from;
             // Dropping a queue's sender closes it: its thread finishes the jobs it holds, then ends.
             if read {
+                let roots = state.lock().unwrap().known_roots();
+                if roots.len() != roots_saved {
+                    roots_saved = roots.len();
+                    save_roots(log, &roots);
+                }
                 let keys = state.lock().unwrap().live_keys();
                 fingerprints.retain(|key, _| keys.contains(key));
                 queues.retain(|key, _| keys.contains(key));
