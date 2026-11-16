@@ -27,8 +27,8 @@ export function sinceText(since: Since): string {
 
 // The banner is kept for one reading of the session: until Daniel selects another, or a prompt starts a turn.
 export type Banner = { session: string; turns: number; since: Since };
-export const bannerFor = (session: Pick<Session, "id" | "state" | "unseen" | "turns" | "since">, now: number): Banner | null =>
-  showsBanner(session, now) ? { session: session.id, turns: session.turns.length, since: session.since } : null;
+export const bannerFor = (session: Pick<Session, "id" | "state" | "unseen" | "turns" | "since_looked">, now: number): Banner | null =>
+  showsBanner(session, now) ? { session: session.id, turns: session.turns.length, since: session.since_looked } : null;
 export const bannerLives = (banner: Banner | null, session: Pick<Session, "id" | "state" | "turns">): boolean =>
   banner !== null && banner.session === session.id && session.turns.length === banner.turns && session.state !== "running" && session.state !== "needs_you";
 

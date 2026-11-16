@@ -237,7 +237,7 @@ pub struct Session {
     seen_at_selection: usize,
     /// What happened after `seen_at_selection`, kept up to date by `update_unseen` for the banner.
     #[serde(default)]
-    since: SinceSeen,
+    since_looked: SinceSeen,
     /// The ids of its background tasks, commands included, from their responses and `Stop`'s
     /// `background_tasks`. With its subagents' ids, they are the task ids a wake-up can name.
     #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
@@ -816,7 +816,7 @@ impl Session {
 
     /// What its turns after the last one Daniel saw before he selected it did.
     pub fn since(&self) -> SinceSeen {
-        self.since
+        self.since_looked
     }
 
     fn count_since(&self) -> SinceSeen {
@@ -847,7 +847,7 @@ impl Session {
         // Going idle keeps the mark: only Daniel seeing the session clears it (danielrispler/Falinks#556).
         self.unseen =
             matches!(self.state, State::YourTurn | State::Idle) && self.turns.len() > self.seen;
-        self.since = self.count_since();
+        self.since_looked = self.count_since();
     }
 
     /// Its subagent `id`, at any depth.

@@ -160,7 +160,7 @@ const session = (state, { running = false, question = false } = {}) => {
       helper("a3", "Find where the delete is styled", "Find every rule that styles `.delete`.", "Explore", "Two rules in `ui/style.css`, none in `ui/list.ts`.", 3, 2 * 60 * MIN),
       helper("a1", "Review the diff", "Review the diff on this branch and list anything that breaks the token rules.", "Explore", "No raw colours; two spacing values bypass the tokens.", 4, 30 * MIN, running),
     ]), asker: state === "needs_you" ? { agent: null, since: now - 3 * MIN } : null,
-    prompts: [], turns, returned: null, seen: 3, since: { turns: 2, files: 3, passed: 1, failed: 1, ran: 0 }, unseen: state === "idle",
+    prompts: [], turns, returned: null, seen: 3, since_looked: { turns: 2, files: 3, passed: 1, failed: 1, ran: 0 }, unseen: state === "idle",
     questions: question ? [{
       tool_use_id: "toolu_q1", agent: null, turn: 4, answer: "open",
       questions: [{

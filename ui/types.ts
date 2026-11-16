@@ -168,8 +168,8 @@ export type Session = {
   unseen?: boolean;
   // How many of its turns Daniel has seen (danielrispler/plotkeeper#124).
   seen: number;
-  // What happened after the turns he had seen when he selected it, from the core's `Session::since`: the banner's count.
-  since: Since;
+  // What happened after the turns he had seen when he selected it, from the core's `Session::since`, as `since_looked` (the agent has its own `since`): the banner's count.
+  since_looked: Since;
 };
 // What happened in a session since Daniel looked (danielrispler/plotkeeper#124).
 export type Since = { turns: number; files: number; passed: number; failed: number; ran: number };

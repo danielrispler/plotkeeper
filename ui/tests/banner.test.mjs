@@ -6,7 +6,7 @@ import { bannerFor, bannerLives, showsBanner, sinceText } from "../../dist/banne
 const MIN = 60_000;
 const NOW = 1_800_000_000_000;
 const ended = (minutes) => ({ started_at: NOW - (minutes + 5) * MIN, ended_at: NOW - minutes * MIN, files: null, checks: [] });
-const session = (state, turns, unseen = false) => ({ id: "s", state, unseen, turns, seen: 0, since: { turns: turns.length, files: 0, passed: 0, failed: 0, ran: 0 } });
+const session = (state, turns, unseen = false) => ({ id: "s", state, unseen, turns, seen: 0, since_looked: { turns: turns.length, files: 0, passed: 0, failed: 0, ran: 0 } });
 
 test("an idle session shows the banner, and so does an ended one", () => {
   assert.equal(showsBanner(session("idle", [ended(200)]), NOW), true);
@@ -26,7 +26,7 @@ test("a running session with nothing unseen shows none", () => {
 
 test("the banner carries the core's since, whatever seen says by then", () => {
   const since = { turns: 2, files: 1, passed: 1, failed: 0, ran: 0 };
-  assert.deepEqual(bannerFor({ ...session("idle", [ended(200)]), seen: 1, since }, NOW).since, since);
+  assert.deepEqual(bannerFor({ ...session("idle", [ended(200)]), seen: 1, since_looked: since }, NOW).since, since);
 });
 
 test("the since line reads as facts", () => {

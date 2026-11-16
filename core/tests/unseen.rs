@@ -369,6 +369,6 @@ mod since {
         let state = serde_json::to_value(studio.session(ID).unwrap()).unwrap();
         assert_eq!(state["seen"], 3);
         // The banner reads what happened since before the selection, not after the poll saw it.
-        assert_eq!(state["since"]["turns"], 3);
+        assert_eq!(state["since_looked"]["turns"], 3);
     }
 }
