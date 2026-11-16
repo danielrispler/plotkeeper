@@ -220,6 +220,7 @@ function applySettings(files: SettingsFiles) {
   layout();
   const { model, effort, on_open: onOpen } = settings.summaries;
   invoke("summary_settings", { model, effort, onOpen }).catch((e) => console.warn(e));
+  invoke("check_lists", { lists: settings.checks }).catch((e) => console.warn(e));
   window.dispatchEvent(new Event("settings"));
 }
 listen<SettingsFiles>("settings-files", applySettings);

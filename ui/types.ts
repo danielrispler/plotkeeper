@@ -74,7 +74,25 @@ export type Answer = "open" | "not_answered" | { answered: Record<string, string
 export type Question = { tool_use_id: string; agent: string | null; questions: Asked[]; answer: Answer; turn: number | null };
 // A turn, a block in the rail's feed (danielrispler/Falinks#574): its prompt's first line, or "worker <name> returned";
 // `id` names its card and summary once its `Stop` came; `message` is its final reply's first line.
-export type Turn = { started_at: number; ended_at: number | null; prompt: string; id: string | null; message: string | null; files: TurnFiles | null };
+// How a check, or one run of it, ended (danielrispler/plotkeeper#112): "ran" is a check whose exit code does not say.
+export type CheckStatus = "passed" | "failed" | "ran";
+// A check suite of a turn: the list entry its commands matched, its last run's status, how many earlier runs
+// failed, and each run with its own command. `call` and `agent` find a run's output (`check_output`).
+export type Check = {
+  suite: string;
+  status: CheckStatus;
+  retries: number;
+  runs: { command: string; status: CheckStatus; exit_code: number | null; call: string; agent: string | null }[];
+};
+export type Turn = {
+  started_at: number;
+  ended_at: number | null;
+  prompt: string;
+  id: string | null;
+  message: string | null;
+  checks: Check[];
+  files: TurnFiles | null;
+};
 // A file the agent or its workers changed in a turn: its worktree's root, its path from there (a rename's new one),
 // a rename's old path, and its lines added and removed (null for a binary file).
 export type TurnFile = { root: string; path: string; from: string | null; added: number | null; removed: number | null };

@@ -55,6 +55,10 @@ pub struct Row {
     pub started_at: Option<u64>,
     /// How long it took: what the agent reports, else from its start to its result.
     pub duration_ms: Option<u64>,
+    /// Whether the command that failed ran: one Daniel denied or that was interrupted did not.
+    pub ran: bool,
+    /// Whether its result is a command's start in the background, which has no result yet.
+    pub background: bool,
     /// `None` until its result lands.
     pub outcome: Option<Outcome>,
     /// The log lines it came from: its start, and its result.
@@ -189,10 +193,13 @@ impl Ledger {
             },
         };
         let took = event.took();
+        let (ran, background) = (event.ran(), event.background_task().is_some());
         let row = self.of(event, tool, turn);
         row.ended_at = Some(at);
         row.took = took;
         row.outcome = Some(outcome);
+        row.ran = ran;
+        row.background = background;
         row.end = Some(event.line);
         row.settle();
     }
