@@ -1,7 +1,7 @@
 // The story rail, on the window's left (danielrispler/Falinks#574). One header line: the verdict and the phase, with the
 // times and the model on hover, and a "⋯" menu. Then "now": the open question, docked, or else the
 // newest card; the current intention, boxed; the latest turn's summary. Below, a feed of turns,
-// newest first, each with its prompt, summary, learning question, cards, questions, subagents,
+// newest first, each with its prompt, summary, Quiz, cards, questions, subagents,
 // checks and folded response. "Ask" sits on a file, a failed check, a subagent line and the Headline. A subagent's view shows its own line,
 // questions, brief and cards in one block.
 
@@ -372,7 +372,7 @@ export function forgetMissingSummaries() {
 // replies, fetched at their first opening.
 const opened = new Set<string>();
 const replies = new Map<string, string>();
-// The option Daniel picked on each turn's learning question, by turn id; kept in the window only.
+// The option Daniel picked on each turn's Quiz, by turn id; kept in the window only.
 const learned = new Map<string, number>();
 
 // A folded block keyed `key`, open while Daniel keeps it open; `onOpen` runs at each opening.
@@ -389,15 +389,14 @@ function folded(key: string, title: string, body: HTMLElement[], onOpen?: () => 
   return node;
 }
 
-// The learning section (danielrispler/Falinks#526): one question, graded at the tap by the writer's key. The turn's
-// main idea and each option's reason show only after the pick, since the idea often gives the answer away.
-export function learningElement(id: string, learning: NonNullable<TurnSummary["summary"]["learning"]>): HTMLElement {
+// A turn's Quiz (danielrispler/plotkeeper#118): one question, graded at the tap by the writer's key, open under the Headline.
+// Each option's reason shows only after the pick.
+export function quizElement(id: string, quiz: NonNullable<TurnSummary["summary"]["quiz"]>): HTMLElement {
   const picked = learned.get(id) ?? null;
-  const { question } = learning;
   const options = document.createElement("ol");
   options.className = "options";
   options.append(
-    ...question.options.map((option, i) => {
+    ...quiz.options.map((option, i) => {
       const item = document.createElement("li");
       const button = pressable(prose("button", option.text) as HTMLButtonElement, picked === i, () => {
         learned.set(id, i);
@@ -407,19 +406,18 @@ export function learningElement(id: string, learning: NonNullable<TurnSummary["s
       item.append(button);
       if (picked !== null) {
         const why = prose("p", option.why);
-        if (i === question.key) why.prepend(Object.assign(text("span", "The right answer. "), { dir: "ltr" }));
+        if (i === quiz.key) why.prepend(Object.assign(text("span", "The right answer. "), { dir: "ltr" }));
         item.append(why);
       }
       return item;
     }),
   );
   const box = document.createElement("div");
-  box.className = "card learning";
-  const quiz = prose("p", question.text);
-  quiz.className = "quiz";
-  box.append(quiz, options);
-  if (picked !== null) box.append(prose("p", learning.idea));
-  return folded(`${id} learning`, "Learning: one question", [box]);
+  box.className = "card quiz-box";
+  const question = prose("p", quiz.text);
+  question.className = "quiz";
+  box.append(question, options);
+  return box;
 }
 
 // "Now" (danielrispler/plotkeeper#116): what the latest turn's state puts above the feed. While running, what Daniel asked;
@@ -471,7 +469,7 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
       node.append(list);
     }
   } else if (summary) node.append(rendered("div", summary.summary.summary, "summary", session.cwd));
-  if (summary?.summary.learning && turn?.id) node.append(learningElement(turn.id, summary.summary.learning));
+  if (summary?.summary.quiz && turn?.id) node.append(quizElement(turn.id, summary.summary.quiz));
   // The evidence line, under the Headline and the Body lines: a running turn shows only a check that ended failed.
   if (turn && index !== null && hasEvidence(turn, session.capabilities)) {
     const line = evidenceElement(session.id, index, turn, { only: session.state === "running" && now ? "failed" : "all" });
@@ -532,7 +530,7 @@ function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
     const summary = turn.id ? summaryOf(turn.id) : null;
     const { headline } = headlineOf(summary, turn.message);
     const open = opened.has(key);
-    const line = foldedLine(turn, headline, block.cards.some(quizOpen) || (summary?.summary.learning != null && !learned.has(turn.id!)));
+    const line = foldedLine(turn, headline, block.cards.some(quizOpen) || (summary?.summary.quiz != null && !learned.has(turn.id!)));
     const button = pressable(document.createElement("button"), open, () => {
       if (opened.has(key)) opened.delete(key);
       else opened.add(key);

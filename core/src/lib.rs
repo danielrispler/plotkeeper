@@ -1603,7 +1603,7 @@ pub struct SummaryRequest {
     pub responses: Vec<String>,
     /// The turn's intentions, one per response.
     pub intentions: Vec<String>,
-    /// The card its `Stop` requested, which the learning section points to instead of a question.
+    /// The card its `Stop` requested, whose Quiz the turn has instead of its own.
     #[serde(default)]
     pub card: Option<String>,
     /// What the hooks and git recorded of the turn (danielrispler/plotkeeper#115); empty until the

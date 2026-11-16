@@ -67,7 +67,7 @@ test("what started in no turn, such as a subagent's cards, goes in one last bloc
   assert.deepEqual(feedTurns([], { cards: [], checks: [], agents: [], questions: [] }), []);
 });
 
-const summary = { summary: { summary: "Fixed the lint.\nThe test reads the token.\nNot checked: the strip.", learning: null } };
+const summary = { summary: { summary: "Fixed the lint.\nThe test reads the token.\nNot checked: the strip.", quiz: null } };
 
 test("a stored summary is a Headline and reported lines; with none, the final response's first line", () => {
   assert.deepEqual(headlineOf(summary, "Fixed it, mostly."), {
@@ -83,7 +83,7 @@ test("a stored summary is a Headline and reported lines; with none, the final re
 
 test("a summary with a Headline and typed lines gives them as they are, and a stripped Headline gives the response's first line", () => {
   const typed = (headline) => ({
-    summary: { summary: "x", headline, lines: [{ kind: "open", text: "Nobody looked." }, { kind: "ask", text: "Merge it?" }], learning: null },
+    summary: { summary: "x", headline, lines: [{ kind: "open", text: "Nobody looked." }, { kind: "ask", text: "Merge it?" }], quiz: null },
   });
   assert.deepEqual(headlineOf(typed("Agent says: fixed the overlay."), "Done."), {
     headline: "Agent says: fixed the overlay.",

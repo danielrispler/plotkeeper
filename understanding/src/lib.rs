@@ -28,13 +28,13 @@ mod turn_trees;
 mod week;
 pub use drift::{AGY_FIXTURE_VERSION, AgyVersions, Drift, Versions, drift, dropped_events};
 pub use fingerprint::{Fingerprints, backfilled, fingerprint_changes, worktree_root};
+use grounding::words;
 pub use store::{
     Brief, CardStore, CheckResult, Guess, Level, Rating, Reason, Row, SessionCards, StoredCard,
     StoredSummary, millis,
 };
 pub use summary::{
-    Learning, Line, LineKind, SummarySetup, TurnSummary, write_agent_summary, write_name,
-    write_summary,
+    Line, LineKind, SummarySetup, TurnSummary, write_agent_summary, write_name, write_summary,
 };
 pub use turn_trees::{Hunk, add_hunks, anchor, hunk, hunk_view, numstat, turn_diffs, turn_hunk};
 pub use week::{Rate, Ratings, Week, week};
@@ -87,15 +87,65 @@ pub struct Choice {
     pub why: String,
 }
 
+/// Marks a writer may put on the right option, which would give the answer away (danielrispler/Falinks#517, decision
+/// 14).
+const MARKS: [&str; 7] = ["✅", "✔️", "✔", "✓", "☑️", "(correct)", "(Correct)"];
+
+/// The most words an option has (danielrispler/plotkeeper#118).
+pub const OPTION_WORDS: usize = 10;
+
 impl Quiz {
-    /// The quiz in `value`, its options shuffled with the key and reasons moving with them, as the
-    /// writer places the right one unevenly (danielrispler/Falinks#434, decision 36); or why it is unusable: it does not
-    /// parse, or its key names none of two or more options.
-    fn from_value(value: serde_json::Value) -> Result<Quiz, String> {
+    /// The quiz in `value`, its options' marks removed and shuffled with the key and reasons moving
+    /// with them, as the writer places the right one unevenly (danielrispler/Falinks#434, decision 36); or why it is
+    /// rejected (danielrispler/plotkeeper#118, `docs/studio/question-rules.md`): it does not parse, its key names none
+    /// of two or more options, an option has no reason or no `right` mark, the key is not the one
+    /// option marked right, an option has over `OPTION_WORDS` words, or the right option is the
+    /// longest.
+    pub(crate) fn from_value(value: serde_json::Value) -> Result<Quiz, String> {
+        let marked: Vec<Option<bool>> = (value["options"].as_array().into_iter().flatten())
+            .map(|option| option["right"].as_bool())
+            .collect();
         let mut quiz: Quiz = serde_json::from_value(value).map_err(|e| e.to_string())?;
         let options = quiz.options.len();
         if options < 2 || quiz.key >= options {
             return Err(format!("key {} of {options} options", quiz.key));
+        }
+        if quiz.options.iter().any(|o| o.why.trim().is_empty()) {
+            return Err("an option has no reason".into());
+        }
+        if marked.contains(&None) {
+            return Err("an option is not marked right or wrong".into());
+        }
+        let right: Vec<usize> = (marked.iter().enumerate())
+            .filter(|(_, m)| **m == Some(true))
+            .map(|(i, _)| i)
+            .collect();
+        if right != [quiz.key] {
+            return Err(format!(
+                "its key {} is not the one option marked right ({right:?})",
+                quiz.key
+            ));
+        }
+        for option in &mut quiz.options {
+            let text = MARKS
+                .iter()
+                .fold(option.text.clone(), |t, m| t.replace(m, ""));
+            option.text = text.trim().into();
+        }
+        if let Some(long) = quiz.options.iter().find(|o| words(&o.text) > OPTION_WORDS) {
+            return Err(format!(
+                "an option has {} words: {:?}",
+                words(&long.text),
+                long.text
+            ));
+        }
+        let length = |o: &Choice| o.text.chars().count();
+        let wrong = (quiz.options.iter().enumerate())
+            .filter(|(i, _)| *i != quiz.key)
+            .map(|(_, o)| length(o))
+            .max();
+        if wrong.is_some_and(|wrong| length(&quiz.options[quiz.key]) > wrong) {
+            return Err("its right option is the longest".into());
         }
         let right = quiz.options[quiz.key].clone();
         // Fisher-Yates, on the random keys std gives each hasher.
@@ -537,7 +587,7 @@ pub fn explain_more(
 /// The card on `request` from `writer`'s reply, which is asked once more when it gives no card
 /// (danielrispler/Falinks#369, decision 12), and `brief` updated with it. The writer reads `earlier`, the summaries of the
 /// earlier cards of the prompt `request` belongs to. Each problem is one line for `log`: no card
-/// after the retry, or a card with no quiz or no brief, which is kept without asking again.
+/// after the retry, or a card with no quiz or no brief, which is kept after the retry.
 pub fn write_card(
     writer: &(impl CardWriter + ?Sized),
     request: &CardRequest,
@@ -556,7 +606,11 @@ pub fn write_card(
         }
         Ok::<_, String>((card, problem, brief_in(&reply).ok()))
     };
-    match card().or_else(|_| card()) {
+    // A reply with no card, or whose quiz breaks a rule (danielrispler/plotkeeper#118), is asked for once more; the
+    // second stands, with no quiz when it breaks one again, or the first when the second gives no card.
+    let first = card();
+    let retry = !matches!(&first, Ok((_, None, _)));
+    match if retry { card().or(first) } else { first } {
         Ok((card, problem, brief)) => {
             if let Some(problem) = problem {
                 log(format!("no quiz on {}: {problem}", request.id));
@@ -613,7 +667,7 @@ impl CardWriter for FakeWriter {
             0 | 1 => NOT_STRUCTURAL.into(),
             _ => format!("Sample architecture section: the change touches {named}."),
         };
-        let option = |text: &str, why: &str| serde_json::json!({ "text": text, "why": why });
+        let option = |text: &str, why: &str, right: bool| serde_json::json!({ "text": text, "why": why, "right": right });
         let card = serde_json::json!({
             "summary": format!("Sample change to {named}"),
             "explanation": "A sample card from the fake writer, which does not read the code. The change itself is below.",
@@ -628,9 +682,9 @@ impl CardWriter for FakeWriter {
             "quiz": {
                 "text": format!("What did the agent change in `{}`?", paths.join("`, `")),
                 "options": [
-                    option("What the code below shows.", "Right: the code below is the change itself."),
-                    option("Only the docs, without touching the code.", "No: the fake writer does not know what changed."),
-                    option("Nothing, it only ran tests.", "No: a card is written only on a change."),
+                    option("What the code below shows.", "Right: the code below is the change itself.", true),
+                    option("Only the docs, without touching the code.", "No: the fake writer does not know what changed.", false),
+                    option("Nothing, it only ran tests.", "No: a card is written only on a change.", false),
                 ],
                 "key": 0,
             },
@@ -672,7 +726,7 @@ impl CardWriter for FakeWriter {
         request: &SummaryRequest,
         earlier: &[TurnSummary],
     ) -> Result<String, String> {
-        let option = |text: &str, why: &str| serde_json::json!({ "text": text, "why": why });
+        let option = |text: &str, why: &str, right: bool| serde_json::json!({ "text": text, "why": why, "right": right });
         let headline = "A sample headline from the fake writer, which does not read the turn.";
         let line = format!(
             "It was given {} responses and {} earlier summaries.",
@@ -682,17 +736,14 @@ impl CardWriter for FakeWriter {
         Ok(serde_json::json!({
             "headline": headline,
             "lines": [{ "kind": "reported", "text": line }],
-            "learning": {
-                "idea": "The turn's main idea goes here.",
-                "question": {
-                    "text": "What did the fake writer read?",
-                    "options": [
-                        option("Nothing of the turn.", "Right: it writes a fixed sample."),
-                        option("The whole transcript.", "No: it reads nothing."),
-                        option("Only the final reply.", "No: it reads nothing."),
-                    ],
-                    "key": 0,
-                },
+            "quiz": {
+                "text": "What did the fake writer read?",
+                "options": [
+                    option("Nothing of the turn.", "Right: it writes a fixed sample.", true),
+                    option("The whole transcript.", "No: it reads nothing.", false),
+                    option("Only the final reply.", "No: it reads nothing.", false),
+                ],
+                "key": 0,
             },
         })
         .to_string())
@@ -940,7 +991,7 @@ impl ClaudeWriter {
     }
 
     /// `run`, with `options` before `-p`.
-    fn run_with(&self, options: &[&str], prompt: &str) -> (Command, String) {
+    pub fn run_with(&self, options: &[&str], prompt: &str) -> (Command, String) {
         let mut command = Command::new(&self.program);
         command
             // `--tools` takes several values, so an option must follow it.
@@ -1091,6 +1142,27 @@ macro_rules! explanation_language {
 }
 pub(crate) use explanation_language;
 
+/// The Quiz's rules (danielrispler/plotkeeper#118), one paragraph in both writers' instructions; `docs/studio/question-rules.md`
+/// holds them too. `headline` names what the writer's own headline is called in that prompt.
+macro_rules! quiz_rules {
+    ($headline:literal) => {
+        concat!(
+            "The quiz asks why this design over the alternative, what must stay true, or what happens in a concrete \
+             case in this codebase. It never asks what the agent did, a name or syntax, or bookkeeping. Its stem \
+             cannot be answered from ",
+            $headline,
+            " or from the evidence line (the recorded files, their line counts and the checks), which the developer \
+             sees beside it: if they answer it, ask something else or leave the quiz out. Each wrong option comes from \
+             the alternative that was considered, the previous behaviour, or a common wrong model of the code. Each \
+             option has at most 10 words, and the right option is never the longest. Every option carries its reason \
+             (`why`) and whether it is right (`right`): exactly one option is right, and the key is its place. Never \
+             mark the right option in its text, with a sign, an emoji or a word: the options are shown in another \
+             order."
+        )
+    };
+}
+pub(crate) use quiz_rules;
+
 /// The card writer's instructions. Its input is the change, the summaries of the prompt's earlier
 /// cards and the brief, not the payloads (v0 note, proposal 8).
 const PROMPT: &str = concat!(
@@ -1103,7 +1175,7 @@ Answer from the input below: the summaries of the earlier cards on the same prom
     r#"
 
 Reply with one JSON object and nothing else:
-{"summary": string, "explanation": string, "paths": [string], "code": string, "why_it_matters": string, "not_checked": string, "architecture": string, "quiz": {"text": string, "options": [{"text": string, "why": string}], "key": number}, "brief": string}
+{"summary": string, "explanation": string, "paths": [string], "code": string, "why_it_matters": string, "not_checked": string, "architecture": string, "quiz": {"text": string, "options": [{"text": string, "why": string, "right": boolean}], "key": number}, "brief": string}
 - summary: what the change did, in one short line.
 - explanation: what the change does and why, in at most three sentences.
 - paths: the files the change touched.
@@ -1111,11 +1183,14 @@ Reply with one JSON object and nothing else:
 - why_it_matters: what the change does for the code, in one or two sentences.
 - not_checked: one thing the diff does not show.
 - architecture: when the change is structural, a short section on how it changes the code's structure, before and after, and why: modules, types, interfaces or files added, removed, moved or split, or a change in which parts call or depend on which. Read it with the earlier cards' summaries, so that a structural change spread over several cards counts. Otherwise exactly "structural: none".
-- quiz.text: one question on the change's logic or design that the diff answers, such as why the code works this way, what a line does, or what would break without it. Never ask whether a command, test or check will pass.
-- quiz.options: 3 or 4 options. Each wrong option is something the code could plausibly have done instead, of the right option's length and tone, so the wording gives nothing away.
-- quiz.options[].why: one line on why that option is right or wrong. The options are shown in another order, so never refer to an option by its letter or place.
+- quiz.text: the quiz's question, under the rules below. Never ask whether a command, test or check will pass.
+- quiz.options: 3 or 4 options, each {"text", "why", "right"}. why: one line on why that option is right or wrong; the options are shown in another order, so never refer to an option by its letter or place. right: true for the one right option, false for the others.
 - quiz.key: the place of the right option in quiz.options, counting from 0.
 - brief: the brief so far, updated with this change: what the session set out to do, what it has done, oldest first, and what is still open, in a few short lines. Keep what still holds. Its last line says what this change did.
+
+"#,
+    quiz_rules!("your `summary`"),
+    r#"
 
 When the change is not a diff but the agent's workers with the summaries of their cards, the agent changed nothing itself and handed the work to them: the card explains what it split up among them, what came back and what is still open, paths and code are empty, and the quiz is on how the work was split.
 "#
