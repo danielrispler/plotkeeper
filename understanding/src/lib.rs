@@ -23,6 +23,7 @@ mod drift;
 mod fingerprint;
 mod store;
 mod summary;
+mod turn_trees;
 mod week;
 pub use drift::{AGY_FIXTURE_VERSION, AgyVersions, Drift, Versions, drift, dropped_events};
 pub use fingerprint::{Fingerprints, backfilled, fingerprint_changes, worktree_root};
@@ -33,6 +34,7 @@ pub use store::{
 pub use summary::{
     Learning, SummarySetup, TurnSummary, write_agent_summary, write_name, write_summary,
 };
+pub use turn_trees::{anchor, hunk, numstat, turn_diffs};
 pub use week::{Rate, Ratings, Week, week};
 
 /// A card on a change, in the explanation language; code inside its text is in

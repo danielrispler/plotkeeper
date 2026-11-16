@@ -19,6 +19,7 @@ pub const CAPABILITIES: Capabilities = Capabilities {
     permission_mode: true,
     durations: true,
     transcript_version: true,
+    turn_trees: true,
     transcript_format: TranscriptFormat::Claude,
 };
 

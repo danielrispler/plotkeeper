@@ -301,7 +301,7 @@ fn os_file(path: &str) -> bool {
 
 /// `git`'s output in `folder`, or `None` when it fails. It takes no optional locks, so it never
 /// holds up the agent's own `git` commands in the same worktree.
-fn git(folder: &Path, args: &[&str]) -> Option<Vec<u8>> {
+pub(crate) fn git(folder: &Path, args: &[&str]) -> Option<Vec<u8>> {
     let output = Command::new("git")
         .arg("--no-optional-locks")
         .args(args)

@@ -74,7 +74,13 @@ export type Answer = "open" | "not_answered" | { answered: Record<string, string
 export type Question = { tool_use_id: string; agent: string | null; questions: Asked[]; answer: Answer; turn: number | null };
 // A turn, a block in the rail's feed (danielrispler/Falinks#574): its prompt's first line, or "worker <name> returned";
 // `id` names its card and summary once its `Stop` came; `message` is its final reply's first line.
-export type Turn = { started_at: number; ended_at: number | null; prompt: string; id: string | null; message: string | null };
+export type Turn = { started_at: number; ended_at: number | null; prompt: string; id: string | null; message: string | null; files: TurnFiles | null };
+// A file the agent or its workers changed in a turn: its worktree's root, its path from there (a rename's new one),
+// a rename's old path, and its lines added and removed (null for a binary file).
+export type TurnFile = { root: string; path: string; from: string | null; added: number | null; removed: number | null };
+// What a turn changed: the files its ledger says its agent or workers touched, and how many other files differ.
+// `null` while the trees are not yet diffed, and for an agent that reports no trees.
+export type TurnFiles = { files: TurnFile[]; external: number };
 // What the session's agent adapter reports, which decides what its view shows (danielrispler/plotkeeper#43, decision 4);
 // `agent` is its mark's name, empty for a status-only row.
 export type Capabilities = {
@@ -85,6 +91,8 @@ export type Capabilities = {
   permission_mode: boolean;
   durations: boolean;
   transcript_version: boolean;
+  // It records a git tree of each worktree a turn touches, so a turn has files (danielrispler/plotkeeper#111).
+  turn_trees: boolean;
 };
 export type Session = {
   id: string;

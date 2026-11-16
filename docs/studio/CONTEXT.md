@@ -22,6 +22,9 @@ _Avoid_: Summary (read after the work, with no question first)
 An agent session's work on one prompt, Daniel's or a wake-up, from its first event to the agent's end of turn. It also ends when the next turn starts after Daniel interrupts it, or when the session ends. A prompt Daniel queues during a turn starts its own turn when the running one ends.
 _Avoid_: Step (one tool call inside a turn)
 
+**Turn files**:
+The files a turn's agent and its workers changed, with their added and removed lines: the diff between the git trees the hook recorded at the turn's start and end, kept to the files the step ledger says they edited. The other files that differ are counted as external (Daniel's own edits, a formatter's, a lockfile's), as a number only. A running turn's end tree is taken on demand. The ended turn's trees are kept under `refs/plotkeeper/turns/` so `git gc` does not prune its hunks. An agent that reports no trees (agy) has none, by its capability `turn_trees`.
+
 **Intention**:
 The latest thing the agent wrote in its own words during a turn, such as why it is about to read an issue. It stays shown, with its age, until the agent writes again, so it covers the steps that follow it. While a turn runs, its intentions are the last line of each of its responses. When the turn ends, its final response's intention becomes that response's first line, which says what the agent did, so a footer a plugin adds is never the intention. A side question ("ask about this") gets these intentions as context.
 _Avoid_: Reason (the card writer's account of a step)

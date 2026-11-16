@@ -1,0 +1,132 @@
+//! The git calls on a turn's trees (danielrispler/plotkeeper#111): the hook records a tree of each
+//! worktree a turn touches, at its start and end, and these read them.
+//!
+//! - `numstat`: the line counts of the files that differ between two trees. A rename is one row; a
+//!   binary file has no counts.
+//! - `hunk`: one file's diff between two trees, which file rows, cards and the diff pane reuse.
+//! - `anchor`: a ref under `refs/plotkeeper/turns/` on each tree of an ended turn. The hook's trees
+//!   are loose, unreferenced objects, which `git gc` prunes after two weeks (at once with
+//!   `--prune=now`); a ref keeps the tree and every blob it holds, so a turn's hunks stay readable.
+
+use crate::fingerprint::git;
+use std::path::Path;
+use studio_core::{Numstat, RootDiff, TurnDiff};
+
+/// The refs' namespace.
+const REFS: &str = "refs/plotkeeper/turns";
+
+/// The files that differ between trees `start` and `end` of the worktree at `root`, with their
+/// line counts; `None` when `git` fails, such as for a tree that was pruned.
+pub fn numstat(root: &Path, start: &str, end: &str) -> Option<Vec<Numstat>> {
+    let args = ["diff", "--numstat", "-z", "-M", "--no-ext-diff", start, end];
+    let out = String::from_utf8(git(root, &args)?).ok()?;
+    Some(parse(&out))
+}
+
+/// Parses `--numstat -z`: `added TAB removed TAB path NUL`, and for a rename an empty path, then
+/// the old path and the new one, each ending in NUL.
+fn parse(out: &str) -> Vec<Numstat> {
+    let mut fields = out.split('\0').filter(|f| !f.is_empty());
+    let mut files = Vec::new();
+    while let Some(record) = fields.next() {
+        let mut parts = record.splitn(3, '\t');
+        let (Some(added), Some(removed), Some(path)) = (parts.next(), parts.next(), parts.next())
+        else {
+            continue;
+        };
+        let (added, removed) = (added.parse().ok(), removed.parse().ok());
+        let (path, from) = match path {
+            "" => match (fields.next(), fields.next()) {
+                (Some(from), Some(to)) => (to.to_owned(), Some(from.to_owned())),
+                _ => continue,
+            },
+            path => (path.to_owned(), None),
+        };
+        files.push(Numstat {
+            path,
+            from,
+            added,
+            removed,
+        });
+    }
+    files
+}
+
+/// `path`'s diff between trees `start` and `end`, as `git diff` shows it; `from` is a renamed
+/// file's old path. `None` when `git` fails; empty when the file is the same in both.
+pub fn hunk(root: &Path, start: &str, end: &str, path: &str, from: Option<&str>) -> Option<String> {
+    let mut args = vec![
+        "diff",
+        "-M",
+        "--no-ext-diff",
+        "--no-color",
+        start,
+        end,
+        "--",
+    ];
+    args.extend(from);
+    args.push(path);
+    String::from_utf8(git(root, &args)?).ok()
+}
+
+/// Keeps `tree` of the worktree at `root` from `git gc`, under `session`'s turn `turn`; `side` is
+/// `start` or `end`.
+pub fn anchor(root: &Path, session: &str, turn: usize, side: &str, tree: &str) -> Option<()> {
+    let name = format!("{REFS}/{session}/{turn}/{:08x}-{side}", hash(root));
+    git(root, &["update-ref", &name, tree]).map(drop)
+}
+
+/// FNV-1a of a worktree's root, so that worktrees of one repository, which share its refs, each
+/// get their own.
+fn hash(root: &Path) -> u32 {
+    let bytes = root.as_os_str().as_encoded_bytes();
+    bytes.iter().fold(0x811c_9dc5, |h, b| {
+        (h ^ u32::from(*b)).wrapping_mul(0x0100_0193)
+    })
+}
+
+/// The numstat of each worktree `ask` names, for the core's `set_turn_files`: `None` when none
+/// could be diffed. A running turn's end is the worktree's tree now. An ended turn's trees are
+/// anchored first, so they outlive `git gc`.
+pub fn turn_diffs(ask: &TurnDiff) -> Option<Vec<RootDiff>> {
+    let safe = studio_hook::answer::is_file_safe(&ask.session_id);
+    let diffs: Vec<RootDiff> = ask
+        .trees
+        .iter()
+        .filter_map(|trees| {
+            let root = Path::new(&trees.root);
+            let end = match &trees.end {
+                Some(end) => end.clone(),
+                None => studio_hook::record_tree(root)?.1,
+            };
+            if ask.ended && safe {
+                for (side, tree) in [("start", &trees.start), ("end", &end)] {
+                    anchor(root, &ask.session_id, ask.turn, side, tree);
+                }
+            }
+            let files = numstat(root, &trees.start, &end)?;
+            Some(RootDiff {
+                root: trees.root.clone(),
+                files,
+            })
+        })
+        .collect();
+    (!diffs.is_empty()).then_some(diffs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse;
+
+    #[test]
+    fn a_rename_is_one_row_and_a_binary_file_has_no_counts() {
+        let out = "3\t1\tsrc/a.rs\0-\t-\timg.png\0\
+                   0\t0\t\0old.rs\0new.rs\0";
+        let files = parse(out);
+        assert_eq!(files.len(), 3);
+        assert_eq!((files[0].added, files[0].removed), (Some(3), Some(1)));
+        assert_eq!((files[1].added, files[1].removed), (None, None));
+        assert_eq!(files[2].path, "new.rs");
+        assert_eq!(files[2].from.as_deref(), Some("old.rs"));
+    }
+}

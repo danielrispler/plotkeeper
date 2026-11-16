@@ -6,7 +6,7 @@
 
 const MIN = 60e3;
 
-const capabilities = { agent: "claude", asks: true, background_tasks: true, replies: true, permission_mode: true, durations: true, transcript_version: true };
+const capabilities = { agent: "claude", asks: true, background_tasks: true, replies: true, permission_mode: true, durations: true, transcript_version: true, turn_trees: true };
 const cwd = "/Users/danielrispler/work/plotkeeper/.claude/worktrees/issue-56-row-controls";
 
 const learning = (idea, text, options, key) => ({ idea, question: { text, options, key } });
@@ -126,6 +126,7 @@ const session = (state, { running = false, question = false } = {}) => {
     prompt,
     id: i < 4 || ended ? `t${i}` : null,
     message: "Done.",
+    files: null,
   }));
   const transcript = {
     intention: ended ? summaries.t4.summary.split("\n")[0] : intentions[state === "needs_you" ? "needs_you" : "running"],
