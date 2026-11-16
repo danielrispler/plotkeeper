@@ -69,6 +69,81 @@ pub fn hunk(root: &Path, start: &str, end: &str, path: &str, from: Option<&str>)
     String::from_utf8(git(root, &args)?).ok()
 }
 
+/// How many lines of a hunk the rail shows.
+const SHOWN: usize = 40;
+
+/// A file's hunk as the rail shows it: the first `SHOWN` lines of `git diff`, how many it left out, and where the
+/// first change is in the file's new text.
+#[derive(Debug, PartialEq, serde::Serialize)]
+pub struct Hunk {
+    pub text: String,
+    pub left_out: usize,
+    /// A binary file has a line saying so and no lines to show.
+    pub binary: bool,
+    /// The line of the first changed line in the new file; 1 when there is none.
+    pub first_line: u32,
+}
+
+/// Shapes a file's `git diff` for the rail.
+pub fn hunk_view(diff: &str) -> Hunk {
+    let lines: Vec<&str> = diff.lines().collect();
+    let binary = lines.iter().any(|l| l.starts_with("Binary files "));
+    if binary {
+        return Hunk {
+            text: String::new(),
+            left_out: 0,
+            binary,
+            first_line: 1,
+        };
+    }
+    Hunk {
+        text: lines
+            .iter()
+            .take(SHOWN)
+            .fold(String::new(), |t, l| t + l + "\n"),
+        left_out: lines.len().saturating_sub(SHOWN),
+        binary,
+        first_line: first_changed(&lines),
+    }
+}
+
+/// The new file's line of the first `+` or `-` line after the first `@@ -a,b +c,d @@`.
+fn first_changed(lines: &[&str]) -> u32 {
+    let Some(at) = lines.iter().position(|l| l.starts_with("@@")) else {
+        return 1;
+    };
+    let start = lines[at]
+        .split_whitespace()
+        .find_map(|f| f.strip_prefix('+'))
+        .and_then(|f| f.split(',').next())
+        .and_then(|n| n.parse::<u32>().ok())
+        .unwrap_or(1);
+    let context = lines[at + 1..]
+        .iter()
+        .take_while(|l| !l.starts_with(['+', '-']))
+        .count();
+    start.max(1) + context as u32
+}
+
+/// The hunk of `path` between a turn's trees: `end` is `None` while the turn runs, then the worktree's tree now.
+pub fn turn_hunk(
+    root: &Path,
+    start: &str,
+    end: Option<&str>,
+    path: &str,
+    from: Option<&str>,
+) -> Option<Hunk> {
+    let now;
+    let end = match end {
+        Some(end) => end,
+        None => {
+            now = studio_hook::record_tree(root)?.1;
+            &now
+        }
+    };
+    hunk(root, start, end, path, from).map(|diff| hunk_view(&diff))
+}
+
 /// Keeps `tree` of the worktree at `root` from `git gc`, under `session`'s turn `turn`; `side` is
 /// `start` or `end`.
 pub fn anchor(root: &Path, session: &str, turn: usize, side: &str, tree: &str) -> Option<()> {
@@ -130,7 +205,7 @@ pub fn add_hunks(ask: &TurnDiff, facts: &mut Facts) {
 
 #[cfg(test)]
 mod tests {
-    use super::parse;
+    use super::{hunk_view, parse};
 
     #[test]
     fn a_rename_is_one_row_and_a_binary_file_has_no_counts() {
@@ -142,5 +217,17 @@ mod tests {
         assert_eq!((files[1].added, files[1].removed), (None, None));
         assert_eq!(files[2].path, "new.rs");
         assert_eq!(files[2].from.as_deref(), Some("old.rs"));
+    }
+
+    #[test]
+    fn a_hunk_is_capped_and_knows_its_first_changed_line() {
+        let mut diff =
+            String::from("diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -9,3 +9,60 @@\n ctx\n ctx\n");
+        diff.push_str(&"+new\n".repeat(55));
+        let h = hunk_view(&diff);
+        assert_eq!(h.text.lines().count(), 40);
+        assert_eq!(h.left_out, 61 - 40);
+        assert_eq!(h.first_line, 11);
+        assert!(hunk_view("Binary files a/x and b/x differ\n").binary);
     }
 }

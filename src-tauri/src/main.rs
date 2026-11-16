@@ -28,8 +28,8 @@ use studio_core::{
 use studio_understanding::{
     AGY_FIXTURE_VERSION, AgyVersions, CardStore, CardWriter, ClaudeWriter, FakeWriter,
     Fingerprints, Rating, Row, SessionCards, StoredSummary, SummarySetup, Versions, add_hunks,
-    backfilled, fingerprint_changes, millis, turn_diffs, worktree_root, write_agent_summary,
-    write_brief, write_name, write_stop, write_summary,
+    backfilled, fingerprint_changes, millis, turn_diffs, turn_hunk, worktree_root,
+    write_agent_summary, write_brief, write_name, write_stop, write_summary,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
@@ -96,6 +96,27 @@ fn check_output(
     studio_core::check_output(&row, &log)
         .map(Some)
         .map_err(|e| e.to_string())
+}
+
+/// A file's hunk of turn `turn` (danielrispler/plotkeeper#114): `git diff` between the turn's two trees of worktree
+/// `root`, off the studio's lock. `None` when the turn has no trees there, or `git` cannot read them.
+#[tauri::command(async)]
+fn turn_file_hunk(
+    session: String,
+    turn: usize,
+    root: String,
+    path: String,
+    from: Option<String>,
+    studio: State<Mutex<Studio>>,
+) -> Option<studio_understanding::Hunk> {
+    let (start, end) = studio.lock().unwrap().turn_trees(&session, turn, &root)?;
+    turn_hunk(
+        std::path::Path::new(&root),
+        &start,
+        end.as_deref(),
+        &path,
+        from.as_deref(),
+    )
 }
 
 /// Daniel opened turn `id` (danielrispler/Falinks#526): its summary, written now when it waits for him, which takes
@@ -660,6 +681,7 @@ fn main() {
             summary_settings,
             check_lists,
             check_output,
+            turn_file_hunk,
             turn_summary,
             turn_reply,
             agent_summary,

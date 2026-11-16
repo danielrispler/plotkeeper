@@ -3036,6 +3036,22 @@ impl Studio {
             .collect()
     }
 
+    /// The trees the hook recorded of worktree `root` for turn `turn` of `session`: its start, and its end once the
+    /// turn ended (danielrispler/plotkeeper#114).
+    pub fn turn_trees(
+        &self,
+        session: &str,
+        turn: usize,
+        root: &str,
+    ) -> Option<(String, Option<String>)> {
+        self.session(session)?
+            .turns
+            .get(turn)?
+            .trees
+            .get(root)
+            .cloned()
+    }
+
     /// The turns whose files the shell should diff now, newest first, at most `limit`
     /// (danielrispler/plotkeeper#111): a running turn each 5 seconds, its end tree taken on demand,
     /// and an ended one of the last 7 days once, from the trees the hook recorded.
