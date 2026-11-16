@@ -105,7 +105,7 @@ fn ask_facts(
     session: String,
     anchor: studio_core::Anchor,
     studio: State<Mutex<Studio>>,
-) -> Result<Option<studio_core::Facts>, String> {
+) -> Result<Option<studio_core::AskFacts>, String> {
     let log = studio_hook::event_log(&std::env::home_dir().ok_or("no home folder")?);
     Ok(studio.lock().unwrap().ask_facts(&session, &anchor, &log))
 }

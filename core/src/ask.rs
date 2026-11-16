@@ -32,27 +32,27 @@ pub enum Anchor {
 
 /// One recorded fact: when it happened, in Unix milliseconds, when that is known.
 #[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct Fact {
+pub struct AskFact {
     pub at: Option<u64>,
     pub text: String,
 }
 
 /// Facts under a label.
 #[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct Section {
+pub struct AskSection {
     pub label: String,
-    pub facts: Vec<Fact>,
+    pub facts: Vec<AskFact>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
-pub struct Facts {
-    pub sections: Vec<Section>,
+pub struct AskFacts {
+    pub sections: Vec<AskSection>,
 }
 
-impl Facts {
-    fn add(&mut self, label: &str, facts: Vec<Fact>) {
+impl AskFacts {
+    fn add(&mut self, label: &str, facts: Vec<AskFact>) {
         if !facts.is_empty() {
-            self.sections.push(Section {
+            self.sections.push(AskSection {
                 label: label.into(),
                 facts,
             });
@@ -62,7 +62,7 @@ impl Facts {
     fn line(&mut self, label: &str, text: impl Into<String>) {
         self.add(
             label,
-            vec![Fact {
+            vec![AskFact {
                 at: None,
                 text: text.into(),
             }],
@@ -95,7 +95,7 @@ fn describe(row: &Row) -> String {
 impl Studio {
     /// The recorded facts of `anchor` in session `session`: from its ledger, and from the event log at `log` through the
     /// ledger's offsets. `None` when the session or the thing is not known.
-    pub fn ask_facts(&self, session: &str, anchor: &Anchor, log: &Path) -> Option<Facts> {
+    pub fn ask_facts(&self, session: &str, anchor: &Anchor, log: &Path) -> Option<AskFacts> {
         let session = self.session(session)?;
         let ledger = &session.ledger;
         let who = |agent: &Option<String>| match agent {
@@ -106,7 +106,7 @@ impl Studio {
                 .find(|a| &a.agent.id == id)
                 .map_or(id.clone(), |a| a.name.clone()),
         };
-        let mut facts = Facts::default();
+        let mut facts = AskFacts::default();
         match anchor {
             Anchor::File { turn, root, path } => {
                 let turn_ = session.turns.get(*turn)?;
@@ -121,7 +121,7 @@ impl Studio {
                     "Steps that edited it",
                     edited
                         .iter()
-                        .map(|r| Fact {
+                        .map(|r| AskFact {
                             at: r.started_at,
                             text: format!("{} by {}", r.tool, who(&r.agent)),
                         })
@@ -129,10 +129,10 @@ impl Studio {
                 );
                 if let Some(first) = edited.first() {
                     let at = rows.iter().position(|r| std::ptr::eq(*r, *first))?;
-                    let before: Vec<Fact> = rows[..at]
+                    let before: Vec<AskFact> = rows[..at]
                         .iter()
                         .filter(|r| r.agent == first.agent && !edits(r))
-                        .map(|r| Fact {
+                        .map(|r| AskFact {
                             at: r.started_at,
                             text: describe(r),
                         })
@@ -170,7 +170,7 @@ impl Studio {
                     "Its steps",
                     rows.iter()
                         .take(STEPS)
-                        .map(|r| Fact {
+                        .map(|r| AskFact {
                             at: r.started_at,
                             text: describe(r),
                         })
@@ -187,7 +187,7 @@ impl Studio {
                     "Files it changed",
                     files
                         .into_iter()
-                        .map(|f| Fact {
+                        .map(|f| AskFact {
                             at: None,
                             text: f.into(),
                         })
@@ -204,7 +204,7 @@ impl Studio {
                         files
                             .files
                             .iter()
-                            .map(|f| Fact {
+                            .map(|f| AskFact {
                                 at: None,
                                 text: format!(
                                     "{} +{} −{}",
@@ -221,7 +221,7 @@ impl Studio {
                     turn_
                         .checks
                         .iter()
-                        .map(|c| Fact {
+                        .map(|c| AskFact {
                             at: None,
                             text: format!("{} {:?}", c.suite, c.status).to_lowercase(),
                         })

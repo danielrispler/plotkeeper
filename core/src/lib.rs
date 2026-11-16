@@ -23,7 +23,7 @@ mod transcript;
 mod turn_files;
 mod work;
 pub use agy::{CAPABILITIES as AGY_CAPABILITIES, Drift as AgyDrift, DriftKind as AgyDriftKind};
-pub use ask::{Anchor, Fact, Facts, Section};
+pub use ask::{Anchor, AskFact, AskFacts, AskSection};
 pub(crate) use checks::is_check;
 pub use checks::{
     Check, CheckLists, Output as CheckOutput, Run as CheckRun, Status as CheckStatus,

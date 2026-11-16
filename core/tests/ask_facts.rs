@@ -102,7 +102,7 @@ fn session() -> (Studio, std::path::PathBuf, tempfile::TempDir) {
     (Studio::replayed(&lines), log, dir)
 }
 
-fn labels(facts: &studio_core::Facts) -> Vec<&str> {
+fn labels(facts: &studio_core::AskFacts) -> Vec<&str> {
     facts.sections.iter().map(|s| s.label.as_str()).collect()
 }
 
