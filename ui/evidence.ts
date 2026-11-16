@@ -104,7 +104,7 @@ const hunkText = (h: Hunk | null) =>
 
 // A file's row: its label, which opens the real hunk between the turn's two trees under it, with "Open in editor" at its
 // first changed line. Only this row changes.
-function fileRow(session: string, index: number, row: EvidenceRow): HTMLElement {
+export function fileRow(session: string, index: number, row: EvidenceRow): HTMLElement {
   const file = row.file!;
   const key = `${session} ${index} ${file.root} ${file.path}`;
   const item = document.createElement("li");

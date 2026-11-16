@@ -374,6 +374,8 @@ body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
 .rating .btn { font-size: var(--size); padding: var(--sp-1) var(--sp-4); margin: 0; }
 .card code { font-size: var(--size); background: var(--raised); padding: var(--sp-1) var(--sp-2); }
 .paths { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
+.card-files { list-style: none; padding: 0; margin: 0; }
+.card-files li:has(.evidence-hunk:not([hidden])) { flex-basis: 100%; }
 .card pre { font: var(--size)/1.6 var(--mono); background: var(--term-bg); color: var(--term-fg); border-radius: var(--radius);
             padding: var(--sp-4) var(--sp-5); margin: var(--sp-5) 0 0; overflow-x: auto; }
 .card h2 { font-size: var(--size); font-weight: 600; color: var(--muted); margin: var(--sp-5) 0 0; }

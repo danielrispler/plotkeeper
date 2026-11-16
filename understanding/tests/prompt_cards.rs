@@ -520,8 +520,10 @@ fn a_prompt_that_changes_nothing_makes_no_writer_call_and_one_that_commits_gets_
     shell.take("Stop", json!({}));
 
     assert_eq!(shell.writer.cards.borrow().len(), 1);
-    let renamed = "--- a/lib.rs\n+++ b/lib.rs\n@@ -1 +1 @@\n-fn a() {}\n+fn b() {}\n";
-    assert_eq!(shell.store.lock().unwrap().cards()[0].card.code, renamed);
+    // The fake writer names line 1 of `lib.rs`; this shell has no trees to pull it from (`card_code.rs`).
+    let card = shell.store.lock().unwrap().cards()[0].card.clone();
+    assert_eq!(card.ranges.len(), 1);
+    assert_eq!(card.code, "");
 }
 
 #[test]

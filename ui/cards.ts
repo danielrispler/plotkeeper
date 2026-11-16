@@ -6,8 +6,12 @@ import { code, element, prose, invoke, pressable, text } from "./dom.js";
 import { refreshCards } from "./selection.js";
 import { studio } from "./state.js";
 import { showDecisions } from "./decisions.js";
+import { fileRow } from "./evidence.js";
 import { drawFeed, forgetMissingSummaries } from "./story.js";
-import type { CardRequest, CheckResult, Guess, Level, Quiz, Rating, Reason, SessionCards, StoredCard } from "./types.js";
+import type { CardRequest, CheckResult, Guess, Level, Quiz, Rating, Reason, SessionCards, StoredCard, TurnFile } from "./types.js";
+
+// The turn a card is drawn in: its file chips open the file's hunk between the turn's trees, as its evidence line's rows do.
+export type CardTurn = { session: string; index: number; files: TurnFile[] };
 
 // Records Daniel's tap, his flag on the key or his rating, and draws the cards again at once.
 async function record(command: "guess" | "key_wrong" | "rate", args: Record<string, unknown>) {
@@ -84,7 +88,7 @@ function quizElements({ request: { id }, guess }: StoredCard, quiz: Quiz, state:
 // structural, why the change matters, what was not checked, his flag on the key, "explain more" and
 // his rating. A card with no quiz shows the explanation at once. The shell keeps each tap in the card
 // store, so after a restart a guessed card is drawn guessed and rated.
-function cardElement(stored: StoredCard): HTMLElement {
+function cardElement(stored: StoredCard, turn: CardTurn | null): HTMLElement {
   const { request, card, key_wrong, more, rating } = stored;
   const node = document.createElement("article");
   node.className = "card";
@@ -95,13 +99,14 @@ function cardElement(stored: StoredCard): HTMLElement {
   if (quiz && !state.answered) return node;
   const explanation = prose("p", card.explanation);
   explanation.className = "explanation";
-  const paths = document.createElement("p");
-  paths.className = "paths";
-  paths.append(...card.paths.map(code));
-  const source = document.createElement("pre");
-  source.dir = "ltr";
-  source.textContent = card.code;
-  node.append(explanation, paths, ...changedBy(request), source);
+  node.append(explanation, fileChips(card.paths, turn), ...changedBy(request));
+  // The code is pulled from git by path and line range; a card with none shows no code.
+  if (card.code) {
+    const source = document.createElement("pre");
+    source.dir = "ltr";
+    source.textContent = card.code;
+    node.append(source);
+  }
   if (card.architecture) node.append(prose("h2", "Architecture"), prose("p", card.architecture));
   node.append(
     prose("h2", "Why it matters"),
@@ -113,6 +118,25 @@ function cardElement(stored: StoredCard): HTMLElement {
   if (flaggable) node.append(keyWrongButton(request.id, key_wrong));
   node.append(moreElement(request.id, more), ratingElement(request.id, rating, flaggable ? key_wrong : null));
   return node;
+}
+
+// The files the card names. One that is among its turn's files is a chip that opens the same hunk as the file's row in the
+// evidence line, in place; any other is plain.
+function fileChips(paths: string[], turn: CardTurn | null): HTMLElement {
+  const list = document.createElement("ul");
+  list.className = "paths card-files";
+  list.append(
+    ...paths.map((path) => {
+      const file = turn?.files.find((f) => f.path === path);
+      if (!turn || !file) {
+        const item = document.createElement("li");
+        item.append(code(path));
+        return item;
+      }
+      return fileRow(turn.session, turn.index, { kind: "file", label: path, file });
+    }),
+  );
+  return list;
 }
 
 // Who changed what: the files another subagent, such as a helper, edited in the card's worktree, one
@@ -257,12 +281,12 @@ function showBrief(cards: SessionCards) {
 }
 
 // Card `stored`'s node, drawn again only when its record changed.
-export function cardNode(stored: StoredCard): HTMLElement {
+export function cardNode(stored: StoredCard, turn: CardTurn | null = null): HTMLElement {
   const id = stored.request.id;
-  const record = JSON.stringify(stored);
+  const record = JSON.stringify([stored, turn]);
   if (drawn.get(id)?.record !== record) {
     if (!drawn.has(id) && stored.guess === null) unshown.add(id);
-    drawn.set(id, { record, node: cardElement(stored) });
+    drawn.set(id, { record, node: cardElement(stored, turn) });
   }
   return drawn.get(id)!.node;
 }
@@ -287,14 +311,14 @@ export function showCards(cards: SessionCards) {
 export const quizOpen = (stored: StoredCard) => stored.card.quiz !== null && !quizState(stored).answered;
 
 // A card in its turn (danielrispler/plotkeeper#117): an answered card is one line, its quiz, which opens to the card.
-export function cardLine(stored: StoredCard): HTMLElement {
+export function cardLine(stored: StoredCard, turn: CardTurn | null = null): HTMLElement {
   const quiz = stored.card.quiz;
-  if (!quiz || !quizState(stored).answered) return cardNode(stored);
+  if (!quiz || !quizState(stored).answered) return cardNode(stored, turn);
   const id = stored.request.id;
   const node = document.createElement("details");
   node.className = "fold answered-card";
   node.open = cardOpen.has(id);
-  node.append(prose("summary", quiz.text), cardNode(stored));
+  node.append(prose("summary", quiz.text), cardNode(stored, turn));
   node.addEventListener("toggle", () => {
     if (node.open) cardOpen.add(id);
     else cardOpen.delete(id);

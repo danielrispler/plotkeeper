@@ -26,6 +26,7 @@ fn record(days: u64, shown: Option<u64>, answered: Option<(u64, bool)>) -> Store
             explanation: "כי.".into(),
             paths: Vec::new(),
             code: String::new(),
+            ranges: Vec::new(),
             why_it_matters: String::new(),
             not_checked: String::new(),
             architecture: None,
