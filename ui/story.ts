@@ -43,8 +43,9 @@ export function showView(selected: Selection | null) {
   element("empty").hidden = selected !== null;
   element("view").hidden = selected === null;
   element("rail-more").hidden = selected === null;
+  element("session-header").hidden = selected === null;
   if (selected === null) {
-    for (const id of ["state", "block", "mode", "mark", "session-name", "phase"]) element(id).textContent = "";
+    for (const id of ["state", "block", "mode", "mark", "session-name", "phase", "bar-state", "bar-name"]) element(id).textContent = "";
     showQuestions([]);
     showCleared([]);
     return;
@@ -65,6 +66,11 @@ export function showView(selected: Selection | null) {
   element("mode").textContent = reports(session, "permission_mode") ? modeText(session.permission_mode) : "";
   element("mark").textContent = agentMark(session);
   element("session-name").textContent = sessionName(session);
+  // The top bar's header (danielrispler/plotkeeper#127) says the same state and name.
+  element("bar-state").textContent = element("state").textContent;
+  element("bar-state").dataset.state = state;
+  element("bar-dot").dataset.state = state;
+  element("bar-name").textContent = sessionName(session);
   element("phase").textContent = agent === null && state === "running" ? estimateText(session.work) : "";
   // The model and effort the session runs at (danielrispler/Falinks#517, decision 8); none for a subagent, whose transcript the studio does not read.
   const effort = session.transcript.effort;
