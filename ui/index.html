@@ -70,7 +70,11 @@
            the phase (danielrispler/Falinks#475); the times (danielrispler/Falinks#473) and the model show on hover. Rename, Close and Delete
            wait in the "⋯" menu. -->
       <div class="rail-h">
-        <p id="headline" class="headline"><span id="state" class="state"></span> <span id="mode" class="mode"></span> <span id="model" class="model"></span> <span id="phase" class="phase"></span></p>
+        <div id="headline" class="headline">
+          <p class="line-1"><span id="state" class="state"></span> <span id="block" class="block"></span> <span id="mode" class="mode"></span> <span id="mark" class="mark"></span></p>
+          <p id="session-name" class="session-name"></p>
+          <p id="phase" class="phase"></p>
+        </div>
         <button id="rail-more" class="btn small" type="button" popovertarget="rail-actions" aria-label="More actions" hidden>⋯</button>
         <div id="rail-actions" class="menu" popover>
           <!-- An ended session opens again with `claude --resume` (danielrispler/Falinks#467). -->
@@ -91,17 +95,16 @@
         <p id="notice" role="status" hidden></p>
         <p id="empty" class="empty">Pick a session in the list.</p>
         <section id="view" hidden>
-          <!-- Else the newest card (danielrispler/Falinks#574). -->
-          <section id="now-card"></section>
+          <!-- While running: what Daniel asked. At your turn it is in the newest turn's block (danielrispler/plotkeeper#116). -->
+          <section id="now-asked"></section>
           <!-- The intention, boxed as the anchor (mockup C), and the step line (danielrispler/Falinks#472). -->
           <div id="intention" class="intention">
+            <p id="intention-label" class="label" hidden>Why it asks</p>
             <p><span id="intention-text"></span> <span id="intention-age" class="age"></span></p>
             <details id="unavailable" class="unavailable" hidden><summary>Steps only</summary><span id="unavailable-why"></span></details>
             <details id="step" class="step"><summary><span id="tool" class="tool-name"></span> <span id="detail"></span></summary><code id="command"></code></details>
           </div>
-          <!-- The latest turn's summary (danielrispler/Falinks#526). -->
-          <section id="now-summary"></section>
-          <!-- The feed of turns, newest first: each with its prompt, summary, learning question, cards,
+          <!-- The feed of turns, newest first, the first being "now" at your turn: each with its prompt, Headline, learning question, cards,
                subagents (danielrispler/Falinks#535), checks and folded response. -->
           <ol id="feed" class="feed"></ol>
           <details id="brief-fold" class="decisions" hidden><summary>Brief</summary><section id="brief" class="brief"></section></details>

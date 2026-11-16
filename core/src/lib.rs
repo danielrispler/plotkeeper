@@ -2557,7 +2557,6 @@ impl Studio {
                             turn.responses.push(reply.into());
                         }
                         turn.ended = true;
-                        turn.summary = None;
                         let daniels = session.prompts.iter().rfind(|p| p.sender.is_daniels());
                         outputs.push(Output::Summary(SummaryRequest {
                             session_id: session.agent.id.clone(),
@@ -3350,22 +3349,6 @@ impl Studio {
 
     pub fn summaries_on_open(&self) -> bool {
         self.summaries_on_open
-    }
-
-    /// The summary of turn `id` of session `session_id` arrived, whose first line is `line`: its
-    /// turn-end intention switches to it once (danielrispler/Falinks#517, decision 16). Nothing changes when summaries
-    /// are written on open, or when the session has moved past that turn. Returns whether it did.
-    pub fn summarized(&mut self, session_id: &str, id: &str, line: &str) -> bool {
-        let Some(session) = self.sessions.get_mut(session_id) else {
-            return false;
-        };
-        let current = session.stopped.as_ref().is_some_and(|s| s.card == id);
-        if self.summaries_on_open || !current || session.in_turn() {
-            return false;
-        }
-        session.transcript.summary = Some(line.into());
-        session.transcript.end(true);
-        true
     }
 
     /// The whole final reply of turn `index` of session `session_id` (danielrispler/Falinks#574), which the rail shows

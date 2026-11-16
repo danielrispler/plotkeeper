@@ -11,7 +11,7 @@ const cwd = "/Users/danielrispler/work/plotkeeper/.claude/worktrees/issue-56-row
 
 const learning = (idea, text, options, key) => ({ idea, question: { text, options, key } });
 
-// What each turn's summary says; its first line is what the real core turns into the turn-end intention.
+// What each turn's summary says; its first line is the turn's Headline (the turn-end intention is the final response's first line).
 const summaries = {
   t4: {
     summary:
@@ -128,7 +128,7 @@ const session = (state, { running = false, question = false } = {}) => {
     message: "Done.",
   }));
   const transcript = {
-    intention: ended ? summaries.t4.summary.split("\n")[0] : intentions[state === "needs_you" ? "needs_you" : "running"],
+    intention: ended ? final.split("\n")[0] : intentions[state === "needs_you" ? "needs_you" : "running"],
     steps_ago: ended || state === "needs_you" ? 0 : 7,
     responses: ended ? ["I'll run the full check first.", final] : ["I'll look at how the row lays out its controls."],
     unavailable: null,

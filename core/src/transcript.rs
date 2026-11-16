@@ -20,7 +20,8 @@ use std::{
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Transcript {
     /// The intention: the last line of the agent's latest text while the turn runs, its first line
-    /// once the turn ended (danielrispler/Falinks#517, decision 16), so a plugin's footer is never the intention.
+    /// once the turn ended, so a plugin's footer is never the intention. The rail shows it only
+    /// while the session runs or needs Daniel.
     pub intention: Option<String>,
     /// The steps (tool calls) the agent made since that text.
     pub steps_ago: usize,
@@ -39,8 +40,6 @@ pub struct Transcript {
     /// The session's effort, from its latest line that carries one (danielrispler/Falinks#517, decision 8); kept across
     /// turns.
     pub effort: Option<String>,
-    /// The first line of the turn's summary, once it arrived (danielrispler/Falinks#526): the turn-end intention then.
-    pub summary: Option<String>,
     /// Whether the session's turn has ended, which the core sets from its hooks; kept across turns.
     #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     pub ended: bool,
@@ -187,28 +186,22 @@ impl Transcript {
     }
 
     /// The turn's intentions, one per response, oldest first: each its last line, but the final
-    /// response's first line once the turn ended, or its summary's when it has one.
+    /// response's first line once the turn ended.
     pub fn intentions(&self) -> Vec<String> {
         let last = self.responses.len().saturating_sub(1);
         let lines = self.responses.iter().enumerate();
         lines
-            .filter_map(|(i, text)| match &self.summary {
-                Some(summary) if self.ended && i == last => Some(summary.as_str()),
-                _ => line_of(text, self.ended && i == last),
-            })
+            .filter_map(|(i, text)| line_of(text, self.ended && i == last))
             .map(Into::into)
             .collect()
     }
 
-    /// Notes whether the session's turn has `ended`, which picks the latest response's line, or
-    /// the summary's once the turn ended with one (danielrispler/Falinks#517, decision 16).
+    /// Notes whether the session's turn has `ended`, which picks the latest response's line. The
+    /// summary never replaces it (danielrispler/plotkeeper#116).
     pub(crate) fn end(&mut self, ended: bool) {
         self.ended = ended;
         if let Some(text) = self.responses.last() {
-            self.intention = match &self.summary {
-                Some(summary) if ended => Some(summary.clone()),
-                _ => line_of(text, ended).map(Into::into),
-            };
+            self.intention = line_of(text, ended).map(Into::into);
         }
     }
 
