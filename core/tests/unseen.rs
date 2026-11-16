@@ -347,6 +347,10 @@ mod since {
         let mut studio = replayed();
         studio.select(ID);
         assert_eq!(studio.see_selected(true), Some((ID.into(), 3)));
+        // Looking marked the turns seen, but "since you looked" counts from before this selection.
+        assert_eq!(studio.session(ID).unwrap().since().turns, 3);
+        // Selected again, nothing is new.
+        studio.select(ID);
         assert_eq!(studio.session(ID).unwrap().since().turns, 0);
         // Marked unseen again, the last turn is what he has not seen.
         assert_eq!(studio.mark_unseen(ID), Some((ID.into(), 2)));
@@ -364,5 +368,7 @@ mod since {
         studio.see_selected(true);
         let state = serde_json::to_value(studio.session(ID).unwrap()).unwrap();
         assert_eq!(state["seen"], 3);
+        // The banner reads what happened since before the selection, not after the poll saw it.
+        assert_eq!(state["since"]["turns"], 3);
     }
 }

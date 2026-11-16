@@ -168,7 +168,11 @@ export type Session = {
   unseen?: boolean;
   // How many of its turns Daniel has seen (danielrispler/plotkeeper#124).
   seen: number;
+  // What happened after the turns he had seen when he selected it, from the core's `Session::since`: the banner's count.
+  since: Since;
 };
+// What happened in a session since Daniel looked (danielrispler/plotkeeper#124).
+export type Since = { turns: number; files: number; passed: number; failed: number; ran: number };
 // The shell sends a card's request without its diff and base, which the pane never reads. `agent`
 // is the worker whose card it is; `changed_by` holds the files other subagents edited in its
 // worktree, by subagent. `check` is the command of the check whose start requested the card (danielrispler/Falinks#476).

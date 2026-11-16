@@ -231,6 +231,13 @@ pub struct Session {
     /// "Where we were" banner counts what happened after them (danielrispler/plotkeeper#124).
     #[serde(default)]
     seen: usize,
+    /// How many it had seen when Daniel selected it: the point "Since you looked" counts from, which the poll's looking
+    /// at the rail does not move (danielrispler/plotkeeper#124).
+    #[serde(default)]
+    seen_at_selection: usize,
+    /// What happened after `seen_at_selection`, kept up to date by `update_unseen` for the banner.
+    #[serde(default)]
+    since: SinceSeen,
     /// The ids of its background tasks, commands included, from their responses and `Stop`'s
     /// `background_tasks`. With its subagents' ids, they are the task ids a wake-up can name.
     #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
@@ -791,7 +798,7 @@ pub enum Kind {
 
 /// What happened in a session since Daniel looked: its turns after the last he saw, the files they changed and how
 /// their checks ended (danielrispler/plotkeeper#124).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SinceSeen {
     pub turns: usize,
     /// Distinct files, by worktree and path.
@@ -807,9 +814,13 @@ impl Session {
         self.seen
     }
 
-    /// What its turns after the last one Daniel saw did.
+    /// What its turns after the last one Daniel saw before he selected it did.
     pub fn since(&self) -> SinceSeen {
-        let turns = &self.turns[self.seen.min(self.turns.len())..];
+        self.since
+    }
+
+    fn count_since(&self) -> SinceSeen {
+        let turns = &self.turns[self.seen_at_selection.min(self.turns.len())..];
         let files: BTreeSet<(&str, &str)> = turns
             .iter()
             .filter_map(|turn| turn.files.as_ref())
@@ -836,6 +847,7 @@ impl Session {
         // Going idle keeps the mark: only Daniel seeing the session clears it (danielrispler/Falinks#556).
         self.unseen =
             matches!(self.state, State::YourTurn | State::Idle) && self.turns.len() > self.seen;
+        self.since = self.count_since();
     }
 
     /// Its subagent `id`, at any depth.
@@ -3261,6 +3273,7 @@ impl Studio {
         if let Some(turn) = session.turns.get_mut(ask.turn) {
             turn.files = diffs.map(|diffs| TurnFiles::of(diffs, &edited));
         }
+        session.update_unseen();
     }
 
     /// Applies, after the replay, what the live app learned before a restart (danielrispler/Falinks#434, decisions 37 and
@@ -3647,6 +3660,7 @@ impl Studio {
             for turn in 0..session.turns.len() {
                 session.turns[turn].checks = checks::of_turn(&session.ledger, turn, list);
             }
+            session.update_unseen();
         }
     }
 
@@ -3849,6 +3863,11 @@ impl Studio {
     /// (`select_terminal`) change the selection.
     pub fn select(&mut self, id: &str) {
         self.selected = Some(id.into());
+        let id = self.rows.get(id).map_or(id, String::as_str);
+        if let Some(session) = self.sessions.get_mut(id) {
+            session.seen_at_selection = session.seen;
+            session.update_unseen();
+        }
         self.viewed = None;
         self.awaiting = None;
         self.held = None;
@@ -3882,6 +3901,7 @@ impl Studio {
         let id = self.session(id)?.agent.id.clone();
         let session = self.sessions.get_mut(&id)?;
         session.seen = session.turns.len().saturating_sub(1);
+        session.seen_at_selection = session.seen;
         session.update_unseen();
         self.held = Some(id.clone());
         Some((id, session.seen))
