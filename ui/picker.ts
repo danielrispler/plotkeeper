@@ -83,8 +83,8 @@ export function newTask(
 }
 
 // The quick start: a task named after an issue, a spec or a prompt, whose session starts on it, or,
-// empty, the main checkout.
-// It creates in `project`, the one the picker opened on, never the one selected by the time Daniel submits.
+// empty, the main checkout. It creates in `project`, the one the picker opened on, never the one
+// selected by the time Daniel submits.
 export const quickTask = (project: string, main: Workspace, request: string, create: typeof invoke = invoke): Promise<Workspace> =>
   request ? create<Workspace>("create_named_task", { project, request }) : Promise.resolve(main);
 const quickStart = (project: string, main: Workspace, start: Start) =>

@@ -98,3 +98,16 @@ fn a_start_in_another_live_terminal_moves_the_session() {
     studio.apply(&event("SessionStart", 2_000, Some("claude-b"), resume));
     assert_eq!(terminal(&studio).as_deref(), Some("claude-b"));
 }
+
+#[test]
+fn before_the_first_terminal_list_a_second_terminals_event_does_not_move_the_session() {
+    let mut studio = started("claude-a");
+    for (i, who) in ["claude-b", "claude-a", "claude-b"].into_iter().enumerate() {
+        studio.replay(&tool(2_000 + i as u64, Some(who)));
+        assert_eq!(
+            terminal(&studio).as_deref(),
+            Some("claude-a"),
+            "after event {i}"
+        );
+    }
+}

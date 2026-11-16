@@ -2256,12 +2256,15 @@ impl Studio {
         // Every event of a studio-run `claude` carries its terminal, so a resume elsewhere moves it
         // (#101): a start does, and so does an event from a terminal once the session's own is gone.
         // An event with no terminal, or from a second live terminal of the conversation, leaves the
-        // link as it is, so the pane neither loses a running terminal nor flips between two.
+        // link as it is, so the pane neither loses a running terminal nor flips between two. Before the
+        // first terminal list nothing is known to be dead, so only a start or no link moves it.
         let moves = match (&event.studio_terminal_id, &session.terminal) {
             (_, None) => true,
             (None, Some(_)) => event.session_starts(),
             (Some(new), Some(own)) => {
-                new == own || event.session_starts() || !self.live_terminals.contains(own)
+                new == own
+                    || event.session_starts()
+                    || (self.listed && !self.live_terminals.contains(own))
             }
         };
         if moves {

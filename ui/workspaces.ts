@@ -359,6 +359,19 @@ function touchShown() {
   for (const [project, found] of read) if (projectOpen(project)) for (const workspace of allWorkspaces(found)) touch(project, workspace.path);
 }
 
+// The configured projects; a failed read is shown in the sidebar until a read succeeds, and gives null.
+async function readProjects(): Promise<string[] | null> {
+  try {
+    const paths = await projects();
+    projectsFailure = null;
+    return paths;
+  } catch (e) {
+    projectsFailure = String(e);
+    drawSidebar();
+    return null;
+  }
+}
+
 // Reads the workspaces of every project from git. At most one read at a time and, unless `now`, one per 10 s, as the list
 // redraws on every hook event. A `now` during a read is not dropped: the read after it sees the
 // change, such as a new task.
@@ -371,15 +384,10 @@ export async function readWorkspaces(now = false) {
   reading = true;
   readAt = Date.now();
   try {
-    let paths: string[];
-    try {
-      paths = await projects();
-      projectsFailure = null;
-    } catch (e) {
-      // Shown in the sidebar; the next read tries again, not 10 s later.
-      projectsFailure = String(e);
+    const paths = await readProjects();
+    if (!paths) {
+      // The next read tries again, not 10 s later.
       readAt = 0;
-      drawSidebar();
       return;
     }
     pruneRemoved();
@@ -453,14 +461,8 @@ export async function fetchNow() {
   if (fetching) return;
   fetching = true;
   try {
-    let paths: string[];
-    try {
-      paths = await projects();
-    } catch (e) {
-      projectsFailure = String(e);
-      drawSidebar();
-      return;
-    }
+    const paths = await readProjects();
+    if (!paths) return;
     await Promise.all(
       paths.map(async (project) => {
         try {
