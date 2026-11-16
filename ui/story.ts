@@ -5,7 +5,7 @@
 // checks and folded response, and one "ask about this". A subagent's view shows its own line,
 // questions, brief and cards in one block.
 
-import { modelLine, reports } from "./capabilities.js";
+import { agentMark, modelLine, reports } from "./capabilities.js";
 import { age, code, element, invoke, pressable, prose, text } from "./dom.js";
 import { select } from "./selection.js";
 import { askElement } from "./ask.js";
@@ -13,7 +13,7 @@ import { rendered } from "./markdown.js";
 import { encode, request } from "./daemon.js";
 import { agentState, sessionName, showsLanded } from "./list.js";
 import { closePane, openHere } from "./panes.js";
-import { openDecision } from "./answer.js";
+import { openDecision, type Ask } from "./answer.js";
 import { cardNode } from "./cards.js";
 import { showCleared } from "./decisions.js";
 import { decisionElement, questionElement } from "./questions.js";
@@ -23,12 +23,15 @@ import { studio } from "./state.js";
 import { typeInto } from "./typing.js";
 import { repositoryOfWorktree } from "./workspaces.js";
 import {
+  askKind,
   stateLabels,
+  type AskKind,
   type CheckLine,
   type Losses,
   type Workspaces,
   type Question,
   type Selection,
+  type SessionState,
   type Session,
   type StoredCard,
   type Subagent,
@@ -41,10 +44,7 @@ export function showView(selected: Selection | null) {
   element("view").hidden = selected === null;
   element("rail-more").hidden = selected === null;
   if (selected === null) {
-    element("state").textContent = "";
-    element("phase").textContent = "";
-    element("mode").textContent = "";
-    element("model").textContent = "";
+    for (const id of ["state", "block", "mode", "mark", "session-name", "phase"]) element(id).textContent = "";
     showQuestions([]);
     showCleared([]);
     return;
@@ -54,18 +54,21 @@ export function showView(selected: Selection | null) {
   const [label, state] = agent === null ? [stateLabels[session.state], session.state] : agentState(session, agent);
   const step = (agent ?? session).last_step;
   const stepSpan = (agent ?? session).step_span;
-  // One line: the verdict and the phase; the times and the model show on hover, counted at the hover.
-  // A landed task's session at your turn, idle or ended says so in words (#53, Landed).
+  // Line 1: the verdict, the kind of block when the session needs Daniel, the permission mode and the agent's
+  // mark. Line 2: the session's name. Line 3, only while it runs: the estimate. The times and the model show on hover,
+  // counted at the hover. A landed task's session at your turn, idle or ended says so in words (#53, Landed).
   element("state").textContent = agent === null && showsLanded(state, session.landed) ? "Landed" : label;
   element("state").dataset.state = state;
-  element("phase").textContent = agent === null ? estimateText(session.work) : "";
+  const open = session.questions.filter((question) => question.agent === (agent?.id ?? null));
+  element("block").textContent = (state === "needs_you" ? blockKind(open, openDecision()) : null) ?? "";
   // A subagent runs in its session's mode.
   element("mode").textContent = reports(session, "permission_mode") ? modeText(session.permission_mode) : "";
-  // The session's model, by its agent's mark; none for a subagent or a status-only row.
-  element("model").textContent = agent === null ? modelLine(session) : "";
+  element("mark").textContent = agentMark(session);
+  element("session-name").textContent = sessionName(session);
+  element("phase").textContent = agent === null && state === "running" ? estimateText(session.work) : "";
   // The model and effort the session runs at (danielrispler/Falinks#517, decision 8); none for a subagent, whose transcript the studio does not read.
-  const { model, effort } = session.transcript;
-  const runsAt = agent === null ? [model, effort && `effort ${effort}`].filter(Boolean).join(" · ") : "";
+  const effort = session.transcript.effort;
+  const runsAt = agent === null ? [modelLine(session), effort && `effort ${effort}`].filter(Boolean).join(" · ") : "";
   element("headline").onmouseenter = () => {
     const now = Date.now();
     element("headline").title = [...times(session, stepSpan).map(([, draw]) => draw(now)), runsAt].filter(Boolean).join(" · ");
@@ -176,6 +179,37 @@ function historyElement(session: string, entry: HistoryEntry): HTMLElement {
   return item;
 }
 
+// The kind of block a session needs Daniel for: a question, else a plan or permission by its tool; null when
+// none is open.
+export function blockKind(questions: Pick<Question, "answer">[], decision: Pick<Ask, "tool_name"> | null): AskKind | null {
+  if (decision) return askKind(decision.tool_name);
+  return questions.some((question) => question.answer === "open") ? "question" : null;
+}
+
+// A turn's Headline and Body lines, adapted from its stored summary (danielrispler/plotkeeper#116): the summary's first
+// line is the Headline and the rest are `reported` lines. Until the summary arrives, and for a turn with none, the
+// Headline is the first line of the final response.
+export type BodyLine = { kind: "reported"; text: string };
+export function headlineOf(summary: TurnSummary | null, message: string | null): { headline: string | null; body: BodyLine[] } {
+  const lines = (summary?.summary.summary ?? "").split("\n").map((line) => line.trim()).filter(Boolean);
+  if (lines.length) return { headline: lines[0], body: lines.slice(1).map((text) => ({ kind: "reported", text })) };
+  return { headline: message?.trim() || null, body: [] };
+}
+
+// What "now" holds in each state: one thing per state. While running, what Daniel asked and the intention, boxed.
+// At your turn (and idle or ended), what he asked, the Headline, the Body lines and the full response, with no
+// intention box. When the session needs him, the intention small as "why it asks", and the turn's facts so far.
+export type Now = { asked: string | null; intention: "box" | "why" | null; headline: string | null; body: BodyLine[]; soFar: boolean; fullResponse: boolean };
+export function nowOf(
+  state: SessionState,
+  turn: { prompt: string; message: string | null },
+  summary: TurnSummary | null,
+): Now {
+  if (state === "running") return { asked: turn.prompt, intention: "box", headline: null, body: [], soFar: false, fullResponse: false };
+  if (state === "needs_you") return { asked: null, intention: "why", headline: null, body: [], soFar: true, fullResponse: false };
+  return { asked: turn.prompt, intention: null, ...headlineOf(summary, turn.message), soFar: false, fullResponse: true };
+}
+
 // After this many steps the intention dims, as it may no longer say what the agent does (danielrispler/Falinks#472).
 const FRESH_STEPS = 5;
 
@@ -194,12 +228,11 @@ function showIntention(story: Session["transcript"] | null) {
 // another agent's status-only row (danielrispler/Falinks#560).
 export const storyOf = (session: Session, agent: unknown) => (agent === null && !session.status_only ? session.transcript : null);
 
-// What the rail draws for `selected`: "now"'s card and latest turn, and the feed. A status-only row
+// What the rail draws for `selected`: its latest turn, which "now" tells, and the feed. Every card is inside its turn. A status-only row
 // (danielrispler/Falinks#560) has no turns or cards to show.
-export function railOf({ session, agent }: Selection, docked: boolean, all: StoredCard[]) {
-  if (session.status_only) return { top: null, latest: null, blocks: [] };
-  const top = railTop(docked, all);
-  const cards = all.filter((card) => card !== top);
+export function railOf({ session, agent }: Selection, all: StoredCard[]) {
+  if (session.status_only) return { latest: null, blocks: [] };
+  const cards = all;
   const own = agent === null;
   const turns = own ? session.turns : [];
   const blocks = feedTurns(turns, {
@@ -209,7 +242,7 @@ export function railOf({ session, agent }: Selection, docked: boolean, all: Stor
     agents: own ? session.agents : [],
     questions: session.questions.filter((question) => question.agent === agent),
   });
-  return { top, latest: own ? (turns.at(-1) ?? null) : null, blocks };
+  return { latest: own ? (turns.at(-1) ?? null) : null, blocks };
 }
 
 // When the event card `id` was written at: the part after its `@`, in Unix ms (the core's `card_time`).
@@ -256,12 +289,6 @@ export function feedTurns(
   const rest = blocks.pop()!;
   const empty = !rest.cards.length && !rest.checks.length && !rest.agents.length && !rest.questions.length;
   return [...blocks.reverse(), ...(empty ? [] : [rest])];
-}
-
-// What the rail starts with: the open question, docked, when one is; else the newest card, which its
-// turn then leaves out. `cards` is oldest first.
-export function railTop(docked: boolean, cards: StoredCard[]): StoredCard | null {
-  return docked ? null : (cards.at(-1) ?? null);
 }
 
 // The turn summaries the store gave (danielrispler/Falinks#526), by turn id, null for a turn with none yet, and those
@@ -372,12 +399,16 @@ export function learningElement(id: string, learning: NonNullable<TurnSummary["s
   return folded(`${id} learning`, "Learning: one question", [box]);
 }
 
-// The latest turn's summary, at the top, and the newest card when no question is docked.
-function drawNow(session: Session | null, latest: Turn | null, top: StoredCard | null) {
-  const summary = latest?.id ? summaryOf(latest.id) : null;
-  const cwd = session?.cwd ?? null;
-  element("now-summary").replaceChildren(...(summary ? [rendered("div", summary.summary.summary, "summary", cwd)] : []));
-  element("now-card").replaceChildren(...(top ? [cardNode(top)] : []));
+// "Now" (danielrispler/plotkeeper#116): what the latest turn's state puts above the feed. While running, what Daniel asked;
+// the intention's box shows while running, small as "why it asks" when the session needs him, and not at all once
+// the turn ended. A subagent's view and a turn-less session keep the box.
+function drawNow(session: Session | null, latest: Turn | null): Now | null {
+  const now = session && latest ? nowOf(session.state, latest, latest.id ? summaryOf(latest.id) : null) : null;
+  const asked = now && session?.state === "running" ? [text("p", "You asked", "label"), text("p", latest?.prompt || "No prompt", "prompt")] : [];
+  element("now-asked").replaceChildren(...asked);
+  element("intention").hidden = now !== null && now.intention === null;
+  element("intention-label").hidden = now?.intention !== "why";
+  return now;
 }
 
 // A check line: its outcome, its command, and how long it took or, while it runs, its time against
@@ -391,25 +422,38 @@ function checkElement(line: CheckLine): HTMLElement {
 }
 
 // One block of the feed. The newest turn's summary is at the top, so its block leaves it out.
-function turnElement(session: Session, block: FeedTurn, newest: boolean): HTMLElement {
+function turnElement(session: Session, block: FeedTurn, now: Now | null): HTMLElement {
   const { turn, index } = block;
   const node = document.createElement("li");
-  node.className = "turn";
+  node.className = now ? "turn now-turn" : "turn";
   const key = `${session.id} ${index ?? "rest"}`;
-  if (turn) {
+  // While running, "now" holds what Daniel asked.
+  if (turn && !(now && session.state === "running")) {
     const prompt = text("p", turn.prompt || "No prompt", "prompt");
     prompt.title = turn.prompt;
-    node.append(prompt);
+    node.append(...(now?.asked ? [text("p", "You asked", "label")] : []), prompt);
   }
+  if (now?.soFar) node.append(text("p", "So far this turn", "label"));
   const summary = turn?.id ? summaryOf(turn.id) : null;
-  if (summary && !newest) node.append(rendered("div", summary.summary.summary, "summary", session.cwd));
+  if (now) {
+    if (now.headline) node.append(rendered("p", now.headline, "headline-text", session.cwd));
+    if (now.body.length) {
+      const list = document.createElement("ul");
+      list.className = "body-lines";
+      list.append(...now.body.map((line) => Object.assign(rendered("li", line.text, line.kind, session.cwd))));
+      node.append(list);
+    }
+  } else if (summary) node.append(rendered("div", summary.summary.summary, "summary", session.cwd));
   if (summary?.summary.learning && turn?.id) node.append(learningElement(turn.id, summary.summary.learning));
   node.append(...block.cards.map(cardNode));
   node.append(...block.questions.filter((q) => q.answer === "not_answered").map(questionElement));
   if (block.agents.length) {
     const list = document.createElement("ol");
     list.className = "subagents";
-    const entries = subagentHistory({ agents: block.agents, capabilities: session.capabilities }, agentSummaries);
+    // In the latest turn each is one line: its name, result and times.
+    const entries = subagentHistory({ agents: block.agents, capabilities: session.capabilities }, agentSummaries).map((e) =>
+      now ? { ...e, asked: "" } : e,
+    );
     list.append(...entries.map((entry) => historyElement(session.id, entry)));
     node.append(list);
   }
@@ -453,17 +497,16 @@ export function drawFeed() {
   const selected = studio.selection;
   const { recent, older } = studio.cards;
   const all = [...older, ...recent];
-  const docked = !element("dock").hidden;
   if (selected === null) {
-    drawNow(null, null, null);
+    drawNow(null, null);
     element("feed").replaceChildren();
     return;
   }
   const session = selected.session;
   const own = selected.agent === null;
-  const { top, latest, blocks } = railOf(selected, docked, all);
-  drawNow(session, latest, top);
-  element("feed").replaceChildren(...blocks.map((block, i) => turnElement(session, block, own && i === 0 && block.index !== null)));
+  const { latest, blocks } = railOf(selected, all);
+  const now = drawNow(session, latest);
+  element("feed").replaceChildren(...blocks.map((block, i) => turnElement(session, block, own && i === 0 && block.index !== null ? now : null)));
 }
 // Rename (danielrispler/Falinks#469): the row's name, kept in the event log, and `/rename` typed into the session while
 // its claude runs, so Claude Code shows the same name. An empty name gives the row its folder's again.

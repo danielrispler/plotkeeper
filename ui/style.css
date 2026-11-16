@@ -227,12 +227,17 @@ body[data-layout="overlay"] .rail { display: none; }
 body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; top: var(--bar); bottom: 0; left: 0;
                                                                 width: var(--rail); background: var(--chrome); box-shadow: var(--shadow-end); z-index: 5; }
 .rail-h { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-4) var(--sp-5); min-height: var(--sp-7); }
-/* The verdict and the phase on one line; the times and the model are its hover text. */
-.headline { flex: 1; min-width: 0; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Line 1 the verdict, the block's kind, the mode and the agent's mark; line 2 the session's name; line 3 the estimate while it
+   runs. They wrap, never cut; the times and the model are the hover text. */
+.headline { flex: 1; min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.headline p { margin: 0; }
+.line-1 { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2) var(--sp-4); }
+.session-name { font-weight: 500; }
+.block, .mark { color: var(--muted); font-size: var(--size-small); }
 .phase { color: var(--muted); font-size: var(--size-small); }
+.phase:empty { display: none; }
 /* The permission mode (danielrispler/Falinks#541): a safety fact, so it reads at a glance, before the phase. */
 .mode { font-size: var(--size-small); font-weight: 600; }
-.model { color: var(--muted); font-size: var(--size-small); }
 /* The "⋯" menu: Open, Rename, Close, Open all, Close all and Delete, under the button, over the story. */
 .menu { position: fixed; inset: auto; top: calc(var(--bar) + var(--sp-7) + var(--sp-5)); left: calc(var(--rail) - var(--menu) - var(--sp-5));
         width: var(--menu); margin: 0; border: 0; padding: var(--sp-3); background: var(--surface); color: var(--fg);
@@ -252,6 +257,13 @@ body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; to
 /* Colour only on "needs you" (danielrispler/Falinks#328, module 3; danielrispler/Falinks#565, decision 1): "your turn" stays as neutral as "running". */
 .state { font-size: var(--size); font-weight: 600; margin: 0 0 var(--sp-3); }
 .headline .state { margin: 0; }
+.label { margin: 0 0 var(--sp-2); color: var(--muted); font-size: var(--size-small); }
+.dock .question > .state { display: none; }
+#intention-label:not([hidden]) + p { font-size: var(--size); font-weight: 400; }
+.headline-text { margin: 0 0 var(--sp-3); font-size: var(--size-large); font-weight: 500; }
+.body-lines { margin: 0 0 var(--sp-4); padding-inline-start: var(--sp-5); }
+.now-turn .subagents button { flex-direction: row; align-items: baseline; gap: var(--sp-4); white-space: nowrap; overflow: hidden; }
+.now-turn .subagents button > :nth-child(2) { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .state[data-state="needs_you"] { color: var(--needs-you); background: var(--needs-you-bg); border-radius: var(--radius);
                                  padding: var(--sp-1) var(--sp-4); display: inline-block; }
 /* The intention, the anchor of "now" (mockup C): boxed, the biggest line, with a bright edge; dim once

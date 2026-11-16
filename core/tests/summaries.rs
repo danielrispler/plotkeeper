@@ -1,5 +1,6 @@
 //! Seam 1 (danielrispler/Falinks#517, Testing Decisions) for the turn summary (danielrispler/Falinks#526; danielrispler/Falinks#517, decisions 12, 13 and 16):
-//! which turns get one, and the turn-end intention's one switch to its first line.
+//! which turns get one. The turn-end intention no longer switches to the summary's first line
+//! (danielrispler/plotkeeper#116).
 
 use studio_core::{Change, Output, Studio, SummaryRequest};
 
@@ -114,50 +115,11 @@ fn a_turn_with_a_card_gets_a_summary_that_points_to_its_card() {
 }
 
 #[test]
-fn the_intention_switches_once_to_the_summarys_first_line() {
-    let (mut studio, request) = ended("switch", &long_reply(), None);
-    let request = request.unwrap();
-    let intention = |studio: &Studio| {
-        studio
-            .session(SESSION)
-            .unwrap()
-            .transcript
-            .intention
-            .clone()
-    };
-    assert_eq!(intention(&studio).as_deref(), Some("Rewrote the parser."));
-
-    assert!(studio.summarized(
-        SESSION,
-        &request.id,
-        "The parser now keeps a bracket stack."
-    ));
-    studio.follow_transcripts(|_| {});
-    assert_eq!(
-        intention(&studio).as_deref(),
-        Some("The parser now keeps a bracket stack.")
-    );
-    let transcript = &studio.session(SESSION).unwrap().transcript;
-    assert_eq!(
-        transcript.intentions(),
-        ["The parser now keeps a bracket stack."]
-    );
-
-    // A summary of an earlier turn moves nothing.
-    assert!(!studio.summarized(SESSION, "an-earlier-turn", "Old news."));
-}
-
-#[test]
-fn with_summaries_on_open_the_intention_stays_the_replys_first_line() {
-    let (mut studio, request) = ended("on-open", &long_reply(), None);
-    studio.set_summaries_on_open(true);
-
-    assert!(!studio.summarized(
-        SESSION,
-        &request.unwrap().id,
-        "The parser now keeps a bracket stack."
-    ));
+fn the_turn_end_intention_stays_the_replys_first_line_when_the_summary_arrives() {
+    let (mut studio, request) = ended("stays", &long_reply(), None);
+    assert!(request.is_some());
     studio.follow_transcripts(|_| {});
     let transcript = &studio.session(SESSION).unwrap().transcript;
     assert_eq!(transcript.intention.as_deref(), Some("Rewrote the parser."));
+    assert_eq!(transcript.intentions(), ["Rewrote the parser."]);
 }

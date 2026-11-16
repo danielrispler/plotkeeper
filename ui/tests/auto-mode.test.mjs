@@ -12,10 +12,10 @@ test("the rail's line names any mode but the default, and auto mode always", () 
   assert.equal(modeText("bypassPermissions"), "bypass permissions");
   assert.equal(modeText("default"), "");
   assert.equal(modeText(null), "");
-  // On the line, before the phase, which the line's ellipsis cuts first; never only in a title.
+  // On the header's first line, with the state; never only in a title.
   const html = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
-  const line = html.match(/<p id="headline"[^\n]*<\/p>/)[0];
-  assert.ok(line.indexOf('id="state"') < line.indexOf('id="mode"') && line.indexOf('id="mode"') < line.indexOf('id="phase"'));
+  const line = html.match(/<p class="line-1"[^\n]*<\/p>/)[0];
+  assert.ok(line.indexOf('id="state"') < line.indexOf('id="mode"'));
 });
 
 test("a revived terminal resumes in auto mode only when its spawn started in it", () => {
