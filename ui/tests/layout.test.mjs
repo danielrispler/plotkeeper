@@ -1,7 +1,7 @@
 // The UI's pure functions, run on the `tsc` output (danielrispler/Falinks#465). Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { arrange, defaultWidths, paneBoxes, panelHeight, railShown, resized } from "../../dist/layout.js";
+import { arrange, arrangeBar, defaultWidths, paneBoxes, panelHeight, railShown, resized } from "../../dist/layout.js";
 
 // The cell of 12.5px SF Mono in WebKit, as danielrispler/Falinks#577 measured it, and the terminal's padding, which holds no column.
 const cell = 7.73;
@@ -116,4 +116,42 @@ test("a turn is seen only while the rail shows its session: not in focus mode, a
   assert.equal(railShown("overlay", false, false), false);
   assert.equal(railShown("overlay", true, false), true);
   assert.equal(railShown("full", true, true), false);
+});
+
+// The top bar (#127). Widths as the bar measures them at its font: header, chip, git line, "+", new terminal, usage, new build.
+const items = { header: 200, "needs-you": 90, git: 260, "new-session": 28, "new-terminal": 100, usage: 120, "new-build": 120 };
+const room = (window) => window - 78 - 12; // the traffic lights' space and the bar's right padding
+const bar = (window, have = items) => arrangeBar(room(window), have, 12, 28);
+
+test("at 1,728 pixels the whole bar shows and the menu is empty", () => {
+  assert.deepEqual(bar(1728), { shown: Object.keys(items), menu: [] });
+});
+
+test("at 1,100 pixels the new terminal, the usage and the new build go to the menu, in that order", () => {
+  assert.deepEqual(bar(1100, { ...items, git: 520 }), { shown: ["header", "needs-you", "git", "new-session"], menu: ["new-terminal", "usage", "new-build"] });
+  assert.deepEqual(bar(1100, { ...items, git: 400 }).menu, ["new-terminal", "usage"]);
+});
+
+test("at 864 pixels, then the narrowest window, the git line and '+' leave last, the header and the chip never", () => {
+  assert.deepEqual(bar(864, { ...items, git: 300 }).menu, ["new-terminal", "usage", "new-build"]);
+  assert.deepEqual(bar(864, { ...items, git: 520 }).menu, ["new-terminal", "usage", "new-build", "new-session", "git"]);
+  assert.deepEqual(bar(500), { shown: ["header", "needs-you"], menu: ["new-terminal", "usage", "new-build", "new-session", "git"] });
+  for (const window of [1728, 1100, 864, 480, 100]) {
+    const { shown } = bar(window);
+    assert.ok(shown.includes("header") && shown.includes("needs-you"), `at ${window}`);
+  }
+});
+
+test("everything shown, with the menu's button when it is drawn, fits the room", () => {
+  for (const window of [1728, 1100, 864, 700, 560]) {
+    const { shown, menu } = bar(window);
+    const count = shown.length + (menu.length ? 1 : 0);
+    const used = shown.reduce((sum, item) => sum + items[item], 0) + (menu.length ? 28 : 0) + 12 * (count - 1);
+    if (menu.length < 5) assert.ok(used <= room(window), `at ${window}`);
+  }
+});
+
+test("an item the bar does not have now is neither shown nor in the menu", () => {
+  const { header, "new-build": _, "needs-you": __, ...have } = items;
+  assert.deepEqual(bar(1728, { header, ...have }).shown, ["header", ...Object.keys(have)]);
 });
