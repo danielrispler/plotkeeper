@@ -329,6 +329,7 @@ body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
 /* The session's brief, folded under the feed; its code wraps as a card's does. */
 .brief { margin: var(--sp-5) 0 0; font-size: var(--size-read); }
 .brief p { margin: 0 0 var(--sp-2); overflow-wrap: anywhere; }
+.brief p.slot-title { margin: var(--sp-3) 0 var(--sp-1); font-weight: 600; }
 .brief code, .card code { white-space: normal; overflow-wrap: anywhere; }
 
 /* A card, told apart by its fill; its code is left to right. No text in it is smaller than 14px. */
@@ -517,3 +518,10 @@ body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
 .diff-line.hunk, .diff-line.meta { color: var(--muted); }
 .diff-external { color: var(--muted); font-size: var(--size-small); }
 .evidence-more[hidden] { display: none; }
+.ask-why { margin-top: var(--sp-4); }
+.ask-why input { font: inherit; font-size: var(--size-small); margin-right: var(--sp-3); }
+.ask-why .btn { margin-top: 0; }
+.ask-why-not { margin-top: var(--sp-3); }
+.ask-why-not > p { font-size: var(--size-small); }
+.ask-why-not summary { margin-top: var(--sp-3); font-size: var(--size-small); color: var(--muted); cursor: pointer; }
+.ask-why-not .markdown { margin: var(--sp-3) 0 0; }

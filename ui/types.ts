@@ -238,7 +238,21 @@ export type TurnSummary = {
   summary: { summary: string; headline?: string | null; lines?: SummaryLine[]; quiz: Quiz | null };
   taps?: QuizTap[];
 };
-export type SessionCards = { brief: string | null; recent: StoredCard[]; older: StoredCard[]; decisions: Decision[] };
+// The Brief's slots (danielrispler/plotkeeper#122): the Goal a model wrote, each answered question with Daniel's reply, and
+// the Open lines the shell computed. `brief` is a brief stored as prose, which shows while there is no Goal.
+export type OpenItem = {
+  kind: "question" | "check" | "unchecked" | "open" | "ask" | "unpushed" | "pr";
+  text: string;
+};
+export type SessionCards = {
+  brief: string | null;
+  goal: string | null;
+  answers: { question: string; reply: string }[];
+  open: OpenItem[];
+  recent: StoredCard[];
+  older: StoredCard[];
+  decisions: Decision[];
+};
 // What a call asks Daniel, by its tool, as the answer hook's `Kind`: a question, a plan, or any other
 // tool's permission.
 export type AskKind = "question" | "plan" | "permission";

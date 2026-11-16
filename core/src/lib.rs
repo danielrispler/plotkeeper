@@ -3639,6 +3639,13 @@ impl Studio {
         self.tasks.retain(|path, _| kept.contains(path));
     }
 
+    /// What the shell last found about the task session `id` works in, `None` in the main checkout
+    /// or before the first lookup.
+    pub fn task_facts(&self, id: &str) -> Option<TaskFacts> {
+        let path = task_path(&self.sessions.get(id)?.cwd)?;
+        self.tasks.get(&path).copied()
+    }
+
     /// The task folder session `id` works in, `None` in the main checkout or for no such session.
     pub fn task_of(&self, id: &str) -> Option<String> {
         task_path(&self.sessions.get(id)?.cwd)

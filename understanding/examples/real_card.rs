@@ -1,8 +1,7 @@
 //! Real `claude -p` cards on two fixture changes, one per prompt of a session (danielrispler/Falinks#375's and danielrispler/Falinks#377's
 //! checks, danielrispler/Falinks#369's Testing Decisions): a structural change, then one that is not. For each it prints
-//! the writer's raw reply, then the card and the brief parsed from it; the second card updates the
-//! first one's brief. Then it prints a rewrite of the brief from the two prompts, the two summaries
-//! and a diffstat, the second card's "explain more" (danielrispler/Falinks#376), and a parent's card and brief from its
+//! the writer's raw reply, then the card parsed from it. Then it prints the goal written from the two
+//! prompts, the second card's "explain more" (danielrispler/Falinks#376), and a parent's card from its
 //! workers' card summaries, with no diff (danielrispler/Falinks#378). It runs the writer as the app does, in
 //! the app's neutral folder, and reads no credential file. Run it outside auto mode, from the
 //! repository's root:
@@ -81,12 +80,6 @@ const PROMPTS: [&str; 2] = [
     "A check behind a pipe should count only with pipefail",
 ];
 
-const DIFFSTAT: &str = " apps/studio/core/src/lib.rs              | 12 ++++++++++--
- understanding/src/brief.rs   | 14 ++++++++++++++
- understanding/src/lib.rs     | 18 ++----------------
- 3 files changed, 26 insertions(+), 18 deletions(-)
-";
-
 /// The real writer, printing each raw reply.
 struct Printing(ClaudeWriter);
 
@@ -101,30 +94,12 @@ impl Printing {
 }
 
 impl CardWriter for Printing {
-    fn reply(
-        &self,
-        request: &CardRequest,
-        earlier: &[String],
-        brief: &str,
-    ) -> Result<String, String> {
-        Self::print(self.0.reply(request, earlier, brief))
+    fn reply(&self, request: &CardRequest, earlier: &[String]) -> Result<String, String> {
+        Self::print(self.0.reply(request, earlier))
     }
 
     fn more(&self, request: &CardRequest, card: &Card) -> Result<String, String> {
         Self::print(self.0.more(request, card))
-    }
-
-    fn rewrite(
-        &self,
-        prompts: &[&str],
-        summaries: &[String],
-        diffstat: &str,
-    ) -> Result<String, String> {
-        Self::print(self.0.rewrite(prompts, summaries, diffstat))
-    }
-
-    fn update(&self, brief: &str, workers: &str) -> Result<String, String> {
-        Self::print(self.0.update(brief, workers))
     }
 }
 
@@ -151,33 +126,24 @@ fn main() {
     let log = studio_hook::event_log(&home);
     let writer = Printing(ClaudeWriter::beside(&log).expect("create the card writer's folder"));
     let log = |line: String| println!("--- Log: {line}");
-    let mut brief = String::new();
-    let mut summaries = Vec::new();
     let mut last = None;
     for (at, change) in [(1, STRUCTURAL), (2, CHANGE)] {
         let request = request(change, at);
         println!("=== Prompt {at}: {}", PROMPTS[at as usize - 1]);
-        let Some((card, updated)) = write_card(&writer, &request, &[], &brief, log) else {
+        let Some(card) = write_card(&writer, &request, &[], log) else {
             continue;
         };
-        println!(
-            "--- The card\n{card:#?}\n--- The brief\n{}",
-            updated.as_deref().unwrap_or("(none)")
-        );
-        brief = updated.unwrap_or(brief);
-        summaries.push(card.summary.clone());
+        println!("--- The card\n{card:#?}");
         last = Some((request, card));
     }
-    println!("=== The brief rewritten");
-    let _ = writer.rewrite(&PROMPTS, &summaries, DIFFSTAT);
+    println!("=== The goal from the prompts");
+    let _ = writer.goal(&PROMPTS);
     if let Some((request, card)) = last {
         println!("=== Explain more on the second card");
         let _ = writer.more(&request, &card);
     }
     println!("=== A parent's card from its workers' cards");
-    if let Some((card, _)) = write_card(&writer, &request(WORKERS, 3), &[], &brief, log) {
+    if let Some(card) = write_card(&writer, &request(WORKERS, 3), &[], log) {
         println!("--- The card\n{card:#?}");
     }
-    println!("=== The brief updated from its workers' cards");
-    let _ = writer.update(&brief, WORKERS);
 }

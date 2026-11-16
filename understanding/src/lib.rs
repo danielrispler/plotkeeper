@@ -19,6 +19,7 @@ use std::{
 };
 use studio_core::{CardRequest, Kind, Session, Status, SummaryRequest, Transcript};
 
+mod brief;
 mod drift;
 mod fingerprint;
 mod grounding;
@@ -26,6 +27,7 @@ mod store;
 mod summary;
 mod turn_trees;
 mod week;
+pub use brief::{Answered, OpenItem, OpenKind, answered, open_items};
 pub use drift::{AGY_FIXTURE_VERSION, AgyVersions, Drift, Versions, drift, dropped_events};
 pub use fingerprint::{Fingerprints, backfilled, fingerprint_changes, worktree_root};
 use grounding::words;
@@ -183,38 +185,23 @@ impl Card {
     }
 }
 
-/// Writes the card on a session's change since its last card, and its brief.
+/// Writes the card on a session's change since its last card.
 pub trait CardWriter {
     /// The writer's reply on `request`'s change, or one line for the log when it gave none. It reads
     /// the change with `earlier`, the summaries of the earlier cards of the prompt the change belongs
-    /// to, oldest first, and `brief`, the session's brief so far, which it updates (danielrispler/Falinks#369, decision
-    /// 12).
-    fn reply(
-        &self,
-        request: &CardRequest,
-        earlier: &[String],
-        brief: &str,
-    ) -> Result<String, String>;
+    /// to, oldest first (danielrispler/Falinks#369, decision 12).
+    fn reply(&self, request: &CardRequest, earlier: &[String]) -> Result<String, String>;
 
     /// The writer's longer explanation of `card` on `request`'s change, for "explain more" (danielrispler/Falinks#369,
     /// decision 15), or one line for the log when it gave none.
     fn more(&self, request: &CardRequest, card: &Card) -> Result<String, String>;
 
-    /// The writer's reply with a session's brief rewritten from scratch (danielrispler/Falinks#369, decision 16), or one
-    /// line for the log when it gave none. It reads only `prompts`, Daniel's, `summaries`, those of
-    /// the session's cards, both oldest first, and `diffstat`, `git diff --stat` since the session
-    /// began.
-    fn rewrite(
-        &self,
-        prompts: &[&str],
-        summaries: &[String],
-        diffstat: &str,
-    ) -> Result<String, String>;
-
-    /// The writer's reply with `brief` updated from `workers`, what a session's workers did since its
-    /// last card, from their cards' summaries (danielrispler/Falinks#369, decision 11), or one line for the log when it
-    /// gave none.
-    fn update(&self, brief: &str, workers: &str) -> Result<String, String>;
+    /// The writer's reply with the Goal of a session, or of a worker, from `prompts`, Daniel's or its
+    /// spawn's, oldest first (danielrispler/plotkeeper#122), or one line for the log when it gave none.
+    /// A writer that writes no goals says so.
+    fn goal(&self, _prompts: &[&str]) -> Result<String, String> {
+        Err("this writer writes no goals".into())
+    }
 
     /// The writer's reply to Daniel's side `question` on `item`, a response, card or intention, read
     /// with `intentions`, those of the item's turn, oldest first (danielrispler/Falinks#461, decision 20), or one line
@@ -260,18 +247,14 @@ pub trait CardWriter {
     }
 }
 
-/// Every 5th update of a brief rewrites it from scratch (danielrispler/Falinks#369, decision 16), a starting guess.
-const REWRITE_EVERY: u32 = 5;
-
-/// The card on a session's or a worker's change and its brief (danielrispler/Falinks#369, decisions 11, 12 and 16), from
-/// `session`'s state. `writer` writes the card on `request` with the summaries of the earlier cards
-/// of its prompt and the brief of its owner, the worker or else the session, which the same reply
-/// updates, and both go in `store`. A card with no change is a session's that changed nothing
-/// itself: it is written from its workers' card summaries instead (`workers`). Every 5th update then
-/// rewrites the brief from scratch (`rebrief`), after `stored` runs on the card stored, so the
-/// shell sends the list and the "New card" notice first (danielrispler/Falinks#434, decision 32). The store is not
-/// locked while the writer runs, which takes seconds. Each problem is one line for `log`. Returns
-/// whether a card was added.
+/// The card on a session's or a worker's change, from `session`'s state, and its Goal (danielrispler/Falinks#369,
+/// decisions 11 and 12; danielrispler/plotkeeper#122). `writer` writes the card on `request` with the
+/// summaries of the earlier cards of its prompt, and it goes in `store`. A card with no change is a
+/// session's that changed nothing itself: it is written from its workers' card summaries instead
+/// (`workers`). The Goal is written after `stored` runs on the card stored, so the shell sends the
+/// list and the "New card" notice first (danielrispler/Falinks#434, decision 32). The store is not locked while
+/// the writer runs, which takes seconds. Each problem is one line for `log`. Returns whether a card
+/// was added.
 pub fn write_stop(
     store: &Mutex<CardStore>,
     writer: &(impl CardWriter + ?Sized),
@@ -281,7 +264,7 @@ pub fn write_stop(
     mut log: impl FnMut(String),
 ) -> bool {
     let owner = request.owner().to_owned();
-    let (earlier, brief, workers) = {
+    let (earlier, workers) = {
         let store = store.lock().unwrap();
         let cards = store
             .cards()
@@ -290,8 +273,7 @@ pub fn write_stop(
         let same_prompt =
             cards.filter(|kept| request.prompt.is_some() && kept.request.prompt == request.prompt);
         let earlier: Vec<String> = same_prompt.filter_map(summary).collect();
-        let brief = store.brief(&owner).cloned().unwrap_or_default();
-        (earlier, brief, workers(&store, &request, session))
+        (earlier, workers(&store, &request, session))
     };
     if request.change.is_none() {
         let Some(workers) = workers else {
@@ -303,60 +285,58 @@ pub fn write_stop(
         };
         request.change = Some(workers);
     }
-    let Some((card, updated)) = write_card(writer, &request, &earlier, &brief.text, &mut log)
-    else {
+    let Some(card) = write_card(writer, &request, &earlier, &mut log) else {
         return false;
     };
     if let Err(e) = store.lock().unwrap().add(request.clone(), card, millis()) {
         log(format!("save the card store: {e}"));
     }
     stored();
-    rebrief(
-        store,
-        writer,
-        &request,
-        brief.updates,
-        updated,
-        session,
-        log,
-    );
+    write_goal(store, writer, &request, session, log);
     true
 }
 
-/// A session's brief updated from its workers' cards since its last card, `request.workers`, when a
-/// turn a wake-up opened changed nothing itself: no card (danielrispler/Falinks#369, decision 11). Every 5th update
-/// rewrites it from scratch (`rebrief`). Each problem is one line for `log`. Returns whether the
-/// brief changed.
-pub fn write_brief(
+/// The Goal of `request`'s owner, its worker or else `session`, written again when its prompts
+/// changed since it was written: one or two lines from Daniel's prompts in the session (a worker's
+/// from its spawn), the only part of the brief a model writes (danielrispler/plotkeeper#122). Each
+/// problem is one line for `log`. Returns whether the Goal changed.
+pub fn write_goal(
     store: &Mutex<CardStore>,
     writer: &(impl CardWriter + ?Sized),
-    request: CardRequest,
+    request: &CardRequest,
     session: &Session,
     mut log: impl FnMut(String),
 ) -> bool {
-    let (brief, workers) = {
-        let store = store.lock().unwrap();
-        let brief = store.brief(&session.agent.id).cloned().unwrap_or_default();
-        (brief, workers(&store, &request, session))
-    };
-    let reply = workers
-        .ok_or("its workers' cards are not in the store".to_owned())
-        .and_then(|workers| writer.update(&brief.text, &workers));
-    match reply.and_then(|reply| brief_in(&reply)) {
-        Ok(updated) => {
-            rebrief(
-                store,
-                writer,
-                &request,
-                brief.updates,
-                Some(updated),
-                session,
-                log,
-            );
-            true
+    let (owner, agent) = (request.owner(), request.agent.as_deref());
+    let prompts: Vec<&str> = match agent.and_then(|id| session.subagent(id)) {
+        Some(worker) => vec![&worker.prompt],
+        None => {
+            let daniels = session.prompts.iter();
+            daniels
+                .filter(|p| p.sender.is_daniels())
+                .map(|p| p.text.as_str())
+                .collect()
         }
+    };
+    let written = store.lock().unwrap().brief(owner).map(|b| b.goal_prompts);
+    if prompts.is_empty() || written == Some(prompts.len() as u32) {
+        return false;
+    }
+    let reply = writer.goal(&prompts).and_then(|reply| goal_in(&reply));
+    match reply {
+        Ok(goal) => match store
+            .lock()
+            .unwrap()
+            .set_goal(owner, goal, prompts.len() as u32)
+        {
+            Ok(()) => true,
+            Err(e) => {
+                log(format!("save the card store: {e}"));
+                false
+            }
+        },
         Err(line) => {
-            log(format!("no brief on {}: {line}", request.id));
+            log(format!("no goal on {}: {line}", request.id));
             false
         }
     }
@@ -397,64 +377,6 @@ fn workers(store: &CardStore, request: &CardRequest, session: &Session) -> Optio
 const WORKERS: &str = "No diff: the agent changed nothing itself since its last card. Its workers, \
                        each with its status and the summaries of its cards since then:\n";
 
-/// Sets the brief of `request`'s owner, its worker or else `session`, to `updated`, the brief after
-/// its `updates` updates so far updated once more. Every 5th update first rewrites it from scratch
-/// from the owner's prompts (a session's with its wake-ups left out, a worker's spawn), the
-/// summaries of its cards (a session's with its workers'), and `git diff --stat` in its folder since
-/// its first card's base: never the raw diff. A failed rewrite keeps `updated`.
-fn rebrief(
-    store: &Mutex<CardStore>,
-    writer: &(impl CardWriter + ?Sized),
-    request: &CardRequest,
-    updates: u32,
-    mut updated: Option<String>,
-    session: &Session,
-    mut log: impl FnMut(String),
-) {
-    let (owner, agent) = (request.owner(), request.agent.as_deref());
-    if (updates + 1).is_multiple_of(REWRITE_EVERY) {
-        let read = |kept: &&StoredCard| match agent {
-            Some(_) => kept.request.agent.as_deref() == agent,
-            None => kept.request.session_id == session.agent.id,
-        };
-        let (summaries, since) = {
-            let store = store.lock().unwrap();
-            let cards = store.cards().iter();
-            let summaries: Vec<String> = cards.clone().filter(read).filter_map(summary).collect();
-            let mut own = cards.filter(|kept| kept.request.owner() == owner);
-            (
-                summaries,
-                own.find_map(|kept| kept.request.base.head.clone()),
-            )
-        };
-        let worker = agent.and_then(|id| session.subagent(id));
-        let folder = worker
-            .and_then(|a| a.folder.as_deref())
-            .unwrap_or(&session.cwd);
-        let diffstat = since.map_or_else(String::new, |head| {
-            fingerprint::diff_stat(Path::new(folder), &head)
-        });
-        let prompts: Vec<&str> = match worker {
-            Some(worker) => vec![&worker.prompt],
-            None => {
-                let daniels = session.prompts.iter();
-                let daniels = daniels.filter(|p| p.sender.is_daniels());
-                daniels.map(|p| p.text.as_str()).collect()
-            }
-        };
-        let rewritten = writer.rewrite(&prompts, &summaries, &diffstat);
-        match rewritten.and_then(|reply| brief_in(&reply)) {
-            Ok(brief) => updated = Some(brief),
-            Err(line) => log(format!("no brief rewrite on {}: {line}", request.id)),
-        }
-    }
-    if let Some(text) = updated
-        && let Err(e) = store.lock().unwrap().set_brief(owner, text)
-    {
-        log(format!("save the card store: {e}"));
-    }
-}
-
 /// The answer to Daniel's side `question` on `item` (danielrispler/Falinks#461, decision 20), from one call to `writer`
 /// with the intentions of `transcript`'s turn, one per response. It stays in the studio: the session
 /// never sees it. Why there is none when the call failed or its reply holds no answer.
@@ -472,6 +394,49 @@ pub fn ask_about(
     }
 }
 
+/// The writer's input item for a question on `what` (danielrispler/plotkeeper#126): the recorded `facts`, and the
+/// `hunk` of a file, as recorded and apart from anything the writer says.
+pub fn ask_item(what: &str, facts: &studio_core::AskFacts, hunk: Option<&str>) -> String {
+    let mut item = format!("About {what}. What was recorded:\n{}", facts.text());
+    if let Some(hunk) = hunk {
+        item.push_str(&format!("\n\nThe hunk:\n{hunk}"));
+    }
+    item
+}
+
+/// What "why didn't it touch `name`" gives: what was recorded about it, and the writer's possible reasons, which are
+/// guesses and never recorded.
+#[derive(Debug, PartialEq, Serialize)]
+pub struct WhyNot {
+    pub facts: studio_core::AskFacts,
+    pub reasons: Option<String>,
+}
+
+/// "Why didn't it touch `name`?" on its recorded `facts`: the writer is asked for possible reasons only when something was
+/// recorded about `name`. When the session never read, searched or mentioned it, the facts say so and there is no call.
+pub fn why_not(
+    writer: &(impl CardWriter + ?Sized),
+    transcript: &Transcript,
+    name: &str,
+    facts: studio_core::AskFacts,
+) -> Result<WhyNot, String> {
+    if facts.sections.is_empty() {
+        return Ok(WhyNot {
+            facts,
+            reasons: None,
+        });
+    }
+    let item = ask_item(&format!("`{name}`"), &facts, None);
+    let question = format!(
+        "Why didn't the agent change {name}? Give possible reasons, each as a guess from what was recorded."
+    );
+    let reasons = ask_about(writer, transcript, &item, &question)?;
+    Ok(WhyNot {
+        facts,
+        reasons: Some(reasons),
+    })
+}
+
 /// The JSON object in a writer's reply, perhaps in a code fence: from its first `{` to its last `}`.
 fn object(reply: &str) -> &str {
     let object = reply.find('{').zip(reply.rfind('}'));
@@ -479,7 +444,7 @@ fn object(reply: &str) -> &str {
     object.map_or("", |(start, end)| &reply[start..=end])
 }
 
-/// Why a reply gave no brief, for the log.
+/// Why a reply gave no goal, for the log.
 const HOLDS_NONE: &str = "the reply holds none";
 
 /// A stored card's summary, when it has one.
@@ -487,16 +452,11 @@ fn summary(kept: &StoredCard) -> Option<String> {
     Some(kept.card.summary.clone()).filter(|s| !s.is_empty())
 }
 
-/// A brief as the writer reads it: "none yet" before its first update.
-fn so_far(brief: &str) -> &str {
-    if brief.is_empty() { "none yet" } else { brief }
-}
-
-/// The brief in a writer's reply, when it holds one that is not empty, or else why not, for the log.
-fn brief_in(reply: &str) -> Result<String, String> {
+/// The Goal in a writer's reply, when it holds one that is not empty, or else why not, for the log.
+fn goal_in(reply: &str) -> Result<String, String> {
     let value: serde_json::Value = serde_json::from_str(object(reply)).unwrap_or_default();
-    match value["brief"].as_str().map(str::trim) {
-        Some(brief) if !brief.is_empty() => Ok(brief.into()),
+    match value["goal"].as_str().map(str::trim) {
+        Some(goal) if !goal.is_empty() => Ok(goal.into()),
         _ => Err(HOLDS_NONE.into()),
     }
 }
@@ -542,18 +502,17 @@ pub fn explain_more(
 }
 
 /// The card on `request` from `writer`'s reply, which is asked once more when it gives no card
-/// (danielrispler/Falinks#369, decision 12), and `brief` updated with it. The writer reads `earlier`, the summaries of the
+/// (danielrispler/Falinks#369, decision 12). The writer reads `earlier`, the summaries of the
 /// earlier cards of the prompt `request` belongs to. Each problem is one line for `log`: no card
-/// after the retry, or a card with no quiz or no brief, which is kept after the retry.
+/// after the retry, or a card with no quiz, which is kept without asking again.
 pub fn write_card(
     writer: &(impl CardWriter + ?Sized),
     request: &CardRequest,
     earlier: &[String],
-    brief: &str,
     mut log: impl FnMut(String),
-) -> Option<(Card, Option<String>)> {
+) -> Option<Card> {
     let card = || {
-        let reply = writer.reply(request, earlier, brief)?;
+        let reply = writer.reply(request, earlier)?;
         let (mut card, mut problem) = Card::from_reply(&reply)?;
         // A check's card asks whether the check passes, which its result settles (danielrispler/Falinks#461, decision
         // 15), so its quiz is the app's, with the writer's reasons.
@@ -561,21 +520,18 @@ pub fn write_card(
             card.quiz = Some(check_quiz(check, &reply));
             problem = None;
         }
-        Ok::<_, String>((card, problem, brief_in(&reply).ok()))
+        Ok::<_, String>((card, problem))
     };
     // A reply with no card, or whose quiz breaks a rule (danielrispler/plotkeeper#118), is asked for once more; the
     // second stands, with no quiz when it breaks one again, or the first when the second gives no card.
     let first = card();
-    let retry = !matches!(&first, Ok((_, None, _)));
+    let retry = !matches!(&first, Ok((_, None)));
     match if retry { card().or(first) } else { first } {
-        Ok((card, problem, brief)) => {
+        Ok((card, problem)) => {
             if let Some(problem) = problem {
                 log(format!("no quiz on {}: {problem}", request.id));
             }
-            if brief.is_none() {
-                log(format!("no brief on {}: {HOLDS_NONE}", request.id));
-            }
-            Some((card, brief))
+            Some(card)
         }
         Err(line) => {
             log(format!("no card on {}: {line}", request.id));
@@ -607,12 +563,12 @@ fn check_quiz(check: &str, reply: &str) -> Quiz {
     }
 }
 
-/// Writes a fixed card that shows the change, and a fixed brief, so the app can run without
+/// Writes a fixed card that shows the change, and a fixed goal, so the app can run without
 /// `claude -p`.
 pub struct FakeWriter;
 
 impl CardWriter for FakeWriter {
-    fn reply(&self, request: &CardRequest, _: &[String], _: &str) -> Result<String, String> {
+    fn reply(&self, request: &CardRequest, _: &[String]) -> Result<String, String> {
         let paths: Vec<&str> = request
             .diff()
             .lines()
@@ -631,7 +587,6 @@ impl CardWriter for FakeWriter {
             "paths": paths,
             "code": request.diff(),
             "architecture": architecture,
-            "brief": format!("A sample brief from the fake writer.\nThe latest change touched {named}."),
             "why_it_matters": "Why the change matters goes here, with code inside the text such as `if a <= b {`.",
             "not_checked": "Not checked: nothing, this is a sample card.",
             "if_it_passes": "It passes when the change is right: a sample reason from the fake writer.",
@@ -653,16 +608,12 @@ impl CardWriter for FakeWriter {
         Ok("A longer sample explanation from the fake writer, which does not read the code. How the changed code works goes here, step by step, and why it was done this way, with code such as `if a <= b {`.".into())
     }
 
-    fn rewrite(&self, _: &[&str], _: &[String], _: &str) -> Result<String, String> {
-        let brief =
-            "A sample brief from the fake writer, rewritten.\nIt does not read the session.";
-        Ok(serde_json::json!({ "brief": brief }).to_string())
-    }
-
-    fn update(&self, brief: &str, _: &str) -> Result<String, String> {
-        let brief =
-            format!("{brief}\nThe workers came back, and the session itself changed nothing.");
-        Ok(serde_json::json!({ "brief": brief }).to_string())
+    fn goal(&self, prompts: &[&str]) -> Result<String, String> {
+        let goal = format!(
+            "A sample goal from the fake writer, which read {} prompts.",
+            prompts.len()
+        );
+        Ok(serde_json::json!({ "goal": goal }).to_string())
     }
 
     fn ask(&self, _: &str, intentions: &[String], question: &str) -> Result<String, String> {
@@ -815,48 +766,32 @@ impl ClaudeWriter {
     }
 
     /// The `claude -p` run for one change's card, read with the summaries of the prompt's `earlier`
-    /// cards and the session's `brief` so far, with the prompt it reads on standard input, as are
-    /// all the runs below.
-    pub fn command(
-        &self,
-        request: &CardRequest,
-        earlier: &[String],
-        brief: &str,
-    ) -> (Command, String) {
+    /// cards, with the prompt it reads on standard input, as are all the runs below.
+    pub fn command(&self, request: &CardRequest, earlier: &[String]) -> (Command, String) {
         let earlier: String = match earlier {
             [] => "none\n".into(),
             summaries => summaries.iter().map(|s| format!("- {s}\n")).collect(),
         };
-        let brief = so_far(brief);
         // A check's card is on what the check verifies against the change (danielrispler/Falinks#461, decision 15).
         let instructions = match &request.check {
             Some(check) => format!("{CHECK}\nThe check's command:\n{check}\n"),
             None => PROMPT.into(),
         };
         let head = format!(
-            "{instructions}\nThe summaries of this prompt's earlier cards, oldest first:\n{earlier}\n\
-             The brief so far:\n{brief}\n"
+            "{instructions}\nThe summaries of this prompt's earlier cards, oldest first:\n{earlier}\n"
         );
         self.claude(&head, request.diff())
     }
 
-    /// The `claude -p` run that rewrites a session's brief from Daniel's `prompts`, its card
-    /// `summaries` and `diffstat`. Past `MAX_CHANGE`, the oldest prompts are cut first, and the
-    /// newest is shortened rather than cut; the summaries stay.
-    pub fn rewrite_command(
-        &self,
-        prompts: &[&str],
-        summaries: &[String],
-        diffstat: &str,
-    ) -> (Command, String) {
-        let summaries: String = summaries.iter().map(|s| format!("- {s}\n")).collect();
+    /// The `claude -p` run that writes a session's Goal from Daniel's `prompts`. Past `MAX_CHANGE`,
+    /// the oldest prompts are cut first, and the newest is shortened rather than cut.
+    pub fn goal_command(&self, prompts: &[&str]) -> (Command, String) {
         let newest = prompts.last().copied();
         let prompts: Vec<String> = prompts
             .iter()
             .map(|prompt| format!("<prompt>\n{prompt}\n</prompt>\n"))
             .collect();
-        let mut size =
-            summaries.len() + diffstat.len() + prompts.iter().map(String::len).sum::<usize>();
+        let mut size = prompts.iter().map(String::len).sum::<usize>();
         let mut cut = 0;
         while size > MAX_CHANGE && cut + 1 < prompts.len() {
             size -= prompts[cut].len();
@@ -868,7 +803,7 @@ impl ClaudeWriter {
         };
         let mut kept = prompts[cut..].concat();
         // The newest prompt alone over the budget is shortened, not dropped (danielrispler/Falinks#434, decision 33),
-        // keeping its start even when the summaries fill the budget.
+        // keeping its start.
         if size > MAX_CHANGE
             && let Some(newest) = newest
         {
@@ -887,17 +822,7 @@ impl ClaudeWriter {
             };
         }
         self.run(&format!(
-            "{REWRITE}\nThe developer's prompts, oldest first{note}:\n{kept}\n\
-             The card summaries, oldest first:\n{summaries}\n\
-             `git diff --stat` since the session began:\n{diffstat}"
-        ))
-    }
-
-    /// The `claude -p` run that updates a session's `brief` from `workers`, what its workers did.
-    pub fn update_command(&self, brief: &str, workers: &str) -> (Command, String) {
-        let brief = so_far(brief);
-        self.run(&format!(
-            "{UPDATE}\nThe brief so far:\n{brief}\n\n{workers}"
+            "{GOAL}\nThe developer's prompts, oldest first{note}:\n{kept}"
         ))
     }
 
@@ -1021,30 +946,16 @@ impl ClaudeWriter {
 
 impl CardWriter for ClaudeWriter {
     /// Runs `claude -p`, which takes seconds, so the shell calls it off its log thread.
-    fn reply(
-        &self,
-        request: &CardRequest,
-        earlier: &[String],
-        brief: &str,
-    ) -> Result<String, String> {
-        self.stdout(self.command(request, earlier, brief))
+    fn reply(&self, request: &CardRequest, earlier: &[String]) -> Result<String, String> {
+        self.stdout(self.command(request, earlier))
     }
 
     fn more(&self, request: &CardRequest, card: &Card) -> Result<String, String> {
         self.stdout(self.more_command(request, card))
     }
 
-    fn rewrite(
-        &self,
-        prompts: &[&str],
-        summaries: &[String],
-        diffstat: &str,
-    ) -> Result<String, String> {
-        self.stdout(self.rewrite_command(prompts, summaries, diffstat))
-    }
-
-    fn update(&self, brief: &str, workers: &str) -> Result<String, String> {
-        self.stdout(self.update_command(brief, workers))
+    fn goal(&self, prompts: &[&str]) -> Result<String, String> {
+        self.stdout(self.goal_command(prompts))
     }
 
     fn ask(&self, item: &str, intentions: &[String], question: &str) -> Result<String, String> {
@@ -1123,16 +1034,16 @@ pub(crate) use quiz_rules;
 /// The card writer's instructions. Its input is the change, the summaries of the prompt's earlier
 /// cards and the brief, not the payloads (v0 note, proposal 8).
 const PROMPT: &str = concat!(
-    r#"You write one card that teaches a developer about the change a coding agent made to his code while he waited on it, since the previous card. The card opens with a multiple-choice question on the change's logic or design. He taps an option, and the card shows at once whether he was right, why each option is right or wrong, and the explanation. You also update the session's brief, which he reads to resume the session.
+    r#"You write one card that teaches a developer about the change a coding agent made to his code while he waited on it, since the previous card. The card opens with a multiple-choice question on the change's logic or design. He taps an option, and the card shows at once whether he was right, why each option is right or wrong, and the explanation.
 
-Answer from the input below: the summaries of the earlier cards on the same prompt of his, the brief so far, and the diff. Use only this input: do not use tools or read files.
+Answer from the input below: the summaries of the earlier cards on the same prompt of his, and the diff. Use only this input: do not use tools or read files.
 
 "#,
     explanation_language!(),
     r#"
 
 Reply with one JSON object and nothing else:
-{"summary": string, "explanation": string, "paths": [string], "code": string, "why_it_matters": string, "not_checked": string, "architecture": string, "quiz": {"text": string, "options": [{"text": string, "why": string, "right": boolean}], "key": number}, "brief": string}
+{"summary": string, "explanation": string, "paths": [string], "code": string, "why_it_matters": string, "not_checked": string, "architecture": string, "quiz": {"text": string, "options": [{"text": string, "why": string, "right": boolean}], "key": number}}
 - summary: what the change did, in one short line.
 - explanation: what the change does and why, in at most three sentences.
 - paths: the files the change touched.
@@ -1143,7 +1054,6 @@ Reply with one JSON object and nothing else:
 - quiz.text: the quiz's question, under the rules below. Never ask whether a command, test or check will pass.
 - quiz.options: 3 or 4 options, each {"text", "why", "right"}. why: one line on why that option is right or wrong; the options are shown in another order, so never refer to an option by its letter or place. right: true for the one right option, false for the others.
 - quiz.key: the place of the right option in quiz.options, counting from 0.
-- brief: the brief so far, updated with this change: what the session set out to do, what it has done, oldest first, and what is still open, in a few short lines. Keep what still holds. Its last line says what this change did.
 
 "#,
     quiz_rules!("your `summary`"),
@@ -1156,16 +1066,16 @@ When the change is not a diff but the agent's workers with the summaries of thei
 /// The card writer's instructions for a check's card (danielrispler/Falinks#461, decision 15), written while the check
 /// runs: on what the check verifies against the change so far. The app asks whether it passes.
 const CHECK: &str = concat!(
-    r#"A coding agent just started a check, a command that tests or verifies its code, which usually runs for minutes. You write one card that teaches the developer who waits on it what this check verifies against the change the agent made since the previous card, so he can guess whether it will pass. The card asks him "Will it pass?"; once the check ends, it shows whether he was right and your two reasons. You also update the session's brief, which he reads to resume the session.
+    r#"A coding agent just started a check, a command that tests or verifies its code, which usually runs for minutes. You write one card that teaches the developer who waits on it what this check verifies against the change the agent made since the previous card, so he can guess whether it will pass. The card asks him "Will it pass?"; once the check ends, it shows whether he was right and your two reasons.
 
-Answer from the input below: the check's command, the summaries of the earlier cards on the same prompt of his, the brief so far, and the diff. Use only this input: do not use tools or read files. You do not know the check's result.
+Answer from the input below: the check's command, the summaries of the earlier cards on the same prompt of his, and the diff. Use only this input: do not use tools or read files. You do not know the check's result.
 
 "#,
     explanation_language!(),
     r#"
 
 Reply with one JSON object and nothing else:
-{"summary": string, "explanation": string, "paths": [string], "code": string, "why_it_matters": string, "not_checked": string, "architecture": string, "if_it_passes": string, "if_it_fails": string, "brief": string}
+{"summary": string, "explanation": string, "paths": [string], "code": string, "why_it_matters": string, "not_checked": string, "architecture": string, "if_it_passes": string, "if_it_fails": string}
 - summary: what the change did, in one short line.
 - explanation: what the check runs and what of the change it verifies, in at most three sentences.
 - paths: the files the change touched.
@@ -1175,38 +1085,21 @@ Reply with one JSON object and nothing else:
 - architecture: when the change is structural, a short section on how it changes the code's structure, before and after, and why. Otherwise exactly "structural: none".
 - if_it_passes: one line on what a pass would show about the change.
 - if_it_fails: one line on the likeliest reason in the change it could fail.
-- brief: the brief so far, updated with this change: what the session set out to do, what it has done, oldest first, and what is still open, in a few short lines. Keep what still holds. Its last line says what this change did.
 "#
 );
 
-/// The writer's instructions for a brief updated from a session's workers' cards when it changed
-/// nothing itself (danielrispler/Falinks#369, decision 11): no card, so a worker's return adds no thin card.
-const UPDATE: &str = concat!(
-    r#"You update the brief of a coding agent's session, which the developer who runs it reads to resume the session: what the session set out to do, what it has done, oldest first, and what is still open, in a few short lines. Since the brief, the agent changed nothing itself; its workers did.
+/// The writer's instructions for a session's Goal (danielrispler/plotkeeper#122): from Daniel's prompts
+/// only, so it names what he wants done and not what the agent did.
+const GOAL: &str = concat!(
+    r#"You write the Goal of a coding agent's session, which the developer who runs it reads to resume the session: one or two short lines on the outcome he wants, such as "Show what the agent did on the rail from recorded facts", not a restatement of his first prompt and not what the agent did so far. When his later prompts changed the aim, the Goal follows the latest aim.
 
-Answer from the input below: the brief so far, and the agent's workers, each with its status and the summaries of its cards since then. Use only this input: do not use tools or read files. Keep what still holds. Its last line says what came back.
+Answer from the input below: the developer's prompts, oldest first. Use only this input: do not use tools or read files.
 
 "#,
     explanation_language!(),
     r#"
 
-Reply with one JSON object and nothing else: {"brief": string}
-"#
-);
-
-/// The writer's instructions for a brief rewritten from scratch (danielrispler/Falinks#369, decision 16): from Daniel's
-/// prompts, the card summaries and the diffstat, never a diff, so errors in the rolling brief do not
-/// compound.
-const REWRITE: &str = concat!(
-    r#"You rewrite from scratch the brief of a coding agent's session, which the developer who runs it reads to resume the session: what the session set out to do, what it has done, oldest first, and what is still open, in a few short lines. Its last line says what the latest change did.
-
-Answer from the input below: the developer's prompts, the one-line summaries of the session's cards, and `git diff --stat` since the session began. Use only this input: do not use tools or read files.
-
-"#,
-    explanation_language!(),
-    r#"
-
-Reply with one JSON object and nothing else: {"brief": string}
+Reply with one JSON object and nothing else: {"goal": string}
 "#
 );
 
@@ -1232,7 +1125,7 @@ Reply with the explanation only, in at most three short paragraphs: no JSON and 
 const ASK: &str = concat!(
     r#"A developer watches a coding agent work and asks a side question about one item of its session: one of the agent's responses, one of its intentions (the last line of a response, which says what it does next and why, or the first line of a finished turn's final response, which says what it did), or a card that explains a change it made. The agent never sees the question or your answer. Answer so that he understands the agent's work.
 
-Answer from the input below: the intentions of the item's turn, oldest first, the item itself, and the question. Use only this input: do not use tools or read files. When the input does not answer the question, say so, and say what would.
+Answer from the input below: the intentions of the item's turn, oldest first, the item itself with what the studio recorded about it, and the question. Use only this input: do not use tools or read files. Build the answer on the recorded facts, and call what you infer from them an inference. When the input does not answer the question, say so, and say what would.
 
 "#,
     explanation_language!(),

@@ -11,7 +11,7 @@ export const studio = {
   // A `selected` or `cards` event came while `pending` waited, so the press's settling fetches both.
   missed: false,
   // The selected session's brief, cards and decisions, as the shell last sent them.
-  cards: { brief: null, recent: [], older: [], decisions: [] } as SessionCards,
+  cards: { brief: null, goal: null, answers: [], open: [], recent: [], older: [], decisions: [] } as SessionCards,
   // Focus mode (danielrispler/Falinks#573): the list and the rail folded, the terminal takes the window.
   focus: false,
   files: initial,
