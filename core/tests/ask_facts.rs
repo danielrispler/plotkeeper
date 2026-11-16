@@ -194,3 +194,24 @@ fn a_subagents_facts_are_its_prompt_steps_and_changed_files() {
     assert_eq!(facts.sections[1].facts[0].text, "Edit /w/repo/src/parse.rs");
     assert_eq!(facts.sections[2].facts[0].text, "/w/repo/src/parse.rs");
 }
+
+#[test]
+fn a_named_things_facts_list_its_reads_searches_and_mentions_and_an_unknown_name_has_none() {
+    let (studio, _log, _dir) = session();
+    let read = studio.ask_named(SESSION, 0, "other.rs").unwrap();
+    assert_eq!(labels(&read), ["Read it"]);
+    assert_eq!(read.sections[0].facts[0].text, "Read /w/repo/src/other.rs");
+    let searched = studio.ask_named(SESSION, 0, "fn parse").unwrap();
+    assert_eq!(labels(&searched), ["Searched for it"]);
+    let said = studio.ask_named(SESSION, 0, "the parser").unwrap();
+    assert_eq!(labels(&said), ["Named in Daniel's prompt"]);
+    let changed = studio.ask_named(SESSION, 0, "parse.rs").unwrap();
+    assert_eq!(labels(&changed), ["Changed it"]);
+    let never = studio.ask_named(SESSION, 0, "lexer.rs").unwrap();
+    assert!(never.sections.is_empty());
+    assert!(studio.ask_named(SESSION, 9, "x").is_none());
+    assert!(
+        read.text()
+            .starts_with("Read it:\nRead /w/repo/src/other.rs")
+    );
+}
