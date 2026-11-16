@@ -19,8 +19,9 @@ export type Anchor =
 export type Facts = { sections: { label: string; facts: { at: number | null; text: string }[] }[] };
 
 export type Hunk = { text: string; left_out: number; binary: boolean; first_line: number };
-export const hunkText = (h: Hunk | null) =>
-  h === null ? "The hunk could not be read." : h.binary ? "Binary file: no lines to show." : h.text + (h.left_out ? `… ${h.left_out} more lines` : "");
+// A hunk as plain text; `more` ends it with "… N more lines" when the cap left some out, for a view with no button of its own.
+export const hunkText = (h: Hunk | null, more = true) =>
+  h === null ? "The hunk could not be read." : h.binary ? "Binary file: no lines to show." : h.text + (more && h.left_out ? `… ${h.left_out} more lines` : "");
 
 // Two or three questions each anchor type offers, after the question types developers ask of a trace (Sillito et al. 2006).
 const questions: Record<Anchor["kind"], string[]> = {

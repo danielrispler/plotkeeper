@@ -5,7 +5,7 @@
 // draws the line open again.
 
 import { code, invoke, pressable, text } from "./dom.js";
-import { askAnchor, type Hunk } from "./ask.js";
+import { askAnchor, type Hunk, hunkText } from "./ask.js";
 import { diffRequest } from "./diff.js";
 import { openAt } from "./paths.js";
 import type { Capabilities, Check, Turn, TurnFile } from "./types.js";
@@ -99,9 +99,6 @@ function checkRow(session: string, row: EvidenceRow): HTMLElement {
 const openHunks = new Set<string>();
 const hunks = new Map<string, Hunk | null>();
 
-const hunkText = (h: Hunk | null) =>
-  h === null ? "The hunk could not be read." : h.binary ? "Binary file: no lines to show." : h.text;
-
 // A file's row: its label, which opens the real hunk between the turn's two trees under it, with "Open in editor" at its
 // first changed line. Only this row changes.
 export function fileRow(session: string, index: number, row: EvidenceRow): HTMLElement {
@@ -109,7 +106,7 @@ export function fileRow(session: string, index: number, row: EvidenceRow): HTMLE
   const key = `${session} ${index} ${file.root} ${file.path}`;
   const item = document.createElement("li");
   item.className = "evidence-file";
-  const pre = text("pre", hunks.has(key) ? hunkText(hunks.get(key)!) : "", "evidence-hunk");
+  const pre = text("pre", hunks.has(key) ? hunkText(hunks.get(key)!, false) : "", "evidence-hunk");
   const edit = pressable(document.createElement("button"), false, () => {
     const first = hunks.get(key)?.first_line ?? 1;
     openAt({ path: file.path, line: first, column: 1 }, file.root);
@@ -135,7 +132,7 @@ export function fileRow(session: string, index: number, row: EvidenceRow): HTMLE
     invoke<Hunk | null>("turn_file_hunk", { session, turn: index, root: file.root, path: file.path, from: file.from })
       .then((h) => {
         hunks.set(key, h);
-        pre.textContent = hunkText(h);
+        pre.textContent = hunkText(h, false);
         left(h);
       })
       .catch((e) => {
