@@ -514,3 +514,10 @@ body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
 .diff-line.hunk, .diff-line.meta { color: var(--muted); }
 .diff-external { color: var(--muted); font-size: var(--size-small); }
 .evidence-more[hidden] { display: none; }
+.ask-why { margin-top: var(--sp-4); }
+.ask-why input { font: inherit; font-size: var(--size-small); margin-right: var(--sp-3); }
+.ask-why .btn { margin-top: 0; }
+.ask-why-not { margin-top: var(--sp-3); }
+.ask-why-not > p { font-size: var(--size-small); }
+.ask-why-not summary { margin-top: var(--sp-3); font-size: var(--size-small); color: var(--muted); cursor: pointer; }
+.ask-why-not .markdown { margin: var(--sp-3) 0 0; }

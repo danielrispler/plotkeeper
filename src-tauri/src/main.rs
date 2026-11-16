@@ -445,6 +445,87 @@ fn ask(
     answer
 }
 
+/// Daniel's `question` on an Ask anchor (danielrispler/plotkeeper#126): the writer's answer, read with the anchor's recorded
+/// facts and, for a file, its hunk. The facts stay above it in the window; this is the interpretation.
+#[tauri::command(async)]
+fn ask_anchor(
+    session: String,
+    anchor: studio_core::Anchor,
+    what: String,
+    question: String,
+    studio: State<Mutex<Studio>>,
+    writer: State<Writer>,
+) -> Result<String, String> {
+    let log = studio_hook::event_log(&std::env::home_dir().ok_or("no home folder")?);
+    let (facts, transcript, trees) = {
+        let studio = studio.lock().unwrap();
+        let trees = match &anchor {
+            studio_core::Anchor::File { turn, root, .. } => {
+                studio.turn_trees(&session, *turn, root)
+            }
+            _ => None,
+        };
+        let transcript = studio.session(&session).map(|s| s.transcript.clone());
+        (studio.ask_facts(&session, &anchor, &log), transcript, trees)
+    };
+    let facts = facts.ok_or("nothing is recorded about this")?;
+    let hunk = match (&anchor, trees) {
+        (studio_core::Anchor::File { root, path, .. }, Some((start, end))) => turn_hunk(
+            std::path::Path::new(root),
+            &start,
+            end.as_deref(),
+            path,
+            None,
+            false,
+        )
+        .filter(|h| !h.binary)
+        .map(|h| {
+            format!(
+                "{}{}",
+                h.text,
+                if h.left_out > 0 {
+                    format!("... {} more lines", h.left_out)
+                } else {
+                    String::new()
+                }
+            )
+        }),
+        _ => None,
+    };
+    let item = studio_understanding::ask_item(&what, &facts, hunk.as_deref());
+    let answer = studio_understanding::ask_about(
+        &**writer,
+        &transcript.unwrap_or_default(),
+        &item,
+        &question,
+    );
+    if let Err(line) = &answer {
+        eprintln!("studio: no answer on {session}: {line}");
+    }
+    answer
+}
+
+/// "Why didn't it touch `name`?" in turn `turn` (danielrispler/plotkeeper#126): what was recorded about `name`, and the
+/// writer's possible reasons only when something was.
+#[tauri::command(async)]
+fn ask_why_not(
+    session: String,
+    turn: usize,
+    name: String,
+    studio: State<Mutex<Studio>>,
+    writer: State<Writer>,
+) -> Result<studio_understanding::WhyNot, String> {
+    let (facts, transcript) = {
+        let studio = studio.lock().unwrap();
+        (
+            studio.ask_named(&session, turn, &name),
+            studio.session(&session).map(|s| s.transcript.clone()),
+        )
+    };
+    let facts = facts.ok_or("this turn is not known")?;
+    studio_understanding::why_not(&**writer, &transcript.unwrap_or_default(), &name, facts)
+}
+
 /// Daniel renamed session `id`: a `StudioRename` line in the event log, which the log thread then
 /// applies and a restart replays (danielrispler/Falinks#469). An empty `name` gives the row its folder's again.
 #[tauri::command(async)]
@@ -697,6 +778,8 @@ fn main() {
             check_output,
             turn_file_hunk,
             ask_facts,
+            ask_anchor,
+            ask_why_not,
             turn_summary,
             turn_reply,
             agent_summary,
