@@ -160,7 +160,7 @@ const session = (state, { running = false, question = false } = {}) => {
       helper("a3", "Find where the delete is styled", "Find every rule that styles `.delete`.", "Explore", "Two rules in `ui/style.css`, none in `ui/list.ts`.", 3, 2 * 60 * MIN),
       helper("a1", "Review the diff", "Review the diff on this branch and list anything that breaks the token rules.", "Explore", "No raw colours; two spacing values bypass the tokens.", 4, 30 * MIN, running),
     ]), asker: state === "needs_you" ? { agent: null, since: now - 3 * MIN } : null,
-    prompts: [], turns, returned: null,
+    prompts: [], turns, returned: null, seen: 3, unseen: state === "idle",
     questions: question ? [{
       tool_use_id: "toolu_q1", agent: null, turn: 4, answer: "open",
       questions: [{
@@ -286,6 +286,18 @@ export const railStates = {
   railIdle: () => build("idle", { answered: true, withBrief: true }),
 };
 
+// #124: the banner opens an idle session, right above the newest turn, with the Brief inside it and not below the feed.
+const bannerScript = `
+  const banner = document.getElementById("banner");
+  if (!banner) log("snap:fail the banner is missing");
+  else {
+    const next = banner.parentElement.nextElementSibling;
+    if (next?.id !== "feed") log("snap:fail the newest turn is not right under the banner");
+    if (!banner.querySelector(".banner-brief .slot-title")) log("snap:fail the Brief is not inside the banner");
+    if (!document.getElementById("brief-fold").hidden) log("snap:fail the Brief shows twice");
+    log("banner: " + [...banner.querySelectorAll("p")].map((p) => p.textContent).join(" | "));
+  }`;
+
 // Sample scripts for a fixture's `snapScript` (see page.mjs): the first scrolls the rail of the five-turn fixture and logs
 // where it stands, the second fails on purpose.
 const scrollScript = `
@@ -373,14 +385,34 @@ const askScript = (selectors) => `
   log("rail scrollTop " + at + " -> " + story.scrollTop);
   if (story.scrollTop !== at) log("snap:fail the rail's scrollTop moved from " + at + " to " + story.scrollTop);`;
 
+// #120: scrolls the rail, answers the turn's Quiz (a pick, or "Show the rest anyway"), and fails when the rail's scrollTop moved
+// or the reasons and the held Body lines did not show.
+const quizScript = (answer) => `
+  const story = document.getElementById("story");
+  story.scrollTop = Math.min(80, story.scrollHeight - story.clientHeight);
+  const at = story.scrollTop;
+  const wait = () => new Promise((resolve) => setTimeout(resolve, 200));
+  const region = document.querySelector(".now-turn .quiz-region");
+  if (!region) return log("snap:fail the newest turn has no open Quiz");
+  if (region.querySelector(".options li p")) log("snap:fail the reasons show before an answer");
+  ${answer === "pick" ? `region.querySelector(".options .btn").click();` : `region.querySelector(".quiz-skip").click();`}
+  await wait();
+  if (!region.querySelector(".options li p")) log("snap:fail the reasons did not show");
+  if (!region.querySelector(".quiz-chips")) log("snap:fail the chips did not show");
+  log("rail scrollTop " + at + " -> " + story.scrollTop);
+  if (story.scrollTop !== at) log("snap:fail the rail's scrollTop moved from " + at + " to " + story.scrollTop);`;
 
 export const railFixtures = {
+  railQuiz: () => build("your_turn"),
+  railQuizPick: () => ({ ...build("your_turn"), snapScript: quizScript("pick") }),
+  railQuizSkip: () => ({ ...build("your_turn"), snapScript: quizScript("skip") }),
   railDiff: () => ({ ...build("your_turn"), snapScript: diffScript }),
   railAsk: () => ({ ...build("your_turn"), snapScript: askScript([".evidence-file", ".evidence-check"]) }),
   railAskCheck: () => ({ ...build("your_turn"), snapScript: askScript([".evidence-check"]) }),
   railHunk: () => ({ ...build("your_turn"), snapScript: hunkScript }),
   railEvidence: () => ({ ...build("your_turn"), snapScript: evidenceScript }),
   ...railStates,
+  railBanner: () => ({ ...build("idle", { answered: true, withBrief: true }), snapScript: bannerScript }),
   railIdleScroll: () => ({ ...build("idle", { answered: true, withBrief: true }), snapScript: scrollScript }),
   railIdleOpened: () => ({ ...build("idle", { answered: true, withBrief: true }), snapScript: openTurnScript }),
   railIdleFail: () => ({ ...build("idle", { answered: true, withBrief: true }), snapScript: failScript }),

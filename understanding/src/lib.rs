@@ -35,8 +35,8 @@ pub use drift::{AGY_FIXTURE_VERSION, AgyVersions, Drift, Versions, drift, droppe
 pub use fingerprint::{Fingerprints, backfilled, fingerprint_changes, worktree_root};
 use grounding::words;
 pub use store::{
-    Brief, CardStore, CheckResult, Guess, Level, Rating, Reason, Row, SessionCards, StoredCard,
-    StoredSummary, millis,
+    Brief, CardStore, CheckResult, Guess, Level, QuizTap, Rating, Reason, Row, SessionCards,
+    StoredCard, StoredSummary, Tap, millis,
 };
 pub use summary::{
     Line, LineKind, SummarySetup, TurnSummary, write_agent_summary, write_name, write_summary,
@@ -402,6 +402,49 @@ pub fn ask_about(
         Some(answer) if !answer.is_empty() => Ok(answer.into()),
         _ => Err("the writer's reply holds no answer".into()),
     }
+}
+
+/// The writer's input item for a question on `what` (danielrispler/plotkeeper#126): the recorded `facts`, and the
+/// `hunk` of a file, as recorded and apart from anything the writer says.
+pub fn ask_item(what: &str, facts: &studio_core::AskFacts, hunk: Option<&str>) -> String {
+    let mut item = format!("About {what}. What was recorded:\n{}", facts.text());
+    if let Some(hunk) = hunk {
+        item.push_str(&format!("\n\nThe hunk:\n{hunk}"));
+    }
+    item
+}
+
+/// What "why didn't it touch `name`" gives: what was recorded about it, and the writer's possible reasons, which are
+/// guesses and never recorded.
+#[derive(Debug, PartialEq, Serialize)]
+pub struct WhyNot {
+    pub facts: studio_core::AskFacts,
+    pub reasons: Option<String>,
+}
+
+/// "Why didn't it touch `name`?" on its recorded `facts`: the writer is asked for possible reasons only when something was
+/// recorded about `name`. When the session never read, searched or mentioned it, the facts say so and there is no call.
+pub fn why_not(
+    writer: &(impl CardWriter + ?Sized),
+    transcript: &Transcript,
+    name: &str,
+    facts: studio_core::AskFacts,
+) -> Result<WhyNot, String> {
+    if facts.sections.is_empty() {
+        return Ok(WhyNot {
+            facts,
+            reasons: None,
+        });
+    }
+    let item = ask_item(&format!("`{name}`"), &facts, None);
+    let question = format!(
+        "Why didn't the agent change {name}? Give possible reasons, each as a guess from what was recorded."
+    );
+    let reasons = ask_about(writer, transcript, &item, &question)?;
+    Ok(WhyNot {
+        facts,
+        reasons: Some(reasons),
+    })
 }
 
 /// The JSON object in a writer's reply, perhaps in a code fence: from its first `{` to its last `}`.
@@ -1139,7 +1182,7 @@ Reply with the explanation only, in at most three short paragraphs: no JSON and 
 const ASK: &str = concat!(
     r#"A developer watches a coding agent work and asks a side question about one item of its session: one of the agent's responses, one of its intentions (the last line of a response, which says what it does next and why, or the first line of a finished turn's final response, which says what it did), or a card that explains a change it made. The agent never sees the question or your answer. Answer so that he understands the agent's work.
 
-Answer from the input below: the intentions of the item's turn, oldest first, the item itself, and the question. Use only this input: do not use tools or read files. When the input does not answer the question, say so, and say what would.
+Answer from the input below: the intentions of the item's turn, oldest first, the item itself with what the studio recorded about it, and the question. Use only this input: do not use tools or read files. Build the answer on the recorded facts, and call what you infer from them an inference. When the input does not answer the question, say so, and say what would.
 
 "#,
     explanation_language!(),
