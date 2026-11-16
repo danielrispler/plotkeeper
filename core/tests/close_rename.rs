@@ -163,3 +163,50 @@ fn a_deleted_session_leaves_the_list_until_it_starts_again() {
     studio.apply(&event("SessionStart", 4_000, json!({ "source": "resume" })));
     assert_eq!(studio.sessions().len(), 1, "a resume");
 }
+
+// A session started outside the studio (no studio terminal), deleted, stays out of the list while its
+// tool and prompt events keep arriving; only a resume's `SessionStart` brings it back.
+#[test]
+fn an_outside_session_stays_deleted_while_its_events_keep_arriving() {
+    let outside = |name: &str, at: u64, extra: Value| {
+        let mut value: Value = serde_json::from_str(&event(name, at, extra)).unwrap();
+        value.as_object_mut().unwrap().remove("studio_terminal_id");
+        value.to_string()
+    };
+    let mut studio = Studio::default();
+    studio.apply(&outside(
+        "SessionStart",
+        1_000,
+        json!({ "source": "startup" }),
+    ));
+    assert_eq!(studio.sessions().len(), 1);
+    assert!(studio.session(ID).unwrap().terminal.is_none());
+    studio.apply(
+        &json!({ "session_id": ID, "hook_event_name": "StudioDelete", "studio_received_ms": 2_000 })
+            .to_string(),
+    );
+    assert!(studio.sessions().is_empty());
+
+    studio.apply(&outside(
+        "UserPromptSubmit",
+        3_000,
+        json!({ "prompt": "More.", "prompt_id": "p-1" }),
+    ));
+    studio.apply(&outside(
+        "PreToolUse",
+        3_100,
+        json!({ "tool_name": "Bash", "tool_input": { "command": "ls" }, "tool_use_id": "t-1" }),
+    ));
+    studio.apply(&outside("Stop", 3_200, json!({})));
+    assert!(
+        studio.sessions().is_empty(),
+        "its events do not bring it back"
+    );
+
+    studio.apply(&outside(
+        "SessionStart",
+        4_000,
+        json!({ "source": "resume" }),
+    ));
+    assert_eq!(studio.sessions().len(), 1, "a resume does");
+}

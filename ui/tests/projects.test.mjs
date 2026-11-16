@@ -30,3 +30,11 @@ test("with no selection the Git line shows the first project in project order th
   assert.equal(firstProject(["/c", "/b"], found), "/b");
   assert.equal(firstProject(["/c"], found), undefined);
 });
+
+test("a worktree resolves to its own repository, never the first project, and to none when git finds none", async () => {
+  const { repositoryOfWorktree } = await import("../../dist/workspaces.js");
+  const worktree = "/other/.claude/worktrees/x";
+  assert.equal(await repositoryOfWorktree(worktree, async (folder) => (folder === worktree ? "/other" : "/a")), "/other");
+  assert.equal(await repositoryOfWorktree(worktree, async () => null), null);
+  assert.equal(await repositoryOfWorktree(worktree, async () => Promise.reject("boom")), null);
+});
