@@ -350,6 +350,10 @@ body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
 .card .btn[aria-pressed="true"] { font-weight: 600; box-shadow: inset 0 0 0 var(--mark) var(--fg); }
 .options .btn:disabled[aria-pressed="false"] { opacity: .45; }
 .key-wrong { margin-top: var(--sp-5); font-size: var(--size); }
+/* A Quiz's escape and its optional chips (danielrispler/plotkeeper#120): small taps under the options. */
+.quiz-skip { margin-top: var(--sp-4); font-size: var(--size); }
+.quiz-chips { display: flex; flex-wrap: wrap; gap: var(--sp-2); font-size: var(--size); }
+.quiz-region .body-lines { margin: var(--sp-4) 0 0; }
 /* "Explain more" opens the writer's longer explanation under the card; the rating's levels and reasons
    are small taps, marked like the options. */
 .more summary { margin-top: var(--sp-5); font-size: var(--size); font-weight: 600; color: var(--muted); cursor: pointer; }
@@ -516,3 +520,18 @@ body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
 .diff-line.hunk, .diff-line.meta { color: var(--muted); }
 .diff-external { color: var(--muted); font-size: var(--size-small); }
 .evidence-more[hidden] { display: none; }
+
+/* "Where we were" (#124): the banner above the newest turn. */
+.banner { margin: 0 0 var(--sp-4); padding: var(--sp-3) var(--sp-4); border: var(--hair) solid var(--line); border-radius: var(--radius); font-size: var(--size-small); }
+.banner p { margin: 0 0 var(--sp-2); }
+.banner .banner-title { font-weight: 600; }
+.banner .label { color: var(--muted); }
+.banner .age { color: var(--muted); }
+.banner-brief summary { cursor: pointer; color: var(--muted); }
+.ask-why { margin-top: var(--sp-4); }
+.ask-why input { font: inherit; font-size: var(--size-small); margin-right: var(--sp-3); }
+.ask-why .btn { margin-top: 0; }
+.ask-why-not { margin-top: var(--sp-3); }
+.ask-why-not > p { font-size: var(--size-small); }
+.ask-why-not summary { margin-top: var(--sp-3); font-size: var(--size-small); color: var(--muted); cursor: pointer; }
+.ask-why-not .markdown { margin: var(--sp-3) 0 0; }

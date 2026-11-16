@@ -70,6 +70,20 @@ impl AskFacts {
     }
 }
 
+impl AskFacts {
+    /// The facts as lines of text under their labels, which the writer reads.
+    pub fn text(&self) -> String {
+        self.sections
+            .iter()
+            .map(|s| {
+                let lines = s.facts.iter().map(|f| f.text.as_str());
+                format!("{}:\n{}", s.label, lines.collect::<Vec<_>>().join("\n"))
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    }
+}
+
 fn edits(row: &Row) -> bool {
     EDITS.contains(&row.tool.as_str())
 }
@@ -93,6 +107,61 @@ fn describe(row: &Row) -> String {
 }
 
 impl Studio {
+    /// What was recorded in turn `turn` about `name`, a file, a symbol or a phrase (danielrispler/plotkeeper#126): the
+    /// steps that changed, read or searched it, the commands that name it, and where Daniel's prompt or the agent's
+    /// replies mention it. No sections when the turn never touched it. `None` when the session or turn is not known.
+    pub fn ask_named(&self, session: &str, turn: usize, name: &str) -> Option<AskFacts> {
+        let session = self.session(session)?;
+        let turn_ = session.turns.get(turn)?;
+        let name = name.trim().to_lowercase();
+        let has = |text: &str| !name.is_empty() && text.to_lowercase().contains(&name);
+        let mut changed = vec![];
+        let mut read = vec![];
+        let mut searched = vec![];
+        let mut named = vec![];
+        for row in session.ledger.turn(turn) {
+            let fact = AskFact {
+                at: row.started_at,
+                text: describe(row),
+            };
+            let on = |text: &Option<String>| text.as_deref().is_some_and(has);
+            if edits(row) && on(&row.file) {
+                changed.push(fact);
+            } else if row.tool == "Read" && on(&row.file) {
+                read.push(fact);
+            } else if matches!(row.tool.as_str(), "Grep" | "Glob")
+                && (on(&row.pattern) || on(&row.file))
+            {
+                searched.push(fact);
+            } else if on(&row.command) || on(&row.file) || on(&row.pattern) {
+                named.push(fact);
+            }
+        }
+        let mut facts = AskFacts::default();
+        facts.add("Changed it", changed);
+        facts.add("Read it", read);
+        facts.add("Searched for it", searched);
+        facts.add("Named in a command", named);
+        if has(&turn_.prompt) {
+            facts.line("Named in Daniel's prompt", turn_.prompt.clone());
+        }
+        // The transcript holds the replies of the newest turn only.
+        if turn + 1 == session.turns.len() {
+            let replies: Vec<AskFact> = session
+                .transcript
+                .responses
+                .iter()
+                .filter(|r| has(r))
+                .map(|r| AskFact {
+                    at: None,
+                    text: r.lines().next().unwrap_or_default().to_string(),
+                })
+                .collect();
+            facts.add("Named in the agent's replies", replies);
+        }
+        Some(facts)
+    }
+
     /// The recorded facts of `anchor` in session `session`: from its ledger, and from the event log at `log` through the
     /// ledger's offsets. `None` when the session or the thing is not known.
     pub fn ask_facts(&self, session: &str, anchor: &Anchor, log: &Path) -> Option<AskFacts> {

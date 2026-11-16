@@ -44,6 +44,10 @@ pub struct StoredCard {
     /// its guess; `None` while it runs, and on a card no check requested.
     #[serde(default)]
     pub check_result: Option<CheckResult>,
+    /// What Daniel did with the quiz besides the pick (`guess`): a skip and the chips, each with its time
+    /// (danielrispler/plotkeeper#120).
+    #[serde(default)]
+    pub taps: Vec<QuizTap>,
 }
 
 /// What a check's result says about the guess on its card: it passed, it failed, or its exit code
@@ -62,6 +66,53 @@ pub struct StoredSummary {
     pub request: SummaryRequest,
     pub summary: TurnSummary,
     pub added_at: u64,
+    /// What Daniel did with the turn's own Quiz, each with its time (danielrispler/plotkeeper#120); a turn with a card has
+    /// its taps on the card.
+    #[serde(default)]
+    pub taps: Vec<QuizTap>,
+}
+
+/// What Daniel does with a Quiz (danielrispler/plotkeeper#120): a pick, "Show the rest anyway" (a skip, which reveals as a pick
+/// does), and the three chips under the revealed answer.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Tap {
+    Pick { option: usize },
+    Skip,
+    Understood,
+    ExplainMore,
+    KeyWrong,
+}
+
+/// A tap and when, in Unix milliseconds.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct QuizTap {
+    #[serde(flatten)]
+    pub tap: Tap,
+    pub at: u64,
+}
+
+impl QuizTap {
+    /// Whether it answers the Quiz, as a pick or a skip do.
+    fn answers(&self) -> bool {
+        matches!(self.tap, Tap::Pick { .. } | Tap::Skip)
+    }
+}
+
+/// Keeps `tap` at `at` in `taps`: the first answer counts, and each chip once. Whether it was kept.
+fn keep_tap(taps: &mut Vec<QuizTap>, tap: Tap, at: u64) -> bool {
+    let new = QuizTap { tap, at };
+    let taken = taps.iter().any(|kept| {
+        if new.answers() {
+            kept.answers()
+        } else {
+            std::mem::discriminant(&kept.tap) == std::mem::discriminant(&new.tap)
+        }
+    });
+    if !taken {
+        taps.push(new);
+    }
+    !taken
 }
 
 /// Daniel's rating of a card's explanation: a level and the reasons he picked. His fifth reason, "the
@@ -159,6 +210,7 @@ struct ShownCard<'a> {
     more: &'a Option<String>,
     rating: &'a Option<Rating>,
     check_result: Option<CheckResult>,
+    taps: &'a [QuizTap],
 }
 
 #[derive(Serialize)]
@@ -191,6 +243,7 @@ fn without_diffs<S: serde::Serializer>(cards: &[StoredCard], s: S) -> Result<S::
         more: &kept.more,
         rating: &kept.rating,
         check_result: kept.check_result,
+        taps: &kept.taps,
     }))
 }
 
@@ -392,6 +445,7 @@ impl CardStore {
             more: None,
             rating: None,
             check_result: None,
+            taps: Vec::new(),
         });
         self.save()
     }
@@ -473,6 +527,48 @@ impl CardStore {
         Ok(())
     }
 
+    /// Records Daniel's `tap` at `at` on the Quiz of `id`, a card's or a turn's own (danielrispler/plotkeeper#120), and saves it.
+    /// A card's pick is its guess, and its key flag the same one record; the first answer counts, so a
+    /// pick after a skip, a skip after a pick and a tap on a check's card record nothing.
+    pub fn quiz_tap(&mut self, id: &str, tap: Tap, at: u64) -> io::Result<()> {
+        if let Some(kept) = self.card_mut(id) {
+            let answered = kept.guess.is_some() || kept.taps.iter().any(QuizTap::answers);
+            if kept.card.quiz.is_none() || kept.request.check.is_some() {
+                return Ok(());
+            }
+            return match tap {
+                Tap::Pick { option } if !answered => self.guess(id, option, at),
+                Tap::Pick { .. } => Ok(()),
+                Tap::Skip if answered => Ok(()),
+                _ => {
+                    if keep_tap(&mut kept.taps, tap, at) {
+                        if tap == Tap::KeyWrong {
+                            kept.key_wrong = true;
+                        }
+                        return self.save();
+                    }
+                    Ok(())
+                }
+            };
+        }
+        let Some(kept) = self.summaries.iter_mut().find(|kept| kept.request.id == id) else {
+            return Ok(());
+        };
+        let options = kept
+            .summary
+            .quiz
+            .as_ref()
+            .map_or(0, |quiz| quiz.options.len());
+        if options == 0 || matches!(tap, Tap::Pick { option } if option >= options) {
+            return Ok(());
+        }
+        if keep_tap(&mut kept.taps, tap, at) {
+            self.revision += 1;
+            return write(&self.path.with_file_name("summaries.json"), &self.summaries);
+        }
+        Ok(())
+    }
+
     /// Records Daniel's flag that the key of card `id`'s quiz is wrong, and saves the store.
     pub fn key_wrong(&mut self, id: &str) -> io::Result<()> {
         if let Some(kept) = self.card_mut(id)
@@ -528,6 +624,7 @@ impl CardStore {
             request,
             summary,
             added_at: millis(),
+            taps: Vec::new(),
         });
         self.revision += 1;
         write(&self.path.with_file_name("summaries.json"), &self.summaries)

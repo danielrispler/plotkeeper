@@ -581,3 +581,111 @@ fn the_live_only_facts_survive_a_restart_and_an_older_store_opens_with_none() {
     assert_eq!(reopened.facts(), &facts);
     assert_eq!(reopened.cards(), store.cards());
 }
+
+/// A store at `path` holding a lone Quiz on turn `t1`: the summary's own, with no card.
+fn lone_quiz(path: &std::path::Path) -> CardStore {
+    let mut store = CardStore::open(path.to_owned()).unwrap();
+    let request = studio_core::SummaryRequest {
+        id: "t1".into(),
+        ..Default::default()
+    };
+    let summary: studio_understanding::TurnSummary = serde_json::from_value(serde_json::json!({
+        "summary": "Did a thing.",
+        "quiz": { "text": "Why?", "key": 0, "options": [
+            { "text": "A", "why": "Because." }, { "text": "B", "why": "No." }] },
+    }))
+    .unwrap();
+    store.add_summary(request, summary).unwrap();
+    store
+}
+
+#[test]
+fn a_lone_quizzes_pick_skip_and_chips_are_stored_with_their_times_and_survive_a_restart() {
+    use studio_understanding::{QuizTap, Tap};
+    let data = tempfile::tempdir().unwrap();
+    let path = data.path().join("cards.json");
+    let mut store = lone_quiz(&path);
+    store.quiz_tap("t1", Tap::Pick { option: 1 }, 10).unwrap();
+    // The first answer counts: a later pick and a skip change nothing; a chip is kept once.
+    store.quiz_tap("t1", Tap::Pick { option: 0 }, 11).unwrap();
+    store.quiz_tap("t1", Tap::Skip, 12).unwrap();
+    store.quiz_tap("t1", Tap::ExplainMore, 13).unwrap();
+    store.quiz_tap("t1", Tap::ExplainMore, 14).unwrap();
+    store.quiz_tap("t1", Tap::Understood, 15).unwrap();
+    // No such option, and no such turn, record nothing.
+    store.quiz_tap("t1", Tap::Pick { option: 5 }, 16).unwrap();
+    store.quiz_tap("nobody", Tap::Skip, 17).unwrap();
+
+    let reopened = CardStore::open(path).unwrap();
+    let taps = &reopened.turn_summary("t1").unwrap().taps;
+    assert_eq!(
+        taps,
+        &[
+            QuizTap {
+                tap: Tap::Pick { option: 1 },
+                at: 10
+            },
+            QuizTap {
+                tap: Tap::ExplainMore,
+                at: 13
+            },
+            QuizTap {
+                tap: Tap::Understood,
+                at: 15
+            },
+        ]
+    );
+}
+
+#[test]
+fn a_skip_alone_is_stored_and_a_pick_after_it_is_not() {
+    use studio_understanding::{QuizTap, Tap};
+    let data = tempfile::tempdir().unwrap();
+    let mut store = lone_quiz(&data.path().join("cards.json"));
+    store.quiz_tap("t1", Tap::Skip, 5).unwrap();
+    store.quiz_tap("t1", Tap::Pick { option: 0 }, 6).unwrap();
+    assert_eq!(
+        store.turn_summary("t1").unwrap().taps,
+        [QuizTap {
+            tap: Tap::Skip,
+            at: 5
+        }]
+    );
+}
+
+#[test]
+fn a_cards_skip_and_chips_are_stored_beside_its_guess_and_the_key_flag_is_the_one_record() {
+    use studio_understanding::{QuizTap, Tap};
+    let data = tempfile::tempdir().unwrap();
+    let path = data.path().join("cards.json");
+    let mut store = two_cards(&path);
+    store.quiz_tap("toolu_01A", Tap::Skip, 7).unwrap();
+    store
+        .quiz_tap("toolu_01A", Tap::Pick { option: 0 }, 8)
+        .unwrap();
+    store.quiz_tap("toolu_01A", Tap::KeyWrong, 9).unwrap();
+    store
+        .quiz_tap("toolu_01B", Tap::Pick { option: 2 }, 10)
+        .unwrap();
+    store.quiz_tap("toolu_01B", Tap::Skip, 11).unwrap();
+
+    let reopened = CardStore::open(path).unwrap();
+    let [a, b] = reopened.cards() else { panic!() };
+    assert_eq!(a.guess, None);
+    assert!(a.key_wrong);
+    assert_eq!(
+        a.taps,
+        [
+            QuizTap {
+                tap: Tap::Skip,
+                at: 7
+            },
+            QuizTap {
+                tap: Tap::KeyWrong,
+                at: 9
+            }
+        ]
+    );
+    assert_eq!(b.guess.map(|g| (g.option, g.at)), Some((2, 10)));
+    assert_eq!(b.taps, []);
+}

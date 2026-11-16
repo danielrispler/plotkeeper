@@ -43,6 +43,7 @@ fn record(days: u64, shown: Option<u64>, answered: Option<(u64, bool)>) -> Store
         more: None,
         rating: None,
         check_result: None,
+        taps: Vec::new(),
     }
 }
 
