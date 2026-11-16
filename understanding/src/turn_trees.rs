@@ -10,7 +10,7 @@
 
 use crate::fingerprint::git;
 use std::path::Path;
-use studio_core::{Numstat, RootDiff, TurnDiff};
+use studio_core::{Facts, Numstat, RootDiff, TurnDiff};
 
 /// The refs' namespace.
 const REFS: &str = "refs/plotkeeper/turns";
@@ -187,6 +187,20 @@ pub fn turn_diffs(ask: &TurnDiff) -> Option<Vec<RootDiff>> {
         })
         .collect();
     (!diffs.is_empty()).then_some(diffs)
+}
+
+/// Fills the hunk of each file in `facts` from the trees `ask` names, for the turn writer.
+pub fn add_hunks(ask: &TurnDiff, facts: &mut Facts) {
+    for fact in &mut facts.files {
+        let file = &fact.file;
+        let trees = ask.trees.iter().find(|t| t.root == file.root);
+        let Some((trees, end)) = trees.and_then(|t| Some((t, t.end.as_deref()?))) else {
+            continue;
+        };
+        let root = Path::new(&file.root);
+        let hunk = hunk(root, &trees.start, end, &file.path, file.from.as_deref());
+        fact.hunk = hunk.unwrap_or_default();
+    }
 }
 
 #[cfg(test)]
