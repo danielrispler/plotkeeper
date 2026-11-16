@@ -19,21 +19,22 @@
   <!-- The grid runs right to left: the list on the right, the terminal in the centre, the rail on the left. -->
   <div class="app">
     <header class="top" data-tauri-drag-region="deep">
-      <!-- The selected session's name and context share are on its row only (danielrispler/Falinks#571). -->
+      <!-- The top bar (danielrispler/plotkeeper#127): each item shows whole or is in the "⋯" menu, in the order bar.ts keeps. The
+           session's header is first, after the traffic lights; a click toggles the rail. Its state is the one the rail's header shows. -->
+      <button id="session-header" class="btn quiet session-header" type="button" aria-label="Session story" hidden><span id="bar-dot" class="dot"></span><span id="bar-state" class="state"></span><span id="bar-name" class="name"></span></button>
+      <!-- How many sessions need Daniel (danielrispler/Falinks#572), anywhere, shown whenever any do; it selects the first. -->
+      <button id="needs-you" class="btn small chip" type="button" hidden></button>
       <!-- The Git line (#29): the selected session's workspace and its git tokens, or the main checkout's; stays in focus mode. -->
       <span id="git-line" class="git-line" hidden></span>
       <span class="sp"></span>
-      <!-- How many sessions need Daniel (danielrispler/Falinks#572), shown whenever any do; it selects the first. -->
-      <button id="needs-you" class="btn small chip" type="button" hidden></button>
-      <!-- A new build to restart into (danielrispler/Falinks#470); sessions live in the daemon, so they stay. -->
-      <button id="new-build" class="btn small" type="button" title="A new build is ready. Sessions keep running." hidden>Restart to update</button>
-      <button id="new-session" class="btn small" type="button">New session</button>
-      <button id="new-terminal" class="btn small" type="button">New terminal</button>
       <!-- Usage: context, 5h and week (danielrispler/Falinks#480, danielrispler/Falinks#481). -->
       <span id="usage" class="usage"></span>
-      <!-- While the rail is an overlay: the selected session's state and open question (danielrispler/Falinks#573). -->
-      <span id="slim" class="slim" hidden></span>
-      <button id="rail-toggle" class="btn small" type="button" hidden>Story ⌘2</button>
+      <button id="new-terminal" class="btn small" type="button">New terminal</button>
+      <!-- A new build to restart into (danielrispler/Falinks#470); sessions live in the daemon, so they stay. -->
+      <button id="new-build" class="btn small" type="button" title="A new build is ready. Sessions keep running." hidden>Restart to update</button>
+      <button id="new-session" class="btn small" type="button" title="New session" aria-label="New session">+</button>
+      <button id="bar-more" class="btn small" type="button" popovertarget="bar-menu" aria-label="More" hidden>⋯</button>
+      <div id="bar-menu" class="menu bar-menu" popover></div>
     </header>
 
     <nav class="list" aria-label="Sessions">

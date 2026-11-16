@@ -61,17 +61,32 @@ body[data-layout="focus"] #rail-divider { display: none; }
 .top { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--sp-5); padding: 0 var(--sp-5) 0 var(--lights);
        white-space: nowrap; overflow: hidden; }
 /* The Git line: the workspace's name, then its tokens (#29). */
-.git-line { display: flex; gap: var(--sp-4); align-items: baseline; min-width: 0; overflow: hidden; font-size: var(--size-small); color: var(--muted); }
+.git-line { display: flex; gap: var(--sp-4); align-items: baseline; font-size: var(--size-small); color: var(--muted); }
 .git-line .git-workspace { color: inherit; font-weight: 600; }
 .git-line .git-bad { color: var(--conflict); }
 .git-line .git-branch { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
 .git-line .git-branch:hover { text-decoration: underline; }
 .project-workspaces .row .l2 { white-space: pre; }
 .usage { font-size: var(--size-small); color: var(--muted); }
-/* The rail's slim header while it is an overlay (danielrispler/Falinks#573): the selected session's state and open question. */
-.slim { display: flex; gap: var(--sp-4); align-items: baseline; min-width: 0; overflow: hidden; font-size: var(--size-small); }
-.slim .state { font-size: inherit; margin: 0; }
-.slim .line { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+/* The top bar's items show whole or sit in the "⋯" menu, so none shrinks (danielrispler/plotkeeper#127, bar.ts). The spacer takes the rest. */
+.top > :not(.sp):not(.menu) { flex: none; }
+.top .sp { flex: 1; }
+.top .menu[popover] { top: var(--bar); right: var(--sp-5); left: auto; width: max-content; max-width: calc(100vw - 2 * var(--sp-5)); }
+.top .menu .git-line { flex-wrap: wrap; padding: var(--sp-2) var(--sp-4); }
+.top .menu .usage { padding: var(--sp-2) var(--sp-4); }
+.top .menu .chip { text-align: start; }
+/* The session's header: its state dot, state and name; the name is the one part that gives way, past a fixed length. */
+.session-header { display: flex; align-items: center; gap: var(--sp-3); font: inherit; font-size: var(--size-small); color: var(--fg); background: none;
+                  border: 0; border-radius: var(--radius); padding: var(--sp-1) var(--sp-4); max-width: var(--session-header); cursor: pointer; }
+.session-header:hover { background: var(--hover); }
+.session-header .state { margin: 0; font-size: inherit; flex: none; }
+.session-header .name { overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+.session-header .dot { flex: none; width: var(--dot); height: var(--dot); border-radius: 50%; background: var(--muted); }
+.session-header .dot[data-state="running"] { background: var(--fg); }
+.session-header .dot[data-state="idle"], .session-header .dot[data-state="ended"] { background: none; box-shadow: inset 0 0 0 var(--hair) var(--muted); }
+.session-header .dot[data-state="needs_you"] { background: var(--needs-you); }
+/* The chip stands apart from the header. */
+.top .chip { margin-inline-start: var(--sp-5); }
 /* The needs-you chip (danielrispler/Falinks#572): the count of sessions that need Daniel, in the needs-you colour. */
 .top .chip { color: var(--needs-you); background: var(--needs-you-bg); font-weight: 600; }
 .top .chip:hover { color: var(--needs-you); background: var(--needs-you-line); }
@@ -262,8 +277,6 @@ body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; to
 #intention-label:not([hidden]) + p { font-size: var(--size); font-weight: 400; }
 .headline-text { margin: 0 0 var(--sp-3); font-size: var(--size-large); font-weight: 500; }
 .body-lines { margin: 0 0 var(--sp-4); padding-inline-start: var(--sp-5); }
-.now-turn .subagents button { flex-direction: row; align-items: baseline; gap: var(--sp-4); white-space: nowrap; overflow: hidden; }
-.now-turn .subagents button > :nth-child(2) { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .state[data-state="needs_you"] { color: var(--needs-you); background: var(--needs-you-bg); border-radius: var(--radius);
                                  padding: var(--sp-1) var(--sp-4); display: inline-block; }
 /* The intention, the anchor of "now" (mockup C): boxed, the biggest line, with a bright edge; dim once
@@ -445,3 +458,14 @@ body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; to
 .subagent-log .log-error { margin-left: var(--sp-4); font-size: var(--size-xs); color: var(--conflict); }
 .subagent-log .log-result { font: var(--size-small)/var(--term-line) var(--mono); white-space: pre-wrap; margin: var(--sp-2) 0 var(--sp-4) var(--sp-5); padding: var(--sp-4) var(--sp-5); background: var(--surface); border-radius: var(--radius-small); color: var(--muted); max-height: 12em; overflow: auto; }
 .subagent-log .failed .log-result { color: var(--conflict); }
+
+/* Earlier turns folded to one line (danielrispler/plotkeeper#117): the prompt cut to fit, the Headline, and two marks. */
+.turn.past { padding: var(--sp-2) 0; }
+.turn-line { display: flex; align-items: baseline; gap: var(--sp-4); width: 100%; min-width: 0; text-align: start; background: none; border: 0; padding: var(--sp-2) 0; color: var(--fg); cursor: pointer; }
+.turn-line .prompt { flex: 0 1 35%; min-width: 0; margin: 0; }
+.turn-line .headline-text { flex: 1 1 0; min-width: 0; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: var(--size-small); }
+.turn-line .mark { flex: none; font-size: var(--size-small); color: var(--muted); }
+.turn .subagents button { flex-direction: row; align-items: baseline; gap: var(--sp-4); white-space: nowrap; overflow: hidden; }
+.turn .subagents button > :nth-child(2) { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.answered-card > summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.answered-card > .card { margin-top: var(--sp-3); }
