@@ -12,7 +12,7 @@ import { askElement } from "./ask.js";
 import { rendered } from "./markdown.js";
 import { encode, request } from "./daemon.js";
 import { agentState, sessionName, showsLanded } from "./list.js";
-import { closePane, resumesAuto, startClaude } from "./panes.js";
+import { closePane, openHere } from "./panes.js";
 import { openDecision } from "./answer.js";
 import { cardNode } from "./cards.js";
 import { showCleared } from "./decisions.js";
@@ -73,7 +73,7 @@ export function showView(selected: Selection | null) {
   element("view").toggleAttribute("data-agent", agent !== null);
   // "Open" resumes an ended session in a new terminal, in its folder, where Claude Code keeps it.
   element("reopen").hidden = agent !== null || session.state !== "ended";
-  element("reopen").onclick = () => startClaude(session.cwd, session.resume_id, "", resumesAuto(session)).catch((e) => console.warn(e));
+  element("reopen").onclick = () => openHere(session).catch((e) => console.warn(e));
   // Another agent's row (danielrispler/Falinks#560) has no name of its own to keep, nor turns to mark, and comes back
   // with its status if dropped.
   const own = agent === null && !session.status_only;
