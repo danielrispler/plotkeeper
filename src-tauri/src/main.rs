@@ -1402,8 +1402,7 @@ fn offered(app: &AppHandle, request: &CardRequest) -> bool {
     offer == Offer::Card
 }
 
-/// Writes the summary of `request`'s turn on its session's queue, after the turn's card, then
-/// switches the turn's intention to its first line (danielrispler/Falinks#517, decision 16). While summaries are written
+/// Writes the summary of `request`'s turn on its session's queue, after the turn's card. While summaries are written
 /// on open, the turn waits for Daniel instead (`turn_summary`).
 fn summarize(
     app: &AppHandle,
