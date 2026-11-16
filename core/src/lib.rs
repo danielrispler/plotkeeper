@@ -13,6 +13,7 @@ use std::{
 };
 
 mod agy;
+mod ask;
 mod checks;
 mod claude;
 mod event;
@@ -22,6 +23,7 @@ mod transcript;
 mod turn_files;
 mod work;
 pub use agy::{CAPABILITIES as AGY_CAPABILITIES, Drift as AgyDrift, DriftKind as AgyDriftKind};
+pub use ask::{Anchor, AskFact, AskFacts, AskSection};
 pub(crate) use checks::is_check;
 pub use checks::{
     Check, CheckLists, Output as CheckOutput, Run as CheckRun, Status as CheckStatus,
@@ -1601,7 +1603,7 @@ pub struct SummaryRequest {
     pub responses: Vec<String>,
     /// The turn's intentions, one per response.
     pub intentions: Vec<String>,
-    /// The card its `Stop` requested, which the learning section points to instead of a question.
+    /// The card its `Stop` requested, whose Quiz the turn has instead of its own.
     #[serde(default)]
     pub card: Option<String>,
     /// What the hooks and git recorded of the turn (danielrispler/plotkeeper#115); empty until the

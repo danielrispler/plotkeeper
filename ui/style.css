@@ -311,10 +311,8 @@ body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
 .turn .prompt { margin: 0; color: var(--muted); font-size: var(--size-small); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .turn .checks, .turn .subagents { list-style: none; padding: 0; }
 .turn .subagents li { margin: 0 0 var(--sp-2); }
-.turn:not(:hover) > .ask-about:not([open]):not(:focus-within) { visibility: hidden; }
 .fold > summary { font-size: var(--size); color: var(--muted); cursor: pointer; }
 .fold .response { margin: var(--sp-4) 0 0; }
-.fold .learning { margin: var(--sp-4) 0 0; }
 /* Rendered Markdown (danielrispler/Falinks#525): responses and "ask about this" replies. */
 .markdown { font-size: var(--size-read); overflow-wrap: anywhere; }
 .markdown > :first-child { margin-top: 0; }
@@ -362,6 +360,12 @@ body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
                 background: var(--bg); color: var(--fg); border: var(--hair) solid var(--edge); border-radius: var(--radius);
                 padding: var(--sp-3) var(--sp-4); }
 .ask-about .btn { margin-top: var(--sp-3); }
+/* The recorded facts (danielrispler/plotkeeper#125), shown at once under an open "Ask", then the suggested questions. */
+.ask-facts .label { margin: var(--sp-4) 0 0; }
+.ask-facts ul { margin: var(--sp-2) 0 0; padding-left: var(--sp-5); font-size: var(--size-small); overflow-wrap: anywhere; }
+.ask-facts pre { margin: var(--sp-2) 0 0; font-size: var(--size-small); overflow-x: auto; }
+.ask-suggestions { display: flex; flex-wrap: wrap; gap: var(--sp-3); margin-top: var(--sp-4); }
+.ask-suggestions .btn { margin-top: 0; }
 .ask-reply > p { font-size: var(--size-read); margin: var(--sp-4) 0 0; }
 .ask-reply .markdown { margin: var(--sp-4) 0 0; }
 .ask-reply .asking, .ask-reply .ask-error { color: var(--muted); font-style: italic; }

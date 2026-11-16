@@ -2,7 +2,7 @@
 //! decision 12) from Daniel's most recent Falinks transcripts in `~/.claude/projects/`, each run
 //! through `write_summary` at the settings' defaults (Haiku at its default effort), as the app runs
 //! it: with its retry, and a throwaway store in a temporary folder. It prints Markdown on standard
-//! output: each turn's prompt, summary, learning section, any logged problem lines, calls, seconds
+//! output: each turn's prompt, summary, Quiz, any logged problem lines, calls, seconds
 //! and `total_cost_usd`. It reads transcripts and no credential file. Run it outside auto mode,
 //! from the repository's root:
 //!
@@ -13,6 +13,11 @@
 //! words they open with, to be read by eye), and of lines the guards stripped or prefixed. A
 //! transcript holds no hook facts, so every turn is written with none: a claim of a fix always gets
 //! "Agent says:" here.
+//!
+//! It also counts the Quiz trial of danielrispler/plotkeeper#118: the share of replies rejected, of
+//! the Quizzes whose key is the longest option before the guard (the first reply of each turn),
+//! and of stems that the Headline answers, which one more Haiku call per Quiz judges (a judge, so
+//! read a few by eye). Only the summary's prompt runs: a transcript holds no diff for a card's.
 
 use std::{
     io::Write,
@@ -110,15 +115,34 @@ fn main() {
         let seconds = start.elapsed().as_secs_f64();
         let (calls, cost) = *writer.calls.lock().unwrap();
         println!("**Calls:** {calls} · **Time:** {seconds:.1} s · **total_cost_usd:** {cost}\n");
-        for line in lines {
+        for line in &lines {
             println!("**Logged:** {line}\n");
         }
         counts.turns += 1;
         counts.rejected += usize::from(calls > 1);
+        counts.replies += calls as usize;
         let replies = writer.replies.lock().unwrap();
+        counts.longest += replies.first().is_some_and(|r| key_is_longest(r)) as usize;
+        counts.first_quizzes += replies.first().is_some_and(|r| has_quiz(r)) as usize;
+        // A turn whose last reply was kept without a Quiz after a problem rejected every reply.
+        let unusable = summary.as_ref().is_none_or(|s| s.quiz.is_none())
+            && lines.iter().any(|l| l.contains("no quiz on"));
+        counts.rejected_replies += (calls as usize).saturating_sub(usize::from(!unusable));
+        counts.no_quiz_after_retry += usize::from(unusable);
         if let Some(summary) = summary {
             counts.add(&summary, replies.last().map_or("", String::as_str));
             print(&summary);
+            if let Some(quiz) = &summary.quiz {
+                drop(replies);
+                let answered = answers(
+                    &writer,
+                    summary.headline.as_deref().unwrap_or_default(),
+                    quiz,
+                );
+                println!("**The Headline answers the stem:** {answered}\n");
+                counts.judged += 1;
+                counts.answered += usize::from(answered);
+            }
         }
     }
     counts.print();
@@ -127,6 +151,17 @@ fn main() {
 /// The trial's counts.
 #[derive(Default)]
 struct Counts {
+    /// Calls made, and how many of them were replies the guards rejected.
+    replies: usize,
+    rejected_replies: usize,
+    /// Turns whose every reply was rejected, so the turn has no Quiz.
+    no_quiz_after_retry: usize,
+    /// First replies that held a Quiz, and of them the ones whose key is the longest option.
+    first_quizzes: usize,
+    longest: usize,
+    /// Kept Quizzes judged, and the ones whose stem the Headline answers.
+    judged: usize,
+    answered: usize,
     turns: usize,
     rejected: usize,
     narrating: usize,
@@ -190,6 +225,22 @@ impl Counts {
             share(self.prefixed, self.turns)
         );
         println!(
+            "- Replies rejected (by any guard): {}",
+            share(self.rejected_replies, self.replies)
+        );
+        println!(
+            "- Turns left with no Quiz after the retry: {}",
+            share(self.no_quiz_after_retry, self.turns)
+        );
+        println!(
+            "- First replies whose key is the longest option, before the guard: {}",
+            share(self.longest, self.first_quizzes)
+        );
+        println!(
+            "- Kept Quizzes whose stem the Headline answers (judged): {}",
+            share(self.answered, self.judged)
+        );
+        println!(
             "- Lines dropped by the guards or for an unknown type: {}",
             share(self.stripped, self.lines)
         );
@@ -201,23 +252,72 @@ fn print(summary: &TurnSummary) {
     if summary.headline.as_deref() == Some("") {
         println!("**Headline stripped by the guards.**\n");
     }
-    let Some(learning) = &summary.learning else {
-        println!("**No learning section.**\n");
+    let Some(quiz) = &summary.quiz else {
+        println!("**No Quiz.**\n");
         return;
     };
-    println!(
-        "### Learning\n\n{}\n\n**{}**\n",
-        learning.idea, learning.question.text
-    );
-    for (i, option) in learning.question.options.iter().enumerate() {
-        let key = if i == learning.question.key {
-            " (key)"
-        } else {
-            ""
-        };
+    println!("### Quiz\n\n**{}**\n", quiz.text);
+    for (i, option) in quiz.options.iter().enumerate() {
+        let key = if i == quiz.key { " (key)" } else { "" };
         println!("- {}{key}: {}", option.text, option.why);
     }
     println!();
+}
+
+/// The Quiz in a raw reply, as its JSON.
+fn quiz_in(reply: &str) -> serde_json::Value {
+    let json = reply
+        .get(reply.find('{').unwrap_or(0)..)
+        .unwrap_or_default();
+    let value: serde_json::Value = serde_json::from_str(json).unwrap_or_default();
+    value["quiz"].clone()
+}
+
+fn has_quiz(reply: &str) -> bool {
+    quiz_in(reply)["options"].is_array()
+}
+
+/// Whether a raw reply's key is its longest option, which the guard rejects.
+fn key_is_longest(reply: &str) -> bool {
+    let quiz = quiz_in(reply);
+    let lengths: Vec<usize> = (quiz["options"].as_array().into_iter().flatten())
+        .map(|o| o["text"].as_str().unwrap_or_default().chars().count())
+        .collect();
+    let Some(key) = quiz["key"].as_u64().and_then(|k| lengths.get(k as usize)) else {
+        return false;
+    };
+    let wrong = (lengths.iter().enumerate())
+        .filter(|(i, _)| *i as u64 != quiz["key"].as_u64().unwrap_or(0));
+    wrong.map(|(_, l)| *l).max().is_some_and(|w| *key > w)
+}
+
+/// One Haiku call: whether `quiz`'s stem can be answered from `headline` alone.
+fn answers(writer: &Costed, headline: &str, quiz: &studio_understanding::Quiz) -> bool {
+    let options: String = quiz
+        .options
+        .iter()
+        .map(|o| format!("- {}\n", o.text))
+        .collect();
+    let (mut command, input) = writer.writer.run_with(
+        &["--model", "haiku", "--system-prompt", "You judge a quiz. Say whether a developer who has read only the headline could pick the right option of the question, without knowing the code. Reply with one word: yes or no."],
+        &format!("Headline: {headline}\n\nQuestion: {}\nOptions:\n{options}\nThe right option: {}", quiz.text, quiz.options[quiz.key].text),
+    );
+    command.args(["--output-format", "json"]);
+    let output = command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .and_then(|mut child| {
+            child.stdin.take().unwrap().write_all(input.as_bytes())?;
+            child.wait_with_output()
+        });
+    let reply: serde_json::Value = output
+        .ok()
+        .and_then(|o| serde_json::from_slice(&o.stdout).ok())
+        .unwrap_or_default();
+    reply["result"]
+        .as_str()
+        .is_some_and(|r| r.trim().to_lowercase().starts_with("yes"))
 }
 
 fn first_line(text: &str) -> &str {

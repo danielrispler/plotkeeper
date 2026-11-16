@@ -1,6 +1,6 @@
 // Fixtures for the story rail (from the design session for #8, danielrispler/plotkeeper#102): one selected session,
 // "#56 · Row controls", in four states (running, at your turn, needing you, idle), with realistic content: 5 turns, summaries as the writer's prompt shapes them (at most 4
-// short lines, the first says what the turn did), a card with its quiz, learning questions,
+// short lines, the first says what the turn did), a card with its quiz, turn Quizzes,
 // subagents, checks, a permission mode, a model, an estimate, a brief and decision history, and a
 // Git line with several tokens. Times are relative to the moment a fixture renders.
 
@@ -9,7 +9,7 @@ const MIN = 60e3;
 const capabilities = { agent: "claude", asks: true, background_tasks: true, replies: true, permission_mode: true, durations: true, transcript_version: true, turn_trees: true };
 const cwd = "/Users/danielrispler/work/plotkeeper/.claude/worktrees/issue-56-row-controls";
 
-const learning = (idea, text, options, key) => ({ idea, question: { text, options, key } });
+const quiz = (text, options, key) => ({ text, options, key });
 
 // What each turn's summary says; its first line is the turn's Headline (the turn-end intention is the final response's first line).
 const summaries = {
@@ -19,13 +19,12 @@ const summaries = {
       "The row's padding now comes from the fold and delete columns (`--control`), so the test reads the token instead of a hard-coded 12px.\n" +
       "Clippy's `needless_borrow` was unrelated to the UI and is fixed with a one-line change.\n" +
       "`npm run check` passes; nobody looked at the rows in a real window.",
-    learning: learning(
-      "Hiding with `visibility: hidden` keeps an element's box in the layout, while `display: none` frees it, so the row would jump when the button appears.",
+    quiz: quiz(
       "Why does the delete button stay in the row's layout while it is hidden?",
       [
-        { text: "Its box is kept, so the name and glyph columns do not shift when it appears", why: "Right: `visibility: hidden` hides the paint but keeps the space." },
-        { text: "The browser reserves space for any element with a hover rule", why: "No rule makes a browser reserve space for a hover rule." },
-        { text: "The row's padding is rounded up to the next control size", why: "Padding is a fixed token here, not rounded." },
+        { text: "Its box is kept, so no column shifts", why: "Right: `visibility: hidden` hides the paint but keeps the space." },
+        { text: "The browser reserves space for any hover rule", why: "No rule makes a browser reserve space for a hover rule." },
+        { text: "The row's padding is rounded up to the control size", why: "Padding is a fixed token here, not rounded." },
       ],
       0,
     ),
@@ -35,20 +34,19 @@ const summaries = {
       "Made the delete button show on hover and on the selected row, and kept its column empty otherwise.\n" +
       "Keyboard users get it through `:focus-within`, so Tab reaches it.\n" +
       "Not checked: the strip, where rows have no delete.",
-    learning: null,
+    quiz: null,
   },
   t1: {
     summary:
       "Added a fold toggle to each session row and moved the delete button into its own column.\n" +
       "The toggle sits at the row's start and is drawn only when subagents show under the row.\n" +
       "Both are siblings of the row button, since a button cannot hold a button.",
-    learning: learning(
-      "A `<button>` may not contain another interactive element, so the controls are siblings placed over the row.",
+    quiz: quiz(
       "Why are the toggle and the delete siblings of the row button, not its children?",
       [
-        { text: "Interactive content inside a button is invalid, and the click would also select the row", why: "Right: the HTML content model forbids it, and the press would bubble." },
+        { text: "A button may not hold interactive content", why: "Right: the HTML content model forbids it, and the press would bubble." },
         { text: "Children of a button cannot take a hover state", why: "They can; hover does not depend on the parent being a button." },
-        { text: "Siblings let the grid place them in the same column as the glyph", why: "The columns come from padding, not the grid." },
+        { text: "Siblings let the grid share the glyph's column", why: "The columns come from padding, not the grid." },
       ],
       0,
     ),
@@ -247,6 +245,13 @@ const build = (state, { ask = null, answered = false, withBrief = false } = {}) 
     selected: { session: s, agent: null },
     cards: { brief: null, goal: withBrief ? goal : null, answers: withBrief ? answers : [], open: withBrief ? open : [], recent: [], older: [stored], decisions: withBrief ? decisions : [] },
     watch: ask,
+    ask_facts: {
+      sections: [
+        { label: "Daniel asked", facts: [{ at: null, text: "Implement the plan, starting with the fold toggle" }] },
+        { label: "Steps that edited it", facts: [{ at: Date.now() - 40 * MIN, text: "Edit by the session's agent" }, { at: Date.now() - 38 * MIN, text: "Edit by Explore the rows" }] },
+        { label: "Read or searched before the first edit", facts: [{ at: Date.now() - 45 * MIN, text: "Read ui/list.ts" }, { at: Date.now() - 44 * MIN, text: "Grep fold" }] },
+      ],
+    },
     check_output: { exit_code: 1, tail: "error: test failed, to rerun pass `-p studio-core --lib`\n\nfailures:\n    rows::fold_toggle_is_a_sibling" },
     turn_file_hunk: { text: ["diff --git a/ui/style.css b/ui/style.css", "--- a/ui/style.css", "+++ b/ui/style.css", "@@ -10,4 +10,6 @@", " .rail {", "-  gap: 4px;", "+  gap: var(--sp-3);", "+  padding: 0;", " }", ""].join("\n"), left_out: 0, binary: false, first_line: 11 },
     turn_summary: { __by: "id", values: Object.fromEntries(Object.entries(turnSummaries).map(([id, summary]) => [id, { summary }])) },
@@ -344,8 +349,31 @@ const diffScript = `
   log("diff files " + pane.querySelectorAll(".diff-file").length + ", lines " + pane.querySelectorAll(".diff-line").length);
   if (!pane.querySelector(".diff-line.add") || !pane.querySelector(".diff-line.del")) log("snap:fail the diff has no added and removed lines");`;
 
+// #125: opens the evidence line, a file's Ask, then a failed check's Ask, and fails when the rail's scrollTop moved or no
+// facts show.
+const askScript = (selectors) => `
+  const story = document.getElementById("story");
+  story.scrollTop = Math.min(80, story.scrollHeight - story.clientHeight);
+  const at = story.scrollTop;
+  const wait = () => new Promise((resolve) => setTimeout(resolve, 200));
+  document.querySelector(".evidence-toggle").click();
+  await wait();
+  const open = async (selector) => {
+    const box = document.querySelector(selector + " .ask-about");
+    if (!box) return log("snap:fail there is no Ask on " + selector);
+    box.open = true;
+    await wait();
+    if (!box.querySelector(".ask-facts li")) log("snap:fail Ask on " + selector + " shows no facts");
+  };
+  for (const selector of ${JSON.stringify(selectors)}) await open(selector);
+  log("rail scrollTop " + at + " -> " + story.scrollTop);
+  if (story.scrollTop !== at) log("snap:fail the rail's scrollTop moved from " + at + " to " + story.scrollTop);`;
+
+
 export const railFixtures = {
   railDiff: () => ({ ...build("your_turn"), snapScript: diffScript }),
+  railAsk: () => ({ ...build("your_turn"), snapScript: askScript([".evidence-file", ".evidence-check"]) }),
+  railAskCheck: () => ({ ...build("your_turn"), snapScript: askScript([".evidence-check"]) }),
   railHunk: () => ({ ...build("your_turn"), snapScript: hunkScript }),
   railEvidence: () => ({ ...build("your_turn"), snapScript: evidenceScript }),
   ...railStates,

@@ -5,6 +5,7 @@
 // draws the line open again.
 
 import { code, invoke, pressable, text } from "./dom.js";
+import { askAnchor, type Hunk } from "./ask.js";
 import { diffRequest } from "./diff.js";
 import { openAt } from "./paths.js";
 import type { Capabilities, Check, Turn, TurnFile } from "./types.js";
@@ -91,11 +92,10 @@ function checkRow(session: string, row: EvidenceRow): HTMLElement {
   button.append(text("span", "✗", "mark"), code(row.label));
   show();
   if (openOutputs.has(key)) fetch();
-  item.append(button, pre);
+  item.append(button, pre, askAnchor(session, { kind: "check", agent: row.agent ?? null, call: row.call }, "this failed check"));
   return item;
 }
 
-type Hunk = { text: string; left_out: number; binary: boolean; first_line: number };
 const openHunks = new Set<string>();
 const hunks = new Map<string, Hunk | null>();
 
@@ -153,7 +153,7 @@ function fileRow(session: string, index: number, row: EvidenceRow): HTMLElement 
   button.append(text("span", row.label));
   show();
   if (openHunks.has(key)) fetch();
-  item.append(button, edit, pre, more);
+  item.append(button, edit, pre, more, askAnchor(session, { kind: "file", turn: index, root: file.root, path: file.path }, `the file ${file.path}`));
   return item;
 }
 

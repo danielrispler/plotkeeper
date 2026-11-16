@@ -224,13 +224,13 @@ export type Decision = {
   at: number;
   source: "card" | "terminal";
 };
-// A turn's summary (danielrispler/Falinks#526) and, unless the turn has a card, its learning section, as the store keeps
-// it.
+// A turn's summary (danielrispler/Falinks#526) and, unless the turn has a card, its Quiz, as the store keeps it; a
+// learning section stored before danielrispler/plotkeeper#118 reads as its question.
 // `headline` and `lines` are the turn writer's Headline and typed Body lines (danielrispler/plotkeeper#115); a summary stored
 // before them has neither, and its `summary` text reads as a Headline and `reported` lines.
 export type SummaryLine = { kind: "why" | "reported" | "open" | "ask"; text: string };
 export type TurnSummary = {
-  summary: { summary: string; headline?: string | null; lines?: SummaryLine[]; learning: { idea: string; question: Quiz } | null };
+  summary: { summary: string; headline?: string | null; lines?: SummaryLine[]; quiz: Quiz | null };
 };
 // The Brief's slots (danielrispler/plotkeeper#122): the Goal a model wrote, each answered question with Daniel's reply, and
 // the Open lines the shell computed. `brief` is a brief stored as prose, which shows while there is no Goal.

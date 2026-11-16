@@ -127,3 +127,24 @@ fn the_real_call_runs_as_the_card_writer_does_with_tools_off_in_english() {
     );
     assert!(prompt.ends_with("Why first?"), "{prompt}");
 }
+
+#[test]
+fn opening_ask_on_an_anchor_shows_its_facts_and_never_calls_the_writer() {
+    // The facts are the core's, read from the ledger and the log: `ask_facts` takes no writer, and the stand-in
+    // that would record a call stays untouched.
+    let writer = Asked::replying(Ok("never"));
+    let session = "7d3e9a51-2b8c-4f6e-a0d7-5c1b9e3f8a24";
+    let prompt = serde_json::json!({
+        "session_id": session, "hook_event_name": "UserPromptSubmit", "cwd": "/Users/danielrispler/work/Falinks", "prompt_id": "p1",
+        "prompt": "Fix it", "studio_received_ms": 1u64,
+    })
+    .to_string();
+    let studio = studio_core::Studio::replayed([&prompt]);
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("events.jsonl");
+    std::fs::write(&log, format!("{prompt}\n")).unwrap();
+    let anchor = studio_core::Anchor::Headline { turn: 0 };
+    let facts = studio.ask_facts(session, &anchor, &log).unwrap();
+    assert_eq!(facts.sections[0].facts[0].text, "Fix it");
+    assert!(writer.asked.borrow().is_empty());
+}

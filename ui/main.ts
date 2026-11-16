@@ -6,6 +6,7 @@
 
 import { withWriterNotice } from "./writer-notice.js";
 import { startWatching } from "./answer.js";
+import { openAsk } from "./ask.js";
 import { placeBar, watchBar } from "./bar.js";
 import { markShown, showCards } from "./cards.js";
 import { diffRequest, newestDiff } from "./diff.js";
@@ -164,6 +165,13 @@ function answer(n: number) {
 const actions: Actions = {
   "studio::ToggleList": () => toggle("list-open"),
   "studio::ToggleRail": () => toggle("rail-open"),
+  // Ask (danielrispler/plotkeeper#125) on the selected session's newest turn: its Headline's box, in the rail, opened.
+  "studio::AskAbout": () => {
+    const turn = (studio.selection?.session.turns.length ?? 0) - 1;
+    if (turn < 0) return;
+    document.body.classList.add("rail-open");
+    openAsk(selectedId()!, { kind: "headline", turn });
+  },
   "studio::Dismiss": () => {
     document.body.classList.remove("list-open", "list-peek", "rail-open", "skills-open");
     element("picker").hidden = true;

@@ -63,7 +63,7 @@ fn store(dir: &std::path::Path) -> CardStore {
             line(LineKind::Open, "The hunk cap is untested."),
             line(LineKind::Ask, "Should the ref be pruned?"),
         ],
-        learning: None,
+        quiz: None,
     };
     store.add_summary(request, summary).unwrap();
     store
