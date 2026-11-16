@@ -12,10 +12,12 @@ use std::{
     sync::Mutex,
     time::Duration,
 };
-use studio_core::{Base, CardRequest, SummaryRequest};
+use studio_core::{
+    Base, CardRequest, Check, CheckRun, CheckStatus, FactFile, Facts, SummaryRequest, TurnFile,
+};
 use studio_understanding::{
-    Card, CardStore, CardWriter, Choice, ClaudeWriter, FakeWriter, Quiz, SummarySetup, TurnSummary,
-    explain_more, find_claude, write_agent_summary, write_card, write_summary,
+    Card, CardStore, CardWriter, Choice, ClaudeWriter, FakeWriter, LineKind, Quiz, SummarySetup,
+    TurnSummary, explain_more, find_claude, write_agent_summary, write_card, write_summary,
 };
 
 const CLAUDE: &str = "/opt/homebrew/bin/claude";
@@ -671,6 +673,7 @@ fn turn(session: &str, n: u64) -> SummaryRequest {
             "Rewrote the parser.".into(),
         ],
         card: None,
+        facts: Facts::default(),
     }
 }
 
@@ -685,8 +688,14 @@ fn setup() -> SummarySetup {
 fn summary_reply(summary: &str, options: [&str; 3]) -> String {
     let option =
         |text: &str| serde_json::json!({ "text": text, "why": format!("Because of {text}.") });
+    let mut lines = summary.lines();
+    let headline = lines.next().unwrap_or_default();
+    let lines: Vec<_> = lines
+        .map(|l| serde_json::json!({ "kind": "reported", "text": l }))
+        .collect();
     serde_json::json!({
-        "summary": summary,
+        "headline": headline,
+        "lines": lines,
         "learning": {
             "idea": "A stack matches nested brackets.",
             "question": {
@@ -805,30 +814,39 @@ fn summaries(dir: &Path) -> Mutex<CardStore> {
     Mutex::new(CardStore::open(dir.join("cards.json")).unwrap())
 }
 
+/// Summary names, in words: a digit in a headline must be in the turn's material.
+const NAMES: [&str; 5] = ["zero", "one", "two", "three", "four"];
+
 #[test]
 fn the_summary_input_holds_the_sessions_last_3_summaries_and_their_questions() {
     let dir = tempfile::tempdir().unwrap();
     let store = summaries(dir.path());
     for n in 1..=4 {
-        let writer = recording(summary_reply(&format!("Summary {n}."), ["a", "b", "c"]));
+        let writer = recording(summary_reply(
+            &format!("Summary {}.", NAMES[n as usize]),
+            ["a", "b", "c"],
+        ));
         write_summary(&store, &writer, &setup(), turn("s", n), |_| {}).unwrap();
     }
     // Another session's summary is not this session's.
     let other = recording(summary_reply("Other session.", ["a", "b", "c"]));
     write_summary(&store, &other, &setup(), turn("t", 5), |_| {}).unwrap();
 
-    let writer = recording(summary_reply("Summary 6.", ["a", "b", "c"]));
+    let writer = recording(summary_reply("Summary six.", ["a", "b", "c"]));
     write_summary(&store, &writer, &setup(), turn("s", 6), |_| {}).unwrap();
 
     let input = writer.inputs.lock().unwrap().pop().unwrap();
-    assert!(!input.contains("Summary 1."), "{input}");
+    assert!(!input.contains("Summary one."), "{input}");
     assert!(!input.contains("Other session."), "{input}");
     for n in 2..=4 {
-        assert!(input.contains(&format!("Summary {n}.")), "{input}");
+        assert!(
+            input.contains(&format!("Summary {}.", NAMES[n as usize])),
+            "{input}"
+        );
     }
     assert_eq!(input.matches("Why a stack?").count(), 3, "{input}");
     let kept = store.lock().unwrap().turn_summary("s@6").cloned();
-    assert_eq!(kept.unwrap().summary.summary, "Summary 6.");
+    assert_eq!(kept.unwrap().summary.summary, "Summary six.");
     // The store keeps them across restarts.
     assert!(
         summaries(dir.path())
@@ -866,7 +884,7 @@ fn a_summary_reply_gives_the_summary_and_the_learning_section() {
 fn a_reply_with_a_null_learning_section_gives_the_summary_alone_and_logs_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let store = summaries(dir.path());
-    let writer = recording(r#"{"summary": "Merged the lanes.", "learning": null}"#.into());
+    let writer = recording(r#"{"headline": "Merged the lanes.", "learning": null}"#.into());
     let mut lines = Vec::new();
 
     let summary = write_summary(&store, &writer, &setup(), turn("s", 1), |l| lines.push(l));
@@ -917,7 +935,7 @@ fn a_reply_whose_options_are_of_similar_length_passes_on_the_first_call() {
 fn a_reply_with_no_learning_field_gives_the_summary_alone_and_logs_why() {
     let dir = tempfile::tempdir().unwrap();
     let store = summaries(dir.path());
-    let writer = recording(r#"{"summary": "Rewrote the parser."}"#.into());
+    let writer = recording(r#"{"headline": "Rewrote the parser."}"#.into());
     let mut lines = Vec::new();
 
     let summary = write_summary(&store, &writer, &setup(), turn("s", 1), |l| lines.push(l));
@@ -1135,4 +1153,242 @@ fn a_writer_that_starts_and_fails_raises_no_notice() {
 
     assert!(writer.reply(&edit(), &[], "").is_err());
     assert!(heard.lock().unwrap().is_empty());
+}
+
+// The grounded turn writer (danielrispler/plotkeeper#115).
+
+fn file(path: &str, added: u64, removed: u64, hunk: &str) -> FactFile {
+    FactFile {
+        file: TurnFile {
+            root: "/w/repo".into(),
+            path: path.into(),
+            from: None,
+            added: Some(added),
+            removed: Some(removed),
+        },
+        hunk: hunk.into(),
+    }
+}
+
+fn check(status: CheckStatus, retries: u32, exit_code: i32) -> Check {
+    let run = CheckRun {
+        command: "npm run check".into(),
+        status,
+        exit_code: Some(exit_code),
+        call: "c1".into(),
+        agent: None,
+    };
+    Check {
+        suite: "npm run check".into(),
+        status,
+        retries,
+        runs: vec![run],
+    }
+}
+
+/// A turn whose facts hold one file with a 47-line-added hunk and `checks`.
+fn with_facts(checks: Vec<Check>) -> SummaryRequest {
+    let hunk = "@@ -1,1 +1,1 @@\n-let width = 30;\n+let width = 4096;\n";
+    SummaryRequest {
+        facts: Facts {
+            files: vec![file("src/parser2.rs", 47, 3, hunk)],
+            external: 2,
+            checks,
+        },
+        ..turn("s", 1)
+    }
+}
+
+fn reply(headline: &str, lines: serde_json::Value) -> String {
+    serde_json::json!({ "headline": headline, "lines": lines, "learning": null }).to_string()
+}
+
+/// The summary `writer` replies for `request`, and the inputs it was given.
+fn written_by(request: SummaryRequest, replies: &[String]) -> (TurnSummary, Vec<String>) {
+    let dir = tempfile::tempdir().unwrap();
+    let store = summaries(dir.path());
+    let writer = Sequence {
+        replies: Mutex::new(replies.to_vec()),
+        inputs: Mutex::default(),
+    };
+    let summary = write_summary(&store, &writer, &setup(), request, |_| {}).unwrap();
+    let inputs = writer.inputs.lock().unwrap().clone();
+    (summary, inputs)
+}
+
+/// A writer that gives each of its replies in turn, the last again after that.
+struct Sequence {
+    replies: Mutex<Vec<String>>,
+    inputs: Mutex<Vec<String>>,
+}
+
+impl CardWriter for Sequence {
+    fn reply(&self, r: &CardRequest, e: &[String], b: &str) -> Result<String, String> {
+        FakeWriter.reply(r, e, b)
+    }
+    fn more(&self, r: &CardRequest, c: &Card) -> Result<String, String> {
+        FakeWriter.more(r, c)
+    }
+    fn rewrite(&self, p: &[&str], s: &[String], d: &str) -> Result<String, String> {
+        FakeWriter.rewrite(p, s, d)
+    }
+    fn update(&self, b: &str, w: &str) -> Result<String, String> {
+        FakeWriter.update(b, w)
+    }
+    fn summarize(
+        &self,
+        setup: &SummarySetup,
+        request: &SummaryRequest,
+        earlier: &[TurnSummary],
+    ) -> Result<String, String> {
+        let writer = ClaudeWriter::new(CLAUDE.into(), "/card-writer".into());
+        let (_, input) = writer.summary_command(setup, request, earlier);
+        self.inputs.lock().unwrap().push(input);
+        let mut replies = self.replies.lock().unwrap();
+        Ok(match replies.len() {
+            1 => replies[0].clone(),
+            _ => replies.remove(0),
+        })
+    }
+}
+
+#[test]
+fn the_writers_input_holds_the_turns_files_counts_capped_hunks_and_check_facts() {
+    let long = (1..=100).map(|n| format!("+line{n}\n")).collect::<String>();
+    let mut request = with_facts(vec![check(CheckStatus::Passed, 1, 0)]);
+    request.facts.files.push(file("src/long.rs", 100, 0, &long));
+
+    let (_, inputs) = written_by(
+        request,
+        &[reply("Widened the parser.", serde_json::json!([]))],
+    );
+
+    let input = &inputs[0];
+    assert!(input.contains("src/parser2.rs +47 -3"), "{input}");
+    assert!(input.contains("+let width = 4096;"), "{input}");
+    assert!(
+        input.contains("npm run check: Passed, after 1 earlier failed runs"),
+        "{input}"
+    );
+    assert!(
+        input.contains("+line40") && !input.contains("+line41"),
+        "{input}"
+    );
+    assert!(input.contains("2 other files"), "{input}");
+}
+
+#[test]
+fn typed_lines_parse_and_a_line_of_an_unknown_type_is_dropped() {
+    let lines = serde_json::json!([
+        { "kind": "why", "text": "A bracket stack keeps nesting." },
+        { "kind": "opinion", "text": "I like it." },
+        { "kind": "open", "text": "Nobody looked at it in a real window." },
+        { "kind": "ask", "text": "Merge it?" },
+    ]);
+
+    let (summary, _) = written_by(turn("s", 1), &[reply("Rewrote the parser.", lines)]);
+
+    assert_eq!(summary.headline.as_deref(), Some("Rewrote the parser."));
+    let kinds: Vec<LineKind> = summary.lines.iter().map(|l| l.kind).collect();
+    assert_eq!(kinds, [LineKind::Why, LineKind::Open, LineKind::Ask]);
+    assert_eq!(
+        summary.summary,
+        "Rewrote the parser.\nA bracket stack keeps nesting.\nNobody looked at it in a real window.\nMerge it?"
+    );
+}
+
+#[test]
+fn a_fix_with_no_passed_check_is_the_agents_claim_and_one_with_a_passed_check_is_not() {
+    let said = |checks: Vec<Check>| {
+        let request = with_facts(checks);
+        written_by(
+            request,
+            &[reply("Fixed the overlay", serde_json::json!([]))],
+        )
+        .0
+        .headline
+    };
+
+    assert_eq!(
+        said(vec![]).as_deref(),
+        Some("Agent says: Fixed the overlay")
+    );
+    assert_eq!(
+        said(vec![check(CheckStatus::Failed, 0, 1)]).as_deref(),
+        Some("Agent says: Fixed the overlay")
+    );
+    assert_eq!(
+        said(vec![check(CheckStatus::Ran, 0, 0)]).as_deref(),
+        Some("Agent says: Fixed the overlay")
+    );
+    assert_eq!(
+        said(vec![check(CheckStatus::Passed, 0, 0)]).as_deref(),
+        Some("Fixed the overlay")
+    );
+}
+
+#[test]
+fn a_line_with_a_number_or_id_the_turn_lacks_is_stripped_and_true_numbers_stay() {
+    let request = with_facts(vec![check(CheckStatus::Passed, 2, 0)]);
+    let texts = [
+        "Made 12 changes.",                // an invented count
+        "Cut the cost by 40%.",            // a percentage
+        "Closes #123.",                    // an issue id
+        "Reverted in abcdef1.",            // a SHA
+        "Used one stack and two passes.",  // number words
+        "Raised the width to 4096.",       // in the hunk
+        "Changed 47 lines and removed 3.", // in the line counts
+        "Passed after 2 retries.",         // in the check facts
+        "Edited src/parser2.rs.",          // digits in a known path
+        "Edited src/parser3.rs.",          // digits in an unknown path
+    ];
+    let kept: Vec<&str> = texts
+        .into_iter()
+        .filter(|text| {
+            let lines = serde_json::json!([{ "kind": "why", "text": text }]);
+            let (summary, _) = written_by(request.clone(), &[reply("Widened the parser.", lines)]);
+            !summary.lines.is_empty()
+        })
+        .collect();
+
+    assert_eq!(kept, [texts[4], texts[5], texts[6], texts[7], texts[8]]);
+}
+
+#[test]
+fn a_headline_with_an_invented_number_is_asked_for_once_more_and_a_second_failure_is_stripped() {
+    let bad = reply("Cut the cost by 40%.", serde_json::json!([]));
+    let good = reply("Cut the cost.", serde_json::json!([]));
+
+    let (summary, inputs) = written_by(turn("s", 1), &[bad.clone(), good]);
+    assert_eq!(summary.headline.as_deref(), Some("Cut the cost."));
+    assert_eq!(inputs.len(), 2);
+
+    let (summary, inputs) = written_by(turn("s", 1), &[bad.clone(), bad]);
+    assert_eq!(summary.headline.as_deref(), Some(""));
+    assert_eq!(inputs.len(), 2);
+}
+
+#[test]
+fn a_headline_over_16_words_is_asked_for_once_more() {
+    let long = reply(&"word ".repeat(17), serde_json::json!([]));
+    let short = reply("Short.", serde_json::json!([]));
+
+    let (summary, inputs) = written_by(turn("s", 1), &[long.clone(), short]);
+    assert_eq!(summary.headline.as_deref(), Some("Short."));
+    assert_eq!(inputs.len(), 2);
+
+    // A second long one stands, as the learning question's does.
+    let (summary, _) = written_by(turn("s", 1), &[long.clone(), long]);
+    assert_eq!(summary.headline.unwrap().split_whitespace().count(), 17);
+}
+
+#[test]
+fn a_summary_stored_before_the_headline_still_reads() {
+    let old = r#"{"summary": "Rewrote the parser.\nIt keeps a stack.", "learning": null}"#;
+
+    let summary: TurnSummary = serde_json::from_str(old).unwrap();
+
+    assert_eq!(summary.summary, "Rewrote the parser.\nIt keeps a stack.");
+    assert_eq!(summary.headline, None);
+    assert_eq!(summary.lines, []);
 }
