@@ -27,7 +27,7 @@ use studio_core::{
 };
 use studio_understanding::{
     AGY_FIXTURE_VERSION, AgyVersions, CardStore, CardWriter, ClaudeWriter, FakeWriter,
-    Fingerprints, Rating, Row, SessionCards, StoredSummary, SummarySetup, Versions, add_hunks,
+    Fingerprints, Rating, Row, SessionCards, StoredSummary, SummarySetup, Tap, Versions, add_hunks,
     backfilled, fingerprint_changes, millis, turn_diffs, turn_hunk, worktree_root,
     write_agent_summary, write_brief, write_name, write_stop, write_summary,
 };
@@ -395,6 +395,15 @@ fn settle_checks(studio: &Studio, store: &mut CardStore) {
     }
 }
 
+/// Daniel picked, skipped or tapped a chip on the Quiz of `id`, a card's or a turn's own (danielrispler/plotkeeper#120): the turn's
+/// summary with its taps, for a turn's own Quiz.
+#[tauri::command(async)]
+fn quiz_tap(id: String, tap: Tap, cards: State<Cards>) -> Option<StoredSummary> {
+    let mut store = cards.lock().unwrap();
+    unsaved(store.quiz_tap(&id, tap, millis()));
+    store.turn_summary(&id).cloned()
+}
+
 /// Daniel flagged that the key of card `id`'s quiz is wrong.
 #[tauri::command(async)]
 fn key_wrong(id: String, cards: State<Cards>) {
@@ -647,6 +656,7 @@ fn main() {
             shown,
             guess,
             key_wrong,
+            quiz_tap,
             rate,
             explain_more,
             ask,

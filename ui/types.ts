@@ -210,7 +210,12 @@ export type StoredCard = {
   more: string | null;
   rating: Rating | null;
   check_result: CheckResult | null;
+  taps?: QuizTap[];
 };
+// What Daniel did with a Quiz besides a card's pick (danielrispler/plotkeeper#120), each with its time: his pick (a lone Quiz's), "Show
+// the rest anyway", and the three chips.
+export type Tap = { kind: "pick"; option: number } | { kind: "skip" | "understood" | "explain_more" | "key_wrong" };
+export type QuizTap = Tap & { at: number };
 // The selected session's brief, and its cards, split at 30 minutes by the shell's tick, each oldest
 // first.
 // An answered question, plan or permission in the session's decision history (danielrispler/Falinks#479): the call's input,
@@ -231,6 +236,7 @@ export type Decision = {
 export type SummaryLine = { kind: "why" | "reported" | "open" | "ask"; text: string };
 export type TurnSummary = {
   summary: { summary: string; headline?: string | null; lines?: SummaryLine[]; quiz: Quiz | null };
+  taps?: QuizTap[];
 };
 export type SessionCards = { brief: string | null; recent: StoredCard[]; older: StoredCard[]; decisions: Decision[] };
 // What a call asks Daniel, by its tool, as the answer hook's `Kind`: a question, a plan, or any other

@@ -367,8 +367,27 @@ const askScript = (selectors) => `
   log("rail scrollTop " + at + " -> " + story.scrollTop);
   if (story.scrollTop !== at) log("snap:fail the rail's scrollTop moved from " + at + " to " + story.scrollTop);`;
 
+// #120: scrolls the rail, answers the turn's Quiz (a pick, or "Show the rest anyway"), and fails when the rail's scrollTop moved
+// or the reasons and the held Body lines did not show.
+const quizScript = (answer) => `
+  const story = document.getElementById("story");
+  story.scrollTop = Math.min(80, story.scrollHeight - story.clientHeight);
+  const at = story.scrollTop;
+  const wait = () => new Promise((resolve) => setTimeout(resolve, 200));
+  const region = document.querySelector(".now-turn .quiz-region");
+  if (!region) return log("snap:fail the newest turn has no open Quiz");
+  if (region.querySelector(".options li p")) log("snap:fail the reasons show before an answer");
+  ${answer === "pick" ? `region.querySelector(".options .btn").click();` : `region.querySelector(".quiz-skip").click();`}
+  await wait();
+  if (!region.querySelector(".options li p")) log("snap:fail the reasons did not show");
+  if (!region.querySelector(".quiz-chips")) log("snap:fail the chips did not show");
+  log("rail scrollTop " + at + " -> " + story.scrollTop);
+  if (story.scrollTop !== at) log("snap:fail the rail's scrollTop moved from " + at + " to " + story.scrollTop);`;
 
 export const railFixtures = {
+  railQuiz: () => build("your_turn"),
+  railQuizPick: () => ({ ...build("your_turn"), snapScript: quizScript("pick") }),
+  railQuizSkip: () => ({ ...build("your_turn"), snapScript: quizScript("skip") }),
   railDiff: () => ({ ...build("your_turn"), snapScript: diffScript }),
   railAsk: () => ({ ...build("your_turn"), snapScript: askScript([".evidence-file", ".evidence-check"]) }),
   railAskCheck: () => ({ ...build("your_turn"), snapScript: askScript([".evidence-check"]) }),

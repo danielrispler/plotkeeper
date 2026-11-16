@@ -30,8 +30,8 @@ pub use drift::{AGY_FIXTURE_VERSION, AgyVersions, Drift, Versions, drift, droppe
 pub use fingerprint::{Fingerprints, backfilled, fingerprint_changes, worktree_root};
 use grounding::words;
 pub use store::{
-    Brief, CardStore, CheckResult, Guess, Level, Rating, Reason, Row, SessionCards, StoredCard,
-    StoredSummary, millis,
+    Brief, CardStore, CheckResult, Guess, Level, QuizTap, Rating, Reason, Row, SessionCards,
+    StoredCard, StoredSummary, Tap, millis,
 };
 pub use summary::{
     Line, LineKind, SummarySetup, TurnSummary, write_agent_summary, write_name, write_summary,
