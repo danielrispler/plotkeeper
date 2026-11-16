@@ -5,6 +5,7 @@
 // draws the line open again.
 
 import { code, invoke, pressable, text } from "./dom.js";
+import { askAnchor, type Hunk, hunkText } from "./ask.js";
 import { openAt } from "./paths.js";
 import type { Capabilities, Check, Turn, TurnFile } from "./types.js";
 
@@ -90,16 +91,12 @@ function checkRow(session: string, row: EvidenceRow): HTMLElement {
   button.append(text("span", "✗", "mark"), code(row.label));
   show();
   if (openOutputs.has(key)) fetch();
-  item.append(button, pre);
+  item.append(button, pre, askAnchor(session, { kind: "check", agent: row.agent ?? null, call: row.call }, "this failed check"));
   return item;
 }
 
-type Hunk = { text: string; left_out: number; binary: boolean; first_line: number };
 const openHunks = new Set<string>();
 const hunks = new Map<string, Hunk | null>();
-
-const hunkText = (h: Hunk | null) =>
-  h === null ? "The hunk could not be read." : h.binary ? "Binary file: no lines to show." : h.text + (h.left_out ? `… ${h.left_out} more lines` : "");
 
 // A file's row: its label, which opens the real hunk between the turn's two trees under it, with "Open in editor" at its
 // first changed line. Only this row changes.
@@ -143,7 +140,7 @@ function fileRow(session: string, index: number, row: EvidenceRow): HTMLElement 
   button.append(text("span", row.label));
   show();
   if (openHunks.has(key)) fetch();
-  item.append(button, edit, pre);
+  item.append(button, edit, pre, askAnchor(session, { kind: "file", turn: index, root: file.root, path: file.path }, `the file ${file.path}`));
   return item;
 }
 

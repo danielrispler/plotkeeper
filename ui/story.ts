@@ -2,13 +2,13 @@
 // times and the model on hover, and a "⋯" menu. Then "now": the open question, docked, or else the
 // newest card; the current intention, boxed; the latest turn's summary. Below, a feed of turns,
 // newest first, each with its prompt, summary, learning question, cards, questions, subagents,
-// checks and folded response, and one "ask about this". A subagent's view shows its own line,
+// checks and folded response. "Ask" sits on a file, a failed check, a subagent line and the Headline. A subagent's view shows its own line,
 // questions, brief and cards in one block.
 
 import { agentMark, modelLine, reports } from "./capabilities.js";
 import { age, code, element, invoke, pressable, prose, text } from "./dom.js";
 import { select } from "./selection.js";
-import { askElement } from "./ask.js";
+import { askAnchor } from "./ask.js";
 import { rendered } from "./markdown.js";
 import { encode, request } from "./daemon.js";
 import { agentState, sessionName, showsLanded } from "./list.js";
@@ -184,7 +184,7 @@ function historyElement(session: string, entry: HistoryEntry): HTMLElement {
   const lines = [text("span", entry.purpose, "asked"), ...(entry.asked ? [prose("span", entry.asked)] : [])];
   button.append(...lines, prose("span", entry.result), text("span", entry.details, "kind"));
   const item = document.createElement("li");
-  item.append(button);
+  item.append(button, askAnchor(session, { kind: "subagent", agent: entry.agent }, `the subagent ${entry.purpose}`));
   return item;
 }
 
@@ -454,7 +454,10 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
   if (now?.soFar) node.append(text("p", "So far this turn", "label"));
   const summary = turn?.id ? summaryOf(turn.id) : null;
   if (now) {
-    if (now.headline) node.append(rendered("p", now.headline, "headline-text", session.cwd));
+    if (now.headline) {
+      node.append(rendered("p", now.headline, "headline-text", session.cwd));
+      if (index !== null) node.append(askAnchor(session.id, { kind: "headline", turn: index }, "this turn's Headline"));
+    }
     if (now.body.length) {
       const list = document.createElement("ul");
       list.className = "body-lines";
@@ -509,9 +512,6 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
     if (fold.hasAttribute("open")) fetch();
     node.append(fold);
   }
-  // One "ask about this" per turn, shown on hover; it asks about the turn's summary, else its reply.
-  const about = summary?.summary.summary || (latest ? responses.join("\n\n") : "") || turn?.message || "";
-  if (about) node.append(askElement(session.id, about));
   return node;
 }
 

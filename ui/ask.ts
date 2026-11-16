@@ -1,29 +1,100 @@
-// "Ask about this" (danielrispler/Falinks#461, decision 20): a side question on a response, card or intention. The shell
-// answers it with the card writer's own call, read with the turn's intentions; the answer stays here
-// and the session never sees it. A failed call or a reply with no answer shows why, with a retry.
+// Ask on an anchor (danielrispler/plotkeeper#125): a file, a failed check, a subagent line or a Headline carries "Ask". Opening
+// it shows what the step ledger and git recorded about the thing, at once, with no model: the core reads it through the
+// ledger's offsets. A suggested question, or one typed, goes to the card writer's call (danielrispler/Falinks#461, decision 20) with
+// those facts; the answer stays here and the session never sees it. A failed call or a reply with no answer shows why, with
+// a retry.
 
 import { invoke, text } from "./dom.js";
 import { rendered } from "./markdown.js";
 import { studio } from "./state.js";
 
-// Each item's box, kept across the view's redraws (every second), so a question being typed, an
-// open box and an answer all stay. shortcut: never pruned; prune by the listed sessions if it grows.
-const asks = new Map<string, HTMLElement>();
+// What Ask is opened on: the core's `Anchor`.
+export type Anchor =
+  | { kind: "file"; turn: number; root: string; path: string }
+  | { kind: "check"; agent: string | null; call: string }
+  | { kind: "subagent"; agent: string }
+  | { kind: "headline"; turn: number };
 
-// The "Ask about this" box under `item`, the text of session `session`'s response, card or intention.
-export function askElement(session: string, item: string): HTMLElement {
-  const key = `${session}\n${item}`;
-  if (!asks.has(key)) asks.set(key, askBox(session, item));
+// The recorded facts, in sections: `at` is Unix milliseconds when known.
+export type Facts = { sections: { label: string; facts: { at: number | null; text: string }[] }[] };
+
+export type Hunk = { text: string; left_out: number; binary: boolean; first_line: number };
+export const hunkText = (h: Hunk | null) =>
+  h === null ? "The hunk could not be read." : h.binary ? "Binary file: no lines to show." : h.text + (h.left_out ? `… ${h.left_out} more lines` : "");
+
+// Two or three questions each anchor type offers, after the question types developers ask of a trace (Sillito et al. 2006).
+const questions: Record<Anchor["kind"], string[]> = {
+  file: ["Why did it touch this file?", "What else could this change break?", "Why was it changed this way?"],
+  check: ["Why did this check fail?", "What would fix it?"],
+  subagent: ["What did this worker do?", "Why was it started?", "Did it finish what it was asked?"],
+  headline: ["What did this turn change?", "What is still open?", "What should I check first?"],
+};
+export const suggestions = (anchor: Anchor): string[] => questions[anchor.kind];
+
+const clock = (at: number) => new Date(at).toLocaleTimeString([], { hour12: false });
+
+// The facts as lines of text, which the model gets as the item and which the box shows.
+export function factsText(facts: Facts): string {
+  return facts.sections.map((s) => [`${s.label}:`, ...s.facts.map((f) => `${f.at ? `${clock(f.at)} ` : ""}${f.text}`)].join("\n")).join("\n\n");
+}
+
+// Each anchor's box, kept across the view's redraws (every second), so a question being typed, an open box and an answer all
+// stay. shortcut: never pruned; prune by the listed sessions if it grows.
+const asks = new Map<string, HTMLDetailsElement>();
+const keyOf = (session: string, anchor: Anchor) => `${session}\n${JSON.stringify(anchor)}`;
+
+// The "Ask" box of `anchor` in session `session`, labelled `what` for the model ("this file").
+export function askAnchor(session: string, anchor: Anchor, what: string): HTMLDetailsElement {
+  const key = keyOf(session, anchor);
+  if (!asks.has(key)) asks.set(key, askBox(session, anchor, what));
   return asks.get(key)!;
 }
 
-function askBox(session: string, item: string): HTMLElement {
+// Opens the box of `anchor` and puts the cursor in it, when it is drawn; false when it is not.
+export function openAsk(session: string, anchor: Anchor): boolean {
+  const node = asks.get(keyOf(session, anchor));
+  if (!node?.isConnected) return false;
+  node.open = true;
+  node.scrollIntoView?.({ block: "nearest" });
+  node.querySelector("textarea")?.focus();
+  return true;
+}
+
+function askBox(session: string, anchor: Anchor, what: string): HTMLDetailsElement {
   const node = document.createElement("details");
   node.className = "ask-about";
+  const recorded = document.createElement("div");
+  recorded.className = "ask-facts";
+  let known = "";
+  // Read at each opening, as a running turn's facts change.
+  const read = () => {
+    if (!known) recorded.replaceChildren(text("p", "Reading what was recorded…", "asking"));
+    invoke<Facts | null>("ask_facts", { session, anchor })
+      .then((facts) => {
+        known = facts ? factsText(facts) : "";
+        const sections = (facts?.sections ?? []).map((s) => {
+          const list = document.createElement("ul");
+          list.append(...s.facts.map((f) => text("li", `${f.at ? `${clock(f.at)} ` : ""}${f.text}`)));
+          return [text("p", s.label, "label"), list];
+        });
+        recorded.replaceChildren(...(sections.length ? sections.flat() : [text("p", "Nothing was recorded about this.", "asking")]));
+        if (anchor.kind === "file") showHunk(anchor);
+      })
+      .catch((e) => recorded.replaceChildren(text("p", `The facts could not be read: ${e}`, "ask-error")));
+  };
+  const hunk = text("pre", "", "evidence-hunk");
+  const showHunk = (a: Extract<Anchor, { kind: "file" }>) => {
+    invoke<Hunk | null>("turn_file_hunk", { session, turn: a.turn, root: a.root, path: a.path, from: null })
+      .then((h) => {
+        hunk.textContent = hunkText(h);
+        recorded.append(text("p", "The hunk", "label"), hunk);
+      })
+      .catch((e) => console.warn(e));
+  };
   const field = document.createElement("textarea");
   field.rows = 2;
   field.placeholder = "Your question. The session never sees it.";
-  field.setAttribute("aria-label", "Your question about this");
+  field.setAttribute("aria-label", `Your question about ${what}`);
   const send = button("Ask");
   const reply = document.createElement("div");
   reply.className = "ask-reply";
@@ -34,9 +105,10 @@ function askBox(session: string, item: string): HTMLElement {
     send.disabled = true;
     reply.replaceChildren(text("p", "Asking…", "asking"));
     try {
-      const answer = await invoke<string>("ask", { session, item, question });
+      const answer = await invoke<string>("ask", { session, item: `About ${what}. What was recorded:\n${known}`, question });
       const cwd = studio.listed.find((s) => s.id === session)?.cwd ?? null;
-      reply.replaceChildren(rendered("div", answer, "", cwd));
+      // The recorded facts are above; the answer is the model's reading of them.
+      reply.replaceChildren(text("p", "Interpretation", "label"), rendered("div", answer, "", cwd));
     } catch (e) {
       const retry = button("Retry");
       retry.addEventListener("click", ask);
@@ -47,7 +119,18 @@ function askBox(session: string, item: string): HTMLElement {
   send.addEventListener("click", ask);
   // ⌘↩ asks, as Enter alone makes a new line.
   field.addEventListener("keydown", (event) => event.metaKey && event.key === "Enter" && ask());
-  node.append(text("summary", "Ask about this"), field, send, reply);
+  const picks = document.createElement("div");
+  picks.className = "ask-suggestions";
+  for (const question of suggestions(anchor)) {
+    const pick = button(question);
+    pick.addEventListener("click", () => {
+      field.value = question;
+      void ask();
+    });
+    picks.append(pick);
+  }
+  node.addEventListener("toggle", () => node.open && read());
+  node.append(text("summary", "Ask", "ask-summary"), recorded, picks, field, send, reply);
   return node;
 }
 
