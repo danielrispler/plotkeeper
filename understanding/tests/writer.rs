@@ -49,43 +49,25 @@ struct Failing {
 }
 
 impl CardWriter for Failing {
-    fn reply(
-        &self,
-        request: &CardRequest,
-        earlier: &[String],
-        brief: &str,
-    ) -> Result<String, String> {
+    fn reply(&self, request: &CardRequest, earlier: &[String]) -> Result<String, String> {
         self.calls.set(self.calls.get() + 1);
         if self.calls.get() <= self.fails {
             return Ok("Shall I read the file?".into());
         }
-        FakeWriter.reply(request, earlier, brief)
+        FakeWriter.reply(request, earlier)
     }
 
     fn more(&self, request: &CardRequest, card: &Card) -> Result<String, String> {
         FakeWriter.more(request, card)
     }
-
-    fn rewrite(
-        &self,
-        prompts: &[&str],
-        summaries: &[String],
-        diffstat: &str,
-    ) -> Result<String, String> {
-        FakeWriter.rewrite(prompts, summaries, diffstat)
-    }
-
-    fn update(&self, brief: &str, workers: &str) -> Result<String, String> {
-        FakeWriter.update(brief, workers)
-    }
 }
 
-/// The card `writer` writes on `edit()`, with no earlier card and no brief yet, and the lines it
+/// The card `writer` writes on `edit()`, with no earlier card, and the lines it
 /// logs.
 fn written(writer: &impl CardWriter) -> (Option<Card>, Vec<String>) {
     let mut lines = Vec::new();
-    let card = write_card(writer, &edit(), &[], "", |line| lines.push(line));
-    (card.map(|(card, _)| sorted(card)), lines)
+    let card = write_card(writer, &edit(), &[], |line| lines.push(line));
+    (card.map(sorted), lines)
 }
 
 #[test]
@@ -124,25 +106,17 @@ fn a_writer_that_fails_twice_gives_no_card_and_one_log_line() {
 struct Replying(String);
 
 impl CardWriter for Replying {
-    fn reply(&self, _: &CardRequest, _: &[String], _: &str) -> Result<String, String> {
+    fn reply(&self, _: &CardRequest, _: &[String]) -> Result<String, String> {
         Ok(self.0.clone())
     }
 
     fn more(&self, _: &CardRequest, _: &Card) -> Result<String, String> {
         Ok(self.0.clone())
     }
-
-    fn rewrite(&self, _: &[&str], _: &[String], _: &str) -> Result<String, String> {
-        Ok(self.0.clone())
-    }
-
-    fn update(&self, _: &str, _: &str) -> Result<String, String> {
-        Ok(self.0.clone())
-    }
 }
 
 /// A good reply on `edit()`, in a code fence: the explanation, a quiz on its design, no
-/// architecture section, and the brief updated.
+/// architecture section.
 const GOOD: &str = concat!(
     "```json\n",
     r#"{"summary": "הגופן של שורת „לא נבדק” גדל ל־`15px`.", "#,
@@ -156,13 +130,9 @@ const GOOD: &str = concat!(
     r#"{"text": "כי רק השורה הזו הייתה קטנה מדי לקריאה.", "why": "נכון: שאר הכרטיס כבר היה ב־`15px`."}, "#,
     r#"{"text": "כי `.unchecked` קובע את גודל הגופן של כל הכרטיס.", "why": "לא: הכלל חל רק על השורה עצמה."}, "#,
     r#"{"text": "כי גודל הגופן של הכרטיס בא מהגדרות המערכת.", "why": "לא: הגודל קבוע ב־`style.css`."}"#,
-    r#"], "key": 0}, "#,
-    r#""brief": "הסשן מתקן את עיצוב הכרטיס.\nשורת „לא נבדק” גדלה ל־`15px`."}"#,
+    r#"], "key": 0}}"#,
     "\n```\n",
 );
-
-/// `GOOD`'s brief.
-const BRIEF: &str = "הסשן מתקן את עיצוב הכרטיס.\nשורת „לא נבדק” גדלה ל־`15px`.";
 
 /// `card` with its quiz's options in the order of their text, the key moved with them, so cards
 /// compare whatever order the shuffle gave.
@@ -231,7 +201,7 @@ fn the_app_shuffles_the_quizs_options_and_the_key_and_reasons_move_with_them() {
 #[test]
 fn the_writer_places_no_option_and_never_names_options_by_letter() {
     let folder = Path::new("/h/Library/Application Support/dev.falinks.studio/card-writer");
-    let (_, prompt) = ClaudeWriter::new(CLAUDE.into(), folder.into()).command(&edit(), &[], "");
+    let (_, prompt) = ClaudeWriter::new(CLAUDE.into(), folder.into()).command(&edit(), &[]);
 
     assert!(!prompt.contains("random place"), "{prompt}");
     assert!(
@@ -255,21 +225,12 @@ fn a_reply_with_an_architecture_section_gives_the_card_that_section() {
 }
 
 #[test]
-fn the_card_call_returns_the_brief_updated_and_one_with_none_logs_one_line() {
-    let updated = write_card(&Replying(GOOD.into()), &edit(), &[], "", |l| panic!("{l}"));
-    let updated = updated.map(|(card, brief)| (sorted(card), brief));
-    assert_eq!(updated, Some((good_card(), Some(BRIEF.into()))));
+fn the_card_call_returns_the_card_and_asks_for_no_brief() {
+    let card = write_card(&Replying(GOOD.into()), &edit(), &[], |l| panic!("{l}"));
+    assert_eq!(card.map(sorted), Some(good_card()));
 
-    let no_brief = GOOD.replace(r#""brief""#, r#""other""#);
-    let mut lines = Vec::new();
-    let written = write_card(&Replying(no_brief), &edit(), &[], "", |l| lines.push(l));
-
-    let written = written.map(|(card, brief)| (sorted(card), brief));
-    assert_eq!(written, Some((good_card(), None)));
-    let [line] = &lines[..] else {
-        panic!("one log line: {lines:?}");
-    };
-    assert!(line.contains(&edit().id), "{line}");
+    let (_, prompt) = ClaudeWriter::new(CLAUDE.into(), "/f".into()).command(&edit(), &[]);
+    assert!(!prompt.contains("brief"), "{prompt}");
 }
 
 #[test]
@@ -305,9 +266,8 @@ fn a_quiz_with_no_key_or_one_that_does_not_parse_logs_one_line_and_the_card_has_
 fn the_real_writer_runs_claude_on_the_subscription_in_its_neutral_folder() {
     let folder = Path::new("/h/Library/Application Support/dev.falinks.studio/card-writer");
     let earlier = ["`Card` קיבל שדה `summary`.".to_string()];
-    let brief = "הסשן מוסיף תקציר לכל סשן.\nהכותב מחזיר את התקציר.";
     let (command, prompt) =
-        ClaudeWriter::new(CLAUDE.into(), folder.into()).command(&edit(), &earlier, brief);
+        ClaudeWriter::new(CLAUDE.into(), folder.into()).command(&edit(), &earlier);
 
     assert_eq!(command.get_program(), CLAUDE);
     // Both keys would take precedence over the subscription login, and without the plugin the
@@ -333,9 +293,8 @@ fn the_real_writer_runs_claude_on_the_subscription_in_its_neutral_folder() {
         ["--tools", "", "--strict-mcp-config", "--safe-mode", "-p"]
     );
     assert!(prompt.contains("multiple-choice question on the change's logic or design"));
-    // The architecture section reads the prompt's earlier cards; the brief is updated.
+    // The architecture section reads the prompt's earlier cards.
     assert!(prompt.contains(&format!("earlier cards, oldest first:\n- {}\n", earlier[0])));
-    assert!(prompt.contains(&format!("The brief so far:\n{brief}\n")));
     assert!(prompt.ends_with(&format!("\nChange:\n{}", edit().diff())));
     assert_eq!(command.get_current_dir(), Some(folder));
 }
@@ -343,12 +302,11 @@ fn the_real_writer_runs_claude_on_the_subscription_in_its_neutral_folder() {
 #[test]
 fn every_writer_run_is_in_safe_mode() {
     let writer = ClaudeWriter::new(CLAUDE.into(), "/card-writer".into());
-    let reply = FakeWriter.reply(&edit(), &[], "").unwrap();
+    let reply = FakeWriter.reply(&edit(), &[]).unwrap();
     let (card, _) = Card::from_reply(&reply).unwrap();
     let runs = [
-        ("card", writer.command(&edit(), &[], "")),
-        ("rewrite", writer.rewrite_command(&["a prompt"], &[], "")),
-        ("update", writer.update_command("", "workers")),
+        ("card", writer.command(&edit(), &[])),
+        ("goal", writer.goal_command(&["a prompt"])),
         ("explain more", writer.more_command(&edit(), &card)),
         ("ask", writer.ask_command("an item", &[], "why?")),
         (
@@ -370,79 +328,51 @@ fn every_writer_run_is_in_safe_mode() {
 }
 
 #[test]
-fn an_oversized_rewrite_cuts_the_oldest_prompts_first_and_keeps_every_summary() {
+fn an_oversized_goal_input_cuts_the_oldest_prompts_first() {
     let folder = Path::new("/h/Library/Application Support/dev.falinks.studio/card-writer");
     let writer = ClaudeWriter::new(CLAUDE.into(), folder.into());
-    // Three prompts of 30 KiB each, 90 KiB in all, and 200 summaries.
+    // Three prompts of 30 KiB each, 90 KiB in all.
     let prompts: Vec<String> = ["first", "second", "third"]
         .iter()
         .map(|name| format!("{name} {}", "x".repeat(30 << 10)))
         .collect();
     let prompts: Vec<&str> = prompts.iter().map(String::as_str).collect();
-    let summaries: Vec<String> = (0..200).map(|i| format!("summary {i}")).collect();
-    let diffstat = " core/src/lib.rs | 12 ++++++------\n 1 file changed\n";
 
-    let (_, prompt) = writer.rewrite_command(&prompts, &summaries, diffstat);
+    let (_, prompt) = writer.goal_command(&prompts);
 
     assert!(
-        prompt.contains("rewrite from scratch the brief"),
+        prompt.contains("Goal of a coding agent's session"),
         "{prompt}"
     );
     assert!(!prompt.contains("first x"));
     assert!(prompt.contains("second x") && prompt.contains("third x"));
-    assert!(
-        summaries
-            .iter()
-            .all(|s| prompt.contains(&format!("- {s}\n")))
-    );
-    assert!(prompt.ends_with(diffstat));
     assert!(prompt.len() < 70 << 10, "{}", prompt.len());
 }
 
 #[test]
-fn a_rewrite_whose_newest_prompt_alone_is_over_the_budget_keeps_its_start() {
+fn a_goal_whose_newest_prompt_alone_is_over_the_budget_keeps_its_start() {
     let folder = Path::new("/h/Library/Application Support/dev.falinks.studio/card-writer");
     let writer = ClaudeWriter::new(CLAUDE.into(), folder.into());
     // A pasted log of 100 KiB.
     let pasted = format!("Why does this fail?\n{}", "x".repeat(100 << 10));
 
-    let (_, prompt) = writer.rewrite_command(&["Add a", &pasted], &["summary".into()], "");
+    let (_, prompt) = writer.goal_command(&["Add a", &pasted]);
 
     assert!(!prompt.contains("Add a"), "{prompt}");
     assert!(
         prompt.contains("<prompt>\nWhy does this fail?\nxxx"),
         "{prompt}"
     );
-    assert!(prompt.contains("- summary\n"));
     assert!(prompt.len() < 70 << 10, "{}", prompt.len());
-}
-
-#[test]
-fn a_rewrite_whose_summaries_fill_the_budget_still_keeps_the_newest_prompts_start() {
-    let folder = Path::new("/h/Library/Application Support/dev.falinks.studio/card-writer");
-    let writer = ClaudeWriter::new(CLAUDE.into(), folder.into());
-    // 2,000 summaries of about 40 bytes each, 80 KiB in all.
-    let summaries: Vec<String> = (0..2_000)
-        .map(|i| format!("summary {i:04} of a long session's card"))
-        .collect();
-
-    let (_, prompt) = writer.rewrite_command(&["Why does this fail?"], &summaries, "");
-
-    assert!(
-        prompt.contains("<prompt>\nWhy does this fail?\n"),
-        "{}",
-        &prompt[..500]
-    );
 }
 
 #[test]
 fn every_prompt_asks_for_english_and_none_for_hebrew() {
     let writer = ClaudeWriter::new(CLAUDE.into(), "/f".into());
     let prompts = [
-        writer.command(&edit(), &[], "").1,
+        writer.command(&edit(), &[]).1,
         writer.more_command(&edit(), &good_card()).1,
-        writer.rewrite_command(&["Add a"], &[], "").1,
-        writer.update_command("brief", "workers").1,
+        writer.goal_command(&["Add a"]).1,
         writer.ask_command("item", &[], "Why?").1,
     ];
     for prompt in prompts {
@@ -462,7 +392,7 @@ fn explain_more_runs_the_same_writer_on_the_cards_explanation_and_its_change() {
 
     let (more, prompt) = writer.more_command(&edit(), &card);
 
-    let (card_run, _) = writer.command(&edit(), &[], "");
+    let (card_run, _) = writer.command(&edit(), &[]);
     assert_eq!(more.get_program(), card_run.get_program());
     assert!(more.get_envs().eq(card_run.get_envs()));
     assert!(more.get_args().eq(card_run.get_args()));
@@ -483,7 +413,7 @@ fn explain_more_on_a_card_built_from_workers_tells_the_writer_there_is_no_diff()
 
     let (_, prompt) = writer.more_command(&workers, &good_card());
 
-    let (_, card) = writer.command(&workers, &[], "");
+    let (_, card) = writer.command(&workers, &[]);
     let clause = card
         .lines()
         .find(|line| line.starts_with("When the change is not a diff"))
@@ -505,7 +435,7 @@ fn a_huge_change_is_cut_so_the_prompt_stays_small() {
         change: Some(format!("+{}\n", "א".repeat(100_000))),
         ..edit()
     };
-    let (_, prompt) = ClaudeWriter::new(CLAUDE.into(), folder.into()).command(&request, &[], "");
+    let (_, prompt) = ClaudeWriter::new(CLAUDE.into(), folder.into()).command(&request, &[]);
 
     assert!(prompt.len() < 70 << 10, "{}", prompt.len());
     assert!(prompt.ends_with(" more bytes cut]"));
@@ -646,7 +576,7 @@ fn a_change_holding_nul_bytes_reaches_the_writer_on_standard_input_and_gets_a_ca
         ..edit()
     };
 
-    let card = write_card(&writer, &request, &[], "", |l| panic!("{l}"));
+    let card = write_card(&writer, &request, &[], |l| panic!("{l}"));
 
     assert!(card.is_some());
     let input = fs::read_to_string(dir.path().join("input")).unwrap();
@@ -767,17 +697,11 @@ struct Recording {
 }
 
 impl CardWriter for Recording {
-    fn reply(&self, r: &CardRequest, e: &[String], b: &str) -> Result<String, String> {
-        FakeWriter.reply(r, e, b)
+    fn reply(&self, r: &CardRequest, e: &[String]) -> Result<String, String> {
+        FakeWriter.reply(r, e)
     }
     fn more(&self, r: &CardRequest, c: &Card) -> Result<String, String> {
         FakeWriter.more(r, c)
-    }
-    fn rewrite(&self, p: &[&str], s: &[String], d: &str) -> Result<String, String> {
-        FakeWriter.rewrite(p, s, d)
-    }
-    fn update(&self, b: &str, w: &str) -> Result<String, String> {
-        FakeWriter.update(b, w)
     }
     fn summarize(
         &self,
@@ -1130,7 +1054,7 @@ fn a_writer_that_cannot_start_gives_one_notice_until_a_call_works() {
     let (writer, heard) = watched(&program, dir.path());
 
     for _ in 0..3 {
-        assert!(writer.reply(&edit(), &[], "").is_err());
+        assert!(writer.reply(&edit(), &[]).is_err());
     }
     {
         let heard = heard.lock().unwrap();
@@ -1140,7 +1064,7 @@ fn a_writer_that_cannot_start_gives_one_notice_until_a_call_works() {
     }
 
     shell(dir.path(), "claude", "echo ok");
-    assert_eq!(writer.reply(&edit(), &[], "").unwrap().trim(), "ok");
+    assert_eq!(writer.reply(&edit(), &[]).unwrap().trim(), "ok");
     assert_eq!(heard.lock().unwrap().last(), Some(&None));
     assert_eq!(heard.lock().unwrap().len(), 2);
 }
@@ -1151,7 +1075,7 @@ fn a_writer_that_starts_and_fails_raises_no_notice() {
     let claude = shell(dir.path(), "claude", "exit 3");
     let (writer, heard) = watched(&claude, dir.path());
 
-    assert!(writer.reply(&edit(), &[], "").is_err());
+    assert!(writer.reply(&edit(), &[]).is_err());
     assert!(heard.lock().unwrap().is_empty());
 }
 
@@ -1223,17 +1147,11 @@ struct Sequence {
 }
 
 impl CardWriter for Sequence {
-    fn reply(&self, r: &CardRequest, e: &[String], b: &str) -> Result<String, String> {
-        FakeWriter.reply(r, e, b)
+    fn reply(&self, r: &CardRequest, e: &[String]) -> Result<String, String> {
+        FakeWriter.reply(r, e)
     }
     fn more(&self, r: &CardRequest, c: &Card) -> Result<String, String> {
         FakeWriter.more(r, c)
-    }
-    fn rewrite(&self, p: &[&str], s: &[String], d: &str) -> Result<String, String> {
-        FakeWriter.rewrite(p, s, d)
-    }
-    fn update(&self, b: &str, w: &str) -> Result<String, String> {
-        FakeWriter.update(b, w)
     }
     fn summarize(
         &self,

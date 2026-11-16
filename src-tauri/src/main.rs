@@ -27,9 +27,9 @@ use studio_core::{
 };
 use studio_understanding::{
     AGY_FIXTURE_VERSION, AgyVersions, CardStore, CardWriter, ClaudeWriter, FakeWriter,
-    Fingerprints, Rating, Row, SessionCards, StoredSummary, SummarySetup, Versions, add_hunks,
-    backfilled, fingerprint_changes, millis, turn_diffs, turn_hunk, worktree_root,
-    write_agent_summary, write_brief, write_name, write_stop, write_summary,
+    Fingerprints, OpenItem, Rating, Row, SessionCards, StoredSummary, SummarySetup, Versions,
+    add_hunks, backfilled, fingerprint_changes, millis, open_items, turn_diffs, turn_hunk,
+    worktree_root, write_agent_summary, write_goal, write_name, write_stop, write_summary,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
@@ -267,14 +267,17 @@ fn selection(studio: &Studio) -> serde_json::Value {
 /// latest tick, without each card's diff and base, which the pane never reads.
 #[tauri::command]
 fn cards(studio: State<Mutex<Studio>>, cards: State<Cards>) -> SessionCards {
-    let (viewed, now) = {
-        let studio = studio.lock().unwrap();
-        (studio.viewed().map(String::from), studio.now())
+    let studio = studio.lock().unwrap();
+    let Some(owner) = studio.viewed() else {
+        return SessionCards::default();
     };
-    match viewed {
-        Some(owner) => cards.lock().unwrap().session_cards(&owner, now),
-        None => SessionCards::default(),
+    let cards = cards.lock().unwrap();
+    let mut shown = cards.session_cards(owner, studio.now());
+    // The Open slot is the session's: a worker's view has none.
+    if let Some(session) = studio.session(owner) {
+        shown.open = open_items(session, studio.task_facts(owner), &cards);
     }
+    shown
 }
 
 /// The plan's 5-hour and weekly usage from the status line's newest snapshot in the `usage` folder
@@ -299,6 +302,7 @@ struct CardsKey {
     viewed: Option<String>,
     revision: u64,
     minute: u64,
+    open: Vec<OpenItem>,
 }
 
 /// The turns whose files the core asks for (danielrispler/plotkeeper#111): each is diffed by `git`
@@ -343,11 +347,17 @@ impl Sent {
         let key = {
             let studio = app.state::<Mutex<Studio>>();
             let studio = studio.lock().unwrap();
-            let revision = app.state::<Cards>().lock().unwrap().revision();
+            let cards = app.state::<Cards>();
+            let cards = cards.lock().unwrap();
+            let viewed = studio.viewed();
+            let session = viewed.and_then(|id| studio.session(id));
+            // The Open slot moves with the core's state, not only with the store's.
+            let open = session.map(|s| open_items(s, studio.task_facts(&s.agent.id), &cards));
             CardsKey {
-                viewed: studio.viewed().map(String::from),
-                revision,
+                viewed: viewed.map(String::from),
+                revision: cards.revision(),
                 minute: studio.now() / 60_000,
+                open: open.unwrap_or_default(),
             }
         };
         if self.cards.as_ref() != Some(&key) {
@@ -1163,7 +1173,7 @@ fn write(
         };
         let written = match card {
             true => write_stop(&store, &*writer, request, &session, stored, log),
-            false => write_brief(&store, &*writer, request, &session, log),
+            false => write_goal(&store, &*writer, &request, &session, log),
         };
         // The brief, which a row's line may show, changed again.
         if written {

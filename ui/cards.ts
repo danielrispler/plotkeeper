@@ -227,10 +227,33 @@ export function markShown() {
 // only when its record changed, such as after a tap, and is moved whole to the older group.
 const drawn = new Map<string, { record: string; node: HTMLElement }>();
 
-// The session's brief, folded under the feed, one paragraph per line.
-function showBrief(brief: string | null) {
-  element("brief").replaceChildren(...(brief ?? "").split("\n").map((line) => prose("p", line)));
-  element("brief-fold").hidden = brief === null;
+// The Brief's slots in order (danielrispler/plotkeeper#122): Goal, Decisions, Open. A brief stored as prose shows as it is,
+// with no title, until the session has a Goal.
+export type BriefSlot = { title: string; lines: string[] };
+export function briefSlots(cards: SessionCards): BriefSlot[] {
+  const slots: BriefSlot[] = [];
+  if (cards.goal) slots.push({ title: "Goal", lines: [cards.goal] });
+  else if (cards.brief) slots.push({ title: "", lines: cards.brief.split("\n") });
+  if (cards.answers.length) slots.push({ title: "Decisions", lines: cards.answers.map((a) => `${a.question} ${a.reply}`) });
+  if (cards.open.length) slots.push({ title: "Open", lines: cards.open.map((item) => item.text) });
+  return slots;
+}
+
+function slotTitle(title: string): HTMLElement {
+  const node = prose("p", title);
+  node.className = "slot-title";
+  return node;
+}
+
+// The session's brief, folded under the feed: each slot with its title and one paragraph per line.
+function showBrief(cards: SessionCards) {
+  const slots = briefSlots(cards);
+  const nodes = slots.flatMap(({ title, lines }) => [
+    ...(title ? [slotTitle(title)] : []),
+    ...lines.map((line) => prose("p", line)),
+  ]);
+  element("brief").replaceChildren(...nodes);
+  element("brief-fold").hidden = slots.length === 0;
 }
 
 // Card `stored`'s node, drawn again only when its record changed.
@@ -246,7 +269,7 @@ export function cardNode(stored: StoredCard): HTMLElement {
 
 export function showCards(cards: SessionCards) {
   studio.cards = cards;
-  showBrief(cards.brief);
+  showBrief(cards);
   showDecisions(cards.decisions);
   const ids = new Set([...cards.recent, ...cards.older].map(({ request }) => request.id));
   for (const id of drawn.keys()) {

@@ -217,11 +217,13 @@ const common = {
   usage: { five_hour: { used_percentage: 42, resets_at: Date.now() / 1000 + 3600 }, seven_day: { used_percentage: 18, resets_at: Date.now() / 1000 + 86400 } },
 };
 
-const brief =
-  "Row controls (#56): each session row gets a fold toggle at its start and a delete at its end.\n" +
-  "Done: the toggle, the delete's hover and focus rule, tests for both.\n" +
-  "Open: the strip draws no delete; the Home rows show it always (their own rule).\n" +
-  "Next: look at the rows in a real window, then open the PR.";
+const goal = "Give each session row a fold toggle and a delete, drawn only where a row can use them.";
+const answers = [{ question: "Hide the delete with display or visibility?", reply: "visibility" }];
+const open = [
+  { kind: "check", text: "npm run check ended failed" },
+  { kind: "open", text: "The strip draws no delete; the Home rows show it always." },
+  { kind: "unpushed", text: "Uncommitted or unpushed work" },
+];
 
 const decisions = [
   { call: "c1", agent: null, tool: "AskUserQuestion", input: { questions: [{ question: "Hide the delete with display or visibility?", options: [] }] }, answer: { "Hide the delete with display or visibility?": "visibility" }, at: Date.now() - 3 * 60 * MIN, source: "card" },
@@ -243,7 +245,7 @@ const build = (state, { ask = null, answered = false, withBrief = false } = {}) 
     ...common,
     sessions,
     selected: { session: s, agent: null },
-    cards: { brief: withBrief ? brief : null, recent: [], older: [stored], decisions: withBrief ? decisions : [] },
+    cards: { brief: null, goal: withBrief ? goal : null, answers: withBrief ? answers : [], open: withBrief ? open : [], recent: [], older: [stored], decisions: withBrief ? decisions : [] },
     watch: ask,
     check_output: { exit_code: 1, tail: "error: test failed, to rerun pass `-p studio-core --lib`\n\nfailures:\n    rows::fold_toggle_is_a_sibling" },
     turn_file_hunk: { text: ["diff --git a/ui/style.css b/ui/style.css", "--- a/ui/style.css", "+++ b/ui/style.css", "@@ -10,4 +10,6 @@", " .rail {", "-  gap: 4px;", "+  gap: var(--sp-3);", "+  padding: 0;", " }", ""].join("\n"), left_out: 0, binary: false, first_line: 11 },
