@@ -5,6 +5,7 @@
 use crate::event::{
     Capabilities, Event, Happened, Spawned, Start, Tool, ToolKind, TranscriptFormat,
 };
+use crate::ledger::Bytes;
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -216,6 +217,11 @@ fn adapt(raw: Raw) -> Event {
             });
             if failed && raw.error.starts_with("Exit code") {
                 happened.push(Happened::ExitedNonZero);
+                let code = raw.error["Exit code".len()..].trim_start();
+                let digits = code.split(|c: char| !c.is_ascii_digit() && c != '-').next();
+                if let Some(code) = digits.and_then(|d| d.parse().ok()) {
+                    happened.push(Happened::ExitCode(code));
+                }
             }
             if failed && raw.error.contains("doesn't want to proceed") {
                 happened.push(Happened::Rejected);
@@ -264,6 +270,7 @@ fn adapt(raw: Raw) -> Event {
         studio_turn_start: raw.studio_turn_start,
         studio_turn_end: raw.studio_turn_end,
         capabilities: CAPABILITIES,
+        line: Bytes::default(),
         happened,
     }
 }

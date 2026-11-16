@@ -5,6 +5,7 @@
 //! The shared events are those every agent reports. What only one agent reports is a variant of
 //! its own, which only that agent's adapter emits, never an optional field of a shared event.
 
+use crate::ledger::Bytes;
 use serde_json::Value;
 use std::collections::BTreeMap;
 
@@ -28,6 +29,8 @@ pub(crate) struct Event {
     pub studio_turn_end: BTreeMap<String, String>,
     /// What the adapter that read the line reports.
     pub capabilities: Capabilities,
+    /// Where the log line it came from is in the event log.
+    pub line: Bytes,
     /// What happened, the line's main event first. A line the adapter does not know has none.
     pub happened: Vec<Happened>,
 }
@@ -91,6 +94,8 @@ pub(crate) enum Happened {
     TasksReported(Vec<(String, String)>),
     /// A failed command that ran and exited with a code.
     ExitedNonZero,
+    /// The exit code a failed command's error names.
+    ExitCode(i32),
     /// A failed call that Daniel rejected.
     Rejected,
     /// A question's answers, as strings by question.
@@ -346,6 +351,13 @@ impl Event {
     pub fn answers(&self) -> Option<&Value> {
         self.find(|h| match h {
             Happened::Answers(answers) => Some(answers),
+            _ => None,
+        })
+    }
+
+    pub fn exit_code(&self) -> Option<i32> {
+        self.find(|h| match h {
+            Happened::ExitCode(code) => Some(*code),
             _ => None,
         })
     }
