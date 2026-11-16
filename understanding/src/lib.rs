@@ -21,6 +21,7 @@ use studio_core::{CardRequest, Kind, Session, Status, SummaryRequest, Transcript
 
 mod drift;
 mod fingerprint;
+mod grounding;
 mod store;
 mod summary;
 mod turn_trees;
@@ -32,9 +33,10 @@ pub use store::{
     StoredSummary, millis,
 };
 pub use summary::{
-    Learning, SummarySetup, TurnSummary, write_agent_summary, write_name, write_summary,
+    Learning, Line, LineKind, SummarySetup, TurnSummary, write_agent_summary, write_name,
+    write_summary,
 };
-pub use turn_trees::{anchor, hunk, numstat, turn_diffs};
+pub use turn_trees::{add_hunks, anchor, hunk, numstat, turn_diffs};
 pub use week::{Rate, Ratings, Week, week};
 
 /// A card on a change, in the explanation language; code inside its text is in
@@ -628,13 +630,15 @@ impl CardWriter for FakeWriter {
         earlier: &[TurnSummary],
     ) -> Result<String, String> {
         let option = |text: &str, why: &str| serde_json::json!({ "text": text, "why": why });
-        let summary = format!(
-            "A sample turn summary from the fake writer, which does not read the turn.\nIt was given {} responses and {} earlier summaries.",
+        let headline = "A sample headline from the fake writer, which does not read the turn.";
+        let line = format!(
+            "It was given {} responses and {} earlier summaries.",
             request.responses.len(),
             earlier.len()
         );
         Ok(serde_json::json!({
-            "summary": summary,
+            "headline": headline,
+            "lines": [{ "kind": "reported", "text": line }],
             "learning": {
                 "idea": "The turn's main idea goes here.",
                 "question": {

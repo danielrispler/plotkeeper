@@ -21,15 +21,15 @@ use std::{
     time::{Duration, Instant},
 };
 use studio_core::{
-    CardRequest, NameRequest, Notifications, Output, Session, Sound,
+    CardRequest, Facts, NameRequest, Notifications, Output, Session, Sound,
     State::{Ended, NeedsYou},
     Studio, SummaryRequest, TaskFacts, TaskQuery,
 };
 use studio_understanding::{
     AGY_FIXTURE_VERSION, AgyVersions, CardStore, CardWriter, ClaudeWriter, FakeWriter,
-    Fingerprints, Rating, Row, SessionCards, StoredSummary, SummarySetup, Versions, backfilled,
-    fingerprint_changes, millis, turn_diffs, worktree_root, write_agent_summary, write_brief,
-    write_name, write_stop, write_summary,
+    Fingerprints, Rating, Row, SessionCards, StoredSummary, SummarySetup, Versions, add_hunks,
+    backfilled, fingerprint_changes, millis, turn_diffs, worktree_root, write_agent_summary,
+    write_brief, write_name, write_stop, write_summary,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
@@ -1149,6 +1149,18 @@ fn write(
     let _ = queue(queues, id).send(Box::new(job));
 }
 
+/// What the hooks and git recorded of the turn named `id`, for its summary writer (danielrispler/plotkeeper#115):
+/// its files with their counts and hunks, and its checks. Empty for a turn with no trees.
+fn turn_facts(state: &Mutex<Studio>, id: &str) -> Facts {
+    let Some(ask) = state.lock().unwrap().summary_ask(id) else {
+        return Facts::default();
+    };
+    let diffs = turn_diffs(&ask);
+    let mut facts = state.lock().unwrap().summary_facts(&ask, diffs);
+    add_hunks(&ask, &mut facts);
+    facts
+}
+
 /// Writes the summary of `request`'s turn on its session's queue, after the turn's card, then
 /// switches the turn's intention to its first line (danielrispler/Falinks#517, decision 16). While summaries are written
 /// on open, the turn waits for Daniel instead (`turn_summary`).
@@ -1173,6 +1185,8 @@ fn summarize(
     let job = move || {
         let log = |line: String| eprintln!("studio: {line}");
         let setup = app.state::<Summaries>().setup.lock().unwrap().clone();
+        let mut request = request;
+        request.facts = turn_facts(&app.state::<Mutex<Studio>>(), &request.id);
         write_summary(&app.state::<Cards>(), &*writer, &setup, request, log);
     };
     queue(queues, id).send(Box::new(job)).ok();

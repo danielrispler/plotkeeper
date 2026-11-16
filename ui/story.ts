@@ -36,6 +36,7 @@ import {
   type StoredCard,
   type Subagent,
   type Turn,
+  type SummaryLine,
   type TurnSummary,
 } from "./types.js";
 
@@ -194,11 +195,15 @@ export function blockKind(questions: Pick<Question, "answer">[], decision: Pick<
   return questions.some((question) => question.answer === "open") ? "question" : null;
 }
 
-// A turn's Headline and Body lines, adapted from its stored summary (danielrispler/plotkeeper#116): the summary's first
-// line is the Headline and the rest are `reported` lines. Until the summary arrives, and for a turn with none, the
-// Headline is the first line of the final response.
-export type BodyLine = { kind: "reported"; text: string };
+// A turn's Headline and Body lines (danielrispler/plotkeeper#115, #116): the writer's, when the summary has them; a summary
+// stored before them is adapted, its first line the Headline and the rest `reported` lines. Until the summary arrives, for a
+// turn with none, and when the guards stripped its Headline (empty), the Headline is the first line of the final response.
+export type BodyLine = SummaryLine;
 export function headlineOf(summary: TurnSummary | null, message: string | null): { headline: string | null; body: BodyLine[] } {
+  const stored = summary?.summary;
+  if (stored && stored.headline != null) {
+    return { headline: stored.headline.trim() || message?.trim() || null, body: stored.lines ?? [] };
+  }
   const lines = (summary?.summary.summary ?? "").split("\n").map((line) => line.trim()).filter(Boolean);
   if (lines.length) return { headline: lines[0], body: lines.slice(1).map((text) => ({ kind: "reported", text })) };
   return { headline: message?.trim() || null, body: [] };
@@ -457,7 +462,8 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
     if (now.body.length) {
       const list = document.createElement("ul");
       list.className = "body-lines";
-      list.append(...now.body.map((line) => Object.assign(rendered("li", line.text, line.kind, session.cwd))));
+      // A `reported` line is the agent's claim, which no recorded fact shows.
+      list.append(...now.body.map((line) => rendered("li", line.kind === "reported" ? `Agent says: ${line.text}` : line.text, line.kind, session.cwd)));
       node.append(list);
     }
   } else if (summary) node.append(rendered("div", summary.summary.summary, "summary", session.cwd));

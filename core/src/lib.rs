@@ -1604,6 +1604,31 @@ pub struct SummaryRequest {
     /// The card its `Stop` requested, which the learning section points to instead of a question.
     #[serde(default)]
     pub card: Option<String>,
+    /// What the hooks and git recorded of the turn (danielrispler/plotkeeper#115); empty until the
+    /// shell fills it in, and for an agent that reports no trees.
+    #[serde(default)]
+    pub facts: Facts,
+}
+
+/// A file a turn changed, with its whole hunk from git.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FactFile {
+    #[serde(flatten)]
+    pub file: TurnFile,
+    /// Its diff between the turn's trees. Not stored: the guards read it while the writer runs.
+    #[serde(skip)]
+    pub hunk: String,
+}
+
+/// The turn's recorded facts, which its writer is given and its guards check the writer against
+/// (danielrispler/plotkeeper#115).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Facts {
+    pub files: Vec<FactFile>,
+    /// How many other files the turn's trees differ in.
+    pub external: u64,
+    /// Each check's last run, retries and commands.
+    pub checks: Vec<Check>,
 }
 
 /// What the writer reads to name a session from its first prompt.
@@ -2623,6 +2648,7 @@ impl Studio {
                                 Some(Output::Card(card)) => Some(card.id.clone()),
                                 _ => None,
                             },
+                            facts: Facts::default(),
                         }));
                     }
                     if let Some(prompt) = session.name_after.take()
@@ -3059,6 +3085,61 @@ impl Studio {
         asks.sort_by_key(|(at, _)| std::cmp::Reverse(*at));
         asks.truncate(limit);
         asks.into_iter().map(|(_, ask)| ask).collect()
+    }
+
+    /// The diff the shell is asked for to write the summary of the turn named `id`
+    /// (`SummaryRequest::id`): its trees as they ended. `None` for a turn with no trees.
+    pub fn summary_ask(&self, id: &str) -> Option<TurnDiff> {
+        let session = self
+            .sessions
+            .values()
+            .find(|s| s.turns.iter().any(|t| t.id.as_deref() == Some(id)))?;
+        let (index, turn) = session
+            .turns
+            .iter()
+            .enumerate()
+            .find(|(_, t)| t.id.as_deref() == Some(id))?;
+        let trees: Vec<TurnTrees> = (turn.trees.iter())
+            .filter_map(|(root, (start, end))| {
+                let end = end.clone()?;
+                Some(TurnTrees {
+                    root: root.clone(),
+                    start: start.clone(),
+                    end: Some(end),
+                })
+            })
+            .collect();
+        (session.capabilities.turn_trees && !trees.is_empty()).then(|| TurnDiff {
+            session_id: session.agent.id.clone(),
+            turn: index,
+            ended: true,
+            trees,
+        })
+    }
+
+    /// The facts of the turn `ask` names, from the numstat the shell found (`None` when git could
+    /// not diff it): its files without their hunks, which the shell adds, and its checks.
+    pub fn summary_facts(&self, ask: &TurnDiff, diffs: Option<Vec<RootDiff>>) -> Facts {
+        let Some(session) = self.sessions.get(&ask.session_id) else {
+            return Facts::default();
+        };
+        let Some(turn) = session.turns.get(ask.turn) else {
+            return Facts::default();
+        };
+        let found = diffs.map(|diffs| TurnFiles::of(diffs, &session.edited(ask.turn)));
+        let found = found.unwrap_or_default();
+        Facts {
+            files: found
+                .files
+                .into_iter()
+                .map(|file| FactFile {
+                    file,
+                    hunk: String::new(),
+                })
+                .collect(),
+            external: found.external,
+            checks: turn.checks.clone(),
+        }
     }
 
     /// Takes what the shell found for `ask`: the numstat of each of its worktrees, `None` when git

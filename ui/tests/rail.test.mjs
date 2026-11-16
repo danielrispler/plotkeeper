@@ -81,6 +81,20 @@ test("a stored summary is a Headline and reported lines; with none, the final re
   assert.deepEqual(headlineOf(null, null), { headline: null, body: [] });
 });
 
+test("a summary with a Headline and typed lines gives them as they are, and a stripped Headline gives the response's first line", () => {
+  const typed = (headline) => ({
+    summary: { summary: "x", headline, lines: [{ kind: "open", text: "Nobody looked." }, { kind: "ask", text: "Merge it?" }], learning: null },
+  });
+  assert.deepEqual(headlineOf(typed("Agent says: fixed the overlay."), "Done."), {
+    headline: "Agent says: fixed the overlay.",
+    body: [
+      { kind: "open", text: "Nobody looked." },
+      { kind: "ask", text: "Merge it?" },
+    ],
+  });
+  assert.equal(headlineOf(typed(""), "Done.").headline, "Done.");
+});
+
 test("what now holds in each state", () => {
   const turn = { prompt: "Fix it", message: "Done.", intention: "Reading the lint" };
   // Running: what was asked and the intention in its box; no Headline yet.

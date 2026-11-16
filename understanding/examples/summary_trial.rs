@@ -1,4 +1,4 @@
-//! The turn summary on real turns (danielrispler/Falinks#526): the last `--turns` turns that get a summary (danielrispler/Falinks#517,
+//! The turn summary on real turns (danielrispler/Falinks#526; the grounded writer's trial, danielrispler/plotkeeper#115): the last `--turns` turns that get a summary (danielrispler/Falinks#517,
 //! decision 12) from Daniel's most recent Falinks transcripts in `~/.claude/projects/`, each run
 //! through `write_summary` at the settings' defaults (Haiku at its default effort), as the app runs
 //! it: with its retry, and a throwaway store in a temporary folder. It prints Markdown on standard
@@ -7,6 +7,12 @@
 //! from the repository's root:
 //!
 //! `cargo run -q -p studio-understanding --example summary_trial -- --turns 3`
+//!
+//! It ends with the counts of the grounded writer's trial: the share of turns whose first reply was
+//! rejected (asked once more), of Headlines that narrate instead of stating an outcome (by the
+//! words they open with, to be read by eye), and of lines the guards stripped or prefixed. A
+//! transcript holds no hook facts, so every turn is written with none: a claim of a fix always gets
+//! "Agent says:" here.
 
 use std::{
     io::Write,
@@ -24,6 +30,8 @@ use studio_understanding::{
 struct Costed {
     writer: ClaudeWriter,
     calls: Mutex<(u32, f64)>,
+    /// The raw replies of the turn being written, oldest first.
+    replies: Mutex<Vec<String>>,
 }
 
 impl CardWriter for Costed {
@@ -64,7 +72,9 @@ impl CardWriter for Costed {
         let mut calls = self.calls.lock().unwrap();
         calls.0 += 1;
         calls.1 += reply["total_cost_usd"].as_f64().unwrap_or_default();
-        Ok(reply["result"].as_str().unwrap_or_default().into())
+        let result: String = reply["result"].as_str().unwrap_or_default().into();
+        self.replies.lock().unwrap().push(result.clone());
+        Ok(result)
     }
 }
 
@@ -83,7 +93,9 @@ fn main() {
         writer: ClaudeWriter::beside(&studio_hook::event_log(&home))
             .expect("create the card writer's folder"),
         calls: Mutex::new((0, 0.0)),
+        replies: Mutex::default(),
     };
+    let mut counts = Counts::default();
     let folder = tempfile::tempdir().expect("create a temporary folder");
     let store = Mutex::new(CardStore::open(folder.path().join("cards.json")).expect("a store"));
     let setup = SummarySetup::default();
@@ -99,6 +111,7 @@ fn main() {
         request.session_id = file.display().to_string();
         request.id = format!("turn {}", n + 1);
         *writer.calls.lock().unwrap() = (0, 0.0);
+        writer.replies.lock().unwrap().clear();
         let mut lines = Vec::new();
         let start = Instant::now();
         let summary = write_summary(&store, &writer, &setup, request, |l| lines.push(l));
@@ -108,14 +121,94 @@ fn main() {
         for line in lines {
             println!("**Logged:** {line}\n");
         }
+        counts.turns += 1;
+        counts.rejected += usize::from(calls > 1);
+        let replies = writer.replies.lock().unwrap();
         if let Some(summary) = summary {
+            counts.add(&summary, replies.last().map_or("", String::as_str));
             print(&summary);
         }
+    }
+    counts.print();
+}
+
+/// The trial's counts.
+#[derive(Default)]
+struct Counts {
+    turns: usize,
+    rejected: usize,
+    narrating: usize,
+    prefixed: usize,
+    lines: usize,
+    stripped: usize,
+}
+
+/// Words a narrating Headline opens with: it says what the agent did on the way, not an outcome.
+const NARRATING: [&str; 12] = [
+    "looked",
+    "looking",
+    "read",
+    "reading",
+    "started",
+    "reviewed",
+    "explored",
+    "investigated",
+    "examined",
+    "checked",
+    "went",
+    "began",
+];
+
+impl Counts {
+    fn add(&mut self, summary: &TurnSummary, last_reply: &str) {
+        let headline = summary.headline.as_deref().unwrap_or_default();
+        let first = headline
+            .split_whitespace()
+            .next()
+            .unwrap_or_default()
+            .to_lowercase();
+        self.narrating += usize::from(NARRATING.contains(&first.as_str()));
+        self.prefixed += usize::from(headline.starts_with("Agent says:"));
+        let value: serde_json::Value = serde_json::from_str(
+            last_reply
+                .get(last_reply.find('{').unwrap_or(0)..)
+                .unwrap_or_default(),
+        )
+        .unwrap_or_default();
+        let given = value["lines"].as_array().map_or(0, Vec::len);
+        self.lines += given;
+        self.stripped += given.saturating_sub(summary.lines.len());
+    }
+
+    fn print(&self) {
+        let share = |n: usize, of: usize| {
+            format!("{n} of {of} ({:.0}%)", 100.0 * n as f64 / of.max(1) as f64)
+        };
+        println!("## Counts\n");
+        println!(
+            "- Turns with a rejected first reply: {}",
+            share(self.rejected, self.turns)
+        );
+        println!(
+            "- Headlines that narrate: {}",
+            share(self.narrating, self.turns)
+        );
+        println!(
+            "- Headlines prefixed \"Agent says:\": {}",
+            share(self.prefixed, self.turns)
+        );
+        println!(
+            "- Lines dropped by the guards or for an unknown type: {}",
+            share(self.stripped, self.lines)
+        );
     }
 }
 
 fn print(summary: &TurnSummary) {
     println!("### Summary\n\n{}\n", summary.summary);
+    if summary.headline.as_deref() == Some("") {
+        println!("**Headline stripped by the guards.**\n");
+    }
     let Some(learning) = &summary.learning else {
         println!("**No learning section.**\n");
         return;
@@ -147,7 +240,12 @@ fn latest(projects: &std::path::Path, n: usize) -> Vec<(PathBuf, SummaryRequest)
     let folders = std::fs::read_dir(projects).expect("read ~/.claude/projects");
     let mut files: Vec<(SystemTime, PathBuf)> = folders
         .flatten()
-        .filter(|f| f.file_name().to_string_lossy().contains("Falinks"))
+        .filter(|f| {
+            let name = f.file_name().to_string_lossy().to_lowercase();
+            // The card writer's own folder holds the writer's calls, not turns.
+            (name.contains("falinks") || name.contains("plotkeeper"))
+                && !name.contains("card-writer")
+        })
         .flat_map(|f| std::fs::read_dir(f.path()).into_iter().flatten().flatten())
         .map(|f| f.path())
         .filter(|p| p.extension().is_some_and(|e| e == "jsonl"))
