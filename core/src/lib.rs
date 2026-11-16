@@ -18,6 +18,7 @@ mod claude;
 mod event;
 mod ledger;
 mod transcript;
+mod turn_files;
 mod work;
 pub use agy::{CAPABILITIES as AGY_CAPABILITIES, Drift as AgyDrift, DriftKind as AgyDriftKind};
 pub(crate) use checks::is_check;
@@ -31,6 +32,7 @@ pub use event::{Capabilities, TranscriptFormat};
 use event::{Event, Happened, Origin, Start, ToolKind};
 pub use ledger::{Bytes, Details, Ledger, Outcome, Row};
 pub use transcript::{Context, LogEntry, SubagentLog, Transcript};
+pub use turn_files::{Numstat, RootDiff, TurnDiff, TurnFile, TurnFiles, TurnTrees};
 pub use work::{Estimate, MIN_HISTORY, Phase, PhaseStart, Work, range};
 
 #[derive(Default)]
@@ -482,6 +484,16 @@ pub struct Turn {
     /// Its whole final reply, which the rail fetches when its block opens (`Studio::turn_reply`).
     #[serde(skip)]
     pub reply: String,
+    /// The files its agent and workers changed, `None` until the shell has diffed its trees, and
+    /// for an agent that reports no trees (danielrispler/plotkeeper#111).
+    pub files: Option<TurnFiles>,
+    /// The tree the hook recorded of each worktree it touched, at its first touch and at its end,
+    /// by root: the start, and the end once it came.
+    #[serde(skip)]
+    trees: BTreeMap<String, (String, Option<String>)>,
+    /// When the shell was last asked for its files, and whether that was its final ask.
+    #[serde(skip)]
+    files_asked: Option<(u64, bool)>,
     /// How its checks ended, its workers' included: each suite's last run (danielrispler/plotkeeper#112).
     pub checks: Vec<Check>,
 }
@@ -1232,6 +1244,40 @@ impl Session {
         };
         self.agent.since.by.clear();
         output
+    }
+
+    /// Keeps the trees the hook recorded at its latest turn's first touch of each worktree.
+    fn keep_start_trees(&mut self, starts: &BTreeMap<String, String>) {
+        let Some(turn) = self.turns.last_mut() else {
+            return;
+        };
+        for (root, tree) in starts {
+            turn.trees
+                .entry(root.clone())
+                .or_insert_with(|| (tree.clone(), None));
+        }
+    }
+
+    /// Keeps the trees the hook recorded at its latest turn's end, for the worktrees it has a start
+    /// tree of.
+    fn keep_end_trees(&mut self, ends: &BTreeMap<String, String>) {
+        let Some(turn) = self.turns.last_mut() else {
+            return;
+        };
+        for (root, tree) in ends {
+            if let Some(trees) = turn.trees.get_mut(root) {
+                trees.1 = Some(tree.clone());
+            }
+        }
+    }
+
+    /// The absolute paths its turn `turn`'s agent and workers edited, as the step ledger has them.
+    fn edited(&self, turn: usize) -> BTreeSet<String> {
+        let rows = self.ledger.turn(turn);
+        let done = rows.filter(|r| turn_files::edits(&r.tool) && !r.failed());
+        done.filter(|r| r.outcome != Some(Outcome::Rejected))
+            .filter_map(|r| r.file.clone())
+            .collect()
     }
 
     /// The backfill of its turn ended at `at` with the hook's trees `ends`: `None` when no worktree
@@ -2346,6 +2392,9 @@ impl Studio {
         if ends_early {
             let change = changes.remove(&session.agent.id);
             outputs.extend(session.end_turn(change, at));
+            if event.capabilities.turn_trees {
+                session.keep_end_trees(&event.studio_turn_end);
+            }
             if replay {
                 self.ended
                     .extend(session.backfill(&event.studio_turn_end, at));
@@ -2378,6 +2427,9 @@ impl Studio {
                     .trees
                     .entry(root.clone())
                     .or_insert_with(|| tree.clone());
+            }
+            if event.capabilities.turn_trees {
+                session.keep_start_trees(&event.studio_turn_start);
             }
         }
         // Who changed what (danielrispler/Falinks#369, story 20): a subagent's edit in a worktree whose cards are another's.
@@ -2517,6 +2569,9 @@ impl Studio {
                     let in_turn = session.in_turn();
                     session.background = *background_pending;
                     let output = session.end_turn(changes.remove(&session.agent.id), at);
+                    if in_turn && event.capabilities.turn_trees {
+                        session.keep_end_trees(&event.studio_turn_end);
+                    }
                     if replay && in_turn {
                         self.ended
                             .extend(session.backfill(&event.studio_turn_end, at));
@@ -2941,6 +2996,70 @@ impl Studio {
         ended
             .filter(|b| cards.iter().all(|c| c.id != b.request.id))
             .collect()
+    }
+
+    /// The turns whose files the shell should diff now, newest first, at most `limit`
+    /// (danielrispler/plotkeeper#111): a running turn each 5 seconds, its end tree taken on demand,
+    /// and an ended one of the last 7 days once, from the trees the hook recorded.
+    pub fn turn_diffs(&mut self, now: u64, limit: usize) -> Vec<TurnDiff> {
+        let mut asks = Vec::new();
+        for session in self.sessions.values_mut() {
+            if !session.capabilities.turn_trees {
+                continue;
+            }
+            for (index, turn) in session.turns.iter_mut().enumerate() {
+                let ended = turn.ended_at.is_some();
+                let recent = turn
+                    .ended_at
+                    .is_none_or(|at| at + turn_files::SINCE_MS >= now);
+                let due = match turn.files_asked {
+                    None => true,
+                    Some((_, true)) => false,
+                    Some((at, false)) => now.saturating_sub(at) >= turn_files::RUNNING_REFRESH_MS,
+                };
+                if !recent || !due || turn.trees.is_empty() {
+                    continue;
+                }
+                let trees: Vec<TurnTrees> = turn
+                    .trees
+                    .iter()
+                    // An ended turn's worktree with no end tree has nothing to compare.
+                    .filter(|(_, (_, end))| !ended || end.is_some())
+                    .map(|(root, (start, end))| TurnTrees {
+                        root: root.clone(),
+                        start: start.clone(),
+                        end: end.clone().filter(|_| ended),
+                    })
+                    .collect();
+                turn.files_asked = Some((now, ended));
+                if !trees.is_empty() {
+                    let session_id = session.agent.id.clone();
+                    let ask = TurnDiff {
+                        session_id,
+                        turn: index,
+                        ended,
+                        trees,
+                    };
+                    asks.push((turn.ended_at.unwrap_or(now), ask));
+                }
+            }
+        }
+        asks.sort_by_key(|(at, _)| std::cmp::Reverse(*at));
+        asks.truncate(limit);
+        asks.into_iter().map(|(_, ask)| ask).collect()
+    }
+
+    /// Takes what the shell found for `ask`: the numstat of each of its worktrees, `None` when git
+    /// could not diff them. The turn's files are the diff's files that its ledger says its agent or
+    /// its workers edited; the others are counted as external.
+    pub fn set_turn_files(&mut self, ask: &TurnDiff, diffs: Option<Vec<RootDiff>>) {
+        let Some(session) = self.sessions.get_mut(&ask.session_id) else {
+            return;
+        };
+        let edited = session.edited(ask.turn);
+        if let Some(turn) = session.turns.get_mut(ask.turn) {
+            turn.files = diffs.map(|diffs| TurnFiles::of(diffs, &edited));
+        }
     }
 
     /// Applies, after the replay, what the live app learned before a restart (danielrispler/Falinks#434, decisions 37 and

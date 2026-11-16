@@ -28,8 +28,8 @@ use studio_core::{
 use studio_understanding::{
     AGY_FIXTURE_VERSION, AgyVersions, CardStore, CardWriter, ClaudeWriter, FakeWriter,
     Fingerprints, Rating, Row, SessionCards, StoredSummary, SummarySetup, Versions, backfilled,
-    fingerprint_changes, millis, worktree_root, write_agent_summary, write_brief, write_name,
-    write_stop, write_summary,
+    fingerprint_changes, millis, turn_diffs, worktree_root, write_agent_summary, write_brief,
+    write_name, write_stop, write_summary,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
@@ -276,6 +276,19 @@ struct CardsKey {
     viewed: Option<String>,
     revision: u64,
     minute: u64,
+}
+
+/// The turns whose files the core asks for (danielrispler/plotkeeper#111): each is diffed by `git`
+/// with the core unlocked, then handed back. Returns whether any was asked.
+fn turn_files(state: &Mutex<Studio>) -> bool {
+    /// At most this many turns a pass, so a launch over a long log does not hold the loop.
+    const PER_PASS: usize = 8;
+    let asks = state.lock().unwrap().turn_diffs(millis(), PER_PASS);
+    for ask in &asks {
+        let diffs = turn_diffs(ask);
+        state.lock().unwrap().set_turn_files(ask, diffs);
+    }
+    !asks.is_empty()
 }
 
 impl Sent {
@@ -850,7 +863,9 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
             state.lock().unwrap().set_snapshot(&id, snapshot) | changed
         });
         let list_changed = LIST_CHANGED.swap(false, Ordering::AcqRel);
-        let changed = read || transcripts_changed || windows_changed || list_changed;
+        let files_changed = turn_files(&state);
+        let changed =
+            read || transcripts_changed || windows_changed || list_changed || files_changed;
         // The open request goes in the same pass as the list that shows "needs you" (danielrispler/Falinks#569).
         if let Ok(data) = answer::data()
             && let Some(ask) = app
