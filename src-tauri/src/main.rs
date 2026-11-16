@@ -1147,16 +1147,7 @@ fn summarize(
     let job = move || {
         let log = |line: String| eprintln!("studio: {line}");
         let setup = app.state::<Summaries>().setup.lock().unwrap().clone();
-        let (session, turn) = (request.session_id.clone(), request.id.clone());
-        let Some(summary) = write_summary(&app.state::<Cards>(), &*writer, &setup, request, log)
-        else {
-            return;
-        };
-        let first = summary.summary.lines().next().unwrap_or_default();
-        let studio = app.state::<Mutex<Studio>>();
-        if studio.lock().unwrap().summarized(&session, &turn, first) {
-            let _ = app.emit("sessions", sessions(app.state(), app.state()));
-        }
+        write_summary(&app.state::<Cards>(), &*writer, &setup, request, log);
     };
     queue(queues, id).send(Box::new(job)).ok();
 }
