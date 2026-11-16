@@ -15,12 +15,14 @@ use std::{
 mod agy;
 mod claude;
 mod event;
+mod ledger;
 mod transcript;
 mod work;
 pub use agy::{CAPABILITIES as AGY_CAPABILITIES, Drift as AgyDrift, DriftKind as AgyDriftKind};
 pub use claude::CAPABILITIES as CLAUDE_CAPABILITIES;
 pub use event::{Capabilities, TranscriptFormat};
 use event::{Event, Happened, Origin, Start, ToolKind};
+pub use ledger::{Bytes, Details, Ledger, Outcome, Row};
 pub use transcript::{Context, LogEntry, SubagentLog, Transcript};
 pub use work::{Estimate, MIN_HISTORY, Phase, PhaseStart, Work, range};
 
@@ -42,6 +44,9 @@ pub struct Studio {
     /// The shell's latest tick, in Unix milliseconds.
     now: u64,
     roots: Roots,
+    /// Where the next log line starts in the event log, in bytes: every line given to `replay`,
+    /// `apply` or `apply_with_changes` moves it, as the shell reads the log from its start.
+    log_end: u64,
     /// The turns the replay saw end with both trees, for `backfill`.
     ended: Vec<Backfill>,
     /// How long each check ran when it did not fail, by `check_key`, oldest first (danielrispler/Falinks#461, decision 13).
@@ -138,6 +143,9 @@ pub struct Session {
     /// A few words on what it is about, written from Daniel's first prompt and logged as a
     /// `StudioPromptName` line; shown after his name and before the identity's.
     pub prompt_name: Option<String>,
+    /// Every tool call of it and its workers (danielrispler/plotkeeper#110).
+    #[serde(skip)]
+    pub ledger: Ledger,
     /// Whether Daniel's first prompt arrived, which asks for the prompt name once.
     #[serde(skip)]
     name_asked: bool,
@@ -1181,6 +1189,12 @@ impl Session {
         self.prompts.push(prompt);
     }
 
+    /// The turn a call of `agent` is in: the latest, or for a subagent's call the one that spawned it.
+    fn ledger_turn(&self, agent: &Option<String>) -> Option<usize> {
+        let spawned = agent.as_deref().and_then(|a| self.subagent(a)?.turn);
+        spawned.or_else(|| self.current_turn())
+    }
+
     /// The index of its latest turn, which a check, subagent or question that starts now is in.
     fn current_turn(&self) -> Option<usize> {
         self.turns.len().checked_sub(1)
@@ -2156,8 +2170,16 @@ impl Studio {
         replay: bool,
     ) -> Vec<Output> {
         let events = self.events(line);
+        // A line's newline is not part of it; one the caller left off is counted all the same.
+        let len = line.strip_suffix('\n').unwrap_or(line).len() as u64;
+        let at = Bytes {
+            offset: self.log_end,
+            len,
+        };
+        self.log_end += len + 1;
         let mut outputs = Vec::new();
-        for event in events {
+        for mut event in events {
+            event.line = at;
             outputs.extend(self.take_event(event, &mut changes, replay));
         }
         outputs
@@ -2634,6 +2656,8 @@ impl Studio {
                     session.turn_ended |= event.started_from() != Some(Start::Compact);
                 }
                 Happened::ToolStart { tool, .. } => {
+                    let turn = session.ledger_turn(&event.agent_id);
+                    session.ledger.start(&event, tool, turn);
                     if own {
                         session.returned = None;
                         let step = Step::new(&tool.name, &tool.input, &event.cwd);
@@ -2743,6 +2767,8 @@ impl Studio {
                     session.carded.insert(call_id.clone());
                 }
                 Happened::ToolEnd { tool, failed, .. } => {
+                    let turn = session.ledger_turn(&event.agent_id);
+                    session.ledger.end(&event, tool, turn, *failed);
                     session.running.retain(|c| c.id != id);
                     let failed = *failed;
                     // A plan or a permission that still waited on Daniel was decided in the terminal:

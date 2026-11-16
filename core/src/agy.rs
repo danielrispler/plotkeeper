@@ -9,6 +9,7 @@
 use crate::event::{
     Capabilities, Event, Happened, Origin, Spawned, Start, Tool, ToolKind, TranscriptFormat,
 };
+use crate::ledger::Bytes;
 use serde::Serialize;
 use serde_json::{Map, Value};
 use std::{
@@ -473,6 +474,7 @@ fn frame(conversation: &Conversation, session: String, agent_id: Option<String>,
         studio_turn_start: BTreeMap::new(),
         studio_turn_end: BTreeMap::new(),
         capabilities: CAPABILITIES,
+        line: Bytes::default(),
         happened: Vec::new(),
     }
 }
