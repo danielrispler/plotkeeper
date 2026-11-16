@@ -314,6 +314,22 @@ export function paneView(session: Pick<Session, "terminal" | "state"> | null, ru
   return { message: session.state === "ended" ? "Ended. Open here resumes it." : "Runs in another terminal. Open here resumes it." };
 }
 
+// The live terminal that already runs `session`'s conversation (#101): the one its row links to, else one
+// started with `--resume` of its id, as a revival or an earlier "Open here" does.
+export function runningTerminal(session: Pick<Session, "terminal" | "resume_id">, terms: Listed[]): Listed | undefined {
+  const live = terms.filter((t) => t.exited === null);
+  const resumes = (t: Listed) => t.argv.some((arg, i) => arg === session.resume_id && t.argv[i - 1] === "--resume");
+  return live.find((t) => t.id === session.terminal) ?? (session.resume_id ? live.find(resumes) : undefined);
+}
+
+// "Open here": shows the terminal that already runs the session's conversation, else resumes it in a new one, so
+// two `claude` never run one conversation (#101).
+export async function openHere(session: Session) {
+  const running = runningTerminal(session, await list());
+  if (!running) return startClaude(session.cwd, session.resume_id, "", resumesAuto(session));
+  show(running.id, () => openPane(box(running.id), running.id, running.cwd, running.argv));
+}
+
 // The selected session's pane, by `paneView`. Daniel's click always shows it; the shell's updates of
 // the selection switch the pane only when the session, its terminal or its end changed, so they
 // never take away a pane Daniel just started.
@@ -358,7 +374,7 @@ export async function showSession(session: Session | null, clicked = false, agen
     return;
   }
   if ("terminal" in view) return show(view.terminal, () => openPane(box(view.terminal), view.terminal, terminal!.cwd, terminal!.argv));
-  const resume = () => startClaude(session.cwd, session.resume_id, "", resumesAuto(session)).catch((e) => console.warn(e));
+  const resume = () => openHere(session).catch((e) => console.warn(e));
   box(ELSEWHERE).classList.add("elsewhere");
   box(ELSEWHERE).replaceChildren(text("p", view.message, "empty"), pressable(text("button", "Open here"), false, resume));
   show(ELSEWHERE, () => null);

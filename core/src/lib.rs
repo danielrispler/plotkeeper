@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     cmp::Reverse,
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     time::Duration,
 };
 
@@ -58,6 +58,9 @@ pub struct Studio {
     /// Whether `terminals` has had its first list: the rows that list finds tell nothing, as Claude
     /// sessions replayed at start tell nothing (danielrispler/Falinks#522).
     listed: bool,
+    /// The terminals of the daemon's last list that have not exited (#101): a session keeps the
+    /// terminal it has while that one is here.
+    live_terminals: HashSet<String>,
     /// What the shell last found about each task's work, by the task's worktree folder: its files,
     /// its PR and its issue, asked at a turn's end, at the window's focus and on a refresh. The main
     /// checkout is never here, so it never lands.
@@ -2250,8 +2253,20 @@ impl Studio {
         session.deleted &= !event.session_starts();
         // The hooks are async, so the latest event can land before an earlier one.
         session.agent.last_event_at = session.agent.last_event_at.max(event.studio_received_ms);
-        // Every event of a `claude` process carries its terminal, so a resume elsewhere moves it.
-        session.terminal.clone_from(&event.studio_terminal_id);
+        // Every event of a studio-run `claude` carries its terminal, so a resume elsewhere moves it
+        // (#101): a start does, and so does an event from a terminal once the session's own is gone.
+        // An event with no terminal, or from a second live terminal of the conversation, leaves the
+        // link as it is, so the pane neither loses a running terminal nor flips between two.
+        let moves = match (&event.studio_terminal_id, &session.terminal) {
+            (_, None) => true,
+            (None, Some(_)) => event.session_starts(),
+            (Some(new), Some(own)) => {
+                new == own || event.session_starts() || !self.live_terminals.contains(own)
+            }
+        };
+        if moves {
+            session.terminal.clone_from(&event.studio_terminal_id);
+        }
         if let Some(mode) = event.permission_mode() {
             session.permission_mode = Some(mode.into());
             if session.started_mode.is_none() {
@@ -3129,6 +3144,9 @@ impl Studio {
         // Everyone else's terminal: a status-only row.
         let mut rows = BTreeSet::new();
         let at_start = !std::mem::replace(&mut self.listed, true);
+        self.live_terminals = (terms.iter().filter(|t| t.exited.is_none()))
+            .map(|t| t.id.clone())
+            .collect();
         for (t, reported) in &reporting {
             let claude = t.app.as_deref() == Some("claude-code");
             if claude || claude_on(&self.sessions, &t.id).is_some() {
