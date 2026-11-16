@@ -5,10 +5,11 @@
 // draws the line open again.
 
 import { code, invoke, pressable, text } from "./dom.js";
-import type { Capabilities, Check, Turn } from "./types.js";
+import { openAt } from "./paths.js";
+import type { Capabilities, Check, Turn, TurnFile } from "./types.js";
 
 type Facts = Pick<Turn, "files" | "checks">;
-export type EvidenceRow = { kind: "file" | "external" | "check"; label: string; call?: string; agent?: string | null };
+export type EvidenceRow = { kind: "file" | "external" | "check"; label: string; call?: string; agent?: string | null; file?: TurnFile };
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
@@ -33,7 +34,7 @@ export const hasEvidence = (turn: Facts, capabilities: Pick<Capabilities, "turn_
 export function evidenceRows({ files, checks }: Facts): EvidenceRow[] {
   const counts = (added: number | null, removed: number | null) => (added === null || removed === null ? "" : ` +${added} −${removed}`);
   return [
-    ...(files?.files ?? []).map((f): EvidenceRow => ({ kind: "file", label: `${f.from ? `${f.from} → ` : ""}${f.path}${counts(f.added, f.removed)}` })),
+    ...(files?.files ?? []).map((f): EvidenceRow => ({ kind: "file", label: `${f.from ? `${f.from} → ` : ""}${f.path}${counts(f.added, f.removed)}`, file: f })),
     ...(files?.external ? [{ kind: "external" as const, label: `+${files.external} external` }] : []),
     ...checks.map((c): EvidenceRow => {
       const after = c.retries ? ` after ${`${c.retries} ${c.retries === 1 ? "retry" : "retries"}`}` : "";
@@ -93,6 +94,59 @@ function checkRow(session: string, row: EvidenceRow): HTMLElement {
   return item;
 }
 
+type Hunk = { text: string; left_out: number; binary: boolean; first_line: number };
+const openHunks = new Set<string>();
+const hunks = new Map<string, Hunk | null>();
+
+const hunkText = (h: Hunk | null) =>
+  h === null ? "The hunk could not be read." : h.binary ? "Binary file: no lines to show." : h.text + (h.left_out ? `… ${h.left_out} more lines` : "");
+
+// A file's row: its label, which opens the real hunk between the turn's two trees under it, with "Open in editor" at its
+// first changed line. Only this row changes.
+function fileRow(session: string, index: number, row: EvidenceRow): HTMLElement {
+  const file = row.file!;
+  const key = `${session} ${index} ${file.root} ${file.path}`;
+  const item = document.createElement("li");
+  item.className = "evidence-file";
+  const pre = text("pre", hunks.has(key) ? hunkText(hunks.get(key)!) : "", "evidence-hunk");
+  const edit = pressable(document.createElement("button"), false, () => {
+    const first = hunks.get(key)?.first_line ?? 1;
+    openAt({ path: file.path, line: first, column: 1 }, file.root);
+  });
+  edit.classList.add("evidence-edit");
+  edit.textContent = "Open in editor";
+  const show = () => {
+    const open = openHunks.has(key);
+    for (const node of [pre, edit]) open ? node.removeAttribute("hidden") : node.setAttribute("hidden", "");
+  };
+  const fetch = () => {
+    if (hunks.has(key)) return;
+    pre.textContent = "Reading the hunk…";
+    invoke<Hunk | null>("turn_file_hunk", { session, turn: index, root: file.root, path: file.path, from: file.from })
+      .then((h) => {
+        hunks.set(key, h);
+        pre.textContent = hunkText(h);
+      })
+      .catch((e) => {
+        pre.textContent = `The hunk could not be read: ${e}`;
+      });
+  };
+  const button = pressable(document.createElement("button"), openHunks.has(key), () => {
+    if (openHunks.has(key)) openHunks.delete(key);
+    else openHunks.add(key);
+    button.setAttribute("aria-expanded", String(openHunks.has(key)));
+    show();
+    if (openHunks.has(key)) fetch();
+  });
+  button.classList.add("evidence-fail");
+  button.setAttribute("aria-expanded", String(openHunks.has(key)));
+  button.append(text("span", row.label));
+  show();
+  if (openHunks.has(key)) fetch();
+  item.append(button, edit, pre);
+  return item;
+}
+
 // The line for turn `index` of `session`. `only: "failed"` is the running turn's: just the checks whose last run failed.
 // Null when there is nothing to show.
 export function evidenceElement(session: string, index: number, turn: Facts, { only }: { only: "all" | "failed" }): HTMLElement | null {
@@ -105,7 +159,7 @@ export function evidenceElement(session: string, index: number, turn: Facts, { o
   const list = document.createElement("ul");
   list.className = "evidence-rows";
   list.append(
-    ...evidenceRows(facts).map((row) => (row.kind === "check" ? checkRow(session, row) : text("li", row.label, row.kind === "external" ? "external" : "evidence-file"))),
+    ...evidenceRows(facts).map((row) => (row.kind === "check" ? checkRow(session, row) : row.file ? fileRow(session, index, row) : text("li", row.label, "external"))),
   );
   const show = () => (openLines.has(key) ? list.removeAttribute("hidden") : list.setAttribute("hidden", ""));
   const button = pressable(document.createElement("button"), openLines.has(key), () => {

@@ -34,7 +34,7 @@ pub use store::{
 pub use summary::{
     Learning, SummarySetup, TurnSummary, write_agent_summary, write_name, write_summary,
 };
-pub use turn_trees::{anchor, hunk, numstat, turn_diffs};
+pub use turn_trees::{Hunk, anchor, hunk, hunk_view, numstat, turn_diffs, turn_hunk};
 pub use week::{Rate, Ratings, Week, week};
 
 /// A card on a change, in the explanation language; code inside its text is in

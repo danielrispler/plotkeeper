@@ -246,6 +246,7 @@ const build = (state, { ask = null, answered = false, withBrief = false } = {}) 
     cards: { brief: withBrief ? brief : null, recent: [], older: [stored], decisions: withBrief ? decisions : [] },
     watch: ask,
     check_output: { exit_code: 1, tail: "error: test failed, to rerun pass `-p studio-core --lib`\n\nfailures:\n    rows::fold_toggle_is_a_sibling" },
+    turn_file_hunk: { text: ["diff --git a/ui/style.css b/ui/style.css", "--- a/ui/style.css", "+++ b/ui/style.css", "@@ -10,4 +10,6 @@", " .rail {", "-  gap: 4px;", "+  gap: var(--sp-3);", "+  padding: 0;", " }", ""].join("\n"), left_out: 0, binary: false, first_line: 11 },
     turn_summary: { __by: "id", values: Object.fromEntries(Object.entries(turnSummaries).map(([id, summary]) => [id, { summary }])) },
     turn_reply: { __by: "index", values: { 0: "Plan: a fold toggle and a delete column.\n\nThe toggle is drawn only when subagents show under the row.", 1: "Implemented the toggle and the delete." } },
     agent_summary: { __by: "agentId", values: { a1: "Reviewed the diff: no raw colours, two spacing values bypass the tokens." } },
@@ -308,7 +309,27 @@ const evidenceScript = `
   log("rail scrollTop " + at + " -> " + story.scrollTop);
   if (story.scrollTop !== at) log("snap:fail the rail's scrollTop moved from " + at + " to " + story.scrollTop);`;
 
+// #114: scrolls the rail, opens the evidence line, then a file's hunk, and fails when the rail's scrollTop moved.
+const hunkScript = `
+  const story = document.getElementById("story");
+  story.scrollTop = Math.min(80, story.scrollHeight - story.clientHeight);
+  const at = story.scrollTop;
+  const wait = () => new Promise((resolve) => setTimeout(resolve, 200));
+  const toggle = document.querySelector(".evidence-toggle");
+  if (!toggle) log("snap:fail there is no evidence line");
+  toggle.click();
+  await wait();
+  const row = document.querySelector(".evidence-file .evidence-fail");
+  if (!row) log("snap:fail the opened line has no file row");
+  row.click();
+  await wait();
+  const hunk = document.querySelector(".evidence-hunk");
+  if (!hunk || hunk.hidden || !/gap: var/.test(hunk.textContent)) log("snap:fail the file's hunk did not open");
+  log("rail scrollTop " + at + " -> " + story.scrollTop);
+  if (story.scrollTop !== at) log("snap:fail the rail's scrollTop moved from " + at + " to " + story.scrollTop);`;
+
 export const railFixtures = {
+  railHunk: () => ({ ...build("your_turn"), snapScript: hunkScript }),
   railEvidence: () => ({ ...build("your_turn"), snapScript: evidenceScript }),
   ...railStates,
   railIdleScroll: () => ({ ...build("idle", { answered: true, withBrief: true }), snapScript: scrollScript }),

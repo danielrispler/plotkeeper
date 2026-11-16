@@ -4,7 +4,7 @@
 use serde_json::json;
 use std::{fs, path::Path, process::Command, sync::Mutex};
 use studio_core::Studio;
-use studio_understanding::{hunk, numstat, turn_diffs};
+use studio_understanding::{hunk, numstat, turn_diffs, turn_hunk};
 
 const SESSION: &str = "5b1c7e30-9d2a-4f8b-8c63-1e0a7d4b9f52";
 const AT: u64 = 1_800_000_000_000;
@@ -165,4 +165,68 @@ fn trees_that_were_never_anchored_do_not_survive_git_gc() {
     let end = tree(&root);
     git(Path::new(&root), &["gc", "--prune=now", "-q"]);
     assert!(hunk(Path::new(&root), &start, &end, "a.rs", None).is_none());
+}
+
+#[test]
+fn a_file_hunk_equals_git_diff_between_the_trees_and_is_capped() {
+    let (_dir, root) = repo();
+    let start = tree(&root);
+    let long: String = (0..60).map(|i| format!("line {i}\n")).collect();
+    fs::write(format!("{root}/a.rs"), format!("fn a() {{}}\n{long}")).unwrap();
+    fs::write(format!("{root}/b.rs"), "fn b() {}\nfn b2() {}\n").unwrap();
+    let end = tree(&root);
+    let root_path = Path::new(&root);
+
+    let small = turn_hunk(root_path, &start, Some(&end), "b.rs", None).unwrap();
+    let diff = git(
+        root_path,
+        &["diff", "--no-color", &start, &end, "--", "b.rs"],
+    );
+    assert_eq!(small.text.trim_end(), diff);
+    assert_eq!(
+        (small.left_out, small.binary, small.first_line),
+        (0, false, 2)
+    );
+
+    let big = turn_hunk(root_path, &start, Some(&end), "a.rs", None).unwrap();
+    let all = git(
+        root_path,
+        &["diff", "--no-color", &start, &end, "--", "a.rs"],
+    );
+    let lines: Vec<&str> = all.lines().collect();
+    assert_eq!(big.text.lines().count(), 40);
+    assert_eq!(big.text.lines().collect::<Vec<_>>(), lines[..40]);
+    assert_eq!(big.left_out, lines.len() - 40);
+}
+
+#[test]
+fn a_renamed_file_hunk_reads_through_its_old_path_and_a_binary_file_has_no_lines() {
+    let (_dir, root) = repo();
+    fs::write(format!("{root}/img.bin"), [0u8, 1, 2, 0]).unwrap();
+    let start = tree(&root);
+    git(Path::new(&root), &["mv", "old.rs", "new.rs"]);
+    fs::write(format!("{root}/new.rs"), "fn old() {\n    2\n}\n").unwrap();
+    fs::write(format!("{root}/img.bin"), [0u8, 9, 9, 0]).unwrap();
+    let end = tree(&root);
+    let root_path = Path::new(&root);
+
+    let renamed = turn_hunk(root_path, &start, Some(&end), "new.rs", Some("old.rs")).unwrap();
+    assert!(
+        renamed.text.contains("rename from old.rs"),
+        "{}",
+        renamed.text
+    );
+    assert!(renamed.text.contains("+    2"));
+    let binary = turn_hunk(root_path, &start, Some(&end), "img.bin", None).unwrap();
+    assert!(binary.binary && binary.text.is_empty());
+}
+
+#[test]
+fn a_running_turns_hunk_ends_at_the_worktree_now() {
+    let (_dir, root) = repo();
+    let start = tree(&root);
+    fs::write(format!("{root}/a.rs"), "fn a() {}\nfn live() {}\n").unwrap();
+    let _one = HOOK.lock().unwrap_or_else(|e| e.into_inner());
+    let hunk = turn_hunk(Path::new(&root), &start, None, "a.rs", None).unwrap();
+    assert!(hunk.text.contains("+fn live() {}"));
 }

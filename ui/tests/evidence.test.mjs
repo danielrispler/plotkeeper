@@ -105,3 +105,75 @@ test("while running, only a check whose last run failed shows", () => {
   assert.doesNotMatch(el.text, /file|cargo test/);
   assert.equal(evidenceElement("s1", 9, { files: null, checks: [check("cargo test", "passed")] }, { only: "failed" }), null);
 });
+
+test("a file row opens its hunk in place, opens the editor at the first changed line, and stays open across a refresh", async () => {
+  const calls = [];
+  const hunk = { text: "@@ -1 +1,2 @@\n a\n+b\n", left_out: 12, binary: false, first_line: 2 };
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command, args) => {
+          calls.push([command, args]);
+          return command === "turn_file_hunk" ? hunk : null;
+        },
+      },
+    },
+  };
+  const turn = {
+    files: files([file("a.rs", 1, 0), file("new.rs", 1, 1, { from: "old.rs" }), file("img.png", null, null)]),
+    checks: [check("cargo test", "failed")],
+  };
+  const make = () => evidenceElement("s2", 7, turn, { only: "all" });
+  const rail = new El("ul");
+  const line = make();
+  rail.append(new El("p"), line);
+  line.find("button")[0].listeners.click();
+  const before = [...rail.childNodes];
+  const inner = [...line.childNodes];
+  const items = [...line.find("li")];
+  const row = items.find((li) => /a\.rs/.test(li.text));
+  const state = items.map((li) => li.find("pre").map((p) => p.hasAttribute("hidden")));
+  assert.ok(row.find("pre")[0].hasAttribute("hidden"));
+
+  row.find("button")[0].listeners.click();
+  await new Promise((resolve) => setTimeout(resolve));
+  assert.deepEqual(calls[0], ["turn_file_hunk", { session: "s2", turn: 7, root: "/r", path: "a.rs", from: null }]);
+  assert.match(row.find("pre")[0].text, /\+b/);
+  assert.match(row.find("pre")[0].text, /… 12 more lines/);
+  assert.ok(!row.find("pre")[0].hasAttribute("hidden"));
+  // Every other node is the same object, and every other row keeps its state.
+  assert.ok(same(rail.childNodes, before));
+  assert.ok(same(line.childNodes, inner));
+  assert.ok(!line.find("ul")[0].hasAttribute("hidden"));
+  items.forEach((li, i) => li !== row && assert.deepEqual(li.find("pre").map((p) => p.hasAttribute("hidden")), state[i]));
+
+  // "Open in editor" goes to the first changed line, from the worktree's folder.
+  row.find("button")[1].listeners.click();
+  const { editor, ...opened } = calls.at(-1)[1];
+  assert.equal(calls.at(-1)[0], "open_file");
+  assert.deepEqual(opened, { path: "a.rs", line: 2, column: 1, cwd: "/r" });
+
+  // A refresh draws it open again, with the hunk kept.
+  const again = make();
+  const reopened = again.find("li").find((li) => /a\.rs/.test(li.text));
+  assert.ok(!reopened.find("pre")[0].hasAttribute("hidden"));
+  assert.match(reopened.find("pre")[0].text, /\+b/);
+  assert.ok(again.find("li").find((li) => /new\.rs/.test(li.text)).find("pre")[0].hasAttribute("hidden"));
+  assert.match(again.find("li").find((li) => /old\.rs → new\.rs/.test(li.text)).text, /old\.rs → new\.rs/);
+});
+
+test("a binary file's hunk says so and a hunk that cannot be read says that", async () => {
+  let answer = { text: "", left_out: 0, binary: true, first_line: 1 };
+  globalThis.window = { __TAURI__: { core: { invoke: async () => answer } } };
+  const turn = { files: files([file("img.png", null, null), file("gone.rs", 1, 0)]), checks: [] };
+  const line = evidenceElement("s3", 1, turn, { only: "all" });
+  line.find("button")[0].listeners.click();
+  const [img, gone] = line.find("li");
+  img.find("button")[0].listeners.click();
+  await new Promise((resolve) => setTimeout(resolve));
+  assert.match(img.find("pre")[0].text, /Binary file/);
+  answer = null;
+  gone.find("button")[0].listeners.click();
+  await new Promise((resolve) => setTimeout(resolve));
+  assert.match(gone.find("pre")[0].text, /could not be read/);
+});
