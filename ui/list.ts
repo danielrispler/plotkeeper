@@ -9,7 +9,7 @@ import { shortPaths } from "./paths.js";
 import { historyLink } from "./history.js";
 import { knownProjects, onProjects, projects, setProjects } from "./projects.js";
 import { addProject, refuse } from "./picker.js";
-import { projectGroups, foundWorkspaces, tokenOf, workspaceSection, type ProjectGroup } from "./workspaces.js";
+import { projectGroups, foundWorkspaces, tokenOf, workspaceSection, projectsError, type ProjectGroup } from "./workspaces.js";
 import { redrawHistory, redrawHome, showHistory } from "./panes.js";
 import { isSelected, select } from "./selection.js";
 import { studio } from "./state.js";
@@ -526,7 +526,14 @@ export function drawSidebar() {
   if (!listening) dragProjects(element("groups"));
   listening = true;
   const paths = knownProjects();
-  patch(element("groups"), projectGroups(paths, foundWorkspaces(), sidebarSessions(studio.listed)).map(projectNode));
+  const error = projectsError();
+  const failure: HTMLElement[] = [];
+  if (error) {
+    const message = text("pre", `The projects could not be read: ${error}`, "picker-error");
+    message.dataset.key = "projects-error";
+    failure.push(message);
+  }
+  patch(element("groups"), [...projectGroups(paths, foundWorkspaces(), sidebarSessions(studio.listed)).map(projectNode), ...failure]);
 }
 
 // The sessions are grouped by project, then by state: needs you, running, your turn, idle; the idle ones
