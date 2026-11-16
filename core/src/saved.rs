@@ -2,7 +2,7 @@
 //! (danielrispler/plotkeeper#134). The saved state is all of `Studio`'s, fields the pane's JSON
 //! leaves out included: those fields say `skip_serializing_if = "saved::unsaved"`, which skips them
 //! except while `Studio::save` runs. The shell's own fields (its root lookup, its clock, its
-//! setting) are not saved.
+//! settings) are not saved.
 
 use crate::Studio;
 use std::{
@@ -53,6 +53,7 @@ impl Studio {
             Ok(mut state) if state.log_end <= log_len => {
                 state.roots = std::mem::take(&mut self.roots);
                 state.summaries_on_open = self.summaries_on_open;
+                state.check_lists = std::mem::take(&mut self.check_lists);
                 *self = state;
                 self.log_end
             }
@@ -74,6 +75,7 @@ impl fmt::Debug for Studio {
             held,
             now: _,
             roots: _,
+            check_lists: _,
             log_end,
             ended,
             durations,

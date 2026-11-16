@@ -55,7 +55,8 @@ pub struct Studio {
     /// The shell's lookup and what it found, which `Studio::resume` keeps (`saved.rs`).
     #[serde(skip)]
     roots: Roots,
-    /// The commands that are checks, per project (danielrispler/plotkeeper#112).
+    /// The commands that are checks, per project (danielrispler/plotkeeper#112), from the settings.
+    #[serde(skip)]
     check_lists: CheckLists,
     /// Where the next log line starts in the event log, in bytes: every line given to `replay`,
     /// `apply` or `apply_with_changes` moves it, as the shell reads the log from its start.

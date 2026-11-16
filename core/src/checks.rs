@@ -2,7 +2,7 @@
 //! turn's checks ended, from the step ledger's rows of the main agent and its workers.
 
 use crate::ledger::{Ledger, Outcome, Row};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{io, path::Path};
 
 /// The checks a project without a list of its own has: the fixed list of danielrispler/Falinks#328 plus this
@@ -126,7 +126,7 @@ pub fn exit_code_counts<S: AsRef<str>>(list: &[S], command: &str) -> bool {
 }
 
 /// How a check, or one run of it, ended.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Status {
     Passed,
@@ -137,7 +137,7 @@ pub enum Status {
 }
 
 /// One run of a check.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Run {
     /// The whole command.
     pub command: String,
@@ -151,7 +151,7 @@ pub struct Run {
 
 /// A suite of a turn: the list entry its commands matched (`cargo test`, `npm run check`), whose
 /// status is its last run's.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Check {
     pub suite: String,
     pub status: Status,
