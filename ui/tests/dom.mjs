@@ -47,6 +47,9 @@ export class El {
   append(...items) {
     this.childNodes.push(...items.map(node));
   }
+  replaceChildren(...items) {
+    this.childNodes = items.map(node);
+  }
   prepend(...items) {
     this.childNodes.unshift(...items.map(node));
   }

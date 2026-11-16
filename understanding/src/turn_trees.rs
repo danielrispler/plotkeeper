@@ -84,8 +84,9 @@ pub struct Hunk {
     pub first_line: u32,
 }
 
-/// Shapes a file's `git diff` for the rail.
-pub fn hunk_view(diff: &str) -> Hunk {
+/// Shapes a file's `git diff` for the rail; `all` (the diff pane) keeps every line.
+pub fn hunk_view(diff: &str, all: bool) -> Hunk {
+    let shown = if all { usize::MAX } else { SHOWN };
     let lines: Vec<&str> = diff.lines().collect();
     let binary = lines.iter().any(|l| l.starts_with("Binary files "));
     if binary {
@@ -99,9 +100,9 @@ pub fn hunk_view(diff: &str) -> Hunk {
     Hunk {
         text: lines
             .iter()
-            .take(SHOWN)
+            .take(shown)
             .fold(String::new(), |t, l| t + l + "\n"),
-        left_out: lines.len().saturating_sub(SHOWN),
+        left_out: lines.len().saturating_sub(shown),
         binary,
         first_line: first_changed(&lines),
     }
@@ -125,13 +126,14 @@ fn first_changed(lines: &[&str]) -> u32 {
     start.max(1) + context as u32
 }
 
-/// The hunk of `path` between a turn's trees: `end` is `None` while the turn runs, then the worktree's tree now.
+/// The hunk of `path` between a turn's trees, whole when `all`: `end` is `None` while the turn runs, then the worktree's tree now.
 pub fn turn_hunk(
     root: &Path,
     start: &str,
     end: Option<&str>,
     path: &str,
     from: Option<&str>,
+    all: bool,
 ) -> Option<Hunk> {
     let now;
     let end = match end {
@@ -141,7 +143,7 @@ pub fn turn_hunk(
             &now
         }
     };
-    hunk(root, start, end, path, from).map(|diff| hunk_view(&diff))
+    hunk(root, start, end, path, from).map(|diff| hunk_view(&diff, all))
 }
 
 /// Keeps `tree` of the worktree at `root` from `git gc`, under `session`'s turn `turn`; `side` is
@@ -210,10 +212,10 @@ mod tests {
         let mut diff =
             String::from("diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -9,3 +9,60 @@\n ctx\n ctx\n");
         diff.push_str(&"+new\n".repeat(55));
-        let h = hunk_view(&diff);
+        let h = hunk_view(&diff, false);
         assert_eq!(h.text.lines().count(), 40);
         assert_eq!(h.left_out, 61 - 40);
         assert_eq!(h.first_line, 11);
-        assert!(hunk_view("Binary files a/x and b/x differ\n").binary);
+        assert!(hunk_view("Binary files a/x and b/x differ\n", false).binary);
     }
 }

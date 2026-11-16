@@ -177,7 +177,7 @@ fn a_file_hunk_equals_git_diff_between_the_trees_and_is_capped() {
     let end = tree(&root);
     let root_path = Path::new(&root);
 
-    let small = turn_hunk(root_path, &start, Some(&end), "b.rs", None).unwrap();
+    let small = turn_hunk(root_path, &start, Some(&end), "b.rs", None, false).unwrap();
     let diff = git(
         root_path,
         &["diff", "--no-color", &start, &end, "--", "b.rs"],
@@ -188,7 +188,7 @@ fn a_file_hunk_equals_git_diff_between_the_trees_and_is_capped() {
         (0, false, 2)
     );
 
-    let big = turn_hunk(root_path, &start, Some(&end), "a.rs", None).unwrap();
+    let big = turn_hunk(root_path, &start, Some(&end), "a.rs", None, false).unwrap();
     let all = git(
         root_path,
         &["diff", "--no-color", &start, &end, "--", "a.rs"],
@@ -210,14 +210,22 @@ fn a_renamed_file_hunk_reads_through_its_old_path_and_a_binary_file_has_no_lines
     let end = tree(&root);
     let root_path = Path::new(&root);
 
-    let renamed = turn_hunk(root_path, &start, Some(&end), "new.rs", Some("old.rs")).unwrap();
+    let renamed = turn_hunk(
+        root_path,
+        &start,
+        Some(&end),
+        "new.rs",
+        Some("old.rs"),
+        false,
+    )
+    .unwrap();
     assert!(
         renamed.text.contains("rename from old.rs"),
         "{}",
         renamed.text
     );
     assert!(renamed.text.contains("+    2"));
-    let binary = turn_hunk(root_path, &start, Some(&end), "img.bin", None).unwrap();
+    let binary = turn_hunk(root_path, &start, Some(&end), "img.bin", None, false).unwrap();
     assert!(binary.binary && binary.text.is_empty());
 }
 
@@ -227,6 +235,24 @@ fn a_running_turns_hunk_ends_at_the_worktree_now() {
     let start = tree(&root);
     fs::write(format!("{root}/a.rs"), "fn a() {}\nfn live() {}\n").unwrap();
     let _one = HOOK.lock().unwrap_or_else(|e| e.into_inner());
-    let hunk = turn_hunk(Path::new(&root), &start, None, "a.rs", None).unwrap();
+    let hunk = turn_hunk(Path::new(&root), &start, None, "a.rs", None, false).unwrap();
     assert!(hunk.text.contains("+fn live() {}"));
+}
+
+#[test]
+fn the_whole_hunk_is_git_diff_between_the_trees_with_nothing_left_out() {
+    let (_dir, root) = repo();
+    let start = tree(&root);
+    let long: String = (0..60).map(|i| format!("line {i}\n")).collect();
+    fs::write(format!("{root}/a.rs"), format!("fn a() {{}}\n{long}")).unwrap();
+    let end = tree(&root);
+    let root_path = Path::new(&root);
+
+    let whole = turn_hunk(root_path, &start, Some(&end), "a.rs", None, true).unwrap();
+    let diff = git(
+        root_path,
+        &["diff", "--no-color", &start, &end, "--", "a.rs"],
+    );
+    assert_eq!(whole.text.trim_end(), diff);
+    assert_eq!(whole.left_out, 0);
 }

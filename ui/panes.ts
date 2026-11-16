@@ -12,6 +12,7 @@
 
 import type * as Xterm from "@xterm/xterm";
 import { connect, list, onEvent, request, type Listed } from "./daemon.js";
+import { diffRequest, drawDiff, keepsDiff } from "./diff.js";
 import { drawHistory } from "./history.js";
 import { drawHome } from "./home.js";
 import { element, invoke, pressable, text } from "./dom.js";
@@ -334,6 +335,9 @@ export async function openHere(session: Session) {
 // never take away a pane Daniel just started.
 let selected: string | null = null;
 export async function showSession(session: Session | null, clicked = false, agent: string | null = null) {
+  // The diff pane stays while the shell re-sends its session's selection; Daniel's click, or another session, ends it.
+  if (keepsDiff(diffShown, session, clicked)) return;
+  diffShown = null;
   const key = session ? `${session.id} ${session.terminal ?? ""} ${session.state === "ended"} ${agent ?? ""}` : null;
   element("terminal-head").hidden = session !== null || shown === HOME;
   const pane = panes.get(shown);
@@ -379,6 +383,19 @@ export async function showSession(session: Session | null, clicked = false, agen
   show(ELSEWHERE, () => null);
 }
 const ELSEWHERE = "elsewhere";
+const DIFF = "turn-diff";
+
+// A turn's whole diff in the column (danielrispler/plotkeeper#131), in a pane of its own: in a split it takes the selected
+// side only, as the log does. "Terminal" shows the session's own pane again, which was never touched.
+let diffShown: { session: string } | null = null;
+diffRequest.open = (id, turn) => {
+  const session = studio.listed.find((s) => s.id === id);
+  if (!session?.capabilities.turn_trees || !session.turns[turn]?.files) return;
+  diffShown = { session: id };
+  show(DIFF, () => null);
+  drawDiff(box(DIFF), session, turn, () => void select(id));
+  element("terminal-head").hidden = true;
+};
 const LOG = "subagent-log";
 
 // A program that failed at start (danielrispler/Falinks#558), a session's, a Doctor entry's or a revived one: a toast names

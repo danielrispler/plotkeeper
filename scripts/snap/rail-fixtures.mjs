@@ -328,7 +328,22 @@ const hunkScript = `
   log("rail scrollTop " + at + " -> " + story.scrollTop);
   if (story.scrollTop !== at) log("snap:fail the rail's scrollTop moved from " + at + " to " + story.scrollTop);`;
 
+// #131: opens the evidence line, then "Open full diff", and fails when the diff pane does not list a file with its hunk.
+const diffScript = `
+  const wait = () => new Promise((resolve) => setTimeout(resolve, 300));
+  document.querySelector(".evidence-toggle").click();
+  await wait();
+  const open = [...document.querySelectorAll(".evidence-edit")].find((b) => b.textContent === "Open full diff");
+  if (!open) log("snap:fail the opened line has no Open full diff");
+  open.click();
+  await wait();
+  const pane = document.querySelector(".turn-diff");
+  if (!pane || pane.hidden) log("snap:fail the diff pane did not open");
+  log("diff files " + pane.querySelectorAll(".diff-file").length + ", lines " + pane.querySelectorAll(".diff-line").length);
+  if (!pane.querySelector(".diff-line.add") || !pane.querySelector(".diff-line.del")) log("snap:fail the diff has no added and removed lines");`;
+
 export const railFixtures = {
+  railDiff: () => ({ ...build("your_turn"), snapScript: diffScript }),
   railHunk: () => ({ ...build("your_turn"), snapScript: hunkScript }),
   railEvidence: () => ({ ...build("your_turn"), snapScript: evidenceScript }),
   ...railStates,
