@@ -130,3 +130,13 @@ test("the repository is a path, the studio's checkout by default, and anything e
   assert.equal(wrong.settings.repository, null);
   assert.deepEqual(wrong.errors, ["settings.json: repository: expected a string"]);
 });
+
+test("the check lists are commands per project folder, none by default, and anything else is reported (danielrispler/plotkeeper#112)", () => {
+  assert.deepEqual(reload(initial, { settings: null, keymap: null }).settings.checks, {});
+  const set = reload(initial, { settings: `{ "checks": { "/work/app": ["make verify", "npm run check"] } }`, keymap: null });
+  assert.deepEqual(set.settings.checks, { "/work/app": ["make verify", "npm run check"] });
+  const wrong = reload(initial, { settings: `{ "checks": { "/a": "make", "/b": ["ok"] } }`, keymap: null });
+  assert.deepEqual(wrong.settings.checks, { "/b": ["ok"] });
+  assert.deepEqual(wrong.errors, ["settings.json: checks./a: expected an array of strings"]);
+  assert.deepEqual(reload(initial, { settings: `{ "checks": [] }`, keymap: null }).errors.length, 1);
+});

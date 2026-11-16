@@ -71,6 +71,33 @@ fn summary_settings(
     studio.lock().unwrap().set_summaries_on_open(on_open);
 }
 
+/// The settings' `checks` (danielrispler/plotkeeper#112): each project folder's list of commands that are checks.
+#[tauri::command]
+fn check_lists(lists: HashMap<String, Vec<String>>, studio: State<Mutex<Studio>>) {
+    studio.lock().unwrap().set_check_lists(lists);
+}
+
+/// A check run's exit code and output tail (danielrispler/plotkeeper#112), read from the event log through
+/// its ledger row's offset, off the studio's lock. `None` when the session has no such call.
+#[tauri::command(async)]
+fn check_output(
+    session: String,
+    agent: Option<String>,
+    call: String,
+    studio: State<Mutex<Studio>>,
+) -> Result<Option<studio_core::CheckOutput>, String> {
+    let row = {
+        let studio = studio.lock().unwrap();
+        let ledger = &studio.session(&session).map(|s| &s.ledger);
+        ledger.and_then(|l| l.row(agent.as_deref(), &call)).cloned()
+    };
+    let Some(row) = row else { return Ok(None) };
+    let log = studio_hook::event_log(&std::env::home_dir().ok_or("no home folder")?);
+    studio_core::check_output(&row, &log)
+        .map(Some)
+        .map_err(|e| e.to_string())
+}
+
 /// Daniel opened turn `id` (danielrispler/Falinks#526): its summary, written now when it waits for him, which takes
 /// seconds, so the command runs off the main thread. `None` when the turn has none. A failed write
 /// keeps the turn waiting and is an error, so the window asks again only at the next opening.
@@ -618,6 +645,8 @@ fn main() {
             settings::set_zoom,
             settings::open_settings,
             summary_settings,
+            check_lists,
+            check_output,
             turn_summary,
             turn_reply,
             agent_summary,
