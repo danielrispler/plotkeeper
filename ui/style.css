@@ -329,6 +329,7 @@ body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
 /* The session's brief, folded under the feed; its code wraps as a card's does. */
 .brief { margin: var(--sp-5) 0 0; font-size: var(--size-read); }
 .brief p { margin: 0 0 var(--sp-2); overflow-wrap: anywhere; }
+.brief p.slot-title { margin: var(--sp-3) 0 var(--sp-1); font-weight: 600; }
 .brief code, .card code { white-space: normal; overflow-wrap: anywhere; }
 
 /* A card, told apart by its fill; its code is left to right. No text in it is smaller than 14px. */

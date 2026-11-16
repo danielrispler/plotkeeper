@@ -27,9 +27,7 @@ fn edit(id: &str, path: &str) -> CardRequest {
 
 /// The fake writer's card on `request`, whose quiz's key is its first option of three.
 fn card(request: &CardRequest) -> Card {
-    let mut card = write_card(&FakeWriter, request, &[], "", |line| panic!("{line}"))
-        .unwrap()
-        .0;
+    let mut card = write_card(&FakeWriter, request, &[], |line| panic!("{line}")).unwrap();
     // The app shuffled the options; put the key back first.
     let quiz = card.quiz.as_mut().unwrap();
     quiz.options.swap(0, quiz.key);
@@ -146,31 +144,13 @@ fn a_rating_with_its_reasons_survives_a_restart_beside_the_one_key_is_wrong_flag
 struct Counting(Cell<usize>);
 
 impl CardWriter for Counting {
-    fn reply(
-        &self,
-        request: &CardRequest,
-        earlier: &[String],
-        brief: &str,
-    ) -> Result<String, String> {
-        FakeWriter.reply(request, earlier, brief)
-    }
-
-    fn rewrite(
-        &self,
-        prompts: &[&str],
-        summaries: &[String],
-        diffstat: &str,
-    ) -> Result<String, String> {
-        FakeWriter.rewrite(prompts, summaries, diffstat)
+    fn reply(&self, request: &CardRequest, earlier: &[String]) -> Result<String, String> {
+        FakeWriter.reply(request, earlier)
     }
 
     fn more(&self, request: &CardRequest, card: &Card) -> Result<String, String> {
         self.0.set(self.0.get() + 1);
         FakeWriter.more(request, card)
-    }
-
-    fn update(&self, brief: &str, workers: &str) -> Result<String, String> {
-        FakeWriter.update(brief, workers)
     }
 }
 
@@ -202,30 +182,12 @@ fn explain_more_calls_the_writer_once_and_a_second_tap_shows_the_kept_text() {
 struct Blank;
 
 impl CardWriter for Blank {
-    fn reply(
-        &self,
-        request: &CardRequest,
-        earlier: &[String],
-        brief: &str,
-    ) -> Result<String, String> {
-        FakeWriter.reply(request, earlier, brief)
-    }
-
-    fn rewrite(
-        &self,
-        prompts: &[&str],
-        summaries: &[String],
-        diffstat: &str,
-    ) -> Result<String, String> {
-        FakeWriter.rewrite(prompts, summaries, diffstat)
+    fn reply(&self, request: &CardRequest, earlier: &[String]) -> Result<String, String> {
+        FakeWriter.reply(request, earlier)
     }
 
     fn more(&self, _: &CardRequest, _: &Card) -> Result<String, String> {
         Ok("\n".into())
-    }
-
-    fn update(&self, brief: &str, workers: &str) -> Result<String, String> {
-        FakeWriter.update(brief, workers)
     }
 }
 
@@ -465,23 +427,32 @@ fn every_session_of_the_day_shows_all_of_its_cards_whichever_was_prompted_last()
 }
 
 #[test]
-fn briefs_survive_a_restart_and_show_with_their_sessions_cards() {
+fn a_goal_survives_a_restart_and_a_brief_stored_as_prose_shows_until_it_comes() {
     let data = tempfile::tempdir().unwrap();
     let path = data.path().join("cards.json");
-    let mut store = two_cards(&path);
     let session = "5b9e3d71-0c2a-4f8e-b6d4-8a1c3e5f7092";
-    store.set_brief(session, "הסשן התחיל.".into()).unwrap();
-    let brief = "הסשן התחיל.\n`README.md` עודכן.";
-    store.set_brief(session, brief.into()).unwrap();
-    store.set_brief("another", "סשן אחר.".into()).unwrap();
+    // The briefs file of before the slots: prose and an update count.
+    let prose = "הסשן התחיל.\n`README.md` עודכן.";
+    let old = serde_json::json!({ session: { "text": prose, "updates": 7 } });
+    std::fs::write(data.path().join("briefs.json"), old.to_string()).unwrap();
+    let mut store = CardStore::open(path.clone()).unwrap();
+    let shown = store.session_cards(session, 0);
+    assert_eq!((shown.brief.as_deref(), shown.goal), (Some(prose), None));
 
+    store
+        .set_goal(session, "לשלוח את הכרטיס.".into(), 2)
+        .unwrap();
+    store.set_goal("another", "סשן אחר.".into(), 1).unwrap();
     let reopened = CardStore::open(path).unwrap();
 
     let kept = reopened.brief(session).unwrap();
-    assert_eq!((kept.text.as_str(), kept.updates), (brief, 2));
-    let shown = reopened.session_cards(session, 1_761_743_990_000);
-    assert_eq!(shown.brief.as_deref(), Some(brief));
-    assert_eq!(reopened.session_cards("none", 0).brief, None);
+    assert_eq!(
+        (kept.goal.as_deref(), kept.goal_prompts),
+        (Some("לשלוח את הכרטיס."), 2)
+    );
+    let shown = reopened.session_cards(session, 0);
+    assert_eq!(shown.goal.as_deref(), Some("לשלוח את הכרטיס."));
+    assert_eq!(reopened.session_cards("none", 0).goal, None);
 }
 
 #[test]
@@ -527,7 +498,7 @@ fn every_change_bumps_the_revision_and_a_call_that_changes_nothing_leaves_it() {
         .unwrap();
     bumped(&store, false);
     store
-        .set_brief("5b9e3d71-0c2a-4f8e-b6d4-8a1c3e5f7092", "Brief.".into())
+        .set_goal("5b9e3d71-0c2a-4f8e-b6d4-8a1c3e5f7092", "Goal.".into(), 1)
         .unwrap();
     bumped(&store, true);
     let store = Mutex::new(store);

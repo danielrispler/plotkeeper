@@ -2,7 +2,7 @@
 //! session's brief, on disk in the studio's data directory, so a restart neither loses nor re-asks
 //! them.
 
-use crate::{Card, TurnSummary};
+use crate::{Answered, Card, OpenItem, TurnSummary, answered};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -113,19 +113,29 @@ pub struct Row {
     pub line: String,
 }
 
-/// A session's or a worker's rolling brief (danielrispler/Falinks#369, decision 16).
+/// A session's or a worker's brief: its Goal, which a model writes from Daniel's prompts
+/// (danielrispler/plotkeeper#122). A brief stored before the slots is prose in `text`, which shows
+/// until the first Goal.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Brief {
     pub text: String,
-    /// How many times it was updated, so that every 5th update rewrites it.
-    pub updates: u32,
+    pub goal: Option<String>,
+    /// How many prompts the Goal was written from, so that it is written again when one comes.
+    pub goal_prompts: u32,
 }
 
 /// One session's brief and its cards in the session view's two groups (danielrispler/Falinks#369, decision 18), each
 /// oldest first.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct SessionCards {
+    /// A brief stored as prose, which shows while there is no Goal.
     pub brief: Option<String>,
+    /// The Brief's slots (danielrispler/plotkeeper#122): the Goal, the answered questions and the
+    /// computed Open lines, which the shell fills in (`open_items`).
+    pub goal: Option<String>,
+    pub answers: Vec<Answered>,
+    pub open: Vec<OpenItem>,
     /// The cards added in the last 30 minutes.
     #[serde(serialize_with = "without_diffs")]
     pub recent: Vec<StoredCard>,
@@ -282,17 +292,25 @@ impl CardStore {
             kept.added_at
                 .is_some_and(|at| now.saturating_sub(at) < RECENT_MS)
         });
-        let brief = self.brief(owner).map(|brief| brief.text.clone());
+        let brief = self.brief(owner);
+        let goal = brief.and_then(|brief| brief.goal.clone());
+        let brief = brief
+            .map(|brief| brief.text.clone())
+            .filter(|text| !text.is_empty());
         // A session's history holds its workers' decisions; a worker's, its own.
         let decisions = self.decisions.iter().flat_map(|(session, kept)| {
             let its = move |d: &&Decision| session == owner || d.agent.as_deref() == Some(owner);
             kept.iter().filter(its)
         });
+        let decisions: Vec<Decision> = decisions.cloned().collect();
         SessionCards {
             brief,
+            goal,
+            answers: answered(&decisions),
+            open: Vec::new(),
             recent,
             older,
-            decisions: decisions.cloned().collect(),
+            decisions,
         }
     }
 
@@ -353,11 +371,11 @@ impl CardStore {
         self.briefs.get(owner)
     }
 
-    /// Updates `owner`'s brief to `text`, and saves the briefs.
-    pub fn set_brief(&mut self, owner: &str, text: String) -> io::Result<()> {
+    /// Sets `owner`'s Goal, written from `prompts` prompts, and saves the briefs.
+    pub fn set_goal(&mut self, owner: &str, goal: String, prompts: u32) -> io::Result<()> {
         let brief = self.briefs.entry(owner.into()).or_default();
-        brief.text = text;
-        brief.updates += 1;
+        brief.goal = Some(goal);
+        brief.goal_prompts = prompts;
         self.revision += 1;
         write(&self.path.with_file_name("briefs.json"), &self.briefs)
     }

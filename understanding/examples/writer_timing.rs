@@ -78,7 +78,7 @@ fn main() {
     let mut each = Vec::new();
     for run in 1..=runs {
         let start = Instant::now();
-        let card = write_card(&writer, &request, &[], "", |line| eprintln!("{line}")).is_some();
+        let card = write_card(&writer, &request, &[], |line| eprintln!("{line}")).is_some();
         let seconds = start.elapsed().as_secs_f64();
         eprintln!("run {run}: {seconds:.1} s, card: {card}");
         each.push((seconds, card));

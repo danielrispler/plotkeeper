@@ -40,19 +40,11 @@ struct Costed {
 }
 
 impl CardWriter for Costed {
-    fn reply(&self, _: &CardRequest, _: &[String], _: &str) -> Result<String, String> {
+    fn reply(&self, _: &CardRequest, _: &[String]) -> Result<String, String> {
         Err("the trial writes summaries only".into())
     }
 
     fn more(&self, _: &CardRequest, _: &Card) -> Result<String, String> {
-        Err("the trial writes summaries only".into())
-    }
-
-    fn rewrite(&self, _: &[&str], _: &[String], _: &str) -> Result<String, String> {
-        Err("the trial writes summaries only".into())
-    }
-
-    fn update(&self, _: &str, _: &str) -> Result<String, String> {
         Err("the trial writes summaries only".into())
     }
 

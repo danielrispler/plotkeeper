@@ -24,7 +24,7 @@ const subagent = (id, name) => ({
 
 const common = {
   settings_files: { settings: null, keymap: null },
-  cards: { brief: null, recent: [], older: [], decisions: [] },
+  cards: { brief: null, goal: null, answers: [], open: [], recent: [], older: [], decisions: [] },
   workspaces: { main: { path: "/w/plotkeeper", branch: "main" }, tasks: [], hidden: 0 },
   terminal_connect: { repo: "/w/plotkeeper", outdated: false },
   terminal_lost: [],

@@ -24,16 +24,10 @@ impl Asked {
 }
 
 impl CardWriter for Asked {
-    fn reply(&self, _: &CardRequest, _: &[String], _: &str) -> Result<String, String> {
+    fn reply(&self, _: &CardRequest, _: &[String]) -> Result<String, String> {
         unreachable!()
     }
     fn more(&self, _: &CardRequest, _: &Card) -> Result<String, String> {
-        unreachable!()
-    }
-    fn rewrite(&self, _: &[&str], _: &[String], _: &str) -> Result<String, String> {
-        unreachable!()
-    }
-    fn update(&self, _: &str, _: &str) -> Result<String, String> {
         unreachable!()
     }
     fn ask(&self, item: &str, intentions: &[String], question: &str) -> Result<String, String> {
@@ -110,7 +104,7 @@ fn a_reply_that_does_not_parse_or_a_failed_call_gives_an_error() {
 #[test]
 fn the_real_call_runs_as_the_card_writer_does_with_tools_off_in_english() {
     let writer = ClaudeWriter::new("/opt/homebrew/bin/claude".into(), "/f".into());
-    let (card_run, _) = writer.update_command("brief", "workers");
+    let (card_run, _) = writer.goal_command(&["a prompt"]);
     let intentions = ["Then I look at the writer.".to_string()];
 
     let (run, prompt) = writer.ask_command("The writer is fine.", &intentions, "Why first?");

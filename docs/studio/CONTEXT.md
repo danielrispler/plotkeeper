@@ -78,7 +78,7 @@ The index of an agent session's tool calls, workers' included, kept as one row p
 The line under a turn's Headline that states what the hooks and git recorded for the turn: the files it changed and each check's last result, such as `3 files · 2 checks passed`. It opens in place to each file with its line counts, the external changes, and each check with its status; a failed check opens its exit code and the tail of its output. It has no model in it, and an agent that reports no trees has none.
 
 **Brief**:
-A rolling account of an agent session's or a worker's work so far, at the top of its view, so that Daniel can resume a session he lost track of. Each new card updates it.
+What Daniel reads to resume an agent session he lost track of, folded under its feed: slots, not prose. **Goal** is one or two lines a model writes from Daniel's prompts, again when a new prompt of his came; it is the only part a model writes. **Decisions** lists each question the agent asked with Daniel's reply, in order. **Open** is computed from facts, never written: the pending question, each check suite whose last run failed, files changed with no check run since, the latest turn's `open` and `ask` lines, and unpushed work or an unmerged PR; each drops out once it is settled. A brief stored before the slots, as prose, shows as it is until the session's next Goal.
 
 **Workbench**:
 The part of the control room where agent work happens: terminals, tasks and Workspaces. It works without the understanding layer.

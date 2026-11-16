@@ -272,13 +272,6 @@ fn between(root: &Path, from: Option<&str>, to: &str) -> String {
     changed.collect()
 }
 
-/// `git diff --stat` in `folder`'s worktree from commit `since` to the files as they are now, for the
-/// brief's rewrite (danielrispler/Falinks#369, decision 16); empty when `git` fails.
-pub(crate) fn diff_stat(folder: &Path, since: &str) -> String {
-    let stat = git(folder, &["diff", "--stat", since]).unwrap_or_default();
-    String::from_utf8_lossy(&stat).into()
-}
-
 /// The paths in `git`'s `-z` output, each after `skip` bytes, without the operating system's own
 /// files, which are not the agent's work (danielrispler/Falinks#568).
 fn split_paths(out: &[u8], skip: usize) -> impl Iterator<Item = String> {
