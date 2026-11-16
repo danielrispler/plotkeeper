@@ -1,7 +1,7 @@
 // The terminal pane's key mapping (danielrispler/Falinks#466), run on the `tsc` output. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { bound, doctorEntries, keyAction, keyLabel, keystroke, newestUnseen, nextNeedsYou, paletteEntries, run, stepSession, windowBinding } from "../../dist/keys.js";
+import { bound, doctorEntries, keyAction, keyLabel, keystroke, newestUnseen, nextNeedsYou, stepLine, paletteEntries, run, stepSession, windowBinding } from "../../dist/keys.js";
 import { initial, reload } from "../../dist/settings.js";
 
 const key = (code, mods = {}, key = "") => ({
@@ -287,4 +287,26 @@ test("↑ and ↓ move the palette's highlighted row, and the window's keys leav
   // The palette's field is an input outside the list, where the window binds neither key.
   assert.equal(windowBinding(initial.keymap, key("ArrowDown"), true), undefined);
   assert.equal(windowBinding(initial.keymap, key("ArrowUp"), true), undefined);
+});
+
+test("the arrow keys step over session rows and subagent lines only, never a workspace row", () => {
+  const line = (classes, current = false) => ({ classes, current });
+  const lines = [line(["row", "session-row"]), line(["row", "worker"]), line(["row"]), line(["row", "session-row"]), line(["row", "helper"])];
+  assert.equal(stepLine(lines, 1), 0);
+  lines[0].current = true;
+  assert.equal(stepLine(lines, 1), 1);
+  lines[0].current = false; lines[1].current = true;
+  assert.equal(stepLine(lines, 1), 3);
+  lines[1].current = false; lines[3].current = true;
+  assert.equal(stepLine(lines, -1), 1);
+  assert.equal(stepLine(lines, 1), 4);
+  lines[3].current = false; lines[4].current = true;
+  assert.equal(stepLine(lines, 1), null);
+});
+
+test("next needs-you and jump to unseen over the sidebar's sessions never land on an ended one", () => {
+  const sidebar = [{ id: "a", state: "idle", unseen: false, last_event_at: 1 }, { id: "b", state: "idle", unseen: true, last_event_at: 2 }];
+  assert.equal(nextNeedsYou(sidebar, "a"), "b");
+  assert.equal(newestUnseen(sidebar), "b");
+  assert.equal(stepSession(sidebar, "b", 1), "a");
 });

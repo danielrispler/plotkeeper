@@ -8,7 +8,7 @@ import { withWriterNotice } from "./writer-notice.js";
 import { startWatching } from "./answer.js";
 import { markShown, showCards } from "./cards.js";
 import { element, invoke, listen } from "./dom.js";
-import { type Actions, doctorEntries, newestUnseen, nextNeedsYou, paletteEntries, run, stepSession, windowBinding } from "./keys.js";
+import { type Actions, doctorEntries, newestUnseen, nextNeedsYou, paletteEntries, run, stepLine, stepSession, windowBinding } from "./keys.js";
 import { arrange, defaultWidths, type LayoutMode, railShown, resized, type Widths } from "./layout.js";
 import { listSpace } from "./home.js";
 import { showSessions } from "./list.js";
@@ -16,8 +16,9 @@ import { goHome, select, show } from "./selection.js";
 import { dragPanel, placePanel, togglePanel } from "./panel.js";
 import { dragSplit, focusPane, placePanes, runDoctor, showHistory, split, startPanes, toggleSplit } from "./panes.js";
 import { showAddProject, showBranches, showPalette, showPicker } from "./picker.js";
-import { fetchNow, showWorkspaces, watchWorkspaces } from "./workspaces.js";
+import { fetchNow, foundWorkspaces, showWorkspaces, sidebarOrder, watchWorkspaces } from "./workspaces.js";
 import { reload, type SettingsFiles, zoomed } from "./settings.js";
+import { knownProjects } from "./projects.js";
 import { studio } from "./state.js";
 import { showSkills } from "./skills.js";
 import { showView } from "./story.js";
@@ -94,6 +95,7 @@ const setZoom = (to: number) => {
 // The keyboard spine (danielrispler/Falinks#575): ⌘] and ⌘[ step through the sessions, ⌘J goes to the next needs-you, else the next unseen, ↑
 // and ↓ move in the list, 1–4 answer the docked card, ⌘N starts a session, ⌘, opens `settings.json`
 // and ⌘⇧P opens the palette of every action here.
+const inSidebar = () => sidebarOrder(knownProjects(), foundWorkspaces(), studio.listed);
 const selectedId = () => studio.selection?.session.id ?? null;
 const go = (id: string | null) => void (id && select(id));
 
@@ -101,7 +103,9 @@ const go = (id: string | null) => void (id && select(id));
 function moveInList(by: 1 | -1) {
   const rows = [...element("groups").querySelectorAll<HTMLButtonElement>("button.row")].filter((row) => row.offsetParent !== null);
   const focused = rows.indexOf(document.activeElement as HTMLButtonElement);
-  const next = rows[(focused === -1 ? rows.findIndex((row) => row.ariaPressed === "true") : focused) + by];
+  const current = focused === -1 ? rows.findIndex((row) => row.ariaPressed === "true") : focused;
+  const at = stepLine(rows.map((row, i) => ({ classes: [...row.classList], current: i === current })), by);
+  const next = at === null ? undefined : rows[at];
   next?.focus();
   next?.click(); // a click without a pointer selects (`list.ts`)
 }
@@ -137,16 +141,16 @@ const actions: Actions = {
     layout();
   },
   // A split (danielrispler/Falinks#529) pins the pane shown and shows the next session beside it.
-  "studio::ToggleSplit": () => void (toggleSplit() && go(stepSession(studio.listed, selectedId(), 1))),
+  "studio::ToggleSplit": () => void (toggleSplit() && go(stepSession(inSidebar(), selectedId(), 1))),
   // The terminal panel (danielrispler/Falinks#542): a shell in the shown session's folder, under the terminal column.
   "studio::TogglePanel": () => togglePanel(focusPane),
   "studio::ZoomIn": () => setZoom(zoomed(zoom, 1)),
   "studio::ZoomOut": () => setZoom(zoomed(zoom, -1)),
   "studio::ResetZoom": () => setZoom(zoomed(zoom, 0)),
-  "studio::NextSession": () => go(stepSession(studio.listed, selectedId(), 1)),
-  "studio::PreviousSession": () => go(stepSession(studio.listed, selectedId(), -1)),
+  "studio::NextSession": () => go(stepSession(inSidebar(), selectedId(), 1)),
+  "studio::PreviousSession": () => go(stepSession(inSidebar(), selectedId(), -1)),
   // The toast's session first, which also leaves focus mode (danielrispler/Falinks#573).
-  "studio::NextNeedsYou": () => void (jumpToNeedsYou() || go(nextNeedsYou(studio.listed, selectedId()))),
+  "studio::NextNeedsYou": () => void (jumpToNeedsYou() || go(nextNeedsYou(inSidebar(), selectedId()))),
   "studio::SelectNext": () => moveInList(1),
   "studio::SelectPrevious": () => moveInList(-1),
   "studio::Answer": (n) => answer(Number(n)),
@@ -157,7 +161,7 @@ const actions: Actions = {
   // Add project (#98): the folder dialog and the suggested repositories.
   "studio::AddProject": () => void showAddProject(),
   // Home, in the terminal column: selects no session.
-  "studio::JumpToUnseen": () => void go(newestUnseen(studio.listed)),
+  "studio::JumpToUnseen": () => void go(newestUnseen(inSidebar())),
   "studio::GoHome": () => void goHome(),
   // History (#94), in the terminal column: the ended sessions, searchable.
   "studio::ShowHistory": () => showHistory(),
