@@ -397,21 +397,31 @@ function strip(sessions: Session[]): HTMLElement[] {
 // The sessions the list shows: all but the ended ones, which are in History (#94).
 export const sidebarSessions = <T extends Pick<Session, "state">>(sessions: T[]): T[] => sessions.filter((session) => session.state !== "ended");
 
-// Whether a folder outside every project is in a git repository (#98), asked once each: only then its group offers
-// Add as project. Unknown until the answer comes, when the sidebar is drawn again.
-const repositories = new Map<string, boolean>();
-function repositoryOf(folder: string): boolean {
+// The main checkout of the repository a folder outside every project is in (#98), asked once each: only then its group
+// may offer Add as project. Unknown until the answer comes, when the sidebar is drawn again.
+const repositories = new Map<string, string | null>();
+function repositoryOf(folder: string): string | null {
   const known = repositories.get(folder);
   if (known === undefined) {
-    repositories.set(folder, false);
+    repositories.set(folder, null);
     invoke<string | null>("repository_of", { folder }).then((main) => {
       if (main) {
-        repositories.set(folder, true);
+        repositories.set(folder, main);
         drawSidebar();
       }
     }, () => {});
   }
-  return known ?? false;
+  return known ?? null;
+}
+
+// A project header's one action (#98): Remove on a project, Add as project on a folder outside every project whose
+// repository (`main`, its main checkout, when known) isn't a project already. `key` names the action and its path, so
+// the sidebar's patch replaces the button when the action changes instead of keeping the old listener.
+export type HeadAction = { kind: "remove" | "add"; path: string; key: string };
+export function headAction(group: { key: string; project: boolean }, main: string | null, projects: string[]): HeadAction | null {
+  if (group.project) return { kind: "remove", path: group.key, key: `remove ${group.key}` };
+  if (main && !projects.includes(main)) return { kind: "add", path: group.key, key: `add ${group.key}` };
+  return null;
 }
 
 // A project's header (#97): its name and, even while folded, its most urgent state: needs you over running. The
@@ -433,18 +443,17 @@ function projectHead(group: ProjectGroup<Session>): HTMLElement {
   toggle.append(text("span", group.name, "name"));
   if (group.rollup) toggle.append(glyph(group.rollup));
   head.append(toggle);
-  const act = (label: string, title: string, run: () => void) => {
-    const button = pressable(text("button", label, "project-action"), false, run);
-    button.removeAttribute("aria-pressed");
-    button.title = title;
-    head.append(button);
-  };
-  if (group.project) {
-    act("×", "Remove project: its worktrees and branches stay", () => {
-      invoke<string[]>("remove_project", { project: group.key }).then(setProjects, refuse);
+  const action = headAction(group, group.project ? null : repositoryOf(group.key), knownProjects());
+  if (action) {
+    const remove = action.kind === "remove";
+    const button = pressable(text("button", remove ? "×" : "Add as project", "project-action"), false, () => {
+      if (remove) invoke<string[]>("remove_project", { project: action.path }).then(setProjects, refuse);
+      else void addProject(action.path);
     });
-  } else if (repositoryOf(group.key)) {
-    act("Add as project", `Add ${group.key} as a project`, () => void addProject(group.key));
+    button.removeAttribute("aria-pressed");
+    button.dataset.key = action.key;
+    button.title = remove ? "Remove project: its worktrees and branches stay" : `Add ${action.path} as a project`;
+    head.append(button);
   }
   return head;
 }
