@@ -5,7 +5,8 @@
 // draws the line open again.
 
 import { code, invoke, pressable, text } from "./dom.js";
-import { askAnchor, type Hunk, hunkText } from "./ask.js";
+import { askAnchor, type Hunk } from "./ask.js";
+import { diffRequest } from "./diff.js";
 import { openAt } from "./paths.js";
 import type { Capabilities, Check, Turn, TurnFile } from "./types.js";
 
@@ -98,6 +99,9 @@ function checkRow(session: string, row: EvidenceRow): HTMLElement {
 const openHunks = new Set<string>();
 const hunks = new Map<string, Hunk | null>();
 
+const hunkText = (h: Hunk | null) =>
+  h === null ? "The hunk could not be read." : h.binary ? "Binary file: no lines to show." : h.text;
+
 // A file's row: its label, which opens the real hunk between the turn's two trees under it, with "Open in editor" at its
 // first changed line. Only this row changes.
 function fileRow(session: string, index: number, row: EvidenceRow): HTMLElement {
@@ -112,9 +116,17 @@ function fileRow(session: string, index: number, row: EvidenceRow): HTMLElement 
   });
   edit.classList.add("evidence-edit");
   edit.textContent = "Open in editor";
+  const left = (h: Hunk | null) => {
+    more.textContent = `${h?.left_out ?? 0} more lines`;
+    if (openHunks.has(key) && h?.left_out) more.removeAttribute("hidden");
+    else more.setAttribute("hidden", "");
+  };
+  const more = pressable(document.createElement("button"), false, () => diffRequest.open(session, index));
+  more.classList.add("evidence-more");
   const show = () => {
     const open = openHunks.has(key);
     for (const node of [pre, edit]) open ? node.removeAttribute("hidden") : node.setAttribute("hidden", "");
+    left(hunks.get(key) ?? null);
   };
   const fetch = () => {
     if (hunks.has(key)) return;
@@ -123,6 +135,7 @@ function fileRow(session: string, index: number, row: EvidenceRow): HTMLElement 
       .then((h) => {
         hunks.set(key, h);
         pre.textContent = hunkText(h);
+        left(h);
       })
       .catch((e) => {
         pre.textContent = `The hunk could not be read: ${e}`;
@@ -140,7 +153,14 @@ function fileRow(session: string, index: number, row: EvidenceRow): HTMLElement 
   button.append(text("span", row.label));
   show();
   if (openHunks.has(key)) fetch();
-  item.append(button, edit, pre, askAnchor(session, { kind: "file", turn: index, root: file.root, path: file.path }, `the file ${file.path}`));
+  item.append(button, edit, pre, more, askAnchor(session, { kind: "file", turn: index, root: file.root, path: file.path }, `the file ${file.path}`));
+  return item;
+}
+
+// "Open full diff": the turn's whole diff in the terminal column (`diff.ts`).
+function fullDiffRow(session: string, index: number): HTMLElement {
+  const item = document.createElement("li");
+  item.append(pressable(text("button", "Open full diff", "evidence-edit"), false, () => diffRequest.open(session, index)));
   return item;
 }
 
@@ -157,6 +177,7 @@ export function evidenceElement(session: string, index: number, turn: Facts, { o
   list.className = "evidence-rows";
   list.append(
     ...evidenceRows(facts).map((row) => (row.kind === "check" ? checkRow(session, row) : row.file ? fileRow(session, index, row) : text("li", row.label, "external"))),
+    ...(facts.files?.files.length ? [fullDiffRow(session, index)] : []),
   );
   const show = () => (openLines.has(key) ? list.removeAttribute("hidden") : list.setAttribute("hidden", ""));
   const button = pressable(document.createElement("button"), openLines.has(key), () => {

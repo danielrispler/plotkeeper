@@ -9,6 +9,7 @@ import { startWatching } from "./answer.js";
 import { openAsk } from "./ask.js";
 import { placeBar, watchBar } from "./bar.js";
 import { markShown, showCards } from "./cards.js";
+import { diffRequest, newestDiff } from "./diff.js";
 import { element, invoke, listen } from "./dom.js";
 import { type Actions, doctorEntries, newestUnseen, nextNeedsYou, paletteEntries, run, stepLine, stepSession, windowBinding } from "./keys.js";
 import { hover, realClock, shownGate } from "./hover.js";
@@ -194,6 +195,12 @@ const actions: Actions = {
   "studio::SelectNext": () => moveInList(1),
   "studio::SelectPrevious": () => moveInList(-1),
   "studio::Answer": (n) => answer(Number(n)),
+  // The selected session's newest turn's whole diff (danielrispler/plotkeeper#131); none for an agent without trees.
+  "studio::OpenFullDiff": () => {
+    const session = studio.selection?.session;
+    const turn = session ? newestDiff(session.turns, session.capabilities) : null;
+    if (session && turn !== null) diffRequest.open(session.id, turn);
+  },
   "studio::NewSession": () => void showPicker(),
   "studio::NewTerminal": () => void showPicker("terminal"),
   // The main checkout's branch picker (#95).

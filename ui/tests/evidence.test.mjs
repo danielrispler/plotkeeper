@@ -4,6 +4,9 @@ import assert from "node:assert/strict";
 import { El } from "./dom.mjs";
 
 globalThis.document = { createElement: (tag) => new El(tag), getElementById: () => new El("div") };
+const { diffRequest } = await import("../../dist/diff.js");
+const diffOpens = [];
+diffRequest.open = (session, turn) => diffOpens.push([session, turn]);
 const { evidenceLine, evidenceRows, evidenceElement, hasEvidence } = await import("../../dist/evidence.js");
 
 const file = (path, added, removed, extra = {}) => ({ root: "/r", path, from: null, added, removed, ...extra });
@@ -139,7 +142,11 @@ test("a file row opens its hunk in place, opens the editor at the first changed 
   await new Promise((resolve) => setTimeout(resolve));
   assert.deepEqual(calls[0], ["turn_file_hunk", { session: "s2", turn: 7, root: "/r", path: "a.rs", from: null }]);
   assert.match(row.find("pre")[0].text, /\+b/);
-  assert.match(row.find("pre")[0].text, /… 12 more lines/);
+  assert.doesNotMatch(row.find("pre")[0].text, /more lines/);
+  // "12 more lines" opens the turn's whole diff (#131).
+  const more = row.find("button").find((b) => /12 more lines/.test(b.text));
+  more.listeners.click();
+  assert.deepEqual(diffOpens.at(-1), ["s2", 7]);
   assert.ok(!row.find("pre")[0].hasAttribute("hidden"));
   // Every other node is the same object, and every other row keeps its state.
   assert.ok(same(rail.childNodes, before));
@@ -176,4 +183,12 @@ test("a binary file's hunk says so and a hunk that cannot be read says that", as
   gone.find("button")[0].listeners.click();
   await new Promise((resolve) => setTimeout(resolve));
   assert.match(gone.find("pre")[0].text, /could not be read/);
+});
+
+test("the opened line offers the full diff only when the turn has files", () => {
+  const line = evidenceElement("s9", 1, { files: files([file("a.rs", 1, 0)]), checks: [] }, { only: "all" });
+  const open = line.find("button").find((b) => b.text === "Open full diff");
+  open.listeners.click();
+  assert.deepEqual(diffOpens.at(-1), ["s9", 1]);
+  assert.equal(evidenceElement("s9", 2, { files: null, checks: [check("cargo test", "passed")] }, { only: "all" }).find("button").some((b) => b.text === "Open full diff"), false);
 });

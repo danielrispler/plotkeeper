@@ -110,7 +110,7 @@ fn ask_facts(
     Ok(studio.lock().unwrap().ask_facts(&session, &anchor, &log))
 }
 
-/// A file's hunk of turn `turn` (danielrispler/plotkeeper#114): `git diff` between the turn's two trees of worktree
+/// A file's hunk of turn `turn` (danielrispler/plotkeeper#114), whole for the diff pane (#131) when `all`: `git diff` between the turn's two trees of worktree
 /// `root`, off the studio's lock. `None` when the turn has no trees there, or `git` cannot read them.
 #[tauri::command(async)]
 fn turn_file_hunk(
@@ -119,6 +119,7 @@ fn turn_file_hunk(
     root: String,
     path: String,
     from: Option<String>,
+    all: Option<bool>,
     studio: State<Mutex<Studio>>,
 ) -> Option<studio_understanding::Hunk> {
     let (start, end) = studio.lock().unwrap().turn_trees(&session, turn, &root)?;
@@ -128,6 +129,7 @@ fn turn_file_hunk(
         end.as_deref(),
         &path,
         from.as_deref(),
+        all.unwrap_or(false),
     )
 }
 
