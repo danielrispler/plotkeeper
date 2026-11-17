@@ -3164,7 +3164,12 @@ impl Studio {
                 let due = match turn.files_asked {
                     None => true,
                     Some((_, true)) => false,
-                    Some((at, false)) => now.saturating_sub(at) >= turn_files::RUNNING_REFRESH_MS,
+                    // The worktree only changes through the agent's own events, so a turn still open is asked again only
+                    // once its session has had one since the last ask: a killed session's turn keeps its last result.
+                    Some((at, false)) => {
+                        now.saturating_sub(at) >= turn_files::RUNNING_REFRESH_MS
+                            && (ended || session.agent.last_event_at >= at)
+                    }
                 };
                 if !recent || !due || turn.trees.is_empty() {
                     continue;

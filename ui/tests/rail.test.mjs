@@ -137,3 +137,9 @@ test("the feed lists a check that is running or whose last run failed, and folds
   const lines = [line("passed", true, 5), line("failed", false, 5), line("running", null, null), line("ran", null, 5)];
   assert.deepEqual(shownChecks(lines).map((l) => l.command), ["failed", "running"]);
 });
+
+test("a check that failed and then passed on a retry has no row, and one that passed and then failed has its failure", () => {
+  const line = (command, passed) => ({ command, passed, started_at: 1, ended_at: 5, typical_ms: null, turn: 0 });
+  assert.deepEqual(shownChecks([line("cargo test", false), line("cargo test 2>&1 | tail", true)]), []);
+  assert.deepEqual(shownChecks([line("cargo test", true), line("cargo test", false), line("npm run check", false)]).map((l) => l.command), ["cargo test", "npm run check"]);
+});

@@ -176,6 +176,8 @@ fn a_running_turn_reports_its_files_so_far_and_is_asked_again_after_5_seconds() 
     studio.set_turn_files(&asks[0], Some(diff));
     assert_eq!(files(&studio).unwrap().files.len(), 1);
     assert!(ask(&mut studio, AT + 4_000).is_empty());
+    // Due after 5 seconds once the session has had an event since the ask.
+    studio.replay(&edit(3_000, "e2", "/w/repo/src/a.rs", None));
     assert_eq!(ask(&mut studio, AT + 7_500).len(), 1);
 }
 
@@ -290,4 +292,20 @@ fn an_unended_turn_older_than_the_window_is_not_diffed_again() {
     assert_eq!(studio.turn_diffs(AT + 20_000, 10).len(), 1);
     let eight_days = 8 * 24 * 60 * 60 * 1000;
     assert!(studio.turn_diffs(AT + eight_days, 10).is_empty());
+}
+
+#[test]
+fn an_unended_turn_is_asked_again_only_after_its_session_has_an_event() {
+    let mut studio = Studio::replayed([
+        prompt(json!({ ROOT: "s1" })),
+        edit(1_000, "e1", "/w/repo/src/a.rs", None),
+    ]);
+    assert_eq!(studio.turn_diffs(AT + 20_000, 10).len(), 1);
+    // The session was killed: nothing has happened since the ask, so the last result stands.
+    assert!(studio.turn_diffs(AT + 40_000, 10).is_empty());
+    assert!(studio.turn_diffs(AT + 60_000, 10).is_empty());
+    // A new edit makes it due again.
+    studio.replay(&edit(50_000, "e2", "/w/repo/src/b.rs", None));
+    assert_eq!(studio.turn_diffs(AT + 70_000, 10).len(), 1);
+    assert!(studio.turn_diffs(AT + 90_000, 10).is_empty());
 }

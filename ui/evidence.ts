@@ -98,9 +98,9 @@ function checkRow(session: string, row: EvidenceRow): HTMLElement {
 }
 
 const openHunks = new Set<string>();
-// A hunk read once its turn ended is final. One read of a turn still open is kept for the redraws of that opening only, and a turn
-// that ended since is read again.
-const hunks = new Map<string, { hunk: Hunk | null; ended: boolean }>();
+// A hunk read once its turn ended is final. One read of a turn still open is kept for the redraws of that opening only, while the
+// file's line counts stay as they were at the read, and a turn that ended since is read again.
+const hunks = new Map<string, { hunk: Hunk | null; ended: boolean; added: number | null; removed: number | null }>();
 
 // A file's row: its label, which opens the real hunk between the turn's two trees under it, with "Open in editor" at its
 // first changed line. Only this row changes.
@@ -114,7 +114,8 @@ export function fileRow(session: string, index: number, row: EvidenceRow, scope 
   // What is kept of its hunk: final, or the read of an open turn while the turn is still open.
   const kept = () => {
     const entry = hunks.get(key);
-    return entry && (entry.ended || !ended) ? entry : undefined;
+    const same = entry && entry.added === file.added && entry.removed === file.removed;
+    return entry && (entry.ended || (!ended && same)) ? entry : undefined;
   };
   const pre = text("pre", kept() ? hunkText(kept()!.hunk, false) : "", "evidence-hunk");
   const edit = pressable(document.createElement("button"), false, () => {
@@ -141,7 +142,7 @@ export function fileRow(session: string, index: number, row: EvidenceRow, scope 
     invoke("hunk_opened", { session, turn: index }).catch((e) => console.warn(e));
     invoke<Hunk | null>("turn_file_hunk", { session, turn: index, root: file.root, path: file.path, from: file.from })
       .then((h) => {
-        hunks.set(key, { hunk: h, ended });
+        hunks.set(key, { hunk: h, ended, added: file.added, removed: file.removed });
         pre.textContent = hunkText(h, false);
         left(h);
       })

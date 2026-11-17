@@ -410,9 +410,18 @@ function drawNow(session: Session | null, latest: Turn | null): Now | null {
   return now;
 }
 
-// The checks the feed lists under a turn: one still running and one whose last run failed. A check that passed folds into the
-// evidence line's count (danielrispler/plotkeeper#102, story 20).
-export const shownChecks = (lines: CheckLine[]): CheckLine[] => lines.filter((line) => line.ended_at === null || line.passed === false);
+// What names "the same check" across runs: the command's first line up to any pipe or output redirection, as the typical
+// durations group them in core (`check_key`), so a retry of `cargo test 2>&1 | tail` is the same check.
+const checkKey = (command: string): string => command.split("\n")[0].split("|")[0].replace(/2>&1/g, "").split(/\s+/).filter(Boolean).join(" ");
+
+// The checks the feed lists under a turn: one still running and one whose last run failed. A check that passed, or that
+// failed and then passed on a retry, folds into the evidence line's count (danielrispler/plotkeeper#102, story 20).
+// `lines` run oldest first, so the last of a check's runs is its latest.
+export const shownChecks = (lines: CheckLine[]): CheckLine[] => {
+  const latest = new Map<string, CheckLine>();
+  for (const line of lines) latest.set(checkKey(line.command), line);
+  return lines.filter((line) => latest.get(checkKey(line.command)) === line && (line.ended_at === null || line.passed === false));
+};
 
 // A check line: its outcome, its command, and how long it took or, while it runs, its time against
 // its typical time. No colour, as colour is only for "needs you".

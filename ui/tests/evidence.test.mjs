@@ -221,3 +221,24 @@ test("an open turn's hunk is read again at each opening and once the turn ended,
   await settle();
   assert.equal(reads, 3);
 });
+
+test("a redraw of an open turn's open hunk reads it again when the file's counts changed, and not when they did not", async () => {
+  let reads = 0;
+  globalThis.window = {
+    __TAURI__: { core: { invoke: async (command) => (command === "turn_file_hunk" ? { text: `read ${++reads}`, left_out: 0, binary: false, first_line: 1 } : null) } },
+  };
+  const settle = () => new Promise((resolve) => setTimeout(resolve));
+  const draw = (added) => fileRow("s4", 1, { kind: "file", label: "m.rs", file: file("m.rs", added, 0) }, "", false);
+  const first = draw(1);
+  first.find("button")[0].listeners.click();
+  await settle();
+  assert.equal(reads, 1);
+  const same = draw(1);
+  await settle();
+  assert.equal(reads, 1);
+  assert.match(same.find("pre")[0].text, /read 1/);
+  const grown = draw(2);
+  await settle();
+  assert.equal(reads, 2);
+  assert.match(grown.find("pre")[0].text, /read 2/);
+});
