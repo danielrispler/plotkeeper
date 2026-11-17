@@ -1,6 +1,6 @@
 // The window's small parts: the shell's calls, and the elements every region builds.
 
-import type { Step } from "./types.js";
+import type { Command, Commands, Step } from "./types.js";
 
 declare global {
   interface Window {
@@ -11,8 +11,9 @@ declare global {
   }
 }
 
-export const invoke = <T>(command: string, args?: Record<string, unknown>) =>
-  window.__TAURI__.core.invoke<T>(command, args);
+// Only a command of the map, and its reply's type comes from there (#144).
+export const invoke = <C extends Command>(command: C, args?: Record<string, unknown>) =>
+  window.__TAURI__.core.invoke<Commands[C]>(command, args);
 export const listen = <T>(event: string, handler: (payload: T) => void) =>
   window.__TAURI__.event.listen<T>(event, (e) => handler(e.payload));
 

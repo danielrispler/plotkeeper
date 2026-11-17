@@ -34,3 +34,6 @@ jobs:
       - run: npm ci
       # The same command an agent runs locally (package.json, `check`).
       - run: npm run check
+      # Every snap fixture rendered in the runner's Chrome; it fails on an uncaught page error. Left out of `check`,
+      # which stays fast for agents running it in parallel (#144).
+      - run: npm run snap:all

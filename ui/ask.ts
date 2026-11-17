@@ -65,7 +65,7 @@ function askBox(session: string, anchor: Anchor, what: string): HTMLDetailsEleme
   // Read at each opening, as a running turn's facts change.
   const read = () => {
     if (!recorded.hasChildNodes()) recorded.replaceChildren(text("p", "Reading what was recorded…", "asking"));
-    invoke<Facts | null>("ask_facts", { session, anchor })
+    invoke("ask_facts", { session, anchor })
       .then((facts) => {
         const sections = (facts?.sections ?? []).map((s) => {
           const list = document.createElement("ul");
@@ -79,7 +79,7 @@ function askBox(session: string, anchor: Anchor, what: string): HTMLDetailsEleme
   };
   const hunk = text("pre", "", "evidence-hunk");
   const showHunk = (a: Extract<Anchor, { kind: "file" }>) => {
-    invoke<Hunk | null>("turn_file_hunk", { session, turn: a.turn, root: a.root, path: a.path, from: a.from ?? null })
+    invoke("turn_file_hunk", { session, turn: a.turn, root: a.root, path: a.path, from: a.from ?? null })
       .then((h) => {
         hunk.textContent = hunkText(h);
         recorded.append(text("p", "The hunk", "label"), hunk);
@@ -100,7 +100,7 @@ function askBox(session: string, anchor: Anchor, what: string): HTMLDetailsEleme
     send.disabled = true;
     reply.replaceChildren(text("p", "Asking…", "asking"));
     try {
-      const answer = await invoke<string>("ask_anchor", { session, anchor, what, question });
+      const answer = await invoke("ask_anchor", { session, anchor, what, question });
       const cwd = studio.listed.find((s) => s.id === session)?.cwd ?? null;
       // The recorded facts are above; the answer is the model's reading of them.
       reply.replaceChildren(text("p", "Interpretation", "label"), rendered("div", answer, "", cwd));
@@ -166,7 +166,7 @@ function whyNotBox(session: string, turn: number): HTMLElement {
     go.disabled = true;
     out.replaceChildren(text("p", "Reading what was recorded…", "asking"));
     try {
-      const result = await invoke<{ facts: Facts; reasons: string | null }>("ask_why_not", { session, turn, name });
+      const result = await invoke("ask_why_not", { session, turn, name });
       const cwd = studio.listed.find((s) => s.id === session)?.cwd ?? null;
       out.replaceChildren(whyNotElement(name, result, cwd));
     } catch (e) {

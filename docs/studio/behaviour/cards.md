@@ -57,7 +57,7 @@ When the studio's window shows no life, the hook returns at once with no decisio
 
 The card follows the run. The core matches the agent's retry by command and folder:
 
-- **Running** at the `PreToolUse` of the same command and folder, with the time since it started. Live output stays in the session's terminal.
+- **Running** at the `PreToolUse` of the same command and folder, with the time since it started, which counts up each second while the card shows. Live output stays in the session's terminal.
 - **Finished** at its end, with its exit code and the last 40 lines of its output, read as a failed check's are.
 - **Running in background** when the agent backgrounded the call, until the wake-up that names its task, which finishes the card. The exit code of a background run is not known.
 - **Blocked again** when a new `PermissionDenied` of the same command follows the Allow, or, for a Running card, when it is that retry's own call that was denied. A same-command block by another call gets a card of its own. It is the same card, with Allow and Decline once more, and the session needs you again.

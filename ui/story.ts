@@ -33,8 +33,6 @@ import {
   type AskKind,
   type BlockedCommand,
   type CheckLine,
-  type Losses,
-  type Workspaces,
   type Question,
   type Selection,
   type SessionState,
@@ -172,7 +170,7 @@ let banner: Banner | null = null;
 function summarize(id: string) {
   if (agentSummaries.has(id) || writing.has(id) || failed.has(id)) return;
   writing.add(id);
-  invoke<string | null>("agent_summary", { agentId: id })
+  invoke("agent_summary", { agentId: id })
     .then((summary) => {
       if (summary === null) return void failed.add(id);
       agentSummaries.set(id, summary);
@@ -368,7 +366,7 @@ export function oneAtATime(run: (id: string) => Promise<void>): (id: string) => 
 }
 
 const askSummary = oneAtATime((id) =>
-  invoke<TurnSummary | null>("turn_summary", { id })
+  invoke("turn_summary", { id })
     .then((summary) => {
       summaries.set(id, summary);
       if (summary) seedQuiz(id, summary.taps);
@@ -500,8 +498,8 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
   if (quiz && turn?.id) {
     const id = turn.id;
     const deps = {
-      record: (tap: Tap) => void invoke<TurnSummary | null>("quiz_tap", { id, tap }).catch((e) => console.warn(e)),
-      explain: () => invoke<string>("ask", { session: session.id, item: quizItem(quiz), question: "I did not get this yet. Explain more." }),
+      record: (tap: Tap) => void invoke("quiz_tap", { id, tap }).catch((e) => console.warn(e)),
+      explain: () => invoke("ask", { session: session.id, item: quizItem(quiz), question: "I did not get this yet. Explain more." }),
       line: bodyLine,
       trial,
     };
@@ -539,7 +537,7 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
     else if (fetched !== undefined) fill([fetched]);
     const fetch = () => {
       if (latest || replies.has(key)) return;
-      invoke<string | null>("turn_reply", { id: session.id, index })
+      invoke("turn_reply", { id: session.id, index })
         .then((reply) => {
           replies.set(key, reply ?? "");
           fill([reply ?? ""]);
@@ -714,9 +712,9 @@ export async function askDelete(session: Session) {
 // The branch is git's, read before the worktree goes: a session with no turn yet has none in its
 // transcript.
 export async function removeWorktree(worktree: string, project: string) {
-  const { tasks } = await invoke<Workspaces>("workspaces", { project });
+  const { tasks } = await invoke("workspaces", { project });
   const branch = tasks.find((task) => task.path === worktree)?.branch ?? null;
-  const losses = await invoke<Losses | null>("remove_task", { project, path: worktree, confirmed: false });
+  const losses = await invoke("remove_task", { project, path: worktree, confirmed: false });
   if (losses) {
     const list = (title: string, lines: string[]) => {
       if (!lines.length) return [];

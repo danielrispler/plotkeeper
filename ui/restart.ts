@@ -50,7 +50,7 @@ export const offerBuilds = () =>
 // no row. "Fix it" points its `CLAUDE_CODE_PLUGIN_DIRS` at the data folder's link, after a backup.
 // The bar is shared, so an upgrade offer already on it wins; a link that failed has no fix.
 export async function offerPluginFix() {
-  const problem = await invoke<string | null>("plugin_setup").catch((e) => {
+  const problem = await invoke("plugin_setup").catch((e) => {
     if (element("restart").hidden) say(`${e}`, [["Dismiss", () => say(null)]]);
     return null;
   });
@@ -66,7 +66,7 @@ export async function offerPluginFix() {
 // The same for agy's copy of the studio plugin (#49): agy copies it on install, so a changed plugin
 // or a moved `studio-hook` needs an install again.
 export async function offerAgyPluginFix() {
-  const problem = await invoke<string | null>("agy_plugin_setup").catch(() => null);
+  const problem = await invoke("agy_plugin_setup").catch(() => null);
   if (!problem || !element("restart").hidden) return;
   const fix = () =>
     invoke("fix_agy_plugin_setup").then(
@@ -76,7 +76,7 @@ export async function offerAgyPluginFix() {
   say(problem, [["Install it", fix], ["Not now", () => say(null)]]);
 }
 
-const plan = async () => invoke<Revive[]>("revival", { terms: await list() });
+const plan = async () => invoke("revival", { terms: await list() });
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 const running = (r: Revive) => `${label(r)} is running ${r.busy}`;
 

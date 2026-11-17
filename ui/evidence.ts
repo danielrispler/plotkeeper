@@ -55,8 +55,8 @@ const openLines = new Set<string>();
 const openOutputs = new Set<string>();
 const outputs = new Map<string, string>();
 
-type Output = { exit_code: number | null; tail: string };
-const outputText = (output: Output) => `${output.exit_code === null ? "No exit code" : `exit code ${output.exit_code}`}\n${output.tail}`;
+export type CheckOutput = { exit_code: number | null; tail: string };
+const outputText = (output: CheckOutput) => `${output.exit_code === null ? "No exit code" : `exit code ${output.exit_code}`}\n${output.tail}`;
 
 // A failed check's row: its label, which opens its exit code and the output's tail under it. Only this row changes.
 function checkRow(session: string, row: EvidenceRow): HTMLElement {
@@ -72,7 +72,7 @@ function checkRow(session: string, row: EvidenceRow): HTMLElement {
   const fetch = () => {
     if (outputs.has(key)) return;
     pre.textContent = "Reading the output…";
-    invoke<Output | null>("check_output", { session, agent: row.agent, call: row.call })
+    invoke("check_output", { session, agent: row.agent, call: row.call })
       .then((output) => {
         outputs.set(key, output ? outputText(output) : "No output was recorded.");
         pre.textContent = outputs.get(key)!;
@@ -140,7 +140,7 @@ export function fileRow(session: string, index: number, row: EvidenceRow, scope 
     if (kept()) return;
     pre.textContent = "Reading the hunk…";
     invoke("hunk_opened", { session, turn: index }).catch((e) => console.warn(e));
-    invoke<Hunk | null>("turn_file_hunk", { session, turn: index, root: file.root, path: file.path, from: file.from })
+    invoke("turn_file_hunk", { session, turn: index, root: file.root, path: file.path, from: file.from })
       .then((h) => {
         hunks.set(key, { hunk: h, ended, added: file.added, removed: file.removed });
         pre.textContent = hunkText(h, false);

@@ -40,7 +40,7 @@ function retestRow(retest: Retest, quiz: NonNullable<Retest["quiz"]>): HTMLEleme
   answeredHere.add(retest.id);
   const region = quizRegion(retest.id, quiz, [], {
     record: (tap) => void invoke("quiz_tap", { id: retest.id, tap }).catch((e) => console.warn(e)),
-    explain: () => invoke<string>("ask", { session: retest.session_id, item: quizItem(quiz), question: "I did not get this yet. Explain more." }),
+    explain: () => invoke("ask", { session: retest.session_id, item: quizItem(quiz), question: "I did not get this yet. Explain more." }),
     line: () => document.createElement("li"),
     trial: true,
   });

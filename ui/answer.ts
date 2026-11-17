@@ -48,7 +48,7 @@ let blockedRequests: BlockedRequest[] = [];
 export const blockedRequestFor = (call: string) => blockedRequests.find((r) => r.tool_use_id === call) ?? null;
 
 const watch = (session: string | null) =>
-  invoke<Ask | null>("watch", { session }).catch((e) => (console.warn(e), null));
+  invoke("watch", { session }).catch((e) => (console.warn(e), null));
 
 // The view watched last, so a redraw of the same one asks the shell nothing.
 let watched = "";
@@ -124,7 +124,7 @@ export async function sendBlockedAnswer(session: string, request: BlockedRequest
   blockedRequests = blockedRequests.filter((r) => r.nonce !== request.nonce);
   redraw();
   try {
-    return await invoke<BlockedAnswered>("answer_blocked_command", { session, nonce: request.nonce, decision });
+    return await invoke("answer_blocked_command",{ session, nonce: request.nonce, decision });
   } catch (e) {
     console.warn(e);
     if (!blockedRequests.some((r) => r.nonce === request.nonce)) blockedRequests = [...blockedRequests, request];

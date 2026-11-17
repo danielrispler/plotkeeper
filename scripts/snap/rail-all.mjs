@@ -1,11 +1,11 @@
-// `npm run snap:rail -- <folder>`: renders every rail fixture (scripts/snap/rail-fixtures.mjs) at 1728, 1100 and 864 px wide
+// `npm run snap:rail -- <folder>`: renders every rail fixture (scripts/snap/rail-fixtures.ts) at 1728, 1100 and 864 px wide
 // into the folder, one PNG each, named <fixture>-<width>.png. At 864 px the rail is an overlay, so it is also rendered
 // open: <fixture>-864-open.png. Run `npm run build` first. Stops at the first run that fails.
 import { spawnSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { railStates } from "./rail-fixtures.mjs";
+import { railStates } from "./rail-fixtures.ts";
 
 const [folder] = process.argv.slice(2);
 if (!folder) {

@@ -1,5 +1,5 @@
 // `npm run snap -- <fixture> <out.png>`: renders the studio UI from dist/ against a stub Tauri API
-// fed by a fixture (scripts/snap/fixtures.mjs) to a PNG, with headless Chrome. Run `npm run build` first.
+// fed by a fixture (scripts/snap/fixtures.ts) to a PNG, with headless Chrome. Run `npm run build` first.
 // Chrome never opens a window, so it takes no focus. Set CHROME to a Chrome binary to override the default.
 import { spawn } from "node:child_process";
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -7,13 +7,13 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fixtures } from "./fixtures.mjs";
+import { fixtures } from "./fixtures.ts";
 import { consoleLines, failed, snapPage } from "./page.mjs";
 
 const [name, out] = process.argv.slice(2);
 // Optional, from the environment: SNAP_SIZE=1728x1117 is the window's size (default 1900x900), and SNAP_BODY=rail-open,list-open
 // are classes put on <body>, such as the rail's overlay open. A fixture's `snapScript` runs once the UI has drawn: what it logs
-// is printed, and a line that starts `snap:fail` makes this exit non-zero.
+// is printed, and a line that starts `snap:fail`, or an uncaught error in the page, makes this exit non-zero.
 const [width, height] = (process.env.SNAP_SIZE ?? "1900x900").split("x");
 // SNAP_SCALE=2 draws at twice the pixel density (the PNG is twice as wide).
 const scale = process.env.SNAP_SCALE ?? "1";

@@ -53,5 +53,6 @@ export const consoleLines = (stderr) =>
     return match ? [match[1].replace(/\\"/g, '"').replace(/\\n/g, "\n")] : [];
   });
 
-// Whether the run failed: a log line that starts `snap:fail`.
-export const failed = (lines) => lines.some((line) => line.startsWith("snap:fail"));
+// Whether the run failed: a log line that starts `snap:fail`, or an uncaught exception or unhandled rejection in the page,
+// which Chrome logs as `Uncaught …` (#144).
+export const failed = (lines) => lines.some((line) => line.startsWith("snap:fail") || line.startsWith("Uncaught"));
