@@ -313,21 +313,33 @@ fn would_conflict(dir: &Path, default: &str) -> bool {
 /// changed or untracked and that the incoming commits `HEAD..default` also touch (#164). Unrelated
 /// changes and untracked files elsewhere do not count.
 fn would_overwrite(dir: &Path, default: &str) -> bool {
-    let Ok(incoming) = git(dir, &["diff", "--name-only", &format!("HEAD..{default}")]) else {
+    // `-z` on both: raw, unquoted paths, so a non-ASCII name compares equal on both sides.
+    let Ok(incoming) = run(
+        dir,
+        &["diff", "--name-only", "-z", &format!("HEAD..{default}")],
+    ) else {
         return false;
     };
-    if incoming.is_empty() {
+    let Ok(status) = run(dir, &["status", "--porcelain", "-z", "-uall"]) else {
+        return false;
+    };
+    if !incoming.status.success() || !status.status.success() {
         return false;
     }
-    let Ok(status) = git(dir, &["status", "--porcelain", "-uall"]) else {
-        return false;
-    };
-    let changed: Vec<&str> = status
-        .lines()
-        .filter_map(|line| line.get(3..))
-        .map(|path| path.rsplit(" -> ").next().unwrap_or(path).trim_matches('"'))
-        .collect();
-    incoming.lines().any(|path| changed.contains(&path))
+    let status = String::from_utf8_lossy(&status.stdout);
+    // Entries are "XY path"; a rename or copy is followed by its other path as an entry of its own.
+    let mut changed: Vec<&str> = Vec::new();
+    let mut entries = status.split('\0');
+    while let Some(entry) = entries.next() {
+        let Some(path) = entry.get(3..) else { continue };
+        changed.push(path);
+        if entry.starts_with(['R', 'C']) || entry[1..2].starts_with(['R', 'C']) {
+            changed.extend(entries.next());
+        }
+    }
+    String::from_utf8_lossy(&incoming.stdout)
+        .split('\0')
+        .any(|path| !path.is_empty() && changed.contains(&path))
 }
 
 /// The operation in progress in the workspace at `dir`, from the files its repository keeps while one is stopped.
@@ -536,13 +548,6 @@ fn status_line(plugin: &Path) -> String {
     let wrapper = plugin.with_file_name("workbench").join("statusline.sh");
     let quoted = format!("'{}'", wrapper.display().to_string().replace('\'', r"'\''"));
     serde_json::json!({ "statusLine": { "type": "command", "command": quoted } }).to_string()
-}
-
-/// The plan's usage (danielrispler/Falinks#481; danielrispler/Falinks#461, decision 19): the `rate_limits` of the newest `*.json` snapshot in
-/// `dir`, where Daniel's status line command saves its stdin, one file per session, by temp file and
-/// rename. `None` when there is no snapshot, it has no limits yet, or it does not parse.
-pub fn plan_usage(dir: &Path) -> Option<serde_json::Value> {
-    usage::newest_snapshot(dir)?.0.get("rate_limits").cloned()
 }
 
 /// The `context_window` of session `id`'s status line snapshot in `dir`: its window size, current

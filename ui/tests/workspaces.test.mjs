@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { pullRefusal, branchBlocked, branchOptions, fetchNote, gitTokens, outsideName, projectGroups, sidebarOrder, sessionProjectName, workspaceRows, workspaceToken } from "../../dist/workspaces.js";
+import { pullPlan, pullRefusal, branchBlocked, branchOptions, fetchNote, gitTokens, outsideName, projectGroups, sidebarOrder, sessionProjectName, workspaceRows, workspaceToken } from "../../dist/workspaces.js";
 import { throttle } from "../../dist/throttle.js";
 
 const ui = new URL("../", import.meta.url);
@@ -317,7 +317,7 @@ test("Pull is refused, with the reason as its title, for uncommitted changes, a 
 
 test("Pull main is a palette action that pulls every project, then reads the workspaces again (#164)", () => {
   assert.match(read("main.ts"), /"studio::PullMain": \(\) => void pullAll\(\)/);
-  assert.match(read("workspaces.ts"), /async function pull\(paths[^]*paths\.map[^]*invoke\("pull_main"[^]*readWorkspaces\(true\)[^]*export async function pullAll[^]*pull\(paths\)/);
+  assert.match(read("workspaces.ts"), /async function pull\(paths[^]*paths\.map[^]*invoke\("pull_main"[^]*readAfterNow\(\)[^]*export async function pullAll[^]*pull\(paths\)/);
 });
 
 test("the palette's Pull main skips a project the button would refuse, and shows why in its group (#164)", () => {
@@ -327,8 +327,25 @@ test("the palette's Pull main skips a project the button would refuse, and shows
   assert.match(pullRefusal(workspaces, on(), [{ cwd: "/r", state: "needs_you" }]), /needs you/);
   assert.match(pullRefusal(workspaces, on({ upstream: [1, 3] }), []), /diverged/);
   assert.match(pullRefusal(workspaces, on({ would_overwrite: true }), []), /overwritten/);
-  // Nothing behind, or no state read: only a session in the way refuses.
-  assert.equal(pullRefusal(workspaces, null, []), null);
-  assert.match(pullRefusal(workspaces, null, [{ cwd: "/r", state: "running" }]), /running/);
-  assert.match(read("workspaces.ts"), /async function pull\(paths[^]*pullRefusal\([^]*pull_main/);
+  // Ahead only is not diverged.
+  assert.equal(pullRefusal(workspaces, on({ upstream: [2, 3] }), []) !== null, true);
+  assert.equal(pullRefusal(workspaces, on({ upstream: [2, 0] }), []), null);
+  // With the default branch not checked out the pull only moves the ref: no session or overwrite refusal, git's own stands.
+  const off = { on_default: false, would_overwrite: true };
+  assert.equal(pullRefusal(workspaces, on(off), [{ cwd: "/r", state: "running" }]), null);
+  assert.equal(pullRefusal(workspaces, null, [{ cwd: "/r", state: "running" }]), null);
+  assert.match(read("workspaces.ts"), /async function pull\(paths[^]*pullPlan\([^]*pull_main/);
+});
+
+test("Pull main skips a project not behind, pulls one ahead only, and refuses one that is both", () => {
+  const on = (upstream, extra) => ({ branch: "main", upstream, changed: 0, main_behind: null, on_default: true, would_conflict: false, operation: null, ...extra });
+  const running = [{ cwd: "/r", state: "running" }];
+  // Up to date with a running session, and ahead only: nothing to pull, nothing said.
+  assert.deepEqual(pullPlan(workspaces, on([0, 0]), running), { run: false, refused: null });
+  assert.deepEqual(pullPlan(workspaces, on([2, 0]), []), { run: false, refused: null });
+  assert.deepEqual(pullPlan(workspaces, on([0, 2]), []), { run: true, refused: null });
+  assert.match(pullPlan(workspaces, on([1, 2]), []).refused, /diverged/);
+  assert.match(pullPlan(workspaces, on([0, 2]), running).refused, /running/);
+  // Default branch not checked out: the pull runs whatever the sessions and files.
+  assert.deepEqual(pullPlan(workspaces, on([0, 2], { on_default: false, would_overwrite: true }), running), { run: true, refused: null });
 });

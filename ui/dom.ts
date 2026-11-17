@@ -27,7 +27,7 @@ export function text(tag: string, content: string, className = ""): HTMLElement 
 
 // `node` with `full` as its native hover title: the full text of what the layout cuts (#162). No title for an empty text,
 // which would hide the tooltip of the element under it.
-export function hover<T extends HTMLElement>(node: T, full: string | null | undefined): T {
+export function fullTitle<T extends HTMLElement>(node: T, full: string | null | undefined): T {
   if (full) node.title = full;
   return node;
 }

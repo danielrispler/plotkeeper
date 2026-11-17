@@ -86,3 +86,19 @@ test("the rail header shows the logo, titled with the model line", async () => {
   assert.equal(mark.childNodes[0].getAttribute("data-logo"), "claude");
   assert.equal(mark.childNodes[0].title, "Claude · Opus 5.5");
 });
+
+test("the rail header's logo for agy keeps the note that it has no context share, after the model line", async () => {
+  const { showView } = await import("../../dist/story.js");
+  const els = new Map();
+  const get = (id) => els.get(id) ?? (els.set(id, make("div")), els.get(id));
+  globalThis.document = { ...globalThis.document, getElementById: get };
+  const session = { ...agy, transcript: agy.transcript, permission_mode: null, work: {}, agents: [], turns: [], checks: [], cleared: [], prompts: [], model: "gemini-3-flash" };
+  try {
+    showView({ session, agent: null });
+  } catch {
+    // The rest of the rail needs more of a page than the stand-in has; the header is drawn first.
+  }
+  const title = get("mark").childNodes[0].title;
+  assert.match(title, /no context share/);
+  assert.ok(title.length > "no context share".length);
+});

@@ -6,8 +6,8 @@
 // questions, brief and cards in one block.
 
 import { modelLine, reports } from "./capabilities.js";
-import { logo, logoKey } from "./logos.js";
-import { age, code, element, hover, invoke, pressable, prose, text } from "./dom.js";
+import { logo, logoKey, logoTitles } from "./logos.js";
+import { age, code, element, fullTitle, invoke, pressable, prose, text } from "./dom.js";
 import { select } from "./selection.js";
 import { askAnchor } from "./ask.js";
 import { rendered } from "./markdown.js";
@@ -80,8 +80,10 @@ export function showView(selected: Selection | null) {
   element("block").textContent = (state === "needs_you" ? blockKind(open, openDecision()) : null) ?? "";
   // A subagent runs in its session's mode.
   element("mode").textContent = reports(session, "permission_mode") ? modeText(session.permission_mode) : "";
-  // The agent's logo, titled with its model line when it has one (#158).
-  element("mark").replaceChildren(logo(logoKey(session), modelLine(session) || undefined));
+  // The agent's logo, titled with its model line when it has one (#158); agy's keeps its note that it has no context share.
+  const key = logoKey(session);
+  const title = [modelLine(session), key === "agy" ? logoTitles.agy : ""].filter(Boolean).join("\n");
+  element("mark").replaceChildren(logo(key, title || undefined));
   element("session-name").textContent = sessionName(session);
   // The top bar's header (danielrispler/plotkeeper#127) says the same state and name.
   element("bar-state").textContent = element("state").textContent;
@@ -201,7 +203,7 @@ function historyElement(session: string, entry: HistoryEntry): HTMLElement {
   button.classList.add("subagent");
   const lines = [text("span", entry.purpose, "asked"), ...(entry.asked ? [prose("span", entry.asked)] : [])];
   button.append(...lines, prose("span", entry.result), text("span", entry.details, "kind"));
-  hover(button, [entry.purpose, entry.asked, entry.result, entry.details].filter(Boolean).join(" · "));
+  fullTitle(button, [entry.purpose, entry.asked, entry.result, entry.details].filter(Boolean).join(" · "));
   const item = document.createElement("li");
   item.append(button, askAnchor(session, { kind: "subagent", agent: entry.agent }, `the subagent ${entry.purpose}`));
   return item;
@@ -451,7 +453,7 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
   const key = `${session.id} ${index ?? "rest"}`;
   // While running, "now" holds what Daniel asked.
   if (turn && !(now && session.state === "running")) {
-    const prompt = hover(text("p", turn.prompt || "No prompt", "prompt"), turn.prompt || "No prompt");
+    const prompt = fullTitle(text("p", turn.prompt || "No prompt", "prompt"), turn.prompt || "No prompt");
     node.append(...(now?.asked ? [text("p", "You asked", "label")] : []), prompt);
   }
   if (now?.soFar) node.append(text("p", "So far this turn", "label"));
@@ -566,8 +568,8 @@ export function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
     button.setAttribute("aria-expanded", String(open));
     button.append(
       ...(line.unanswered ? [text("span", "●", "mark quiz-open")] : []),
-      hover(text("span", line.prompt, "prompt"), turn.prompt.trim() || line.prompt),
-      hover(text("span", line.headline ?? "", "headline-text"), line.headline),
+      fullTitle(text("span", line.prompt, "prompt"), turn.prompt.trim() || line.prompt),
+      fullTitle(text("span", line.headline ?? "", "headline-text"), line.headline),
       ...(line.failed ? [text("span", "✕", "mark check-failed")] : []),
     );
     if (line.unanswered) button.querySelector(".quiz-open")!.setAttribute("title", "A quiz is open");

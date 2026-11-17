@@ -5,7 +5,7 @@
 // session's workspace. Clicking a workspace offers a new session there and, for a task, Remove, with the
 // loss check of a session's Delete. Creating a task is here too, not in the new-session picker.
 
-import { element, hover, invoke, patch, pressable, text } from "./dom.js";
+import { element, fullTitle, invoke, patch, pressable, text } from "./dom.js";
 import { knownProjects, mainProject, onProjects, projects } from "./projects.js";
 import { drawSidebar, glyph, projectOpen } from "./list.js";
 import { newTask, showBranches, startLast } from "./picker.js";
@@ -68,14 +68,24 @@ export type Pull = { behind: number; refused: string | null };
 export type WorkspaceRow = { workspace: Workspace; name: string; facts: string; actions: string[]; landed: boolean; pull: Pull | null };
 
 // Why Pull main is refused for a main checkout now, or null: files would change under a session there, local main has
-// commits origin lacks (a fast-forward is never forced), or the incoming commits would overwrite changed files. Shared by
-// the button and the palette's action.
+// commits origin lacks (ahead and behind: a fast-forward is never forced), or the incoming commits would overwrite changed
+// files. Only with the default branch checked out: otherwise the pull only moves the ref and changes no files, and git's own
+// refusal stands. Shared by the button and the palette's action.
 export function pullRefusal(found: Workspaces, state: GitState | null, sessions: Pick<Session, "cwd" | "state">[]): string | null {
+  if (!state?.on_default) return null;
   const blocked = branchBlocked(found, sessions);
   if (blocked) return `Not now: ${blocked}`;
-  if (state?.on_default && state.upstream?.[0]) return "Local main has diverged from origin: it has commits origin lacks";
-  if (state?.would_overwrite) return "Uncommitted changes would be overwritten";
+  if (state.upstream?.[0] && state.upstream[1]) return "Local main has diverged from origin: it has commits origin lacks";
+  if (state.would_overwrite) return "Uncommitted changes would be overwritten";
   return null;
+}
+
+// What the palette's Pull main does with a project: nothing when its checked-out default branch is not behind origin, else
+// the refusal or a pull.
+export function pullPlan(found: Workspaces, state: GitState | null, sessions: Pick<Session, "cwd" | "state">[]): { run: boolean; refused: string | null } {
+  if (state?.on_default && !state.upstream?.[1]) return { run: false, refused: null };
+  const refused = pullRefusal(found, state, sessions);
+  return { run: !refused, refused };
 }
 
 // Pull main's button for the main checkout: only with its default branch checked out and behind origin.
@@ -230,9 +240,13 @@ const read = new Map<string, Workspaces>();
 const states = new Map<string, GitState | null>();
 // A project's latest error, git's or any other, shown in its group until the next one.
 const failures = new Map<string, string>();
+// A project's pull error: kept across reads until its next pull or fetch.
+const pullErrors = new Map<string, string>();
 let reading = false;
 // A forced read asked for while one runs: one more read follows it.
 let again = false;
+// Callers waiting for the read in flight to finish.
+let waiters: (() => void)[] = [];
 let readAt = 0;
 const opened = new Set<string>();
 
@@ -240,7 +254,7 @@ const opened = new Set<string>();
 export function keepProjects(paths: string[], ...maps: Map<string, unknown>[]) {
   for (const map of maps) for (const key of [...map.keys()]) if (!paths.includes(key)) map.delete(key);
 }
-const pruneRemoved = () => keepProjects(knownProjects(), read, failures, fetched);
+const pruneRemoved = () => keepProjects(knownProjects(), read, failures, pullErrors, fetched);
 
 // The first of `paths`, in project order, that `found` has: where the Git line looks with no selection.
 export const firstProject = (paths: string[], found: Map<string, unknown>): string | undefined => paths.find((path) => found.has(path));
@@ -255,7 +269,7 @@ export function workspaceSection(project: string, sessions: Pick<Session, "cwd" 
   const found = read.get(project);
   if (!found) return [];
   const rows = workspaceRows(found, allWorkspaces(found).map(({ path }) => states.get(path) ?? null), sessions);
-  const error = failures.get(project);
+  const error = failures.get(project) ?? pullErrors.get(project);
   const message = text("pre", error ?? "", "picker-error");
   message.dataset.key = "error";
   return [...rows.map((row) => workspaceRow(project, row)), creating(project), ...(error ? [message] : [])];
@@ -284,8 +298,8 @@ export function workspaceRow(project: string, { workspace, name, facts, actions,
   button.title = workspace.path;
   button.setAttribute("aria-expanded", String(opened.has(workspace.path)));
   const line = text("span", "", "l1");
-  line.append(hover(text("span", name, "name"), name));
-  if (facts) line.append(hover(text("span", facts, "facts"), facts));
+  line.append(fullTitle(text("span", name, "name"), name));
+  if (facts) line.append(fullTitle(text("span", facts, "facts"), facts));
   if (landed) line.append(glyph("idle", false, true));
   button.append(line);
   if (pull) {
@@ -438,11 +452,18 @@ export async function readWorkspaces(now = false) {
     touchShown();
   } finally {
     reading = false;
+    waiters.splice(0).forEach((wake) => wake());
   }
   if (again) {
     again = false;
     await readWorkspaces(true);
   }
+}
+
+// A read that starts after now: waits for any read in flight, and its deferred one, to finish, then reads.
+async function readAfterNow() {
+  while (reading) await new Promise<void>((wake) => waiters.push(wake));
+  await readWorkspaces(true);
 }
 
 // A project added or removed: every project's workspaces are read again at once.
@@ -498,6 +519,7 @@ export async function fetchNow() {
     await Promise.all(
       paths.map(async (project) => {
         try {
+          pullErrors.delete(project);
           await invoke("fetch_repository", { project });
           fetched.set(project, { at: Date.now(), error: null });
         } catch (e) {
@@ -524,18 +546,19 @@ export function watchWorkspaces() {
 // Pulls each of `paths`' main checkout (#164), then reads every workspace and each main checkout's git state again, so the
 // rows and the git line show the new distance. A pull that failed shows git's reason on its project's group, after that read.
 async function pull(paths: string[]) {
+  for (const project of paths) pullErrors.delete(project);
   const errors = await Promise.all(
     paths.map((project) => {
       const found = read.get(project);
-      const refused = found && pullRefusal(found, states.get(found.main.path) ?? null, studio.listed);
-      return refused ? Promise.resolve(refused) : invoke("pull_main", { project }).then(() => null, (e) => String(e));
+      const plan = found ? pullPlan(found, states.get(found.main.path) ?? null, studio.listed) : { run: true, refused: null };
+      return plan.run ? invoke("pull_main", { project }).then(() => null, (e) => String(e)) : Promise.resolve(plan.refused);
     }),
   );
-  await readWorkspaces(true);
+  await readAfterNow();
   paths.forEach((project, i) => {
     const found = read.get(project);
     if (found) touch(project, found.main.path);
-    if (errors[i]) failures.set(project, errors[i]);
+    if (errors[i]) pullErrors.set(project, errors[i]);
   });
   drawSidebar();
 }

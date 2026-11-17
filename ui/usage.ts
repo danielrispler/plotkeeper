@@ -2,7 +2,7 @@
 // usage in one shape, `AgentUsage`: its windows and when and from where they were read, or one line saying why it has none.
 // Each window has `used_percentage` (0 to 100) and `resets_at` (Unix seconds); a window past its reset is dropped. Times here
 // are Unix seconds.
-import { hover, invoke, text } from "./dom.js";
+import { fullTitle, invoke, text } from "./dom.js";
 import { logo, logoKey } from "./logos.js";
 
 type UsageWindow = { used_percentage: number; resets_at: number };
@@ -69,8 +69,8 @@ function ago(seconds: number): string {
 }
 
 // One agent's tile: its logo and name, then a bar per current window with the share used and its reset, and the data's age and
-// source. A failed read shows only its reason, never an old number.
-export function tile(usage: AgentUsage, now: number): HTMLElement {
+// source. A failed read shows only its reason, never an old number. While `reading`, the footer says so instead of an age.
+export function tile(usage: AgentUsage, now: number, reading = false): HTMLElement {
   const node = document.createElement("section");
   node.className = "usage-tile";
   const head = document.createElement("div");
@@ -78,7 +78,8 @@ export function tile(usage: AgentUsage, now: number): HTMLElement {
   head.append(logo(logoKey({ agent: usage.agent }), nameOf(usage.agent)), text("span", nameOf(usage.agent), "tile-name"));
   node.append(head);
   if (usage.reason !== null) {
-    node.append(hover(text("p", usage.reason, "tile-reason"), usage.reason));
+    node.append(fullTitle(text("p", usage.reason, "tile-reason"), usage.reason));
+    if (reading) node.append(text("p", "Reading…", "tile-foot"));
     return node;
   }
   for (const w of current(usage, now)) {
@@ -94,25 +95,43 @@ export function tile(usage: AgentUsage, now: number): HTMLElement {
     row.append(text("span", w.label, "window-name"), bar, text("span", `${share}%`, "window-share"), text("span", `resets in ${span(w.resets_at - now)}`, "window-resets"));
     node.append(row);
   }
-  if (usage.read_at !== null) {
+  if (reading) node.append(text("p", "Reading…", "tile-foot"));
+  else if (usage.read_at !== null) {
     const foot = [`as of ${ago(now - usage.read_at)}`, usage.source].filter(Boolean).join(" · ");
-    node.append(hover(text("p", foot, "tile-foot"), foot));
+    node.append(fullTitle(text("p", foot, "tile-foot"), foot));
   }
   return node;
 }
 
-// The newest read of each agent, so a read of some agents redraws the glance without losing the others'.
+// The newest read of each agent, so a read of some agents redraws the glance without losing the others'. Each agent keeps the
+// sequence number of the read it came from: a slower, older read that resolves later never overwrites a newer one.
 const latest = new Map<string, AgentUsage>();
+const applied = new Map<string, number>();
+let sequence = 0;
 
-// Reads usage and draws it. `agents` is the ones to read, or null for every agent (the popover's open, the load, the focus).
-// The refresh that runs on a timer passes only the agents that cost nothing to read (Claude's snapshot): an agent that runs
-// a CLI to answer is never read on a timer. Only a read of every agent redraws the popover's tiles.
-export async function readUsage(glanceButton: HTMLElement, popover: HTMLElement, agents: string[] | null) {
-  for (const usage of await invoke<AgentUsage[]>("usage", { agents })) latest.set(usage.agent, usage);
+const drawTiles = (popover: HTMLElement, reading: boolean) => {
   const now = Date.now() / 1000;
-  const all = [...latest.values()];
-  showGlance(glanceButton, all, now);
-  if (agents === null) popover.replaceChildren(...all.map((usage) => tile(usage, now)));
+  popover.replaceChildren(...[...latest.values()].map((usage) => tile(usage, now, reading)));
+};
+
+// Reads usage and draws it. `agents` is the ones to read, or null for every agent: only the popover's open does that. The
+// load, the focus and the timer pass only the agents that cost nothing to read (Claude's snapshot): an agent that runs a CLI
+// to answer is never read behind the user's back. A read of every agent redraws the popover's tiles, which say "Reading…"
+// until it is done. A read that fails keeps the old data.
+export async function readUsage(glanceButton: HTMLElement, popover: HTMLElement, agents: string[] | null) {
+  const mine = ++sequence;
+  if (agents === null) drawTiles(popover, true);
+  try {
+    for (const usage of await invoke<AgentUsage[]>("usage", { agents })) {
+      if ((applied.get(usage.agent) ?? 0) > mine) continue;
+      applied.set(usage.agent, mine);
+      latest.set(usage.agent, usage);
+    }
+  } catch {
+    // The old data stays.
+  }
+  showGlance(glanceButton, [...latest.values()], Date.now() / 1000);
+  if (agents === null) drawTiles(popover, false);
 }
 
 // The timer's refresh of the glance reads only these.

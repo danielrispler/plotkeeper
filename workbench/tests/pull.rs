@@ -188,3 +188,30 @@ fn a_tracked_edit_the_incoming_commits_touch_would_be_overwritten() {
 
     assert!(git_state(&repos.main, &main).unwrap().would_overwrite);
 }
+
+#[test]
+fn a_non_ascii_path_the_incoming_commits_touch_would_be_overwritten() {
+    let repos = repos();
+    let main = repos.main.display().to_string();
+    merged_upstream(&repos, Some("é.txt"));
+    git(&repos.main, &["fetch", "-q", "origin"]);
+    std::fs::write(repos.main.join("é.txt"), "mine\n").unwrap();
+
+    assert!(git_state(&repos.main, &main).unwrap().would_overwrite);
+}
+
+#[test]
+fn a_rename_away_from_a_path_the_incoming_commits_touch_would_be_overwritten() {
+    let repos = repos();
+    let main = repos.main.display().to_string();
+    merged_upstream(&repos, Some("a.txt"));
+    git(&repos.seed, &["pull", "-q", "origin", "trunk"]);
+    git(&repos.main, &["pull", "-q", "--ff-only"]);
+    std::fs::write(repos.seed.join("a.txt"), "theirs 2\n").unwrap();
+    git(&repos.seed, &["commit", "-q", "-am", "Again"]);
+    git(&repos.seed, &["push", "-q", "origin", "trunk"]);
+    git(&repos.main, &["fetch", "-q", "origin"]);
+    git(&repos.main, &["mv", "a.txt", "renamed.txt"]);
+
+    assert!(git_state(&repos.main, &main).unwrap().would_overwrite);
+}

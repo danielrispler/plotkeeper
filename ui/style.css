@@ -217,7 +217,8 @@ h1 { margin: 0 0 var(--sp-4); }
 .pane.history .row:hover { background: var(--hover); }
 .pane.history .item .delete { visibility: visible; }
 .list-foot { display: flex; align-items: center; justify-content: space-between; }
-.list-foot .gear { margin-right: var(--sp-4); color: var(--muted); }
+.list-foot .gear { margin-right: var(--sp-4); color: var(--muted); display: inline-grid; place-items: center; width: calc(var(--icon) * 2); height: calc(var(--icon) * 2); padding: 0; }
+.list-foot .gear svg { width: var(--icon); height: var(--icon); }
 .history-link { display: block; margin: var(--sp-3) var(--sp-4); color: var(--muted); }
 /* A landed row's Delete is the point of the section, so it shows without hover. */
 .pane.home .item .delete { visibility: visible; }

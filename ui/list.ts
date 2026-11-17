@@ -2,7 +2,7 @@
 // by shape (danielrispler/Falinks#572), each session's subagents nested under it. When the window is narrow it collapses to
 // a strip of glyphs and labels, which opens the full list on hover, on click or on ⌘1.
 
-import { age, element, hover, invoke, patch, prose, pressable, stepText, text } from "./dom.js";
+import { age, element, fullTitle, invoke, patch, prose, pressable, stepText, text } from "./dom.js";
 import { counts, times, type Time } from "./times.js";
 import { shortPaths } from "./paths.js";
 import { historyLink } from "./history.js";
@@ -81,7 +81,7 @@ function markNode(session: Session): HTMLElement {
     : session.status_only
     ? "Another agent, followed by its reported status only"
     : contextTitle(session.transcript.context);
-  return hover(text("span", rowMark(session), "id"), title);
+  return fullTitle(text("span", rowMark(session), "id"), title);
 }
 
 // A subagent's state label and its state: "Needs you" while it asks, else its status.
@@ -227,7 +227,7 @@ export function row(session: Session, children: Children, token: string | null =
   const first = rowLines(
     button,
     session.state,
-    [hover(text("span", sessionName(session), "name"), nameTitle(session)), markNode(session), ...(token ? [hover(text("span", token, "id token"), token)] : [])],
+    [fullTitle(text("span", sessionName(session), "name"), nameTitle(session)), markNode(session), ...(token ? [fullTitle(text("span", token, "id token"), token)] : [])],
     line === null
       ? null
       : [...done(children, children.get("session")), rowLine(line), ...(turn ? [Object.assign(counts(clock, turn[1]), { title: turn[0] })] : [])],
@@ -267,7 +267,7 @@ function rowLine(line: string): HTMLElement {
   const node = prose("span", shown);
   node.className = "row-step";
   node.dir = "auto";
-  return hover(node, full || shown);
+  return fullTitle(node, full || shown);
 }
 
 // A subagent row's second line, as a session row's (danielrispler/Falinks#572): only while it runs or needs Daniel.

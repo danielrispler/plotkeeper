@@ -33,7 +33,7 @@ const marks: Record<LogoKey, Mark> = {
   generic: { box: "0 0 14 14", path: "M12 7a5 5 0 1 1-10 0a5 5 0 1 1 10 0M8.2 7a1.2 1.2 0 1 1-2.4 0a1.2 1.2 0 1 1 2.4 0", stroke: true },
 };
 
-const titles: Record<LogoKey, string> = {
+export const logoTitles: Record<LogoKey, string> = {
   claude: "Claude Code",
   agy: "agy: followed by what it reports, which has no context share",
   codex: "Codex: followed by its reported status only",
@@ -42,7 +42,7 @@ const titles: Record<LogoKey, string> = {
 };
 
 // The logo's element, named by its title so the shape is never alone.
-export function logo(key: LogoKey, title = titles[key]): HTMLElement {
+export function logo(key: LogoKey, title = logoTitles[key]): HTMLElement {
   const node = document.createElement("span");
   node.className = "logo";
   node.setAttribute("data-logo", key);

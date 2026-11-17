@@ -4,7 +4,7 @@
 // with a count, and it stays until Daniel acts on them or dismisses it. The session in the focused
 // terminal, the selected one, gets none: its prompt is already there.
 
-import { element, hover, text } from "./dom.js";
+import { element, fullTitle, text } from "./dom.js";
 import type { LayoutMode } from "./layout.js";
 import { sessionName } from "./list.js";
 import { select } from "./selection.js";
@@ -52,7 +52,7 @@ export function showToast() {
     const more = shown.count > 1 ? [text("span", `+${shown.count - 1} more`, "count")] : [];
     const name = sessionName(shown.session);
     const line = questionLine(shown.session);
-    toast.replaceChildren(hover(text("strong", name, "name"), name), ...more, close, hover(text("span", line, "line"), line));
+    toast.replaceChildren(fullTitle(text("strong", name, "name"), name), ...more, close, fullTitle(text("span", line, "line"), line));
   }
 }
 
@@ -76,7 +76,7 @@ export function showStartToast(message: string, open: () => void) {
   };
   const close = button("×", "quiet small", () => {});
   close.setAttribute("aria-label", "Dismiss");
-  row.push(hover(text("strong", message, "name"), message), button("Show output", "small", open), close);
+  row.push(fullTitle(text("strong", message, "name"), message), button("Show output", "small", open), close);
   toast.append(...row);
   toast.hidden = false;
 }

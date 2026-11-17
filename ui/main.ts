@@ -347,12 +347,12 @@ invoke<SessionCards>("cards").then(showCards);
 // The answer hook waits for the card only while its session shows (danielrispler/Falinks#461, decision 16).
 startWatching(() => showView(studio.selection));
 
-// Each agent's plan usage (danielrispler/plotkeeper#163): every agent is read when the window loads, takes focus and the popover
-// opens. The glance keeps its refresh from Claude's snapshot every 10 s, which runs no CLI; no other agent is read on the timer.
-// shortcut: polls every 10 s; push from the shell if the delay matters.
+// Each agent's plan usage (danielrispler/plotkeeper#163): the load, the focus and a 10 s timer read only Claude's snapshot, which
+// runs no CLI; every agent is read only when the popover opens, so the studio runs no agent CLI behind the user's back.
+// shortcut: polls Claude's snapshot every 10 s; push from the shell if the delay matters.
 const readUsageOf = (agents: string[] | null) => readUsage(element("usage"), element("usage-popover"), agents);
-readUsageOf(null);
-addEventListener("focus", () => readUsageOf(null));
+readUsageOf(timedAgents);
+addEventListener("focus", () => readUsageOf(timedAgents));
 setInterval(() => readUsageOf(timedAgents), 10_000);
 element("usage-popover").addEventListener("toggle", (event) => {
   if ((event as ToggleEvent).newState === "open") readUsageOf(null);

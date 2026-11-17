@@ -2,6 +2,7 @@
 // one agent's windows or the reason it has none. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { El } from "./dom.mjs";
 
 globalThis.document = {
@@ -108,4 +109,68 @@ test("the timer's refresh asks only for Claude, the popover's open for every age
   await readUsage(button, popover, null);
   assert.deepEqual(asked[1], ["usage", null]);
   assert.equal(popover.childNodes.length, 1);
+});
+
+const deferred = () => {
+  let resolve, reject;
+  const promise = new Promise((a, b) => ((resolve = a), (reject = b)));
+  return { promise, resolve, reject };
+};
+const nowS = () => Date.now() / 1000;
+const fresh = (five, readAt) => ({
+  agent: "claude",
+  five_hour: { used_percentage: five, resets_at: nowS() + 3600 },
+  seven_day: null,
+  read_at: readAt,
+  source: "last Claude session",
+  reason: null,
+});
+
+test("load, focus and the timer read Claude only; only the popover's open reads every agent", () => {
+  const main = fs.readFileSync(new URL("../main.ts", import.meta.url), "utf8");
+  assert.equal(main.match(/readUsageOf\(null\)/g).length, 1);
+  assert.match(main, /newState === "open"\) readUsageOf\(null\)/);
+  assert.match(main, /readUsageOf\(timedAgents\);\naddEventListener\("focus", \(\) => readUsageOf\(timedAgents\)\)/);
+});
+
+test("a slow read that resolves after a newer one does not overwrite that agent's newer reading", async () => {
+  const slow = deferred();
+  const calls = [slow.promise, Promise.resolve([fresh(70, nowS())])];
+  globalThis.window = { __TAURI__: { core: { invoke: () => calls.shift() } } };
+  const { readUsage } = await import("../../dist/usage.js");
+  const button = new El("button");
+  const popover = new El("div");
+  const first = readUsage(button, popover, null);
+  await readUsage(button, popover, ["claude"]);
+  assert.equal(textOf(button), "5h 70%");
+  slow.resolve([fresh(10, nowS() - 600)]);
+  await first;
+  assert.equal(textOf(button), "5h 70%");
+});
+
+test("a read that fails keeps the old data and rejects nothing", async () => {
+  globalThis.window = { __TAURI__: { core: { invoke: () => Promise.reject(new Error("no")) } } };
+  const { readUsage } = await import("../../dist/usage.js");
+  const button = new El("button");
+  const popover = new El("div");
+  await readUsage(button, popover, ["claude"]);
+  await readUsage(button, popover, null);
+  assert.equal(popover.childNodes.length > 0, true);
+  assert.doesNotMatch(textOf(popover), /Reading/);
+});
+
+test("while the popover's read runs its tiles say Reading and no stale age, then show the new data", async () => {
+  const pending = deferred();
+  globalThis.window = { __TAURI__: { core: { invoke: () => pending.promise } } };
+  const { readUsage, tile } = await import("../../dist/usage.js");
+  const popover = new El("div");
+  const read = readUsage(new El("button"), popover, null);
+  assert.match(textOf(popover), /Reading…/);
+  assert.doesNotMatch(textOf(popover), /as of/);
+  assert.match(textOf(tile(claude(62, 30), now, true)), /Reading…/);
+  assert.match(textOf(tile(failed("codex", "x"), now, true)), /Reading…/);
+  pending.resolve([fresh(33, nowS() - 120)]);
+  await read;
+  assert.doesNotMatch(textOf(popover), /Reading…/);
+  assert.match(textOf(popover), /as of 2 min ago/);
 });
