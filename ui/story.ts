@@ -5,7 +5,8 @@
 // checks and folded response. "Ask" sits on a file, a failed check, a subagent line and the Headline. A subagent's view shows its own line,
 // questions, brief and cards in one block.
 
-import { agentMark, modelLine, reports } from "./capabilities.js";
+import { modelLine, reports } from "./capabilities.js";
+import { logo, logoKey } from "./logos.js";
 import { age, code, element, invoke, pressable, prose, text } from "./dom.js";
 import { select } from "./selection.js";
 import { askAnchor } from "./ask.js";
@@ -72,7 +73,8 @@ export function showView(selected: Selection | null) {
   element("block").textContent = (state === "needs_you" ? blockKind(open, openDecision()) : null) ?? "";
   // A subagent runs in its session's mode.
   element("mode").textContent = reports(session, "permission_mode") ? modeText(session.permission_mode) : "";
-  element("mark").textContent = agentMark(session);
+  // The agent's logo, titled with its model line when it has one (#158).
+  element("mark").replaceChildren(logo(logoKey(session), modelLine(session) || undefined));
   element("session-name").textContent = sessionName(session);
   // The top bar's header (danielrispler/plotkeeper#127) says the same state and name.
   element("bar-state").textContent = element("state").textContent;

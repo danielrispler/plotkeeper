@@ -2,11 +2,11 @@
 // by shape (danielrispler/Falinks#572), each session's subagents nested under it. When the window is narrow it collapses to
 // a strip of glyphs and labels, which opens the full list on hover, on click or on ⌘1.
 
-import { agentMark } from "./capabilities.js";
 import { age, element, invoke, patch, prose, pressable, stepText, text } from "./dom.js";
 import { counts, times, type Time } from "./times.js";
 import { shortPaths } from "./paths.js";
 import { historyLink } from "./history.js";
+import { logo, logoKey } from "./logos.js";
 import { knownProjects, onProjects, projects, projectsError, setProjects } from "./projects.js";
 import { addProject, refuse } from "./picker.js";
 import { projectGroups, foundWorkspaces, tokenOf, workspaceSection, type ProjectGroup } from "./workspaces.js";
@@ -60,11 +60,12 @@ export function contextTitle(context: Context | null): string {
 }
 
 // The muted mark after a row's name: "terminal" for a plain terminal's row, "status only" for another agent's row
-// (danielrispler/Falinks#560), so it never reads as a Claude session with missing data; else the context share.
-export function rowMark(session: Pick<Session, "shell" | "status_only" | "transcript" | "capabilities">): string {
+// (danielrispler/Falinks#560), so it never reads as a Claude session with missing data; else the context share. The
+// agent itself is the logo before the name (#158).
+export function rowMark(session: Pick<Session, "shell" | "status_only" | "transcript">): string {
   if (session.shell) return "terminal";
   if (session.status_only) return "status only";
-  return agentMark(session) || contextText(session.transcript.context);
+  return contextText(session.transcript.context);
 }
 
 // The name's hover: the identity's PR and worktree, which a prompt name leaves out.
@@ -78,9 +79,7 @@ function markNode(session: Session): HTMLElement {
     ? "A plain terminal"
     : session.status_only
     ? "Another agent, followed by its reported status only"
-    : agentMark(session)
-      ? `${agentMark(session)}: followed by what it reports, which has no context share`
-      : contextTitle(session.transcript.context);
+    : contextTitle(session.transcript.context);
   return Object.assign(text("span", rowMark(session), "id"), { title });
 }
 
@@ -224,7 +223,7 @@ export function row(session: Session, children: Children, token: string | null =
   const line = secondLine(session);
   const turn = line === null ? null : rowTime(session, isSelected(session.id));
   const clock = text("span", "", "clock");
-  rowLines(
+  const first = rowLines(
     button,
     session.state,
     [Object.assign(text("span", sessionName(session), "name"), { title: nameTitle(session) }), markNode(session), ...(token ? [text("span", token, "id token")] : [])],
@@ -234,6 +233,8 @@ export function row(session: Session, children: Children, token: string | null =
     session.unseen,
     session.landed,
   );
+  // The agent's logo leads the row, apart from its state glyph (#158).
+  first.prepend(logo(logoKey(session)));
   return button;
 }
 

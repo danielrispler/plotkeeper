@@ -21,8 +21,8 @@ test("a part of the view shows only when the session's capabilities report it", 
   assert.equal(reports(agy, "turn_trees"), false);
 });
 
-test("an agy row carries the agy mark, a Claude row its context share, a status-only row its own", () => {
-  assert.equal(rowMark({ ...agy, status_only: false }), "agy");
+test("an agy row shows no text mark (its logo says it), a Claude row its context share, a status-only row its own", () => {
+  assert.equal(rowMark({ ...agy, status_only: false }), "");
   assert.equal(rowMark({ ...claude, status_only: false }), "context 9%");
   assert.equal(rowMark(codex), "status only");
 });
