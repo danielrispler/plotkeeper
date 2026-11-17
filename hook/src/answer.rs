@@ -74,6 +74,36 @@ pub fn answer_file(data: &Path, session: &str) -> PathBuf {
     data.join("asks").join(format!("{session}.answer.json"))
 }
 
+/// A pass lives this long unused (30 minutes).
+pub const PASS_TTL_MS: u64 = 30 * 60 * 1000;
+
+/// Where the blocked-command requests and answers of `session` live.
+pub fn blocked_dir(data: &Path, session: &str) -> PathBuf {
+    data.join("blocked").join(session)
+}
+
+/// Where the one-time passes of `session` live.
+pub fn pass_dir(data: &Path, session: &str) -> PathBuf {
+    data.join("passes").join(session)
+}
+
+/// The studio grants a one-time pass for `command` in `cwd` to `session`, valid for `PASS_TTL_MS`
+/// from `now`.
+pub fn write_pass(
+    data: &Path,
+    session: &str,
+    command: &str,
+    cwd: &str,
+    now: u64,
+) -> io::Result<()> {
+    let pass = json!({ "session_id": session, "command": command, "cwd": cwd,
+        "expires_ms": now + PASS_TTL_MS });
+    write_private(
+        &pass_dir(data, session).join(format!("{}.json", nonce()?)),
+        &pass,
+    )
+}
+
 /// Whether a session id may name a file: letters, digits, `-` and `_` only.
 pub fn is_file_safe(session: &str) -> bool {
     let plain = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_';
@@ -107,21 +137,37 @@ pub fn write_private(path: &Path, value: &Value) -> io::Result<()> {
     fs::rename(&temp, path)
 }
 
-/// Whether the studio watches `session`: the watching file names it, its pid lives and its heartbeat
-/// is fresh.
-pub fn watched(data: &Path, session: &str) -> bool {
+/// Whether the studio shows life, whatever session it shows: the watching file's pid lives and its
+/// heartbeat is fresh. `session`, when given, must also be the one it names.
+fn shows_life(data: &Path, session: Option<&str>) -> bool {
     let Ok(text) = fs::read_to_string(watching_file(data)) else {
         return false;
     };
     let watching: Value = serde_json::from_str(&text).unwrap_or_default();
     let pid = watching["pid"].as_i64().and_then(|p| i32::try_from(p).ok());
     let heartbeat = watching["heartbeat_ms"].as_u64().unwrap_or(0);
-    watching["session_id"] == session
+    session.is_none_or(|session| watching["session_id"] == session)
         && now_ms().saturating_sub(heartbeat) <= STALE_MS
-        // Signal 0 only checks that the process exists and is the user's own.
-        // SAFETY: `kill` takes plain integers and touches no memory; `pid > 0` keeps it to one
-        // process, never a process group.
-        && pid.is_some_and(|pid| pid > 0 && unsafe { libc::kill(pid, 0) } == 0)
+        && pid.is_some_and(pid_lives)
+}
+
+/// Whether process `pid` exists and is the user's own.
+pub fn pid_lives(pid: i32) -> bool {
+    // Signal 0 only checks that the process exists and is the user's own.
+    // SAFETY: `kill` takes plain integers and touches no memory; `pid > 0` keeps it to one
+    // process, never a process group.
+    pid > 0 && unsafe { libc::kill(pid, 0) } == 0
+}
+
+/// Whether the studio watches `session`: the watching file names it, its pid lives and its heartbeat
+/// is fresh.
+pub fn watched(data: &Path, session: &str) -> bool {
+    shows_life(data, Some(session))
+}
+
+/// Whether the studio's window shows life, whatever session it shows.
+pub fn studio_alive(data: &Path) -> bool {
+    shows_life(data, None)
 }
 
 /// The kind of `payload`'s call.
@@ -216,6 +262,17 @@ pub fn answered_line(payload: &Value, answer: &Value) -> Value {
 /// Runs the hook for `payload` with the studio's data directory `data`: the output to print, if any.
 pub fn run(payload: &Value, data: &Path, timeout: Duration) -> io::Result<Option<Value>> {
     let session = payload["session_id"].as_str().unwrap_or_default();
+    if is_file_safe(session) && payload["tool_name"] == "Bash" {
+        match payload["hook_event_name"].as_str() {
+            Some("PermissionDenied") => return run_blocked(payload, data, timeout),
+            Some("PreToolUse") => return Ok(claim_pass(payload, data)),
+            Some("PermissionRequest") if spend_pass(payload, data) => {
+                return Ok(Some(json!({ "hookSpecificOutput": {
+                    "hookEventName": "PermissionRequest", "decision": { "behavior": "allow" } } })));
+            }
+            _ => {}
+        }
+    }
     if !waits_for(payload) || !is_file_safe(session) || !watched(data, session) {
         return Ok(None);
     }
@@ -261,7 +318,7 @@ pub fn run(payload: &Value, data: &Path, timeout: Duration) -> io::Result<Option
 fn wait(data: &Path, session: &str, nonce: &str, timeout: Duration) -> Option<Value> {
     let until = Instant::now() + timeout;
     loop {
-        if let Some(answer) = take_private_answer(&answer_file(data, session)) {
+        if let Some(answer) = take_private_answer(&answer_file(data, session), true) {
             if answer["nonce"] == nonce {
                 return Some(answer);
             }
@@ -274,10 +331,113 @@ fn wait(data: &Path, session: &str, nonce: &str, timeout: Duration) -> Option<Va
     }
 }
 
+/// A blocked Bash command (`PermissionDenied`): leaves its request in `blocked/<session>/<nonce>.json`
+/// and, while the studio shows life, waits for `<nonce>.answer.json`. Allow returns `retry: true`
+/// and Decline no decision, each logged as a `StudioAnswer` line, and the request goes. With no
+/// answer (nobody watching, a timeout) the request stays, so the card still waits for Daniel.
+fn run_blocked(payload: &Value, data: &Path, timeout: Duration) -> io::Result<Option<Value>> {
+    let session = payload["session_id"].as_str().unwrap_or_default();
+    let nonce = nonce()?;
+    let dir = blocked_dir(data, session);
+    let (request, answer_path) = (
+        dir.join(format!("{nonce}.json")),
+        dir.join(format!("{nonce}.answer.json")),
+    );
+    let asked = json!({
+        "nonce": nonce,
+        "hook_event_name": payload["hook_event_name"],
+        "tool_name": payload["tool_name"],
+        "tool_use_id": payload["tool_use_id"],
+        "tool_input": payload["tool_input"],
+        "cwd": payload["cwd"],
+        "reason": payload["reason"],
+        "agent_id": payload["agent_id"],
+        "pid": std::process::id(),
+        "asked_ms": now_ms(),
+    });
+    write_private(&request, &asked)?;
+    let until = Instant::now() + timeout;
+    let answer = loop {
+        if let Some(answer) = take_private_answer(&answer_path, true) {
+            if answer["nonce"] == nonce {
+                break Some(answer);
+            }
+            eprintln!("studio-answer: an answer with a wrong nonce was refused");
+        }
+        if !studio_alive(data) || Instant::now() >= until {
+            break None;
+        }
+        thread::sleep(Duration::from_millis(100));
+    };
+    let Some(answer) = answer else {
+        return Ok(None);
+    };
+    let verdict = Verdict::deserialize(answer.get("decision").unwrap_or(&Value::Null)).ok();
+    let _ = fs::remove_file(&request);
+    let Some(verdict) = verdict else {
+        return Ok(None);
+    };
+    let line = answered_line(payload, &answer);
+    match crate::append(&data.join("events.jsonl"), &line, crate::PATIENCE) {
+        Ok(true) => {}
+        Ok(false) => eprintln!("studio-answer: log the answer: the log stayed locked"),
+        Err(e) => eprintln!("studio-answer: log the answer: {e}"),
+    }
+    Ok((verdict == Verdict::Allow).then(|| {
+        json!({ "hookSpecificOutput": {
+        "hookEventName": "PermissionDenied", "retry": true } })
+    }))
+}
+
+/// The passes of `payload`'s session whose file name ends in `suffix`, with their content, that are
+/// private to the user, unexpired and for exactly this session, command and `cwd`.
+fn matching_passes(payload: &Value, data: &Path, suffix: &str) -> Vec<PathBuf> {
+    let session = payload["session_id"].as_str().unwrap_or_default();
+    let Ok(entries) = fs::read_dir(pass_dir(data, session)) else {
+        return vec![];
+    };
+    let (command, cwd) = (&payload["tool_input"]["command"], &payload["cwd"]);
+    entries
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.to_string_lossy().ends_with(suffix))
+        .filter(|path| {
+            read_private(path).is_some_and(|pass| {
+                pass["session_id"] == session
+                    && pass["command"] == *command
+                    && pass["cwd"] == *cwd
+                    && command.is_string()
+                    && pass["expires_ms"].as_u64().is_some_and(|at| now_ms() < at)
+            })
+        })
+        .collect()
+}
+
+/// The `PreToolUse` of a Bash call: claims a pass for exactly this command and `cwd` and makes the
+/// call ask, which sends it to `PermissionRequest` and not to the classifier. No pass, no output.
+fn claim_pass(payload: &Value, data: &Path) -> Option<Value> {
+    let path = matching_passes(payload, data, ".json").into_iter().next()?;
+    fs::rename(&path, path.with_extension("claimed")).ok()?;
+    Some(
+        json!({ "hookSpecificOutput": { "hookEventName": "PreToolUse", "permissionDecision": "ask" } }),
+    )
+}
+
+/// The `PermissionRequest` of a Bash call: whether a claimed pass covers it, and the studio shows
+/// life (else Claude Code asks in the terminal). The pass is spent either way.
+fn spend_pass(payload: &Value, data: &Path) -> bool {
+    let Some(path) = matching_passes(payload, data, ".claimed")
+        .into_iter()
+        .next()
+    else {
+        return false;
+    };
+    fs::remove_file(path).is_ok() && studio_alive(data)
+}
+
 /// The answer file's content, removed as it is read; `None` when there is none, or when it is not a
 /// regular file of the user's own with mode 0600, which is refused. The checks and the read use one
 /// handle, opened without following a link, so the file cannot be swapped between them.
-fn take_private_answer(path: &Path) -> Option<Value> {
+fn take_private_answer(path: &Path, remove: bool) -> Option<Value> {
     // O_NONBLOCK: opening a planted FIFO must not hang the hook.
     let opened = OpenOptions::new()
         .read(true)
@@ -289,7 +449,9 @@ fn take_private_answer(path: &Path) -> Option<Value> {
     {
         return None;
     }
-    let _ = fs::remove_file(path);
+    if remove {
+        let _ = fs::remove_file(path);
+    }
     let refuse = || eprintln!("studio-answer: an answer file not private to its user was refused");
     // A link fails to open (ELOOP), so it is refused too.
     let Ok(mut file) = opened else {
@@ -306,6 +468,11 @@ fn take_private_answer(path: &Path) -> Option<Value> {
     let mut text = String::new();
     file.read_to_string(&mut text).ok()?;
     serde_json::from_str(&text).ok()
+}
+
+/// A file's content, left in place; `None` unless it passes `take_private_answer`'s checks.
+fn read_private(path: &Path) -> Option<Value> {
+    take_private_answer(path, false)
 }
 
 /// A one-time nonce: 16 random bytes in hex.

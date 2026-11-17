@@ -77,6 +77,18 @@ pub(crate) enum Happened {
     PermissionAsked {
         tool: Tool,
     },
+    /// Auto mode blocked a Bash command; its hook waits for Daniel's card while the studio shows life.
+    CommandBlocked {
+        tool: Tool,
+        id: String,
+        reason: String,
+    },
+    /// Daniel chose Allow or Decline on a blocked command's card.
+    BlockedAnswered {
+        tool: Tool,
+        id: String,
+        answer: Value,
+    },
     /// A notice that a permission waits on Daniel.
     PermissionNotice,
     /// A notice that the agent waits for input.

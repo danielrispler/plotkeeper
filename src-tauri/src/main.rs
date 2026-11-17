@@ -888,6 +888,7 @@ fn main() {
             answer::watch,
             answer::alive,
             answer::answer,
+            answer::answer_blocked_command,
             settings::settings_files,
             settings::set_zoom,
             settings::open_settings,
@@ -1142,6 +1143,15 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                 .pass(&data, studio_hook::answer::now_ms())
         {
             let _ = app.emit("ask", ask);
+        }
+        if let Ok(data) = answer::data()
+            && let Some(blocked) = app
+                .state::<Mutex<answer::Watching>>()
+                .lock()
+                .unwrap()
+                .blocked_pass(&data)
+        {
+            let _ = app.emit("blocked", blocked);
         }
         // Asking for focus waits on the main thread, which never takes this lock.
         let focused = || {

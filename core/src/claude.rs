@@ -113,6 +113,9 @@ struct Raw {
     /// question, `decision` for a plan or a permission.
     #[serde(default)]
     studio_answer: Value,
+    /// On a `StudioAnswer` line, the event whose call the answer decides.
+    #[serde(default)]
+    studio_asked_by: String,
 }
 
 /// The event of hook line `line`; an error when it is no Claude Code line.
@@ -240,6 +243,20 @@ fn adapt(raw: Raw) -> Event {
         RENAME => happened.push(Happened::Renamed(raw.studio_name.clone())),
         PROMPT_NAME => happened.push(Happened::PromptNamed(raw.studio_name.clone())),
         DELETE => happened.push(Happened::Deleted),
+        "PermissionDenied" if tool(&raw).kind == ToolKind::Command => {
+            happened.push(Happened::CommandBlocked {
+                tool: tool(&raw),
+                id: id.clone(),
+                reason: raw.reason.clone(),
+            })
+        }
+        STUDIO_ANSWER if raw.studio_asked_by == "PermissionDenied" => {
+            happened.push(Happened::BlockedAnswered {
+                tool: tool(&raw),
+                id: id.clone(),
+                answer: raw.studio_answer.clone(),
+            })
+        }
         STUDIO_ANSWER => happened.push(Happened::Answered {
             tool: tool(&raw),
             id: id.clone(),

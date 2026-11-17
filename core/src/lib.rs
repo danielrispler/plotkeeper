@@ -248,6 +248,9 @@ pub struct Session {
     /// decision 17). The card store keeps them across restarts and gives them to the pane.
     #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     pub decisions: Vec<Decision>,
+    /// The Bash commands auto mode blocked, in block order (danielrispler/plotkeeper#170).
+    #[serde(default)]
+    pub blocked_commands: Vec<BlockedCommand>,
     /// The questions answered on the studio card, by call, whose result has not landed yet.
     #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     carded: BTreeSet<String>,
@@ -574,6 +577,35 @@ pub struct Decision {
     /// When it was answered, in Unix milliseconds.
     pub at: u64,
     pub source: Source,
+}
+
+/// A Bash command auto mode blocked, as a card on its session's view (danielrispler/plotkeeper#170).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BlockedCommand {
+    /// The denied call's `tool_use_id`.
+    pub call: String,
+    /// The command in full, and the folder it was asked to run in.
+    pub command: String,
+    pub cwd: String,
+    /// The rule that blocked it.
+    pub reason: String,
+    /// The subagent that asked, `None` for the session's own agent.
+    pub agent: Option<String>,
+    /// When it was blocked, in Unix milliseconds.
+    pub at: u64,
+    pub status: BlockedStatus,
+}
+
+/// Where a blocked command stands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BlockedStatus {
+    /// Blocked, and Daniel has not chosen.
+    Blocked,
+    /// Daniel allowed it from the card.
+    Allowed,
+    /// Daniel declined it from the card, which closes it.
+    Declined,
 }
 
 /// Where Daniel answered: the studio card, through the answer hook, or the terminal.
@@ -1467,6 +1499,7 @@ impl Session {
             calls: Vec::new(),
             at,
             noticed: false,
+            denied: None,
         };
         let mut calls = self.running.iter().filter(|c| block.takes(c));
         let calls: Vec<&Call> = match named {
@@ -1518,6 +1551,9 @@ struct Block {
     at: u64,
     /// A permission notice already echoed it, so the next notice is another agent's.
     noticed: bool,
+    /// For a blocked command, the denied call, which Daniel's choice names.
+    #[serde(default)]
+    denied: Option<String>,
 }
 
 /// What a block waits on.
@@ -1529,6 +1565,8 @@ enum Cause {
     Notice,
     /// An external server's request for input.
     Elicitation,
+    /// A blocked command, whose hook waits for Daniel's card until the agent's next event.
+    Denied,
 }
 
 impl Block {
@@ -1540,6 +1578,8 @@ impl Block {
             Cause::Elicitation => call.kind == ToolKind::External,
             Cause::Notice => call.kind != ToolKind::Spawn,
             Cause::Call => self.tool == call.tool && self.input == call.input,
+            // The denied call never ran, so no call is its.
+            Cause::Denied => false,
         };
         tool && (!self.named || self.agent == call.agent)
     }
@@ -2671,8 +2711,67 @@ impl Studio {
             session.agent.since.at = at;
             session.agent.since.by.clear();
         }
+        // The agent's next step shows its blocked-command hook has returned.
+        let acts = event.has(|h| {
+            matches!(
+                h,
+                Happened::ToolStart { .. }
+                    | Happened::ToolEnd { .. }
+                    | Happened::TurnStart { .. }
+                    | Happened::TurnEnd { .. }
+                    | Happened::SubagentEnd
+            )
+        });
+        if acts {
+            let agent = &event.agent_id;
+            session
+                .blocks
+                .retain(|w| !(w.cause == Cause::Denied && w.agent == *agent));
+        }
         for happened in &event.happened {
             match happened {
+                Happened::CommandBlocked { tool, id, reason } => {
+                    session.blocked_commands.push(BlockedCommand {
+                        call: id.clone(),
+                        command: tool.command.clone().unwrap_or_default(),
+                        cwd: event.cwd.clone(),
+                        reason: reason.clone(),
+                        agent: event.agent_id.clone(),
+                        at,
+                        status: BlockedStatus::Blocked,
+                    });
+                    let agent = event.agent_id.clone();
+                    session.block(
+                        Cause::Denied,
+                        tool.name.clone(),
+                        tool.input.clone(),
+                        agent,
+                        at,
+                    );
+                    session.blocks.last_mut().expect("just pushed").denied = Some(id.clone());
+                }
+                // Daniel's Allow or Decline: the hook has what it waited for, and the decision
+                // enters the history on the card.
+                Happened::BlockedAnswered { tool, id, answer } => {
+                    let allowed = answer["decision"] == "allow";
+                    if let Some(card) = session.blocked_commands.iter_mut().find(|c| c.call == *id)
+                    {
+                        card.status = match allowed {
+                            true => BlockedStatus::Allowed,
+                            false => BlockedStatus::Declined,
+                        };
+                        session.decisions.push(Decision {
+                            call: id.clone(),
+                            agent: card.agent.clone(),
+                            tool: tool.name.clone(),
+                            input: tool.input.clone(),
+                            answer: answer["decision"].clone(),
+                            at,
+                            source: Source::Card,
+                        });
+                    }
+                    session.blocks.retain(|w| w.denied.as_ref() != Some(id));
+                }
                 // A prompt opens a wait, also after an interrupt, which fires no `Stop`.
                 Happened::TurnStart { prompt, origin } => {
                     let sender = match origin {

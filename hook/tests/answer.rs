@@ -421,3 +421,287 @@ fn other_calls_pass_through_at_once() {
     }
     let _ = fs::remove_dir_all(&home);
 }
+
+// Blocked commands (danielrispler/plotkeeper#170, #171).
+
+const COMMAND: &str = "claude -p \"summarise the repo\" > /tmp/out.txt";
+const CWD: &str = "/work/repo";
+
+/// What auto mode's `PermissionDenied` hook gets for a blocked Bash command.
+fn denied() -> Value {
+    json!({
+        "session_id": SESSION,
+        "hook_event_name": "PermissionDenied",
+        "tool_name": "Bash",
+        "tool_use_id": "toolu_9",
+        "tool_input": { "command": COMMAND, "description": "Summarise" },
+        "cwd": CWD,
+        "reason": "Nested agent runs are blocked.",
+        "agent_id": "a-7"
+    })
+}
+
+/// The retry's `PreToolUse` and `PermissionRequest` for `command` in `cwd`.
+fn retried(event: &str, command: &str, cwd: &str, session: &str) -> Value {
+    json!({
+        "session_id": session, "hook_event_name": event, "tool_name": "Bash",
+        "tool_use_id": "toolu_10", "tool_input": { "command": command }, "cwd": cwd
+    })
+}
+
+/// The blocked-command request files the hook left, parsed.
+fn blocked_requests(home: &Path) -> Vec<Value> {
+    let dir = answer::blocked_dir(&data(home), SESSION);
+    let Ok(entries) = fs::read_dir(dir) else {
+        return vec![];
+    };
+    let mut found: Vec<Value> = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| !e.file_name().to_string_lossy().contains(".answer."))
+        .filter_map(|e| fs::read_to_string(e.path()).ok())
+        .filter_map(|t| serde_json::from_str(&t).ok())
+        .collect();
+    found.sort_by_key(|r| r["asked_ms"].as_u64());
+    found
+}
+
+/// The one blocked-command request, once it appears.
+fn blocked_request(home: &Path) -> Value {
+    let until = Instant::now() + PROMPTLY;
+    while Instant::now() < until {
+        if let Some(r) = blocked_requests(home).into_iter().next() {
+            return r;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    panic!("no blocked-command request appeared");
+}
+
+fn blocked_reply(home: &Path, nonce: &Value, decision: &str) {
+    let path = answer::blocked_dir(&data(home), SESSION)
+        .join(format!("{}.answer.json", nonce.as_str().unwrap()));
+    answer::write_private(&path, &json!({ "nonce": nonce, "decision": decision })).unwrap();
+}
+
+#[test]
+fn allowing_a_blocked_command_from_the_card_tells_the_agent_to_retry() {
+    let home = scratch("blocked-allow");
+    // Any session may be the one the studio shows.
+    watch(&home, "s-other", std::process::id(), 0);
+    let since = Instant::now();
+    let child = start(&home, WAIT_MS, &denied());
+    let request = blocked_request(&home);
+    for (field, expected) in [
+        ("tool_use_id", json!("toolu_9")),
+        ("cwd", json!(CWD)),
+        ("reason", json!("Nested agent runs are blocked.")),
+        ("agent_id", json!("a-7")),
+        ("hook_event_name", json!("PermissionDenied")),
+    ] {
+        assert_eq!(request[field], expected, "{field}");
+    }
+    assert_eq!(request["tool_input"]["command"], COMMAND);
+    // The hook's pid tells the studio whether the hook still waits.
+    assert!(request["pid"].as_u64().is_some_and(|pid| pid > 0));
+    assert_ne!(request["nonce"], "");
+    blocked_reply(&home, &request["nonce"], "allow");
+    let out: Value = serde_json::from_str(&finish(child, since).0).unwrap();
+    assert_eq!(
+        out,
+        json!({ "hookSpecificOutput": { "hookEventName": "PermissionDenied", "retry": true } })
+    );
+    // Answered, so the request is gone and the answer is in the event log.
+    assert_eq!(blocked_requests(&home), Vec::<Value>::new());
+    let log = fs::read_to_string(studio_hook::event_log(&home)).unwrap();
+    let line: Value = serde_json::from_str(log.lines().next().unwrap()).unwrap();
+    assert_eq!(line["hook_event_name"], "StudioAnswer");
+    assert_eq!(line["studio_asked_by"], "PermissionDenied");
+    assert_eq!(line["studio_answer"], json!({ "decision": "allow" }));
+    assert_eq!(line["tool_input"]["command"], COMMAND);
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn declining_a_blocked_command_gives_no_decision_and_is_logged() {
+    let home = scratch("blocked-decline");
+    watch(&home, SESSION, std::process::id(), 0);
+    let since = Instant::now();
+    let child = start(&home, WAIT_MS, &denied());
+    blocked_reply(&home, &blocked_request(&home)["nonce"], "deny");
+    let (out, took) = finish(child, since);
+    assert_eq!(out, "");
+    assert!(took < PROMPTLY);
+    assert_eq!(blocked_requests(&home), Vec::<Value>::new());
+    let log = fs::read_to_string(studio_hook::event_log(&home)).unwrap();
+    let line: Value = serde_json::from_str(log.lines().next().unwrap()).unwrap();
+    assert_eq!(line["studio_answer"], json!({ "decision": "deny" }));
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn a_block_nobody_watches_returns_at_once_and_leaves_its_request_for_the_card() {
+    let home = scratch("blocked-away");
+    let gone = Command::new("true").spawn().unwrap();
+    let dead = gone.id();
+    gone.wait_with_output().unwrap();
+    let me = std::process::id();
+    let cases: [(&str, Option<(u32, u64)>); 3] = [
+        ("no watching file", None),
+        ("a dead pid", Some((dead, 0))),
+        ("an old heartbeat", Some((me, 6_000))),
+    ];
+    for (case, watching) in cases {
+        let _ = fs::remove_file(answer::watching_file(&data(&home)));
+        if let Some((pid, age)) = watching {
+            watch(&home, SESSION, pid, age);
+        }
+        let since = Instant::now();
+        let (out, took) = finish(start(&home, WAIT_MS, &denied()), since);
+        assert_eq!(out, "", "{case}");
+        assert!(took < PROMPTLY, "{case}");
+        let requests = blocked_requests(&home);
+        assert_eq!(requests.len(), 1, "{case}");
+        assert_eq!(requests[0]["tool_input"]["command"], COMMAND, "{case}");
+        let _ = fs::remove_dir_all(answer::blocked_dir(&data(&home), SESSION));
+    }
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn other_denials_pass_through_at_once() {
+    let home = scratch("blocked-other");
+    watch(&home, SESSION, std::process::id(), 0);
+    let mut web = denied();
+    web["tool_name"] = "WebFetch".into();
+    let since = Instant::now();
+    let (out, took) = finish(start(&home, WAIT_MS, &web), since);
+    assert_eq!(out, "");
+    assert!(took < PROMPTLY);
+    assert_eq!(blocked_requests(&home), Vec::<Value>::new());
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// What the retry's two hooks print, with a pass for `COMMAND` in `CWD` granted at `granted_ms`,
+/// when the retry is `command` in `cwd` of `session`. The permission request comes with a claim
+/// first unless `claim` is false.
+fn retry(
+    name: &str,
+    granted_ms: u64,
+    command: &str,
+    cwd: &str,
+    session: &str,
+    claim: bool,
+) -> (String, String) {
+    let home = scratch(name);
+    // The studio shows another session, so an uncovered permission request is not held for its card.
+    watch(&home, "s-other", std::process::id(), 0);
+    answer::write_pass(&data(&home), SESSION, COMMAND, CWD, granted_ms).unwrap();
+    let run = |payload: Value| {
+        let since = Instant::now();
+        let out = finish(start(&home, WAIT_MS, &payload), since);
+        assert!(out.1 < PROMPTLY);
+        out.0
+    };
+    let claimed = if claim {
+        run(retried("PreToolUse", command, cwd, session))
+    } else {
+        String::new()
+    };
+    let permitted = run(retried("PermissionRequest", command, cwd, session));
+    let _ = fs::remove_dir_all(&home);
+    (claimed, permitted)
+}
+
+#[test]
+fn a_retry_of_the_exact_command_is_claimed_asked_and_allowed_once() {
+    let home = scratch("pass-flow");
+    // The studio shows another session, so an uncovered permission request is not held for its card.
+    watch(&home, "s-other", std::process::id(), 0);
+    answer::write_pass(&data(&home), SESSION, COMMAND, CWD, now_ms()).unwrap();
+    let pass_files = || {
+        fs::read_dir(answer::pass_dir(&data(&home), SESSION))
+            .map(|d| d.count())
+            .unwrap_or(0)
+    };
+    assert_eq!(pass_files(), 1);
+    let mode = fs::read_dir(answer::pass_dir(&data(&home), SESSION))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        fs::metadata(mode.path()).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    let run = |payload: Value| {
+        let since = Instant::now();
+        let out = finish(start(&home, WAIT_MS, &payload), since);
+        assert!(out.1 < PROMPTLY);
+        out.0
+    };
+    // Before any claim the permission request is not covered.
+    assert_eq!(run(retried("PermissionRequest", COMMAND, CWD, SESSION)), "");
+    let claimed: Value =
+        serde_json::from_str(&run(retried("PreToolUse", COMMAND, CWD, SESSION))).unwrap();
+    assert_eq!(
+        claimed,
+        json!({ "hookSpecificOutput": { "hookEventName": "PreToolUse", "permissionDecision": "ask" } })
+    );
+    let allowed: Value =
+        serde_json::from_str(&run(retried("PermissionRequest", COMMAND, CWD, SESSION))).unwrap();
+    assert_eq!(
+        allowed,
+        json!({ "hookSpecificOutput": { "hookEventName": "PermissionRequest",
+            "decision": { "behavior": "allow" } } })
+    );
+    assert_eq!(pass_files(), 0, "the pass is spent");
+    // A second run has no pass.
+    assert_eq!(run(retried("PreToolUse", COMMAND, CWD, SESSION)), "");
+    assert_eq!(run(retried("PermissionRequest", COMMAND, CWD, SESSION)), "");
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn a_retry_that_is_not_the_approved_call_is_not_claimed_or_allowed() {
+    let requoted = "claude -p 'summarise the repo' > /tmp/out.txt";
+    let cases = [
+        ("a re-quoted command", now_ms(), requoted, CWD, SESSION),
+        ("another cwd", now_ms(), COMMAND, "/work/other", SESSION),
+        ("another session", now_ms(), COMMAND, CWD, "s-2"),
+        (
+            "an expired pass",
+            now_ms() - answer::PASS_TTL_MS - 1_000,
+            COMMAND,
+            CWD,
+            SESSION,
+        ),
+    ];
+    for (case, granted, command, cwd, session) in cases {
+        let (claimed, permitted) = retry("pass-miss", granted, command, cwd, session, true);
+        assert_eq!((claimed.as_str(), permitted.as_str()), ("", ""), "{case}");
+    }
+}
+
+#[test]
+fn a_pass_file_of_the_wrong_mode_is_refused() {
+    let home = scratch("pass-mode");
+    // The studio shows another session, so an uncovered permission request is not held for its card.
+    watch(&home, "s-other", std::process::id(), 0);
+    answer::write_pass(&data(&home), SESSION, COMMAND, CWD, now_ms()).unwrap();
+    let file = fs::read_dir(answer::pass_dir(&data(&home), SESSION))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    fs::set_permissions(&file, fs::Permissions::from_mode(0o644)).unwrap();
+    for event in ["PreToolUse", "PermissionRequest"] {
+        let since = Instant::now();
+        let (out, _) = finish(
+            start(&home, WAIT_MS, &retried(event, COMMAND, CWD, SESSION)),
+            since,
+        );
+        assert_eq!(out, "", "{event}");
+    }
+    let _ = fs::remove_dir_all(&home);
+}

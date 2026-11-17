@@ -158,6 +158,8 @@ export type Session = {
   prompts: Prompt[];
   turns: Turn[];
   questions: Question[];
+  // Its blocked commands, in block order.
+  blocked_commands: BlockedCommand[];
   // "worker <name> returned", after a wake-up until its next step or Daniel's next prompt.
   returned: string | null;
   transcript: Transcript;
@@ -244,6 +246,18 @@ export type Decision = {
   answer: Record<string, string> | "allow" | "deny";
   at: number;
   source: "card" | "terminal";
+};
+// A Bash command auto mode blocked, as a card on its session's view (danielrispler/plotkeeper#170): the command in full, its
+// folder, the rule that blocked it, the subagent that asked (null for the session's own agent) and where it stands.
+export type BlockedStatus = "blocked" | "allowed" | "declined";
+export type BlockedCommand = {
+  call: string;
+  command: string;
+  cwd: string;
+  reason: string;
+  agent: string | null;
+  at: number;
+  status: BlockedStatus;
 };
 // A turn's summary (danielrispler/Falinks#526) and, unless the turn has a card, its Quiz, as the store keeps it; a
 // learning section stored before danielrispler/plotkeeper#118 reads as its question.

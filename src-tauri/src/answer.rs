@@ -28,6 +28,8 @@ pub struct Watching {
     ask: Value,
     /// When the window last showed life, by `watch` or `alive`.
     alive_ms: u64,
+    /// The watched session's blocked-command requests as last sent.
+    blocked: Value,
 }
 
 impl Watching {
@@ -35,9 +37,20 @@ impl Watching {
     pub fn watch(&mut self, data: &Path, session: Option<String>) -> Option<Value> {
         self.session = session.filter(|s| answer::is_file_safe(s));
         self.ask = Value::Null;
+        self.blocked = Value::Null;
         let now = answer::now_ms();
         self.alive(now);
         self.pass(data, now).filter(|ask| !ask.is_null())
+    }
+
+    /// The watched session's blocked-command requests when they changed since the last call.
+    pub fn blocked_pass(&mut self, data: &Path) -> Option<Value> {
+        let session = self.session.as_deref()?;
+        let blocked = blocked_requests(data, session);
+        (blocked != self.blocked).then(|| {
+            self.blocked = blocked.clone();
+            blocked
+        })
     }
 
     /// The window showed life at `now`.
@@ -75,6 +88,62 @@ impl Watching {
             ask
         })
     }
+}
+
+/// The blocked-command requests of `session` the hook left, each with whether its hook still waits.
+pub fn blocked_requests(data: &Path, session: &str) -> Value {
+    let Ok(entries) = fs::read_dir(answer::blocked_dir(data, session)) else {
+        return json!([]);
+    };
+    let requests = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| !e.file_name().to_string_lossy().contains(".answer."))
+        .filter_map(|e| fs::read_to_string(e.path()).ok())
+        .filter_map(|text| serde_json::from_str::<Value>(&text).ok())
+        .map(|r| {
+            let pid = r["pid"].as_i64().and_then(|p| i32::try_from(p).ok());
+            json!({ "nonce": r["nonce"], "tool_use_id": r["tool_use_id"],
+                "waiting": pid.is_some_and(answer::pid_lives) })
+        });
+    Value::Array(requests.collect())
+}
+
+/// Daniel's Allow or Decline of `session`'s blocked-command request `nonce`: Allow grants the one-time
+/// pass for the request's exact command and folder, and either writes the answer the hook waits for.
+pub fn answer_blocked(
+    data: &Path,
+    session: &str,
+    nonce: &str,
+    decision: answer::Verdict,
+) -> Result<(), String> {
+    if !answer::is_file_safe(session) || !answer::is_file_safe(nonce) {
+        return Err("not a session or request id".into());
+    }
+    let dir = answer::blocked_dir(data, session);
+    let text = fs::read_to_string(dir.join(format!("{nonce}.json"))).map_err(|e| e.to_string())?;
+    let request: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    if decision == answer::Verdict::Allow {
+        let command = request["tool_input"]["command"].as_str();
+        let cwd = request["cwd"].as_str();
+        let (Some(command), Some(cwd)) = (command, cwd) else {
+            return Err("the request names no command or folder".into());
+        };
+        answer::write_pass(data, session, command, cwd, answer::now_ms())
+            .map_err(|e| e.to_string())?;
+    }
+    let reply = json!({ "nonce": nonce, "decision": decision });
+    answer::write_private(&dir.join(format!("{nonce}.answer.json")), &reply)
+        .map_err(|e| e.to_string())
+}
+
+/// Daniel chose Allow or Decline on a blocked command's card.
+#[tauri::command]
+pub fn answer_blocked_command(
+    session: String,
+    nonce: String,
+    decision: answer::Verdict,
+) -> Result<(), String> {
+    answer_blocked(&data()?, &session, &nonce, decision)
 }
 
 /// The window shows `session`'s view, or none (`None`, also while the window is hidden). Returns the
@@ -119,7 +188,7 @@ pub fn answer(
 
 #[cfg(test)]
 mod tests {
-    use super::Watching;
+    use super::{Watching, answer_blocked, blocked_requests};
     use serde_json::{Value, json};
     use studio_hook::answer;
 
@@ -212,5 +281,63 @@ mod tests {
         watching.watch(data.path(), None);
 
         assert!(!answer::watched(data.path(), "s1"));
+    }
+
+    /// A blocked command's request, as the hook leaves it.
+    fn request(data: &std::path::Path, nonce: &str, pid: u32) {
+        let request = json!({ "nonce": nonce, "tool_use_id": "toolu_9", "pid": pid, "cwd": "/work/repo",
+            "tool_input": { "command": "claude -p hi" } });
+        let path = answer::blocked_dir(data, "s1").join(format!("{nonce}.json"));
+        answer::write_private(&path, &request).unwrap();
+    }
+
+    #[test]
+    fn the_window_gets_a_sessions_blocked_requests_with_whether_their_hook_waits() {
+        let data = tempfile::tempdir().unwrap();
+        assert_eq!(blocked_requests(data.path(), "s1"), json!([]));
+        request(data.path(), "n1", std::process::id());
+        request(data.path(), "n2", 0);
+        let mut sent = blocked_requests(data.path(), "s1");
+        sent.as_array_mut()
+            .unwrap()
+            .sort_by_key(|r| r["nonce"].as_str().unwrap().to_owned());
+        assert_eq!(
+            sent,
+            json!([{ "nonce": "n1", "tool_use_id": "toolu_9", "waiting": true },
+                   { "nonce": "n2", "tool_use_id": "toolu_9", "waiting": false }])
+        );
+    }
+
+    #[test]
+    fn allow_grants_a_pass_for_the_exact_command_and_decline_does_not() {
+        let data = tempfile::tempdir().unwrap();
+        request(data.path(), "n1", std::process::id());
+        request(data.path(), "n2", std::process::id());
+        let passes = || std::fs::read_dir(answer::pass_dir(data.path(), "s1")).map(|d| d.count());
+
+        answer_blocked(data.path(), "s1", "n2", answer::Verdict::Deny).unwrap();
+        assert!(passes().is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound));
+        let denied = answer::blocked_dir(data.path(), "s1").join("n2.answer.json");
+        let text = std::fs::read_to_string(denied).unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&text).unwrap(),
+            json!({ "nonce": "n2", "decision": "deny" })
+        );
+
+        answer_blocked(data.path(), "s1", "n1", answer::Verdict::Allow).unwrap();
+        assert_eq!(passes().unwrap(), 1);
+        let allowed = answer::blocked_dir(data.path(), "s1").join("n1.answer.json");
+        let text = std::fs::read_to_string(allowed).unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&text).unwrap(),
+            json!({ "nonce": "n1", "decision": "allow" })
+        );
+    }
+
+    #[test]
+    fn an_answer_for_a_request_that_is_not_there_writes_nothing() {
+        let data = tempfile::tempdir().unwrap();
+        assert!(answer_blocked(data.path(), "s1", "nope", answer::Verdict::Allow).is_err());
+        assert!(!answer::blocked_dir(data.path(), "s1").exists());
     }
 }

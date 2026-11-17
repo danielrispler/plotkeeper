@@ -39,3 +39,16 @@ To run the real writer on two fixture changes, one structural and one not, run t
 When a subagent or a background command returns, Claude Code sends its parent a prompt that names the task's id in markup: `<agent-message from="…">` or `<task-notification><task-id>…</task-id>`. A prompt that names a task id the session knows, from a spawn's response, a background command's response or `Stop`'s `background_tasks`, that way is a wake-up, never your prompt. The session's row and its view's "now" line read "worker … returned", with the subagent's name or else the task's short id, until the session's own next step or your next prompt; its last step stays.
 
 A card on a wake-up's turn belongs to your prompt before it, so it reads that prompt's earlier cards. A turn a wake-up opened that changed nothing itself gets no card, only a brief updated from its workers' cards. A known id in plain text ("check what a1191 did") is your prompt. A known id in any other markup is your prompt too, logs one line on stderr and counts in `weekly`: Claude Code may have changed its markup.
+
+## Blocked commands
+
+In a Claude Code session in auto mode, a Bash command that auto mode blocks raises a card on the session's view, docked above the open questions. It shows the command in full, its folder, the rule that blocked it and, for a subagent's block, the subagent's name. Cards stack in block order. A block of any other tool keeps Claude Code's own notice, and Codex and agy keep their own prompts. The card has Allow and Decline and no edit, so what runs is what the card shows.
+
+The plugin's `PermissionDenied` hook for Bash waits up to 600 seconds for your click while the studio's window shows life, whichever session it shows. The session needs you until your click or the agent's next event. The card reads Blocked.
+
+- Allow reads Allowed. The hook returns `retry: true`, and the agent retries the exact command in its own Bash tool. The studio grants a one-time pass for that command and folder, good for 30 minutes: the retry's `PreToolUse` claims it and asks, and the `PermissionRequest` after it is allowed once, whichever session the studio shows, while the studio runs. A retry that is re-quoted, in another folder or another session, expired, or already used, gets no pass and goes back to the classifier.
+- Decline closes the card and the denial stands.
+
+Each Allow or Decline enters the session's decision history, as given on the card.
+
+The card also stays when nobody watches or the 600 seconds pass, but then it has no buttons yet.
