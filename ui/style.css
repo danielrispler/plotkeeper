@@ -66,7 +66,7 @@ body[data-layout="focus"] #rail-divider { display: none; }
 .git-line .git-bad { color: var(--conflict); }
 .git-line .git-branch { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
 .git-line .git-branch:hover { text-decoration: underline; }
-.project-workspaces .row .l2 { white-space: pre; }
+.project-workspaces .row .facts { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; font-size: var(--size-small); color: var(--muted); }
 .usage { font-size: var(--size-small); color: var(--muted); }
 /* The top bar's items show whole or sit in the "⋯" menu, so none shrinks (danielrispler/plotkeeper#127, bar.ts). The spacer takes the rest. */
 .top > :not(.sp):not(.menu) { flex: none; }
