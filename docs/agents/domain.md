@@ -9,6 +9,10 @@ The studio, a control room for understanding agent work, keeps its vocabulary in
 Read `docs/studio/CONTEXT.md` and any ADRs relevant to the area you are exploring.
 If they do not exist, proceed silently. The domain-modeling skill creates them when terms or decisions are resolved.
 
+## The real event log
+
+To measure the real event log, read `~/Library/Application Support/dev.falinks.studio/events.jsonl` (hundreds of MB); `~/.studio-terminal-spike/events.jsonl` is a small spike log.
+
 ## Vocabulary
 
 Use the terms defined in `docs/studio/CONTEXT.md` when naming domain concepts in issues, proposals, hypotheses, and tests. If a needed term is missing, reconsider whether it fits the project or note the gap for domain-modeling.
