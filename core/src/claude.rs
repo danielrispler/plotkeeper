@@ -331,7 +331,9 @@ pub(crate) fn exit_code_of(prompt: &str, id: &str) -> Option<i32> {
         .skip(1)
         .find(|notice| tag(notice, "task-id") == Some(id))?;
     let (_, after) = tag(notice, "summary")?.rsplit_once("exit code ")?;
-    let digits = after.find(|c: char| !c.is_ascii_digit()).unwrap_or(after.len());
+    let digits = after
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(after.len());
     after[..digits].parse().ok()
 }
 

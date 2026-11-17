@@ -534,7 +534,10 @@ fn a_block_of_the_same_command_that_is_not_the_running_retrys_own_gets_its_own_c
 #[test]
 fn a_real_shaped_background_block_goes_from_blocked_to_finished_at_its_wake_up() {
     let (running, finished) = background_block_woken_by("…");
-    assert_eq!(running.reason, "The server-side auto mode classifier judged this action dangerous (it gave no explanation)");
+    assert_eq!(
+        running.reason,
+        "The server-side auto mode classifier judged this action dangerous (it gave no explanation)"
+    );
     assert_eq!(running.status, BlockedStatus::RunningInBackground);
     assert_eq!(finished.status, BlockedStatus::Finished);
     assert_eq!(finished.exit_code, None);
@@ -546,9 +549,15 @@ fn a_real_shaped_background_block_goes_from_blocked_to_finished_at_its_wake_up()
 fn a_background_commands_exit_code_is_read_from_each_real_summary_shape() {
     for (summary, code) in [
         ("Background command \"…\" completed (exit code 0)", Some(0)),
-        ("Background command \"…\" failed with exit code 144", Some(144)),
+        (
+            "Background command \"…\" failed with exit code 144",
+            Some(144),
+        ),
         ("Background command \"…\" failed with exit code 1", Some(1)),
-        ("Background command \"…\" completed (exit code 1: No matches found)", Some(1)),
+        (
+            "Background command \"…\" completed (exit code 1: No matches found)",
+            Some(1),
+        ),
         ("Background command \"…\" was stopped", None),
     ] {
         let (_, finished) = background_block_woken_by(summary);
@@ -558,7 +567,9 @@ fn a_background_commands_exit_code_is_read_from_each_real_summary_shape() {
 
 /// The card of a real-shaped background block (session 407caba5 of the first recordings of #174) before its
 /// wake-up, and after a wake-up whose summary is `summary`.
-fn background_block_woken_by(summary: &str) -> (studio_core::BlockedCommand, studio_core::BlockedCommand) {
+fn background_block_woken_by(
+    summary: &str,
+) -> (studio_core::BlockedCommand, studio_core::BlockedCommand) {
     const BG: &str =
         "claude -p \"Reply with the word ok\" --model haiku # studio-fixture-background";
     let input = json!({ "command": BG, "description": "Run claude CLI in background",
