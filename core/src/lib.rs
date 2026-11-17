@@ -1386,7 +1386,7 @@ impl Session {
         let rows = self.ledger.rows().iter();
         let done = rows.filter(|r| turn_files::edits(&r.tool) && !r.failed());
         let done = done.filter(|r| r.outcome != Some(Outcome::Rejected));
-        let (mut ours, mut others) = (BTreeSet::new(), BTreeSet::new());
+        let (mut ours, mut theirs) = (BTreeSet::new(), BTreeSet::new());
         for row in done {
             let Some(file) = row.file.clone() else {
                 continue;
@@ -1394,10 +1394,10 @@ impl Session {
             if row.turn == Some(turn) {
                 ours.insert(file);
             } else if row.started_at.is_none_or(|at| at >= since) {
-                others.insert(file);
+                theirs.insert(file);
             }
         }
-        (ours, others)
+        (ours, theirs)
     }
 
     /// The backfill of its turn ended at `at` with the hook's trees `ends`: `None` when no worktree
@@ -3207,10 +3207,10 @@ impl Studio {
             if !session.capabilities.turn_trees {
                 continue;
             }
-            let open = session.open_roots();
+            let running = session.open_roots();
             for (index, turn) in session.turns.iter_mut().enumerate() {
                 let ended = turn.ended_at.is_some();
-                let open = |root: &String| !ended || open.contains(&(index, root.clone()));
+                let open = |root: &String| !ended || running.contains(&(index, root.clone()));
                 // Final once it ended and no worker it spawned runs on in one of its worktrees.
                 let last = ended && !turn.trees.keys().any(open);
                 // A turn that never ended (its session was killed) ages from its start.
@@ -3322,8 +3322,8 @@ impl Studio {
         let Some(turn) = session.turns.get(ask.turn) else {
             return Facts::default();
         };
-        let (ours, others) = session.edited(ask.turn);
-        let found = diffs.map(|diffs| TurnFiles::of(diffs, &ours, &others));
+        let (ours, theirs) = session.edited(ask.turn);
+        let found = diffs.map(|diffs| TurnFiles::of(diffs, &ours, &theirs));
         let found = found.unwrap_or_default();
         Facts {
             files: found
@@ -3346,9 +3346,9 @@ impl Studio {
         let Some(session) = self.sessions.get_mut(&ask.session_id) else {
             return;
         };
-        let (ours, others) = session.edited(ask.turn);
+        let (ours, theirs) = session.edited(ask.turn);
         if let Some(turn) = session.turns.get_mut(ask.turn) {
-            turn.files = diffs.map(|diffs| TurnFiles::of(diffs, &ours, &others));
+            turn.files = diffs.map(|diffs| TurnFiles::of(diffs, &ours, &theirs));
         }
         session.update_unseen();
     }
