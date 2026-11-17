@@ -324,11 +324,30 @@ fn cards(studio: State<Mutex<Studio>>, cards: State<Cards>) -> SessionCards {
     shown
 }
 
-/// The plan's 5-hour and weekly usage from the status line's newest snapshot in the `usage` folder
-/// beside the event log, `null` when there is none (danielrispler/Falinks#481).
+/// Plan usage (danielrispler/plotkeeper#163) of the `agents` asked for, or of every agent when `None`. The window asks for only
+/// "claude" on its timer, which reads a snapshot file and runs no CLI; an agent that runs one is read only when every agent is.
+/// Claude's is from the status line's newest snapshot in the `usage` folder beside the event log. An agent whose usage cannot
+/// be read says why.
 #[tauri::command]
-fn usage() -> Option<serde_json::Value> {
-    studio_workbench::plan_usage(&studio_hook::data_dir(&std::env::home_dir()?).join("usage"))
+fn usage(agents: Option<Vec<String>>) -> Vec<studio_workbench::AgentUsage> {
+    let wanted = |agent: &str| {
+        agents
+            .as_ref()
+            .is_none_or(|list| list.iter().any(|a| a == agent))
+    };
+    let mut read = Vec::new();
+    if wanted("claude") {
+        read.push(match std::env::home_dir() {
+            Some(home) => {
+                studio_workbench::claude_usage(&studio_hook::data_dir(&home).join("usage"))
+            }
+            None => studio_workbench::AgentUsage::failed(
+                "claude",
+                "No home folder to find Claude's usage in",
+            ),
+        });
+    }
+    read
 }
 
 /// What the read loop last sent the window, so it sends each again only when it changes.

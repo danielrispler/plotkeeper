@@ -212,7 +212,7 @@ const common = {
   terminal_connect: { repo: "/Users/danielrispler/work/plotkeeper", outdated: false },
   terminal_lost: [],
   revival: [],
-  usage: { five_hour: { used_percentage: 42, resets_at: Date.now() / 1000 + 3600 }, seven_day: { used_percentage: 18, resets_at: Date.now() / 1000 + 86400 } },
+  usage: [{ agent: "claude", five_hour: { used_percentage: 42, resets_at: Date.now() / 1000 + 3600 }, seven_day: { used_percentage: 18, resets_at: Date.now() / 1000 + 86400 }, read_at: Date.now() / 1000 - 240, source: "last Claude session", reason: null }],
 };
 
 const goal = "Give each session row a fold toggle and a delete, drawn only where a row can use them.";

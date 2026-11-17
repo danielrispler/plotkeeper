@@ -73,6 +73,14 @@ const recordedTerminal = () => {
   };
 };
 
+const usageTiles = () => {
+  const now = Date.now() / 1000;
+  return [
+    { agent: "claude", five_hour: { used_percentage: 62, resets_at: now + 2 * 3600 + 600 }, seven_day: { used_percentage: 80, resets_at: now + 3 * 86400 }, read_at: now - 240, source: "last Claude session", reason: null },
+    { agent: "codex", five_hour: null, seven_day: null, read_at: null, source: null, reason: "Codex's usage could not be read: codex app-server did not answer" },
+  ];
+};
+
 export const fixtures = {
   ...railFixtures,
   recordedTerminal,
@@ -87,6 +95,14 @@ export const fixtures = {
       session("s4", "#55 · Delete default", "your_turn", { unseen: true }),
     ];
     return { ...common, sessions, selected: { session: sessions[0], agent: null } };
+  },
+  // The top bar's usage glance (#163): the tightest window across the agents' tiles, here Claude's weekly 80%.
+  usageGlance() {
+    return { ...fixtures.list(), usage: usageTiles() };
+  },
+  // The usage popover open (#163): Claude's tile with its bars and age, and Codex's, whose read failed, with only its reason.
+  usagePopover() {
+    return { ...fixtures.list(), usage: usageTiles(), snapScript: `document.getElementById("usage-popover").showPopover();` };
   },
   // The list with each agent's logo in each state (#158): Claude, agy, status-only Codex, another program and a shell.
   logos() {
