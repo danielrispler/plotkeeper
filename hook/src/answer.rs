@@ -118,6 +118,27 @@ pub fn write_pass(
     )
 }
 
+/// "Ask again": the pass for `command` in `cwd`, fresh for `PASS_TTL_MS` from `now`, as the only one. An earlier pass
+/// for the same call, whether spent, claimed or still waiting, is replaced, so one approval never covers two runs.
+pub fn renew_pass(
+    data: &Path,
+    session: &str,
+    command: &str,
+    cwd: &str,
+    now: u64,
+) -> io::Result<()> {
+    if let Ok(entries) = fs::read_dir(pass_dir(data, session)) {
+        for path in entries.filter_map(|e| e.ok().map(|e| e.path())) {
+            let same = read_private(&path)
+                .is_some_and(|pass| pass["command"] == command && pass["cwd"] == cwd);
+            if same {
+                let _ = fs::remove_file(path);
+            }
+        }
+    }
+    write_pass(data, session, command, cwd, now)
+}
+
 /// Whether a session id may name a file: letters, digits, `-` and `_` only.
 pub fn is_file_safe(session: &str) -> bool {
     let plain = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_';

@@ -723,3 +723,59 @@ fn a_pass_file_of_the_wrong_mode_is_refused() {
     }
     let _ = fs::remove_dir_all(&home);
 }
+
+#[test]
+fn a_retry_run_after_cd_into_the_subagents_folder_matches_the_pass_for_that_folder() {
+    let home = scratch("pass-cd");
+    watch(&home, "s-other", std::process::id(), 0);
+    // The subagent was blocked in its own folder; the session ran `cd` there as its own call, so the retry's cwd is that folder.
+    answer::write_pass(&data(&home), SESSION, COMMAND, "/work/sub", now_ms()).unwrap();
+    let run = |payload: Value| {
+        let since = Instant::now();
+        let out = finish(start(&home, WAIT_MS, &payload), since);
+        assert!(out.1 < PROMPTLY);
+        out.0
+    };
+    // Run from the session's own folder it is not the approved call.
+    assert_eq!(run(retried("PreToolUse", COMMAND, CWD, SESSION)), "");
+    let claimed: Value =
+        serde_json::from_str(&run(retried("PreToolUse", COMMAND, "/work/sub", SESSION))).unwrap();
+    assert_eq!(claimed["hookSpecificOutput"]["permissionDecision"], "ask");
+    let allowed: Value = serde_json::from_str(&run(retried(
+        "PermissionRequest",
+        COMMAND,
+        "/work/sub",
+        SESSION,
+    )))
+    .unwrap();
+    assert_eq!(
+        allowed["hookSpecificOutput"]["decision"]["behavior"],
+        "allow"
+    );
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn asking_again_leaves_one_fresh_pass_so_the_command_runs_once() {
+    let home = scratch("pass-renew");
+    watch(&home, "s-other", std::process::id(), 0);
+    // The first approval was claimed by a retry that never reached its permission request; Daniel asks again.
+    answer::write_pass(&data(&home), SESSION, COMMAND, CWD, now_ms() - 40 * 60_000).unwrap();
+    answer::write_pass(&data(&home), SESSION, COMMAND, CWD, now_ms()).unwrap();
+    answer::renew_pass(&data(&home), SESSION, COMMAND, CWD, now_ms()).unwrap();
+    answer::renew_pass(&data(&home), SESSION, COMMAND, CWD, now_ms()).unwrap();
+    let run = |payload: Value| {
+        let since = Instant::now();
+        let out = finish(start(&home, WAIT_MS, &payload), since);
+        assert!(out.1 < PROMPTLY);
+        out.0
+    };
+    assert!(run(retried("PreToolUse", COMMAND, CWD, SESSION)).contains("ask"));
+    assert!(run(retried("PermissionRequest", COMMAND, CWD, SESSION)).contains("allow"));
+    assert_eq!(
+        run(retried("PreToolUse", COMMAND, CWD, SESSION)),
+        "",
+        "a second run has no pass"
+    );
+    let _ = fs::remove_dir_all(&home);
+}

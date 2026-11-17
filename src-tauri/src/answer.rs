@@ -159,6 +159,17 @@ pub fn answer_blocked_command(
     answer_blocked(&data()?, &session, &nonce, decision)
 }
 
+/// "Ask again" on an Allowed, not run card: a fresh pass for its exact command and folder, the only one, since the
+/// 30-minute pass may have expired or been spent. The window then types the retry line.
+#[tauri::command]
+pub fn ask_again(session: String, command: String, cwd: String) -> Result<(), String> {
+    if !answer::is_file_safe(&session) {
+        return Err("not a session id".into());
+    }
+    answer::renew_pass(&data()?, &session, &command, &cwd, answer::now_ms())
+        .map_err(|e| e.to_string())
+}
+
 /// The window shows `session`'s view, or none (`None`, also while the window is hidden). Returns the
 /// session's open request, if any.
 #[tauri::command]

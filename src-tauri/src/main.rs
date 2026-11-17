@@ -889,6 +889,7 @@ fn main() {
             answer::alive,
             answer::answer,
             answer::answer_blocked_command,
+            answer::ask_again,
             settings::settings_files,
             settings::set_zoom,
             settings::open_settings,

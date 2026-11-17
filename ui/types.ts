@@ -252,6 +252,7 @@ export type Decision = {
 export type BlockedStatus =
   | "blocked"
   | "allowed"
+  | "allowed_not_run"
   | "running"
   | "finished"
   | "running_in_background"

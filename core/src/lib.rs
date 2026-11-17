@@ -623,6 +623,8 @@ pub enum BlockedStatus {
     RunningInBackground,
     /// A new `PermissionDenied` of the same command followed the Allow.
     BlockedAgain,
+    /// Its turn ended with no matching call: Daniel's Allow was not used, and "Ask again" retries it.
+    AllowedNotRun,
     /// Daniel declined it from the card, which closes it.
     Declined,
 }
@@ -1498,7 +1500,10 @@ impl Session {
         let waits = |c: &&BlockedCommand| {
             matches!(
                 c.status,
-                BlockedStatus::Blocked | BlockedStatus::Allowed | BlockedStatus::BlockedAgain
+                BlockedStatus::Blocked
+                    | BlockedStatus::Allowed
+                    | BlockedStatus::AllowedNotRun
+                    | BlockedStatus::BlockedAgain
             )
         };
         self.blocked_commands.iter().filter(waits).count()
@@ -2774,14 +2779,27 @@ impl Studio {
             match happened {
                 Happened::ToolStart { tool, id } if tool.kind == ToolKind::Command => {
                     let card = session.blocked_commands.iter_mut().find(|c| {
-                        c.status == BlockedStatus::Allowed
-                            && Some(c.command.as_str()) == tool.command.as_deref()
+                        matches!(
+                            c.status,
+                            BlockedStatus::Allowed | BlockedStatus::AllowedNotRun
+                        ) && Some(c.command.as_str()) == tool.command.as_deref()
                             && c.cwd == event.cwd
                     });
                     if let Some(card) = card {
                         card.status = BlockedStatus::Running;
                         card.run = Some(id.clone());
                         card.run_at = Some(at);
+                    }
+                }
+                // A turn that ends with no retry leaves the approval unused: the session's own turn covers every
+                // card, a subagent's its own.
+                Happened::TurnEnd { .. } => {
+                    for card in &mut session.blocked_commands {
+                        if card.status == BlockedStatus::Allowed
+                            && (event.agent_id.is_none() || card.agent == event.agent_id)
+                        {
+                            card.status = BlockedStatus::AllowedNotRun;
+                        }
                     }
                 }
                 // The retry's end: finished with its exit code, or running on in the background.
@@ -2815,8 +2833,12 @@ impl Studio {
                     let command = tool.command.clone().unwrap_or_default();
                     // The same command blocked again after Allow is its card's, not a new one.
                     let again = session.blocked_commands.iter_mut().find(|c| {
-                        matches!(c.status, BlockedStatus::Allowed | BlockedStatus::Running)
-                            && c.command == command
+                        matches!(
+                            c.status,
+                            BlockedStatus::Allowed
+                                | BlockedStatus::AllowedNotRun
+                                | BlockedStatus::Running
+                        ) && c.command == command
                             && c.cwd == event.cwd
                     });
                     match again {

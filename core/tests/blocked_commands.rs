@@ -393,3 +393,66 @@ fn a_new_block_of_the_same_command_after_allow_blocks_the_card_again() {
     assert_eq!(card.call, "toolu_2");
     assert_eq!(session.state, State::NeedsYou);
 }
+
+/// The agent's turn ends at `at`.
+fn stop(at: u64, agent: Option<&str>) -> String {
+    let mut extra = json!({ "prompt_id": "p-1" });
+    if let Some(agent) = agent {
+        extra["agent_id"] = agent.into();
+    }
+    line(
+        if agent.is_some() {
+            "SubagentStop"
+        } else {
+            "Stop"
+        },
+        at,
+        extra,
+    )
+}
+
+#[test]
+fn an_allowed_command_whose_turn_ends_without_the_retry_is_allowed_not_run_and_still_counts_on_the_row()
+ {
+    let session = session(&then(allowed(), vec![stop(6_000, None)]));
+    assert_eq!(
+        session.blocked_commands[0].status,
+        BlockedStatus::AllowedNotRun
+    );
+    assert_eq!(session.blocked_waiting(), 1);
+}
+
+#[test]
+fn a_retry_that_runs_before_the_turn_ends_is_not_allowed_not_run() {
+    let lines = then(
+        allowed(),
+        vec![retry(5_000, "toolu_2", COMMAND), stop(6_000, None)],
+    );
+    assert_eq!(
+        session(&lines).blocked_commands[0].status,
+        BlockedStatus::Running
+    );
+}
+
+#[test]
+fn a_late_retry_after_allowed_not_run_runs_the_card_again() {
+    let lines = then(
+        allowed(),
+        vec![stop(6_000, None), retry(7_000, "toolu_2", COMMAND)],
+    );
+    let card = &session(&lines).blocked_commands[0];
+    assert_eq!(card.status, BlockedStatus::Running);
+    assert_eq!(card.run.as_deref(), Some("toolu_2"));
+}
+
+#[test]
+fn a_new_block_of_an_allowed_not_run_command_blocks_the_card_again() {
+    let lines = then(
+        allowed(),
+        vec![stop(6_000, None), denied(7_000, "toolu_3", COMMAND, None)],
+    );
+    assert_eq!(
+        session(&lines).blocked_commands[0].status,
+        BlockedStatus::BlockedAgain
+    );
+}

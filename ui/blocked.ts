@@ -5,6 +5,7 @@
 import { blockedRequestFor, sendBlockedAnswer } from "./answer.js";
 import { code, invoke, text } from "./dom.js";
 import { duration } from "./times.js";
+import { typeInto, type TypingIo } from "./typing.js";
 import type { BlockedCommand, BlockedStatus } from "./types.js";
 
 export type BlockedView = {
@@ -24,6 +25,7 @@ export type BlockedOutput = { exit_code: number | null; tail: string };
 const states: Record<Exclude<BlockedStatus, "declined">, string> = {
   blocked: "Blocked",
   allowed: "Allowed",
+  allowed_not_run: "Allowed, not run",
   running: "Running",
   finished: "Finished",
   running_in_background: "Running in background",
@@ -41,6 +43,18 @@ function detailOf(card: BlockedCommand, now: number): string | null {
 // The tails read so far, by the run's call id.
 const tails = new Map<string, BlockedOutput | null>();
 
+// The line typed into the session's terminal to have the agent retry `card`'s command: for the session's own block, or,
+// when `agent` (the subagent's name) asked, one that tells the session to run it in the subagent's folder.
+export function retryLine(card: BlockedCommand, agent: string | null): string {
+  if (agent === null) return `Daniel approved the blocked command: \`${card.command}\`. Run it again.`;
+  return `Daniel approved the command subagent \`${agent}\` was blocked on. Run \`cd ${card.cwd}\` as its own Bash call, then run exactly: \`${card.command}\`. Or pass it to the subagent if it still runs.`;
+}
+
+// Types the retry line of `card` into terminal `id`, through `typeInto`: never over Daniel's draft or into a session that needs him.
+export async function typeRetry(card: BlockedCommand, agent: string | null, id: string, blocked: () => boolean, io: TypingIo): Promise<boolean> {
+  return typeInto(id, retryLine(card, agent), blocked, io);
+}
+
 export function blockedView(
   card: BlockedCommand,
   agent: string | null,
@@ -55,13 +69,14 @@ export function blockedView(
     folder: card.cwd,
     reason: card.reason,
     agent,
-    buttons: (card.status === "blocked" && answerable) || card.status === "blocked_again" ? ["Allow", "Decline"] : [],
+    buttons: (card.status === "blocked" && answerable) || card.status === "blocked_again" ? ["Allow", "Decline"] : card.status === "allowed_not_run" ? ["Ask again"] : [],
     detail: detailOf(card, now),
     tail: card.status === "finished" ? (output?.tail ?? null) : null,
   };
 }
 
-export function blockedElement(session: string, card: BlockedCommand, agent: string | null): HTMLElement | null {
+// `retry` types the card's retry line into the session's terminal (`story.ts`).
+export function blockedElement(session: string, card: BlockedCommand, agent: string | null, retry: (card: BlockedCommand) => void): HTMLElement | null {
   const request = blockedRequestFor(card.call);
   const run = card.status === "finished" ? card.run : null;
   const output = run ? (tails.get(run) ?? null) : null;
@@ -88,13 +103,23 @@ export function blockedElement(session: string, card: BlockedCommand, agent: str
         pre.textContent = `The output could not be read: ${e}`;
       });
   } else if (view.tail !== null) block.append(text("pre", view.tail, "evidence-output"));
-  if (view.buttons.length > 0 && request !== null) {
+  if (view.buttons.length > 0 && (request !== null || card.status === "allowed_not_run")) {
     const row = document.createElement("p");
     row.className = "answer-buttons";
     for (const label of view.buttons) {
       const button = text("button", label, "btn") as HTMLButtonElement;
       button.type = "button";
-      button.addEventListener("click", () => sendBlockedAnswer(session, request, label === "Allow" ? "allow" : "deny"));
+      button.addEventListener("click", async () => {
+        if (label === "Ask again") {
+          // The pass may have expired or been spent, so the approval is renewed before the line asks for the retry.
+          await invoke("ask_again", { session, command: card.command, cwd: card.cwd }).catch((e) => console.warn(e));
+          return retry(card);
+        }
+        if (request === null) return;
+        await sendBlockedAnswer(session, request, label === "Allow" ? "allow" : "deny");
+        // Its hook has returned, so nothing waits for the click: the agent is asked to retry in its terminal.
+        if (label === "Allow" && !request.waiting) retry(card);
+      });
       row.append(button);
     }
     block.append(row);
