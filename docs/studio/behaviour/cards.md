@@ -1,6 +1,6 @@
 # Cards
 
-At a session's `Stop`, one card explains what the prompt changed, commits made during the prompt included, when the change is big enough to get one: a turn that changed less gets a lone Quiz or nothing (see "What a turn gets"). When the change is structural, the card has an architecture section (ארכיטקטורה). The writer reads the summaries of the earlier cards on your prompt, its wake-ups' cards included, so a structural change spread over several cards still counts.
+At a session's `Stop`, one card explains what the prompt changed, commits made during the prompt included, when the change is big enough to get one: a turn that changed less gets a lone Quiz or nothing (see "What a turn gets"). When the change is structural, the card has an architecture section. The writer reads the summaries of the earlier cards on your prompt, its wake-ups' cards included, so a structural change spread over several cards still counts.
 
 A worker is explained like a session. It gets a card at each commit in its worktree (its `HEAD` moved, seen after a Bash step) and at its end (`SubagentStop`, or for a killed worker, which has none, the wake-up that reports it), each on its change since its previous card, and its own brief. Click its line to see its brief and cards.
 
@@ -10,7 +10,7 @@ At a session's `Stop`, when it changed nothing itself but its workers wrote card
 
 A card's code is pulled from git, never retyped by the model: the writer names a path and a line range, and the app reads those lines from the turn's end tree, at most 12 lines of one range; a range whose lines are not in the file is dropped, and a check's card has no code. A card's file chips that are among its turn's files open the same hunk as the file's row in the evidence line, in place.
 
-Under the explanation, "explain more" (הסבר עוד) asks the writer once more, on the card's change and its explanation, and shows the longer explanation under the card; later taps open and close the kept text with no new call. When the writer gives no text, the app logs one line on stderr and the next tap asks again. Rate the explanation: good, fair or poor (טוב, בינוני, חלש), then tick its reasons: unclear, wrong, too shallow, too easy, and, on a card with a quiz, the key is wrong, which is the same flag as the quiz's.
+Under the explanation, "explain more" asks the writer once more, on the card's change and its explanation, and shows the longer explanation under the card; later taps open and close the kept text with no new call. When the writer gives no text, the app logs one line on stderr and the next tap asks again. Rate the explanation: Good, Fair or Poor, then tick its reasons: unclear, wrong, too shallow, too easy, and, on a card with a quiz, the key is wrong, which is the same flag as the quiz's.
 
 The card store keeps the cards, your guesses, flags, ratings and longer explanations across restarts; turns that ended while the app was down get no cards.
 
@@ -20,7 +20,7 @@ Each subagent gets its own fingerprint too, of the folder of its first event: it
 
 Ignored files do not count, and a commit alone changes nothing. A file over 1 MiB is compared by its size and modification time, and the card writer gets one line that names it instead of its diff.
 
-The card writer runs `claude -p` on your subscription, with `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` removed from its environment, in `card-writer/` beside the event log. A change is untrusted text, so the writer runs with no tools (`--tools ""`) and no MCP servers (`--strict-mcp-config`), whatever your settings allow. It gets at most the first 64 KiB of the change. It also runs without `CLAUDE_CODE_PLUGIN_DIRS`, so its own sessions send no hook events. It writes the card in Hebrew, right to left, with code left to right.
+The card writer runs `claude -p` on your subscription, with `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` removed from its environment, in `card-writer/` beside the event log. A change is untrusted text, so the writer runs with no tools (`--tools ""`) and no MCP servers (`--strict-mcp-config`), whatever your settings allow. It gets at most the first 64 KiB of the change. It also runs without `CLAUDE_CODE_PLUGIN_DIRS`, so its own sessions send no hook events. It writes the card in English, with code in backticks, and shows code left to right. A card stored in Hebrew before the language changed is not rewritten: it keeps its text and shows it right to left.
 
 A card that does not parse is asked for once more; when the second fails too, there is no card and one line on the app's stderr; `open --stderr <file>` keeps it.
 

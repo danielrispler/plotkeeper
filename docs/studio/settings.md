@@ -13,8 +13,8 @@ Each `doctor` entry is a palette action, "Doctor: <label>", marked with its kind
   "summaries": { "model": "haiku", "effort": "low", "on_open": false },
   "notifications": { "while_focused": false }, // also notify "your turn" while focused, but not for the selected session
   "sounds": true,                // false: no needs-you or your-turn sound
-  "repository": "/Users/danielrispler/work/Falinks", // the starting project only, and where the shell starts; default: this checkout
-  "checks": { "/Users/danielrispler/work/app": ["make verify"] }, // per project folder, the commands that are checks; default: `cargo test` and the like, and `npm run check`
+  "repository": "/path/to/plotkeeper", // the starting project only, and where the shell starts; default: this checkout
+  "checks": { "/path/to/app": ["make verify"] }, // per project folder, the commands that are checks; default: `cargo test` and the like, and `npm run check`
   "quiz_trial": "2026-11-20",    // the day the confidence tap and "why?" trial starts; two weeks
   "quiz_self_test": "2026-11-20", // the day the quiz-first against body-only self-test starts; three weeks
   "doctor": [
