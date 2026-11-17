@@ -21,6 +21,9 @@ pub enum Anchor {
         turn: usize,
         root: String,
         path: String,
+        /// Its path before the turn, when the turn renamed it.
+        #[serde(default)]
+        from: Option<String>,
     },
     /// A check's run, by its call and the worker that made it.
     Check { agent: Option<String>, call: String },
@@ -177,7 +180,9 @@ impl Studio {
         };
         let mut facts = AskFacts::default();
         match anchor {
-            Anchor::File { turn, root, path } => {
+            Anchor::File {
+                turn, root, path, ..
+            } => {
                 let turn_ = session.turns.get(*turn)?;
                 facts.line("Daniel asked", turn_.prompt.clone());
                 let rows: Vec<&Row> = ledger.turn(*turn).collect();

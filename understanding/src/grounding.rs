@@ -128,6 +128,10 @@ pub(crate) fn grounded(line: &str, material: &str) -> bool {
         let hex = token.len() >= 7 && token.chars().all(|c| c.is_ascii_hexdigit());
         let sha = hex && token.chars().any(|c| c.is_ascii_alphabetic());
         let number_shaped = token.starts_with(|c: char| c.is_ascii_digit() || c == '#');
+        if token.starts_with('#') {
+            // An issue or PR id: it has to be there as written, `#12`, not as a bare 12.
+            return lower.contains(&token.to_lowercase());
+        }
         if sha || !number_shaped {
             // A SHA, or a path or a name with digits: it has to be there as written.
             let token = word.trim_matches(|c: char| !c.is_alphanumeric() && !"/_-.".contains(c));
@@ -159,4 +163,16 @@ pub(crate) fn agent_says(headline: &str, facts: &Facts) -> String {
 /// How many words `text` has.
 pub(crate) fn words(text: &str) -> usize {
     text.split_whitespace().count()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::grounded;
+
+    #[test]
+    fn an_issue_id_must_be_in_the_material_as_written_not_as_a_bare_number() {
+        assert!(!grounded("Closes #12.", "It took 12 tries."));
+        assert!(grounded("Closes #12.", "Fixes #12 and more."));
+        assert!(grounded("Took 12 tries.", "It took 12 tries."));
+    }
 }

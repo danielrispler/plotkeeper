@@ -1,6 +1,7 @@
 //! What a turn gets for a Quiz (danielrispler/plotkeeper#119): a card with its Quiz, a lone Quiz, or
 //! nothing, by the size of its change; the rules are in `docs/studio/question-rules.md`.
 
+use std::collections::HashMap;
 use studio_core::{CheckStatus, Facts};
 
 /// Changed lines, in logic files, from which a turn gets a card.
@@ -127,13 +128,35 @@ fn non_trivial(diff: &str) -> u64 {
     let squeezed =
         |lines: &[&str]| -> Vec<String> { lines.iter().map(|l| squeeze(&l[1..])).collect() };
     let (added_sq, removed_sq) = (squeezed(&added), squeezed(&removed));
-    let moved = |text: &String, other: &Vec<String>| other.contains(text);
-    let count = |lines: &[&str], squeezed: &[String], other: &Vec<String>| {
+    // Each removed line cancels at most one added line of the same squeezed text, and the reverse.
+    let (in_added, in_removed) = (tally(&added_sq), tally(&removed_sq));
+    let pairs: HashMap<&str, usize> = in_added
+        .iter()
+        .filter_map(|(text, n)| Some((*text, (*n).min(*in_removed.get(text)?))))
+        .collect();
+    let count = |lines: &[&str], squeezed: &[String]| {
+        let mut left = pairs.clone();
         let kept = lines.iter().zip(squeezed);
-        kept.filter(|(l, sq)| !trivial(&l[1..]) && !moved(sq, other))
-            .count() as u64
+        kept.filter(|(l, sq)| {
+            let moved = left.get_mut(sq.as_str()).is_some_and(|n| {
+                let cancels = *n > 0;
+                *n = n.saturating_sub(1);
+                cancels
+            });
+            !trivial(&l[1..]) && !moved
+        })
+        .count() as u64
     };
-    count(&added, &added_sq, &removed_sq) + count(&removed, &removed_sq, &added_sq)
+    count(&added, &added_sq) + count(&removed, &removed_sq)
+}
+
+/// How many times each text is in `texts`.
+fn tally(texts: &[String]) -> HashMap<&str, usize> {
+    let mut tally = HashMap::new();
+    texts
+        .iter()
+        .for_each(|t| *tally.entry(t.as_str()).or_default() += 1);
+    tally
 }
 
 /// A line that is blank, a comment, an import or only brackets and punctuation.
@@ -265,5 +288,14 @@ mod tests {
         assert_eq!(files[0].lines, 8);
         // `let a`, `let c`: the reindented `let b` is formatting only.
         assert_eq!(files[0].non_trivial, 2);
+    }
+
+    #[test]
+    fn a_removed_line_cancels_only_one_added_line_of_the_same_text() {
+        let diff = format!(
+            "diff --git a/a.rs b/a.rs\n--- a/a.rs\n+++ b/a.rs\n@@ -1 +1,8 @@\n-  return None;\n{}",
+            "+return None;\n".repeat(8)
+        );
+        assert_eq!(of_diff(&diff)[0].non_trivial, 7);
     }
 }

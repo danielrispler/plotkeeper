@@ -246,6 +246,9 @@ pub struct Brief {
     /// written again when one came.
     pub design: Vec<DesignLine>,
     pub design_from: u32,
+    /// Unused: kept so that the previous build, whose `Brief` requires it, can still read the file.
+    #[serde(default)]
+    pub updates: u32,
 }
 
 /// One session's brief and its cards in the session view's two groups (danielrispler/Falinks#369, decision 18), each
@@ -958,7 +961,10 @@ impl CardStore {
         }
         let since = now.saturating_sub(HOUR_MS);
         let open = |k: &&StoredSummary| {
-            k.summary.quiz.is_some() && !k.taps.iter().any(QuizTap::answers) && k.added_at > since
+            k.summary.quiz.is_some()
+                && k.arm != Some(Arm::BodyOnly)
+                && !k.taps.iter().any(QuizTap::answers)
+                && k.added_at > since
         };
         match self.summaries.iter().find(open) {
             Some(oldest) if card => Place::Replace(oldest.request.id.clone()),

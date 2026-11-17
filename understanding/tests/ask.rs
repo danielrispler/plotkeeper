@@ -188,6 +188,7 @@ fn a_question_on_a_file_gives_the_writer_its_editing_steps_the_prompt_and_the_hu
         turn: 0,
         root: "/w/repo".into(),
         path: "src/parse.rs".into(),
+        from: None,
     };
     let facts = studio.ask_facts(SESSION, &anchor, &log).unwrap();
     let writer = Asked::replying(Ok(r#"{"answer": "Because it fixes the parser."}"#));

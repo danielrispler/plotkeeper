@@ -203,6 +203,25 @@ fn a_quiz_older_than_an_hour_does_not_count() {
 }
 
 #[test]
+fn a_turn_the_table_gives_no_quiz_keeps_its_summary_without_one() {
+    let (_dir, store) = store();
+    let request = SummaryRequest {
+        no_quiz: true,
+        ..turn(1)
+    };
+    let summary = write_summary(
+        &store,
+        &Canned("why"),
+        &SummarySetup::default(),
+        request,
+        |l| panic!("{l}"),
+    )
+    .unwrap();
+    assert_eq!(summary.quiz, None);
+    assert_eq!(summary.headline.as_deref(), Some("Rewrote the parser."));
+}
+
+#[test]
 fn a_turn_that_asks_has_no_quiz_beside_the_decision() {
     let (_dir, store) = store();
     assert_eq!(lone(&store, 1, 0, true, "why").unwrap().quiz, None);

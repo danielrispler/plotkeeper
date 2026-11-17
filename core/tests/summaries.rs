@@ -69,6 +69,21 @@ fn ended(name: &str, reply: &str, change: Option<Change>) -> (Studio, Option<Sum
     (studio, requested(outputs))
 }
 
+/// The outputs of a live `Stop` that changed code, in order.
+fn stop_outputs(name: &str) -> Vec<Output> {
+    let reply = long_reply();
+    let path = transcript(name, &reply);
+    let mut studio = prompted(&path);
+    studio.follow_transcripts(|_| {});
+    let change = Change {
+        base: Default::default(),
+        diff: "--- a/src/parser.rs\n+++ b/src/parser.rs\n".into(),
+        head: None,
+    };
+    let changes = [(SESSION.to_owned(), change)].into_iter().collect();
+    studio.apply_with_changes(&stop(&path, &reply), changes)
+}
+
 fn long_reply() -> String {
     let paragraph = "The parser reads one token at a time and keeps the open brackets on a stack. ";
     format!("Rewrote the parser.\n\n{}", paragraph.repeat(12))
@@ -122,4 +137,13 @@ fn the_turn_end_intention_stays_the_replys_first_line_when_the_summary_arrives()
     let transcript = &studio.session(SESSION).unwrap().transcript;
     assert_eq!(transcript.intention.as_deref(), Some("Rewrote the parser."));
     assert_eq!(transcript.intentions(), ["Rewrote the parser."]);
+}
+
+#[test]
+fn a_turns_card_is_queued_before_its_summary() {
+    let outputs = stop_outputs("order");
+    let at = |f: fn(&Output) -> bool| outputs.iter().position(f).expect("both are emitted");
+    let card = at(|o| matches!(o, Output::Card(_)));
+    let summary = at(|o| matches!(o, Output::Summary(_)));
+    assert!(card < summary);
 }

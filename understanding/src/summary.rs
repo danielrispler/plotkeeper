@@ -162,10 +162,11 @@ impl TurnSummary {
             }
             agent_says(headline, &request.facts)
         };
-        let quiz = match card || value.get("quiz") == Some(&serde_json::Value::Null) {
-            true => Ok(None),
-            false => quiz(&value["quiz"]).map(Some),
-        };
+        let quiz =
+            match card || request.no_quiz || value.get("quiz") == Some(&serde_json::Value::Null) {
+                true => Ok(None),
+                false => quiz(&value["quiz"]).map(Some),
+            };
         let (quiz, problem) = match quiz {
             Ok(quiz) => (quiz, headline_problem),
             Err(problem) => (None, headline_problem.or(Some(problem))),
@@ -313,6 +314,7 @@ impl ClaudeWriter {
             Some(_) => {
                 "This turn has a card, which asks its quiz: write the headline and lines only."
             }
+            None if request.no_quiz => "This turn gets no quiz: write the headline and lines only.",
             None => "Write the headline, the lines and the quiz.",
         };
         self.run_with(

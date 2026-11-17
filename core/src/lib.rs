@@ -1678,6 +1678,10 @@ pub struct SummaryRequest {
     /// Whether the turn ended in Needs you, which keeps a Quiz from showing beside the decision.
     #[serde(default)]
     pub asks: bool,
+    /// Whether the offer table gives the turn no lone Quiz (danielrispler/plotkeeper#119): its
+    /// summary is written without one. Set by the shell, which reads the table.
+    #[serde(default)]
+    pub no_quiz: bool,
 }
 
 fn wanted() -> bool {
@@ -2702,8 +2706,14 @@ impl Studio {
                     }
                     let reply = event.reply().trim();
                     let wanted = wants_summary(reply, session.needs_you());
+                    // The turn's card goes first: its summary then finds the card stored.
+                    let card = match &output {
+                        Some(Output::Card(card)) => Some(card.id.clone()),
+                        _ => None,
+                    };
+                    outputs.extend(output);
                     // A turn that changed code gets its summary for a lone Quiz (danielrispler/plotkeeper#119).
-                    if !replay && (wanted || matches!(output, Some(Output::Card(_)))) {
+                    if !replay && (wanted || card.is_some()) {
                         // shortcut: the transcript may lag the `Stop` by one poll, so the final reply
                         // is taken from the `Stop`; read the transcript first if earlier texts go missing.
                         let mut turn = session.transcript.clone();
@@ -2720,13 +2730,11 @@ impl Studio {
                             prompt: daniels.map(|p| p.text.clone()).unwrap_or_default(),
                             intentions: turn.intentions(),
                             responses: turn.responses,
-                            card: match &output {
-                                Some(Output::Card(card)) => Some(card.id.clone()),
-                                _ => None,
-                            },
+                            card: card.clone(),
                             facts: Facts::default(),
                             wanted,
                             asks: session.needs_you(),
+                            no_quiz: false,
                         }));
                     }
                     if let Some(prompt) = session.name_after.take()
@@ -2741,7 +2749,7 @@ impl Studio {
                     let mut lines = event.reply().lines().map(str::trim);
                     let stopped = Stopped {
                         card: card_id(&event.session_id, at),
-                        requested: matches!(output, Some(Output::Card(_))),
+                        requested: card.is_some(),
                         message: lines.find(|line| !line.is_empty()).map(Into::into),
                     };
                     if let Some(turn) = session.turns.last_mut().filter(|_| in_turn) {
@@ -2750,7 +2758,6 @@ impl Studio {
                         turn.reply = event.reply().trim().into();
                     }
                     session.stopped = Some(stopped);
-                    outputs.extend(output);
                 }
                 Happened::SessionEnd => {
                     session.unblock();

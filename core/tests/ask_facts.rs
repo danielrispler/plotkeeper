@@ -113,6 +113,7 @@ fn a_files_facts_list_its_editing_steps_in_order_with_the_prompt_and_what_came_b
         turn: 0,
         root: "/w/repo".into(),
         path: "src/parse.rs".into(),
+        from: None,
     };
     let facts = studio.ask_facts(SESSION, &anchor, &log).unwrap();
     assert_eq!(

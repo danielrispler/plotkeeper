@@ -60,6 +60,7 @@ fn main() {
                         turn,
                         root: session.cwd.clone(),
                         path: path.into(),
+                        from: None,
                     };
                     if !by_kind[0].iter().any(|(s, a)| s == &id && a == &anchor) {
                         by_kind[0].push((id.clone(), anchor));
@@ -95,7 +96,9 @@ fn main() {
             continue;
         };
         let hunk = match &anchor {
-            Anchor::File { turn, root, path } => studio
+            Anchor::File {
+                turn, root, path, ..
+            } => studio
                 .turn_trees(session, *turn, root)
                 .and_then(|(start, end)| {
                     turn_hunk(

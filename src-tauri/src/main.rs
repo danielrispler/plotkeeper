@@ -79,6 +79,7 @@ fn summary_settings(
 #[tauri::command]
 fn check_lists(lists: HashMap<String, Vec<String>>, studio: State<Mutex<Studio>>) {
     studio.lock().unwrap().set_check_lists(lists);
+    LIST_CHANGED.store(true, Ordering::Release);
 }
 
 /// A check run's exit code and output tail (danielrispler/plotkeeper#112), read from the event log through
@@ -544,12 +545,17 @@ fn ask_anchor(
     };
     let facts = facts.ok_or("nothing is recorded about this")?;
     let hunk = match (&anchor, trees) {
-        (studio_core::Anchor::File { root, path, .. }, Some((start, end))) => turn_hunk(
+        (
+            studio_core::Anchor::File {
+                root, path, from, ..
+            },
+            Some((start, end)),
+        ) => turn_hunk(
             std::path::Path::new(root),
             &start,
             end.as_deref(),
             path,
-            None,
+            from.as_deref(),
             false,
         )
         .filter(|h| !h.binary)
@@ -1402,6 +1408,17 @@ fn offered(app: &AppHandle, request: &CardRequest) -> bool {
     offer == Offer::Card
 }
 
+/// Fills in `request`'s facts and, by the offer table (danielrispler/plotkeeper#119), whether its summary may keep a Quiz.
+/// Returns whether the summary is written: one asked for the sake of a lone Quiz is dropped when the turn gets none.
+fn settle(app: &AppHandle, request: &mut SummaryRequest) -> bool {
+    let state = app.state::<Mutex<Studio>>();
+    request.facts = turn_facts(&state, &request.id);
+    let merge = state.lock().unwrap().turn_merged(&request.id);
+    let lone = Shape::of(&request.facts, "", merge).offer() == Offer::Quiz;
+    request.no_quiz = !lone;
+    request.wanted || lone
+}
+
 /// Writes the summary of `request`'s turn on its session's queue, after the turn's card. While summaries are written
 /// on open, the turn waits for Daniel instead (`turn_summary`).
 fn summarize(
@@ -1410,19 +1427,17 @@ fn summarize(
     queues: &mut HashMap<String, mpsc::Sender<Job>>,
     request: SummaryRequest,
 ) {
-    // A summary asked for the sake of a lone Quiz is dropped when the turn gets none.
-    let lone = |app: &AppHandle| offer_of(&app.state(), &request.id, "") == Offer::Quiz;
-    if !request.wanted && !lone(app) {
-        return;
-    }
     if app
         .state::<Mutex<Studio>>()
         .lock()
         .unwrap()
         .summaries_on_open()
     {
-        let waiting = &app.state::<Summaries>().waiting;
-        waiting.lock().unwrap().insert(request.id.clone(), request);
+        let mut request = request;
+        if settle(app, &mut request) {
+            let waiting = &app.state::<Summaries>().waiting;
+            waiting.lock().unwrap().insert(request.id.clone(), request);
+        }
         return;
     }
     let (app, writer) = (app.clone(), writer.clone());
@@ -1431,7 +1446,9 @@ fn summarize(
         let log = |line: String| eprintln!("studio: {line}");
         let setup = app.state::<Summaries>().setup.lock().unwrap().clone();
         let mut request = request;
-        request.facts = turn_facts(&app.state::<Mutex<Studio>>(), &request.id);
+        if !settle(&app, &mut request) {
+            return;
+        }
         let session = request.session_id.clone();
         let (studio, cards) = (app.state::<Mutex<Studio>>(), app.state::<Cards>());
         if write_summary(&cards, &*writer, &setup, request, log).is_some() {

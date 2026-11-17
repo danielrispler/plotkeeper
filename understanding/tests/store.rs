@@ -918,3 +918,20 @@ fn the_coin_gives_both_arms_and_a_turn_with_no_quiz_gets_none() {
         .unwrap();
     assert_eq!(store.summaries().last().unwrap().arm, None);
 }
+
+#[test]
+fn a_card_past_the_cap_never_replaces_a_body_only_turns_quiz() {
+    use studio_understanding::Place;
+    let data = tempfile::tempdir().unwrap();
+    let mut store = CardStore::open(data.path().join("cards.json")).unwrap();
+    store.set_self_test(Some(START));
+    // The body-only turn is the oldest and does not count toward the cap; three offered ones do.
+    quiz_turn(&mut store, "hidden", START + 1, true);
+    for (i, id) in ["a", "b", "c"].into_iter().enumerate() {
+        quiz_turn(&mut store, id, START + 2 + i as u64, false);
+    }
+    assert_eq!(
+        store.place_quiz(true, START + 10),
+        Place::Replace("a".into())
+    );
+}
