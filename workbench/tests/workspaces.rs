@@ -109,6 +109,7 @@ fn a_branch_with_no_upstream_has_no_distance() {
             main_behind: None,
             on_default: false,
             would_conflict: false,
+            would_overwrite: false,
         })
     };
 
@@ -165,6 +166,7 @@ fn upstream_distance_counts_unpushed_and_unpulled_commits() {
             main_behind: Some(1),
             on_default: true,
             would_conflict: false,
+            would_overwrite: false,
         })
     );
 }
@@ -185,6 +187,7 @@ fn a_detached_head_has_no_branch() {
             main_behind: None,
             on_default: false,
             would_conflict: false,
+            would_overwrite: false,
         })
     );
 }

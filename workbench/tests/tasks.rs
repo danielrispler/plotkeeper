@@ -288,6 +288,7 @@ fn a_workspace_reads_its_upstream_distance_and_its_changed_files() {
             main_behind,
             on_default,
             would_conflict: false,
+            would_overwrite: false,
         })
     };
 

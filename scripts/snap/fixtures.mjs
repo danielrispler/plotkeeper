@@ -143,3 +143,13 @@ export const fixtures = {
     return { ...common, sessions, selected: null };
   },
 };
+
+// Pull main (#164), on #160's rows: the main checkout is 3 commits behind origin, so Pull ↓3 shows, enabled; with uncommitted files it is disabled.
+const pullMain = (extra) => () => {
+  const f = fixtures.branchOnce();
+  const main = f.workspaces.main.path;
+  f.workspace_git_state.values[main] = { ...f.workspace_git_state.values[main], upstream: [0, 3], main_behind: 3, ...extra };
+  return f;
+};
+fixtures.pullEnabled = pullMain({});
+fixtures.pullDisabled = pullMain({ changed: 2 });

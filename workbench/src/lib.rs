@@ -197,6 +197,9 @@ pub struct GitState {
     /// Whether rebasing the branch onto `origin`'s default branch would conflict; `false` when it
     /// is not behind it (#32).
     pub would_conflict: bool,
+    /// Whether pulling `origin`'s default branch into this checkout would overwrite its files: a
+    /// changed or untracked file the incoming commits also touch (#164). Only on the default branch.
+    pub would_overwrite: bool,
 }
 
 /// The git state of the workspace at `path`, one of the workspaces of `repo`; any other path is refused, so
@@ -236,6 +239,10 @@ pub fn git_state(repo: &Path, path: &str) -> Result<GitState, String> {
         (Some(d), false, Some(_)) => would_conflict(dir, d),
         _ => false,
     };
+    let would_overwrite = match (&default, on_default) {
+        (Some(d), true) => would_overwrite(dir, d),
+        _ => false,
+    };
     Ok(GitState {
         branch,
         upstream,
@@ -244,6 +251,7 @@ pub fn git_state(repo: &Path, path: &str) -> Result<GitState, String> {
         main_behind,
         on_default,
         would_conflict,
+        would_overwrite,
     })
 }
 
@@ -298,6 +306,27 @@ fn would_conflict(dir: &Path, default: &str) -> bool {
     conflicts
 }
 
+/// Whether fast-forwarding `dir`'s checked-out branch to `default` would overwrite a file: one that is
+/// changed or untracked and that the incoming commits `HEAD..default` also touch (#164). Unrelated
+/// changes and untracked files elsewhere do not count.
+fn would_overwrite(dir: &Path, default: &str) -> bool {
+    let Ok(incoming) = git(dir, &["diff", "--name-only", &format!("HEAD..{default}")]) else {
+        return false;
+    };
+    if incoming.is_empty() {
+        return false;
+    }
+    let Ok(status) = git(dir, &["status", "--porcelain", "-uall"]) else {
+        return false;
+    };
+    let changed: Vec<&str> = status
+        .lines()
+        .filter_map(|line| line.get(3..))
+        .map(|path| path.rsplit(" -> ").next().unwrap_or(path).trim_matches('"'))
+        .collect();
+    incoming.lines().any(|path| changed.contains(&path))
+}
+
 /// The operation in progress in the workspace at `dir`, from the files its repository keeps while one is stopped.
 fn operation(dir: &Path) -> Result<Option<String>, String> {
     let marked = |name: &str| -> Result<bool, String> {
@@ -324,6 +353,32 @@ fn operation(dir: &Path) -> Result<Option<String>, String> {
 /// writes `refs/remotes/*` and `FETCH_HEAD` only, never a branch, the index or a worktree's files.
 pub fn fetch(repo: &Path) -> Result<(), String> {
     git(repo, &["fetch", "--quiet", "origin"]).map(drop)
+}
+
+/// Brings the default branch of the repository that holds `repo` up to `origin`'s (#164), fetching
+/// first. With the default branch checked out in the main checkout it is a fast-forward-only merge;
+/// otherwise the local branch moves without a checkout, as `git fetch origin main:main` does. It never
+/// merges, rebases or stashes, and no other branch moves. Git's message is the error when the branch
+/// has diverged or uncommitted changes are in the way.
+pub fn pull(repo: &Path) -> Result<(), String> {
+    let main = workspaces(repo)?.main.path;
+    let main = Path::new(&main);
+    fetch(main)?;
+    let remote = git(
+        main,
+        &["symbolic-ref", "--short", "-q", "refs/remotes/origin/HEAD"],
+    )
+    .map_err(|_| "origin's default branch is not known".to_string())?;
+    let name = remote.strip_prefix("origin/").unwrap_or(&remote);
+    if git(main, &["symbolic-ref", "--short", "-q", "HEAD"]).is_ok_and(|b| b == name) {
+        git(main, &["merge", "--ff-only", "--quiet", &remote]).map(drop)
+    } else {
+        git(
+            main,
+            &["fetch", "--quiet", "origin", &format!("{name}:{name}")],
+        )
+        .map(drop)
+    }
 }
 
 /// The command a studio terminal runs for a new session, or for `resume`, an ended session's id. It
