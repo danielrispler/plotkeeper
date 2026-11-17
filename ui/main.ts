@@ -275,7 +275,7 @@ function applySettings(files: SettingsFiles) {
   window.dispatchEvent(new Event("settings"));
 }
 listen<SettingsFiles>("settings-files", applySettings);
-invoke<SettingsFiles>("settings_files").then(applySettings);
+invoke("settings_files").then(applySettings);
 // The session's header in the top bar toggles the rail, as ⌘2 does (danielrispler/plotkeeper#127).
 // In the overlay layout a click pins the layer open, and a click on a pinned one closes it (hover.ts).
 element("session-header").addEventListener("click", () => (document.body.dataset.layout === "overlay" ? railHover.click() : toggle("rail-open")));
@@ -322,7 +322,7 @@ const showList = (sessions: Session[]) => {
 };
 watchWorkspaces();
 listen<Session[]>("sessions", showList);
-invoke<Session[]>("sessions").then(showList);
+invoke("sessions").then(showList);
 // A press on the toast jumps to its session; the press itself keeps the terminal's keyboard focus.
 element("toast").addEventListener("pointerdown", (event) => event.preventDefault());
 element("toast").addEventListener("click", jumpToNeedsYou);
@@ -330,7 +330,7 @@ element("toast").addEventListener("click", jumpToNeedsYou);
 // would draw it with the last session's cards for a frame (danielrispler/Falinks#570).
 // The press's settling fetches what it held back.
 listen<Selection | null>("selected", (selected) => (studio.pending ? (studio.missed = true) : show(selected)));
-invoke<Selection | null>("selected").then(show);
+invoke("selected").then(show);
 listen<SessionCards>("cards", (cards) => (studio.pending ? (studio.missed = true) : showCards(cards)));
 // Claude Code's version changed: re-record the subagent fixture.
 listen<string>("notice", (notice) => {
@@ -343,7 +343,7 @@ listen<string | null>("writer-notice", (notice) => {
   line.textContent = withWriterNotice(line.textContent ?? "", notice);
   line.hidden = !line.textContent;
 });
-invoke<SessionCards>("cards").then(showCards);
+invoke("cards").then(showCards);
 // The answer hook waits for the card only while its session shows (danielrispler/Falinks#461, decision 16).
 startWatching(() => showView(studio.selection));
 

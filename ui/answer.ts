@@ -48,7 +48,7 @@ let blockedRequests: BlockedRequest[] = [];
 export const blockedRequestFor = (call: string) => blockedRequests.find((r) => r.tool_use_id === call) ?? null;
 
 const watch = (session: string | null) =>
-  invoke<Ask | null>("watch", { session }).catch((e) => (console.warn(e), null));
+  invoke("watch", { session }).catch((e) => (console.warn(e), null));
 
 // The view watched last, so a redraw of the same one asks the shell nothing.
 let watched = "";

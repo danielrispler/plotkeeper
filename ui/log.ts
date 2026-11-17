@@ -66,7 +66,7 @@ export async function showLog(place: HTMLElement, session: string, agent: Subage
   expanded.clear();
   const mine = { session, agent: agent.id, log: null as SubagentLog | null };
   Object.assign(shownLog, mine);
-  const log = await invoke<SubagentLog | null>("subagent_log", { session, agentId: agent.id, offset: 0 });
+  const log = await invoke("subagent_log", { session, agentId: agent.id, offset: 0 });
   if (shownLog.session !== session || shownLog.agent !== agent.id || shownLog.log) return; // a newer selection took over
   shownLog.log = log;
   drawLog(place, agent, shownLog.log, toParent);
@@ -78,7 +78,7 @@ export async function showLog(place: HTMLElement, session: string, agent: Subage
 export async function followLog(place: HTMLElement, session: string, agent: Subagent, toParent: () => void) {
   if (shownLog.session !== session || shownLog.agent !== agent.id) return;
   const from = shownLog.log?.offset ?? 0;
-  const read = await invoke<SubagentLog | null>("subagent_log", { session, agentId: agent.id, offset: from });
+  const read = await invoke("subagent_log", { session, agentId: agent.id, offset: from });
   // Another read or selection since: the offset moved, or it is another log.
   if (shownLog.session !== session || shownLog.agent !== agent.id || (shownLog.log?.offset ?? 0) !== from) return;
   if (!read || read.entries.length === 0) return; // nothing new: no redraw

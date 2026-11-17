@@ -15,7 +15,7 @@ import { shortPath } from "./paths.js";
 import { studio } from "./state.js";
 import { branchBlocked, branchOptions, refreshAfterSwitch, shownProject, workspaceRows } from "./workspaces.js";
 import type { Binding } from "./settings.js";
-import type { Branch, Workspace, Workspaces } from "./types.js";
+import type { Workspace, Workspaces } from "./types.js";
 
 // Git's error, or any other, at the picker's foot.
 function failed(error: unknown) {
@@ -86,7 +86,7 @@ export function newTask(
 // empty, the main checkout. It creates in `project`, the one the picker opened on, never the one
 // selected by the time Daniel submits.
 export const quickTask = (project: string, main: Workspace, request: string, create: typeof invoke = invoke): Promise<Workspace> =>
-  request ? create<Workspace>("create_named_task", { project, request }) : Promise.resolve(main);
+  request ? create("create_named_task", { project, request }) : Promise.resolve(main);
 const quickStart = (project: string, main: Workspace, start: Start) =>
   newTask("Issue #, spec path or prompt; empty for main", "Start", (request) => quickTask(project, main, request), true, failed, start);
 
@@ -101,7 +101,7 @@ function autoChoice(): [HTMLElement, () => boolean] {
 
 // The agents on Daniel's `PATH`, asked once per run, as his login shell is slow to start.
 let installed: Promise<string[]> | null = null;
-const offeredAgents = () => (installed ??= invoke<string[]>("agents").catch(() => ["claude"]));
+const offeredAgents = () => (installed ??= invoke("agents").catch(() => ["claude"]));
 
 // The agent choice: one button per agent, the chosen one pressed; Auto mode shows with Claude Code only.
 function agentRow(offered: string[], chosen: string, auto: HTMLElement): [HTMLElement, () => string] {
@@ -228,7 +228,7 @@ export async function showPicker(kind: Kind = "session") {
   // It opens once its rows are read, so no placeholder flashes first in another box (danielrispler/Falinks#570).
   try {
     const project = await shownProject();
-    const [workspaces, agents] = await Promise.all([invoke<Workspaces>("workspaces", { project }), offeredAgents()]);
+    const [workspaces, agents] = await Promise.all([invoke("workspaces", { project }), offeredAgents()]);
     picker.replaceChildren(...picked(project, workspaces, agents, kind));
   } catch (e) {
     picker.replaceChildren(text("p", `No worktrees: ${e}`, "empty"));
@@ -257,7 +257,7 @@ export async function showBranches(from?: string) {
   if (closed("Switch branch")) return;
   try {
     const project = from ?? (await shownProject());
-    const [workspaces, branches] = await Promise.all([invoke<Workspaces>("workspaces", { project }), invoke<Branch[]>("branches", { project })]);
+    const [workspaces, branches] = await Promise.all([invoke("workspaces", { project }), invoke("branches", { project })]);
     const blocked = branchBlocked(workspaces, studio.listed);
     const rows = branchOptions(branches, blocked).map(({ branch, label, note, disabled }) =>
       branchRow(label, note, disabled, () => {
@@ -280,7 +280,7 @@ export async function showBranches(from?: string) {
 // recognise or a repository already listed, shows in the picker's box as the message it is.
 export async function addProject(folder: string) {
   try {
-    setProjects(await invoke<string[]>("add_project", { folder }));
+    setProjects(await invoke("add_project", { folder }));
     element("picker").hidden = true;
   } catch (e) {
     refuse(e);
@@ -301,7 +301,7 @@ export async function showAddProject() {
   const picker = element("picker");
   if (closed("Add project")) return;
   const choose = pressable(text("button", "Choose folder…", "name"), false, () => {
-    invoke<string | null>("choose_folder")
+    invoke("choose_folder")
       .then((folder) => (folder ? addProject(folder) : undefined))
       .catch(failed);
   });
@@ -310,7 +310,7 @@ export async function showAddProject() {
   picker.hidden = false;
   try {
     const cwds = [...studio.listed].sort((a, b) => b.last_event_at - a.last_event_at).map(({ cwd }) => cwd);
-    const suggested = await invoke<string[]>("suggest_projects", { cwds });
+    const suggested = await invoke("suggest_projects", { cwds });
     if (picker.hidden || picker.ariaLabel !== "Add project") return;
     const rows = suggested.map((path) => {
       const row = pressable(document.createElement("button"), false, () => void addProject(path));

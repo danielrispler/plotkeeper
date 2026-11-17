@@ -4,8 +4,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import vm from "node:vm";
 import { consoleLines, failed, headSource, snapPage, stubSource } from "../../scripts/snap/page.mjs";
-import { fixtures } from "../../scripts/snap/fixtures.mjs";
-import { railStates } from "../../scripts/snap/rail-fixtures.mjs";
+import { fixtures } from "../../scripts/snap/fixtures.ts";
+import { railStates } from "../../scripts/snap/rail-fixtures.ts";
 
 const invokeIn = (source, command) => {
   const window = {};
@@ -147,6 +147,14 @@ test("snapPage puts a fixture's script in the page, after the stub and before th
 test("a log line starting snap:fail fails the run; other lines do not", () => {
   assert.equal(failed(["rail scrollTop 120", "snap:fail moved"]), true);
   assert.equal(failed(["rail scrollTop 120", "a snap:fail inside"]), false);
+});
+
+// #144: an uncaught exception or an unhandled rejection in the page fails the run, as Chrome logs either: a stub reply the UI
+// cannot read, such as `null` for a list, throws in a promise that nothing awaits.
+test("an uncaught error or unhandled rejection in the page fails the run", () => {
+  assert.equal(failed(["Uncaught TypeError: Cannot read properties of null (reading 'filter')"]), true);
+  assert.equal(failed(["Uncaught (in promise) TypeError: Cannot read properties of null (reading 'filter')"]), true);
+  assert.equal(failed(["the rail logged Uncaught once"]), false);
 });
 
 test("consoleLines reads the page's console lines out of Chrome's stderr", () => {

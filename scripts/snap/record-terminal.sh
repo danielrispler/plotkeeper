@@ -6,7 +6,7 @@
 #
 #     scripts/snap/record-terminal.sh
 #
-# It records at 110 x 32 (the size scripts/snap/fixtures.mjs replays it at), answers the folder-trust question (the recording
+# It records at 110 x 32 (the size scripts/snap/fixtures.ts replays it at), answers the folder-trust question (the recording
 # starts after it), types the prompt once the input box shows, and stops once the turn is done and the screen has been still. Before it writes the file it searches the recording
 # for your login name, your home folder, and your git name and email; it writes nothing when one is there.
 # Search the file yourself too, for anything the script cannot know, before committing it.

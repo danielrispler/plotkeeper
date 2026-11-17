@@ -7,7 +7,7 @@ import { element, invoke, pressable, text } from "./dom.js";
 import { rendered } from "./markdown.js";
 import { studio } from "./state.js";
 
-type Skill = { name: string; source: string; path: string; text: string; editable: boolean };
+export type Skill = { name: string; source: string; path: string; text: string; editable: boolean };
 
 const titles: Record<string, string> = { user: "Your skills", project: "This project" };
 
@@ -44,7 +44,7 @@ function row(skill: Skill): HTMLElement {
 export async function showSkills() {
   const view = element("skills");
   try {
-    const skills = await invoke<Skill[]>("skills", { project: studio.selection?.session.cwd ?? null });
+    const skills = await invoke("skills", { project: studio.selection?.session.cwd ?? null });
     const sources = [...new Set(skills.map((skill) => skill.source))];
     view.replaceChildren(
       ...(skills.length ? [] : [text("p", "No skills found.", "empty")]),

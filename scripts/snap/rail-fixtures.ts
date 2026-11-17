@@ -4,15 +4,19 @@
 // subagents, checks, a permission mode, a model, an estimate, a brief and decision history, and a
 // Git line with several tokens. Times are relative to the moment a fixture renders.
 
+import type { Ask } from "../../ui/answer.ts";
+import type { CheckLine, CheckStatus, Decision, OpenItem, Quiz, Session, SessionState, StoredCard, Subagent, Turn, TurnFile, TurnSummary } from "../../ui/types.ts";
+import { base, type Fixture } from "./base.ts";
+
 const MIN = 60e3;
 
 const capabilities = { agent: "claude", asks: true, background_tasks: true, replies: true, permission_mode: true, durations: true, transcript_version: true, context: true, turn_trees: true };
 const cwd = "/Users/danielrispler/work/plotkeeper/.claude/worktrees/issue-56-row-controls";
 
-const quiz = (text, options, key) => ({ text, options, key });
+const quiz = (text: string, options: Quiz["options"], key: number): Quiz => ({ text, options, key });
 
 // What each turn's summary says; its first line is the turn's Headline (the turn-end intention is the final response's first line).
-const summaries = {
+const summaries: Record<string, TurnSummary["summary"]> = {
   t4: {
     summary:
       "Fixed the two failures `npm run check` found: a clippy lint in a Rust test helper and a UI test that still expected the old row padding.\n" +
@@ -61,7 +65,7 @@ const prompts = [
   "Run npm run check and fix what fails",
 ];
 
-const card = (id, answered) => ({
+const card = (id: string, answered: boolean): StoredCard => ({
   request: { session_id: "s1", id, agent: null, changed_by: {}, check: null },
   card: {
     summary: "Delete shows on hover, focus and the selected row.",
@@ -89,14 +93,14 @@ const card = (id, answered) => ({
   check_result: null,
 });
 
-const check = (command, passed, startedAgo, tookMs, turn) => ({
+const check = (command: string, passed: boolean, startedAgo: number, tookMs: number, turn: number): CheckLine => ({
   command, passed, started_at: Date.now() - startedAgo, ended_at: Date.now() - startedAgo + tookMs, typical_ms: tookMs, turn,
 });
 
-const file = (path, added, removed) => ({ root: cwd, path, from: null, added, removed });
-const run = (status, call, exit_code) => ({ command: "cargo", status, exit_code, call, agent: null });
+const file = (path: string, added: number, removed: number): TurnFile => ({ root: cwd, path, from: null, added, removed });
+const run = (status: CheckStatus, call: string, exit_code: number) => ({ command: "cargo", status, exit_code, call, agent: null });
 
-const helper = (id, name, asked, type, result, turn, ago, running = false) => ({
+const helper = (id: string, name: string, asked: string, type: string, result: string, turn: number, ago: number, running = false): Subagent => ({
   id, parent: "session", kind: "helper", name, asked, agent_type: type, status: running ? "running" : "completed",
   started_at: Date.now() - ago, ended_at: running ? null : Date.now() - ago + 3 * MIN, last_step: running ? { tool: "Grep", detail: "#[0-9a-f]{3,8} ui/style.css" } : null,
   step_span: null, result: running ? null : result, failed: false, opened: true, faded: !running, turn,
@@ -112,7 +116,7 @@ const final = [
   "I did not open the window; the rows are checked by their CSS and by the tests only.",
 ].join("\n");
 
-const session = (state, { running = false, question = false } = {}) => {
+const session = (state: SessionState, { running = false, question = false } = {}): Session => {
   const now = Date.now();
   const ended = !running && state !== "needs_you";
   const intentions = {
@@ -121,7 +125,7 @@ const session = (state, { running = false, question = false } = {}) => {
   };
   const stepTools = { tool: "Edit", detail: `${cwd}/ui/list.ts` };
   const turnStart = [now - 5 * 60 * MIN, now - 4 * 60 * MIN, now - 3 * 60 * MIN, now - 2 * 60 * MIN, now - 40 * MIN];
-  const turns = prompts.map((prompt, i) => ({
+  const turns = prompts.map((prompt, i): Turn => ({
     started_at: turnStart[i],
     ended_at: i < 4 ? turnStart[i] + 20 * MIN : ended ? now - 6 * MIN : null,
     prompt,
@@ -147,7 +151,7 @@ const session = (state, { running = false, question = false } = {}) => {
     effort: "high",
   };
   return {
-    id: "s1", capabilities, model: null, cwd, folder_name: "issue-56-row-controls", terminal: null, status_only: false, name: null,
+    id: "s1", capabilities, model: null, cwd, folder_name: "issue-56-row-controls", terminal: null, status_only: false, shell: false, name: null,
     prompt_name: "Row controls", resume_id: "s1", permission_mode: "auto", started_mode: "auto", cleared: [], asks_before_closing: state !== "idle",
     landed: false, last_step: ended ? { tool: "Bash", detail: "Run the full check", command: "npm run check" } : stepTools,
     started_at: now - 5 * 60 * MIN, last_event_at: now - 30e3, turn_span: running ? { start: now - 14 * MIN, end: null } : null,
@@ -155,12 +159,12 @@ const session = (state, { running = false, question = false } = {}) => {
       check("cargo clippy --locked --workspace --all-targets -- -D warnings", false, 38 * MIN, 41e3, 4),
       check("cargo clippy --locked --workspace --all-targets -- -D warnings", true, 22 * MIN, 38e3, 4),
       check("npm run check", true, 20 * MIN, 5 * MIN + 40e3, 4),
-    ].slice(0, running ? 1 : 3), agents: (running ? (all) => all.filter((a) => a.id !== "a2") : (all) => all)([
+    ].slice(0, running ? 1 : 3), agents: (running ? (all: Subagent[]) => all.filter((a) => a.id !== "a2") : (all: Subagent[]) => all)([
       helper("a2", "Write tests for the fold toggle", "Write node tests for the fold toggle in ui/list.ts", "general-purpose", "Added 4 tests; all pass.", 1, 4 * 60 * MIN - 5 * MIN),
       helper("a3", "Find where the delete is styled", "Find every rule that styles `.delete`.", "Explore", "Two rules in `ui/style.css`, none in `ui/list.ts`.", 3, 2 * 60 * MIN),
       helper("a1", "Review the diff", "Review the diff on this branch and list anything that breaks the token rules.", "Explore", "No raw colours; two spacing values bypass the tokens.", 4, 30 * MIN, running),
     ]), asker: state === "needs_you" ? { agent: null, since: now - 3 * MIN } : null,
-    prompts: [], turns, returned: null, seen: 3, since_looked: { turns: 2, files: 3, passed: 1, failed: 1, ran: 0 }, unseen: state === "idle",
+    prompts: [], turns, returned: null, seen: 3, since_looked: { turns: 2, files: 3, passed: 1, failed: 1, ran: 0 },
     questions: question ? [{
       tool_use_id: "toolu_q1", agent: null, turn: 4, answer: "open",
       questions: [{
@@ -185,24 +189,24 @@ const session = (state, { running = false, question = false } = {}) => {
 
 const others = () => {
   const now = Date.now();
-  const base = (id, name, state, extra) => ({
+  const other = (id: string, name: string, state: SessionState, extra: Partial<Session> = {}): Session => ({
     ...session("your_turn"), id, resume_id: id, prompt_name: name.slice(name.indexOf("·") + 2), identity: { issue: Number(name.slice(1, 3)), branch: null, pr: null, worktree: "", name },
     cwd: `/Users/danielrispler/work/plotkeeper/.claude/worktrees/issue-${name.slice(1, 3)}`, folder_name: `issue-${name.slice(1, 3)}`, state, checks: [], agents: [], questions: [], turns: [],
     asker: null, unseen: false, line: undefined, landed: false, started_at: now - 3600e3, ...extra,
     transcript: { ...session("your_turn").transcript, context: { tokens: 120000, window: 1000000, share: 12, left: 88 } },
   });
   return [
-    base("s2", "#57 · Name from the prompt", "needs_you", { line: "Which name should a session take from its prompt? · 2m", asker: { agent: null, since: now - 2 * MIN }, questions: [{ tool_use_id: "q", agent: null, turn: 0, answer: "open", questions: [{ question: "Which name should a session take from its prompt?", options: [] }] }] }),
-    base("s4", "#55 · Delete default", "running", { line: "Bash cargo test --locked --workspace" }),
-    base("s5", "#54 · Subagent terminal", "your_turn", { unseen: true }),
-    base("s6", "#48 · Agent deadline", "idle", { landed: true }),
-    base("s7", "#41 · Git line in the top bar", "ended"),
+    other("s2", "#57 · Name from the prompt", "needs_you", { line: "Which name should a session take from its prompt? · 2m", asker: { agent: null, since: now - 2 * MIN }, questions: [{ tool_use_id: "q", agent: null, turn: 0, answer: "open", questions: [{ question: "Which name should a session take from its prompt?", options: [] }] }] }),
+    other("s4", "#55 · Delete default", "running", { line: "Bash cargo test --locked --workspace" }),
+    other("s5", "#54 · Subagent terminal", "your_turn", { unseen: true }),
+    other("s6", "#48 · Agent deadline", "idle", { landed: true }),
+    other("s7", "#41 · Git line in the top bar", "ended"),
   ];
 };
 
 const common = {
+  ...base,
   projects: ["/Users/danielrispler/work/plotkeeper"],
-  settings_files: { settings: null, keymap: null },
   workspaces: {
     main: { path: "/Users/danielrispler/work/plotkeeper", branch: "main" },
     tasks: [{ path: cwd, branch: "issue-56-row-controls" }],
@@ -210,14 +214,12 @@ const common = {
   },
   workspace_git_state: { branch: "issue-56-row-controls", upstream: [2, 1], changed: 5, main_behind: 7, on_default: false, would_conflict: true, operation: null },
   terminal_connect: { repo: "/Users/danielrispler/work/plotkeeper", outdated: false },
-  terminal_lost: [],
-  revival: [],
   usage: [{ agent: "claude", groups: [{ name: "", windows: [{ label: "5h", used_percentage: 42, resets_at: Date.now() / 1000 + 3600 }, { label: "week", used_percentage: 18, resets_at: Date.now() / 1000 + 86400 }] }], read_at: Date.now() / 1000 - 240, source: "last Claude session", reason: null }],
-};
+} satisfies Fixture;
 
 const goal = "Give each session row a fold toggle and a delete, drawn only where a row can use them.";
 const answers = [{ question: "Hide the delete with display or visibility?", reply: "visibility" }];
-const open = [
+const open: OpenItem[] = [
   { kind: "check", text: "npm run check ended failed" },
   { kind: "open", text: "The strip draws no delete; the Home rows show it always." },
   { kind: "unpushed", text: "Uncommitted or unpushed work" },
@@ -227,16 +229,16 @@ const design = [
   { text: "Hide the delete with visibility, because display would move the row's text.", cite: "" },
 ];
 
-const decisions = [
+const decisions: Decision[] = [
   { call: "c1", agent: null, tool: "AskUserQuestion", input: { questions: [{ question: "Hide the delete with display or visibility?", options: [] }] }, answer: { "Hide the delete with display or visibility?": "visibility" }, at: Date.now() - 3 * 60 * MIN, source: "card" },
   { call: "c2", agent: null, tool: "ExitPlanMode", input: { plan: "Add a fold toggle and a delete column to each row." }, answer: "allow", at: Date.now() - 4 * 60 * MIN, source: "card" },
   { call: "c3", agent: null, tool: "Bash", input: { command: "git push -u origin issue-56-row-controls" }, answer: "allow", at: Date.now() - 90 * MIN, source: "terminal" },
 ];
 
-const questionAsk = { nonce: "n1", hook_event_name: "PreToolUse", tool_name: "AskUserQuestion", tool_use_id: "toolu_q1", agent_id: null, tool_input: {} };
+const questionAsk: Ask = { nonce: "n1", hook_event_name: "PreToolUse", tool_name: "AskUserQuestion", tool_use_id: "toolu_q1", agent_id: null, tool_input: {} };
 
 // The fixture for a state: its session, the list around it and the cards it has.
-const build = (state, { ask = null, answered = false, withBrief = false } = {}) => {
+const build = (state: SessionState, { ask = null as Ask | null, answered = false, withBrief = false } = {}) => {
   const running = state === "running";
   const s = session(state, { running, question: ask === questionAsk });
   const sessions = [s, ...others()].sort((a, b) => ["needs_you", "running", "your_turn", "idle", "ended"].indexOf(a.state) - ["needs_you", "running", "your_turn", "idle", "ended"].indexOf(b.state));
@@ -261,7 +263,7 @@ const build = (state, { ask = null, answered = false, withBrief = false } = {}) 
     turn_summary: { __by: "id", values: Object.fromEntries(Object.entries(turnSummaries).map(([id, summary]) => [id, { summary }])) },
     turn_reply: { __by: "index", values: { 0: "Plan: a fold toggle and a delete column.\n\nThe toggle is drawn only when subagents show under the row.", 1: "Implemented the toggle and the delete." } },
     agent_summary: { __by: "agentId", values: { a1: "Reviewed the diff: no raw colours, two spacing values bypass the tokens." } },
-  };
+  } satisfies Fixture;
 };
 
 // The top bar (#127): no item is cut. Every item in the bar sits whole inside it; the session's header is the one that may
@@ -323,7 +325,7 @@ const evidenceScript = `
   if (!toggle) log("snap:fail there is no evidence line");
   toggle.click();
   await wait();
-  const row = document.querySelector(".evidence-fail");
+  const row = document.querySelector(".evidence-check .evidence-fail");
   if (!row) log("snap:fail the opened line has no failed check");
   row.click();
   await wait();
@@ -367,7 +369,7 @@ const diffScript = `
 
 // #125: opens the evidence line, a file's Ask, then a failed check's Ask, and fails when the rail's scrollTop moved or no
 // facts show.
-const askScript = (selectors) => `
+const askScript = (selectors: string[]) => `
   const story = document.getElementById("story");
   story.scrollTop = Math.min(80, story.scrollHeight - story.clientHeight);
   const at = story.scrollTop;
@@ -387,7 +389,7 @@ const askScript = (selectors) => `
 
 // #120: scrolls the rail, answers the turn's Quiz (a pick, or "Show the rest anyway"), and fails when the rail's scrollTop moved
 // or the reasons and the held Body lines did not show.
-const quizScript = (answer) => `
+const quizScript = (answer: "pick" | "skip") => `
   const story = document.getElementById("story");
   story.scrollTop = Math.min(80, story.scrollHeight - story.clientHeight);
   const at = story.scrollTop;
@@ -404,7 +406,7 @@ const quizScript = (answer) => `
 
 // `npm run snap:readme` (scripts/snap/readme.mjs): the README's three rail crops. Each script scrolls the rail to its top, finds
 // its target (a missing one is a `snap:fail`) and logs `snap:crop x y width height`, the box in page pixels that the crop keeps.
-const cropScript = (setup, from, to) => `
+const cropScript = (setup: string, from: string, to: string) => `
   const story = document.getElementById("story");
   const wait = () => new Promise((resolve) => setTimeout(resolve, 200));
   ${setup}
@@ -447,4 +449,4 @@ export const railFixtures = {
   railIdleScroll: () => ({ ...build("idle", { answered: true, withBrief: true }), snapScript: scrollScript }),
   railIdleOpened: () => ({ ...build("idle", { answered: true, withBrief: true }), snapScript: openTurnScript }),
   railIdleFail: () => ({ ...build("idle", { answered: true, withBrief: true }), snapScript: failScript }),
-};
+} satisfies Record<string, () => Fixture>;

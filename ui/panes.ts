@@ -20,14 +20,14 @@ import { onProjects, projects } from "./projects.js";
 import { followLog, showLog, showMissing } from "./log.js";
 import { type Box, paneBoxes } from "./layout.js";
 import { isPanel, panelTerm, showPanel, showPanelShell } from "./panel.js";
-import { offerAgyPluginFix, offerBuilds, offerPluginFix, upgrade, type Revive } from "./restart.js";
+import { offerAgyPluginFix, offerBuilds, offerPluginFix, upgrade } from "./restart.js";
 import { select, show as showSelection } from "./selection.js";
 import type { DoctorEntry } from "./settings.js";
 import { studio } from "./state.js";
 import { sessionName } from "./list.js";
 import { FAILED_OSC, openPane, startNotice } from "./terminal.js";
 import { showStartToast } from "./toast.js";
-import type { Retest, Selection, Session } from "./types.js";
+import type { Retest, Session } from "./types.js";
 
 type Pane = { box: HTMLElement; term: Xterm.Terminal | null; title: string };
 const panes = new Map<string, Pane>();
@@ -57,7 +57,7 @@ const readHomeProjects = () =>
 
 // Gives Home the retests as they are read (danielrispler/plotkeeper#129); a failed read leaves them as they were.
 const readRetests = () =>
-  invoke<Retest[]>("retests").then(
+  invoke("retests").then(
     (found) => {
       retests = found;
       redrawHome();
@@ -94,12 +94,12 @@ export function startPanes(): Promise<void> {
 // Spawns each terminal the dead daemon ran, with `claude --resume` for a Claude terminal, then
 // attaches every running terminal: a new pane, hidden, or the pane it had.
 async function revive(outdated: boolean) {
-  const lost = await invoke<Listed[]>("terminal_lost");
-  for (const r of await invoke<Revive[]>("revival", { terms: lost })) {
+  const lost = await invoke("terminal_lost");
+  for (const r of await invoke("revival", { terms: lost })) {
     if (!r.revives) continue;
     // A revived conversation keeps its terminal's id, on purpose: its session stays linked to the
     // pane it had. Only a new conversation gets a fresh id (`startClaude`, danielrispler/Falinks#467).
-    const argv = r.session ? await invoke<string[]>("claude_argv", { resume: r.session, auto: startedAuto(r.argv) }) : r.argv;
+    const argv = r.session ? await invoke("claude_argv", { resume: r.session, auto: startedAuto(r.argv) }) : r.argv;
     const term = panes.get(r.id)?.term ?? panelTerm(r.id);
     await request({ op: "spawn", id: r.id, argv, cwd: r.cwd, cols: term?.cols ?? 80, rows: term?.rows ?? 24 });
   }
@@ -269,7 +269,7 @@ export function dragSplit() {
 // selects it, so the rail follows (danielrispler/Falinks#567).
 let starting: string | null = null;
 export async function startClaude(cwd: string, resume: string | null = null, prompt = "", auto = false) {
-  const argv = [...(await invoke<string[]>("claude_argv", { resume, auto })), ...(prompt ? ["--", prompt] : [])]; // `--`: a prompt like "-p x" is no flag
+  const argv = [...(await invoke("claude_argv", { resume, auto })), ...(prompt ? ["--", prompt] : [])]; // `--`: a prompt like "-p x" is no flag
   await startTerminal(`claude-${crypto.randomUUID()}`, cwd, argv);
 }
 
@@ -278,7 +278,7 @@ export async function startClaude(cwd: string, resume: string | null = null, pro
 export async function startAgent(agent: string, cwd: string, prompt = "", auto = false) {
   if (agent === "claude") return startClaude(cwd, null, prompt, auto);
   if (agent === "terminal") return startTerminal(`shell-${crypto.randomUUID()}`, cwd, []);
-  await startTerminal(`${agent}-${crypto.randomUUID()}`, cwd, await invoke<string[]>("agent_argv", { agent, prompt }));
+  await startTerminal(`${agent}-${crypto.randomUUID()}`, cwd, await invoke("agent_argv", { agent, prompt }));
 }
 
 // A Doctor entry (danielrispler/Falinks#527) in a new terminal in the selected session's folder, else the configured
@@ -307,7 +307,7 @@ async function startTerminal(id: string, cwd: string, argv: string[]) {
   element("terminal-head").hidden = false;
   studio.pending = null; // an earlier press's late reply must not take the pane from this session
   show(id, () => openPane(box(id), id, cwd, argv));
-  showSelection(await invoke<Selection | null>("select_terminal", { terminal: id }));
+  showSelection(await invoke("select_terminal", { terminal: id }));
 }
 
 // Whether a terminal's spawn `argv` started Claude Code in auto mode (danielrispler/Falinks#541), so its revival keeps it.
