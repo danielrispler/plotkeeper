@@ -533,6 +533,32 @@ fn a_block_of_the_same_command_that_is_not_the_running_retrys_own_gets_its_own_c
 /// wake-up with its task, tool call and output file.
 #[test]
 fn a_real_shaped_background_block_goes_from_blocked_to_finished_at_its_wake_up() {
+    let (running, finished) = background_block_woken_by("…");
+    assert_eq!(running.reason, "The server-side auto mode classifier judged this action dangerous (it gave no explanation)");
+    assert_eq!(running.status, BlockedStatus::RunningInBackground);
+    assert_eq!(finished.status, BlockedStatus::Finished);
+    assert_eq!(finished.exit_code, None);
+}
+
+/// Each way a real wake-up's summary words how a background command ended (Daniel's event log, 2026-11-17:
+/// 94 completed with 0, 3 failed, 1 completed with a code and a note), and the exit code the card shows.
+#[test]
+fn a_background_commands_exit_code_is_read_from_each_real_summary_shape() {
+    for (summary, code) in [
+        ("Background command \"…\" completed (exit code 0)", Some(0)),
+        ("Background command \"…\" failed with exit code 144", Some(144)),
+        ("Background command \"…\" failed with exit code 1", Some(1)),
+        ("Background command \"…\" completed (exit code 1: No matches found)", Some(1)),
+        ("Background command \"…\" was stopped", None),
+    ] {
+        let (_, finished) = background_block_woken_by(summary);
+        assert_eq!(finished.exit_code, code, "{summary}");
+    }
+}
+
+/// The card of a real-shaped background block (session 407caba5 of the first recordings of #174) before its
+/// wake-up, and after a wake-up whose summary is `summary`.
+fn background_block_woken_by(summary: &str) -> (studio_core::BlockedCommand, studio_core::BlockedCommand) {
     const BG: &str =
         "claude -p \"Reply with the word ok\" --model haiku # studio-fixture-background";
     let input = json!({ "command": BG, "description": "Run claude CLI in background",
@@ -555,9 +581,9 @@ fn a_real_shaped_background_block_goes_from_blocked_to_finished_at_its_wake_up()
     let wake = line(
         "UserPromptSubmit",
         9_000,
-        json!({ "prompt_id": "p-2", "prompt": "<task-notification><task-id>b7f03l9m0</task-id>\
+        json!({ "prompt_id": "p-2", "prompt": format!("<task-notification><task-id>b7f03l9m0</task-id>\
             <tool-use-id>toolu_01Ut</tool-use-id><output-file>/private/tmp/c/s/tasks/b7f03l9m0.output</output-file>\
-            <status>completed</status><summary>…</summary></task-notification>" }),
+            <status>completed</status><summary>{summary}</summary></task-notification>") }),
     );
     let mut lines = then(started(), vec![denied, answered, pre(5_000, "toolu_01Ut")]);
     let started_bg = line(
@@ -568,11 +594,9 @@ fn a_real_shaped_background_block_goes_from_blocked_to_finished_at_its_wake_up()
     );
     lines.push(started_bg);
 
-    let card = &session(&lines).blocked_commands[0];
-    assert_eq!(card.reason, reason);
-    assert_eq!(card.status, BlockedStatus::RunningInBackground);
-    let card = &session(&then(lines, vec![wake])).blocked_commands[0];
-    assert_eq!(card.status, BlockedStatus::Finished);
+    let running = session(&lines).blocked_commands[0].clone();
+    let finished = session(&then(lines, vec![wake])).blocked_commands[0].clone();
+    (running, finished)
 }
 
 /// The recorded run (`core/tests/record-blocked-run.sh`): a foreground and a background `claude -p`, each

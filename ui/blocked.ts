@@ -104,7 +104,7 @@ export function blockedElement(session: string, card: BlockedCommand, agent: str
   if (run && !tails.has(run)) {
     const pre = text("pre", "Reading the output…", "evidence-output");
     block.append(pre);
-    invoke("check_output",{ session, agent: card.agent, call: run })
+    invoke("check_output", { session, agent: card.agent, call: run })
       .then((read) => {
         tails.set(run, read);
         pre.textContent = read?.tail ?? "No output was recorded.";
