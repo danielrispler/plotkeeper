@@ -164,8 +164,12 @@ _Avoid_: Restore (nothing of the old process survives)
 A local debug log, beside the event log, of the Claude sessions whose hook state and OSC 7501 state disagree for more than a few seconds: one line each, with the time, the session and both states.
 
 **Decision**:
-A question, plan or permission Daniel answered, with his answer and where he gave it: on the card or in the terminal. A session's decisions, newest first, are its decision history.
+A question, plan, permission or blocked command Daniel answered, with his answer and where he gave it: on the card or in the terminal. A session's decisions, newest first, are its decision history.
 _Avoid_: Verdict (only a plan's or a permission's allow or deny)
+
+**Blocked command**:
+A Bash command an agent session tried in auto mode that auto mode blocked, held on a card until Daniel allows or declines it. Allowed, the agent runs it itself, once; declined, the block stands. While the agent waits on his click the session needs you; once it has moved on, its row still names the blocked command until he chooses.
+_Avoid_: Denied command (a command Daniel declined)
 
 **Identity**:
 The name an agent session gets from its work: its issue, its PR and its worktree, such as "danielrispler/Falinks#480 · PR danielrispler/Falinks#490 · agent-a1b2". A name Daniel gives it replaces it.
@@ -178,7 +182,7 @@ _Avoid_: Title
 How much of its context window an agent session uses, as a percentage. It is measured as Claude Code's status line measures it, from the session's status line snapshot: its tokens, its window size, and its own percent used and left. Without a snapshot, the control room shows the latest turn's tokens only.
 
 **Needs you**:
-The state of an agent session that is blocked on Daniel: waiting for his permission, his answer to a question tool, his approval of a plan, or an MCP request for input. A reply that ends with a question in its text blocks nothing, so it is your turn.
+The state of an agent session that is blocked on Daniel: waiting for his permission, his click on a blocked command, his answer to a question tool, his approval of a plan, or an MCP request for input. A reply that ends with a question in its text blocks nothing, so it is your turn.
 _Avoid_: Stuck (a session that is not progressing, which is a different state)
 
 **Running**:
