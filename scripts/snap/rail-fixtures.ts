@@ -207,7 +207,6 @@ const others = () => {
 const common = {
   ...base,
   projects: ["/Users/danielrispler/work/plotkeeper"],
-  settings_files: { settings: null, keymap: null },
   workspaces: {
     main: { path: "/Users/danielrispler/work/plotkeeper", branch: "main" },
     tasks: [{ path: cwd, branch: "issue-56-row-controls" }],
@@ -215,8 +214,6 @@ const common = {
   },
   workspace_git_state: { branch: "issue-56-row-controls", upstream: [2, 1], changed: 5, main_behind: 7, on_default: false, would_conflict: true, operation: null },
   terminal_connect: { repo: "/Users/danielrispler/work/plotkeeper", outdated: false },
-  terminal_lost: [],
-  revival: [],
   usage: [{ agent: "claude", groups: [{ name: "", windows: [{ label: "5h", used_percentage: 42, resets_at: Date.now() / 1000 + 3600 }, { label: "week", used_percentage: 18, resets_at: Date.now() / 1000 + 86400 }] }], read_at: Date.now() / 1000 - 240, source: "last Claude session", reason: null }],
 } satisfies Fixture;
 

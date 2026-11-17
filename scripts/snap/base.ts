@@ -10,7 +10,7 @@ import type { Listed } from "../../ui/daemon.ts";
 export type ByArg<T> = { __by: string; values: Record<string, T> };
 
 // The commands whose reply the window reads.
-type Read = { [C in Command]: Commands[C] extends void ? never : C }[Command];
+type ReadCommand = { [C in Command]: Commands[C] extends void ? never : C }[Command];
 
 // A daemon terminal and the screen it replays when the window attaches.
 export type Terminal = Listed & { replay: { data: string; cols: number; rows: number } };
@@ -42,7 +42,6 @@ export const base = {
   open: noSelection,
   plugin_setup: null,
   projects: ["/w/plotkeeper"],
-  quiz_tap: null,
   remove_project: [],
   remove_task: null,
   reorder_projects: [],
@@ -66,4 +65,4 @@ export const base = {
   watch: null,
   workspace_git_state: { branch: "main", upstream: [0, 0], changed: 0, main_behind: 0, on_default: true, would_conflict: false, operation: null },
   workspaces: { main: workspace, tasks: [], hidden: 0 },
-} satisfies { [C in Read]: Commands[C] };
+} satisfies { [C in ReadCommand]: Commands[C] };

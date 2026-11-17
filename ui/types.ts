@@ -394,7 +394,7 @@ export interface Commands {
   plugin_setup: string | null;
   projects: string[];
   pull_main: void;
-  quiz_tap: TurnSummary | null;
+  quiz_tap: void;
   rail_shown: void;
   rate: void;
   refresh_landed_tasks: void;
