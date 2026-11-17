@@ -48,7 +48,7 @@ while time.time() - start < 240 and child.poll() is None:
         data += chunk
         last = time.time()
         # The folder-trust question of a new folder: its first option is "No, exit", so move down to "Yes" before Enter.
-        if not trusted and b"Enter" in data and b"trust this folder" in data:
+        if not trusted and b"trust" in data and b"confirm" in data:
             trusted = True
             time.sleep(1)
             os.write(master, b"\x1b[B")
