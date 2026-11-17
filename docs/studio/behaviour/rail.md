@@ -2,13 +2,13 @@
 
 The rail, on the window's left, tells the selected session's story, ranked by what Daniel needs: what the agent is doing now, the facts the hooks and git recorded under it, and the earlier turns folded below. Its terms are in `docs/studio/CONTEXT.md`.
 
-**The header** is two lines that wrap and are never cut. The first is the state, with the kind of block when it needs you (question, plan or permission), and the permission mode unless it is the default; the second is the session's name; while it runs, a third gives the estimate. The model and the times show on hover, an "agy" session keeps its mark, and the "⋯" menu holds Rename, Close and Delete.
+**The header** is two lines that wrap and are never cut. The first is the state, with the kind of block when it needs you (question, plan or permission), and the permission mode unless it is the default; the second is the session's name; while it runs, a third gives the estimate. The model and the times show on hover, an "agy" session keeps its mark, and the "⋯" menu holds Open (an ended session), Rename, Mark unseen, Close and Delete, and Open all and Close all.
 
 **Now, by state.** The newest turn is the top block of the feed, and what it shows depends on the session's state; a card belongs to its turn and is never drawn above it.
 
 - Running: "You asked" with your prompt, then the intention, boxed, with its age and the step line. The intention is the latest thing the agent wrote in its own words; it shows only while the session runs, and small, as "Why it asks", while it needs you. At your turn the Headline says what happened, and the turn-end intention is the final response's first line, never the summary's.
 - Needs you: the docked question, plan or permission, then "Why it asks" and "So far this turn", the facts the hooks recorded.
-- Your turn, idle or ended: "You asked", the **Headline**, the evidence line, the Body lines, the Quiz, one line for each subagent and its checks, and "Full response", folded. A session returned to after a while opens on "Where we were" (below).
+- Your turn, idle or ended: "You asked", the **Headline**, the evidence line, the Body lines, the Quiz, one line for each subagent and its checks, and "Full response", folded. A session returned to after a while opens on "Where we were" (see The Brief and Where we were).
 
 **The turn summary.** When a turn ends, one `claude -p` call (the model and effort from `summaries` in `settings.json`; with `on_open` true, when you open the turn instead) writes a Headline and up to three Body lines, for a turn whose final response is about 150 words or more or that ends asking you something. Any other turn shows its response as it is: its Headline is the response's first line, which is also what the Headline is until the summary arrives.
 
@@ -22,7 +22,7 @@ A summary stored before the Headline is read with its first line as the Headline
 
 A failed check's row opens its exit code and the last 40 lines of its output. A running turn shows only a check that ended failed. A turn's files are the diff between the git trees the hook recorded at its start and end, kept to the files its agent or its workers edited; the ended turn's trees are kept under `refs/plotkeeper/turns/`, so `git gc` leaves its hunks. An agent that reports no trees (agy) has no evidence line and no hunks.
 
-**Real code.** A file row opens its real hunk between the turn's trees, in place, at most about 40 lines; a capped hunk's "N more lines" opens the whole file's diff, and "Open in editor" opens the file in your editor at the hunk's first line. The palette's "studio::OpenFullDiff" opens the newest turn's whole diff in the terminal column's place, one fold per file with its hunk read whole, the external changes in one folded line and "Terminal" to go back.
+**Real code.** A file row opens its real hunk between the turn's trees, in place, at most about 40 lines; a capped hunk's "N more lines" opens the turn's whole diff, and "Open in editor" opens the file in your editor at the hunk's first line. The palette's "studio::OpenFullDiff" opens the whole diff of the newest turn that has files, in the terminal column's place, one fold per file with its hunk read whole, the external changes in one folded line and "Terminal" to go back.
 
 **Earlier turns** fold to one line each: your prompt, the Headline, a dot for a Quiz not answered yet and a mark for a check that ended failed. A click opens the turn's block under it and folds it again. Opening or closing the evidence line, a hunk, a Quiz's answer or a folded turn changes only that node: the rail's others are kept, the scroll position does not move, and what is open stays open when the studio's state refreshes.
 
