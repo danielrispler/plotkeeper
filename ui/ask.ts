@@ -10,7 +10,7 @@ import { studio } from "./state.js";
 
 // What Ask is opened on: the core's `Anchor`.
 export type Anchor =
-  | { kind: "file"; turn: number; root: string; path: string }
+  | { kind: "file"; turn: number; root: string; path: string; from?: string | null }
   | { kind: "check"; agent: string | null; call: string }
   | { kind: "subagent"; agent: string }
   | { kind: "headline"; turn: number };
@@ -78,7 +78,7 @@ function askBox(session: string, anchor: Anchor, what: string): HTMLDetailsEleme
   };
   const hunk = text("pre", "", "evidence-hunk");
   const showHunk = (a: Extract<Anchor, { kind: "file" }>) => {
-    invoke<Hunk | null>("turn_file_hunk", { session, turn: a.turn, root: a.root, path: a.path, from: null })
+    invoke<Hunk | null>("turn_file_hunk", { session, turn: a.turn, root: a.root, path: a.path, from: a.from ?? null })
       .then((h) => {
         hunk.textContent = hunkText(h);
         recorded.append(text("p", "The hunk", "label"), hunk);

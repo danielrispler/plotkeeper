@@ -14,7 +14,7 @@ import { encode, request } from "./daemon.js";
 import { agentState, sessionName, showsLanded } from "./list.js";
 import { closePane, openHere } from "./panes.js";
 import { openDecision, type Ask } from "./answer.js";
-import { briefNodes, cardLine, cardsFor, quizOpen } from "./cards.js";
+import { briefNodes, cardLine, cardsFor, openCard, quizOpen } from "./cards.js";
 import { type Banner, bannerElement, bannerFor, bannerLives } from "./banner.js";
 import { quizAllowed, quizAnswered, quizItem, quizRegion, seedQuiz, trialOn } from "./quiz.js";
 import { evidenceElement, hasEvidence } from "./evidence.js";
@@ -437,13 +437,14 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
   const bodyLine = (line: BodyLine) =>
     // A `reported` line is the agent's claim, which no recorded fact shows.
     rendered("li", line.kind === "reported" ? `Agent says: ${line.text}` : line.text, line.kind, session.cwd);
-  const lines = now?.body ?? [];
+  // An earlier turn's Body is derived as the folded line's Headline is, which that line already shows.
+  const lines = (now ?? (turn ? headlineOf(summary, turn.message) : null))?.body ?? [];
   if (now) {
     if (now.headline) {
       node.append(rendered("p", now.headline, "headline-text", session.cwd));
       if (index !== null) node.append(askAnchor(session.id, { kind: "headline", turn: index }, "this turn's Headline"));
     }
-  } else if (summary) node.append(rendered("div", summary.summary.summary, "summary", session.cwd));
+  }
   // The evidence line, under the Headline: a running turn shows only a check that ended failed.
   if (turn && index !== null && hasEvidence(turn, session.capabilities)) {
     const line = evidenceElement(session.id, index, turn, { only: session.state === "running" && now ? "failed" : "all" });
@@ -455,6 +456,8 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
   const allowed = quizAllowed(lines, now !== null && session.state === "needs_you");
   const quiz = summary?.summary.quiz && summary.arm !== "body_only" && turn?.id && allowed ? summary.summary.quiz : null;
   const cards = cardsFor(block.cards, allowed);
+  // The trial of the confidence tap and the "why?" line (#129) runs on the Quizzes of "now".
+  const trial = now !== null && trialOn(studio.files.settings.quiz_trial, Date.now());
   const held = cards.some(quizOpen) || quiz !== null;
   const [always, rest] = [lines.filter((l) => l.kind === "open" || l.kind === "ask"), lines.filter((l) => l.kind !== "open" && l.kind !== "ask")];
   const shown = held ? always : lines;
@@ -470,12 +473,12 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
       record: (tap: Tap) => void invoke<TurnSummary | null>("quiz_tap", { id, tap }).catch((e) => console.warn(e)),
       explain: () => invoke<string>("ask", { session: session.id, item: quizItem(quiz), question: "I did not get this yet. Explain more." }),
       line: bodyLine,
-      trial: trialOn(studio.files.settings.quiz_trial, Date.now()),
+      trial,
     };
-    node.append(quizRegion(id, quiz, now ? rest : [], deps));
+    node.append(quizRegion(id, quiz, rest, deps));
   }
   const cardTurn = index !== null && turn?.files ? { session: session.id, index, files: turn.files.files } : null;
-  node.append(...cards.map((card) => cardLine(card, cardTurn)));
+  node.append(...cards.map((card) => cardLine(card, cardTurn, trial)));
   node.append(...block.questions.filter((q) => q.answer === "not_answered").map(questionElement));
   if (block.agents.length) {
     const list = document.createElement("ol");
@@ -567,6 +570,7 @@ export function openCitation(id: string) {
   const index = citedTurn(session.turns, id);
   if (index === null) return;
   opened.add(`${session.id} ${index} turn`);
+  openCard(id);
   drawFeed();
   const node = element("feed").children[session.turns.length - 1 - index];
   (node as HTMLElement | undefined)?.scrollIntoView?.({ block: "start" });

@@ -101,9 +101,11 @@ const hunks = new Map<string, Hunk | null>();
 
 // A file's row: its label, which opens the real hunk between the turn's two trees under it, with "Open in editor" at its
 // first changed line. Only this row changes.
-export function fileRow(session: string, index: number, row: EvidenceRow): HTMLElement {
+export function fileRow(session: string, index: number, row: EvidenceRow, scope = ""): HTMLElement {
   const file = row.file!;
   const key = `${session} ${index} ${file.root} ${file.path}`;
+  // Whether it is open is its own to each place that draws it; the hunk read is shared.
+  const openKey = `${scope}${key}`;
   const item = document.createElement("li");
   item.className = "evidence-file";
   const pre = text("pre", hunks.has(key) ? hunkText(hunks.get(key)!, false) : "", "evidence-hunk");
@@ -115,13 +117,13 @@ export function fileRow(session: string, index: number, row: EvidenceRow): HTMLE
   edit.textContent = "Open in editor";
   const left = (h: Hunk | null) => {
     more.textContent = `${h?.left_out ?? 0} more lines`;
-    if (openHunks.has(key) && h?.left_out) more.removeAttribute("hidden");
+    if (openHunks.has(openKey) && h?.left_out) more.removeAttribute("hidden");
     else more.setAttribute("hidden", "");
   };
   const more = pressable(document.createElement("button"), false, () => diffRequest.open(session, index));
   more.classList.add("evidence-more");
   const show = () => {
-    const open = openHunks.has(key);
+    const open = openHunks.has(openKey);
     for (const node of [pre, edit]) open ? node.removeAttribute("hidden") : node.setAttribute("hidden", "");
     left(hunks.get(key) ?? null);
   };
@@ -139,19 +141,19 @@ export function fileRow(session: string, index: number, row: EvidenceRow): HTMLE
         pre.textContent = `The hunk could not be read: ${e}`;
       });
   };
-  const button = pressable(document.createElement("button"), openHunks.has(key), () => {
-    if (openHunks.has(key)) openHunks.delete(key);
-    else openHunks.add(key);
-    button.setAttribute("aria-expanded", String(openHunks.has(key)));
+  const button = pressable(document.createElement("button"), openHunks.has(openKey), () => {
+    if (openHunks.has(openKey)) openHunks.delete(openKey);
+    else openHunks.add(openKey);
+    button.setAttribute("aria-expanded", String(openHunks.has(openKey)));
     show();
-    if (openHunks.has(key)) fetch();
+    if (openHunks.has(openKey)) fetch();
   });
   button.classList.add("evidence-fail");
-  button.setAttribute("aria-expanded", String(openHunks.has(key)));
+  button.setAttribute("aria-expanded", String(openHunks.has(openKey)));
   button.append(text("span", row.label));
   show();
-  if (openHunks.has(key)) fetch();
-  item.append(button, edit, pre, more, askAnchor(session, { kind: "file", turn: index, root: file.root, path: file.path }, `the file ${file.path}`));
+  if (openHunks.has(openKey)) fetch();
+  item.append(button, edit, pre, more, askAnchor(session, { kind: "file", turn: index, root: file.root, path: file.path, from: file.from }, `the file ${file.path}`));
   return item;
 }
 

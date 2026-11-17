@@ -6,14 +6,15 @@ import { El } from "./dom.mjs";
 const calls = [];
 const hunk = { text: "@@ -1 +1 @@\n-a\n+b\n", left_out: 0, binary: false, first_line: 1 };
 globalThis.window = {
-  __TAURI__: { core: { invoke: async (command, args) => (calls.push([command, args]), command === "turn_file_hunk" ? hunk : null) } },
+  __TAURI__: { core: { invoke: async (command, args) => (calls.push([command, args]), command === "guess" ? new Promise(() => {}) : command === "turn_file_hunk" ? hunk : null) } },
 };
 // The document is set after the import: times.ts starts a timer when one exists at load.
-const { cardLine, cardsFor, quizOpen } = await import("../../dist/cards.js");
+const { cardLine, cardsFor, openCard, quizOpen } = await import("../../dist/cards.js");
+const { fileRow } = await import("../../dist/evidence.js");
 globalThis.document = { createElement: (tag) => new El(tag), getElementById: () => new El("div"), visibilityState: "hidden" };
 
-const stored = (card) => ({
-  request: { session_id: "s1", id: "s1@1", agent: null, changed_by: {}, check: null },
+const stored = (card, id = "s1@1") => ({
+  request: { session_id: "s1", id, agent: null, changed_by: {}, check: null },
   card: { summary: "", explanation: "e", paths: ["a.rs", "b.rs"], code: "a.rs:1-1\nfn a() {}", why_it_matters: "", not_checked: "", architecture: null, quiz: null, ...card },
   guess: null,
   check_result: null,
@@ -46,4 +47,48 @@ test("a card's Quiz is hidden where a Quiz may not show beside a decision", () =
   assert.equal(hidden.some(quizOpen), false);
   assert.equal(hidden[0].card.quiz, null);
   assert.equal(cards[0].card.quiz, quiz);
+});
+
+const quizOf = { text: "Why a stack?", key: 0, options: [{ text: "It nests.", why: "Right." }, { text: "It is fast.", why: "No." }] };
+const press = (key, value = "") => ({ key, target: { value }, preventDefault() {} });
+const buttons = (node, pattern) => node.find("button").find((b) => pattern.test(b.text));
+
+test("a card answered in this view stays open on the redraw after its pick", () => {
+  const open = stored({ quiz: quizOf }, "s1@10");
+  buttons(cardLine(open), /It nests/).listeners.click();
+  const answered = cardLine({ ...open, guess: { option: 0, right: true } });
+  assert.equal(answered.tag, "details");
+  assert.equal(answered.open, true);
+  // Another answered card is one closed line, until a citation opens it.
+  const other = { ...stored({ quiz: quizOf }, "s1@11"), guess: { option: 1, right: false } };
+  assert.equal(cardLine(other).open, false);
+  openCard("s1@11");
+  assert.equal(cardLine(other).open, true);
+});
+
+test("a card's file chip opens on its own, not with the evidence row of the same file", async () => {
+  const file = { root: "/r", path: "a.rs", from: null, added: 1, removed: 1 };
+  const turn = { session: "s9", index: 2, files: [file] };
+  const node = cardLine(stored({ paths: ["a.rs"] }, "s9@2"), turn);
+  node.find("li")[0].find("button")[0].listeners.click();
+  await new Promise((done) => setImmediate(done));
+  const row = fileRow("s9", 2, { kind: "file", label: "a.rs", file });
+  assert.equal(row.find("pre")[0].hasAttribute("hidden"), true);
+});
+
+test("during the trial a card's Quiz asks the confidence tap, then the why line, and the reveal waits for it", () => {
+  const open = stored({ quiz: quizOf }, "s1@20");
+  const first = cardLine(open, null, true);
+  assert.ok(buttons(first, /^Sure/) && buttons(first, /^Not sure/));
+  buttons(first, /It nests/).listeners.click();
+  const picked = { ...open, guess: { option: 0, right: true } };
+  const waiting = cardLine(picked, null, true);
+  const [input] = waiting.find("input");
+  assert.equal(input.placeholder, "In a few words, why?");
+  assert.doesNotMatch(waiting.text, /Why it matters/);
+  input.listeners.keydown(press("Enter", "it nests"));
+  assert.deepEqual(calls.at(-1), ["quiz_tap", { id: "s1@20", tap: { kind: "why", text: "it nests" } }]);
+  assert.match(cardLine(picked, null, true).text, /Why it matters/);
+  // Without the trial, none of it shows.
+  assert.equal(cardLine(stored({ quiz: quizOf }, "s1@21"), null, false).find("input").length, 0);
 });

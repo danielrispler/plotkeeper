@@ -167,3 +167,23 @@ test("a skip needs no why line, and a stored pick reads back revealed with its l
   assert.match(back.text, /frozen/);
   assert.equal(labelled(back, /^Sure/), undefined);
 });
+
+test("the why line keeps its draft and focus when the rail draws the Quiz again", async () => {
+  const first = trialRegion("t6");
+  first.find("button").find((b) => b.text === "The pairs").listeners.click();
+  const [input] = first.find("input");
+  input.value = "because";
+  input.listeners.input();
+  input.listeners.focus();
+  const focused = [];
+  El.prototype.focus = function () {
+    focused.push(this);
+  };
+  // The rail draws the turn again: a new region, from the kept state.
+  const again = trialRegion("t6");
+  const [redrawn] = again.find("input");
+  assert.equal(redrawn.value, "because");
+  await Promise.resolve();
+  assert.deepEqual(focused, [redrawn]);
+  delete El.prototype.focus;
+});

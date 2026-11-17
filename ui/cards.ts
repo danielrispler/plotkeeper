@@ -8,7 +8,8 @@ import { studio } from "./state.js";
 import { showDecisions } from "./decisions.js";
 import { fileRow } from "./evidence.js";
 import { drawFeed, forgetMissingSummaries, openCitation } from "./story.js";
-import type { CardRequest, CheckResult, Guess, Level, Quiz, Rating, Reason, SessionCards, StoredCard, TurnFile } from "./types.js";
+import { confidenceRow, pickedHere, trialStage, whyInput, whyWaiting } from "./quiz.js";
+import type { CardRequest, CheckResult, Guess, Level, Quiz, Rating, Reason, SessionCards, StoredCard, Tap, TurnFile } from "./types.js";
 
 // The turn a card is drawn in: its file chips open the file's hunk between the turn's trees, as its evidence line's rows do.
 export type CardTurn = { session: string; index: number; files: TurnFile[] };
@@ -55,7 +56,15 @@ export function quizState({ request, guess, check_result, taps }: StoredCard) {
 // under each option, why it is right or wrong, with the right one named; a tapped option stays
 // marked, with no colour, as colour is only for "needs you". On a check's card the check's result
 // is the key, so the reasons and the verdict wait for it.
-function quizElements({ request: { id, check }, guess }: StoredCard, quiz: Quiz, state: ReturnType<typeof quizState>): HTMLElement[] {
+// While the trial runs (#129), a card of "now" asks the confidence tap before the pick and the "why?" line after it, and its reveal
+// waits for the line, as a turn's Quiz does (`quizRegion`).
+const waitsForWhy = ({ request: { id, check }, guess }: StoredCard, trial: boolean) => trial && check === null && guess !== null && whyWaiting(id);
+
+function quizElements(stored: StoredCard, quiz: Quiz, shown: ReturnType<typeof quizState>, trial: boolean): HTMLElement[] {
+  const { request: { id, check }, guess } = stored;
+  const waiting = waitsForWhy(stored, trial);
+  const state = waiting ? { ...shown, reasons: false, verdict: null } : shown;
+  const send = (tap: Tap) => void invoke("quiz_tap", { id, tap }).catch((e) => console.warn(e));
   const options = document.createElement("ol");
   options.className = "options";
   options.append(
@@ -64,6 +73,9 @@ function quizElements({ request: { id, check }, guess }: StoredCard, quiz: Quiz,
       // The tap shows at once; the cards drawn from the shell's reply then settle it (danielrispler/Falinks#570).
       const button = pressable(prose("button", option.text) as HTMLButtonElement, guess?.option === i, () => {
         button.setAttribute("aria-pressed", "true");
+        // Answered here, the card stays open to show its reveal.
+        cardOpen.add(id);
+        pickedHere(id, i);
         record("guess", { id, option: i });
       });
       button.disabled = state.answered;
@@ -80,10 +92,14 @@ function quizElements({ request: { id, check }, guess }: StoredCard, quiz: Quiz,
   const title = prose("p", quiz.text);
   title.className = "quiz";
   if (!state.answered && check === null) {
-    const skip = pressable(prose("button", "Show the rest anyway"), false, () => record("quiz_tap", { id, tap: { kind: "skip" } }));
+    const skip = pressable(prose("button", "Show the rest anyway"), false, () => {
+      cardOpen.add(id);
+      return record("quiz_tap", { id, tap: { kind: "skip" } });
+    });
     skip.classList.add("quiz-skip");
-    return [title, options, skip];
+    return [title, ...(trial && check === null ? [confidenceRow(id, send, drawFeed)] : []), options, skip];
   }
+  if (waiting) return [title, options, whyInput(id, send, drawFeed)];
   if (!state.verdict) return [title, options];
   const verdict = prose("p", state.verdict);
   verdict.className = "verdict";
@@ -95,15 +111,15 @@ function quizElements({ request: { id, check }, guess }: StoredCard, quiz: Quiz,
 // structural, why the change matters, what was not checked, his flag on the key, "explain more" and
 // his rating. A card with no quiz shows the explanation at once. The shell keeps each tap in the card
 // store, so after a restart a guessed card is drawn guessed and rated.
-function cardElement(stored: StoredCard, turn: CardTurn | null): HTMLElement {
+function cardElement(stored: StoredCard, turn: CardTurn | null, trial: boolean): HTMLElement {
   const { request, card, key_wrong, more, rating, taps } = stored;
   const node = document.createElement("article");
   node.className = "card";
   const quiz = card.quiz;
   const state = quizState(stored);
-  if (quiz) node.append(...quizElements(stored, quiz, state));
+  if (quiz) node.append(...quizElements(stored, quiz, state, trial));
   // Its turn holds the one "ask about this" (danielrispler/Falinks#574).
-  if (quiz && !state.answered) return node;
+  if (quiz && (!state.answered || waitsForWhy(stored, trial))) return node;
   const explanation = prose("p", card.explanation);
   explanation.className = "explanation";
   node.append(explanation, fileChips(card.paths, turn), ...changedBy(request));
@@ -140,7 +156,7 @@ function fileChips(paths: string[], turn: CardTurn | null): HTMLElement {
         item.append(code(path));
         return item;
       }
-      return fileRow(turn.session, turn.index, { kind: "file", label: path, file });
+      return fileRow(turn.session, turn.index, { kind: "file", label: path, file }, "card ");
     }),
   );
   return list;
@@ -314,12 +330,12 @@ function showBrief(cards: SessionCards) {
 }
 
 // Card `stored`'s node, drawn again only when its record changed.
-export function cardNode(stored: StoredCard, turn: CardTurn | null = null): HTMLElement {
+export function cardNode(stored: StoredCard, turn: CardTurn | null = null, trial = false): HTMLElement {
   const id = stored.request.id;
-  const record = JSON.stringify([stored, turn]);
+  const record = JSON.stringify([stored, turn, trial ? trialStage(id) : null]);
   if (drawn.get(id)?.record !== record) {
     if (!drawn.has(id) && stored.guess === null) unshown.add(id);
-    drawn.set(id, { record, node: cardElement(stored, turn) });
+    drawn.set(id, { record, node: cardElement(stored, turn, trial) });
   }
   return drawn.get(id)!.node;
 }
@@ -349,14 +365,14 @@ export const cardsFor = (cards: StoredCard[], allowed: boolean): StoredCard[] =>
   allowed ? cards : cards.map((stored) => (stored.card.quiz === null ? stored : { ...stored, card: { ...stored.card, quiz: null } }));
 
 // A card in its turn (danielrispler/plotkeeper#117): an answered card is one line, its quiz, which opens to the card.
-export function cardLine(stored: StoredCard, turn: CardTurn | null = null): HTMLElement {
+export function cardLine(stored: StoredCard, turn: CardTurn | null = null, trial = false): HTMLElement {
   const quiz = stored.card.quiz;
-  if (!quiz || !quizState(stored).answered) return cardNode(stored, turn);
+  if (!quiz || !quizState(stored).answered) return cardNode(stored, turn, trial);
   const id = stored.request.id;
   const node = document.createElement("details");
   node.className = "fold answered-card";
   node.open = cardOpen.has(id);
-  node.append(prose("summary", quiz.text), cardNode(stored, turn));
+  node.append(prose("summary", quiz.text), cardNode(stored, turn, trial));
   node.addEventListener("toggle", () => {
     if (node.open) cardOpen.add(id);
     else cardOpen.delete(id);
@@ -364,3 +380,6 @@ export function cardLine(stored: StoredCard, turn: CardTurn | null = null): HTML
   return node;
 }
 const cardOpen = new Set<string>();
+
+// Opens card `id`'s line, for a citation of it (#123).
+export const openCard = (id: string) => void cardOpen.add(id);

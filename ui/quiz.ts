@@ -44,10 +44,13 @@ type Kept = {
   sure: boolean | null;
   why: string | null;
   whyDone: boolean;
+  // The "why?" line as typed so far, and whether it has the focus, so that a redraw of the rail keeps both.
+  draft: string;
+  typing: boolean;
 };
 const kept = new Map<string, Kept>();
 const keptOf = (id: string): Kept => {
-  if (!kept.has(id)) kept.set(id, { pick: null, skipped: false, chips: new Set(), more: null, asking: false, sure: null, why: null, whyDone: false });
+  if (!kept.has(id)) kept.set(id, { pick: null, skipped: false, chips: new Set(), more: null, asking: false, sure: null, why: null, whyDone: false, draft: "", typing: false });
   return kept.get(id)!;
 };
 
@@ -69,6 +72,62 @@ export function seedQuiz(id: string, taps: QuizTap[] | undefined) {
 
 // Whether turn `id`'s Quiz was answered, by a pick or a skip.
 export const quizAnswered = (id: string) => quizStage(keptOf(id).pick, keptOf(id).skipped) !== "open";
+
+// The trial's confidence tap, "Sure" and "Not sure", before the pick; `redraw` draws what shows it again.
+export function confidenceRow(id: string, record: (tap: Tap) => void, redraw: () => void): HTMLElement {
+  const one = keptOf(id);
+  const row = document.createElement("p");
+  row.className = "quiz-sure";
+  const sure = (value: boolean, label: string) => {
+    const button = pressable(prose("button", label) as HTMLButtonElement, one.sure === value, () => {
+      if (one.sure !== null) return;
+      one.sure = value;
+      record({ kind: "confidence", sure: value });
+      redraw();
+    });
+    button.disabled = one.sure !== null;
+    return button;
+  };
+  row.append(sure(true, "Sure"), sure(false, "Not sure"));
+  return row;
+}
+
+// The trial's "In a few words, why?" line, after the pick: Enter sends it, or skips it when empty. Its draft and focus outlast the
+// rail's redraws.
+export function whyInput(id: string, record: (tap: Tap) => void, redraw: () => void): HTMLInputElement {
+  const one = keptOf(id);
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "quiz-why";
+  input.placeholder = "In a few words, why?";
+  input.value = one.draft;
+  input.addEventListener("input", () => void (one.draft = input.value));
+  input.addEventListener("focus", () => void (one.typing = true));
+  // Taking the input out of the page ends its focus without Daniel leaving it.
+  input.addEventListener("blur", () => void (one.typing = one.typing && input.isConnected));
+  input.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    const line = (event.target as HTMLInputElement).value.trim();
+    one.whyDone = true;
+    one.typing = false;
+    if (line) {
+      one.why = line;
+      record({ kind: "why", text: line });
+    }
+    redraw();
+  });
+  if (one.typing) queueMicrotask(() => input.focus?.());
+  return input;
+}
+
+// Whether turn or card `id` was picked here and still waits for its "why?" line, which holds the reveal back.
+export const whyWaiting = (id: string) => keptOf(id).pick !== null && !keptOf(id).whyDone;
+
+// Notes a pick of card `id` made here, so that its reveal waits for the "why?" line while the trial runs.
+export const pickedHere = (id: string, option: number) => void (keptOf(id).pick = option);
+
+// What the trial's steps of `id` show, to tell a card's drawing that it changed.
+export const trialStage = (id: string) => `${keptOf(id).sure}/${whyWaiting(id)}`;
 
 export type QuizDeps = {
   // Sends the tap to the card store.
@@ -133,39 +192,9 @@ export function quizRegion(id: string, quiz: Quiz, held: SummaryLine[], deps: Qu
     const box = document.createElement("div");
     box.className = "card quiz-box";
     box.append(question);
-    if (deps.trial && stage === "open") {
-      const row = document.createElement("p");
-      row.className = "quiz-sure";
-      const sure = (value: boolean, label: string) => {
-        const button = pressable(prose("button", label) as HTMLButtonElement, one.sure === value, () => {
-          if (one.sure !== null) return;
-          one.sure = value;
-          tap({ kind: "confidence", sure: value });
-        });
-        button.disabled = one.sure !== null;
-        return button;
-      };
-      row.append(sure(true, "Sure"), sure(false, "Not sure"));
-      box.append(row);
-    }
+    if (deps.trial && stage === "open") box.append(confidenceRow(id, deps.record, draw));
     box.append(options);
-    if (waiting) {
-      const input = document.createElement("input");
-      input.type = "text";
-      input.className = "quiz-why";
-      input.placeholder = "In a few words, why?";
-      input.addEventListener("keydown", (event) => {
-        if (event.key !== "Enter") return;
-        const line = (event.target as HTMLInputElement).value.trim();
-        one.whyDone = true;
-        if (line) {
-          one.why = line;
-          deps.record({ kind: "why", text: line });
-        }
-        draw();
-      });
-      box.append(input);
-    }
+    if (waiting) box.append(whyInput(id, deps.record, draw));
     if (view.skip) {
       const skip = pressable(prose("button", "Show the rest anyway"), false, () => {
         one.skipped = true;

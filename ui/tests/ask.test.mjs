@@ -42,3 +42,14 @@ test("the palette has an Ask about action", async () => {
   const { initial } = await import("../../dist/settings.js");
   assert.ok(paletteEntries(initial.keymap, ["studio::AskAbout"]).some((entry) => entry.title === "Ask about"));
 });
+
+test("Ask on a renamed file reads the hunk with the file's old path", async () => {
+  const calls = [];
+  globalThis.window = { __TAURI__: { core: { invoke: async (command, args) => (calls.push([command, args]), command === "ask_facts" ? { sections: [] } : null) } } };
+  const { askAnchor } = await import("../../dist/ask.js");
+  const node = askAnchor("s1", { kind: "file", turn: 3, root: "/r", path: "new.rs", from: "old.rs" }, "the file new.rs");
+  node.open = true;
+  node.listeners.toggle();
+  await new Promise((done) => setTimeout(done));
+  assert.deepEqual(calls.find(([c]) => c === "turn_file_hunk"), ["turn_file_hunk", { session: "s1", turn: 3, root: "/r", path: "new.rs", from: "old.rs" }]);
+});

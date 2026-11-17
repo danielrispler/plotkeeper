@@ -44,6 +44,9 @@ export class El {
   hasAttribute(name) {
     return this.attrs.has(name);
   }
+  hasChildNodes() {
+    return this.childNodes.length > 0;
+  }
   append(...items) {
     this.childNodes.push(...items.map(node));
   }
