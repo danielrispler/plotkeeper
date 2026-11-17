@@ -1,5 +1,5 @@
 target/
-# A parallel run's worker target dirs (AGENTS.md, "Checks"): the hook must never hash them (#141).
+# Leftover worker target dirs from before #38: the hook must never hash them (#141).
 /target-*/
 node_modules/
 dist/
