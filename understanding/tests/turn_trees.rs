@@ -256,3 +256,167 @@ fn the_whole_hunk_is_git_diff_between_the_trees_with_nothing_left_out() {
     assert_eq!(whole.text.trim_end(), diff);
     assert_eq!(whole.left_out, 0);
 }
+
+/// Runs hook event `event` through the hook's tree recording, with its state in `data`, and
+/// returns the line it logs.
+fn hooked(data: &Path, ms: u64, mut event: serde_json::Value) -> String {
+    event["session_id"] = SESSION.into();
+    let event = event.as_object_mut().unwrap();
+    {
+        let _one = HOOK.lock().unwrap_or_else(|e| e.into_inner());
+        studio_hook::trees(event, data).unwrap();
+    }
+    event.insert("studio_received_ms".into(), (AT + ms).into());
+    serde_json::Value::from(event.clone()).to_string()
+}
+
+#[test]
+fn a_workers_edits_in_its_own_worktree_count_in_its_turn_even_after_the_turn_ended() {
+    let (_dir, root) = repo();
+    let outside = tempfile::tempdir().unwrap();
+    let path = outside.path().join("w1");
+    git(
+        Path::new(&root),
+        &["worktree", "add", "-q", "-b", "w1", path.to_str().unwrap()],
+    );
+    let worker = fs::canonicalize(&path).unwrap().display().to_string();
+    let data = tempfile::tempdir().unwrap();
+    let data = data.path();
+    let own = |name: &str, prompt: &str, extra: serde_json::Value| {
+        let mut event = json!({ "hook_event_name": name, "cwd": &root, "prompt_id": prompt });
+        event
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        event
+    };
+    let by_worker = |name: &str, prompt: &str, extra: serde_json::Value| {
+        let mut event = json!({ "hook_event_name": name, "cwd": &worker, "prompt_id": prompt,
+                                "agent_id": "agent-1" });
+        event
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        event
+    };
+    let write = |id: &str, file: &str| {
+        json!({ "tool_name": "Write", "tool_input": { "file_path": format!("{worker}/{file}") },
+                "tool_use_id": id, "tool_response": {} })
+    };
+    let running = json!({ "background_tasks": [{ "id": "agent-1", "type": "subagent" }] });
+
+    let mut lines = vec![
+        hooked(
+            data,
+            0,
+            own("UserPromptSubmit", "p1", json!({ "prompt": "go" })),
+        ),
+        hooked(data, 500, by_worker("SubagentStart", "p1", json!({}))),
+    ];
+    fs::write(format!("{worker}/a.rs"), "fn a() {}\nfn during() {}\n").unwrap();
+    lines.push(hooked(
+        data,
+        1_000,
+        by_worker("PostToolUse", "p1", write("w-1", "a.rs")),
+    ));
+    lines.push(hooked(data, 9_000, own("Stop", "p1", running)));
+    // The worker runs on in the background into the next turn.
+    lines.push(hooked(
+        data,
+        10_000,
+        own("UserPromptSubmit", "p2", json!({ "prompt": "next" })),
+    ));
+    fs::write(format!("{worker}/late.rs"), "fn late() {}\n").unwrap();
+    lines.push(hooked(
+        data,
+        12_000,
+        by_worker("PostToolUse", "p2", write("w-2", "late.rs")),
+    ));
+    lines.push(hooked(
+        data,
+        15_000,
+        by_worker("SubagentStop", "p2", json!({})),
+    ));
+    lines.push(hooked(
+        data,
+        20_000,
+        own("Stop", "p2", json!({ "background_tasks": [] })),
+    ));
+
+    let mut studio = Studio::replayed(&lines);
+    for ask in studio.turn_diffs(AT + 40_000, 10) {
+        studio.set_turn_files(&ask, turn_diffs(&ask));
+    }
+    let turns = &studio.session(SESSION).unwrap().turns;
+    let files = |turn: usize| {
+        let found = turns[turn].files.clone().unwrap_or_default();
+        let paths: Vec<(String, String)> = (found.files.iter())
+            .map(|f| (f.root.clone(), f.path.clone()))
+            .collect();
+        (paths, found.external)
+    };
+    let theirs = |path: &str| (worker.clone(), path.to_owned());
+    assert_eq!(files(0), (vec![theirs("a.rs"), theirs("late.rs")], 0));
+    assert_eq!(files(1), (vec![], 0));
+}
+
+#[test]
+fn a_workers_late_edit_in_the_sessions_worktree_is_its_turns_and_not_external_in_the_next() {
+    let (_dir, root) = repo();
+    let data = tempfile::tempdir().unwrap();
+    let data = data.path();
+    let event = |name: &str, prompt: &str, extra: serde_json::Value| {
+        let mut event = json!({ "hook_event_name": name, "cwd": &root, "prompt_id": prompt });
+        event
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        event
+    };
+    let worker = json!({ "agent_id": "agent-1" });
+    let mut lines = vec![
+        hooked(
+            data,
+            0,
+            event("UserPromptSubmit", "p1", json!({ "prompt": "go" })),
+        ),
+        hooked(data, 500, event("SubagentStart", "p1", worker.clone())),
+        hooked(
+            data,
+            9_000,
+            event(
+                "Stop",
+                "p1",
+                json!({ "background_tasks": [{ "id": "agent-1" }] }),
+            ),
+        ),
+        hooked(
+            data,
+            10_000,
+            event("UserPromptSubmit", "p2", json!({ "prompt": "next" })),
+        ),
+    ];
+    fs::write(format!("{root}/late.rs"), "fn late() {}\n").unwrap();
+    let write = json!({ "agent_id": "agent-1", "tool_name": "Write", "tool_use_id": "w-1",
+                        "tool_input": { "file_path": format!("{root}/late.rs") }, "tool_response": {} });
+    lines.push(hooked(data, 12_000, event("PostToolUse", "p2", write)));
+    lines.push(hooked(data, 15_000, event("SubagentStop", "p2", worker)));
+    lines.push(hooked(
+        data,
+        20_000,
+        event("Stop", "p2", json!({ "background_tasks": [] })),
+    ));
+
+    let mut studio = Studio::replayed(&lines);
+    for ask in studio.turn_diffs(AT + 40_000, 10) {
+        studio.set_turn_files(&ask, turn_diffs(&ask));
+    }
+    let turns = &studio.session(SESSION).unwrap().turns;
+    let files = |turn: usize| {
+        let found = turns[turn].files.clone().unwrap_or_default();
+        let paths: Vec<String> = found.files.iter().map(|f| f.path.clone()).collect();
+        (paths, found.external)
+    };
+    assert_eq!(files(0), (vec!["late.rs".to_owned()], 0));
+    assert_eq!(files(1), (vec![], 0));
+}

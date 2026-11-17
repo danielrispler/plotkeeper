@@ -96,10 +96,20 @@ fn an_ended_turns_files_are_the_diff_kept_to_what_its_agent_edited_and_the_rest_
     assert!(ask(&mut studio, AT + 40_000).is_empty());
 }
 
+/// Worker `agent`'s first event, in its own worktree, with the start tree the hook recorded there.
+fn worker_starts(ms: u64, agent: &str, tree: &str) -> String {
+    line(
+        "SubagentStart",
+        ms,
+        json!({ "agent_id": agent, "cwd": WORKER_ROOT, "studio_turn_start": { WORKER_ROOT: tree } }),
+    )
+}
+
 #[test]
 fn a_workers_edits_in_its_own_worktree_count_in_the_turn_that_spawned_it() {
     let mut studio = Studio::replayed([
-        prompt(json!({ ROOT: "s1", WORKER_ROOT: "w1" })),
+        prompt(json!({ ROOT: "s1" })),
+        worker_starts(500, "agent-1", "w1"),
         edit(
             1_000,
             "e1",
@@ -125,6 +135,142 @@ fn a_workers_edits_in_its_own_worktree_count_in_the_turn_that_spawned_it() {
     assert_eq!(found.files.len(), 1);
     assert_eq!(found.files[0].root, WORKER_ROOT);
     assert_eq!(found.external, 0);
+}
+
+/// The diff of each worktree of `ask`, from `files`: the files that differ in each root, by root.
+fn diffs(ask: &TurnDiff, files: &[(&str, &str)]) -> Vec<RootDiff> {
+    let diff = |root: &str| RootDiff {
+        root: root.into(),
+        files: (files.iter())
+            .filter(|(r, _)| *r == root)
+            .map(|(_, path)| stat(path, 1, 0))
+            .collect(),
+    };
+    ask.trees.iter().map(|t| diff(&t.root)).collect()
+}
+
+fn turn_files(studio: &Studio, turn: usize) -> (Vec<String>, u64) {
+    let found = studio.session(SESSION).unwrap().turns[turn].files.clone();
+    let found = found.expect("files");
+    let paths = found.files.iter().map(|f| f.path.clone()).collect();
+    (paths, found.external)
+}
+
+#[test]
+fn a_background_workers_late_edits_count_in_the_turn_that_spawned_it_and_not_the_next() {
+    let late = |name: &str, ms: u64, extra: Value| {
+        let mut extra = extra;
+        extra["prompt_id"] = "p2".into();
+        line(name, ms, extra)
+    };
+    let mut studio = Studio::replayed([
+        prompt(json!({ ROOT: "s1" })),
+        worker_starts(500, "agent-1", "w1"),
+        // The worker runs on in the background past its turn's end, which takes its worktree's
+        // tree too, as the hook does for a worktree its turn's worker touched.
+        line(
+            "Stop",
+            9_000,
+            json!({ "background_tasks": [{ "id": "agent-1", "type": "subagent" }],
+                    "studio_turn_end": { ROOT: "e1", WORKER_ROOT: "w2" } }),
+        ),
+        late(
+            "UserPromptSubmit",
+            10_000,
+            json!({ "prompt": "next", "studio_turn_start": { ROOT: "s2" } }),
+        ),
+        edit(
+            12_000,
+            "e1",
+            "/w/repo/.claude/worktrees/w1/late.rs",
+            Some("agent-1"),
+        ),
+        late(
+            "PostToolUse",
+            13_000,
+            json!({ "tool_name": "Edit", "tool_input": { "file_path": "/w/repo/src/c.rs" },
+                    "tool_use_id": "e2", "tool_response": {} }),
+        ),
+    ]);
+    // While the worker runs, its worktree's end is the worktree now.
+    let asks = ask(&mut studio, AT + 14_000);
+    let first = asks
+        .iter()
+        .find(|a| a.turn == 0)
+        .expect("the spawning turn");
+    assert!(!first.ended);
+    let worker = first.trees.iter().find(|t| t.root == WORKER_ROOT).unwrap();
+    assert_eq!(worker.end, None);
+    // So does a hunk's.
+    let trees = studio.turn_trees(SESSION, 0, WORKER_ROOT);
+    assert_eq!(trees, Some(("w1".into(), None)));
+    let root = first.trees.iter().find(|t| t.root == ROOT).unwrap();
+    assert_eq!(root.end.as_deref(), Some("e1"));
+
+    // Its stop takes its worktree's end tree.
+    studio.replay(&late(
+        "SubagentStop",
+        15_000,
+        json!({ "agent_id": "agent-1", "cwd": WORKER_ROOT,
+                "studio_turn_end": { WORKER_ROOT: "w3" } }),
+    ));
+    studio.replay(&late(
+        "Stop",
+        20_000,
+        json!({ "studio_turn_end": { ROOT: "e2" } }),
+    ));
+    let asks = ask(&mut studio, AT + 40_000);
+    let first = asks
+        .iter()
+        .find(|a| a.turn == 0)
+        .expect("the spawning turn");
+    assert!(first.ended);
+    let worker = first.trees.iter().find(|t| t.root == WORKER_ROOT).unwrap();
+    assert_eq!(worker.end.as_deref(), Some("w3"));
+    studio.set_turn_files(first, Some(diffs(first, &[(WORKER_ROOT, "late.rs")])));
+    assert_eq!(turn_files(&studio, 0), (vec!["late.rs".into()], 0));
+    let second = asks.iter().find(|a| a.turn == 1).expect("the next turn");
+    studio.set_turn_files(second, Some(diffs(second, &[(ROOT, "src/c.rs")])));
+    assert_eq!(turn_files(&studio, 1), (vec!["src/c.rs".into()], 0));
+}
+
+#[test]
+fn a_late_edit_of_a_worker_in_the_sessions_worktree_is_not_external_in_the_next_turn() {
+    let late = |name: &str, ms: u64, extra: Value| {
+        let mut extra = extra;
+        extra["prompt_id"] = "p2".into();
+        line(name, ms, extra)
+    };
+    let mut studio = Studio::replayed([
+        prompt(json!({ ROOT: "s1" })),
+        line("SubagentStart", 500, json!({ "agent_id": "agent-1" })),
+        line(
+            "Stop",
+            9_000,
+            json!({ "background_tasks": [{ "id": "agent-1", "type": "subagent" }],
+                    "studio_turn_end": { ROOT: "e1" } }),
+        ),
+        late(
+            "UserPromptSubmit",
+            10_000,
+            json!({ "prompt": "next", "studio_turn_start": { ROOT: "s2" } }),
+        ),
+        edit(12_000, "e1", "/w/repo/late.rs", Some("agent-1")),
+        late(
+            "SubagentStop",
+            15_000,
+            json!({ "agent_id": "agent-1", "studio_turn_end": { ROOT: "w3" } }),
+        ),
+        late("Stop", 20_000, json!({ "studio_turn_end": { ROOT: "e2" } })),
+    ]);
+    let asks = ask(&mut studio, AT + 40_000);
+    let first = asks.iter().find(|a| a.turn == 0).unwrap();
+    assert_eq!(first.trees[0].end.as_deref(), Some("w3"));
+    studio.set_turn_files(first, Some(diffs(first, &[(ROOT, "late.rs")])));
+    assert_eq!(turn_files(&studio, 0), (vec!["late.rs".into()], 0));
+    let second = asks.iter().find(|a| a.turn == 1).unwrap();
+    studio.set_turn_files(second, Some(diffs(second, &[(ROOT, "late.rs")])));
+    assert_eq!(turn_files(&studio, 1), (vec![], 0));
 }
 
 #[test]

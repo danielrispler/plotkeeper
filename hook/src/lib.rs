@@ -477,6 +477,154 @@ fn git(folder: &Path, args: &[&str], index: Option<&Path>) -> Option<String> {
     status.success().then(|| out.trim_end().to_owned())
 }
 
+/// Adds to `event` the trees of the turn it ends, `studio_turn_end`, and of the worktrees its turn
+/// touches first with it, `studio_turn_start`, each by worktree root. Like the core, it takes an
+/// event's folder and an `Edit` or `Write` path as what it touches (danielrispler/Falinks#434,
+/// decision 9). A worker's event takes trees for the turn that spawned it, the turn the hook is in at
+/// its first event (danielrispler/plotkeeper#142): a start at its first touch of a worktree that turn
+/// has none of, and an end of each worktree it touched at the later of that turn's end and its own
+/// stop. What it knows of the turn and its workers is kept in `turns/` in the data directory `data`,
+/// until the session ends or, if its end never comes, for 7 days.
+pub fn trees(
+    event: &mut serde_json::Map<String, serde_json::Value>,
+    data: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use serde_json::{Map, Value, json};
+    use std::io::{Seek, Write};
+    let text = |key: &str| event.get(key).and_then(Value::as_str);
+    let name = text("hook_event_name").unwrap_or_default();
+    let idle = name == "Notification" && text("notification_type") == Some("idle_prompt");
+    let outside = matches!(name, "SessionStart" | "SessionEnd" | "Notification");
+    let session = text("session_id").unwrap_or_default();
+    // The id names a file, so it must be a plain one.
+    let plain = answer::is_file_safe(session);
+    let turns = data.join("turns");
+    let state = turns.join(format!("{session}.json"));
+    // A session's record goes with it; a start, which is rare, prunes those whose end never came.
+    if name == "SessionEnd" && plain {
+        let _ = fs::remove_file(&state);
+    }
+    if name == "SessionStart" {
+        prune_turns(&turns);
+    }
+    if outside && !idle || !plain {
+        return Ok(());
+    }
+    fs::create_dir_all(&turns)?;
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(&state)?;
+    // Hooks of one session that fire together take turns, so each sees the last one's record.
+    file.lock()?;
+    let mut kept = String::new();
+    file.read_to_string(&mut kept)?;
+    let kept: Value = serde_json::from_str(&kept).unwrap_or_default();
+    let strings = |value: &Value| -> Vec<String> {
+        let values = value.as_array().into_iter().flatten();
+        values
+            .filter_map(|v| Some(v.as_str()?.to_owned()))
+            .collect()
+    };
+    let mut turn = Turn {
+        prompt_id: kept["prompt_id"].as_str().map(Into::into),
+        roots: strings(&kept["roots"]),
+        ended: kept["ended"].as_bool().unwrap_or(true),
+    };
+    // Each worker's turn, by its prompt id, and the worktrees it touched.
+    let mut workers = kept["workers"].as_object().cloned().unwrap_or_default();
+
+    let tool = text("tool_name");
+    let path = event
+        .get("tool_input")
+        .and_then(|input| input.get("file_path")?.as_str());
+    let path = path.filter(|p| p.starts_with('/') && matches!(tool, Some("Edit" | "Write")));
+    let folder = path.and_then(|p| Path::new(p).parent()?.to_str());
+    let folders = [text("cwd"), folder];
+    let touched = || (folders.into_iter().flatten()).filter_map(|f| worktree_root(Path::new(f)));
+    let mut end = Map::new();
+    let mut start = Map::new();
+    match text("agent_id") {
+        None => {
+            let (ended, in_turn) = turn.take(name, text("prompt_id"), idle);
+            end = ended.iter().filter_map(|root| record(root)).collect();
+            if in_turn {
+                for root in touched() {
+                    if !turn.roots.contains(&root)
+                        && let Some((root, tree)) = record(&root)
+                    {
+                        turn.roots.push(root.clone());
+                        start.insert(root, tree);
+                    }
+                }
+            }
+        }
+        Some(agent) => {
+            let worker = workers
+                .entry(agent)
+                .or_insert_with(|| json!({ "prompt_id": turn.prompt_id, "roots": [] }));
+            let mut roots = strings(&worker["roots"]);
+            // While its turn runs, that turn's end takes the trees of the worktrees it touched.
+            let live = !turn.ended && worker["prompt_id"].as_str() == turn.prompt_id.as_deref();
+            if name == "SubagentStop" {
+                if !live {
+                    end = roots.iter().filter_map(|root| record(root)).collect();
+                }
+            } else {
+                for root in touched() {
+                    if roots.contains(&root) {
+                        continue;
+                    }
+                    if live && turn.roots.contains(&root) {
+                        roots.push(root);
+                    } else if let Some((root, tree)) = record(&root) {
+                        roots.push(root.clone());
+                        if live {
+                            turn.roots.push(root.clone());
+                        }
+                        start.insert(root, tree);
+                    }
+                }
+            }
+            worker["roots"] = roots.into();
+        }
+    }
+    let kept = json!({
+        "prompt_id": turn.prompt_id, "roots": turn.roots, "ended": turn.ended, "workers": workers,
+    });
+    file.set_len(0)?;
+    file.rewind()?;
+    file.write_all(kept.to_string().as_bytes())?;
+    for (key, trees) in [("studio_turn_end", end), ("studio_turn_start", start)] {
+        if !trees.is_empty() {
+            event.insert(key.into(), trees.into());
+        }
+    }
+    Ok(())
+}
+
+/// Deletes the records in `turns` unchanged for 7 days.
+fn prune_turns(turns: &Path) {
+    let week = Duration::from_secs(7 * 24 * 3600);
+    let Ok(entries) = fs::read_dir(turns) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let modified = entry.metadata().and_then(|m| m.modified());
+        let age = modified.ok().and_then(|t| t.elapsed().ok());
+        if age.is_some_and(|age| age > week) {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+}
+
+/// Worktree `root`'s tree now, as a JSON pair.
+fn record(root: &str) -> Option<(String, serde_json::Value)> {
+    record_tree(Path::new(root)).map(|(root, tree)| (root, tree.into()))
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::Path;

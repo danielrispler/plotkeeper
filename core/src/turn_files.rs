@@ -75,17 +75,25 @@ pub struct TurnFiles {
 }
 
 impl TurnFiles {
-    /// The files of `diffs` whose absolute path is in `touched`, and the count of the others.
-    pub(crate) fn of(diffs: Vec<RootDiff>, touched: &BTreeSet<String>) -> TurnFiles {
+    /// The files of `diffs` whose absolute path is in `touched`, and the count of the others, but
+    /// those in `theirs`, which another turn changed.
+    pub(crate) fn of(
+        diffs: Vec<RootDiff>,
+        touched: &BTreeSet<String>,
+        theirs: &BTreeSet<String>,
+    ) -> TurnFiles {
         let mut found = TurnFiles::default();
         for diff in diffs {
             let at = |path: &str| format!("{}/{path}", diff.root.trim_end_matches('/'));
             for file in diff.files {
-                let ours = touched.contains(&at(&file.path))
-                    || file
-                        .from
-                        .as_deref()
-                        .is_some_and(|from| touched.contains(&at(from)));
+                let among = |paths: &BTreeSet<String>| {
+                    paths.contains(&at(&file.path))
+                        || (file.from.as_deref()).is_some_and(|from| paths.contains(&at(from)))
+                };
+                let ours = among(touched);
+                if !ours && among(theirs) {
+                    continue;
+                }
                 if ours {
                     found.files.push(TurnFile {
                         root: diff.root.clone(),
