@@ -33,7 +33,7 @@ It leaves out the shell, which needs `dist/` from `npm run build`.
 
 `npm run snap:rail -- <folder>` renders the rail's states from fixtures in Chrome, which `npm run check` leaves out.
 
-`npm run check` runs them all in order: `npm run build`, `npm test`, `cargo fmt --all --check`, `cargo clippy --locked --workspace --all-targets -- -D warnings` and `cargo test --locked --workspace`, the shell included. CI runs `npm ci` and `npm run check` in `.github/workflows/studio.yml`, on macOS. It runs for each pull request that changes ``, and for each push to `main` or to an `issue-*` branch that does. The engine's `checks.yml` and `ci-checks` skip the studio.
+`npm run check` runs them all in order: `cargo fmt --all --check`, `npm run build`, `cargo clippy --locked --workspace --all-targets -- -D warnings`, `cargo test --locked --workspace` (the shell included) and `npm run test:node`. CI runs `npm ci` and `npm run check` in `.github/workflows/studio.yml`, on macOS. It runs for each pull request, and for each push to `main` or to an `issue-*` branch. The engine's `checks.yml` and `ci-checks` skip the studio.
 
 ## Recorded logs
 
