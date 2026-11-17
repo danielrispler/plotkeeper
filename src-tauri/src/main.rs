@@ -329,9 +329,14 @@ fn cards(studio: State<Mutex<Studio>>, cards: State<Cards>) -> SessionCards {
 #[tauri::command]
 fn usage() -> Vec<studio_workbench::AgentUsage> {
     let Some(home) = std::env::home_dir() else {
-        return vec![studio_workbench::AgentUsage::failed("claude", "No home folder to find Claude's usage in")];
+        return vec![studio_workbench::AgentUsage::failed(
+            "claude",
+            "No home folder to find Claude's usage in",
+        )];
     };
-    vec![studio_workbench::claude_usage(&studio_hook::data_dir(&home).join("usage"))]
+    vec![studio_workbench::claude_usage(
+        &studio_hook::data_dir(&home).join("usage"),
+    )]
 }
 
 /// What the read loop last sent the window, so it sends each again only when it changes.

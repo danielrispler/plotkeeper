@@ -88,14 +88,26 @@ fn a_sessions_snapshot_gives_its_context_window() {
 fn claude_usage_gives_the_windows_the_snapshots_time_and_its_source() {
     let dir = tempfile::tempdir().unwrap();
     fs::write(dir.path().join("s.json"), snapshot(LIMITS)).unwrap();
-    let saved = fs::metadata(dir.path().join("s.json")).unwrap().modified().unwrap();
-    let saved = saved.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+    let saved = fs::metadata(dir.path().join("s.json"))
+        .unwrap()
+        .modified()
+        .unwrap();
+    let saved = saved
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
 
     let usage = serde_json::to_value(claude_usage(dir.path())).unwrap();
 
     assert_eq!(usage["agent"], json!("claude"));
-    assert_eq!(usage["five_hour"], json!({"used_percentage": 23.5, "resets_at": 1738425600}));
-    assert_eq!(usage["seven_day"], json!({"used_percentage": 41.2, "resets_at": 1738857600}));
+    assert_eq!(
+        usage["five_hour"],
+        json!({"used_percentage": 23.5, "resets_at": 1738425600})
+    );
+    assert_eq!(
+        usage["seven_day"],
+        json!({"used_percentage": 41.2, "resets_at": 1738857600})
+    );
     assert_eq!(usage["read_at"], json!(saved));
     assert_eq!(usage["source"], json!("last Claude session"));
     assert_eq!(usage["reason"], json!(null));
