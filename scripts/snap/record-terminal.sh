@@ -47,10 +47,12 @@ while time.time() - start < 240 and child.poll() is None:
             break
         data += chunk
         last = time.time()
-        # The folder-trust question of a new folder: its first option is "Yes".
-        if not trusted and b"trust" in data:
+        # The folder-trust question of a new folder: its first option is "No, exit", so move down to "Yes" before Enter.
+        if not trusted and b"Enter" in data and b"trust this folder" in data:
             trusted = True
             time.sleep(1)
+            os.write(master, b"\x1b[B")
+            time.sleep(0.5)
             os.write(master, b"\r")
     # The turn is done when the answer is on the screen and nothing has moved for 20 s.
     elif time.time() - last > 20 and time.time() - start > 30:
