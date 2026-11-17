@@ -27,14 +27,15 @@
       <!-- The Git line (#29): the selected session's workspace and its git tokens, or the main checkout's; stays in focus mode. -->
       <span id="git-line" class="git-line" hidden></span>
       <span class="sp"></span>
-      <!-- Usage: context, 5h and week (danielrispler/Falinks#480, danielrispler/Falinks#481). -->
-      <span id="usage" class="usage"></span>
+      <!-- Plan usage (danielrispler/plotkeeper#163): the tightest window; a click opens the popover of each agent's tile. -->
+      <button id="usage" class="btn small usage" type="button" popovertarget="usage-popover">Usage</button>
       <!-- A new build to restart into (danielrispler/Falinks#470); sessions live in the daemon, so they stay. -->
       <button id="new-build" class="btn small" type="button" title="A new build is ready. Sessions keep running." hidden>Restart to update</button>
       <button id="new-session" class="btn small" type="button" title="New session" aria-label="New session">+</button>
       <button id="bar-more" class="btn small" type="button" popovertarget="bar-menu" aria-label="More" hidden>⋯</button>
       <div id="bar-menu" class="menu bar-menu" popover></div>
     </header>
+    <div id="usage-popover" class="menu usage-popover" popover></div>
 
     <nav class="list" aria-label="Sessions">
       <div class="full">

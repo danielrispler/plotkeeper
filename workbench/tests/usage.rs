@@ -3,7 +3,7 @@
 
 use serde_json::json;
 use std::{fs, thread, time::Duration};
-use studio_workbench::{context_window, plan_usage};
+use studio_workbench::{claude_usage, context_window, plan_usage};
 
 const LIMITS: &str = r#"{"five_hour":{"used_percentage":23.5,"resets_at":1738425600},"seven_day":{"used_percentage":41.2,"resets_at":1738857600}}"#;
 
@@ -81,4 +81,36 @@ fn a_sessions_snapshot_gives_its_context_window() {
     assert_eq!(context_window(dir.path(), "d-4"), None);
     let name = dir.path().file_name().unwrap().to_str().unwrap();
     assert_eq!(context_window(dir.path(), &format!("../{name}/a-1")), None);
+}
+
+/// danielrispler/plotkeeper#163: the usage seam gives Claude's windows, when the snapshot was saved and where it came from.
+#[test]
+fn claude_usage_gives_the_windows_the_snapshots_time_and_its_source() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("s.json"), snapshot(LIMITS)).unwrap();
+    let saved = fs::metadata(dir.path().join("s.json")).unwrap().modified().unwrap();
+    let saved = saved.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+
+    let usage = serde_json::to_value(claude_usage(dir.path())).unwrap();
+
+    assert_eq!(usage["agent"], json!("claude"));
+    assert_eq!(usage["five_hour"], json!({"used_percentage": 23.5, "resets_at": 1738425600}));
+    assert_eq!(usage["seven_day"], json!({"used_percentage": 41.2, "resets_at": 1738857600}));
+    assert_eq!(usage["read_at"], json!(saved));
+    assert_eq!(usage["source"], json!("last Claude session"));
+    assert_eq!(usage["reason"], json!(null));
+}
+
+#[test]
+fn claude_usage_without_a_snapshot_says_why_and_gives_no_number() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("s.json"), r#"{"session_id":"s"}"#).unwrap();
+    for folder in [dir.path().join("none"), dir.path().to_path_buf()] {
+        let usage = serde_json::to_value(claude_usage(&folder)).unwrap();
+        assert_eq!(usage["agent"], json!("claude"));
+        assert_eq!(usage["five_hour"], json!(null));
+        assert_eq!(usage["seven_day"], json!(null));
+        assert_eq!(usage["read_at"], json!(null));
+        assert!(usage["reason"].as_str().unwrap().contains("Claude"));
+    }
 }

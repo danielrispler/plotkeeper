@@ -28,7 +28,7 @@ import { showSkills } from "./skills.js";
 import { showView } from "./story.js";
 import { jumpToNeedsYou, showToast } from "./toast.js";
 import type { Selection, Session, SessionCards } from "./types.js";
-import { type Limits, usageText } from "./usage.js";
+import { type AgentUsage, showGlance, tile } from "./usage.js";
 
 // The terminal's cell, measured from a probe in its font, sets the columns' layout.
 function cell(): number {
@@ -345,13 +345,16 @@ invoke<SessionCards>("cards").then(showCards);
 // The answer hook waits for the card only while its session shows (danielrispler/Falinks#461, decision 16).
 startWatching(() => showView(studio.selection));
 
-// The plan's usage, from the status line's snapshot (danielrispler/Falinks#481). The status line runs after each message.
-// shortcut: polls every 10 s; push from the shell if the delay matters.
+// Each agent's plan usage (danielrispler/plotkeeper#163): read when the window loads, when it takes focus and whenever the popover
+// opens, never on a timer. The glance and the popover's tiles draw from the same read.
 const showUsage = () =>
-  invoke<Limits | null>("usage").then((limits) => {
-    const usage = usageText(limits, Date.now() / 1000);
-    element("usage").textContent = usage;
-    element("usage").title = usage;
+  invoke<AgentUsage[]>("usage").then((usages) => {
+    const now = Date.now() / 1000;
+    showGlance(element("usage"), usages, now);
+    element("usage-popover").replaceChildren(...usages.map((usage) => tile(usage, now)));
   });
 showUsage();
-setInterval(showUsage, 10_000);
+addEventListener("focus", showUsage);
+element("usage-popover").addEventListener("toggle", (event) => {
+  if ((event as ToggleEvent).newState === "open") showUsage();
+});

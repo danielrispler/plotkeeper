@@ -67,13 +67,21 @@ body[data-layout="focus"] #rail-divider { display: none; }
 .git-line .git-branch { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
 .git-line .git-branch:hover { text-decoration: underline; }
 .project-workspaces .row .facts { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; font-size: var(--size-small); color: var(--muted); }
-.usage { font-size: var(--size-small); color: var(--muted); }
+.usage { display: inline-flex; align-items: center; gap: var(--sp-3); color: var(--muted); }
+/* The usage popover (danielrispler/plotkeeper#163): one tile per agent, under the bar at its right. */
+.usage-popover[popover] { top: var(--bar); right: var(--sp-5); left: auto; width: var(--popover); max-width: calc(100vw - 2 * var(--sp-5)); gap: var(--sp-5); }
+.usage-tile { display: flex; flex-direction: column; gap: var(--sp-3); }
+.usage-tile .tile-head { display: flex; align-items: center; gap: var(--sp-3); font-weight: 600; }
+.usage-tile .usage-window { display: grid; grid-template-columns: 3em 1fr 3em auto; align-items: center; gap: var(--sp-3); font-size: var(--size-small); }
+.usage-tile .window-name, .usage-tile .window-resets, .usage-tile .tile-foot { color: var(--muted); }
+.usage-tile .bar { height: var(--sp-3); border-radius: var(--radius-small); background: var(--line); }
+.usage-tile .bar-fill { height: 100%; border-radius: var(--radius-small); background: var(--muted); }
+.usage-tile .tile-reason, .usage-tile .tile-foot { margin: 0; font-size: var(--size-small); }
 /* The top bar's items show whole or sit in the "⋯" menu, so none shrinks (danielrispler/plotkeeper#127, bar.ts). The spacer takes the rest. */
 .top > :not(.sp):not(.menu) { flex: none; }
 .top .sp { flex: 1; }
 .top .menu[popover] { top: var(--bar); right: var(--sp-5); left: auto; width: max-content; max-width: calc(100vw - 2 * var(--sp-5)); }
 .top .menu .git-line { flex-wrap: wrap; padding: var(--sp-2) var(--sp-4); }
-.top .menu .usage { padding: var(--sp-2) var(--sp-4); }
 .top .menu .chip { text-align: start; }
 /* The session's header: its state dot, state and name; the name is the one part that gives way, past a fixed length. */
 .session-header { display: flex; align-items: center; gap: var(--sp-3); font: inherit; font-size: var(--size-small); color: var(--fg); background: none;

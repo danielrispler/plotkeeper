@@ -3,6 +3,9 @@
 //! terminal runs. Beside them, creating and removing tasks (danielrispler/Falinks#468; danielrispler/Falinks#461, decision 9): no call passes
 //! git's force option, so git refuses whatever would lose work, and its message is shown as it is.
 
+mod usage;
+pub use usage::{AgentUsage, UsageWindow, claude_usage};
+
 use serde::Serialize;
 use std::{
     collections::BTreeMap,
@@ -484,14 +487,7 @@ fn status_line(plugin: &Path) -> String {
 /// `dir`, where Daniel's status line command saves its stdin, one file per session, by temp file and
 /// rename. `None` when there is no snapshot, it has no limits yet, or it does not parse.
 pub fn plan_usage(dir: &Path) -> Option<serde_json::Value> {
-    let newest = std::fs::read_dir(dir)
-        .ok()?
-        .flatten()
-        .filter(|entry| entry.path().extension().is_some_and(|e| e == "json"))
-        .max_by_key(|entry| entry.metadata().and_then(|m| m.modified()).ok())?;
-    let snapshot: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(newest.path()).ok()?).ok()?;
-    snapshot.get("rate_limits").cloned()
+    usage::newest_snapshot(dir)?.0.get("rate_limits").cloned()
 }
 
 /// The `context_window` of session `id`'s status line snapshot in `dir`: its window size, current
