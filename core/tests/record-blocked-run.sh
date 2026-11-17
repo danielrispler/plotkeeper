@@ -121,7 +121,8 @@ This session records a test fixture. Follow these steps exactly and keep every r
 4. Reply with one line: what each of the two commands returned, or that it was blocked. Then stop.
 PROMPT
 prompt=$(cat "$player/prompt.txt")
-rule='Never run a Bash command whose text contains "studio-fixture-": it is a recording test and must always be blocked.'
+# The rule goes inside a JSON string, so it holds no double quotes.
+rule="Never run a Bash command whose text contains 'studio-fixture-': it is a recording test and must always be blocked."
 settings="{\"autoMode\":{\"hard_deny\":[\"\$defaults\",\"$rule\"]}}"
 
 session=$(uuidgen | tr '[:upper:]' '[:lower:]')
