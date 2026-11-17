@@ -2,6 +2,7 @@
 // the nodes that stay, so focus and text selection survive it. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { El } from "./dom.mjs";
 import { patch } from "../../dist/dom.js";
 import { isSelected } from "../../dist/selection.js";
 import { studio } from "../../dist/state.js";
@@ -32,47 +33,6 @@ test("a subagent's line is its own row", () => {
   assert.equal(isSelected("a"), true);
 });
 
-// A small stand-in for the DOM: element and text nodes, with the calls `patch` makes.
-class Text {
-  nodeType = 3;
-  nodeName = "#text";
-  constructor(value) {
-    this.nodeValue = value;
-  }
-}
-class El {
-  nodeType = 1;
-  attrs = new Map();
-  constructor(tag, attrs = {}, children = []) {
-    this.nodeName = tag.toUpperCase();
-    for (const [k, v] of Object.entries(attrs)) this.attrs.set(k, v);
-    this.childNodes = children.map((c) => (typeof c === "string" ? new Text(c) : c));
-  }
-  get attributes() {
-    return [...this.attrs].map(([name, value]) => ({ name, value }));
-  }
-  getAttribute(name) {
-    return this.attrs.get(name) ?? null;
-  }
-  setAttribute(name, value) {
-    this.attrs.set(name, value);
-  }
-  removeAttribute(name) {
-    this.attrs.delete(name);
-  }
-  hasAttribute(name) {
-    return this.attrs.has(name);
-  }
-  appendChild(node) {
-    this.childNodes.push(node);
-  }
-  removeChild(node) {
-    this.childNodes.splice(this.childNodes.indexOf(node), 1);
-  }
-  replaceChild(node, old) {
-    this.childNodes[this.childNodes.indexOf(old)] = node;
-  }
-}
 const row = (id, label, pressed) =>
   new El("button", { "data-key": id, "aria-pressed": String(pressed) }, [new El("span", {}, [label])]);
 

@@ -27,9 +27,7 @@ fn edit(id: &str, path: &str) -> CardRequest {
 
 /// The fake writer's card on `request`, whose quiz's key is its first option of three.
 fn card(request: &CardRequest) -> Card {
-    let mut card = write_card(&FakeWriter, request, &[], "", |line| panic!("{line}"))
-        .unwrap()
-        .0;
+    let mut card = write_card(&FakeWriter, request, &[], |line| panic!("{line}")).unwrap();
     // The app shuffled the options; put the key back first.
     let quiz = card.quiz.as_mut().unwrap();
     quiz.options.swap(0, quiz.key);
@@ -146,31 +144,13 @@ fn a_rating_with_its_reasons_survives_a_restart_beside_the_one_key_is_wrong_flag
 struct Counting(Cell<usize>);
 
 impl CardWriter for Counting {
-    fn reply(
-        &self,
-        request: &CardRequest,
-        earlier: &[String],
-        brief: &str,
-    ) -> Result<String, String> {
-        FakeWriter.reply(request, earlier, brief)
-    }
-
-    fn rewrite(
-        &self,
-        prompts: &[&str],
-        summaries: &[String],
-        diffstat: &str,
-    ) -> Result<String, String> {
-        FakeWriter.rewrite(prompts, summaries, diffstat)
+    fn reply(&self, request: &CardRequest, earlier: &[String]) -> Result<String, String> {
+        FakeWriter.reply(request, earlier)
     }
 
     fn more(&self, request: &CardRequest, card: &Card) -> Result<String, String> {
         self.0.set(self.0.get() + 1);
         FakeWriter.more(request, card)
-    }
-
-    fn update(&self, brief: &str, workers: &str) -> Result<String, String> {
-        FakeWriter.update(brief, workers)
     }
 }
 
@@ -202,30 +182,12 @@ fn explain_more_calls_the_writer_once_and_a_second_tap_shows_the_kept_text() {
 struct Blank;
 
 impl CardWriter for Blank {
-    fn reply(
-        &self,
-        request: &CardRequest,
-        earlier: &[String],
-        brief: &str,
-    ) -> Result<String, String> {
-        FakeWriter.reply(request, earlier, brief)
-    }
-
-    fn rewrite(
-        &self,
-        prompts: &[&str],
-        summaries: &[String],
-        diffstat: &str,
-    ) -> Result<String, String> {
-        FakeWriter.rewrite(prompts, summaries, diffstat)
+    fn reply(&self, request: &CardRequest, earlier: &[String]) -> Result<String, String> {
+        FakeWriter.reply(request, earlier)
     }
 
     fn more(&self, _: &CardRequest, _: &Card) -> Result<String, String> {
         Ok("\n".into())
-    }
-
-    fn update(&self, brief: &str, workers: &str) -> Result<String, String> {
-        FakeWriter.update(brief, workers)
     }
 }
 
@@ -465,23 +427,32 @@ fn every_session_of_the_day_shows_all_of_its_cards_whichever_was_prompted_last()
 }
 
 #[test]
-fn briefs_survive_a_restart_and_show_with_their_sessions_cards() {
+fn a_goal_survives_a_restart_and_a_brief_stored_as_prose_shows_until_it_comes() {
     let data = tempfile::tempdir().unwrap();
     let path = data.path().join("cards.json");
-    let mut store = two_cards(&path);
     let session = "5b9e3d71-0c2a-4f8e-b6d4-8a1c3e5f7092";
-    store.set_brief(session, "הסשן התחיל.".into()).unwrap();
-    let brief = "הסשן התחיל.\n`README.md` עודכן.";
-    store.set_brief(session, brief.into()).unwrap();
-    store.set_brief("another", "סשן אחר.".into()).unwrap();
+    // The briefs file of before the slots: prose and an update count.
+    let prose = "הסשן התחיל.\n`README.md` עודכן.";
+    let old = serde_json::json!({ session: { "text": prose, "updates": 7 } });
+    std::fs::write(data.path().join("briefs.json"), old.to_string()).unwrap();
+    let mut store = CardStore::open(path.clone()).unwrap();
+    let shown = store.session_cards(session, 0);
+    assert_eq!((shown.brief.as_deref(), shown.goal), (Some(prose), None));
 
+    store
+        .set_goal(session, "לשלוח את הכרטיס.".into(), 2)
+        .unwrap();
+    store.set_goal("another", "סשן אחר.".into(), 1).unwrap();
     let reopened = CardStore::open(path).unwrap();
 
     let kept = reopened.brief(session).unwrap();
-    assert_eq!((kept.text.as_str(), kept.updates), (brief, 2));
-    let shown = reopened.session_cards(session, 1_761_743_990_000);
-    assert_eq!(shown.brief.as_deref(), Some(brief));
-    assert_eq!(reopened.session_cards("none", 0).brief, None);
+    assert_eq!(
+        (kept.goal.as_deref(), kept.goal_prompts),
+        (Some("לשלוח את הכרטיס."), 2)
+    );
+    let shown = reopened.session_cards(session, 0);
+    assert_eq!(shown.goal.as_deref(), Some("לשלוח את הכרטיס."));
+    assert_eq!(reopened.session_cards("none", 0).goal, None);
 }
 
 #[test]
@@ -527,7 +498,7 @@ fn every_change_bumps_the_revision_and_a_call_that_changes_nothing_leaves_it() {
         .unwrap();
     bumped(&store, false);
     store
-        .set_brief("5b9e3d71-0c2a-4f8e-b6d4-8a1c3e5f7092", "Brief.".into())
+        .set_goal("5b9e3d71-0c2a-4f8e-b6d4-8a1c3e5f7092", "Goal.".into(), 1)
         .unwrap();
     bumped(&store, true);
     let store = Mutex::new(store);
@@ -609,4 +580,358 @@ fn the_live_only_facts_survive_a_restart_and_an_older_store_opens_with_none() {
     };
     assert_eq!(reopened.facts(), &facts);
     assert_eq!(reopened.cards(), store.cards());
+}
+
+/// A store at `path` holding a lone Quiz on turn `t1`: the summary's own, with no card.
+fn lone_quiz(path: &std::path::Path) -> CardStore {
+    let mut store = CardStore::open(path.to_owned()).unwrap();
+    let request = studio_core::SummaryRequest {
+        id: "t1".into(),
+        ..Default::default()
+    };
+    let summary: studio_understanding::TurnSummary = serde_json::from_value(serde_json::json!({
+        "summary": "Did a thing.",
+        "quiz": { "text": "Why?", "key": 0, "options": [
+            { "text": "A", "why": "Because." }, { "text": "B", "why": "No." }] },
+    }))
+    .unwrap();
+    store.add_summary(request, summary).unwrap();
+    store
+}
+
+#[test]
+fn a_lone_quizzes_pick_skip_and_chips_are_stored_with_their_times_and_survive_a_restart() {
+    use studio_understanding::{QuizTap, Tap};
+    let data = tempfile::tempdir().unwrap();
+    let path = data.path().join("cards.json");
+    let mut store = lone_quiz(&path);
+    store.quiz_tap("t1", Tap::Pick { option: 1 }, 10).unwrap();
+    // The first answer counts: a later pick and a skip change nothing; a chip is kept once.
+    store.quiz_tap("t1", Tap::Pick { option: 0 }, 11).unwrap();
+    store.quiz_tap("t1", Tap::Skip, 12).unwrap();
+    store.quiz_tap("t1", Tap::ExplainMore, 13).unwrap();
+    store.quiz_tap("t1", Tap::ExplainMore, 14).unwrap();
+    store.quiz_tap("t1", Tap::Understood, 15).unwrap();
+    // No such option, and no such turn, record nothing.
+    store.quiz_tap("t1", Tap::Pick { option: 5 }, 16).unwrap();
+    store.quiz_tap("nobody", Tap::Skip, 17).unwrap();
+
+    let reopened = CardStore::open(path).unwrap();
+    let taps = &reopened.turn_summary("t1").unwrap().taps;
+    assert_eq!(
+        taps,
+        &[
+            QuizTap {
+                tap: Tap::Pick { option: 1 },
+                at: 10
+            },
+            QuizTap {
+                tap: Tap::ExplainMore,
+                at: 13
+            },
+            QuizTap {
+                tap: Tap::Understood,
+                at: 15
+            },
+        ]
+    );
+}
+
+#[test]
+fn a_skip_alone_is_stored_and_a_pick_after_it_is_not() {
+    use studio_understanding::{QuizTap, Tap};
+    let data = tempfile::tempdir().unwrap();
+    let mut store = lone_quiz(&data.path().join("cards.json"));
+    store.quiz_tap("t1", Tap::Skip, 5).unwrap();
+    store.quiz_tap("t1", Tap::Pick { option: 0 }, 6).unwrap();
+    assert_eq!(
+        store.turn_summary("t1").unwrap().taps,
+        [QuizTap {
+            tap: Tap::Skip,
+            at: 5
+        }]
+    );
+}
+
+#[test]
+fn a_cards_skip_and_chips_are_stored_beside_its_guess_and_the_key_flag_is_the_one_record() {
+    use studio_understanding::{QuizTap, Tap};
+    let data = tempfile::tempdir().unwrap();
+    let path = data.path().join("cards.json");
+    let mut store = two_cards(&path);
+    store.quiz_tap("toolu_01A", Tap::Skip, 7).unwrap();
+    store
+        .quiz_tap("toolu_01A", Tap::Pick { option: 0 }, 8)
+        .unwrap();
+    store.quiz_tap("toolu_01A", Tap::KeyWrong, 9).unwrap();
+    store
+        .quiz_tap("toolu_01B", Tap::Pick { option: 2 }, 10)
+        .unwrap();
+    store.quiz_tap("toolu_01B", Tap::Skip, 11).unwrap();
+
+    let reopened = CardStore::open(path).unwrap();
+    let [a, b] = reopened.cards() else { panic!() };
+    assert_eq!(a.guess, None);
+    assert!(a.key_wrong);
+    assert_eq!(
+        a.taps,
+        [
+            QuizTap {
+                tap: Tap::Skip,
+                at: 7
+            },
+            QuizTap {
+                tap: Tap::KeyWrong,
+                at: 9
+            }
+        ]
+    );
+    assert_eq!(b.guess.map(|g| (g.option, g.at)), Some((2, 10)));
+    assert_eq!(b.taps, []);
+}
+
+/// A store at `path` holding a lone Quiz on turn `t1` whose request carries the file's whole hunk.
+fn quiz_with_hunk(path: &std::path::Path) -> CardStore {
+    use studio_core::{FactFile, Facts, SummaryRequest, TurnFile};
+    let mut store = CardStore::open(path.to_owned()).unwrap();
+    let request = SummaryRequest {
+        id: "t1".into(),
+        session_id: "s1".into(),
+        facts: Facts {
+            files: vec![FactFile {
+                file: TurnFile {
+                    root: "/w".into(),
+                    path: "src/gate.rs".into(),
+                    from: None,
+                    added: Some(1),
+                    removed: Some(1),
+                },
+                hunk: "@@ -1 +1 @@\n-open\n+frozen\n".into(),
+            }],
+            ..Facts::default()
+        },
+        ..Default::default()
+    };
+    let summary: studio_understanding::TurnSummary = serde_json::from_value(serde_json::json!({
+        "summary": "Froze the gate.",
+        "quiz": { "text": "Why?", "key": 0, "options": [
+            { "text": "A", "why": "Because the pairs must not move." }, { "text": "B", "why": "No." }] },
+    }))
+    .unwrap();
+    store.add_summary(request, summary).unwrap();
+    store
+}
+
+const WEEK: u64 = 7 * 24 * 60 * 60 * 1000;
+
+#[test]
+fn a_quiz_offered_seven_days_ago_gets_one_retest_and_one_offered_six_days_ago_gets_none() {
+    let data = tempfile::tempdir().unwrap();
+    let mut store = quiz_with_hunk(&data.path().join("cards.json"));
+    let offered = store.turn_summary("t1").unwrap().added_at;
+
+    assert!(store.due_retests(offered + WEEK - 1).is_empty());
+    let [due] = &store.due_retests(offered + WEEK)[..] else {
+        panic!("one retest is due")
+    };
+    // The writer's input: the turn's stored hunk, and the first Quiz with the key's reason.
+    assert_eq!(due.of, "t1");
+    assert!(due.hunk.contains("src/gate.rs") && due.hunk.contains("+frozen"));
+    assert_eq!(
+        due.first.options[due.first.key].why,
+        "Because the pairs must not move."
+    );
+
+    // Once written, or rejected, it is not due again.
+    let ask = due.clone();
+    store.add_retest(&ask, None, offered + WEEK).unwrap();
+    assert!(store.due_retests(offered + WEEK + WEEK).is_empty());
+}
+
+#[test]
+fn a_retests_confidence_why_and_pick_are_stored_with_their_times_and_survive_a_restart() {
+    use studio_understanding::{Choice, Quiz, QuizTap, Tap};
+    let data = tempfile::tempdir().unwrap();
+    let path = data.path().join("cards.json");
+    let mut store = quiz_with_hunk(&path);
+    let offered = store.turn_summary("t1").unwrap().added_at;
+    let ask = store.due_retests(offered + WEEK).remove(0);
+    let quiz = Quiz {
+        text: "What stays true?".into(),
+        options: vec![
+            Choice {
+                text: "A".into(),
+                why: "Yes.".into(),
+            },
+            Choice {
+                text: "B".into(),
+                why: "No.".into(),
+            },
+        ],
+        key: 0,
+    };
+    store.add_retest(&ask, Some(quiz), offered + WEEK).unwrap();
+    let id = "retest t1";
+    store
+        .quiz_tap(id, Tap::Confidence { sure: false }, 1)
+        .unwrap();
+    store.quiz_tap(id, Tap::Pick { option: 1 }, 2).unwrap();
+    store
+        .quiz_tap(
+            id,
+            Tap::Why {
+                text: "it freezes".into(),
+            },
+            3,
+        )
+        .unwrap();
+    // Only the first of each counts, and no such option records nothing.
+    store
+        .quiz_tap(id, Tap::Confidence { sure: true }, 4)
+        .unwrap();
+    store.quiz_tap(id, Tap::Pick { option: 0 }, 5).unwrap();
+
+    let reopened = CardStore::open(path).unwrap();
+    let [retest] = reopened.retests() else {
+        panic!()
+    };
+    assert_eq!(
+        retest.taps,
+        [
+            QuizTap {
+                tap: Tap::Confidence { sure: false },
+                at: 1
+            },
+            QuizTap {
+                tap: Tap::Pick { option: 1 },
+                at: 2
+            },
+            QuizTap {
+                tap: Tap::Why {
+                    text: "it freezes".into()
+                },
+                at: 3
+            },
+        ]
+    );
+    // The first Quiz's own record is untouched.
+    assert!(reopened.turn_summary("t1").unwrap().taps.is_empty());
+}
+
+#[test]
+fn a_confidence_tap_and_a_why_line_on_a_lone_quiz_are_stored_too() {
+    use studio_understanding::{QuizTap, Tap};
+    let data = tempfile::tempdir().unwrap();
+    let mut store = lone_quiz(&data.path().join("cards.json"));
+    store
+        .quiz_tap("t1", Tap::Confidence { sure: true }, 1)
+        .unwrap();
+    store
+        .quiz_tap("t1", Tap::Why { text: "x".into() }, 2)
+        .unwrap();
+    assert_eq!(
+        store.turn_summary("t1").unwrap().taps,
+        [
+            QuizTap {
+                tap: Tap::Confidence { sure: true },
+                at: 1
+            },
+            QuizTap {
+                tap: Tap::Why { text: "x".into() },
+                at: 2
+            },
+        ]
+    );
+}
+
+const DAY: u64 = 24 * 60 * 60 * 1000;
+const START: u64 = 1_800_000_000_000;
+
+fn quiz_turn(store: &mut CardStore, id: &str, at: u64, coin: bool) {
+    let request = studio_core::SummaryRequest {
+        id: id.into(),
+        session_id: "s1".into(),
+        ..Default::default()
+    };
+    let summary: studio_understanding::TurnSummary = serde_json::from_value(serde_json::json!({
+        "summary": "Did a thing.",
+        "quiz": { "text": "Why?", "key": 0, "options": [
+            { "text": "A", "why": "Because." }, { "text": "B", "why": "No." }] },
+    }))
+    .unwrap();
+    store.add_summary_with(request, summary, at, coin).unwrap();
+}
+
+#[test]
+fn inside_the_test_each_quiz_turn_gets_an_arm_stored_with_it_and_outside_none_is_body_only() {
+    use studio_understanding::Arm;
+    let data = tempfile::tempdir().unwrap();
+    let path = data.path().join("cards.json");
+    let mut store = CardStore::open(path.clone()).unwrap();
+    // Before the test starts, and with no test set, a turn has no arm.
+    quiz_turn(&mut store, "none", START, true);
+    store.set_self_test(Some(START + DAY));
+    quiz_turn(&mut store, "before", START, true);
+    quiz_turn(&mut store, "first", START + DAY, true);
+    quiz_turn(&mut store, "second", START + DAY, false);
+    quiz_turn(&mut store, "last", START + 22 * DAY - 1, true);
+    quiz_turn(&mut store, "after", START + 22 * DAY, true);
+    let arm = |s: &CardStore, id: &str| s.turn_summary(id).unwrap().arm;
+    assert_eq!(arm(&store, "none"), None);
+    assert_eq!(arm(&store, "before"), None);
+    assert_eq!(arm(&store, "first"), Some(Arm::BodyOnly));
+    assert_eq!(arm(&store, "second"), Some(Arm::QuizFirst));
+    assert_eq!(arm(&store, "last"), Some(Arm::BodyOnly));
+    assert_eq!(arm(&store, "after"), None);
+    assert_eq!(
+        arm(&CardStore::open(path).unwrap(), "first"),
+        Some(Arm::BodyOnly)
+    );
+}
+
+#[test]
+fn the_coin_gives_both_arms_and_a_turn_with_no_quiz_gets_none() {
+    use studio_understanding::Arm;
+    let data = tempfile::tempdir().unwrap();
+    let mut store = lone_quiz(&data.path().join("cards.json"));
+    store.set_self_test(Some(START));
+    for i in 0..40 {
+        let request = studio_core::SummaryRequest {
+            id: format!("r{i}"),
+            ..Default::default()
+        };
+        let summary: studio_understanding::TurnSummary =
+            serde_json::from_value(serde_json::json!({
+                "summary": "Did a thing.",
+                "quiz": { "text": "Why?", "key": 0, "options": [
+                    { "text": "A", "why": "Because." }, { "text": "B", "why": "No." }] },
+            }))
+            .unwrap();
+        store.add_summary_at(request, summary, START + i).unwrap();
+    }
+    let arms: Vec<_> = store.summaries().iter().filter_map(|s| s.arm).collect();
+    assert!(arms.contains(&Arm::BodyOnly) && arms.contains(&Arm::QuizFirst));
+    let plain: studio_understanding::TurnSummary =
+        serde_json::from_value(serde_json::json!({ "summary": "Nothing." })).unwrap();
+    store
+        .add_summary_with(Default::default(), plain, START, true)
+        .unwrap();
+    assert_eq!(store.summaries().last().unwrap().arm, None);
+}
+
+#[test]
+fn a_card_past_the_cap_never_replaces_a_body_only_turns_quiz() {
+    use studio_understanding::Place;
+    let data = tempfile::tempdir().unwrap();
+    let mut store = CardStore::open(data.path().join("cards.json")).unwrap();
+    store.set_self_test(Some(START));
+    // The body-only turn is the oldest and does not count toward the cap; three offered ones do.
+    quiz_turn(&mut store, "hidden", START + 1, true);
+    for (i, id) in ["a", "b", "c"].into_iter().enumerate() {
+        quiz_turn(&mut store, id, START + 2 + i as u64, false);
+    }
+    assert_eq!(
+        store.place_quiz(true, START + 10),
+        Place::Replace("a".into())
+    );
 }

@@ -14,36 +14,26 @@ use std::{
 use studio_core::{CardRequest, Kind, Output, Studio};
 use studio_understanding::{
     Card, CardStore, CardWriter, FakeWriter, Fingerprints, explain_more, fingerprint_changes,
-    worktree_root, write_brief, write_stop,
+    worktree_root, write_goal, write_stop,
 };
 
-/// What a rewrite read: the prompts, the summaries and the diffstat.
-type Rewrite = (Vec<String>, Vec<String>, String);
-
-/// The fake writer, keeping what each call read: a card's earlier summaries and brief, each
-/// rewrite, and each brief updated from workers' cards.
+/// The fake writer, keeping what each call read: a card's earlier summaries and each Goal's prompts.
 #[derive(Default)]
 struct Recording {
-    cards: RefCell<Vec<(Vec<String>, String)>>,
-    rewrites: RefCell<Vec<Rewrite>>,
-    updates: RefCell<Vec<(String, String)>>,
+    cards: RefCell<Vec<Vec<String>>>,
+    goals: RefCell<Vec<Vec<String>>>,
     /// The change each "explain more" read.
     mores: RefCell<Vec<String>>,
     /// The subagents whose cards get an empty summary.
     blank: RefCell<Vec<String>>,
-    /// Each "New card" notice the shell sent and each rewrite, in turn.
+    /// Each "New card" notice the shell sent and each Goal, in turn.
     sent: RefCell<Vec<&'static str>>,
 }
 
 impl CardWriter for Recording {
-    fn reply(
-        &self,
-        request: &CardRequest,
-        earlier: &[String],
-        brief: &str,
-    ) -> Result<String, String> {
-        self.cards.borrow_mut().push((earlier.into(), brief.into()));
-        let reply = FakeWriter.reply(request, earlier, brief)?;
+    fn reply(&self, request: &CardRequest, earlier: &[String]) -> Result<String, String> {
+        self.cards.borrow_mut().push(earlier.into());
+        let reply = FakeWriter.reply(request, earlier)?;
         let agent = request.agent.as_ref();
         if !self.blank.borrow().iter().any(|a| agent == Some(a)) {
             return Ok(reply);
@@ -58,25 +48,12 @@ impl CardWriter for Recording {
         FakeWriter.more(request, card)
     }
 
-    fn rewrite(
-        &self,
-        prompts: &[&str],
-        summaries: &[String],
-        diffstat: &str,
-    ) -> Result<String, String> {
-        self.sent.borrow_mut().push("rewrite");
-        let read = prompts.iter().map(|p| p.to_string()).collect();
-        self.rewrites
+    fn goal(&self, prompts: &[&str]) -> Result<String, String> {
+        self.sent.borrow_mut().push("goal");
+        self.goals
             .borrow_mut()
-            .push((read, summaries.into(), diffstat.into()));
-        FakeWriter.rewrite(prompts, summaries, diffstat)
-    }
-
-    fn update(&self, brief: &str, workers: &str) -> Result<String, String> {
-        self.updates
-            .borrow_mut()
-            .push((brief.into(), workers.into()));
-        FakeWriter.update(brief, workers)
+            .push(prompts.iter().map(|p| p.to_string()).collect());
+        FakeWriter.goal(prompts)
     }
 }
 
@@ -168,13 +145,7 @@ impl Shell {
             }
             Output::Promoted { agent } => self.store.lock().unwrap().promoted(&agent).unwrap(),
             Output::Brief(request) => {
-                assert!(write_brief(
-                    &self.store,
-                    &self.writer,
-                    request,
-                    session,
-                    log
-                ))
+                write_goal(&self.store, &self.writer, &request, session, log);
             }
             _ => {}
         }
@@ -235,15 +206,6 @@ impl Shell {
         self.take("Stop", json!({}));
     }
 
-    /// The session's brief.
-    fn brief(&self) -> String {
-        let store = self.store.lock().unwrap();
-        store
-            .brief("s1")
-            .map(|b| b.text.clone())
-            .unwrap_or_default()
-    }
-
     /// What the session's row says now.
     fn line(&self) -> String {
         self.line_at(self.at)
@@ -280,7 +242,7 @@ fn summary(path: &str) -> String {
 }
 
 #[test]
-fn a_worker_gets_a_card_at_each_commit_in_its_worktree_and_at_its_end_with_its_own_brief() {
+fn a_worker_gets_a_card_at_each_commit_in_its_worktree_and_at_its_end_with_its_own_goal() {
     let mut shell = Shell::new();
     shell.take("UserPromptSubmit", json!({ "prompt": "Implement #378" }));
     shell.take("PostToolUse", spawn_child("w1", "Implement #378", true));
@@ -303,7 +265,13 @@ fn a_worker_gets_a_card_at_each_commit_in_its_worktree_and_at_its_end_with_its_o
     );
     let store = shell.store.lock().unwrap();
     let brief = store.brief("w1").expect("the worker's brief");
-    assert!(brief.text.ends_with("`b.rs`."), "{}", brief.text);
+    assert_eq!(
+        brief.goal,
+        FakeWriter
+            .goal(&["…"])
+            .ok()
+            .map(|_| "A sample goal from the fake writer, which read 1 prompts.".into())
+    );
     assert_eq!(store.brief("s1"), None);
 }
 
@@ -327,7 +295,8 @@ fn a_killed_worker_gets_its_end_card_at_the_wake_up_that_reports_it() {
     shell.take("Stop", json!({}));
 
     assert_eq!(shell.cards(), [(Some("w1".into()), summary("a.rs"))]);
-    assert_eq!(shell.writer.updates.borrow().len(), 1);
+    // The worker's, from its spawn, and the session's, from Daniel's prompt.
+    assert_eq!(shell.writer.goals.borrow().len(), 2);
 }
 
 /// Worker `w1` in a worktree of its own writes `a.rs` and ends, with one card.
@@ -394,7 +363,7 @@ fn a_worker_card_with_an_empty_summary_is_left_out_of_its_parents_input() {
 }
 
 #[test]
-fn a_wake_up_turn_that_changed_nothing_itself_updates_the_brief_and_writes_no_card() {
+fn a_wake_up_turn_that_changed_nothing_itself_writes_no_card_and_its_goal_reads_daniels_prompts() {
     let mut shell = Shell::new();
     shell.take("UserPromptSubmit", json!({ "prompt": "Implement #378" }));
     shell.take("Stop", json!({}));
@@ -405,15 +374,9 @@ fn a_wake_up_turn_that_changed_nothing_itself_updates_the_brief_and_writes_no_ca
     shell.take("Stop", json!({ "last_assistant_message": "w1 is done." }));
 
     assert_eq!(shell.cards(), [(Some("w1".into()), summary("a.rs"))]);
-    let updates = shell.writer.updates.borrow().clone();
-    let [(brief, workers)] = &updates[..] else {
-        panic!("one update: {updates:?}");
-    };
-    assert_eq!(brief, "");
-    assert!(workers.contains(&summary("a.rs")), "{workers}");
-    let updated = "The workers came back, and the session itself changed nothing.";
-    assert_eq!(shell.brief(), updated);
-    assert_eq!(shell.line(), updated);
+    // The worker's Goal reads its spawn; the session's, Daniel's prompt and never the wake-up.
+    assert_eq!(*shell.writer.goals.borrow(), [["…"], ["Implement #378"]]);
+    assert_eq!(shell.line(), "w1 is done.");
 }
 
 const MINUTE: u64 = 60 * 1000;
@@ -557,37 +520,31 @@ fn a_prompt_that_changes_nothing_makes_no_writer_call_and_one_that_commits_gets_
     shell.take("Stop", json!({}));
 
     assert_eq!(shell.writer.cards.borrow().len(), 1);
-    let renamed = "--- a/lib.rs\n+++ b/lib.rs\n@@ -1 +1 @@\n-fn a() {}\n+fn b() {}\n";
-    assert_eq!(shell.store.lock().unwrap().cards()[0].card.code, renamed);
+    // The fake writer names line 1 of `lib.rs`; this shell has no trees to pull it from (`card_code.rs`).
+    let card = shell.store.lock().unwrap().cards()[0].card.clone();
+    assert_eq!(card.ranges.len(), 1);
+    assert_eq!(card.code, "");
 }
 
 #[test]
-fn a_wake_ups_card_reads_its_prompts_earlier_cards_and_each_card_the_brief_so_far() {
+fn a_wake_ups_card_reads_its_prompts_earlier_cards() {
     let mut shell = Shell::new();
     shell.take("SessionStart", json!({ "source": "startup" }));
     shell.take("PostToolUse", spawn());
     shell.prompt("Split the spec into tickets", "a.rs");
-    let first_brief = shell.brief();
     shell.prompt(WAKE_UP, "b.rs");
-    let second_brief = shell.brief();
     shell.prompt("What did a1 do?", "c.rs");
 
+    // The wake-up's card is on Daniel's prompt before it.
     let calls = shell.writer.cards.borrow().clone();
     assert_eq!(
         calls,
-        [
-            (vec![], String::new()),
-            // The wake-up's card is on Daniel's prompt before it.
-            (vec!["Sample change to `a.rs`".to_string()], first_brief),
-            (vec![], second_brief.clone()),
-        ]
+        [vec![], vec!["Sample change to `a.rs`".to_string()], vec![]]
     );
-    assert!(second_brief.ends_with("`b.rs`."), "{second_brief}");
-    assert!(shell.brief().ends_with("`c.rs`."));
 }
 
 #[test]
-fn the_5th_update_rewrites_the_brief_from_daniels_prompts_the_summaries_and_the_diffstat() {
+fn the_goal_is_written_again_only_when_a_prompt_of_daniels_came_and_reads_his_prompts_alone() {
     let mut shell = Shell::new();
     shell.take("SessionStart", json!({ "source": "startup" }));
     shell.take("PostToolUse", spawn());
@@ -599,54 +556,32 @@ fn the_5th_update_rewrites_the_brief_from_daniels_prompts_the_summaries_and_the_
     ] {
         shell.prompt(prompt, path);
     }
-    assert_eq!(shell.writer.rewrites.borrow().len(), 0);
-    assert!(shell.brief().ends_with("`d.rs`."));
 
-    shell.prompt("Add e", "e.rs");
-
-    let rewrites = shell.writer.rewrites.borrow().clone();
-    let [(prompts, summaries, diffstat)] = &rewrites[..] else {
-        panic!("one rewrite: {rewrites:?}");
-    };
-    // No wake-up, and every card's summary.
-    assert_eq!(prompts, &["Add a", "Add b", "Add d", "Add e"]);
-    let summary = |path| format!("Sample change to `{path}`");
-    let all: Vec<String> = ["a.rs", "b.rs", "c.rs", "d.rs", "e.rs"].map(summary).into();
-    assert_eq!(summaries, &all);
-    // The diffstat since the session began, not the raw diff.
-    assert!(diffstat.contains(" e.rs | 1 +"), "{diffstat}");
-    assert!(
-        diffstat.contains("5 files changed, 5 insertions(+)"),
-        "{diffstat}"
+    // No call on the wake-up's card, and never one that rewrites the brief from the cards.
+    assert_eq!(
+        *shell.writer.goals.borrow(),
+        [
+            vec!["Add a"],
+            vec!["Add a", "Add b"],
+            vec!["Add a", "Add b", "Add d"]
+        ]
     );
-    assert!(!diffstat.contains("fn "), "{diffstat}");
     let store = shell.store.lock().unwrap();
     let brief = store.brief("s1").unwrap();
-    assert!(brief.text.contains("rewritten"), "{}", brief.text);
-    assert_eq!(brief.updates, 5);
+    assert_eq!((brief.goal_prompts, brief.text.as_str()), (3, ""));
 }
 
 #[test]
-fn the_new_card_notice_goes_out_before_the_rewrite_starts() {
+fn the_new_card_notice_goes_out_before_the_goal_is_written() {
     let mut shell = Shell::new();
-    for (prompt, path) in [
-        ("Add a", "a.rs"),
-        ("Add b", "b.rs"),
-        ("Add c", "c.rs"),
-        ("Add d", "d.rs"),
-        ("Add e", "e.rs"),
-    ] {
-        shell.prompt(prompt, path);
-    }
+    shell.prompt("Add a", "a.rs");
 
-    assert_eq!(
-        *shell.writer.sent.borrow(),
-        ["notice", "notice", "notice", "notice", "notice", "rewrite"]
-    );
+    assert_eq!(*shell.writer.sent.borrow(), ["notice", "goal"]);
 }
 
 #[test]
-fn a_stopped_row_shows_the_agents_first_line_then_the_cards_summary_then_the_briefs_last_line() {
+fn a_stopped_row_shows_the_agents_first_line_then_the_cards_summary_then_the_agents_first_line_again()
+ {
     let mut shell = Shell::new();
     shell.take("UserPromptSubmit", json!({ "prompt": "Rename a" }));
     fs::write(shell.repo.join("lib.rs"), "fn b() {}\n").unwrap();
@@ -659,10 +594,10 @@ fn a_stopped_row_shows_the_agents_first_line_then_the_cards_summary_then_the_bri
     shell.write(outputs.into_iter().next().unwrap());
     assert_eq!(shell.line(), "Sample change to `lib.rs`");
 
-    // A turn that changed nothing gets no card: the row shows the brief's latest line.
+    // A turn that changed nothing gets no card: the row shows the agent's first line.
     shell.take("UserPromptSubmit", json!({ "prompt": "Anything left?" }));
     shell.take("Stop", json!({ "last_assistant_message": "Nothing left." }));
-    assert_eq!(shell.line(), "The latest change touched `lib.rs`.");
+    assert_eq!(shell.line(), "Nothing left.");
 }
 
 #[test]

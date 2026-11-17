@@ -1,13 +1,15 @@
 // Studio state for `npm run snap`: each fixture maps a Tauri command to what it returns.
 // A fixture is a function so that its times are relative to the moment it renders.
 
+import { railFixtures } from "./rail-fixtures.mjs";
+
 const session = (id, name, state, extra = {}) => {
   const now = Date.now();
   return {
     id, cwd: `/w/plotkeeper/.claude/worktrees/${id}`, folder_name: id, terminal: null, status_only: false, name, prompt_name: null,
     resume_id: id, permission_mode: null, started_mode: null, cleared: [], asks_before_closing: false, landed: false, last_step: null,
     started_at: now - 3600e3, last_event_at: now - 60e3, turn_span: null, step_span: null, state, checks: [], agents: [], asker: null,
-    prompts: [], turns: [], questions: [], returned: null,
+    prompts: [], turns: [], since_looked: { turns: 0, files: 0, passed: 0, failed: 0, ran: 0 }, questions: [], returned: null,
     transcript: { intention: null, steps_ago: 0, responses: [], unavailable: null, context: null, branch: null, model: null, effort: null },
     identity: { issue: null, branch: null, pr: null, worktree: "", name },
     work: { kind: null, phases: [], agent_ms: 0, estimate: { range: null, depends_on_you: false } },
@@ -22,7 +24,7 @@ const subagent = (id, name) => ({
 
 const common = {
   settings_files: { settings: null, keymap: null },
-  cards: { brief: null, recent: [], older: [], decisions: [] },
+  cards: { brief: null, goal: null, answers: [], open: [], design: [], recent: [], older: [], decisions: [] },
   workspaces: { main: { path: "/w/plotkeeper", branch: "main" }, tasks: [], hidden: 0 },
   terminal_connect: { repo: "/w/plotkeeper", outdated: false },
   terminal_lost: [],
@@ -51,6 +53,7 @@ const logFixture = (status) => {
 };
 
 export const fixtures = {
+  ...railFixtures,
   logRunning: () => logFixture("running"),
   logDone: () => logFixture("completed"),
   // The list with a nested row (a session with subagents), the selected row and a landed one.

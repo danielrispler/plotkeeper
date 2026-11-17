@@ -21,15 +21,16 @@ use std::{
     time::{Duration, Instant},
 };
 use studio_core::{
-    CardRequest, NameRequest, Notifications, Output, Session, Sound,
+    CardRequest, Facts, NameRequest, Notifications, Output, Session, Sound,
     State::{Ended, NeedsYou},
     Studio, SummaryRequest, TaskFacts, TaskQuery,
 };
 use studio_understanding::{
     AGY_FIXTURE_VERSION, AgyVersions, CardStore, CardWriter, ClaudeWriter, FakeWriter,
-    Fingerprints, Rating, Row, SessionCards, StoredSummary, SummarySetup, Versions, backfilled,
-    fingerprint_changes, millis, worktree_root, write_agent_summary, write_brief, write_name,
-    write_stop, write_summary,
+    Fingerprints, Offer, OpenItem, Rating, Row, SessionCards, Shape, StoredSummary, SummarySetup,
+    Tap, Versions, add_hunks, backfilled, fingerprint_changes, millis, open_items, turn_diffs,
+    turn_hunk, worktree_root, write_agent_summary, write_design, write_goal, write_name,
+    write_retests, write_stop, write_summary,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
@@ -64,11 +65,86 @@ fn summary_settings(
     model: String,
     effort: String,
     on_open: bool,
+    self_test: Option<u64>,
     summaries: State<Summaries>,
     studio: State<Mutex<Studio>>,
+    cards: State<Cards>,
 ) {
+    cards.lock().unwrap().set_self_test(self_test);
     *summaries.setup.lock().unwrap() = SummarySetup { model, effort };
     studio.lock().unwrap().set_summaries_on_open(on_open);
+}
+
+/// The settings' `checks` (danielrispler/plotkeeper#112): each project folder's list of commands that are checks.
+#[tauri::command]
+fn check_lists(lists: HashMap<String, Vec<String>>, studio: State<Mutex<Studio>>) {
+    studio.lock().unwrap().set_check_lists(lists);
+    LIST_CHANGED.store(true, Ordering::Release);
+}
+
+/// A check run's exit code and output tail (danielrispler/plotkeeper#112), read from the event log through
+/// its ledger row's offset, off the studio's lock. `None` when the session has no such call.
+#[tauri::command(async)]
+fn check_output(
+    session: String,
+    agent: Option<String>,
+    call: String,
+    studio: State<Mutex<Studio>>,
+) -> Result<Option<studio_core::CheckOutput>, String> {
+    let row = {
+        let studio = studio.lock().unwrap();
+        let ledger = &studio.session(&session).map(|s| &s.ledger);
+        ledger.and_then(|l| l.row(agent.as_deref(), &call)).cloned()
+    };
+    let Some(row) = row else { return Ok(None) };
+    let log = studio_hook::event_log(&std::env::home_dir().ok_or("no home folder")?);
+    studio_core::check_output(&row, &log)
+        .map(Some)
+        .map_err(|e| e.to_string())
+}
+
+/// The recorded facts of an Ask anchor (danielrispler/plotkeeper#125): from the ledger and the event log through its
+/// offsets, with no writer in the call. `None` when the session or the thing is not known.
+#[tauri::command(async)]
+fn ask_facts(
+    session: String,
+    anchor: studio_core::Anchor,
+    studio: State<Mutex<Studio>>,
+) -> Result<Option<studio_core::AskFacts>, String> {
+    let log = studio_hook::event_log(&std::env::home_dir().ok_or("no home folder")?);
+    Ok(studio.lock().unwrap().ask_facts(&session, &anchor, &log))
+}
+
+/// A file's hunk of turn `turn` (danielrispler/plotkeeper#114), whole for the diff pane (#131) when `all`: `git diff` between the turn's two trees of worktree
+/// `root`, off the studio's lock. `None` when the turn has no trees there, or `git` cannot read them.
+#[tauri::command(async)]
+fn turn_file_hunk(
+    session: String,
+    turn: usize,
+    root: String,
+    path: String,
+    from: Option<String>,
+    all: Option<bool>,
+    studio: State<Mutex<Studio>>,
+) -> Option<studio_understanding::Hunk> {
+    let (start, end) = studio.lock().unwrap().turn_trees(&session, turn, &root)?;
+    turn_hunk(
+        std::path::Path::new(&root),
+        &start,
+        end.as_deref(),
+        &path,
+        from.as_deref(),
+        all.unwrap_or(false),
+    )
+}
+
+/// Daniel opened a hunk of turn `turn` (danielrispler/plotkeeper#130): the self-test counts the turns where he did.
+#[tauri::command(async)]
+fn hunk_opened(session: String, turn: usize, studio: State<Mutex<Studio>>, cards: State<Cards>) {
+    let id = (studio.lock().unwrap().session(&session)).and_then(|s| s.turns.get(turn)?.id.clone());
+    if let Some(id) = id {
+        unsaved(cards.lock().unwrap().quiz_tap(&id, Tap::Hunk, millis()));
+    }
 }
 
 /// Daniel opened turn `id` (danielrispler/Falinks#526): its summary, written now when it waits for him, which takes
@@ -78,6 +154,7 @@ fn summary_settings(
 fn turn_summary(
     id: String,
     cards: State<Cards>,
+    studio: State<Mutex<Studio>>,
     summaries: State<Summaries>,
     writer: State<Writer>,
 ) -> Result<Option<StoredSummary>, String> {
@@ -97,7 +174,24 @@ fn turn_summary(
             .insert(id.clone(), request);
         return Err(format!("no summary on {id}"));
     }
+    design(&studio, &cards, &**writer, &request.session_id);
     Ok(cards.lock().unwrap().turn_summary(&id).cloned())
+}
+
+/// Writes "Design so far" of session `id` when its sources changed (danielrispler/plotkeeper#123). Returns whether it did.
+fn design(
+    studio: &Mutex<Studio>,
+    cards: &Cards,
+    writer: &(impl CardWriter + ?Sized),
+    id: &str,
+) -> bool {
+    let turns: Vec<String> = match studio.lock().unwrap().session(id) {
+        Some(session) => session.turns.iter().filter_map(|t| t.id.clone()).collect(),
+        None => return false,
+    };
+    write_design(cards, writer, id, &turns, |line| {
+        eprintln!("studio: {line}")
+    })
 }
 
 /// The whole final reply of turn `index` of session `id` (danielrispler/Falinks#574), which the rail fetches when Daniel
@@ -217,14 +311,17 @@ fn selection(studio: &Studio) -> serde_json::Value {
 /// latest tick, without each card's diff and base, which the pane never reads.
 #[tauri::command]
 fn cards(studio: State<Mutex<Studio>>, cards: State<Cards>) -> SessionCards {
-    let (viewed, now) = {
-        let studio = studio.lock().unwrap();
-        (studio.viewed().map(String::from), studio.now())
+    let studio = studio.lock().unwrap();
+    let Some(owner) = studio.viewed() else {
+        return SessionCards::default();
     };
-    match viewed {
-        Some(owner) => cards.lock().unwrap().session_cards(&owner, now),
-        None => SessionCards::default(),
+    let cards = cards.lock().unwrap();
+    let mut shown = cards.session_cards(owner, studio.now());
+    // The Open slot is the session's: a worker's view has none.
+    if let Some(session) = studio.session(owner) {
+        shown.open = open_items(session, studio.task_facts(owner), &cards);
     }
+    shown
 }
 
 /// The plan's 5-hour and weekly usage from the status line's newest snapshot in the `usage` folder
@@ -249,6 +346,20 @@ struct CardsKey {
     viewed: Option<String>,
     revision: u64,
     minute: u64,
+    open: Vec<OpenItem>,
+}
+
+/// The turns whose files the core asks for (danielrispler/plotkeeper#111): each is diffed by `git`
+/// with the core unlocked, then handed back. Returns whether any was asked.
+fn turn_files(state: &Mutex<Studio>) -> bool {
+    /// At most this many turns a pass, so a launch over a long log does not hold the loop.
+    const PER_PASS: usize = 8;
+    let asks = state.lock().unwrap().turn_diffs(millis(), PER_PASS);
+    for ask in &asks {
+        let diffs = turn_diffs(ask);
+        state.lock().unwrap().set_turn_files(ask, diffs);
+    }
+    !asks.is_empty()
 }
 
 impl Sent {
@@ -280,11 +391,17 @@ impl Sent {
         let key = {
             let studio = app.state::<Mutex<Studio>>();
             let studio = studio.lock().unwrap();
-            let revision = app.state::<Cards>().lock().unwrap().revision();
+            let cards = app.state::<Cards>();
+            let cards = cards.lock().unwrap();
+            let viewed = studio.viewed();
+            let session = viewed.and_then(|id| studio.session(id));
+            // The Open slot moves with the core's state, not only with the store's.
+            let open = session.map(|s| open_items(s, studio.task_facts(&s.agent.id), &cards));
             CardsKey {
-                viewed: studio.viewed().map(String::from),
-                revision,
+                viewed: viewed.map(String::from),
+                revision: cards.revision(),
                 minute: studio.now() / 60_000,
+                open: open.unwrap_or_default(),
             }
         };
         if self.cards.as_ref() != Some(&key) {
@@ -317,6 +434,39 @@ fn guess(id: String, option: usize, studio: State<Mutex<Studio>>, cards: State<C
 fn settle_checks(studio: &Studio, store: &mut CardStore) {
     for session in studio.sessions() {
         unsaved(store.settle_checks(session));
+    }
+}
+
+/// Daniel picked, skipped or tapped a chip on the Quiz of `id`, a card's or a turn's own (danielrispler/plotkeeper#120): the turn's
+/// summary with its taps, for a turn's own Quiz.
+#[tauri::command(async)]
+fn quiz_tap(id: String, tap: Tap, cards: State<Cards>) -> Option<StoredSummary> {
+    let mut store = cards.lock().unwrap();
+    unsaved(store.quiz_tap(&id, tap, millis()));
+    store.turn_summary(&id).cloned()
+}
+
+/// The retests that have a Quiz (danielrispler/plotkeeper#129), which Home offers.
+#[tauri::command]
+fn retests(cards: State<Cards>) -> Vec<studio_understanding::Retest> {
+    let store = cards.lock().unwrap();
+    let kept = store.retests().iter();
+    kept.filter(|r| r.quiz.is_some()).cloned().collect()
+}
+
+/// Writes the retests that fell due, once an hour from a minute after the start, off the read loop; Home reads them
+/// again when one was written (danielrispler/plotkeeper#129).
+fn write_due_retests(app: &AppHandle) {
+    thread::sleep(Duration::from_secs(60));
+    loop {
+        let (cards, writer) = (app.state::<Cards>(), app.state::<Writer>());
+        if write_retests(&cards, &**writer, millis(), |line| {
+            eprintln!("studio: {line}")
+        }) > 0
+        {
+            let _ = app.emit("retests", ());
+        }
+        thread::sleep(Duration::from_secs(60 * 60));
     }
 }
 
@@ -368,6 +518,92 @@ fn ask(
         eprintln!("studio: no answer on {session}: {line}");
     }
     answer
+}
+
+/// Daniel's `question` on an Ask anchor (danielrispler/plotkeeper#126): the writer's answer, read with the anchor's recorded
+/// facts and, for a file, its hunk. The facts stay above it in the window; this is the interpretation.
+#[tauri::command(async)]
+fn ask_anchor(
+    session: String,
+    anchor: studio_core::Anchor,
+    what: String,
+    question: String,
+    studio: State<Mutex<Studio>>,
+    writer: State<Writer>,
+) -> Result<String, String> {
+    let log = studio_hook::event_log(&std::env::home_dir().ok_or("no home folder")?);
+    let (facts, transcript, trees) = {
+        let studio = studio.lock().unwrap();
+        let trees = match &anchor {
+            studio_core::Anchor::File { turn, root, .. } => {
+                studio.turn_trees(&session, *turn, root)
+            }
+            _ => None,
+        };
+        let transcript = studio.session(&session).map(|s| s.transcript.clone());
+        (studio.ask_facts(&session, &anchor, &log), transcript, trees)
+    };
+    let facts = facts.ok_or("nothing is recorded about this")?;
+    let hunk = match (&anchor, trees) {
+        (
+            studio_core::Anchor::File {
+                root, path, from, ..
+            },
+            Some((start, end)),
+        ) => turn_hunk(
+            std::path::Path::new(root),
+            &start,
+            end.as_deref(),
+            path,
+            from.as_deref(),
+            false,
+        )
+        .filter(|h| !h.binary)
+        .map(|h| {
+            format!(
+                "{}{}",
+                h.text,
+                if h.left_out > 0 {
+                    format!("... {} more lines", h.left_out)
+                } else {
+                    String::new()
+                }
+            )
+        }),
+        _ => None,
+    };
+    let item = studio_understanding::ask_item(&what, &facts, hunk.as_deref());
+    let answer = studio_understanding::ask_about(
+        &**writer,
+        &transcript.unwrap_or_default(),
+        &item,
+        &question,
+    );
+    if let Err(line) = &answer {
+        eprintln!("studio: no answer on {session}: {line}");
+    }
+    answer
+}
+
+/// "Why didn't it touch `name`?" in turn `turn` (danielrispler/plotkeeper#126): what was recorded about `name`, and the
+/// writer's possible reasons only when something was.
+#[tauri::command(async)]
+fn ask_why_not(
+    session: String,
+    turn: usize,
+    name: String,
+    studio: State<Mutex<Studio>>,
+    writer: State<Writer>,
+) -> Result<studio_understanding::WhyNot, String> {
+    let (facts, transcript) = {
+        let studio = studio.lock().unwrap();
+        (
+            studio.ask_named(&session, turn, &name),
+            studio.session(&session).map(|s| s.transcript.clone()),
+        )
+    };
+    let facts = facts.ok_or("this turn is not known")?;
+    studio_understanding::why_not(&**writer, &transcript.unwrap_or_default(), &name, facts)
 }
 
 /// Daniel renamed session `id`: a `StudioRename` line in the event log, which the log thread then
@@ -431,6 +667,26 @@ fn saved_roots(log: &Path) -> HashMap<String, String> {
     saved
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
         .unwrap_or_default()
+}
+
+/// Takes the state a launch before saved, when it fits the log, and returns the offset to replay the
+/// log from: 0 when there is none (danielrispler/plotkeeper#134).
+fn resume(studio: &Mutex<Studio>, log: &Path) -> u64 {
+    let Ok(saved) = std::fs::read(studio_hook::state_file(log)) else {
+        return 0;
+    };
+    let len = std::fs::metadata(log).map_or(0, |m| m.len());
+    studio.lock().unwrap().resume(&saved, len)
+}
+
+/// Keeps the replayed state beside the log, through a new file that takes the old one's place.
+fn save_state(log: &Path, state: &[u8]) {
+    let file = studio_hook::state_file(log);
+    let next = file.with_extension("json.next");
+    let saved = std::fs::write(&next, state).and_then(|()| std::fs::rename(&next, &file));
+    if let Err(e) = saved {
+        eprintln!("studio: keep the replayed state: {e}");
+    }
 }
 
 /// Keeps `roots` beside the log, through a new file that takes the old one's place.
@@ -552,6 +808,8 @@ fn main() {
             shown,
             guess,
             key_wrong,
+            quiz_tap,
+            retests,
             rate,
             explain_more,
             ask,
@@ -598,6 +856,13 @@ fn main() {
             settings::set_zoom,
             settings::open_settings,
             summary_settings,
+            hunk_opened,
+            check_lists,
+            check_output,
+            turn_file_hunk,
+            ask_facts,
+            ask_anchor,
+            ask_why_not,
             turn_summary,
             turn_reply,
             agent_summary,
@@ -632,6 +897,8 @@ fn main() {
             settings::watch(app.clone());
             let prs_app = app.clone();
             thread::spawn(move || prs(&prs_app));
+            let retest_app = app.clone();
+            thread::spawn(move || write_due_retests(&retest_app));
             let notice_app = app.clone();
             thread::spawn(move || {
                 for notice in writer_notice_reader {
@@ -668,7 +935,9 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
         Ok(_) => {}
         Err(e) => eprintln!("studio: prune the event log: {e}"),
     }
-    let mut read_to = 0;
+    // The saved state, when there is one that fits the log, takes the replay from where it stopped
+    // (danielrispler/plotkeeper#134).
+    let mut read_to = resume(&app.state::<Mutex<Studio>>(), log);
     let mut roots_saved = 0;
     let mut live = false;
     // Each session's and each subagent's own, so another's prompt or step in the same worktree moves
@@ -712,6 +981,8 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
             // goes first, so Daniel sees it while `git` runs.
             if !live {
                 let mut studio = state.lock().unwrap();
+                // What the replay made, before the card store's facts and the backfill change it.
+                let replayed = studio.save();
                 let store = app.state::<Cards>();
                 let store = store.lock().unwrap();
                 store.restore(&mut studio);
@@ -720,6 +991,8 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                     store.cards().iter().map(|k| k.request.clone()).collect();
                 let backfill = studio.backfill(millis(), &requests);
                 drop((store, studio));
+                let log = log.to_path_buf();
+                thread::spawn(move || save_state(&log, &replayed));
                 state.lock().unwrap().tick(millis());
                 sent.list(app);
                 let waiting = state.lock().unwrap().waiting_folders();
@@ -821,7 +1094,9 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
             state.lock().unwrap().set_snapshot(&id, snapshot) | changed
         });
         let list_changed = LIST_CHANGED.swap(false, Ordering::AcqRel);
-        let changed = read || transcripts_changed || windows_changed || list_changed;
+        let files_changed = turn_files(&state);
+        let changed =
+            read || transcripts_changed || windows_changed || list_changed || files_changed;
         // The open request goes in the same pass as the list that shows "needs you" (danielrispler/Falinks#569).
         if let Ok(data) = answer::data()
             && let Some(ask) = app
@@ -1033,7 +1308,7 @@ fn write(
     app: &AppHandle,
     writer: &Writer,
     queues: &mut HashMap<String, mpsc::Sender<Job>>,
-    request: CardRequest,
+    mut request: CardRequest,
     card: bool,
 ) {
     let (app, writer) = (app.clone(), writer.clone());
@@ -1050,6 +1325,12 @@ fn write(
     let job = move || {
         let log = |line: String| eprintln!("studio: {line}");
         let store = app.state::<Cards>();
+        // Where the card's code is pulled from: its turn's end trees (danielrispler/plotkeeper#121).
+        request.ends = app
+            .state::<Mutex<Studio>>()
+            .lock()
+            .unwrap()
+            .card_ends(&request);
         let agent = request.agent.clone();
         let sent = || {
             let _ = app.emit("sessions", sessions(app.state(), app.state()));
@@ -1067,20 +1348,78 @@ fn write(
                 agent.as_deref(),
             );
         };
+        let card_id = request.id.clone();
+        // A turn the table gives no card is written none, but still feeds the design.
         let written = match card {
+            true if !offered(&app, &request) => false,
             true => write_stop(&store, &*writer, request, &session, stored, log),
-            false => write_brief(&store, &*writer, request, &session, log),
+            false => write_goal(&store, &*writer, &request, &session, log),
         };
+        // A Quiz is never beside a decision (danielrispler/plotkeeper#119).
+        if card && session.needs_you() {
+            unsaved(store.lock().unwrap().drop_card_quiz(&card_id));
+        }
+        let designed = design(
+            &app.state::<Mutex<Studio>>(),
+            &store,
+            &*writer,
+            &session.agent.id,
+        );
         // The brief, which a row's line may show, changed again.
-        if written {
+        if written || designed {
             sent();
         }
     };
     let _ = queue(queues, id).send(Box::new(job));
 }
 
-/// Writes the summary of `request`'s turn on its session's queue, after the turn's card, then
-/// switches the turn's intention to its first line (danielrispler/Falinks#517, decision 16). While summaries are written
+/// What the hooks and git recorded of the turn named `id`, for its summary writer (danielrispler/plotkeeper#115):
+/// its files with their counts and hunks, and its checks. Empty for a turn with no trees.
+fn turn_facts(state: &Mutex<Studio>, id: &str) -> Facts {
+    let Some(ask) = state.lock().unwrap().summary_ask(id) else {
+        return Facts::default();
+    };
+    let diffs = turn_diffs(&ask);
+    let mut facts = state.lock().unwrap().summary_facts(&ask, diffs);
+    add_hunks(&ask, &mut facts);
+    facts
+}
+
+/// What the turn named `id` gets for a Quiz (danielrispler/plotkeeper#119), by its facts, or by `diff`, its card's
+/// change, when an agent reports no trees.
+fn offer_of(state: &Mutex<Studio>, id: &str, diff: &str) -> Offer {
+    let merge = state.lock().unwrap().turn_merged(id);
+    Shape::of(&turn_facts(state, id), diff, merge).offer()
+}
+
+/// Whether the stop card `request` is written: a turn's card only when the table gives it one. A
+/// worker's card and a check's are no turn's and are always written.
+fn offered(app: &AppHandle, request: &CardRequest) -> bool {
+    if request.agent.is_some() || request.check.is_some() {
+        return true;
+    }
+    let offer = offer_of(&app.state(), &request.id, request.diff());
+    if offer != Offer::Card {
+        eprintln!(
+            "studio: no card on {}: its change gets {offer:?}",
+            request.id
+        );
+    }
+    offer == Offer::Card
+}
+
+/// Fills in `request`'s facts and, by the offer table (danielrispler/plotkeeper#119), whether its summary may keep a Quiz.
+/// Returns whether the summary is written: one asked for the sake of a lone Quiz is dropped when the turn gets none.
+fn settle(app: &AppHandle, request: &mut SummaryRequest) -> bool {
+    let state = app.state::<Mutex<Studio>>();
+    request.facts = turn_facts(&state, &request.id);
+    let merge = state.lock().unwrap().turn_merged(&request.id);
+    let lone = Shape::of(&request.facts, "", merge).offer() == Offer::Quiz;
+    request.no_quiz = !lone;
+    request.wanted || lone
+}
+
+/// Writes the summary of `request`'s turn on its session's queue, after the turn's card. While summaries are written
 /// on open, the turn waits for Daniel instead (`turn_summary`).
 fn summarize(
     app: &AppHandle,
@@ -1094,8 +1433,11 @@ fn summarize(
         .unwrap()
         .summaries_on_open()
     {
-        let waiting = &app.state::<Summaries>().waiting;
-        waiting.lock().unwrap().insert(request.id.clone(), request);
+        let mut request = request;
+        if settle(app, &mut request) {
+            let waiting = &app.state::<Summaries>().waiting;
+            waiting.lock().unwrap().insert(request.id.clone(), request);
+        }
         return;
     }
     let (app, writer) = (app.clone(), writer.clone());
@@ -1103,15 +1445,14 @@ fn summarize(
     let job = move || {
         let log = |line: String| eprintln!("studio: {line}");
         let setup = app.state::<Summaries>().setup.lock().unwrap().clone();
-        let (session, turn) = (request.session_id.clone(), request.id.clone());
-        let Some(summary) = write_summary(&app.state::<Cards>(), &*writer, &setup, request, log)
-        else {
+        let mut request = request;
+        if !settle(&app, &mut request) {
             return;
-        };
-        let first = summary.summary.lines().next().unwrap_or_default();
-        let studio = app.state::<Mutex<Studio>>();
-        if studio.lock().unwrap().summarized(&session, &turn, first) {
-            let _ = app.emit("sessions", sessions(app.state(), app.state()));
+        }
+        let session = request.session_id.clone();
+        let (studio, cards) = (app.state::<Mutex<Studio>>(), app.state::<Cards>());
+        if write_summary(&cards, &*writer, &setup, request, log).is_some() {
+            design(&studio, &cards, &*writer, &session);
         }
     };
     queue(queues, id).send(Box::new(job)).ok();

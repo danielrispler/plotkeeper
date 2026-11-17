@@ -5,6 +5,7 @@
 //! The shared events are those every agent reports. What only one agent reports is a variant of
 //! its own, which only that agent's adapter emits, never an optional field of a shared event.
 
+use crate::ledger::Bytes;
 use serde_json::Value;
 use std::collections::BTreeMap;
 
@@ -28,6 +29,8 @@ pub(crate) struct Event {
     pub studio_turn_end: BTreeMap<String, String>,
     /// What the adapter that read the line reports.
     pub capabilities: Capabilities,
+    /// Where the log line it came from is in the event log.
+    pub line: Bytes,
     /// What happened, the line's main event first. A line the adapter does not know has none.
     pub happened: Vec<Happened>,
 }
@@ -91,6 +94,8 @@ pub(crate) enum Happened {
     TasksReported(Vec<(String, String)>),
     /// A failed command that ran and exited with a code.
     ExitedNonZero,
+    /// The exit code a failed command's error names.
+    ExitCode(i32),
     /// A failed call that Daniel rejected.
     Rejected,
     /// A question's answers, as strings by question.
@@ -113,7 +118,7 @@ pub(crate) enum Happened {
 }
 
 /// Where a turn came from, where an adapter can tell.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) enum Origin {
     Daniel,
     WakeUp,
@@ -141,7 +146,7 @@ pub(crate) struct Tool {
     pub path: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) enum ToolKind {
     #[default]
     Other,
@@ -197,12 +202,31 @@ pub struct Capabilities {
     pub durations: bool,
     /// Its transcript carries the agent's version.
     pub transcript_version: bool,
+    /// It records a git tree of each worktree a turn touches, at its start and end.
+    pub turn_trees: bool,
     /// How its transcript's lines read.
     pub transcript_format: TranscriptFormat,
 }
 
+/// Saved state finds its agent's capabilities by the agent's name: the two adapters' constants.
+impl<'de> serde::Deserialize<'de> for Capabilities {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(serde::Deserialize)]
+        struct Named {
+            agent: String,
+        }
+        let Named { agent } = Named::deserialize(deserializer)?;
+        match agent.as_str() {
+            "" => Ok(Capabilities::default()),
+            "claude" => Ok(crate::claude::CAPABILITIES),
+            "agy" => Ok(crate::agy::CAPABILITIES),
+            other => Err(serde::de::Error::custom(format!("unknown agent {other}"))),
+        }
+    }
+}
+
 /// The record format of an agent's transcript.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TranscriptFormat {
     #[default]
@@ -346,6 +370,13 @@ impl Event {
     pub fn answers(&self) -> Option<&Value> {
         self.find(|h| match h {
             Happened::Answers(answers) => Some(answers),
+            _ => None,
+        })
+    }
+
+    pub fn exit_code(&self) -> Option<i32> {
+        self.find(|h| match h {
+            Happened::ExitCode(code) => Some(*code),
             _ => None,
         })
     }

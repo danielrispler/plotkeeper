@@ -84,5 +84,10 @@ export function fileTarget(text: string): FileTarget | null {
 // relative path from `cwd`, the folder of the session that printed it (null: the repository).
 export function openFile(text: string, cwd: string | null) {
   const target = fileTarget(text);
-  if (target) invoke("open_file", { ...target, cwd, editor: studio.files.settings.editor }).catch((e) => console.warn(e));
+  if (target) openAt(target, cwd);
+}
+
+// Opens a file already split into its path, line and column.
+export function openAt(target: FileTarget, cwd: string | null) {
+  invoke("open_file", { ...target, cwd, editor: studio.files.settings.editor }).catch((e) => console.warn(e));
 }

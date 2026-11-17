@@ -6,6 +6,7 @@ use std::{
     env, fs,
     path::{Path, PathBuf},
     process::{self, Command},
+    sync::atomic::{AtomicU64, Ordering},
     thread,
     time::{Duration, Instant},
 };
@@ -95,6 +96,12 @@ pub const KEEP: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 /// The archive beside the log `log`, which a prune appends to and a launch never replays.
 pub fn archive_file(log: &Path) -> PathBuf {
     log.with_file_name("events-archive.jsonl")
+}
+
+/// The state a replay of the log made, beside the log `log` (danielrispler/plotkeeper#134), which a
+/// prune removes: it moves lines, so the byte offsets the state holds point elsewhere.
+pub fn state_file(log: &Path) -> PathBuf {
+    log.with_file_name("studio-state.json")
 }
 
 /// What a prune did: the lines it moved to the archive, and the kept lines it lightened.
@@ -217,6 +224,12 @@ pub fn prune(log: &Path, now: u64) -> std::io::Result<Pruned> {
     io::copy(&mut tail, &mut kept)?;
     let kept = kept.into_inner().map_err(io::IntoInnerError::into_error)?;
     kept.sync_all()?;
+    // Before the new log takes the old one's place: a failure between the two leaves no state, never
+    // a state beside a log it does not fit.
+    match fs::remove_file(state_file(log)) {
+        Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
+        _ => {}
+    }
     fs::rename(&next, log)?;
     drop(held);
     Ok(pruned)
@@ -316,7 +329,10 @@ pub fn record_tree(folder: &Path) -> Option<(String, String)> {
         &["rev-parse", "--git-path", "index"],
         None,
     )?;
-    let scratch = env::temp_dir().join(format!("studio-hook-{}.index", process::id()));
+    // One per call: Studio records trees from several threads at once.
+    static CALLS: AtomicU64 = AtomicU64::new(0);
+    let call = CALLS.fetch_add(1, Ordering::Relaxed);
+    let scratch = env::temp_dir().join(format!("studio-hook-{}-{call}.index", process::id()));
     // A copy of the real index keeps git's stat cache, so only changed files are hashed again.
     let _ = fs::copy(Path::new(&root).join(index), &scratch);
     let added = git(Path::new(&root), &["add", "-A"], Some(&scratch));

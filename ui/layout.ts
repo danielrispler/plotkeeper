@@ -82,3 +82,28 @@ export const panelHeight = (dragged: number, column: number) => Math.round(Math.
 // overlay, and not under the skills browser, which takes its place.
 export const railShown = (mode: LayoutMode, railOpen: boolean, skillsOpen: boolean) =>
   mode !== "focus" && (mode !== "overlay" || railOpen) && !skillsOpen;
+
+// The top bar's items, in the order they survive a narrowing window (#127): the session's header and the needs-you chip never
+// leave; the git line, "+" (new session) and the "⋯" menu come after. The menu takes, first to last, the new terminal, the
+// usage, the new-build button, then "+" and the git line. An item shows whole or is in the menu.
+export type BarItem = "header" | "needs-you" | "git" | "new-session" | "new-terminal" | "usage" | "new-build";
+export type Bar = { shown: BarItem[]; menu: BarItem[] };
+const leaves: BarItem[] = ["new-terminal", "usage", "new-build", "new-session", "git"];
+
+// What shows and what is in the menu, in a bar of `room` px that has `items`, each with its width (an item the bar does not
+// have now, such as the chip with nothing to say, is absent), `gap` between shown items and a "⋯" button of `more` px,
+// drawn only when the menu holds an item.
+export function arrangeBar(room: number, items: Partial<Record<BarItem, number>>, gap: number, more: number): Bar {
+  const present = (Object.keys(items) as BarItem[]).filter((item) => items[item] !== undefined);
+  const menu: BarItem[] = [];
+  const width = () => {
+    const shown = present.filter((item) => !menu.includes(item));
+    const count = shown.length + (menu.length ? 1 : 0);
+    return shown.reduce((sum, item) => sum + items[item]!, 0) + (menu.length ? more : 0) + gap * Math.max(0, count - 1);
+  };
+  for (const item of leaves) {
+    if (width() <= room) break;
+    if (present.includes(item)) menu.push(item);
+  }
+  return { shown: present.filter((item) => !menu.includes(item)), menu };
+}

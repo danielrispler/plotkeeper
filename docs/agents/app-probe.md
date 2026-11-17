@@ -47,6 +47,11 @@ To show how the UI draws a given state, such as a ticket's screenshot criterion,
 npm run build                                  # snap renders dist/, so build first
 npm run snap -- home out/home.png              # Home with every section
 npm run snap -- list out/list.png              # the list with a nested, a selected and a landed row
+npm run snap:rail -- out/rail                  # every rail fixture (running, your turn, needs you, idle) at 1728, 1100 and 864 px, the overlay open too
 ```
+
+`SNAP_SIZE=1100x800` sets the window's size for a `snap` run and `SNAP_BODY=rail-open` puts classes on `<body>`, such as the rail's overlay open; with neither, the render is the 1900x900 default. The rail fixtures are in `scripts/snap/rail-fixtures.mjs`.
+
+A fixture can carry a `snapScript`: a string run in the page once the UI has drawn, as the body of an async function that gets `log`. It can click, scroll and read the page. `snap` prints what it logs and exits non-zero when a logged line starts `snap:fail` (a script that throws logs one). `railIdleScroll` and `railIdleFail` are the samples: the first scrolls the story and logs its `scrollTop`, the second fails on purpose. These runs need Chrome, so they stay out of `npm run check`.
 
 The fixtures are in `scripts/snap/fixtures.mjs`: a fixture maps each Tauri command to its reply, so add one there for a new state. The stub is injected into a temp copy of `dist/`, never the shipped app. `npm run check` does not run Chrome; set `CHROME` to use another binary than the default macOS Chrome. Look at the PNG yourself, to check that it shows what the fixture claims.

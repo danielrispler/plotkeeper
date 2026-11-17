@@ -1,29 +1,73 @@
-//! The turn summary and its learning section (danielrispler/Falinks#526; danielrispler/Falinks#517, decisions 12 to 15): one writer call
+//! The turn summary and its Quiz (danielrispler/Falinks#526; danielrispler/Falinks#517, decisions 12 to 15): one writer call
 //! when a long turn ends, on a small model with the studio's own system prompt, read with the
 //! session's last 3 summaries.
 
-use crate::{CardStore, CardWriter, ClaudeWriter, MAX_CHANGE, Quiz, object};
+use crate::grounding::{HEADLINE_WORDS, agent_says, facts_text, grounded, material, words};
+use crate::{
+    CardStore, CardWriter, ClaudeWriter, MAX_CHANGE, Place, Quiz, millis, object, quiz_rules,
+};
 use serde::{Deserialize, Serialize};
 use std::{process::Command, sync::Mutex};
 
 use crate::explanation_language;
 use studio_core::SummaryRequest;
 
-/// A turn's summary and, unless the turn has a card, its learning section.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct TurnSummary {
-    /// The turn's main ideas in a few lines; its first line is the turn-end intention.
-    pub summary: String,
-    /// `None` on a turn with a card, which teaches it instead, on a turn with nothing to teach
-    /// (danielrispler/Falinks#583), or when the writer's was unusable.
-    pub learning: Option<Learning>,
+/// What a Body line is (danielrispler/plotkeeper#115).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LineKind {
+    /// Why the agent did it.
+    Why,
+    /// What the agent says, which no recorded fact shows.
+    Reported,
+    /// What was not done or not checked.
+    Open,
+    /// What the agent asks Daniel.
+    Ask,
 }
 
-/// The learning section: the turn's main idea and one question on it.
+/// A line under the Headline.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Learning {
-    pub idea: String,
-    pub question: Quiz,
+pub struct Line {
+    pub kind: LineKind,
+    pub text: String,
+}
+
+/// The most Body lines a turn has.
+const LINES: usize = 3;
+
+/// A turn's summary and, unless the turn has a card, its Quiz.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TurnSummary {
+    /// The Headline and the Body lines' texts, one per line. Summaries stored before the Headline
+    /// existed hold only this: their first line reads as the Headline, the rest as `reported` lines.
+    pub summary: String,
+    /// The Headline; `None` on a stored summary of before it, and empty when the guards stripped
+    /// it, so that the rail shows the turn's own first line.
+    #[serde(default)]
+    pub headline: Option<String>,
+    /// The Body lines, at most 3, typed.
+    #[serde(default)]
+    pub lines: Vec<Line>,
+    /// `None` on a turn with a card, whose Quiz is the card's, on a turn with nothing to teach
+    /// (danielrispler/Falinks#583), or when the writer's was rejected twice. A learning section stored before
+    /// danielrispler/plotkeeper#118 reads as its question (`stored_quiz`).
+    #[serde(default, alias = "learning", deserialize_with = "stored_quiz")]
+    pub quiz: Option<Quiz>,
+}
+
+/// A stored Quiz, or a stored learning section, `{idea, question}`, whose question is the Quiz.
+fn stored_quiz<'de, D: serde::Deserializer<'de>>(from: D) -> Result<Option<Quiz>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Stored {
+        Learning { question: Quiz },
+        Quiz(Quiz),
+    }
+    Ok(match Option::<Stored>::deserialize(from)? {
+        Some(Stored::Learning { question }) | Some(Stored::Quiz(question)) => Some(question),
+        None => None,
+    })
 }
 
 /// The summary writer's model and effort, from the settings (danielrispler/Falinks#517, decision 17). An empty effort
@@ -47,121 +91,161 @@ impl Default for SummarySetup {
 /// How many of the session's latest summaries the writer reads (danielrispler/Falinks#517, decision 15).
 const EARLIER: usize = 3;
 
-/// Marks a writer may put on the right option, which would give the answer away (danielrispler/Falinks#517, decision
-/// 14).
-const MARKS: [&str; 7] = ["✅", "✔️", "✔", "✓", "☑️", "(correct)", "(Correct)"];
-
-/// A right option longer than this many times the longest wrong option, and by more than
-/// `KEY_GAP` characters, gives the answer away (danielrispler/Falinks#583). Of Haiku's 3 real questions, the 2
-/// guessable ones' right options were 1.30 and 1.60 times it, and the fair one's 0.85.
-const KEY_RATIO: f64 = 1.25;
-
-/// The characters a right option must exceed the longest wrong one by to be guessable, so short
-/// options such as `O(n log n)` against `O(n)` pass.
-const KEY_GAP: f64 = 15.0;
-
-/// Why a learning section is unusable.
+/// Why a summary's Quiz or Headline is unusable.
 enum Unusable {
-    /// Its right option is clearly the longest; a reply with one is asked for once more.
-    Guessable,
+    /// Its Quiz breaks a rule (`Quiz::from_value`); a reply with one is asked for once more.
+    Quiz(String),
+    /// Its Headline held a number or id the turn's material lacks, or ran over its words; the
+    /// reply is asked for once more.
+    Headline(String),
     Other(String),
 }
 
 impl std::fmt::Display for Unusable {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Unusable::Guessable => {
-                f.write_str("its right option is much longer than every wrong one")
+            Unusable::Quiz(why) | Unusable::Headline(why) | Unusable::Other(why) => {
+                f.write_str(why)
             }
-            Unusable::Other(why) => f.write_str(why),
         }
     }
 }
 
 impl TurnSummary {
-    /// The summary in a writer's reply, which must hold one JSON object with a summary. On a turn
-    /// with a `card`, any learning section is dropped; a `null` one means the turn has nothing to
-    /// teach, and a missing one is unusable. A learning section that is unusable is dropped too,
-    /// with why.
-    fn from_reply(reply: &str, card: bool) -> Result<(TurnSummary, Option<Unusable>), String> {
+    /// The summary in a writer's reply, which must hold one JSON object with a headline. Its Body
+    /// lines of an unknown kind, or with a number or id that `material` lacks, are dropped. A
+    /// Headline with such a number is stripped, and one over `HEADLINE_WORDS` stands, each with why
+    /// so the reply is asked for once more; a claim of a fix, a pass or a verification gets "Agent
+    /// says:" unless a check backs it. On a turn with a `card`, any Quiz is dropped; a `null` one
+    /// means the turn has nothing to teach, and a missing one is unusable. A Quiz that breaks a
+    /// rule is dropped too, with why, and the reply is asked for once more.
+    fn from_reply(
+        reply: &str,
+        request: &SummaryRequest,
+        material: &str,
+    ) -> Result<(TurnSummary, Option<Unusable>), String> {
+        let card = request.card.is_some();
         let head: String = reply.chars().take(300).collect();
         let value: serde_json::Value = serde_json::from_str(object(reply))
             .map_err(|e| format!("the summary reply does not parse ({e}): {head:?}"))?;
-        let summary = value["summary"].as_str().map(str::trim).unwrap_or_default();
-        if summary.is_empty() {
-            return Err(format!("the summary reply holds no summary: {head:?}"));
+        let headline = value["headline"]
+            .as_str()
+            .map(str::trim)
+            .unwrap_or_default();
+        if headline.is_empty() {
+            return Err(format!("the summary reply holds no headline: {head:?}"));
         }
-        let learning = match card || value.get("learning") == Some(&serde_json::Value::Null) {
-            true => Ok(None),
-            false => learning(&value["learning"]).map(Some),
+        let lines: Vec<Line> = (value["lines"].as_array().into_iter().flatten())
+            .filter_map(|line| {
+                let kind = serde_json::from_value(line["kind"].clone()).ok()?;
+                let text = line["text"].as_str()?.trim();
+                Some(Line {
+                    kind,
+                    text: text.into(),
+                })
+            })
+            .filter(|line| !line.text.is_empty() && grounded(&line.text, material))
+            .take(LINES)
+            .collect();
+        let mut headline_problem = None;
+        let headline = if !grounded(headline, material) {
+            headline_problem = Some(Unusable::Headline(format!(
+                "its headline holds a number or id the turn lacks: {headline:?}"
+            )));
+            String::new()
+        } else {
+            if words(headline) > HEADLINE_WORDS {
+                headline_problem = Some(Unusable::Headline(format!(
+                    "its headline has {} words",
+                    words(headline)
+                )));
+            }
+            agent_says(headline, &request.facts)
         };
-        let (learning, problem) = match learning {
-            Ok(learning) => (learning, None),
-            Err(problem) => (None, Some(problem)),
+        let quiz =
+            match card || request.no_quiz || value.get("quiz") == Some(&serde_json::Value::Null) {
+                true => Ok(None),
+                false => quiz(&value["quiz"]).map(Some),
+            };
+        let (quiz, problem) = match quiz {
+            Ok(quiz) => (quiz, headline_problem),
+            Err(problem) => (None, headline_problem.or(Some(problem))),
         };
-        let summary = summary.into();
-        Ok((TurnSummary { summary, learning }, problem))
+        let texts = lines.iter().map(|l| l.text.as_str());
+        let summary = std::iter::once(headline.as_str())
+            .filter(|h| !h.is_empty())
+            .chain(texts)
+            .collect::<Vec<_>>()
+            .join("\n");
+        let summary = TurnSummary {
+            summary,
+            headline: Some(headline),
+            lines,
+            quiz,
+        };
+        Ok((summary, problem))
     }
 }
 
-/// The learning section in `value`, its options' marks removed, or why it is unusable.
-fn learning(value: &serde_json::Value) -> Result<Learning, Unusable> {
-    let idea = value["idea"].as_str().map(str::trim).unwrap_or_default();
-    if idea.is_empty() {
-        return Err(Unusable::Other("its learning section has no idea".into()));
+/// The Quiz in `value`, or why it is unusable.
+fn quiz(value: &serde_json::Value) -> Result<Quiz, Unusable> {
+    if value.is_null() {
+        return Err(Unusable::Other("the reply holds no quiz".into()));
     }
-    let mut question = Quiz::from_value(value["question"].clone()).map_err(Unusable::Other)?;
-    for option in &mut question.options {
-        let text = MARKS
-            .iter()
-            .fold(option.text.clone(), |t, m| t.replace(m, ""));
-        option.text = text.trim().into();
-    }
-    let length = |o: &crate::Choice| o.text.chars().count() as f64;
-    let key = question.options.get(question.key).map_or(0.0, length);
-    let wrong = (question.options.iter().enumerate())
-        .filter(|(i, _)| *i != question.key)
-        .map(|(_, o)| length(o))
-        .fold(0.0, f64::max);
-    if key > KEY_RATIO * wrong && key - wrong > KEY_GAP {
-        return Err(Unusable::Guessable);
-    }
-    Ok(Learning {
-        idea: idea.into(),
-        question,
-    })
+    Quiz::from_value(value.clone()).map_err(Unusable::Quiz)
 }
 
 /// The summary of `request`'s turn from `writer`, read with the session's last 3 summaries in
-/// `store`, which keeps it. The writer is asked once more when its reply gives none, or gives a
-/// learning section whose right option is guessable by its length; the second reply stands, or the
+/// `store`, which keeps it. The writer is asked once more when its reply gives none, gives a
+/// Headline with an invented number or over 16 words, or gives a Quiz that breaks a rule
+/// (`Quiz::from_value`); the second reply stands, with no Quiz when it breaks a rule again, or the
 /// first when the second gives no summary. Each problem
 /// is one line for `log`. The store is not locked while the writer runs.
 pub fn write_summary(
     store: &Mutex<CardStore>,
     writer: &(impl CardWriter + ?Sized),
     setup: &SummarySetup,
-    request: SummaryRequest,
+    mut request: SummaryRequest,
     mut log: impl FnMut(String),
 ) -> Option<TurnSummary> {
+    // A card the offer did not write is no card: the turn's summary may carry its Quiz instead.
+    if let Some(card) = &request.card
+        && !store
+            .lock()
+            .unwrap()
+            .cards()
+            .iter()
+            .any(|k| k.request.id == *card)
+    {
+        request.card = None;
+    }
     let earlier = store
         .lock()
         .unwrap()
         .latest_summaries(&request.session_id, EARLIER);
-    let card = request.card.is_some();
-    let summary = || TurnSummary::from_reply(&writer.summarize(setup, &request, &earlier)?, card);
+    let texts: Vec<&str> = earlier.iter().map(|s| s.summary.as_str()).collect();
+    let material = material(&request, &texts.join("\n"));
+    let summary = || {
+        TurnSummary::from_reply(
+            &writer.summarize(setup, &request, &earlier)?,
+            &request,
+            &material,
+        )
+    };
     let first = summary();
     let retry = match &first {
         Err(_) => true,
-        Ok((_, problem)) => matches!(problem, Some(Unusable::Guessable)),
+        Ok((_, problem)) => matches!(problem, Some(Unusable::Quiz(_) | Unusable::Headline(_))),
     };
     match if retry { summary().or(first) } else { first } {
-        Ok((summary, problem)) => {
+        Ok((mut summary, problem)) => {
             if let Some(problem) = problem {
-                log(format!("no learning section on {}: {problem}", request.id));
+                log(format!("no quiz on {}: {problem}", request.id));
             }
             let id = request.id.clone();
-            if let Err(e) = store.lock().unwrap().add_summary(request, summary.clone()) {
+            let mut store = store.lock().unwrap();
+            quiz_cap(&mut store, &request, &mut summary, &mut log);
+            if let Err(e) = store.add_summary(request, summary.clone()) {
                 log(format!("save the summaries of {id}: {e}"));
             }
             Some(summary)
@@ -170,6 +254,28 @@ pub fn write_summary(
             log(format!("no summary on {}: {line}", request.id));
             None
         }
+    }
+}
+
+/// Holds the Quiz of `summary` and of its turn's card to the rules for when a Quiz shows
+/// (danielrispler/plotkeeper#119): none beside a decision, a turn that asks Daniel something or ended in Needs
+/// you, and at most 3 in an hour, which a lone Quiz past the cap does not get.
+fn quiz_cap(
+    store: &mut CardStore,
+    request: &SummaryRequest,
+    summary: &mut TurnSummary,
+    mut log: impl FnMut(String),
+) {
+    let asks = request.asks || summary.lines.iter().any(|l| l.kind == LineKind::Ask);
+    if asks {
+        summary.quiz = None;
+        if let Some(card) = &request.card
+            && let Err(e) = store.drop_card_quiz(card)
+        {
+            log(format!("save the card store: {e}"));
+        }
+    } else if summary.quiz.is_some() && store.place_quiz(false, millis()) != Place::Offer {
+        summary.quiz = None;
     }
 }
 
@@ -196,10 +302,7 @@ impl ClaudeWriter {
             earlier => earlier
                 .iter()
                 .map(|s| {
-                    let question = s
-                        .learning
-                        .as_ref()
-                        .map_or("none", |l| l.question.text.as_str());
+                    let question = s.quiz.as_ref().map_or("none", |q| q.text.as_str());
                     format!(
                         "<summary>\n{}\nIts question: {question}\n</summary>\n",
                         s.summary
@@ -208,8 +311,11 @@ impl ClaudeWriter {
                 .collect(),
         };
         let card = match request.card {
-            Some(_) => "This turn has a card, which teaches it: write the summary only.",
-            None => "Write the summary and the learning section.",
+            Some(_) => {
+                "This turn has a card, which asks its quiz: write the headline and lines only."
+            }
+            None if request.no_quiz => "This turn gets no quiz: write the headline and lines only.",
+            None => "Write the headline, the lines and the quiz.",
         };
         self.run_with(
             &options(setup, SUMMARY),
@@ -217,9 +323,11 @@ impl ClaudeWriter {
                 "The developer's prompt:\n<prompt>\n{}\n</prompt>\n\n\
                  The agent's responses in the turn, oldest first:\n{responses}\n\
                  The turn's intentions, oldest first:\n{intentions}\n\
+                 What the hooks and git recorded of the turn:\n{facts}\n\
                  The session's latest turn summaries and their questions, oldest first:\n\
                  {earlier}\n{card}",
-                request.prompt
+                request.prompt,
+                facts = facts_text(&request.facts)
             ),
         )
     }
@@ -316,30 +424,36 @@ Reply with one JSON object and nothing else:
 "#
 );
 
-/// The summary writer's system prompt (danielrispler/Falinks#517, decision 14), which replaces Claude Code's own.
+/// The summary writer's system prompt (danielrispler/Falinks#517, decision 14; danielrispler/plotkeeper#115), which replaces
+/// Claude Code's own.
 const SUMMARY: &str = concat!(
-    r#"You write the turn summary of one turn of a coding agent's session, for the developer who runs it and wants to learn from the turn instead of reading its raw output. Under the summary sits, when the turn has something to teach, a learning section: the turn's main idea and one multiple-choice question on it, which he answers when he chooses.
+    r#"You write the turn summary of one turn of a coding agent's session, for the developer who runs it and wants to check what happened instead of reading its raw output: a headline and up to three lines. Under them sits, when the turn has something to teach, a quiz: one multiple-choice question that he answers when he chooses.
 
-Answer from the input: his prompt, the agent's responses in the turn, its intentions, and the session's latest turn summaries with their questions. Connect to those earlier turns where it helps, and never ask the same question twice. Use only this input: do not use tools or read files.
+Answer from the input: his prompt, the agent's responses in the turn, its intentions, what the hooks and git recorded of the turn (its files with their line counts, its checks and its hunks), and the session's latest turn summaries with their questions. Connect to those earlier turns where it helps, and never ask the same question twice. Use only this input: do not use tools or read files.
+
+The studio shows the recorded files and checks itself, next to your headline. Do not restate them: no file lists, no line counts, no check results. Write what they cannot say. Never write a number, an issue or PR id or a commit SHA that the input does not hold; say "one" or "a few" in words instead. Say "fixed", "passes" or "verified" only when a check in the recorded facts ended passed; otherwise attribute the claim to the agent.
 
 "#,
     explanation_language!(),
     r#"
 
 Reply with one JSON object and nothing else:
-{"summary": string, "learning": {"idea": string, "question": {"text": string, "options": [{"text": string, "why": string}], "key": number}}}
-- summary: the turn's main ideas in at most 4 short lines. Its first line says what the turn did or found, or what it asks the developer.
-- learning.idea: the one idea from the turn worth keeping, in one or two sentences.
-- learning.question.text: one question on that idea that asks why something works or how a mechanism behaves, so its answer carries over beyond this session. Never ask what the agent did or decided.
-- learning.question.options: 3 or 4 options. Each wrong option is plausible: a mistake a developer could really make, of the right option's length, specificity and tone. The right option is not the longest or most specific one. Never mark the right option in its text, with a sign, an emoji or a word: the options are shown in another order, and the key alone says which is right.
-- learning.question.options[].why: one line on why that option is right or wrong, never naming an option by its letter or place.
-- learning.question.key: the place of the right option, counting from 0.
+{"headline": string, "lines": [{"kind": "why" | "reported" | "open" | "ask", "text": string}], "quiz": {"text": string, "options": [{"text": string, "why": string, "right": boolean}], "key": number}}
+- headline: at most 16 words, one sentence that states an outcome, or what the turn waits on. Never narrate ("Looked at", "Started by"). When the turn ends by asking the developer something, the headline is that ask.
+- lines: at most 3, each at most 20 words, each typed. why: the reason for a choice the turn made. reported: something the agent claims that the recorded facts do not show. open: what was left undone or was not checked, such as "Nobody looked at the rows in a real window." ask: a question or decision the agent puts to the developer. Leave out a line that says nothing more than the headline.
+- quiz.text: the quiz's question, under the rules below.
+- quiz.options: 3 or 4 options, each {"text", "why", "right"}. why: one line on why that option is right or wrong, never naming an option by its letter or place. right: true for the one right option, false for the others.
+- quiz.key: the place of the right option, counting from 0.
 
 A number taken from the input keeps its bound or condition, such as "upper bound", "on fixtures" or "median", wherever it appears.
 
-When the turn holds no idea that carries over beyond this session, such as orchestration, status, merges or bookkeeping, reply with {"summary": string, "learning": null}. The summary is still written: a question made up for such a turn wastes the developer's time.
+"#,
+    quiz_rules!("your headline"),
+    r#"
 
-When the input says the turn has a card, reply with {"summary": string} only.
+When the turn holds nothing worth a quiz, such as orchestration, status, merges or bookkeeping, reply with {"headline": string, "lines": [...], "quiz": null}. The headline is still written: a question made up for such a turn wastes the developer's time.
+
+When the input says the turn has a card, reply with {"headline": string, "lines": [...]} only.
 "#
 );
 

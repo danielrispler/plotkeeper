@@ -74,7 +74,31 @@ export type Answer = "open" | "not_answered" | { answered: Record<string, string
 export type Question = { tool_use_id: string; agent: string | null; questions: Asked[]; answer: Answer; turn: number | null };
 // A turn, a block in the rail's feed (danielrispler/Falinks#574): its prompt's first line, or "worker <name> returned";
 // `id` names its card and summary once its `Stop` came; `message` is its final reply's first line.
-export type Turn = { started_at: number; ended_at: number | null; prompt: string; id: string | null; message: string | null };
+// How a check, or one run of it, ended (danielrispler/plotkeeper#112): "ran" is a check whose exit code does not say.
+export type CheckStatus = "passed" | "failed" | "ran";
+// A check suite of a turn: the list entry its commands matched, its last run's status, how many earlier runs
+// failed, and each run with its own command. `call` and `agent` find a run's output (`check_output`).
+export type Check = {
+  suite: string;
+  status: CheckStatus;
+  retries: number;
+  runs: { command: string; status: CheckStatus; exit_code: number | null; call: string; agent: string | null }[];
+};
+export type Turn = {
+  started_at: number;
+  ended_at: number | null;
+  prompt: string;
+  id: string | null;
+  message: string | null;
+  checks: Check[];
+  files: TurnFiles | null;
+};
+// A file the agent or its workers changed in a turn: its worktree's root, its path from there (a rename's new one),
+// a rename's old path, and its lines added and removed (null for a binary file).
+export type TurnFile = { root: string; path: string; from: string | null; added: number | null; removed: number | null };
+// What a turn changed: the files its ledger says its agent or workers touched, and how many other files differ.
+// `null` while the trees are not yet diffed, and for an agent that reports no trees.
+export type TurnFiles = { files: TurnFile[]; external: number };
 // What the session's agent adapter reports, which decides what its view shows (danielrispler/plotkeeper#43, decision 4);
 // `agent` is its mark's name, empty for a status-only row.
 export type Capabilities = {
@@ -85,6 +109,8 @@ export type Capabilities = {
   permission_mode: boolean;
   durations: boolean;
   transcript_version: boolean;
+  // It records a git tree of each worktree a turn touches, so a turn has files (danielrispler/plotkeeper#111).
+  turn_trees: boolean;
 };
 export type Session = {
   id: string;
@@ -140,7 +166,13 @@ export type Session = {
   line?: string;
   // Its turn finished and Daniel has not looked at it since; danielrispler/Falinks#556 sets it (danielrispler/Falinks#572 draws it).
   unseen?: boolean;
+  // How many of its turns Daniel has seen (danielrispler/plotkeeper#124).
+  seen: number;
+  // What happened after the turns he had seen when he selected it, from the core's `Session::since`, as `since_looked` (the agent has its own `since`): the banner's count.
+  since_looked: Since;
 };
+// What happened in a session since Daniel looked (danielrispler/plotkeeper#124).
+export type Since = { turns: number; files: number; passed: number; failed: number; ran: number };
 // The shell sends a card's request without its diff and base, which the pane never reads. `agent`
 // is the worker whose card it is; `changed_by` holds the files other subagents edited in its
 // worktree, by subagent. `check` is the command of the check whose start requested the card (danielrispler/Falinks#476).
@@ -184,7 +216,20 @@ export type StoredCard = {
   more: string | null;
   rating: Rating | null;
   check_result: CheckResult | null;
+  taps?: QuizTap[];
 };
+// What Daniel did with a Quiz besides a card's pick (danielrispler/plotkeeper#120), each with its time: his pick (a lone Quiz's), "Show
+// the rest anyway", and the three chips.
+// The trial's two (#129): how sure he was before the pick, and one optional line on why after it.
+export type Tap =
+  | { kind: "pick"; option: number }
+  | { kind: "confidence"; sure: boolean }
+  | { kind: "why"; text: string }
+  | { kind: "shown" | "hunk" }
+  | { kind: "skip" | "understood" | "explain_more" | "key_wrong" };
+export type QuizTap = Tap & { at: number };
+// A fresh Quiz on the decision of an earlier one, a week after it, which Home offers (#129). `id` names it for `quiz_tap`.
+export type Retest = { id: string; of: string; session_id: string; added_at: number; quiz: Quiz | null; taps: QuizTap[] };
 // The selected session's brief, and its cards, split at 30 minutes by the shell's tick, each oldest
 // first.
 // An answered question, plan or permission in the session's decision history (danielrispler/Falinks#479): the call's input,
@@ -198,10 +243,35 @@ export type Decision = {
   at: number;
   source: "card" | "terminal";
 };
-// A turn's summary (danielrispler/Falinks#526) and, unless the turn has a card, its learning section, as the store keeps
-// it.
-export type TurnSummary = { summary: { summary: string; learning: { idea: string; question: Quiz } | null } };
-export type SessionCards = { brief: string | null; recent: StoredCard[]; older: StoredCard[]; decisions: Decision[] };
+// A turn's summary (danielrispler/Falinks#526) and, unless the turn has a card, its Quiz, as the store keeps it; a
+// learning section stored before danielrispler/plotkeeper#118 reads as its question.
+// `headline` and `lines` are the turn writer's Headline and typed Body lines (danielrispler/plotkeeper#115); a summary stored
+// before them has neither, and its `summary` text reads as a Headline and `reported` lines.
+export type SummaryLine = { kind: "why" | "reported" | "open" | "ask"; text: string };
+export type TurnSummary = {
+  summary: { summary: string; headline?: string | null; lines?: SummaryLine[]; quiz: Quiz | null };
+  taps?: QuizTap[];
+  // The self-test's arm (#130): body-only shows the Body open and no Quiz; absent is quiz-first.
+  arm?: "quiz_first" | "body_only" | null;
+};
+// The Brief's slots (danielrispler/plotkeeper#122): the Goal a model wrote, each answered question with Daniel's reply, and
+// the Open lines the shell computed. `brief` is a brief stored as prose, which shows while there is no Goal.
+export type OpenItem = {
+  kind: "question" | "check" | "unchecked" | "open" | "ask" | "unpushed" | "pr";
+  text: string;
+};
+// A line of "Design so far" (danielrispler/plotkeeper#123): a decision with its reason, and the id of the turn or card it came from.
+export type DesignLine = { text: string; cite: string };
+export type SessionCards = {
+  brief: string | null;
+  goal: string | null;
+  answers: { question: string; reply: string }[];
+  open: OpenItem[];
+  design: DesignLine[];
+  recent: StoredCard[];
+  older: StoredCard[];
+  decisions: Decision[];
+};
 // What a call asks Daniel, by its tool, as the answer hook's `Kind`: a question, a plan, or any other
 // tool's permission.
 export type AskKind = "question" | "plan" | "permission";

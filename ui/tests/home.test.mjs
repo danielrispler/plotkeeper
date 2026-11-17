@@ -67,3 +67,14 @@ test("landed sessions come after needs-you and unseen, and a session that is not
     ["Landed", ["a", "c", "d"]],
   ]);
 });
+
+test("Home offers the retests that have a Quiz and are not answered, and keeps one it showed answered", async () => {
+  const { homeRetests } = await import("../../dist/home.js");
+  const quiz = { text: "q", key: 0, options: [] };
+  const retest = (id, quiz_, taps = []) => ({ id, of: id, session_id: "s", added_at: 1, quiz: quiz_, taps });
+  // One rejected by the guards has no Quiz; an answered one that was never shown is done.
+  assert.deepEqual(
+    homeRetests([retest("a", quiz), retest("b", null), retest("c", quiz, [{ kind: "pick", option: 0, at: 2 }]), retest("d", quiz, [{ kind: "confidence", sure: true, at: 2 }])]).map((r) => r.id),
+    ["a", "d"],
+  );
+});

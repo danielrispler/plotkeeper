@@ -61,17 +61,32 @@ body[data-layout="focus"] #rail-divider { display: none; }
 .top { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--sp-5); padding: 0 var(--sp-5) 0 var(--lights);
        white-space: nowrap; overflow: hidden; }
 /* The Git line: the workspace's name, then its tokens (#29). */
-.git-line { display: flex; gap: var(--sp-4); align-items: baseline; min-width: 0; overflow: hidden; font-size: var(--size-small); color: var(--muted); }
+.git-line { display: flex; gap: var(--sp-4); align-items: baseline; font-size: var(--size-small); color: var(--muted); }
 .git-line .git-workspace { color: inherit; font-weight: 600; }
 .git-line .git-bad { color: var(--conflict); }
 .git-line .git-branch { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
 .git-line .git-branch:hover { text-decoration: underline; }
 .project-workspaces .row .l2 { white-space: pre; }
 .usage { font-size: var(--size-small); color: var(--muted); }
-/* The rail's slim header while it is an overlay (danielrispler/Falinks#573): the selected session's state and open question. */
-.slim { display: flex; gap: var(--sp-4); align-items: baseline; min-width: 0; overflow: hidden; font-size: var(--size-small); }
-.slim .state { font-size: inherit; margin: 0; }
-.slim .line { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+/* The top bar's items show whole or sit in the "⋯" menu, so none shrinks (danielrispler/plotkeeper#127, bar.ts). The spacer takes the rest. */
+.top > :not(.sp):not(.menu) { flex: none; }
+.top .sp { flex: 1; }
+.top .menu[popover] { top: var(--bar); right: var(--sp-5); left: auto; width: max-content; max-width: calc(100vw - 2 * var(--sp-5)); }
+.top .menu .git-line { flex-wrap: wrap; padding: var(--sp-2) var(--sp-4); }
+.top .menu .usage { padding: var(--sp-2) var(--sp-4); }
+.top .menu .chip { text-align: start; }
+/* The session's header: its state dot, state and name; the name is the one part that gives way, past a fixed length. */
+.session-header { display: flex; align-items: center; gap: var(--sp-3); font: inherit; font-size: var(--size-small); color: var(--fg); background: none;
+                  border: 0; border-radius: var(--radius); padding: var(--sp-1) var(--sp-4); max-width: var(--session-header); cursor: pointer; }
+.session-header:hover { background: var(--hover); }
+.session-header .state { margin: 0; font-size: inherit; flex: none; }
+.session-header .name { overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+.session-header .dot, .spine .dot { flex: none; width: var(--dot); height: var(--dot); border-radius: 50%; background: var(--muted); }
+.session-header .dot[data-state="running"], .spine .dot[data-state="running"] { background: var(--fg); }
+.session-header .dot[data-state="idle"], .session-header .dot[data-state="ended"], .spine .dot[data-state="idle"], .spine .dot[data-state="ended"] { background: none; box-shadow: inset 0 0 0 var(--hair) var(--muted); }
+.session-header .dot[data-state="needs_you"], .spine .dot[data-state="needs_you"] { background: var(--needs-you); }
+/* The chip stands apart from the header. */
+.top .chip { margin-inline-start: var(--sp-5); }
 /* The needs-you chip (danielrispler/Falinks#572): the count of sessions that need Daniel, in the needs-you colour. */
 .top .chip { color: var(--needs-you); background: var(--needs-you-bg); font-weight: 600; }
 .top .chip:hover { color: var(--needs-you); background: var(--needs-you-line); }
@@ -83,7 +98,7 @@ body[data-layout="focus"] #rail-divider { display: none; }
 .strip { display: none; flex-direction: column; align-items: center; gap: var(--sp-2); padding: var(--sp-4) 0; }
 body:not([data-layout="full"]) .full { display: none; }
 body:not([data-layout="full"]) .strip { display: flex; }
-body.list-open .full, body:not([data-layout="full"]) .list:hover .full {
+body.list-open .full, body.list-peek:not([data-layout="full"]) .full {
   display: block !important; position: fixed; top: var(--bar); bottom: 0; right: 0; width: var(--list);
   background: var(--surface); box-shadow: var(--shadow-start); overflow-y: auto; z-index: 6; }
 .strip .btn { width: var(--strip-button); padding: var(--sp-2) 0; display: flex; flex-direction: column; align-items: center;
@@ -223,16 +238,31 @@ h1 { margin: 0 0 var(--sp-4); }
 /* The rail (danielrispler/Falinks#574): one header line, the open question docked under it, then the story: "now" and the
    feed of turns. In "overlay" ⌘2 toggles it over the terminal. */
 .rail { display: grid; grid-template-rows: auto auto 1fr; grid-template-columns: minmax(0, 1fr); }
-body[data-layout="overlay"] .rail { display: none; }
-body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; top: var(--bar); bottom: 0; left: 0;
-                                                                width: var(--rail); background: var(--chrome); box-shadow: var(--shadow-end); z-index: 5; }
+/* In "overlay" the rail is a layer over the terminal (danielrispler/plotkeeper#128): 320 px on the lighter surface with an edge line,
+   sliding in over 150 ms and out over 100 ms, no scrim. It opens by a rest on the spine or the session header, by a click, or ⌘2
+   (hover.ts); it is visible only while open, so a closed one takes no pointer. */
+body[data-layout="overlay"] .rail { --rail: var(--layer); position: fixed; top: var(--bar); bottom: 0; left: 0; width: var(--layer);
+                                    background: var(--surface); box-shadow: inset calc(-1 * var(--hair)) 0 0 var(--edge); z-index: 5;
+                                    transform: translateX(-100%); visibility: hidden;
+                                    transition: transform var(--slide-out) ease-in, visibility 0s linear var(--slide-out); }
+body[data-layout="overlay"].rail-open .rail { transform: none; visibility: visible; transition: transform var(--slide-in) ease-out, visibility 0s; }
+/* The spine (#128): a 14 px target on the window's left edge, under the top bar, with the session's state dot. */
+.spine { display: none; position: fixed; top: var(--bar); bottom: 0; left: 0; width: var(--spine); z-index: 4; justify-content: center;
+         padding-top: var(--sp-5); background: var(--chrome); box-shadow: inset calc(-1 * var(--hair)) 0 0 var(--edge); }
+body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
+.spine .dot { width: var(--dot); height: var(--dot); border-radius: 50%; background: var(--muted); }
 .rail-h { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-4) var(--sp-5); min-height: var(--sp-7); }
-/* The verdict and the phase on one line; the times and the model are its hover text. */
-.headline { flex: 1; min-width: 0; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Line 1 the verdict, the block's kind, the mode and the agent's mark; line 2 the session's name; line 3 the estimate while it
+   runs. They wrap, never cut; the times and the model are the hover text. */
+.headline { flex: 1; min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.headline p { margin: 0; }
+.line-1 { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2) var(--sp-4); }
+.session-name { font-weight: 500; }
+.block, .mark { color: var(--muted); font-size: var(--size-small); }
 .phase { color: var(--muted); font-size: var(--size-small); }
+.phase:empty { display: none; }
 /* The permission mode (danielrispler/Falinks#541): a safety fact, so it reads at a glance, before the phase. */
 .mode { font-size: var(--size-small); font-weight: 600; }
-.model { color: var(--muted); font-size: var(--size-small); }
 /* The "⋯" menu: Open, Rename, Close, Open all, Close all and Delete, under the button, over the story. */
 .menu { position: fixed; inset: auto; top: calc(var(--bar) + var(--sp-7) + var(--sp-5)); left: calc(var(--rail) - var(--menu) - var(--sp-5));
         width: var(--menu); margin: 0; border: 0; padding: var(--sp-3); background: var(--surface); color: var(--fg);
@@ -252,6 +282,11 @@ body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; to
 /* Colour only on "needs you" (danielrispler/Falinks#328, module 3; danielrispler/Falinks#565, decision 1): "your turn" stays as neutral as "running". */
 .state { font-size: var(--size); font-weight: 600; margin: 0 0 var(--sp-3); }
 .headline .state { margin: 0; }
+.label { margin: 0 0 var(--sp-2); color: var(--muted); font-size: var(--size-small); }
+.dock .question > .state { display: none; }
+#intention-label:not([hidden]) + p { font-size: var(--size); font-weight: 400; }
+.headline-text { margin: 0 0 var(--sp-3); font-size: var(--size-large); font-weight: 500; }
+.body-lines { margin: 0 0 var(--sp-4); padding-inline-start: var(--sp-5); }
 .state[data-state="needs_you"] { color: var(--needs-you); background: var(--needs-you-bg); border-radius: var(--radius);
                                  padding: var(--sp-1) var(--sp-4); display: inline-block; }
 /* The intention, the anchor of "now" (mockup C): boxed, the biggest line, with a bright edge; dim once
@@ -276,10 +311,8 @@ body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; to
 .turn .prompt { margin: 0; color: var(--muted); font-size: var(--size-small); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .turn .checks, .turn .subagents { list-style: none; padding: 0; }
 .turn .subagents li { margin: 0 0 var(--sp-2); }
-.turn:not(:hover) > .ask-about:not([open]):not(:focus-within) { visibility: hidden; }
 .fold > summary { font-size: var(--size); color: var(--muted); cursor: pointer; }
 .fold .response { margin: var(--sp-4) 0 0; }
-.fold .learning { margin: var(--sp-4) 0 0; }
 /* Rendered Markdown (danielrispler/Falinks#525): responses and "ask about this" replies. */
 .markdown { font-size: var(--size-read); overflow-wrap: anywhere; }
 .markdown > :first-child { margin-top: 0; }
@@ -296,6 +329,7 @@ body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; to
 /* The session's brief, folded under the feed; its code wraps as a card's does. */
 .brief { margin: var(--sp-5) 0 0; font-size: var(--size-read); }
 .brief p { margin: 0 0 var(--sp-2); overflow-wrap: anywhere; }
+.brief p.slot-title { margin: var(--sp-3) 0 var(--sp-1); font-weight: 600; }
 .brief code, .card code { white-space: normal; overflow-wrap: anywhere; }
 
 /* A card, told apart by its fill; its code is left to right. No text in it is smaller than 14px. */
@@ -316,6 +350,10 @@ body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; to
 .card .btn[aria-pressed="true"] { font-weight: 600; box-shadow: inset 0 0 0 var(--mark) var(--fg); }
 .options .btn:disabled[aria-pressed="false"] { opacity: .45; }
 .key-wrong { margin-top: var(--sp-5); font-size: var(--size); }
+/* A Quiz's escape and its optional chips (danielrispler/plotkeeper#120): small taps under the options. */
+.quiz-skip { margin-top: var(--sp-4); font-size: var(--size); }
+.quiz-chips { display: flex; flex-wrap: wrap; gap: var(--sp-2); font-size: var(--size); }
+.quiz-region .body-lines { margin: var(--sp-4) 0 0; }
 /* "Explain more" opens the writer's longer explanation under the card; the rating's levels and reasons
    are small taps, marked like the options. */
 .more summary { margin-top: var(--sp-5); font-size: var(--size); font-weight: 600; color: var(--muted); cursor: pointer; }
@@ -326,6 +364,12 @@ body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; to
                 background: var(--bg); color: var(--fg); border: var(--hair) solid var(--edge); border-radius: var(--radius);
                 padding: var(--sp-3) var(--sp-4); }
 .ask-about .btn { margin-top: var(--sp-3); }
+/* The recorded facts (danielrispler/plotkeeper#125), shown at once under an open "Ask", then the suggested questions. */
+.ask-facts .label { margin: var(--sp-4) 0 0; }
+.ask-facts ul { margin: var(--sp-2) 0 0; padding-left: var(--sp-5); font-size: var(--size-small); overflow-wrap: anywhere; }
+.ask-facts pre { margin: var(--sp-2) 0 0; font-size: var(--size-small); overflow-x: auto; }
+.ask-suggestions { display: flex; flex-wrap: wrap; gap: var(--sp-3); margin-top: var(--sp-4); }
+.ask-suggestions .btn { margin-top: 0; }
 .ask-reply > p { font-size: var(--size-read); margin: var(--sp-4) 0 0; }
 .ask-reply .markdown { margin: var(--sp-4) 0 0; }
 .ask-reply .asking, .ask-reply .ask-error { color: var(--muted); font-style: italic; }
@@ -334,6 +378,8 @@ body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; to
 .rating .btn { font-size: var(--size); padding: var(--sp-1) var(--sp-4); margin: 0; }
 .card code { font-size: var(--size); background: var(--raised); padding: var(--sp-1) var(--sp-2); }
 .paths { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
+.card-files { list-style: none; padding: 0; margin: 0; }
+.card-files li:has(.evidence-hunk:not([hidden])) { flex-basis: 100%; }
 .card pre { font: var(--size)/1.6 var(--mono); background: var(--term-bg); color: var(--term-fg); border-radius: var(--radius);
             padding: var(--sp-4) var(--sp-5); margin: var(--sp-5) 0 0; overflow-x: auto; }
 .card h2 { font-size: var(--size); font-weight: 600; color: var(--muted); margin: var(--sp-5) 0 0; }
@@ -433,3 +479,59 @@ body[data-layout="overlay"].rail-open .rail { display: grid; position: fixed; to
 .subagent-log .log-error { margin-left: var(--sp-4); font-size: var(--size-xs); color: var(--conflict); }
 .subagent-log .log-result { font: var(--size-small)/var(--term-line) var(--mono); white-space: pre-wrap; margin: var(--sp-2) 0 var(--sp-4) var(--sp-5); padding: var(--sp-4) var(--sp-5); background: var(--surface); border-radius: var(--radius-small); color: var(--muted); max-height: 12em; overflow: auto; }
 .subagent-log .failed .log-result { color: var(--conflict); }
+
+/* Earlier turns folded to one line (danielrispler/plotkeeper#117): the prompt cut to fit, the Headline, and two marks. */
+.turn.past { padding: var(--sp-2) 0; }
+.turn-line { display: flex; align-items: baseline; gap: var(--sp-4); width: 100%; min-width: 0; text-align: start; background: none; border: 0; padding: var(--sp-2) 0; color: var(--fg); cursor: pointer; }
+.turn-line .prompt { flex: 0 1 35%; min-width: 0; margin: 0; }
+.turn-line .headline-text { flex: 1 1 0; min-width: 0; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: var(--size-small); }
+.turn-line .mark { flex: none; font-size: var(--size-small); color: var(--muted); }
+.turn .subagents button { flex-direction: row; align-items: baseline; gap: var(--sp-4); white-space: nowrap; overflow: hidden; }
+.turn .subagents button > :nth-child(2) { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.answered-card > summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.answered-card > .card { margin-top: var(--sp-3); }
+
+/* The evidence line (#113): one line of recorded facts that opens in place. */
+.evidence { margin: 0 0 var(--sp-4); font-size: var(--size-small); }
+.evidence-toggle { display: block; width: 100%; text-align: start; background: none; border: 0; padding: var(--sp-2) 0; color: var(--muted); cursor: pointer; }
+.evidence-toggle::before { content: "▸"; display: inline-block; width: var(--sp-5); }
+.evidence-toggle[aria-expanded="true"]::before { content: "▾"; }
+.evidence-rows { list-style: none; margin: 0; padding: 0 0 0 var(--sp-5); }
+.evidence-rows[hidden], .evidence-output[hidden], .evidence-hunk[hidden], .evidence-edit[hidden] { display: none; }
+.evidence-rows li { margin: 0 0 var(--sp-2); min-width: 0; overflow-wrap: anywhere; }
+.evidence-rows .external { color: var(--muted); opacity: 0.7; }
+.evidence-fail { display: block; width: 100%; text-align: start; background: none; border: 0; padding: 0; color: var(--fg); cursor: pointer; }
+.evidence-hunk { margin: var(--sp-2) 0 0; padding: var(--sp-3); overflow: auto; white-space: pre; font-size: var(--size-small); background: var(--surface); border-radius: var(--radius-small); }
+.evidence-edit { margin-top: var(--sp-2); font-size: var(--size-small); }
+.evidence-fail .mark { margin-inline-end: var(--sp-3); }
+.evidence-output { margin: var(--sp-2) 0 0; padding: var(--sp-3); max-height: 12em; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--size-small); background: var(--surface); border-radius: var(--radius-small); }
+
+/* The diff pane (#131): a turn's whole diff in the terminal column, a fold per file. Colour is spent only on a removed line. */
+.pane.turn-diff { overflow-y: auto; padding: 0 var(--sp-6) var(--sp-6); font-size: var(--size-read); }
+.turn-diff header { position: sticky; top: 0; z-index: 1; display: flex; gap: var(--sp-4); align-items: center; padding: var(--sp-4) 0; margin-bottom: var(--sp-5); background: var(--bg); border-bottom: var(--hair) solid var(--line); }
+.turn-diff .log-title { font-weight: 600; margin-right: auto; }
+.turn-diff .log-type { font-size: var(--size-xs); padding: var(--hair) var(--sp-3); border-radius: var(--radius-small); background: var(--raised); color: var(--muted); }
+.diff-file { margin: 0 0 var(--sp-5); }
+.diff-file summary { cursor: pointer; font: var(--size-small)/var(--term-line) var(--mono); padding: var(--sp-2) 0; overflow-wrap: anywhere; }
+.diff-body { margin-top: var(--sp-2); overflow-x: auto; background: var(--surface); border-radius: var(--radius-small); padding: var(--sp-3) 0; }
+.diff-line { margin: 0; padding: 0 var(--sp-4); font: var(--size-small)/var(--term-line) var(--mono); white-space: pre; width: max-content; min-width: 100%; box-sizing: border-box; }
+.diff-line.add { background: var(--selected); }
+.diff-line.del { background: var(--needs-you-bg); color: var(--conflict); }
+.diff-line.hunk, .diff-line.meta { color: var(--muted); }
+.diff-external { color: var(--muted); font-size: var(--size-small); }
+.evidence-more[hidden] { display: none; }
+
+/* "Where we were" (#124): the banner above the newest turn. */
+.banner { margin: 0 0 var(--sp-4); padding: var(--sp-3) var(--sp-4); border: var(--hair) solid var(--line); border-radius: var(--radius); font-size: var(--size-small); }
+.banner p { margin: 0 0 var(--sp-2); }
+.banner .banner-title { font-weight: 600; }
+.banner .label { color: var(--muted); }
+.banner .age { color: var(--muted); }
+.banner-brief summary { cursor: pointer; color: var(--muted); }
+.ask-why { margin-top: var(--sp-4); }
+.ask-why input { font: inherit; font-size: var(--size-small); margin-right: var(--sp-3); }
+.ask-why .btn { margin-top: 0; }
+.ask-why-not { margin-top: var(--sp-3); }
+.ask-why-not > p { font-size: var(--size-small); }
+.ask-why-not summary { margin-top: var(--sp-3); font-size: var(--size-small); color: var(--muted); cursor: pointer; }
+.ask-why-not .markdown { margin: var(--sp-3) 0 0; }

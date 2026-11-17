@@ -2,11 +2,12 @@
 // sessions that need Daniel, the unseen ones and the landed ones, each with its Delete, then a row
 // per project to start a session in. The sections are content functions over the studio state.
 
-import { patch, pressable, text } from "./dom.js";
+import { invoke, patch, pressable, text } from "./dom.js";
+import { quizItem, quizRegion, seedQuiz } from "./quiz.js";
 import { childrenOf, deleting, item, row, showsLanded } from "./list.js";
 import { lastSegment } from "./workspaces.js";
 import { startLast } from "./picker.js";
-import type { Session } from "./types.js";
+import type { Retest, Session } from "./types.js";
 
 export type HomeSection = { key: string; title: string; sessions: Session[] };
 
@@ -22,6 +23,29 @@ export function homeSections(sessions: Session[]): HomeSection[] {
     { key: "landed", title: "Landed", sessions: landed },
   ];
   return sections.filter((section) => section.sessions.length > 0);
+}
+
+// The retests Home offers (#129): those with a Quiz that he has not answered, and those he answered while this window showed
+// them, so the answer's reasons stay until the window is closed. Nothing else shows a retest.
+const answeredHere = new Set<string>();
+export function homeRetests(retests: Retest[]): Retest[] {
+  const answered = (r: Retest) => r.taps.some((t) => t.kind === "pick" || t.kind === "skip");
+  return retests.filter((r) => r.quiz && (answeredHere.has(r.id) || !answered(r)));
+}
+
+function retestRow(retest: Retest, quiz: NonNullable<Retest["quiz"]>): HTMLElement {
+  seedQuiz(retest.id, retest.taps);
+  // The self-test times the pick from the retest's first showing (#130).
+  if (!retest.taps.some((t) => t.kind === "shown")) void invoke("quiz_tap", { id: retest.id, tap: { kind: "shown" } }).catch((e) => console.warn(e));
+  answeredHere.add(retest.id);
+  const region = quizRegion(retest.id, quiz, [], {
+    record: (tap) => void invoke("quiz_tap", { id: retest.id, tap }).catch((e) => console.warn(e)),
+    explain: () => invoke<string>("ask", { session: retest.session_id, item: quizItem(quiz), question: "I did not get this yet. Explain more." }),
+    line: () => document.createElement("li"),
+    trial: true,
+  });
+  region.dataset.key = `retest ${retest.id}`;
+  return region;
 }
 
 export type HomeProject = { name: string; path: string };
@@ -54,9 +78,10 @@ function projectRow({ name, path }: HomeProject): HTMLElement {
 }
 
 // Draws Home into `box`, patched, so focus survives the list's updates.
-export function drawHome(box: HTMLElement, sessions: Session[], projects: string[]) {
+export function drawHome(box: HTMLElement, sessions: Session[], projects: string[], retests: Retest[] = []) {
   box.classList.add("home");
   const sections = homeSections(sessions);
+  const retesting = homeRetests(retests);
   const keyed = (node: HTMLElement, key: string) => {
     node.dataset.key = key;
     return node;
@@ -65,6 +90,7 @@ export function drawHome(box: HTMLElement, sessions: Session[], projects: string
   patch(box, [
     ...(sections.length ? [] : [keyed(text("p", "Nothing needs you.", "empty"), "none")]),
     ...sections.flatMap((section) => [heading(section.title, `h ${section.key}`), ...section.sessions.map((session) => sessionRow(session, section.key === "landed"))]),
+    ...(retesting.length ? [heading("Retest", "h retest"), ...retesting.flatMap((r) => (r.quiz ? [retestRow(r, r.quiz)] : []))] : []),
     heading("Start a session in", "h projects"),
     ...homeProjects(projects).map(projectRow),
   ]);

@@ -2,7 +2,7 @@
 //! session's brief, on disk in the studio's data directory, so a restart neither loses nor re-asks
 //! them.
 
-use crate::{Card, TurnSummary};
+use crate::{Answered, Card, DesignLine, OpenItem, Quiz, TurnSummary, answered};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -44,6 +44,10 @@ pub struct StoredCard {
     /// its guess; `None` while it runs, and on a card no check requested.
     #[serde(default)]
     pub check_result: Option<CheckResult>,
+    /// What Daniel did with the quiz besides the pick (`guess`): a skip and the chips, each with its time
+    /// (danielrispler/plotkeeper#120).
+    #[serde(default)]
+    pub taps: Vec<QuizTap>,
 }
 
 /// What a check's result says about the guess on its card: it passed, it failed, or its exit code
@@ -62,6 +66,121 @@ pub struct StoredSummary {
     pub request: SummaryRequest,
     pub summary: TurnSummary,
     pub added_at: u64,
+    /// What Daniel did with the turn's own Quiz, each with its time (danielrispler/plotkeeper#120); a turn with a card has
+    /// its taps on the card.
+    #[serde(default)]
+    pub taps: Vec<QuizTap>,
+    /// The turn's hunks as the writer read them (danielrispler/plotkeeper#129), which its retest is written from; empty
+    /// before they were kept, and for a turn with no facts.
+    #[serde(default)]
+    pub hunk: String,
+    /// The self-test's arm (danielrispler/plotkeeper#130), kept only on a turn with a Quiz that was written while the test ran;
+    /// `None` is quiz-first.
+    #[serde(default)]
+    pub arm: Option<Arm>,
+}
+
+/// How long the self-test assigns arms: 21 days from its start (danielrispler/plotkeeper#130).
+pub const SELF_TEST_MS: u64 = 21 * 24 * 60 * 60 * 1000;
+
+/// A turn's arm in the self-test (danielrispler/plotkeeper#130): quiz-first shows the Quiz open and the Body after a pick;
+/// body-only shows the Body open and no Quiz, though the Quiz is kept for the retest.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Arm {
+    QuizFirst,
+    BodyOnly,
+}
+
+/// A random bit, from the random keys std gives each hasher.
+fn coin() -> bool {
+    use std::hash::{BuildHasher, Hasher};
+    std::collections::hash_map::RandomState::new()
+        .build_hasher()
+        .finish()
+        & 1
+        == 1
+}
+
+/// What Daniel does with a Quiz (danielrispler/plotkeeper#120): a pick, "Show the rest anyway" (a skip, which reveals as a pick
+/// does), and the three chips under the revealed answer. The trial's two (danielrispler/plotkeeper#129): how sure he is
+/// before the pick, and an optional line on why after it, which no model reads.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Tap {
+    Pick {
+        option: usize,
+    },
+    Confidence {
+        sure: bool,
+    },
+    Why {
+        text: String,
+    },
+    /// A retest's first showing, and the first hunk opened on a turn (danielrispler/plotkeeper#130).
+    Shown,
+    Hunk,
+    Skip,
+    Understood,
+    ExplainMore,
+    KeyWrong,
+}
+
+/// A tap and when, in Unix milliseconds.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct QuizTap {
+    #[serde(flatten)]
+    pub tap: Tap,
+    pub at: u64,
+}
+
+impl QuizTap {
+    /// Whether it answers the Quiz, as a pick or a skip do.
+    fn answers(&self) -> bool {
+        matches!(self.tap, Tap::Pick { .. } | Tap::Skip)
+    }
+}
+
+/// Keeps `tap` at `at` in `taps`: the first answer counts, and each chip once. Whether it was kept.
+fn keep_tap(taps: &mut Vec<QuizTap>, tap: Tap, at: u64) -> bool {
+    let new = QuizTap { tap, at };
+    let taken = taps.iter().any(|kept| {
+        if new.answers() {
+            kept.answers()
+        } else {
+            std::mem::discriminant(&kept.tap) == std::mem::discriminant(&new.tap)
+        }
+    });
+    if !taken {
+        taps.push(new);
+    }
+    !taken
+}
+
+/// How long after a Quiz was offered its retest is due: seven days (danielrispler/plotkeeper#129).
+pub const RETEST_AFTER_MS: u64 = 7 * 24 * 60 * 60 * 1000;
+
+/// A fresh Quiz on the decision of an earlier one, offered on Home a week after it (danielrispler/plotkeeper#129). `quiz`
+/// is `None` when the writer's replies broke the rules twice: the retest is then not asked for again.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Retest {
+    /// What `quiz_tap` names it by: `retest ` and the id of the Quiz it retests, `of`.
+    pub id: String,
+    pub of: String,
+    pub session_id: String,
+    pub added_at: u64,
+    pub quiz: Option<Quiz>,
+    #[serde(default)]
+    pub taps: Vec<QuizTap>,
+}
+
+/// What the retest's writer reads: the turn's stored hunk, and the first Quiz with the reason of its key.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RetestAsk {
+    pub of: String,
+    pub session_id: String,
+    pub hunk: String,
+    pub first: Quiz,
 }
 
 /// Daniel's rating of a card's explanation: a level and the reasons he picked. His fifth reason, "the
@@ -113,11 +232,22 @@ pub struct Row {
     pub line: String,
 }
 
-/// A session's or a worker's rolling brief (danielrispler/Falinks#369, decision 16).
+/// A session's or a worker's brief: its Goal, which a model writes from Daniel's prompts
+/// (danielrispler/plotkeeper#122). A brief stored before the slots is prose in `text`, which shows
+/// until the first Goal.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Brief {
     pub text: String,
-    /// How many times it was updated, so that every 5th update rewrites it.
+    pub goal: Option<String>,
+    /// How many prompts the Goal was written from, so that it is written again when one comes.
+    pub goal_prompts: u32,
+    /// "Design so far" (danielrispler/plotkeeper#123), and how many sources it was written from, so that it is
+    /// written again when one came.
+    pub design: Vec<DesignLine>,
+    pub design_from: u32,
+    /// Unused: kept so that the previous build, whose `Brief` requires it, can still read the file.
+    #[serde(default)]
     pub updates: u32,
 }
 
@@ -125,7 +255,15 @@ pub struct Brief {
 /// oldest first.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct SessionCards {
+    /// A brief stored as prose, which shows while there is no Goal.
     pub brief: Option<String>,
+    /// The Brief's slots (danielrispler/plotkeeper#122): the Goal, the answered questions and the
+    /// computed Open lines, which the shell fills in (`open_items`).
+    pub goal: Option<String>,
+    pub answers: Vec<Answered>,
+    pub open: Vec<OpenItem>,
+    /// "Design so far": at most five decisions, each citing its turn or card.
+    pub design: Vec<DesignLine>,
     /// The cards added in the last 30 minutes.
     #[serde(serialize_with = "without_diffs")]
     pub recent: Vec<StoredCard>,
@@ -149,6 +287,7 @@ struct ShownCard<'a> {
     more: &'a Option<String>,
     rating: &'a Option<Rating>,
     check_result: Option<CheckResult>,
+    taps: &'a [QuizTap],
 }
 
 #[derive(Serialize)]
@@ -181,6 +320,7 @@ fn without_diffs<S: serde::Serializer>(cards: &[StoredCard], s: S) -> Result<S::
         more: &kept.more,
         rating: &kept.rating,
         check_result: kept.check_result,
+        taps: &kept.taps,
     }))
 }
 
@@ -210,6 +350,10 @@ pub struct CardStore {
     summaries: Vec<StoredSummary>,
     /// The subagent summaries, by subagent id, in `agent-summaries.json` beside the cards (danielrispler/Falinks#535).
     agent_summaries: BTreeMap<String, String>,
+    /// The retests, in `retests.json` beside the cards (danielrispler/plotkeeper#129).
+    retests: Vec<Retest>,
+    /// When the self-test started, in Unix milliseconds, from the settings; kept in memory.
+    self_test: Option<u64>,
     /// Rises on every change, briefs included, so the shell sends the cards only when it moves.
     revision: u64,
 }
@@ -235,8 +379,11 @@ impl CardStore {
         // A cache: a corrupt file costs the summaries again, never the studio's start.
         let agent_summaries =
             read(&path.with_file_name("agent-summaries.json")).unwrap_or_default();
+        let retests = read(&path.with_file_name("retests.json"))?;
         Ok(CardStore {
             path,
+            retests,
+            self_test: None,
             cards,
             briefs,
             facts,
@@ -282,17 +429,27 @@ impl CardStore {
             kept.added_at
                 .is_some_and(|at| now.saturating_sub(at) < RECENT_MS)
         });
-        let brief = self.brief(owner).map(|brief| brief.text.clone());
+        let brief = self.brief(owner);
+        let goal = brief.and_then(|brief| brief.goal.clone());
+        let design = brief.map(|brief| brief.design.clone()).unwrap_or_default();
+        let brief = brief
+            .map(|brief| brief.text.clone())
+            .filter(|text| !text.is_empty());
         // A session's history holds its workers' decisions; a worker's, its own.
         let decisions = self.decisions.iter().flat_map(|(session, kept)| {
             let its = move |d: &&Decision| session == owner || d.agent.as_deref() == Some(owner);
             kept.iter().filter(its)
         });
+        let decisions: Vec<Decision> = decisions.cloned().collect();
         SessionCards {
             brief,
+            goal,
+            answers: answered(&decisions),
+            open: Vec::new(),
+            design,
             recent,
             older,
-            decisions: decisions.cloned().collect(),
+            decisions,
         }
     }
 
@@ -353,11 +510,25 @@ impl CardStore {
         self.briefs.get(owner)
     }
 
-    /// Updates `owner`'s brief to `text`, and saves the briefs.
-    pub fn set_brief(&mut self, owner: &str, text: String) -> io::Result<()> {
+    /// Sets `owner`'s "Design so far", written from `from` sources, and saves the briefs.
+    pub fn set_design(
+        &mut self,
+        owner: &str,
+        design: Vec<DesignLine>,
+        from: u32,
+    ) -> io::Result<()> {
         let brief = self.briefs.entry(owner.into()).or_default();
-        brief.text = text;
-        brief.updates += 1;
+        brief.design = design;
+        brief.design_from = from;
+        self.revision += 1;
+        write(&self.path.with_file_name("briefs.json"), &self.briefs)
+    }
+
+    /// Sets `owner`'s Goal, written from `prompts` prompts, and saves the briefs.
+    pub fn set_goal(&mut self, owner: &str, goal: String, prompts: u32) -> io::Result<()> {
+        let brief = self.briefs.entry(owner.into()).or_default();
+        brief.goal = Some(goal);
+        brief.goal_prompts = prompts;
         self.revision += 1;
         write(&self.path.with_file_name("briefs.json"), &self.briefs)
     }
@@ -374,6 +545,7 @@ impl CardStore {
             more: None,
             rating: None,
             check_result: None,
+            taps: Vec::new(),
         });
         self.save()
     }
@@ -455,6 +627,116 @@ impl CardStore {
         Ok(())
     }
 
+    /// Records Daniel's `tap` at `at` on the Quiz of `id`, a card's or a turn's own (danielrispler/plotkeeper#120), and saves it.
+    /// A card's pick is its guess, and its key flag the same one record; the first answer counts, so a
+    /// pick after a skip, a skip after a pick and a tap on a check's card record nothing.
+    pub fn quiz_tap(&mut self, id: &str, tap: Tap, at: u64) -> io::Result<()> {
+        if let Some(kept) = self.card_mut(id) {
+            let answered = kept.guess.is_some() || kept.taps.iter().any(QuizTap::answers);
+            if kept.card.quiz.is_none() || kept.request.check.is_some() {
+                return Ok(());
+            }
+            return match tap {
+                Tap::Pick { option } if !answered => self.guess(id, option, at),
+                Tap::Pick { .. } => Ok(()),
+                Tap::Skip if answered => Ok(()),
+                _ => {
+                    let key_wrong = matches!(tap, Tap::KeyWrong);
+                    if keep_tap(&mut kept.taps, tap, at) {
+                        if key_wrong {
+                            kept.key_wrong = true;
+                        }
+                        return self.save();
+                    }
+                    Ok(())
+                }
+            };
+        }
+        if let Some(kept) = self.retests.iter_mut().find(|kept| kept.id == id) {
+            let options = kept.quiz.as_ref().map_or(0, |quiz| quiz.options.len());
+            if options == 0 || matches!(tap, Tap::Pick { option } if option >= options) {
+                return Ok(());
+            }
+            if keep_tap(&mut kept.taps, tap, at) {
+                self.revision += 1;
+                return write(&self.path.with_file_name("retests.json"), &self.retests);
+            }
+            return Ok(());
+        }
+        let Some(kept) = self.summaries.iter_mut().find(|kept| kept.request.id == id) else {
+            return Ok(());
+        };
+        let options = kept
+            .summary
+            .quiz
+            .as_ref()
+            .map_or(0, |quiz| quiz.options.len());
+        if options == 0 || matches!(tap, Tap::Pick { option } if option >= options) {
+            return Ok(());
+        }
+        if keep_tap(&mut kept.taps, tap, at) {
+            self.revision += 1;
+            return write(&self.path.with_file_name("summaries.json"), &self.summaries);
+        }
+        Ok(())
+    }
+
+    /// The Quizzes offered `RETEST_AFTER_MS` or more before `now`, a card's or a turn's own, that have no retest yet and
+    /// that have a hunk to ask on (danielrispler/plotkeeper#129). `now` is the caller's clock.
+    pub fn due_retests(&self, now: u64) -> Vec<RetestAsk> {
+        let due = |offered: u64| now >= offered.saturating_add(RETEST_AFTER_MS);
+        let cards = self.cards.iter().filter_map(|kept| {
+            let offered = kept.added_at.or(kept.shown_at)?;
+            let quiz = kept
+                .card
+                .quiz
+                .as_ref()
+                .filter(|_| kept.request.check.is_none())?;
+            let ask = (due(offered), kept.request.diff());
+            Some((ask, &kept.request.id, &kept.request.session_id, quiz))
+        });
+        let summaries = self.summaries.iter().filter_map(|kept| {
+            let quiz = kept.summary.quiz.as_ref()?;
+            let ask = (due(kept.added_at), kept.hunk.as_str());
+            Some((ask, &kept.request.id, &kept.request.session_id, quiz))
+        });
+        cards
+            .chain(summaries)
+            .filter(|((due, hunk), of, ..)| {
+                *due && !hunk.trim().is_empty() && self.retests.iter().all(|r| &r.of != *of)
+            })
+            .map(|((_, hunk), of, session, quiz)| RetestAsk {
+                of: of.clone(),
+                session_id: session.clone(),
+                hunk: hunk.into(),
+                first: quiz.clone(),
+            })
+            .collect()
+    }
+
+    /// Keeps the retest of `ask`'s Quiz, `quiz` as the writer wrote it, or `None` when it was rejected, at `at`; and
+    /// saves the retests. A Quiz that has one is not asked again.
+    pub fn add_retest(&mut self, ask: &RetestAsk, quiz: Option<Quiz>, at: u64) -> io::Result<()> {
+        if self.retests.iter().any(|r| r.of == ask.of) {
+            return Ok(());
+        }
+        self.retests.push(Retest {
+            id: format!("retest {}", ask.of),
+            of: ask.of.clone(),
+            session_id: ask.session_id.clone(),
+            added_at: at,
+            quiz,
+            taps: Vec::new(),
+        });
+        self.revision += 1;
+        write(&self.path.with_file_name("retests.json"), &self.retests)
+    }
+
+    /// The retests, oldest first.
+    pub fn retests(&self) -> &[Retest] {
+        &self.retests
+    }
+
     /// Records Daniel's flag that the key of card `id`'s quiz is wrong, and saves the store.
     pub fn key_wrong(&mut self, id: &str) -> io::Result<()> {
         if let Some(kept) = self.card_mut(id)
@@ -506,13 +788,55 @@ impl CardStore {
 
     /// Keeps `summary` of `request`'s turn, and saves the summaries.
     pub fn add_summary(&mut self, request: SummaryRequest, summary: TurnSummary) -> io::Result<()> {
+        self.add_summary_at(request, summary, millis())
+    }
+
+    /// `add_summary` at `at`, in Unix milliseconds.
+    pub fn add_summary_at(
+        &mut self,
+        request: SummaryRequest,
+        summary: TurnSummary,
+        at: u64,
+    ) -> io::Result<()> {
+        self.add_summary_with(request, summary, at, coin())
+    }
+
+    /// Starts the self-test at `start`, in Unix milliseconds, or ends it with `None` (danielrispler/plotkeeper#130).
+    pub fn set_self_test(&mut self, start: Option<u64>) {
+        self.self_test = start;
+    }
+
+    /// `add_summary_at` with the self-test's coin given: heads is body-only. A turn with a Quiz written in the test's 21
+    /// days gets an arm; any other turn none, so outside the window no turn is body-only.
+    pub fn add_summary_with(
+        &mut self,
+        request: SummaryRequest,
+        summary: TurnSummary,
+        at: u64,
+        heads: bool,
+    ) -> io::Result<()> {
+        let arm = (self.self_test)
+            .filter(|start| (*start..*start + SELF_TEST_MS).contains(&at))
+            .filter(|_| summary.quiz.is_some())
+            .map(|_| if heads { Arm::BodyOnly } else { Arm::QuizFirst });
+        let hunk = (request.facts.files.iter())
+            .map(|f| format!("--- {}\n{}", f.file.path, f.hunk))
+            .collect();
         self.summaries.push(StoredSummary {
             request,
             summary,
-            added_at: millis(),
+            added_at: at,
+            taps: Vec::new(),
+            hunk,
+            arm,
         });
         self.revision += 1;
         write(&self.path.with_file_name("summaries.json"), &self.summaries)
+    }
+
+    /// The turn summaries, oldest first.
+    pub fn summaries(&self) -> &[StoredSummary] {
+        &self.summaries
     }
 
     /// The summary of turn `id` (`SummaryRequest::id`), when it was written.
@@ -596,6 +920,78 @@ impl CardStore {
     fn save(&mut self) -> io::Result<()> {
         self.revision += 1;
         write(&self.path, &self.cards)
+    }
+}
+
+/// At most this many Quizzes are offered in any rolling hour, across the studio (danielrispler/plotkeeper#119).
+pub const QUIZZES_PER_HOUR: usize = 3;
+const HOUR_MS: u64 = 60 * 60 * 1000;
+
+/// Where a Quiz about to be stored goes under the cap.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Place {
+    /// It is offered.
+    Offer,
+    /// It is not: the hour holds its 3 already.
+    Withhold,
+    /// A card's Quiz takes the place of the lone Quiz of the summary of this turn, which loses it.
+    Replace(String),
+}
+
+impl CardStore {
+    /// The Quizzes offered in the hour before `now`: the cards' and the lone ones, a check card's
+    /// apart, answered or not.
+    fn offered(&self, now: u64) -> usize {
+        let since = now.saturating_sub(HOUR_MS);
+        let cards = self.cards.iter().filter(|k| k.request.check.is_none());
+        let cards =
+            cards.filter(|k| k.card.quiz.is_some() && k.added_at.is_some_and(|at| at > since));
+        let lone = self.summaries.iter().filter(|k| {
+            k.summary.quiz.is_some() && k.arm != Some(Arm::BodyOnly) && k.added_at > since
+        });
+        cards.count() + lone.count()
+    }
+
+    /// Where a Quiz stored at `now` goes: a card's (`card`) comes before a lone one, which is offered
+    /// only while fewer than `QUIZZES_PER_HOUR` were offered in the last hour. A card's past the cap
+    /// takes the place of the oldest unanswered lone Quiz of that hour, and is otherwise not offered.
+    pub fn place_quiz(&self, card: bool, now: u64) -> Place {
+        if self.offered(now) < QUIZZES_PER_HOUR {
+            return Place::Offer;
+        }
+        let since = now.saturating_sub(HOUR_MS);
+        let open = |k: &&StoredSummary| {
+            k.summary.quiz.is_some()
+                && k.arm != Some(Arm::BodyOnly)
+                && !k.taps.iter().any(QuizTap::answers)
+                && k.added_at > since
+        };
+        match self.summaries.iter().find(open) {
+            Some(oldest) if card => Place::Replace(oldest.request.id.clone()),
+            _ => Place::Withhold,
+        }
+    }
+
+    /// Takes the Quiz from the summary of turn `id`, and saves the summaries.
+    pub fn drop_summary_quiz(&mut self, id: &str) -> io::Result<()> {
+        let found = self.summaries.iter_mut().find(|k| k.request.id == id);
+        if let Some(kept) = found.filter(|k| k.summary.quiz.is_some()) {
+            kept.summary.quiz = None;
+            self.revision += 1;
+            write(&self.path.with_file_name("summaries.json"), &self.summaries)?;
+        }
+        Ok(())
+    }
+
+    /// Takes the Quiz from card `id`, which then shows without it, and saves the store.
+    pub fn drop_card_quiz(&mut self, id: &str) -> io::Result<()> {
+        match self.card_mut(id).filter(|k| k.card.quiz.is_some()) {
+            Some(kept) => {
+                kept.card.quiz = None;
+                self.save()
+            }
+            None => Ok(()),
+        }
     }
 }
 

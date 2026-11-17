@@ -13,18 +13,32 @@ use std::{
 };
 
 mod agy;
+mod ask;
+mod checks;
 mod claude;
 mod event;
+mod ledger;
+mod saved;
 mod transcript;
+mod turn_files;
 mod work;
 pub use agy::{CAPABILITIES as AGY_CAPABILITIES, Drift as AgyDrift, DriftKind as AgyDriftKind};
+pub use ask::{Anchor, AskFact, AskFacts, AskSection};
+pub(crate) use checks::is_check;
+pub use checks::{
+    Check, CheckLists, Output as CheckOutput, Run as CheckRun, Status as CheckStatus,
+    output as check_output,
+};
+use checks::{exit_code_counts, matched};
 pub use claude::CAPABILITIES as CLAUDE_CAPABILITIES;
 pub use event::{Capabilities, TranscriptFormat};
 use event::{Event, Happened, Origin, Start, ToolKind};
+pub use ledger::{Bytes, Details, Ledger, Outcome, Row};
 pub use transcript::{Context, LogEntry, SubagentLog, Transcript};
+pub use turn_files::{Numstat, RootDiff, TurnDiff, TurnFile, TurnFiles, TurnTrees};
 pub use work::{Estimate, MIN_HISTORY, Phase, PhaseStart, Work, range};
 
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 pub struct Studio {
     /// The agy adapter, which keeps its conversations (`agy.rs`).
     agy: agy::Adapter,
@@ -40,8 +54,17 @@ pub struct Studio {
     /// again (danielrispler/Falinks#556).
     held: Option<String>,
     /// The shell's latest tick, in Unix milliseconds.
+    #[serde(skip)]
     now: u64,
+    /// The shell's lookup and what it found, which `Studio::resume` keeps (`saved.rs`).
+    #[serde(skip)]
     roots: Roots,
+    /// The commands that are checks, per project (danielrispler/plotkeeper#112), from the settings.
+    #[serde(skip)]
+    check_lists: CheckLists,
+    /// Where the next log line starts in the event log, in bytes: every line given to `replay`,
+    /// `apply` or `apply_with_changes` moves it, as the shell reads the log from its start.
+    log_end: u64,
     /// The turns the replay saw end with both trees, for `backfill`.
     ended: Vec<Backfill>,
     /// How long each check ran when it did not fail, by `check_key`, oldest first (danielrispler/Falinks#461, decision 13).
@@ -51,6 +74,7 @@ pub struct Studio {
     rows: HashMap<String, String>,
     /// Summaries are written when Daniel opens a turn, not at its end, so they move no intention
     /// (danielrispler/Falinks#517, decisions 13 and 16), from the settings.
+    #[serde(skip)]
     summaries_on_open: bool,
     /// Since when each Claude session's hook state and its terminal's OSC 7501 state disagree, and
     /// whether that disagreement was logged (danielrispler/Falinks#560).
@@ -68,7 +92,7 @@ pub struct Studio {
 }
 
 /// What the shell found about a task, for **Landed**. A lookup that failed is `false`.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct TaskFacts {
     /// Nothing uncommitted and nothing unpushed.
     pub safe: bool,
@@ -120,7 +144,7 @@ pub struct Selection<'a> {
     pub agent: Option<&'a str>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Session {
     /// Its own agent: the session id, last step, first and latest events, and worktree since.
     #[serde(flatten)]
@@ -138,11 +162,14 @@ pub struct Session {
     /// A few words on what it is about, written from Daniel's first prompt and logged as a
     /// `StudioPromptName` line; shown after his name and before the identity's.
     pub prompt_name: Option<String>,
+    /// Every tool call of it and its workers (danielrispler/plotkeeper#110).
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
+    pub ledger: Ledger,
     /// Whether Daniel's first prompt arrived, which asks for the prompt name once.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     name_asked: bool,
     /// His first prompt, a bare slash command, whose name waits for its turn's end.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     name_after: Option<String>,
     /// The id `claude --resume` takes: its latest conversation's, which a `/clear` changes while the
     /// row keeps its first id (danielrispler/Falinks#461, decision 18).
@@ -157,7 +184,7 @@ pub struct Session {
     pub cleared: Vec<u64>,
     /// Its latest `SessionEnd` was a `/clear`, so the next `SessionStart` from `clear` on its
     /// terminal, or in its folder, continues it.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     clearing: bool,
     pub state: State,
     /// Whether closing its terminal asks first: it is in a turn, or its latest `Stop` listed
@@ -166,26 +193,26 @@ pub struct Session {
     /// Its task has landed; the shell sets it from `Studio::landed` as it sends the list.
     pub landed: bool,
     /// Daniel deleted it: the list leaves it out until it starts again.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     deleted: bool,
     /// Its latest `Stop` listed background tasks.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     background: bool,
     /// The checks that ran, oldest first: pass or fail lines in the session's timeline (danielrispler/Falinks#369,
     /// decision 14).
     pub checks: Vec<CheckLine>,
     /// The tool calls whose `PreToolUse` landed and whose `PostToolUse` has not.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     running: Vec<Call>,
     /// What blocks it on Daniel, so that it needs you, oldest first (danielrispler/Falinks#434, decision 24).
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     blocks: Vec<Block>,
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     turn_ended: bool,
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     ended: bool,
     /// Whether a `Stop` of it requested Claude Code's version.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     versioned: bool,
     /// Its subagents at any depth, in the order they were first seen (danielrispler/Falinks#369, decision 5).
     #[serde(serialize_with = "serialize_agents")]
@@ -200,46 +227,54 @@ pub struct Session {
     /// At your turn, or idle since, with a turn Daniel has not seen (danielrispler/Falinks#556): its row's filled dot and
     /// bold name.
     pub unseen: bool,
-    /// How many of its turns Daniel has seen, which the card store keeps (danielrispler/Falinks#556).
-    #[serde(skip)]
+    /// How many of its turns Daniel has seen, which the card store keeps (danielrispler/Falinks#556). The rail's
+    /// "Where we were" banner counts what happened after them (danielrispler/plotkeeper#124).
+    #[serde(default)]
     seen: usize,
+    /// How many it had seen when Daniel selected it: the point "Since you looked" counts from, which the poll's looking
+    /// at the rail does not move (danielrispler/plotkeeper#124).
+    #[serde(default)]
+    seen_at_selection: usize,
+    /// What happened after `seen_at_selection`, kept up to date by `update_unseen` for the banner.
+    #[serde(default)]
+    since_looked: SinceSeen,
     /// The ids of its background tasks, commands included, from their responses and `Stop`'s
     /// `background_tasks`. With its subagents' ids, they are the task ids a wake-up can name.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     tasks: BTreeSet<String>,
     /// The questions its agents asked, oldest first (danielrispler/Falinks#369, decision 21).
     pub questions: Vec<Question>,
     /// Its answered questions, plans and permissions, oldest first: its decision history (danielrispler/Falinks#461,
     /// decision 17). The card store keeps them across restarts and gives them to the pane.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     pub decisions: Vec<Decision>,
     /// The questions answered on the studio card, by call, whose result has not landed yet.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     carded: BTreeSet<String>,
     /// When its latest turn started and ended (danielrispler/Falinks#461, decision 13).
     pub turn_span: Option<Span>,
     /// Its latest `Stop`, until its next prompt (danielrispler/Falinks#369, decision 19).
     pub stopped: Option<Stopped>,
     /// When its latest turn ended, which took its workers' cards since its last card.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     stopped_at: u64,
     /// Whether its turn was opened by a wake-up and has had no prompt of Daniel's since.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     woken: bool,
     /// Claude Code's prompt id of its latest turn (danielrispler/Falinks#434, decision 3), `None` until an event of its
     /// own agent carries one.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     turn: Option<String>,
     /// The prompts that arrived during its turn, queued or typed after an interrupt: the next turn's
     /// (danielrispler/Falinks#434, decision 4).
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     queued: Vec<Prompt>,
     /// The worktree roots its latest turn touched, each with its base from the first touch (danielrispler/Falinks#434,
     /// decision 9).
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     touched: BTreeSet<String>,
     /// The tree the hook recorded at its latest turn's first touch of each worktree, by root (danielrispler/Falinks#486).
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     trees: BTreeMap<String, String>,
     /// "worker <name> returned", from its latest wake-up until its own next step or Daniel's next
     /// prompt (danielrispler/Falinks#410, decision 27).
@@ -247,7 +282,7 @@ pub struct Session {
     /// What its transcript says of its latest turn: the intention, the agent's texts, or why it
     /// cannot be read (danielrispler/Falinks#461, decision 12).
     pub transcript: Transcript,
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     transcript_file: transcript::TranscriptFile,
     /// What its agent's adapter reports, which decides what its view shows (decision 4).
     pub capabilities: Capabilities,
@@ -267,17 +302,17 @@ pub struct Session {
     pub shell: bool,
     /// Its terminal's OSC 7501 state is `blocked`, for an agent that reports no permission or question of its own
     /// (agy, decision 5): it needs Daniel, with no text.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     terminal_blocked: bool,
     /// A status-only row's terminal `turn` at the last list (danielrispler/Falinks#560).
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     reported_turn: u64,
 }
 
 /// What names a session (danielrispler/Falinks#461, decision 19): the issue of its `issue-<n>-…` branch, else the one
 /// it claimed with `wayfinder-startup --claim <n>`, the PR the shell finds for its branch, and its
 /// worktree's folder.
-#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Identity {
     pub issue: Option<u64>,
     /// Its folder's branch, from its transcript.
@@ -287,7 +322,7 @@ pub struct Identity {
     pub worktree: String,
     /// The derived name: "danielrispler/Falinks#480 · PR danielrispler/Falinks#490 · agent-a1b2", "fix-typo · agent-a1b2" or "main · Falinks".
     pub name: String,
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     claim: Option<u64>,
 }
 
@@ -397,7 +432,7 @@ pub struct Revive {
 
 /// What happened in a worktree since the last card on it: a session's own, or a subagent's that
 /// works in a folder of its own (danielrispler/Falinks#369, decisions 10 and 11).
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 struct Since {
     /// When that card, or else the first base, was taken.
     at: u64,
@@ -418,6 +453,7 @@ const LONG_CHECK_MS: u64 = 2 * 60 * 1000;
 /// (`Studio::typical`).
 struct CheckStart {
     command: String,
+    counts: bool,
     typical: Option<u64>,
 }
 
@@ -429,17 +465,17 @@ impl CheckStart {
 }
 
 /// A prompt of a session (danielrispler/Falinks#369, decision 7), received at `at`.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Prompt {
     pub at: u64,
     pub sender: Sender,
     /// What it says, which the brief's rewrite reads (danielrispler/Falinks#369, decision 16); the pane never shows it.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     pub text: String,
 }
 
 /// A session's `Stop`, which its row tells about while its turn is over (danielrispler/Falinks#369, decision 19).
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Stopped {
     /// The id a card on it has (`CardRequest::id`).
     pub card: String,
@@ -450,7 +486,7 @@ pub struct Stopped {
 }
 
 /// A turn of a session, a block in the rail's feed (danielrispler/Falinks#574): from what opened it until it ended.
-#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Turn {
     pub started_at: u64,
     pub ended_at: Option<u64>,
@@ -462,12 +498,24 @@ pub struct Turn {
     /// The first line of its final reply, from its `Stop`.
     pub message: Option<String>,
     /// Its whole final reply, which the rail fetches when its block opens (`Studio::turn_reply`).
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     pub reply: String,
+    /// The files its agent and workers changed, `None` until the shell has diffed its trees, and
+    /// for an agent that reports no trees (danielrispler/plotkeeper#111).
+    pub files: Option<TurnFiles>,
+    /// The tree the hook recorded of each worktree it touched, at its first touch and at its end,
+    /// by root: the start, and the end once it came.
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
+    trees: BTreeMap<String, (String, Option<String>)>,
+    /// When the shell was last asked for its files, and whether that was its final ask.
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
+    files_asked: Option<(u64, bool)>,
+    /// How its checks ended, its workers' included: each suite's last run (danielrispler/plotkeeper#112).
+    pub checks: Vec<Check>,
 }
 
 /// Who sent a prompt: Daniel, or Claude Code waking the session when one of its tasks returns.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Sender {
     Daniel,
@@ -485,7 +533,7 @@ impl Sender {
 }
 
 /// An `AskUserQuestion` call, which Daniel answers in the terminal (danielrispler/Falinks#369, decision 21).
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Question {
     /// The call's id, which the answer hook's request names (danielrispler/Falinks#461, decision 16).
     tool_use_id: String,
@@ -498,7 +546,7 @@ pub struct Question {
     pub turn: Option<usize>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Answer {
     /// Asked, with no result yet.
@@ -537,7 +585,7 @@ pub enum Source {
 }
 
 /// A subagent of a session (danielrispler/Falinks#369, decisions 5, 6 and 8).
-#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Subagent {
     /// Its `agent_id`, last step, first and latest events, and worktree since.
     #[serde(flatten)]
@@ -557,32 +605,32 @@ pub struct Subagent {
     /// The first line of its last message, from its `SubagentStop`.
     pub result: Option<String>,
     /// Its whole last message, which its summary reads (danielrispler/Falinks#535); the pane never shows it.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     pub message: String,
     /// Daniel opened its line after it failed (danielrispler/Falinks#434, decision 39).
     pub opened: bool,
     /// The turn of its session it was first seen in (`Session::turns`).
     pub turn: Option<usize>,
     /// The folder of its first event that has one: its worktree, or its parent's folder.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     pub folder: Option<String>,
     /// Its folder's worktree root, and the owner key of the cards on its changes there, decided at
     /// its first folder and never again (danielrispler/Falinks#434, decision 11).
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     root: String,
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     owner: String,
     /// What its spawn asked it to do, which its brief's rewrite reads; the pane never shows it.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     pub prompt: String,
     /// Its spawn's call, by `tool_use_id`, and the agent that made it, `None` for the session's own.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     spawn: Option<(String, Option<String>)>,
 }
 
 /// The state a session's own agent and each subagent share (danielrispler/Falinks#410, decision 22). Its id is the owner
 /// key of its card stream.
-#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Agent {
     pub id: String,
     pub last_step: Option<Step>,
@@ -593,15 +641,15 @@ pub struct Agent {
     /// When its last step started, and ended at its result or its turn's end (danielrispler/Falinks#461, decision 13).
     pub step_span: Option<Span>,
     /// The last step's `tool_use_id`, whose result ends it.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     step_call: String,
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     since: Since,
 }
 
 /// When something started and ended, in Unix milliseconds as the hook received them; `end` is `None`
 /// while it runs.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Span {
     pub start: u64,
     pub end: Option<u64>,
@@ -693,6 +741,12 @@ impl std::fmt::Display for Status {
     }
 }
 
+impl<'de> Deserialize<'de> for Status {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(Status::from(String::deserialize(deserializer)?.as_str()))
+    }
+}
+
 impl Serialize for Status {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.collect_str(self)
@@ -723,7 +777,7 @@ fn serialize_agents<S: serde::Serializer>(
 }
 
 /// Who spawned a subagent: the session's own agent, another subagent, or no known spawn.
-#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Parent {
     Session,
@@ -734,7 +788,7 @@ pub enum Parent {
 
 /// A worker is spawned with its own worktree, or changes files; any other subagent is a helper
 /// (danielrispler/Falinks#369, decision 6).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Kind {
     Worker,
@@ -742,11 +796,58 @@ pub enum Kind {
     Helper,
 }
 
+/// What happened in a session since Daniel looked: its turns after the last he saw, the files they changed and how
+/// their checks ended (danielrispler/plotkeeper#124).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SinceSeen {
+    pub turns: usize,
+    /// Distinct files, by worktree and path.
+    pub files: usize,
+    pub passed: usize,
+    pub failed: usize,
+    pub ran: usize,
+}
+
 impl Session {
+    /// How many of its turns Daniel has seen.
+    pub fn seen(&self) -> usize {
+        self.seen
+    }
+
+    /// What its turns after the last one Daniel saw before he selected it did.
+    pub fn since(&self) -> SinceSeen {
+        self.since_looked
+    }
+
+    fn count_since(&self) -> SinceSeen {
+        let turns = &self.turns[self.seen_at_selection.min(self.turns.len())..];
+        let files: BTreeSet<(&str, &str)> = turns
+            .iter()
+            .filter_map(|turn| turn.files.as_ref())
+            .flat_map(|found| &found.files)
+            .map(|file| (file.root.as_str(), file.path.as_str()))
+            .collect();
+        let count = |status| {
+            turns
+                .iter()
+                .flat_map(|turn| &turn.checks)
+                .filter(|check| check.status == status)
+                .count()
+        };
+        SinceSeen {
+            turns: turns.len(),
+            files: files.len(),
+            passed: count(CheckStatus::Passed),
+            failed: count(CheckStatus::Failed),
+            ran: count(CheckStatus::Ran),
+        }
+    }
+
     fn update_unseen(&mut self) {
         // Going idle keeps the mark: only Daniel seeing the session clears it (danielrispler/Falinks#556).
         self.unseen =
             matches!(self.state, State::YourTurn | State::Idle) && self.turns.len() > self.seen;
+        self.since_looked = self.count_since();
     }
 
     /// Its subagent `id`, at any depth.
@@ -1121,6 +1222,7 @@ impl Session {
             changed_by: since.by,
             workers: since.cards,
             check: None,
+            ends: BTreeMap::new(),
         }
     }
 
@@ -1181,6 +1283,12 @@ impl Session {
         self.prompts.push(prompt);
     }
 
+    /// The turn a call of `agent` is in: the latest, or for a subagent's call the one that spawned it.
+    fn ledger_turn(&self, agent: &Option<String>) -> Option<usize> {
+        let spawned = agent.as_deref().and_then(|a| self.subagent(a)?.turn);
+        spawned.or_else(|| self.current_turn())
+    }
+
     /// The index of its latest turn, which a check, subagent or question that starts now is in.
     fn current_turn(&self) -> Option<usize> {
         self.turns.len().checked_sub(1)
@@ -1206,6 +1314,40 @@ impl Session {
         };
         self.agent.since.by.clear();
         output
+    }
+
+    /// Keeps the trees the hook recorded at its latest turn's first touch of each worktree.
+    fn keep_start_trees(&mut self, starts: &BTreeMap<String, String>) {
+        let Some(turn) = self.turns.last_mut() else {
+            return;
+        };
+        for (root, tree) in starts {
+            turn.trees
+                .entry(root.clone())
+                .or_insert_with(|| (tree.clone(), None));
+        }
+    }
+
+    /// Keeps the trees the hook recorded at its latest turn's end, for the worktrees it has a start
+    /// tree of.
+    fn keep_end_trees(&mut self, ends: &BTreeMap<String, String>) {
+        let Some(turn) = self.turns.last_mut() else {
+            return;
+        };
+        for (root, tree) in ends {
+            if let Some(trees) = turn.trees.get_mut(root) {
+                trees.1 = Some(tree.clone());
+            }
+        }
+    }
+
+    /// The absolute paths its turn `turn`'s agent and workers edited, as the step ledger has them.
+    fn edited(&self, turn: usize) -> BTreeSet<String> {
+        let rows = self.ledger.turn(turn);
+        let done = rows.filter(|r| turn_files::edits(&r.tool) && !r.failed());
+        done.filter(|r| r.outcome != Some(Outcome::Rejected))
+            .filter_map(|r| r.file.clone())
+            .collect()
     }
 
     /// The backfill of its turn ended at `at` with the hook's trees `ends`: `None` when no worktree
@@ -1237,7 +1379,7 @@ impl Session {
         }
     }
 
-    fn needs_you(&self) -> bool {
+    pub fn needs_you(&self) -> bool {
         !self.blocks.is_empty() || self.terminal_blocked
     }
 
@@ -1300,7 +1442,7 @@ impl Session {
 
 /// What blocks a session on Daniel, so that it needs you (danielrispler/Falinks#434, decisions 24 to 26): what asks,
 /// and the calls it holds.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 struct Block {
     cause: Cause,
     /// The tool it asks for, when its cause is a call.
@@ -1320,7 +1462,7 @@ struct Block {
 }
 
 /// What a block waits on.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 enum Cause {
     /// A tool call that asks, or a permission request for one.
     Call,
@@ -1356,7 +1498,7 @@ impl Block {
 
 /// A session's state (danielrispler/Falinks#369, decision 4). Each has a named clearer: an event, or the tick for idle.
 /// The order is the session list's: needs you first, then the groups the list collapses.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum State {
     /// Waiting on Daniel (danielrispler/Falinks#328, module 3, "Needs you"), until the step that asks resolves, a prompt
@@ -1503,6 +1645,10 @@ pub struct CardRequest {
     /// `None` for any other card.
     #[serde(default)]
     pub check: Option<String>,
+    /// The end tree of each worktree the card's turn touched, by root, which the shell fills in before the
+    /// writer runs: where the card's code is pulled from (danielrispler/plotkeeper#121).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub ends: BTreeMap<String, String>,
 }
 
 /// A turn that gets a summary (danielrispler/Falinks#517, decisions 12, 13 and 15): what the summary writer reads of it.
@@ -1517,9 +1663,50 @@ pub struct SummaryRequest {
     pub responses: Vec<String>,
     /// The turn's intentions, one per response.
     pub intentions: Vec<String>,
-    /// The card its `Stop` requested, which the learning section points to instead of a question.
+    /// The card its `Stop` requested, whose Quiz the turn has instead of its own.
     #[serde(default)]
     pub card: Option<String>,
+    /// What the hooks and git recorded of the turn (danielrispler/plotkeeper#115); empty until the
+    /// shell fills it in, and for an agent that reports no trees.
+    #[serde(default)]
+    pub facts: Facts,
+    /// Whether the turn's reply is long or asks Daniel something (`wants_summary`), so that its
+    /// summary is wanted for itself; a summary of a turn that only changed code is there for a lone
+    /// Quiz (danielrispler/plotkeeper#119), and is dropped when the turn gets none.
+    #[serde(default = "wanted")]
+    pub wanted: bool,
+    /// Whether the turn ended in Needs you, which keeps a Quiz from showing beside the decision.
+    #[serde(default)]
+    pub asks: bool,
+    /// Whether the offer table gives the turn no lone Quiz (danielrispler/plotkeeper#119): its
+    /// summary is written without one. Set by the shell, which reads the table.
+    #[serde(default)]
+    pub no_quiz: bool,
+}
+
+fn wanted() -> bool {
+    true
+}
+
+/// A file a turn changed, with its whole hunk from git.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FactFile {
+    #[serde(flatten)]
+    pub file: TurnFile,
+    /// Its diff between the turn's trees. Not stored: the guards read it while the writer runs.
+    #[serde(skip)]
+    pub hunk: String,
+}
+
+/// The turn's recorded facts, which its writer is given and its guards check the writer against
+/// (danielrispler/plotkeeper#115).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Facts {
+    pub files: Vec<FactFile>,
+    /// How many other files the turn's trees differ in.
+    pub external: u64,
+    /// Each check's last run, retries and commands.
+    pub checks: Vec<Check>,
 }
 
 /// What the writer reads to name a session from its first prompt.
@@ -1551,14 +1738,14 @@ pub fn wants_summary(reply: &str, asks: bool) -> bool {
 
 /// A turn that ended with no card, as the replay saw it (danielrispler/Falinks#486): its card request with no change,
 /// and its worktrees' trees, whose diffs the shell joins into the change.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Backfill {
     pub request: CardRequest,
     pub trees: Vec<Trees>,
 }
 
 /// The git trees the hook recorded for worktree `root` at a turn's start and end, which differ.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Trees {
     pub root: String,
     pub start: String,
@@ -1587,7 +1774,7 @@ pub struct Fingerprint {
 }
 
 /// A check that runs or ran, shown as a pass or fail line once it ends.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CheckLine {
     /// The command's first line.
     pub command: String,
@@ -1606,17 +1793,17 @@ pub struct CheckLine {
     /// The turn of its session it started in (`Session::turns`).
     pub turn: Option<usize>,
     /// Its call's `tool_use_id`, and its background task's id once it moved to the background.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     call: String,
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     task: Option<String>,
     /// Whether its exit code says whether it passed (`exit_code_counts`).
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     counts: bool,
 }
 
 impl CheckLine {
-    fn new(command: &str, call: &str, at: u64, typical_ms: Option<u64>) -> Self {
+    fn new(command: &str, counts: bool, call: &str, at: u64, typical_ms: Option<u64>) -> Self {
         CheckLine {
             command: command.lines().next().unwrap_or_default().into(),
             passed: None,
@@ -1627,7 +1814,7 @@ impl CheckLine {
             turn: None,
             call: call.into(),
             task: None,
-            counts: exit_code_counts(command),
+            counts,
         }
     }
 
@@ -1701,7 +1888,7 @@ pub enum Purpose {
 
 /// One tool call: its `tool_use_id`, and its tool and input, which are all `PermissionRequest`
 /// names it by. Also the subagent that made it, `None` for the session's own agent.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 struct Call {
     id: Option<String>,
     tool: String,
@@ -1712,7 +1899,7 @@ struct Call {
 
 /// Who a session that needs Daniel waits for: its oldest block's asker, a subagent or `None` for the
 /// session's own agent, and since when, in Unix milliseconds (danielrispler/Falinks#369, decision 21).
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Asker {
     pub agent: Option<String>,
     pub since: u64,
@@ -1764,68 +1951,6 @@ fn step_detail(input: &Value, cwd: &str) -> Option<String> {
 fn relative<'a>(path: &'a str, folder: &str) -> &'a str {
     let relative = path.strip_prefix(folder).and_then(|p| p.strip_prefix('/'));
     relative.unwrap_or(path)
-}
-
-/// A command that runs a check from the check list (danielrispler/Falinks#328, module 3): `cargo
-/// test|nextest|clippy|check|build`, `ci-checks`, `go test|vet`, with any flags or toolchain before
-/// the subcommand (`cargo +nightly test`). Quoted text is not run, so a PR body that names `cargo
-/// test` is no check.
-// shortcut: every session uses the Falinks list; take each project's list from the shell once
-// projects exist.
-fn is_check(command: &str) -> bool {
-    let mut quote = None;
-    let unquoted: String = command
-        .chars()
-        .map(|c| {
-            match quote {
-                None if c == '\'' || c == '"' => quote = Some(c),
-                None => return c,
-                Some(open) if c == open => quote = None,
-                Some(_) => {}
-            }
-            ' '
-        })
-        .collect();
-    let words: Vec<&str> = unquoted
-        .split(|c: char| c.is_whitespace() || ";&|()".contains(c))
-        .filter(|word| !word.is_empty())
-        .collect();
-    words
-        .iter()
-        .any(|word| word.rsplit('/').next() == Some("ci-checks"))
-        || words.iter().enumerate().any(|(i, word)| {
-            let subcommand = words[i + 1..].iter().find(|w| !w.starts_with(['-', '+']));
-            matches!(
-                (*word, subcommand.copied()),
-                (
-                    "cargo",
-                    Some("test" | "nextest" | "clippy" | "check" | "build")
-                ) | ("go", Some("test" | "vet"))
-            )
-        })
-}
-
-/// Whether a check's exit code says whether it passed (danielrispler/Falinks#328, module 4). A command exits with its
-/// last statement's code, so the check must be the last statement, and nothing in it may mask the
-/// code: `|| true` exits 0, `!` flips it, `&` runs the check in the background, and a pipe exits
-/// with its last command's code unless an earlier `set` turns on `pipefail`.
-fn exit_code_counts(command: &str) -> bool {
-    let statements = command.split([';', '\n']).map(str::trim);
-    let Some(last) = statements.clone().rfind(|s| !s.is_empty()) else {
-        return false;
-    };
-    let pipefail = statements
-        .flat_map(|s| s.split("&&"))
-        .any(|s| s.trim().starts_with("set ") && s.contains("pipefail"));
-    let background = ["&&", ">&", "&>"]
-        .iter()
-        .fold(last.to_string(), |rest, and| rest.replace(and, ""))
-        .contains('&');
-    is_check(last)
-        && !last.contains("||")
-        && !last.starts_with('!')
-        && !background
-        && (pipefail || !last.contains('|'))
 }
 
 impl Studio {
@@ -2156,8 +2281,16 @@ impl Studio {
         replay: bool,
     ) -> Vec<Output> {
         let events = self.events(line);
+        // A line's newline is not part of it; one the caller left off is counted all the same.
+        let len = line.strip_suffix('\n').unwrap_or(line).len() as u64;
+        let at = Bytes {
+            offset: self.log_end,
+            len,
+        };
+        self.log_end += len + 1;
         let mut outputs = Vec::new();
-        for event in events {
+        for mut event in events {
+            event.line = at;
             outputs.extend(self.take_event(event, &mut changes, replay));
         }
         outputs
@@ -2374,6 +2507,9 @@ impl Studio {
         if ends_early {
             let change = changes.remove(&session.agent.id);
             outputs.extend(session.end_turn(change, at));
+            if event.capabilities.turn_trees {
+                session.keep_end_trees(&event.studio_turn_end);
+            }
             if replay {
                 self.ended
                     .extend(session.backfill(&event.studio_turn_end, at));
@@ -2406,6 +2542,9 @@ impl Studio {
                     .trees
                     .entry(root.clone())
                     .or_insert_with(|| tree.clone());
+            }
+            if event.capabilities.turn_trees {
+                session.keep_start_trees(&event.studio_turn_start);
             }
         }
         // Who changed what (danielrispler/Falinks#369, story 20): a subagent's edit in a worktree whose cards are another's.
@@ -2545,6 +2684,9 @@ impl Studio {
                     let in_turn = session.in_turn();
                     session.background = *background_pending;
                     let output = session.end_turn(changes.remove(&session.agent.id), at);
+                    if in_turn && event.capabilities.turn_trees {
+                        session.keep_end_trees(&event.studio_turn_end);
+                    }
                     if replay && in_turn {
                         self.ended
                             .extend(session.backfill(&event.studio_turn_end, at));
@@ -2563,7 +2705,15 @@ impl Studio {
                         outputs.push(Output::AgyVersion);
                     }
                     let reply = event.reply().trim();
-                    if !replay && wants_summary(reply, session.needs_you()) {
+                    let wanted = wants_summary(reply, session.needs_you());
+                    // The turn's card goes first: its summary then finds the card stored.
+                    let card = match &output {
+                        Some(Output::Card(card)) => Some(card.id.clone()),
+                        _ => None,
+                    };
+                    outputs.extend(output);
+                    // A turn that changed code gets its summary for a lone Quiz (danielrispler/plotkeeper#119).
+                    if !replay && (wanted || card.is_some()) {
                         // shortcut: the transcript may lag the `Stop` by one poll, so the final reply
                         // is taken from the `Stop`; read the transcript first if earlier texts go missing.
                         let mut turn = session.transcript.clone();
@@ -2573,7 +2723,6 @@ impl Studio {
                             turn.responses.push(reply.into());
                         }
                         turn.ended = true;
-                        turn.summary = None;
                         let daniels = session.prompts.iter().rfind(|p| p.sender.is_daniels());
                         outputs.push(Output::Summary(SummaryRequest {
                             session_id: session.agent.id.clone(),
@@ -2581,10 +2730,11 @@ impl Studio {
                             prompt: daniels.map(|p| p.text.clone()).unwrap_or_default(),
                             intentions: turn.intentions(),
                             responses: turn.responses,
-                            card: match &output {
-                                Some(Output::Card(card)) => Some(card.id.clone()),
-                                _ => None,
-                            },
+                            card: card.clone(),
+                            facts: Facts::default(),
+                            wanted,
+                            asks: session.needs_you(),
+                            no_quiz: false,
                         }));
                     }
                     if let Some(prompt) = session.name_after.take()
@@ -2599,7 +2749,7 @@ impl Studio {
                     let mut lines = event.reply().lines().map(str::trim);
                     let stopped = Stopped {
                         card: card_id(&event.session_id, at),
-                        requested: matches!(output, Some(Output::Card(_))),
+                        requested: card.is_some(),
                         message: lines.find(|line| !line.is_empty()).map(Into::into),
                     };
                     if let Some(turn) = session.turns.last_mut().filter(|_| in_turn) {
@@ -2608,7 +2758,6 @@ impl Studio {
                         turn.reply = event.reply().trim().into();
                     }
                     session.stopped = Some(stopped);
-                    outputs.extend(output);
                 }
                 Happened::SessionEnd => {
                     session.unblock();
@@ -2634,6 +2783,8 @@ impl Studio {
                     session.turn_ended |= event.started_from() != Some(Start::Compact);
                 }
                 Happened::ToolStart { tool, .. } => {
+                    let turn = session.ledger_turn(&event.agent_id);
+                    session.ledger.start(&event, tool, turn);
                     if own {
                         session.returned = None;
                         let step = Step::new(&tool.name, &tool.input, &event.cwd);
@@ -2642,7 +2793,13 @@ impl Studio {
                         // A check's line runs from its start (danielrispler/Falinks#461, decision 13).
                         if let Some(start) = &start {
                             let call = event.call_id();
-                            let mut line = CheckLine::new(&start.command, call, at, start.typical);
+                            let mut line = CheckLine::new(
+                                &start.command,
+                                start.counts,
+                                call,
+                                at,
+                                start.typical,
+                            );
                             line.card = check_card.take();
                             line.turn = session.current_turn();
                             session.checks.push(line);
@@ -2743,6 +2900,19 @@ impl Studio {
                     session.carded.insert(call_id.clone());
                 }
                 Happened::ToolEnd { tool, failed, .. } => {
+                    let turn = session.ledger_turn(&event.agent_id);
+                    session.ledger.end(&event, tool, turn, *failed);
+                    if let Some(turn) = turn.filter(|_| tool.kind == ToolKind::Command) {
+                        let list = self.check_lists.of(&session.cwd);
+                        if tool
+                            .command
+                            .as_deref()
+                            .is_some_and(|c| matched(list, c).is_some())
+                        {
+                            session.turns[turn].checks =
+                                checks::of_turn(&session.ledger, turn, list);
+                        }
+                    }
                     session.running.retain(|c| c.id != id);
                     let failed = *failed;
                     // A plan or a permission that still waited on Daniel was decided in the terminal:
@@ -2810,7 +2980,8 @@ impl Studio {
                     // A check gets its line whether it passed or failed; one that did not run loses
                     // the line its start gave it. A child's checks are its own, so they add no line.
                     let command = tool.command.as_deref().unwrap_or_default();
-                    if own && tool.kind == ToolKind::Command && is_check(command) {
+                    let list = self.check_lists.of(&session.cwd);
+                    if own && tool.kind == ToolKind::Command && matched(list, command).is_some() {
                         let index = session
                             .checks
                             .iter()
@@ -2824,8 +2995,13 @@ impl Studio {
                             // The hooks are async, so its result can land before its start.
                             None => {
                                 let start = at.saturating_sub(event.took().unwrap_or_default());
-                                let mut line =
-                                    CheckLine::new(command, event.call_id(), start, typical);
+                                let mut line = CheckLine::new(
+                                    command,
+                                    exit_code_counts(list, command),
+                                    event.call_id(),
+                                    start,
+                                    typical,
+                                );
                                 line.turn = session.current_turn();
                                 session.checks.push(line);
                                 Some(session.checks.len() - 1)
@@ -2943,6 +3119,183 @@ impl Studio {
         ended
             .filter(|b| cards.iter().all(|c| c.id != b.request.id))
             .collect()
+    }
+
+    /// The trees the hook recorded of worktree `root` for turn `turn` of `session`: its start, and its end once the
+    /// turn ended (danielrispler/plotkeeper#114).
+    pub fn turn_trees(
+        &self,
+        session: &str,
+        turn: usize,
+        root: &str,
+    ) -> Option<(String, Option<String>)> {
+        self.session(session)?
+            .turns
+            .get(turn)?
+            .trees
+            .get(root)
+            .cloned()
+    }
+
+    /// The end tree of each worktree of the turn that `request`'s card belongs to, by root: the latest turn started
+    /// by the card's time, and only the worktrees it has ended in (danielrispler/plotkeeper#121).
+    pub fn card_ends(&self, request: &CardRequest) -> BTreeMap<String, String> {
+        let at = card_time(&request.id);
+        let turns = self.session(&request.session_id).map(|s| s.turns.iter());
+        let turn = turns.and_then(|mut turns| turns.rfind(|t| t.started_at <= at));
+        let trees = turn.into_iter().flat_map(|t| t.trees.iter());
+        let ends = trees.filter_map(|(root, (_, end))| Some((root.clone(), end.clone()?)));
+        ends.collect()
+    }
+
+    /// The turns whose files the shell should diff now, newest first, at most `limit`
+    /// (danielrispler/plotkeeper#111): a running turn each 5 seconds, its end tree taken on demand,
+    /// and an ended one of the last 7 days once, from the trees the hook recorded.
+    pub fn turn_diffs(&mut self, now: u64, limit: usize) -> Vec<TurnDiff> {
+        let mut asks = Vec::new();
+        for session in self.sessions.values_mut() {
+            if !session.capabilities.turn_trees {
+                continue;
+            }
+            for (index, turn) in session.turns.iter_mut().enumerate() {
+                let ended = turn.ended_at.is_some();
+                // A turn that never ended (its session was killed) ages from its start.
+                let recent = turn.ended_at.unwrap_or(turn.started_at) + turn_files::SINCE_MS >= now;
+                let due = match turn.files_asked {
+                    None => true,
+                    Some((_, true)) => false,
+                    // The worktree only changes through the agent's own events, so a turn still open is asked again only
+                    // once its session has had one since the last ask: a killed session's turn keeps its last result.
+                    Some((at, false)) => {
+                        now.saturating_sub(at) >= turn_files::RUNNING_REFRESH_MS
+                            && (ended || session.agent.last_event_at >= at)
+                    }
+                };
+                if !recent || !due || turn.trees.is_empty() {
+                    continue;
+                }
+                let trees: Vec<TurnTrees> = turn
+                    .trees
+                    .iter()
+                    // An ended turn's worktree with no end tree has nothing to compare.
+                    .filter(|(_, (_, end))| !ended || end.is_some())
+                    .map(|(root, (start, end))| TurnTrees {
+                        root: root.clone(),
+                        start: start.clone(),
+                        end: end.clone().filter(|_| ended),
+                    })
+                    .collect();
+                if trees.is_empty() {
+                    turn.files_asked = Some((now, ended));
+                } else {
+                    let session_id = session.agent.id.clone();
+                    let ask = TurnDiff {
+                        session_id,
+                        turn: index,
+                        ended,
+                        trees,
+                    };
+                    asks.push((turn.ended_at.unwrap_or(now), ask));
+                }
+            }
+        }
+        asks.sort_by_key(|(at, _)| std::cmp::Reverse(*at));
+        asks.truncate(limit);
+        // Only the asks that survive the cut are asked, so the rest are due again in the next pass.
+        for (_, ask) in &asks {
+            let turn = self
+                .sessions
+                .get_mut(&ask.session_id)
+                .and_then(|s| s.turns.get_mut(ask.turn));
+            if let Some(turn) = turn {
+                turn.files_asked = Some((now, ask.ended));
+            }
+        }
+        asks.into_iter().map(|(_, ask)| ask).collect()
+    }
+
+    /// The diff the shell is asked for to write the summary of the turn named `id`
+    /// (`SummaryRequest::id`): its trees as they ended. `None` for a turn with no trees.
+    pub fn summary_ask(&self, id: &str) -> Option<TurnDiff> {
+        let session = self
+            .sessions
+            .values()
+            .find(|s| s.turns.iter().any(|t| t.id.as_deref() == Some(id)))?;
+        let (index, turn) = session
+            .turns
+            .iter()
+            .enumerate()
+            .find(|(_, t)| t.id.as_deref() == Some(id))?;
+        let trees: Vec<TurnTrees> = (turn.trees.iter())
+            .filter_map(|(root, (start, end))| {
+                let end = end.clone()?;
+                Some(TurnTrees {
+                    root: root.clone(),
+                    start: start.clone(),
+                    end: Some(end),
+                })
+            })
+            .collect();
+        (session.capabilities.turn_trees && !trees.is_empty()).then(|| TurnDiff {
+            session_id: session.agent.id.clone(),
+            turn: index,
+            ended: true,
+            trees,
+        })
+    }
+
+    /// Whether the turn named `id` ran a merge, by `git merge` or `gh pr merge`, which the offer of a
+    /// Quiz leaves out (danielrispler/plotkeeper#119).
+    pub fn turn_merged(&self, id: &str) -> bool {
+        let found = self.sessions.values().find_map(|s| {
+            let at = s.turns.iter().position(|t| t.id.as_deref() == Some(id))?;
+            Some(
+                s.ledger
+                    .turn(at)
+                    .filter_map(|r| r.command.as_deref())
+                    .any(merges),
+            )
+        });
+        found.unwrap_or(false)
+    }
+
+    /// The facts of the turn `ask` names, from the numstat the shell found (`None` when git could
+    /// not diff it): its files without their hunks, which the shell adds, and its checks.
+    pub fn summary_facts(&self, ask: &TurnDiff, diffs: Option<Vec<RootDiff>>) -> Facts {
+        let Some(session) = self.sessions.get(&ask.session_id) else {
+            return Facts::default();
+        };
+        let Some(turn) = session.turns.get(ask.turn) else {
+            return Facts::default();
+        };
+        let found = diffs.map(|diffs| TurnFiles::of(diffs, &session.edited(ask.turn)));
+        let found = found.unwrap_or_default();
+        Facts {
+            files: found
+                .files
+                .into_iter()
+                .map(|file| FactFile {
+                    file,
+                    hunk: String::new(),
+                })
+                .collect(),
+            external: found.external,
+            checks: turn.checks.clone(),
+        }
+    }
+
+    /// Takes what the shell found for `ask`: the numstat of each of its worktrees, `None` when git
+    /// could not diff them. The turn's files are the diff's files that its ledger says its agent or
+    /// its workers edited; the others are counted as external.
+    pub fn set_turn_files(&mut self, ask: &TurnDiff, diffs: Option<Vec<RootDiff>>) {
+        let Some(session) = self.sessions.get_mut(&ask.session_id) else {
+            return;
+        };
+        let edited = session.edited(ask.turn);
+        if let Some(turn) = session.turns.get_mut(ask.turn) {
+            turn.files = diffs.map(|diffs| TurnFiles::of(diffs, &edited));
+        }
+        session.update_unseen();
     }
 
     /// Applies, after the replay, what the live app learned before a restart (danielrispler/Falinks#434, decisions 37 and
@@ -3320,6 +3673,19 @@ impl Studio {
         &self.agy.drift
     }
 
+    /// The check lists of the settings, by project folder (`checks` in `settings.json`); a project
+    /// with none uses the default list. Every turn's checks are read again against them.
+    pub fn set_check_lists(&mut self, projects: impl IntoIterator<Item = (String, Vec<String>)>) {
+        self.check_lists.set(projects);
+        for session in self.sessions.values_mut() {
+            let list = self.check_lists.of(&session.cwd);
+            for turn in 0..session.turns.len() {
+                session.turns[turn].checks = checks::of_turn(&session.ledger, turn, list);
+            }
+            session.update_unseen();
+        }
+    }
+
     /// Whether summaries are written when Daniel opens a turn (`summaries.on_open` in the settings).
     pub fn set_summaries_on_open(&mut self, on: bool) {
         self.summaries_on_open = on;
@@ -3327,22 +3693,6 @@ impl Studio {
 
     pub fn summaries_on_open(&self) -> bool {
         self.summaries_on_open
-    }
-
-    /// The summary of turn `id` of session `session_id` arrived, whose first line is `line`: its
-    /// turn-end intention switches to it once (danielrispler/Falinks#517, decision 16). Nothing changes when summaries
-    /// are written on open, or when the session has moved past that turn. Returns whether it did.
-    pub fn summarized(&mut self, session_id: &str, id: &str, line: &str) -> bool {
-        let Some(session) = self.sessions.get_mut(session_id) else {
-            return false;
-        };
-        let current = session.stopped.as_ref().is_some_and(|s| s.card == id);
-        if self.summaries_on_open || !current || session.in_turn() {
-            return false;
-        }
-        session.transcript.summary = Some(line.into());
-        session.transcript.end(true);
-        true
     }
 
     /// The whole final reply of turn `index` of session `session_id` (danielrispler/Falinks#574), which the rail shows
@@ -3413,6 +3763,13 @@ impl Studio {
     pub fn forget_gone_tasks(&mut self) {
         let kept: Vec<String> = self.task_queries().into_iter().map(|q| q.path).collect();
         self.tasks.retain(|path, _| kept.contains(path));
+    }
+
+    /// What the shell last found about the task session `id` works in, `None` in the main checkout
+    /// or before the first lookup.
+    pub fn task_facts(&self, id: &str) -> Option<TaskFacts> {
+        let path = task_path(&self.sessions.get(id)?.cwd)?;
+        self.tasks.get(&path).copied()
     }
 
     /// The task folder session `id` works in, `None` in the main checkout or for no such session.
@@ -3488,11 +3845,12 @@ impl Studio {
         let session = self.sessions.get(&event.session_id);
         let known = session.is_some_and(|s| s.checks.iter().any(|l| l.call == event.call_id()));
         let start = event.tool_starts() && event.agent_id.is_none();
-        (start && tool.kind == ToolKind::Command && is_check(command) && !known).then(|| {
-            CheckStart {
-                command: command.into(),
-                typical: self.typical(command),
-            }
+        let list = self.check_lists.of(session.map_or("", |s| &s.cwd));
+        let is_check = matched(list, command).is_some();
+        (start && tool.kind == ToolKind::Command && is_check && !known).then(|| CheckStart {
+            command: command.into(),
+            counts: exit_code_counts(list, command),
+            typical: self.typical(command),
         })
     }
 
@@ -3527,6 +3885,11 @@ impl Studio {
     /// (`select_terminal`) change the selection.
     pub fn select(&mut self, id: &str) {
         self.selected = Some(id.into());
+        let id = self.rows.get(id).map_or(id, String::as_str);
+        if let Some(session) = self.sessions.get_mut(id) {
+            session.seen_at_selection = session.seen;
+            session.update_unseen();
+        }
         self.viewed = None;
         self.awaiting = None;
         self.held = None;
@@ -3560,6 +3923,7 @@ impl Studio {
         let id = self.session(id)?.agent.id.clone();
         let session = self.sessions.get_mut(&id)?;
         session.seen = session.turns.len().saturating_sub(1);
+        session.seen_at_selection = session.seen;
         session.update_unseen();
         self.held = Some(id.clone());
         Some((id, session.seen))
@@ -3638,6 +4002,14 @@ impl Studio {
         }
         body
     }
+}
+
+/// Whether a shell command merges: `git merge` or `gh pr merge`, alone or in a chain.
+fn merges(command: &str) -> bool {
+    let parts = command.split(['&', ';', '|', '\n']);
+    parts
+        .map(str::trim)
+        .any(|c| c.starts_with("git merge") || c.starts_with("gh pr merge"))
 }
 
 /// The id of `owner`'s card written at `at`, a worker's or else a session's (`CardRequest::id`).

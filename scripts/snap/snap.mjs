@@ -8,9 +8,14 @@ import { tmpdir } from "node:os";
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { fixtures } from "./fixtures.mjs";
-import { snapPage } from "./page.mjs";
+import { consoleLines, failed, snapPage } from "./page.mjs";
 
 const [name, out] = process.argv.slice(2);
+// Optional, from the environment: SNAP_SIZE=1728x1117 is the window's size (default 1900x900), and SNAP_BODY=rail-open,list-open
+// are classes put on <body>, such as the rail's overlay open. A fixture's `snapScript` runs once the UI has drawn: what it logs
+// is printed, and a line that starts `snap:fail` makes this exit non-zero.
+const [width, height] = (process.env.SNAP_SIZE ?? "1900x900").split("x");
+const bodyClasses = (process.env.SNAP_BODY ?? "").split(",").filter(Boolean);
 if (!fixtures[name] || !out) {
   console.error(`usage: npm run snap -- <${Object.keys(fixtures).join("|")}> <out.png>`);
   process.exit(2);
@@ -22,7 +27,7 @@ const chrome = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/M
 const site = mkdtempSync(join(tmpdir(), "snap-site-"));
 const profile = mkdtempSync(join(tmpdir(), "snap-chrome-"));
 cpSync(dist, site, { recursive: true });
-writeFileSync(join(site, "index.html"), snapPage(readFileSync(join(dist, "index.html"), "utf8"), fixtures[name]()));
+writeFileSync(join(site, "index.html"), snapPage(readFileSync(join(dist, "index.html"), "utf8"), fixtures[name](), { bodyClasses }));
 
 const types = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css" };
 const server = createServer((req, res) => {
@@ -38,7 +43,7 @@ const server = createServer((req, res) => {
 });
 await new Promise((done) => server.listen(0, "127.0.0.1", done));
 const chromeArgs = [
-  "--headless=new", "--enable-logging=stderr", "--v=0", "--disable-gpu", `--user-data-dir=${profile}`, "--window-size=1900,900",
+  "--headless=new", "--enable-logging=stderr", "--v=0", "--disable-gpu", `--user-data-dir=${profile}`, `--window-size=${width},${height}`,
   "--virtual-time-budget=5000", `--screenshot=${resolve(out)}`, `http://127.0.0.1:${server.address().port}/index.html`,
 ];
 const run = await new Promise((done) => {
@@ -50,7 +55,8 @@ const run = await new Promise((done) => {
 server.close();
 rmSync(site, { recursive: true, force: true });
 rmSync(profile, { recursive: true, force: true });
-const log = (run.stderr ?? "").split("\n").filter((line) => /CONSOLE/.test(line));
+const log = consoleLines(run.stderr ?? "");
 if (log.length) console.log(log.join("\n"));
 if (run.status !== 0) process.exit(run.status ?? 1);
+if (failed(log)) process.exit(1);
 console.log(`wrote ${out}`);

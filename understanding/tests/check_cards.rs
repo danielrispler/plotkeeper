@@ -19,26 +19,17 @@ const DIFF: &str = "--- a/ui/style.css\n+++ b/ui/style.css\n@@ -1 +1 @@\n-a\n+b\
 struct Recording(RefCell<Vec<CardRequest>>);
 
 impl CardWriter for Recording {
-    fn reply(
-        &self,
-        request: &CardRequest,
-        earlier: &[String],
-        brief: &str,
-    ) -> Result<String, String> {
+    fn reply(&self, request: &CardRequest, earlier: &[String]) -> Result<String, String> {
         self.0.borrow_mut().push(request.clone());
-        FakeWriter.reply(request, earlier, brief)
+        FakeWriter.reply(request, earlier)
     }
 
     fn more(&self, request: &CardRequest, card: &Card) -> Result<String, String> {
         FakeWriter.more(request, card)
     }
 
-    fn rewrite(&self, p: &[&str], s: &[String], d: &str) -> Result<String, String> {
-        FakeWriter.rewrite(p, s, d)
-    }
-
-    fn update(&self, brief: &str, workers: &str) -> Result<String, String> {
-        FakeWriter.update(brief, workers)
+    fn goal(&self, prompts: &[&str]) -> Result<String, String> {
+        FakeWriter.goal(prompts)
     }
 }
 
@@ -116,8 +107,8 @@ fn the_writers_prompt_holds_the_checks_command_and_the_change() {
     let folder = tempfile::tempdir().unwrap();
     let writer = ClaudeWriter::new("/opt/homebrew/bin/claude".into(), folder.path().into());
 
-    let (_, prompt) = writer.command(&check_request("a@1"), &[], "");
-    let (_, plain) = writer.command(&edit_request(), &[], "");
+    let (_, prompt) = writer.command(&check_request("a@1"), &[]);
+    let (_, plain) = writer.command(&edit_request(), &[]);
 
     assert!(
         prompt.contains(&format!("The check's command:\n{COMMAND}\n")),
@@ -144,9 +135,7 @@ fn store(path: &std::path::Path) -> CardStore {
         ..edit_request()
     };
     for request in [check_request("a@1"), check_request("a@2"), edit] {
-        let card = write_card(&FakeWriter, &request, &[], "", |l| panic!("{l}"))
-            .unwrap()
-            .0;
+        let card = write_card(&FakeWriter, &request, &[], |l| panic!("{l}")).unwrap();
         store.add(request, card, 1_793_264_000_000).unwrap();
     }
     store

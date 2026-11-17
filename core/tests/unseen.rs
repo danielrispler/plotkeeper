@@ -227,3 +227,148 @@ fn sounds_off_plays_none() {
     assert_eq!(needs_you(Some(FIRST), true, false).sound, None);
     assert_eq!(needs_you(None, false, false).sound, None);
 }
+
+// Seam 1 for danielrispler/plotkeeper#124: what happened since Daniel looked, counted from the turns after the
+// last one he saw, from hook events replayed through the core.
+mod since {
+    use serde_json::{Value, json};
+    use studio_core::{Numstat, RootDiff, Studio};
+
+    const ID: &str = "5b1c7e30-9d2a-4f8b-8c63-1e0a7d4b9f52";
+    const ROOT: &str = "/w/repo";
+    const AT: u64 = 1_800_000_000_000;
+
+    fn line(name: &str, turn: u32, ms: u64, extra: Value) -> String {
+        let mut event = json!({
+            "session_id": ID, "hook_event_name": name, "cwd": ROOT,
+            "prompt_id": format!("p{turn}"), "studio_received_ms": AT + ms,
+        });
+        event
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        event.to_string()
+    }
+
+    /// Turn `turn`: a prompt, an edit of `file`, `npm run check` with `exit_code`, and a `Stop`.
+    fn turn(turn: u32, file: &str, exit_code: i32) -> Vec<String> {
+        let base = u64::from(turn) * 100_000;
+        let tree = |end: bool| json!({ ROOT: format!("{}{turn}", if end { "e" } else { "s" }) });
+        let call = |id: &str, tool: &str, input: Value| json!({ "tool_name": tool, "tool_input": input, "tool_use_id": id });
+        let mut check = call(
+            &format!("c{turn}"),
+            "Bash",
+            json!({ "command": "npm run check" }),
+        );
+        check["tool_response"] = json!({ "stdout": "done", "stderr": "", "exit_code": exit_code });
+        let mut edit = call(
+            &format!("e{turn}"),
+            "Edit",
+            json!({ "file_path": format!("{ROOT}/{file}") }),
+        );
+        edit["tool_response"] = json!({});
+        let mut check_failed = check.clone();
+        check_failed["error"] = format!("Exit code {exit_code}").into();
+        check_failed
+            .as_object_mut()
+            .unwrap()
+            .remove("tool_response");
+        vec![
+            line(
+                "UserPromptSubmit",
+                turn,
+                base,
+                json!({ "prompt": "go", "studio_turn_start": tree(false) }),
+            ),
+            line("PostToolUse", turn, base + 1_000, edit),
+            line(
+                "PreToolUse",
+                turn,
+                base + 2_000,
+                call(
+                    &format!("c{turn}"),
+                    "Bash",
+                    json!({ "command": "npm run check" }),
+                ),
+            ),
+            if exit_code == 0 {
+                line("PostToolUse", turn, base + 3_000, check)
+            } else {
+                line("PostToolUseFailure", turn, base + 3_000, check_failed)
+            },
+            line(
+                "Stop",
+                turn,
+                base + 9_000,
+                json!({ "studio_turn_end": tree(true) }),
+            ),
+        ]
+    }
+
+    fn stat(path: &str) -> Numstat {
+        Numstat {
+            path: path.into(),
+            from: None,
+            added: Some(2),
+            removed: Some(1),
+        }
+    }
+
+    /// Three turns replayed, their trees diffed: a.rs, then b.rs, then a.rs again with a failing check.
+    fn replayed() -> Studio {
+        let lines: Vec<String> =
+            [turn(1, "a.rs", 0), turn(2, "b.rs", 0), turn(3, "a.rs", 1)].concat();
+        let mut studio = Studio::replayed(&lines);
+        for ask in studio.turn_diffs(AT + 1_000_000, 10) {
+            let path = ["a.rs", "b.rs", "a.rs"][ask.turn];
+            studio.set_turn_files(
+                &ask,
+                Some(vec![RootDiff {
+                    root: ROOT.into(),
+                    files: vec![stat(path)],
+                }]),
+            );
+        }
+        studio
+    }
+
+    #[test]
+    fn the_turns_after_the_seen_ones_are_counted_with_their_files_and_check_results() {
+        let studio = replayed();
+        let session = studio.session(ID).unwrap();
+        assert_eq!(session.seen(), 0);
+        let all = session.since();
+        assert_eq!((all.turns, all.files), (3, 2));
+        assert_eq!((all.passed, all.failed, all.ran), (2, 1, 0));
+    }
+
+    #[test]
+    fn what_he_has_seen_is_left_out() {
+        let mut studio = replayed();
+        studio.select(ID);
+        assert_eq!(studio.see_selected(true), Some((ID.into(), 3)));
+        // Looking marked the turns seen, but "since you looked" counts from before this selection.
+        assert_eq!(studio.session(ID).unwrap().since().turns, 3);
+        // Selected again, nothing is new.
+        studio.select(ID);
+        assert_eq!(studio.session(ID).unwrap().since().turns, 0);
+        // Marked unseen again, the last turn is what he has not seen.
+        assert_eq!(studio.mark_unseen(ID), Some((ID.into(), 2)));
+        let since = studio.session(ID).unwrap().since();
+        assert_eq!(
+            (since.turns, since.files, since.passed, since.failed),
+            (1, 1, 0, 1)
+        );
+    }
+
+    #[test]
+    fn the_seen_count_reaches_the_ui_state() {
+        let mut studio = replayed();
+        studio.select(ID);
+        studio.see_selected(true);
+        let state = serde_json::to_value(studio.session(ID).unwrap()).unwrap();
+        assert_eq!(state["seen"], 3);
+        // The banner reads what happened since before the selection, not after the poll saw it.
+        assert_eq!(state["since_looked"]["turns"], 3);
+    }
+}

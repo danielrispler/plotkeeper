@@ -6,11 +6,16 @@ import { code, element, prose, invoke, pressable, text } from "./dom.js";
 import { refreshCards } from "./selection.js";
 import { studio } from "./state.js";
 import { showDecisions } from "./decisions.js";
-import { drawFeed, forgetMissingSummaries } from "./story.js";
-import type { CardRequest, CheckResult, Guess, Level, Quiz, Rating, Reason, SessionCards, StoredCard } from "./types.js";
+import { fileRow } from "./evidence.js";
+import { drawFeed, forgetMissingSummaries, openCitation } from "./story.js";
+import { confidenceRow, pickedHere, trialStage, whyInput, whyWaiting } from "./quiz.js";
+import type { CardRequest, CheckResult, Guess, Level, Quiz, Rating, Reason, SessionCards, StoredCard, Tap, TurnFile } from "./types.js";
+
+// The turn a card is drawn in: its file chips open the file's hunk between the turn's trees, as its evidence line's rows do.
+export type CardTurn = { session: string; index: number; files: TurnFile[]; ended: boolean };
 
 // Records Daniel's tap, his flag on the key or his rating, and draws the cards again at once.
-async function record(command: "guess" | "key_wrong" | "rate", args: Record<string, unknown>) {
+async function record(command: "guess" | "key_wrong" | "rate" | "quiz_tap", args: Record<string, unknown>) {
   await invoke(command, args);
   await refreshCards();
 }
@@ -30,10 +35,12 @@ export function checkVerdict(result: CheckResult | null, guess: Guess | null): s
 // can be flagged wrong. Any other card is past its quiz at the tap, which the writer's key grades. On
 // a check's card the check's result is the key (danielrispler/Falinks#476): the quiz closes when the check ends, the
 // reasons and the verdict wait for it, and its key cannot be wrong.
-export function quizState({ request, guess, check_result }: StoredCard) {
+export function quizState({ request, guess, check_result, taps }: StoredCard) {
   if (request.check === null) {
+    // "Show the rest anyway" (danielrispler/plotkeeper#120) answers it without a pick, so it has no verdict.
+    const open = guess === null && !taps?.some((tap) => tap.kind === "skip");
     const verdict = guess && (guess.right ? "You were right." : "You were wrong.");
-    return { answered: guess !== null, reasons: guess !== null, keyNamed: true, verdict, flaggable: true };
+    return { answered: !open, reasons: !open, keyNamed: true, verdict, flaggable: true };
   }
   const ended = check_result !== null;
   return {
@@ -49,7 +56,15 @@ export function quizState({ request, guess, check_result }: StoredCard) {
 // under each option, why it is right or wrong, with the right one named; a tapped option stays
 // marked, with no colour, as colour is only for "needs you". On a check's card the check's result
 // is the key, so the reasons and the verdict wait for it.
-function quizElements({ request: { id }, guess }: StoredCard, quiz: Quiz, state: ReturnType<typeof quizState>): HTMLElement[] {
+// While the trial runs (#129), a card of "now" asks the confidence tap before the pick and the "why?" line after it, and its reveal
+// waits for the line, as a turn's Quiz does (`quizRegion`).
+const waitsForWhy = ({ request: { id, check }, guess }: StoredCard, trial: boolean) => trial && check === null && guess !== null && whyWaiting(id);
+
+function quizElements(stored: StoredCard, quiz: Quiz, shown: ReturnType<typeof quizState>, trial: boolean): HTMLElement[] {
+  const { request: { id, check }, guess } = stored;
+  const waiting = waitsForWhy(stored, trial);
+  const state = waiting ? { ...shown, reasons: false, verdict: null } : shown;
+  const send = (tap: Tap) => void invoke("quiz_tap", { id, tap }).catch((e) => console.warn(e));
   const options = document.createElement("ol");
   options.className = "options";
   options.append(
@@ -58,6 +73,9 @@ function quizElements({ request: { id }, guess }: StoredCard, quiz: Quiz, state:
       // The tap shows at once; the cards drawn from the shell's reply then settle it (danielrispler/Falinks#570).
       const button = pressable(prose("button", option.text) as HTMLButtonElement, guess?.option === i, () => {
         button.setAttribute("aria-pressed", "true");
+        // Answered here, the card stays open to show its reveal.
+        cardOpen.add(id);
+        pickedHere(id, i);
         record("guess", { id, option: i });
       });
       button.disabled = state.answered;
@@ -73,6 +91,15 @@ function quizElements({ request: { id }, guess }: StoredCard, quiz: Quiz, state:
   );
   const title = prose("p", quiz.text);
   title.className = "quiz";
+  if (!state.answered && check === null) {
+    const skip = pressable(prose("button", "Show the rest anyway"), false, () => {
+      cardOpen.add(id);
+      return record("quiz_tap", { id, tap: { kind: "skip" } });
+    });
+    skip.classList.add("quiz-skip");
+    return [title, ...(trial && check === null ? [confidenceRow(id, send, drawFeed)] : []), options, skip];
+  }
+  if (waiting) return [title, options, whyInput(id, send, drawFeed)];
   if (!state.verdict) return [title, options];
   const verdict = prose("p", state.verdict);
   verdict.className = "verdict";
@@ -84,24 +111,25 @@ function quizElements({ request: { id }, guess }: StoredCard, quiz: Quiz, state:
 // structural, why the change matters, what was not checked, his flag on the key, "explain more" and
 // his rating. A card with no quiz shows the explanation at once. The shell keeps each tap in the card
 // store, so after a restart a guessed card is drawn guessed and rated.
-function cardElement(stored: StoredCard): HTMLElement {
-  const { request, card, key_wrong, more, rating } = stored;
+function cardElement(stored: StoredCard, turn: CardTurn | null, trial: boolean): HTMLElement {
+  const { request, card, key_wrong, more, rating, taps } = stored;
   const node = document.createElement("article");
   node.className = "card";
   const quiz = card.quiz;
   const state = quizState(stored);
-  if (quiz) node.append(...quizElements(stored, quiz, state));
+  if (quiz) node.append(...quizElements(stored, quiz, state, trial));
   // Its turn holds the one "ask about this" (danielrispler/Falinks#574).
-  if (quiz && !state.answered) return node;
+  if (quiz && (!state.answered || waitsForWhy(stored, trial))) return node;
   const explanation = prose("p", card.explanation);
   explanation.className = "explanation";
-  const paths = document.createElement("p");
-  paths.className = "paths";
-  paths.append(...card.paths.map(code));
-  const source = document.createElement("pre");
-  source.dir = "ltr";
-  source.textContent = card.code;
-  node.append(explanation, paths, ...changedBy(request), source);
+  node.append(explanation, fileChips(card.paths, turn), ...changedBy(request));
+  // The code is pulled from git by path and line range; a card with none shows no code.
+  if (card.code) {
+    const source = document.createElement("pre");
+    source.dir = "ltr";
+    source.textContent = card.code;
+    node.append(source);
+  }
   if (card.architecture) node.append(prose("h2", "Architecture"), prose("p", card.architecture));
   node.append(
     prose("h2", "Why it matters"),
@@ -110,9 +138,28 @@ function cardElement(stored: StoredCard): HTMLElement {
     prose("p", card.not_checked),
   );
   const flaggable = quiz && state.flaggable;
-  if (flaggable) node.append(keyWrongButton(request.id, key_wrong));
+  if (flaggable) node.append(understoodButton(request.id, taps), keyWrongButton(request.id, key_wrong));
   node.append(moreElement(request.id, more), ratingElement(request.id, rating, flaggable ? key_wrong : null));
   return node;
+}
+
+// The files the card names. One that is among its turn's files is a chip that opens the same hunk as the file's row in the
+// evidence line, in place; any other is plain.
+function fileChips(paths: string[], turn: CardTurn | null): HTMLElement {
+  const list = document.createElement("ul");
+  list.className = "paths card-files";
+  list.append(
+    ...paths.map((path) => {
+      const file = turn?.files.find((f) => f.path === path);
+      if (!turn || !file) {
+        const item = document.createElement("li");
+        item.append(code(path));
+        return item;
+      }
+      return fileRow(turn.session, turn.index, { kind: "file", label: path, file }, "card ", turn.ended);
+    }),
+  );
+  return list;
 }
 
 // Who changed what: the files another subagent, such as a helper, edited in the card's worktree, one
@@ -131,10 +178,19 @@ function changedBy({ session_id, changed_by }: CardRequest): HTMLElement[] {
 // "The key is wrong": one record, flagged from the quiz or from the rating, and never undone.
 function keyWrongButton(id: string, keyWrong: boolean): HTMLElement {
   const label = keyWrong ? "You flagged the key as wrong" : "The key is wrong";
-  const flag = pressable(prose("button", label) as HTMLButtonElement, keyWrong, () => record("key_wrong", { id }));
+  // The store sets the one flag and keeps the tap with its time (danielrispler/plotkeeper#120).
+  const flag = pressable(prose("button", label) as HTMLButtonElement, keyWrong, () => record("quiz_tap", { id, tap: { kind: "key_wrong" } }));
   flag.classList.add("key-wrong");
   flag.disabled = keyWrong;
   return flag;
+}
+
+// "I get why": an optional chip under a revealed answer, kept once with its time.
+function understoodButton(id: string, taps: StoredCard["taps"]): HTMLElement {
+  const done = taps?.some((tap) => tap.kind === "understood") ?? false;
+  const chip = pressable(prose("button", "I get why") as HTMLButtonElement, done, () => record("quiz_tap", { id, tap: { kind: "understood" } }));
+  chip.disabled = done;
+  return chip;
 }
 
 // The cards whose longer explanation Daniel opened, and those whose writer call is running; both
@@ -163,6 +219,7 @@ function moreElement(id: string, more: string | null): HTMLElement {
 // gave none, so the next tap asks again.
 async function explainMore(id: string) {
   asking.add(id);
+  invoke("quiz_tap", { id, tap: { kind: "explain_more" } }).catch((e) => console.warn(e));
   const more = await invoke<string | null>("explain_more", { id });
   asking.delete(id);
   if (more === null) moreOpen.delete(id);
@@ -227,26 +284,65 @@ export function markShown() {
 // only when its record changed, such as after a tap, and is moved whole to the older group.
 const drawn = new Map<string, { record: string; node: HTMLElement }>();
 
-// The session's brief, folded under the feed, one paragraph per line.
-function showBrief(brief: string | null) {
-  element("brief").replaceChildren(...(brief ?? "").split("\n").map((line) => prose("p", line)));
-  element("brief-fold").hidden = brief === null;
+// The Brief's slots in order (danielrispler/plotkeeper#122): Goal, Decisions, Open. A brief stored as prose shows as it is,
+// with no title, until the session has a Goal.
+export type BriefSlot = { title: string; lines: string[]; cites?: string[] };
+export function briefSlots(cards: SessionCards): BriefSlot[] {
+  const slots: BriefSlot[] = [];
+  if (cards.goal) slots.push({ title: "Goal", lines: [cards.goal] });
+  else if (cards.brief) slots.push({ title: "", lines: cards.brief.split("\n") });
+  if (cards.answers.length) slots.push({ title: "Decisions", lines: cards.answers.map((a) => `${a.question} ${a.reply}`) });
+  if (cards.open.length) slots.push({ title: "Open", lines: cards.open.map((item) => item.text) });
+  if (cards.design.length) slots.push({ title: "Design so far", lines: cards.design.map((line) => line.text), cites: cards.design.map((line) => line.cite) });
+  return slots;
+}
+
+// A design line's citation: a button that opens the turn or card it came from in the rail.
+function citation(id: string): HTMLElement {
+  const button = pressable(text("button", "↗", "cite") as HTMLButtonElement, false, () => openCitation(id));
+  button.title = "Open the turn or card it came from";
+  return button;
+}
+
+function slotTitle(title: string): HTMLElement {
+  const node = prose("p", title);
+  node.className = "slot-title";
+  return node;
+}
+
+// The session's brief: each slot with its title and one paragraph per line.
+export const briefNodes = (cards: SessionCards): HTMLElement[] =>
+  briefSlots(cards).flatMap(({ title, lines, cites }) => [
+    ...(title ? [slotTitle(title)] : []),
+    ...lines.map((line, i) => {
+      const node = prose("p", line);
+      const cite = cites?.[i];
+      if (cite) node.append(" ", citation(cite));
+      return node;
+    }),
+  ]);
+
+// The brief, folded under the feed.
+function showBrief(cards: SessionCards) {
+  const nodes = briefNodes(cards);
+  element("brief").replaceChildren(...nodes);
+  element("brief-fold").hidden = nodes.length === 0;
 }
 
 // Card `stored`'s node, drawn again only when its record changed.
-export function cardNode(stored: StoredCard): HTMLElement {
+export function cardNode(stored: StoredCard, turn: CardTurn | null = null, trial = false): HTMLElement {
   const id = stored.request.id;
-  const record = JSON.stringify(stored);
+  const record = JSON.stringify([stored, turn, trial ? trialStage(id) : null]);
   if (drawn.get(id)?.record !== record) {
     if (!drawn.has(id) && stored.guess === null) unshown.add(id);
-    drawn.set(id, { record, node: cardElement(stored) });
+    drawn.set(id, { record, node: cardElement(stored, turn, trial) });
   }
   return drawn.get(id)!.node;
 }
 
 export function showCards(cards: SessionCards) {
   studio.cards = cards;
-  showBrief(cards.brief);
+  showBrief(cards);
   showDecisions(cards.decisions);
   const ids = new Set([...cards.recent, ...cards.older].map(({ request }) => request.id));
   for (const id of drawn.keys()) {
@@ -259,3 +355,31 @@ export function showCards(cards: SessionCards) {
   drawFeed();
   markShown();
 }
+
+// Whether the card's quiz waits for Daniel's answer.
+export const quizOpen = (stored: StoredCard) => stored.card.quiz !== null && !quizState(stored).answered;
+
+// The cards of a turn whose Quiz may not show beside a decision (`quizAllowed`), without their Quiz: the core drops it only when the
+// card is written, so a Quiz written before the `ask` line or the Needs you state stays in the store.
+export const cardsFor = (cards: StoredCard[], allowed: boolean): StoredCard[] =>
+  allowed ? cards : cards.map((stored) => (stored.card.quiz === null ? stored : { ...stored, card: { ...stored.card, quiz: null } }));
+
+// A card in its turn (danielrispler/plotkeeper#117): an answered card is one line, its quiz, which opens to the card.
+export function cardLine(stored: StoredCard, turn: CardTurn | null = null, trial = false): HTMLElement {
+  const quiz = stored.card.quiz;
+  if (!quiz || !quizState(stored).answered) return cardNode(stored, turn, trial);
+  const id = stored.request.id;
+  const node = document.createElement("details");
+  node.className = "fold answered-card";
+  node.open = cardOpen.has(id);
+  node.append(prose("summary", quiz.text), cardNode(stored, turn, trial));
+  node.addEventListener("toggle", () => {
+    if (node.open) cardOpen.add(id);
+    else cardOpen.delete(id);
+  });
+  return node;
+}
+const cardOpen = new Set<string>();
+
+// Opens card `id`'s line, for a citation of it (#123).
+export const openCard = (id: string) => void cardOpen.add(id);
