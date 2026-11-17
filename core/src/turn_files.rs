@@ -29,7 +29,8 @@ pub struct TurnDiff {
     pub session_id: String,
     /// The turn's index in `Session::turns`.
     pub turn: usize,
-    /// Whether the turn has ended, so its trees are final and worth anchoring.
+    /// Whether its trees are final and worth anchoring: the turn has ended, and no worker it
+    /// spawned runs on in one of its worktrees.
     pub ended: bool,
     pub trees: Vec<TurnTrees>,
 }
@@ -75,18 +76,22 @@ pub struct TurnFiles {
 }
 
 impl TurnFiles {
-    /// The files of `diffs` whose absolute path is in `touched`, and the count of the others.
-    pub(crate) fn of(diffs: Vec<RootDiff>, touched: &BTreeSet<String>) -> TurnFiles {
+    /// The files of `diffs` whose absolute path is in `ours`, and the count of the others, but
+    /// those in `theirs`, which another turn changed.
+    pub(crate) fn of(
+        diffs: Vec<RootDiff>,
+        ours: &BTreeSet<String>,
+        theirs: &BTreeSet<String>,
+    ) -> TurnFiles {
         let mut found = TurnFiles::default();
         for diff in diffs {
             let at = |path: &str| format!("{}/{path}", diff.root.trim_end_matches('/'));
             for file in diff.files {
-                let ours = touched.contains(&at(&file.path))
-                    || file
-                        .from
-                        .as_deref()
-                        .is_some_and(|from| touched.contains(&at(from)));
-                if ours {
+                let listed = |paths: &BTreeSet<String>| {
+                    paths.contains(&at(&file.path))
+                        || (file.from.as_deref()).is_some_and(|from| paths.contains(&at(from)))
+                };
+                if listed(ours) {
                     found.files.push(TurnFile {
                         root: diff.root.clone(),
                         path: file.path,
@@ -94,7 +99,7 @@ impl TurnFiles {
                         added: file.added,
                         removed: file.removed,
                     });
-                } else {
+                } else if !listed(theirs) {
                     found.external += 1;
                 }
             }

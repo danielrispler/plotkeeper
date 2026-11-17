@@ -98,6 +98,11 @@ impl Row {
         })
     }
 
+    /// When it happened: its start, else its result, as the hooks are async.
+    pub(crate) fn at(&self) -> Option<u64> {
+        self.started_at.or(self.ended_at)
+    }
+
     /// Whether it ended in failure.
     pub fn failed(&self) -> bool {
         matches!(self.outcome, Some(Outcome::Failed { .. }))
