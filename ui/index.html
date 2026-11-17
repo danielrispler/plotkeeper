@@ -29,7 +29,6 @@
       <span class="sp"></span>
       <!-- Usage: context, 5h and week (danielrispler/Falinks#480, danielrispler/Falinks#481). -->
       <span id="usage" class="usage"></span>
-      <button id="new-terminal" class="btn small" type="button">New terminal</button>
       <!-- A new build to restart into (danielrispler/Falinks#470); sessions live in the daemon, so they stay. -->
       <button id="new-build" class="btn small" type="button" title="A new build is ready. Sessions keep running." hidden>Restart to update</button>
       <button id="new-session" class="btn small" type="button" title="New session" aria-label="New session">+</button>
@@ -43,7 +42,11 @@
         <div id="groups"></div>
         <button id="add-project" class="btn small add-project" type="button">Add project…</button>
         <!-- "History · N" (#94): the ended sessions, which are not in the list. -->
-        <div id="history-link"></div>
+        <div class="list-foot">
+          <div id="history-link"></div>
+          <!-- The gear (#159) runs Open settings, as ⌘, does; its title names the key the keymap binds. -->
+          <button id="settings-gear" class="btn small quiet gear" type="button" aria-label="Settings">⚙</button>
+        </div>
       </div>
       <div id="strip" class="strip"></div>
     </nav>
