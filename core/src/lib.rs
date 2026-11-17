@@ -1474,6 +1474,17 @@ impl Session {
         !self.blocks.is_empty() || self.terminal_blocked
     }
 
+    /// How many blocked commands wait for Daniel's choice or, once allowed, for the agent's retry.
+    pub fn blocked_waiting(&self) -> usize {
+        let waits = |c: &&BlockedCommand| c.status != BlockedStatus::Declined;
+        self.blocked_commands.iter().filter(waits).count()
+    }
+
+    /// Whether the Dock badge counts it: it needs you, or a blocked command waits.
+    pub fn wants_you(&self) -> bool {
+        self.state == State::NeedsYou || self.blocked_waiting() > 0
+    }
+
     /// Its workers that failed: they ended with a status other than `completed`, such as `killed`.
     fn failed_workers(&self) -> Vec<String> {
         self.agents
@@ -1666,6 +1677,12 @@ pub enum Output {
     /// A session newly needs Daniel: its own agent asks, or `agent`, a subagent at any depth, whose
     /// notice goes on its session's line (danielrispler/Falinks#369, decision 22).
     NeedsYou {
+        session_id: String,
+        agent: Option<String>,
+    },
+    /// Auto mode blocked a Bash command live, `agent` (a subagent, `None` for the session's own agent)
+    /// asking: the macOS notification "Auto mode blocked a command". A replay raises none.
+    CommandBlocked {
         session_id: String,
         agent: Option<String>,
     },
@@ -3211,7 +3228,16 @@ impl Studio {
             since: block.at,
         });
         let phase_started = session.work.phases.len() != phases_before;
-        if !blocked_before && session.state == State::NeedsYou {
+        // A blocked command's own notice stands for its needs-you, so one block shows one notification.
+        let only_denied =
+            !session.blocks.is_empty() && session.blocks.iter().all(|b| b.cause == Cause::Denied);
+        if !replay && event.has(|h| matches!(h, Happened::CommandBlocked { .. })) {
+            outputs.push(Output::CommandBlocked {
+                session_id: event.session_id.clone(),
+                agent: event.agent_id.clone(),
+            });
+        }
+        if !blocked_before && session.state == State::NeedsYou && !only_denied {
             outputs.push(Output::NeedsYou {
                 session_id: event.session_id.clone(),
                 agent: session.asker.as_ref().and_then(|w| w.agent.clone()),

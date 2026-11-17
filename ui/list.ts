@@ -13,7 +13,7 @@ import { projectGroups, foundWorkspaces, tokenOf, workspaceSection, type Project
 import { redrawHistory, redrawHome, showHistory } from "./panes.js";
 import { isSelected, select } from "./selection.js";
 import { studio } from "./state.js";
-import { stateLabels, type Context, type Session, type SessionState, type Subagent } from "./types.js";
+import { stateLabels, type BlockedCommand, type Context, type Session, type SessionState, type Subagent } from "./types.js";
 import { askDelete, report } from "./story.js";
 
 // The state groups folded in a project, idle only, and the idle groups Daniel opened, by project and state,
@@ -120,12 +120,19 @@ export function glyph(state: string, unseen = false, landed = false): HTMLElemen
 
 // A row's second line, only while it runs or needs Daniel: the current step, or the open question's
 // first line, else who asks (a plan or a permission); null otherwise.
-export function secondLine(session: Pick<Session, "state" | "line" | "questions"> & { status_only?: boolean }): string | null {
+export function secondLine(
+  session: Pick<Session, "state" | "line" | "questions"> & { status_only?: boolean; blocked_commands?: Pick<BlockedCommand, "status">[] },
+): string | null {
   // A status-only row has no step or question to show (danielrispler/Falinks#560).
   if (session.status_only) return null;
+  const open = session.questions.filter((question) => question.answer === "open").at(-1);
+  // Blocked commands waiting for Daniel's choice or the agent's retry (danielrispler/plotkeeper#173).
+  const waiting = (session.blocked_commands ?? []).filter((card) => card.status !== "declined").length;
+  if (waiting > 0 && session.state !== "ended" && !(session.state === "needs_you" && open)) {
+    return `${waiting} blocked ${waiting === 1 ? "command" : "commands"} waiting`;
+  }
   if (session.state === "running") return session.line ?? "";
   if (session.state !== "needs_you") return null;
-  const open = session.questions.filter((question) => question.answer === "open").at(-1);
   // A question with no text, as a redacted log holds, falls back to the row's line rather than throw.
   return open?.questions[0]?.question?.split("\n")[0] ?? session.line ?? "";
 }

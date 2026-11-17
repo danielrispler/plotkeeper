@@ -401,7 +401,7 @@ impl Sent {
     /// Sends the session list, the Dock badge and the selection, each only if it changed.
     fn list(&mut self, app: &AppHandle) {
         let list = sessions(app.state(), app.state());
-        let needing = list.iter().filter(|r| r.session.state == NeedsYou).count();
+        let needing = list.iter().filter(|r| r.session.wants_you()).count();
         // macOS shows `Some(0)` as a "0" badge.
         if self.badge != Some(needing)
             && let Some(window) = app.get_webview_window("main")
@@ -1049,6 +1049,14 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                     Output::YourTurn { session_id } => {
                         refresh_landed(app, Some(session_id.clone()));
                         tell(app, Notice::YourTurn, &session_id, None);
+                    }
+                    Output::CommandBlocked { session_id, agent } => {
+                        tell(
+                            app,
+                            Notice::Titled("Auto mode blocked a command"),
+                            &session_id,
+                            agent.as_deref(),
+                        );
                     }
                     Output::Failed { session_id, agent } => {
                         tell(

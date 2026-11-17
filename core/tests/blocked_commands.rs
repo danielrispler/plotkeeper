@@ -173,3 +173,108 @@ fn a_denied_call_of_another_tool_raises_no_card() {
     assert!(session.blocked_commands.is_empty());
     assert_eq!(session.state, State::Running);
 }
+
+#[test]
+fn a_session_wants_you_while_a_card_is_blocked_or_allowed_and_not_after_it_is_declined() {
+    let step = line(
+        "PreToolUse",
+        5_000,
+        json!({ "tool_name": "Read", "tool_use_id": "toolu_5", "prompt_id": "p-1",
+            "tool_input": { "file_path": "/work/repo/a.rs" } }),
+    );
+    let blocked = then(started(), vec![denied(3_000, "toolu_1", "first", None)]);
+    let blocked = then(
+        blocked,
+        vec![denied(3_500, "toolu_2", "second", None), step],
+    );
+    // The agent went on, so the session shows its real state, but two cards wait.
+    let s = session(&blocked);
+    assert_eq!(
+        (s.state, s.blocked_waiting(), s.wants_you()),
+        (State::Running, 2, true)
+    );
+    let allowed = then(
+        blocked.clone(),
+        vec![answer(6_000, "toolu_1", "first", "allow")],
+    );
+    assert_eq!(session(&allowed).blocked_waiting(), 2);
+    let declined = then(allowed, vec![answer(6_500, "toolu_2", "second", "deny")]);
+    assert_eq!(session(&declined).blocked_waiting(), 1);
+}
+
+#[test]
+fn a_late_allow_after_the_agent_went_on_is_recorded_on_the_card_and_in_the_history() {
+    let step = line(
+        "PreToolUse",
+        5_000,
+        json!({ "tool_name": "Read", "tool_use_id": "toolu_5", "prompt_id": "p-1",
+            "tool_input": { "file_path": "/work/repo/a.rs" } }),
+    );
+    let lines = then(
+        started(),
+        vec![denied(3_000, "toolu_1", COMMAND, None), step],
+    );
+    let lines = then(lines, vec![answer(9_000, "toolu_1", COMMAND, "allow")]);
+    let s = session(&lines);
+    assert_eq!(s.state, State::Running);
+    assert_eq!(s.blocked_commands[0].status, BlockedStatus::Allowed);
+    assert_eq!(s.decisions.len(), 1);
+    assert_eq!(
+        (s.decisions[0].at, s.decisions[0].source),
+        (9_000, Source::Card)
+    );
+}
+
+/// The live outputs of `lines`, in order.
+fn live(lines: &[String]) -> Vec<studio_core::Output> {
+    let mut studio = Studio::default();
+    lines.iter().flat_map(|l| studio.apply(l)).collect()
+}
+
+#[test]
+fn a_live_block_raises_one_notice_naming_its_subagent_and_no_needs_you() {
+    let lines = then(
+        started(),
+        vec![denied(3_000, "toolu_1", COMMAND, Some("a-7aaaa"))],
+    );
+    let notices: Vec<_> = live(&lines)
+        .into_iter()
+        .filter(|o| {
+            matches!(
+                o,
+                studio_core::Output::CommandBlocked { .. } | studio_core::Output::NeedsYou { .. }
+            )
+        })
+        .collect();
+    assert_eq!(
+        notices,
+        [studio_core::Output::CommandBlocked {
+            session_id: SESSION.into(),
+            agent: Some("a-7aaaa".into())
+        }]
+    );
+}
+
+#[test]
+fn a_block_of_another_tool_raises_no_blocked_notice() {
+    let web = denied(3_000, "toolu_1", COMMAND, None).replace("\"Bash\"", "\"WebFetch\"");
+    let outputs = live(&then(started(), vec![web]));
+    assert!(
+        !outputs
+            .iter()
+            .any(|o| matches!(o, studio_core::Output::CommandBlocked { .. }))
+    );
+}
+
+#[test]
+fn the_notice_shows_once_with_others_within_three_seconds_and_not_in_a_focused_window() {
+    use std::time::Duration;
+    let mut notices = studio_core::Notifications::default();
+    let title = "Auto mode blocked a command";
+    notices.push(title, "repo s-1".into(), Duration::from_secs(10));
+    let due = notices.due(Duration::from_secs(13), || false, |_| false, || None);
+    assert_eq!(due.notification, Some((title.into(), "repo s-1".into())));
+    notices.push(title, "repo s-1".into(), Duration::from_secs(20));
+    let due = notices.due(Duration::from_secs(23), || true, |_| false, || None);
+    assert_eq!(due.notification, None);
+}

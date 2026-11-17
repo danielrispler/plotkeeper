@@ -13,7 +13,7 @@ const card = (status = "blocked", agent = null) => ({
   status,
 });
 
-test("a blocked command shows in full with its folder and rule, and Allow and Decline while its hook waits", () => {
+test("a blocked command shows in full with its folder and rule, and Allow and Decline, also after its hook has returned", () => {
   assert.deepEqual(blockedView(card(), null, true), {
     state: "Blocked",
     command: 'claude -p "summarise" > /tmp/out.txt',
@@ -28,7 +28,7 @@ test("a subagent's block names the subagent", () => {
   assert.equal(blockedView(card("blocked", "a-7aaaa"), "Reviewer", true).agent, "Reviewer");
 });
 
-test("with no hook waiting there is nothing to answer yet", () => {
+test("with no request file there is nothing to answer", () => {
   assert.deepEqual(blockedView(card(), null, false).buttons, []);
 });
 

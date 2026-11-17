@@ -51,4 +51,4 @@ The plugin's `PermissionDenied` hook for Bash waits up to 600 seconds for your c
 
 Each Allow or Decline enters the session's decision history, as given on the card.
 
-The card also stays when nobody watches or the 600 seconds pass, but then it has no buttons yet.
+When the studio's window shows no life, the hook returns at once with no decision, and when no click comes by 600 seconds it returns none too. Either way the card stays, with Allow and Decline, until you choose. The session needs you only until the agent's next event or your choice, then shows its real state, and its row reads "N blocked commands waiting" (see [Sessions](sessions.md)). An Allow after the hook has returned still grants the pass and enters the decision history, which the studio logs itself, since no hook is left to. The agent does not retry by itself then; the retry line the studio types for it is a later change.

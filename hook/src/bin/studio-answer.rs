@@ -22,6 +22,6 @@ fn run() -> Result<Option<serde_json::Value>, Box<dyn Error>> {
     let timeout = env::var("STUDIO_ANSWER_TIMEOUT_MS")
         .ok()
         .and_then(|ms| ms.parse().ok());
-    let timeout = Duration::from_millis(timeout.unwrap_or(answer::TIMEOUT_MS));
+    let timeout = timeout.map_or_else(|| answer::wait_for(&payload), Duration::from_millis);
     Ok(answer::run(&payload, &data, timeout)?)
 }

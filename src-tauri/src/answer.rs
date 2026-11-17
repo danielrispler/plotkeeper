@@ -109,7 +109,8 @@ pub fn blocked_requests(data: &Path, session: &str) -> Value {
 }
 
 /// Daniel's Allow or Decline of `session`'s blocked-command request `nonce`: Allow grants the one-time
-/// pass for the request's exact command and folder, and either writes the answer the hook waits for.
+/// pass for the request's exact command and folder. Either writes the answer a waiting hook reads, or,
+/// when the hook has returned, logs the decision itself.
 pub fn answer_blocked(
     data: &Path,
     session: &str,
@@ -132,8 +133,20 @@ pub fn answer_blocked(
             .map_err(|e| e.to_string())?;
     }
     let reply = json!({ "nonce": nonce, "decision": decision });
-    answer::write_private(&dir.join(format!("{nonce}.answer.json")), &reply)
-        .map_err(|e| e.to_string())
+    let hook_waits = request["pid"]
+        .as_i64()
+        .and_then(|p| i32::try_from(p).ok())
+        .is_some_and(answer::pid_lives);
+    if hook_waits {
+        return answer::write_private(&dir.join(format!("{nonce}.answer.json")), &reply)
+            .map_err(|e| e.to_string());
+    }
+    // A late answer: the hook has returned, so no one logs the decision but the studio, which
+    // writes the line the hook would have and closes the request.
+    let mut asked = request;
+    asked["session_id"] = session.into();
+    answer::log_answer(data, &answer::answered_line(&asked, &reply));
+    fs::remove_file(dir.join(format!("{nonce}.json"))).map_err(|e| e.to_string())
 }
 
 /// Daniel chose Allow or Decline on a blocked command's card.
@@ -285,7 +298,8 @@ mod tests {
 
     /// A blocked command's request, as the hook leaves it.
     fn request(data: &std::path::Path, nonce: &str, pid: u32) {
-        let request = json!({ "nonce": nonce, "tool_use_id": "toolu_9", "pid": pid, "cwd": "/work/repo",
+        let request = json!({ "nonce": nonce, "hook_event_name": "PermissionDenied", "tool_name": "Bash",
+            "tool_use_id": "toolu_9", "pid": pid, "cwd": "/work/repo",
             "tool_input": { "command": "claude -p hi" } });
         let path = answer::blocked_dir(data, "s1").join(format!("{nonce}.json"));
         answer::write_private(&path, &request).unwrap();
@@ -331,6 +345,31 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<Value>(&text).unwrap(),
             json!({ "nonce": "n1", "decision": "allow" })
+        );
+    }
+
+    #[test]
+    fn a_late_answer_whose_hook_has_returned_is_logged_by_the_studio_and_closes_the_request() {
+        let data = tempfile::tempdir().unwrap();
+        request(data.path(), "n1", 0);
+        answer_blocked(data.path(), "s1", "n1", answer::Verdict::Allow).unwrap();
+        // No hook waits to read an answer file or to log the decision.
+        let blocked = answer::blocked_dir(data.path(), "s1");
+        assert_eq!(std::fs::read_dir(&blocked).unwrap().count(), 0);
+        let log = std::fs::read_to_string(data.path().join("events.jsonl")).unwrap();
+        let line: Value = serde_json::from_str(log.lines().next().unwrap()).unwrap();
+        assert_eq!(line["hook_event_name"], "StudioAnswer");
+        assert_eq!(line["studio_asked_by"], "PermissionDenied");
+        assert_eq!(line["session_id"], "s1");
+        assert_eq!(line["tool_use_id"], "toolu_9");
+        assert_eq!(line["studio_answer"], json!({ "decision": "allow" }));
+        assert_eq!(line["tool_input"]["command"], "claude -p hi");
+        // The pass is granted all the same, for the agent's retry.
+        assert_eq!(
+            std::fs::read_dir(answer::pass_dir(data.path(), "s1"))
+                .unwrap()
+                .count(),
+            1
         );
     }
 

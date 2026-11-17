@@ -1,5 +1,5 @@
 // A blocked command's card (danielrispler/plotkeeper#170, #171): the Bash command auto mode blocked, in full, with its
-// folder, the rule that blocked it and the subagent that asked. While the answer hook waits for Daniel's click, Allow
+// folder, the rule that blocked it and the subagent that asked. While its request stands, Allow
 // lets the agent retry it once and Decline closes the card; there is no edit, so what runs is what the card shows.
 
 import { blockedRequestFor, sendBlockedAnswer } from "./answer.js";
@@ -18,8 +18,9 @@ export type BlockedView = {
 const states = { blocked: "Blocked", allowed: "Allowed" };
 
 // What the card shows for `card`, asked by `agent` (the subagent's name, null for the session's own agent), or null once
-// Daniel declined it. `waiting`: its hook still waits for his click, so Allow and Decline have something to answer.
-export function blockedView(card: BlockedCommand, agent: string | null, waiting: boolean): BlockedView | null {
+// Daniel declined it. `answerable`: its request file is still there, so Allow and Decline have something to answer;
+// that holds after its hook has returned too, and the studio then logs the decision itself.
+export function blockedView(card: BlockedCommand, agent: string | null, answerable: boolean): BlockedView | null {
   if (card.status === "declined") return null;
   return {
     state: states[card.status],
@@ -27,13 +28,13 @@ export function blockedView(card: BlockedCommand, agent: string | null, waiting:
     folder: card.cwd,
     reason: card.reason,
     agent,
-    buttons: card.status === "blocked" && waiting ? ["Allow", "Decline"] : [],
+    buttons: card.status === "blocked" && answerable ? ["Allow", "Decline"] : [],
   };
 }
 
 export function blockedElement(session: string, card: BlockedCommand, agent: string | null): HTMLElement | null {
   const request = blockedRequestFor(card.call);
-  const view = blockedView(card, agent, request?.waiting === true);
+  const view = blockedView(card, agent, request !== null);
   if (view === null) return null;
   const block = document.createElement("article");
   block.className = "question decision blocked-command";

@@ -35,6 +35,20 @@ pub const STALE_MS: u64 = 5_000;
 /// With no answer by then, the terminal asks (decision 22).
 pub const TIMEOUT_MS: u64 = 120_000;
 
+/// A blocked command's hook waits this long for his click (danielrispler/plotkeeper#170, decision 3).
+pub const BLOCKED_TIMEOUT_MS: u64 = 600_000;
+
+/// How long the hook waits for an answer to `payload`'s call, unless a test shortens it.
+pub fn wait_for(payload: &Value) -> Duration {
+    let blocked =
+        payload["hook_event_name"] == "PermissionDenied" && payload["tool_name"] == "Bash";
+    Duration::from_millis(if blocked {
+        BLOCKED_TIMEOUT_MS
+    } else {
+        TIMEOUT_MS
+    })
+}
+
 /// What a call asks Daniel: a question, a plan to approve, or a permission for any other tool.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -259,6 +273,15 @@ pub fn answered_line(payload: &Value, answer: &Value) -> Value {
     line
 }
 
+/// Appends a `StudioAnswer` line to the event log; the decision stands even if it cannot be logged.
+pub fn log_answer(data: &Path, line: &Value) {
+    match crate::append(&data.join("events.jsonl"), line, crate::PATIENCE) {
+        Ok(true) => {}
+        Ok(false) => eprintln!("studio-answer: log the answer: the log stayed locked"),
+        Err(e) => eprintln!("studio-answer: log the answer: {e}"),
+    }
+}
+
 /// Runs the hook for `payload` with the studio's data directory `data`: the output to print, if any.
 pub fn run(payload: &Value, data: &Path, timeout: Duration) -> io::Result<Option<Value>> {
     let session = payload["session_id"].as_str().unwrap_or_default();
@@ -304,12 +327,7 @@ pub fn run(payload: &Value, data: &Path, timeout: Duration) -> io::Result<Option
     let out = reply(payload, &answer);
     if out.is_some() {
         // The decision stands even if its line cannot be logged.
-        let line = answered_line(payload, &answer);
-        match crate::append(&data.join("events.jsonl"), &line, crate::PATIENCE) {
-            Ok(true) => {}
-            Ok(false) => eprintln!("studio-answer: log the answer: the log stayed locked"),
-            Err(e) => eprintln!("studio-answer: log the answer: {e}"),
-        }
+        log_answer(data, &answered_line(payload, &answer));
     }
     Ok(out)
 }
@@ -377,12 +395,7 @@ fn run_blocked(payload: &Value, data: &Path, timeout: Duration) -> io::Result<Op
     let Some(verdict) = verdict else {
         return Ok(None);
     };
-    let line = answered_line(payload, &answer);
-    match crate::append(&data.join("events.jsonl"), &line, crate::PATIENCE) {
-        Ok(true) => {}
-        Ok(false) => eprintln!("studio-answer: log the answer: the log stayed locked"),
-        Err(e) => eprintln!("studio-answer: log the answer: {e}"),
-    }
+    log_answer(data, &answered_line(payload, &answer));
     Ok((verdict == Verdict::Allow).then(|| {
         json!({ "hookSpecificOutput": {
         "hookEventName": "PermissionDenied", "retry": true } })

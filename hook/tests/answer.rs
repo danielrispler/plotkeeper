@@ -568,6 +568,24 @@ fn a_block_nobody_watches_returns_at_once_and_leaves_its_request_for_the_card() 
 }
 
 #[test]
+fn a_blocked_command_waits_600_seconds_and_every_other_call_120() {
+    assert_eq!(answer::wait_for(&denied()), Duration::from_secs(600));
+    assert_eq!(answer::wait_for(&asked()), Duration::from_secs(120));
+}
+
+#[test]
+fn a_block_nobody_answers_by_the_timeout_returns_no_decision_and_keeps_its_request() {
+    let home = scratch("blocked-timeout");
+    watch(&home, SESSION, std::process::id(), 0);
+    let since = Instant::now();
+    let (out, took) = finish(start(&home, 300, &denied()), since);
+    assert_eq!(out, "");
+    assert!(took < PROMPTLY);
+    assert_eq!(blocked_requests(&home).len(), 1);
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
 fn other_denials_pass_through_at_once() {
     let home = scratch("blocked-other");
     watch(&home, SESSION, std::process::id(), 0);
