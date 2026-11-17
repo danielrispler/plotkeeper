@@ -1,0 +1,25 @@
+# The sessions
+
+## The session list
+
+On the right, the session list: every Claude Code session, one line each with its folder, state and name, grouped by state with "needs you" first. A running row adds a second line, its current step, and a row that needs you the open question's first line, else who asks (a plan, a permission, or a subagent: its name and "asks"), each with how long it has waited ("Bash cargo test · 3m"); a session whose last step is a wake-up reads "worker … returned" until its next step.
+
+Idle sessions collapse at the bottom; ended ones are in History, from the "History · N" link at the list's end or the palette's "Show history". On the left, the story rail of the session you clicked, and in the centre its terminal (see "The story rail"). Only your click changes the session shown.
+
+A session is running from a prompt until its turn ends; needs you while it waits on your permission, answer or plan approval; your turn when its turn ended without asking you, or it started and has had no prompt yet; idle after 2 hours at your turn with no events, until its next event; ended from its `SessionEnd` until it starts again under its id. A wake-up is not your prompt, so it leaves "needs you" in place. Only "needs you" is in colour. macOS shows a notification when a session newly needs you, a card arrives or a worker fails, only while the window is not focused.
+
+A subagent's wait, failure or card shows on its session's line and names the subagent; a failed helper raises none. A subagent's name is its spawn's description, else the first 5 characters of its id; the list, its view's header, the notices and the card writer all use it. A session's folder is the last segment of its `cwd`, or the whole `cwd` when the folder ends in a slash. Notices within 3 seconds of the first show as one notification. macOS asks once for permission to show them. The Dock badge counts the sessions that need you.
+
+## Sessions in the studio
+
+"New session", in the top bar, opens the picker: the configured repository's main checkout and its tasks, the worktrees under `.claude/worktrees/`, read from `git worktree list --porcelain` each time it opens. `agent-*` worktrees are hidden, and the main checkout says how many. Its top row chooses what starts: Claude Code, agy or Codex, each offered when the login shell finds it on `PATH`, or Terminal. New session opens on the agent last chosen; Workspaces' "New session here" and "Create", and Home's rows, start it too.
+
+"New terminal", beside it, opens the picker on Terminal, which is never kept as the choice: a plain login shell with a row of its own, "terminal · <folder>", until an agent in it reports a status or links a session. agy starts as `agy --prompt-interactive=<prompt>` and Codex as `codex -- <prompt>`, with no prompt when the field is empty; after a daemon restart each comes back with its own resume command, not `claude --resume`. Auto mode is offered with Claude Code only.
+
+Choosing Claude Code starts `claude` there in a new daemon terminal, through a login shell, as `env CLAUDE_CODE_PLUGIN_DIRS=<this checkout>/plugin claude`: the studio plugin alone, so a profile that also sets the variable never loads the hooks twice. The terminal's id, `claude-<uuid>`, reaches every hook as `STUDIO_TERMINAL_ID`, and the core links the session's row to it (`terminal` in the list). Clicking a row shows its terminal; a session the studio did not start shows the login shell. A terminal from an earlier app run is attached when the daemon still runs it, and reported otherwise.
+
+"Open", on an ended session's view, runs `claude --resume <session_id>` in a new terminal in the session's folder. "Rename" names the session: the shell appends a `StudioRename` line to the event log, so the name survives a restart, and, while its `claude` runs in a studio terminal, types `/rename <name>` there, so Claude Code shows the same name. An empty name gives the row its folder's again. "Close" ends the session's terminal and its whole process group (`kill`, then `forget`), and the login shell shows again.
+
+It asks first while the session is in a turn or its latest `Stop` listed background tasks. "Delete" drops the session's row: it ends its terminal as "Close" does, then the shell appends a `StudioDelete` line to the event log, so the row stays gone after a restart until a `SessionStart` of the session brings it back; its cards stay in the store.
+
+When the session's folder is in a task, `.claude/worktrees/<task>`, a box, unticked by default, also removes that worktree, asking first in the same way, then its branch, as the picker's "Remove" does: with `git branch -d` when the main checkout's `HEAD` holds it, or, after a squash merge, when `gh` lists a merged pull request whose head is the branch's tip, with `git update-ref -d` at that tip. Any other branch stays, and a kept branch is named over the story. The dialog says when another session still works in that worktree.

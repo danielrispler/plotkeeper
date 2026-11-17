@@ -10,6 +10,10 @@ Read `docs/studio/CONTEXT.md` and any ADRs relevant to the area you are explorin
 If they do not exist, proceed silently. The domain-modeling skill creates them when terms or decisions are resolved.
 To measure the real event log, use `~/Library/Application Support/dev.falinks.studio/events.jsonl`.
 
+## Behaviour docs
+
+What the app does is written in `docs/studio/behaviour/`, one file per area: sessions, rail, cards, quiz, brief, checks, terminal, storage. Read the one for your area before changing its behaviour. `docs/studio/plugin.md`, `settings.md` and `development.md` hold the setup guides and the crate and test list. The README only links them.
+
 ## Vocabulary
 
 Use the terms defined in `docs/studio/CONTEXT.md` when naming domain concepts in issues, proposals, hypotheses, and tests. If a needed term is missing, reconsider whether it fits the project or note the gap for domain-modeling.
