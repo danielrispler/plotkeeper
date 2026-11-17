@@ -1,7 +1,7 @@
 // History (#94, spec #90): the view in the terminal column that holds the ended sessions, newest first, with one search box
 // over session name, project and branch. The functions are content functions over the studio state.
 
-import { patch, pressable, text } from "./dom.js";
+import { fullTitle, patch, pressable, text } from "./dom.js";
 import { deleting, item, row, childrenOf, sessionName } from "./list.js";
 import { knownProjects } from "./projects.js";
 import { studio } from "./state.js";
@@ -65,7 +65,7 @@ export function drawHistory(box: HTMLElement, sessions: Session[]) {
     ...rows.map((session) => {
       const line = row(session, childrenOf(session));
       const detail = [projectName(session), branchOf(session)].filter(Boolean).join(" · ");
-      line.append(text("span", detail, "l2"));
+      line.append(fullTitle(text("span", detail, "l2"), detail));
       return item(session.id, 0, null, line, deleting(session));
     }),
   ]);

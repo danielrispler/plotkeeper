@@ -1,0 +1,48 @@
+{
+  "agent": "agy",
+  "groups": [
+    {
+      "name": "Gemini Models",
+      "windows": [
+        {
+          "label": "week",
+          "resets_at": 1795270157,
+          "used_percentage": 0.9726941585540771
+        },
+        {
+          "label": "5h",
+          "resets_at": 1794939110,
+          "used_percentage": 0.38529038429260254
+        }
+      ]
+    },
+    {
+      "name": "Claude and GPT models",
+      "windows": [
+        {
+          "label": "week",
+          "resets_at": 1795537867,
+          "used_percentage": 0.0
+        },
+        {
+          "label": "5h",
+          "resets_at": 1794951067,
+          "used_percentage": 0.0
+        }
+      ]
+    },
+    {
+      "name": "Gemini 4 Argon",
+      "windows": [
+        {
+          "label": "week",
+          "resets_at": 1795429733,
+          "used_percentage": 78.29523980617523
+        }
+      ]
+    }
+  ],
+  "read_at": 1000,
+  "reason": null,
+  "source": "agy /usage"
+}

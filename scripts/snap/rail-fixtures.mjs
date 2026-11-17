@@ -6,7 +6,7 @@
 
 const MIN = 60e3;
 
-const capabilities = { agent: "claude", asks: true, background_tasks: true, replies: true, permission_mode: true, durations: true, transcript_version: true, turn_trees: true };
+const capabilities = { agent: "claude", asks: true, background_tasks: true, replies: true, permission_mode: true, durations: true, transcript_version: true, context: true, turn_trees: true };
 const cwd = "/Users/danielrispler/work/plotkeeper/.claude/worktrees/issue-56-row-controls";
 
 const quiz = (text, options, key) => ({ text, options, key });
@@ -212,7 +212,7 @@ const common = {
   terminal_connect: { repo: "/Users/danielrispler/work/plotkeeper", outdated: false },
   terminal_lost: [],
   revival: [],
-  usage: { five_hour: { used_percentage: 42, resets_at: Date.now() / 1000 + 3600 }, seven_day: { used_percentage: 18, resets_at: Date.now() / 1000 + 86400 } },
+  usage: [{ agent: "claude", groups: [{ name: "", windows: [{ label: "5h", used_percentage: 42, resets_at: Date.now() / 1000 + 3600 }, { label: "week", used_percentage: 18, resets_at: Date.now() / 1000 + 86400 }] }], read_at: Date.now() / 1000 - 240, source: "last Claude session", reason: null }],
 };
 
 const goal = "Give each session row a fold toggle and a delete, drawn only where a row can use them.";

@@ -21,7 +21,7 @@ test("each state has its glyph and a word for its title and accessible name", ()
 test("only needs you uses colour in the list, the strip and the top bar", () => {
   const css = fs.readFileSync(new URL("../style.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
   const rules = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].map(([, selector, body]) => [selector.trim(), body]);
-  const ours = rules.filter(([selector]) => /\.row|\.strip|\.glyph|\.chip|\.top/.test(selector));
+  const ours = rules.filter(([selector]) => /\.row|\.strip|\.glyph|\.chip|\.top|\.logo/.test(selector));
   assert.ok(ours.length > 5);
   const coloured = ours.filter(([, body]) => /--needs-you/.test(body)).map(([selector]) => selector);
   assert.ok(coloured.length > 0);

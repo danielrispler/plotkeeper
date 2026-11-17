@@ -202,6 +202,8 @@ pub struct Capabilities {
     pub durations: bool,
     /// Its transcript carries the agent's version.
     pub transcript_version: bool,
+    /// It reports how full the session's context is.
+    pub context: bool,
     /// It records a git tree of each worktree a turn touches, at its start and end.
     pub turn_trees: bool,
     /// How its transcript's lines read.

@@ -3,6 +3,12 @@
 //! terminal runs. Beside them, creating and removing tasks (danielrispler/Falinks#468; danielrispler/Falinks#461, decision 9): no call passes
 //! git's force option, so git refuses whatever would lose work, and its message is shown as it is.
 
+mod usage;
+pub use usage::{
+    AgentUsage, LimitGroup, UsageWindow, claude_usage, cli_usages, find_in_path, login_shell_path,
+    parse_agy, parse_codex, read_agy, read_codex,
+};
+
 use serde::Serialize;
 use std::{
     collections::BTreeMap,
@@ -197,6 +203,9 @@ pub struct GitState {
     /// Whether rebasing the branch onto `origin`'s default branch would conflict; `false` when it
     /// is not behind it (#32).
     pub would_conflict: bool,
+    /// Whether pulling `origin`'s default branch into this checkout would overwrite its files: a
+    /// changed or untracked file the incoming commits also touch (#164). Only on the default branch.
+    pub would_overwrite: bool,
 }
 
 /// The git state of the workspace at `path`, one of the workspaces of `repo`; any other path is refused, so
@@ -220,11 +229,7 @@ pub fn git_state(repo: &Path, path: &str) -> Result<GitState, String> {
     });
     let changed = git(dir, &["status", "--porcelain"])?.lines().count();
     let operation = operation(dir)?;
-    let default = git(
-        dir,
-        &["symbolic-ref", "--short", "-q", "refs/remotes/origin/HEAD"],
-    )
-    .ok();
+    let default = default_branch(dir);
     let on_default =
         matches!((&branch, &default), (Some(b), Some(d)) if d.strip_prefix("origin/") == Some(b));
     let main_behind = default
@@ -236,6 +241,10 @@ pub fn git_state(repo: &Path, path: &str) -> Result<GitState, String> {
         (Some(d), false, Some(_)) => would_conflict(dir, d),
         _ => false,
     };
+    let would_overwrite = match (&default, on_default) {
+        (Some(d), true) => would_overwrite(dir, d),
+        _ => false,
+    };
     Ok(GitState {
         branch,
         upstream,
@@ -244,6 +253,7 @@ pub fn git_state(repo: &Path, path: &str) -> Result<GitState, String> {
         main_behind,
         on_default,
         would_conflict,
+        would_overwrite,
     })
 }
 
@@ -298,6 +308,39 @@ fn would_conflict(dir: &Path, default: &str) -> bool {
     conflicts
 }
 
+/// Whether fast-forwarding `dir`'s checked-out branch to `default` would overwrite a file: one that is
+/// changed or untracked and that the incoming commits `HEAD..default` also touch (#164). Unrelated
+/// changes and untracked files elsewhere do not count.
+fn would_overwrite(dir: &Path, default: &str) -> bool {
+    // `-z` on both: raw, unquoted paths, so a non-ASCII name compares equal on both sides.
+    let Ok(incoming) = run(
+        dir,
+        &["diff", "--name-only", "-z", &format!("HEAD..{default}")],
+    ) else {
+        return false;
+    };
+    let Ok(status) = run(dir, &["status", "--porcelain", "-z", "-uall"]) else {
+        return false;
+    };
+    if !incoming.status.success() || !status.status.success() {
+        return false;
+    }
+    let status = String::from_utf8_lossy(&status.stdout);
+    // Entries are "XY path"; a rename or copy is followed by its other path as an entry of its own.
+    let mut changed: Vec<&str> = Vec::new();
+    let mut entries = status.split('\0');
+    while let Some(entry) = entries.next() {
+        let Some(path) = entry.get(3..) else { continue };
+        changed.push(path);
+        if entry.starts_with(['R', 'C']) || entry[1..2].starts_with(['R', 'C']) {
+            changed.extend(entries.next());
+        }
+    }
+    String::from_utf8_lossy(&incoming.stdout)
+        .split('\0')
+        .any(|path| !path.is_empty() && changed.contains(&path))
+}
+
 /// The operation in progress in the workspace at `dir`, from the files its repository keeps while one is stopped.
 fn operation(dir: &Path) -> Result<Option<String>, String> {
     let marked = |name: &str| -> Result<bool, String> {
@@ -324,6 +367,37 @@ fn operation(dir: &Path) -> Result<Option<String>, String> {
 /// writes `refs/remotes/*` and `FETCH_HEAD` only, never a branch, the index or a worktree's files.
 pub fn fetch(repo: &Path) -> Result<(), String> {
     git(repo, &["fetch", "--quiet", "origin"]).map(drop)
+}
+
+/// The remote's default branch as a ref, such as `origin/main`; none when origin's HEAD is not known.
+fn default_branch(dir: &Path) -> Option<String> {
+    git(
+        dir,
+        &["symbolic-ref", "--short", "-q", "refs/remotes/origin/HEAD"],
+    )
+    .ok()
+}
+
+/// Brings the default branch of the repository that holds `repo` up to `origin`'s (#164), fetching
+/// first. With the default branch checked out in the main checkout it is a fast-forward-only merge;
+/// otherwise the local branch moves without a checkout, as `git fetch origin main:main` does. It never
+/// merges, rebases or stashes, and no other branch moves. Git's message is the error when the branch
+/// has diverged or uncommitted changes are in the way.
+pub fn pull(repo: &Path) -> Result<(), String> {
+    let main = workspaces(repo)?.main.path;
+    let main = Path::new(&main);
+    fetch(main)?;
+    let remote = default_branch(main).ok_or("origin's default branch is not known")?;
+    let name = remote.strip_prefix("origin/").unwrap_or(&remote);
+    if git(main, &["symbolic-ref", "--short", "-q", "HEAD"]).is_ok_and(|b| b == name) {
+        git(main, &["merge", "--ff-only", "--quiet", &remote]).map(drop)
+    } else {
+        git(
+            main,
+            &["fetch", "--quiet", "origin", &format!("{name}:{name}")],
+        )
+        .map(drop)
+    }
 }
 
 /// The command a studio terminal runs for a new session, or for `resume`, an ended session's id. It
@@ -478,20 +552,6 @@ fn status_line(plugin: &Path) -> String {
     let wrapper = plugin.with_file_name("workbench").join("statusline.sh");
     let quoted = format!("'{}'", wrapper.display().to_string().replace('\'', r"'\''"));
     serde_json::json!({ "statusLine": { "type": "command", "command": quoted } }).to_string()
-}
-
-/// The plan's usage (danielrispler/Falinks#481; danielrispler/Falinks#461, decision 19): the `rate_limits` of the newest `*.json` snapshot in
-/// `dir`, where Daniel's status line command saves its stdin, one file per session, by temp file and
-/// rename. `None` when there is no snapshot, it has no limits yet, or it does not parse.
-pub fn plan_usage(dir: &Path) -> Option<serde_json::Value> {
-    let newest = std::fs::read_dir(dir)
-        .ok()?
-        .flatten()
-        .filter(|entry| entry.path().extension().is_some_and(|e| e == "json"))
-        .max_by_key(|entry| entry.metadata().and_then(|m| m.modified()).ok())?;
-    let snapshot: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(newest.path()).ok()?).ok()?;
-    snapshot.get("rate_limits").cloned()
 }
 
 /// The `context_window` of session `id`'s status line snapshot in `dir`: its window size, current

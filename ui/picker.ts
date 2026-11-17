@@ -7,7 +7,7 @@
 // left empty, a session starts in the main checkout with no prompt.
 
 import { AGENT_NAMES, agentChoice, kept, type Kind, showsAuto } from "./agents.js";
-import { element, invoke, pressable, text } from "./dom.js";
+import { element, fullTitle, invoke, pressable, text } from "./dom.js";
 import type { Entry } from "./keys.js";
 import { setProjects } from "./projects.js";
 import { startAgent } from "./panes.js";
@@ -124,14 +124,14 @@ function agentRow(offered: string[], chosen: string, auto: HTMLElement): [HTMLEl
 }
 
 // A workspace's row: its name, then its folder.
-function workspaceRow(name: string, workspace: Workspace, start: Start): HTMLElement {
+export function workspaceRow(name: string, workspace: Workspace, start: Start): HTMLElement {
   const button = pressable(document.createElement("button"), false, () => {
     element("picker").hidden = true;
     start(workspace.path, "").catch((e) => console.warn(e));
   });
   button.classList.add("row");
   const first = text("span", "", "l1");
-  first.append(text("span", name, "name"));
+  first.append(fullTitle(text("span", name, "name"), name));
   const second = Object.assign(text("span", shortPath(workspace.path), "l2"), { title: workspace.path }); // danielrispler/Falinks#571
   button.append(first, second);
   return button;
@@ -192,8 +192,8 @@ export function showPalette(entries: Entry[], run: (binding: Binding) => void) {
         const button = pressable(document.createElement("button"), index === highlighted, () => choose(entry));
         button.classList.add("row");
         const line = text("span", "", "l1");
-        line.append(text("span", entry.title, "name"), text("span", entry.keys.join("  "), "row-state"));
-        button.append(line, ...(entry.note ? [text("span", entry.note, "l2")] : []));
+        line.append(fullTitle(text("span", entry.title, "name"), entry.title), text("span", entry.keys.join("  "), "row-state"));
+        button.append(line, ...(entry.note ? [fullTitle(text("span", entry.note, "l2"), entry.note)] : []));
         return button;
       }),
     );
@@ -237,6 +237,17 @@ export async function showPicker(kind: Kind = "session") {
   picker.querySelector("input")?.focus();
 }
 
+// A branch's row: its label, cut to fit, with its full text in a title, and its note.
+export function branchRow(label: string, note: string | null | undefined, disabled: boolean, pick: () => void): HTMLElement {
+  const button = pressable(document.createElement("button"), false, pick);
+  button.classList.add("row");
+  button.disabled = disabled;
+  const line = text("span", "", "l1");
+  line.append(fullTitle(text("span", label, "name"), label), ...(note ? [text("span", note, "row-state")] : []));
+  button.append(line);
+  return button;
+}
+
 // The branch picker (#95), for the main checkout only: its local branches and the remote-only ones, one
 // pick runs `git switch`, and git's refusal shows as it is. Disabled with its reason while a session in the
 // main checkout is running or needs Daniel; a branch a task holds is greyed out as "in task X". Opening it
@@ -248,22 +259,16 @@ export async function showBranches(from?: string) {
     const project = from ?? (await shownProject());
     const [workspaces, branches] = await Promise.all([invoke<Workspaces>("workspaces", { project }), invoke<Branch[]>("branches", { project })]);
     const blocked = branchBlocked(workspaces, studio.listed);
-    const rows = branchOptions(branches, blocked).map(({ branch, label, note, disabled }) => {
-      const button = pressable(document.createElement("button"), false, () => {
+    const rows = branchOptions(branches, blocked).map(({ branch, label, note, disabled }) =>
+      branchRow(label, note, disabled, () => {
         invoke("switch_branch", { project, branch: branch.name, remote: branch.remote })
           .then(() => {
             picker.hidden = true;
             return refreshAfterSwitch(project);
           })
           .catch(failed);
-      });
-      button.classList.add("row");
-      button.disabled = disabled;
-      const line = text("span", "", "l1");
-      line.append(text("span", label, "name"), ...(note ? [text("span", note, "row-state")] : []));
-      button.append(line);
-      return button;
-    });
+      }),
+    );
     picker.replaceChildren(...(blocked ? [text("p", `Switching is off: ${blocked}`, "empty")] : []), ...rows);
   } catch (e) {
     picker.replaceChildren(text("p", `No branches: ${e}`, "empty"));
@@ -310,7 +315,7 @@ export async function showAddProject() {
     const rows = suggested.map((path) => {
       const row = pressable(document.createElement("button"), false, () => void addProject(path));
       row.classList.add("row");
-      row.append(text("span", shortPath(path), "name"));
+      row.append(Object.assign(text("span", shortPath(path), "name"), { title: path }));
       return row;
     });
     picker.append(...(rows.length ? [text("p", "Repositories where sessions ran", "empty"), ...rows] : []));

@@ -25,6 +25,13 @@ export function text(tag: string, content: string, className = ""): HTMLElement 
   return node;
 }
 
+// `node` with `full` as its native hover title: the full text of what the layout cuts (#162). No title for an empty text,
+// which would hide the tooltip of the element under it.
+export function fullTitle<T extends HTMLElement>(node: T, full: string | null | undefined): T {
+  if (full) node.title = full;
+  return node;
+}
+
 export const stepText = (step: Step | null) => (step ? `${step.tool} ${step.detail ?? ""}` : "No step yet");
 
 // The time from `from` to `to`, such as "3m".

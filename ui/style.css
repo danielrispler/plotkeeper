@@ -66,14 +66,23 @@ body[data-layout="focus"] #rail-divider { display: none; }
 .git-line .git-bad { color: var(--conflict); }
 .git-line .git-branch { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
 .git-line .git-branch:hover { text-decoration: underline; }
-.project-workspaces .row .l2 { white-space: pre; }
-.usage { font-size: var(--size-small); color: var(--muted); }
+.project-workspaces .row .facts { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; font-size: var(--size-small); color: var(--muted); }
+.usage { display: inline-flex; align-items: center; gap: var(--sp-3); color: var(--muted); }
+/* The usage popover (danielrispler/plotkeeper#163): one tile per agent, under the bar at its right. */
+.usage-popover[popover] { top: var(--bar); right: var(--sp-5); left: auto; width: var(--popover); max-width: calc(100vw - 2 * var(--sp-5)); gap: var(--sp-5); }
+.usage-tile { display: flex; flex-direction: column; gap: var(--sp-3); }
+.usage-tile .tile-head { display: flex; align-items: center; gap: var(--sp-3); font-weight: 600; }
+.usage-tile .usage-window { display: grid; grid-template-columns: 3em 1fr 3em auto; align-items: center; gap: var(--sp-3); font-size: var(--size-small); }
+.usage-tile .window-name, .usage-tile .window-resets, .usage-tile .tile-foot { color: var(--muted); }
+.usage-tile .bar { height: var(--sp-3); border-radius: var(--radius-small); background: var(--line); }
+.usage-tile .bar-fill { height: 100%; border-radius: var(--radius-small); background: var(--muted); }
+.usage-tile .group-name { margin: 0; font-size: var(--size-small); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.usage-tile .tile-reason, .usage-tile .tile-foot { margin: 0; font-size: var(--size-small); }
 /* The top bar's items show whole or sit in the "⋯" menu, so none shrinks (danielrispler/plotkeeper#127, bar.ts). The spacer takes the rest. */
 .top > :not(.sp):not(.menu) { flex: none; }
 .top .sp { flex: 1; }
 .top .menu[popover] { top: var(--bar); right: var(--sp-5); left: auto; width: max-content; max-width: calc(100vw - 2 * var(--sp-5)); }
 .top .menu .git-line { flex-wrap: wrap; padding: var(--sp-2) var(--sp-4); }
-.top .menu .usage { padding: var(--sp-2) var(--sp-4); }
 .top .menu .chip { text-align: start; }
 /* The session's header: its state dot, state and name; the name is the one part that gives way, past a fixed length. */
 .session-header { display: flex; align-items: center; gap: var(--sp-3); font: inherit; font-size: var(--size-small); color: var(--fg); background: none;
@@ -119,6 +128,9 @@ h1 { margin: 0 0 var(--sp-4); }
 .row .l2 { display: flex; gap: var(--sp-3); font-size: var(--size-small); color: var(--muted); white-space: nowrap; overflow: hidden; }
 .row .name { overflow: hidden; text-overflow: ellipsis; }
 .row.unseen .name { font-weight: 600; }
+/* An agent's logo (#158): one colour, the muted text colour; the "Needs you" pill stays the only colour. */
+.logo { flex: none; display: inline-grid; place-items: center; width: var(--icon); height: var(--icon); color: var(--muted); }
+.logo svg { width: var(--icon); height: var(--icon); }
 .row .id { color: var(--muted); flex: none; font-size: var(--size-small); }
 .row .l1 .glyph { margin-inline-start: auto; }
 .row .clock { flex: none; margin-inline-start: auto; font-size: var(--size-xs); }
@@ -205,6 +217,9 @@ h1 { margin: 0 0 var(--sp-4); }
 .pane.history input { width: 100%; box-sizing: border-box; margin-bottom: var(--sp-3); font: inherit; padding: var(--sp-3); background: var(--raised); color: var(--fg); border: var(--hair) solid var(--edge); border-radius: var(--radius-small); }
 .pane.history .row:hover { background: var(--hover); }
 .pane.history .item .delete { visibility: visible; }
+.list-foot { display: flex; align-items: center; justify-content: space-between; }
+.list-foot .gear { margin-right: var(--sp-4); color: var(--muted); display: inline-grid; place-items: center; width: calc(var(--icon) * 2); height: calc(var(--icon) * 2); padding: 0; }
+.list-foot .gear svg { width: var(--icon); height: var(--icon); }
 .history-link { display: block; margin: var(--sp-3) var(--sp-4); color: var(--muted); }
 /* A landed row's Delete is the point of the section, so it shows without hover. */
 .pane.home .item .delete { visibility: visible; }
@@ -535,3 +550,8 @@ body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
 .ask-why-not > p { font-size: var(--size-small); }
 .ask-why-not summary { margin-top: var(--sp-3); font-size: var(--size-small); color: var(--muted); cursor: pointer; }
 .ask-why-not .markdown { margin: var(--sp-3) 0 0; }
+/* Pull ↓N (#164), at the end of the main checkout's line. Disabled, it still takes hover so its title says why. */
+.project-workspaces .workspace-line { display: flex; align-items: center; gap: var(--sp-2); padding-inline-end: var(--sp-3); }
+.project-workspaces .workspace-line .row { flex: 1; min-width: 0; width: auto; }
+.project-workspaces .workspace .pull { flex: none; color: var(--fg); }
+.project-workspaces .workspace .pull:disabled { pointer-events: auto; cursor: default; color: var(--muted); }

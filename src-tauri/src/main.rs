@@ -324,11 +324,46 @@ fn cards(studio: State<Mutex<Studio>>, cards: State<Cards>) -> SessionCards {
     shown
 }
 
-/// The plan's 5-hour and weekly usage from the status line's newest snapshot in the `usage` folder
-/// beside the event log, `null` when there is none (danielrispler/Falinks#481).
-#[tauri::command]
-fn usage() -> Option<serde_json::Value> {
-    studio_workbench::plan_usage(&studio_hook::data_dir(&std::env::home_dir()?).join("usage"))
+/// Plan usage (danielrispler/plotkeeper#163; #165) of the `agents` asked for, or of every agent when `None`. The window asks for only
+/// "claude" on its timer, which reads a snapshot file and runs no CLI; Codex and agy run theirs only when every agent is read, and
+/// only if the CLI is on the login shell's `PATH`: an agent not installed has no entry. Claude's is from the status line's newest
+/// snapshot in the `usage` folder beside the event log. An agent whose usage cannot be read says why.
+#[tauri::command(async)]
+fn usage(agents: Option<Vec<String>>) -> Vec<studio_workbench::AgentUsage> {
+    let wanted = |agent: &str| {
+        agents
+            .as_ref()
+            .is_none_or(|list| list.iter().any(|a| a == agent))
+    };
+    let mut read = Vec::new();
+    if wanted("claude") {
+        read.push(match std::env::home_dir() {
+            Some(home) => {
+                studio_workbench::claude_usage(&studio_hook::data_dir(&home).join("usage"))
+            }
+            None => studio_workbench::AgentUsage::failed(
+                "claude",
+                "No home folder to find Claude's usage in",
+            ),
+        });
+    }
+    let cli: Vec<&str> = ["codex", "agy"].into_iter().filter(|a| wanted(a)).collect();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64);
+    if !cli.is_empty() {
+        // The login shell's PATH, read once: a Dock-started app lacks it, and an npm-installed CLI needs it to find `node`.
+        let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/zsh".into());
+        let path = studio_workbench::login_shell_path(
+            &shell.to_string_lossy(),
+            std::time::Duration::from_secs(5),
+        )
+        .or_else(|| std::env::var("PATH").ok())
+        .unwrap_or_default();
+        let find = |program: &str| studio_workbench::find_in_path(program, &path);
+        read.extend(studio_workbench::cli_usages(&cli, &find, Some(&path), now));
+    }
+    read
 }
 
 /// What the read loop last sent the window, so it sends each again only when it changes.
@@ -832,6 +867,7 @@ fn main() {
             terminal::workspaces,
             terminal::workspace_git_state,
             terminal::fetch_repository,
+            terminal::pull_main,
             terminal::claude_argv,
             terminal::agent_argv,
             terminal::agents,

@@ -5,7 +5,7 @@
 // session's workspace. Clicking a workspace offers a new session there and, for a task, Remove, with the
 // loss check of a session's Delete. Creating a task is here too, not in the new-session picker.
 
-import { element, invoke, patch, pressable, text } from "./dom.js";
+import { element, fullTitle, invoke, patch, pressable, text } from "./dom.js";
 import { knownProjects, mainProject, onProjects, projects } from "./projects.js";
 import { drawSidebar, glyph, projectOpen } from "./list.js";
 import { newTask, showBranches, startLast } from "./picker.js";
@@ -22,8 +22,9 @@ export type Token = { text: string; title: string; bad?: boolean };
 // "detached", the upstream distance "↑2 ↓1" or "not pushed", "main ↓5" when behind origin's default
 // branch (not on it, where the upstream distance is the same), "●3" uncommitted files, and "⚠" with
 // an operation in progress. The hover title says each in words. The one function for the Git line
-// and for Workspaces rows.
-export function gitTokens(state: GitState | null): Token[] {
+// and for Workspaces rows. A task's folder, branch and name are one string, so with the task's `name` the
+// branch token drops when it is that string (#160): the surrounding line says it once.
+export function gitTokens(state: GitState | null, name?: string): Token[] {
   if (!state) return [];
   const tokens: Token[] = [
     state.branch ? { text: state.branch, title: `On branch ${state.branch}` } : { text: "detached", title: "Detached HEAD" },
@@ -49,7 +50,7 @@ export function gitTokens(state: GitState | null): Token[] {
     const title = state.operation === "conflicts" ? "Files have unresolved conflicts" : `A ${state.operation} is in progress`;
     tokens.push({ text: `⚠ ${state.operation}`, title });
   }
-  return tokens;
+  return state.branch !== null && state.branch === name ? tokens.slice(1) : tokens;
 }
 
 // Every workspace, the main checkout first.
@@ -62,10 +63,39 @@ const workspaceOf = (all: Workspace[], cwd: string): Workspace | undefined =>
     .filter(({ path }) => cwd === path || cwd.startsWith(`${path}/`))
     .sort((a, b) => b.path.length - a.path.length)[0];
 
-export type WorkspaceRow = { workspace: Workspace; name: string; facts: string; actions: string[]; landed: boolean };
+// The main checkout's Pull ↓N (#164): how far its default branch is behind origin's, and why Pull is refused now, or null.
+export type Pull = { behind: number; refused: string | null };
+export type WorkspaceRow = { workspace: Workspace; name: string; facts: string; actions: string[]; landed: boolean; pull: Pull | null };
+
+// Why Pull main is refused for a main checkout now, or null: files would change under a session there, local main has
+// commits origin lacks (ahead and behind: a fast-forward is never forced), or the incoming commits would overwrite changed
+// files. Only with the default branch checked out: otherwise the pull only moves the ref and changes no files, and git's own
+// refusal stands. Shared by the button and the palette's action.
+export function pullRefusal(found: Workspaces, state: GitState | null, sessions: Pick<Session, "cwd" | "state">[]): string | null {
+  if (!state?.on_default) return null;
+  const blocked = branchBlocked(found, sessions);
+  if (blocked) return `Not now: ${blocked}`;
+  if (state.upstream?.[0] && state.upstream[1]) return "Local main has diverged from origin: it has commits origin lacks";
+  if (state.would_overwrite) return "Uncommitted changes would be overwritten";
+  return null;
+}
+
+// What the palette's Pull main does with a project: nothing when its checked-out default branch is not behind origin, else
+// the refusal or a pull.
+export function pullPlan(found: Workspaces, state: GitState | null, sessions: Pick<Session, "cwd" | "state">[]): { run: boolean; refused: string | null } {
+  if (state?.on_default && !state.upstream?.[1]) return { run: false, refused: null };
+  const refused = pullRefusal(found, state, sessions);
+  return { run: !refused, refused };
+}
+
+// Pull main's button for the main checkout: only with its default branch checked out and behind origin.
+function pullOf(found: Workspaces, state: GitState | null, sessions: Pick<Session, "cwd" | "state">[]): Pull | null {
+  const behind = state?.on_default ? (state.upstream?.[1] ?? 0) : 0;
+  return behind ? { behind, refused: pullRefusal(found, state, sessions) } : null;
+}
 
 // The rows: the main checkout, then the tasks, each with its tokens and session count.
-export function workspaceRows(found: Workspaces, states: (GitState | null)[], sessions: (Pick<Session, "cwd"> & { landed?: boolean })[]): WorkspaceRow[] {
+export function workspaceRows(found: Workspaces, states: (GitState | null)[], sessions: (Pick<Session, "cwd"> & { landed?: boolean; state?: SessionState })[]): WorkspaceRow[] {
   const all = allWorkspaces(found);
   const working = all.map(() => 0);
   // A task is landed when the core says so for its sessions (#53): the mark is the list's, on the task's row.
@@ -77,14 +107,17 @@ export function workspaceRows(found: Workspaces, states: (GitState | null)[], se
     if (shipped) landed[all.indexOf(workspace)] = true;
   }
   const folder = (workspace: Workspace) => workspace.path.split("/").pop() ?? workspace.path;
+  const names = all.map((workspace, i) => (i === 0 ? "Main checkout" : (workspace.branch ?? `${folder(workspace)} (detached)`)));
   return all.map((workspace, i) => ({
     workspace,
-    name: i === 0 ? "Main checkout" : (workspace.branch ?? `${folder(workspace)} (detached)`),
-    facts: [...gitTokens(states[i] ?? null).map((token) => token.text), working[i] && plural(working[i], "session")]
+    name: names[i],
+    // A task's branch shows only when it differs from its name; the main checkout keeps its branch.
+    facts: [...gitTokens(states[i] ?? null, i === 0 ? undefined : names[i]).map((token) => token.text), working[i] && plural(working[i], "session")]
       .filter(Boolean)
       .join("  "),
     actions: i === 0 ? ["New session here"] : ["New session here", "Remove"],
     landed: i > 0 && landed[i],
+    pull: i === 0 ? pullOf(found, states[0] ?? null, sessions as Pick<Session, "cwd" | "state">[]) : null,
   }));
 }
 
@@ -207,9 +240,13 @@ const read = new Map<string, Workspaces>();
 const states = new Map<string, GitState | null>();
 // A project's latest error, git's or any other, shown in its group until the next one.
 const failures = new Map<string, string>();
+// A project's pull error: kept across reads until its next pull or fetch.
+const pullErrors = new Map<string, string>();
 let reading = false;
 // A forced read asked for while one runs: one more read follows it.
 let again = false;
+// Callers waiting for the read in flight to finish.
+let waiters: (() => void)[] = [];
 let readAt = 0;
 const opened = new Set<string>();
 
@@ -217,7 +254,7 @@ const opened = new Set<string>();
 export function keepProjects(paths: string[], ...maps: Map<string, unknown>[]) {
   for (const map of maps) for (const key of [...map.keys()]) if (!paths.includes(key)) map.delete(key);
 }
-const pruneRemoved = () => keepProjects(knownProjects(), read, failures, fetched);
+const pruneRemoved = () => keepProjects(knownProjects(), read, failures, pullErrors, fetched);
 
 // The first of `paths`, in project order, that `found` has: where the Git line looks with no selection.
 export const firstProject = (paths: string[], found: Map<string, unknown>): string | undefined => paths.find((path) => found.has(path));
@@ -232,7 +269,7 @@ export function workspaceSection(project: string, sessions: Pick<Session, "cwd" 
   const found = read.get(project);
   if (!found) return [];
   const rows = workspaceRows(found, allWorkspaces(found).map(({ path }) => states.get(path) ?? null), sessions);
-  const error = failures.get(project);
+  const error = failures.get(project) ?? pullErrors.get(project);
   const message = text("pre", error ?? "", "picker-error");
   message.dataset.key = "error";
   return [...rows.map((row) => workspaceRow(project, row)), creating(project), ...(error ? [message] : [])];
@@ -248,8 +285,8 @@ export const tokenOf = (project: string, cwd: string): string | null => {
   return found ? workspaceToken(found, cwd, (path) => states.get(path) ?? null) : null;
 };
 
-// A workspace's row: its name, then its facts; a click shows or hides its actions under it.
-function workspaceRow(project: string, { workspace, name, facts, actions, landed }: WorkspaceRow): HTMLElement {
+// A workspace's row: one line, its name then its facts; a click shows or hides its actions under it.
+export function workspaceRow(project: string, { workspace, name, facts, actions, landed, pull }: WorkspaceRow): HTMLElement {
   const row = document.createElement("div");
   row.className = "workspace";
   row.dataset.key = workspace.path;
@@ -261,11 +298,16 @@ function workspaceRow(project: string, { workspace, name, facts, actions, landed
   button.title = workspace.path;
   button.setAttribute("aria-expanded", String(opened.has(workspace.path)));
   const line = text("span", "", "l1");
-  line.append(text("span", name, "name"));
+  line.append(fullTitle(text("span", name, "name"), name));
+  if (facts) line.append(fullTitle(text("span", facts, "facts"), facts));
   if (landed) line.append(glyph("idle", false, true));
-  // The facts go under the name, so a long branch name is not cut for them.
-  button.append(line, ...(facts ? [text("span", facts, "l2")] : []));
-  row.append(button);
+  button.append(line);
+  if (pull) {
+    // Pull ↓N sits at the end of the row's line, beside its button: a button cannot nest in one.
+    const line = text("div", "", "workspace-line");
+    line.append(button, pullButton(project, pull));
+    row.append(line);
+  } else row.append(button);
   if (!opened.has(workspace.path)) return row;
   const act = (label: string) =>
     pressable(text("button", label, "small"), false, () => {
@@ -277,6 +319,15 @@ function workspaceRow(project: string, { workspace, name, facts, actions, landed
   buttons.append(...actions.map(act));
   row.append(buttons);
   return row;
+}
+
+// Pull ↓N (#164): fast-forwards the default branch; refused, it is disabled with the reason as its title.
+function pullButton(project: string, { behind, refused }: Pull): HTMLButtonElement {
+  const button = pressable(text("button", `Pull ↓${behind}`, "small pull") as HTMLButtonElement, false, () => void pull([project]));
+  button.dataset.key = "pull";
+  button.title = refused ?? `Fast-forward the default branch to origin's, ${plural(behind, "commit")}`;
+  button.disabled = refused !== null;
+  return button;
 }
 
 // A new task in a project, named by its branch; a session starts in it.
@@ -313,8 +364,9 @@ function drawLine() {
   const { project, workspaces, workspace } = now;
   const repo = lastSegment(workspaces.main.path);
   const name = workspace === workspaces.main ? repo : `${repo} › ${lastSegment(workspace.path)}`;
-  const tokens = gitTokens(states.get(workspace.path) ?? null);
-  line.title = [...tokens.map((token) => token.title), fetchNote(fetched.get(project) ?? { at: null, error: null }, Date.now())].join("\n");
+  const state = states.get(workspace.path) ?? null;
+  const tokens = gitTokens(state, workspace === workspaces.main ? undefined : lastSegment(workspace.path));
+  line.title = [[name, ...tokens.map((token) => token.text)].join("  "), ...gitTokens(state).map((token) => token.title), fetchNote(fetched.get(project) ?? { at: null, error: null }, Date.now())].join("\n");
   // The main checkout's branch token opens the branch picker (#95); a task's worktree keeps its branch.
   const shownTokens = tokens.map((token, i) => {
     if (i > 0 || workspace !== workspaces.main) return Object.assign(text("span", token.text, token.bad ? "git-bad" : ""), { title: token.title });
@@ -400,11 +452,18 @@ export async function readWorkspaces(now = false) {
     touchShown();
   } finally {
     reading = false;
+    waiters.splice(0).forEach((wake) => wake());
   }
   if (again) {
     again = false;
     await readWorkspaces(true);
   }
+}
+
+// A read that starts after now: waits for any read in flight, and its deferred one, to finish, then reads.
+async function readAfterNow() {
+  while (reading) await new Promise<void>((wake) => waiters.push(wake));
+  await readWorkspaces(true);
 }
 
 // A project added or removed: every project's workspaces are read again at once.
@@ -460,6 +519,7 @@ export async function fetchNow() {
     await Promise.all(
       paths.map(async (project) => {
         try {
+          pullErrors.delete(project);
           await invoke("fetch_repository", { project });
           fetched.set(project, { at: Date.now(), error: null });
         } catch (e) {
@@ -481,4 +541,30 @@ export function watchWorkspaces() {
   void fetchNow();
   setInterval(() => document.hasFocus() && touchShown(), 5000);
   setInterval(() => document.hasFocus() && void fetchNow(), 5 * 60_000);
+}
+
+// Pulls each of `paths`' main checkout (#164), then reads every workspace and each main checkout's git state again, so the
+// rows and the git line show the new distance. A pull that failed shows git's reason on its project's group, after that read.
+async function pull(paths: string[]) {
+  for (const project of paths) pullErrors.delete(project);
+  const errors = await Promise.all(
+    paths.map((project) => {
+      const found = read.get(project);
+      const plan = found ? pullPlan(found, states.get(found.main.path) ?? null, studio.listed) : { run: true, refused: null };
+      return plan.run ? invoke("pull_main", { project }).then(() => null, (e) => String(e)) : Promise.resolve(plan.refused);
+    }),
+  );
+  await readAfterNow();
+  paths.forEach((project, i) => {
+    const found = read.get(project);
+    if (found) touch(project, found.main.path);
+    if (errors[i]) pullErrors.set(project, errors[i]);
+  });
+  drawSidebar();
+}
+
+// Pull main for every project, the palette's action (#164).
+export async function pullAll() {
+  const paths = await readProjects();
+  if (paths) await pull(paths);
 }

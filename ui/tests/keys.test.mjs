@@ -1,7 +1,7 @@
 // The terminal pane's key mapping (danielrispler/Falinks#466), run on the `tsc` output. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { bound, doctorEntries, keyAction, keyLabel, keystroke, newestUnseen, nextNeedsYou, stepLine, paletteEntries, run, stepSession, windowBinding } from "../../dist/keys.js";
+import { bound, doctorEntries, titled, keyAction, keyLabel, keystroke, newestUnseen, nextNeedsYou, stepLine, paletteEntries, run, stepSession, windowBinding } from "../../dist/keys.js";
 import { initial, reload } from "../../dist/settings.js";
 
 const key = (code, mods = {}, key = "") => ({
@@ -309,4 +309,16 @@ test("next needs-you and jump to unseen over the sidebar's sessions never land o
   assert.equal(nextNeedsYou(sidebar, "a"), "b");
   assert.equal(newestUnseen(sidebar), "b");
   assert.equal(stepSession(sidebar, "b", 1), "a");
+});
+
+test("Cmd+N opens the picker as before and Cmd+T opens it on Terminal (#159)", () => {
+  assert.equal(windowBinding(initial.keymap, key("KeyN", { metaKey: true }), false), "studio::NewSession");
+  assert.equal(windowBinding(initial.keymap, key("KeyT", { metaKey: true }), false), "studio::NewTerminal");
+});
+
+test("a button's title names the key the keymap binds its action to now (#159)", () => {
+  assert.equal(titled(initial.keymap, "Settings", "studio::OpenSettings"), "Settings (⌘,)");
+  const rebound = reload(initial, { settings: "{}", keymap: JSON.stringify([{ context: "Window", bindings: { "cmd-.": "studio::OpenSettings" } }]) });
+  assert.ok(titled(rebound.keymap, "Settings", "studio::OpenSettings").includes("⌘."), "the rebound key shows");
+  assert.equal(titled({}, "Settings", "studio::OpenSettings"), "Settings");
 });

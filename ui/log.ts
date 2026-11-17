@@ -2,7 +2,7 @@
 // offset and the pane keeps that offset, reading on when the shell re-sends the selection. Tool calls show as rows,
 // folded once they have a result. The header's name and state come from the core's tracking, never from the log.
 
-import { element, invoke, pressable, text } from "./dom.js";
+import { element, fullTitle, invoke, pressable, text } from "./dom.js";
 import type { LogCall, LogEntry, LogResult, LogRow, Subagent, SubagentLog } from "./types.js";
 
 // Pairs each result with its call by id, in order of the calls. A call without a result yet is running
@@ -96,7 +96,7 @@ function drawLog(place: HTMLElement, agent: Subagent | null, log: SubagentLog | 
   place.className = "pane subagent-log";
   const head = document.createElement("header");
   head.append(
-    text("span", agent?.name ?? "Subagent", "log-title"),
+    fullTitle(text("span", agent?.name ?? "Subagent", "log-title"), agent?.name ?? "Subagent"),
     ...(agent?.agent_type ? [text("span", agent.agent_type, "log-type")] : []),
     ...(agent ? [text("span", stateLabel(agent.status), `log-state ${agent.status === "running" ? "running" : "done"}`)] : []),
     pressable(text("button", "Parent's terminal"), false, toParent),
@@ -115,7 +115,7 @@ function drawRow(row: LogRow): HTMLElement {
   fold.open = expanded.has(row.id);
   fold.addEventListener("toggle", () => (fold.open ? expanded.add(row.id) : expanded.delete(row.id)));
   fold.className = failed ? "log-call failed" : "log-call";
-  const summary = text("summary", callTitle(row));
+  const summary = fullTitle(text("summary", callTitle(row)), callTitle(row));
   if (failed) summary.append(text("span", "error", "log-error"));
   fold.append(summary, text("pre", out + (cut ? "\n… cut" : ""), "log-result"));
   return fold;

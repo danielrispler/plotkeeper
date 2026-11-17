@@ -118,8 +118,8 @@ test("a turn is seen only while the rail shows its session: not in focus mode, a
   assert.equal(railShown("full", true, true), false);
 });
 
-// The top bar (#127). Widths as the bar measures them at its font: header, chip, git line, "+", new terminal, usage, new build.
-const items = { header: 200, "needs-you": 90, git: 260, "new-session": 28, "new-terminal": 100, usage: 120, "new-build": 120 };
+// The top bar (#127). Widths as the bar measures them at its font: header, chip, git line, "+", usage, new build.
+const items = { header: 200, "needs-you": 90, git: 260, "new-session": 28, usage: 120, "new-build": 120 };
 const room = (window) => window - 78 - 12; // the traffic lights' space and the bar's right padding
 const bar = (window, have = items) => arrangeBar(room(window), have, 12, 28);
 
@@ -127,15 +127,15 @@ test("at 1,728 pixels the whole bar shows and the menu is empty", () => {
   assert.deepEqual(bar(1728), { shown: Object.keys(items), menu: [] });
 });
 
-test("at 1,100 pixels the new terminal, the usage and the new build go to the menu, in that order", () => {
-  assert.deepEqual(bar(1100, { ...items, git: 520 }), { shown: ["header", "needs-you", "git", "new-session"], menu: ["new-terminal", "usage", "new-build"] });
-  assert.deepEqual(bar(1100, { ...items, git: 400 }).menu, ["new-terminal", "usage"]);
+test("at 1,100 pixels the usage and the new build go to the menu, in that order", () => {
+  assert.deepEqual(bar(1100, { ...items, git: 520 }), { shown: ["header", "needs-you", "git", "new-session"], menu: ["usage", "new-build"] });
+  assert.deepEqual(bar(1100, { ...items, git: 400 }).menu, ["usage"]);
 });
 
 test("at 864 pixels, then the narrowest window, the git line and '+' leave last, the header and the chip never", () => {
-  assert.deepEqual(bar(864, { ...items, git: 300 }).menu, ["new-terminal", "usage", "new-build"]);
-  assert.deepEqual(bar(864, { ...items, git: 520 }).menu, ["new-terminal", "usage", "new-build", "new-session", "git"]);
-  assert.deepEqual(bar(500), { shown: ["header", "needs-you"], menu: ["new-terminal", "usage", "new-build", "new-session", "git"] });
+  assert.deepEqual(bar(864, { ...items, git: 300 }).menu, ["usage", "new-build"]);
+  assert.deepEqual(bar(864, { ...items, git: 520 }).menu, ["usage", "new-build", "new-session", "git"]);
+  assert.deepEqual(bar(500), { shown: ["header", "needs-you"], menu: ["usage", "new-build", "new-session", "git"] });
   for (const window of [1728, 1100, 864, 480, 100]) {
     const { shown } = bar(window);
     assert.ok(shown.includes("header") && shown.includes("needs-you"), `at ${window}`);

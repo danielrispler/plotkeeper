@@ -11,7 +11,7 @@ import { placeBar, watchBar } from "./bar.js";
 import { markShown, showCards } from "./cards.js";
 import { diffRequest, newestDiff } from "./diff.js";
 import { element, invoke, listen } from "./dom.js";
-import { type Actions, doctorEntries, newestUnseen, nextNeedsYou, paletteEntries, run, stepLine, stepSession, windowBinding } from "./keys.js";
+import { type Actions, doctorEntries, newestUnseen, nextNeedsYou, paletteEntries, run, stepLine, stepSession, titled, windowBinding } from "./keys.js";
 import { hover, realClock, shownGate } from "./hover.js";
 import { arrange, defaultWidths, type LayoutMode, railShown, resized, type Widths } from "./layout.js";
 import { listSpace } from "./home.js";
@@ -20,7 +20,7 @@ import { goHome, select, show } from "./selection.js";
 import { dragPanel, placePanel, togglePanel } from "./panel.js";
 import { dragSplit, focusPane, placePanes, runDoctor, showHistory, split, startPanes, toggleSplit } from "./panes.js";
 import { showAddProject, showBranches, showPalette, showPicker } from "./picker.js";
-import { fetchNow, foundWorkspaces, showWorkspaces, sidebarOrder, watchWorkspaces } from "./workspaces.js";
+import { fetchNow, foundWorkspaces, pullAll, showWorkspaces, sidebarOrder, watchWorkspaces } from "./workspaces.js";
 import { reload, type SettingsFiles, zoomed } from "./settings.js";
 import { knownProjects } from "./projects.js";
 import { studio } from "./state.js";
@@ -28,7 +28,7 @@ import { showSkills } from "./skills.js";
 import { showView } from "./story.js";
 import { jumpToNeedsYou, showToast } from "./toast.js";
 import type { Selection, Session, SessionCards } from "./types.js";
-import { type Limits, usageText } from "./usage.js";
+import { readUsage, timedAgents } from "./usage.js";
 
 // The terminal's cell, measured from a probe in its font, sets the columns' layout.
 function cell(): number {
@@ -214,6 +214,8 @@ const actions: Actions = {
   "studio::ShowHistory": () => showHistory(),
   // Fetches the repository now (#33); the workspaces' states follow.
   "studio::Fetch": () => void fetchNow(),
+  // Pull main (#164): every project's main checkout's default branch fast-forwards to origin's.
+  "studio::PullMain": () => void pullAll(),
   // Asks GitHub again which tasks have landed (#53); it is otherwise asked at a turn's end and at the window's focus.
   "studio::RefreshLanded": () => void invoke("refresh_landed_tasks").catch((e) => console.warn(e)),
   "studio::OpenSettings": () => void invoke("open_settings", { editor: studio.files.settings.editor }).catch((e) => console.warn(e)),
@@ -251,6 +253,7 @@ function applySettings(files: SettingsFiles) {
   const previous = studio.files.settings;
   studio.files = reload(studio.files, files);
   const { settings, errors } = studio.files;
+  element("settings-gear").title = titled(studio.files.keymap, "Settings", "studio::OpenSettings");
   const notice = element("notice");
   // Other notices, such as the Claude Code version's, stay beside the settings errors.
   const others = (notice.textContent ?? "").split("\n").filter((line) => line && !/^(settings|keymap)\.json: /.test(line));
@@ -297,7 +300,7 @@ dragSplit();
 dragPanel();
 element("new-session").addEventListener("click", () => void showPicker());
 element("add-project").addEventListener("click", () => void showAddProject());
-element("new-terminal").addEventListener("click", () => void showPicker("terminal"));
+element("settings-gear").addEventListener("click", () => void run(actions, "studio::OpenSettings"));
 // A click on the session list's empty space selects none and shows Home.
 document.querySelector(".list")!.addEventListener("click", (event) => listSpace(event.target as HTMLElement) && void goHome());
 // The needs-you chip (danielrispler/Falinks#572) selects the first session that needs Daniel.
@@ -308,7 +311,7 @@ element("needs-you").addEventListener("click", () => {
 // A click outside the picker, but not on its own buttons, closes it.
 document.addEventListener("pointerdown", (event) => {
   const target = event.target as Node;
-  const opener = ["new-session", "new-terminal", "add-project"].some((id) => element(id).contains(target));
+  const opener = ["new-session", "add-project"].some((id) => element(id).contains(target));
   if (!element("picker").contains(target) && !opener) element("picker").hidden = true;
 }, true); // capture: the terminal must not swallow it
 
@@ -344,11 +347,13 @@ invoke<SessionCards>("cards").then(showCards);
 // The answer hook waits for the card only while its session shows (danielrispler/Falinks#461, decision 16).
 startWatching(() => showView(studio.selection));
 
-// The plan's usage, from the status line's snapshot (danielrispler/Falinks#481). The status line runs after each message.
-// shortcut: polls every 10 s; push from the shell if the delay matters.
-const showUsage = () =>
-  invoke<Limits | null>("usage").then((limits) => {
-    element("usage").textContent = usageText(limits, Date.now() / 1000);
-  });
-showUsage();
-setInterval(showUsage, 10_000);
+// Each agent's plan usage (danielrispler/plotkeeper#163): the load, the focus and a 10 s timer read only Claude's snapshot, which
+// runs no CLI; every agent is read only when the popover opens, so the studio runs no agent CLI behind the user's back.
+// shortcut: polls Claude's snapshot every 10 s; push from the shell if the delay matters.
+const readUsageOf = (agents: string[] | null) => readUsage(element("usage"), element("usage-popover"), agents);
+readUsageOf(timedAgents);
+addEventListener("focus", () => readUsageOf(timedAgents));
+setInterval(() => readUsageOf(timedAgents), 10_000);
+element("usage-popover").addEventListener("toggle", (event) => {
+  if ((event as ToggleEvent).newState === "open") readUsageOf(null);
+});

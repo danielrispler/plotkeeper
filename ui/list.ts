@@ -2,11 +2,11 @@
 // by shape (danielrispler/Falinks#572), each session's subagents nested under it. When the window is narrow it collapses to
 // a strip of glyphs and labels, which opens the full list on hover, on click or on ⌘1.
 
-import { agentMark } from "./capabilities.js";
-import { age, element, invoke, patch, prose, pressable, stepText, text } from "./dom.js";
+import { age, element, fullTitle, invoke, patch, prose, pressable, stepText, text } from "./dom.js";
 import { counts, times, type Time } from "./times.js";
 import { shortPaths } from "./paths.js";
 import { historyLink } from "./history.js";
+import { logo, logoKey, noContextNote } from "./logos.js";
 import { knownProjects, onProjects, projects, projectsError, setProjects } from "./projects.js";
 import { addProject, refuse } from "./picker.js";
 import { projectGroups, foundWorkspaces, tokenOf, workspaceSection, type ProjectGroup } from "./workspaces.js";
@@ -60,16 +60,18 @@ export function contextTitle(context: Context | null): string {
 }
 
 // The muted mark after a row's name: "terminal" for a plain terminal's row, "status only" for another agent's row
-// (danielrispler/Falinks#560), so it never reads as a Claude session with missing data; else the context share.
-export function rowMark(session: Pick<Session, "shell" | "status_only" | "transcript" | "capabilities">): string {
+// (danielrispler/Falinks#560), so it never reads as a Claude session with missing data; else the context share. The
+// agent itself is the logo before the name (#158).
+export function rowMark(session: Pick<Session, "shell" | "status_only" | "transcript">): string {
   if (session.shell) return "terminal";
   if (session.status_only) return "status only";
-  return agentMark(session) || contextText(session.transcript.context);
+  return contextText(session.transcript.context);
 }
 
-// The name's hover: the identity's PR and worktree, which a prompt name leaves out.
+// The name's hover, only for a prompt-named session: its full name, then the identity's PR and worktree, which the prompt
+// name leaves out. Any other name is in the row's own title.
 function nameTitle(session: Session): string {
-  return session.name || !session.prompt_name ? "" : session.identity.name;
+  return session.name || !session.prompt_name ? "" : `${sessionName(session)} · ${session.identity.name}`;
 }
 
 // The mark's node, with the context share's hover.
@@ -78,10 +80,8 @@ function markNode(session: Session): HTMLElement {
     ? "A plain terminal"
     : session.status_only
     ? "Another agent, followed by its reported status only"
-    : agentMark(session)
-      ? `${agentMark(session)}: followed by what it reports, which has no context share`
-      : contextTitle(session.transcript.context);
-  return Object.assign(text("span", rowMark(session), "id"), { title });
+    : contextTitle(session.transcript.context);
+  return fullTitle(text("span", rowMark(session), "id"), title);
 }
 
 // A subagent's state label and its state: "Needs you" while it asks, else its status.
@@ -224,16 +224,18 @@ export function row(session: Session, children: Children, token: string | null =
   const line = secondLine(session);
   const turn = line === null ? null : rowTime(session, isSelected(session.id));
   const clock = text("span", "", "clock");
-  rowLines(
+  const first = rowLines(
     button,
     session.state,
-    [Object.assign(text("span", sessionName(session), "name"), { title: nameTitle(session) }), markNode(session), ...(token ? [text("span", token, "id token")] : [])],
+    [fullTitle(text("span", sessionName(session), "name"), nameTitle(session)), markNode(session), ...(token ? [fullTitle(text("span", token, "id token"), token)] : [])],
     line === null
       ? null
       : [...done(children, children.get("session")), rowLine(line), ...(turn ? [Object.assign(counts(clock, turn[1]), { title: turn[0] })] : [])],
     session.unseen,
     session.landed,
   );
+  // The agent's logo leads the row, apart from its state glyph (#158).
+  first.prepend(logo(logoKey(session), noContextNote(session) || undefined));
   return button;
 }
 
@@ -265,8 +267,7 @@ function rowLine(line: string): HTMLElement {
   const node = prose("span", shown);
   node.className = "row-step";
   node.dir = "auto";
-  if (full) node.title = full;
-  return node;
+  return fullTitle(node, full || shown);
 }
 
 // A subagent row's second line, as a session row's (danielrispler/Falinks#572): only while it runs or needs Daniel.
@@ -277,7 +278,7 @@ export function agentLine(state: string, details: (string | null)[]): string | n
 // A subagent's row, indented under the agent that spawned it. A worker shows its task, status and
 // last step; a helper its task, type, status, duration and result. A failed child stands out until
 // Daniel opens it.
-function agentRow(session: Session, children: Children, agent: Subagent, depth: number): HTMLElement {
+export function agentRow(session: Session, children: Children, agent: Subagent, depth: number): HTMLElement {
   const button = selecting(session.id, agent.id);
   button.classList.add("row", agent.kind);
   button.style.paddingInlineStart = `calc(var(--sp-4) + var(--indent) * ${depth + 1})`;
@@ -374,7 +375,7 @@ export function stripLabels(sessions: Pick<Session, "name" | "identity" | "folde
 
 // The strip: a button per session that is not idle or ended, by its glyph and strip label, then one
 // count for those collapsed, which opens the full list.
-function strip(sessions: Session[]): HTMLElement[] {
+export function strip(sessions: Session[]): HTMLElement[] {
   const toggle = () => document.body.classList.toggle("list-open");
   const open = pressable(text("button", "☰", "open"), false, toggle);
   open.title = "Open list (⌘1)";
@@ -427,7 +428,7 @@ export function headAction(group: { key: string; project: boolean }, main: strin
 // A project's header (#97): its name and, even while folded, its most urgent state: needs you over running. The
 // header carries the project's own actions (#98): Remove, and Add as project on a folder outside every project; a
 // project's header is dragged to reorder the projects.
-function projectHead(group: ProjectGroup<Session>): HTMLElement {
+export function projectHead(group: ProjectGroup<Session>): HTMLElement {
   const head = document.createElement("div");
   head.className = "project-head";
   head.dataset.key = `head ${group.key}`;
@@ -439,7 +440,7 @@ function projectHead(group: ProjectGroup<Session>): HTMLElement {
   });
   toggle.removeAttribute("aria-pressed");
   toggle.setAttribute("aria-expanded", String(projectOpen(group.key)));
-  toggle.title = group.key;
+  fullTitle(toggle, group.key || group.name);
   toggle.append(text("span", group.name, "name"));
   if (group.rollup) toggle.append(glyph(group.rollup));
   head.append(toggle);

@@ -27,15 +27,15 @@
       <!-- The Git line (#29): the selected session's workspace and its git tokens, or the main checkout's; stays in focus mode. -->
       <span id="git-line" class="git-line" hidden></span>
       <span class="sp"></span>
-      <!-- Usage: context, 5h and week (danielrispler/Falinks#480, danielrispler/Falinks#481). -->
-      <span id="usage" class="usage"></span>
-      <button id="new-terminal" class="btn small" type="button">New terminal</button>
+      <!-- Plan usage (danielrispler/plotkeeper#163): the tightest window; a click opens the popover of each agent's tile. -->
+      <button id="usage" class="btn small usage" type="button" popovertarget="usage-popover">Usage</button>
       <!-- A new build to restart into (danielrispler/Falinks#470); sessions live in the daemon, so they stay. -->
       <button id="new-build" class="btn small" type="button" title="A new build is ready. Sessions keep running." hidden>Restart to update</button>
       <button id="new-session" class="btn small" type="button" title="New session" aria-label="New session">+</button>
       <button id="bar-more" class="btn small" type="button" popovertarget="bar-menu" aria-label="More" hidden>⋯</button>
       <div id="bar-menu" class="menu bar-menu" popover></div>
     </header>
+    <div id="usage-popover" class="menu usage-popover" popover></div>
 
     <nav class="list" aria-label="Sessions">
       <div class="full">
@@ -43,7 +43,11 @@
         <div id="groups"></div>
         <button id="add-project" class="btn small add-project" type="button">Add project…</button>
         <!-- "History · N" (#94): the ended sessions, which are not in the list. -->
-        <div id="history-link"></div>
+        <div class="list-foot">
+          <div id="history-link"></div>
+          <!-- The gear (#159) runs Open settings, as ⌘, does; its title names the key the keymap binds. -->
+          <button id="settings-gear" class="btn small quiet gear" type="button" aria-label="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="7"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg></button>
+        </div>
       </div>
       <div id="strip" class="strip"></div>
     </nav>

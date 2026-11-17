@@ -5,8 +5,9 @@
 // checks and folded response. "Ask" sits on a file, a failed check, a subagent line and the Headline. A subagent's view shows its own line,
 // questions, brief and cards in one block.
 
-import { agentMark, modelLine, reports } from "./capabilities.js";
-import { age, code, element, invoke, pressable, prose, text } from "./dom.js";
+import { modelLine, reports } from "./capabilities.js";
+import { logo, logoKey, noContextNote } from "./logos.js";
+import { age, code, element, fullTitle, invoke, pressable, prose, text } from "./dom.js";
 import { select } from "./selection.js";
 import { askAnchor } from "./ask.js";
 import { rendered } from "./markdown.js";
@@ -44,6 +45,12 @@ import {
   type TurnSummary,
 } from "./types.js";
 
+// The top bar's header name, with the full name on the header's hover, where the name is cut (#162).
+export function showBarName(name: string) {
+  element("bar-name").textContent = name;
+  element("session-header").title = name || "Session story";
+}
+
 export function showView(selected: Selection | null) {
   element("empty").hidden = selected !== null;
   element("view").hidden = selected === null;
@@ -51,7 +58,8 @@ export function showView(selected: Selection | null) {
   element("session-header").hidden = selected === null;
   element("spine").hidden = selected === null;
   if (selected === null) {
-    for (const id of ["state", "block", "mode", "mark", "session-name", "phase", "bar-state", "bar-name"]) element(id).textContent = "";
+    for (const id of ["state", "block", "mode", "mark", "session-name", "phase", "bar-state"]) element(id).textContent = "";
+    showBarName("");
     showQuestions([]);
     showCleared([]);
     shownSession = null;
@@ -72,14 +80,17 @@ export function showView(selected: Selection | null) {
   element("block").textContent = (state === "needs_you" ? blockKind(open, openDecision()) : null) ?? "";
   // A subagent runs in its session's mode.
   element("mode").textContent = reports(session, "permission_mode") ? modeText(session.permission_mode) : "";
-  element("mark").textContent = agentMark(session);
+  // The agent's logo, titled with its model line when it has one (#158); agy's keeps its note that it has no context share.
+  const key = logoKey(session);
+  const title = [agent === null ? modelLine(session) : "", noContextNote(session)].filter(Boolean).join("\n");
+  element("mark").replaceChildren(logo(key, title || undefined));
   element("session-name").textContent = sessionName(session);
   // The top bar's header (danielrispler/plotkeeper#127) says the same state and name.
   element("bar-state").textContent = element("state").textContent;
   element("bar-state").dataset.state = state;
   element("bar-dot").dataset.state = state;
   element("spine-dot").dataset.state = state;
-  element("bar-name").textContent = sessionName(session);
+  showBarName(sessionName(session));
   element("phase").textContent = agent === null && state === "running" ? estimateText(session.work) : "";
   // The model and effort the session runs at (danielrispler/Falinks#517, decision 8); none for a subagent, whose transcript the studio does not read.
   const effort = session.transcript.effort;
@@ -111,7 +122,8 @@ export function showView(selected: Selection | null) {
     : (step?.tool ?? (agent === null ? session.returned : null) ?? "No step yet");
   const [detail, fullDetail] = shortPaths(step?.detail ?? "");
   element("detail").textContent = detail;
-  element("detail").title = fullDetail;
+  element("detail").removeAttribute("title");
+  fullTitle(element("detail"), fullDetail);
   element("command").textContent = step?.command ?? "";
   element("step").classList.toggle("has-command", Boolean(step?.command));
   showIntention(storyOf(session, agent));
@@ -192,6 +204,7 @@ function historyElement(session: string, entry: HistoryEntry): HTMLElement {
   button.classList.add("subagent");
   const lines = [text("span", entry.purpose, "asked"), ...(entry.asked ? [prose("span", entry.asked)] : [])];
   button.append(...lines, prose("span", entry.result), text("span", entry.details, "kind"));
+  fullTitle(button, [entry.purpose, entry.asked, entry.result, entry.details].filter(Boolean).join(" · "));
   const item = document.createElement("li");
   item.append(button, askAnchor(session, { kind: "subagent", agent: entry.agent }, `the subagent ${entry.purpose}`));
   return item;
@@ -425,11 +438,11 @@ export const shownChecks = (lines: CheckLine[]): CheckLine[] => {
 
 // A check line: its outcome, its command, and how long it took or, while it runs, its time against
 // its typical time. No colour, as colour is only for "needs you".
-function checkElement(line: CheckLine): HTMLElement {
+export function checkElement(line: CheckLine): HTMLElement {
   const item = document.createElement("li");
   const label = line.ended_at === null ? "Running" : line.passed === null ? "Ran" : line.passed ? "Passed" : "Failed";
   const time = counts(text("span", "", "check-time"), (now) => checkTime(line, now));
-  item.append(text("span", label, "outcome"), code(line.command), time);
+  item.append(text("span", label, "outcome"), fullTitle(code(line.command), line.command), time);
   return item;
 }
 
@@ -441,8 +454,7 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
   const key = `${session.id} ${index ?? "rest"}`;
   // While running, "now" holds what Daniel asked.
   if (turn && !(now && session.state === "running")) {
-    const prompt = text("p", turn.prompt || "No prompt", "prompt");
-    prompt.title = turn.prompt;
+    const prompt = fullTitle(text("p", turn.prompt || "No prompt", "prompt"), turn.prompt || "No prompt");
     node.append(...(now?.asked ? [text("p", "You asked", "label")] : []), prompt);
   }
   if (now?.soFar) node.append(text("p", "So far this turn", "label"));
@@ -538,7 +550,7 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
 
 // A turn before the newest (danielrispler/plotkeeper#117): one line, which opens the turn's block under it and folds it
 // again. Only this node changes, so the others and the scroll position stay; the opened turns outlast a redraw.
-function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
+export function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
   const node = document.createElement("li");
   node.className = "turn past";
   const key = `${session.id} ${block.index} turn`;
@@ -557,8 +569,8 @@ function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
     button.setAttribute("aria-expanded", String(open));
     button.append(
       ...(line.unanswered ? [text("span", "●", "mark quiz-open")] : []),
-      text("span", line.prompt, "prompt"),
-      text("span", line.headline ?? "", "headline-text"),
+      fullTitle(text("span", line.prompt, "prompt"), turn.prompt.trim() || line.prompt),
+      fullTitle(text("span", line.headline ?? "", "headline-text"), line.headline),
       ...(line.failed ? [text("span", "✕", "mark check-failed")] : []),
     );
     if (line.unanswered) button.querySelector(".quiz-open")!.setAttribute("title", "A quiz is open");

@@ -7,7 +7,8 @@ import { railFixtures } from "./rail-fixtures.mjs";
 const session = (id, name, state, extra = {}) => {
   const now = Date.now();
   return {
-    id, cwd: `/w/plotkeeper/.claude/worktrees/${id}`, folder_name: id, terminal: null, status_only: false, name, prompt_name: null,
+    id, capabilities: { agent: "claude", asks: true, background_tasks: true, replies: true, permission_mode: true, durations: true, transcript_version: true, context: true, turn_trees: true },
+    model: null, shell: false, cwd: `/w/plotkeeper/.claude/worktrees/${id}`, folder_name: id, terminal: null, status_only: false, name, prompt_name: null,
     resume_id: id, permission_mode: null, started_mode: null, cleared: [], asks_before_closing: false, landed: false, last_step: null,
     started_at: now - 3600e3, last_event_at: now - 60e3, turn_span: null, step_span: null, state, checks: [], agents: [], asker: null,
     prompts: [], turns: [], since_looked: { turns: 0, files: 0, passed: 0, failed: 0, ran: 0 }, questions: [], returned: null,
@@ -30,6 +31,7 @@ const common = {
   terminal_connect: { repo: "/w/plotkeeper", outdated: false },
   terminal_lost: [],
   revival: [],
+  projects: ["/w/plotkeeper"],
 };
 
 // A subagent's log pane: the subagent's line selected, its log from the stubbed `subagent_log`.
@@ -71,6 +73,26 @@ const recordedTerminal = () => {
   };
 };
 
+const usageTiles = () => {
+  const now = Date.now() / 1000;
+  const window = (label, used, ahead) => ({ label, used_percentage: used, resets_at: now + ahead });
+  return [
+    { agent: "claude", groups: [{ name: "", windows: [window("5h", 62, 2 * 3600 + 600), window("week", 80, 3 * 86400)] }], read_at: now - 240, source: "last Claude session", reason: null },
+    { agent: "codex", groups: [], read_at: null, source: null, reason: "Codex's usage could not be read: it did not answer in time" },
+    {
+      agent: "agy",
+      groups: [
+        { name: "Gemini Models", windows: [window("5h", 1, 5400), window("week", 3, 4 * 86400)] },
+        { name: "Claude and GPT models", windows: [window("5h", 0, 4 * 3600), window("week", 0, 7 * 86400)] },
+        { name: "Gemini 4 Argon", windows: [window("week", 78, 5 * 86400)] },
+      ],
+      read_at: now - 5,
+      source: "agy /usage",
+      reason: null,
+    },
+  ];
+};
+
 export const fixtures = {
   ...railFixtures,
   recordedTerminal,
@@ -86,6 +108,57 @@ export const fixtures = {
     ];
     return { ...common, sessions, selected: { session: sessions[0], agent: null } };
   },
+  // The top bar's usage glance (#163): the tightest window across the agents' tiles, here Claude's weekly 80%.
+  usageGlance() {
+    return { ...fixtures.list(), usage: usageTiles() };
+  },
+  // The usage popover open (#163): Claude's tile with its bars and age, Codex's, whose read failed, with only its reason, and agy's three groups, most used first.
+  usagePopover() {
+    return { ...fixtures.list(), usage: usageTiles(), snapScript: `document.getElementById("usage-popover").showPopover();` };
+  },
+  // The list with each agent's logo in each state (#158): Claude, agy, status-only Codex, another program and a shell.
+  logos() {
+    const agy = { capabilities: { agent: "agy", asks: false, background_tasks: false, replies: false, permission_mode: false, durations: false, transcript_version: false, context: false, turn_trees: false }, model: "gemini-3.8-flash-high" };
+    const only = (program, extra = {}) => ({ status_only: true, capabilities: { agent: "", asks: false, background_tasks: false, replies: false, permission_mode: false, durations: false, transcript_version: false, context: false, turn_trees: false }, ...extra, identity: { issue: null, branch: null, pr: null, worktree: "", name: `${program} · plotkeeper` } });
+    const sessions = [
+      session("s1", "#56 · Row controls", "running", { transcript: { ...session("x", "x", "idle").transcript, context: { tokens: 90000, share: 9, window: 1000000, left: 91 } } }),
+      session("s2", "agy · Name from the prompt", "needs_you", agy),
+      session("s3", "#54 · Subagent terminal", "your_turn", { unseen: true }),
+      session("s4", "codex · plotkeeper", "running", only("codex")),
+      session("s5", "aider · plotkeeper", "your_turn", only("aider")),
+      session("s6", "plotkeeper", "idle", only("zsh", { shell: true })),
+      session("s7", "#55 · Delete default", "idle", agy),
+    ];
+    // The idle group is folded by default: open it, so the idle rows show.
+    const snapScript = `[...document.querySelectorAll("summary, button")].find((el) => /^Idle/.test(el.textContent.trim()))?.click();`;
+    return { ...common, sessions, selected: { session: sessions[1], agent: null }, snapScript };
+  },
+  // Workspaces rows and the git line (#160): the selected session's task shows its branch once, a renamed and a detached one show
+  // theirs, and the main checkout keeps its branch. Built on the rail's running fixture, whose session works in the first task.
+  branchOnce() {
+    const base = railFixtures.railRunning();
+    const root = "/Users/danielrispler/work/plotkeeper";
+    const task = (name) => `${root}/.claude/worktrees/${name}`;
+    const state = (branch, extra = {}) => ({ branch, upstream: branch ? [0, 0] : null, changed: 0, main_behind: null, on_default: false, would_conflict: false, operation: null, ...extra });
+    return {
+      ...base,
+      workspaces: {
+        main: { path: root, branch: "main" },
+        tasks: [
+          { path: task("issue-56-row-controls"), branch: "issue-56-row-controls" },
+          { path: task("issue-140-old"), branch: "issue-140-new" },
+          { path: task("look"), branch: null },
+        ],
+        hidden: 0,
+      },
+      workspace_git_state: { __by: "path", values: {
+        [root]: state("main", { on_default: true }),
+        [task("issue-56-row-controls")]: state("issue-56-row-controls", { upstream: [2, 1], changed: 5 }),
+        [task("issue-140-old")]: state("renamed-branch", { upstream: null }),
+        [task("look")]: state(null, { changed: 1 }),
+      } },
+    };
+  },
   // Home: nothing selected, with Needs you, Unseen, Landed and the project row.
   home() {
     const sessions = [
@@ -98,3 +171,21 @@ export const fixtures = {
     return { ...common, sessions, selected: null };
   },
 };
+
+// Pull main (#164), on #160's rows: the main checkout is 3 commits behind origin, so Pull ↓3 shows, enabled; when the incoming commits would overwrite changed files it is disabled.
+const pullScript = (disabled) => `
+  const pull = document.querySelector(".workspace .pull");
+  if (!pull) log("snap:fail Pull is missing");
+  else if (pull.disabled !== ${disabled}) log("snap:fail Pull should be ${disabled ? "disabled" : "enabled"}");
+  else log("Pull is " + (pull.disabled ? "disabled: " + pull.title : "enabled"));
+`;
+const pullMain = (extra, disabled) => () => {
+  const f = fixtures.branchOnce();
+  const main = f.workspaces.main.path;
+  // The other sessions work in tasks of their own, so none of them blocks Pull for working in the main checkout.
+  for (const { cwd } of f.sessions) if (!f.workspaces.tasks.some(({ path }) => path === cwd)) f.workspaces.tasks.push({ path: cwd, branch: cwd.split("/").pop() });
+  f.workspace_git_state.values[main] = { ...f.workspace_git_state.values[main], upstream: [0, 3], main_behind: 3, ...extra };
+  return { ...f, snapScript: pullScript(disabled) };
+};
+fixtures.pullEnabled = pullMain({}, false);
+fixtures.pullDisabled = pullMain({ changed: 2, would_overwrite: true }, true);
