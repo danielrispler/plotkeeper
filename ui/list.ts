@@ -3,7 +3,7 @@
 // a strip of glyphs and labels, which opens the full list on hover, on click or on ⌘1.
 
 import { agentMark } from "./capabilities.js";
-import { age, element, invoke, patch, prose, pressable, stepText, text } from "./dom.js";
+import { age, element, hover, invoke, patch, prose, pressable, stepText, text } from "./dom.js";
 import { counts, times, type Time } from "./times.js";
 import { shortPaths } from "./paths.js";
 import { historyLink } from "./history.js";
@@ -67,9 +67,10 @@ export function rowMark(session: Pick<Session, "shell" | "status_only" | "transc
   return agentMark(session) || contextText(session.transcript.context);
 }
 
-// The name's hover: the identity's PR and worktree, which a prompt name leaves out.
+// The name's hover, only for a prompt-named session: its full name, then the identity's PR and worktree, which the prompt
+// name leaves out. Any other name is in the row's own title.
 function nameTitle(session: Session): string {
-  return session.name || !session.prompt_name ? "" : session.identity.name;
+  return session.name || !session.prompt_name ? "" : `${sessionName(session)} · ${session.identity.name}`;
 }
 
 // The mark's node, with the context share's hover.
@@ -81,7 +82,7 @@ function markNode(session: Session): HTMLElement {
     : agentMark(session)
       ? `${agentMark(session)}: followed by what it reports, which has no context share`
       : contextTitle(session.transcript.context);
-  return Object.assign(text("span", rowMark(session), "id"), { title });
+  return hover(text("span", rowMark(session), "id"), title);
 }
 
 // A subagent's state label and its state: "Needs you" while it asks, else its status.
@@ -227,7 +228,7 @@ export function row(session: Session, children: Children, token: string | null =
   rowLines(
     button,
     session.state,
-    [Object.assign(text("span", sessionName(session), "name"), { title: nameTitle(session) }), markNode(session), ...(token ? [text("span", token, "id token")] : [])],
+    [hover(text("span", sessionName(session), "name"), nameTitle(session)), markNode(session), ...(token ? [hover(text("span", token, "id token"), token)] : [])],
     line === null
       ? null
       : [...done(children, children.get("session")), rowLine(line), ...(turn ? [Object.assign(counts(clock, turn[1]), { title: turn[0] })] : [])],
@@ -265,8 +266,7 @@ function rowLine(line: string): HTMLElement {
   const node = prose("span", shown);
   node.className = "row-step";
   node.dir = "auto";
-  if (full) node.title = full;
-  return node;
+  return hover(node, full || shown);
 }
 
 // A subagent row's second line, as a session row's (danielrispler/Falinks#572): only while it runs or needs Daniel.

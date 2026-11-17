@@ -349,7 +349,9 @@ startWatching(() => showView(studio.selection));
 // shortcut: polls every 10 s; push from the shell if the delay matters.
 const showUsage = () =>
   invoke<Limits | null>("usage").then((limits) => {
-    element("usage").textContent = usageText(limits, Date.now() / 1000);
+    const usage = usageText(limits, Date.now() / 1000);
+    element("usage").textContent = usage;
+    element("usage").title = usage;
   });
 showUsage();
 setInterval(showUsage, 10_000);

@@ -5,7 +5,7 @@
 // session's workspace. Clicking a workspace offers a new session there and, for a task, Remove, with the
 // loss check of a session's Delete. Creating a task is here too, not in the new-session picker.
 
-import { element, invoke, patch, pressable, text } from "./dom.js";
+import { element, hover, invoke, patch, pressable, text } from "./dom.js";
 import { knownProjects, mainProject, onProjects, projects } from "./projects.js";
 import { drawSidebar, glyph, projectOpen } from "./list.js";
 import { newTask, showBranches, startLast } from "./picker.js";
@@ -252,7 +252,7 @@ export const tokenOf = (project: string, cwd: string): string | null => {
 };
 
 // A workspace's row: one line, its name then its facts; a click shows or hides its actions under it.
-function workspaceRow(project: string, { workspace, name, facts, actions, landed }: WorkspaceRow): HTMLElement {
+export function workspaceRow(project: string, { workspace, name, facts, actions, landed }: WorkspaceRow): HTMLElement {
   const row = document.createElement("div");
   row.className = "workspace";
   row.dataset.key = workspace.path;
@@ -264,8 +264,8 @@ function workspaceRow(project: string, { workspace, name, facts, actions, landed
   button.title = workspace.path;
   button.setAttribute("aria-expanded", String(opened.has(workspace.path)));
   const line = text("span", "", "l1");
-  line.append(text("span", name, "name"));
-  if (facts) line.append(text("span", facts, "facts"));
+  line.append(hover(text("span", name, "name"), name));
+  if (facts) line.append(hover(text("span", facts, "facts"), facts));
   if (landed) line.append(glyph("idle", false, true));
   button.append(line);
   row.append(button);
@@ -318,7 +318,7 @@ function drawLine() {
   const name = workspace === workspaces.main ? repo : `${repo} › ${lastSegment(workspace.path)}`;
   const state = states.get(workspace.path) ?? null;
   const tokens = gitTokens(state, workspace === workspaces.main ? undefined : lastSegment(workspace.path));
-  line.title = [...gitTokens(state).map((token) => token.title), fetchNote(fetched.get(project) ?? { at: null, error: null }, Date.now())].join("\n");
+  line.title = [[name, ...tokens.map((token) => token.text)].join("  "), ...gitTokens(state).map((token) => token.title), fetchNote(fetched.get(project) ?? { at: null, error: null }, Date.now())].join("\n");
   // The main checkout's branch token opens the branch picker (#95); a task's worktree keeps its branch.
   const shownTokens = tokens.map((token, i) => {
     if (i > 0 || workspace !== workspaces.main) return Object.assign(text("span", token.text, token.bad ? "git-bad" : ""), { title: token.title });
