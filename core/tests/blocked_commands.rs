@@ -574,3 +574,65 @@ fn a_real_shaped_background_block_goes_from_blocked_to_finished_at_its_wake_up()
     let card = &session(&then(lines, vec![wake])).blocked_commands[0];
     assert_eq!(card.status, BlockedStatus::Finished);
 }
+
+/// The recorded run (`core/tests/record-blocked-run.sh`): a foreground and a background `claude -p`, each
+/// blocked, allowed from the card, retried and run, then the background one's wake-up.
+const RECORDED: &str = include_str!("fixtures/blocked-run.jsonl");
+
+/// The recorded run's lines up to and with the `n`th (from 1) event named `name`.
+fn recorded_through(name: &str, n: usize) -> Studio {
+    let lines: Vec<&str> = RECORDED.lines().collect();
+    let mut seen = 0;
+    let end = lines
+        .iter()
+        .position(|l| {
+            seen += usize::from(l.contains(&format!("\"hook_event_name\":\"{name}\"")));
+            seen == n
+        })
+        .unwrap_or_else(|| panic!("no {n}th {name}"));
+    Studio::replayed(&lines[..=end])
+}
+
+fn recorded_cards(name: &str, n: usize) -> Vec<studio_core::BlockedCommand> {
+    let studio = recorded_through(name, n);
+    let id = RECORDED
+        .lines()
+        .next()
+        .and_then(|l| serde_json::from_str::<Value>(l).ok())
+        .and_then(|v| v["session_id"].as_str().map(String::from))
+        .unwrap();
+    studio.session(&id).unwrap().blocked_commands.clone()
+}
+
+#[test]
+fn the_recorded_foreground_command_goes_blocked_allowed_running_finished() {
+    let status = |name, n| recorded_cards(name, n)[0].status;
+    assert_eq!(status("PermissionDenied", 1), BlockedStatus::Blocked);
+    assert_eq!(status("StudioAnswer", 1), BlockedStatus::Allowed);
+    // The retry runs under a new call id, and its `PermissionRequest` follows.
+    assert_eq!(status("PreToolUse", 2), BlockedStatus::Running);
+    let card = &recorded_cards("PostToolUse", 1)[0];
+    assert_eq!(card.status, BlockedStatus::Finished);
+    assert_eq!(card.exit_code, Some(0));
+    assert!(card.command.ends_with("# studio-fixture-foreground"));
+    assert!(
+        card.reason
+            .starts_with("The server-side auto mode classifier")
+    );
+}
+
+#[test]
+fn the_recorded_background_command_runs_in_the_background_until_its_wake_up_gives_its_exit_code() {
+    let cards = recorded_cards("PostToolUse", 2);
+    assert_eq!(cards[1].status, BlockedStatus::RunningInBackground);
+    assert_eq!(cards[1].task.as_deref(), Some("brug0dna7"));
+    // The turn ends with the task still running: the card stays, not "not run".
+    assert_eq!(
+        recorded_cards("Stop", 1)[1].status,
+        BlockedStatus::RunningInBackground
+    );
+
+    let card = &recorded_cards("UserPromptSubmit", 2)[1];
+    assert_eq!(card.status, BlockedStatus::Finished);
+    assert_eq!(card.exit_code, Some(0));
+}

@@ -323,6 +323,21 @@ fn reported(prompt: &str) -> impl Iterator<Item = (&str, &str)> {
     notices.filter_map(|notice| Some((tag(notice, "task-id")?, tag(notice, "status")?)))
 }
 
+/// The exit code a wake-up's summary gives task `id`, as in `Background command "…" completed (exit code 0)`;
+/// `None` when it gives none.
+pub(crate) fn exit_code_of(prompt: &str, id: &str) -> Option<i32> {
+    let notice = prompt
+        .split("<task-notification>")
+        .skip(1)
+        .find(|notice| tag(notice, "task-id") == Some(id))?;
+    let summary = tag(notice, "summary")?;
+    let (_, code) = summary
+        .trim_end()
+        .strip_suffix(')')?
+        .rsplit_once("(exit code ")?;
+    code.parse().ok()
+}
+
 /// The text of the first `<name>` element in `text`.
 fn tag<'a>(text: &'a str, name: &str) -> Option<&'a str> {
     let (_, rest) = text.split_once(&format!("<{name}>"))?;

@@ -2926,6 +2926,7 @@ impl Studio {
                                     && card.task.as_ref() == Some(task_id)
                                 {
                                     card.status = BlockedStatus::Finished;
+                                    card.exit_code = claude::exit_code_of(prompt, task_id);
                                 }
                             }
                             let returned =

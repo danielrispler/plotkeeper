@@ -9,12 +9,12 @@
 # session and, when the plugin's `PermissionDenied` hook leaves a request under `blocked/<session>/`,
 # grants a one-time pass and writes the Allow answer, so the hook returns `retry: true`, the next
 # `PreToolUse` claims the pass and the retry runs. The background retry's wake-up
-# (`<task-notification>`) lands in the log too. `scrub` then copies the session's events here
+# (`<task-notification>`, whose summary carries the exit code) lands in the log too. `scrub` then copies the session's events here
 # without their content (a command stays only when it carries the marker `studio-fixture-`).
 #
 # The session is interactive (an `ask` has no prompt to go to under `claude -p`, so a pass would never
 # run): run the script straight in a terminal, not with its output redirected, watch the agent, and
-# type /exit once it has replied its last line. The rule makes the block reliable, so there is one attempt;
+# type /exit once it has replied its last line (not Ctrl-C). The rule makes the block reliable, so there is one attempt;
 # a session with no PermissionDenied, no Allow answer or no wake-up makes the script say which is
 # missing, exit 1 and write no fixture.
 #
@@ -132,10 +132,13 @@ playing=$!
 echo "Session $session starts now, interactively. Watch it: when the agent has replied its last line,"
 echo "type /exit. (Allowing the blocked commands is done for you.)"
 # An `ask` has no prompt to go to under `claude -p`, so the session must be interactive.
+# Ctrl-C reaches the script as well as `claude`: ignore it here, so the scrub below still runs.
+trap '' INT
 (cd "$repo" && CLAUDE_CODE_PLUGIN_DIRS="$studio/plugin" claude --session-id "$session" \
   --permission-mode auto --settings "$settings" "$prompt") || echo "claude exited with $?" >&2
 
 # The hooks are async, so the last events may land just after `claude` exits.
+trap - INT
 sleep 3
 kill "$playing" 2>/dev/null || true
 playing=

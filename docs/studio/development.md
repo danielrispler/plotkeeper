@@ -41,17 +41,21 @@ The window calls the shell only through `invoke` (`ui/dom.ts`), which takes a co
 
 ## Recorded logs
 
-Two fixtures in `core/tests/fixtures/` are real event logs, scrubbed by `scrub` (`core/src/bin/scrub.rs`). Each event keeps its shape and loses its content: text becomes `…`, and lists and objects become empty, except for what stays. What stays: ids, event names, `cwd`, the permission mode, a session's start source and end reason, agent ids and types, the `description` of a spawn or a Bash command, `isolation`, the paths of the files a tool reads or writes, skill names, the types and statuses in tool results, background tasks without their commands, exit codes, numbers, flags and timings.
+Three fixtures in `core/tests/fixtures/` are real event logs, scrubbed by `scrub` (`core/src/bin/scrub.rs`). Each event keeps its shape and loses its content: text becomes `…`, and lists and objects become empty, except for what stays. What stays: ids, event names, `cwd`, the permission mode, a session's start source and end reason, agent ids and types, the `description` of a spawn or a Bash command, `isolation`, the paths of the files a tool reads or writes, skill names, the types and statuses in tool results, background tasks without their commands, exit codes, numbers, flags and timings.
 
 An MCP tool keeps no text. Transcript and output paths become `…`. A prompt keeps only the markup Claude Code adds, with its ids and statuses, so a wake-up stays one; any other tag becomes `<…>`. A last message that asks Daniel something becomes `…?`.
 
 - `checkpoint-day.jsonl`: the events of 2026-10-30, the checkpoint day of danielrispler/Falinks#347. Some of its sessions were still open at midnight.
 - `subagent-run.jsonl`: a scripted session in a temporary repository that spawns a worktree worker and a read-only helper in the background, then stops the helper.
 
+- `blocked-run.jsonl`: an interactive session in auto mode, in a temporary repository, whose foreground and background nested `claude -p` are blocked, allowed by a fake studio, retried and run, with the background one's wake-up. A command stays only when it carries the marker `studio-fixture-`; a wake-up's summary keeps its status and exit code and loses its quoted description. `core/tests/blocked_commands.rs` replays it.
+
 Re-record the second when Claude Code's version changes. The script runs a nested `claude` on your subscription, so run it yourself, outside auto mode:
 
     core/tests/record-subagent-run.sh
 
 Quit the studio app first: it would take the session as live and ask for cards. The script builds `studio-hook`, runs the session with this checkout's plugin, and scrubs the session's events from the event log into the fixture. Before you commit the new fixture, run `cargo test` and check that each text it keeps is a label, an id or a path.
+
+Re-record the third the same way, with Claude Code's version, or when the blocked-command hooks change: quit the studio app, then run `core/tests/record-blocked-run.sh` straight in a terminal, with its output not redirected, since the session is interactive (an `ask` has no prompt to go to under `claude -p`). Watch the agent, and type `/exit` after its last reply, once the background command's wake-up has come. Ctrl-C is ignored by the script but ends `claude` early. The script plays the studio (heartbeat, one-time pass and Allow answer) and gives the session an `autoMode.hard_deny` rule through `--settings` so auto mode blocks its marked commands. It writes the fixture only when the log holds a `PermissionDenied`, a `StudioAnswer` and a wake-up for the session, and names what is missing otherwise.
 
 The app tells you when the version changed. At a session's first `Stop`, it reads Claude Code's version from the session's transcript, the `.jsonl` file at the event's `transcript_path`, and opens no other file. It keeps each new version, with when it was first seen, in `claude-versions.txt` beside the event log. A version that differs from the last one kept shows a one-line notice at the top of the pane, one line on stderr, and a line in `weekly`. The first version kept has nothing to compare with, so it shows nothing.

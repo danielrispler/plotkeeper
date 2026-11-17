@@ -200,6 +200,8 @@ fn markup(prompt: &str) -> String {
         let kept = text.trim();
         if holds_id && id_like(kept) || keeps_text(open, kept) {
             out.push_str(kept);
+        } else if let Some(summary) = summary_label(open, kept) {
+            out.push_str(&summary);
         } else if !kept.is_empty() {
             out.push('…');
         }
@@ -225,9 +227,37 @@ fn keeps_text(open: &str, text: &str) -> bool {
                 && text.ends_with(".output")
                 && !text.contains(char::is_whitespace)
         }
-        "summary" => text.len() <= 200 && !text.contains('\n') && text.contains(FIXTURE_MARK),
         _ => false,
     }
+}
+
+/// A background command's wake-up summary, as in `Background command "Run the gate" completed (exit code 0)`,
+/// without the quoted description: `Background command "…" completed (exit code 0)`. `None` for any other
+/// summary, whose text is content.
+fn summary_label(open: &str, text: &str) -> Option<String> {
+    let (first, last) = (text.find('"')?, text.rfind('"')?);
+    let (head, tail) = (&text[..first], text.get(last + 1..)?);
+    let word = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_lowercase());
+    let code = |s: &str| {
+        s.strip_prefix('(')
+            .and_then(|s| s.strip_suffix(')'))
+            .and_then(|s| s.strip_prefix("exit code "))
+            .is_some_and(|n| n.parse::<i32>().is_ok())
+    };
+    let mut words = tail.split_whitespace();
+    let status = words.next().filter(|w| word(w))?;
+    let rest = words.collect::<Vec<_>>().join(" ");
+    let shaped = open == "summary"
+        && last > first
+        && head == "Background command "
+        && text.len() <= 400
+        && (rest.is_empty() || code(&rest));
+    shaped.then(|| {
+        format!(
+            "{head}\"…\" {status}{}{rest}",
+            if rest.is_empty() { "" } else { " " }
+        )
+    })
 }
 
 /// The tag at the start of `s`, rebuilt: a tag in `TAGS` with its attributes whose key and value look
@@ -427,7 +457,7 @@ mod tests {
         assert_eq!(
             scrub(wake)["prompt"],
             "<task-notification><status>completed</status><output-file>/private/tmp/t/a.output</output-file>\
-            <summary>Background command \"claude -p # studio-fixture-background\" completed (exit code 0)</summary>\
+            <summary>Background command \"…\" completed (exit code 0)</summary>\
             <result>…</result></task-notification>"
         );
     }
