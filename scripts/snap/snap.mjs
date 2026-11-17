@@ -15,6 +15,8 @@ const [name, out] = process.argv.slice(2);
 // are classes put on <body>, such as the rail's overlay open. A fixture's `snapScript` runs once the UI has drawn: what it logs
 // is printed, and a line that starts `snap:fail` makes this exit non-zero.
 const [width, height] = (process.env.SNAP_SIZE ?? "1900x900").split("x");
+// SNAP_SCALE=2 draws at twice the pixel density (the PNG is twice as wide).
+const scale = process.env.SNAP_SCALE ?? "1";
 const bodyClasses = (process.env.SNAP_BODY ?? "").split(",").filter(Boolean);
 if (!fixtures[name] || !out) {
   console.error(`usage: npm run snap -- <${Object.keys(fixtures).join("|")}> <out.png>`);
@@ -43,7 +45,7 @@ const server = createServer((req, res) => {
 });
 await new Promise((done) => server.listen(0, "127.0.0.1", done));
 const chromeArgs = [
-  "--headless=new", "--enable-logging=stderr", "--v=0", "--disable-gpu", `--user-data-dir=${profile}`, `--window-size=${width},${height}`,
+  "--headless=new", "--enable-logging=stderr", "--v=0", "--disable-gpu", `--force-device-scale-factor=${scale}`, `--user-data-dir=${profile}`, `--window-size=${width},${height}`,
   "--virtual-time-budget=5000", `--screenshot=${resolve(out)}`, `http://127.0.0.1:${server.address().port}/index.html`,
 ];
 const run = await new Promise((done) => {

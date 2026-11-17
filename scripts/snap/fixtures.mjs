@@ -1,6 +1,7 @@
 // Studio state for `npm run snap`: each fixture maps a Tauri command to what it returns.
 // A fixture is a function so that its times are relative to the moment it renders.
 
+import { existsSync, readFileSync } from "node:fs";
 import { railFixtures } from "./rail-fixtures.mjs";
 
 const session = (id, name, state, extra = {}) => {
@@ -52,8 +53,27 @@ const logFixture = (status) => {
   return { ...common, sessions, selected: { session: sessions[0], agent: agent.id }, subagent_log: { entries, offset: 1 } };
 };
 
+// The session's terminal for `recordedTerminal`: the output of a scripted Claude Code session, kept in terminal-recording.txt and
+// recorded by record-terminal.sh at the size below. Before the first recording the terminal is empty, which the fixture's script fails.
+const recordingFile = new URL("./terminal-recording.txt", import.meta.url);
+const recording = { cols: 110, rows: 32 };
+const recordedTerminal = () => {
+  const f = railFixtures.railYourTurn();
+  const data = existsSync(recordingFile) ? readFileSync(recordingFile).toString("base64") : "";
+  f.selected.session.terminal = "t1";
+  return {
+    ...f, terminals: [{ id: "t1", argv: ["claude"], cwd: f.selected.session.cwd, exited: null, replay: { data, ...recording } }],
+    // The terminal's drawn rows, not the page's: a recording that did not replay leaves them empty.
+    snapScript: `
+      const rows = [...document.querySelectorAll("#terminal .xterm-rows > div")].filter((row) => row.textContent.trim() !== "");
+      if (rows.length === 0) log("snap:fail the terminal shows no rows");
+      else log("terminal rows: " + rows.length);`,
+  };
+};
+
 export const fixtures = {
   ...railFixtures,
+  recordedTerminal,
   logRunning: () => logFixture("running"),
   logDone: () => logFixture("completed"),
   // The list with a nested row (a session with subagents), the selected row and a landed one.

@@ -6,9 +6,16 @@ export const stubSource = (fixture) => `window.__TAURI__ = (() => {
   const fixture = ${JSON.stringify(fixture)};
   const listeners = {};
   const listen = async (name, handler) => ((listeners[name] ??= []).push(handler), () => {});
-  // The daemon answers a list request with an empty list, which the terminals' revival waits for.
+  // The daemon's terminals are the fixture's terminals key (none by default). A list request is answered with them, which the
+  // terminals' revival waits for, and an attach with the terminal's recorded screen, as the daemon replays it at start.
+  const terminals = fixture.terminals ?? [];
+  const emit = (payload) => setTimeout(() => (listeners.terminal ?? []).forEach((h) => h({ payload })));
   const invoke = async (command, args) => {
-    if (command === "terminal_send" && args?.msg?.op === "list") setTimeout(() => (listeners.terminal ?? []).forEach((h) => h({ payload: { ev: "list", terms: [] } })));
+    if (command === "terminal_send" && args?.msg?.op === "list") emit({ ev: "list", terms: terminals.map(({ replay, ...listed }) => listed) });
+    if (command === "terminal_send" && args?.msg?.op === "attach") {
+      const found = terminals.find((t) => t.id === args.msg.id);
+      if (found) emit({ ev: "replay", id: found.id, ...found.replay, exited: found.exited });
+    }
     const reply = fixture[command];
     // A reply that depends on one argument: { __by: "id", values: { <id>: reply } }.
     if (reply?.__by) return reply.values[args?.[reply.__by]] ?? null;

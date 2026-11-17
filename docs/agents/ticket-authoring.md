@@ -28,6 +28,7 @@ The installed skill remains unchanged. Where it and this file differ, follow thi
 - **Edges.** Link each ticket to its spec as a sub-issue and add its blockers as native dependencies (**Wayfinder tracker operations** below), in place of the skill's `## Blocked by` section. A ticket waits only for what it uses, whatever its place in the build order.
 - **Agreed breakdown.** When Daniel approved the ticket list and its edges in the current conversation, publish it; the skill's quiz is for a breakdown he has not seen.
 - **Shared docs.** A file that most tickets of a spec would edit, such as `README.md`, goes to one closing ticket blocked by the tickets it describes, so parallel implementers never meet in it.
+- **Behaviour docs.** A ticket that changes behaviour updates that area's doc under `docs/studio/behaviour/` (or `plugin.md`, `settings.md`) and names it in Touches, not `README.md`.
 - **Labels.** `studio` and `ready-for-agent`; `needs-triage` for a ticket that holds a choice of Daniel's.
 
 ## Spec and ticket constraints
