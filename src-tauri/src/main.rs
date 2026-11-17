@@ -330,12 +330,21 @@ fn cards(studio: State<Mutex<Studio>>, cards: State<Cards>) -> SessionCards {
 /// be read says why.
 #[tauri::command]
 fn usage(agents: Option<Vec<String>>) -> Vec<studio_workbench::AgentUsage> {
-    let wanted = |agent: &str| agents.as_ref().is_none_or(|list| list.iter().any(|a| a == agent));
+    let wanted = |agent: &str| {
+        agents
+            .as_ref()
+            .is_none_or(|list| list.iter().any(|a| a == agent))
+    };
     let mut read = Vec::new();
     if wanted("claude") {
         read.push(match std::env::home_dir() {
-            Some(home) => studio_workbench::claude_usage(&studio_hook::data_dir(&home).join("usage")),
-            None => studio_workbench::AgentUsage::failed("claude", "No home folder to find Claude's usage in"),
+            Some(home) => {
+                studio_workbench::claude_usage(&studio_hook::data_dir(&home).join("usage"))
+            }
+            None => studio_workbench::AgentUsage::failed(
+                "claude",
+                "No home folder to find Claude's usage in",
+            ),
         });
     }
     read
