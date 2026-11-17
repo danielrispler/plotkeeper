@@ -568,6 +568,35 @@ fn a_block_nobody_watches_returns_at_once_and_leaves_its_request_for_the_card() 
 }
 
 #[test]
+fn a_block_waits_for_the_card_while_no_session_is_selected() {
+    let home = scratch("blocked-none");
+    let heartbeat = now_ms() + 600_000;
+    let none = json!({ "session_id": null, "pid": std::process::id(), "heartbeat_ms": heartbeat });
+    answer::write_private(&answer::watching_file(&data(&home)), &none).unwrap();
+    let since = Instant::now();
+    let child = start(&home, WAIT_MS, &denied());
+    blocked_reply(&home, &blocked_request(&home)["nonce"], "allow");
+    let out: Value = serde_json::from_str(&finish(child, since).0).unwrap();
+    assert_eq!(out["hookSpecificOutput"]["retry"], true);
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn a_decision_that_could_not_be_logged_keeps_the_request_so_the_card_keeps_its_buttons() {
+    let home = scratch("blocked-unlogged");
+    watch(&home, SESSION, std::process::id(), 0);
+    // The log cannot be appended to: a directory stands where the file should be.
+    fs::create_dir_all(studio_hook::event_log(&home)).unwrap();
+    let since = Instant::now();
+    let child = start(&home, WAIT_MS, &denied());
+    blocked_reply(&home, &blocked_request(&home)["nonce"], "allow");
+    let out: Value = serde_json::from_str(&finish(child, since).0).unwrap();
+    assert_eq!(out["hookSpecificOutput"]["retry"], true);
+    assert_eq!(blocked_requests(&home).len(), 1);
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
 fn a_blocked_command_waits_600_seconds_and_every_other_call_120() {
     assert_eq!(answer::wait_for(&denied()), Duration::from_secs(600));
     assert_eq!(answer::wait_for(&asked()), Duration::from_secs(120));
@@ -777,5 +806,27 @@ fn asking_again_leaves_one_fresh_pass_so_the_command_runs_once() {
         "",
         "a second run has no pass"
     );
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn scanning_a_sessions_passes_deletes_the_expired_ones() {
+    let home = scratch("pass-expired");
+    watch(&home, "s-other", std::process::id(), 0);
+    let old = now_ms() - answer::PASS_TTL_MS - 1_000;
+    answer::write_pass(&data(&home), SESSION, "other command", CWD, old).unwrap();
+    let dir = answer::pass_dir(&data(&home), SESSION);
+    assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
+    let since = Instant::now();
+    let (out, _) = finish(
+        start(
+            &home,
+            WAIT_MS,
+            &retried("PreToolUse", COMMAND, CWD, SESSION),
+        ),
+        since,
+    );
+    assert_eq!(out, "");
+    assert_eq!(fs::read_dir(&dir).unwrap().count(), 0);
     let _ = fs::remove_dir_all(&home);
 }

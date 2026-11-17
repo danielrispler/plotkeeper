@@ -629,6 +629,16 @@ pub enum BlockedStatus {
     Declined,
 }
 
+impl BlockedStatus {
+    /// Whether a card in this status waits for Daniel's choice or, once allowed, for the agent's retry.
+    pub fn waits(self) -> bool {
+        matches!(
+            self,
+            Self::Blocked | Self::Allowed | Self::AllowedNotRun | Self::BlockedAgain
+        )
+    }
+}
+
 /// Where Daniel answered: the studio card, through the answer hook, or the terminal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1497,21 +1507,13 @@ impl Session {
 
     /// How many blocked commands wait for Daniel's choice (blocked, also again) or, once allowed, for the agent's retry.
     pub fn blocked_waiting(&self) -> usize {
-        let waits = |c: &&BlockedCommand| {
-            matches!(
-                c.status,
-                BlockedStatus::Blocked
-                    | BlockedStatus::Allowed
-                    | BlockedStatus::AllowedNotRun
-                    | BlockedStatus::BlockedAgain
-            )
-        };
+        let waits = |c: &&BlockedCommand| c.status.waits();
         self.blocked_commands.iter().filter(waits).count()
     }
 
-    /// Whether the Dock badge counts it: it needs you, or a blocked command waits.
+    /// Whether the Dock badge counts it: it needs you, or a blocked command waits, unless it has ended.
     pub fn wants_you(&self) -> bool {
-        self.state == State::NeedsYou || self.blocked_waiting() > 0
+        self.state == State::NeedsYou || (self.state != State::Ended && self.blocked_waiting() > 0)
     }
 
     /// Its workers that failed: they ended with a status other than `completed`, such as `killed`.
@@ -2791,13 +2793,26 @@ impl Studio {
                         card.run_at = Some(at);
                     }
                 }
-                // A turn that ends with no retry leaves the approval unused: the session's own turn covers every
-                // card, a subagent's its own.
-                Happened::TurnEnd { .. } => {
-                    for card in &mut session.blocked_commands {
-                        if card.status == BlockedStatus::Allowed
-                            && (event.agent_id.is_none() || card.agent == event.agent_id)
-                        {
+                // A turn that ends with no retry leaves the approval unused: the session's own turn covers its
+                // own cards and those of subagents that have ended; a running subagent's card waits for
+                // that subagent's own end, since its worker may still retry by itself.
+                Happened::TurnEnd { .. } | Happened::SubagentEnd => {
+                    let ended = |agent: &Option<String>| {
+                        agent.as_deref().is_none_or(|id| {
+                            session.subagent(id).is_none_or(|a| a.ended_at.is_some())
+                        })
+                    };
+                    let own_end = matches!(happened, Happened::SubagentEnd);
+                    let flips: Vec<bool> = session
+                        .blocked_commands
+                        .iter()
+                        .map(|card| match own_end {
+                            true => card.agent.is_some() && card.agent == event.agent_id,
+                            false => ended(&card.agent),
+                        })
+                        .collect();
+                    for (card, flip) in session.blocked_commands.iter_mut().zip(flips) {
+                        if flip && card.status == BlockedStatus::Allowed {
                             card.status = BlockedStatus::AllowedNotRun;
                         }
                     }
@@ -2831,15 +2846,15 @@ impl Studio {
             match happened {
                 Happened::CommandBlocked { tool, id, reason } => {
                     let command = tool.command.clone().unwrap_or_default();
-                    // The same command blocked again after Allow is its card's, not a new one.
+                    // The same command blocked again after Allow is its card's, not a new one. A running
+                    // card takes only the block of its own retry: another call's is a card of its own.
                     let again = session.blocked_commands.iter_mut().find(|c| {
-                        matches!(
-                            c.status,
-                            BlockedStatus::Allowed
-                                | BlockedStatus::AllowedNotRun
-                                | BlockedStatus::Running
-                        ) && c.command == command
-                            && c.cwd == event.cwd
+                        let awaits = match c.status {
+                            BlockedStatus::Allowed | BlockedStatus::AllowedNotRun => true,
+                            BlockedStatus::Running => c.run.as_ref() == Some(id),
+                            _ => false,
+                        };
+                        awaits && c.command == command && c.cwd == event.cwd
                     });
                     match again {
                         Some(card) => {

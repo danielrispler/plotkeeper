@@ -13,7 +13,7 @@ import { projectGroups, foundWorkspaces, tokenOf, workspaceSection, type Project
 import { redrawHistory, redrawHome, showHistory } from "./panes.js";
 import { isSelected, select } from "./selection.js";
 import { studio } from "./state.js";
-import { stateLabels, type BlockedCommand, type Context, type Session, type SessionState, type Subagent } from "./types.js";
+import { blockedWaits, stateLabels, type BlockedCommand, type Context, type Session, type SessionState, type Subagent } from "./types.js";
 import { askDelete, report } from "./story.js";
 
 // The state groups folded in a project, idle only, and the idle groups Daniel opened, by project and state,
@@ -127,7 +127,7 @@ export function secondLine(
   if (session.status_only) return null;
   const open = session.questions.filter((question) => question.answer === "open").at(-1);
   // Blocked commands waiting for Daniel's choice or the agent's retry (danielrispler/plotkeeper#173).
-  const waiting = (session.blocked_commands ?? []).filter((card) => ["blocked", "allowed", "allowed_not_run", "blocked_again"].includes(card.status)).length;
+  const waiting = (session.blocked_commands ?? []).filter((card) => blockedWaits(card.status)).length;
   if (waiting > 0 && session.state !== "ended" && !(session.state === "needs_you" && open)) {
     return `${waiting} blocked ${waiting === 1 ? "command" : "commands"} waiting`;
   }

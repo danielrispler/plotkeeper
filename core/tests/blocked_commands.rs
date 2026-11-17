@@ -456,3 +456,74 @@ fn a_new_block_of_an_allowed_not_run_command_blocks_the_card_again() {
         BlockedStatus::BlockedAgain
     );
 }
+
+#[test]
+fn an_ended_session_does_not_want_you_for_its_waiting_cards() {
+    let end = line("SessionEnd", 8_000, json!({ "reason": "other" }));
+    let s = session(&then(allowed(), vec![end]));
+    assert_eq!(s.state, State::Ended);
+    assert_eq!((s.blocked_waiting(), s.wants_you()), (1, false));
+}
+
+/// A subagent `a-7aaaa`'s block of `COMMAND`, which Daniel allowed.
+fn allowed_for_subagent() -> Vec<String> {
+    then(
+        started(),
+        vec![
+            denied(3_000, "toolu_1", COMMAND, Some("a-7aaaa")),
+            answer(4_000, "toolu_1", COMMAND, "allow"),
+        ],
+    )
+}
+
+#[test]
+fn the_sessions_turn_end_leaves_a_running_subagents_allowed_card_allowed() {
+    let s = session(&then(allowed_for_subagent(), vec![stop(6_000, None)]));
+    assert_eq!(s.blocked_commands[0].status, BlockedStatus::Allowed);
+}
+
+#[test]
+fn a_subagents_own_turn_end_makes_its_allowed_card_allowed_not_run() {
+    let lines = then(allowed_for_subagent(), vec![stop(6_000, Some("a-7aaaa"))]);
+    let s = session(&lines);
+    assert_eq!(s.blocked_commands[0].status, BlockedStatus::AllowedNotRun);
+}
+
+#[test]
+fn the_sessions_turn_end_covers_the_allowed_card_of_a_subagent_that_had_already_ended() {
+    let lines = then(
+        started(),
+        vec![
+            denied(3_000, "toolu_1", COMMAND, Some("a-7aaaa")),
+            stop(3_500, Some("a-7aaaa")),
+            answer(4_000, "toolu_1", COMMAND, "allow"),
+            stop(6_000, None),
+        ],
+    );
+    let s = session(&lines);
+    assert_eq!(s.blocked_commands[0].status, BlockedStatus::AllowedNotRun);
+}
+
+#[test]
+fn a_block_of_the_same_command_that_is_not_the_running_retrys_own_gets_its_own_card() {
+    let lines = then(
+        allowed(),
+        vec![
+            retry(5_000, "toolu_2", COMMAND),
+            denied(5_100, "toolu_3", COMMAND, Some("a-7aaaa")),
+        ],
+    );
+    let s = session(&lines);
+    let cards: Vec<_> = s
+        .blocked_commands
+        .iter()
+        .map(|c| (c.call.as_str(), c.status))
+        .collect();
+    assert_eq!(
+        cards,
+        [
+            ("toolu_1", BlockedStatus::Running),
+            ("toolu_3", BlockedStatus::Blocked)
+        ]
+    );
+}

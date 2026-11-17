@@ -1158,7 +1158,7 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                 .state::<Mutex<answer::Watching>>()
                 .lock()
                 .unwrap()
-                .blocked_pass(&data)
+                .changed_blocked_requests(&data)
         {
             let _ = app.emit("blocked", blocked);
         }

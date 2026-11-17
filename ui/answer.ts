@@ -101,7 +101,7 @@ export function startWatching(draw: () => void) {
   // Shows the shell the window is alive, so a frozen window lets the hook hand a question to the
   // terminal within seconds (danielrispler/Falinks#569). It asks for nothing; the open request still comes as an event.
   setInterval(() => {
-    if (shown().session !== null) invoke("alive").catch(() => {});
+    if (document.visibilityState === "visible") invoke("alive").catch(() => {});
   }, 1000);
 }
 
@@ -115,9 +115,20 @@ export async function sendAnswer(ask: Ask, reply: Reply) {
   await invoke("answer", args).catch((e) => console.warn(e));
 }
 
-// Allow or Decline of a blocked command. The card stays until the core takes the answer's line.
-export async function sendBlockedAnswer(session: string, request: BlockedRequest, decision: "allow" | "deny") {
+// Which way the shell took Daniel's answer to a blocked command: to its hook, still waiting, or late, the hook having returned.
+export type BlockedAnswered = "hook" | "late";
+
+// Allow or Decline of a blocked command, and which way it went; null when the shell refused it, which puts the request back so the
+// card keeps its buttons. The card stays until the core takes the answer's line.
+export async function sendBlockedAnswer(session: string, request: BlockedRequest, decision: "allow" | "deny"): Promise<BlockedAnswered | null> {
   blockedRequests = blockedRequests.filter((r) => r.nonce !== request.nonce);
   redraw();
-  await invoke("answer_blocked_command", { session, nonce: request.nonce, decision }).catch((e) => console.warn(e));
+  try {
+    return await invoke<BlockedAnswered>("answer_blocked_command", { session, nonce: request.nonce, decision });
+  } catch (e) {
+    console.warn(e);
+    if (!blockedRequests.some((r) => r.nonce === request.nonce)) blockedRequests = [...blockedRequests, request];
+    redraw();
+    return null;
+  }
 }

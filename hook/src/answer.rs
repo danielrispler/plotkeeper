@@ -179,11 +179,10 @@ fn shows_life(data: &Path, session: Option<&str>) -> bool {
         return false;
     };
     let watching: Value = serde_json::from_str(&text).unwrap_or_default();
-    let pid = watching["pid"].as_i64().and_then(|p| i32::try_from(p).ok());
     let heartbeat = watching["heartbeat_ms"].as_u64().unwrap_or(0);
     session.is_none_or(|session| watching["session_id"] == session)
         && now_ms().saturating_sub(heartbeat) <= STALE_MS
-        && pid.is_some_and(pid_lives)
+        && file_pid_lives(&watching)
 }
 
 /// Whether process `pid` exists and is the user's own.
@@ -192,6 +191,12 @@ pub fn pid_lives(pid: i32) -> bool {
     // SAFETY: `kill` takes plain integers and touches no memory; `pid > 0` keeps it to one
     // process, never a process group.
     pid > 0 && unsafe { libc::kill(pid, 0) } == 0
+}
+
+/// Whether the process a file's `pid` names exists and is the user's own.
+pub fn file_pid_lives(file: &Value) -> bool {
+    let pid = file["pid"].as_i64().and_then(|p| i32::try_from(p).ok());
+    pid.is_some_and(pid_lives)
 }
 
 /// Whether the studio watches `session`: the watching file names it, its pid lives and its heartbeat
@@ -294,12 +299,19 @@ pub fn answered_line(payload: &Value, answer: &Value) -> Value {
     line
 }
 
-/// Appends a `StudioAnswer` line to the event log; the decision stands even if it cannot be logged.
-pub fn log_answer(data: &Path, line: &Value) {
+/// Appends a `StudioAnswer` line to the event log and says whether it got there; the decision stands
+/// even if it cannot be logged.
+pub fn log_answer(data: &Path, line: &Value) -> bool {
     match crate::append(&data.join("events.jsonl"), line, crate::PATIENCE) {
-        Ok(true) => {}
-        Ok(false) => eprintln!("studio-answer: log the answer: the log stayed locked"),
-        Err(e) => eprintln!("studio-answer: log the answer: {e}"),
+        Ok(true) => true,
+        Ok(false) => {
+            eprintln!("studio-answer: log the answer: the log stayed locked");
+            false
+        }
+        Err(e) => {
+            eprintln!("studio-answer: log the answer: {e}");
+            false
+        }
     }
 }
 
@@ -412,11 +424,14 @@ fn run_blocked(payload: &Value, data: &Path, timeout: Duration) -> io::Result<Op
         return Ok(None);
     };
     let verdict = Verdict::deserialize(answer.get("decision").unwrap_or(&Value::Null)).ok();
-    let _ = fs::remove_file(&request);
     let Some(verdict) = verdict else {
+        let _ = fs::remove_file(&request);
         return Ok(None);
     };
-    log_answer(data, &answered_line(payload, &answer));
+    // Only a logged decision closes the request: else the card keeps its buttons.
+    if log_answer(data, &answered_line(payload, &answer)) {
+        let _ = fs::remove_file(&request);
+    }
     Ok((verdict == Verdict::Allow).then(|| {
         json!({ "hookSpecificOutput": {
         "hookEventName": "PermissionDenied", "retry": true } })
@@ -435,13 +450,19 @@ fn matching_passes(payload: &Value, data: &Path, suffix: &str) -> Vec<PathBuf> {
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| p.to_string_lossy().ends_with(suffix))
         .filter(|path| {
-            read_private(path).is_some_and(|pass| {
-                pass["session_id"] == session
-                    && pass["command"] == *command
-                    && pass["cwd"] == *cwd
-                    && command.is_string()
-                    && pass["expires_ms"].as_u64().is_some_and(|at| now_ms() < at)
-            })
+            let Some(pass) = read_private(path) else {
+                return false;
+            };
+            // An expired pass can never match again.
+            let fresh = pass["expires_ms"].as_u64().is_some_and(|at| now_ms() < at);
+            if !fresh {
+                let _ = fs::remove_file(path);
+            }
+            fresh
+                && pass["session_id"] == session
+                && pass["command"] == *command
+                && pass["cwd"] == *cwd
+                && command.is_string()
         })
         .collect()
 }

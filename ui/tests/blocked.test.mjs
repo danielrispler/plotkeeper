@@ -141,3 +141,47 @@ test("the retry line waits for Daniel's draft and is never typed into a session 
   assert.deepEqual(needing.sent, []);
   assert.equal(needing.notices.length, 1);
 });
+
+import { blockedRequestFor, sendBlockedAnswer, startWatching } from "../../dist/answer.js";
+
+// The shell as `invoke` and `listen` see it: `answers` is what `answer_blocked_command` returns, or an error to throw.
+function shell(answers) {
+  const handlers = {};
+  globalThis.document = { addEventListener() {}, visibilityState: "hidden" };
+  globalThis.setInterval = () => 0;
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command) => {
+          if (command !== "answer_blocked_command") return null;
+          const next = answers.shift();
+          if (next instanceof Error) throw next;
+          return next;
+        },
+      },
+      event: { listen: async (name, handler) => void (handlers[name] = (payload) => handler({ payload })) },
+    },
+  };
+  startWatching(() => {});
+  return handlers;
+}
+
+test("the answer says whether the hook took it or it was late, which decides whether the retry line is typed", async () => {
+  const handlers = shell(["hook", "late"]);
+  const request = (nonce) => ({ nonce, tool_use_id: `toolu_${nonce}`, waiting: true });
+  handlers.blocked([request("n1"), request("n2")]);
+  assert.equal(await sendBlockedAnswer("s1", request("n1"), "allow"), "hook");
+  assert.equal(await sendBlockedAnswer("s1", request("n2"), "allow"), "late");
+});
+
+test("a failed answer puts the request back so the card keeps its buttons", async () => {
+  const handlers = shell([new Error("no such request")]);
+  const original = { nonce: "n1", tool_use_id: "toolu_n1", waiting: true };
+  handlers.blocked([original]);
+  const origWarn = console.warn;
+  console.warn = () => {};
+  const took = await sendBlockedAnswer("s1", original, "allow");
+  console.warn = origWarn;
+  assert.equal(took, null);
+  assert.deepEqual(blockedRequestFor("toolu_n1"), original);
+});

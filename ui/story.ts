@@ -62,7 +62,7 @@ export function showView(selected: Selection | null) {
   if (selected === null) {
     for (const id of ["state", "block", "mode", "mark", "session-name", "phase", "bar-state"]) element(id).textContent = "";
     showBarName("");
-    showQuestions([]);
+    showQuestions([], []);
     showCleared([]);
     shownSession = null;
     banner = null;
@@ -765,7 +765,7 @@ function blockedCards(session: Session, agent: Subagent | null): HTMLElement[] {
 // The open question of the viewed agent, docked at the top of the rail, newest first; a plan or a
 // permission the answer hook waits on docks too, whichever agent asks (danielrispler/Falinks#478). A question never
 // answered shows in its turn; an answered one is in the decision history (danielrispler/Falinks#479).
-function showQuestions(questions: Question[], blocked: HTMLElement[] = []) {
+function showQuestions(questions: Question[], blocked: HTMLElement[]) {
   const open = [...questions].reverse().filter((question) => question.answer === "open");
   const decision = openDecision();
   const docked = [...(decision ? [decisionElement(decision)] : []), ...open.map(questionElement), ...blocked];

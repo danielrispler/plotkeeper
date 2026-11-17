@@ -6,7 +6,7 @@ import { blockedRequestFor, sendBlockedAnswer } from "./answer.js";
 import { code, invoke, text } from "./dom.js";
 import { duration } from "./times.js";
 import { typeInto, type TypingIo } from "./typing.js";
-import type { BlockedCommand, BlockedStatus } from "./types.js";
+import { blockedWaits, type BlockedCommand, type BlockedStatus } from "./types.js";
 
 export type BlockedView = {
   state: string;
@@ -32,12 +32,18 @@ const states: Record<Exclude<BlockedStatus, "declined">, string> = {
   blocked_again: "Blocked again",
 };
 
-// What the card shows for `card`, asked by `agent` (the subagent's name, null for the session's own agent), or null once
-// Daniel declined it. `answerable`: its request file is still there, so Allow and Decline have something to answer, also after its hook has returned.
+// The card's second line: the time since a running retry started, or a finished one's exit code.
 function detailOf(card: BlockedCommand, now: number): string | null {
   if (card.status === "running") return duration(now - (card.run_at ?? now));
   if (card.status !== "finished") return null;
   return card.exit_code == null ? "No exit code" : `exit code ${card.exit_code}`;
+}
+
+// The buttons of a card that waits: Allow and Decline while Daniel has not chosen, Ask again once his Allow went unused.
+function buttonsOf(status: BlockedStatus, answerable: boolean): string[] {
+  if (!blockedWaits(status)) return [];
+  if (status === "allowed_not_run") return ["Ask again"];
+  return status === "blocked_again" || (status === "blocked" && answerable) ? ["Allow", "Decline"] : [];
 }
 
 // The tails read so far, by the run's call id.
@@ -55,6 +61,8 @@ export async function typeRetry(card: BlockedCommand, agent: string | null, id: 
   return typeInto(id, retryLine(card, agent), blocked, io);
 }
 
+// What the card shows for `card`, asked by `agent` (the subagent's name, null for the session's own agent), or null once
+// Daniel declined it. `answerable`: its request file is still there, so Allow and Decline have something to answer, also after its hook has returned.
 export function blockedView(
   card: BlockedCommand,
   agent: string | null,
@@ -69,7 +77,7 @@ export function blockedView(
     folder: card.cwd,
     reason: card.reason,
     agent,
-    buttons: (card.status === "blocked" && answerable) || card.status === "blocked_again" ? ["Allow", "Decline"] : card.status === "allowed_not_run" ? ["Ask again"] : [],
+    buttons: buttonsOf(card.status, answerable),
     detail: detailOf(card, now),
     tail: card.status === "finished" ? (output?.tail ?? null) : null,
   };
@@ -116,9 +124,9 @@ export function blockedElement(session: string, card: BlockedCommand, agent: str
           return retry(card);
         }
         if (request === null) return;
-        await sendBlockedAnswer(session, request, label === "Allow" ? "allow" : "deny");
-        // Its hook has returned, so nothing waits for the click: the agent is asked to retry in its terminal.
-        if (label === "Allow" && !request.waiting) retry(card);
+        const took = await sendBlockedAnswer(session, request, label === "Allow" ? "allow" : "deny");
+        // Its hook had returned, so nothing waited for the click: the agent is asked to retry in its terminal.
+        if (label === "Allow" && took === "late") retry(card);
       });
       row.append(button);
     }

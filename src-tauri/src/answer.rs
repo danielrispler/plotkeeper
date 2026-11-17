@@ -6,6 +6,7 @@
 //! `STALE_MS`, so a frozen window hands the question to the terminal. `answer` writes the reply that
 //! echoes the request's nonce.
 
+use serde::Serialize;
 use serde_json::{Value, json};
 use std::{
     fs,
@@ -44,7 +45,7 @@ impl Watching {
     }
 
     /// The watched session's blocked-command requests when they changed since the last call.
-    pub fn blocked_pass(&mut self, data: &Path) -> Option<Value> {
+    pub fn changed_blocked_requests(&mut self, data: &Path) -> Option<Value> {
         let session = self.session.as_deref()?;
         let blocked = blocked_requests(data, session);
         (blocked != self.blocked).then(|| {
@@ -59,29 +60,26 @@ impl Watching {
     }
 
     /// One pass of the read loop at `now`: refreshes the heartbeat, or removes the watching file when
-    /// no session is watched or the window has been silent for `STALE_MS`, and returns the open
+    /// the window has been silent for `STALE_MS`, and returns the open
     /// request (`null` for none) when it changed.
     pub fn pass(&mut self, data: &Path, now: u64) -> Option<Value> {
         let watching = answer::watching_file(data);
         let silent = now.saturating_sub(self.alive_ms) > answer::STALE_MS;
+        if silent {
+            let _ = fs::remove_file(&watching);
+        } else {
+            // With no session selected the heartbeat names none: a blocked command's hook still waits.
+            let heartbeat = json!({ "session_id": self.session, "pid": std::process::id(), "heartbeat_ms": now });
+            if let Err(e) = answer::write_private(&watching, &heartbeat) {
+                eprintln!("studio: keep watching: {e}");
+            }
+        }
         let ask = match &self.session {
-            None => {
-                let _ = fs::remove_file(watching);
-                Value::Null
-            }
-            Some(session) => {
-                if silent {
-                    let _ = fs::remove_file(watching);
-                } else {
-                    let heartbeat = json!({ "session_id": session, "pid": std::process::id(), "heartbeat_ms": now });
-                    if let Err(e) = answer::write_private(&watching, &heartbeat) {
-                        eprintln!("studio: keep watching {session}: {e}");
-                    }
-                }
-                let ask = fs::read_to_string(answer::ask_file(data, session)).ok();
-                ask.and_then(|text| serde_json::from_str(&text).ok())
-                    .unwrap_or_default()
-            }
+            None => Value::Null,
+            Some(session) => fs::read_to_string(answer::ask_file(data, session))
+                .ok()
+                .and_then(|text| serde_json::from_str(&text).ok())
+                .unwrap_or_default(),
         };
         (ask != self.ask).then(|| {
             self.ask = ask.clone();
@@ -101,11 +99,19 @@ pub fn blocked_requests(data: &Path, session: &str) -> Value {
         .filter_map(|e| fs::read_to_string(e.path()).ok())
         .filter_map(|text| serde_json::from_str::<Value>(&text).ok())
         .map(|r| {
-            let pid = r["pid"].as_i64().and_then(|p| i32::try_from(p).ok());
             json!({ "nonce": r["nonce"], "tool_use_id": r["tool_use_id"],
-                "waiting": pid.is_some_and(answer::pid_lives) })
+                "waiting": answer::file_pid_lives(&r) })
         });
     Value::Array(requests.collect())
+}
+
+/// Which way Daniel's answer to a blocked command went: to its hook, still waiting, or, the hook having
+/// returned, taken by the studio itself, which leaves the agent to be asked to retry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Answered {
+    Hook,
+    Late,
 }
 
 /// Daniel's Allow or Decline of `session`'s blocked-command request `nonce`: Allow grants the one-time
@@ -116,7 +122,7 @@ pub fn answer_blocked(
     session: &str,
     nonce: &str,
     decision: answer::Verdict,
-) -> Result<(), String> {
+) -> Result<Answered, String> {
     if !answer::is_file_safe(session) || !answer::is_file_safe(nonce) {
         return Err("not a session or request id".into());
     }
@@ -129,24 +135,22 @@ pub fn answer_blocked(
         let (Some(command), Some(cwd)) = (command, cwd) else {
             return Err("the request names no command or folder".into());
         };
-        answer::write_pass(data, session, command, cwd, answer::now_ms())
+        answer::renew_pass(data, session, command, cwd, answer::now_ms())
             .map_err(|e| e.to_string())?;
     }
     let reply = json!({ "nonce": nonce, "decision": decision });
-    let hook_waits = request["pid"]
-        .as_i64()
-        .and_then(|p| i32::try_from(p).ok())
-        .is_some_and(answer::pid_lives);
-    if hook_waits {
-        return answer::write_private(&dir.join(format!("{nonce}.answer.json")), &reply)
-            .map_err(|e| e.to_string());
+    if answer::file_pid_lives(&request) {
+        answer::write_private(&dir.join(format!("{nonce}.answer.json")), &reply)
+            .map_err(|e| e.to_string())?;
+        return Ok(Answered::Hook);
     }
     // A late answer: the hook has returned, so no one logs the decision but the studio, which
     // writes the line the hook would have and closes the request.
     let mut asked = request;
     asked["session_id"] = session.into();
     answer::log_answer(data, &answer::answered_line(&asked, &reply));
-    fs::remove_file(dir.join(format!("{nonce}.json"))).map_err(|e| e.to_string())
+    fs::remove_file(dir.join(format!("{nonce}.json"))).map_err(|e| e.to_string())?;
+    Ok(Answered::Late)
 }
 
 /// Daniel chose Allow or Decline on a blocked command's card.
@@ -155,7 +159,7 @@ pub fn answer_blocked_command(
     session: String,
     nonce: String,
     decision: answer::Verdict,
-) -> Result<(), String> {
+) -> Result<Answered, String> {
     answer_blocked(&data()?, &session, &nonce, decision)
 }
 
@@ -180,7 +184,7 @@ pub fn watch(
     Ok(watching.lock().unwrap().watch(&data()?, session))
 }
 
-/// The window is alive: it calls this every second while it watches a session.
+/// The window is alive: it calls this every second while it is visible.
 #[tauri::command]
 pub fn alive(watching: State<Mutex<Watching>>) {
     watching.lock().unwrap().alive(answer::now_ms());
@@ -212,7 +216,7 @@ pub fn answer(
 
 #[cfg(test)]
 mod tests {
-    use super::{Watching, answer_blocked, blocked_requests};
+    use super::{Answered, Watching, answer_blocked, blocked_requests};
     use serde_json::{Value, json};
     use studio_hook::answer;
 
@@ -297,6 +301,23 @@ mod tests {
     }
 
     #[test]
+    fn a_window_showing_no_session_keeps_a_blocked_commands_hook_waiting() {
+        let data = tempfile::tempdir().unwrap();
+        let mut watching = Watching::default();
+        watching.watch(data.path(), Some("s1".into()));
+
+        watching.watch(data.path(), None);
+        watching.pass(data.path(), answer::now_ms());
+
+        assert!(answer::studio_alive(data.path()));
+        assert!(!answer::watched(data.path(), "s1"));
+
+        let now = answer::now_ms() + answer::STALE_MS + 1_000;
+        watching.pass(data.path(), now);
+        assert!(!answer::studio_alive(data.path()));
+    }
+
+    #[test]
     fn watching_no_session_stops_the_hook_waiting() {
         let data = tempfile::tempdir().unwrap();
         let mut watching = Watching::default();
@@ -340,7 +361,8 @@ mod tests {
         request(data.path(), "n2", std::process::id());
         let passes = || std::fs::read_dir(answer::pass_dir(data.path(), "s1")).map(|d| d.count());
 
-        answer_blocked(data.path(), "s1", "n2", answer::Verdict::Deny).unwrap();
+        let took = answer_blocked(data.path(), "s1", "n2", answer::Verdict::Deny).unwrap();
+        assert_eq!(took, Answered::Hook);
         assert!(passes().is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound));
         let denied = answer::blocked_dir(data.path(), "s1").join("n2.answer.json");
         let text = std::fs::read_to_string(denied).unwrap();
@@ -363,7 +385,17 @@ mod tests {
     fn a_late_answer_whose_hook_has_returned_is_logged_by_the_studio_and_closes_the_request() {
         let data = tempfile::tempdir().unwrap();
         request(data.path(), "n1", 0);
-        answer_blocked(data.path(), "s1", "n1", answer::Verdict::Allow).unwrap();
+        // A pass the agent's earlier approval left: the late Allow replaces it.
+        answer::write_pass(
+            data.path(),
+            "s1",
+            "claude -p hi",
+            "/work/repo",
+            answer::now_ms(),
+        )
+        .unwrap();
+        let took = answer_blocked(data.path(), "s1", "n1", answer::Verdict::Allow).unwrap();
+        assert_eq!(took, Answered::Late);
         // No hook waits to read an answer file or to log the decision.
         let blocked = answer::blocked_dir(data.path(), "s1");
         assert_eq!(std::fs::read_dir(&blocked).unwrap().count(), 0);
