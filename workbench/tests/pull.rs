@@ -148,3 +148,43 @@ fn a_task_branch_is_left_untouched() {
     assert_eq!(git(Path::new(&task.path), &["rev-parse", "HEAD"]), before);
     assert_eq!(git(&repos.main, &["rev-parse", "t"]), before);
 }
+
+use studio_workbench::git_state;
+
+#[test]
+fn only_changes_the_incoming_commits_touch_would_be_overwritten() {
+    let repos = repos();
+    let main = repos.main.display().to_string();
+    // The state Daniel's checkout is always in: an untracked folder, and an edit elsewhere.
+    std::fs::create_dir_all(repos.main.join(".claude/worktrees")).unwrap();
+    std::fs::write(repos.main.join(".claude/worktrees/x"), "x\n").unwrap();
+    std::fs::write(repos.main.join("other.txt"), "mine\n").unwrap();
+    merged_upstream(&repos, Some("a.txt"));
+    git(&repos.main, &["fetch", "-q", "origin"]);
+
+    let state = git_state(&repos.main, &main).unwrap();
+    assert!(state.changed > 0 && !state.would_overwrite);
+    pull(&repos.main).unwrap();
+
+    // An untracked file, and a tracked edit, that the incoming commit also adds or edits.
+    merged_upstream(&repos, Some("b.txt"));
+    git(&repos.main, &["fetch", "-q", "origin"]);
+    std::fs::write(repos.main.join("b.txt"), "mine\n").unwrap();
+    assert!(git_state(&repos.main, &main).unwrap().would_overwrite);
+}
+
+#[test]
+fn a_tracked_edit_the_incoming_commits_touch_would_be_overwritten() {
+    let repos = repos();
+    let main = repos.main.display().to_string();
+    merged_upstream(&repos, Some("a.txt"));
+    git(&repos.seed, &["pull", "-q", "origin", "trunk"]);
+    git(&repos.main, &["pull", "-q", "--ff-only"]);
+    std::fs::write(repos.seed.join("a.txt"), "theirs 2\n").unwrap();
+    git(&repos.seed, &["commit", "-q", "-am", "Again"]);
+    git(&repos.seed, &["push", "-q", "origin", "trunk"]);
+    git(&repos.main, &["fetch", "-q", "origin"]);
+    std::fs::write(repos.main.join("a.txt"), "mine\n").unwrap();
+
+    assert!(git_state(&repos.main, &main).unwrap().would_overwrite);
+}

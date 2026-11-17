@@ -197,6 +197,9 @@ pub struct GitState {
     /// Whether rebasing the branch onto `origin`'s default branch would conflict; `false` when it
     /// is not behind it (#32).
     pub would_conflict: bool,
+    /// Whether pulling `origin`'s default branch into this checkout would overwrite its files: a
+    /// changed or untracked file the incoming commits also touch (#164). Only on the default branch.
+    pub would_overwrite: bool,
 }
 
 /// The git state of the workspace at `path`, one of the workspaces of `repo`; any other path is refused, so
@@ -236,6 +239,10 @@ pub fn git_state(repo: &Path, path: &str) -> Result<GitState, String> {
         (Some(d), false, Some(_)) => would_conflict(dir, d),
         _ => false,
     };
+    let would_overwrite = match (&default, on_default) {
+        (Some(d), true) => would_overwrite(dir, d),
+        _ => false,
+    };
     Ok(GitState {
         branch,
         upstream,
@@ -244,6 +251,7 @@ pub fn git_state(repo: &Path, path: &str) -> Result<GitState, String> {
         main_behind,
         on_default,
         would_conflict,
+        would_overwrite,
     })
 }
 
@@ -296,6 +304,27 @@ fn would_conflict(dir: &Path, default: &str) -> bool {
         },
     );
     conflicts
+}
+
+/// Whether fast-forwarding `dir`'s checked-out branch to `default` would overwrite a file: one that is
+/// changed or untracked and that the incoming commits `HEAD..default` also touch (#164). Unrelated
+/// changes and untracked files elsewhere do not count.
+fn would_overwrite(dir: &Path, default: &str) -> bool {
+    let Ok(incoming) = git(dir, &["diff", "--name-only", &format!("HEAD..{default}")]) else {
+        return false;
+    };
+    if incoming.is_empty() {
+        return false;
+    }
+    let Ok(status) = git(dir, &["status", "--porcelain", "-uall"]) else {
+        return false;
+    };
+    let changed: Vec<&str> = status
+        .lines()
+        .filter_map(|line| line.get(3..))
+        .map(|path| path.rsplit(" -> ").next().unwrap_or(path).trim_matches('"'))
+        .collect();
+    incoming.lines().any(|path| changed.contains(&path))
 }
 
 /// The operation in progress in the workspace at `dir`, from the files its repository keeps while one is stopped.

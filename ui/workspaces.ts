@@ -67,15 +67,21 @@ const workspaceOf = (all: Workspace[], cwd: string): Workspace | undefined =>
 export type Pull = { behind: number; refused: string | null };
 export type WorkspaceRow = { workspace: Workspace; name: string; facts: string; actions: string[]; landed: boolean; pull: Pull | null };
 
-// Pull main's button for the main checkout: only with its default branch checked out and behind origin. It is refused
-// when the files would change under a session there, when uncommitted changes might be in the way, or when local main
-// has commits origin lacks (a fast-forward is never forced).
+// Why Pull main is refused for a main checkout now, or null: files would change under a session there, local main has
+// commits origin lacks (a fast-forward is never forced), or the incoming commits would overwrite changed files. Shared by
+// the button and the palette's action.
+export function pullRefusal(found: Workspaces, state: GitState | null, sessions: Pick<Session, "cwd" | "state">[]): string | null {
+  const blocked = branchBlocked(found, sessions);
+  if (blocked) return `Not now: ${blocked}`;
+  if (state?.on_default && state.upstream?.[0]) return "Local main has diverged from origin: it has commits origin lacks";
+  if (state?.would_overwrite) return "Uncommitted changes would be overwritten";
+  return null;
+}
+
+// Pull main's button for the main checkout: only with its default branch checked out and behind origin.
 function pullOf(found: Workspaces, state: GitState | null, sessions: Pick<Session, "cwd" | "state">[]): Pull | null {
   const behind = state?.on_default ? (state.upstream?.[1] ?? 0) : 0;
-  if (!state || !behind) return null;
-  const blocked = branchBlocked(found, sessions);
-  const refused = state.upstream![0] ? "Local main has diverged from origin: it has commits origin lacks" : state.changed ? "Uncommitted changes would be overwritten" : blocked && `Not now: ${blocked}`;
-  return { behind, refused: refused || null };
+  return behind ? { behind, refused: pullRefusal(found, state, sessions) } : null;
 }
 
 // The rows: the main checkout, then the tasks, each with its tokens and session count.
@@ -518,7 +524,13 @@ export function watchWorkspaces() {
 // Pulls each of `paths`' main checkout (#164), then reads every workspace and each main checkout's git state again, so the
 // rows and the git line show the new distance. A pull that failed shows git's reason on its project's group, after that read.
 async function pull(paths: string[]) {
-  const errors = await Promise.all(paths.map((project) => invoke("pull_main", { project }).then(() => null, (e) => String(e))));
+  const errors = await Promise.all(
+    paths.map((project) => {
+      const found = read.get(project);
+      const refused = found && pullRefusal(found, states.get(found.main.path) ?? null, studio.listed);
+      return refused ? Promise.resolve(refused) : invoke("pull_main", { project }).then(() => null, (e) => String(e));
+    }),
+  );
   await readWorkspaces(true);
   paths.forEach((project, i) => {
     const found = read.get(project);
