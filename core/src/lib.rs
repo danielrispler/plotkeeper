@@ -3159,9 +3159,8 @@ impl Studio {
             }
             for (index, turn) in session.turns.iter_mut().enumerate() {
                 let ended = turn.ended_at.is_some();
-                let recent = turn
-                    .ended_at
-                    .is_none_or(|at| at + turn_files::SINCE_MS >= now);
+                // A turn that never ended (its session was killed) ages from its start.
+                let recent = turn.ended_at.unwrap_or(turn.started_at) + turn_files::SINCE_MS >= now;
                 let due = match turn.files_asked {
                     None => true,
                     Some((_, true)) => false,
@@ -3181,8 +3180,9 @@ impl Studio {
                         end: end.clone().filter(|_| ended),
                     })
                     .collect();
-                turn.files_asked = Some((now, ended));
-                if !trees.is_empty() {
+                if trees.is_empty() {
+                    turn.files_asked = Some((now, ended));
+                } else {
                     let session_id = session.agent.id.clone();
                     let ask = TurnDiff {
                         session_id,
@@ -3196,6 +3196,16 @@ impl Studio {
         }
         asks.sort_by_key(|(at, _)| std::cmp::Reverse(*at));
         asks.truncate(limit);
+        // Only the asks that survive the cut are asked, so the rest are due again in the next pass.
+        for (_, ask) in &asks {
+            let turn = self
+                .sessions
+                .get_mut(&ask.session_id)
+                .and_then(|s| s.turns.get_mut(ask.turn));
+            if let Some(turn) = turn {
+                turn.files_asked = Some((now, ask.ended));
+            }
+        }
         asks.into_iter().map(|(_, ask)| ask).collect()
     }
 

@@ -245,3 +245,49 @@ fn a_turns_summary_facts_are_its_files_with_counts_and_its_checks() {
     assert_eq!(facts.external, 1);
     assert_eq!(studio.summary_ask("no-such-turn"), None);
 }
+
+/// `count` turns, each ended, from prompt ids `t0`, `t1`, ... one second apart.
+fn ended_turns(count: u64) -> Vec<String> {
+    let mut lines = Vec::new();
+    for i in 0..count {
+        let at = i * 10_000;
+        let id = format!("t{i}");
+        let mut start =
+            json!({ "prompt_id": id, "prompt": "go", "studio_turn_start": { ROOT: "s1" } });
+        start["studio_received_ms"] = (AT + at).into();
+        lines.push(line("UserPromptSubmit", at, start));
+        let mut end = json!({ "prompt_id": id, "studio_turn_end": { ROOT: "e1" } });
+        end["studio_received_ms"] = (AT + at + 5_000).into();
+        lines.push(line("Stop", at + 5_000, end));
+    }
+    lines
+}
+
+#[test]
+fn ended_turns_past_a_passs_limit_are_asked_in_the_next_pass() {
+    let mut studio = Studio::replayed(ended_turns(5));
+    let now = AT + 100_000;
+    let mut seen = std::collections::BTreeSet::new();
+    for _ in 0..3 {
+        for ask in studio.turn_diffs(now, 2) {
+            seen.insert(ask.turn);
+            let diff = vec![RootDiff {
+                root: ROOT.into(),
+                files: vec![],
+            }];
+            studio.set_turn_files(&ask, Some(diff));
+        }
+    }
+    assert_eq!(seen.len(), 5, "{seen:?}");
+}
+
+#[test]
+fn an_unended_turn_older_than_the_window_is_not_diffed_again() {
+    let mut studio = Studio::replayed([
+        prompt(json!({ ROOT: "s1" })),
+        edit(1_000, "e1", "/w/repo/src/a.rs", None),
+    ]);
+    assert_eq!(studio.turn_diffs(AT + 20_000, 10).len(), 1);
+    let eight_days = 8 * 24 * 60 * 60 * 1000;
+    assert!(studio.turn_diffs(AT + eight_days, 10).is_empty());
+}

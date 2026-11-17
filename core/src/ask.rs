@@ -93,9 +93,9 @@ fn edits(row: &Row) -> bool {
 
 /// Whether `row` works on `path` of worktree `root`.
 fn on_file(row: &Row, root: &str, path: &str) -> bool {
-    row.file.as_deref().is_some_and(|f| {
-        f == path || f == format!("{root}/{path}") || f.ends_with(&format!("/{path}"))
-    })
+    row.file
+        .as_deref()
+        .is_some_and(|f| f == path || f == format!("{root}/{path}"))
 }
 
 /// What a step did, in a few words: its tool and what it worked on.

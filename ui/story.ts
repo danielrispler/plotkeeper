@@ -410,6 +410,10 @@ function drawNow(session: Session | null, latest: Turn | null): Now | null {
   return now;
 }
 
+// The checks the feed lists under a turn: one still running and one whose last run failed. A check that passed folds into the
+// evidence line's count (danielrispler/plotkeeper#102, story 20).
+export const shownChecks = (lines: CheckLine[]): CheckLine[] => lines.filter((line) => line.ended_at === null || line.passed === false);
+
 // A check line: its outcome, its command, and how long it took or, while it runs, its time against
 // its typical time. No colour, as colour is only for "needs you".
 function checkElement(line: CheckLine): HTMLElement {
@@ -477,7 +481,7 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
     };
     node.append(quizRegion(id, quiz, rest, deps));
   }
-  const cardTurn = index !== null && turn?.files ? { session: session.id, index, files: turn.files.files } : null;
+  const cardTurn = index !== null && turn?.files ? { session: session.id, index, files: turn.files.files, ended: turn.ended_at !== null } : null;
   node.append(...cards.map((card) => cardLine(card, cardTurn, trial)));
   node.append(...block.questions.filter((q) => q.answer === "not_answered").map(questionElement));
   if (block.agents.length) {
@@ -490,10 +494,11 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
     list.append(...entries.map((entry) => historyElement(session.id, entry)));
     node.append(list);
   }
-  if (block.checks.length) {
+  const checksShown = shownChecks(block.checks);
+  if (checksShown.length) {
     const list = document.createElement("ul");
     list.className = "checks";
-    list.append(...block.checks.map(checkElement));
+    list.append(...checksShown.map(checkElement));
     node.append(list);
   }
   // The full response, folded: the latest turn's from the transcript, an older one's fetched at its

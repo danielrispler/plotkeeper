@@ -37,18 +37,19 @@ const clock = (at: number) => new Date(at).toLocaleTimeString([], { hour12: fals
 // Each anchor's box, kept across the view's redraws (every second), so a question being typed, an open box and an answer all
 // stay. shortcut: never pruned; prune by the listed sessions if it grows.
 const asks = new Map<string, HTMLDetailsElement>();
-const keyOf = (session: string, anchor: Anchor) => `${session}\n${JSON.stringify(anchor)}`;
+// `scope` keeps the boxes of one anchor drawn in two places apart, as a node has one parent.
+const keyOf = (session: string, anchor: Anchor, scope: string) => `${scope}${session}\n${JSON.stringify(anchor)}`;
 
 // The "Ask" box of `anchor` in session `session`, labelled `what` for the model ("this file").
-export function askAnchor(session: string, anchor: Anchor, what: string): HTMLDetailsElement {
-  const key = keyOf(session, anchor);
+export function askAnchor(session: string, anchor: Anchor, what: string, scope = ""): HTMLDetailsElement {
+  const key = keyOf(session, anchor, scope);
   if (!asks.has(key)) asks.set(key, askBox(session, anchor, what));
   return asks.get(key)!;
 }
 
 // Opens the box of `anchor` and puts the cursor in it, when it is drawn; false when it is not.
 export function openAsk(session: string, anchor: Anchor): boolean {
-  const node = asks.get(keyOf(session, anchor));
+  const node = asks.get(keyOf(session, anchor, ""));
   if (!node?.isConnected) return false;
   node.open = true;
   node.scrollIntoView?.({ block: "nearest" });

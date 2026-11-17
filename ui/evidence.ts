@@ -11,6 +11,7 @@ import { openAt } from "./paths.js";
 import type { Capabilities, Check, Turn, TurnFile } from "./types.js";
 
 type Facts = Pick<Turn, "files" | "checks">;
+type Ended = { ended_at: Turn["ended_at"] };
 export type EvidenceRow = { kind: "file" | "external" | "check"; label: string; call?: string; agent?: string | null; file?: TurnFile };
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -97,20 +98,27 @@ function checkRow(session: string, row: EvidenceRow): HTMLElement {
 }
 
 const openHunks = new Set<string>();
-const hunks = new Map<string, Hunk | null>();
+// A hunk read once its turn ended is final. One read of a turn still open is kept for the redraws of that opening only, and a turn
+// that ended since is read again.
+const hunks = new Map<string, { hunk: Hunk | null; ended: boolean }>();
 
 // A file's row: its label, which opens the real hunk between the turn's two trees under it, with "Open in editor" at its
 // first changed line. Only this row changes.
-export function fileRow(session: string, index: number, row: EvidenceRow, scope = ""): HTMLElement {
+export function fileRow(session: string, index: number, row: EvidenceRow, scope = "", ended = false): HTMLElement {
   const file = row.file!;
   const key = `${session} ${index} ${file.root} ${file.path}`;
   // Whether it is open is its own to each place that draws it; the hunk read is shared.
   const openKey = `${scope}${key}`;
   const item = document.createElement("li");
   item.className = "evidence-file";
-  const pre = text("pre", hunks.has(key) ? hunkText(hunks.get(key)!, false) : "", "evidence-hunk");
+  // What is kept of its hunk: final, or the read of an open turn while the turn is still open.
+  const kept = () => {
+    const entry = hunks.get(key);
+    return entry && (entry.ended || !ended) ? entry : undefined;
+  };
+  const pre = text("pre", kept() ? hunkText(kept()!.hunk, false) : "", "evidence-hunk");
   const edit = pressable(document.createElement("button"), false, () => {
-    const first = hunks.get(key)?.first_line ?? 1;
+    const first = kept()?.hunk?.first_line ?? 1;
     openAt({ path: file.path, line: first, column: 1 }, file.root);
   });
   edit.classList.add("evidence-edit");
@@ -125,15 +133,15 @@ export function fileRow(session: string, index: number, row: EvidenceRow, scope 
   const show = () => {
     const open = openHunks.has(openKey);
     for (const node of [pre, edit]) open ? node.removeAttribute("hidden") : node.setAttribute("hidden", "");
-    left(hunks.get(key) ?? null);
+    left(kept()?.hunk ?? null);
   };
   const fetch = () => {
-    if (hunks.has(key)) return;
+    if (kept()) return;
     pre.textContent = "Reading the hunk…";
     invoke("hunk_opened", { session, turn: index }).catch((e) => console.warn(e));
     invoke<Hunk | null>("turn_file_hunk", { session, turn: index, root: file.root, path: file.path, from: file.from })
       .then((h) => {
-        hunks.set(key, h);
+        hunks.set(key, { hunk: h, ended });
         pre.textContent = hunkText(h, false);
         left(h);
       })
@@ -145,6 +153,8 @@ export function fileRow(session: string, index: number, row: EvidenceRow, scope 
     if (openHunks.has(openKey)) openHunks.delete(openKey);
     else openHunks.add(openKey);
     button.setAttribute("aria-expanded", String(openHunks.has(openKey)));
+    // An open turn's hunk is read again at each opening.
+    if (!ended) hunks.delete(key);
     show();
     if (openHunks.has(openKey)) fetch();
   });
@@ -153,7 +163,7 @@ export function fileRow(session: string, index: number, row: EvidenceRow, scope 
   button.append(text("span", row.label));
   show();
   if (openHunks.has(openKey)) fetch();
-  item.append(button, edit, pre, more, askAnchor(session, { kind: "file", turn: index, root: file.root, path: file.path, from: file.from }, `the file ${file.path}`));
+  item.append(button, edit, pre, more, askAnchor(session, { kind: "file", turn: index, root: file.root, path: file.path, from: file.from }, `the file ${file.path}`, scope));
   return item;
 }
 
@@ -166,7 +176,7 @@ function fullDiffRow(session: string, index: number): HTMLElement {
 
 // The line for turn `index` of `session`. `only: "failed"` is the running turn's: just the checks whose last run failed.
 // Null when there is nothing to show.
-export function evidenceElement(session: string, index: number, turn: Facts, { only }: { only: "all" | "failed" }): HTMLElement | null {
+export function evidenceElement(session: string, index: number, turn: Facts & Ended, { only }: { only: "all" | "failed" }): HTMLElement | null {
   const facts: Facts = only === "failed" ? { files: null, checks: turn.checks.filter((c) => c.status === "failed") } : turn;
   const line = evidenceLine(facts);
   if (!line) return null;
@@ -176,7 +186,7 @@ export function evidenceElement(session: string, index: number, turn: Facts, { o
   const list = document.createElement("ul");
   list.className = "evidence-rows";
   list.append(
-    ...evidenceRows(facts).map((row) => (row.kind === "check" ? checkRow(session, row) : row.file ? fileRow(session, index, row) : text("li", row.label, "external"))),
+    ...evidenceRows(facts).map((row) => (row.kind === "check" ? checkRow(session, row) : row.file ? fileRow(session, index, row, "", turn.ended_at != null) : text("li", row.label, "external"))),
     ...(facts.files?.files.length ? [fullDiffRow(session, index)] : []),
   );
   const show = () => (openLines.has(key) ? list.removeAttribute("hidden") : list.setAttribute("hidden", ""));

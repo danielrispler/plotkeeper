@@ -7,7 +7,7 @@ globalThis.document = { createElement: (tag) => new El(tag), getElementById: () 
 const { diffRequest } = await import("../../dist/diff.js");
 const diffOpens = [];
 diffRequest.open = (session, turn) => diffOpens.push([session, turn]);
-const { evidenceLine, evidenceRows, evidenceElement, hasEvidence } = await import("../../dist/evidence.js");
+const { evidenceLine, evidenceRows, evidenceElement, fileRow, hasEvidence } = await import("../../dist/evidence.js");
 
 const file = (path, added, removed, extra = {}) => ({ root: "/r", path, from: null, added, removed, ...extra });
 const run = (status, call, exit_code = null) => ({ command: "cargo test", status, exit_code, call, agent: null });
@@ -193,4 +193,31 @@ test("the opened line offers the full diff only when the turn has files", () => 
   open.listeners.click();
   assert.deepEqual(diffOpens.at(-1), ["s9", 1]);
   assert.equal(evidenceElement("s9", 2, { files: null, checks: [check("cargo test", "passed")] }, { only: "all" }).find("button").some((b) => b.text === "Open full diff"), false);
+});
+
+test("an open turn's hunk is read again at each opening and once the turn ended, and an ended turn's is kept", async () => {
+  let reads = 0;
+  globalThis.window = {
+    __TAURI__: { core: { invoke: async (command) => (command === "turn_file_hunk" ? { text: `read ${++reads}`, left_out: 0, binary: false, first_line: 1 } : null) } },
+  };
+  const row = { kind: "file", label: "k.rs", file: file("k.rs", 1, 0) };
+  const settle = () => new Promise((resolve) => setTimeout(resolve));
+  const toggle = async (item) => (item.find("button")[0].listeners.click(), settle());
+  // While the turn is open: open, close, open again reads twice.
+  const open = fileRow("s3", 1, row, "", false);
+  await toggle(open);
+  await toggle(open);
+  await toggle(open);
+  assert.equal(reads, 2);
+  // The turn ended: its row, drawn again with the file still open, reads the hunk again; then it is kept.
+  const ended = fileRow("s3", 1, row, "", true);
+  await settle();
+  assert.equal(reads, 3);
+  assert.match(ended.find("pre")[0].text, /read 3/);
+  await toggle(ended);
+  await toggle(ended);
+  assert.equal(reads, 3);
+  fileRow("s3", 1, row, "", true);
+  await settle();
+  assert.equal(reads, 3);
 });

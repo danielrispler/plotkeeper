@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { blockKind, cardTime, feedTurns, foldedLine, headlineOf, nowOf, oneAtATime, turnAt } from "../../dist/story.js";
+import { blockKind, cardTime, feedTurns, foldedLine, headlineOf, nowOf, oneAtATime, shownChecks, turnAt } from "../../dist/story.js";
 
 test("summaries on open are written one at a time, in the order asked, newest first", async () => {
   const started = [];
@@ -130,4 +130,10 @@ test("a folded turn's line holds the prompt and Headline, a dot for an open Quiz
   assert.equal(line([{ ...run("passed"), retries: 1 }], false).failed, false);
   assert.deepEqual(line([run("ran")], false, null), { prompt: "Fix the parser", headline: null, unanswered: false, failed: false });
   assert.equal(foldedLine({ prompt: "", checks: [] }, null, false).prompt, "No prompt");
+});
+
+test("the feed lists a check that is running or whose last run failed, and folds a passed one into the evidence count", () => {
+  const line = (command, passed, ended_at) => ({ command, passed, started_at: 1, ended_at, typical_ms: null, turn: 0 });
+  const lines = [line("passed", true, 5), line("failed", false, 5), line("running", null, null), line("ran", null, 5)];
+  assert.deepEqual(shownChecks(lines).map((l) => l.command), ["failed", "running"]);
 });

@@ -12,7 +12,7 @@ import { confidenceRow, pickedHere, trialStage, whyInput, whyWaiting } from "./q
 import type { CardRequest, CheckResult, Guess, Level, Quiz, Rating, Reason, SessionCards, StoredCard, Tap, TurnFile } from "./types.js";
 
 // The turn a card is drawn in: its file chips open the file's hunk between the turn's trees, as its evidence line's rows do.
-export type CardTurn = { session: string; index: number; files: TurnFile[] };
+export type CardTurn = { session: string; index: number; files: TurnFile[]; ended: boolean };
 
 // Records Daniel's tap, his flag on the key or his rating, and draws the cards again at once.
 async function record(command: "guess" | "key_wrong" | "rate" | "quiz_tap", args: Record<string, unknown>) {
@@ -156,7 +156,7 @@ function fileChips(paths: string[], turn: CardTurn | null): HTMLElement {
         item.append(code(path));
         return item;
       }
-      return fileRow(turn.session, turn.index, { kind: "file", label: path, file }, "card ");
+      return fileRow(turn.session, turn.index, { kind: "file", label: path, file }, "card ", turn.ended);
     }),
   );
   return list;

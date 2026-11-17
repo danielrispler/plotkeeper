@@ -6,6 +6,7 @@ use std::{
     env, fs,
     path::{Path, PathBuf},
     process::{self, Command},
+    sync::atomic::{AtomicU64, Ordering},
     thread,
     time::{Duration, Instant},
 };
@@ -328,7 +329,10 @@ pub fn record_tree(folder: &Path) -> Option<(String, String)> {
         &["rev-parse", "--git-path", "index"],
         None,
     )?;
-    let scratch = env::temp_dir().join(format!("studio-hook-{}.index", process::id()));
+    // One per call: Studio records trees from several threads at once.
+    static CALLS: AtomicU64 = AtomicU64::new(0);
+    let call = CALLS.fetch_add(1, Ordering::Relaxed);
+    let scratch = env::temp_dir().join(format!("studio-hook-{}-{call}.index", process::id()));
     // A copy of the real index keeps git's stat cache, so only changed files are hashed again.
     let _ = fs::copy(Path::new(&root).join(index), &scratch);
     let added = git(Path::new(&root), &["add", "-A"], Some(&scratch));

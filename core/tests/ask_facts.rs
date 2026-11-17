@@ -216,3 +216,20 @@ fn a_named_things_facts_list_its_reads_searches_and_mentions_and_an_unknown_name
             .starts_with("Read it:\nRead /w/repo/src/other.rs")
     );
 }
+
+#[test]
+fn a_files_facts_leave_out_another_worktrees_file_of_the_same_relative_path() {
+    let (studio, log, _dir) = session();
+    let anchor = Anchor::File {
+        turn: 0,
+        root: "/w/other".into(),
+        path: "src/parse.rs".into(),
+        from: None,
+    };
+    let facts = studio.ask_facts(SESSION, &anchor, &log).unwrap();
+    assert!(
+        !labels(&facts).contains(&"Steps that edited it"),
+        "{:?}",
+        labels(&facts)
+    );
+}

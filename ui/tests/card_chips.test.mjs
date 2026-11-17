@@ -92,3 +92,15 @@ test("during the trial a card's Quiz asks the confidence tap, then the why line,
   // Without the trial, none of it shows.
   assert.equal(cardLine(stored({ quiz: quizOf }, "s1@21"), null, false).find("input").length, 0);
 });
+
+test("a card's file chip and the evidence row of the same file each keep their own Ask box", () => {
+  const file = { root: "/r", path: "a.rs", from: null, added: 1, removed: 1 };
+  const turn = { session: "s7", index: 1, files: [file], ended: true };
+  const chip = cardLine(stored({ paths: ["a.rs"] }, "s7@1"), turn).find("li")[0];
+  const row = fileRow("s7", 1, { kind: "file", label: "a.rs", file });
+  const [chipAsk] = chip.find("details");
+  const [rowAsk] = row.find("details");
+  assert.ok(chipAsk && rowAsk);
+  assert.notEqual(chipAsk, rowAsk);
+  assert.ok(chip.find("details").includes(chipAsk) && !row.find("details").includes(chipAsk));
+});
