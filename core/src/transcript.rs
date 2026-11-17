@@ -345,12 +345,10 @@ pub(crate) fn read_subagent_log(
     while reader.read_until(b'\n', &mut line).ok()? > 0 && line.ends_with(b"\n") {
         offset += line.len() as u64;
         if let Ok(value) = serde_json::from_slice::<Value>(&line) {
-            match format {
-                TranscriptFormat::Claude if value["agentId"] == agent => {
-                    log_entries(&value, cwd, &mut entries);
-                }
-                TranscriptFormat::Claude => {}
-                TranscriptFormat::Agy => agy_log_entries(&value, cwd, &mut entries),
+            if format == TranscriptFormat::Agy {
+                agy_log_entries(&value, cwd, &mut entries);
+            } else if value["agentId"] == agent {
+                log_entries(&value, cwd, &mut entries);
             }
         }
         line.clear();
@@ -371,7 +369,7 @@ fn agy_log_entries(record: &Value, cwd: &str, entries: &mut Vec<LogEntry>) {
             text: content.trim().into(),
         }),
         (Some("SYSTEM_MESSAGE"), _) => entries.push(LogEntry::Prompt {
-            text: message(content).into(),
+            text: agy_message(content).into(),
         }),
         (Some("PLANNER_RESPONSE"), _) => {
             if !content.trim().is_empty() {
@@ -405,7 +403,7 @@ fn agy_log_entries(record: &Value, cwd: &str, entries: &mut Vec<LogEntry>) {
 
 /// The text of an agy `SYSTEM_MESSAGE`, which wraps a message as `[Message] … content=<text>` in a
 /// `<SYSTEM_MESSAGE>` element; any other message as it is.
-fn message(content: &str) -> &str {
+fn agy_message(content: &str) -> &str {
     let Some((_, text)) = content.split_once(" content=") else {
         return content.trim();
     };
