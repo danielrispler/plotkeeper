@@ -3957,10 +3957,10 @@ impl Studio {
     }
 
     /// The log of subagent `agent` of session `session`, from byte `from`: the entries after it and
-    /// the offset read to (danielrispler/plotkeeper#54). The file is in the parent's transcript
-    /// folder, `<transcript without .jsonl>/subagents/agent-<id>.jsonl`. `None` is "no log": an unknown
-    /// session or subagent, no file, or a transcript path that is no `.jsonl`. Stateless: the caller
-    /// keeps the offset.
+    /// the offset read to (danielrispler/plotkeeper#54). A Claude subagent's file is in the parent's
+    /// transcript folder, `<transcript without .jsonl>/subagents/agent-<id>.jsonl`; an agy subagent's
+    /// is its own conversation's transcript. `None` is "no log": an unknown session or subagent, no
+    /// file, or a transcript path that is no `.jsonl`. Stateless: the caller keeps the offset.
     pub fn subagent_log(&self, session: &str, agent: &str, from: u64) -> Option<SubagentLog> {
         let session = self.session(session)?;
         session.subagent(agent)?;
@@ -3968,11 +3968,15 @@ impl Studio {
         if transcript.extension()? != "jsonl" {
             return None;
         }
-        let path = transcript
-            .with_extension("")
-            .join("subagents")
-            .join(format!("agent-{agent}.jsonl"));
-        transcript::read_subagent_log(&path, agent, from, &session.cwd)
+        let format = session.capabilities.transcript_format;
+        let path = match format {
+            TranscriptFormat::Claude => transcript
+                .with_extension("")
+                .join("subagents")
+                .join(format!("agent-{agent}.jsonl")),
+            TranscriptFormat::Agy => agy::subagent_transcript(transcript, agent)?,
+        };
+        transcript::read_subagent_log(&path, agent, format, from, &session.cwd)
     }
 
     /// The selected session and the subagent of it Daniel opened; `None` until his first click.

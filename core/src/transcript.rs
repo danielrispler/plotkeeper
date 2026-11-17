@@ -325,11 +325,13 @@ pub struct SubagentLog {
 }
 
 /// Reads the complete lines of the log at `path` from byte `from` that belong to subagent `agent`
-/// (by `agentId`, never `sessionId`), or `None` when the file is missing or is no `.jsonl`. A line
-/// that does not parse is skipped. `cwd` shortens the paths of the calls' details.
+/// (a Claude line by its `agentId`, never `sessionId`; every line of an agy subagent's own
+/// transcript), or `None` when the file is missing or is no `.jsonl`. A line that does not parse is
+/// skipped. `cwd` shortens the paths of the calls' details.
 pub(crate) fn read_subagent_log(
     path: &Path,
     agent: &str,
+    format: TranscriptFormat,
     from: u64,
     cwd: &str,
 ) -> Option<SubagentLog> {
@@ -342,14 +344,85 @@ pub(crate) fn read_subagent_log(
     let (mut entries, mut offset, mut line) = (Vec::new(), from, Vec::new());
     while reader.read_until(b'\n', &mut line).ok()? > 0 && line.ends_with(b"\n") {
         offset += line.len() as u64;
-        if let Ok(value) = serde_json::from_slice::<Value>(&line)
-            && value["agentId"] == agent
-        {
-            log_entries(&value, cwd, &mut entries);
+        if let Ok(value) = serde_json::from_slice::<Value>(&line) {
+            match format {
+                TranscriptFormat::Claude if value["agentId"] == agent => {
+                    log_entries(&value, cwd, &mut entries);
+                }
+                TranscriptFormat::Claude => {}
+                TranscriptFormat::Agy => agy_log_entries(&value, cwd, &mut entries),
+            }
         }
         line.clear();
     }
     Some(SubagentLog { entries, offset })
+}
+
+/// The entries of agy transcript record `record`. A message the subagent was sent is a prompt, the
+/// model's text a reply and its tool calls calls; any other record of the model's is the result of
+/// the call at its step, as call `k` of the response at step `n` runs as step `n + 1 + k`.
+fn agy_log_entries(record: &Value, cwd: &str, entries: &mut Vec<LogEntry>) {
+    let content = record["content"].as_str().unwrap_or_default();
+    let Some(step) = record["step_index"].as_u64() else {
+        return;
+    };
+    match (record["type"].as_str(), record["source"].as_str()) {
+        (Some("USER_INPUT"), _) => entries.push(LogEntry::Prompt {
+            text: content.trim().into(),
+        }),
+        (Some("SYSTEM_MESSAGE"), _) => entries.push(LogEntry::Prompt {
+            text: message(content).into(),
+        }),
+        (Some("PLANNER_RESPONSE"), _) => {
+            if !content.trim().is_empty() {
+                entries.push(LogEntry::Reply {
+                    text: content.trim().into(),
+                });
+            }
+            let calls = record["tool_calls"].as_array().into_iter().flatten();
+            for (k, call) in (step + 1..).zip(calls) {
+                let name = call["name"].as_str().unwrap_or_default();
+                let tool = crate::agy::tool_of(name, &call["args"]);
+                entries.push(LogEntry::Call {
+                    id: k.to_string(),
+                    tool: name.into(),
+                    detail: crate::step_detail(&tool.input, cwd),
+                });
+            }
+        }
+        (Some(_), Some("MODEL")) => {
+            // Each result opens with its call's times, which the log does not show.
+            let text: Vec<&str> = content
+                .lines()
+                .skip_while(|l| l.starts_with("Created At:") || l.starts_with("Completed At:"))
+                .collect();
+            let failed = record["status"] == "ERROR";
+            entries.push(result(&step.to_string(), text.join("\n").trim(), failed));
+        }
+        _ => {}
+    }
+}
+
+/// The text of an agy `SYSTEM_MESSAGE`, which wraps a message as `[Message] … content=<text>` in a
+/// `<SYSTEM_MESSAGE>` element; any other message as it is.
+fn message(content: &str) -> &str {
+    let Some((_, text)) = content.split_once(" content=") else {
+        return content.trim();
+    };
+    let text = text.trim_end();
+    text.strip_suffix("</SYSTEM_MESSAGE>")
+        .unwrap_or(text)
+        .trim()
+}
+
+/// The result of call `id`, capped at `RESULT_CAP` characters.
+fn result(id: &str, full: &str, failed: bool) -> LogEntry {
+    LogEntry::Result {
+        id: id.into(),
+        text: full.chars().take(RESULT_CAP).collect(),
+        failed,
+        cut: full.chars().count() > RESULT_CAP,
+    }
 }
 
 fn log_entries(line: &Value, cwd: &str, entries: &mut Vec<LogEntry>) {
@@ -392,13 +465,11 @@ fn log_entries(line: &Value, cwd: &str, entries: &mut Vec<LogEntry>) {
                         .join("\n"),
                     _ => String::new(),
                 };
-                let cut = full.chars().count() > RESULT_CAP;
-                entries.push(LogEntry::Result {
-                    id: block["tool_use_id"].as_str().unwrap_or_default().into(),
-                    text: full.chars().take(RESULT_CAP).collect(),
-                    failed: block["is_error"] == true,
-                    cut,
-                });
+                entries.push(result(
+                    block["tool_use_id"].as_str().unwrap_or_default(),
+                    &full,
+                    block["is_error"] == true,
+                ));
             }
             _ => {}
         }

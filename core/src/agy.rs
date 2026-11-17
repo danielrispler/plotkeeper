@@ -15,7 +15,7 @@ use serde_json::{Map, Value};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     fs,
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 /// What agy reports. It has no permission or question hook, no background task ids, no last message
@@ -456,6 +456,17 @@ fn strings(value: &Value) -> BTreeMap<String, String> {
         .unwrap_or_default()
 }
 
+/// The transcript of subagent `child`, beside its parent's transcript `parent`:
+/// `brain/<conversation>/.system_generated/logs/transcript_full.jsonl`, as every conversation's.
+pub(crate) fn subagent_transcript(parent: &Path, child: &str) -> Option<PathBuf> {
+    let brain = parent.ancestors().nth(4)?;
+    Some(
+        brain
+            .join(child)
+            .join(".system_generated/logs/transcript_full.jsonl"),
+    )
+}
+
 /// The `state` of a subagent's file.
 fn file_state(file: &Value) -> Option<String> {
     file["state"].as_str().map(Into::into)
@@ -511,7 +522,7 @@ fn turn_origin(transcript: &str, initial: u64) -> Option<Origin> {
     })
 }
 
-fn tool_of(name: &str, args: &Value) -> Tool {
+pub(crate) fn tool_of(name: &str, args: &Value) -> Tool {
     let kind = match name {
         "write_file" | "replace_file_content" | "multi_replace_file_content" | "edit_file" => {
             ToolKind::Edit

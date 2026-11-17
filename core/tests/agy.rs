@@ -3,7 +3,7 @@
 
 use serde_json::{Value, json};
 use std::path::PathBuf;
-use studio_core::{AgyDriftKind, Parent, Sender, State, Status, Studio};
+use studio_core::{AgyDriftKind, LogEntry, Parent, Sender, State, Status, Studio};
 
 const RUN: &str = include_str!("fixtures/agy/run.jsonl");
 const PARENT: &str = "145c3c4a-3fac-4c6c-8ffc-b1bd95c0f78a";
@@ -384,4 +384,41 @@ fn a_blocked_agy_session_stops_needing_you_when_its_terminal_goes_or_stops_repor
         studio.terminals(&gone, 20);
         assert_eq!(studio.session(PARENT).unwrap().state, State::YourTurn);
     }
+}
+
+#[test]
+fn an_agy_subagents_log_is_its_own_transcript() {
+    let studio = Studio::replayed(fixture());
+
+    let log = studio
+        .subagent_log(PARENT, CHILD, 0)
+        .expect("the child's log");
+    let call = |id: &str, tool: &str, detail: Option<&str>| LogEntry::Call {
+        id: id.into(),
+        tool: tool.into(),
+        detail: detail.map(Into::into),
+    };
+    let result = |id: &str, text: &str| LogEntry::Result {
+        id: id.into(),
+        text: text.into(),
+        failed: false,
+        cut: false,
+    };
+    assert_eq!(
+        log.entries,
+        [
+            LogEntry::Prompt {
+                text: "Please run the shell command 'sleep 8; echo done' and report back once completed."
+                    .into()
+            },
+            call("2", "run_command", Some("Run sleep test command")),
+            result("2", "Command exited with code 0.\n\nCommand output:\ndone"),
+            call("4", "send_message", None),
+            result("4", &format!("Message sent to \"{PARENT}\".")),
+            LogEntry::Reply {
+                text: "The command `sleep 8; echo done` has completed, and the result has been reported back to the parent agent."
+                    .into()
+            },
+        ]
+    );
 }
