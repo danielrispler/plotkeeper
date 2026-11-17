@@ -14,8 +14,11 @@ set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
 out="$here/terminal-recording.txt"
-repo=$(mktemp -d)
+# A fixed folder, so the banner and status line show "demo-app" and not a random temp path.
+repo=/tmp/demo-app
 raw=$(mktemp)
+rm -rf "$repo"
+mkdir "$repo"
 trap 'rm -rf "$repo" "$raw"' EXIT
 
 git -C "$repo" init -q
@@ -33,11 +36,13 @@ master, slave = pty.openpty()
 fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 32, 110, 0, 0))
 env = {**os.environ, "TERM": "xterm-256color", "COLUMNS": "110", "LINES": "32"}
 child = subprocess.Popen(
-    ["claude", "--permission-mode", "acceptEdits", "--allowedTools", "Bash(git *)", os.environ["PROMPT"]],
+    ["claude", "--permission-mode", "acceptEdits", "--allowedTools", "Bash(git *)"],
     stdin=slave, stdout=slave, stderr=slave, env=env, close_fds=True, start_new_session=True,
 )
 os.close(slave)
-data, trusted, start, last = b"", False, time.time(), time.time()
+# cut: the recording starts after the folder-trust question, so the replay shows only the session.
+data, cut, trusted, prompted = b"", 0, False, False
+start = last = time.time()
 while time.time() - start < 240 and child.poll() is None:
     ready, _, _ = select.select([master], [], [], 0.5)
     if ready:
@@ -48,17 +53,26 @@ while time.time() - start < 240 and child.poll() is None:
         data += chunk
         last = time.time()
         # The folder-trust question of a new folder: its first option is "No, exit", so move down to "Yes" before Enter.
-        if not trusted and b"trust" in data and b"confirm" in data:
+        # Words on screen are split by cursor moves, so each word is matched alone.
+        if not trusted and not prompted and b"trust" in data and b"confirm" in data:
             trusted = True
             time.sleep(1)
             os.write(master, b"\x1b[B")
             time.sleep(0.5)
             os.write(master, b"\r")
-    # The turn is done when the answer is on the screen and nothing has moved for 20 s.
-    elif time.time() - last > 20 and time.time() - start > 30:
+            cut = len(data)
+        # The input box is drawn (its footer names shift+tab): type the prompt, as a prompt in argv is lost after the trust question.
+        elif not prompted and b"shift+tab" in data[cut:]:
+            prompted = True
+            time.sleep(1)
+            os.write(master, os.environ["PROMPT"].encode())
+            time.sleep(0.5)
+            os.write(master, b"\r")
+    # The turn is done when the prompt was sent and nothing has moved for 20 s.
+    elif prompted and time.time() - last > 20:
         break
 child.terminate()
-open(os.environ["RAW"], "wb").write(data)
+open(os.environ["RAW"], "wb").write(data[cut:])
 PY
 
 # Nothing personal: refuse a recording that holds the login name, the home folder, the git name or email.
