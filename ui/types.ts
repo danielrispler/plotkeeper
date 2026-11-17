@@ -249,7 +249,14 @@ export type Decision = {
 };
 // A Bash command auto mode blocked, as a card on its session's view (danielrispler/plotkeeper#170): the command in full, its
 // folder, the rule that blocked it, the subagent that asked (null for the session's own agent) and where it stands.
-export type BlockedStatus = "blocked" | "allowed" | "declined";
+export type BlockedStatus =
+  | "blocked"
+  | "allowed"
+  | "running"
+  | "finished"
+  | "running_in_background"
+  | "blocked_again"
+  | "declined";
 export type BlockedCommand = {
   call: string;
   command: string;
@@ -258,6 +265,11 @@ export type BlockedCommand = {
   agent: string | null;
   at: number;
   status: BlockedStatus;
+  // The retry's call id once it runs (`check_output` reads its tail), when it started, its exit code once finished.
+  run?: string | null;
+  run_at?: number | null;
+  exit_code?: number | null;
+  task?: string | null;
 };
 // A turn's summary (danielrispler/Falinks#526) and, unless the turn has a card, its Quiz, as the store keeps it; a
 // learning section stored before danielrispler/plotkeeper#118 reads as its question.

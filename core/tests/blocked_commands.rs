@@ -278,3 +278,118 @@ fn the_notice_shows_once_with_others_within_three_seconds_and_not_in_a_focused_w
     let due = notices.due(Duration::from_secs(23), || true, |_| false, || None);
     assert_eq!(due.notification, None);
 }
+
+/// The agent's retry of `command` after Allow: its `PreToolUse`.
+fn retry(at: u64, id: &str, command: &str) -> String {
+    line(
+        "PreToolUse",
+        at,
+        json!({ "tool_name": "Bash", "tool_use_id": id, "prompt_id": "p-1",
+            "tool_input": { "command": command } }),
+    )
+}
+
+fn allowed() -> Vec<String> {
+    then(
+        started(),
+        vec![
+            denied(3_000, "toolu_1", COMMAND, None),
+            answer(4_000, "toolu_1", COMMAND, "allow"),
+        ],
+    )
+}
+
+#[test]
+fn the_matching_pre_tool_use_after_allow_runs_the_card_from_its_start() {
+    let session = session(&then(allowed(), vec![retry(5_000, "toolu_2", COMMAND)]));
+    let card = &session.blocked_commands[0];
+    assert_eq!(card.status, BlockedStatus::Running);
+    assert_eq!(card.run.as_deref(), Some("toolu_2"));
+    assert_eq!(card.run_at, Some(5_000));
+}
+
+#[test]
+fn a_different_command_or_folder_leaves_the_card_allowed() {
+    let other = retry(5_000, "toolu_2", "claude -p \"other\"");
+    let mut elsewhere = retry(5_500, "toolu_3", COMMAND);
+    elsewhere = elsewhere.replace(CWD, "/work/other");
+    let session = session(&then(allowed(), vec![other, elsewhere]));
+    assert_eq!(session.blocked_commands[0].status, BlockedStatus::Allowed);
+}
+
+fn ended(at: u64, id: &str, extra: Value) -> String {
+    let mut extra = extra;
+    extra["tool_name"] = "Bash".into();
+    extra["tool_use_id"] = id.into();
+    extra["prompt_id"] = "p-1".into();
+    extra["tool_input"] = json!({ "command": COMMAND });
+    let name = if extra.get("error").is_some() {
+        "PostToolUseFailure"
+    } else {
+        "PostToolUse"
+    };
+    line(name, at, extra)
+}
+
+#[test]
+fn a_retry_that_succeeds_finishes_the_card_with_exit_code_zero() {
+    let done = ended(
+        9_000,
+        "toolu_2",
+        json!({ "tool_response": { "stdout": "ok" } }),
+    );
+    let lines = then(allowed(), vec![retry(5_000, "toolu_2", COMMAND), done]);
+    let card = &session(&lines).blocked_commands[0];
+    assert_eq!(card.status, BlockedStatus::Finished);
+    assert_eq!(card.exit_code, Some(0));
+}
+
+#[test]
+fn a_retry_that_exits_non_zero_finishes_the_card_with_that_code() {
+    let done = ended(9_000, "toolu_2", json!({ "error": "Exit code 2\nboom" }));
+    let lines = then(allowed(), vec![retry(5_000, "toolu_2", COMMAND), done]);
+    let card = &session(&lines).blocked_commands[0];
+    assert_eq!(card.status, BlockedStatus::Finished);
+    assert_eq!(card.exit_code, Some(2));
+}
+
+#[test]
+fn a_backgrounded_retry_runs_in_the_background_until_the_wake_up_names_its_task() {
+    let started_bg = ended(
+        6_000,
+        "toolu_2",
+        json!({ "tool_response": { "backgroundTaskId": "bash-7" } }),
+    );
+    let lines = then(
+        allowed(),
+        vec![retry(5_000, "toolu_2", COMMAND), started_bg],
+    );
+    let card = &session(&lines).blocked_commands[0];
+    assert_eq!(card.status, BlockedStatus::RunningInBackground);
+    assert_eq!(card.task.as_deref(), Some("bash-7"));
+    let wake = line(
+        "UserPromptSubmit",
+        9_000,
+        json!({ "prompt": "<task-notification><task-id>bash-7</task-id><status>completed</status></task-notification>",
+            "prompt_id": "p-2" }),
+    );
+    let card = &session(&then(lines, vec![wake])).blocked_commands[0];
+    assert_eq!(card.status, BlockedStatus::Finished);
+}
+
+#[test]
+fn a_new_block_of_the_same_command_after_allow_blocks_the_card_again() {
+    let lines = then(
+        allowed(),
+        vec![
+            retry(5_000, "toolu_2", COMMAND),
+            denied(5_100, "toolu_2", COMMAND, None),
+        ],
+    );
+    let session = session(&lines);
+    assert_eq!(session.blocked_commands.len(), 1);
+    let card = &session.blocked_commands[0];
+    assert_eq!(card.status, BlockedStatus::BlockedAgain);
+    assert_eq!(card.call, "toolu_2");
+    assert_eq!(session.state, State::NeedsYou);
+}
