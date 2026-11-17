@@ -5,9 +5,9 @@ import fs from "node:fs";
 import { El } from "./dom.mjs";
 
 const { logoKey } = await import("../../dist/logos.js");
-const { row, rowMark } = await import("../../dist/list.js");
+const { row, rowMark, strip: stripOf, projectHead, agentRow } = await import("../../dist/list.js");
 // The document is set after the import: times.ts starts a timer when one exists at load.
-const make = (tag) => Object.assign(new El(tag), { dataset: {}, classList: { add() {}, toggle() {} } });
+const make = (tag) => Object.assign(new El(tag), { dataset: {}, style: {}, classList: { add() {}, toggle() {} } });
 globalThis.document = { createElement: make, getElementById: () => make("div"), visibilityState: "hidden" };
 
 const base = { id: "s", name: null, prompt_name: null, folder_name: "p", state: "idle", line: "", questions: [], shell: false, status_only: false, unseen: false, landed: false };
@@ -45,11 +45,21 @@ test("a session row in the list, Home and History shows the logo before its name
   assert.equal(rowMark(claude), "context 9%");
 });
 
-test("the strip, the project rollup and subagent rows draw no logo", () => {
-  const src = fs.readFileSync(new URL("../list.ts", import.meta.url), "utf8");
-  const only = (fn) => src.slice(src.indexOf(`function ${fn}(`), src.indexOf("\n}\n", src.indexOf(`function ${fn}(`)));
-  for (const fn of ["strip", "agentRow"]) assert.doesNotMatch(only(fn), /logo/i, fn);
-  assert.match(only("row"), /logo/i);
+test("the strip, the project header's rollup and a subagent row draw no logo", () => {
+  const withLogos = (node) => node.find("span").filter((s) => s.className === "logo");
+  const sessions = [{ ...claude, state: "running" }, { ...agy, id: "g", state: "needs_you" }, { ...statusOnly("codex"), id: "c", state: "running" }];
+  const strip = stripOf(sessions);
+  assert.ok(strip.length > 1);
+  for (const button of strip) assert.equal(withLogos(button).length, 0);
+  // Its rows do: the same sessions drawn as rows show a logo each.
+  for (const s of sessions) assert.equal(withLogos(row(s, new Map())).length, 1);
+  const head = projectHead({ key: "/w/p", name: "p", project: true, rollup: "running", states: [] });
+  assert.equal(withLogos(head).length, 0);
+  assert.ok(head.find("span").some((s) => s.dataset?.glyph === "spinner"));
+  const worker = { id: "a1", parent: "session", kind: "worker", name: "Review", asked: null, agent_type: null, status: "running", started_at: 1, ended_at: null, last_step: null, step_span: null };
+  const drawnAgent = agentRow({ ...claude, agents: [worker], asker: null }, new Map(), worker, 1);
+  assert.equal(withLogos(drawnAgent).length, 0);
+  assert.ok(drawnAgent.find("span").length > 0);
 });
 
 test("the logo is monochrome: one colour, the muted text colour", () => {
@@ -72,6 +82,7 @@ test("the rail header shows the logo, titled with the model line", async () => {
     // The rest of the rail needs more of a page than the stand-in has; the header is drawn first.
   }
   const mark = get("mark");
+  assert.equal(mark.childNodes.length, 1, "the header draws its logo");
   assert.equal(mark.childNodes[0].getAttribute("data-logo"), "claude");
   assert.equal(mark.childNodes[0].title, "Claude · Opus 5.5");
 });
