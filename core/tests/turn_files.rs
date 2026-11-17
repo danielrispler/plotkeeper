@@ -234,6 +234,69 @@ fn a_background_workers_late_edits_count_in_the_turn_that_spawned_it_and_not_the
     assert_eq!(turn_files(&studio, 1), (vec!["src/c.rs".into()], 0));
 }
 
+/// Daniel edited b.rs during turn 0, and the agent edited it again in turn 1, after turn 0 and its
+/// workers were done: turn 0's diff still counts it as external.
+#[test]
+fn a_files_later_edit_by_another_turn_does_not_hide_an_external_change_before_it() {
+    let next = |name: &str, ms: u64, extra: Value| {
+        let mut extra = extra;
+        extra["prompt_id"] = "p2".into();
+        line(name, ms, extra)
+    };
+    let mut studio = Studio::replayed([
+        prompt(json!({ ROOT: "s1" })),
+        edit(1_000, "e1", "/w/repo/src/a.rs", None),
+        stop(json!({ ROOT: "e1" })),
+        next(
+            "UserPromptSubmit",
+            10_000,
+            json!({ "prompt": "next", "studio_turn_start": { ROOT: "s2" } }),
+        ),
+        next(
+            "PostToolUse",
+            11_000,
+            json!({ "tool_name": "Edit", "tool_input": { "file_path": "/w/repo/src/b.rs" },
+                    "tool_use_id": "e2", "tool_response": {} }),
+        ),
+        next("Stop", 20_000, json!({ "studio_turn_end": { ROOT: "e2" } })),
+    ]);
+    let asks = ask(&mut studio, AT + 40_000);
+    let first = asks.iter().find(|a| a.turn == 0).unwrap();
+    let diff = diffs(first, &[(ROOT, "src/a.rs"), (ROOT, "src/b.rs")]);
+    studio.set_turn_files(first, Some(diff));
+    assert_eq!(turn_files(&studio, 0), (vec!["src/a.rs".into()], 1));
+    // And turn 1's diff counts b.rs as its own, not as turn 0's.
+    let second = asks.iter().find(|a| a.turn == 1).unwrap();
+    studio.set_turn_files(second, Some(diffs(second, &[(ROOT, "src/b.rs")])));
+    assert_eq!(turn_files(&studio, 1), (vec!["src/b.rs".into()], 0));
+}
+
+/// A call whose start never landed is placed by its result's time: turn 0's edit of a.rs does not
+/// hide Daniel's change to a.rs during turn 1.
+#[test]
+fn an_earlier_turns_edit_with_no_start_does_not_hide_an_external_change_in_a_later_turn() {
+    let next = |name: &str, ms: u64, extra: Value| {
+        let mut extra = extra;
+        extra["prompt_id"] = "p2".into();
+        line(name, ms, extra)
+    };
+    let mut studio = Studio::replayed([
+        prompt(json!({ ROOT: "s1" })),
+        edit(1_000, "e1", "/w/repo/src/a.rs", None),
+        stop(json!({ ROOT: "e1" })),
+        next(
+            "UserPromptSubmit",
+            10_000,
+            json!({ "prompt": "next", "studio_turn_start": { ROOT: "s2" } }),
+        ),
+        next("Stop", 20_000, json!({ "studio_turn_end": { ROOT: "e2" } })),
+    ]);
+    let asks = ask(&mut studio, AT + 40_000);
+    let second = asks.iter().find(|a| a.turn == 1).unwrap();
+    studio.set_turn_files(second, Some(diffs(second, &[(ROOT, "src/a.rs")])));
+    assert_eq!(turn_files(&studio, 1), (vec![], 1));
+}
+
 #[test]
 fn a_late_edit_of_a_worker_in_the_sessions_worktree_is_not_external_in_the_next_turn() {
     let late = |name: &str, ms: u64, extra: Value| {

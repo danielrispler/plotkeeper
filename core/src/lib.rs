@@ -1378,11 +1378,20 @@ impl Session {
     }
 
     /// The absolute paths its turn `turn`'s agent and workers edited, as the step ledger has them,
-    /// and those other turns' agents and workers edited since it started: its trees show their
-    /// changes too, as a worker edits on after its turn (danielrispler/plotkeeper#142), but they
-    /// are theirs.
+    /// and those other turns' agents and workers edited while its trees ran: from its start to its
+    /// end, or its workers' last end, as a worker edits on after its turn
+    /// (danielrispler/plotkeeper#142). Its trees show their changes too, but they are theirs.
     fn edited(&self, turn: usize) -> (BTreeSet<String>, BTreeSet<String>) {
-        let since = self.turns.get(turn).map_or(0, |t| t.started_at);
+        let (since, end) = self
+            .turns
+            .get(turn)
+            .map_or((0, None), |t| (t.started_at, t.ended_at));
+        let spawned = self.agents.iter().filter(|a| a.turn == Some(turn));
+        let ends: Option<Vec<u64>> = spawned.map(|a| a.ended_at).collect();
+        // Until now while it or a worker it spawned runs.
+        let until = end
+            .zip(ends)
+            .map_or(u64::MAX, |(end, ends)| ends.into_iter().fold(end, u64::max));
         let rows = self.ledger.rows().iter();
         let done = rows.filter(|r| turn_files::edits(&r.tool) && !r.failed());
         let done = done.filter(|r| r.outcome != Some(Outcome::Rejected));
@@ -1393,7 +1402,7 @@ impl Session {
             };
             if row.turn == Some(turn) {
                 ours.insert(file);
-            } else if row.started_at.is_none_or(|at| at >= since) {
+            } else if row.at().is_some_and(|at| (since..=until).contains(&at)) {
                 theirs.insert(file);
             }
         }

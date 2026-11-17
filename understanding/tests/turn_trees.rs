@@ -355,8 +355,8 @@ fn a_workers_edits_in_its_own_worktree_count_in_its_turn_even_after_the_turn_end
             .collect();
         (paths, found.external)
     };
-    let theirs = |path: &str| (worker.clone(), path.to_owned());
-    assert_eq!(files(0), (vec![theirs("a.rs"), theirs("late.rs")], 0));
+    let in_worker = |path: &str| (worker.clone(), path.to_owned());
+    assert_eq!(files(0), (vec![in_worker("a.rs"), in_worker("late.rs")], 0));
     assert_eq!(files(1), (vec![], 0));
 }
 
