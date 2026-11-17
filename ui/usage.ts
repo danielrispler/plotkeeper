@@ -1,16 +1,16 @@
-// Plan usage (danielrispler/plotkeeper#163): the top bar's glance and the popover's tiles. The workbench gives each agent's
-// usage in one shape, `AgentUsage`: its windows and when and from where they were read, or one line saying why it has none.
-// Each window has `used_percentage` (0 to 100) and `resets_at` (Unix seconds); a window past its reset is dropped. Times here
-// are Unix seconds.
+// Plan usage (danielrispler/plotkeeper#163; #165): the top bar's glance and the popover's tiles. The workbench gives each agent's
+// usage in one shape, `AgentUsage`: its limit groups (agy has one per model group, the others one) and when and from where they
+// were read, or one line saying why it has none. Each group holds windows with a `label` ("5h", "week", or its length such as
+// "30d"), `used_percentage` (0 to 100) and `resets_at` (Unix seconds); a window past its reset is dropped. Times here are Unix seconds.
 import { fullTitle, invoke, text } from "./dom.js";
 import { agentNames } from "./capabilities.js";
 import { logo, logoKey } from "./logos.js";
 
-type UsageWindow = { used_percentage: number; resets_at: number };
+type UsageWindow = { label: string; used_percentage: number; resets_at: number };
+type LimitGroup = { name: string; windows: UsageWindow[] };
 export type AgentUsage = {
   agent: string;
-  five_hour: UsageWindow | null;
-  seven_day: UsageWindow | null;
+  groups: LimitGroup[];
   read_at: number | null;
   source: string | null;
   reason: string | null;
@@ -18,25 +18,30 @@ export type AgentUsage = {
 
 const nameOf = (agent: string) => agentNames[agent] ?? agent;
 
-// The windows that are still current, in the order they show.
-const current = (usage: AgentUsage, now: number) =>
-  (
-    [
-      ["5h", "5-hour", usage.five_hour],
-      ["week", "weekly", usage.seven_day],
-    ] as const
-  ).flatMap(([label, long, w]) => (w && w.resets_at > now ? [{ label, long, ...w }] : []));
+// The groups with a window still current, each with only those windows, the most used group first. Groups never merge.
+const current = (usage: AgentUsage, now: number): LimitGroup[] =>
+  usage.groups
+    .map((group) => ({ name: group.name, windows: group.windows.filter((w) => w.resets_at > now) }))
+    .filter((group) => group.windows.length > 0)
+    .sort((a, b) => Math.max(...b.windows.map((w) => w.used_percentage)) - Math.max(...a.windows.map((w) => w.used_percentage)));
 
-// The tightest window across the agents: the one with the largest share used, as that agent's logo and "5h 62%" or "wk 80%".
+const longName = (label: string) => (label === "5h" ? "5-hour" : label === "week" ? "weekly" : label);
+
+// The tightest window across the agents and their groups: the one with the largest share used, as that agent's logo and "5h 62%"
+// or "wk 80%". Its title names the group when the agent has more than one.
 export function glance(usages: AgentUsage[], now: number): { agent: string; text: string; title: string } | null {
-  const all = usages.flatMap((usage) => current(usage, now).map((w) => ({ agent: usage.agent, ...w })));
+  const all = usages.flatMap((usage) => {
+    const groups = current(usage, now);
+    return groups.flatMap((group) => group.windows.map((w) => ({ agent: usage.agent, group: groups.length > 1 ? group.name : "", ...w })));
+  });
   const tightest = all.reduce<(typeof all)[number] | null>((best, w) => (!best || w.used_percentage > best.used_percentage ? w : best), null);
   if (!tightest) return null;
   const share = Math.floor(tightest.used_percentage);
+  const of = tightest.group ? `${tightest.group} ` : "";
   return {
     agent: tightest.agent,
     text: `${tightest.label === "week" ? "wk" : tightest.label} ${share}%`,
-    title: `${nameOf(tightest.agent)}'s ${tightest.long} usage is ${share}%. Click for plan usage.`,
+    title: `${nameOf(tightest.agent)}'s ${of}${longName(tightest.label)} usage is ${share}%. Click for plan usage.`,
   };
 }
 
@@ -68,8 +73,9 @@ function ago(seconds: number): string {
   return hours < 24 ? `${hours} h ago` : `${Math.floor(hours / 24)} d ago`;
 }
 
-// One agent's tile: its logo and name, then a bar per current window with the share used and its reset, and the data's age and
-// source. A failed read shows only its reason, never an old number. While `reading`, the footer says so instead of an age.
+// One agent's tile: its logo and name, then per limit group (named when there is more than one, most used first) a bar per current
+// window with the share used and its reset, and the data's age and source. A failed read shows only its reason, never an old
+// number. While `reading`, the footer says so instead of an age.
 export function tile(usage: AgentUsage, now: number, reading = false): HTMLElement {
   const node = document.createElement("section");
   node.className = "usage-tile";
@@ -82,18 +88,22 @@ export function tile(usage: AgentUsage, now: number, reading = false): HTMLEleme
     if (reading) node.append(text("p", "Reading…", "tile-foot"));
     return node;
   }
-  for (const w of current(usage, now)) {
-    const share = Math.floor(w.used_percentage);
-    const row = document.createElement("div");
-    row.className = "usage-window";
-    const bar = document.createElement("div");
-    bar.className = "bar";
-    const fill = document.createElement("div");
-    fill.className = "bar-fill";
-    fill.style.width = `${Math.min(100, share)}%`;
-    bar.append(fill);
-    row.append(text("span", w.label, "window-name"), bar, text("span", `${share}%`, "window-share"), text("span", `resets in ${span(w.resets_at - now)}`, "window-resets"));
-    node.append(row);
+  const groups = current(usage, now);
+  for (const group of groups) {
+    if (groups.length > 1) node.append(fullTitle(text("p", group.name, "group-name"), group.name));
+    for (const w of group.windows) {
+      const share = Math.floor(w.used_percentage);
+      const row = document.createElement("div");
+      row.className = "usage-window";
+      const bar = document.createElement("div");
+      bar.className = "bar";
+      const fill = document.createElement("div");
+      fill.className = "bar-fill";
+      fill.style.width = `${Math.min(100, share)}%`;
+      bar.append(fill);
+      row.append(text("span", w.label, "window-name"), bar, text("span", `${share}%`, "window-share"), text("span", `resets in ${span(w.resets_at - now)}`, "window-resets"));
+      node.append(row);
+    }
   }
   if (reading) node.append(text("p", "Reading…", "tile-foot"));
   else if (usage.read_at !== null) {

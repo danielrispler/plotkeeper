@@ -1,0 +1,18 @@
+{
+  "agent": "codex",
+  "groups": [
+    {
+      "name": "",
+      "windows": [
+        {
+          "label": "30d",
+          "resets_at": 1797525063,
+          "used_percentage": 0.0
+        }
+      ]
+    }
+  ],
+  "read_at": 1000,
+  "reason": null,
+  "source": "codex app-server"
+}

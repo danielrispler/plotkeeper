@@ -191,6 +191,7 @@ const covered = {
   ".answered-card > summary": "cards.ts: the summary's title",
   ".subagent-log .log-title": "log.ts: the title's title",
   ".subagent-log .log-call summary": "log.ts: the summary's title",
+  ".usage-tile .group-name": "usage.ts: the group name's title",
   code: "a check's command has its own title (story.ts); any other code span wraps or sits in a text that wraps",
 };
 

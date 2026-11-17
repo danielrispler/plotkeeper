@@ -4,7 +4,10 @@
 //! git's force option, so git refuses whatever would lose work, and its message is shown as it is.
 
 mod usage;
-pub use usage::{AgentUsage, UsageWindow, claude_usage};
+pub use usage::{
+    AgentUsage, LimitGroup, UsageWindow, claude_usage, cli_usages, parse_agy, parse_codex,
+    read_agy, read_codex,
+};
 
 use serde::Serialize;
 use std::{
