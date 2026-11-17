@@ -291,3 +291,29 @@ test("a task's row has no branch token when its branch is its name; a renamed or
   assert.deepEqual(rows.map((row) => row.facts), ["main", "", "renamed", "detached"]);
   assert.deepEqual(rows.map((row) => row.name), ["Main checkout", "same", "new", "look (detached)"]);
 });
+
+test("the main checkout's row offers Pull ↓N when its default branch is behind origin, and nothing when it is not (#164)", () => {
+  const on = (extra) => ({ branch: "main", upstream: [0, 3], changed: 0, main_behind: 3, on_default: true, would_conflict: false, operation: null, ...extra });
+  const pulls = (state, running = []) => workspaceRows(workspaces, [state, ...states.slice(1)], running).map((row) => row.pull);
+  assert.deepEqual(pulls(on()), [{ behind: 3, refused: null }, null, null]);
+  assert.deepEqual(pulls(on({ upstream: [0, 0], main_behind: null })), [null, null, null]);
+  // Another branch checked out in the main checkout: its upstream is not the default branch's.
+  assert.deepEqual(pulls(on({ branch: "work", on_default: false })), [null, null, null]);
+  assert.deepEqual(pulls(null), [null, null, null]);
+});
+
+test("Pull is refused, with the reason as its title, for uncommitted changes, a diverged main and a running session in the main checkout (#164)", () => {
+  const on = (extra) => ({ branch: "main", upstream: [0, 3], changed: 0, main_behind: 3, on_default: true, would_conflict: false, operation: null, ...extra });
+  const refused = (state, sessions = []) => workspaceRows(workspaces, [state, ...states.slice(1)], sessions)[0].pull.refused;
+  assert.match(refused(on({ changed: 2 })), /ncommitted/);
+  assert.match(refused(on({ upstream: [1, 3] })), /diverged/);
+  assert.match(refused(on(), [{ cwd: "/r", state: "running" }]), /running/);
+  assert.match(refused(on(), [{ cwd: "/r", state: "needs_you" }]), /needs you/);
+  // A session in a task does not refuse it.
+  assert.equal(refused(on(), [{ cwd: "/r/.claude/worktrees/issue-1", state: "running" }]), null);
+});
+
+test("Pull main is a palette action that pulls every project, then reads the workspaces again (#164)", () => {
+  assert.match(read("main.ts"), /"studio::PullMain": \(\) => void pullAll\(\)/);
+  assert.match(read("workspaces.ts"), /async function pull\(paths[^]*paths\.map[^]*invoke\("pull_main"[^]*readWorkspaces\(true\)[^]*export async function pullAll[^]*pull\(paths\)/);
+});

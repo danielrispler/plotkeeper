@@ -326,6 +326,32 @@ pub fn fetch(repo: &Path) -> Result<(), String> {
     git(repo, &["fetch", "--quiet", "origin"]).map(drop)
 }
 
+/// Brings the default branch of the repository that holds `repo` up to `origin`'s (#164), fetching
+/// first. With the default branch checked out in the main checkout it is a fast-forward-only merge;
+/// otherwise the local branch moves without a checkout, as `git fetch origin main:main` does. It never
+/// merges, rebases or stashes, and no other branch moves. Git's message is the error when the branch
+/// has diverged or uncommitted changes are in the way.
+pub fn pull(repo: &Path) -> Result<(), String> {
+    let main = workspaces(repo)?.main.path;
+    let main = Path::new(&main);
+    fetch(main)?;
+    let remote = git(
+        main,
+        &["symbolic-ref", "--short", "-q", "refs/remotes/origin/HEAD"],
+    )
+    .map_err(|_| "origin's default branch is not known".to_string())?;
+    let name = remote.strip_prefix("origin/").unwrap_or(&remote);
+    if git(main, &["symbolic-ref", "--short", "-q", "HEAD"]).is_ok_and(|b| b == name) {
+        git(main, &["merge", "--ff-only", "--quiet", &remote]).map(drop)
+    } else {
+        git(
+            main,
+            &["fetch", "--quiet", "origin", &format!("{name}:{name}")],
+        )
+        .map(drop)
+    }
+}
+
 /// The command a studio terminal runs for a new session, or for `resume`, an ended session's id. It
 /// sets `CLAUDE_CODE_PLUGIN_DIRS` to the studio plugin at `plugin` alone, as the README loads it,
 /// so a profile that sets it too never loads the hooks twice, and `CLAUDE_CLIENT_PRESENCE_FILE` to
