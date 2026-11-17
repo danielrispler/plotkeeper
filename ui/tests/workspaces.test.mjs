@@ -32,7 +32,8 @@ test("each workspace has its name, its git tokens and its session count, and off
     [
       ["Main checkout", "main  1 session", ["New session here"]],
       // A session in a task's subfolder counts for the task, not the main checkout around it.
-      ["issue-1", "issue-1  ↑2 ↓1  ●3  2 sessions", ["New session here", "Remove"]],
+      // The branch is the task's name, so the row says it once.
+      ["issue-1", "↑2 ↓1  ●3  2 sessions", ["New session here", "Remove"]],
       ["look (detached)", "detached", ["New session here", "Remove"]],
     ],
   );
@@ -265,4 +266,28 @@ test("the sidebar draws no Workspaces section, and only needs you is coloured in
 test("the sidebar's order is project by project, by state, without ended sessions", () => {
   const order = sidebarOrder(["/q", "/r"], found, [live("a", "idle", "/r"), live("e", "ended", "/q"), live("b", "running", "/r"), live("c", "idle", "/q"), live("d", "needs_you", "/q"), live("o", "idle", "/x/y")]);
   assert.deepEqual(order.map((s) => s.id), ["d", "c", "b", "a", "o"]);
+});
+
+test("the git line's tokens drop the branch when it is the task's name, and keep it when it differs (#160)", () => {
+  const state = { branch: "issue-137-readme-move", upstream: [2, 0], changed: 3 };
+  assert.deepEqual(texts(state), ["issue-137-readme-move", "↑2 ↓0", "●3"]);
+  assert.deepEqual(gitTokens(state, "issue-137-readme-move").map((t) => t.text), ["↑2 ↓0", "●3"]);
+  assert.deepEqual(gitTokens(state, "issue-137-other").map((t) => t.text), ["issue-137-readme-move", "↑2 ↓0", "●3"]);
+  assert.deepEqual(gitTokens({ branch: null, upstream: null, changed: 0 }, "look").map((t) => t.text), ["detached"]);
+});
+
+test("a task's row has no branch token when its branch is its name; a renamed or detached one shows its branch; the main checkout keeps its branch (#160)", () => {
+  const found = {
+    main: { path: "/r", branch: "main" },
+    tasks: [
+      { path: "/r/.claude/worktrees/same", branch: "same" },
+      { path: "/r/.claude/worktrees/old", branch: "new" },
+      { path: "/r/.claude/worktrees/look", branch: null },
+    ],
+    hidden: 0,
+  };
+  const on = (branch) => ({ branch, upstream: [0, 0], changed: 0 });
+  const rows = workspaceRows(found, [on("main"), on("same"), on("renamed"), on(null)], []);
+  assert.deepEqual(rows.map((row) => row.facts), ["main", "", "renamed", "detached"]);
+  assert.deepEqual(rows.map((row) => row.name), ["Main checkout", "same", "new", "look (detached)"]);
 });
