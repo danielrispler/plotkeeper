@@ -7,6 +7,8 @@ import { arrangeBar, type BarItem } from "./layout.js";
 
 // In the bar's order, left to right.
 const order: BarItem[] = ["header", "needs-you", "git", "usage", "new-build", "new-session"];
+// The items left of the spacer; the rest sit right of it.
+const left: BarItem[] = ["header", "needs-you", "git"];
 const ids: Record<BarItem, string> = {
   header: "session-header",
   "needs-you": "needs-you",
@@ -20,9 +22,9 @@ export function placeBar() {
   const top = document.querySelector<HTMLElement>(".top")!;
   const menu = element("bar-menu");
   const more = element("bar-more");
-  // Every item back in the bar, in order, to measure it whole.
-  const before = element("bar-more");
-  for (const item of order) top.insertBefore(element(ids[item]), before);
+  // Every item back in the bar, in order and on its side of the spacer, to measure it whole.
+  const spacer = top.querySelector(".sp")!;
+  for (const item of order) top.insertBefore(element(ids[item]), left.includes(item) ? spacer : more);
   more.hidden = false;
   const style = getComputedStyle(top);
   const gap = parseFloat(style.columnGap) || 0;
