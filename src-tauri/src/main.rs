@@ -351,23 +351,19 @@ fn usage(agents: Option<Vec<String>>) -> Vec<studio_workbench::AgentUsage> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs() as i64);
-    read.extend(studio_workbench::cli_usages(&cli, &login_path, now));
+    if !cli.is_empty() {
+        // The login shell's PATH, read once: a Dock-started app lacks it, and an npm-installed CLI needs it to find `node`.
+        let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/zsh".into());
+        let path = studio_workbench::login_shell_path(
+            &shell.to_string_lossy(),
+            std::time::Duration::from_secs(5),
+        )
+        .or_else(|| std::env::var("PATH").ok())
+        .unwrap_or_default();
+        let find = |program: &str| studio_workbench::find_in_path(program, &path);
+        read.extend(studio_workbench::cli_usages(&cli, &find, Some(&path), now));
+    }
     read
-}
-
-/// Where `program` is on Daniel's login shell's `PATH`, which a Dock-started app lacks; `None` when it is not installed.
-fn login_path(program: &str) -> Option<String> {
-    let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/zsh".into());
-    let out = Command::new(shell)
-        .args(["-lc", &format!("command -v {program}")])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())?;
-    String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .last()
-        .map(str::to_owned)
-        .filter(|path| path.starts_with('/'))
 }
 
 /// What the read loop last sent the window, so it sends each again only when it changes.

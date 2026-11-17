@@ -248,3 +248,41 @@ test("a failed agy tile shows its reason and no bar", () => {
   assert.match(textOf(has(node, "tile-reason")[0]), /did not answer in time/);
   assert.equal(has(node, "usage-window").length, 0);
 });
+
+test("a full read drops the tile of an agent the reply no longer has", async () => {
+  const replies = [[fresh(10, nowS()), failed("codex", "x")], [fresh(10, nowS())]];
+  globalThis.window = { __TAURI__: { core: { invoke: async () => replies.shift() } } };
+  const { readUsage } = await import("../../dist/usage.js");
+  const popover = new El("div");
+  await readUsage(new El("button"), popover, null);
+  assert.equal(popover.childNodes.length, 2);
+  await readUsage(new El("button"), popover, null);
+  assert.equal(popover.childNodes.length, 1);
+});
+
+test("a Claude-only read leaves the other agents' tiles alone", async () => {
+  const replies = [[fresh(10, nowS()), failed("codex", "x")], [fresh(11, nowS())]];
+  globalThis.window = { __TAURI__: { core: { invoke: async () => replies.shift() } } };
+  const { readUsage } = await import("../../dist/usage.js");
+  const popover = new El("div");
+  await readUsage(new El("button"), popover, null);
+  await readUsage(new El("button"), popover, ["claude"]);
+  assert.match(textOf(popover), /x/);
+});
+
+test("with overlapping popover reads only the newest clears Reading", async () => {
+  const first = deferred();
+  const second = deferred();
+  const calls = [first.promise, second.promise];
+  globalThis.window = { __TAURI__: { core: { invoke: () => calls.shift() } } };
+  const { readUsage } = await import("../../dist/usage.js");
+  const popover = new El("div");
+  const a = readUsage(new El("button"), popover, null);
+  const b = readUsage(new El("button"), popover, null);
+  first.resolve([fresh(20, nowS())]);
+  await a;
+  assert.match(textOf(popover), /Reading…/);
+  second.resolve([fresh(30, nowS())]);
+  await b;
+  assert.doesNotMatch(textOf(popover), /Reading…/);
+});

@@ -118,6 +118,8 @@ export function tile(usage: AgentUsage, now: number, reading = false): HTMLEleme
 const latest = new Map<string, AgentUsage>();
 const applied = new Map<string, number>();
 let sequence = 0;
+// The newest popover read: only it clears "Reading…".
+let popoverRead = 0;
 
 const drawTiles = (popover: HTMLElement, reading: boolean) => {
   const now = Date.now() / 1000;
@@ -130,9 +132,17 @@ const drawTiles = (popover: HTMLElement, reading: boolean) => {
 // until it is done. A read that fails keeps the old data.
 export async function readUsage(glanceButton: HTMLElement, popover: HTMLElement, agents: string[] | null) {
   const mine = ++sequence;
-  if (agents === null) drawTiles(popover, true);
+  if (agents === null) {
+    popoverRead = mine;
+    drawTiles(popover, true);
+  }
   try {
-    for (const usage of await invoke<AgentUsage[]>("usage", { agents })) {
+    const reply = await invoke<AgentUsage[]>("usage", { agents });
+    if (agents === null) {
+      // A full read says which agents exist: one it no longer has loses its tile.
+      for (const agent of [...latest.keys()]) if (!reply.some((u) => u.agent === agent) && (applied.get(agent) ?? 0) < mine) latest.delete(agent);
+    }
+    for (const usage of reply) {
       if ((applied.get(usage.agent) ?? 0) > mine) continue;
       applied.set(usage.agent, mine);
       latest.set(usage.agent, usage);
@@ -141,7 +151,7 @@ export async function readUsage(glanceButton: HTMLElement, popover: HTMLElement,
     // The old data stays.
   }
   showGlance(glanceButton, [...latest.values()], Date.now() / 1000);
-  if (agents === null) drawTiles(popover, false);
+  if (agents === null && mine === popoverRead) drawTiles(popover, false);
 }
 
 // The timer's refresh of the glance reads only these.

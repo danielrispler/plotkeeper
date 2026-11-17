@@ -4,8 +4,8 @@
 use serde_json::json;
 use std::{fs, thread, time::Duration};
 use studio_workbench::{
-    AgentUsage, claude_usage, cli_usages, context_window, parse_agy, parse_codex, read_agy,
-    read_codex,
+    AgentUsage, claude_usage, cli_usages, context_window, find_in_path, login_shell_path,
+    parse_agy, parse_codex, read_agy, read_codex,
 };
 
 const LIMITS: &str = r#"{"five_hour":{"used_percentage":23.5,"resets_at":1738425600},"seven_day":{"used_percentage":41.2,"resets_at":1738857600}}"#;
@@ -230,12 +230,13 @@ fn an_unreadable_reply_gives_a_reason_for_each_agent() {
 fn a_command_that_fails_gives_a_reason_line() {
     let dir = tempfile::tempdir().unwrap();
     let broken = fake_cli(dir.path(), "broken", "exit 3");
-    assert!(reason(&read_codex(&broken, Duration::from_secs(10), 0)).contains("Codex"));
-    assert!(reason(&read_agy(&broken, Duration::from_secs(10), 0)).contains("agy"));
+    assert!(reason(&read_codex(&broken, None, Duration::from_secs(10), 0)).contains("Codex"));
+    assert!(reason(&read_agy(&broken, None, Duration::from_secs(10), 0)).contains("agy"));
     let missing = dir.path().join("none");
     assert!(
         reason(&read_agy(
             missing.to_str().unwrap(),
+            None,
             Duration::from_secs(10),
             0
         ))
@@ -251,8 +252,8 @@ fn a_reply_that_is_not_the_answer_gives_a_reason_line() {
         "junk",
         "echo 'not json'; echo '{\"id\":1,\"result\":{}}'",
     );
-    assert!(reason(&read_codex(&junk, Duration::from_secs(10), 0)).contains("no answer"));
-    assert!(reason(&read_agy(&junk, Duration::from_secs(10), 0)).contains("not JSON"));
+    assert!(reason(&read_codex(&junk, None, Duration::from_secs(10), 0)).contains("no answer"));
+    assert!(reason(&read_agy(&junk, None, Duration::from_secs(10), 0)).contains("not JSON"));
 }
 
 #[test]
@@ -260,8 +261,8 @@ fn a_command_that_times_out_is_killed_and_gives_a_reason_line() {
     let dir = tempfile::tempdir().unwrap();
     let slow = fake_cli(dir.path(), "slow", "exec sleep 30");
     let start = std::time::Instant::now();
-    assert!(reason(&read_codex(&slow, Duration::from_millis(200), 0)).contains("in time"));
-    assert!(reason(&read_agy(&slow, Duration::from_millis(200), 0)).contains("in time"));
+    assert!(reason(&read_codex(&slow, None, Duration::from_millis(200), 0)).contains("in time"));
+    assert!(reason(&read_agy(&slow, None, Duration::from_millis(200), 0)).contains("in time"));
     assert!(start.elapsed() < Duration::from_secs(10));
 }
 
@@ -277,13 +278,18 @@ fn the_readers_run_the_cli_and_parse_what_it_prints() {
         ),
     );
     assert_eq!(
-        read_codex(&codex, Duration::from_secs(10), 1).groups[0].windows[0].label,
+        read_codex(&codex, None, Duration::from_secs(10), 1).groups[0].windows[0].label,
         "30d"
     );
     let reply = dir.path().join("agy.json");
     fs::write(&reply, recorded("agy-usage.json").to_string()).unwrap();
     let agy = fake_cli(dir.path(), "agy", &format!("cat '{}'", reply.display()));
-    assert_eq!(read_agy(&agy, Duration::from_secs(10), 1).groups.len(), 3);
+    assert_eq!(
+        read_agy(&agy, None, Duration::from_secs(10), 1)
+            .groups
+            .len(),
+        3
+    );
 }
 
 #[test]
@@ -291,12 +297,12 @@ fn an_agent_whose_cli_is_not_found_has_no_entry() {
     let dir = tempfile::tempdir().unwrap();
     let agy = fake_cli(dir.path(), "agy", "exit 1");
     let find = |agent: &str| (agent == "agy").then(|| agy.clone());
-    let read = cli_usages(&["codex", "agy"], &find, 0);
+    let read = cli_usages(&["codex", "agy"], &find, None, 0);
     assert_eq!(
         read.iter().map(|u| u.agent.as_str()).collect::<Vec<_>>(),
         ["agy"]
     );
-    assert!(cli_usages(&["codex", "agy"], &|_: &str| None, 0).is_empty());
+    assert!(cli_usages(&["codex", "agy"], &|_: &str| None, None, 0).is_empty());
 }
 
 /// The shapes the UI's tests read: the recorded replies as the seam gives them, with `read_at` 1000.
@@ -320,4 +326,70 @@ fn the_recorded_replies_give_the_shapes_the_ui_tests_read() {
             serde_json::from_str::<serde_json::Value>(&fs::read_to_string(&path).unwrap()).unwrap()
         );
     }
+}
+
+#[test]
+fn a_read_is_bounded_even_when_a_grandchild_holds_the_pipe_open() {
+    let dir = tempfile::tempdir().unwrap();
+    // The CLI exits at once; a helper it started keeps its stdout open.
+    let leaky = fake_cli(dir.path(), "leaky", "(sleep 30) &\nexit 0");
+    let start = std::time::Instant::now();
+    let usage = read_agy(&leaky, None, Duration::from_millis(500), 0);
+    assert!(reason(&usage).contains("in time"), "{usage:?}");
+    assert!(start.elapsed() < Duration::from_secs(10));
+}
+
+#[test]
+fn a_time_with_fractional_seconds_or_a_zero_offset_is_read() {
+    for time in [
+        "2026-11-17T18:11:50.123456Z",
+        "2026-11-17T18:11:50+00:00",
+        "2026-11-17T18:11:50.5+00:00",
+    ] {
+        let mut reply = recorded("agy-usage.json");
+        reply["command"]["data"]["groups"][0]["buckets"][0]["reset_time"] = json!(time);
+        let usage = parse_agy(&reply, 0);
+        assert_eq!(
+            usage.groups[0].windows[0].resets_at, 1_794_939_110,
+            "{time}"
+        );
+    }
+}
+
+#[test]
+fn a_program_is_found_in_the_directories_of_a_given_path() {
+    let one = tempfile::tempdir().unwrap();
+    let two = tempfile::tempdir().unwrap();
+    let agy = fake_cli(two.path(), "agy", "exit 0");
+    fs::write(one.path().join("codex"), "not executable").unwrap();
+    let path = format!("{}:{}", one.path().display(), two.path().display());
+    assert_eq!(find_in_path("agy", &path), Some(agy));
+    assert_eq!(find_in_path("codex", &path), None);
+    assert_eq!(find_in_path("agy", ""), None);
+}
+
+#[test]
+fn a_child_sees_the_path_it_was_given() {
+    let dir = tempfile::tempdir().unwrap();
+    let agy = fake_cli(
+        dir.path(),
+        "agy",
+        r#"printf '{"status":"SUCCESS","command":{"data":{"groups":[{"name":"%s","buckets":[{"window":"5h","remaining_fraction":0.5,"reset_time":"2026-11-17T18:11:50Z"}]}]}}}' "$PATH""#,
+    );
+    let usage = read_agy(&agy, Some("/given/bin:/other"), Duration::from_secs(10), 0);
+    assert_eq!(usage.groups[0].name, "/given/bin:/other");
+}
+
+#[test]
+fn the_login_shells_path_is_its_last_line_and_a_hung_shell_gives_none() {
+    let dir = tempfile::tempdir().unwrap();
+    let shell = fake_cli(dir.path(), "shell", "echo 'rc noise'; echo /a/bin:/b/bin");
+    assert_eq!(
+        login_shell_path(&shell, Duration::from_secs(10)),
+        Some("/a/bin:/b/bin".into())
+    );
+    let hung = fake_cli(dir.path(), "hung", "exec sleep 30");
+    let start = std::time::Instant::now();
+    assert_eq!(login_shell_path(&hung, Duration::from_millis(300)), None);
+    assert!(start.elapsed() < Duration::from_secs(10));
 }

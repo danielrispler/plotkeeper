@@ -158,9 +158,14 @@ pub fn parse_codex(reply: &serde_json::Value, now: i64) -> AgentUsage {
 
 /// Unix seconds of an ISO 8601 UTC time such as `2026-11-17T18:11:50Z`.
 fn iso_seconds(time: &str) -> Option<i64> {
-    let (date, clock) = time.strip_suffix('Z')?.split_once('T')?;
+    let time = time
+        .strip_suffix('Z')
+        .or_else(|| time.strip_suffix("+00:00"))?;
+    let (date, clock) = time.split_once('T')?;
     let mut date = date.split('-').map(|n| n.parse::<i64>());
     let (year, month, day) = (date.next()?.ok()?, date.next()?.ok()?, date.next()?.ok()?);
+    // Fractions of a second are dropped.
+    let clock = clock.split_once('.').map_or(clock, |(whole, _)| whole);
     let mut clock = clock.split(':').map(|n| n.parse::<i64>());
     let (hour, minute, second) = (
         clock.next()?.ok()?,
@@ -227,8 +232,17 @@ pub fn parse_agy(reply: &serde_json::Value, now: i64) -> AgentUsage {
     }
 }
 
-/// Runs `command` and gives what it printed, killing it when `timeout` passes. `stdin` is written, then closed.
-fn run_cli(mut command: Command, stdin: &str, timeout: Duration) -> Result<String, String> {
+/// Runs `command` and gives what it printed, killing it when `timeout` passes, however long its output stays open: the whole read
+/// is bounded, even when a helper it started holds its stdout. `stdin` is written, then closed. `path` is the `PATH` it runs with.
+fn run_cli(
+    mut command: Command,
+    path: Option<&str>,
+    stdin: &str,
+    timeout: Duration,
+) -> Result<String, String> {
+    if let Some(path) = path {
+        command.env("PATH", path);
+    }
     let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -240,35 +254,35 @@ fn run_cli(mut command: Command, stdin: &str, timeout: Duration) -> Result<Strin
         let _ = input.write_all(stdin.as_bytes());
     }
     let mut stdout = child.stdout.take().expect("stdout is piped");
-    let reader = std::thread::spawn(move || {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
         let mut out = String::new();
         let _ = stdout.read_to_string(&mut out);
-        out
+        let _ = sender.send(out);
     });
     let deadline = Instant::now() + timeout;
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
-            Ok(None) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err("it did not answer in time".into());
-            }
-            Err(e) => return Err(format!("it could not be waited on ({e})")),
-        }
+    let stop = |child: &mut std::process::Child, why: String| {
+        let _ = child.kill();
+        let _ = child.wait();
+        Err(why)
     };
-    let out = reader.join().unwrap_or_default();
-    if status.success() {
-        Ok(out)
-    } else {
-        Err(format!("it exited with {status}"))
+    let Ok(out) = receiver.recv_timeout(deadline.saturating_duration_since(Instant::now())) else {
+        return stop(&mut child, "it did not answer in time".into());
+    };
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => return Ok(out),
+            Ok(Some(status)) => return Err(format!("it exited with {status}")),
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
+            Ok(None) => return stop(&mut child, "it did not answer in time".into()),
+            Err(e) => return stop(&mut child, format!("it could not be waited on ({e})")),
+        }
     }
 }
 
 /// Codex's usage, from `codex app-server`: `initialize`, `initialized`, then `account/rateLimits/read` as newline-delimited
 /// JSON-RPC, skipping every message but the answer to the read.
-pub fn read_codex(program: &str, timeout: Duration, now: i64) -> AgentUsage {
+pub fn read_codex(program: &str, path: Option<&str>, timeout: Duration, now: i64) -> AgentUsage {
     let mut command = Command::new(program);
     command.args(["-s", "read-only", "-a", "never", "app-server"]);
     let requests = concat!(
@@ -279,7 +293,7 @@ pub fn read_codex(program: &str, timeout: Duration, now: i64) -> AgentUsage {
         r#"{"id":2,"method":"account/rateLimits/read"}"#,
         "\n",
     );
-    match run_cli(command, requests, timeout) {
+    match run_cli(command, path, requests, timeout) {
         Err(why) => AgentUsage::failed("codex", &format!("Codex's usage could not be read: {why}")),
         Ok(out) => {
             let answer = out
@@ -298,7 +312,7 @@ pub fn read_codex(program: &str, timeout: Duration, now: i64) -> AgentUsage {
 }
 
 /// agy's usage, from `agy -p /usage --output-format json` in an empty temporary folder, which costs no conversation.
-pub fn read_agy(program: &str, timeout: Duration, now: i64) -> AgentUsage {
+pub fn read_agy(program: &str, path: Option<&str>, timeout: Duration, now: i64) -> AgentUsage {
     let Ok(dir) = tempfile::tempdir() else {
         return AgentUsage::failed("agy", "agy's usage could not be read: no temporary folder");
     };
@@ -307,7 +321,7 @@ pub fn read_agy(program: &str, timeout: Duration, now: i64) -> AgentUsage {
         .args(["-p", "/usage", "--output-format", "json"])
         .env("AGY_CLI_DISABLE_AUTO_UPDATE", "true")
         .current_dir(dir.path());
-    match run_cli(command, "", timeout) {
+    match run_cli(command, path, "", timeout) {
         Err(why) => AgentUsage::failed("agy", &format!("agy's usage could not be read: {why}")),
         Ok(out) => match serde_json::from_str(&out) {
             Ok(reply) => parse_agy(&reply, now),
@@ -324,6 +338,7 @@ pub fn read_agy(program: &str, timeout: Duration, now: i64) -> AgentUsage {
 pub fn cli_usages(
     agents: &[&str],
     find: &(dyn Fn(&str) -> Option<String> + Sync),
+    path: Option<&str>,
     now: i64,
 ) -> Vec<AgentUsage> {
     std::thread::scope(|scope| {
@@ -332,8 +347,8 @@ pub fn cli_usages(
             .filter_map(|&agent| {
                 let program = find(agent)?;
                 Some(scope.spawn(move || match agent {
-                    "codex" => read_codex(&program, CODEX_TIMEOUT, now),
-                    _ => read_agy(&program, AGY_TIMEOUT, now),
+                    "codex" => read_codex(&program, path, CODEX_TIMEOUT, now),
+                    _ => read_agy(&program, path, AGY_TIMEOUT, now),
                 }))
             })
             .collect();
@@ -342,4 +357,29 @@ pub fn cli_usages(
             .filter_map(|read| read.join().ok())
             .collect()
     })
+}
+
+/// Where `program` is among the directories of `path`; `None` when it is not there.
+pub fn find_in_path(program: &str, path: &str) -> Option<String> {
+    use std::os::unix::fs::PermissionsExt;
+    path.split(':')
+        .filter(|dir| !dir.is_empty())
+        .map(|dir| Path::new(dir).join(program))
+        .find(|candidate| {
+            candidate
+                .metadata()
+                .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+        })
+        .and_then(|found| found.to_str().map(str::to_owned))
+}
+
+/// The `PATH` a login shell gives, read by running `shell` once with `-lc`; `None` when it fails or takes longer than `timeout`.
+pub fn login_shell_path(shell: &str, timeout: Duration) -> Option<String> {
+    let mut command = Command::new(shell);
+    command.args(["-lc", "printf '\\n%s' \"$PATH\""]);
+    let out = run_cli(command, None, "", timeout).ok()?;
+    out.lines()
+        .last()
+        .map(str::to_owned)
+        .filter(|path| path.contains('/'))
 }

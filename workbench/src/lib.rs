@@ -5,8 +5,8 @@
 
 mod usage;
 pub use usage::{
-    AgentUsage, LimitGroup, UsageWindow, claude_usage, cli_usages, parse_agy, parse_codex,
-    read_agy, read_codex,
+    AgentUsage, LimitGroup, UsageWindow, claude_usage, cli_usages, find_in_path, login_shell_path,
+    parse_agy, parse_codex, read_agy, read_codex,
 };
 
 use serde::Serialize;
