@@ -324,19 +324,21 @@ fn cards(studio: State<Mutex<Studio>>, cards: State<Cards>) -> SessionCards {
     shown
 }
 
-/// Each agent's plan usage (danielrispler/plotkeeper#163), read when the popover opens and when the window loads: Claude's, from
-/// the status line's newest snapshot in the `usage` folder beside the event log. An agent whose usage cannot be read says why.
+/// Plan usage (danielrispler/plotkeeper#163) of the `agents` asked for, or of every agent when `None`. The window asks for only
+/// "claude" on its timer, which reads a snapshot file and runs no CLI; an agent that runs one is read only when every agent is.
+/// Claude's is from the status line's newest snapshot in the `usage` folder beside the event log. An agent whose usage cannot
+/// be read says why.
 #[tauri::command]
-fn usage() -> Vec<studio_workbench::AgentUsage> {
-    let Some(home) = std::env::home_dir() else {
-        return vec![studio_workbench::AgentUsage::failed(
-            "claude",
-            "No home folder to find Claude's usage in",
-        )];
-    };
-    vec![studio_workbench::claude_usage(
-        &studio_hook::data_dir(&home).join("usage"),
-    )]
+fn usage(agents: Option<Vec<String>>) -> Vec<studio_workbench::AgentUsage> {
+    let wanted = |agent: &str| agents.as_ref().is_none_or(|list| list.iter().any(|a| a == agent));
+    let mut read = Vec::new();
+    if wanted("claude") {
+        read.push(match std::env::home_dir() {
+            Some(home) => studio_workbench::claude_usage(&studio_hook::data_dir(&home).join("usage")),
+            None => studio_workbench::AgentUsage::failed("claude", "No home folder to find Claude's usage in"),
+        });
+    }
+    read
 }
 
 /// What the read loop last sent the window, so it sends each again only when it changes.

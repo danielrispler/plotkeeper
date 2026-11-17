@@ -2,7 +2,7 @@
 // usage in one shape, `AgentUsage`: its windows and when and from where they were read, or one line saying why it has none.
 // Each window has `used_percentage` (0 to 100) and `resets_at` (Unix seconds); a window past its reset is dropped. Times here
 // are Unix seconds.
-import { hover, text } from "./dom.js";
+import { hover, invoke, text } from "./dom.js";
 import { logo, logoKey } from "./logos.js";
 
 type UsageWindow = { used_percentage: number; resets_at: number };
@@ -100,3 +100,20 @@ export function tile(usage: AgentUsage, now: number): HTMLElement {
   }
   return node;
 }
+
+// The newest read of each agent, so a read of some agents redraws the glance without losing the others'.
+const latest = new Map<string, AgentUsage>();
+
+// Reads usage and draws it. `agents` is the ones to read, or null for every agent (the popover's open, the load, the focus).
+// The refresh that runs on a timer passes only the agents that cost nothing to read (Claude's snapshot): an agent that runs
+// a CLI to answer is never read on a timer. Only a read of every agent redraws the popover's tiles.
+export async function readUsage(glanceButton: HTMLElement, popover: HTMLElement, agents: string[] | null) {
+  for (const usage of await invoke<AgentUsage[]>("usage", { agents })) latest.set(usage.agent, usage);
+  const now = Date.now() / 1000;
+  const all = [...latest.values()];
+  showGlance(glanceButton, all, now);
+  if (agents === null) popover.replaceChildren(...all.map((usage) => tile(usage, now)));
+}
+
+// The timer's refresh of the glance reads only these.
+export const timedAgents = ["claude"];

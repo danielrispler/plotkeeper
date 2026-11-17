@@ -95,3 +95,17 @@ test("a tile whose read failed shows its reason and no number, bar or age", () =
   assert.equal(has(node, "tile-foot").length, 0);
   assert.doesNotMatch(textOf(node), /%/);
 });
+
+test("the timer's refresh asks only for Claude, the popover's open for every agent", async () => {
+  const asked = [];
+  globalThis.window = { __TAURI__: { core: { invoke: async (command, args) => (asked.push([command, args.agents]), [claude(62, 30)]) } } };
+  const { readUsage, timedAgents } = await import("../../dist/usage.js");
+  const button = new El("button");
+  const popover = new El("div");
+  await readUsage(button, popover, timedAgents);
+  assert.deepEqual(asked, [["usage", ["claude"]]]);
+  assert.equal(popover.childNodes.length, 0);
+  await readUsage(button, popover, null);
+  assert.deepEqual(asked[1], ["usage", null]);
+  assert.equal(popover.childNodes.length, 1);
+});
