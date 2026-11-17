@@ -2,7 +2,7 @@
 
 A control room for coding agents that explains what your prompts changed.
 
-![Studio: the story rail on the left, a Claude Code terminal in the middle, the session strip on the right](docs/studio/assets/readme/hero.png)
+![Studio: the story rail on the left, a Claude Code terminal in the middle, the session list on the right](docs/studio/assets/readme/hero.png)
 
 plotkeeper is a desktop app for macOS that sits beside your agent sessions and keeps your understanding of the code in step with what the agents change. The app it builds is called Studio. It reads Claude Code sessions in full and agy sessions with fewer details, and it shows the status of other agents' sessions, such as Codex.
 
@@ -12,7 +12,7 @@ plotkeeper is a desktop app for macOS that sits beside your agent sessions and k
 
   ![A finished turn: its Headline and its evidence line](docs/studio/assets/readme/turn.png)
 
-- **Facts kept apart from the model's words.** Files, line counts and check results come from hooks and git. Code on a card is read from git, never retyped by a model. A claimed fix with no passed check is marked "Agent says:".
+- **Facts kept apart from the model's words.** Files, line counts and check results come from hooks and git. Code on a card is read from git, never retyped by a model. A claimed fix with no passed check is marked "Agent says:". [The rail](docs/studio/behaviour/rail.md) shows the evidence line.
 - **One question that makes you think.** A [Quiz](docs/studio/behaviour/quiz.md) asks about the change before it tells you the answer. It is never scored, and you get at most three an hour.
 
   ![A Quiz after a pick, with the reasons for each option](docs/studio/assets/readme/quiz.png)

@@ -192,6 +192,7 @@ test("recordedTerminal: a session at your turn, linked to a terminal that replay
   assert.ok(term, "the fixture has a terminal");
   assert.equal(s.terminal, term.id);
   assert.ok(term.replay.cols > 0 && term.replay.rows > 0);
+  assert.ok(term.replay.data.length > 0, "terminal-recording.txt is missing or empty");
 });
 
 // What the page's terminal shows: its drawn rows, as the stand-in document answers `querySelectorAll`.

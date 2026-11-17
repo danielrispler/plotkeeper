@@ -41,7 +41,7 @@ child = subprocess.Popen(
 )
 os.close(slave)
 # cut: the recording starts after the folder-trust question, so the replay shows only the session.
-data, cut, trusted, prompted = b"", 0, False, False
+data, cut, trusted, prompted, done = b"", 0, False, False, False
 start = last = time.time()
 while time.time() - start < 240 and child.poll() is None:
     ready, _, _ = select.select([master], [], [], 0.5)
@@ -70,8 +70,12 @@ while time.time() - start < 240 and child.poll() is None:
             os.write(master, b"\r")
     # The turn is done when the prompt was sent and nothing has moved for 20 s.
     elif prompted and time.time() - last > 20:
+        done = True
         break
 child.terminate()
+# A recording that never typed the prompt, or never reached the 20 s stillness, is junk: write nothing.
+if not prompted or not done:
+    raise SystemExit("The recording is incomplete (the prompt was " + ("typed" if prompted else "never typed") + ", the screen " + ("settled" if done else "never stayed still for 20 s within 240 s") + "); nothing was written.")
 open(os.environ["RAW"], "wb").write(data[cut:])
 PY
 

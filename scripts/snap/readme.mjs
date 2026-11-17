@@ -11,14 +11,14 @@ const here = dirname(fileURLToPath(import.meta.url));
 const folder = resolve(here, "../../docs/studio/assets/readme");
 const scale = 2;
 const pictures = [
-  { out: "hero.png", fixture: "recordedTerminal", size: "1400x800", scale: 1 },
-  { out: "turn.png", fixture: "readmeTurn", size: "1400x1000", scale },
-  { out: "quiz.png", fixture: "readmeQuiz", size: "1400x1000", scale },
-  { out: "where-we-were.png", fixture: "readmeWhere", size: "1400x1000", scale },
+  { out: "hero.png", fixture: "recordedTerminal", size: "1400x800", scale: 1, crop: false },
+  { out: "turn.png", fixture: "readmeTurn", size: "1400x1000", scale, crop: true },
+  { out: "quiz.png", fixture: "readmeQuiz", size: "1400x1000", scale, crop: true },
+  { out: "where-we-were.png", fixture: "readmeWhere", size: "1400x1000", scale, crop: true },
 ];
 
 mkdirSync(folder, { recursive: true });
-for (const { out, fixture, size, scale: density } of pictures) {
+for (const { out, fixture, size, scale: density, crop: wantsCrop } of pictures) {
   const file = join(folder, out);
   const run = spawnSync(process.execPath, [join(here, "snap.mjs"), fixture, file], {
     encoding: "utf8", env: { ...process.env, SNAP_SIZE: size, SNAP_SCALE: String(density) },
@@ -30,7 +30,7 @@ for (const { out, fixture, size, scale: density } of pictures) {
     process.exit(run.status ?? 1);
   }
   const crop = /^snap:crop (\d+) (\d+) (\d+) (\d+)$/m.exec(run.stdout ?? "");
-  if (fixture !== "recordedTerminal" && !crop) {
+  if (wantsCrop && !crop) {
     console.error(`snap:readme: ${fixture} logged no crop box`);
     process.exit(1);
   }
