@@ -44,7 +44,7 @@ Early: one user so far. macOS only, and no download yet, so you build from sourc
 
 ## Why
 
-I build with coding agents, and they move faster than I understand what they build. I made plotkeeper to close that gap while the work happens, not in a long review after it. If you want a multiplexer for many agents, herdr and T3 Code do that well; plotkeeper is for understanding what the agents changed.
+Coding agents write code faster than I can read their diffs. I was losing track of how my own codebase worked, and every session ended in a long, painful review. I built plotkeeper so I could follow along turn by turn, while the code is being written. If you want to run many agents side by side, herdr and T3 Code are good at that. plotkeeper is for understanding what they changed.
 
 ## Documentation
 
