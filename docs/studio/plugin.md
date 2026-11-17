@@ -11,3 +11,5 @@ Only zsh's `~/.zshrc` is fixed, and a line that builds the value with `${`, `$(`
 Each `claude` session then loads the plugin in place, as `falinks-studio@inline` in `claude plugin list`. Nothing is written to `~/.claude/settings.json`. `claude plugin install` would write `enabledPlugins` and `extraKnownMarketplaces` there.
 
 The hooks run the `studio-hook` built in this checkout, so build before you start a session. Edits to the plugin take effect at the next session start or `/reload-plugins`.
+
+Two hooks carry a blocked command (spec #170). On `PermissionDenied` for Bash, `studio-answer` leaves a request for the card and waits up to 600 s for Allow or Decline (timeout 610). On `PreToolUse` for Bash it claims the one-time pass Allow left and returns `"ask"`, or returns at once with no output when no pass matches. `PermissionDenied` is also logged by `studio-hook` like every other event.

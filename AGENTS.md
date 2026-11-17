@@ -20,7 +20,7 @@ Raw evidence from finished real runs (run directories, screenshots, terminal out
 - **Grill, spec, ticket, then build.** By default, work moves through `$grilling`, then `$to-spec`, then `$to-tickets`, and only then to implementation, of one ticket or a whole spec. `$to-spec` and `$to-tickets` are user-invoked: they load when Daniel types them. Without them, follow `docs/agents/ticket-authoring.md`.
 - **Implement in a worktree.** Each change gets its own worktree under `.claude/worktrees/`, on a new branch from `origin/main`; the main checkout stays on `main`. Work in the main checkout only when Daniel says so.
 - **Finish with a PR.** When an implementation is done and `npm run check` passes, push its branch and open a PR against `main`, its body written with `$pr`. Daniel reviews and merges it.
-- **Blocked commands go to Daniel.** When auto mode or a permission rule blocks a command you need, give Daniel that command as one line that sends its output to a file in your scratchpad or temp dir (`… > <file> 2>&1`). He runs it in his terminal and tells you when it is done; then read the file and continue.
+- **Blocked commands go to Daniel.** When auto mode blocks a Bash command you need, it reaches Daniel on a studio card with Allow and Decline; wait for his click, and on Allow run that exact command once yourself, with the same quoting and folder. Hand over only a command that needs his keyboard: write it into `<scratchpad>/run-<name>.sh`, end your reply with that path, and he runs `bash <path>` in the terminal panel. Other blocks (a tool other than Bash, a permission rule) keep Claude Code's own notice.
 
 ## Implementation language
 
