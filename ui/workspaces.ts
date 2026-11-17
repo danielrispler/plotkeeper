@@ -22,8 +22,9 @@ export type Token = { text: string; title: string; bad?: boolean };
 // "detached", the upstream distance "↑2 ↓1" or "not pushed", "main ↓5" when behind origin's default
 // branch (not on it, where the upstream distance is the same), "●3" uncommitted files, and "⚠" with
 // an operation in progress. The hover title says each in words. The one function for the Git line
-// and for Workspaces rows.
-export function gitTokens(state: GitState | null): Token[] {
+// and for Workspaces rows. A task's folder, branch and name are one string, so with the task's `name` the
+// branch token drops when it is that string (#160): the surrounding line says it once.
+export function gitTokens(state: GitState | null, name?: string): Token[] {
   if (!state) return [];
   const tokens: Token[] = [
     state.branch ? { text: state.branch, title: `On branch ${state.branch}` } : { text: "detached", title: "Detached HEAD" },
@@ -49,7 +50,7 @@ export function gitTokens(state: GitState | null): Token[] {
     const title = state.operation === "conflicts" ? "Files have unresolved conflicts" : `A ${state.operation} is in progress`;
     tokens.push({ text: `⚠ ${state.operation}`, title });
   }
-  return tokens;
+  return state.branch !== null && state.branch === name ? tokens.slice(1) : tokens;
 }
 
 // Every workspace, the main checkout first.
@@ -77,10 +78,12 @@ export function workspaceRows(found: Workspaces, states: (GitState | null)[], se
     if (shipped) landed[all.indexOf(workspace)] = true;
   }
   const folder = (workspace: Workspace) => workspace.path.split("/").pop() ?? workspace.path;
+  const names = all.map((workspace, i) => (i === 0 ? "Main checkout" : (workspace.branch ?? `${folder(workspace)} (detached)`)));
   return all.map((workspace, i) => ({
     workspace,
-    name: i === 0 ? "Main checkout" : (workspace.branch ?? `${folder(workspace)} (detached)`),
-    facts: [...gitTokens(states[i] ?? null).map((token) => token.text), working[i] && plural(working[i], "session")]
+    name: names[i],
+    // A task's branch shows only when it differs from its name; the main checkout keeps its branch.
+    facts: [...gitTokens(states[i] ?? null, i === 0 ? undefined : names[i]).map((token) => token.text), working[i] && plural(working[i], "session")]
       .filter(Boolean)
       .join("  "),
     actions: i === 0 ? ["New session here"] : ["New session here", "Remove"],
@@ -248,7 +251,7 @@ export const tokenOf = (project: string, cwd: string): string | null => {
   return found ? workspaceToken(found, cwd, (path) => states.get(path) ?? null) : null;
 };
 
-// A workspace's row: its name, then its facts; a click shows or hides its actions under it.
+// A workspace's row: one line, its name then its facts; a click shows or hides its actions under it.
 function workspaceRow(project: string, { workspace, name, facts, actions, landed }: WorkspaceRow): HTMLElement {
   const row = document.createElement("div");
   row.className = "workspace";
@@ -262,9 +265,9 @@ function workspaceRow(project: string, { workspace, name, facts, actions, landed
   button.setAttribute("aria-expanded", String(opened.has(workspace.path)));
   const line = text("span", "", "l1");
   line.append(text("span", name, "name"));
+  if (facts) line.append(text("span", facts, "facts"));
   if (landed) line.append(glyph("idle", false, true));
-  // The facts go under the name, so a long branch name is not cut for them.
-  button.append(line, ...(facts ? [text("span", facts, "l2")] : []));
+  button.append(line);
   row.append(button);
   if (!opened.has(workspace.path)) return row;
   const act = (label: string) =>
@@ -313,8 +316,9 @@ function drawLine() {
   const { project, workspaces, workspace } = now;
   const repo = lastSegment(workspaces.main.path);
   const name = workspace === workspaces.main ? repo : `${repo} › ${lastSegment(workspace.path)}`;
-  const tokens = gitTokens(states.get(workspace.path) ?? null);
-  line.title = [...tokens.map((token) => token.title), fetchNote(fetched.get(project) ?? { at: null, error: null }, Date.now())].join("\n");
+  const state = states.get(workspace.path) ?? null;
+  const tokens = gitTokens(state, workspace === workspaces.main ? undefined : lastSegment(workspace.path));
+  line.title = [...gitTokens(state).map((token) => token.title), fetchNote(fetched.get(project) ?? { at: null, error: null }, Date.now())].join("\n");
   // The main checkout's branch token opens the branch picker (#95); a task's worktree keeps its branch.
   const shownTokens = tokens.map((token, i) => {
     if (i > 0 || workspace !== workspaces.main) return Object.assign(text("span", token.text, token.bad ? "git-bad" : ""), { title: token.title });

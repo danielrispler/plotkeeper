@@ -86,6 +86,32 @@ export const fixtures = {
     ];
     return { ...common, sessions, selected: { session: sessions[0], agent: null } };
   },
+  // Workspaces rows and the git line (#160): the selected session's task shows its branch once, a renamed and a detached one show
+  // theirs, and the main checkout keeps its branch. Built on the rail's running fixture, whose session works in the first task.
+  branchOnce() {
+    const base = railFixtures.railRunning();
+    const root = "/Users/danielrispler/work/plotkeeper";
+    const task = (name) => `${root}/.claude/worktrees/${name}`;
+    const state = (branch, extra = {}) => ({ branch, upstream: branch ? [0, 0] : null, changed: 0, main_behind: null, on_default: false, would_conflict: false, operation: null, ...extra });
+    return {
+      ...base,
+      workspaces: {
+        main: { path: root, branch: "main" },
+        tasks: [
+          { path: task("issue-56-row-controls"), branch: "issue-56-row-controls" },
+          { path: task("issue-140-old"), branch: "issue-140-new" },
+          { path: task("look"), branch: null },
+        ],
+        hidden: 0,
+      },
+      workspace_git_state: { __by: "path", values: {
+        [root]: state("main", { on_default: true }),
+        [task("issue-56-row-controls")]: state("issue-56-row-controls", { upstream: [2, 1], changed: 5 }),
+        [task("issue-140-old")]: state("renamed-branch", { upstream: null }),
+        [task("look")]: state(null, { changed: 1 }),
+      } },
+    };
+  },
   // Home: nothing selected, with Needs you, Unseen, Landed and the project row.
   home() {
     const sessions = [
