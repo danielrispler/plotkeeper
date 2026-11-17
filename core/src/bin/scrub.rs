@@ -35,6 +35,7 @@ const TOP_LEVEL_TEXT: &[&str] = &[
     "reason",
     "session_id",
     "source",
+    "studio_asked_by",
     "studio_terminal_id",
     "tool_name",
     "tool_use_id",
@@ -77,6 +78,14 @@ fn scrub(event: Map<String, Value>) -> Map<String, Value> {
                 None => blank(value),
             },
             "tool_input" | "tool_response" => labels_only(value, &tool),
+            // Daniel's choice on a card, `allow` or `deny`; the nonce is already gone.
+            "studio_answer" => match value {
+                Value::Object(answer) => answer
+                    .into_iter()
+                    .filter(|(key, _)| key == "decision")
+                    .collect(),
+                other => blank(other),
+            },
             "background_tasks" => match value {
                 Value::Array(tasks) => tasks
                     .into_iter()
@@ -108,6 +117,7 @@ fn labels_only(value: Value, tool: &str) -> Value {
         let kept = match key {
             "description" => DESCRIBED.contains(&tool),
             "name" => tool == "Agent",
+            "command" => fixture_command(tool, value),
             key => LABELS.contains(&key) && !tool.starts_with("mcp__"),
         };
         kept && value
@@ -123,6 +133,17 @@ fn labels_only(value: Value, tool: &str) -> Value {
         (key, value)
     };
     Value::Object(fields.into_iter().map(field).collect())
+}
+
+/// The word that marks a command as the recording script's own (`core/tests/record-blocked-run.sh`),
+/// so its text may stay in a fixture. Any other command is content.
+const FIXTURE_MARK: &str = "studio-fixture-";
+
+/// Whether `value` is a Bash command or background task's one-line command that carries `FIXTURE_MARK`.
+fn fixture_command(tool: &str, value: &Value) -> bool {
+    value
+        .as_str()
+        .is_some_and(|c| (tool == "Bash" || tool == "background_tasks") && c.contains(FIXTURE_MARK))
 }
 
 /// A value with its content gone and its type kept: text becomes `…`, a list or an object empty.
@@ -164,8 +185,9 @@ const TAGS: &[&str] = &[
 fn markup(prompt: &str) -> String {
     let mut out = String::new();
     let mut text = String::new();
-    // Whether the tag right before `text` may hold an id or a status.
+    // Whether the tag right before `text` may hold an id or a status, and its name.
     let mut holds_id = false;
+    let mut open = "";
     let mut rest = prompt;
     while let Some(at) = rest.find('<') {
         text.push_str(&rest[..at]);
@@ -176,13 +198,14 @@ fn markup(prompt: &str) -> String {
             continue;
         };
         let kept = text.trim();
-        if holds_id && id_like(kept) {
+        if holds_id && id_like(kept) || keeps_text(open, kept) {
             out.push_str(kept);
         } else if !kept.is_empty() {
             out.push('…');
         }
         out.push_str(&tag);
         holds_id = !tag.starts_with("</") && (name == "status" || name.ends_with("id"));
+        open = if tag.starts_with("</") { "" } else { name };
         text.clear();
         rest = &rest[len..];
     }
@@ -190,6 +213,21 @@ fn markup(prompt: &str) -> String {
         out.push('…');
     }
     out
+}
+
+/// Whether `text`, right after tag `open`, stays: a background task's output path (`tasks/<id>.output`),
+/// or a summary of one line that names a recording script's command.
+fn keeps_text(open: &str, text: &str) -> bool {
+    match open {
+        "output-file" => {
+            text.len() <= 200
+                && text.starts_with('/')
+                && text.ends_with(".output")
+                && !text.contains(char::is_whitespace)
+        }
+        "summary" => text.len() <= 200 && !text.contains('\n') && text.contains(FIXTURE_MARK),
+        _ => false,
+    }
 }
 
 /// The tag at the start of `s`, rebuilt: a tag in `TAGS` with its attributes whose key and value look
@@ -270,7 +308,7 @@ mod tests {
         assert_eq!(
             scrubbed(prompt),
             "<task-notification><task-id>a1191df87fb730aa0</task-id>\
-            <tool-use-id>toolu_01Bg1Ag2Ct3Dv4Ew5Fx6Gy7H</tool-use-id><output-file>…</output-file>\
+            <tool-use-id>toolu_01Bg1Ag2Ct3Dv4Ew5Fx6Gy7H</tool-use-id><output-file>/private/tmp/x/tasks/a1191df87fb730aa0.output</output-file>\
             <status>killed</status><summary>…</summary><result>…</result></task-notification>"
         );
         assert_eq!(
@@ -360,6 +398,38 @@ mod tests {
             json!({"name": "…", "description": "…", "status": "…"})
         );
         assert_eq!(input(task), json!({"subject": "…", "description": "…"}));
+    }
+
+    #[test]
+    fn a_recorded_blocked_run_keeps_its_marked_command_and_the_cards_decision() {
+        let denied = |command: &str| {
+            json!({"hook_event_name": "PermissionDenied", "tool_name": "Bash", "reason": "Auto mode blocked it",
+                "tool_input": {"command": command}})
+        };
+        let answered = json!({"hook_event_name": "StudioAnswer", "studio_asked_by": "PermissionDenied",
+            "tool_name": "Bash", "studio_answer": {"decision": "allow", "note": "x"}});
+        let wake = json!({"hook_event_name": "UserPromptSubmit", "prompt":
+            "<task-notification><status>completed</status><output-file>/private/tmp/t/a.output</output-file>\
+            <summary>Background command \"claude -p # studio-fixture-background\" completed (exit code 0)</summary>\
+            <result>Daniel's text</result></task-notification>"});
+
+        assert_eq!(
+            scrub(denied("claude -p ok # studio-fixture-foreground"))["tool_input"]["command"],
+            "claude -p ok # studio-fixture-foreground"
+        );
+        assert_eq!(
+            scrub(denied("rm -rf ~/secret"))["tool_input"]["command"],
+            "…"
+        );
+        let kept = scrub(answered);
+        assert_eq!(kept["studio_asked_by"], "PermissionDenied");
+        assert_eq!(kept["studio_answer"], json!({"decision": "allow"}));
+        assert_eq!(
+            scrub(wake)["prompt"],
+            "<task-notification><status>completed</status><output-file>/private/tmp/t/a.output</output-file>\
+            <summary>Background command \"claude -p # studio-fixture-background\" completed (exit code 0)</summary>\
+            <result>…</result></task-notification>"
+        );
     }
 
     #[test]
