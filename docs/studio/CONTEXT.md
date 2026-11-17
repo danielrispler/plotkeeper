@@ -224,6 +224,9 @@ The column on the window's left that tells the selected session's or subagent's 
 The window with the session list and the story rail folded, so the terminal takes the window. One key, rebindable in the keymap, enters it and the same key leaves it. Only two other things leave it: pressing the toast to jump to its session, and the next-needs-you key. Nothing else changes the layout, so the terminal's size never moves under Daniel's typing. While in it, a session that newly needs you shows a toast over the terminal's corner instead.
 _Avoid_: Zen mode, full screen (the macOS window state)
 
+**plotkeeper**:
+The project and its repository (`danielrispler/plotkeeper`). The app it builds is named Studio.
+
 **Falinks run**:
 Several agent sessions coordinated by the Falinks engine on one repository.
 

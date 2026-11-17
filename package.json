@@ -7,6 +7,7 @@
     "tauri": "tauri",
     "snap": "node scripts/snap/snap.mjs",
     "snap:rail": "node scripts/snap/rail-all.mjs",
+    "snap:readme": "node scripts/snap/readme.mjs",
     "start": "tauri build && open target/release/bundle/macos/Studio.app",
     "test": "tsc && npm run test:node",
     "test:node": "node --test terminal-daemon/tests/replay.test.mjs ui/tests/*.test.mjs",

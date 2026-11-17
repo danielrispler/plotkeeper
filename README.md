@@ -1,28 +1,56 @@
-# Studio
+# plotkeeper
 
-The control room's app (map danielrispler/Falinks#266, specs danielrispler/Falinks#328 and danielrispler/Falinks#369), for macOS.
+A control room for coding agents that explains what your prompts changed.
 
-## Build
+![Studio: the story rail on the left, a Claude Code terminal in the middle, the session strip on the right](docs/studio/assets/readme/hero.png)
 
-Needs Node and the Rust toolchain.
+plotkeeper is a desktop app for macOS that sits beside your agent sessions and keeps your understanding of the code in step with what the agents change. The app it builds is called Studio. It reads Claude Code sessions in full and agy sessions with fewer details, and it shows the status of other agents' sessions, such as Codex.
 
+## What you get
+
+- **Know what your prompt changed.** Each turn ends with a one-sentence Headline, and a change big enough gets a card that explains it. [The story rail](docs/studio/behaviour/rail.md) and [cards](docs/studio/behaviour/cards.md) hold both.
+
+  ![A finished turn: its Headline and its evidence line](docs/studio/assets/readme/turn.png)
+
+- **Facts kept apart from the model's words.** Files, line counts and check results come from hooks and git. Code on a card is read from git, never retyped by a model. A claimed fix with no passed check is marked "Agent says:".
+- **One question that makes you think.** A [Quiz](docs/studio/behaviour/quiz.md) asks about the change before it tells you the answer. It is never scored, and you get at most three an hour.
+
+  ![A Quiz after a pick, with the reasons for each option](docs/studio/assets/readme/quiz.png)
+
+- **Pick up where you left off.** "Where we were" and [the Brief](docs/studio/behaviour/brief.md) sum up an idle session: the last Headline, what changed since you looked, and what is still open.
+
+  ![Where we were](docs/studio/assets/readme/where-we-were.png)
+
+- **See who needs you.** [Every session is in one list](docs/studio/behaviour/sessions.md), only "needs you" is in colour, and you can answer an agent's question from its card.
+- **Terminals that outlive the app.** A [restart, rebuild or crash](docs/studio/behaviour/terminal.md) loses none of them.
+- **Your subscription, your machine.** The [card writer](docs/studio/behaviour/cards.md) runs `claude -p` on your own subscription, with no tools and no MCP servers.
+
+## Quick start
+
+You need macOS, Node, the Rust toolchain and Claude Code. `claude` must be on the `PATH` of your login shell: a login shell reads `~/.zprofile`, not `~/.zshrc`.
+
+    git clone https://github.com/danielrispler/plotkeeper
+    cd plotkeeper
     npm ci
-    npm run tauri build
+    npm start
 
-This builds `target/release/bundle/macos/Studio.app` with an ad-hoc signature (`codesign -dv` shows `Signature=adhoc`), and `target/release/studio-hook`, which the plugin runs. The bundle carries `studio-terminal-daemon` beside the app's executable, in `Contents/MacOS/`.
+`npm start` builds the app, which takes a while the first time, and opens it. Click "New session".
 
-Open the app with `open target/release/bundle/macos/Studio.app`. `npm start` does both: it builds, recompiling only what changed, then opens the app.
+Sessions Studio starts load its plugin on their own. For a `claude` you start elsewhere, see [Load the plugin](docs/studio/plugin.md).
 
-## Docs
+## Status
 
-- [Sessions](docs/studio/behaviour/sessions.md): the session list, its states, notifications and starting sessions
-- [The story rail](docs/studio/behaviour/rail.md): header, now, turn summary, evidence line, Ask, the narrow window
-- [Cards](docs/studio/behaviour/cards.md): cards, the card writer, fingerprints, workers' cards and wake-ups
-- [The Quiz](docs/studio/behaviour/quiz.md): the Quiz, the trials and the weekly rates
-- [The Brief](docs/studio/behaviour/brief.md): the Brief and "Where we were"
-- [Checks](docs/studio/behaviour/checks.md): the check list, check cards and exit-code rules
-- [The terminal pane](docs/studio/behaviour/terminal.md): the terminal pane, its keys, restarts and daemon upgrades
-- [Storage](docs/studio/behaviour/storage.md): the event log, the card store and plan usage
-- [Load the plugin](docs/studio/plugin.md): loading the plugin
-- [Settings files](docs/studio/settings.md): settings files and the keymap
-- [Development](docs/studio/development.md): the crates, the tests and recorded logs
+Early: one user so far. macOS only, and no download yet, so you build from source. Issues are welcome; pull requests are not reviewed yet.
+
+## Why
+
+I build with coding agents, and they move faster than I understand what they build. I made plotkeeper to close that gap while the work happens, not in a long review after it. If you want a multiplexer for many agents, herdr and T3 Code do that well; plotkeeper is for understanding what the agents changed.
+
+## Documentation
+
+- [Sessions](docs/studio/behaviour/sessions.md), [the story rail](docs/studio/behaviour/rail.md), [cards](docs/studio/behaviour/cards.md), [the Quiz](docs/studio/behaviour/quiz.md), [the Brief](docs/studio/behaviour/brief.md), [checks](docs/studio/behaviour/checks.md), [the terminal pane](docs/studio/behaviour/terminal.md), [storage](docs/studio/behaviour/storage.md)
+- [Load the plugin](docs/studio/plugin.md), [settings files](docs/studio/settings.md), [development](docs/studio/development.md)
+
+## Licence
+
+[MIT](LICENSE).

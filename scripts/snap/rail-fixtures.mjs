@@ -402,7 +402,38 @@ const quizScript = (answer) => `
   log("rail scrollTop " + at + " -> " + story.scrollTop);
   if (story.scrollTop !== at) log("snap:fail the rail's scrollTop moved from " + at + " to " + story.scrollTop);`;
 
+// `npm run snap:readme` (scripts/snap/readme.mjs): the README's three rail crops. Each script scrolls the rail to its top, finds
+// its target (a missing one is a `snap:fail`) and logs `snap:crop x y width height`, the box in page pixels that the crop keeps.
+const cropScript = (setup, from, to) => `
+  const story = document.getElementById("story");
+  const wait = () => new Promise((resolve) => setTimeout(resolve, 200));
+  ${setup}
+  story.scrollTop = 0;
+  await wait();
+  const top = document.querySelector(${JSON.stringify(from)});
+  const bottom = document.querySelector(${JSON.stringify(to)});
+  if (!top || !bottom) return log("snap:fail the crop's target is missing: " + (top ? ${JSON.stringify(to)} : ${JSON.stringify(from)}));
+  const rail = story.getBoundingClientRect();
+  const start = top.getBoundingClientRect().top;
+  const end = bottom.getBoundingClientRect().bottom;
+  if (end - start < 40) return log("snap:fail the crop's target is empty");
+  log("snap:crop " + [rail.left, start - 8, story.clientWidth, end - start + 16].map(Math.round).join(" "));`;
+
+const readmeTurn = () => ({ ...build("your_turn"), snapScript: cropScript("", ".now-turn", ".now-turn .evidence-toggle") });
+const readmeQuiz = () => ({
+  ...build("your_turn"),
+  snapScript: cropScript(`
+    const pick = document.querySelector(".now-turn .quiz-region .options .btn");
+    if (pick) pick.click();
+    await wait();
+    if (!document.querySelector(".now-turn .quiz-region .options li p")) return log("snap:fail the pick did not show the reasons");`, ".now-turn .quiz-region", ".now-turn .quiz-region"),
+});
+const readmeWhere = () => ({ ...build("idle", { answered: true, withBrief: true }), snapScript: cropScript("", "#banner", "#banner") });
+
 export const railFixtures = {
+  readmeTurn,
+  readmeQuiz,
+  readmeWhere,
   railQuiz: () => build("your_turn"),
   railQuizPick: () => ({ ...build("your_turn"), snapScript: quizScript("pick") }),
   railQuizSkip: () => ({ ...build("your_turn"), snapScript: quizScript("skip") }),
