@@ -19,7 +19,7 @@ The app also keeps `roots.json` beside the log: the git worktree root of each fo
 
 Claude Code gives the plan's 5-hour and weekly usage, and the context window's size, only to the status line command, on its stdin. Sessions the studio starts run `claude --settings` with `workbench/statusline.sh` as their status line, so you edit nothing. On every refresh it saves that stdin as `usage/<session_id>.json` beside the event log, by temp file and rename, readable only by you (mode 0600, in a folder of mode 0700), with the line in `workbench/statusline-usage.sh`.
 
-Then it reads `statusLine.command` from `~/.claude/settings.json`, runs it on the same stdin, and passes its output and exit status through; with none set, it prints nothing. The top bar shows the newest snapshot's `rate_limits`, or "no usage". Sessions started outside the studio save no snapshot. Snapshots are never deleted; remove the folder at any time.
+Then it reads `statusLine.command` from `~/.claude/settings.json`, runs it on the same stdin, and passes its output and exit status through; with none set, it prints nothing. The top bar's usage button shows the tightest window across the agents, as that agent's logo and "5h 62%" or "wk 80%", or "Usage" when none has data; a click opens a popover with a tile for each agent: its windows with the share used and the time to reset, and when and from where they were read, or the reason it has none. Claude's snapshot is read on load, on focus and every 10 seconds; the other agents' usage is read only when the popover opens. Sessions started outside the studio save no snapshot. Snapshots are never deleted; remove the folder at any time.
 
 ## The card store
 

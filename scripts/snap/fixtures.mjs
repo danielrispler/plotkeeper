@@ -160,12 +160,20 @@ export const fixtures = {
   },
 };
 
-// Pull main (#164), on #160's rows: the main checkout is 3 commits behind origin, so Pull ↓3 shows, enabled; with uncommitted files it is disabled.
-const pullMain = (extra) => () => {
+// Pull main (#164), on #160's rows: the main checkout is 3 commits behind origin, so Pull ↓3 shows, enabled; when the incoming commits would overwrite changed files it is disabled.
+const pullScript = (disabled) => `
+  const pull = document.querySelector(".workspace .pull");
+  if (!pull) log("snap:fail Pull is missing");
+  else if (pull.disabled !== ${disabled}) log("snap:fail Pull should be ${disabled ? "disabled" : "enabled"}");
+  else log("Pull is " + (pull.disabled ? "disabled: " + pull.title : "enabled"));
+`;
+const pullMain = (extra, disabled) => () => {
   const f = fixtures.branchOnce();
   const main = f.workspaces.main.path;
+  // The other sessions work in tasks of their own, so none of them blocks Pull for working in the main checkout.
+  for (const { cwd } of f.sessions) if (!f.workspaces.tasks.some(({ path }) => path === cwd)) f.workspaces.tasks.push({ path: cwd, branch: cwd.split("/").pop() });
   f.workspace_git_state.values[main] = { ...f.workspace_git_state.values[main], upstream: [0, 3], main_behind: 3, ...extra };
-  return f;
+  return { ...f, snapScript: pullScript(disabled) };
 };
-fixtures.pullEnabled = pullMain({});
-fixtures.pullDisabled = pullMain({ changed: 2, would_overwrite: true });
+fixtures.pullEnabled = pullMain({}, false);
+fixtures.pullDisabled = pullMain({ changed: 2, would_overwrite: true }, true);
