@@ -1033,6 +1033,9 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                 thread::spawn(move || save_state(&log, &replayed));
                 state.lock().unwrap().tick(millis());
                 sent.list(app);
+                // The terminals' revival waits only for the replay, not for this pass's `git` work, which
+                // can take a minute on a long log, while a click's pane waits on it (#182).
+                restart::REPLAYED.store(true, std::sync::atomic::Ordering::Release);
                 let waiting = state.lock().unwrap().waiting_folders();
                 fingerprint_changes(waiting, &mut fingerprints);
                 let cards = backfill.into_iter().filter_map(backfilled);
@@ -1201,6 +1204,7 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
         // The cards also change with no line read: a card arrives, or one turns 30 minutes old.
         sent.cards(app);
         live = true;
+        // Also when the log did not open, so its replay block never ran.
         restart::REPLAYED.store(true, std::sync::atomic::Ordering::Release);
         thread::sleep(Duration::from_millis(200));
     }
