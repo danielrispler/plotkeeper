@@ -59,7 +59,7 @@ child.terminate()
 open(os.environ["RAW"], "wb").write(data)
 PY
 
-# Nothing personal: refuse a recording that holds the login name, the home folder, the git name or email or email.
+# Nothing personal: refuse a recording that holds the login name, the home folder, the git name or email.
 for needle in "$(id -un)" "$HOME" "$(git config --global user.name || true)" "$(git config --global user.email || true)"; do
   if [ -n "$needle" ] && grep -qF -- "$needle" "$raw"; then
     echo "The recording holds \"$needle\"; nothing was written." >&2
