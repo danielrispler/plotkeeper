@@ -75,9 +75,21 @@ const recordedTerminal = () => {
 
 const usageTiles = () => {
   const now = Date.now() / 1000;
+  const window = (label, used, ahead) => ({ label, used_percentage: used, resets_at: now + ahead });
   return [
-    { agent: "claude", five_hour: { used_percentage: 62, resets_at: now + 2 * 3600 + 600 }, seven_day: { used_percentage: 80, resets_at: now + 3 * 86400 }, read_at: now - 240, source: "last Claude session", reason: null },
-    { agent: "codex", five_hour: null, seven_day: null, read_at: null, source: null, reason: "Codex's usage could not be read: codex app-server did not answer" },
+    { agent: "claude", groups: [{ name: "", windows: [window("5h", 62, 2 * 3600 + 600), window("week", 80, 3 * 86400)] }], read_at: now - 240, source: "last Claude session", reason: null },
+    { agent: "codex", groups: [], read_at: null, source: null, reason: "Codex's usage could not be read: it did not answer in time" },
+    {
+      agent: "agy",
+      groups: [
+        { name: "Gemini Models", windows: [window("5h", 1, 5400), window("week", 3, 4 * 86400)] },
+        { name: "Claude and GPT models", windows: [window("5h", 0, 4 * 3600), window("week", 0, 7 * 86400)] },
+        { name: "Gemini 4 Argon", windows: [window("week", 78, 5 * 86400)] },
+      ],
+      read_at: now - 5,
+      source: "agy /usage",
+      reason: null,
+    },
   ];
 };
 
@@ -100,7 +112,7 @@ export const fixtures = {
   usageGlance() {
     return { ...fixtures.list(), usage: usageTiles() };
   },
-  // The usage popover open (#163): Claude's tile with its bars and age, and Codex's, whose read failed, with only its reason.
+  // The usage popover open (#163): Claude's tile with its bars and age, Codex's, whose read failed, with only its reason, and agy's three groups, most used first.
   usagePopover() {
     return { ...fixtures.list(), usage: usageTiles(), snapScript: `document.getElementById("usage-popover").showPopover();` };
   },

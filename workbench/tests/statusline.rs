@@ -65,7 +65,10 @@ fn the_line_saves_the_snapshot_and_leaves_the_output_unchanged() {
         .permissions()
         .mode();
     assert_eq!(mode & 0o777, 0o600);
-    assert_eq!(claude_usage(&dir).five_hour.unwrap().used_percentage, 23.5);
+    assert_eq!(
+        claude_usage(&dir).groups[0].windows[0].used_percentage,
+        23.5
+    );
 }
 
 #[test]

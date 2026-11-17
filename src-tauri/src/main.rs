@@ -324,11 +324,11 @@ fn cards(studio: State<Mutex<Studio>>, cards: State<Cards>) -> SessionCards {
     shown
 }
 
-/// Plan usage (danielrispler/plotkeeper#163) of the `agents` asked for, or of every agent when `None`. The window asks for only
-/// "claude" on its timer, which reads a snapshot file and runs no CLI; an agent that runs one is read only when every agent is.
-/// Claude's is from the status line's newest snapshot in the `usage` folder beside the event log. An agent whose usage cannot
-/// be read says why.
-#[tauri::command]
+/// Plan usage (danielrispler/plotkeeper#163; #165) of the `agents` asked for, or of every agent when `None`. The window asks for only
+/// "claude" on its timer, which reads a snapshot file and runs no CLI; Codex and agy run theirs only when every agent is read, and
+/// only if the CLI is on the login shell's `PATH`: an agent not installed has no entry. Claude's is from the status line's newest
+/// snapshot in the `usage` folder beside the event log. An agent whose usage cannot be read says why.
+#[tauri::command(async)]
 fn usage(agents: Option<Vec<String>>) -> Vec<studio_workbench::AgentUsage> {
     let wanted = |agent: &str| {
         agents
@@ -347,7 +347,27 @@ fn usage(agents: Option<Vec<String>>) -> Vec<studio_workbench::AgentUsage> {
             ),
         });
     }
+    let cli: Vec<&str> = ["codex", "agy"].into_iter().filter(|a| wanted(a)).collect();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64);
+    read.extend(studio_workbench::cli_usages(&cli, &login_path, now));
     read
+}
+
+/// Where `program` is on Daniel's login shell's `PATH`, which a Dock-started app lacks; `None` when it is not installed.
+fn login_path(program: &str) -> Option<String> {
+    let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/zsh".into());
+    let out = Command::new(shell)
+        .args(["-lc", &format!("command -v {program}")])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())?;
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .last()
+        .map(str::to_owned)
+        .filter(|path| path.starts_with('/'))
 }
 
 /// What the read loop last sent the window, so it sends each again only when it changes.

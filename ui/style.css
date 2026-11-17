@@ -76,6 +76,7 @@ body[data-layout="focus"] #rail-divider { display: none; }
 .usage-tile .window-name, .usage-tile .window-resets, .usage-tile .tile-foot { color: var(--muted); }
 .usage-tile .bar { height: var(--sp-3); border-radius: var(--radius-small); background: var(--line); }
 .usage-tile .bar-fill { height: 100%; border-radius: var(--radius-small); background: var(--muted); }
+.usage-tile .group-name { margin: 0; font-size: var(--size-small); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .usage-tile .tile-reason, .usage-tile .tile-foot { margin: 0; font-size: var(--size-small); }
 /* The top bar's items show whole or sit in the "⋯" menu, so none shrinks (danielrispler/plotkeeper#127, bar.ts). The spacer takes the rest. */
 .top > :not(.sp):not(.menu) { flex: none; }

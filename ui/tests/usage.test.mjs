@@ -13,15 +13,22 @@ const { glance, showGlance, tile } = await import("../../dist/usage.js");
 const now = 1738400000;
 const claude = (five, week, extra = {}) => ({
   agent: "claude",
-  five_hour: five === null ? null : { used_percentage: five, resets_at: now + 2 * 3600 + 10 * 60 },
-  seven_day: week === null ? null : { used_percentage: week, resets_at: now + 3 * 86400 },
+  groups: [
+    {
+      name: "",
+      windows: [
+        ...(five === null ? [] : [{ label: "5h", used_percentage: five, resets_at: now + 2 * 3600 + 10 * 60 }]),
+        ...(week === null ? [] : [{ label: "week", used_percentage: week, resets_at: now + 3 * 86400 }]),
+      ],
+    },
+  ],
   read_at: now - 4 * 60,
   source: "last Claude session",
   reason: null,
   ...extra,
 });
 const pick = ({ agent, text }) => ({ agent, text });
-const failed = (agent, reason) => ({ agent, five_hour: null, seven_day: null, read_at: null, source: null, reason });
+const failed = (agent, reason) => ({ agent, groups: [], read_at: null, source: null, reason });
 
 const every = (node, out = []) => {
   if (node instanceof El) {
@@ -54,9 +61,9 @@ test("with no data the glance reads Usage", () => {
 
 test("a window past its reset is hidden, so the next tightest shows", () => {
   const spent = claude(90, 41);
-  spent.five_hour.resets_at = now - 1;
+  spent.groups[0].windows[0].resets_at = now - 1;
   assert.deepEqual(pick(glance([spent], now)), { agent: "claude", text: "wk 41%" });
-  spent.seven_day.resets_at = now - 1;
+  spent.groups[0].windows[1].resets_at = now - 1;
   assert.equal(glance([spent], now), null);
 });
 
@@ -85,7 +92,7 @@ test("a tile draws its logo and name, a bar and reset time per window, and the d
 
 test("a window past its reset is left out of the tile", () => {
   const spent = claude(62, 30);
-  spent.five_hour.resets_at = now - 1;
+  spent.groups[0].windows[0].resets_at = now - 1;
   assert.equal(has(tile(spent, now), "usage-window").length, 1);
 });
 
@@ -119,8 +126,7 @@ const deferred = () => {
 const nowS = () => Date.now() / 1000;
 const fresh = (five, readAt) => ({
   agent: "claude",
-  five_hour: { used_percentage: five, resets_at: nowS() + 3600 },
-  seven_day: null,
+  groups: [{ name: "", windows: [{ label: "5h", used_percentage: five, resets_at: nowS() + 3600 }] }],
   read_at: readAt,
   source: "last Claude session",
   reason: null,
@@ -173,4 +179,72 @@ test("while the popover's read runs its tiles say Reading and no stale age, then
   await read;
   assert.doesNotMatch(textOf(popover), /Reading…/);
   assert.match(textOf(popover), /as of 2 min ago/);
+});
+
+// Codex and agy (danielrispler/plotkeeper#165): the recorded replies as the workbench's seam gives them (`codex-parsed.json` and
+// `agy-parsed.json`, which a Rust test keeps equal to the parsed replies), read at the spike's time.
+const recorded = (name) => JSON.parse(fs.readFileSync(new URL(`../../workbench/tests/fixtures/usage/${name}`, import.meta.url), "utf8"));
+const spikeNow = Date.parse("2026-11-17T16:31:00Z") / 1000;
+const codex = () => recorded("codex-parsed.json");
+const agy = () => recorded("agy-parsed.json");
+const claudeAt = () => claude(10, 20, { read_at: spikeNow - 60 });
+const claudeSpike = () => {
+  const usage = claudeAt();
+  for (const w of usage.groups[0].windows) w.resets_at = spikeNow + 3600;
+  return usage;
+};
+
+test("the popover shows a tile per agent that was read, and the glance the tightest window with that agent's logo", async () => {
+  globalThis.window = { __TAURI__: { core: { invoke: async () => [claudeSpike(), codex(), agy()] } } };
+  const { readUsage } = await import("../../dist/usage.js");
+  const realNow = Date.now;
+  Date.now = () => spikeNow * 1000;
+  try {
+    const button = new El("button");
+    const popover = new El("div");
+    await readUsage(button, popover, null);
+    assert.deepEqual(has(popover, "usage-tile").map((t) => has(t, "logo")[0].getAttribute("data-logo")), ["claude", "codex", "agy"]);
+    assert.equal(has(button, "logo")[0].getAttribute("data-logo"), "agy");
+    assert.equal(textOf(button), "wk 78%");
+    assert.match(button.title, /Gemini 4 Argon weekly usage is 78%/);
+  } finally {
+    Date.now = realNow;
+  }
+});
+
+test("agy's tile shows its three groups most used first, and no group appears in another agent's tile", () => {
+  const node = tile(agy(), spikeNow);
+  assert.deepEqual(has(node, "group-name").map(textOf), ["Gemini 4 Argon", "Gemini Models", "Claude and GPT models"]);
+  assert.equal(has(node, "usage-window").length, 5);
+  assert.match(textOf(has(node, "usage-window")[0]), /week.*78%/);
+  for (const other of [tile(codex(), spikeNow), tile(claudeSpike(), spikeNow)]) {
+    assert.equal(has(other, "group-name").length, 0);
+    assert.doesNotMatch(textOf(other), /Argon|Gemini/);
+  }
+});
+
+test("a group name shows only when the agent has more than one group", () => {
+  assert.equal(has(tile(claude(62, 30), now), "group-name").length, 0);
+  const one = agy();
+  one.groups = one.groups.slice(0, 1);
+  assert.equal(has(tile(one, spikeNow), "group-name").length, 0);
+});
+
+test("Codex's free plan shows one 30d bar, and the glance can pick it as the tightest", () => {
+  const node = tile(codex(), spikeNow);
+  const windows = has(node, "usage-window");
+  assert.equal(windows.length, 1);
+  assert.match(textOf(windows[0]), /^30d/);
+  assert.match(textOf(windows[0]), /resets in 30d/);
+  assert.doesNotMatch(textOf(node), /no limit|5h|week/);
+  assert.deepEqual(pick(glance([codex()], spikeNow)), { agent: "codex", text: "30d 0%" });
+  const busy = codex();
+  busy.groups[0].windows[0].used_percentage = 91;
+  assert.deepEqual(pick(glance([claudeSpike(), busy, agy()], spikeNow)), { agent: "codex", text: "30d 91%" });
+});
+
+test("a failed agy tile shows its reason and no bar", () => {
+  const node = tile(failed("agy", "agy's usage could not be read: it did not answer in time"), now);
+  assert.match(textOf(has(node, "tile-reason")[0]), /did not answer in time/);
+  assert.equal(has(node, "usage-window").length, 0);
 });
