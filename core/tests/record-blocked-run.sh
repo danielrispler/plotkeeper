@@ -132,8 +132,9 @@ playing=$!
 echo "Session $session starts now, interactively. Watch it: when the agent has replied its last line,"
 echo "type /exit. (Allowing the blocked commands is done for you.)"
 # An `ask` has no prompt to go to under `claude -p`, so the session must be interactive.
-# Ctrl-C reaches the script as well as `claude`: ignore it here, so the scrub below still runs.
-trap '' INT
+# Ctrl-C reaches the script as well as `claude`: catch it here, so the scrub below still runs. A
+# handler, not `trap '' INT`, since an ignored signal stays ignored in `claude` too.
+trap ':' INT
 (cd "$repo" && CLAUDE_CODE_PLUGIN_DIRS="$studio/plugin" claude --session-id "$session" \
   --permission-mode auto --settings "$settings" "$prompt") || echo "claude exited with $?" >&2
 
