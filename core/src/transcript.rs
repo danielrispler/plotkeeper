@@ -345,10 +345,13 @@ pub(crate) fn read_subagent_log(
     while reader.read_until(b'\n', &mut line).ok()? > 0 && line.ends_with(b"\n") {
         offset += line.len() as u64;
         if let Ok(value) = serde_json::from_slice::<Value>(&line) {
-            if format == TranscriptFormat::Agy {
-                agy_log_entries(&value, cwd, &mut entries);
-            } else if value["agentId"] == agent {
-                log_entries(&value, cwd, &mut entries);
+            match format {
+                TranscriptFormat::Claude => {
+                    if value["agentId"] == agent {
+                        log_entries(&value, cwd, &mut entries);
+                    }
+                }
+                TranscriptFormat::Agy => agy_log_entries(&value, cwd, &mut entries),
             }
         }
         line.clear();
