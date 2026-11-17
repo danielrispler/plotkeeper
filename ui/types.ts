@@ -392,7 +392,9 @@ export interface Commands {
   agy_plugin_setup: string | null;
   alive: void;
   answer: void;
+  answer_blocked_command: "hook" | "late";
   ask: string;
+  ask_again: void;
   ask_anchor: string;
   ask_facts: Facts | null;
   ask_why_not: { facts: Facts; reasons: string | null };

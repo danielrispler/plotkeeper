@@ -124,7 +124,7 @@ export async function sendBlockedAnswer(session: string, request: BlockedRequest
   blockedRequests = blockedRequests.filter((r) => r.nonce !== request.nonce);
   redraw();
   try {
-    return await invoke<BlockedAnswered>("answer_blocked_command", { session, nonce: request.nonce, decision });
+    return await invoke("answer_blocked_command",{ session, nonce: request.nonce, decision });
   } catch (e) {
     console.warn(e);
     if (!blockedRequests.some((r) => r.nonce === request.nonce)) blockedRequests = [...blockedRequests, request];

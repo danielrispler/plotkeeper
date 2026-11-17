@@ -27,6 +27,7 @@ export const base = {
   agent_summary: null,
   agents: ["claude"],
   agy_plugin_setup: null,
+  answer_blocked_command: "hook",
   ask: "",
   ask_anchor: "",
   ask_facts: null,
