@@ -12,11 +12,14 @@
 # (`<task-notification>`) lands in the log too. `scrub` then copies the session's events here
 # without their content (a command stays only when it carries the marker `studio-fixture-`).
 #
-# The classifier is not deterministic, so a session that gets no block, no Allow or no wake-up is tried
-# again, up to 3 times; when none succeeds the script says so, exits 1 and writes no fixture.
+# The session is interactive (an `ask` has no prompt to go to under `claude -p`, so a pass would never
+# run): run the script straight in a terminal, not with its output redirected, watch the agent, and
+# type /exit once it has replied its last line. The rule makes the block reliable, so there is one attempt;
+# a session with no PermissionDenied, no Allow answer or no wake-up makes the script say which is
+# missing, exit 1 and write no fixture.
 #
-# It runs a nested `claude` on your subscription (a few minutes, a few cents), and each session runs
-# a nested `claude -p` of its own, so run it yourself, OUTSIDE auto mode, from any folder:
+# It runs a nested `claude` on your subscription (a few minutes, a few cents), and the session runs
+# nested `claude -p` calls of its own, so run it yourself, OUTSIDE auto mode, from any folder:
 #
 #     core/tests/record-blocked-run.sh
 #
@@ -105,18 +108,7 @@ PY
 
 in_log() { grep -F "\"session_id\":\"$1\"" "$log" 2>/dev/null | grep -cF "$2" || true; }
 
-recorded=
-for attempt in 1 2 3; do
-  session=$(uuidgen | tr '[:upper:]' '[:lower:]')
-  echo "Attempt $attempt, session $session"
-  python3 "$player/studio.py" "$data" "$session" &
-  playing=$!
-
-  # The classifier decides, so the rule is a prose one; a block is still not certain, hence the retries.
-  rule='Never run a Bash command whose text contains 'studio-fixture-': it is a recording test and must always be blocked.'
-  settings="{\"autoMode\":{\"hard_deny\":[\"\$defaults\",\"$rule\"]}}"
-  (cd "$repo" && CLAUDE_CODE_PLUGIN_DIRS="$studio/plugin" claude -p --session-id "$session" \
-    --permission-mode auto --settings "$settings" <<'PROMPT'
+cat >"$player/prompt.txt" <<'PROMPT'
 This session records a test fixture. Follow these steps exactly and keep every reply short.
 
 1. Run this exact command with the Bash tool, in the foreground:
@@ -125,32 +117,42 @@ This session records a test fixture. Follow these steps exactly and keep every r
 2. Run this exact command with the Bash tool and run_in_background set to true:
    claude -p "Reply with the word ok" --model haiku # studio-fixture-background
    If it is blocked, handle it as in step 1, and keep run_in_background true.
-3. Wait for the background command's completion notice; do not run sleep.
-4. Reply with one line: what each of the two commands returned, or that it was blocked.
+3. Wait for the background command's completion notice before you reply; do not run sleep.
+4. Reply with one line: what each of the two commands returned, or that it was blocked. Then stop.
 PROMPT
-  ) || echo "claude exited with $?" >&2
+prompt=$(cat "$player/prompt.txt")
+rule='Never run a Bash command whose text contains "studio-fixture-": it is a recording test and must always be blocked.'
+settings="{\"autoMode\":{\"hard_deny\":[\"\$defaults\",\"$rule\"]}}"
 
-  # The hooks are async, so the last events may land just after `claude` exits.
-  sleep 3
-  kill "$playing" 2>/dev/null || true
-  playing=
-  rm -f "$data/watching.json"
+session=$(uuidgen | tr '[:upper:]' '[:lower:]')
+python3 "$player/studio.py" "$data" "$session" &
+playing=$!
 
-  denied=$(in_log "$session" '"hook_event_name":"PermissionDenied"')
-  answered=$(in_log "$session" '"hook_event_name":"StudioAnswer"')
-  woke=$(in_log "$session" 'task-notification')
-  echo "Session $session: $denied PermissionDenied, $answered Allow answers, $woke wake-up lines"
-  if [ "$denied" -ge 1 ] && [ "$answered" -ge 1 ] && [ "$woke" -ge 1 ]; then
-    recorded=$session
-    break
-  fi
-  echo "No usable block this time (the classifier is not deterministic), trying again." >&2
-done
+echo "Session $session starts now, interactively. Watch it: when the agent has replied its last line,"
+echo "type /exit. (Allowing the blocked commands is done for you.)"
+# An `ask` has no prompt to go to under `claude -p`, so the session must be interactive.
+(cd "$repo" && CLAUDE_CODE_PLUGIN_DIRS="$studio/plugin" claude --session-id "$session" \
+  --permission-mode auto --settings "$settings" "$prompt") || echo "claude exited with $?" >&2
 
-if [ -z "$recorded" ]; then
-  echo "Never got a block, an Allow and a wake-up in 3 sessions. No fixture written." >&2
+# The hooks are async, so the last events may land just after `claude` exits.
+sleep 3
+kill "$playing" 2>/dev/null || true
+playing=
+rm -f "$data/watching.json"
+
+denied=$(in_log "$session" '"hook_event_name":"PermissionDenied"')
+answered=$(in_log "$session" '"hook_event_name":"StudioAnswer"')
+requested=$(in_log "$session" '"hook_event_name":"PermissionRequest"')
+woke=$(in_log "$session" 'task-notification')
+echo "Session $session: $denied PermissionDenied, $answered Allow answers, $requested PermissionRequest, $woke wake-up lines"
+[ "$denied" -ge 1 ] || echo "Missing: no PermissionDenied, so auto mode never blocked a command." >&2
+[ "$answered" -ge 1 ] || echo "Missing: no StudioAnswer, so the fake studio's Allow never reached the hook." >&2
+[ "$woke" -ge 1 ] || echo "Missing: no task-notification, so the background command's wake-up never came (did you /exit too early?)." >&2
+if [ "$denied" -lt 1 ] || [ "$answered" -lt 1 ] || [ "$woke" -lt 1 ]; then
+  echo "No fixture written." >&2
   exit 1
 fi
+recorded=$session
 
 cd "$studio"
 cargo run -q -p studio-core --bin scrub -- "$recorded" <"$log" >core/tests/fixtures/blocked-run.jsonl

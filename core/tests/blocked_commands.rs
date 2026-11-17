@@ -527,3 +527,50 @@ fn a_block_of_the_same_command_that_is_not_the_running_retrys_own_gets_its_own_c
         ]
     );
 }
+
+/// The payloads of a real run (session 407caba5 of the first recordings of #174): the classifier's real
+/// `reason`, a `description` and `run_in_background` on the input, a retry under a new `tool_use_id`, and a
+/// wake-up with its task, tool call and output file.
+#[test]
+fn a_real_shaped_background_block_goes_from_blocked_to_finished_at_its_wake_up() {
+    const BG: &str =
+        "claude -p \"Reply with the word ok\" --model haiku # studio-fixture-background";
+    let input = json!({ "command": BG, "description": "Run claude CLI in background",
+        "run_in_background": true });
+    let reason = "The server-side auto mode classifier judged this action dangerous (it gave no explanation)";
+    let denied = line(
+        "PermissionDenied",
+        3_000,
+        json!({ "tool_name": "Bash", "tool_use_id": "toolu_011", "prompt_id": "p-1",
+            "tool_input": input, "reason": reason, "permission_mode": "auto" }),
+    );
+    let answered = answer(4_000, "toolu_011", BG, "allow");
+    let pre = |at, id: &str| {
+        line(
+            "PreToolUse",
+            at,
+            json!({ "tool_name": "Bash", "tool_use_id": id, "prompt_id": "p-1", "tool_input": input }),
+        )
+    };
+    let wake = line(
+        "UserPromptSubmit",
+        9_000,
+        json!({ "prompt_id": "p-2", "prompt": "<task-notification><task-id>b7f03l9m0</task-id>\
+            <tool-use-id>toolu_01Ut</tool-use-id><output-file>/private/tmp/c/s/tasks/b7f03l9m0.output</output-file>\
+            <status>completed</status><summary>…</summary></task-notification>" }),
+    );
+    let mut lines = then(started(), vec![denied, answered, pre(5_000, "toolu_01Ut")]);
+    let started_bg = line(
+        "PostToolUse",
+        6_000,
+        json!({ "tool_name": "Bash", "tool_use_id": "toolu_01Ut", "prompt_id": "p-1", "tool_input": input,
+            "tool_response": { "backgroundTaskId": "b7f03l9m0", "interrupted": false } }),
+    );
+    lines.push(started_bg);
+
+    let card = &session(&lines).blocked_commands[0];
+    assert_eq!(card.reason, reason);
+    assert_eq!(card.status, BlockedStatus::RunningInBackground);
+    let card = &session(&then(lines, vec![wake])).blocked_commands[0];
+    assert_eq!(card.status, BlockedStatus::Finished);
+}
