@@ -52,3 +52,12 @@ The plugin's `PermissionDenied` hook for Bash waits up to 600 seconds for your c
 Each Allow or Decline enters the session's decision history, as given on the card.
 
 The card also stays when nobody watches or the 600 seconds pass, but then it has no buttons yet.
+
+### After Allow
+
+The card follows the run. The core matches the agent's retry by command and folder:
+
+- **Running** at the `PreToolUse` of the same command and folder, with the time since it started. Live output stays in the session's terminal.
+- **Finished** at its end, with its exit code and the last 40 lines of its output, read as a failed check's are.
+- **Running in background** when the agent backgrounded the call, until the wake-up that names its task, which finishes the card. The exit code of a background run is not known.
+- **Blocked again** when a new `PermissionDenied` of the same command follows the Allow. It is the same card, with Allow and Decline once more, and the session needs you again.

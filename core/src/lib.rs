@@ -594,6 +594,17 @@ pub struct BlockedCommand {
     /// When it was blocked, in Unix milliseconds.
     pub at: u64,
     pub status: BlockedStatus,
+    /// The retry's `tool_use_id` once it runs, which `check_output` reads the tail by, and when it started.
+    #[serde(default)]
+    pub run: Option<String>,
+    #[serde(default)]
+    pub run_at: Option<u64>,
+    /// Its exit code once Finished; `None` when it is unknown, as after a background run.
+    #[serde(default)]
+    pub exit_code: Option<i32>,
+    /// The background task a backgrounded retry started, until its wake-up.
+    #[serde(default)]
+    pub task: Option<String>,
 }
 
 /// Where a blocked command stands.
@@ -604,6 +615,14 @@ pub enum BlockedStatus {
     Blocked,
     /// Daniel allowed it from the card.
     Allowed,
+    /// Its retry runs, from the matching `PreToolUse`.
+    Running,
+    /// Its retry ended.
+    Finished,
+    /// Its retry runs in the background, until the wake-up that names its task.
+    RunningInBackground,
+    /// A new `PermissionDenied` of the same command followed the Allow.
+    BlockedAgain,
     /// Daniel declined it from the card, which closes it.
     Declined,
 }
@@ -2728,18 +2747,78 @@ impl Studio {
                 .blocks
                 .retain(|w| !(w.cause == Cause::Denied && w.agent == *agent));
         }
+        // A blocked command's retry follows the run: its start, its end, and the wake-up of a background task.
+        for happened in &event.happened {
+            match happened {
+                Happened::ToolStart { tool, id } if tool.kind == ToolKind::Command => {
+                    let card = session.blocked_commands.iter_mut().find(|c| {
+                        c.status == BlockedStatus::Allowed
+                            && Some(c.command.as_str()) == tool.command.as_deref()
+                            && c.cwd == event.cwd
+                    });
+                    if let Some(card) = card {
+                        card.status = BlockedStatus::Running;
+                        card.run = Some(id.clone());
+                        card.run_at = Some(at);
+                    }
+                }
+                // The retry's end: finished with its exit code, or running on in the background.
+                Happened::ToolEnd { id, failed, .. } => {
+                    let card = session
+                        .blocked_commands
+                        .iter_mut()
+                        .find(|c| c.status == BlockedStatus::Running && c.run.as_ref() == Some(id));
+                    if let Some(card) = card {
+                        match event.background_task() {
+                            Some(task) => {
+                                card.status = BlockedStatus::RunningInBackground;
+                                card.task = Some(task.into());
+                            }
+                            None => {
+                                card.status = BlockedStatus::Finished;
+                                card.exit_code = match failed {
+                                    false => Some(0),
+                                    true => event.exit_code(),
+                                };
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
         for happened in &event.happened {
             match happened {
                 Happened::CommandBlocked { tool, id, reason } => {
-                    session.blocked_commands.push(BlockedCommand {
-                        call: id.clone(),
-                        command: tool.command.clone().unwrap_or_default(),
-                        cwd: event.cwd.clone(),
-                        reason: reason.clone(),
-                        agent: event.agent_id.clone(),
-                        at,
-                        status: BlockedStatus::Blocked,
+                    let command = tool.command.clone().unwrap_or_default();
+                    // The same command blocked again after Allow is its card's, not a new one.
+                    let again = session.blocked_commands.iter_mut().find(|c| {
+                        matches!(c.status, BlockedStatus::Allowed | BlockedStatus::Running)
+                            && c.command == command
+                            && c.cwd == event.cwd
                     });
+                    match again {
+                        Some(card) => {
+                            card.status = BlockedStatus::BlockedAgain;
+                            card.call = id.clone();
+                            card.reason = reason.clone();
+                            card.run = None;
+                            card.run_at = None;
+                        }
+                        None => session.blocked_commands.push(BlockedCommand {
+                            call: id.clone(),
+                            command,
+                            cwd: event.cwd.clone(),
+                            reason: reason.clone(),
+                            agent: event.agent_id.clone(),
+                            at,
+                            status: BlockedStatus::Blocked,
+                            run: None,
+                            run_at: None,
+                            exit_code: None,
+                            task: None,
+                        }),
+                    }
                     let agent = event.agent_id.clone();
                     session.block(
                         Cause::Denied,
@@ -2783,6 +2862,13 @@ impl Studio {
                     match &sender {
                         // The row says which worker returned until the session's next step.
                         Sender::WakeUp(task_id) => {
+                            for card in &mut session.blocked_commands {
+                                if card.status == BlockedStatus::RunningInBackground
+                                    && card.task.as_ref() == Some(task_id)
+                                {
+                                    card.status = BlockedStatus::Finished;
+                                }
+                            }
                             let returned =
                                 format!("worker {} returned", session.agent_name(task_id));
                             session.returned = Some(returned);
