@@ -68,6 +68,9 @@ export class El {
   addEventListener(name, run) {
     this.listeners[name] = run;
   }
+  get textContent() {
+    return this.text;
+  }
   set textContent(value) {
     this.childNodes = [new Text(value)];
   }

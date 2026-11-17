@@ -159,6 +159,7 @@ function draw(id: string, open: () => Xterm.Terminal | null): Pane {
 // title its program sets. The grid size is on the header's hover.
 function header({ term, title }: Pane) {
   element("terminal-title").textContent = title;
+  element("terminal-title").title = title;
   element("terminal-head").title = term ? `${term.cols} × ${term.rows}` : "";
 }
 

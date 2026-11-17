@@ -2,7 +2,7 @@
 // it was written in, or at the top when it is the newest (danielrispler/Falinks#574). The writer writes them in English
 // (danielrispler/Falinks#487); cards stored in Hebrew keep their direction.
 
-import { code, element, prose, invoke, pressable, text } from "./dom.js";
+import { code, element, hover, prose, invoke, pressable, text } from "./dom.js";
 import { refreshCards } from "./selection.js";
 import { studio } from "./state.js";
 import { showDecisions } from "./decisions.js";
@@ -372,7 +372,7 @@ export function cardLine(stored: StoredCard, turn: CardTurn | null = null, trial
   const node = document.createElement("details");
   node.className = "fold answered-card";
   node.open = cardOpen.has(id);
-  node.append(prose("summary", quiz.text), cardNode(stored, turn, trial));
+  node.append(hover(prose("summary", quiz.text), quiz.text), cardNode(stored, turn, trial));
   node.addEventListener("toggle", () => {
     if (node.open) cardOpen.add(id);
     else cardOpen.delete(id);
