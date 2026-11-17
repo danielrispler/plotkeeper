@@ -109,6 +109,8 @@ export type Capabilities = {
   permission_mode: boolean;
   durations: boolean;
   transcript_version: boolean;
+  // It reports how full its context is.
+  context: boolean;
   // It records a git tree of each worktree a turn touches, so a turn has files (danielrispler/plotkeeper#111).
   turn_trees: boolean;
 };

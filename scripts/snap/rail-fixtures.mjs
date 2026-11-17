@@ -6,7 +6,7 @@
 
 const MIN = 60e3;
 
-const capabilities = { agent: "claude", asks: true, background_tasks: true, replies: true, permission_mode: true, durations: true, transcript_version: true, turn_trees: true };
+const capabilities = { agent: "claude", asks: true, background_tasks: true, replies: true, permission_mode: true, durations: true, transcript_version: true, context: true, turn_trees: true };
 const cwd = "/Users/danielrispler/work/plotkeeper/.claude/worktrees/issue-56-row-controls";
 
 const quiz = (text, options, key) => ({ text, options, key });

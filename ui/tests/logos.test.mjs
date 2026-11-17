@@ -7,11 +7,11 @@ import { El } from "./dom.mjs";
 const { logoKey } = await import("../../dist/logos.js");
 const { row, rowMark, strip: stripOf, projectHead, agentRow } = await import("../../dist/list.js");
 // The document is set after the import: times.ts starts a timer when one exists at load.
-const make = (tag) => Object.assign(new El(tag), { dataset: {}, style: {}, classList: { add() {}, toggle() {} } });
+const make = (tag) => Object.assign(new El(tag), { dataset: {}, style: {}, classList: { add() {}, toggle() {} }, toggleAttribute() {}, removeAttribute() {} });
 globalThis.document = { createElement: make, getElementById: () => make("div"), visibilityState: "hidden" };
 
 const base = { id: "s", name: null, prompt_name: null, folder_name: "p", state: "idle", line: "", questions: [], shell: false, status_only: false, unseen: false, landed: false };
-const caps = (agent) => ({ agent });
+const caps = (agent) => ({ agent, context: agent === "claude" });
 const claude = { ...base, capabilities: caps("claude"), identity: { issue: null, name: "p" }, transcript: { context: { tokens: 9000, share: 9 } } };
 const agy = { ...base, capabilities: caps("agy"), identity: { issue: null, name: "p" }, transcript: { context: null } };
 const statusOnly = (program) => ({ ...base, status_only: true, capabilities: caps(""), identity: { issue: null, name: `${program} · p` }, transcript: { context: null } });
@@ -101,4 +101,39 @@ test("the rail header's logo for agy keeps the note that it has no context share
   const title = get("mark").childNodes[0].title;
   assert.match(title, /no context share/);
   assert.ok(title.length > "no context share".length);
+});
+
+const railOf = (session, agent = null) => {
+  const els = new Map();
+  const get = (id) => els.get(id) ?? (els.set(id, make("div")), els.get(id));
+  globalThis.document = { ...globalThis.document, getElementById: get };
+  const full = { permission_mode: null, work: {}, agents: [], turns: [], checks: [], cleared: [], prompts: [], model: null, ...session };
+  return import("../../dist/story.js").then(({ showView }) => {
+    showView({ session: full, agent });
+    return get;
+  });
+};
+
+test("the no-context note follows the session's capabilities, not the agent's name", async () => {
+  const other = { ...agy, capabilities: { agent: "newagent", context: false }, model: null };
+  const get = await railOf(other);
+  assert.match(get("mark").childNodes[0].title, /no context share/);
+  assert.match(logoOf(row(other, new Map())).title, /no context share/);
+  const noNote = await railOf({ ...agy, capabilities: { agent: "agy", context: true } });
+  assert.doesNotMatch(noNote("mark").childNodes[0].title, /no context share/);
+  assert.doesNotMatch(logoOf(row({ ...agy, capabilities: { agent: "agy", context: true } }, new Map())).title, /no context share/);
+  // A status-only row has no agent of its own to note.
+  assert.doesNotMatch(logoOf(row(statusOnly("codex"), new Map())).title, /no context share/);
+});
+
+test("a selected subagent's rail logo carries no model line", async () => {
+  const worker = { id: "a1", parent: "session", kind: "worker", name: "Review", asked: null, agent_type: null, status: "running", started_at: 1, ended_at: null, last_step: null, step_span: null };
+  const session = { ...claude, transcript: { ...claude.transcript, model: "claude-opus-5-5" }, agents: [worker] };
+  const get = await railOf(session, "a1");
+  assert.doesNotMatch(get("mark").childNodes[0].title, /Opus/);
+});
+
+test("the rail's #detail has no title when the step has no detail", async () => {
+  const get = await railOf({ ...claude, transcript: { ...claude.transcript, model: "claude-opus-5-5" } });
+  assert.notEqual(get("detail").title, "");
 });

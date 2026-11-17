@@ -6,7 +6,8 @@ type WithCapabilities = { capabilities: Capabilities };
 // Whether the session's agent reports `what`, so the part of the view that shows it may show.
 export const reports = (session: WithCapabilities, what: Exclude<keyof Capabilities, "agent">): boolean => session.capabilities[what];
 
-const marks: Record<string, string> = { claude: "Claude" };
+// An agent's display name, as the header's model line and the usage glance show it.
+export const agentNames: Record<string, string> = { claude: "Claude", agy: "agy", codex: "Codex" };
 
 // A model's short name: "claude-opus-5-5" is "Opus 5.5", "gemini-3.8-flash-high" is "Flash high".
 function shortModel(agent: string, model: string): string {
@@ -27,5 +28,5 @@ function shortModel(agent: string, model: string): string {
 export function modelLine(session: Pick<Session, "capabilities" | "model" | "transcript">): string {
   const { agent } = session.capabilities;
   const model = agent === "claude" ? session.transcript.model : session.model;
-  return agent && model ? `${marks[agent] ?? agent} · ${shortModel(agent, model)}` : "";
+  return agent && model ? `${agentNames[agent] ?? agent} · ${shortModel(agent, model)}` : "";
 }

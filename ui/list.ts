@@ -6,7 +6,7 @@ import { age, element, fullTitle, invoke, patch, prose, pressable, stepText, tex
 import { counts, times, type Time } from "./times.js";
 import { shortPaths } from "./paths.js";
 import { historyLink } from "./history.js";
-import { logo, logoKey } from "./logos.js";
+import { logo, logoKey, noContextNote } from "./logos.js";
 import { knownProjects, onProjects, projects, projectsError, setProjects } from "./projects.js";
 import { addProject, refuse } from "./picker.js";
 import { projectGroups, foundWorkspaces, tokenOf, workspaceSection, type ProjectGroup } from "./workspaces.js";
@@ -235,7 +235,7 @@ export function row(session: Session, children: Children, token: string | null =
     session.landed,
   );
   // The agent's logo leads the row, apart from its state glyph (#158).
-  first.prepend(logo(logoKey(session)));
+  first.prepend(logo(logoKey(session), noContextNote(session) || undefined));
   return button;
 }
 
@@ -440,7 +440,7 @@ export function projectHead(group: ProjectGroup<Session>): HTMLElement {
   });
   toggle.removeAttribute("aria-pressed");
   toggle.setAttribute("aria-expanded", String(projectOpen(group.key)));
-  toggle.title = group.key;
+  fullTitle(toggle, group.key || group.name);
   toggle.append(text("span", group.name, "name"));
   if (group.rollup) toggle.append(glyph(group.rollup));
   head.append(toggle);

@@ -6,9 +6,9 @@ import { rowMark, secondLine } from "../../dist/list.js";
 import { subagentHistory } from "../../dist/story.js";
 
 const caps = (agent, rest = {}) => ({
-  agent, asks: false, background_tasks: false, replies: false, permission_mode: false, durations: false, transcript_version: false, turn_trees: false, ...rest,
+  agent, asks: false, background_tasks: false, replies: false, permission_mode: false, durations: false, transcript_version: false, context: false, turn_trees: false, ...rest,
 });
-const claude = { capabilities: caps("claude", { asks: true, replies: true, permission_mode: true, transcript_version: true, turn_trees: true }), model: null, transcript: { context: { tokens: 9000, share: 9 }, model: "claude-opus-5-5" } };
+const claude = { capabilities: caps("claude", { asks: true, replies: true, permission_mode: true, transcript_version: true, context: true, turn_trees: true }), model: null, transcript: { context: { tokens: 9000, share: 9 }, model: "claude-opus-5-5" } };
 const agy = { capabilities: caps("agy"), model: "gemini-3.8-flash-high", transcript: { context: null, model: null } };
 const codex = { capabilities: caps(""), model: null, status_only: true, transcript: { context: null, model: null } };
 

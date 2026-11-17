@@ -3,6 +3,7 @@
 // Each window has `used_percentage` (0 to 100) and `resets_at` (Unix seconds); a window past its reset is dropped. Times here
 // are Unix seconds.
 import { fullTitle, invoke, text } from "./dom.js";
+import { agentNames } from "./capabilities.js";
 import { logo, logoKey } from "./logos.js";
 
 type UsageWindow = { used_percentage: number; resets_at: number };
@@ -15,8 +16,7 @@ export type AgentUsage = {
   reason: string | null;
 };
 
-const names: Record<string, string> = { claude: "Claude", agy: "agy", codex: "Codex" };
-const nameOf = (agent: string) => names[agent] ?? agent;
+const nameOf = (agent: string) => agentNames[agent] ?? agent;
 
 // The windows that are still current, in the order they show.
 const current = (usage: AgentUsage, now: number) =>

@@ -35,11 +35,15 @@ const marks: Record<LogoKey, Mark> = {
 
 export const logoTitles: Record<LogoKey, string> = {
   claude: "Claude Code",
-  agy: "agy: followed by what it reports, which has no context share",
+  agy: "agy: followed by what it reports",
   codex: "Codex: followed by its reported status only",
   shell: "A plain terminal",
   generic: "Another agent, followed by its reported status only",
 };
+
+// The note on the logo of an agent that reports no context share, taken from its capabilities (never its name); a status-only row has no agent of its own.
+export const noContextNote = (session: Pick<Session, "capabilities">): string =>
+  session.capabilities.agent && !session.capabilities.context ? "This agent reports no context share" : "";
 
 // The logo's element, named by its title so the shape is never alone.
 export function logo(key: LogoKey, title = logoTitles[key]): HTMLElement {

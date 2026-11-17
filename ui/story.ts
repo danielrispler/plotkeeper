@@ -6,7 +6,7 @@
 // questions, brief and cards in one block.
 
 import { modelLine, reports } from "./capabilities.js";
-import { logo, logoKey, logoTitles } from "./logos.js";
+import { logo, logoKey, noContextNote } from "./logos.js";
 import { age, code, element, fullTitle, invoke, pressable, prose, text } from "./dom.js";
 import { select } from "./selection.js";
 import { askAnchor } from "./ask.js";
@@ -82,7 +82,7 @@ export function showView(selected: Selection | null) {
   element("mode").textContent = reports(session, "permission_mode") ? modeText(session.permission_mode) : "";
   // The agent's logo, titled with its model line when it has one (#158); agy's keeps its note that it has no context share.
   const key = logoKey(session);
-  const title = [modelLine(session), key === "agy" ? logoTitles.agy : ""].filter(Boolean).join("\n");
+  const title = [agent === null ? modelLine(session) : "", noContextNote(session)].filter(Boolean).join("\n");
   element("mark").replaceChildren(logo(key, title || undefined));
   element("session-name").textContent = sessionName(session);
   // The top bar's header (danielrispler/plotkeeper#127) says the same state and name.
@@ -122,7 +122,8 @@ export function showView(selected: Selection | null) {
     : (step?.tool ?? (agent === null ? session.returned : null) ?? "No step yet");
   const [detail, fullDetail] = shortPaths(step?.detail ?? "");
   element("detail").textContent = detail;
-  element("detail").title = fullDetail;
+  element("detail").removeAttribute("title");
+  fullTitle(element("detail"), fullDetail);
   element("command").textContent = step?.command ?? "";
   element("step").classList.toggle("has-command", Boolean(step?.command));
   showIntention(storyOf(session, agent));
@@ -437,11 +438,11 @@ export const shownChecks = (lines: CheckLine[]): CheckLine[] => {
 
 // A check line: its outcome, its command, and how long it took or, while it runs, its time against
 // its typical time. No colour, as colour is only for "needs you".
-function checkElement(line: CheckLine): HTMLElement {
+export function checkElement(line: CheckLine): HTMLElement {
   const item = document.createElement("li");
   const label = line.ended_at === null ? "Running" : line.passed === null ? "Ran" : line.passed ? "Passed" : "Failed";
   const time = counts(text("span", "", "check-time"), (now) => checkTime(line, now));
-  item.append(text("span", label, "outcome"), code(line.command), time);
+  item.append(text("span", label, "outcome"), fullTitle(code(line.command), line.command), time);
   return item;
 }
 

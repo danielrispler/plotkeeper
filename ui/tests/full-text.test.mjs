@@ -4,9 +4,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { El } from "./dom.mjs";
-import { row } from "../../dist/list.js";
+import { row, projectHead } from "../../dist/list.js";
+import { showPalette, workspaceRow as pickerRow, branchRow } from "../../dist/picker.js";
 import { showStartToast, showToast } from "../../dist/toast.js";
-import { foldedTurn, showBarName } from "../../dist/story.js";
+import { checkElement, foldedTurn, showBarName } from "../../dist/story.js";
 import { workspaceRow } from "../../dist/workspaces.js";
 import { studio } from "../../dist/state.js";
 
@@ -127,6 +128,45 @@ test("a toast's name and line hold their full text, and a start toast's message"
   noEmptyTitle(start);
 });
 
+test("a check's command holds its full text in a title", () => {
+  const command = "cargo test --locked --workspace --all-targets -- --some-long-flag";
+  const node = checkElement({ command, ended_at: 2, passed: true, started_at: 1 });
+  const code = every(node).find((n) => n.tag === "code");
+  assert.ok(code, "the command is drawn");
+  assert.ok(titled(code).some((title) => title.includes(command)));
+});
+
+test("the picker's, palette's and branch picker's rows hold their full text in a title", () => {
+  const picker = document.getElementById("picker");
+  const path = "/Users/someone/work/a-long-project-name/.claude/worktrees/issue-1-a-long-task-name";
+  const worktree = pickerRow("issue-1-a-long-task-name", { path, branch: "issue-1" }, () => Promise.resolve());
+  holds(worktree, "name", "issue-1-a-long-task-name");
+  holds(worktree, "l2", path);
+  noEmptyTitle(worktree);
+  const make = document.createElement;
+  document.createElement = (tag) => Object.assign(make(tag), tag === "input" ? { value: "", focus() {} } : {});
+  showPalette([{ title: "Switch to a session with a very long action name", keys: ["⌘K"], note: "A note the row cuts to fit", binding: {} }], () => {});
+  const rows = every(picker).filter((n) => n.tag === "button");
+  assert.ok(rows.length > 0, "the palette draws its rows");
+  for (const drawn of rows) {
+    holds(drawn, "name", "Switch to a session with a very long action name");
+    holds(drawn, "l2", "A note the row cuts to fit");
+    noEmptyTitle(drawn);
+  }
+  document.createElement = make;
+  const branch = branchRow("a-long-branch-name-the-row-cuts", "in task X", false, () => {});
+  holds(branch, "name", "a-long-branch-name-the-row-cuts");
+  noEmptyTitle(branch);
+});
+
+test("the outside-project group's toggle has a title, also for the home folder", () => {
+  const group = (key, name) => ({ key, name, project: true, rollup: null, states: [], workspaces: null });
+  const head = projectHead(group("/Users/someone/elsewhere/a-repository", "a-repository"));
+  holds(head, "project-toggle", "/Users/someone/elsewhere/a-repository");
+  noEmptyTitle(projectHead(group("", "~")));
+  holds(projectHead(group("", "~")), "project-toggle", "~");
+});
+
 // Every CSS rule that cuts text, by selector, with where its full text is: a new one fails this test until it is covered.
 const covered = {
   ".term": "the terminal pane, not a text",
@@ -151,7 +191,7 @@ const covered = {
   ".answered-card > summary": "cards.ts: the summary's title",
   ".subagent-log .log-title": "log.ts: the title's title",
   ".subagent-log .log-call summary": "log.ts: the summary's title",
-  code: "a code span inside a text whose own title holds it",
+  code: "a check's command has its own title (story.ts); any other code span wraps or sits in a text that wraps",
 };
 
 test("every CSS rule that cuts text is covered by the full-text rule", () => {

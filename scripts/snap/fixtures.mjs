@@ -7,7 +7,7 @@ import { railFixtures } from "./rail-fixtures.mjs";
 const session = (id, name, state, extra = {}) => {
   const now = Date.now();
   return {
-    id, capabilities: { agent: "claude", asks: true, background_tasks: true, replies: true, permission_mode: true, durations: true, transcript_version: true, turn_trees: true },
+    id, capabilities: { agent: "claude", asks: true, background_tasks: true, replies: true, permission_mode: true, durations: true, transcript_version: true, context: true, turn_trees: true },
     model: null, shell: false, cwd: `/w/plotkeeper/.claude/worktrees/${id}`, folder_name: id, terminal: null, status_only: false, name, prompt_name: null,
     resume_id: id, permission_mode: null, started_mode: null, cleared: [], asks_before_closing: false, landed: false, last_step: null,
     started_at: now - 3600e3, last_event_at: now - 60e3, turn_span: null, step_span: null, state, checks: [], agents: [], asker: null,
@@ -106,8 +106,8 @@ export const fixtures = {
   },
   // The list with each agent's logo in each state (#158): Claude, agy, status-only Codex, another program and a shell.
   logos() {
-    const agy = { capabilities: { agent: "agy", asks: false, background_tasks: false, replies: false, permission_mode: false, durations: false, transcript_version: false, turn_trees: false }, model: "gemini-3.8-flash-high" };
-    const only = (program, extra = {}) => ({ status_only: true, capabilities: { agent: "", asks: false, background_tasks: false, replies: false, permission_mode: false, durations: false, transcript_version: false, turn_trees: false }, ...extra, identity: { issue: null, branch: null, pr: null, worktree: "", name: `${program} · plotkeeper` } });
+    const agy = { capabilities: { agent: "agy", asks: false, background_tasks: false, replies: false, permission_mode: false, durations: false, transcript_version: false, context: false, turn_trees: false }, model: "gemini-3.8-flash-high" };
+    const only = (program, extra = {}) => ({ status_only: true, capabilities: { agent: "", asks: false, background_tasks: false, replies: false, permission_mode: false, durations: false, transcript_version: false, context: false, turn_trees: false }, ...extra, identity: { issue: null, branch: null, pr: null, worktree: "", name: `${program} · plotkeeper` } });
     const sessions = [
       session("s1", "#56 · Row controls", "running", { transcript: { ...session("x", "x", "idle").transcript, context: { tokens: 90000, share: 9, window: 1000000, left: 91 } } }),
       session("s2", "agy · Name from the prompt", "needs_you", agy),
@@ -168,4 +168,4 @@ const pullMain = (extra) => () => {
   return f;
 };
 fixtures.pullEnabled = pullMain({});
-fixtures.pullDisabled = pullMain({ changed: 2 });
+fixtures.pullDisabled = pullMain({ changed: 2, would_overwrite: true });

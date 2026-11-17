@@ -226,11 +226,7 @@ pub fn git_state(repo: &Path, path: &str) -> Result<GitState, String> {
     });
     let changed = git(dir, &["status", "--porcelain"])?.lines().count();
     let operation = operation(dir)?;
-    let default = git(
-        dir,
-        &["symbolic-ref", "--short", "-q", "refs/remotes/origin/HEAD"],
-    )
-    .ok();
+    let default = default_branch(dir);
     let on_default =
         matches!((&branch, &default), (Some(b), Some(d)) if d.strip_prefix("origin/") == Some(b));
     let main_behind = default
@@ -370,6 +366,15 @@ pub fn fetch(repo: &Path) -> Result<(), String> {
     git(repo, &["fetch", "--quiet", "origin"]).map(drop)
 }
 
+/// The remote's default branch as a ref, such as `origin/main`; none when origin's HEAD is not known.
+fn default_branch(dir: &Path) -> Option<String> {
+    git(
+        dir,
+        &["symbolic-ref", "--short", "-q", "refs/remotes/origin/HEAD"],
+    )
+    .ok()
+}
+
 /// Brings the default branch of the repository that holds `repo` up to `origin`'s (#164), fetching
 /// first. With the default branch checked out in the main checkout it is a fast-forward-only merge;
 /// otherwise the local branch moves without a checkout, as `git fetch origin main:main` does. It never
@@ -379,11 +384,7 @@ pub fn pull(repo: &Path) -> Result<(), String> {
     let main = workspaces(repo)?.main.path;
     let main = Path::new(&main);
     fetch(main)?;
-    let remote = git(
-        main,
-        &["symbolic-ref", "--short", "-q", "refs/remotes/origin/HEAD"],
-    )
-    .map_err(|_| "origin's default branch is not known".to_string())?;
+    let remote = default_branch(main).ok_or("origin's default branch is not known")?;
     let name = remote.strip_prefix("origin/").unwrap_or(&remote);
     if git(main, &["symbolic-ref", "--short", "-q", "HEAD"]).is_ok_and(|b| b == name) {
         git(main, &["merge", "--ff-only", "--quiet", &remote]).map(drop)
