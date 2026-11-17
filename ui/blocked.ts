@@ -4,7 +4,7 @@
 
 import { blockedRequestFor, sendBlockedAnswer } from "./answer.js";
 import { code, invoke, text } from "./dom.js";
-import { duration } from "./times.js";
+import { counts, duration } from "./times.js";
 import { typeInto, type TypingIo } from "./typing.js";
 import { blockedWaits, type BlockedCommand, type BlockedStatus } from "./types.js";
 
@@ -98,7 +98,9 @@ export function blockedElement(session: string, card: BlockedCommand, agent: str
   const command = document.createElement("p");
   command.append(code(view.command));
   block.append(state, asked, command, text("p", `In ${view.folder}`, "description"), text("p", view.reason, "description"));
-  if (view.detail !== null) block.append(text("p", view.detail, "description"));
+  // A Running card's time counts up each second, as a running check's does, until the card leaves the page.
+  if (card.status === "running") block.append(counts(text("p", "", "description"), (at) => detailOf(card, at) ?? ""));
+  else if (view.detail !== null) block.append(text("p", view.detail, "description"));
   if (run && !tails.has(run)) {
     const pre = text("pre", "Reading the output…", "evidence-output");
     block.append(pre);
