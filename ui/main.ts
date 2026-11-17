@@ -11,7 +11,7 @@ import { placeBar, watchBar } from "./bar.js";
 import { markShown, showCards } from "./cards.js";
 import { diffRequest, newestDiff } from "./diff.js";
 import { element, invoke, listen } from "./dom.js";
-import { type Actions, doctorEntries, newestUnseen, nextNeedsYou, paletteEntries, run, stepLine, stepSession, windowBinding } from "./keys.js";
+import { type Actions, doctorEntries, newestUnseen, nextNeedsYou, paletteEntries, run, stepLine, stepSession, titled, windowBinding } from "./keys.js";
 import { hover, realClock, shownGate } from "./hover.js";
 import { arrange, defaultWidths, type LayoutMode, railShown, resized, type Widths } from "./layout.js";
 import { listSpace } from "./home.js";
@@ -251,6 +251,7 @@ function applySettings(files: SettingsFiles) {
   const previous = studio.files.settings;
   studio.files = reload(studio.files, files);
   const { settings, errors } = studio.files;
+  element("settings-gear").title = titled(studio.files.keymap, "Settings", "studio::OpenSettings");
   const notice = element("notice");
   // Other notices, such as the Claude Code version's, stay beside the settings errors.
   const others = (notice.textContent ?? "").split("\n").filter((line) => line && !/^(settings|keymap)\.json: /.test(line));
@@ -297,7 +298,7 @@ dragSplit();
 dragPanel();
 element("new-session").addEventListener("click", () => void showPicker());
 element("add-project").addEventListener("click", () => void showAddProject());
-element("new-terminal").addEventListener("click", () => void showPicker("terminal"));
+element("settings-gear").addEventListener("click", () => void run(actions, "studio::OpenSettings"));
 // A click on the session list's empty space selects none and shows Home.
 document.querySelector(".list")!.addEventListener("click", (event) => listSpace(event.target as HTMLElement) && void goHome());
 // The needs-you chip (danielrispler/Falinks#572) selects the first session that needs Daniel.
@@ -308,7 +309,7 @@ element("needs-you").addEventListener("click", () => {
 // A click outside the picker, but not on its own buttons, closes it.
 document.addEventListener("pointerdown", (event) => {
   const target = event.target as Node;
-  const opener = ["new-session", "new-terminal", "add-project"].some((id) => element(id).contains(target));
+  const opener = ["new-session", "add-project"].some((id) => element(id).contains(target));
   if (!element("picker").contains(target) && !opener) element("picker").hidden = true;
 }, true); // capture: the terminal must not swallow it
 

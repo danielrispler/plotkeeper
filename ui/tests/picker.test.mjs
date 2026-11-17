@@ -21,3 +21,16 @@ test("an empty quick start starts in the main checkout without creating", async 
   const create = async () => assert.fail("no task is created");
   assert.equal(await quickTask("/a", main, "", create), main);
 });
+
+test("the bar holds one '+' and no New terminal button (#159)", async () => {
+  const html = (await import("node:fs")).readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  assert.equal([...html.matchAll(/<button id="new-session"/g)].length, 1);
+  assert.ok(!html.includes("new-terminal"));
+  assert.ok(!html.includes("New terminal"));
+});
+
+test("the list's footer holds the settings gear beside History (#159)", async () => {
+  const html = (await import("node:fs")).readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  const foot = html.match(/<div class="list-foot">[\s\S]*?<\/div>\s*<\/div>/)[0];
+  assert.ok(foot.includes('id="history-link"') && foot.includes('id="settings-gear"'));
+});
