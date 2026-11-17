@@ -6,10 +6,6 @@ type WithCapabilities = { capabilities: Capabilities };
 // Whether the session's agent reports `what`, so the part of the view that shows it may show.
 export const reports = (session: WithCapabilities, what: Exclude<keyof Capabilities, "agent">): boolean => session.capabilities[what];
 
-// The small mark of an agent other than Claude Code ("agy"); none for Claude, whose row shows its context share, and
-// none for a status-only row, which has no agent adapter.
-export const agentMark = (session: WithCapabilities): string => (session.capabilities.agent === "claude" ? "" : session.capabilities.agent);
-
 const marks: Record<string, string> = { claude: "Claude" };
 
 // A model's short name: "claude-opus-5-5" is "Opus 5.5", "gemini-3.8-flash-high" is "Flash high".

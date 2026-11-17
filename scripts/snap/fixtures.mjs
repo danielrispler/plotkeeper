@@ -7,7 +7,8 @@ import { railFixtures } from "./rail-fixtures.mjs";
 const session = (id, name, state, extra = {}) => {
   const now = Date.now();
   return {
-    id, cwd: `/w/plotkeeper/.claude/worktrees/${id}`, folder_name: id, terminal: null, status_only: false, name, prompt_name: null,
+    id, capabilities: { agent: "claude", asks: true, background_tasks: true, replies: true, permission_mode: true, durations: true, transcript_version: true, turn_trees: true },
+    model: null, shell: false, cwd: `/w/plotkeeper/.claude/worktrees/${id}`, folder_name: id, terminal: null, status_only: false, name, prompt_name: null,
     resume_id: id, permission_mode: null, started_mode: null, cleared: [], asks_before_closing: false, landed: false, last_step: null,
     started_at: now - 3600e3, last_event_at: now - 60e3, turn_span: null, step_span: null, state, checks: [], agents: [], asker: null,
     prompts: [], turns: [], since_looked: { turns: 0, files: 0, passed: 0, failed: 0, ran: 0 }, questions: [], returned: null,
@@ -30,6 +31,7 @@ const common = {
   terminal_connect: { repo: "/w/plotkeeper", outdated: false },
   terminal_lost: [],
   revival: [],
+  projects: ["/w/plotkeeper"],
 };
 
 // A subagent's log pane: the subagent's line selected, its log from the stubbed `subagent_log`.
@@ -85,6 +87,23 @@ export const fixtures = {
       session("s4", "#55 · Delete default", "your_turn", { unseen: true }),
     ];
     return { ...common, sessions, selected: { session: sessions[0], agent: null } };
+  },
+  // The list with each agent's logo in each state (#158): Claude, agy, status-only Codex, another program and a shell.
+  logos() {
+    const agy = { capabilities: { agent: "agy", asks: false, background_tasks: false, replies: false, permission_mode: false, durations: false, transcript_version: false, turn_trees: false }, model: "gemini-3.8-flash-high" };
+    const only = (program, extra = {}) => ({ status_only: true, capabilities: { agent: "", asks: false, background_tasks: false, replies: false, permission_mode: false, durations: false, transcript_version: false, turn_trees: false }, ...extra, identity: { issue: null, branch: null, pr: null, worktree: "", name: `${program} · plotkeeper` } });
+    const sessions = [
+      session("s1", "#56 · Row controls", "running", { transcript: { ...session("x", "x", "idle").transcript, context: { tokens: 90000, share: 9, window: 1000000, left: 91 } } }),
+      session("s2", "agy · Name from the prompt", "needs_you", agy),
+      session("s3", "#54 · Subagent terminal", "your_turn", { unseen: true }),
+      session("s4", "codex · plotkeeper", "running", only("codex")),
+      session("s5", "aider · plotkeeper", "your_turn", only("aider")),
+      session("s6", "plotkeeper", "idle", only("zsh", { shell: true })),
+      session("s7", "#55 · Delete default", "idle", agy),
+    ];
+    // The idle group is folded by default: open it, so the idle rows show.
+    const snapScript = `[...document.querySelectorAll("summary, button")].find((el) => /^Idle/.test(el.textContent.trim()))?.click();`;
+    return { ...common, sessions, selected: { session: sessions[1], agent: null }, snapScript };
   },
   // Workspaces rows and the git line (#160): the selected session's task shows its branch once, a renamed and a detached one show
   // theirs, and the main checkout keeps its branch. Built on the rail's running fixture, whose session works in the first task.

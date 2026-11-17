@@ -119,6 +119,9 @@ h1 { margin: 0 0 var(--sp-4); }
 .row .l2 { display: flex; gap: var(--sp-3); font-size: var(--size-small); color: var(--muted); white-space: nowrap; overflow: hidden; }
 .row .name { overflow: hidden; text-overflow: ellipsis; }
 .row.unseen .name { font-weight: 600; }
+/* An agent's logo (#158): one colour, the muted text colour; the "Needs you" pill stays the only colour. */
+.logo { flex: none; display: inline-grid; place-items: center; width: var(--icon); height: var(--icon); color: var(--muted); }
+.logo svg { width: var(--icon); height: var(--icon); }
 .row .id { color: var(--muted); flex: none; font-size: var(--size-small); }
 .row .l1 .glyph { margin-inline-start: auto; }
 .row .clock { flex: none; margin-inline-start: auto; font-size: var(--size-xs); }
