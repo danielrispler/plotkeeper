@@ -33,7 +33,7 @@ The app shows no rate, score or tally. Once a week, print the rates of the cards
 
 Then the drift in Claude Code over the same 7 days, from the event log and `claude-versions.txt`:
 
-- unrecognised wake-ups: the prompts that named a known task id in markup the studio does not know (see "Wake-ups");
+- unrecognised wake-ups: the prompts that named a known task id in markup the studio does not know (see [Wake-ups](cards.md#wake-ups));
 - one line per version change, with its date.
 
 A rate with nothing to count prints `n/a`. To record your one-line verdict on the questions, add it after `--`:

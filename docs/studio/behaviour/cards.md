@@ -1,6 +1,6 @@
 # Cards
 
-At a session's `Stop`, one card explains what the prompt changed, commits made during the prompt included, when the change is big enough to get one: a turn that changed less gets a lone Quiz or nothing (see "What a turn gets"). When the change is structural, the card has an architecture section. The writer reads the summaries of the earlier cards on your prompt, its wake-ups' cards included, so a structural change spread over several cards still counts.
+At a session's `Stop`, one card explains what the prompt changed, commits made during the prompt included, when the change is big enough to get one: a turn that changed less gets a lone Quiz or nothing (see [What a turn gets](../question-rules.md#what-a-turn-gets)). When the change is structural, the card has an architecture section. The writer reads the summaries of the earlier cards on your prompt, its wake-ups' cards included, so a structural change spread over several cards still counts.
 
 A worker is explained like a session. It gets a card at each commit in its worktree (its `HEAD` moved, seen after a Bash step) and at its end (`SubagentStop`, or for a killed worker, which has none, the wake-up that reports it), each on its change since its previous card, and its own brief. Click its line to see its brief and cards.
 

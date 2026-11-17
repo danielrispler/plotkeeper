@@ -33,7 +33,7 @@ Every Cmd shortcut goes to the terminal or to the app (`ui/keys.ts`):
 | Cmd+=, Cmd+-, Cmd+0 | app | zooms the window in, out (from half to double size) and back |
 | any other Cmd shortcut | app | the app's menu: Cmd+Q, Cmd+W, Cmd+H, Cmd+M and the like |
 
-Every shortcut here but Cmd+C, Cmd+V and the app's menu can be rebound in `keymap.json` (see Settings files).
+Every shortcut here but Cmd+C, Cmd+V and the app's menu can be rebound in `keymap.json` (see [Settings files](../settings.md)).
 
 ## Restarts and daemon upgrades
 

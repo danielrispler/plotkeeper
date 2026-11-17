@@ -8,7 +8,7 @@ The rail, on the window's left, tells the selected session's story, ranked by wh
 
 - Running: "You asked" with your prompt, then the intention, boxed, with its age and the step line. The intention is the latest thing the agent wrote in its own words; it shows only while the session runs, and small, as "Why it asks", while it needs you. At your turn the Headline says what happened, and the turn-end intention is the final response's first line, never the summary's.
 - Needs you: the docked question, plan or permission, then "Why it asks" and "So far this turn", the facts the hooks recorded.
-- Your turn, idle or ended: "You asked", the **Headline**, the evidence line, the Body lines, the Quiz, one line for each subagent and its checks, and "Full response", folded. A session returned to after a while opens on "Where we were" (see The Brief and Where we were).
+- Your turn, idle or ended: "You asked", the **Headline**, the evidence line, the Body lines, the Quiz, one line for each subagent and its checks, and "Full response", folded. A session returned to after a while opens on "Where we were" (see [The Brief and Where we were](brief.md)).
 
 **The turn summary.** When a turn ends, one `claude -p` call (the model and effort from `summaries` in `settings.json`; with `on_open` true, when you open the turn instead) writes a Headline and up to three Body lines, for a turn whose final response is about 150 words or more or that ends asking you something. Any other turn shows its response as it is: its Headline is the response's first line, which is also what the Headline is until the summary arrives.
 
