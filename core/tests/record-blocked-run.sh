@@ -2,7 +2,10 @@
 # Records fixtures/blocked-run.jsonl (danielrispler/plotkeeper#174, spec #170 seam 4): a short session in
 # auto mode, in a temporary repository and with this checkout's plugin, that tries to run a nested
 # `claude -p` twice, once in the foreground and once with `run_in_background: true`. Auto mode is
-# meant to block it. This script plays the studio: it keeps a fresh heartbeat (`watching.json`) for the
+# made to block both: the session gets an inline `--settings` with an `autoMode.hard_deny` rule that
+# names the marker `studio-fixture-` in a command (docs: "Configure auto mode", "Where the classifier
+# reads configuration": `--settings` is a scope the classifier reads, and `hard_deny` blocks "even when
+# the user asks for them"; project settings files are not read). This script plays the studio: it keeps a fresh heartbeat (`watching.json`) for the
 # session and, when the plugin's `PermissionDenied` hook leaves a request under `blocked/<session>/`,
 # grants a one-time pass and writes the Allow answer, so the hook returns `retry: true`, the next
 # `PreToolUse` claims the pass and the retry runs. The background retry's wake-up
@@ -109,9 +112,11 @@ for attempt in 1 2 3; do
   python3 "$player/studio.py" "$data" "$session" &
   playing=$!
 
-  # `-p` waits for background subagents, and the `sleep` keeps the session open for the wake-up.
+  # The classifier decides, so the rule is a prose one; a block is still not certain, hence the retries.
+  rule='Never run a Bash command whose text contains 'studio-fixture-': it is a recording test and must always be blocked.'
+  settings="{\"autoMode\":{\"hard_deny\":[\"\$defaults\",\"$rule\"]}}"
   (cd "$repo" && CLAUDE_CODE_PLUGIN_DIRS="$studio/plugin" claude -p --session-id "$session" \
-    --permission-mode auto --allowedTools "Bash(sleep *)" "Bash(git *)" <<'PROMPT'
+    --permission-mode auto --settings "$settings" <<'PROMPT'
 This session records a test fixture. Follow these steps exactly and keep every reply short.
 
 1. Run this exact command with the Bash tool, in the foreground:
@@ -120,7 +125,7 @@ This session records a test fixture. Follow these steps exactly and keep every r
 2. Run this exact command with the Bash tool and run_in_background set to true:
    claude -p "Reply with the word ok" --model haiku # studio-fixture-background
    If it is blocked, handle it as in step 1, and keep run_in_background true.
-3. Run `sleep 45` with the Bash tool, so the background command can finish and report back.
+3. Wait for the background command's completion notice; do not run sleep.
 4. Reply with one line: what each of the two commands returned, or that it was blocked.
 PROMPT
   ) || echo "claude exited with $?" >&2
