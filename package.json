@@ -3,9 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc && cp ui/index.html ui/tokens.css ui/style.css dist/ && mkdir -p dist/vendor && cp node_modules/@xterm/xterm/lib/xterm.js node_modules/@xterm/xterm/css/xterm.css node_modules/@xterm/addon-fit/lib/addon-fit.js node_modules/@xterm/addon-unicode11/lib/addon-unicode11.js node_modules/@xterm/addon-webgl/lib/addon-webgl.js node_modules/@xterm/addon-search/lib/addon-search.js node_modules/@xterm/addon-web-links/lib/addon-web-links.js node_modules/marked/lib/marked.umd.js dist/vendor/",
+    "build": "tsc && tsc -p scripts/snap && cp ui/index.html ui/tokens.css ui/style.css dist/ && mkdir -p dist/vendor && cp node_modules/@xterm/xterm/lib/xterm.js node_modules/@xterm/xterm/css/xterm.css node_modules/@xterm/addon-fit/lib/addon-fit.js node_modules/@xterm/addon-unicode11/lib/addon-unicode11.js node_modules/@xterm/addon-webgl/lib/addon-webgl.js node_modules/@xterm/addon-search/lib/addon-search.js node_modules/@xterm/addon-web-links/lib/addon-web-links.js node_modules/marked/lib/marked.umd.js dist/vendor/",
     "tauri": "tauri",
     "snap": "node scripts/snap/snap.mjs",
+    "snap:all": "node scripts/snap/all.mjs",
     "snap:rail": "node scripts/snap/rail-all.mjs",
     "snap:readme": "node scripts/snap/readme.mjs",
     "start": "tauri build && open target/release/bundle/macos/Studio.app",
@@ -15,6 +16,7 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.12.3",
+    "@types/node": "^22.20.5",
     "@xterm/headless": "^6.0.0",
     "typescript": "^7.0.2"
   },

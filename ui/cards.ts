@@ -220,7 +220,7 @@ function moreElement(id: string, more: string | null): HTMLElement {
 async function explainMore(id: string) {
   asking.add(id);
   invoke("quiz_tap", { id, tap: { kind: "explain_more" } }).catch((e) => console.warn(e));
-  const more = await invoke<string | null>("explain_more", { id });
+  const more = await invoke("explain_more", { id });
   asking.delete(id);
   if (more === null) moreOpen.delete(id);
   drawn.delete(id);

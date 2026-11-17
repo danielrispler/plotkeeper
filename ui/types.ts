@@ -1,5 +1,14 @@
 // What the shell sends the window: sessions, the selection and a session's cards.
 
+import type { Ask } from "./answer.js";
+import type { Facts, Hunk } from "./ask.js";
+import type { Config, Listed } from "./daemon.js";
+import type { CheckOutput } from "./evidence.js";
+import type { Revive } from "./restart.js";
+import type { SettingsFiles } from "./settings.js";
+import type { Skill } from "./skills.js";
+import type { AgentUsage } from "./usage.js";
+
 // `detail` is a command's description, else what the step works on; `command` a command's full text.
 export type Step = { tool: string; detail: string | null; command?: string | null };
 // What the transcript says of the latest turn (danielrispler/Falinks#472): the agent's latest line, the steps since it,
@@ -341,3 +350,85 @@ export type Work = {
 // A branch the main checkout can switch to (#95): `remote` when only `origin` has it, `task` the folder of the task
 // whose worktree holds it, `current` the main checkout's own.
 export type Branch = { name: string; remote: boolean; task: string | null; current: boolean };
+
+// Every command the window invokes, with what the shell replies (`src-tauri/src/*.rs`, `#[tauri::command]`): `void` where the
+// window ignores the reply, `null` where the shell may answer none. `invoke` takes only these names, and the snap fixtures
+// (`scripts/snap/`) are typed against it, and `scripts/snap/base.ts` answers every command that is not `void`, so a fixture
+// that lacks a command or a field fails `tsc` (#144).
+export interface Commands {
+  add_project: string[];
+  agent_argv: string[];
+  agent_summary: string | null;
+  agents: string[];
+  agy_plugin_setup: string | null;
+  alive: void;
+  answer: void;
+  ask: string;
+  ask_anchor: string;
+  ask_facts: Facts | null;
+  ask_why_not: { facts: Facts; reasons: string | null };
+  branches: Branch[];
+  cards: SessionCards;
+  check_lists: void;
+  check_output: CheckOutput | null;
+  choose_folder: string | null;
+  claude_argv: string[];
+  closed: void;
+  create_named_task: Workspace;
+  create_task: Workspace;
+  delete_merged_branch: void;
+  delete_session: void;
+  explain_more: string | null;
+  fetch_repository: void;
+  fix_agy_plugin_setup: void;
+  fix_plugin_setup: void;
+  guess: void;
+  hunk_opened: void;
+  key_wrong: void;
+  mark_unseen: void;
+  notify_while_focused: void;
+  open: Selection | null;
+  open_file: void;
+  open_link: void;
+  open_settings: void;
+  plugin_setup: string | null;
+  projects: string[];
+  pull_main: void;
+  quiz_tap: void;
+  rail_shown: void;
+  rate: void;
+  refresh_landed_tasks: void;
+  remove_project: string[];
+  remove_task: Losses | null;
+  rename: void;
+  reorder_projects: string[];
+  repository_of: string | null;
+  restart_into: void;
+  retests: Retest[];
+  revival: Revive[];
+  select: Selection | null;
+  select_terminal: Selection | null;
+  selected: Selection | null;
+  sessions: Session[];
+  set_zoom: void;
+  settings_files: SettingsFiles;
+  shown: void;
+  skills: Skill[];
+  sounds: void;
+  subagent_log: SubagentLog | null;
+  suggest_projects: string[];
+  summary_settings: void;
+  switch_branch: void;
+  terminal_connect: Config;
+  terminal_lost: Listed[];
+  terminal_send: void;
+  terminal_upgrade: void;
+  turn_file_hunk: Hunk | null;
+  turn_reply: string | null;
+  turn_summary: TurnSummary | null;
+  usage: AgentUsage[];
+  watch: Ask | null;
+  workspace_git_state: GitState;
+  workspaces: Workspaces;
+}
+export type Command = keyof Commands;

@@ -28,7 +28,7 @@ The Tauri 2 stack is a settled decision ([scope decision](https://github.com/dan
 
 ## Checks
 
-Before handing off a change, run `npm ci` once, then `npm run check` from the repository's root. It builds the UI first, which the Tauri crate needs to compile, then runs the same checks as `.github/workflows/studio.yml`.
+Before handing off a change, run `npm ci` once, then `npm run check` from the repository's root. It builds the UI first, which the Tauri crate needs to compile, then runs the same checks as `.github/workflows/studio.yml`, which also renders every snap fixture in Chrome (`npm run snap:all`).
 
 The app embeds `dist/` when it is built, so a merged change reaches Daniel's open Studio only after a rebuild. After merging a change to the app, tell him to quit Studio and run `npm run start` from the main checkout.
 

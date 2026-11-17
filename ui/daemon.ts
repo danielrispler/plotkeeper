@@ -24,10 +24,10 @@ export interface DaemonEvent {
 }
 
 // Connects to the daemon, starting it if none runs; again after `lost`, it reconnects.
-export const connect = () => invoke<Config>("terminal_connect");
+export const connect = () => invoke("terminal_connect");
 
 // Sends one request, such as `{ op: "attach", id }`.
-export const request = (msg: Record<string, unknown>) => invoke<void>("terminal_send", { msg });
+export const request = (msg: Record<string, unknown>) => invoke("terminal_send", { msg });
 
 // Every daemon event, for every terminal; each pane keeps those of its own id. Resolves, once
 // listening, to the function that stops it.

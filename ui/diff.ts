@@ -60,7 +60,7 @@ function fileFold(session: string, index: number, file: TurnFile): HTMLElement {
   invoke("hunk_opened", { session, turn: index }).catch((e) => console.warn(e));
   const body = text("div", "Reading the hunk…", "diff-body");
   fold.append(text("summary", `${file.from ? `${file.from} → ` : ""}${file.path}${counts(file)}`), edit, body);
-  invoke<{ text: string; binary: boolean; first_line: number } | null>("turn_file_hunk", { session, turn: index, root: file.root, path: file.path, from: file.from, all: true })
+  invoke("turn_file_hunk", { session, turn: index, root: file.root, path: file.path, from: file.from, all: true })
     .then((hunk) => {
       first = hunk?.first_line ?? 1;
       if (!hunk || hunk.binary) return void body.replaceChildren(text("p", hunk ? "Binary file: no lines to show." : "The hunk could not be read.", "empty"));
