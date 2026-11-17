@@ -1,4 +1,6 @@
 target/
+# A parallel run's worker target dirs (AGENTS.md, "Checks"): the hook must never hash them (#141).
+/target-*/
 node_modules/
 dist/
 src-tauri/gen/

@@ -3,9 +3,13 @@
 pub mod answer;
 
 use std::{
-    env, fs,
+    env,
+    ffi::OsStr,
+    fs,
+    io::{BufRead, BufReader, Read},
+    os::unix::ffi::OsStrExt,
     path::{Path, PathBuf},
-    process::{self, Command},
+    process::{self, Command, Stdio},
     sync::atomic::{AtomicU64, Ordering},
     thread,
     time::{Duration, Instant},
@@ -318,12 +322,30 @@ pub fn worktree_root(folder: &Path) -> Option<String> {
     git(existing, &["rev-parse", "--show-toplevel"], None)
 }
 
+/// The most untracked files, and bytes of them, that a tree is recorded with: past either, hashing
+/// them costs more than a hook may (#141).
+pub const MAX_UNTRACKED_FILES: usize = 10_000;
+pub const MAX_UNTRACKED_BYTES: u64 = 256 << 20;
+
+/// How long one of the hook's `git` calls may run before it is killed (#141).
+const GIT_TIMEOUT: Duration = Duration::from_secs(20);
+
 /// The root of the git worktree that holds `folder`, or its nearest existing parent, and the git
 /// tree of its files as they are now, untracked ones included and ignored ones not (danielrispler/Falinks#486). `None`
 /// outside a worktree or when `git` fails. It writes the tree through a throwaway index, so the
 /// working tree, the real index and `git status` stay as they were.
 pub fn record_tree(folder: &Path) -> Option<(String, String)> {
+    record_tree_within(folder, MAX_UNTRACKED_FILES, MAX_UNTRACKED_BYTES)
+}
+
+/// `record_tree`, which gives up, and says so on stderr, when the worktree holds more than `files`
+/// untracked files or `bytes` of them.
+pub fn record_tree_within(folder: &Path, files: usize, bytes: u64) -> Option<(String, String)> {
     let root = worktree_root(folder)?;
+    if let Err(why) = untracked_within(Path::new(&root), files, bytes) {
+        eprintln!("studio-hook: no tree of {root}: {why}");
+        return None;
+    }
     let index = git(
         Path::new(&root),
         &["rev-parse", "--git-path", "index"],
@@ -338,30 +360,112 @@ pub fn record_tree(folder: &Path) -> Option<(String, String)> {
     let added = git(Path::new(&root), &["add", "-A"], Some(&scratch));
     let tree = added.and_then(|_| git(Path::new(&root), &["write-tree"], Some(&scratch)));
     let _ = fs::remove_file(&scratch);
+    // A killed `add` leaves its lock behind.
+    let _ = fs::remove_file(scratch.with_extension("index.lock"));
     Some((root, tree?))
 }
 
-/// `git`'s trimmed output in `folder`, with `index` as its index when given, or `None` when it
-/// fails. It takes no optional locks, so it never holds up the agent's own `git` commands.
-fn git(folder: &Path, args: &[&str], index: Option<&Path>) -> Option<String> {
+/// `Ok` when the untracked, unignored files under the worktree `root` are at most `files` files
+/// and `bytes` bytes. It stops listing them at the first cap they pass, so a huge untracked
+/// directory costs no more than the caps.
+fn untracked_within(root: &Path, files: usize, bytes: u64) -> Result<(), String> {
+    let args = ["ls-files", "-z", "--others", "--exclude-standard"];
+    let mut child = command(root, &args, None)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("git ls-files: {e}"))?;
+    let stdout = child.stdout.take().ok_or("git ls-files: no output")?;
+    let deadline = Instant::now() + GIT_TIMEOUT;
+    let (mut count, mut size) = (0, 0);
+    let mut verdict = Ok(());
+    for path in BufReader::new(stdout).split(b'\0') {
+        let Ok(path) = path else { break };
+        count += 1;
+        size += fs::symlink_metadata(root.join(OsStr::from_bytes(&path))).map_or(0, |m| m.len());
+        verdict = if count > files {
+            Err(format!("more than {files} untracked files"))
+        } else if size > bytes {
+            Err(format!("more than {bytes} bytes of untracked files"))
+        } else if Instant::now() > deadline {
+            Err(format!(
+                "listing its untracked files took over {GIT_TIMEOUT:?}"
+            ))
+        } else {
+            continue;
+        };
+        let _ = child.kill();
+        break;
+    }
+    let status = child.wait().map_err(|e| format!("git ls-files: {e}"))?;
+    verdict?;
+    status
+        .success()
+        .then_some(())
+        .ok_or_else(|| "git ls-files failed".into())
+}
+
+/// The hook's `git` in `folder`, with `index` as its index when given. It takes no optional locks,
+/// so it never holds up the agent's own `git` commands, and never starts auto maintenance, whose
+/// repacks stacked up by the dozen in #141.
+fn command(folder: &Path, args: &[&str], index: Option<&Path>) -> Command {
     let mut command = Command::new("git");
     command
-        .arg("--no-optional-locks")
+        .args([
+            "--no-optional-locks",
+            "-c",
+            "maintenance.auto=false",
+            "-c",
+            "gc.auto=0",
+        ])
         .args(args)
         .current_dir(folder);
     if let Some(index) = index {
         command.env("GIT_INDEX_FILE", index);
     }
-    let output = command.output().ok()?;
-    let out = String::from_utf8(output.stdout).ok()?;
-    output.status.success().then(|| out.trim_end().to_owned())
+    command
+}
+
+/// `git`'s trimmed output in `folder`, with `index` as its index when given, or `None` when it
+/// fails or runs past `GIT_TIMEOUT`, when it is killed.
+fn git(folder: &Path, args: &[&str], index: Option<&Path>) -> Option<String> {
+    let mut child = command(folder, args, index)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let mut stdout = child.stdout.take()?;
+    // Read as it runs, so a full pipe never stalls it.
+    let reader = thread::spawn(move || {
+        let mut out = String::new();
+        stdout.read_to_string(&mut out).map(|_| out)
+    });
+    let deadline = Instant::now() + GIT_TIMEOUT;
+    let status = loop {
+        if let Some(status) = child.try_wait().ok()? {
+            break status;
+        }
+        if Instant::now() > deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            let args = args.join(" ");
+            eprintln!(
+                "studio-hook: git {args} in {} ran over {GIT_TIMEOUT:?}",
+                folder.display()
+            );
+            return None;
+        }
+        thread::sleep(Duration::from_millis(5));
+    };
+    let out = reader.join().ok()?.ok()?;
+    status.success().then(|| out.trim_end().to_owned())
 }
 
 #[cfg(test)]
 mod tests {
     use std::path::Path;
 
-    use super::Turn;
+    use super::{Turn, command};
 
     /// The hook's view of one session's turns, after `events`, each a name and a prompt id.
     fn after(turn: &mut Turn, name: &str, prompt: &str) -> (Vec<String>, bool) {
@@ -408,5 +512,14 @@ mod tests {
         let identifier = conf["identifier"].as_str().unwrap();
         let data = Path::new("/h/Library/Application Support").join(identifier);
         assert_eq!(super::event_log(Path::new("/h")), data.join("events.jsonl"));
+    }
+
+    #[test]
+    fn the_hooks_git_calls_never_start_auto_maintenance() {
+        let command = command(Path::new("/"), &["add", "-A"], None);
+        let args: Vec<_> = command.get_args().filter_map(|a| a.to_str()).collect();
+        let configs = ["-c", "maintenance.auto=false", "-c", "gc.auto=0"];
+        assert!(args.windows(4).any(|w| w == configs), "{args:?}");
+        assert_eq!(&args[args.len() - 2..], ["add", "-A"]);
     }
 }
