@@ -20,7 +20,7 @@ import { goHome, select, show } from "./selection.js";
 import { dragPanel, placePanel, togglePanel } from "./panel.js";
 import { dragSplit, focusPane, placePanes, runDoctor, showHistory, split, startPanes, toggleSplit } from "./panes.js";
 import { showAddProject, showBranches, showPalette, showPicker } from "./picker.js";
-import { fetchNow, foundWorkspaces, showWorkspaces, sidebarOrder, watchWorkspaces } from "./workspaces.js";
+import { fetchNow, foundWorkspaces, pullAll, showWorkspaces, sidebarOrder, watchWorkspaces } from "./workspaces.js";
 import { reload, type SettingsFiles, zoomed } from "./settings.js";
 import { knownProjects } from "./projects.js";
 import { studio } from "./state.js";
@@ -214,6 +214,8 @@ const actions: Actions = {
   "studio::ShowHistory": () => showHistory(),
   // Fetches the repository now (#33); the workspaces' states follow.
   "studio::Fetch": () => void fetchNow(),
+  // Pull main (#164): every project's main checkout's default branch fast-forwards to origin's.
+  "studio::PullMain": () => void pullAll(),
   // Asks GitHub again which tasks have landed (#53); it is otherwise asked at a turn's end and at the window's focus.
   "studio::RefreshLanded": () => void invoke("refresh_landed_tasks").catch((e) => console.warn(e)),
   "studio::OpenSettings": () => void invoke("open_settings", { editor: studio.files.settings.editor }).catch((e) => console.warn(e)),

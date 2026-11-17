@@ -835,6 +835,7 @@ fn main() {
             terminal::workspaces,
             terminal::workspace_git_state,
             terminal::fetch_repository,
+            terminal::pull_main,
             terminal::claude_argv,
             terminal::agent_argv,
             terminal::agents,

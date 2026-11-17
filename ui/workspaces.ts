@@ -63,10 +63,29 @@ const workspaceOf = (all: Workspace[], cwd: string): Workspace | undefined =>
     .filter(({ path }) => cwd === path || cwd.startsWith(`${path}/`))
     .sort((a, b) => b.path.length - a.path.length)[0];
 
-export type WorkspaceRow = { workspace: Workspace; name: string; facts: string; actions: string[]; landed: boolean };
+// The main checkout's Pull ↓N (#164): how far its default branch is behind origin's, and why Pull is refused now, or null.
+export type Pull = { behind: number; refused: string | null };
+export type WorkspaceRow = { workspace: Workspace; name: string; facts: string; actions: string[]; landed: boolean; pull: Pull | null };
+
+// Why Pull main is refused for a main checkout now, or null: files would change under a session there, local main has
+// commits origin lacks (a fast-forward is never forced), or the incoming commits would overwrite changed files. Shared by
+// the button and the palette's action.
+export function pullRefusal(found: Workspaces, state: GitState | null, sessions: Pick<Session, "cwd" | "state">[]): string | null {
+  const blocked = branchBlocked(found, sessions);
+  if (blocked) return `Not now: ${blocked}`;
+  if (state?.on_default && state.upstream?.[0]) return "Local main has diverged from origin: it has commits origin lacks";
+  if (state?.would_overwrite) return "Uncommitted changes would be overwritten";
+  return null;
+}
+
+// Pull main's button for the main checkout: only with its default branch checked out and behind origin.
+function pullOf(found: Workspaces, state: GitState | null, sessions: Pick<Session, "cwd" | "state">[]): Pull | null {
+  const behind = state?.on_default ? (state.upstream?.[1] ?? 0) : 0;
+  return behind ? { behind, refused: pullRefusal(found, state, sessions) } : null;
+}
 
 // The rows: the main checkout, then the tasks, each with its tokens and session count.
-export function workspaceRows(found: Workspaces, states: (GitState | null)[], sessions: (Pick<Session, "cwd"> & { landed?: boolean })[]): WorkspaceRow[] {
+export function workspaceRows(found: Workspaces, states: (GitState | null)[], sessions: (Pick<Session, "cwd"> & { landed?: boolean; state?: SessionState })[]): WorkspaceRow[] {
   const all = allWorkspaces(found);
   const working = all.map(() => 0);
   // A task is landed when the core says so for its sessions (#53): the mark is the list's, on the task's row.
@@ -88,6 +107,7 @@ export function workspaceRows(found: Workspaces, states: (GitState | null)[], se
       .join("  "),
     actions: i === 0 ? ["New session here"] : ["New session here", "Remove"],
     landed: i > 0 && landed[i],
+    pull: i === 0 ? pullOf(found, states[0] ?? null, sessions as Pick<Session, "cwd" | "state">[]) : null,
   }));
 }
 
@@ -252,7 +272,7 @@ export const tokenOf = (project: string, cwd: string): string | null => {
 };
 
 // A workspace's row: one line, its name then its facts; a click shows or hides its actions under it.
-export function workspaceRow(project: string, { workspace, name, facts, actions, landed }: WorkspaceRow): HTMLElement {
+export function workspaceRow(project: string, { workspace, name, facts, actions, landed, pull }: WorkspaceRow): HTMLElement {
   const row = document.createElement("div");
   row.className = "workspace";
   row.dataset.key = workspace.path;
@@ -268,7 +288,12 @@ export function workspaceRow(project: string, { workspace, name, facts, actions,
   if (facts) line.append(hover(text("span", facts, "facts"), facts));
   if (landed) line.append(glyph("idle", false, true));
   button.append(line);
-  row.append(button);
+  if (pull) {
+    // Pull ↓N sits at the end of the row's line, beside its button: a button cannot nest in one.
+    const line = text("div", "", "workspace-line");
+    line.append(button, pullButton(project, pull));
+    row.append(line);
+  } else row.append(button);
   if (!opened.has(workspace.path)) return row;
   const act = (label: string) =>
     pressable(text("button", label, "small"), false, () => {
@@ -280,6 +305,15 @@ export function workspaceRow(project: string, { workspace, name, facts, actions,
   buttons.append(...actions.map(act));
   row.append(buttons);
   return row;
+}
+
+// Pull ↓N (#164): fast-forwards the default branch; refused, it is disabled with the reason as its title.
+function pullButton(project: string, { behind, refused }: Pull): HTMLButtonElement {
+  const button = pressable(text("button", `Pull ↓${behind}`, "small pull") as HTMLButtonElement, false, () => void pull([project]));
+  button.dataset.key = "pull";
+  button.title = refused ?? `Fast-forward the default branch to origin's, ${plural(behind, "commit")}`;
+  button.disabled = refused !== null;
+  return button;
 }
 
 // A new task in a project, named by its branch; a session starts in it.
@@ -485,4 +519,29 @@ export function watchWorkspaces() {
   void fetchNow();
   setInterval(() => document.hasFocus() && touchShown(), 5000);
   setInterval(() => document.hasFocus() && void fetchNow(), 5 * 60_000);
+}
+
+// Pulls each of `paths`' main checkout (#164), then reads every workspace and each main checkout's git state again, so the
+// rows and the git line show the new distance. A pull that failed shows git's reason on its project's group, after that read.
+async function pull(paths: string[]) {
+  const errors = await Promise.all(
+    paths.map((project) => {
+      const found = read.get(project);
+      const refused = found && pullRefusal(found, states.get(found.main.path) ?? null, studio.listed);
+      return refused ? Promise.resolve(refused) : invoke("pull_main", { project }).then(() => null, (e) => String(e));
+    }),
+  );
+  await readWorkspaces(true);
+  paths.forEach((project, i) => {
+    const found = read.get(project);
+    if (found) touch(project, found.main.path);
+    if (errors[i]) failures.set(project, errors[i]);
+  });
+  drawSidebar();
+}
+
+// Pull main for every project, the palette's action (#164).
+export async function pullAll() {
+  const paths = await readProjects();
+  if (paths) await pull(paths);
 }

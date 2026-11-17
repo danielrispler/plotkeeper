@@ -233,6 +233,12 @@ pub fn fetch_repository(project: String) -> Result<(), String> {
     studio_workbench::fetch(Path::new(&project))
 }
 
+/// Pulls the project's main checkout's default branch up to `origin`'s (#164); the window reads every workspace again after.
+#[tauri::command(async)]
+pub fn pull_main(project: String) -> Result<(), String> {
+    studio_workbench::pull(Path::new(&project))
+}
+
 /// Creates task `name` in the project (danielrispler/Falinks#468) and returns its workspace.
 #[tauri::command(async)]
 pub fn create_task(project: String, name: String) -> Result<studio_workbench::Workspace, String> {

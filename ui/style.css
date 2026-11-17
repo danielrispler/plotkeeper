@@ -548,3 +548,8 @@ body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
 .ask-why-not > p { font-size: var(--size-small); }
 .ask-why-not summary { margin-top: var(--sp-3); font-size: var(--size-small); color: var(--muted); cursor: pointer; }
 .ask-why-not .markdown { margin: var(--sp-3) 0 0; }
+/* Pull ↓N (#164), at the end of the main checkout's line. Disabled, it still takes hover so its title says why. */
+.project-workspaces .workspace-line { display: flex; align-items: center; gap: var(--sp-2); padding-inline-end: var(--sp-3); }
+.project-workspaces .workspace-line .row { flex: 1; min-width: 0; width: auto; }
+.project-workspaces .workspace .pull { flex: none; color: var(--fg); }
+.project-workspaces .workspace .pull:disabled { pointer-events: auto; cursor: default; color: var(--muted); }
