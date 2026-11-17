@@ -129,11 +129,10 @@ _Avoid_: Git panel (a view of its own, which the studio does not have), status b
 
 **Plan usage**:
 An agent's plan limits: its windows, such as the 5-hour and the weekly one, each with the share used and when it resets. A window of another length, such as the 30 days of Codex's free plan, shows as its own, named by its length. An agent with several limits, such as agy's model groups, has one group each, most used first, never merged into one and never mixed with another agent's. It is read without any credential, from what the agent itself reports. The top bar's glance shows the tightest window across every agent and group, with that agent's logo, or "Usage" when none has data; a click opens a popover with one tile per installed agent. Claude's is refreshed in the background; the other agents' are read only when the popover opens, and one that cannot be read says why instead of showing an old number. A window past its reset time is hidden.
-_Avoid_: Quota, billing (what the plan costs)
 
 **Pull main**:
 A fast-forward of a project's main checkout's default branch to `origin`'s, from the "Pull ↓N" button on its row in **Workspaces** or the palette's action for every project. It never merges, rebases or stashes, and never touches a task's branch. With the default branch checked out it is refused, the button disabled with the reason as its title, when a session in the main checkout is running or needs Daniel, when local main has commits `origin` lacks, or when the incoming commits would overwrite a changed file; a project with nothing to pull is skipped.
-_Avoid_: Sync (see **Upstream**), update
+_Avoid_: Sync (see **Upstream**)
 
 **Terminal daemon**:
 The background process that owns the workbench's terminals, so they outlive the app. The app connects to it over a socket.
