@@ -137,7 +137,7 @@ export async function readUsage(glanceButton: HTMLElement, popover: HTMLElement,
     drawTiles(popover, true);
   }
   try {
-    const reply = await invoke<AgentUsage[]>("usage", { agents });
+    const reply = await invoke("usage", { agents });
     if (agents === null) {
       // A full read says which agents exist: one it no longer has loses its tile.
       for (const agent of [...latest.keys()]) if (!reply.some((u) => u.agent === agent) && (applied.get(agent) ?? 0) < mine) latest.delete(agent);

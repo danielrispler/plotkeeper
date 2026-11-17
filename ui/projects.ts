@@ -11,7 +11,7 @@ let failure: string | null = null;
 
 export const projects = (): Promise<string[]> => {
   if (!loaded) {
-    const reading: Promise<string[]> = invoke<string[]>("projects").then(
+    const reading: Promise<string[]> = invoke("projects").then(
       (paths) => {
         known = paths;
         if (failure !== null) {

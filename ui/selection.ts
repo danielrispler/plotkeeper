@@ -11,11 +11,11 @@ import { showWorkspaces } from "./workspaces.js";
 import { studio } from "./state.js";
 import { showView } from "./story.js";
 import { showToast } from "./toast.js";
-import type { Selection, Session, SessionCards } from "./types.js";
+import type { Selection } from "./types.js";
 
 // Asks the shell for the selected session's cards and draws them.
 export async function refreshCards() {
-  showCards(await invoke<SessionCards>("cards"));
+  showCards(await invoke("cards"));
 }
 
 // Whether row `session`, or its subagent `agent`'s line, shows selected: the one Daniel just pressed
@@ -34,19 +34,19 @@ export async function select(id: string, agent: string | null = null) {
   studio.pending = pressed;
   showSessions(studio.listed);
   try {
-    let selected = await invoke<Selection>("select", { id });
+    let selected = await invoke("select", { id });
     if (agent !== null) {
-      selected = await invoke<Selection>("open", { agentId: agent });
-      studio.listed = await invoke<Session[]>("sessions");
+      selected = await invoke("open", { agentId: agent });
+      studio.listed = await invoke("sessions");
     }
     // The cards come first, so the rail draws the new session once, with its cards (danielrispler/Falinks#567).
-    const cards = await invoke<SessionCards>("cards");
+    const cards = await invoke("cards");
     if (studio.pending === pressed) {
       studio.pending = null;
       document.body.classList.remove("list-open");
       show(selected);
       showCards(cards);
-      showSession(selected.session, true, selected.agent);
+      showSession(selected?.session ?? null, true, selected?.agent ?? null);
     }
   } catch (e) {
     if (studio.pending === pressed) {
@@ -62,8 +62,8 @@ export async function select(id: string, agent: string | null = null) {
 export async function goHome() {
   studio.pending = null;
   try {
-    const selected = await invoke<Selection | null>("select", { id: null });
-    const cards = await invoke<SessionCards>("cards");
+    const selected = await invoke("select", { id: null });
+    const cards = await invoke("cards");
     if (studio.pending) return; // a press since wins
     document.body.classList.remove("list-open");
     show(selected);
@@ -79,7 +79,7 @@ export async function goHome() {
 async function catchUp() {
   if (studio.pending || !studio.missed) return;
   studio.missed = false;
-  const [selected, cards] = await Promise.all([invoke<Selection | null>("selected"), invoke<SessionCards>("cards")]);
+  const [selected, cards] = await Promise.all([invoke("selected"), invoke("cards")]);
   if (studio.pending) return; // a newer press draws its own reply
   show(selected);
   showCards(cards);

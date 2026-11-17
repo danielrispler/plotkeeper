@@ -332,7 +332,7 @@ function pullButton(project: string, { behind, refused }: Pull): HTMLButtonEleme
 
 // A new task in a project, named by its branch; a session starts in it.
 function creating(project: string): HTMLElement {
-  const form = newTask("New task: branch name", "Create", async (name) => invoke<Workspace>("create_task", { project, name }).finally(() => readWorkspaces(true)), false, fail(project));
+  const form = newTask("New task: branch name", "Create", async (name) => invoke("create_task", { project, name }).finally(() => readWorkspaces(true)), false, fail(project));
   form.dataset.key = "new-task";
   return form;
 }
@@ -352,7 +352,7 @@ export const shownProject = async (): Promise<string> => shown()?.project ?? mai
 
 // The repository a worktree belongs to: its own main checkout, project or not, never another project; null when
 // none is found (so a removal there cannot work).
-export const repositoryOfWorktree = async (path: string, ask: (folder: string) => Promise<string | null> = (folder) => invoke<string | null>("repository_of", { folder })): Promise<string | null> =>
+export const repositoryOfWorktree = async (path: string, ask: (folder: string) => Promise<string | null> = (folder) => invoke("repository_of", { folder })): Promise<string | null> =>
   (await ask(path).catch(() => null)) || null;
 
 // The Git line: the workspace of the selected session, or the main checkout's with none, and its tokens.
@@ -389,7 +389,7 @@ function touch(project: string, path: string) {
   let event = throttles.get(path);
   if (!event) {
     const readState = () =>
-      invoke<GitState>("workspace_git_state", { project, path })
+      invoke("workspace_git_state", { project, path })
         .catch(() => states.get(path) ?? null)
         .then((state) => {
           states.set(path, state);
@@ -440,7 +440,7 @@ export async function readWorkspaces(now = false) {
     await Promise.all(
       paths.map(async (project) => {
         try {
-          read.set(project, await invoke<Workspaces>("workspaces", { project }));
+          read.set(project, await invoke("workspaces", { project }));
           failures.delete(project);
         } catch (e) {
           failures.set(project, String(e));

@@ -41,7 +41,7 @@ export const openDecision = () =>
   current !== null && askKind(current.ask.tool_name) !== "question" ? current.ask : null;
 
 const watch = (session: string | null) =>
-  invoke<Ask | null>("watch", { session }).catch((e) => (console.warn(e), null));
+  invoke("watch", { session }).catch((e) => (console.warn(e), null));
 
 // The view watched last, so a redraw of the same one asks the shell nothing.
 let watched = "";

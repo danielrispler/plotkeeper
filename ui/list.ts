@@ -405,7 +405,7 @@ function repositoryOf(folder: string): string | null {
   const known = repositories.get(folder);
   if (known === undefined) {
     repositories.set(folder, null);
-    invoke<string | null>("repository_of", { folder }).then((main) => {
+    invoke("repository_of", { folder }).then((main) => {
       if (main) {
         repositories.set(folder, main);
         drawSidebar();
@@ -448,7 +448,7 @@ export function projectHead(group: ProjectGroup<Session>): HTMLElement {
   if (action) {
     const remove = action.kind === "remove";
     const button = pressable(text("button", remove ? "×" : "Add as project", "project-action"), false, () => {
-      if (remove) invoke<string[]>("remove_project", { project: action.path }).then(setProjects, refuse);
+      if (remove) invoke("remove_project", { project: action.path }).then(setProjects, refuse);
       else void addProject(action.path);
     });
     button.removeAttribute("aria-pressed");
@@ -484,7 +484,7 @@ function dragProjects(groups: HTMLElement) {
     if (at < 0) return;
     rest.splice(at + (after ? 1 : 0), 0, dragged);
     dragged = null;
-    invoke<string[]>("reorder_projects", { order: rest }).then(setProjects, refuse);
+    invoke("reorder_projects", { order: rest }).then(setProjects, refuse);
   });
   groups.addEventListener("dragend", () => (dragged = null));
 }
