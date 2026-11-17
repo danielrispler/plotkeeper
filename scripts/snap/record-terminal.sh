@@ -1,13 +1,13 @@
 #!/bin/sh
 # Records scripts/snap/terminal-recording.txt (danielrispler/plotkeeper#150): the raw terminal output of a short scripted Claude
-# Code session in a temporary repository, which `npm run snap -- recordedTerminal <out.png>` replays into the window's terminal.
+# Code session in a temporary repository (/tmp/demo-app), which `npm run snap -- recordedTerminal <out.png>` replays into the window's terminal.
 # Record it again when Claude Code's look changes. It runs a nested `claude` on your subscription (one turn), so run it yourself,
 # outside auto mode, from the repository's root, in a terminal of your own:
 #
 #     scripts/snap/record-terminal.sh
 #
-# It records at 110 x 32 (the size scripts/snap/fixtures.mjs replays it at), takes the folder-trust question by answering it,
-# and stops once the turn is done and the screen has been still for a while. Before it writes the file it searches the recording
+# It records at 110 x 32 (the size scripts/snap/fixtures.mjs replays it at), answers the folder-trust question (the recording
+# starts after it), types the prompt once the input box shows, and stops once the turn is done and the screen has been still. Before it writes the file it searches the recording
 # for your login name, your home folder, and your git name and email; it writes nothing when one is there.
 # Search the file yourself too, for anything the script cannot know, before committing it.
 set -eu
