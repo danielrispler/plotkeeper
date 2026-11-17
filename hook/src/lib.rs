@@ -10,7 +10,10 @@ use std::{
     os::unix::ffi::OsStrExt,
     path::{Path, PathBuf},
     process::{self, Command, Stdio},
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        mpsc::{self, RecvTimeoutError},
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -376,29 +379,42 @@ fn untracked_within(root: &Path, files: usize, bytes: u64) -> Result<(), String>
         .spawn()
         .map_err(|e| format!("git ls-files: {e}"))?;
     let stdout = child.stdout.take().ok_or("git ls-files: no output")?;
+    // Read on a thread, so the deadline holds even while git prints nothing.
+    let (paths, listed) = mpsc::channel();
+    thread::spawn(move || {
+        for path in BufReader::new(stdout).split(b'\0').map_while(Result::ok) {
+            if paths.send(path).is_err() {
+                break;
+            }
+        }
+    });
     let deadline = Instant::now() + GIT_TIMEOUT;
     let (mut count, mut size) = (0, 0);
-    let mut verdict = Ok(());
-    for path in BufReader::new(stdout).split(b'\0') {
-        let Ok(path) = path else { break };
+    let passed = loop {
+        let path = match listed.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+            Ok(path) => path,
+            Err(RecvTimeoutError::Disconnected) => break None,
+            Err(RecvTimeoutError::Timeout) => {
+                break Some(format!(
+                    "listing its untracked files took over {GIT_TIMEOUT:?}"
+                ));
+            }
+        };
         count += 1;
         size += fs::symlink_metadata(root.join(OsStr::from_bytes(&path))).map_or(0, |m| m.len());
-        verdict = if count > files {
-            Err(format!("more than {files} untracked files"))
-        } else if size > bytes {
-            Err(format!("more than {bytes} bytes of untracked files"))
-        } else if Instant::now() > deadline {
-            Err(format!(
-                "listing its untracked files took over {GIT_TIMEOUT:?}"
-            ))
-        } else {
-            continue;
-        };
+        if count > files {
+            break Some(format!("more than {files} untracked files"));
+        }
+        if size > bytes {
+            break Some(format!("more than {bytes} bytes of untracked files"));
+        }
+    };
+    if let Some(why) = passed {
         let _ = child.kill();
-        break;
+        let _ = child.wait();
+        return Err(why);
     }
     let status = child.wait().map_err(|e| format!("git ls-files: {e}"))?;
-    verdict?;
     status
         .success()
         .then_some(())
