@@ -30,6 +30,16 @@ The installed skill remains unchanged. Where it and this file differ, follow thi
 - **Shared docs.** A file that most tickets of a spec would edit, such as `README.md`, goes to one closing ticket blocked by the tickets it describes, so parallel implementers never meet in it.
 - **Behaviour docs.** A ticket that changes behaviour updates that area's doc under `docs/studio/behaviour/` (or `plugin.md`, `settings.md`) and names it in Touches, not `README.md`.
 - **Labels.** `studio` and `ready-for-agent`; `needs-triage` for a ticket that holds a choice of Daniel's.
+- **Publish.** Write each ticket's body to its own Markdown file in one scratchpad folder, with a manifest, `tickets.json`, beside them. Then run `cargo run --bin wayfinder-startup -- --publish <folder>` in place of `gh` calls by hand. The manifest names the spec and, for each ticket, its body file, title, labels and the files of the tickets that block it (`blocked_by` may be left out):
+
+  ```json
+  {"parent": 102, "tickets": [
+    {"file": "01-rail.md", "title": "Studio: ...", "labels": ["studio", "ready-for-agent"]},
+    {"file": "02-cards.md", "title": "Studio: ...", "labels": ["studio", "ready-for-agent"], "blocked_by": ["01-rail.md"]}
+  ]}
+  ```
+
+  The run first checks that the spec is open, every body for `## Reading` and `## Touches` with its **Files** and **Session** lines, every label against the repository, and every blocker for a file of the manifest and for cycles. Any problem stops it before an issue exists, naming the file. Then it creates the issues blockers first, links each to the spec as a sub-issue and adds its blocked-by edges (**Wayfinder tracker operations** below), and prints one row per ticket: its file, issue number and blockers. It records each write in `<folder>/published.json`, so after a failure, fix the cause and run it again: it does only what is missing.
 
 ## Spec and ticket constraints
 

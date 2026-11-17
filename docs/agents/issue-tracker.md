@@ -2,7 +2,7 @@
 
 Issues and specs for `danielrispler/plotkeeper` live as GitHub issues. Use the `gh` CLI for all operations. `gh` infers the repo from `git remote -v` when run inside a clone.
 
-This file covers lookups, claims and Wayfinder startup. To create, edit or resolve tickets, read `docs/agents/ticket-authoring.md`.
+This file covers lookups, claims and Wayfinder startup. To create, edit or resolve tickets, read `docs/agents/ticket-authoring.md`; it covers `wayfinder-startup --publish`, which creates a spec's tickets from a folder.
 
 ## Read and list
 
