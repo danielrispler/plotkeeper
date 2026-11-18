@@ -18,6 +18,7 @@ fn turn(store: &mut CardStore, id: &str, at: u64, body_only: bool) {
                     from: None,
                     added: Some(1),
                     removed: None,
+                    agent: None,
                 },
                 hunk: "+x\n".into(),
             }],

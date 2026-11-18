@@ -121,9 +121,13 @@ fn a_turns_files_equal_numstat_between_its_trees_for_what_its_agent_edited() {
         .clone()
         .unwrap();
     let paths: Vec<&str> = files.files.iter().map(|f| f.path.as_str()).collect();
-    assert_eq!(paths.len(), 3);
+    // b.rs is Daniel's hand edit, which counts as the turn's.
+    assert_eq!(paths.len(), 4);
     assert!(paths.contains(&"a.rs") && paths.contains(&"new.rs") && paths.contains(&"logo.png"));
-    assert_eq!(files.external, 1, "b.rs is Daniel's");
+    let daniels = files.files.iter().find(|f| f.path == "b.rs").unwrap();
+    assert_eq!(daniels.agent, None, "no call names b.rs");
+    let own = files.files.iter().find(|f| f.path == "a.rs").unwrap();
+    assert_eq!(own.agent.as_deref(), Some("claude"));
     let renamed = files.files.iter().find(|f| f.path == "new.rs").unwrap();
     assert_eq!(renamed.from.as_deref(), Some("old.rs"));
     let binary = files.files.iter().find(|f| f.path == "logo.png").unwrap();
@@ -353,15 +357,15 @@ fn a_workers_edits_in_its_own_worktree_count_in_its_turn_even_after_the_turn_end
         let paths: Vec<(String, String)> = (found.files.iter())
             .map(|f| (f.root.clone(), f.path.clone()))
             .collect();
-        (paths, found.external)
+        paths
     };
     let in_worker = |path: &str| (worker.clone(), path.to_owned());
-    assert_eq!(files(0), (vec![in_worker("a.rs"), in_worker("late.rs")], 0));
-    assert_eq!(files(1), (vec![], 0));
+    assert_eq!(files(0), vec![in_worker("a.rs"), in_worker("late.rs")]);
+    assert_eq!(files(1), vec![]);
 }
 
 #[test]
-fn a_workers_late_edit_in_the_sessions_worktree_is_its_turns_and_not_external_in_the_next() {
+fn a_workers_late_edit_in_the_sessions_worktree_is_its_turns_and_not_the_next() {
     let (_dir, root) = repo();
     let data = tempfile::tempdir().unwrap();
     let data = data.path();
@@ -415,8 +419,37 @@ fn a_workers_late_edit_in_the_sessions_worktree_is_its_turns_and_not_external_in
     let files = |turn: usize| {
         let found = turns[turn].files.clone().unwrap_or_default();
         let paths: Vec<String> = found.files.iter().map(|f| f.path.clone()).collect();
-        (paths, found.external)
+        paths
     };
-    assert_eq!(files(0), (vec!["late.rs".to_owned()], 0));
-    assert_eq!(files(1), (vec![], 0));
+    assert_eq!(files(0), vec!["late.rs".to_owned()]);
+    assert_eq!(files(1), Vec::<String>::new());
+}
+
+#[test]
+fn a_turn_whose_trees_name_a_removed_worktree_has_no_diff_for_it_and_none_of_the_main_checkout() {
+    let (_dir, root) = repo();
+    let removed = format!("{root}/worktrees/w1");
+    git(
+        Path::new(&root),
+        &["worktree", "add", "-q", "-b", "w1", &removed],
+    );
+    let start = tree(&removed);
+    fs::write(format!("{removed}/a.rs"), "fn a() {}\nfn more() {}\n").unwrap();
+    let end = tree(&removed);
+    git(
+        Path::new(&root),
+        &["worktree", "remove", "--force", &removed],
+    );
+    fs::write(format!("{root}/a.rs"), "fn main_side() {}\n").unwrap();
+    let ask = studio_core::TurnDiff {
+        session_id: SESSION.into(),
+        turn: 0,
+        ended: true,
+        trees: vec![studio_core::TurnTrees {
+            root: removed,
+            start,
+            end: Some(end),
+        }],
+    };
+    assert_eq!(turn_diffs(&ask), None);
 }

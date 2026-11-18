@@ -1,6 +1,6 @@
 // The evidence line (danielrispler/plotkeeper#113): under a turn's Headline, what the hooks and git recorded for the turn, with
 // no model in it. The top level counts the turn's files and each check's final result; a click opens it, in place, to the
-// files with their line counts, the external changes, and each check with its status. A failed check's row opens its exit code
+// files with their line counts, and each check with its status. A failed check's row opens its exit code
 // and the tail of its output. Opening changes only the nodes it opens: the open state is kept by key, so a redraw of the rail
 // draws the line open again.
 
@@ -12,7 +12,7 @@ import type { Capabilities, Check, Turn, TurnFile } from "./types.js";
 
 type Facts = Pick<Turn, "files" | "checks">;
 type Ended = { ended_at: Turn["ended_at"] };
-export type EvidenceRow = { kind: "file" | "external" | "check"; label: string; call?: string; agent?: string | null; file?: TurnFile };
+export type EvidenceRow = { kind: "file" | "check"; label: string; call?: string; agent?: string | null; file?: TurnFile };
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
@@ -33,12 +33,11 @@ export function evidenceLine({ files, checks }: Facts): string {
 export const hasEvidence = (turn: Facts, capabilities: Pick<Capabilities, "turn_trees">): boolean =>
   capabilities.turn_trees && (turn.files?.files.length ?? 0) + turn.checks.length > 0;
 
-// The opened list: each file, "+N external" for the other changes in the worktree, and each check with its status.
+// The opened list: each file with its agent, and each check with its status.
 export function evidenceRows({ files, checks }: Facts): EvidenceRow[] {
   const counts = (added: number | null, removed: number | null) => (added === null || removed === null ? "" : ` +${added} −${removed}`);
   return [
-    ...(files?.files ?? []).map((f): EvidenceRow => ({ kind: "file", label: `${f.from ? `${f.from} → ` : ""}${f.path}${counts(f.added, f.removed)}`, file: f })),
-    ...(files?.external ? [{ kind: "external" as const, label: `+${files.external} external` }] : []),
+    ...(files?.files ?? []).map((f): EvidenceRow => ({ kind: "file", label: `${f.from ? `${f.from} → ` : ""}${f.path}${counts(f.added, f.removed)}`, agent: f.agent, file: f })),
     ...checks.map((c): EvidenceRow => {
       const after = c.retries ? ` after ${`${c.retries} ${c.retries === 1 ? "retry" : "retries"}`}` : "";
       const last = c.runs.at(-1);
@@ -161,7 +160,7 @@ export function fileRow(session: string, index: number, row: EvidenceRow, scope 
   });
   button.classList.add("evidence-fail");
   button.setAttribute("aria-expanded", String(openHunks.has(openKey)));
-  button.append(text("span", row.label));
+  button.append(text("span", row.label), ...(row.agent ? [text("span", row.agent, "evidence-agent")] : []));
   show();
   if (openHunks.has(openKey)) fetch();
   item.append(button, edit, pre, more, askAnchor(session, { kind: "file", turn: index, root: file.root, path: file.path, from: file.from }, `the file ${file.path}`, scope));
@@ -187,7 +186,7 @@ export function evidenceElement(session: string, index: number, turn: Facts & En
   const list = document.createElement("ul");
   list.className = "evidence-rows";
   list.append(
-    ...evidenceRows(facts).map((row) => (row.kind === "check" ? checkRow(session, row) : row.file ? fileRow(session, index, row, "", turn.ended_at != null) : text("li", row.label, "external"))),
+    ...evidenceRows(facts).map((row) => (row.kind === "check" ? checkRow(session, row) : fileRow(session, index, row, "", turn.ended_at != null))),
     ...(facts.files?.files.length ? [fullDiffRow(session, index)] : []),
   );
   const show = () => (openLines.has(key) ? list.removeAttribute("hidden") : list.setAttribute("hidden", ""));

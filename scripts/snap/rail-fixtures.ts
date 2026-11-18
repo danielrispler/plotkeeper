@@ -98,7 +98,7 @@ const check = (command: string, passed: boolean, startedAgo: number, tookMs: num
   command, passed, started_at: Date.now() - startedAgo, ended_at: Date.now() - startedAgo + tookMs, typical_ms: tookMs, turn,
 });
 
-const file = (path: string, added: number, removed: number): TurnFile => ({ root: cwd, path, from: null, added, removed });
+const file = (path: string, added: number, removed: number, agent: string | null = null): TurnFile => ({ root: cwd, path, from: null, added, removed, agent });
 const run = (status: CheckStatus, call: string, exit_code: number) => ({ command: "cargo", status, exit_code, call, agent: null });
 
 const helper = (id: string, name: string, asked: string, type: string, result: string, turn: number, ago: number, running = false): Subagent => ({
@@ -133,7 +133,7 @@ const session = (state: SessionState, { running = false, question = false } = {}
     id: i < 4 || ended ? `t${i}` : null,
     message: "Done.",
     // The newest turns changed files (#113); the second turn ends with a failed check, which its folded line marks (#117).
-    files: i >= 3 ? { files: [file("ui/style.css", 14, 3), file("ui/list.ts", 22, 9), file("ui/tests/rows.test.mjs", 6, 6)], external: i === 4 ? 2 : 0 } : null,
+    files: i >= 3 ? { files: [file("ui/style.css", 14, 3, "claude"), file("ui/list.ts", 22, 9, "claude"), file("ui/tests/rows.test.mjs", 6, 6)] } : null,
     checks: i === 4
       ? [
           { suite: "cargo clippy", status: "passed", retries: 1, runs: [run("failed", "k1", 101), run("passed", "k2", 0)] },
@@ -250,7 +250,7 @@ const build = (state: SessionState, { ask = null as Ask | null, answered = false
     ...common,
     sessions,
     selected: { session: s, agent: null },
-    cards: { brief: null, goal: withBrief ? goal : null, answers: withBrief ? answers : [], open: withBrief ? open : [], design: withBrief ? design.map((line) => ({ ...line, cite: stored.request.id })) : [], recent: [], older: [stored], decisions: withBrief ? decisions : [] },
+    cards: { brief: null, goal: withBrief ? goal : null, answers: withBrief ? answers : [], open: withBrief ? open : [], design: withBrief ? design.map((line) => ({ ...line, cite: stored.request.id })) : [], recent: [], older: [stored], workers: [], decisions: withBrief ? decisions : [] },
     watch: ask,
     ask_facts: {
       sections: [
@@ -331,6 +331,10 @@ const evidenceScript = `
   if (!toggle) log("snap:fail there is no evidence line");
   toggle.click();
   await wait();
+  // #207: every file counts, an agent is named only where a call or a worker names it, and nothing is "external".
+  const shown = toggle.parentElement.querySelectorAll(".evidence-rows li");
+  if ([...shown].some((li) => /external/.test(li.textContent))) log("snap:fail the opened line still has an external row");
+  if (toggle.parentElement.querySelectorAll(".evidence-file .evidence-agent").length !== 2) log("snap:fail the files' agents are not named");
   const row = document.querySelector(".evidence-check .evidence-fail");
   if (!row) log("snap:fail the opened line has no failed check");
   row.click();
@@ -455,7 +459,34 @@ const unseenOpenScript = `
   if (document.querySelector(".turn.past .turn-line[aria-expanded=true]")) log("snap:fail the turn unfolded");
   row.scrollIntoView({ block: "start" });`;
 
+// #212: a worker's card sits in the turn its wake-up opened ("worker w1 returned", the third turn): folded it shows a title row, opened
+// the card is in that turn's block, and no other turn holds it.
+const workerCard = (): StoredCard => {
+  const stored = card(`w1@${Date.now() - 100 * MIN}`, false);
+  return { ...stored, request: { ...stored.request, agent: "w1" }, card: { ...stored.card, summary: "The worker made the fold toggle a sibling of the glyph." } };
+};
+const workerCardFixture = (snapScript: string) => {
+  const fixture = build("idle");
+  return { ...fixture, cards: { ...fixture.cards, older: [], workers: [{ card: workerCard(), turn: 2 }] }, snapScript };
+};
+const workerRowScript = `
+  const lines = [...document.querySelectorAll(".turn.past")];
+  const rows = lines.map((t) => t.querySelectorAll(".unseen-card").length);
+  if (JSON.stringify(rows) !== "[0,1,0,0]") return log("snap:fail the worker's row should be under the hand-back turn only: " + rows);
+  lines[1].scrollIntoView({ block: "center" });
+  log("hand-back turn row: " + lines[1].querySelector(".unseen-card summary").textContent);`;
+const workerOpenScript = `
+  const lines = [...document.querySelectorAll(".turn.past")];
+  lines[1].querySelector(".turn-line").click();
+  const open = [...document.querySelectorAll(".turn.past")][1];
+  if (!open.querySelector("article.card")) return log("snap:fail the worker's card is not in the hand-back turn's block");
+  if (document.querySelectorAll("article.card").length !== 1) log("snap:fail the card shows more than once");
+  if (!open.textContent.includes("worker w1 returned")) log("snap:fail the open turn is not the hand-back");
+  open.scrollIntoView({ block: "start" });`;
+
 export const railFixtures = {
+  railWorkerCardRow: () => workerCardFixture(workerRowScript),
+  railWorkerCard: () => workerCardFixture(workerOpenScript),
   railUnseenCard: () => ({ ...build("idle"), snapScript: unseenScript }),
   railUnseenCardOpen: () => ({ ...build("idle"), snapScript: unseenOpenScript }),
   readmeTurn,

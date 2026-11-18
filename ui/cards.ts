@@ -344,7 +344,7 @@ export function showCards(cards: SessionCards) {
   studio.cards = cards;
   showBrief(cards);
   showDecisions(cards.decisions);
-  const ids = new Set([...cards.recent, ...cards.older].map(({ request }) => request.id));
+  const ids = new Set([...cards.recent, ...cards.older, ...cards.workers.map(({ card }) => card)].map(({ request }) => request.id));
   for (const id of drawn.keys()) {
     if (ids.has(id)) continue;
     drawn.delete(id);

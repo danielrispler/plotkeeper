@@ -705,6 +705,7 @@ fn quiz_with_hunk(path: &std::path::Path) -> CardStore {
                     from: None,
                     added: Some(1),
                     removed: Some(1),
+                    agent: None,
                 },
                 hunk: "@@ -1 +1 @@\n-open\n+frozen\n".into(),
             }],
@@ -934,4 +935,96 @@ fn a_card_past_the_cap_never_replaces_a_body_only_turns_quiz() {
         store.place_quiz(true, START + 10),
         Place::Replace("a".into())
     );
+}
+
+/// danielrispler/plotkeeper#212: session `s1`, whose first turn spawns worker `w1` and whose wake-up for it opens its third.
+fn session_with_a_worker() -> Studio {
+    let event = |name: &str, at: u64, prompt: &str, fields: serde_json::Value| {
+        let mut event = serde_json::json!({"session_id": "s1", "hook_event_name": name,
+            "cwd": "/w", "prompt_id": prompt, "studio_received_ms": at});
+        event
+            .as_object_mut()
+            .unwrap()
+            .extend(fields.as_object().unwrap().clone());
+        event.to_string()
+    };
+    let mut studio = Studio::default();
+    studio.apply(&event(
+        "UserPromptSubmit",
+        1,
+        "p1",
+        serde_json::json!({"prompt": "Do it"}),
+    ));
+    studio.apply(&event("PostToolUse", 2, "p1", serde_json::json!({"tool_name": "Agent",
+        "tool_use_id": "t1", "tool_input": {}, "tool_response": {"agentId": "w1", "status": "async_launched"}})));
+    studio.apply(&event(
+        "SubagentStop",
+        10,
+        "p1",
+        serde_json::json!({"agent_id": "w1"}),
+    ));
+    studio.apply(&event(
+        "Stop",
+        11,
+        "p1",
+        serde_json::json!({"background_tasks": []}),
+    ));
+    studio.apply(&event(
+        "UserPromptSubmit",
+        12,
+        "p2",
+        serde_json::json!({"prompt": "Meanwhile"}),
+    ));
+    studio.apply(&event(
+        "Stop",
+        14,
+        "p2",
+        serde_json::json!({"background_tasks": []}),
+    ));
+    let woken =
+        "<task-notification><task-id>w1</task-id><status>completed</status></task-notification>";
+    studio.apply(&event(
+        "UserPromptSubmit",
+        20,
+        "p3",
+        serde_json::json!({"prompt": woken}),
+    ));
+    studio
+}
+
+#[test]
+fn a_sessions_rail_cards_include_its_workers_each_with_its_turn_and_the_workers_view_is_unchanged()
+{
+    let studio = session_with_a_worker();
+    let data = tempfile::tempdir().unwrap();
+    let mut store = CardStore::open(data.path().join("cards.json")).unwrap();
+    let request = |session: &str, agent: Option<&str>, at: u64| CardRequest {
+        session_id: session.into(),
+        id: format!("{}@{at}", agent.unwrap_or(session)),
+        agent: agent.map(Into::into),
+        change: Some("--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n".into()),
+        ..CardRequest::default()
+    };
+    for r in [
+        request("s1", None, 5),
+        request("s1", Some("w1"), 9),
+        request("s1", Some("w1"), 11),
+        request("other", Some("w9"), 12),
+    ] {
+        let card = card(&r);
+        store.add(r, card, 1_761_743_990_000).unwrap();
+    }
+
+    let rail = store.rail_cards(studio.session("s1").unwrap(), 1_761_743_990_000);
+
+    let placed: Vec<(&str, Option<usize>)> = rail
+        .workers
+        .iter()
+        .map(|w| (w.card.request.id.as_str(), w.turn))
+        .collect();
+    assert_eq!(placed, [("w1@9", Some(0)), ("w1@11", Some(2))]);
+    assert_eq!(ids(&rail.recent), ["s1@5"]);
+    let own = store.session_cards("w1", 1_761_743_990_000);
+    assert_eq!(ids(&own.recent), ["w1@9", "w1@11"]);
+    assert!(own.workers.is_empty());
 }
