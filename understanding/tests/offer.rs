@@ -320,7 +320,42 @@ fn turn_facts(files: &[(&str, u64)], check: Option<CheckStatus>) -> TurnFacts {
     TurnFacts {
         facts: facts(files, check),
         merge: false,
+        workers: Vec::new(),
     }
+}
+
+/// The turn of `turn_facts`, with its files in `/w` the home of a worker.
+fn with_worker(files: &[(&str, u64)], own: &[(&str, u64)]) -> TurnFacts {
+    let mut turn = turn_facts(files, None);
+    let mut worker = facts(own, None).files;
+    worker.iter_mut().for_each(|f| f.file.root = "/w".into());
+    turn.facts.files.extend(worker);
+    turn.workers = vec!["/w".into()];
+    turn
+}
+
+#[test]
+fn a_turn_is_offered_what_changed_in_its_own_worktrees_and_not_its_workers() {
+    let mut request = SummaryRequest {
+        wanted: false,
+        ..turn_request(1)
+    };
+    let only = with_worker(&[], &[("w.rs", 200)]);
+    let settled = settle(&mut request, &only, &[]);
+    assert_eq!(settled.decision.offer, Offer::Nothing);
+    assert_eq!(settled.decision.inputs.logic_lines, 0);
+    // The evidence line keeps the worker's file.
+    assert_eq!(only.facts.files.len(), 1);
+
+    let both = with_worker(&[("a.rs", 30)], &[("w.rs", 200)]);
+    let mut request = SummaryRequest {
+        wanted: false,
+        ..turn_request(2)
+    };
+    let settled = settle(&mut request, &both, &[]);
+    assert_eq!(settled.decision.offer, Offer::Card);
+    assert_eq!(settled.decision.inputs.logic_lines, 30);
+    assert_eq!(both.facts.files.len(), 2);
 }
 
 fn diff_of(lines: usize) -> String {
