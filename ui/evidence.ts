@@ -12,17 +12,20 @@ import type { Capabilities, Check, Turn, TurnFile } from "./types.js";
 
 type Facts = Pick<Turn, "files" | "checks">;
 type Ended = { ended_at: Turn["ended_at"] };
-export type EvidenceRow = { kind: "file" | "check"; label: string; call?: string; agent?: string | null; file?: TurnFile };
+export type EvidenceRow = { kind: "file" | "check" | "merged"; label: string; call?: string; agent?: string | null; file?: TurnFile };
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
-// The top level: "3 files · 2 checks passed". A check's status is its last run's, so only one that ended failed is named;
+const mergedLabel = (n: number) => `+${n} merged`;
+
+// The top level: "3 files · +2 merged · 2 checks passed". A check's status is its last run's, so only one that ended failed is named;
 // one that only "ran" is counted apart.
 export function evidenceLine({ files, checks }: Facts): string {
   const count = (status: Check["status"]) => checks.filter((c) => c.status === status).length;
   const [passed, ran] = [count("passed"), count("ran")];
   return [
     ...(files?.files.length ? [plural(files.files.length, "file")] : []),
+    ...(files?.merged ? [mergedLabel(files.merged)] : []),
     ...(passed ? [`${plural(passed, "check")} passed`] : []),
     ...(ran ? [`${plural(ran, "check")} ran`] : []),
     ...checks.filter((c) => c.status === "failed").map((c) => `✗ ${c.suite} failed`),
@@ -31,13 +34,14 @@ export function evidenceLine({ files, checks }: Facts): string {
 
 // Whether the turn has an evidence line: its agent reports trees (agy's does not), and it has files or checks.
 export const hasEvidence = (turn: Facts, capabilities: Pick<Capabilities, "turn_trees">): boolean =>
-  capabilities.turn_trees && (turn.files?.files.length ?? 0) + turn.checks.length > 0;
+  capabilities.turn_trees && (turn.files?.files.length ?? 0) + (turn.files?.merged ?? 0) + turn.checks.length > 0;
 
 // The opened list: each file with its agent, and each check with its status.
 export function evidenceRows({ files, checks }: Facts): EvidenceRow[] {
   const counts = (added: number | null, removed: number | null) => (added === null || removed === null ? "" : ` +${added} −${removed}`);
   return [
     ...(files?.files ?? []).map((f): EvidenceRow => ({ kind: "file", label: `${f.from ? `${f.from} → ` : ""}${f.path}${counts(f.added, f.removed)}`, agent: f.agent, file: f })),
+    ...(files?.merged ? [{ kind: "merged", label: mergedLabel(files.merged) } as EvidenceRow] : []),
     ...checks.map((c): EvidenceRow => {
       const after = c.retries ? ` after ${`${c.retries} ${c.retries === 1 ? "retry" : "retries"}`}` : "";
       const last = c.runs.at(-1);
@@ -167,6 +171,11 @@ export function fileRow(session: string, index: number, row: EvidenceRow, scope 
   return item;
 }
 
+// The merged files' row: a count, with no hunk, as they are not the turn's change.
+function mergedRow(row: EvidenceRow): HTMLElement {
+  return text("li", row.label, "evidence-merged");
+}
+
 // "Open full diff": the turn's whole diff in the terminal column (`diff.ts`).
 function fullDiffRow(session: string, index: number): HTMLElement {
   const item = document.createElement("li");
@@ -186,7 +195,9 @@ export function evidenceElement(session: string, index: number, turn: Facts & En
   const list = document.createElement("ul");
   list.className = "evidence-rows";
   list.append(
-    ...evidenceRows(facts).map((row) => (row.kind === "check" ? checkRow(session, row) : fileRow(session, index, row, "", turn.ended_at != null))),
+    ...evidenceRows(facts).map((row) =>
+      row.kind === "check" ? checkRow(session, row) : row.kind === "merged" ? mergedRow(row) : fileRow(session, index, row, "", turn.ended_at != null),
+    ),
     ...(facts.files?.files.length ? [fullDiffRow(session, index)] : []),
   );
   const show = () => (openLines.has(key) ? list.removeAttribute("hidden") : list.setAttribute("hidden", ""));

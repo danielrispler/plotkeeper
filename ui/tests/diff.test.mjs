@@ -58,3 +58,13 @@ test("a turn with no files says so, and draws no external line", () => {
   assert.match(place.text, /changed no files/);
   assert.equal(place.find("summary").length, 0);
 });
+
+test("the head counts the files and shows \"+N merged\" for the files a merge brought in", () => {
+  const place = new El("div");
+  const merged = { files: { files: [file("a.rs", 1, 0)], merged: 2 }, checks: [] };
+  drawDiff(place, { id: "s", turns: [merged] }, 0, () => {});
+  assert.match(place.text, /1 file · \+2 merged/);
+  const plain = new El("div");
+  drawDiff(plain, { id: "s", turns: [turn([file("a.rs", 1, 0)])] }, 0, () => {});
+  assert.doesNotMatch(plain.text, /merged/);
+});

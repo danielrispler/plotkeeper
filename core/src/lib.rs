@@ -3552,6 +3552,9 @@ impl Studio {
                 continue;
             }
             let running = session.open_roots();
+            let windows: Vec<(u64, u64)> = (0..session.turns.len())
+                .map(|index| session.trees_window(index))
+                .collect();
             for (index, turn) in session.turns.iter_mut().enumerate() {
                 let ended = turn.ended_at.is_some();
                 let open = |root: &String| !ended || running.contains(&(index, root.clone()));
@@ -3592,6 +3595,7 @@ impl Studio {
                         turn: index,
                         ended: last,
                         trees,
+                        window: windows[index],
                     };
                     asks.push((turn.ended_at.unwrap_or(now), ask));
                 }
@@ -3639,6 +3643,7 @@ impl Studio {
             turn: index,
             ended: true,
             trees,
+            window: session.trees_window(index),
         })
     }
 
@@ -3738,7 +3743,7 @@ impl Studio {
                 None => worker().map(|id| name(&Some(id))),
             }
         };
-        TurnFiles::of(diffs, &others, agent)
+        TurnFiles::of(diffs, &others, &ours, agent)
     }
 
     /// Applies, after the replay, what the live app learned before a restart (danielrispler/Falinks#434, decisions 37 and
@@ -4454,9 +4459,14 @@ impl Studio {
 /// Whether a shell command merges: `git merge` or `gh pr merge`, alone or in a chain.
 fn merges(command: &str) -> bool {
     let parts = command.split(['&', ';', '|', '\n']);
+    // The word ends there: `git merge-base` is no merge.
+    let word = |c: &str, start: &str| {
+        let rest = c.strip_prefix(start);
+        rest.is_some_and(|r| r.is_empty() || r.starts_with(char::is_whitespace))
+    };
     parts
         .map(str::trim)
-        .any(|c| c.starts_with("git merge") || c.starts_with("gh pr merge"))
+        .any(|c| word(c, "git merge") || word(c, "gh pr merge"))
 }
 
 /// The id of `owner`'s card written at `at`, a worker's or else a session's (`CardRequest::id`).

@@ -450,6 +450,169 @@ fn a_turn_whose_trees_name_a_removed_worktree_has_no_diff_for_it_and_none_of_the
             start,
             end: Some(end),
         }],
+        window: (0, u64::MAX),
     };
     assert_eq!(turn_diffs(&ask), None);
+}
+
+/// `git` run at second `secs` of the epoch, which dates its reflog entries.
+fn git_at(repo: &Path, secs: u64, args: &[&str]) -> String {
+    let date = format!("{secs} +0000");
+    let output = Command::new("git")
+        .args([
+            "-c",
+            "user.name=Studio",
+            "-c",
+            "user.email=studio@example.com",
+        ])
+        .args(args)
+        .current_dir(repo)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_COMMITTER_DATE", &date)
+        .env("GIT_AUTHOR_DATE", &date)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "git {args:?}");
+    String::from_utf8(output.stdout).unwrap().trim_end().into()
+}
+
+/// A second inside the turns of this file, which run from `AT` to `AT + 9_000` ms.
+const INSIDE: u64 = AT / 1000 + 3;
+
+/// A repository with branch `other`, one commit ahead with `p.rs` and `q.rs`, and `main` one commit ahead with
+/// `m.rs`; the branch `main` is checked out. Its root and the name of that branch.
+fn diverged() -> (tempfile::TempDir, String, String) {
+    let (dir, root) = repo();
+    let main = git(dir.path(), &["branch", "--show-current"]);
+    git(dir.path(), &["checkout", "-qb", "other"]);
+    fs::write(dir.path().join("p.rs"), "fn p() {}\n").unwrap();
+    fs::write(dir.path().join("q.rs"), "fn q() {}\n").unwrap();
+    git(dir.path(), &["add", "."]);
+    git(dir.path(), &["commit", "-qm", "other"]);
+    git(dir.path(), &["checkout", "-q", &main]);
+    fs::write(dir.path().join("m.rs"), "fn m() {}\n").unwrap();
+    git(dir.path(), &["add", "."]);
+    git(dir.path(), &["commit", "-qm", "main"]);
+    (dir, root, main)
+}
+
+/// The paths a move brought in, among a turn that ran `mv` in `root` at second `secs`.
+fn moved_by(root: &str, secs: u64, mv: impl Fn(&Path, u64)) -> Vec<String> {
+    let start = tree(root);
+    mv(Path::new(root), secs);
+    let end = tree(root);
+    let ask = studio_core::TurnDiff {
+        session_id: SESSION.into(),
+        turn: 0,
+        ended: true,
+        trees: vec![studio_core::TurnTrees {
+            root: root.into(),
+            start,
+            end: Some(end),
+        }],
+        window: (AT, AT + 9_000),
+    };
+    let mut moved = turn_diffs(&ask).unwrap().remove(0).moved;
+    moved.sort();
+    moved
+}
+
+/// A move of `HEAD` made in a worktree at a second.
+type Move = dyn Fn(&Path, u64);
+
+#[test]
+fn a_merge_a_pull_a_rebase_a_checkout_and_a_reset_each_count_as_a_move() {
+    let merge = |dir: &Path, at| {
+        git_at(dir, at, &["merge", "-q", "--no-ff", "-m", "merge", "other"]);
+    };
+    let pull = |dir: &Path, at| {
+        git_at(
+            dir,
+            at,
+            &["pull", "-q", "--no-rebase", "--no-edit", ".", "other"],
+        );
+    };
+    let rebase = |dir: &Path, at| {
+        git_at(dir, at, &["rebase", "-q", "other"]);
+    };
+    let checkout = |dir: &Path, at| {
+        git_at(dir, at, &["checkout", "-q", "other"]);
+    };
+    let reset = |dir: &Path, at| {
+        git_at(dir, at, &["reset", "-q", "--hard", "other"]);
+    };
+    let moves: [(&str, &Move); 5] = [
+        ("merge", &merge),
+        ("pull", &pull),
+        ("rebase", &rebase),
+        ("checkout", &checkout),
+        ("reset", &reset),
+    ];
+    for (name, mv) in moves {
+        let (_dir, root, _) = diverged();
+        let moved = moved_by(&root, INSIDE, mv);
+        assert!(
+            moved.iter().any(|p| p == "p.rs") && moved.iter().any(|p| p == "q.rs"),
+            "{name}: {moved:?}"
+        );
+    }
+}
+
+#[test]
+fn the_agents_own_commit_and_a_move_before_the_turn_are_no_move_of_it() {
+    let (_dir, root, _) = diverged();
+    let own = |dir: &Path, at| {
+        fs::write(dir.join("a.rs"), "fn a() {}\nfn more() {}\n").unwrap();
+        git_at(dir, at, &["commit", "-qam", "own"]);
+    };
+    assert_eq!(moved_by(&root, INSIDE, own), Vec::<String>::new());
+    // A merge a minute before the turn began is not the turn's.
+    let (_dir, root, _) = diverged();
+    let before = |dir: &Path, at| {
+        git_at(dir, at, &["merge", "-q", "--no-ff", "-m", "merge", "other"]);
+    };
+    assert_eq!(
+        moved_by(&root, AT / 1000 - 60, before),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn a_turn_that_merges_a_branch_with_two_files_and_edits_a_third_has_one_file_and_two_merged() {
+    let (_dir, root, _) = diverged();
+    let start = tree(&root);
+    git_at(
+        Path::new(&root),
+        INSIDE,
+        &["merge", "-q", "--no-ff", "-m", "merge", "other"],
+    );
+    fs::write(format!("{root}/a.rs"), "fn a() {}\nfn a2() {}\n").unwrap();
+    let end = tree(&root);
+    let lines = [
+        line(
+            "UserPromptSubmit",
+            0,
+            json!({ "prompt": "go", "studio_turn_start": { &root: &start } }),
+        ),
+        line(
+            "PostToolUse",
+            1_000,
+            json!({
+                "tool_name": "Edit", "tool_input": { "file_path": format!("{root}/a.rs") },
+                "tool_use_id": "e1", "tool_response": {},
+            }),
+        ),
+        line("Stop", 9_000, json!({ "studio_turn_end": { &root: &end } })),
+    ];
+    let mut studio = Studio::replayed(lines);
+    let asks = studio.turn_diffs(AT + 20_000, 10);
+    studio.set_turn_files(&asks[0], turn_diffs(&asks[0]));
+    let files = studio.session(SESSION).unwrap().turns[0]
+        .files
+        .clone()
+        .unwrap();
+    let paths: Vec<&str> = files.files.iter().map(|f| f.path.as_str()).collect();
+    assert_eq!(paths, ["a.rs"]);
+    assert_eq!(files.merged, 2);
 }

@@ -78,7 +78,7 @@ export function drawDiff(place: HTMLElement, session: Pick<Session, "id" | "turn
   const head = document.createElement("header");
   head.append(
     text("span", "Full diff", "log-title"),
-    text("span", `${files.length} ${files.length === 1 ? "file" : "files"}`, "log-type"),
+    text("span", `${files.length} ${files.length === 1 ? "file" : "files"}${turn?.files?.merged ? ` · +${turn.files.merged} merged` : ""}`, "log-type"),
     pressable(text("button", "Terminal"), false, toTerminal),
   );
   place.replaceChildren(head, ...(files.length ? files.map((f) => fileFold(session.id, index, f)) : [text("p", "This turn changed no files.", "empty")]));

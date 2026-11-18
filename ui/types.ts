@@ -106,9 +106,10 @@ export type Turn = {
 // a rename's old path, its lines added and removed (null for a binary file), and the name of the agent whose call
 // names it or whose worktree holds it (null when none does, as for Daniel's own edit).
 export type TurnFile = { root: string; path: string; from: string | null; added: number | null; removed: number | null; agent: string | null };
-// What a turn changed: every file that differs between its trees, but those another call names.
+// What a turn changed: every file that differs between its trees, but those another call names, and the files
+// a move of `HEAD` (a merge, a pull, a rebase, a checkout) brought in, which are only counted in `merged`.
 // `null` while the trees are not yet diffed, and for an agent that reports no trees.
-export type TurnFiles = { files: TurnFile[] };
+export type TurnFiles = { files: TurnFile[]; merged: number };
 // What the session's agent adapter reports, which decides what its view shows (danielrispler/plotkeeper#43, decision 4);
 // `agent` is its mark's name, empty for a status-only row.
 export type Capabilities = {

@@ -33,6 +33,9 @@ pub struct TurnDiff {
     /// spawned runs on in one of its worktrees.
     pub ended: bool,
     pub trees: Vec<TurnTrees>,
+    /// The span of time its trees run in, in milliseconds (`u64::MAX` while it runs): the moves of
+    /// `HEAD` in it are the shell's to find.
+    pub window: (u64, u64),
 }
 
 /// One line of `git diff --numstat -M` between two trees.
@@ -48,10 +51,13 @@ pub struct Numstat {
 }
 
 /// The numstat of one worktree, as the shell read it.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct RootDiff {
     pub root: String,
     pub files: Vec<Numstat>,
+    /// The paths a move of `HEAD` during the turn changed, other than the agent's own commits: a
+    /// merge, a pull, a rebase, a checkout or a reset brought them in.
+    pub moved: Vec<String>,
 }
 
 /// A file a turn changed.
@@ -75,6 +81,10 @@ pub struct TurnFile {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct TurnFiles {
     pub files: Vec<TurnFile>,
+    /// How many files that differ were brought in by a move of `HEAD` and no call of the turn
+    /// names: merged work, not the turn's change.
+    #[serde(default)]
+    pub merged: usize,
 }
 
 /// Whether the call of `row` names the file at `path` from worktree `root`: an edit of its
@@ -93,10 +103,12 @@ pub(crate) fn names(row: &Row, root: &str, path: &str) -> bool {
 
 impl TurnFiles {
     /// The files of `diffs` but those `others` name, each with the agent that `agent` finds for it
-    /// (its calls, else its worktree's worker).
+    /// (its calls, else its worktree's worker). A file a move of `HEAD` brought in, which no call
+    /// of `ours` names, is counted in `merged` instead.
     pub(crate) fn of(
         diffs: Vec<RootDiff>,
         others: &[&Row],
+        ours: &[&Row],
         agent: impl Fn(&RootDiff, &Numstat) -> Option<String>,
     ) -> TurnFiles {
         let mut found = TurnFiles::default();
@@ -104,16 +116,25 @@ impl TurnFiles {
             for file in &diff.files {
                 let named = |path: &str| others.iter().any(|row| names(row, &diff.root, path));
                 let taken = named(&file.path) || file.from.as_deref().is_some_and(named);
-                if !taken {
-                    found.files.push(TurnFile {
-                        root: diff.root.clone(),
-                        path: file.path.clone(),
-                        from: file.from.clone(),
-                        added: file.added,
-                        removed: file.removed,
-                        agent: agent(&diff, file),
-                    });
+                if taken {
+                    continue;
                 }
+                let moved = |path: &str| diff.moved.iter().any(|m| m == path);
+                let called = |path: &str| ours.iter().any(|row| names(row, &diff.root, path));
+                let brought = moved(&file.path) || file.from.as_deref().is_some_and(moved);
+                let ours = called(&file.path) || file.from.as_deref().is_some_and(called);
+                if brought && !ours {
+                    found.merged += 1;
+                    continue;
+                }
+                found.files.push(TurnFile {
+                    root: diff.root.clone(),
+                    path: file.path.clone(),
+                    from: file.from.clone(),
+                    added: file.added,
+                    removed: file.removed,
+                    agent: agent(&diff, file),
+                });
             }
         }
         found

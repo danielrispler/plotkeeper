@@ -8,8 +8,8 @@
 //!   are loose, unreferenced objects, which `git gc` prunes after two weeks (at once with
 //!   `--prune=now`); a ref keeps the tree and every blob it holds, so a turn's hunks stay readable.
 
-use crate::fingerprint::git;
-use std::path::Path;
+use crate::fingerprint::{git, is_own, names, reflog};
+use std::{fs, path::Path};
 use studio_core::{Facts, Numstat, RootDiff, TurnDiff};
 
 /// The refs' namespace.
@@ -182,13 +182,47 @@ pub fn turn_diffs(ask: &TurnDiff) -> Option<Vec<RootDiff>> {
                 }
             }
             let files = numstat(root, &trees.start, &end)?;
+            let moved = moved(root, ask.window);
             Some(RootDiff {
                 root: trees.root.clone(),
                 files,
+                moved,
             })
         })
         .collect();
     (!diffs.is_empty()).then_some(diffs)
+}
+
+/// The paths that moves of `HEAD` in the worktree at `root` changed within `window`, in
+/// milliseconds: a merge, a pull, a rebase, a checkout or a reset brought them in, and the agent's
+/// own commits did not. The reflog dates each move (danielrispler/plotkeeper#208).
+pub fn moved(root: &Path, window: (u64, u64)) -> Vec<String> {
+    let log = reflog(root).and_then(|log| fs::read(log).ok());
+    let log = String::from_utf8_lossy(log.as_deref().unwrap_or_default()).into_owned();
+    let (since, until) = (window.0 / 1000, window.1 / 1000);
+    let mut paths = Vec::new();
+    for line in log.lines() {
+        // `old new Name <email> seconds zone TAB subject`
+        let Some((who, subject)) = line.split_once('\t') else {
+            continue;
+        };
+        let mut parts = who.rsplit(' ');
+        let at = parts.nth(1).and_then(|secs| secs.parse::<u64>().ok());
+        let mut shas = who.split(' ');
+        let (Some(old), Some(new), Some(at)) = (shas.next(), shas.next(), at) else {
+            continue;
+        };
+        let unborn = old.bytes().all(|byte| byte == b'0');
+        if is_own(subject) || unborn || !(since..=until).contains(&at) {
+            continue;
+        }
+        for path in names(root, Some(old), new) {
+            if !paths.contains(&path) {
+                paths.push(path);
+            }
+        }
+    }
+    paths
 }
 
 /// Fills the hunk of each file in `facts` from the trees `ask` names, for the turn writer.
