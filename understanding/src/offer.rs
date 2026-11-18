@@ -1,8 +1,13 @@
 //! What a turn gets for a Quiz (danielrispler/plotkeeper#119): a card with its Quiz, a lone Quiz, or
 //! nothing, by the size of its change; the rules are in `docs/studio/question-rules.md`.
 
+use crate::{CardStore, CardWriter, Place, SummarySetup, TurnSummary, write_stop, write_summary};
+use serde::Serialize;
 use std::collections::HashMap;
-use studio_core::{CheckStatus, Facts};
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use studio_core::{CardRequest, CheckStatus, Facts, Session, SummaryRequest};
 
 /// Changed lines, in logic files, from which a turn gets a card.
 const CARD_LINES: u64 = 25;
@@ -12,7 +17,8 @@ const CARD_FILES: usize = 2;
 const QUIZ_LINES: u64 = 8;
 
 /// What a turn gets.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Offer {
     Card,
     Quiz,
@@ -44,9 +50,14 @@ impl Shape {
     /// be read counts all its lines as non-trivial. A turn with no files in `facts` reads `diff`,
     /// the change of its card request, which an agent that reports no trees leaves.
     pub fn of(facts: &Facts, diff: &str, merge: bool) -> Shape {
+        Shape::read(facts, of_diff(diff), merge)
+    }
+
+    /// As `of`, with the files of the card's change already read.
+    fn read(facts: &Facts, change: Vec<Changed>, merge: bool) -> Shape {
         let failed = facts.checks.iter().any(|c| c.status == CheckStatus::Failed);
         let files = match facts.files.is_empty() {
-            true => of_diff(diff),
+            true => change,
             false => facts
                 .files
                 .iter()
@@ -88,6 +99,254 @@ impl Shape {
             false => Offer::Nothing,
         }
     }
+}
+
+/// What a decision is about.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OfferKind {
+    Turn,
+    Worker,
+    LateChange,
+}
+
+/// What the hooks and git recorded of a turn, as the offer reads it: the one input both paths share.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TurnFacts {
+    pub facts: Facts,
+    /// The turn ran `git merge` or merged a pull request.
+    pub merge: bool,
+}
+
+/// The table's inputs, as the record keeps them.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct Inputs {
+    pub logic_lines: u64,
+    pub logic_files: usize,
+    pub non_trivial: u64,
+    pub failed: bool,
+    pub merge: bool,
+    pub test_run: bool,
+    pub docs: bool,
+}
+
+/// What a change is offered, with the inputs and the reason for nothing.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Decision {
+    pub kind: OfferKind,
+    pub offer: Offer,
+    pub inputs: Inputs,
+    pub reason: Option<&'static str>,
+}
+
+/// The one function that decides an offer, by the table (danielrispler/plotkeeper#119) read from `turn`'s
+/// files, or from `change`, the files of the card's own diff, where `turn` has none: an agent that
+/// reports no trees, and a worker's card. A worker's card, and a subagent's late change, must pass
+/// the table's first row, and get no lone Quiz, since neither has a summary.
+pub fn decide(kind: OfferKind, turn: &TurnFacts, change: &[Changed]) -> Decision {
+    let shape = Shape::read(&turn.facts, change.to_vec(), turn.merge);
+    let logic: Vec<&Changed> = shape.logic().collect();
+    let non_trivial: u64 = logic.iter().map(|f| f.non_trivial).sum();
+    let inputs = Inputs {
+        logic_lines: logic.iter().map(|f| f.lines).sum(),
+        logic_files: logic.len(),
+        non_trivial,
+        failed: shape.failed,
+        merge: shape.merge,
+        test_run: !logic.is_empty() && logic.iter().all(|f| is_test(&f.path)),
+        docs: logic.is_empty() && !shape.files.is_empty(),
+    };
+    let mut offer = shape.offer();
+    let reason = match offer {
+        Offer::Card => None,
+        _ if kind != OfferKind::Turn => {
+            offer = Offer::Nothing;
+            Some("below the card row")
+        }
+        Offer::Quiz => None,
+        Offer::Nothing => Some(match () {
+            _ if shape.files.is_empty() => "no change",
+            _ if logic.is_empty() => "no logic file",
+            _ if non_trivial < QUIZ_LINES => "under 8 non-trivial lines",
+            _ if inputs.failed => "a check ended failed",
+            _ if inputs.merge => "a merge turn",
+            _ => "a test run",
+        }),
+    };
+    Decision {
+        kind,
+        offer,
+        inputs,
+        reason,
+    }
+}
+
+/// The files of the diff of a card request.
+pub fn changed_in(diff: &str) -> Vec<Changed> {
+    of_diff(diff)
+}
+
+/// How a decision ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub enum Outcome {
+    #[serde(rename = "written")]
+    Written,
+    #[serde(rename = "held by the hourly cap")]
+    HeldByCap,
+    #[serde(rename = "no reply from the writer")]
+    NoReply,
+    #[serde(rename = "no quiz in the reply")]
+    NoQuiz,
+}
+
+/// One line of the record.
+#[derive(Serialize)]
+struct Line<'a> {
+    at: u64,
+    session: &'a str,
+    id: &'a str,
+    kind: OfferKind,
+    inputs: &'a Inputs,
+    offer: Offer,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    outcome: Option<Outcome>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<&'static str>,
+}
+
+/// The record of offers (`offers.jsonl`), beside the event log: one JSON line for each offer decided,
+/// with the table's inputs and how it ended, and no diff and no text of a file. Nothing reads it yet.
+pub struct Offers(PathBuf);
+
+impl Offers {
+    /// The record beside the event log `log`.
+    pub fn beside(log: &Path) -> Offers {
+        Offers(log.with_file_name("offers.jsonl"))
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.0
+    }
+
+    /// Appends the line of `decision` on `id` of `session`, ending in `outcome` (or, with none,
+    /// in the decision's reason). A failed write is no reason to lose the offer: it is logged.
+    pub fn record(&self, session: &str, id: &str, decision: &Decision, outcome: Option<Outcome>) {
+        let line = Line {
+            at: crate::millis(),
+            session,
+            id,
+            kind: decision.kind,
+            inputs: &decision.inputs,
+            offer: decision.offer,
+            outcome,
+            reason: decision.reason,
+        };
+        let mut text = serde_json::to_string(&line).unwrap_or_default();
+        text.push('\n');
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.0);
+        if let Err(e) = file.and_then(|mut f| f.write_all(text.as_bytes())) {
+            eprintln!("save the offers record: {e}");
+        }
+    }
+}
+
+/// What settling a turn's summary found.
+pub struct Settled {
+    /// Whether the summary is written: it is wanted for itself, or for a lone Quiz.
+    pub write: bool,
+    pub decision: Decision,
+}
+
+/// Fills in `request`'s facts from `turn` and whether its summary may keep a Quiz, from the same
+/// decision the turn's card got: a lone Quiz only when the table gives that, and the card's own
+/// `change` is read only where `turn` has no files.
+pub fn settle(request: &mut SummaryRequest, turn: &TurnFacts, change: &[Changed]) -> Settled {
+    request.facts = turn.facts.clone();
+    let decision = decide(OfferKind::Turn, turn, change);
+    let lone = decision.offer == Offer::Quiz;
+    request.no_quiz = !lone;
+    Settled {
+        write: request.wanted || lone,
+        decision,
+    }
+}
+
+/// Writes the stop card of `request` when the table gives it one, and puts the decision on record. A
+/// check's card is not judged. See `write_stop` for the rest.
+#[allow(clippy::too_many_arguments)]
+pub fn offer_stop(
+    store: &Mutex<CardStore>,
+    writer: &(impl CardWriter + ?Sized),
+    request: CardRequest,
+    session: &Session,
+    turn: &TurnFacts,
+    offers: &Offers,
+    stored: impl FnOnce(),
+    mut log: impl FnMut(String),
+) -> bool {
+    if request.check.is_some() {
+        return write_stop(store, writer, request, session, stored, log);
+    }
+    let kind = match () {
+        _ if request.agent.is_some() => OfferKind::Worker,
+        _ if turn.facts.files.is_empty() && !request.changed_by.is_empty() => OfferKind::LateChange,
+        _ => OfferKind::Turn,
+    };
+    let decision = decide(kind, turn, &changed_in(request.diff()));
+    let (id, session_id) = (request.id.clone(), request.session_id.clone());
+    match decision.offer {
+        Offer::Card => {
+            let written = write_stop(store, writer, request, session, stored, &mut log);
+            let outcome = if written {
+                Outcome::Written
+            } else {
+                Outcome::NoReply
+            };
+            offers.record(&session_id, &id, &decision, Some(outcome));
+            written
+        }
+        // Its summary carries the lone Quiz, and puts the line there.
+        Offer::Quiz => {
+            log(format!("no card on {id}: its change gets a lone Quiz"));
+            false
+        }
+        Offer::Nothing => {
+            let why = decision.reason.unwrap_or_default();
+            log(format!("no card on {id}: {why}"));
+            offers.record(&session_id, &id, &decision, None);
+            false
+        }
+    }
+}
+
+/// Writes the summary of `request`, and, when `lone` is the decision that gave the turn a lone Quiz,
+/// puts it on record with its outcome.
+pub fn offer_summary(
+    store: &Mutex<CardStore>,
+    writer: &(impl CardWriter + ?Sized),
+    setup: &SummarySetup,
+    request: SummaryRequest,
+    lone: Option<&Decision>,
+    offers: &Offers,
+    log: impl FnMut(String),
+) -> Option<TurnSummary> {
+    let (session, id) = (request.session_id.clone(), request.id.clone());
+    let summary = write_summary(store, writer, setup, request, log);
+    if let Some(decision) = lone {
+        let outcome = match &summary {
+            None => Outcome::NoReply,
+            Some(s) if s.quiz.is_some() => Outcome::Written,
+            Some(_) if store.lock().unwrap().place_quiz(false, crate::millis()) != Place::Offer => {
+                Outcome::HeldByCap
+            }
+            Some(_) => Outcome::NoQuiz,
+        };
+        offers.record(&session, &id, decision, Some(outcome));
+    }
+    summary
 }
 
 /// The files of a unified diff (`git diff`, one `diff --git` header per file).

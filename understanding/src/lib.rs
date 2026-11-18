@@ -39,7 +39,10 @@ pub use card_code::{CodeRange, pull_code};
 pub use drift::{AGY_FIXTURE_VERSION, AgyVersions, Drift, Versions, drift, dropped_events};
 pub use fingerprint::{Fingerprints, backfilled, fingerprint_changes, worktree_root};
 use grounding::words;
-pub use offer::{Changed, Offer, Shape, is_logic};
+pub use offer::{
+    Changed, Decision, Inputs, Offer, OfferKind, Offers, Outcome, Settled, Shape, TurnFacts,
+    changed_in, decide, is_logic, offer_stop, offer_summary, settle,
+};
 pub use retest::{retest_quiz, write_retests};
 pub use self_test::{ArmReport, SelfTest, self_test};
 pub use store::{

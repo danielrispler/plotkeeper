@@ -477,6 +477,81 @@ fn git(folder: &Path, args: &[&str], index: Option<&Path>) -> Option<String> {
     status.success().then(|| out.trim_end().to_owned())
 }
 
+/// The roots of the worktrees `git worktree list` gives for the repository that holds `folder`, as
+/// it spells them; empty outside a repository.
+fn listed_worktrees(folder: &Path) -> Vec<String> {
+    let Some(existing) = folder.ancestors().find(|p| p.is_dir()) else {
+        return Vec::new();
+    };
+    let list = git(existing, &["worktree", "list", "--porcelain"], None).unwrap_or_default();
+    let roots = list
+        .lines()
+        .filter_map(|line| line.strip_prefix("worktree "));
+    roots.map(Into::into).collect()
+}
+
+/// Whether `root` holds `path`: the path is the root or lies below it, on a path boundary.
+fn holds(root: &str, path: &str) -> bool {
+    path.strip_prefix(root)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('/') || root.ends_with('/'))
+}
+
+/// The absolute paths a Bash `command` names, as the text spells them.
+fn named_paths(command: &str) -> Vec<&str> {
+    let separators = |c: char| c.is_whitespace() || "\"'`;&|<>()=,:{}$*?[]".contains(c);
+    let tokens = command.split(separators);
+    let paths = tokens.filter(|t| t.starts_with('/') && t.len() > 1);
+    paths.collect()
+}
+
+/// `path` with its nearest existing folder spelled as `git` spells it, and that folder.
+fn spelled(path: &Path) -> Option<(PathBuf, PathBuf)> {
+    let existing = path.ancestors().find(|p| p.is_dir())?;
+    let real = existing.canonicalize().ok()?;
+    let rest = path.strip_prefix(existing).ok()?;
+    Some((real.join(rest), real))
+}
+
+/// The worktree roots the folders and paths a call names touch (danielrispler/plotkeeper#202). A
+/// path counts for the deepest listed root that holds it. The lists come from `git worktree list`
+/// at the first path of a repository the call names, so a worktree an earlier command made is
+/// found. A path in the folder of a worktree that is no longer listed, which `known` remembers
+/// from earlier lists or which sits in a `worktrees` folder, gives no root.
+struct Named<'a> {
+    lists: Vec<Vec<String>>,
+    known: &'a mut Vec<String>,
+}
+
+impl Named<'_> {
+    fn root(&mut self, path: &Path) -> Option<String> {
+        let (spelled, existing) = spelled(path)?;
+        let at = spelled.to_str()?;
+        let held = |list: &Vec<String>| list.iter().any(|r| holds(r, at));
+        let index = match self.lists.iter().position(held) {
+            Some(index) => index,
+            None => {
+                let list = listed_worktrees(&existing);
+                for root in &list {
+                    if !self.known.contains(root) {
+                        self.known.push(root.clone());
+                    }
+                }
+                self.lists.push(list);
+                self.lists.len() - 1
+            }
+        };
+        let list = &self.lists[index];
+        let root = list
+            .iter()
+            .filter(|r| holds(r, at))
+            .max_by_key(|r| r.len())?;
+        let gone = |r: &&String| !list.contains(r) && holds(r, at) && r.len() > root.len();
+        let removed = self.known.iter().any(|r| gone(&r));
+        let below = existing.file_name().is_some_and(|n| n == "worktrees") && existing != spelled;
+        (!removed && !below).then(|| root.clone())
+    }
+}
+
 /// Adds to `event` the trees of the turn it ends, `studio_turn_end`, and of the worktrees its turn
 /// touches first with it, `studio_turn_start`, each by worktree root. Like the core, it takes an
 /// event's folder and an `Edit` or `Write` path as what it touches (danielrispler/Falinks#434,
@@ -542,8 +617,32 @@ pub fn trees(
         .and_then(|input| input.get("file_path")?.as_str());
     let path = path.filter(|p| p.starts_with('/') && matches!(tool, Some("Edit" | "Write")));
     let folder = path.and_then(|p| Path::new(p).parent()?.to_str());
-    let folders = [text("cwd"), folder];
-    let touched = || (folders.into_iter().flatten()).filter_map(|f| worktree_root(Path::new(f)));
+    let cwd = text("cwd");
+    let command = text("tool_name")
+        .filter(|t| *t == "Bash")
+        .and_then(|_| event.get("tool_input")?.get("command")?.as_str());
+    let named = command.map(named_paths).unwrap_or_default();
+    let mut known = strings(&kept["worktrees"]);
+    // The worktrees the call touches, listed once: the folder's, an `Edit` or `Write` path's, and
+    // those a Bash command names.
+    let touched = |known: &mut Vec<String>| {
+        let mut found: Vec<String> = Vec::new();
+        let mut names = Named {
+            lists: Vec::new(),
+            known,
+        };
+        let roots = cwd.and_then(|f| worktree_root(Path::new(f))).into_iter();
+        let roots = roots.chain(folder.and_then(|f| names.root(Path::new(f))));
+        let mut roots: Vec<String> = roots.collect();
+        roots.extend(named.iter().filter_map(|p| names.root(Path::new(p))));
+        for root in roots {
+            if !found.contains(&root) {
+                found.push(root);
+            }
+        }
+        found
+    };
+    let mut touches = Vec::new();
     let mut end = Map::new();
     let mut start = Map::new();
     match text("agent_id") {
@@ -551,7 +650,8 @@ pub fn trees(
             let (ended, in_turn) = turn.take(name, text("prompt_id"), idle);
             end = ended.iter().filter_map(|root| record(root)).collect();
             if in_turn {
-                for root in touched() {
+                touches = touched(&mut known);
+                for root in touches.clone() {
                     if !turn.roots.contains(&root)
                         && let Some((root, tree)) = record(&root)
                     {
@@ -573,7 +673,8 @@ pub fn trees(
                     end = roots.iter().filter_map(|root| record(root)).collect();
                 }
             } else {
-                for root in touched() {
+                touches = touched(&mut known);
+                for root in touches.clone() {
                     if roots.contains(&root) {
                         continue;
                     }
@@ -593,10 +694,15 @@ pub fn trees(
     }
     let kept = json!({
         "prompt_id": turn.prompt_id, "roots": turn.roots, "ended": turn.ended, "workers": workers,
+        "worktrees": known,
     });
     file.set_len(0)?;
     file.rewind()?;
     file.write_all(kept.to_string().as_bytes())?;
+    // The roots the call touched, which the core reads for the session's own touches.
+    if !touches.is_empty() {
+        event.insert("studio_touched_roots".into(), touches.into());
+    }
     for (key, trees) in [("studio_turn_end", end), ("studio_turn_start", start)] {
         if !trees.is_empty() {
             event.insert(key.into(), trees.into());

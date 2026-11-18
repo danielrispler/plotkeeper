@@ -106,6 +106,8 @@ struct Raw {
     /// The trees the hook recorded at the end of the turn this event ends, by root.
     #[serde(default)]
     studio_turn_end: BTreeMap<String, String>,
+    /// The worktree roots the hook found the call touched.
+    studio_touched_roots: Option<Vec<String>>,
     /// On the studio's own `StudioRename` line, the session's new name; empty for none.
     #[serde(default)]
     studio_name: String,
@@ -288,6 +290,7 @@ fn adapt(raw: Raw) -> Event {
         studio_terminal_id: raw.studio_terminal_id,
         studio_turn_start: raw.studio_turn_start,
         studio_turn_end: raw.studio_turn_end,
+        studio_touched_roots: raw.studio_touched_roots,
         capabilities: CAPABILITIES,
         line: Bytes::default(),
         happened,
