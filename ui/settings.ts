@@ -65,8 +65,12 @@ export const clampZoom = (zoom: number) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN,
 // The zoom `by` steps from `zoom`, inside its bounds; 0 resets it.
 export const zoomed = (zoom: number, by: number) => clampZoom(by === 0 ? 1 : Math.round((zoom + by * ZOOM_STEP) * 10) / 10);
 
-const FONT_MIN = 8;
-const FONT_MAX = 40;
+export const FONT_MIN = 8;
+export const FONT_MAX = 40;
+
+// The zoom the window has after a reload of the settings: the file's when its `zoom` changed (the settings page writes it), else
+// `current`, which ⌘+, ⌘− and ⌘0 may have moved; those keys never write the file.
+export const reloadedZoom = (current: number, previous: Settings, next: Settings) => (next.zoom !== previous.zoom ? next.zoom : current);
 
 const defaultSettings: Settings = {
   zoom: 1,

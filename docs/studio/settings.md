@@ -6,7 +6,14 @@ The studio's projects, the main checkouts Home and Workspaces list, are an order
 
 ## The settings page
 
-Cmd+, (`studio::OpenSettings`) and the gear at the top bar's far right open the settings page: a dialog over the window, about 880 by 620, closed by Esc, the X ("Close (Esc)") or a click outside it. One scrolling page, each row a title, a muted description and its control. It shows the **Alerts** heading (Sounds; Notify "your turn" while focused, both toggles) and the **Files** heading (Open settings.json, Open keymap.json). The rest stay in the file.
+Cmd+, (`studio::OpenSettings`) and the gear at the top bar's far right open the settings page: a dialog over the window, about 880 by 620, closed by Esc, the X ("Close (Esc)") or a click outside it. One scrolling page, each row a title, a muted description and its control. It has four headings, nine rows:
+
+- **Appearance:** Default zoom (a stepper, 0.5 to 2 in steps of 0.1, editing `zoom`; the window's zoom changes at once, while ⌘+, ⌘− and ⌘0 stay temporary and never write the file) and Terminal font size (a stepper, 8 to 40; unset, it shows the stylesheet's size).
+- **Alerts:** Sounds, and Notify "your turn" while focused (toggles).
+- **Summaries:** Model (a dropdown of Haiku, Sonnet, Opus and Fable; a model from the file that is not listed shows as its own entry and is never overwritten by opening the page), Effort (a dropdown of Default, which passes no `--effort`, then low, medium, high, xhigh and max) and Write a summary when a turn is opened (a toggle).
+- **Files:** Open settings.json, Open keymap.json.
+
+The rest (`doctor`, `checks`, `editor`, `repository`, `quiz_trial`, `quiz_self_test`) stay in the file.
 
 Each change saves at once, by editing `settings.json` in place: the one property's text changes, so comments, trailing commas, formatting and every other key stay as they were; a missing parent object (such as `terminal`) is created, and a missing file is created with the one key. A row whose value differs from its default shows an undo icon, "Reset to default", which removes the key from the file. A key of the wrong type counts as its default.
 

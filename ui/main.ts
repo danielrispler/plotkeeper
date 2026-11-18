@@ -21,7 +21,7 @@ import { dragPanel, placePanel, togglePanel } from "./panel.js";
 import { dragSplit, focusPane, placePanes, runDoctor, showHistory, split, startPanes, toggleSplit } from "./panes.js";
 import { showAddProject, showBranches, showPalette, showPicker } from "./picker.js";
 import { fetchNow, foundWorkspaces, pullAll, showWorkspaces, sidebarOrder, watchWorkspaces } from "./workspaces.js";
-import { reload, type SettingsFiles, zoomed } from "./settings.js";
+import { reload, reloadedZoom, type SettingsFiles, zoomed } from "./settings.js";
 import { knownProjects } from "./projects.js";
 import { studio } from "./state.js";
 import { closeSettingsPage, settingsPageOpen, showSettingsPage, startSettingsPage } from "./settings-page.js";
@@ -267,7 +267,8 @@ function applySettings(files: SettingsFiles) {
   if (errors.length) notice.hidden = false;
   else if (!others.length) notice.hidden = true;
   // Only a changed `zoom` resets the zoom the keys set.
-  if (settings.zoom !== previous.zoom) setZoom(settings.zoom);
+  const to = reloadedZoom(zoom, previous, settings);
+  if (to !== zoom) setZoom(to);
   invoke("notify_while_focused", { on: settings.notifications.while_focused }).catch((e) => console.warn(e));
   invoke("sounds", { on: settings.sounds }).catch((e) => console.warn(e));
   const size = settings.terminal.font_size;

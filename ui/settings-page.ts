@@ -4,16 +4,28 @@
 
 import { element, invoke, patch, text } from "./dom.js";
 import { titled } from "./keys.js";
-import { initial, type Files, type Settings, type SettingsFiles } from "./settings.js";
+import { FONT_MAX, FONT_MIN, initial, ZOOM_MAX, ZOOM_MIN, type Files, type Settings, type SettingsFiles } from "./settings.js";
 import { studio } from "./state.js";
 
-// A row's key in `settings.json`, such as `["terminal", "font_size"]`, and the control that sets it. A new control (a stepper, a
-// dropdown) adds its kind here and to `Row`, and its rows to `SECTIONS`; `settingsPage` and the write stay as they are.
-type Spec = { title: string; description: string } & ({ kind: "toggle"; path: string[] } | { kind: "open"; file: "settings" | "keymap" });
+// A row's key in `settings.json`, such as `["terminal", "font_size"]`, and the control that sets it. A new control adds its kind here
+// and to `Row`, and its rows to `SECTIONS`; `settingsPage` and the write stay as they are.
+type Spec = { title: string; description: string } & (
+  | { kind: "toggle"; path: string[] }
+  | { kind: "stepper"; path: string[]; min: number; max: number; step: number }
+  | { kind: "select"; path: string[]; options: [value: string, label: string][] }
+  | { kind: "open"; file: "settings" | "keymap" }
+);
 
 // The page's rows, hand-written as Zed's and herdr's are. A setting's default is the UI's own (`initial`), so one source decides
 // both the parser's default and the page's reset. Descriptions come from the comments in `docs/studio/settings.md`.
 const SECTIONS: { heading: string; rows: Spec[] }[] = [
+  {
+    heading: "Appearance",
+    rows: [
+      { kind: "stepper", path: ["zoom"], min: ZOOM_MIN, max: ZOOM_MAX, step: 0.1, title: "Default zoom", description: "The window's zoom when it opens. ⌘+, ⌘− and ⌘0 change it for now only." },
+      { kind: "stepper", path: ["terminal", "font_size"], min: FONT_MIN, max: FONT_MAX, step: 1, title: "Terminal font size", description: "The terminal's text size, 8 to 40. Unset, it follows the stylesheet." },
+    ],
+  },
   {
     heading: "Alerts",
     rows: [
@@ -24,6 +36,26 @@ const SECTIONS: { heading: string; rows: Spec[] }[] = [
         title: 'Notify "your turn" while focused',
         description: "Also notify while the window is focused, for any session but the selected one.",
       },
+    ],
+  },
+  {
+    heading: "Summaries",
+    rows: [
+      {
+        kind: "select",
+        path: ["summaries", "model"],
+        options: [["haiku", "Haiku"], ["sonnet", "Sonnet"], ["opus", "Opus"], ["fable", "Fable"]],
+        title: "Model",
+        description: "The model that writes a turn's summary.",
+      },
+      {
+        kind: "select",
+        path: ["summaries", "effort"],
+        options: [["", "Default"], ["low", "low"], ["medium", "medium"], ["high", "high"], ["xhigh", "xhigh"], ["max", "max"]],
+        title: "Effort",
+        description: "The effort the summary writer works at; Default passes no --effort.",
+      },
+      { kind: "toggle", path: ["summaries", "on_open"], title: "Write a summary when a turn is opened", description: "Write a turn's summary when you open it, not only when it ends." },
     ],
   },
   {
@@ -39,6 +71,9 @@ const SECTIONS: { heading: string; rows: Spec[] }[] = [
 // so the undo icon shows. `disabled`: the file does not parse.
 export type Row = { title: string; description: string; disabled: boolean } & (
   | { control: "toggle"; path: string[]; value: boolean; changed: boolean }
+  | { control: "stepper"; path: string[]; value: number; changed: boolean; min: number; max: number; step: number }
+  // `options` holds a value from the file that the list lacks, as its own entry, so opening the page never changes it.
+  | { control: "select"; path: string[]; value: string; changed: boolean; options: { value: string; label: string }[] }
   | { control: "open"; file: "settings" | "keymap" }
 );
 export type Page = { error: string | null; sections: { heading: string; rows: Row[] }[] };
@@ -48,12 +83,25 @@ const valueAt = (settings: Settings, path: string[]): unknown =>
 
 export const BROKEN = "settings.json has errors: fix it first";
 
-export function settingsPage({ settings, broken }: Files): Page {
+// The value a stepper's button gives, `by` steps up or down from the row's value, inside its bounds, to one decimal.
+export const stepped = ({ value, min, max, step }: { value: number; min: number; max: number; step: number }, by: 1 | -1) =>
+  Math.min(max, Math.max(min, Math.round((value + by * step) * 10) / 10));
+
+// `sheetSize` is the stylesheet's terminal size, what an unset font size shows.
+export function settingsPage({ settings, broken }: Files, sheetSize: number): Page {
   const row = (spec: Spec): Row => {
     const { title, description } = spec;
-    if (spec.kind === "open") return { title, description, disabled: broken, control: "open", file: spec.file };
-    const value = valueAt(settings, spec.path) as boolean;
-    return { title, description, disabled: broken, control: "toggle", path: spec.path, value, changed: value !== valueAt(initial.settings, spec.path) };
+    const base = { title, description, disabled: broken };
+    if (spec.kind === "open") return { ...base, control: "open", file: spec.file };
+    const { path } = spec;
+    // A setting with no default of its own (an unset font size) is the stylesheet's.
+    const value = valueAt(settings, path) ?? sheetSize;
+    const changed = value !== (valueAt(initial.settings, path) ?? sheetSize);
+    if (spec.kind === "toggle") return { ...base, control: "toggle", path, value: value as boolean, changed };
+    if (spec.kind === "stepper") return { ...base, control: "stepper", path, value: value as number, changed, min: spec.min, max: spec.max, step: spec.step };
+    const options = spec.options.map(([value, label]) => ({ value, label }));
+    if (!options.some((o) => o.value === value)) options.push({ value: value as string, label: value as string });
+    return { ...base, control: "select", path, value: value as string, changed, options };
   };
   return { error: broken ? BROKEN : null, sections: SECTIONS.map(({ heading, rows }) => ({ heading, rows: rows.map(row) })) };
 }
@@ -69,6 +117,8 @@ let queue: Promise<void> = Promise.resolve();
 // What the window does with the text a write returned: parse it as a reload would, without waiting for the file's change.
 let saved: (files: SettingsFiles) => void = () => {};
 
+// The page as the window shows it: the stylesheet's `--size-mono` is what an unset terminal font size shows.
+const current = () => settingsPage(studio.files, parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--size-mono")));
 const dialog = () => element("settings-dialog") as HTMLDialogElement;
 const keyOf = (row: Row) => (row.control === "open" ? `open:${row.file}` : row.path.join("."));
 
@@ -100,6 +150,37 @@ function drawRow(row: Row): HTMLElement {
     undo.innerHTML = UNDO;
     title.append(undo);
   }
+  node.append(info, control(row));
+  return node;
+}
+
+// The row's control, other than the file rows' button.
+function control(row: Exclude<Row, { control: "open" }>): HTMLElement {
+  if (row.control === "select") {
+    const select = text("select", "", "select");
+    select.dataset.action = "select";
+    select.dataset.key = keyOf(row);
+    select.dataset.value = row.value;
+    select.setAttribute("aria-label", row.title);
+    select.toggleAttribute("disabled", row.disabled);
+    select.append(...row.options.map((o) => text("option", o.label)));
+    row.options.forEach((o, i) => ((select.children[i] as HTMLOptionElement).value = o.value));
+    return select;
+  }
+  if (row.control === "stepper") {
+    const group = text("div", "", "stepper");
+    const button = (by: 1 | -1) => {
+      const b = text("button", by === 1 ? "+" : "−", "btn quiet");
+      b.setAttribute("type", "button");
+      b.setAttribute("aria-label", `${by === 1 ? "Increase" : "Decrease"} ${row.title}`);
+      b.dataset.action = by === 1 ? "up" : "down";
+      b.dataset.key = keyOf(row);
+      b.toggleAttribute("disabled", row.disabled || stepped(row, by) === row.value);
+      return b;
+    };
+    group.append(button(-1), text("span", String(row.value), "stepper-value"), button(1));
+    return group;
+  }
   const toggle = text("button", "", "btn switch");
   toggle.setAttribute("type", "button");
   toggle.setAttribute("role", "switch");
@@ -108,13 +189,12 @@ function drawRow(row: Row): HTMLElement {
   toggle.dataset.action = "toggle";
   toggle.dataset.key = keyOf(row);
   toggle.toggleAttribute("disabled", row.disabled);
-  node.append(info, toggle);
-  return node;
+  return toggle;
 }
 
 // Draws the page from `studio.files`; an open dialog is patched, so a focused control stays focused.
 export function drawSettingsPage() {
-  const page = settingsPage(studio.files);
+  const page = current();
   const lines: HTMLElement[] = [];
   if (page.error !== null) {
     const line = text("div", "", "broken");
@@ -133,13 +213,15 @@ export function drawSettingsPage() {
   }
   const sections = page.sections.flatMap(({ heading, rows }) => [text("h2", heading), ...rows.map(drawRow)]);
   patch(element("settings-body"), [...lines, ...sections]);
+  // A dropdown's selection is a property the patch does not carry: set it from the row.
+  for (const select of element("settings-body").querySelectorAll("select")) select.value = select.dataset.value ?? "";
   element("settings-close").title = titled(studio.files.keymap, "Close", "studio::Dismiss");
 }
 
-const rowFor = (key: string) => settingsPage(studio.files).sections.flatMap((s) => s.rows).find((row) => keyOf(row) === key);
+const rowFor = (key: string) => current().sections.flatMap((s) => s.rows).find((row) => keyOf(row) === key);
 
 // Writes `value` to `path` in `settings.json`, or removes the key when null, from the text the window last read.
-function write(path: string[], value: boolean | null) {
+function write(path: string[], value: boolean | number | string | null) {
   queue = queue.then(async () => {
     try {
       const written = await invoke("write_setting", { expected: studio.texts.settings, path, value });
@@ -173,12 +255,18 @@ export function startSettingsPage(apply: (files: SettingsFiles) => void) {
   element("settings-close").addEventListener("click", closeSettingsPage);
   // A click on the backdrop lands on the dialog itself: the frame fills it.
   dialog().addEventListener("click", (event) => event.target === dialog() && closeSettingsPage());
-  element("settings-body").addEventListener("click", (event) => {
-    const button = (event.target as Element).closest<HTMLElement>("[data-action]");
+  const change = (target: EventTarget | null, what: "click" | "change") => {
+    const button = (target as Element).closest<HTMLElement>("[data-action]");
     const row = button?.dataset.key ? rowFor(button.dataset.key) : undefined;
     if (!button || !row || (button as HTMLButtonElement).disabled) return;
+    const action = button.dataset.action;
     if (row.control === "open") open(row.file);
-    else write(row.path, button.dataset.action === "reset" ? null : !row.value);
-  });
+    else if (action === "reset") write(row.path, null);
+    else if (row.control === "toggle") write(row.path, !row.value);
+    else if (row.control === "stepper") write(row.path, stepped(row, action === "up" ? 1 : -1));
+    else if (row.control === "select" && what === "change") write(row.path, (button as HTMLSelectElement).value);
+  };
+  element("settings-body").addEventListener("click", (event) => change(event.target, "click"));
+  element("settings-body").addEventListener("change", (event) => change(event.target, "change"));
   window.addEventListener("settings", () => dialog().open && drawSettingsPage());
 }

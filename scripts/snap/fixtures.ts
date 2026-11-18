@@ -159,6 +159,19 @@ const settingsPage = (settings: string | null, expect: string, extra: Fixture = 
     ${expect}`,
 });
 
+// The page's steppers and dropdowns (#196) with one value changed, the zoom: its stepper and undo icon, the font size's stylesheet value, and the
+// dropdowns at Haiku and Default.
+const settingsControls = (): Fixture =>
+  settingsPage(`{ "zoom": 1.2 }`, `
+      const values = () => [...dialog.querySelectorAll(".stepper-value")].map((v) => v.textContent);
+      const selects = () => [...dialog.querySelectorAll("select")].map((s) => s.options[s.selectedIndex].textContent);
+      if (values().join() !== "1.2,12.5") log("snap:fail the steppers read " + values());
+      if (selects().join() !== "Haiku,Default") log("snap:fail the dropdowns read " + selects());
+      if (undo() !== 1) log("snap:fail expected one undo icon, got " + undo());
+      if (dialog.querySelector(".setting-title").textContent.trim() !== "Default zoom") log("snap:fail the first row is not Default zoom");
+      log("headings: " + [...dialog.querySelectorAll("h2")].map((h) => h.textContent).join(" | "));
+      log("scroll: " + dialog.querySelector(".settings-body").scrollHeight + " of " + dialog.querySelector(".settings-body").clientHeight);`);
+
 export const fixtures = {
   ...railFixtures,
   recordedTerminal,
@@ -205,20 +218,58 @@ export const fixtures = {
   settingsDefaults: () =>
     settingsPage(null, `
       if (undo() !== 0) log("snap:fail an undo icon shows at the defaults");
-      if (toggles().join() !== "true,false") log("snap:fail the toggles read " + toggles());
+      if (toggles().join() !== "true,false,false") log("snap:fail the toggles read " + toggles());
       if (broken()) log("snap:fail the broken-file line shows");`),
   // Two values changed in the file: each row shows its undo icon.
   settingsChanged: () =>
     settingsPage(`{\n  // Quiet.\n  "sounds": false,\n  "notifications": { "while_focused": true },\n}\n`, `
       if (undo() !== 2) log("snap:fail expected 2 undo icons, got " + undo());
-      if (toggles().join() !== "false,true") log("snap:fail the toggles read " + toggles());
+      if (toggles().join() !== "false,true,false") log("snap:fail the toggles read " + toggles());
       if (dialog.querySelector(".reset").title !== "Reset to default") log("snap:fail the undo icon's tooltip is wrong");
       if (document.getElementById("settings-close").title !== "Close (Esc)") log("snap:fail the X's tooltip is " + document.getElementById("settings-close").title);`),
+  // The page's steppers and dropdowns (#196) with one value changed, the zoom: its stepper and undo icon, the font size's stylesheet
+  // value, and the dropdowns at Haiku and Default.
+  settingsControls,
+  // The same page scrolled to its end, to see Summaries and Files.
+  settingsControlsEnd: () => {
+    const f = settingsControls();
+    return { ...f, snapScript: `${f.snapScript}\ndialog.querySelector(".settings-body").scrollTop = 9999;` };
+  },
+  // A model the list lacks is its own entry, selected; the page never overwrites it.
+  settingsModel: () =>
+    settingsPage(`{ "summaries": { "model": "claude-opus-4-1" } }`, `
+      const model = dialog.querySelector('select[data-key="summaries.model"]');
+      if (model.options[model.selectedIndex].textContent !== "claude-opus-4-1") log("snap:fail the unlisted model is not selected");
+      if (model.options.length !== 5) log("snap:fail the model's entries are " + model.options.length);
+      if (undo() !== 1) log("snap:fail expected one undo icon, got " + undo());`),
+  // Pressing a stepper sends the write: the zoom's text it returns shows its value and undo icon.
+  settingsStepper: () =>
+    settingsPage(null, `
+      dialog.querySelector('button[data-action="up"]').click();
+      await new Promise((done) => setTimeout(done, 200));
+      if (dialog.querySelector(".stepper-value").textContent !== "1.1") log("snap:fail the zoom did not step to 1.1");
+      if (undo() !== 1) log("snap:fail the change did not show its undo icon");`, { write_setting: '{ "zoom": 1.1 }' }),
+  // A stepper at its bound has that button off.
+  settingsBound: () =>
+    settingsPage(`{ "zoom": 2 }`, `
+      const zoom = dialog.querySelector(".stepper");
+      if (!zoom.querySelector('[data-action="up"]').disabled) log("snap:fail Increase is enabled at 2");
+      if (zoom.querySelector('[data-action="down"]').disabled) log("snap:fail Decrease is off at 2");`),
+  // Choosing a model in the dropdown sends the write, and the page shows it as the one selected, with its undo icon.
+  settingsSelect: () =>
+    settingsPage(null, `
+      const model = dialog.querySelector('select[data-key="summaries.model"]');
+      model.value = "opus";
+      model.dispatchEvent(new Event("change", { bubbles: true }));
+      await new Promise((done) => setTimeout(done, 200));
+      if (model.options[model.selectedIndex].textContent !== "Opus") log("snap:fail the model did not show Opus");
+      if (undo() !== 1) log("snap:fail the change did not show its undo icon");`, { write_setting: '{ "summaries": { "model": "opus" } }' }),
   // A file that does not parse: the line, the button, and every control off.
   settingsBroken: () =>
     settingsPage(`{ "sounds": false, `, `
       if (!broken().startsWith("settings.json has errors: fix it first")) log("snap:fail the line reads: " + broken());
       if (!toggles().every((t) => t.endsWith("disabled"))) log("snap:fail a toggle is enabled: " + toggles());
+      if ([...dialog.querySelectorAll("select, .stepper .btn")].some((c) => !c.disabled)) log("snap:fail a stepper or dropdown is enabled");
       if ([...dialog.querySelectorAll("button.open")].some((b) => !b.disabled)) log("snap:fail an Open button is enabled");`),
   // A change saves at once: pressing Sounds sends the write, and the text it returns shows with its undo icon.
   settingsWrite: () =>
