@@ -1023,3 +1023,22 @@ fn a_worker_that_ended_before_a_turn_began_is_no_home_of_it() {
         .unwrap();
     assert!(studio.turn_workers(&second).is_empty());
 }
+
+#[test]
+fn a_worktree_the_session_edits_through_bash_with_no_worker_in_it_counts_for_its_turn() {
+    let mut studio = Studio::replayed([
+        prompt(json!({ ROOT: "s1", WORKER_ROOT: "w1" })),
+        line(
+            "PostToolUse",
+            1_000,
+            json!({ "tool_name": "Bash", "tool_use_id": "b1", "tool_response": {},
+                    "tool_input": { "command": "cd /w/repo/.claude/worktrees/w1 && sed -i s/a/b/ x.rs" },
+                    "studio_touched_roots": [ROOT, WORKER_ROOT] }),
+        ),
+        stop(json!({ ROOT: "e1", WORKER_ROOT: "w2" })),
+    ]);
+    let asks = ask(&mut studio, AT + 20_000);
+    studio.set_turn_files(&asks[0], Some(diffs(&asks[0], &[(WORKER_ROOT, "x.rs")])));
+    assert_eq!(turn_files(&studio, 0), ["x.rs"]);
+    assert!(studio.turn_workers(&turn_id(&studio)).is_empty());
+}

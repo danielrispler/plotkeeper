@@ -708,3 +708,56 @@ fn the_summary_takes_the_decision_the_card_made_not_a_new_one() {
     assert_eq!(settled.decision.offer, Offer::Nothing);
     assert!(request.no_quiz);
 }
+
+#[test]
+fn a_workers_200_lines_are_offered_once_on_the_workers_card_and_not_again_on_the_turn() {
+    let (_dir, store) = store();
+    let (_o, offers) = offers();
+    // The turn changed only what its worker changed, in the worker's worktree `/w`.
+    let turn = with_worker(&[], &[("a.rs", 200)]);
+    let mut request = SummaryRequest {
+        wanted: false,
+        ..turn_request(1)
+    };
+    let settled = settle(&mut request, &turn, &[], None);
+    assert_eq!(settled.decision.offer, Offer::Nothing);
+    assert!(!settled.write);
+
+    // The worker's own card is the one that passes the first row, on its diff: its id names no turn, so
+    // the shell gives it no turn facts.
+    let (written, decided) = {
+        let session = studio_core::Session::default();
+        offer_stop(
+            &store,
+            &FakeWriter,
+            card_request("s@1", Some("w"), &diff_of(200)),
+            &session,
+            &TurnFacts::default(),
+            &offers,
+            || {},
+            |_| {},
+        )
+    };
+    assert!(written);
+    assert_eq!(decided.unwrap().offer, Offer::Card);
+    let lines = lines_of(&offers);
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0]["kind"], "worker");
+}
+
+#[test]
+fn a_worktree_the_session_edits_itself_counts_for_its_turn_when_no_worker_is_in_it() {
+    let mut turn = turn_facts(&[], None);
+    let mut own = facts(&[("a.rs", 30)], None).files;
+    own.iter_mut().for_each(|f| f.file.root = "/w".into());
+    turn.facts.files = own;
+    // No worker has `/w` as its home, so its files are the turn's own.
+    let mut request = SummaryRequest {
+        wanted: false,
+        ..turn_request(1)
+    };
+    assert_eq!(
+        settle(&mut request, &turn, &[], None).decision.offer,
+        Offer::Card
+    );
+}

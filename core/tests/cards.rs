@@ -345,3 +345,46 @@ fn an_event_with_no_touched_roots_is_read_as_before() {
     );
     assert_eq!(studio.fingerprint_folders(&pre), []);
 }
+
+#[test]
+fn a_session_event_whose_touched_roots_hold_a_running_workers_home_asks_for_no_fingerprint_there() {
+    let mut studio = Studio::default();
+    let prompt = event(
+        "UserPromptSubmit",
+        1_000,
+        json!({"prompt": "go", "prompt_id": "p1", "studio_turn_start": {"/w": "t0"}}),
+    );
+    apply(&mut studio, &prompt, Some(found()));
+    let session_bash = event(
+        "PreToolUse",
+        3_000,
+        json!({"tool_name": "Bash", "tool_use_id": "b1", "prompt_id": "p1",
+               "tool_input": {"command": "cd /w/second && ls"},
+               "studio_touched_roots": ["/w", "/w/second"]}),
+    );
+    let asked = |studio: &Studio| -> Vec<String> {
+        let looks = studio.fingerprint_folders(&session_bash).into_iter();
+        looks.map(|f| f.folder).collect()
+    };
+    assert_eq!(asked(&studio), ["/w/second"]);
+
+    // A worker whose own worktree is `/w/second` changes it: it has cards of its own now.
+    let worker = |name: &str, at: u64, id: &str| {
+        let fields = json!({"agent_id": "w1", "agent_type": "general-purpose", "cwd": "/w/second",
+            "prompt_id": "p1", "tool_name": "Bash", "tool_use_id": id,
+            "tool_input": {"command": "touch x"}});
+        event(name, at, fields)
+    };
+    apply(
+        &mut studio,
+        &worker("PreToolUse", 2_000, "c1"),
+        Some(found()),
+    );
+    apply(
+        &mut studio,
+        &worker("PostToolUse", 2_500, "c1"),
+        Some(found()),
+    );
+
+    assert_eq!(asked(&studio), Vec::<String>::new());
+}
