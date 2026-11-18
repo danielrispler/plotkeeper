@@ -16,7 +16,7 @@ import { agentState, sessionName, showsLanded } from "./list.js";
 import { closePane, openHere } from "./panes.js";
 import { openDecision, type Ask } from "./answer.js";
 import { blockedElement, typeRetry } from "./blocked.js";
-import { briefNodes, cardLine, cardsFor, openCard, quizOpen } from "./cards.js";
+import { briefNodes, cardLine, cardsFor, openCard, quizOpen, rowCards, unseenRow } from "./cards.js";
 import { type Banner, bannerElement, bannerFor, bannerLives } from "./banner.js";
 import { quizAllowed, quizAnswered, quizItem, quizRegion, seedQuiz, trialOn } from "./quiz.js";
 import { evidenceElement, hasEvidence } from "./evidence.js";
@@ -578,7 +578,11 @@ export function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
     );
     if (line.unanswered) button.querySelector(".quiz-open")!.setAttribute("title", "A quiz is open");
     if (line.failed) button.querySelector(".check-failed")!.setAttribute("title", "A check ended failed");
-    node.replaceChildren(button, ...(open ? [...turnContent(session, block, null).children] : []));
+    // An unseen card of a folded turn keeps a title row (danielrispler/plotkeeper#211); the open turn shows its cards itself.
+    const turnIndex = block.index!;
+    const cardTurn = turn.files ? { session: session.id, index: turnIndex, files: turn.files.files, ended: turn.ended_at !== null } : null;
+    const rows = open ? [] : rowCards(block.cards).map((stored) => unseenRow(stored, cardTurn));
+    node.replaceChildren(button, ...rows, ...(open ? [...turnContent(session, block, null).children] : []));
   };
   draw();
   return node;

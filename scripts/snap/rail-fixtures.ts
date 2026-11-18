@@ -87,6 +87,7 @@ const card = (id: string, answered: boolean): StoredCard => ({
     },
   },
   guess: answered ? { option: 0, right: true, at: Date.now() - 20 * MIN } : null,
+  shown_at: answered ? Date.now() - 105 * MIN : null,
   key_wrong: false,
   more: null,
   rating: null,
@@ -437,7 +438,26 @@ const readmeQuiz = () => ({
 });
 const readmeWhere = () => ({ ...build("idle", { answered: true, withBrief: true }), snapScript: cropScript("", "#banner", "#banner") });
 
+// #211: a folded turn's unseen card shows one title row; a click opens the card in place and writes its `shown` tap.
+const unseenScript = `
+  const rows = [...document.querySelectorAll(".turn.past .unseen-card")];
+  if (rows.length !== 1) return log("snap:fail one unseen card should have one row, found " + rows.length);
+  if (!rows[0].querySelector("summary").textContent) log("snap:fail the row has no title");
+  if (document.querySelector(".now-turn .unseen-card")) log("snap:fail the newest turn shows a row");
+  rows[0].scrollIntoView({ block: "center" });
+  log("unseen rows " + rows.length + ": " + rows[0].querySelector("summary").textContent);`;
+const unseenOpenScript = `
+  const row = document.querySelector(".turn.past .unseen-card");
+  if (!row) return log("snap:fail there is no row");
+  row.open = true;
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  if (!row.querySelector(".card")) log("snap:fail the card did not open in place");
+  if (document.querySelector(".turn.past .turn-line[aria-expanded=true]")) log("snap:fail the turn unfolded");
+  row.scrollIntoView({ block: "start" });`;
+
 export const railFixtures = {
+  railUnseenCard: () => ({ ...build("idle"), snapScript: unseenScript }),
+  railUnseenCardOpen: () => ({ ...build("idle"), snapScript: unseenOpenScript }),
   readmeTurn,
   readmeQuiz,
   readmeWhere,
