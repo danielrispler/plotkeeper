@@ -1,10 +1,13 @@
 name: Studio checks
 
+# A change to Markdown files alone skips the checks; README.md still runs them, as `ui/tests/readme.test.mjs` reads it.
 on:
   pull_request:
+    paths: ["**", "!**.md", "README.md"]
   # `issue-*` covers integration branches, which take merges with no pull request.
   push:
     branches: [main, "issue-*"]
+    paths: ["**", "!**.md", "README.md"]
 
 # A new push cancels the older run on its branch or pull request; every main commit runs to completion.
 concurrency:
