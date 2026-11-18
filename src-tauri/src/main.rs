@@ -3,8 +3,9 @@
 //! window lists every session (danielrispler/Falinks#369, decision 18) and shows the one Daniel selected: its cards, with
 //! their quizzes, his guesses, his ratings and the longer explanations he asked for, which the card
 //! store keeps on disk, and its check lines. A session that newly needs Daniel or reaches your turn,
-//! a new card and a failed worker raise a macOS notification while the window is not focused, and
-//! the Dock badge counts the sessions that need him (danielrispler/Falinks#369, decision 22; danielrispler/Falinks#517, decision 6).
+//! a new card and a failed worker raise a macOS notification while the window is not focused; while
+//! it is, a turn that ends off screen goes to the window's toast. The Dock badge counts the sessions
+//! that need him (danielrispler/Falinks#369, decision 22; danielrispler/Falinks#517, decision 6).
 
 use std::{
     collections::{HashMap, HashSet},
@@ -1032,7 +1033,7 @@ fn main() {
             turn_summary,
             turn_reply,
             agent_summary,
-            notify_while_focused,
+            split_shown,
             mark_unseen,
             rail_shown,
             refresh_landed_tasks,
@@ -1327,13 +1328,25 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
             .unwrap()
             .due(uptime(), focused, needs_you, || {
                 let studio = state.lock().unwrap();
-                studio.selected().map(|s| s.agent.id.clone())
+                let selected = studio.selected().map(|s| s.agent.id.clone());
+                let mut on_screen: Vec<String> = selected.into_iter().collect();
+                // The split's pane shows a terminal: a status-only row's id, or a session's in it.
+                if let Some(terminal) = SPLIT_SHOWN.lock().unwrap().clone() {
+                    let in_it = studio.sessions().into_iter();
+                    let in_it = in_it.filter(|s| s.terminal.as_ref() == Some(&terminal));
+                    on_screen.extend(in_it.map(|s| s.agent.id.clone()));
+                    on_screen.push(terminal);
+                }
+                on_screen
             });
         if let Some((title, body)) = due.notification {
             let _ = app.notification().builder().title(title).body(body).show();
         }
         if let Some(sound) = due.sound {
             play(sound);
+        }
+        if !due.finished.is_empty() {
+            let _ = app.emit("finished", &due.finished);
         }
         // The cards also change with no line read: a card arrives, or one turns 30 minutes old.
         sent.cards(app);
@@ -1356,6 +1369,16 @@ static RAIL_SHOWN: AtomicBool = AtomicBool::new(true);
 #[tauri::command]
 fn rail_shown(shown: bool) {
     RAIL_SHOWN.store(shown, Ordering::Release);
+}
+
+/// The terminal the split's second pane shows, as the UI last said, `None` with no split: its
+/// session is on screen, so its turn's end raises no toast.
+static SPLIT_SHOWN: Mutex<Option<String>> = Mutex::new(None);
+
+/// The UI's split opened, closed or pinned another terminal.
+#[tauri::command]
+fn split_shown(terminal: Option<String>) {
+    *SPLIT_SHOWN.lock().unwrap() = terminal;
 }
 
 /// The `gh` to run: the first on Daniel's login shell's `PATH`, found once.
@@ -1708,13 +1731,6 @@ enum Notice<'a> {
     NeedsYou,
     YourTurn,
     Titled(&'a str),
-}
-
-/// The setting that also notifies "your turn" while the window is focused (danielrispler/Falinks#517, decision 6), from
-/// `settings.json`, which the window parses.
-#[tauri::command]
-fn notify_while_focused(on: bool, notices: State<Notices>) {
-    notices.lock().unwrap().while_focused = on;
 }
 
 /// Daniel marked session `id` unseen (danielrispler/Falinks#556), from the rail's menu.

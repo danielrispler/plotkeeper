@@ -24,6 +24,8 @@
       <button id="session-header" class="btn quiet session-header" type="button" aria-label="Session story" hidden><span id="bar-dot" class="dot"></span><span id="bar-state" class="state"></span><span id="bar-name" class="name"></span></button>
       <!-- How many sessions need Daniel (danielrispler/Falinks#572), anywhere, shown whenever any do; it selects the first. -->
       <button id="needs-you" class="btn small chip" type="button" hidden></button>
+      <!-- How many sessions finished a turn Daniel has not seen, not in colour; it selects the newest. -->
+      <button id="unseen" class="btn small chip unseen" type="button" hidden></button>
       <!-- The Git line (#29): the selected session's workspace and its git tokens, or the main checkout's; stays in focus mode. -->
       <span id="git-line" class="git-line" hidden></span>
       <span class="sp"></span>
@@ -64,8 +66,12 @@
       <div id="terminal-body" class="term-body"><div id="split-divider" class="split-divider" hidden></div></div>
       <!-- The terminal panel (danielrispler/Falinks#542): a shell in the shown session's folder, a band under the panes. -->
       <div id="panel" class="term-body panel" hidden><div id="panel-divider" class="split-divider stacked" role="separator" aria-orientation="horizontal" aria-label="Resize the terminal panel"></div></div>
-      <!-- The needs-you toast (danielrispler/Falinks#573): over the terminal's top-right corner, never focused. -->
-      <div id="toast" class="toast" role="status" hidden></div>
+      <!-- The needs-you toast (danielrispler/Falinks#573) over the terminal's top-right corner, and under it the note toast, for a
+           turn that ended off screen or a context warning; never focused. -->
+      <div class="toasts">
+        <div id="toast" class="toast" role="status" hidden></div>
+        <div id="note-toast" class="toast note" role="status" hidden></div>
+      </div>
       <!-- A program that failed at start (danielrispler/Falinks#558): over the terminal's bottom-right corner, never focused. -->
       <div id="start-toast" class="toast start" role="status" hidden></div>
     </section>

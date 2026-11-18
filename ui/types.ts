@@ -419,7 +419,6 @@ export interface Commands {
   hunk_opened: void;
   key_wrong: void;
   mark_unseen: void;
-  notify_while_focused: void;
   open: Selection | null;
   open_file: void;
   open_link: void;
@@ -443,6 +442,7 @@ export interface Commands {
   revival: Revive[];
   select: Selection | null;
   select_terminal: Selection | null;
+  split_shown: void;
   selected: Selection | null;
   sessions: Session[];
   set_zoom: void;

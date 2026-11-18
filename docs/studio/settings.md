@@ -9,7 +9,7 @@ The studio's projects, the main checkouts Home and Workspaces list, are an order
 Cmd+, (`studio::OpenSettings`) and the gear at the top bar's far right open the settings page: a dialog over the window, about 880 by 620, closed by Esc, the X ("Close (Esc)") or a click outside it. One scrolling page, each row a title, a muted description and its control. It has four headings, nine rows:
 
 - **Appearance:** Default zoom (a stepper, 0.5 to 2 in steps of 0.1, editing `zoom`; the window's zoom changes at once, while ⌘+, ⌘− and ⌘0 stay temporary and never write the file) and Terminal font size (a stepper, 8 to 40; unset, it shows the stylesheet's size).
-- **Alerts:** Sounds, and Notify "your turn" while focused (toggles).
+- **Alerts:** Sounds (a toggle) and Warn at context share (a stepper, 0 to 100 in steps of 5, editing `context_warning`; it shows "Off" at 0).
 - **Summaries:** Model (a dropdown of Haiku, Sonnet, Opus and Fable; a model from the file that is not listed shows as its own entry and is never overwritten by opening the page), Effort (a dropdown of Default, which passes no `--effort`, then low, medium, high, xhigh and max) and Write a summary when a turn is opened (a toggle).
 - **Files:** Open settings.json, Open keymap.json.
 
@@ -31,8 +31,8 @@ Each `doctor` entry is a palette action, "Doctor: <label>", marked with its kind
   "zoom": 1,                     // 0.5 to 2
   "terminal": { "font_size": 15 }, // 8 to 40; default: the stylesheet's 12.5
   "summaries": { "model": "haiku", "effort": "low", "on_open": false },
-  "notifications": { "while_focused": false }, // also notify "your turn" while focused, but not for the selected session
   "sounds": true,                // false: no needs-you or your-turn sound
+  "context_warning": 30,         // the context share, 0 to 100, past which a session warns once; 0: never
   "repository": "/path/to/plotkeeper", // the starting project only, and where the shell starts; default: this checkout
   "checks": { "/path/to/app": ["make verify"] }, // per project folder, the commands that are checks; default: `cargo test` and the like, and `npm run check`
   "quiz_trial": "2026-11-20",    // the day the confidence tap and "why?" trial starts; two weeks

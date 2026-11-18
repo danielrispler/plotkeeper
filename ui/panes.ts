@@ -126,11 +126,22 @@ function box(id: string): HTMLElement {
   return pane.box;
 }
 
+// The terminal the split's second pane shows, as the shell last heard: its session is on screen, so its turn's end
+// raises no note.
+let toldSplit: string | null = null;
+function tellSplit() {
+  const second = split() ? pinned : null;
+  if (second === toldSplit) return;
+  toldSplit = second;
+  invoke("split_shown", { terminal: second }).catch(failure("split_shown"));
+}
+
 // Shows terminal `id`'s pane, drawing it with `open` the first time, and the header's title and size.
 function show(id: string, open: () => Xterm.Terminal | null) {
   shown = id;
   const place = box(id);
   for (const [key, pane] of panes) pane.box.hidden = pane.box !== place && !(split() && key === pinned);
+  tellSplit();
   // A split opening or closing changes the width rule's layout (`main.ts`), which places the panes.
   if (split() !== laidSplit) window.dispatchEvent(new Event("layout"));
   else placePanes(stacked, cell);

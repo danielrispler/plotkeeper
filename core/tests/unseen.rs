@@ -134,19 +134,26 @@ fn needs_you(selected: Option<&str>, focused: bool, sounds: bool) -> Due {
             }
         }
     }
-    let selected = selected.map(String::from);
-    notifications.due(at(4_000), || focused, |_| true, || selected)
+    let on_screen = selected.map(String::from).into_iter().collect();
+    notifications.due(at(4_000), || focused, |_| true, || on_screen)
 }
 
-/// What is due 3 seconds after the second session's turn ends, with the first selected.
-fn your_turn(focused: bool, while_focused: bool) -> Due {
+/// What is due 3 seconds after the second session's turn ends, with the first selected, and the
+/// second in the split's other pane when `split`.
+fn your_turn(focused: bool, split: bool) -> Due {
     let mut studio = second_stopped();
     let mut notifications = Notifications::default();
-    notifications.while_focused = while_focused;
     studio.select(FIRST);
     notifications.push_your_turn(SECOND, String::new(), at(1_000));
-    let selected = studio.selected().map(|s| s.agent.id.clone());
-    notifications.due(at(4_000), || focused, |_| false, || selected)
+    let mut on_screen: Vec<String> = studio
+        .selected()
+        .map(|s| s.agent.id.clone())
+        .into_iter()
+        .collect();
+    if split {
+        on_screen.push(SECOND.into());
+    }
+    notifications.due(at(4_000), || focused, |_| false, || on_screen)
 }
 
 #[test]
@@ -160,13 +167,13 @@ fn focused_a_needs_you_on_another_session_sounds_with_no_notification() {
 fn focused_a_needs_you_sounds_at_once_with_its_toast_and_once_only() {
     let mut notifications = Notifications::default();
     notifications.push_needs_you(ASKING, String::new(), at(1_000));
-    let selected = || Some(FIRST.to_owned());
+    let selected = || vec![FIRST.to_owned()];
     let due = notifications.due(at(1_200), || true, |_| true, selected);
     assert_eq!(
         due,
         Due {
-            notification: None,
-            sound: Some(Sound::NeedsYou)
+            sound: Some(Sound::NeedsYou),
+            ..Due::default()
         }
     );
     assert_eq!(
@@ -191,11 +198,30 @@ fn focused_the_viewed_session_makes_no_sound() {
 }
 
 #[test]
-fn focused_your_turn_makes_no_sound_even_when_it_notifies() {
-    assert_eq!(your_turn(true, false).sound, None);
-    let due = your_turn(true, true);
-    assert!(due.notification.is_some());
-    assert_eq!(due.sound, None);
+fn focused_your_turn_off_screen_sounds_and_toasts_with_no_notification() {
+    let due = your_turn(true, false);
+    assert_eq!(
+        due,
+        Due {
+            notification: None,
+            sound: Some(Sound::YourTurn),
+            finished: vec![SECOND.into()],
+        }
+    );
+}
+
+#[test]
+fn focused_your_turn_in_the_split_pane_is_on_screen_and_raises_nothing() {
+    assert_eq!(your_turn(true, true), Due::default());
+}
+
+#[test]
+fn focused_your_turn_is_silent_with_sounds_off_but_still_toasts() {
+    let mut notifications = Notifications::default();
+    notifications.sounds = false;
+    notifications.push_your_turn(SECOND, String::new(), at(1_000));
+    let due = notifications.due(at(4_000), || true, |_| false, || vec![FIRST.into()]);
+    assert_eq!((due.sound, due.finished), (None, vec![SECOND.to_owned()]));
 }
 
 #[test]
@@ -204,6 +230,7 @@ fn unfocused_a_sound_plays_with_each_needs_you_or_your_turn_notification() {
     assert!(due.notification.is_some());
     assert_eq!(due.sound, Some(Sound::NeedsYou));
     let due = your_turn(false, false);
+    assert_eq!(due.finished, Vec::<String>::new());
     assert!(due.notification.is_some());
     assert_eq!(due.sound, Some(Sound::YourTurn));
 }
@@ -213,11 +240,11 @@ fn unfocused_no_notification_means_no_sound() {
     let mut notifications = Notifications::default();
     notifications.push_needs_you(ASKING, String::new(), at(1_000));
     // Answered within 3 seconds: no notification, so no sound.
-    let due = notifications.due(at(4_000), || false, |_| false, || None);
+    let due = notifications.due(at(4_000), || false, |_| false, Vec::new);
     assert_eq!((due.notification, due.sound), (None, None));
     // A failed worker notifies with no sound.
     notifications.push("Worker failed", String::new(), at(5_000));
-    let due = notifications.due(at(8_000), || false, |_| false, || None);
+    let due = notifications.due(at(8_000), || false, |_| false, Vec::new);
     assert!(due.notification.is_some());
     assert_eq!(due.sound, None);
 }

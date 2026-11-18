@@ -3,7 +3,7 @@
 //! from (danielrispler/Falinks#369, decision 22).
 
 use std::time::Duration;
-use studio_core::{Notifications, Output, State, Studio};
+use studio_core::{Due, Notifications, Output, State, Studio};
 
 /// The scripted session of `record-subagent-run.sh` (danielrispler/Falinks#370): a worktree worker completes, and a
 /// helper is stopped mid-step (line 25 says `killed`).
@@ -114,7 +114,7 @@ fn at(ms: u64) -> Duration {
 /// The notification due at `ms`, from a window that is not focused, with no session needing Daniel.
 fn due(notifications: &mut Notifications, ms: u64) -> Option<(String, String)> {
     notifications
-        .due(at(ms), || false, |_| false, || None)
+        .due(at(ms), || false, |_| false, Vec::new)
         .notification
 }
 
@@ -157,7 +157,7 @@ fn a_focused_window_gets_no_notification() {
     // Daniel is looking at the list, so the notice is dropped, not held for later.
     assert_eq!(
         notifications
-            .due(at(13_000), || true, |_| false, || None)
+            .due(at(13_000), || true, |_| false, Vec::new)
             .notification,
         None
     );
@@ -187,7 +187,7 @@ fn needs_you_notification(upto: usize) -> Option<(String, String)> {
             .is_some_and(|s| s.state == State::NeedsYou)
     };
     notifications
-        .due(at(4_000), || false, needs_you, || None)
+        .due(at(4_000), || false, needs_you, Vec::new)
         .notification
 }
 
@@ -221,18 +221,12 @@ fn stop(id: &str) -> String {
     )
 }
 
-/// The notification due 3 seconds after the sessions `stopped` reach "your turn" live, each queued
-/// as the shell queues it, with the first session selected, the window `focused` or not, and the
-/// setting for notifying while focused `while_focused`.
-fn your_turn_notification(
-    stopped: &[&str],
-    focused: bool,
-    while_focused: bool,
-) -> Option<(String, String)> {
+/// What is due 3 seconds after the sessions `stopped` reach "your turn" live, each queued as the
+/// shell queues it, with the first session selected and the window `focused` or not.
+fn your_turn_due(stopped: &[&str], focused: bool) -> Due {
     let mut studio = Studio::replayed(TWO.lines());
     studio.select(FIRST);
     let mut notifications = Notifications::default();
-    notifications.while_focused = while_focused;
     for id in stopped {
         for output in studio.apply(&stop(id)) {
             if let Output::YourTurn { session_id } = output {
@@ -241,10 +235,17 @@ fn your_turn_notification(
             }
         }
     }
-    let selected = studio.selected().map(|s| s.agent.id.clone());
-    notifications
-        .due(at(4_000), || focused, |_| false, || selected)
-        .notification
+    let on_screen = studio
+        .selected()
+        .map(|s| s.agent.id.clone())
+        .into_iter()
+        .collect();
+    notifications.due(at(4_000), || focused, |_| false, || on_screen)
+}
+
+/// The notification of `your_turn_due`.
+fn your_turn_notification(stopped: &[&str], focused: bool) -> Option<(String, String)> {
+    your_turn_due(stopped, focused).notification
 }
 
 #[test]
@@ -262,28 +263,22 @@ fn a_session_starting_raises_no_your_turn() {
 #[test]
 fn your_turn_notifies_while_not_focused_for_the_selected_session_too() {
     assert_eq!(
-        your_turn_notification(&[FIRST], false, false),
+        your_turn_notification(&[FIRST], false),
         Some(("Your turn".into(), "Falinks c41d8e27".into()))
     );
 }
 
 #[test]
-fn your_turn_does_not_notify_while_focused_by_default() {
-    assert_eq!(your_turn_notification(&[FIRST, SECOND], true, false), None);
-}
-
-#[test]
-fn your_turn_notifies_while_focused_with_the_setting_on_for_another_session_only() {
-    assert_eq!(
-        your_turn_notification(&[FIRST, SECOND], true, true),
-        Some(("Your turn".into(), "issue-322-terminals 9e0b5f13".into()))
-    );
+fn your_turn_while_focused_toasts_the_sessions_off_screen_with_no_notification() {
+    let due = your_turn_due(&[FIRST, SECOND], true);
+    assert_eq!(due.notification, None);
+    assert_eq!(due.finished, vec![SECOND.to_owned()]);
 }
 
 #[test]
 fn two_sessions_reaching_your_turn_together_give_one_notification() {
     assert_eq!(
-        your_turn_notification(&[FIRST, SECOND], false, false),
+        your_turn_notification(&[FIRST, SECOND], false),
         Some((
             "2 notices".into(),
             "Your turn: Falinks c41d8e27\nYour turn: issue-322-terminals 9e0b5f13".into()

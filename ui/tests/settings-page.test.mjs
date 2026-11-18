@@ -19,7 +19,7 @@ test("the page has its four headings, with their rows", () => {
     "Default zoom",
     "Terminal font size",
     "Sounds",
-    'Notify "your turn" while focused',
+    "Warn at context share",
     "Model",
     "Effort",
     "Write a summary when a turn is opened",
@@ -34,12 +34,12 @@ test("a row at its default shows no undo icon, and a changed one does", () => {
   const defaults = settingsPage(initial);
   assert.equal(row(defaults, "Sounds").value, true);
   assert.equal(row(defaults, "Sounds").changed, false);
-  assert.equal(row(defaults, 'Notify "your turn" while focused').changed, false);
-  const changed = settingsPage(load(`{ "sounds": false, "notifications": { "while_focused": true } }`));
+  assert.equal(row(defaults, "Warn at context share").changed, false);
+  const changed = settingsPage(load(`{ "sounds": false, "context_warning": 20 }`));
   assert.equal(row(changed, "Sounds").value, false);
   assert.equal(row(changed, "Sounds").changed, true);
-  assert.equal(row(changed, 'Notify "your turn" while focused').value, true);
-  assert.equal(row(changed, 'Notify "your turn" while focused').changed, true);
+  assert.equal(row(changed, "Warn at context share").value, 20);
+  assert.equal(row(changed, "Warn at context share").changed, true);
   // Set to the default's own value in the file, it is not changed.
   assert.equal(row(settingsPage(load(`{ "sounds": true }`)), "Sounds").changed, false);
 });
@@ -47,7 +47,7 @@ test("a row at its default shows no undo icon, and a changed one does", () => {
 test("a row names the key it writes", () => {
   const page = settingsPage(initial);
   assert.deepEqual(row(page, "Sounds").path, ["sounds"]);
-  assert.deepEqual(row(page, 'Notify "your turn" while focused').path, ["notifications", "while_focused"]);
+  assert.deepEqual(row(page, "Warn at context share").path, ["context_warning"]);
 });
 
 test("a file that does not parse disables every control, says so, and shows the settings in effect", () => {
@@ -63,12 +63,21 @@ test("a file that does not parse disables every control, says so, and shows the 
 });
 
 test("a key of the wrong type reads as its default and is not a broken file", () => {
-  const page = settingsPage(load(`{ "sounds": "yes", "notifications": { "while_focused": 3 } }`));
+  const page = settingsPage(load(`{ "sounds": "yes", "context_warning": "high" }`));
   assert.equal(row(page, "Sounds").value, true);
   assert.equal(row(page, "Sounds").changed, false);
-  assert.equal(row(page, 'Notify "your turn" while focused').value, false);
+  assert.equal(row(page, "Warn at context share").value, 30);
   assert.equal(page.error, null);
   assert.ok(rows(page).every((r) => !r.disabled));
+});
+
+test("the context warning steps by 5 from 0, Off, to 100, and its step back to 30 removes the key", () => {
+  const warning = row(settingsPage(initial), "Warn at context share");
+  assert.equal(warning.control, "stepper");
+  assert.deepEqual([warning.value, warning.min, warning.max, warning.step, warning.zero], [30, 0, 100, 5, "Off"]);
+  assert.equal(newValue(warning, "up"), 35);
+  assert.equal(newValue(row(settingsPage(load(`{ "context_warning": 5 }`)), "Warn at context share"), "down"), 0);
+  assert.equal(newValue(row(settingsPage(load(`{ "context_warning": 35 }`)), "Warn at context share"), "down"), null);
 });
 
 test("only the file rows open a file", () => {
@@ -121,7 +130,7 @@ test("a control's change gives the value to write from the row as it is now, and
   assert.equal(newValue(row(page, "Default zoom"), "up"), 1.2);
   assert.equal(newValue(row(page, "Default zoom"), "down"), null, "1.0 is the default");
   assert.equal(newValue(row(page, "Sounds"), "toggle"), null, "back on is the default");
-  assert.equal(newValue(row(page, 'Notify "your turn" while focused'), "toggle"), true);
+  assert.equal(newValue(row(page, "Warn at context share"), "down"), 25);
   assert.equal(newValue(row(page, "Model"), "select", "sonnet"), "sonnet");
   assert.equal(newValue(row(page, "Model"), "select", "haiku"), null, "Haiku is the default");
   assert.equal(newValue(row(page, "Effort"), "select", ""), null, "Default is the default");

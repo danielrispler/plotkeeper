@@ -162,8 +162,7 @@ fn the_checkpoint_days_clears_each_keep_their_row() {
 }
 
 /// danielrispler/Falinks#522: after a `/clear`, the new conversation's `Stop` notifies "your turn" under the row's id,
-/// the one the selection names, so the setting for notifying while focused still skips the session
-/// Daniel looks at.
+/// the one the selection names, so a focused window raises no toast for the session Daniel looks at.
 #[test]
 fn your_turn_after_a_clear_names_the_selected_row() {
     let mut studio = Studio::replayed(cleared(OLD, NEW, Some("claude-1")));
@@ -176,7 +175,6 @@ fn your_turn_after_a_clear_names_the_selected_row() {
         json!({ "prompt": "Next.", "prompt_id": "p-2" }),
     ));
     let mut notifications = Notifications::default();
-    notifications.while_focused = true;
 
     let stop = event(
         NEW,
@@ -193,6 +191,12 @@ fn your_turn_after_a_clear_names_the_selected_row() {
 
     let selected = studio.selected().map(|s| s.agent.id.clone());
     assert_eq!(selected.as_deref(), Some(OLD));
-    let due = notifications.due(Duration::from_secs(10), || true, |_| false, || selected);
-    assert_eq!(due.notification, None);
+    let due = notifications.due(
+        Duration::from_secs(10),
+        || true,
+        |_| false,
+        || selected.into_iter().collect(),
+    );
+    assert_eq!(due.finished, Vec::<String>::new());
+    assert_eq!(due.sound, None);
 }

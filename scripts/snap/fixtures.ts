@@ -159,13 +159,13 @@ const settingsPage = (settings: string | null, expect: string, extra: Fixture = 
     ${expect}`,
 });
 
-// The page's steppers and dropdowns (#196) with one value changed, the zoom: its stepper and undo icon, the font size's stylesheet value, and the
+// The page's steppers and dropdowns (#196) with one value changed, the zoom: its stepper and undo icon, the font size's stylesheet value, the context warning at 30, and the
 // dropdowns at Haiku and Default.
 const settingsControls = (): Fixture =>
   settingsPage(`{ "zoom": 1.2 }`, `
       const values = () => [...dialog.querySelectorAll(".stepper-value")].map((v) => v.textContent);
       const selects = () => [...dialog.querySelectorAll("select")].map((s) => s.options[s.selectedIndex].textContent);
-      if (values().join() !== "1.2,12.5") log("snap:fail the steppers read " + values());
+      if (values().join() !== "1.2,12.5,30") log("snap:fail the steppers read " + values());
       if (selects().join() !== "Haiku,Default") log("snap:fail the dropdowns read " + selects());
       if (undo() !== 1) log("snap:fail expected one undo icon, got " + undo());
       if (dialog.querySelector(".setting-title").textContent.trim() !== "Default zoom") log("snap:fail the first row is not Default zoom");
@@ -233,13 +233,15 @@ export const fixtures = {
   settingsDefaults: () =>
     settingsPage(null, `
       if (undo() !== 0) log("snap:fail an undo icon shows at the defaults");
-      if (toggles().join() !== "true,false,false") log("snap:fail the toggles read " + toggles());
+      if (toggles().join() !== "true,false") log("snap:fail the toggles read " + toggles());
       if (broken()) log("snap:fail the broken-file line shows");`),
   // Two values changed in the file: each row shows its undo icon.
   settingsChanged: () =>
-    settingsPage(`{\n  // Quiet.\n  "sounds": false,\n  "notifications": { "while_focused": true },\n}\n`, `
+    settingsPage(`{\n  // Quiet.\n  "sounds": false,\n  "context_warning": 20,\n}\n`, `
       if (undo() !== 2) log("snap:fail expected 2 undo icons, got " + undo());
-      if (toggles().join() !== "false,true,false") log("snap:fail the toggles read " + toggles());
+      if (toggles().join() !== "false,false") log("snap:fail the toggles read " + toggles());
+      const warning = [...dialog.querySelectorAll(".stepper-value")].map((v) => v.textContent)[2];
+      if (warning !== "20") log("snap:fail the context warning reads " + warning);
       if (dialog.querySelector(".reset").title !== "Reset to default") log("snap:fail the undo icon's tooltip is wrong");
       if (document.getElementById("settings-close").title !== "Close (Esc)") log("snap:fail the X's tooltip is " + document.getElementById("settings-close").title);`),
   // The page's steppers and dropdowns (#196) with one value changed, the zoom: its stepper and undo icon, the font size's stylesheet
@@ -317,6 +319,28 @@ export const fixtures = {
       await new Promise((done) => setTimeout(done, 200));
       if (dialog.querySelector(".switch") !== sounds) log("snap:fail the refusal's line rebuilt the rows");
       if (!dialog.querySelector(".refused")?.textContent.includes("changed since")) log("snap:fail the refusal's reason is not shown");`, { write_setting: { __throw: "settings.json changed since the page read it: try again" } as never }),
+  // Alerts: two sessions' turns ended off screen (the note toast and the unseen chip), and one session past the 30% context
+  // warning, whose row mark reads at full strength.
+  alerts() {
+    const context = (share: number) => ({ ...session("x", "x", "idle").transcript, context: { tokens: share * 10000, share, window: 1000000, left: 100 - share } });
+    const sessions = [
+      session("s1", "#56 · Row controls", "running", { transcript: context(34) }),
+      session("s2", "#57 · Name from the prompt", "running", { transcript: context(12) }),
+      session("s3", "#54 · Subagent terminal", "your_turn", { unseen: true, transcript: { ...context(20), intention: "The subagent's terminal opens beside its parent's" } }),
+      session("s4", "#55 · Delete default", "your_turn", { unseen: true }),
+    ];
+    const snapScript = `
+      window.__TAURI__.__emit("finished", ["s3", "s4"]);
+      await new Promise((done) => setTimeout(done, 50));
+      const note = document.getElementById("note-toast");
+      if (note.hidden || !note.textContent.includes("2 finished")) log("snap:fail the note toast should say 2 finished");
+      const unseen = document.getElementById("unseen");
+      if (unseen.hidden || unseen.textContent !== "2 unseen") log("snap:fail the unseen chip should say 2 unseen");
+      const past = [...document.querySelectorAll(".row .id.past")].map((mark) => mark.textContent);
+      if (past.join() !== "context 34%") log("snap:fail only the 34% mark should be past the warning: " + past.join());
+      log("note: " + note.textContent + " · chip: " + unseen.textContent + " · past: " + past.join());`;
+    return { ...base, sessions, selected: { session: sessions[1], agent: null }, snapScript };
+  },
   branchOnce,
   pullEnabled: pullMain({}, false),
   pullDisabled: pullMain({ changed: 2, would_overwrite: true }, true),
