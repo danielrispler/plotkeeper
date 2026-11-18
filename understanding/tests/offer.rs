@@ -341,7 +341,7 @@ fn a_turn_is_offered_what_changed_in_its_own_worktrees_and_not_its_workers() {
         ..turn_request(1)
     };
     let only = with_worker(&[], &[("w.rs", 200)]);
-    let settled = settle(&mut request, &only, &[]);
+    let settled = settle(&mut request, &only, &[], None);
     assert_eq!(settled.decision.offer, Offer::Nothing);
     assert_eq!(settled.decision.inputs.logic_lines, 0);
     // The evidence line keeps the worker's file.
@@ -352,7 +352,7 @@ fn a_turn_is_offered_what_changed_in_its_own_worktrees_and_not_its_workers() {
         wanted: false,
         ..turn_request(2)
     };
-    let settled = settle(&mut request, &both, &[]);
+    let settled = settle(&mut request, &both, &[], None);
     assert_eq!(settled.decision.offer, Offer::Card);
     assert_eq!(settled.decision.inputs.logic_lines, 30);
     assert_eq!(both.facts.files.len(), 2);
@@ -405,6 +405,7 @@ fn stop_of(
         || {},
         |_| {},
     )
+    .0
 }
 
 #[test]
@@ -423,7 +424,7 @@ fn the_card_path_and_the_summary_path_agree_on_the_same_facts() {
         wanted: false,
         ..turn_request(1)
     };
-    let settled = settle(&mut request, &turn, &[]);
+    let settled = settle(&mut request, &turn, &[], None);
     assert_eq!(settled.decision.offer, Offer::Card);
     assert!(request.no_quiz && !settled.write);
 }
@@ -449,7 +450,7 @@ fn an_agent_with_no_trees_is_judged_on_its_cards_diff_by_both_paths() {
         ..turn_request(2)
     };
     assert_eq!(
-        settle(&mut request, &none, &changed_in(&diff))
+        settle(&mut request, &none, &changed_in(&diff), None)
             .decision
             .offer,
         Offer::Card
@@ -459,7 +460,7 @@ fn an_agent_with_no_trees_is_judged_on_its_cards_diff_by_both_paths() {
         wanted: false,
         ..turn_request(3)
     };
-    let settled = settle(&mut request, &none, &changed_in(&small));
+    let settled = settle(&mut request, &none, &changed_in(&small), None);
     assert_eq!(settled.decision.offer, Offer::Quiz);
     assert!(settled.write && !request.no_quiz);
 }
@@ -569,7 +570,8 @@ fn a_writer_that_gives_no_reply_is_on_the_record() {
         &offers,
         || {},
         |_| {},
-    );
+    )
+    .0;
     assert!(!written);
     assert_eq!(lines_of(&offers)[0]["outcome"], "no reply from the writer");
 }
@@ -583,7 +585,7 @@ fn a_lone_quiz_held_by_the_cap_says_so() {
     }
     let turn = turn_facts(&[("a.rs", 9)], None);
     let mut request = turn_request(4);
-    let settled = settle(&mut request, &turn, &[]);
+    let settled = settle(&mut request, &turn, &[], None);
     assert_eq!(settled.decision.offer, Offer::Quiz);
     let summary = offer_summary(
         &store,
@@ -606,7 +608,7 @@ fn a_lone_quiz_written_is_on_the_record() {
     let (_dir, store) = store();
     let (_o, offers) = offers();
     let mut request = turn_request(1);
-    let settled = settle(&mut request, &turn_facts(&[("a.rs", 9)], None), &[]);
+    let settled = settle(&mut request, &turn_facts(&[("a.rs", 9)], None), &[], None);
     offer_summary(
         &store,
         &Canned("why"),
@@ -638,4 +640,71 @@ fn a_replay_of_the_log_appends_no_line() {
     let mut studio = studio_core::Studio::default();
     studio.replay(r#"{"session_id":"s","hook_event_name":"SessionStart","studio_received_ms":1}"#);
     assert!(lines_of(&offers).is_empty());
+}
+
+#[test]
+fn a_decision_is_on_the_record_once_across_a_restart() {
+    let (_dir, store) = store();
+    let (_o, offers) = offers();
+    let nothing = turn_facts(&[("a.rs", 2)], None);
+    for _ in 0..2 {
+        stop_of(&store, &offers, card_request("s@1", None, ""), &nothing);
+    }
+    assert_eq!(lines_of(&offers).len(), 1);
+    assert!(offers.settled("s", "s@1"));
+    assert!(!offers.settled("s", "s@2"));
+}
+
+#[test]
+fn a_writer_that_gave_no_reply_is_asked_again_and_the_line_stays_one_per_outcome() {
+    let (_dir, store) = store();
+    let (_o, offers) = offers();
+    let turn = turn_facts(&[("a.rs", 30)], None);
+    let session = studio_core::Session::default();
+    let ask = |writer: &dyn CardWriter| {
+        offer_stop(
+            &store,
+            writer,
+            card_request("s@1", None, ""),
+            &session,
+            &turn,
+            &offers,
+            || {},
+            |_| {},
+        )
+        .0
+    };
+    assert!(!ask(&Silent));
+    assert!(!offers.settled("s", "s@1"));
+    assert!(ask(&FakeWriter));
+    assert!(offers.settled("s", "s@1"));
+}
+
+#[test]
+fn the_summary_takes_the_decision_the_card_made_not_a_new_one() {
+    let (_dir, store) = store();
+    let (_o, offers) = offers();
+    // The card path saw a change under the lone Quiz's lines and decided nothing.
+    let at_card = turn_facts(&[("a.rs", 2)], None);
+    let (_, decided) = {
+        let session = studio_core::Session::default();
+        offer_stop(
+            &store,
+            &FakeWriter,
+            card_request("s@1", None, ""),
+            &session,
+            &at_card,
+            &offers,
+            || {},
+            |_| {},
+        )
+    };
+    let decided = decided.unwrap();
+    assert_eq!(decided.offer, Offer::Nothing);
+    // 20 seconds later the facts differ: a fresh decision would be a lone Quiz.
+    let later = turn_facts(&[("a.rs", 9)], None);
+    let mut request = turn_request(1);
+    let settled = settle(&mut request, &later, &[], Some(&decided));
+    assert_eq!(settled.decision.offer, Offer::Nothing);
+    assert!(request.no_quiz);
 }

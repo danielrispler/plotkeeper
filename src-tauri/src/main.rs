@@ -60,6 +60,9 @@ struct Summaries {
     /// The files of each turn card's own change, for a summary of an agent that reports no trees: it is
     /// judged on the same change as its card (danielrispler/plotkeeper#209).
     changes: Mutex<HashMap<String, Vec<Changed>>>,
+    /// What the card path decided for each live turn card, by turn id, until the turn's summary takes it:
+    /// one decision for a turn (danielrispler/plotkeeper#209), however late its summary runs.
+    decided: Mutex<HashMap<String, Decision>>,
     /// The turns whose decision was a lone Quiz, by turn id, until their summary puts it on record.
     lone: Mutex<HashMap<String, Decision>>,
 }
@@ -1205,13 +1208,21 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                 restart::REPLAYED.store(true, std::sync::atomic::Ordering::Release);
                 let waiting = state.lock().unwrap().waiting_folders();
                 fingerprint_changes(waiting, &mut fingerprints);
-                let cards = backfill.into_iter().filter_map(backfilled);
-                outputs.extend(cards.map(Output::Card));
+                // A turn already decided and on record, a refused one too, is not asked again.
+                let recorded = offers();
+                let cards = backfill
+                    .into_iter()
+                    .filter(|b| !recorded.settled(&b.request.session_id, &b.request.id))
+                    .filter_map(backfilled);
+                // No summary follows a backfilled card, so nothing is kept for one.
+                for request in cards {
+                    write(app, writer, &mut queues, request, true, false);
+                }
             }
             for output in outputs {
                 match output {
-                    Output::Card(request) => write(app, writer, &mut queues, request, true),
-                    Output::Brief(request) => write(app, writer, &mut queues, request, false),
+                    Output::Card(request) => write(app, writer, &mut queues, request, true, true),
+                    Output::Brief(request) => write(app, writer, &mut queues, request, false, true),
                     Output::Summary(request) => summarize(app, writer, &mut queues, request),
                     Output::Name(request) => name(app, writer, &mut queues, request),
                     Output::NeedsYou { session_id, agent } => {
@@ -1549,7 +1560,7 @@ fn prs(app: &AppHandle) {
 type Job = Box<dyn FnOnce() + Send>;
 
 /// Writes the card `request` asks for, or only the brief when `card` is false, on its session's
-/// queue in `queues`. `claude -p` takes seconds, so the read loop goes on and draws a card once it
+/// queue in `queues`; `live` is false for a card of a turn that ended while the app was down. `claude -p` takes seconds, so the read loop goes on and draws a card once it
 /// is in the store; the row's line changes with no line read, so the list is sent from here.
 fn write(
     app: &AppHandle,
@@ -1557,10 +1568,13 @@ fn write(
     queues: &mut HashMap<String, mpsc::Sender<Job>>,
     mut request: CardRequest,
     card: bool,
+    live: bool,
 ) {
     let (app, writer) = (app.clone(), writer.clone());
     let id = request.session_id.clone();
-    if request.agent.is_none() && request.check.is_none() && card {
+    // Only a live turn's card has a summary to come, which takes what is kept here and clears it.
+    let turn_card = request.agent.is_none() && request.check.is_none() && card && live;
+    if turn_card {
         let files = changed_in(request.diff());
         let changes = &app.state::<Summaries>().changes;
         changes.lock().unwrap().insert(request.id.clone(), files);
@@ -1605,9 +1619,18 @@ fn write(
             true => {
                 let turn = turn_of(&app.state(), &request.id);
                 let offers = offers();
-                offer_stop(
+                let (written, decided) = offer_stop(
                     &store, &*writer, request, &session, &turn, &offers, stored, report,
-                )
+                );
+                if let Some(decided) = decided.filter(|_| turn_card) {
+                    let summaries = app.state::<Summaries>();
+                    summaries
+                        .decided
+                        .lock()
+                        .unwrap()
+                        .insert(card_id.clone(), decided);
+                }
+                written
             }
             false => write_goal(&store, &*writer, &request, &session, report),
         };
@@ -1663,10 +1686,12 @@ fn settle_summary(app: &AppHandle, request: &mut SummaryRequest) -> bool {
     let state = app.state::<Mutex<Studio>>();
     let summaries = app.state::<Summaries>();
     let change = summaries.changes.lock().unwrap().remove(&request.id);
+    let decided = summaries.decided.lock().unwrap().remove(&request.id);
     let settled = settle(
         request,
         &turn_of(&state, &request.id),
         &change.unwrap_or_default(),
+        decided.as_ref(),
     );
     if settled.decision.offer == Offer::Quiz {
         let mut lone = summaries.lone.lock().unwrap();
@@ -1689,11 +1714,17 @@ fn summarize(
         .unwrap()
         .summaries_on_open()
     {
-        let mut request = request;
-        if settle_summary(app, &mut request) {
-            let waiting = &app.state::<Summaries>().waiting;
-            waiting.lock().unwrap().insert(request.id.clone(), request);
-        }
+        // On its session's queue, after the card's job that makes the decision the summary takes.
+        let app = app.clone();
+        let id = request.session_id.clone();
+        let job = move || {
+            let mut request = request;
+            if settle_summary(&app, &mut request) {
+                let waiting = &app.state::<Summaries>().waiting;
+                waiting.lock().unwrap().insert(request.id.clone(), request);
+            }
+        };
+        queue(queues, id).send(Box::new(job)).ok();
         return;
     }
     let (app, writer) = (app.clone(), writer.clone());

@@ -232,9 +232,25 @@ impl Offers {
         &self.0
     }
 
+    /// Whether the record already holds the final decision on `id` of `session`.
+    pub fn settled(&self, session: &str, id: &str) -> bool {
+        let text = std::fs::read_to_string(&self.0).unwrap_or_default();
+        let no_reply = serde_json::to_value(Outcome::NoReply).unwrap_or_default();
+        text.lines()
+            .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+            .any(|l| {
+                l["session"] == session && l["id"] == id && l.get("outcome") != Some(&no_reply)
+            })
+    }
+
     /// Appends the line of `decision` on `id` of `session`, ending in `outcome` (or, with none,
     /// in the decision's reason). A failed write is no reason to lose the offer: it is logged.
+    /// A decision already on record, other than a writer's silence, is not recorded again: a turn
+    /// the app asks about again after a restart adds no line.
     pub fn record(&self, session: &str, id: &str, decision: &Decision, outcome: Option<Outcome>) {
+        if self.settled(session, id) {
+            return;
+        }
         let line = Line {
             at: crate::millis(),
             session,
@@ -266,10 +282,19 @@ pub struct Settled {
 
 /// Fills in `request`'s facts from `turn` and whether its summary may keep a Quiz, from the same
 /// decision the turn's card got: a lone Quiz only when the table gives that, and the card's own
-/// `change` is read only where `turn` has no files.
-pub fn settle(request: &mut SummaryRequest, turn: &TurnFacts, change: &[Changed]) -> Settled {
+/// `change` is read only where `turn` has no files. A `decided` decision, the one the card path made
+/// for this turn, is taken as it is: the summary never decides again on facts that moved since.
+pub fn settle(
+    request: &mut SummaryRequest,
+    turn: &TurnFacts,
+    change: &[Changed],
+    decided: Option<&Decision>,
+) -> Settled {
     request.facts = turn.facts.clone();
-    let decision = decide(OfferKind::Turn, turn, change);
+    let decision = match decided {
+        Some(decided) => decided.clone(),
+        None => decide(OfferKind::Turn, turn, change),
+    };
     let lone = decision.offer == Offer::Quiz;
     request.no_quiz = !lone;
     Settled {
@@ -290,9 +315,12 @@ pub fn offer_stop(
     offers: &Offers,
     stored: impl FnOnce(),
     mut log: impl FnMut(String),
-) -> bool {
+) -> (bool, Option<Decision>) {
     if request.check.is_some() {
-        return write_stop(store, writer, request, session, stored, log);
+        return (
+            write_stop(store, writer, request, session, stored, log),
+            None,
+        );
     }
     let kind = match () {
         _ if request.agent.is_some() => OfferKind::Worker,
@@ -310,18 +338,18 @@ pub fn offer_stop(
                 Outcome::NoReply
             };
             offers.record(&session_id, &id, &decision, Some(outcome));
-            written
+            (written, Some(decision))
         }
         // Its summary carries the lone Quiz, and puts the line there.
         Offer::Quiz => {
             log(format!("no card on {id}: its change gets a lone Quiz"));
-            false
+            (false, Some(decision))
         }
         Offer::Nothing => {
             let why = decision.reason.unwrap_or_default();
             log(format!("no card on {id}: {why}"));
             offers.record(&session_id, &id, &decision, None);
-            false
+            (false, Some(decision))
         }
     }
 }
