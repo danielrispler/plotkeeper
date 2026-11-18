@@ -423,6 +423,7 @@ export interface Commands {
   open: Selection | null;
   open_file: void;
   open_link: void;
+  open_keymap: void;
   open_settings: void;
   plugin_setup: string | null;
   projects: string[];
@@ -461,6 +462,8 @@ export interface Commands {
   turn_summary: TurnSummary | null;
   usage: AgentUsage[];
   watch: Ask | null;
+  // The new `settings.json` text, as `settings.rs` wrote it; an error is why the write was refused.
+  write_setting: string;
   workspace_git_state: GitState;
   workspaces: Workspaces;
 }

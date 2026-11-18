@@ -1,6 +1,6 @@
 // The session list and the selection, as the shell last sent them, and the settings files in effect.
 
-import { initial } from "./settings.js";
+import { initial, type SettingsFiles } from "./settings.js";
 import type { Selection, Session, SessionCards } from "./types.js";
 
 // `pending` is the row Daniel just pressed, shown selected until the shell replies (danielrispler/Falinks#570).
@@ -15,4 +15,6 @@ export const studio = {
   // Focus mode (danielrispler/Falinks#573): the list and the rail folded, the terminal takes the window.
   focus: false,
   files: initial,
+  // The two files' text as the shell last sent it: what the settings page's write is made from (#195).
+  texts: { settings: null, keymap: null } as SettingsFiles,
 };

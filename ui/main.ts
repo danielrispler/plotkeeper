@@ -21,9 +21,10 @@ import { dragPanel, placePanel, togglePanel } from "./panel.js";
 import { dragSplit, focusPane, placePanes, runDoctor, showHistory, split, startPanes, toggleSplit } from "./panes.js";
 import { showAddProject, showBranches, showPalette, showPicker } from "./picker.js";
 import { fetchNow, foundWorkspaces, pullAll, showWorkspaces, sidebarOrder, watchWorkspaces } from "./workspaces.js";
-import { reload, type SettingsFiles, zoomed } from "./settings.js";
+import { reload, reloadedZoom, type SettingsFiles, zoomed } from "./settings.js";
 import { knownProjects } from "./projects.js";
 import { studio } from "./state.js";
+import { closeSettingsPage, settingsPageOpen, showSettingsPage, startSettingsPage } from "./settings-page.js";
 import { showSkills } from "./skills.js";
 import { showView } from "./story.js";
 import { jumpToNeedsYou, showToast } from "./toast.js";
@@ -127,7 +128,7 @@ const setZoom = (to: number) => {
   invoke("set_zoom", { zoom }).then(layout, (e) => console.warn(e));
 };
 // The keyboard spine (danielrispler/Falinks#575): ⌘] and ⌘[ step through the sessions, ⌘J goes to the next needs-you, else the next unseen, ↑
-// and ↓ move in the list, 1–4 answer the docked card, ⌘N starts a session, ⌘, opens `settings.json`
+// and ↓ move in the list, 1–4 answer the docked card, ⌘N starts a session, ⌘, opens the settings page
 // and ⌘⇧P opens the palette of every action here.
 const inSidebar = () => sidebarOrder(knownProjects(), foundWorkspaces(), studio.listed);
 const selectedId = () => studio.selection?.session.id ?? null;
@@ -173,6 +174,8 @@ const actions: Actions = {
     openAsk(selectedId()!, { kind: "headline", turn });
   },
   "studio::Dismiss": () => {
+    // The settings page, a dialog over the window, closes first and leaves the rest as it was.
+    if (settingsPageOpen()) return closeSettingsPage();
     document.body.classList.remove("list-open", "list-peek", "rail-open", "skills-open");
     element("picker").hidden = true;
   },
@@ -218,7 +221,9 @@ const actions: Actions = {
   "studio::PullMain": () => void pullAll(),
   // Asks GitHub again which tasks have landed (#53); it is otherwise asked at a turn's end and at the window's focus.
   "studio::RefreshLanded": () => void invoke("refresh_landed_tasks").catch((e) => console.warn(e)),
-  "studio::OpenSettings": () => void invoke("open_settings", { editor: studio.files.settings.editor }).catch((e) => console.warn(e)),
+  // The settings page (#195); the file itself is `studio::OpenSettingsFile`.
+  "studio::OpenSettings": () => showSettingsPage(),
+  "studio::OpenSettingsFile": () => void invoke("open_settings", { editor: studio.files.settings.editor }).catch((e) => console.warn(e)),
   // The skills browser (danielrispler/Falinks#528), in the rail's place; it leaves focus mode, which hides the rail.
   "studio::Skills": () => {
     if (studio.focus) actions["studio::ToggleFocus"]();
@@ -242,15 +247,20 @@ window.addEventListener("keydown", (event) => {
   const typing = target.isContentEditable || target.matches?.("input, textarea, select") === true;
   const inList = target.closest?.(".list") != null;
   const inTerminal = target.closest?.("#terminal") != null;
-  const action = windowBinding(studio.files.keymap, event, typing, inList, !typing && !inTerminal && answerable());
+  const action = windowBinding(studio.files.keymap, event, typing, inList, !typing && !inTerminal && answerable(), settingsPageOpen());
   if (!run(actions, action)) return;
   if (action !== "studio::Dismiss") event.preventDefault();
 });
 
 // `settings.json` and `keymap.json`, at start and each time one is saved. A file that does not parse
 // is reported in the notice line and the last good one stays in effect.
+let applied = false;
 function applySettings(files: SettingsFiles) {
+  // A write's returned text and then the watcher's report of the same file are one change: the second does nothing.
+  if (applied && files.settings === studio.texts.settings && files.keymap === studio.texts.keymap) return;
+  applied = true;
   const previous = studio.files.settings;
+  studio.texts = files;
   studio.files = reload(studio.files, files);
   const { settings, errors } = studio.files;
   element("settings-gear").title = titled(studio.files.keymap, "Settings", "studio::OpenSettings");
@@ -261,7 +271,8 @@ function applySettings(files: SettingsFiles) {
   if (errors.length) notice.hidden = false;
   else if (!others.length) notice.hidden = true;
   // Only a changed `zoom` resets the zoom the keys set.
-  if (settings.zoom !== previous.zoom) setZoom(settings.zoom);
+  const to = reloadedZoom(zoom, previous, settings);
+  if (to !== zoom) setZoom(to);
   invoke("notify_while_focused", { on: settings.notifications.while_focused }).catch((e) => console.warn(e));
   invoke("sounds", { on: settings.sounds }).catch((e) => console.warn(e));
   const size = settings.terminal.font_size;
@@ -274,6 +285,7 @@ function applySettings(files: SettingsFiles) {
   invoke("check_lists", { lists: settings.checks }).catch((e) => console.warn(e));
   window.dispatchEvent(new Event("settings"));
 }
+startSettingsPage(applySettings);
 listen<SettingsFiles>("settings-files", applySettings);
 invoke("settings_files").then(applySettings);
 // The session's header in the top bar toggles the rail, as ⌘2 does (danielrispler/plotkeeper#127).

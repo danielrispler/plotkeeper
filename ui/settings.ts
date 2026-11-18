@@ -52,6 +52,9 @@ export interface Files {
   // One line per file that did not parse or key of the wrong type, such as
   // "settings.json: Unexpected end of JSON input".
   errors: string[];
+  // `settings.json` does not parse (a key of the wrong type is not that): `settings` is the last good one, and the settings page
+  // writes nothing (#195).
+  broken: boolean;
 }
 
 export const ZOOM_MIN = 0.5;
@@ -62,8 +65,12 @@ export const clampZoom = (zoom: number) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN,
 // The zoom `by` steps from `zoom`, inside its bounds; 0 resets it.
 export const zoomed = (zoom: number, by: number) => clampZoom(by === 0 ? 1 : Math.round((zoom + by * ZOOM_STEP) * 10) / 10);
 
-const FONT_MIN = 8;
-const FONT_MAX = 40;
+export const FONT_MIN = 8;
+export const FONT_MAX = 40;
+
+// The zoom the window has after a reload of the settings: the file's when its `zoom` changed (the settings page writes it), else
+// `current`, which ⌘+, ⌘− and ⌘0 may have moved; those keys never write the file.
+export const reloadedZoom = (current: number, previous: Settings, next: Settings) => (next.zoom !== previous.zoom ? next.zoom : current);
 
 const defaultSettings: Settings = {
   zoom: 1,
@@ -130,7 +137,7 @@ const defaultKeymap: Keymap = {
   },
 };
 
-export const initial: Files = { settings: defaultSettings, keymap: defaultKeymap, errors: [] };
+export const initial: Files = { settings: defaultSettings, keymap: defaultKeymap, errors: [], broken: false };
 
 // Drops comments and trailing commas outside strings, so `JSON.parse` reads Zed's format.
 function parseJsonc(text: string): unknown {
@@ -253,16 +260,18 @@ export type SettingsFiles = { settings: string | null; keymap: string | null };
 // The settings files from their text, each falling back to `previous` when it does not parse.
 export function reload(previous: Files, files: SettingsFiles): Files {
   const errors: string[] = [];
+  let broken = false;
   const read = <T>(name: string, text: string | null, parse: (json: unknown, report: Report) => T, fallback: T, last: T): T => {
     if (text === null || !text.trim()) return fallback;
     try {
       return parse(parseJsonc(text), (problem) => errors.push(`${name}: ${problem}`));
     } catch (e) {
       errors.push(`${name}: ${e instanceof Error ? e.message : e}`);
+      if (name === "settings.json") broken = true;
       return last;
     }
   };
   const settings = read("settings.json", files.settings, readSettings, defaultSettings, previous.settings);
   const keymap = read("keymap.json", files.keymap, readKeymap, defaultKeymap, previous.keymap);
-  return { settings, keymap, errors };
+  return { settings, keymap, errors, broken };
 }

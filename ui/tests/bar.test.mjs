@@ -33,7 +33,7 @@ class Node {
 
 const widths = { "session-header": 260, "needs-you": 90, "git-line": 400, usage: 120, "new-build": 130, "new-session": 28 };
 const top = new Node(".top");
-for (const id of ["session-header", "needs-you", "git-line", ".sp", "usage", "new-build", "new-session", "bar-more", "bar-menu"])
+for (const id of ["session-header", "needs-you", "git-line", ".sp", "usage", "new-build", "new-session", "bar-more", "settings-gear", "bar-menu"])
   top.append(new Node(id, widths[id] ?? 28));
 const nodes = Object.fromEntries(top.children.map((node) => [node.id, node]));
 nodes["new-build"].hidden = true;
@@ -47,14 +47,25 @@ const inBar = () => top.children.map((node) => node.id).filter((id) => !nodes[id
 test("the header, the chip and the git line stay left of the spacer once the bar is placed", () => {
   top.clientWidth = 1728;
   placeBar();
-  assert.deepEqual(inBar(), ["session-header", "needs-you", "git-line", ".sp", "usage", "new-session"]);
+  assert.deepEqual(inBar(), ["session-header", "needs-you", "git-line", ".sp", "usage", "new-session", "settings-gear"]);
 });
 
 test("an item back from the menu returns to its side of the spacer", () => {
-  top.clientWidth = 1000;
+  top.clientWidth = 1020;
   placeBar();
-  assert.deepEqual(inBar(), ["session-header", "needs-you", "git-line", ".sp", "new-session", "bar-more"]);
+  assert.deepEqual(inBar(), ["session-header", "needs-you", "git-line", ".sp", "new-session", "bar-more", "settings-gear"]);
   top.clientWidth = 1728;
   placeBar();
-  assert.deepEqual(inBar(), ["session-header", "needs-you", "git-line", ".sp", "usage", "new-session"]);
+  assert.deepEqual(inBar(), ["session-header", "needs-you", "git-line", ".sp", "usage", "new-session", "settings-gear"]);
+});
+
+test("the gear is the bar's last item and takes its room: it never goes into the menu, the usage does instead (#194)", () => {
+  // Room for everything but the gear: 898 px of items and four gaps of 12 fit in 946, the gear's 28 and a gap more do not.
+  top.clientWidth = 946 + 78 + 12 + 24; // plus the bar's padding and the spacer's two gaps
+  placeBar();
+  assert.deepEqual(inBar(), ["session-header", "needs-you", "git-line", ".sp", "new-session", "bar-more", "settings-gear"]);
+  assert.ok(nodes["usage"].parent === nodes["bar-menu"], "the usage is in the menu");
+  assert.ok(nodes["settings-gear"].parent === top, "the gear is in the bar");
+  top.clientWidth = 1728;
+  placeBar();
 });
