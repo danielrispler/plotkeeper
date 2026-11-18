@@ -567,6 +567,11 @@ fn bash(ms: u64, id: &str, command: &str, roots: Option<Value>) -> String {
 /// The files of the session's turn 0 when the trees differ in `a.rs` and `b.rs` of the root, and
 /// `others` happened in the turn.
 fn kept(others: Vec<String>) -> Vec<String> {
+    kept_of(&["src/a.rs", "src/b.rs"], others)
+}
+
+/// Like `kept`, when the trees differ in `paths` of the root.
+fn kept_of(paths: &[&str], others: Vec<String>) -> Vec<String> {
     let mut lines = vec![prompt(json!({ ROOT: "s1" })), other_prompt()];
     lines.extend(others);
     lines.push(stop(json!({ ROOT: "e1" })));
@@ -575,7 +580,10 @@ fn kept(others: Vec<String>) -> Vec<String> {
     let mine = asks.iter().find(|a| a.session_id == SESSION).unwrap();
     studio.set_turn_files(
         mine,
-        Some(diffs(mine, &[(ROOT, "src/a.rs"), (ROOT, "src/b.rs")])),
+        Some(diffs(
+            mine,
+            &paths.iter().map(|p| (ROOT, *p)).collect::<Vec<_>>(),
+        )),
     );
     turn_files(&studio, 0)
 }
@@ -904,4 +912,37 @@ fn a_turn_that_ran_only_git_merge_base_has_no_merge_flag() {
     assert!(ran("git merge feature"));
     assert!(ran("git fetch && git merge origin/main"));
     assert!(ran("gh pr merge 12 --squash"));
+}
+
+#[test]
+fn another_sessions_command_names_a_root_level_file_only_by_its_absolute_path() {
+    let paths = ["README.md", "Cargo.toml"];
+    let bare = bash(
+        2_000,
+        "x1",
+        "cat README.md ./Cargo.toml",
+        Some(json!([ROOT])),
+    );
+    assert_eq!(kept_of(&paths, vec![bare]), paths);
+    let absolute = bash(2_000, "x2", "cat /w/repo/README.md", Some(json!([ROOT])));
+    assert_eq!(kept_of(&paths, vec![absolute]), ["Cargo.toml"]);
+}
+
+#[test]
+fn another_sessions_command_names_a_path_on_its_boundaries_not_as_a_substring() {
+    let paths = ["src/a.rs", "Cargo.toml", "core/Cargo.toml"];
+    let command = bash(
+        2_000,
+        "x1",
+        "cat src/a.rs.bak mysrc/a.rs core/Cargo.toml.lock",
+        Some(json!([ROOT])),
+    );
+    assert_eq!(kept_of(&paths, vec![command]), paths);
+    let right = bash(
+        2_000,
+        "x2",
+        "cat ./src/a.rs; cat \"core/Cargo.toml\"",
+        Some(json!([ROOT])),
+    );
+    assert_eq!(kept_of(&paths, vec![right]), ["Cargo.toml"]);
 }

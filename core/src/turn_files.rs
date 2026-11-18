@@ -98,7 +98,36 @@ pub(crate) fn names(row: &Row, root: &str, path: &str) -> bool {
     let Some(command) = row.command.as_deref() else {
         return false;
     };
-    command.contains(&absolute) || (row.roots.iter().any(|r| r == root) && command.contains(path))
+    // A root-level file's path from the root is its bare name, which a command names only in full.
+    let relative = path.contains('/') && row.roots.iter().any(|r| r == root);
+    mentions(command, &absolute) || (relative && mentions(command, path))
+}
+
+/// Whether `command` holds `path` as a whole path: not as the tail of a longer one (`mysrc/a.rs`,
+/// `x/core/a.rs`, though `./src/a.rs` is `src/a.rs`) and not as the start of a longer name
+/// (`a.rs.bak`, `a.rs2`).
+fn mentions(command: &str, path: &str) -> bool {
+    let word = |c: char| c.is_alphanumeric() || "_-".contains(c);
+    command.match_indices(path).any(|(at, _)| {
+        let before = &command[..at];
+        let after = command[at + path.len()..].chars();
+        let start = match before.strip_suffix("./") {
+            Some(before) => before,
+            None => before,
+        };
+        let opens = start
+            .chars()
+            .next_back()
+            .is_none_or(|c| !word(c) && c != '/' && c != '.')
+            || path.starts_with('/') && before.chars().next_back().is_none_or(|c| !word(c));
+        let mut rest = after;
+        let closes = match rest.next() {
+            None => true,
+            Some('.') => rest.next().is_none_or(|c| !word(c)),
+            Some(c) => !word(c) && c != '/',
+        };
+        opens && closes
+    })
 }
 
 impl TurnFiles {
