@@ -341,3 +341,41 @@ fn a_card_of_a_worker_that_ended_waits_in_the_spawning_turn_until_its_wake_up_ar
 
     assert_eq!(card_turn(&studio, "w1", 10), Some(0));
 }
+
+/// `spawned_and_woken`, then `w1` is sent on at 22 with a step of its own, ends again at 25, and a second wake-up at 30
+/// names it.
+fn resumed_and_woken_again() -> Studio {
+    let mut studio = spawned_and_woken();
+    studio.apply(&ev("Stop", 21, "p3", json!({"background_tasks": []})));
+    let step = json!({"agent_id": "w1", "tool_name": "Read", "tool_input": {"file_path": "/w/a"},
+        "tool_use_id": "r1", "tool_response": {}});
+    studio.apply(&ev("PreToolUse", 22, "p3", step));
+    studio.apply(&ev("SubagentStop", 25, "p3", json!({"agent_id": "w1"})));
+    studio.apply(&woken(30, "p4", &["w1"]));
+    studio
+}
+
+#[test]
+fn a_workers_card_stays_in_the_turn_of_the_wake_up_for_its_end_after_the_worker_resumes() {
+    let studio = resumed_and_woken_again();
+    assert_eq!(studio.session("s1").unwrap().turns.len(), 4);
+
+    // The end at 10 is the first wake-up's, the end at 25 the second's, whatever the worker did between.
+    assert_eq!(card_turn(&studio, "w1", 10), Some(2));
+    assert_eq!(card_turn(&studio, "w1", 13), Some(2));
+    assert_eq!(card_turn(&studio, "w1", 25), Some(3));
+    assert_eq!(card_turn(&studio, "w1", 9), Some(0));
+}
+
+#[test]
+fn a_workers_card_of_a_second_end_waits_in_the_spawning_turn_until_its_own_wake_up_arrives() {
+    let mut studio = spawned_and_woken();
+    studio.apply(&ev("Stop", 21, "p3", json!({"background_tasks": []})));
+    let step = json!({"agent_id": "w1", "tool_name": "Read", "tool_input": {"file_path": "/w/a"},
+        "tool_use_id": "r1", "tool_response": {}});
+    studio.apply(&ev("PreToolUse", 22, "p3", step));
+    studio.apply(&ev("SubagentStop", 25, "p3", json!({"agent_id": "w1"})));
+
+    assert_eq!(card_turn(&studio, "w1", 10), Some(2));
+    assert_eq!(card_turn(&studio, "w1", 25), Some(0));
+}

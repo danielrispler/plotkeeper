@@ -682,6 +682,10 @@ pub struct Subagent {
     pub status: Status,
     /// When its end was received, in Unix milliseconds.
     pub ended_at: Option<u64>,
+    /// Each time its end was received, which a step of its own after the end does not take back
+    /// (danielrispler/plotkeeper#212).
+    #[serde(default)]
+    pub ends: Vec<u64>,
     /// The first line of its last message, from its `SubagentStop`.
     pub result: Option<String>,
     /// Its whole last message, which its summary reads (danielrispler/Falinks#535); the pane never shows it.
@@ -774,6 +778,9 @@ impl Subagent {
             self.status = Status::from(status);
         } else if self.status == Status::Running {
             self.status = Status::Completed;
+        }
+        if self.ended_at.is_none() {
+            self.ends.push(at);
         }
         self.ended_at.get_or_insert(at);
     }
@@ -1403,22 +1410,26 @@ impl Session {
     }
 
     /// The turn of this session's rail that worker card `request` belongs to (danielrispler/plotkeeper#212): the turn the
-    /// wake-up that names the worker opened, for a card asked for at or after the worker's end; else the turn that spawned
-    /// it, which also holds a card of the worker's end until its wake-up arrives.
+    /// first wake-up that names the worker after its latest end before the card opened; else the turn that spawned it,
+    /// which also holds a card of the worker's end until its wake-up arrives.
     pub fn worker_card_turn(&self, request: &CardRequest) -> Option<usize> {
         let worker = self.subagent(request.agent.as_deref()?)?;
-        let ended = worker
-            .ended_at
-            .is_some_and(|end| card_time(&request.id) >= end);
+        // The latest end the card was asked for at or after: the card of that end waits for its own wake-up.
+        let at = card_time(&request.id);
+        let ends = worker.ends.iter().chain(worker.ended_at.iter());
+        let Some(end) = ends.filter(|end| **end <= at).max() else {
+            return worker.turn;
+        };
         let woke = |p: &&Prompt| {
-            matches!(p.sender, Sender::WakeUp(_))
+            p.at >= *end
+                && matches!(p.sender, Sender::WakeUp(_))
                 && matches!(
                     claude::names(&p.text, &worker.agent.id),
                     claude::Names::WakeUp
                 )
         };
         let wake_up = self.prompts.iter().find(woke).and_then(|p| p.turn);
-        wake_up.filter(|_| ended).or(worker.turn)
+        wake_up.or(worker.turn)
     }
 
     /// The index of its latest turn, which a check, subagent or question that starts now is in.
