@@ -160,8 +160,11 @@ The empty file `present` in the studio's data folder, kept while the window is f
 Bringing back the terminals a terminal daemon ran after it died, from a crash, a reboot or an upgrade. A Claude terminal reopens its latest session with `claude --resume`; a shell that ran another agent with a resume command, such as `agy` or `codex`, reopens that agent's latest conversation in its folder; any other shell starts again in its folder. Each loses its screen, and a shell its state. Quitting a revived agent ends its terminal, as the agent, not a shell, is the terminal's program.
 _Avoid_: Restore (nothing of the old process survives)
 
+**Studio log**:
+The studio's own diagnostics: its errors, warnings and panics, one line each with a local time and a level, in `~/Library/Logs/dev.falinks.studio/`. Not the event log, which holds the agents' hook events.
+
 **Mismatch log**:
-A local debug log, beside the event log, of the Claude sessions whose hook state and OSC 7501 state disagree for more than a few seconds: one line each, with the time, the session and both states.
+The lines in the **Studio log**, marked `mismatch`, of the Claude sessions whose hook state and OSC 7501 state disagree for more than a few seconds: one line each, with the time, the session and both states. They used to be a file of their own, `mismatch.log`, which is no longer written.
 
 **Decision**:
 A question, plan, permission or blocked command Daniel answered, with his answer and where he gave it: on the card or in the terminal. A session's decisions, newest first, are its decision history.

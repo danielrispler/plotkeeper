@@ -1,11 +1,13 @@
 // The window's small parts: the shell's calls, and the elements every region builds.
 
+import { showError } from "./notice.js";
 import type { Command, Commands, Step } from "./types.js";
 
 declare global {
   interface Window {
     __TAURI__: {
       core: { invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> };
+      log: { warn(message: string): Promise<void>; error(message: string): Promise<void> };
       event: { listen<T>(event: string, handler: (event: { payload: T }) => void): Promise<() => void> };
     };
   }
@@ -16,6 +18,29 @@ export const invoke = <C extends Command>(command: C, args?: Record<string, unkn
   window.__TAURI__.core.invoke<Commands[C]>(command, args);
 export const listen = <T>(event: string, handler: (payload: T) => void) =>
   window.__TAURI__.event.listen<T>(event, (e) => handler(e.payload));
+
+// The Studio log (#190): the line is the command's name and the error's message, nothing else of the error. `error` is for a
+// failed action Daniel asked for, `warn` for a call that degrades and carries on. A log that fails is dropped.
+const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e));
+// What of a line may reach the log, as Rust's `scrubbed` keeps it: one line, up to the first quote mark, so a writer's words never do.
+const kept = (line: string) =>
+  line.replace(/\s*\n\s*/g, " ").split('"')[0].replace(/[: ]+$/, "");
+// An `error` also shows in the notice line (#191), whole; the app does not echo the UI's own lines back (its `Webview` target drops them).
+export function logLine(level: "warn" | "error", line: string) {
+  if (level === "error") {
+    showError(line);
+  }
+  try {
+    window.__TAURI__.log[level](kept(line)).catch(() => {});
+  } catch {}
+}
+export const failure = (command: string, level: "warn" | "error" = "warn") => (e: unknown) => logLine(level, `${command}: ${messageOf(e)}`);
+
+// An uncaught error or unhandled rejection in the page goes to the log at `error`.
+export function logUncaught(target: Pick<Window, "addEventListener">) {
+  target.addEventListener("error", (event) => logLine("error", `uncaught: ${event.message}`));
+  target.addEventListener("unhandledrejection", (event) => logLine("error", `unhandled rejection: ${messageOf(event.reason)}`));
+}
 
 export const element = (id: string) => document.getElementById(id)!;
 

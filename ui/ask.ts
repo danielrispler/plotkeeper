@@ -4,7 +4,7 @@
 // those facts and, for a file, its hunk; the answer stays here, labelled as interpretation under the facts as recorded and the session never sees it. A failed call or a reply with no answer shows why, with
 // a retry.
 
-import { invoke, text } from "./dom.js";
+import { failure, invoke, text } from "./dom.js";
 import { rendered } from "./markdown.js";
 import { studio } from "./state.js";
 
@@ -84,7 +84,7 @@ function askBox(session: string, anchor: Anchor, what: string): HTMLDetailsEleme
         hunk.textContent = hunkText(h);
         recorded.append(text("p", "The hunk", "label"), hunk);
       })
-      .catch((e) => console.warn(e));
+      .catch(failure("turn_file_hunk"));
   };
   const field = document.createElement("textarea");
   field.rows = 2;
@@ -170,6 +170,7 @@ function whyNotBox(session: string, turn: number): HTMLElement {
       const cwd = studio.listed.find((s) => s.id === session)?.cwd ?? null;
       out.replaceChildren(whyNotElement(name, result, cwd));
     } catch (e) {
+      failure("ask_why_not", "error")(e);
       out.replaceChildren(text("p", `No answer: ${e}.`, "ask-error"));
     }
     go.disabled = false;

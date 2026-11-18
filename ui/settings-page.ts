@@ -2,7 +2,7 @@
 // `settings.json` in place (`settings.rs`'s `write_setting`). The rows are one pure function from the parsed files, `settingsPage`;
 // the dialog below only draws them and sends each change.
 
-import { element, invoke, patch, text } from "./dom.js";
+import { element, failure, invoke, patch, text } from "./dom.js";
 import { titled } from "./keys.js";
 import { FONT_MAX, FONT_MIN, initial, ZOOM_MAX, ZOOM_MIN, type Files, type Settings, type SettingsFiles } from "./settings.js";
 import { studio } from "./state.js";
@@ -251,11 +251,12 @@ function write(key: string, action: Action, picked?: string) {
       refused = null;
       saved({ ...studio.texts, settings: written });
     } catch (e) {
+      failure("write_setting", "error")(e);
       // The window's text may be older than the file's (a write's reply that crossed an editor's save): read both again, so the next try is made against the file as it is.
       try {
         saved(await invoke("settings_files"));
       } catch (again) {
-        console.warn(again);
+        failure("settings_files")(again);
       }
       // Set after the read, so the line stays until the text changes again or a write succeeds.
       refused = { why: String(e), at: studio.texts.settings };
@@ -266,7 +267,7 @@ function write(key: string, action: Action, picked?: string) {
 
 function openFile(file: FileName) {
   const command = file === "settings" ? "open_settings" : "open_keymap";
-  invoke(command, { editor: studio.files.settings.editor }).catch((e) => console.warn(e));
+  invoke(command, { editor: studio.files.settings.editor }).catch(failure(command, "error"));
 }
 
 export const settingsPageOpen = () => dialog().open;

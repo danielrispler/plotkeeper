@@ -10,7 +10,7 @@ At a session's `Stop`, when it changed nothing itself but its workers wrote card
 
 A card's code is pulled from git, never retyped by the model: the writer names a path and a line range, and the app reads those lines from the turn's end tree, at most 12 lines of one range; a range whose lines are not in the file is dropped, and a check's card has no code. A card's file chips that are among its turn's files open the same hunk as the file's row in the evidence line, in place.
 
-Under the explanation, "explain more" asks the writer once more, on the card's change and its explanation, and shows the longer explanation under the card; later taps open and close the kept text with no new call. When the writer gives no text, the app logs one line on stderr and the next tap asks again. Rate the explanation: Good, Fair or Poor, then tick its reasons: unclear, wrong, too shallow, too easy, and, on a card with a quiz that is not a check's, the key is wrong, which is the same flag as the quiz's.
+Under the explanation, "explain more" asks the writer once more, on the card's change and its explanation, and shows the longer explanation under the card; later taps open and close the kept text with no new call. When the writer gives no text, the app logs one line in the Studio log and the next tap asks again. Rate the explanation: Good, Fair or Poor, then tick its reasons: unclear, wrong, too shallow, too easy, and, on a card with a quiz that is not a check's, the key is wrong, which is the same flag as the quiz's.
 
 The card store keeps the cards, your guesses, flags, ratings and longer explanations across restarts; a turn that ended while the app was down gets its card when the app starts, if it ended in the last 24 hours, changed files and has none.
 
@@ -22,7 +22,7 @@ Ignored files do not count, and a commit alone changes nothing. A file over 1 Mi
 
 The card writer runs `claude -p` on your subscription, with `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` removed from its environment, in `card-writer/` beside the event log. A change is untrusted text, so the writer runs with no tools (`--tools ""`) and no MCP servers (`--strict-mcp-config`), whatever your settings allow. It gets at most the first 64 KiB of the change. It also runs without `CLAUDE_CODE_PLUGIN_DIRS`, so its own sessions send no hook events. It writes the card in English, with code in backticks, and shows code left to right. A card stored in Hebrew before the language changed is not rewritten: it keeps its text and shows it right to left.
 
-A card that does not parse is asked for once more; when the second fails too, there is no card and one line on the app's stderr; `open --stderr <file>` keeps it.
+A card that does not parse is asked for once more; when the second fails too, there is no card and one line in the Studio log (`storage.md`).
 
 An app opened from Finder or `open` does not get your shell's `PATH`, so at start the app asks your login shell where `claude` is: `$SHELL -lc 'command -v claude'`, with `/bin/zsh` when `SHELL` is unset. Only the path comes back; the writer keeps the app's own environment. A login shell that is not interactive reads `~/.zprofile` but not `~/.zshrc`, so the line that puts `claude` on your `PATH` must be in the first. With no answer, the app runs `claude` from its own `PATH`.
 
@@ -38,7 +38,7 @@ To run the real writer on two fixture changes, one structural and one not, run t
 
 When a subagent or a background command returns, Claude Code sends its parent a prompt that names the task's id in markup: `<agent-message from="…">` or `<task-notification><task-id>…</task-id>`. A prompt that names a task id the session knows, from a spawn's response, a background command's response or `Stop`'s `background_tasks`, that way is a wake-up, never your prompt. The session's row and its view's "now" line read "worker … returned", with the subagent's name or else the task's short id, until the session's own next step or your next prompt; its last step stays.
 
-A card on a wake-up's turn belongs to your prompt before it, so it reads that prompt's earlier cards. A turn a wake-up opened that changed nothing itself gets no card, only a brief updated from its workers' cards. A known id in plain text ("check what a1191 did") is your prompt. A known id in any other markup is your prompt too, logs one line on stderr and counts in `weekly`: Claude Code may have changed its markup.
+A card on a wake-up's turn belongs to your prompt before it, so it reads that prompt's earlier cards. A turn a wake-up opened that changed nothing itself gets no card, only a brief updated from its workers' cards. A known id in plain text ("check what a1191 did") is your prompt. A known id in any other markup is your prompt too, logs one line in the Studio log and counts in `weekly`: Claude Code may have changed its markup.
 
 ## Blocked commands
 

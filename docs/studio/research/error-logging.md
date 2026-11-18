@@ -1,0 +1,99 @@
+# Error logging without a monitoring service
+
+> **Answer:** Give Studio one local log file, `~/Library/Logs/dev.falinks.studio/studio.log`, and send everything to it: the 30 `eprintln!("studio: …")` lines, panics, and the UI's swallowed `invoke` failures. The proven pattern is `tauri-plugin-log` with a `LogDir` target, a raised size cap like Handy's, and `KeepSome(1)` rotation rather than Handy's `KeepOne`, which deletes the full file ([`lib.rs:257`](https://github.com/tauri-apps/plugins-workspace/blob/v2/plugins/log/src/lib.rs#L246-L260)). Add a "Reveal log" action that opens the folder. Show the user only what they can act on (a failed save, a failed action they asked for); log the rest quietly. Do not use the unified log as the only sink: it is Apple's recommended API, but a developer then needs `log show` and the macOS 26 redaction rules (Unverified), and it holds nothing the app cannot also put in a file.
+> **Smaller step:** no new crate. At the start of `main()`, open `~/Library/Logs/dev.falinks.studio/studio.log` in append mode and `dup2` it onto stderr (the pattern `terminal.rs:635` already uses for the daemon), after renaming the file to `studio.old.log` if it is over about 500 KB. Every existing `eprintln!` and Rust's default panic message then land in the file with no other edit. It does not capture the webview.
+> **Evidence:** Strong for where stderr goes (Apple DTS forum answers, `open`'s man-page option) and for what `tauri-plugin-log` does (its source and v2 docs). Medium for prior art: four apps read at pinned commits, only one (Handy) configures it with care. Not run: no build, no `open` launch, no `log show`, no panic in a Tauri release build. Apple's current doc pages did not load for me, so the unified-log points rest on an Apple DTS forum post.
+
+Research date: 2026-11-18. Studio's code is read in the working tree on `main` at `5f4e51746`.
+
+**How to read this.** A sentence with a link is established by that source. A sentence marked **Inference** is my own reading, which the sources do not state. **Unverified** marks something that would need a run to confirm. Where I link a forum post, it is by an Apple DTS engineer and is named as such.
+
+---
+
+## 1. Where stdout and stderr go for a LaunchServices launch
+
+- Apple DTS: "Logging to `stderr` isn't best practice on the Mac because, by default, `stderr` goes nowhere." ([Apple Developer Forums, thread 786673](https://developer.apple.com/forums/thread/786673), Quinn "The Eskimo!".)
+- `open` "ask[s] LaunchServices to run your app, making launchd the parent process"; "the Finder is actually doing the same thing 'open' does" (same thread, Kevin Elliott, Apple DTS). The Dock goes through LaunchServices too. **Inference.**
+- For an app extension started by the system, "`stdout` and `stderr` are connected to `/dev/null` and system log entries go straight to the system log" ([thread 793770](https://developer.apple.com/forums/thread/793770), Quinn). That post is about an extension, not an app.
+- So: not the unified log. Plain `eprintln!` output is not forwarded to it. Whether a double-clicked app's stderr is exactly `/dev/null` is **Unverified**; the app-specific post says only "goes nowhere".
+- `open` can connect them for one launch: `open --stderr PATH` ("Launches the application with stderr connected to PATH", quoted in thread 786673). Shell redirection on `open` itself does nothing, because the app is not `open`'s child.
+- **Inference:** this matches Studio today. `npm run start` ends in `open …/Studio.app`, so all `eprintln!` lines vanish. Running `Studio.app/Contents/MacOS/<binary>` from a terminal keeps them (the same thread says a directly run executable behaves "like any other Unix tool").
+
+## 2. The options
+
+**a. A plain log file.**
+- Where: Apple's archived File System Programming Guide describes `~/Library/Logs` as "log files for the console and specific system services. Users can also view these logs using the Console app", and `Application Support/<bundle id>` as "all app-specific data and support files" ([File System Programming Guide, library directories](https://developer.apple.com/library/archive/documentation/FileManagement/Conceptual/FileSystemProgrammingGuide/MacOSXDirectories/MacOSXDirectories.html), archived 2018). It does not say an app's own log belongs in `~/Library/Logs`. **Inference:** the folder is the convention for apps, because Tauri's `app_log_dir` resolves to `home_dir/Library/Logs/${bundle_identifier}` on macOS ([tauri `PathResolver`](https://docs.rs/tauri/latest/tauri/path/struct.PathResolver.html)) and Console lists `~/Library/Logs`. Apple does not prescribe it.
+- Pros: works with `open`, easy to `tail`, easy to attach to a bug report, no tools. Cons: you write rotation and a size cap yourself unless a crate does it; it is not in a sysdiagnose.
+- Studio already has one precedent: the daemon's `terminal-daemon.log` in the app data folder (`src-tauri/src/terminal.rs:633`).
+
+**b. Apple's unified log (`os_log`, `Logger`).**
+- Apple DTS recommends it: "I generally recommend that you log to the system log" (thread 786673, Quinn); "`os_log` is the system's 'core' logging API" (Kevin Elliott). The same thread suggests that if you keep your own file, you also send lines to `os_log` and match timestamps, so the file works as an index into a sysdiagnose.
+- Reading it: Console.app (last 5 minutes by default, search `subsystem:…`), `log stream`, `log collect`, and `log show` ([Your Friend the System Log](https://developer.apple.com/forums/thread/705868), Quinn; that page does not cover `log show`, which is in `man log`, **not read**).
+- Persistence: entries "persist for a long time" and each type has a default disposition, customisable by `log config` (same post). Debug and info are not kept by default (**Unverified**; the page I read gives no table).
+- Privacy: values "may [be] tag[ged] as private" and are omitted by default (same post). A reported change in macOS 26 makes `NSLog` text private ([a vendor forum post](https://forum.latenightsw.com/t/nslog-neutered-in-the-unified-log-in-macos-26-tahoe-options/5664), a lead only, **Unverified**). **Inference:** the Rust `oslog` route needs a crate and an explicit public marker for every string; this is the biggest cost.
+- The same post calls `NSLog`, `syslog` and Apple System Log "effectively deprecated in favour of the system log API".
+
+**c. Redirecting stderr with `dup2`.**
+- Apple DTS describes it: "Add a debug option that causes the app to open your log file and `dup2` it on to `stderr`" (thread 786673, Quinn); Kevin Elliott says the process "involves using the 'dup' and 'dup2' syscalls", and says he was not sure he would recommend it.
+- Pros: no call site changes; Rust's default panic hook prints to stderr ([`std::panic::set_hook`](https://doc.rust-lang.org/std/panic/fn.set_hook.html): "prints a message to standard error and generates a backtrace if requested"), so panics are captured too. Cons: no levels, no timestamps, no size cap (rotate at startup instead), and the `eprintln!` lines carry no module or severity. **Inference:** `nix` or `libc` gives `dup2`; the `hook` crate already depends on `libc` (`hook/Cargo.toml:8`), but `src-tauri` does not list it, so it would be a new direct dependency.
+
+## 3. What Tauri 2 offers
+
+**`tauri-plugin-log`**, read at [`plugins/log/src/lib.rs`](https://github.com/tauri-apps/plugins-workspace/blob/v2/plugins/log/src/lib.rs) on branch `v2` (not pinned to a commit; the doc page says it needs Rust 1.90):
+- Targets: `Stdout`, `Stderr`, `Folder { path, file_name }`, `LogDir { file_name }`, `Webview`, `Dispatch`. Default targets are `Stdout` plus `LogDir`. Each target can carry its own filter and format.
+- Directory: `LogDir` is `app_log_dir()`, created if missing. On macOS: `{homeDir}/Library/Logs/{bundleIdentifier}` ([v2 logging docs](https://v2.tauri.app/plugin/logging/)). For Studio: `~/Library/Logs/dev.falinks.studio/`. File name defaults to the package name, with `.log`.
+- Size and rotation: `DEFAULT_MAX_FILE_SIZE = 40_000` bytes and `DEFAULT_ROTATION_STRATEGY = KeepOne` (the file is discarded when it reaches the cap, per the docs). `KeepAll` renames rotated files with a timestamp and never deletes them; `KeepSome(n)` keeps n. **Inference:** the default 40 KB is small; Handy raised it (section 5).
+- Level: default `Trace`; `level()` and `level_for(module, level)` set filters.
+- Time: UTC by default; `TimezoneStrategy::UseLocal` falls back to UTC if the local offset is unavailable. Default desktop line: timestamp, target, level, message.
+- JS side ([`guest-js/index.ts`](https://github.com/tauri-apps/plugins-workspace/blob/v2/plugins/log/guest-js/index.ts)): `error`, `warn`, `info`, `debug`, `trace` call `invoke('plugin:log|log', …)`, so they write to Rust's targets. `attachConsole()` does the opposite: it listens for the `log://log` event and prints Rust logs through `console.*`. **The plugin does not patch `console.*` to forward the webview's own `console.warn` to the file.** To get that, the app wraps `console.warn` or replaces its `.catch` calls with the plugin's `warn`/`error`. The `Webview` target needs `attachConsole()` on the JS side; Studio does not need it.
+- Permissions: plugin commands are blocked until `log:default` (which includes `allow-log`) is in a capability file ([docs](https://v2.tauri.app/plugin/logging/)). **Unverified** for Studio: its config has `withGlobalTauri: true`, and I did not check whether it uses capability files or an npm bundler for `@tauri-apps/plugin-log`.
+
+**What Tauri does on a Rust panic.** I found no panic hook in Tauri's `app.rs` (no `set_hook`, `take_hook` or `catch_unwind`; search of [`crates/tauri/src/app.rs`](https://github.com/tauri-apps/tauri/blob/dev/crates/tauri/src/app.rs) only; the rest of the crate was not searched). It calls `panic!("Failed to setup app: {e}")` if `setup` fails, so the default hook prints to stderr and, from `open`, nothing is kept. Release profile default is unwind (Handy sets `panic = "unwind"` explicitly: [Cargo.toml](https://github.com/cjpais/Handy/blob/aca8985190c3ad7f361d8a80cb30f179513ed690/src-tauri/Cargo.toml)); Studio's root `Cargo.toml` has no `[profile.release]`, so it is the Cargo default, **Inference** (the default is from Cargo's docs, not re-read). **Unverified:** whether a panic in a command, in an event-loop callback, or in a spawned thread closes the window or leaves it running. That needs a run.
+
+## 4. Rust libraries
+
+**`log` + a backend.** `log` is a facade: "a single logging API that abstracts over the actual logging implementation", with five levels, and "executables should choose a logging implementation and initialize it early" ([docs.rs/log](https://docs.rs/log/latest/log/)). `tauri-plugin-log` is such a backend (built on `fern`; the plugin's internal choice is read from its source listing, not inspected line by line). Static max-level features can compile out chatty levels.
+
+**`tracing` + `tracing-appender`.** ([docs.rs/tracing-appender](https://docs.rs/tracing-appender/latest/tracing_appender/))
+- Rolling files by time only: `Rotation::MINUTELY`, `HOURLY`, `DAILY`, `NEVER`. The builder's `max_log_files(n)` "keeps the last n log files on disk" and deletes the oldest ([`rolling::Builder`](https://docs.rs/tracing-appender/latest/tracing_appender/rolling/struct.Builder.html)). The page does not mention size-based rotation. **Inference:** a daily file plus `max_log_files(7)` bounds the total only if a single day cannot grow without limit.
+- `non_blocking` gives an off-thread writer and a `WorkerGuard` that flushes on drop; keep it in `main`. If the program ends abruptly "some spans or events may not be written", with an uncaught panic and `std::process::exit` as the examples ([`WorkerGuard`](https://docs.rs/tracing-appender/latest/tracing_appender/non_blocking/struct.WorkerGuard.html)). `src-tauri/src` has no `process::exit` call (grep).
+- It needs `tracing`, `tracing-subscriber` and `tracing-appender`, and `log` compatibility (`tracing-log`) if any dependency uses `log`. **Inference:** more than Studio needs.
+
+**Panics.** [`std::panic::set_hook`](https://doc.rust-lang.org/std/panic/fn.set_hook.html) replaces the global hook, which "is invoked when a thread panics, but before the panic runtime is invoked", so it runs with both aborting and unwinding runtimes. `take_hook` returns the old one so the new hook can call it afterwards. The hook receives a `PanicHookInfo` with the payload and the source location. The page does not say what happens if the hook itself panics. A sound hook: log `info` (message, location) with `log::error!`, then call the previous hook. **Inference.**
+
+## 5. Prior art
+
+All links are pinned to the commit I read.
+
+| App | Setup | What it does |
+|---|---|---|
+| [Handy](https://github.com/cjpais/Handy/blob/aca8985190c3ad7f361d8a80cb30f179513ed690/src-tauri/src/lib.rs#L856-L900) (speech to text, macOS first) | `tauri-plugin-log` | `max_file_size(500_000)`, `KeepOne`, `clear_targets()`. Three targets: stdout (or stderr in headless mode), a file in `LogDir` named `handy` (or `<data_dir>/logs` in portable mode), and `Webview`. The file has its own level, set by a user setting (default Debug) and changed at runtime through an atomic. The webview target only streams while debug mode is on, because records "can include file paths or transcribed text" (comment, [`lib.rs:70-76`](https://github.com/cjpais/Handy/blob/aca8985190c3ad7f361d8a80cb30f179513ed690/src-tauri/src/lib.rs#L70-L76)). It has `get_log_dir_path` and `open_log_dir` commands that open the folder ([`commands/mod.rs:52-107`](https://github.com/cjpais/Handy/blob/aca8985190c3ad7f361d8a80cb30f179513ed690/src-tauri/src/commands/mod.rs#L52-L107)). It catches panics only on its headless path, with `catch_unwind` and `eprintln!` ([`lib.rs:425-445`](https://github.com/cjpais/Handy/blob/aca8985190c3ad7f361d8a80cb30f179513ed690/src-tauri/src/lib.rs#L425-L445)); no `set_hook` found in `lib.rs`. |
+| [GG](https://github.com/gulbanana/gg/blob/9dddb5ca617d0e171d0bdf5d17bbbf304d697d76/src/gui/mod.rs#L282-L312) (Jujutsu GUI) | `tauri-plugin-log` | Targets `Stderr` and `LogDir`, not stdout, with the comment "a spawning parent exits after the first line it reads there". Level `Warn` by default, `Debug` for its own crates under a `--debug` option, `tao` kept at `Error`. Size and rotation are the plugin defaults (40 KB, `KeepOne`). Webview forwarding: not checked. |
+| [Kanri](https://github.com/kanriapp/kanri/blob/48f19e3a593f7c4e118bcfb76346193ca16297b2/src-tauri/src/lib.rs#L34) (kanban) | `tauri-plugin-log` | `Builder::new().build()`: all defaults, so stdout plus `LogDir`, 40 KB, `KeepOne`, level `Trace`. |
+| [dev-manager-desktop](https://github.com/webosbrew/dev-manager-desktop/blob/1cdb0dbbd1d643bfed974f118b70b7590941df97/src-tauri/src/lib.rs#L36) (webOS devices) | `tauri-plugin-log` | Same one-line defaults. |
+| [electron-log](https://github.com/megahertz/electron-log/blob/master/docs/transports/file.md) (the common Electron answer) | library | File transport; default `maxSize` 1 MB; past that the file is moved to `<name>.old.log`, so at most two files. Format `[y-m-d h:i:s.ms] [level] text`. The macOS path is not stated on that page. Not pinned to a commit. |
+
+**Inference:** the Tauri pattern is `tauri-plugin-log` almost everywhere, with defaults in the small apps. Only Handy sets the cap, which suggests 40 KB is hit quickly. None of the three with a `Cargo.toml` I read uses `tracing-appender`. I did not survey more than five apps; this is not a statistical claim.
+
+## 6. Practice for a single-user, local-first app
+
+Most of this is **Inference** from the sources above plus common practice; I did not find a primary source that sets a rule.
+
+- **Show or log.** Show the user an error when they just asked for something and it failed, or when data may be lost (a failed card-store save, a failed version keep). Log quietly what they cannot act on and what is retried: a failed prune of the event log, a failed `presence` write, and the `.catch((e) => console.warn(e))` cases for background refreshes. A log line alone is invisible; for a failure the user caused, a log line plus a visible message is right.
+- **Levels.** `error` for a lost action or data, `warn` for degraded but continuing, `info` for startup and rare lifecycle events, `debug` for the rest. The `log` crate's five levels fit ([docs.rs/log](https://docs.rs/log/latest/log/)). Default to `info` in release; allow `debug` with an environment variable, as GG does with a `--debug` flag.
+- **Size cap.** Always bound it. electron-log's two files at 1 MB each and `tauri-plugin-log`'s rotation are both bounded. But `KeepOne` deletes the file when it reaches the cap ([`lib.rs:257`](https://github.com/tauri-apps/plugins-workspace/blob/v2/plugins/log/src/lib.rs#L246-L260)), so the history before an error can vanish just after it is written; `KeepSome(1)` keeps the current file and one dated older one. Two files of 500 KB is enough for one user.
+- **Privacy.** Keep the file local; do not upload. Handy's comment is the model: gate anything that can carry paths or content, and do not stream it to places that other code can read. For Studio, avoid logging card text, transcripts, prompts, answer contents and anything from `~/.claude*`; log ids, paths and the error's `Display`. Never log a token or the contents of a credential file, which is also a hard rule in `AGENTS.md`.
+- **Finding it.** A known path plus a command to open the folder. Handy has `open_log_dir`. **Inference:** for Studio a "Reveal log" menu item or a button in the existing debugging corner, calling `opener` or `open -R`.
+- **Both file and system log?** Apple DTS suggests a custom file should also go to `os_log` and use matching timestamps (thread 786673). For one developer who reads the file, that is optional. **Inference.**
+
+---
+
+## Recommendation for Studio
+
+1. **Smaller step first** (about 15 lines, one file): in `src-tauri/src/main.rs`'s `main()`, before `tauri::Builder`, create `~/Library/Logs/dev.falinks.studio/`, rename `studio.log` to `studio.old.log` if it is over 500 KB, open `studio.log` for append and `dup2` it onto stderr. Existing `eprintln!("studio: …")` calls in `main.rs`, `presence.rs`, `answer.rs` and `skills.rs` and the default panic message then land there. Leave `terminal.rs:635`'s daemon log alone. Nothing changes in the UI.
+2. **If Daniel wants levels, timestamps and the webview**, take the proven route instead: add `log` and `tauri-plugin-log` to `src-tauri/Cargo.toml`; register it in `main.rs` with `clear_targets()`, targets `Stderr` and `LogDir { file_name: Some("studio".into()) }`, `max_file_size(500_000)`, `RotationStrategy::KeepSome(1)`, level `Info`, and `TimezoneStrategy::UseLocal`; turn each `eprintln!("studio: …")` into `log::error!` or `log::warn!`; add a `std::panic::set_hook` that logs and then calls `take_hook()`'s previous hook; add `log:default` to the capability file (path not checked).
+3. **UI.** In `ui/main.ts` and `ui/story.ts`, replace `.catch((e) => console.warn(e))` with one shared helper that calls the plugin's `warn`, so failures reach the file; keep the few visible errors (`ui/main.ts:298`, `ui/picker.ts`, `report` in `ui/story.ts`) as they are and log them too. Add a window `error` and `unhandledrejection` listener in `ui/main.ts` that calls the helper.
+4. **Reveal log.** One Tauri command in `src-tauri/src/main.rs` that opens `app_log_dir()`, and one entry in the UI's menu; update `docs/studio/` where the data folder is described (file not checked).
+5. **Fold `mismatch.log`** (`main.rs:~770`) into the same log only if it is still needed; it is debug-only.
+
+Not decided here: whether to also write to `os_log`, and what a panic in a Tauri release build does to the window (both **Unverified**, needing a run).

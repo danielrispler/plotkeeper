@@ -221,7 +221,7 @@ With a real `claude` session in the pane (danielrispler/Falinks#466, danielrispl
 
 ### Cards and answers, staged (danielrispler/Falinks#598)
 
-- [ ] **danielrispler/Falinks#462:** with the app started with `open --stderr <file>` (to keep writer errors), a turn that changes a worktree produces a card in `cards-v2.json`.
+- [ ] **danielrispler/Falinks#462:** a turn that changes a worktree produces a card in `cards-v2.json`.
 - [ ] **danielrispler/Falinks#486:** a turn that ends while the app is down gets its card after the app starts.
 - [ ] **danielrispler/Falinks#476:** one real card on a `ci-checks` run: it is ready before the check ends, and the check's exit code settles "Will `<command>` pass?". A check whose exit code does not count (such as `cargo test 2>&1 | tail`) stays not counted; a subagent's check gets no card.
 - [ ] **danielrispler/Falinks#473:** a failed background check ends its time.
@@ -331,7 +331,7 @@ Save everything in a new folder: `local-evidence/<date>-ui-ux-recheck/` (for exa
   That terminal shows `"state":"working"` and `"app"` set, and `turn` goes up after the turn ends.
 - [ ] **danielrispler/Falinks#555:** quitting the app deletes `present`; a CLI `attach` that detaches leaves it.
 - [ ] **danielrispler/Falinks#470:** after a reboot, every Claude session comes back with its conversation.
-- [ ] **danielrispler/Falinks#560:** review the mismatch log, `~/Library/Application Support/dev.falinks.studio/mismatch.log`: each line is a Claude session whose hook state and OSC 7501 state disagreed for over 5 s. Report any pattern on danielrispler/Falinks#560; no file means none did.
+- [ ] **danielrispler/Falinks#560:** review the mismatch lines of the Studio log, `grep mismatch ~/Library/Logs/dev.falinks.studio/studio.log`: each line is a Claude session whose hook state and OSC 7501 state disagreed for over 5 s. Report any pattern on danielrispler/Falinks#560; no line means none did.
 
 ## 6. The test-day note (danielrispler/Falinks#599)
 

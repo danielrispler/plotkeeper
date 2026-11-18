@@ -7,7 +7,7 @@
 // left empty, a session starts in the main checkout with no prompt.
 
 import { AGENT_NAMES, agentChoice, kept, type Kind, showsAuto } from "./agents.js";
-import { element, fullTitle, invoke, pressable, text } from "./dom.js";
+import { element, failure, fullTitle, invoke, pressable, text } from "./dom.js";
 import type { Entry } from "./keys.js";
 import { setProjects } from "./projects.js";
 import { startAgent } from "./panes.js";
@@ -19,6 +19,7 @@ import type { Workspace, Workspaces } from "./types.js";
 
 // Git's error, or any other, at the picker's foot.
 function failed(error: unknown) {
+  failure("picker", "error")(error);
   element("picker").querySelector(".picker-error")?.remove();
   element("picker").append(text("pre", String(error), "picker-error"));
 }
@@ -73,6 +74,7 @@ export function newTask(
       element("picker").hidden = true;
       await start(task.path, prompt ? value : "");
     } catch (e) {
+      failure("new task", "error")(e);
       report(e);
     } finally {
       button.textContent = label;
@@ -127,7 +129,7 @@ function agentRow(offered: string[], chosen: string, auto: HTMLElement): [HTMLEl
 export function workspaceRow(name: string, workspace: Workspace, start: Start): HTMLElement {
   const button = pressable(document.createElement("button"), false, () => {
     element("picker").hidden = true;
-    start(workspace.path, "").catch((e) => console.warn(e));
+    start(workspace.path, "").catch(failure("start", "error"));
   });
   button.classList.add("row");
   const first = text("span", "", "l1");
@@ -231,6 +233,7 @@ export async function showPicker(kind: Kind = "session") {
     const [workspaces, agents] = await Promise.all([invoke("workspaces", { project }), offeredAgents()]);
     picker.replaceChildren(...picked(project, workspaces, agents, kind));
   } catch (e) {
+    failure("workspaces", "error")(e);
     picker.replaceChildren(text("p", `No worktrees: ${e}`, "empty"));
   }
   picker.hidden = false;
@@ -271,6 +274,7 @@ export async function showBranches(from?: string) {
     );
     picker.replaceChildren(...(blocked ? [text("p", `Switching is off: ${blocked}`, "empty")] : []), ...rows);
   } catch (e) {
+    failure("branches", "error")(e);
     picker.replaceChildren(text("p", `No branches: ${e}`, "empty"));
   }
   picker.hidden = false;
@@ -289,6 +293,7 @@ export async function addProject(folder: string) {
 
 // A refused add, remove or reorder of a project, as a message in the picker's box.
 export function refuse(error: unknown) {
+  failure("project", "error")(error);
   const picker = element("picker");
   picker.ariaLabel = "Add project";
   picker.replaceChildren(text("p", String(error), "empty"));
@@ -320,6 +325,7 @@ export async function showAddProject() {
     });
     picker.append(...(rows.length ? [text("p", "Repositories where sessions ran", "empty"), ...rows] : []));
   } catch (e) {
+    failure("repositories")(e);
     failed(e);
   }
 }

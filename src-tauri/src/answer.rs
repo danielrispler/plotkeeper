@@ -71,7 +71,7 @@ impl Watching {
             // With no session selected the heartbeat names none: a blocked command's hook still waits.
             let heartbeat = json!({ "session_id": self.session, "pid": std::process::id(), "heartbeat_ms": now });
             if let Err(e) = answer::write_private(&watching, &heartbeat) {
-                eprintln!("studio: keep watching: {e}");
+                log::warn!("keep watching: {e}");
             }
         }
         let ask = match &self.session {

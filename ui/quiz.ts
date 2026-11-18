@@ -3,7 +3,7 @@
 // the Quiz's region: its children are drawn again and nothing else in the rail is, so the scroll position stays. What Daniel
 // did is kept by turn id, which outlasts a redraw of the rail, and sent to the card store, which keeps it with its time.
 
-import { pressable, prose, text } from "./dom.js";
+import { failure, pressable, prose, text } from "./dom.js";
 import type { Quiz, QuizTap, SummaryLine, Tap } from "./types.js";
 
 export type QuizStage = "open" | "picked" | "skipped";
@@ -213,7 +213,7 @@ export function quizRegion(id: string, quiz: Quiz, held: SummaryLine[], deps: Qu
           deps
             .explain()
             .then((more) => void (one.more = more))
-            .catch((e) => console.warn(e))
+            .catch(failure("explain"))
             .finally(() => {
               one.asking = false;
               if (one.more === null) one.chips.delete("explain_more");

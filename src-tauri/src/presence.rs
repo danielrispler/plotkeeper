@@ -26,7 +26,7 @@ pub fn set(path: &Path, focused: bool) {
         })
     };
     if let Err(e) = done {
-        eprintln!("studio: presence file {}: {e}", path.display());
+        log::warn!("presence file {}: {e}", path.display());
     }
 }
 

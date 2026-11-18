@@ -16,7 +16,7 @@ type ReadCommand = { [C in Command]: Commands[C] extends void ? never : C }[Comm
 export type Terminal = Listed & { replay: { data: string; cols: number; rows: number } };
 
 // Beside the replies, the harness's own keys: the daemon's terminals and a script that runs once the UI has drawn (page.mjs).
-export type Fixture = { [C in Command]?: Commands[C] | ByArg<Commands[C]> } & { terminals?: Terminal[]; snapScript?: string };
+export type Fixture = { [C in Command]?: Commands[C] | ByArg<Commands[C]> } & { terminals?: Terminal[]; appErrors?: string[]; snapScript?: string };
 
 const workspace = { path: "/w/plotkeeper", branch: "main" };
 const noSelection: Selection | null = null;

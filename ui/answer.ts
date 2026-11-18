@@ -3,7 +3,7 @@
 // open request in its read loop (danielrispler/Falinks#569), and the answer echoes its nonce. The hook waits only while the
 // request's card shows: a question asked in a view that is not shown is handed to the terminal.
 
-import { invoke, listen } from "./dom.js";
+import { failure, invoke, listen } from "./dom.js";
 import { studio } from "./state.js";
 import { askKind, type Question } from "./types.js";
 
@@ -48,7 +48,7 @@ let blockedRequests: BlockedRequest[] = [];
 export const blockedRequestFor = (call: string) => blockedRequests.find((r) => r.tool_use_id === call) ?? null;
 
 const watch = (session: string | null) =>
-  invoke("watch", { session }).catch((e) => (console.warn(e), null));
+  invoke("watch", { session }).catch((e) => (failure("watch")(e), null));
 
 // The view watched last, so a redraw of the same one asks the shell nothing.
 let watched = "";
@@ -112,7 +112,7 @@ export async function sendAnswer(ask: Ask, reply: Reply) {
   current = null;
   redraw();
   const args = { session, nonce: ask.nonce, answers: null, decision: null, ...reply };
-  await invoke("answer", args).catch((e) => console.warn(e));
+  await invoke("answer", args).catch(failure("answer", "error"));
 }
 
 // Which way the shell took Daniel's answer to a blocked command: to its hook, still waiting, or late, the hook having returned.
@@ -126,7 +126,7 @@ export async function sendBlockedAnswer(session: string, request: BlockedRequest
   try {
     return await invoke("answer_blocked_command",{ session, nonce: request.nonce, decision });
   } catch (e) {
-    console.warn(e);
+    failure("answer_blocked_command", "error")(e);
     if (!blockedRequests.some((r) => r.nonce === request.nonce)) blockedRequests = [...blockedRequests, request];
     redraw();
     return null;

@@ -4,7 +4,7 @@
 
 import type * as Xterm from "@xterm/xterm";
 import { connect, decode, encode, onEvent, request } from "./daemon.js";
-import { invoke, listen } from "./dom.js";
+import { failure, invoke, listen, logLine } from "./dom.js";
 import { keyAction, type Action } from "./keys.js";
 import { openFile, pathLinks, quotePath } from "./paths.js";
 import { studio } from "./state.js";
@@ -18,7 +18,7 @@ declare const SearchAddon: typeof import("@xterm/addon-search");
 declare const WebLinksAddon: typeof import("@xterm/addon-web-links");
 
 const utf8 = new TextEncoder();
-const openLink = (target: string) => invoke("open_link", { target }).catch((e) => console.warn(e));
+const openLink = (target: string) => invoke("open_link", { target }).catch(failure("open_link", "error"));
 
 // A program that ends nonzero within 2 s of starting failed at start (danielrispler/Falinks#558): its status and its last
 // lines of output, read from the terminal's buffer; else null, and the pane only notes the exit.
@@ -70,7 +70,7 @@ export function openPane(place: HTMLElement, id: string, cwd: string, argv: stri
     webgl.onContextLoss(() => webgl.dispose());
     term.loadAddon(webgl);
   } catch (e) {
-    console.warn(`terminal: no WebGL, the default renderer draws: ${e}`);
+    logLine("warn", `terminal: no WebGL, the default renderer draws: ${e}`);
   }
 
   // While a replay is written, xterm answers the queries in the old output; those answers must not

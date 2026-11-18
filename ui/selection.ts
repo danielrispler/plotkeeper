@@ -4,7 +4,7 @@
 
 import { rewatch } from "./answer.js";
 import { showCards } from "./cards.js";
-import { invoke } from "./dom.js";
+import { failure, invoke } from "./dom.js";
 import { showSessions } from "./list.js";
 import { showSession } from "./panes.js";
 import { showWorkspaces } from "./workspaces.js";
@@ -53,7 +53,7 @@ export async function select(id: string, agent: string | null = null) {
       studio.pending = null;
       showSessions(studio.listed);
     }
-    console.warn(e);
+    failure("select", "error")(e);
   }
   await catchUp();
 }
@@ -70,7 +70,7 @@ export async function goHome() {
     showCards(cards);
     showSession(null, true);
   } catch (e) {
-    console.warn(e);
+    failure("select home", "error")(e);
   }
 }
 

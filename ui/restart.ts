@@ -4,7 +4,7 @@
 // shell stops the old daemon, and the daemon's loss revives each terminal (`panes.ts`).
 
 import { list } from "./daemon.js";
-import { element, invoke, listen, text } from "./dom.js";
+import { element, failure, invoke, listen, text } from "./dom.js";
 
 // How a terminal comes back, from the core: `claude --resume <session>` for a Claude terminal, a
 // shell in `cwd` otherwise; `busy` names what runs in it now.
@@ -93,7 +93,7 @@ function offer(): Promise<"now" | "later"> {
     let shown = "";
     while (open) {
       // A failed poll is logged and the next one retries; the bar waits for one that succeeds.
-      const terms = await plan().catch((e) => (console.warn(`restart offer: ${e}`), null));
+      const terms = await plan().catch((e) => (failure("restart_offer")(e), null));
       if (!terms) {
         await sleep(3000);
         continue;

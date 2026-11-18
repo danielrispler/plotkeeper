@@ -214,6 +214,21 @@ export const fixtures = {
     ];
     return { ...base, sessions, selected: null };
   },
+  // Errors in the notice line (#191): two errors and the dismiss control, beside a settings error.
+  noticeErrors() {
+    const snapScript = `
+      await new Promise((r) => setTimeout(r, 100));
+      const notice = document.getElementById("notice");
+      const box = notice.getBoundingClientRect();
+      const button = document.getElementById("notice-dismiss").getBoundingClientRect();
+      if (notice.hidden || notice.textContent.split("\\n").length !== 3) log("snap:fail the notice line does not hold the settings error and the two errors");
+      if (button.right > innerWidth || box.right > button.left) log("snap:fail the notice line or its dismiss control is clipped");`;
+    const appErrors = [
+      "save_cards: the card store did not save (No space left on device)",
+      "delete_session: could not remove the worktree /w/plotkeeper/.claude/worktrees/issue-191-notice-errors-with-a-very-long-name",
+    ];
+    return { ...list(), settings_files: { settings: "{ bad", keymap: null }, appErrors, snapScript };
+  },
   // The settings page at its defaults: no undo icon, both toggles at their defaults, the file's two rows.
   settingsDefaults: () =>
     settingsPage(null, `

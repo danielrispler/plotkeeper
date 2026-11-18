@@ -8,7 +8,7 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    fs::{File, OpenOptions},
+    fs::File,
     io::{self, BufRead, BufReader, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     process::Command,
@@ -165,8 +165,7 @@ fn turn_summary(
         return Ok(None);
     };
     let setup = summaries.setup.lock().unwrap().clone();
-    let log = |line: String| eprintln!("studio: {line}");
-    if write_summary(&cards, &**writer, &setup, request.clone(), log).is_none() {
+    if write_summary(&cards, &**writer, &setup, request.clone(), report).is_none() {
         summaries
             .waiting
             .lock()
@@ -189,9 +188,7 @@ fn design(
         Some(session) => session.turns.iter().filter_map(|t| t.id.clone()).collect(),
         None => return false,
     };
-    write_design(cards, writer, id, &turns, |line| {
-        eprintln!("studio: {line}")
-    })
+    write_design(cards, writer, id, &turns, report)
 }
 
 /// The whole final reply of turn `index` of session `id` (danielrispler/Falinks#574), which the rail fetches when Daniel
@@ -223,8 +220,9 @@ fn agent_summary(
         return None;
     }
     let setup = summaries.setup.lock().unwrap().clone();
-    let log = |line: String| eprintln!("studio: {line}");
-    write_agent_summary(&cards, &**writer, &setup, &agent_id, &prompt, &message, log)
+    write_agent_summary(
+        &cards, &**writer, &setup, &agent_id, &prompt, &message, report,
+    )
 }
 
 /// The session list, in its order.
@@ -495,10 +493,7 @@ fn write_due_retests(app: &AppHandle) {
     thread::sleep(Duration::from_secs(60));
     loop {
         let (cards, writer) = (app.state::<Cards>(), app.state::<Writer>());
-        if write_retests(&cards, &**writer, millis(), |line| {
-            eprintln!("studio: {line}")
-        }) > 0
-        {
+        if write_retests(&cards, &**writer, millis(), report) > 0 {
             let _ = app.emit("retests", ());
         }
         thread::sleep(Duration::from_secs(60 * 60));
@@ -521,8 +516,7 @@ fn rate(id: String, rating: Rating, cards: State<Cards>) {
 /// command runs off the main thread. `None` when the writer gave none.
 #[tauri::command(async)]
 fn explain_more(id: String, cards: State<Cards>, writer: State<Writer>) -> Option<String> {
-    let log = |line: String| eprintln!("studio: {line}");
-    studio_understanding::explain_more(&cards, &**writer, &id, log)
+    studio_understanding::explain_more(&cards, &**writer, &id, report)
 }
 
 /// Daniel's side `question` on `item`, a response, card or intention of session `session` (danielrispler/Falinks#461,
@@ -550,7 +544,7 @@ fn ask(
         &question,
     );
     if let Err(line) = &answer {
-        eprintln!("studio: no answer on {session}: {line}");
+        log::error!("no answer on {session}: {}", scrubbed(line));
     }
     answer
 }
@@ -615,7 +609,7 @@ fn ask_anchor(
         &question,
     );
     if let Err(line) = &answer {
-        eprintln!("studio: no answer on {session}: {line}");
+        log::error!("no answer on {session}: {}", scrubbed(line));
     }
     answer
 }
@@ -720,7 +714,7 @@ fn save_state(log: &Path, state: &[u8]) {
     let next = file.with_extension("json.next");
     let saved = std::fs::write(&next, state).and_then(|()| std::fs::rename(&next, &file));
     if let Err(e) = saved {
-        eprintln!("studio: keep the replayed state: {e}");
+        log::error!("keep the replayed state: {e}");
     }
 }
 
@@ -730,7 +724,7 @@ fn save_roots(log: &Path, roots: &HashMap<String, String>) {
     let written = serde_json::to_vec(roots).map_err(io::Error::from);
     let saved = written.and_then(|bytes| std::fs::write(&next, bytes));
     if let Err(e) = saved.and_then(|()| std::fs::rename(&next, roots_file(log))) {
-        eprintln!("studio: keep the worktree roots: {e}");
+        log::error!("keep the worktree roots: {e}");
     }
 }
 
@@ -767,22 +761,152 @@ fn listed(app: &AppHandle, terms: Vec<studio_core::Terminal>) {
     LIST_CHANGED.store(true, Ordering::Release);
 }
 
-/// Appends `line` to the mismatch log beside the event log, local and only for debugging (danielrispler/Falinks#560).
+/// Logs `line` at `info` under the `mismatch` target, for debugging (danielrispler/Falinks#560).
 fn mismatch(line: &str) {
-    let Some(home) = std::env::home_dir() else {
-        return;
-    };
-    let path = studio_hook::data_dir(&home).join("mismatch.log");
-    let open = OpenOptions::new().create(true).append(true).open(&path);
-    if let Err(e) = open.and_then(|mut log| writeln!(log, "{line}")) {
-        eprintln!("studio: append to {}: {e}", path.display());
+    log::info!(target: "mismatch", "{line}");
+}
+
+/// The Studio log (danielrispler/plotkeeper#188): `studio.log` in the app's log folder, beside stderr, 500 KB a file with
+/// one older file kept, in local time. The studio's own crates log at `Debug` and libraries at `Warn`, in every build.
+fn studio_log() -> tauri::plugin::TauriPlugin<tauri::Wry> {
+    use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
+    let mut log = tauri_plugin_log::Builder::new()
+        .clear_targets()
+        .targets([
+            Target::new(TargetKind::Stderr).format(stamped),
+            Target::new(TargetKind::LogDir {
+                file_name: Some("studio".into()),
+            })
+            .format(stamped),
+            // Errors also show in the window's notice line (#191), as the bare message; warnings stay in the file.
+            Target::new(TargetKind::Webview).filter(shows_in_window),
+        ])
+        .max_file_size(500_000)
+        .rotation_strategy(RotationStrategy::KeepSome(1))
+        .timezone_strategy(TimezoneStrategy::UseLocal)
+        // The Builder's own format is the bare message: a target adds the prefix its output wants (the window's does not).
+        .clear_format()
+        .level(log::LevelFilter::Warn);
+    for own in [
+        "studio",
+        "studio_core",
+        "studio_hook",
+        "studio_understanding",
+        "studio_terminal_daemon",
+        "studio_workbench",
+        "mismatch",
+    ] {
+        log = log.level_for(own, log::LevelFilter::Debug);
+    }
+    log.build()
+}
+
+/// A line of `stderr` and `studio.log`: `[date][time][LEVEL][target] message`, the plugin's own shape, in local time.
+fn log_line(at: [u32; 6], level: log::Level, target: &str, message: &str) -> String {
+    let [year, month, day, hour, minute, second] = at;
+    format!(
+        "[{year:04}-{month:02}-{day:02}][{hour:02}:{minute:02}:{second:02}][{level}][{target}] {message}"
+    )
+}
+
+/// `log_line` for a record now, in local time.
+fn stamped(
+    out: tauri_plugin_log::fern::FormatCallback,
+    message: &std::fmt::Arguments,
+    record: &log::Record,
+) {
+    let now = tauri_plugin_log::TimezoneStrategy::UseLocal.get_now();
+    let at = [
+        now.year() as u32,
+        u8::from(now.month()).into(),
+        now.day().into(),
+        now.hour().into(),
+        now.minute().into(),
+        now.second().into(),
+    ];
+    out.finish(format_args!(
+        "{}",
+        log_line(at, record.level(), record.target(), &message.to_string())
+    ));
+}
+
+/// Whether a record reaches the window's notice line: an `error` that did not come from the UI, which showed its own.
+fn shows_in_window(metadata: &log::Metadata) -> bool {
+    metadata.level() == log::Level::Error
+        && !metadata
+            .target()
+            .starts_with(tauri_plugin_log::WEBVIEW_TARGET)
+}
+
+/// A panic is logged at `error` with its location, then reaches the default panic output.
+fn keep_panics_in_the_log() {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let at = info
+            .location()
+            .map_or_else(String::new, |l| format!(" at {}:{}", l.file(), l.line()));
+        log::error!("panic{at}: {}", panic_message(info.payload()));
+        previous(info);
+    }));
+}
+
+/// A panic's message when it is text, scrubbed like a writer's line: an `unwrap` on an `Err` can carry what the code was working on.
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
+    let text = payload
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+        .unwrap_or("not text");
+    scrubbed(text)
+}
+
+/// Opens Finder with the Studio log selected.
+#[tauri::command]
+fn reveal_log(app: AppHandle) -> Result<(), String> {
+    let file = app
+        .path()
+        .app_log_dir()
+        .map_err(|e| e.to_string())?
+        .join("studio.log");
+    Command::new("open")
+        .arg("-R")
+        .arg(file)
+        .status()
+        .map_err(|e| e.to_string())?
+        .success()
+        .then_some(())
+        .ok_or_else(|| "open -R failed".to_string())
+}
+
+/// What of a line from the writers' code may reach the Studio log: the line up to the first quote mark, so a reply's
+/// words never do, whether quoted after a colon or inside a parse error (`invalid type: string "<reply>"`).
+fn scrubbed(line: &str) -> &str {
+    line.split('"')
+        .next()
+        .unwrap_or(line)
+        .trim_end_matches([':', ' '])
+}
+
+/// Whether a line from the writers' code reports lost data (a save that failed), not a degraded step. Every such line of
+/// the `understanding` crate starts `save `; a test reads their sources to keep it so.
+fn lost_data(line: &str) -> bool {
+    line.starts_with("save ")
+}
+
+/// Logs a line from the writers' code: an error when it lost data, a warning otherwise.
+fn report(line: String) {
+    let line = scrubbed(&line);
+    if lost_data(line) {
+        log::error!("{line}");
+    } else {
+        log::warn!("{line}");
     }
 }
 
 /// Logs a card store change that could not be saved; it stays in memory until the next save.
 fn unsaved(saved: io::Result<()>) {
     if let Err(e) = saved {
-        eprintln!("studio: save the card store: {e}");
+        log::error!("save the card store: {e}");
     }
 }
 
@@ -815,7 +939,9 @@ fn main() {
             }))
         }
     };
+    keep_panics_in_the_log();
     tauri::Builder::default()
+        .plugin(studio_log())
         // First, so a second instance exits before it sets anything up (danielrispler/Falinks#470).
         .plugin(tauri_plugin_single_instance::init(restart::second_instance))
         .plugin(tauri_plugin_dialog::init())
@@ -910,6 +1036,7 @@ fn main() {
             mark_unseen,
             rail_shown,
             refresh_landed_tasks,
+            reveal_log,
             sounds
         ])
         .on_window_event(|window, event| {
@@ -929,6 +1056,7 @@ fn main() {
             }
         })
         .setup(move |app| {
+            log::info!("start, version {}", app.package_info().version);
             if let Some(path) = presence::path() {
                 presence::start(&path);
             }
@@ -942,7 +1070,11 @@ fn main() {
             let notice_app = app.clone();
             thread::spawn(move || {
                 for notice in writer_notice_reader {
-                    eprintln!("studio: writer: {notice:?}");
+                    // The notice is the writer's own words; the log keeps only that one arrived or cleared.
+                    log::warn!(
+                        "card writer notice {}",
+                        if notice.is_some() { "shown" } else { "cleared" }
+                    );
                     let _ = notice_app.emit("writer-notice", notice);
                 }
             });
@@ -968,12 +1100,13 @@ fn main() {
 fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
     // Before the replay, so it reads none of what the prune moves (danielrispler/plotkeeper#132).
     match studio_hook::prune(log, millis()) {
-        Ok(pruned) if pruned != studio_hook::Pruned::default() => eprintln!(
-            "studio: pruned the event log: {} lines archived, {} lightened",
-            pruned.archived, pruned.lightened
+        Ok(pruned) if pruned != studio_hook::Pruned::default() => log::info!(
+            "pruned the event log: {} lines archived, {} lightened",
+            pruned.archived,
+            pruned.lightened
         ),
         Ok(_) => {}
-        Err(e) => eprintln!("studio: prune the event log: {e}"),
+        Err(e) => log::warn!("prune the event log: {e}"),
     }
     // The saved state, when there is one that fits the log, takes the replay from where it stopped
     // (danielrispler/plotkeeper#134).
@@ -1078,8 +1211,8 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                     Output::Unrecognised {
                         session_id,
                         task_id,
-                    } => eprintln!(
-                        "studio: unrecognised wake-up: a prompt of session {session_id} names \
+                    } => log::warn!(
+                        "unrecognised wake-up: a prompt of session {session_id} names \
                          task {task_id} in markup the studio does not know"
                     ),
                     Output::Mismatch { line } => mismatch(&line),
@@ -1087,24 +1220,24 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                         Some(version) => {
                             match agy_versions.check(&version, AGY_FIXTURE_VERSION, millis()) {
                                 Ok(Some(notice)) => {
-                                    eprintln!("studio: {notice}");
+                                    log::warn!("{notice}");
                                     let _ = app.emit("notice", &notice);
                                 }
                                 Ok(None) => {}
-                                Err(e) => eprintln!("studio: keep agy's version: {e}"),
+                                Err(e) => log::warn!("keep agy's version: {e}"),
                             }
                         }
-                        None => eprintln!("studio: agy's version: `agy --version` did not run"),
+                        None => log::warn!("agy's version: `agy --version` did not run"),
                     },
                     // Reads the transcript's lines and nothing else (`AGENTS.md`).
                     Output::Version { transcript_path } => {
                         match versions.check(Path::new(&transcript_path), millis()) {
                             Ok(Some(notice)) => {
-                                eprintln!("studio: {notice}");
+                                log::warn!("{notice}");
                                 let _ = app.emit("notice", &notice);
                             }
                             Ok(None) => {}
-                            Err(e) => eprintln!("studio: keep Claude Code's version: {e}"),
+                            Err(e) => log::warn!("keep Claude Code's version: {e}"),
                         }
                     }
                 }
@@ -1130,8 +1263,7 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
             }
         }
         // Reads the transcripts' lines and nothing else (`AGENTS.md`).
-        let log = |line: String| eprintln!("studio: {line}");
-        let transcripts_changed = state.lock().unwrap().follow_transcripts(log);
+        let transcripts_changed = state.lock().unwrap().follow_transcripts(report);
         // Each live session's context, from its status line snapshot (danielrispler/Falinks#517, decision 1; danielrispler/Falinks#519); the
         // snapshot is named by the conversation's id, which a `/clear` changes.
         let running: Vec<_> = (state.lock().unwrap().sessions().into_iter())
@@ -1384,7 +1516,6 @@ fn write(
         return;
     };
     let job = move || {
-        let log = |line: String| eprintln!("studio: {line}");
         let store = app.state::<Cards>();
         // Where the card's code is pulled from: its turn's end trees (danielrispler/plotkeeper#121).
         request.ends = app
@@ -1413,8 +1544,8 @@ fn write(
         // A turn the table gives no card is written none, but still feeds the design.
         let written = match card {
             true if !offered(&app, &request) => false,
-            true => write_stop(&store, &*writer, request, &session, stored, log),
-            false => write_goal(&store, &*writer, &request, &session, log),
+            true => write_stop(&store, &*writer, request, &session, stored, report),
+            false => write_goal(&store, &*writer, &request, &session, report),
         };
         // A Quiz is never beside a decision (danielrispler/plotkeeper#119).
         if card && session.needs_you() {
@@ -1461,10 +1592,7 @@ fn offered(app: &AppHandle, request: &CardRequest) -> bool {
     }
     let offer = offer_of(&app.state(), &request.id, request.diff());
     if offer != Offer::Card {
-        eprintln!(
-            "studio: no card on {}: its change gets {offer:?}",
-            request.id
-        );
+        log::warn!("no card on {}: its change gets {offer:?}", request.id);
     }
     offer == Offer::Card
 }
@@ -1504,7 +1632,6 @@ fn summarize(
     let (app, writer) = (app.clone(), writer.clone());
     let id = request.session_id.clone();
     let job = move || {
-        let log = |line: String| eprintln!("studio: {line}");
         let setup = app.state::<Summaries>().setup.lock().unwrap().clone();
         let mut request = request;
         if !settle(&app, &mut request) {
@@ -1512,7 +1639,7 @@ fn summarize(
         }
         let session = request.session_id.clone();
         let (studio, cards) = (app.state::<Mutex<Studio>>(), app.state::<Cards>());
-        if write_summary(&cards, &*writer, &setup, request, log).is_some() {
+        if write_summary(&cards, &*writer, &setup, request, report).is_some() {
             design(&studio, &cards, &*writer, &session);
         }
     };
@@ -1531,10 +1658,9 @@ fn name(
     let (app, writer) = (app.clone(), writer.clone());
     let id = request.session_id.clone();
     let job = move || {
-        let log = |line: String| eprintln!("studio: {line}");
         let setup = app.state::<Summaries>().setup.lock().unwrap().clone();
         let response = request.response.as_deref();
-        let Some(name) = write_name(&*writer, &setup, &request.prompt, response, log) else {
+        let Some(name) = write_name(&*writer, &setup, &request.prompt, response, report) else {
             return;
         };
         let line = serde_json::json!({
@@ -1544,7 +1670,7 @@ fn name(
             "studio_received_ms": millis(),
         });
         if let Err(e) = append(&[line]) {
-            eprintln!("studio: save the name of {}: {e}", request.session_id);
+            log::error!("save the name of {}: {e}", request.session_id);
         }
     };
     queue(queues, id).send(Box::new(job)).ok();
@@ -1616,7 +1742,7 @@ fn play(sound: Sound) {
     // Waited on its own thread, so no finished `afplay` is left a zombie.
     thread::spawn(move || {
         if let Err(e) = Command::new("afplay").arg(file).status() {
-            eprintln!("studio: play the {name} sound: {e}");
+            log::warn!("play the {name} sound: {e}");
         }
     });
 }
@@ -1629,7 +1755,96 @@ fn uptime() -> Duration {
 
 #[cfg(test)]
 mod tests {
-    use super::in_app;
+    use super::{in_app, log_line, lost_data, scrubbed, shows_in_window};
+
+    #[test]
+    fn a_file_line_carries_the_local_time_level_and_target() {
+        assert_eq!(
+            log_line(
+                [2026, 11, 18, 9, 5, 7],
+                log::Level::Error,
+                "studio",
+                "no answer"
+            ),
+            "[2026-11-18][09:05:07][ERROR][studio] no answer"
+        );
+    }
+
+    #[test]
+    fn the_window_shows_an_app_error_and_not_a_warning_or_the_uis_own_error() {
+        let on = |level, target| {
+            shows_in_window(&log::Metadata::builder().level(level).target(target).build())
+        };
+        assert!(on(log::Level::Error, "studio"));
+        assert!(!on(log::Level::Warn, "studio"));
+        assert!(!on(log::Level::Error, "webview"));
+        assert!(!on(log::Level::Error, "webview::main.js:3"));
+    }
+
+    #[test]
+    fn a_logged_line_keeps_no_reply_a_parse_error_quotes() {
+        assert_eq!(
+            scrubbed("no quiz on t1: invalid type: string \"secret reply\", expected usize"),
+            "no quiz on t1: invalid type: string"
+        );
+        assert_eq!(
+            scrubbed(
+                "the card writer's reply does not parse (invalid type: string \"secret\", expected a map at line 1): \"head\""
+            ),
+            "the card writer's reply does not parse (invalid type: string"
+        );
+    }
+
+    #[test]
+    fn a_panic_message_is_scrubbed_like_a_writer_line() {
+        assert_eq!(
+            super::panic_message(&"called `Result::unwrap()` on an `Err` value: Parse(\"secret\")"),
+            "called `Result::unwrap()` on an `Err` value: Parse("
+        );
+    }
+
+    #[test]
+    fn every_save_line_of_the_writers_is_lost_data() {
+        let sources = [
+            include_str!("../../understanding/src/lib.rs"),
+            include_str!("../../understanding/src/brief.rs"),
+            include_str!("../../understanding/src/retest.rs"),
+            include_str!("../../understanding/src/summary.rs"),
+        ];
+        let mut saves = 0;
+        for source in sources {
+            for line in source
+                .lines()
+                .filter_map(|l| l.split("log(format!(\"").nth(1))
+            {
+                let text = line.split('"').next().unwrap_or("");
+                if text.to_lowercase().contains("sav") {
+                    assert!(lost_data(text), "a save line is not lost data: {text}");
+                    saves += 1;
+                }
+            }
+        }
+        assert!(saves >= 9, "found only {saves} save lines");
+    }
+
+    #[test]
+    fn a_logged_line_keeps_no_quoted_reply() {
+        assert_eq!(
+            scrubbed("no summary on t1: `claude -p` failed (exit status: 1): \"secret card text\""),
+            "no summary on t1: `claude -p` failed (exit status: 1)"
+        );
+        assert_eq!(
+            scrubbed("no session name: the reply holds none"),
+            "no session name: the reply holds none"
+        );
+    }
+
+    #[test]
+    fn only_a_failed_save_is_lost_data() {
+        assert!(lost_data("save the card store: disk full"));
+        assert!(lost_data("save the summaries of s1: disk full"));
+        assert!(!lost_data("no summary on t1: the writer is away"));
+    }
 
     #[test]
     fn the_window_stays_on_the_app() {

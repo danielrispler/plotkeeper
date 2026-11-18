@@ -8,7 +8,7 @@ The newest turn's Quiz is open in the rail: one click on an option reveals the r
 
 ## A card's Quiz
 
-A card opens with its Quiz (see "The Quiz"). Tap an option: on any card but a check's, the card says at once whether you were right, shows under each option why it is right or wrong, then the explanation. If you think the writer's key is wrong, tap "the key is wrong"; the flag is kept on the card. Your guesses are recorded, never shown as a score. When the writer's Quiz breaks a guard or does not parse, it is asked for once more; when the second fails too, the card shows its explanation with no Quiz, and the app logs one line on stderr.
+A card opens with its Quiz (see "The Quiz"). Tap an option: on any card but a check's, the card says at once whether you were right, shows under each option why it is right or wrong, then the explanation. If you think the writer's key is wrong, tap "the key is wrong"; the flag is kept on the card. Your guesses are recorded, never shown as a score. When the writer's Quiz breaks a guard or does not parse, it is asked for once more; when the second fails too, the card shows its explanation with no Quiz, and the app logs one line in the Studio log.
 
 ## The trials
 
