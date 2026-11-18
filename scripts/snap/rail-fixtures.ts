@@ -278,6 +278,11 @@ const barScript = `
     if (item.scrollWidth > item.clientWidth + 1 && item.id !== "session-header") log("snap:fail #" + item.id + " is clipped at " + innerWidth);
   }
   if (document.getElementById("session-header").hidden) log("snap:fail the session header is missing");
+  // The settings gear (#194): the bar's last item, at its right end, in the bar and never in the "⋯" menu.
+  const gear = document.getElementById("settings-gear");
+  const shown = [...top.children].filter((i) => !i.hidden && i.id && !i.classList.contains("menu"));
+  if (gear.parentElement !== top || shown.at(-1) !== gear) log("snap:fail the settings gear is not the bar's last item at " + innerWidth);
+  if (room - gear.getBoundingClientRect().right > 20) log("snap:fail the settings gear is not at the bar's right end at " + innerWidth);
   log("bar at " + innerWidth + ": " + [...top.children].filter((i) => !i.hidden && i.id).map((i) => i.id).join(" "));`;
 
 // One fixture per state of the rail. `railStates` is what `npm run snap:rail` renders.

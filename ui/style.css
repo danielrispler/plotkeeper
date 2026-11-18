@@ -84,6 +84,9 @@ body[data-layout="focus"] #rail-divider { display: none; }
 .top .menu[popover] { top: var(--bar); right: var(--sp-5); left: auto; width: max-content; max-width: calc(100vw - 2 * var(--sp-5)); }
 .top .menu .git-line { flex-wrap: wrap; padding: var(--sp-2) var(--sp-4); }
 .top .menu .chip { text-align: start; }
+/* The settings gear (#194): icon only, the bar's last item. */
+.top .gear { color: var(--muted); display: inline-grid; place-items: center; width: calc(var(--icon) * 2); height: calc(var(--icon) * 2); padding: 0; }
+.top .gear svg { width: var(--icon); height: var(--icon); }
 /* The session's header: its state dot, state and name; the name is the one part that gives way, past a fixed length. */
 .session-header { display: flex; align-items: center; gap: var(--sp-3); font: inherit; font-size: var(--size-small); color: var(--fg); background: none;
                   border: 0; border-radius: var(--radius); padding: var(--sp-1) var(--sp-4); max-width: var(--session-header); cursor: pointer; }
@@ -218,8 +221,6 @@ h1 { margin: 0 0 var(--sp-4); }
 .pane.history .row:hover { background: var(--hover); }
 .pane.history .item .delete { visibility: visible; }
 .list-foot { display: flex; align-items: center; justify-content: space-between; }
-.list-foot .gear { margin-right: var(--sp-4); color: var(--muted); display: inline-grid; place-items: center; width: calc(var(--icon) * 2); height: calc(var(--icon) * 2); padding: 0; }
-.list-foot .gear svg { width: var(--icon); height: var(--icon); }
 .history-link { display: block; margin: var(--sp-3) var(--sp-4); color: var(--muted); }
 /* A landed row's Delete is the point of the section, so it shows without hover. */
 .pane.home .item .delete { visibility: visible; }

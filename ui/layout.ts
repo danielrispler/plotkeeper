@@ -84,9 +84,10 @@ export const railShown = (mode: LayoutMode, railOpen: boolean, skillsOpen: boole
   mode !== "focus" && (mode !== "overlay" || railOpen) && !skillsOpen;
 
 // The top bar's items, in the order they survive a narrowing window (#127): the session's header and the needs-you chip never
-// leave; the git line, "+" (new session) and the "⋯" menu come after. The menu takes, first to last, the
-// usage, the new-build button, then "+" and the git line. An item shows whole or is in the menu.
-export type BarItem = "header" | "needs-you" | "git" | "new-session" | "usage" | "new-build";
+// leave, and nor does the settings gear (#194), the bar's last item; the git line, "+" (new session) and the "⋯" menu come
+// after. The menu takes, first to last, the usage, the new-build button, then "+" and the git line. An item shows whole or is
+// in the menu.
+export type BarItem = "header" | "needs-you" | "git" | "new-session" | "usage" | "new-build" | "gear";
 export type Bar = { shown: BarItem[]; menu: BarItem[] };
 const leaves: BarItem[] = ["usage", "new-build", "new-session", "git"];
 

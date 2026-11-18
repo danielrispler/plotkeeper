@@ -6,7 +6,7 @@ import { element } from "./dom.js";
 import { arrangeBar, type BarItem } from "./layout.js";
 
 // In the bar's order, left to right.
-const order: BarItem[] = ["header", "needs-you", "git", "usage", "new-build", "new-session"];
+const order: BarItem[] = ["header", "needs-you", "git", "usage", "new-build", "new-session", "gear"];
 // The items left of the spacer; the rest sit right of it.
 const left: BarItem[] = ["header", "needs-you", "git"];
 const ids: Record<BarItem, string> = {
@@ -16,6 +16,7 @@ const ids: Record<BarItem, string> = {
   usage: "usage",
   "new-build": "new-build",
   "new-session": "new-session",
+  gear: "settings-gear",
 };
 
 export function placeBar() {
@@ -24,7 +25,8 @@ export function placeBar() {
   const more = element("bar-more");
   // Every item back in the bar, in order and on its side of the spacer, to measure it whole.
   const spacer = top.querySelector(".sp")!;
-  for (const item of order) top.insertBefore(element(ids[item]), left.includes(item) ? spacer : more);
+  // The gear is last, right of the "⋯" button; the menu's popover follows it and takes no room.
+  for (const item of order) top.insertBefore(element(ids[item]), left.includes(item) ? spacer : item === "gear" ? menu : more);
   more.hidden = false;
   const style = getComputedStyle(top);
   const gap = parseFloat(style.columnGap) || 0;

@@ -33,6 +33,8 @@
       <button id="new-build" class="btn small" type="button" title="A new build is ready. Sessions keep running." hidden>Restart to update</button>
       <button id="new-session" class="btn small" type="button" title="New session" aria-label="New session">+</button>
       <button id="bar-more" class="btn small" type="button" popovertarget="bar-menu" aria-label="More" hidden>⋯</button>
+      <!-- The gear (#159, #194) runs Open settings, as ⌘, does; its title names the key the keymap binds. It is the bar's last item and never folds into "⋯". -->
+      <button id="settings-gear" class="btn small quiet gear" type="button" aria-label="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="7"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg></button>
       <div id="bar-menu" class="menu bar-menu" popover></div>
     </header>
     <div id="usage-popover" class="menu usage-popover" popover></div>
@@ -45,8 +47,6 @@
         <!-- "History · N" (#94): the ended sessions, which are not in the list. -->
         <div class="list-foot">
           <div id="history-link"></div>
-          <!-- The gear (#159) runs Open settings, as ⌘, does; its title names the key the keymap binds. -->
-          <button id="settings-gear" class="btn small quiet gear" type="button" aria-label="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="7"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg></button>
         </div>
       </div>
       <div id="strip" class="strip"></div>

@@ -28,7 +28,7 @@ Every Cmd shortcut goes to the terminal or to the app (`ui/keys.ts`):
 | Cmd+Shift+Enter | app | focus mode: hides the list and the rail; again to leave |
 | Ctrl+` | app, from the terminal too | the terminal panel: a shell in the shown session's folder, under the terminal; again to hide |
 | 1 to 4 | app, while the docked card shows answer buttons; never from the terminal or a text box | chooses that answer on the docked card |
-| Cmd+N, Cmd+T, Cmd+, | app | opens the new-session picker; opens it on Terminal; opens `settings.json` in your editor (the gear at the list's foot does the same) |
+| Cmd+N, Cmd+T, Cmd+, | app | opens the new-session picker; opens it on Terminal; opens `settings.json` in your editor (the gear at the top bar's right end does the same) |
 | Cmd+Shift+P | app | the palette: every action with its key; type to filter, Enter runs |
 | Cmd+=, Cmd+-, Cmd+0 | app | zooms the window in, out (from half to double size) and back |
 | any other Cmd shortcut | app | the app's menu: Cmd+Q, Cmd+W, Cmd+H, Cmd+M and the like |
