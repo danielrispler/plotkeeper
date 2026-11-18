@@ -2167,8 +2167,11 @@ impl Studio {
         let folder = folder.filter(|f| self.roots.find.is_some() || !below(f));
         let session = self.sessions.get(&event.session_id);
         let mut roots: Vec<String> = Vec::new();
-        for folder in [Some(event.cwd.as_str()), folder].into_iter().flatten() {
-            let root = self.roots.of(folder);
+        let listed = event.studio_touched_roots.iter().flatten();
+        let folders = [Some(event.cwd.as_str()), folder].into_iter().flatten();
+        // The hook's list holds roots already, so they need no lookup.
+        let found = folders.map(|f| self.roots.of(f));
+        for root in found.chain(listed.cloned()) {
             if !root.is_empty()
                 && !roots.contains(&root)
                 && !session.is_some_and(|s| s.workers_own(&root))
