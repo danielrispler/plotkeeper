@@ -81,6 +81,7 @@ fn an_ended_turns_files_are_every_file_that_differs_between_its_trees() {
     // Daniel edited b.rs in the same worktree during the turn.
     let diff = vec![RootDiff {
         root: ROOT.into(),
+        moved: vec![],
         files: vec![stat("src/a.rs", 3, 1), stat("src/b.rs", 5, 0)],
     }];
     studio.set_turn_files(&asks[0], Some(diff));
@@ -123,10 +124,12 @@ fn a_workers_edits_in_its_own_worktree_count_in_the_turn_that_spawned_it() {
     let diff = vec![
         RootDiff {
             root: ROOT.into(),
+            moved: vec![],
             files: vec![],
         },
         RootDiff {
             root: WORKER_ROOT.into(),
+            moved: vec![],
             files: vec![stat("x.rs", 2, 0)],
         },
     ];
@@ -140,6 +143,7 @@ fn a_workers_edits_in_its_own_worktree_count_in_the_turn_that_spawned_it() {
 fn diffs(ask: &TurnDiff, files: &[(&str, &str)]) -> Vec<RootDiff> {
     let diff = |root: &str| RootDiff {
         root: root.into(),
+        moved: vec![],
         files: (files.iter())
             .filter(|(r, _)| *r == root)
             .map(|(_, path)| stat(path, 1, 0))
@@ -360,6 +364,7 @@ fn a_rename_is_one_row_and_a_binary_file_has_no_counts() {
     };
     let diff = vec![RootDiff {
         root: ROOT.into(),
+        moved: vec![],
         files: vec![renamed, binary],
     }];
     studio.set_turn_files(&asks[0], Some(diff));
@@ -381,6 +386,7 @@ fn a_running_turn_reports_its_files_so_far_and_is_asked_again_after_5_seconds() 
     assert_eq!(asks[0].trees[0].end, None);
     let diff = vec![RootDiff {
         root: ROOT.into(),
+        moved: vec![],
         files: vec![stat("src/a.rs", 1, 0)],
     }];
     studio.set_turn_files(&asks[0], Some(diff));
@@ -448,6 +454,7 @@ fn a_turns_summary_facts_are_its_files_with_counts_and_its_checks() {
     assert_eq!(ask.trees[0].end.as_deref(), Some("e1"));
     let diff = vec![RootDiff {
         root: ROOT.into(),
+        moved: vec![],
         files: vec![stat("src/a.rs", 3, 1), stat("src/b.rs", 5, 0)],
     }];
     let facts = studio.summary_facts(&ask, Some(diff));
@@ -485,6 +492,7 @@ fn ended_turns_past_a_passs_limit_are_asked_in_the_next_pass() {
             seen.insert(ask.turn);
             let diff = vec![RootDiff {
                 root: ROOT.into(),
+                moved: vec![],
                 files: vec![],
             }];
             studio.set_turn_files(&ask, Some(diff));
@@ -587,6 +595,7 @@ fn a_file_changed_only_through_bash_is_the_turns_with_its_lines() {
     let asks = ask(&mut studio, AT + 20_000);
     let diff = vec![RootDiff {
         root: ROOT.into(),
+        moved: vec![],
         files: vec![stat("src/a.rs", 4, 2)],
     }];
     studio.set_turn_files(&asks[0], Some(diff));
@@ -819,4 +828,80 @@ fn a_subagent_that_stayed_in_the_sessions_worktree_has_no_home_of_its_own() {
     ]);
     ask(&mut studio, AT + 20_000);
     assert!(studio.turn_workers(&turn_id(&studio)).is_empty());
+}
+
+/// The files and merged count of turn 0 when the trees differ in `a.rs`, `b.rs` and `c.rs` of the
+/// root, a move of `HEAD` brought in `b.rs` and `c.rs`, and `calls` happened in the turn.
+fn merged_of(calls: Vec<String>) -> (Vec<String>, usize) {
+    let mut lines = vec![prompt(json!({ ROOT: "s1" }))];
+    lines.extend(calls);
+    lines.push(stop(json!({ ROOT: "e1" })));
+    let mut studio = Studio::replayed(lines);
+    let asks = ask(&mut studio, AT + 20_000);
+    let mut diff = diffs(
+        &asks[0],
+        &[(ROOT, "src/a.rs"), (ROOT, "src/b.rs"), (ROOT, "src/c.rs")],
+    );
+    diff[0].moved = vec!["src/b.rs".into(), "src/c.rs".into()];
+    studio.set_turn_files(&asks[0], Some(diff));
+    (turn_files(&studio, 0), files(&studio).unwrap().merged)
+}
+
+#[test]
+fn files_a_move_of_head_brought_in_are_counted_as_merged_and_not_the_turns() {
+    let calls = vec![edit(1_000, "e1", "/w/repo/src/a.rs", None)];
+    assert_eq!(merged_of(calls), (vec!["src/a.rs".to_string()], 2));
+}
+
+#[test]
+fn a_merged_file_that_an_edit_of_the_turn_names_stays_the_turns() {
+    let calls = vec![
+        edit(1_000, "e1", "/w/repo/src/a.rs", None),
+        edit(2_000, "e2", "/w/repo/src/b.rs", None),
+    ];
+    assert_eq!(
+        merged_of(calls),
+        (vec!["src/a.rs".to_string(), "src/b.rs".to_string()], 1)
+    );
+}
+
+#[test]
+fn a_merged_file_that_a_bash_command_of_the_turn_names_by_its_path_stays_the_turns() {
+    let command = line(
+        "PostToolUse",
+        1_000,
+        json!({ "tool_name": "Bash", "tool_input": { "command": "sed -i s/<<<//g /w/repo/src/c.rs" },
+                "tool_use_id": "b1", "tool_response": {} }),
+    );
+    assert_eq!(
+        merged_of(vec![command]),
+        (vec!["src/a.rs".to_string(), "src/c.rs".to_string()], 1)
+    );
+}
+
+#[test]
+fn a_turn_that_ran_only_git_merge_base_has_no_merge_flag() {
+    let ran = |command: &str| {
+        let lines = [
+            prompt(json!({ ROOT: "s1" })),
+            line(
+                "PostToolUse",
+                1_000,
+                json!({ "tool_name": "Bash", "tool_input": { "command": command },
+                        "tool_use_id": "b1", "tool_response": {} }),
+            ),
+            stop(json!({ ROOT: "e1" })),
+        ];
+        let studio = Studio::replayed(lines);
+        let id = studio.session(SESSION).unwrap().turns[0]
+            .id
+            .clone()
+            .unwrap();
+        studio.turn_merged(&id)
+    };
+    assert!(!ran("git merge-base HEAD origin/main"));
+    assert!(!ran("cd /w/repo && git merge-base --is-ancestor a b"));
+    assert!(ran("git merge feature"));
+    assert!(ran("git fetch && git merge origin/main"));
+    assert!(ran("gh pr merge 12 --squash"));
 }

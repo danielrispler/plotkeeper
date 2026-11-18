@@ -133,7 +133,7 @@ const session = (state: SessionState, { running = false, question = false } = {}
     id: i < 4 || ended ? `t${i}` : null,
     message: "Done.",
     // The newest turns changed files (#113); the second turn ends with a failed check, which its folded line marks (#117).
-    files: i >= 3 ? { files: [file("ui/style.css", 14, 3, "claude"), file("ui/list.ts", 22, 9, "claude"), file("ui/tests/rows.test.mjs", 6, 6)] } : null,
+    files: i >= 3 ? { files: [file("ui/style.css", 14, 3, "claude"), file("ui/list.ts", 22, 9, "claude"), file("ui/tests/rows.test.mjs", 6, 6)], merged: 0 } : null,
     checks: i === 4
       ? [
           { suite: "cargo clippy", status: "passed", retries: 1, runs: [run("failed", "k1", 101), run("passed", "k2", 0)] },
@@ -344,6 +344,19 @@ const evidenceScript = `
   log("rail scrollTop " + at + " -> " + story.scrollTop);
   if (story.scrollTop !== at) log("snap:fail the rail's scrollTop moved from " + at + " to " + story.scrollTop);`;
 
+// #208: opens the evidence line of a turn that merged a branch, and fails unless the line counts 3 files and "+2 merged",
+// and the opened rows end their files with a "+2 merged" row that is no file.
+const mergedScript = `
+  const wait = () => new Promise((resolve) => setTimeout(resolve, 200));
+  const toggle = document.querySelector(".evidence-toggle");
+  if (!toggle) log("snap:fail there is no evidence line");
+  if (!/^3 files · \\+2 merged/.test(toggle.textContent)) log("snap:fail the line reads " + toggle.textContent);
+  toggle.click();
+  await wait();
+  const merged = toggle.parentElement.querySelectorAll(".evidence-merged");
+  if (merged.length !== 1 || merged[0].textContent !== "+2 merged") log("snap:fail the opened line has no '+2 merged' row");
+  if (toggle.parentElement.querySelectorAll(".evidence-file").length !== 3) log("snap:fail the merged files are listed as files");`;
+
 // #114: scrolls the rail, opens the evidence line, then a file's hunk, and fails when the rail's scrollTop moved.
 const hunkScript = `
   const story = document.getElementById("story");
@@ -499,6 +512,11 @@ export const railFixtures = {
   railAsk: () => ({ ...build("your_turn"), snapScript: askScript([".evidence-file", ".evidence-check"]) }),
   railAskCheck: () => ({ ...build("your_turn"), snapScript: askScript([".evidence-check"]) }),
   railHunk: () => ({ ...build("your_turn"), snapScript: hunkScript }),
+  railMerged: () => {
+    const fixture = build("your_turn");
+    fixture.selected.session.turns[4].files!.merged = 2;
+    return { ...fixture, snapScript: mergedScript };
+  },
   railEvidence: () => ({ ...build("your_turn"), snapScript: evidenceScript }),
   ...railStates,
   railBanner: () => ({ ...build("idle", { answered: true, withBrief: true }), snapScript: bannerScript }),

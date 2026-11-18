@@ -199,7 +199,7 @@ fn created(root: &Path) -> Option<Created> {
 }
 
 /// The path of the reflog of `HEAD` in the worktree at `root`.
-fn reflog(root: &Path) -> Option<PathBuf> {
+pub(crate) fn reflog(root: &Path) -> Option<PathBuf> {
     let path = git(root, &["rev-parse", "--git-path", "logs/HEAD"])?;
     Some(root.join(String::from_utf8(path).ok()?.trim_end()))
 }
@@ -221,6 +221,12 @@ fn moves(root: &Path, from: u64) -> Vec<(String, String, String)> {
     moves.collect()
 }
 
+/// Whether a reflog `subject` is the agent's own commit, not a move of `HEAD` that brings in other work.
+pub(crate) fn is_own(subject: &str) -> bool {
+    let own = ["commit:", "commit (amend):", "commit (initial):"];
+    own.iter().any(|own| subject.starts_with(own))
+}
+
 /// The change in the worktree at `root` from record `previous`, its base, to `record`. Only the
 /// agent's own commits count (danielrispler/Falinks#434, decisions 12 to 14): any other move of `HEAD` since the base
 /// moves the base to where it left `HEAD`, keeping the change of the agent's commits before it, and
@@ -231,8 +237,7 @@ fn change(root: &Path, previous: &Record, record: &Record) -> Option<Change> {
     let mut moved = false;
     if previous.head != record.head {
         for (old, new, subject) in moves(root, previous.log) {
-            let own = ["commit:", "commit (amend):", "commit (initial):"];
-            if own.iter().any(|own| subject.starts_with(own)) {
+            if is_own(&subject) {
                 continue;
             }
             let unborn = old.bytes().all(|byte| byte == b'0');
@@ -300,7 +305,7 @@ pub fn backfilled(backfill: Backfill) -> Option<CardRequest> {
 }
 
 /// The paths that differ between commits, or trees, `from` and `to`; every path of `to` when `from` is `None`.
-fn names(root: &Path, from: Option<&str>, to: &str) -> Vec<String> {
+pub(crate) fn names(root: &Path, from: Option<&str>, to: &str) -> Vec<String> {
     let out = match from {
         Some(from) => git(
             root,

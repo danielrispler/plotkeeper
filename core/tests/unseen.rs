@@ -352,6 +352,7 @@ mod since {
                 &ask,
                 Some(vec![RootDiff {
                     root: ROOT.into(),
+                    moved: vec![],
                     files: vec![stat(path)],
                 }]),
             );

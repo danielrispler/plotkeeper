@@ -13,7 +13,7 @@ const file = (path, added, removed, extra = {}) => ({ root: "/r", path, from: nu
 const run = (status, call, exit_code = null) => ({ command: "cargo test", status, exit_code, call, agent: null });
 const check = (suite, status, retries = 0, runs = [run(status, `c-${suite}`, status === "failed" ? 101 : 0)]) => ({ suite, status, retries, runs });
 const same = (a, b) => a.length === b.length && a.every((node, i) => node === b[i]);
-const files = (list) => ({ files: list });
+const files = (list, merged = 0) => ({ files: list, merged });
 
 test("the top level: files and each check's final result, singular and plural", () => {
   assert.equal(evidenceLine({ files: files([file("a", 1, 0)]), checks: [] }), "1 file");
@@ -243,4 +243,23 @@ test("a redraw of an open turn's open hunk reads it again when the file's counts
   await settle();
   assert.equal(reads, 2);
   assert.match(grown.find("pre")[0].text, /read 2/);
+});
+
+test("merged files are counted apart: the line's file count leaves them out, and the rows show \"+2 merged\"", () => {
+  const facts = { files: files([file("a", 1, 0)], 2), checks: [check("cargo test", "passed")] };
+  assert.equal(evidenceLine(facts), "1 file · +2 merged · 1 check passed");
+  assert.equal(evidenceLine({ files: files([], 3), checks: [] }), "+3 merged");
+  assert.equal(evidenceLine({ files: files([file("a", 1, 0)], 0), checks: [] }), "1 file");
+  const rows = evidenceRows(facts);
+  assert.deepEqual(rows.map((r) => [r.kind, r.label]), [["file", "a +1 −0"], ["merged", "+2 merged"], ["check", "cargo test passed"]]);
+  assert.equal(hasEvidence({ files: files([], 2), checks: [] }, { turn_trees: true }), true);
+});
+
+test("the opened line draws the merged row as plain text, without a hunk", () => {
+  const node = evidenceElement("s", 0, { ended_at: 1, files: files([file("a", 1, 0)], 2), checks: [] }, { only: "all" });
+  const items = [];
+  const walk = (n) => (n.className === "evidence-merged" ? items.push(n) : (n.children ?? []).forEach(walk));
+  walk(node);
+  assert.equal(items.length, 1);
+  assert.match(JSON.stringify(items[0]), /\+2 merged/);
 });
