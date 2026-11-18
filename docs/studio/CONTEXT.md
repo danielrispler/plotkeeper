@@ -227,7 +227,7 @@ An agent that an agent session, or another subagent, spawned to do part of its w
 _Avoid_: Task (the workbench's unit of work)
 
 **Worker**:
-A subagent spawned with its own git worktree, or one that changes files. A helper becomes a worker at its first change. Daniel follows a worker like a session, with its own cards and brief. A finished worker folds into its parent's line as a helper does, and its session's rail keeps it in the subagent history. A worker is not a task.
+A subagent spawned with its own git worktree, or one that changes files. A helper becomes a worker at its first change. Its home is its own worktree, or for a subagent not spawned isolated, the first worktree it touches that is not its session's. Daniel follows a worker like a session, with its own cards and brief. A finished worker folds into its parent's line as a helper does, and its session's rail keeps it in the subagent history. A worker is not a task.
 
 **Helper**:
 A subagent that is not a worker, such as a review or a search. It shows as one line under the agent that spawned it.
