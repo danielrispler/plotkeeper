@@ -58,7 +58,7 @@ fn plugins(home: &Path, project: &Path) -> Vec<(String, PathBuf)> {
         .and_then(|json| json.get("plugins").filter(|p| p.is_object()).cloned());
     if installed.is_none() {
         FALLBACK.call_once(|| {
-            eprintln!("studio: no readable installed_plugins.json; skills show each plugin's newest cached version");
+            log::warn!("no readable installed_plugins.json; skills show each plugin's newest cached version");
         });
     }
     let enabled = enabled(home, project);

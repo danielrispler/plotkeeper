@@ -331,7 +331,7 @@ Save everything in a new folder: `local-evidence/<date>-ui-ux-recheck/` (for exa
   That terminal shows `"state":"working"` and `"app"` set, and `turn` goes up after the turn ends.
 - [ ] **danielrispler/Falinks#555:** quitting the app deletes `present`; a CLI `attach` that detaches leaves it.
 - [ ] **danielrispler/Falinks#470:** after a reboot, every Claude session comes back with its conversation.
-- [ ] **danielrispler/Falinks#560:** review the mismatch log, `~/Library/Application Support/dev.falinks.studio/mismatch.log`: each line is a Claude session whose hook state and OSC 7501 state disagreed for over 5 s. Report any pattern on danielrispler/Falinks#560; no file means none did.
+- [ ] **danielrispler/Falinks#560:** review the mismatch lines of the Studio log, `grep mismatch ~/Library/Logs/dev.falinks.studio/studio.log`: each line is a Claude session whose hook state and OSC 7501 state disagreed for over 5 s. Report any pattern on danielrispler/Falinks#560; no line means none did.
 
 ## 6. The test-day note (danielrispler/Falinks#599)
 

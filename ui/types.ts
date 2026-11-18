@@ -431,6 +431,7 @@ export interface Commands {
   rail_shown: void;
   rate: void;
   refresh_landed_tasks: void;
+  reveal_log: void;
   remove_project: string[];
   remove_task: Losses | null;
   rename: void;
