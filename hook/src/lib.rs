@@ -526,6 +526,26 @@ impl Named<'_> {
     fn root(&mut self, path: &Path) -> Option<String> {
         let (spelled, existing) = spelled(path)?;
         let at = spelled.to_str()?;
+        // A root the hook already knows holds the path, with no worktree made between: no listing.
+        let known = self.known.iter().filter(|r| holds(r, at));
+        if let Some(deepest) = known.max_by_key(|r| r.len()) {
+            let alive = Path::new(deepest).join(".git").exists();
+            let between = |p: &&Path| {
+                let at_root = p.to_str().is_some_and(|p| p == deepest);
+                let unknown = |p: &Path| {
+                    p.to_str()
+                        .is_some_and(|p| !self.known.iter().any(|r| r == p))
+                };
+                !at_root && p.join(".git").exists() && unknown(p)
+            };
+            let made = existing.ancestors().take_while(|p| p.starts_with(deepest));
+            if !alive {
+                return None;
+            }
+            if made.clone().all(|p| !between(&p)) {
+                return Some(deepest.clone());
+            }
+        }
         let held = |list: &Vec<String>| list.iter().any(|r| holds(r, at));
         let index = match self.lists.iter().position(held) {
             Some(index) => index,
@@ -631,7 +651,7 @@ pub fn trees(
             lists: Vec::new(),
             known,
         };
-        let roots = cwd.and_then(|f| worktree_root(Path::new(f))).into_iter();
+        let roots = cwd.and_then(|f| names.root(Path::new(f))).into_iter();
         let roots = roots.chain(folder.and_then(|f| names.root(Path::new(f))));
         let mut roots: Vec<String> = roots.collect();
         roots.extend(named.iter().filter_map(|p| names.root(Path::new(p))));

@@ -25,6 +25,8 @@ fn git(dir: &Path, args: &[&str]) -> String {
 struct Scene {
     home: PathBuf,
     main: PathBuf,
+    /// A folder put first on the hook's `PATH`.
+    bin: Option<PathBuf>,
 }
 
 impl Scene {
@@ -42,7 +44,11 @@ impl Scene {
         fs::write(main.join("a.txt"), "a\n").unwrap();
         git(&main, &["add", "."]);
         git(&main, &["commit", "-qm", "init"]);
-        Scene { home, main }
+        Scene {
+            home,
+            main,
+            bin: None,
+        }
     }
 
     /// A worktree at `path` below the main checkout or beside it.
@@ -73,6 +79,7 @@ impl Scene {
         let mut child = Command::new(env!("CARGO_BIN_EXE_studio-hook"))
             .env("HOME", &self.home)
             .env_remove("STUDIO_TERMINAL_ID")
+            .env("PATH", self.path())
             .stdin(Stdio::piped())
             .spawn()
             .unwrap();
@@ -85,6 +92,14 @@ impl Scene {
         assert!(child.wait().unwrap().success());
         let log = fs::read_to_string(studio_hook::event_log(&self.home)).unwrap();
         serde_json::from_str(log.lines().last().unwrap()).unwrap()
+    }
+
+    fn path(&self) -> String {
+        let path = std::env::var("PATH").unwrap_or_default();
+        match &self.bin {
+            Some(bin) => format!("{}:{path}", bin.display()),
+            None => path,
+        }
     }
 
     fn bash(&self, command: &str, extra: Value) -> Value {
@@ -384,4 +399,69 @@ fn a_worktree_with_no_first_reflog_line_starts_from_its_files_at_first_touch() {
         .as_str()
         .unwrap();
     assert!(files(&made, start).contains("new.txt"));
+}
+
+#[test]
+fn a_late_event_whose_folder_is_a_removed_worktrees_touches_no_root() {
+    let scene = Scene::new("removed-cwd");
+    let second = scene.worktree(&scene.main.join(".claude/worktrees/second"));
+    scene.hook("UserPromptSubmit", json!({ "prompt": "go" }));
+    scene.bash(&format!("ls {}", second.display()), json!({}));
+    git(
+        &scene.main,
+        &["worktree", "remove", "--force", second.to_str().unwrap()],
+    );
+
+    let late = scene.hook(
+        "PostToolUse",
+        json!({ "tool_name": "Read", "cwd": second, "tool_use_id": "r1" }),
+    );
+    assert_eq!(roots(&late), Vec::<String>::new(), "{late}");
+}
+
+/// A `git` on the path that counts its `worktree list` runs in `count`, then runs the real one.
+fn counting_git(scene: &Scene) -> (PathBuf, PathBuf) {
+    let bin = scene.home.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    let count = scene.home.join("lists");
+    let real =
+        String::from_utf8(Command::new("which").arg("git").output().unwrap().stdout).unwrap();
+    let script = format!(
+        "#!/bin/sh\ncase \"$*\" in *'worktree list'*) echo x >> '{}';; esac\nexec {} \"$@\"\n",
+        count.display(),
+        real.trim()
+    );
+    fs::write(bin.join("git"), script).unwrap();
+    Command::new("chmod")
+        .arg("+x")
+        .arg(bin.join("git"))
+        .status()
+        .unwrap();
+    (bin, count)
+}
+
+#[test]
+fn a_path_under_a_root_the_hook_knows_lists_no_worktrees_again() {
+    let mut scene = Scene::new("lists");
+    let second = scene.worktree(&scene.main.with_file_name("second"));
+    scene.hook("UserPromptSubmit", json!({ "prompt": "go" }));
+    scene.bash(&format!("ls {}", second.display()), json!({}));
+    let (bin, count) = counting_git(&scene);
+    scene.bin = Some(bin);
+
+    let call = scene.bash(
+        &format!(
+            "cat {}/a.txt {}/b.txt",
+            second.display(),
+            scene.main.display()
+        ),
+        json!({ "tool_use_id": "b2" }),
+    );
+    let second_root = second.to_str().unwrap().to_owned();
+    assert!(roots(&call).contains(&second_root), "{call}");
+    let lists = fs::read_to_string(&count)
+        .unwrap_or_default()
+        .lines()
+        .count();
+    assert_eq!(lists, 0, "listed again for a root it knew");
 }
