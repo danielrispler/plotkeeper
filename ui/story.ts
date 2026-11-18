@@ -7,7 +7,7 @@
 
 import { modelLine, reports } from "./capabilities.js";
 import { logo, logoKey, noContextNote } from "./logos.js";
-import { age, code, element, fullTitle, invoke, pressable, prose, text } from "./dom.js";
+import { age, code, element, failure, fullTitle, invoke, pressable, prose, text } from "./dom.js";
 import { select } from "./selection.js";
 import { askAnchor } from "./ask.js";
 import { rendered } from "./markdown.js";
@@ -102,14 +102,14 @@ export function showView(selected: Selection | null) {
   element("view").toggleAttribute("data-agent", agent !== null);
   // "Open" resumes an ended session in a new terminal, in its folder, where Claude Code keeps it.
   element("reopen").hidden = agent !== null || session.state !== "ended";
-  element("reopen").onclick = () => openHere(session).catch((e) => console.warn(e));
+  element("reopen").onclick = () => openHere(session).catch(failure("reopen", "error"));
   // Another agent's row (danielrispler/Falinks#560) has no name of its own to keep, nor turns to mark, and comes back
   // with its status if dropped.
   const own = agent === null && !session.status_only;
   element("rename").hidden = !own;
   element("rename").onclick = () => askName(session);
   element("mark-unseen").hidden = !own || session.state !== "your_turn" || session.unseen === true;
-  element("mark-unseen").onclick = () => void invoke("mark_unseen", { id: session.id }).catch((e) => console.warn(e));
+  element("mark-unseen").onclick = () => void invoke("mark_unseen", { id: session.id }).catch(failure("mark_unseen", "error"));
   // Only a terminal the studio runs can be closed from here.
   element("close").hidden = agent !== null || session.terminal === null;
   element("close").onclick = () => askClose(session);
@@ -179,7 +179,7 @@ function summarize(id: string) {
     })
     .catch((e) => {
       failed.add(id);
-      console.warn(e);
+      failure("subagent summary")(e);
     })
     .finally(() => writing.delete(id));
 }
@@ -373,7 +373,7 @@ const askSummary = oneAtATime((id) =>
     })
     .catch((e) => {
       failedTurns.add(id);
-      console.warn(e);
+      failure("turn summary")(e);
     })
     .finally(() => {
       asking.delete(id);
@@ -498,7 +498,7 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
   if (quiz && turn?.id) {
     const id = turn.id;
     const deps = {
-      record: (tap: Tap) => void invoke("quiz_tap", { id, tap }).catch((e) => console.warn(e)),
+      record: (tap: Tap) => void invoke("quiz_tap", { id, tap }).catch(failure("quiz_tap")),
       explain: () => invoke("ask", { session: session.id, item: quizItem(quiz), question: "I did not get this yet. Explain more." }),
       line: bodyLine,
       trial,
@@ -542,7 +542,7 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
           replies.set(key, reply ?? "");
           fill([reply ?? ""]);
         })
-        .catch((e) => console.warn(e));
+        .catch(failure("turn_file_hunk"));
     };
     const fold = folded(`${key} response`, "Full response", [body], fetch);
     if (fold.hasAttribute("open")) fetch();
@@ -643,7 +643,7 @@ function askName(session: Session) {
   dialog.onclose = async () => {
     if (dialog.returnValue !== "rename") return;
     const name = field.value.trim();
-    await invoke("rename", { id: session.id, name }).catch((e) => console.warn(e));
+    await invoke("rename", { id: session.id, name }).catch(failure("rename", "error"));
     if (!name || session.terminal === null || session.state === "ended") return;
     const terminal = session.terminal;
     const blocked = () => studio.listed.find((s) => s.id === session.id)?.state === "needs_you";
@@ -655,7 +655,7 @@ function askName(session: Session) {
         element("notice").textContent = text;
         element("notice").hidden = false;
       },
-    }).catch((e) => console.warn(e));
+    }).catch(failure("type retry", "error"));
   };
   dialog.returnValue = "";
   dialog.showModal();
@@ -663,7 +663,7 @@ function askName(session: Session) {
 
 // Close (danielrispler/Falinks#469): ends the session's terminal, asking first while it works or has background tasks.
 function askClose(session: Session) {
-  const close = () => closePane(session.terminal!).catch((e) => console.warn(e));
+  const close = () => closePane(session.terminal!).catch(failure("close pane", "error"));
   if (!session.asks_before_closing) return close();
   const dialog = element("close-dialog") as HTMLDialogElement;
   element("close-name").textContent = sessionName(session);
@@ -674,6 +674,7 @@ function askClose(session: Session) {
 
 // Shows a failed delete's reason over the story.
 export function report(error: unknown) {
+  failure("delete", "error")(error);
   element("notice").textContent = String(error);
   element("notice").hidden = false;
 }
@@ -754,7 +755,7 @@ function typeRetryLine(session: Session, card: BlockedCommand, agent: string | n
     sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
     send: (data) => request({ op: "input", id: terminal, data: encode(new TextEncoder().encode(data)) }),
     notice,
-  }, answered).catch((e) => console.warn(e));
+  }, answered).catch(failure("type retry", "error"));
 }
 
 // The session's blocked commands as cards, in block order: its own view shows them all, naming a subagent's, and a

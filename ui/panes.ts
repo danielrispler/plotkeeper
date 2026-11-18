@@ -15,7 +15,7 @@ import { connect, list, onEvent, request, type Listed } from "./daemon.js";
 import { diffRequest, drawDiff, keepsDiff } from "./diff.js";
 import { drawHistory } from "./history.js";
 import { drawHome } from "./home.js";
-import { element, invoke, listen, pressable, text } from "./dom.js";
+import { element, failure, invoke, listen, pressable, text } from "./dom.js";
 import { onProjects, projects } from "./projects.js";
 import { followLog, showLog, showMissing } from "./log.js";
 import { type Box, paneBoxes } from "./layout.js";
@@ -52,7 +52,7 @@ const readHomeProjects = () =>
       projectPaths = paths;
       redrawHome();
     },
-    (e) => console.warn(e),
+    failure("projects"),
   );
 
 // Gives Home the retests as they are read (danielrispler/plotkeeper#129); a failed read leaves them as they were.
@@ -62,7 +62,7 @@ const readRetests = () =>
       retests = found;
       redrawHome();
     },
-    (e) => console.warn(e),
+    failure("retests"),
   );
 
 // Connects, shows Home, then brings back every terminal;
@@ -71,7 +71,7 @@ export function startPanes(): Promise<void> {
   offerBuilds();
   offerPluginFix()
     .then(offerAgyPluginFix)
-    .catch((e) => console.warn(e));
+    .catch(failure("plugin fix"));
   ready = connect().then((config) => {
     repo = config.repo;
     showPanel(null, repo);
@@ -391,7 +391,7 @@ export async function showSession(session: Session | null, clicked = false, agen
     return;
   }
   if ("terminal" in view) return show(view.terminal, () => openPane(box(view.terminal), view.terminal, terminal!.cwd, terminal!.argv));
-  const resume = () => openHere(session).catch((e) => console.warn(e));
+  const resume = () => openHere(session).catch(failure("resume", "error"));
   box(ELSEWHERE).classList.add("elsewhere");
   box(ELSEWHERE).replaceChildren(text("p", view.message, "empty"), pressable(text("button", "Open here"), false, resume));
   show(ELSEWHERE, () => null);

@@ -21,7 +21,8 @@ export const stubSource = (fixture) => `window.__TAURI__ = (() => {
     if (reply?.__by) return reply.values[args?.[reply.__by]] ?? null;
     return reply ?? null;
   };
-  return { event: { listen }, core: { invoke } };
+  const log = { warn: async () => {}, error: async () => {} };
+  return { event: { listen }, core: { invoke }, log };
 })();`;
 
 // What runs in the page's head, after the stub: the body's classes (set once the body exists), then the fixture's script once

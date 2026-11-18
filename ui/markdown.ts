@@ -2,7 +2,7 @@
 // untrusted and the page can call the shell, so raw HTML stays text, only `http(s)` and file links
 // (danielrispler/Falinks#557) become links, and an image shows its alt text. marked loads as a plain script from `vendor/`.
 
-import { invoke } from "./dom.js";
+import { failure, invoke } from "./dom.js";
 import { codePath, fileTarget, openFile } from "./paths.js";
 
 declare const marked: typeof import("marked");
@@ -57,7 +57,7 @@ export function rendered(tag: string, text: string, className = "", cwd: string 
     // marked percent-encodes a link's path; a `file://` URL is decoded with its host dropped.
     const href = link.getAttribute("href") ?? "";
     if (link.hasAttribute("data-file")) openFile(href.startsWith("file:") ? href : decodeURI(href), cwd);
-    else invoke("open_link", { target: link.href }).catch((e) => console.warn(e));
+    else invoke("open_link", { target: link.href }).catch(failure("open_link", "error"));
   });
   return node;
 }

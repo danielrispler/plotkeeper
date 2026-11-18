@@ -2,7 +2,7 @@
 // it was written in, or at the top when it is the newest (danielrispler/Falinks#574). The writer writes them in English
 // (danielrispler/Falinks#487); cards stored in Hebrew keep their direction.
 
-import { code, element, fullTitle, prose, invoke, pressable, text } from "./dom.js";
+import { code, element, failure, fullTitle, invoke, pressable, prose, text } from "./dom.js";
 import { refreshCards } from "./selection.js";
 import { studio } from "./state.js";
 import { showDecisions } from "./decisions.js";
@@ -64,7 +64,7 @@ function quizElements(stored: StoredCard, quiz: Quiz, shown: ReturnType<typeof q
   const { request: { id, check }, guess } = stored;
   const waiting = waitsForWhy(stored, trial);
   const state = waiting ? { ...shown, reasons: false, verdict: null } : shown;
-  const send = (tap: Tap) => void invoke("quiz_tap", { id, tap }).catch((e) => console.warn(e));
+  const send = (tap: Tap) => void invoke("quiz_tap", { id, tap }).catch(failure("quiz_tap"));
   const options = document.createElement("ol");
   options.className = "options";
   options.append(
@@ -219,7 +219,7 @@ function moreElement(id: string, more: string | null): HTMLElement {
 // gave none, so the next tap asks again.
 async function explainMore(id: string) {
   asking.add(id);
-  invoke("quiz_tap", { id, tap: { kind: "explain_more" } }).catch((e) => console.warn(e));
+  invoke("quiz_tap", { id, tap: { kind: "explain_more" } }).catch(failure("quiz_tap"));
   const more = await invoke("explain_more", { id });
   asking.delete(id);
   if (more === null) moreOpen.delete(id);

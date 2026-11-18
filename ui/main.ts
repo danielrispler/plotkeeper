@@ -10,7 +10,7 @@ import { openAsk } from "./ask.js";
 import { placeBar, watchBar } from "./bar.js";
 import { markShown, showCards } from "./cards.js";
 import { diffRequest, newestDiff } from "./diff.js";
-import { element, invoke, listen } from "./dom.js";
+import { element, failure, invoke, listen, logUncaught } from "./dom.js";
 import { type Actions, doctorEntries, newestUnseen, nextNeedsYou, paletteEntries, run, stepLine, stepSession, titled, windowBinding } from "./keys.js";
 import { hover, realClock, shownGate } from "./hover.js";
 import { arrange, defaultWidths, type LayoutMode, railShown, resized, type Widths } from "./layout.js";
@@ -50,11 +50,12 @@ function layout() {
   placePanes(stacked, cell());
   showToast();
 }
+logUncaught(window);
 window.addEventListener("resize", layout);
 // The shell counts a turn seen only while the rail shows its session (danielrispler/Falinks#556), so it is told whether it
 // does each time the layout or the body's classes change. A rail that shows as an overlay is told only after it has stayed
 // open 2 seconds, so a peek does not clear the unseen mark (danielrispler/plotkeeper#128).
-const tellShown = shownGate(realClock, (shown) => invoke("rail_shown", { shown }).catch((e) => console.warn(e)));
+const tellShown = shownGate(realClock, (shown) => invoke("rail_shown", { shown }).catch(failure("rail_shown")));
 // The overlays open on a rest of the pointer (hover.ts): the rail's layer from the spine or the session header, the list's strip
 // over the terminal. A click, ⌘2 and Esc keep working; they change the body's classes, which the observer below hands to the machines.
 const railHover = hover(realClock, (open) => document.body.classList.toggle("rail-open", open));
@@ -124,7 +125,7 @@ const toggle = (name: string) => document.body.classList.toggle(name);
 let zoom = 1;
 const setZoom = (to: number) => {
   zoom = to;
-  invoke("set_zoom", { zoom }).then(layout, (e) => console.warn(e));
+  invoke("set_zoom", { zoom }).then(layout, failure("set_zoom"));
 };
 // The keyboard spine (danielrispler/Falinks#575): ⌘] and ⌘[ step through the sessions, ⌘J goes to the next needs-you, else the next unseen, ↑
 // and ↓ move in the list, 1–4 answer the docked card, ⌘N starts a session, ⌘, opens `settings.json`
@@ -217,19 +218,19 @@ const actions: Actions = {
   // Pull main (#164): every project's main checkout's default branch fast-forwards to origin's.
   "studio::PullMain": () => void pullAll(),
   // Asks GitHub again which tasks have landed (#53); it is otherwise asked at a turn's end and at the window's focus.
-  "studio::RefreshLanded": () => void invoke("refresh_landed_tasks").catch((e) => console.warn(e)),
+  "studio::RefreshLanded": () => void invoke("refresh_landed_tasks").catch(failure("refresh_landed_tasks")),
   // Finder opens with the Studio log selected.
-  "studio::RevealLog": () => void invoke("reveal_log").catch((e) => console.warn(e)),
-  "studio::OpenSettings": () => void invoke("open_settings", { editor: studio.files.settings.editor }).catch((e) => console.warn(e)),
+  "studio::RevealLog": () => void invoke("reveal_log").catch(failure("reveal_log", "error")),
+  "studio::OpenSettings": () => void invoke("open_settings", { editor: studio.files.settings.editor }).catch(failure("open_settings", "error")),
   // The skills browser (danielrispler/Falinks#528), in the rail's place; it leaves focus mode, which hides the rail.
   "studio::Skills": () => {
     if (studio.focus) actions["studio::ToggleFocus"]();
-    showSkills().catch((e) => console.warn(e));
+    showSkills().catch(failure("skills", "error"));
   },
   // A Doctor entry from settings, by its command (danielrispler/Falinks#527).
   "studio::Doctor": (command) => {
     const entry = studio.files.settings.doctor.find((e) => e.command === command);
-    if (entry) runDoctor(entry).catch((e) => console.warn(e));
+    if (entry) runDoctor(entry).catch(failure("doctor", "error"));
   },
   "studio::Palette": () => {
     const { keymap, settings } = studio.files;
@@ -264,16 +265,16 @@ function applySettings(files: SettingsFiles) {
   else if (!others.length) notice.hidden = true;
   // Only a changed `zoom` resets the zoom the keys set.
   if (settings.zoom !== previous.zoom) setZoom(settings.zoom);
-  invoke("notify_while_focused", { on: settings.notifications.while_focused }).catch((e) => console.warn(e));
-  invoke("sounds", { on: settings.sounds }).catch((e) => console.warn(e));
+  invoke("notify_while_focused", { on: settings.notifications.while_focused }).catch(failure("notify_while_focused"));
+  invoke("sounds", { on: settings.sounds }).catch(failure("sounds"));
   const size = settings.terminal.font_size;
   if (size === null) document.documentElement.style.removeProperty("--term-size");
   else document.documentElement.style.setProperty("--term-size", `${size}px`);
   layout();
   const { model, effort, on_open: onOpen } = settings.summaries;
   const selfTest = Date.parse(settings.quiz_self_test ?? "");
-  invoke("summary_settings", { model, effort, onOpen, selfTest: Number.isNaN(selfTest) ? null : selfTest }).catch((e) => console.warn(e));
-  invoke("check_lists", { lists: settings.checks }).catch((e) => console.warn(e));
+  invoke("summary_settings", { model, effort, onOpen, selfTest: Number.isNaN(selfTest) ? null : selfTest }).catch(failure("summary_settings"));
+  invoke("check_lists", { lists: settings.checks }).catch(failure("check_lists"));
   window.dispatchEvent(new Event("settings"));
 }
 listen<SettingsFiles>("settings-files", applySettings);
@@ -297,7 +298,10 @@ document.addEventListener("visibilitychange", markShown);
 window.addEventListener("focus", () => actions["studio::RefreshLanded"]());
 
 // A login shell in the configured repository, then a pane per session terminal (danielrispler/Falinks#467).
-startPanes().catch((e) => element("terminal-body").append(`No terminal: ${e}`));
+startPanes().catch((e) => {
+  failure("terminal", "error")(e);
+  element("terminal-body").append(`No terminal: ${e}`);
+});
 dragSplit();
 dragPanel();
 element("new-session").addEventListener("click", () => void showPicker());
