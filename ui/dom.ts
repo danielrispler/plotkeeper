@@ -1,5 +1,6 @@
 // The window's small parts: the shell's calls, and the elements every region builds.
 
+import { showError } from "./notice.js";
 import type { Command, Commands, Step } from "./types.js";
 
 declare global {
@@ -21,7 +22,13 @@ export const listen = <T>(event: string, handler: (payload: T) => void) =>
 // The Studio log (#190): the line is the command's name and the error's message, nothing else of the error. `error` is for a
 // failed action Daniel asked for, `warn` for a call that degrades and carries on. A log that fails is dropped.
 const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e));
+// An `error` also shows in the notice line (#191); the app's echo of it through the log's `Webview` target is the same line.
 export function logLine(level: "warn" | "error", line: string) {
+  if (level === "error") {
+    try {
+      showError(line);
+    } catch {}
+  }
   try {
     window.__TAURI__.log[level](line).catch(() => {});
   } catch {}

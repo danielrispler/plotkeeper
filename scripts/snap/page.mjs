@@ -21,7 +21,11 @@ export const stubSource = (fixture) => `window.__TAURI__ = (() => {
     if (reply?.__by) return reply.values[args?.[reply.__by]] ?? null;
     return reply ?? null;
   };
-  const log = { warn: async () => {}, error: async () => {} };
+  // The app echoes an error back to the page through the log plugin's Webview target (\`log://log\`, level 5), as the real one does.
+  const log = {
+    warn: async () => {},
+    error: async (message) => setTimeout(() => (listeners["log://log"] ?? []).forEach((h) => h({ payload: { level: 5, message } }))),
+  };
   return { event: { listen }, core: { invoke }, log };
 })();`;
 
