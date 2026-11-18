@@ -221,7 +221,7 @@ With a real `claude` session in the pane (danielrispler/Falinks#466, danielrispl
 
 ### Cards and answers, staged (danielrispler/Falinks#598)
 
-- [ ] **danielrispler/Falinks#462:** with the app started with `open --stderr <file>` (to keep writer errors), a turn that changes a worktree produces a card in `cards-v2.json`.
+- [ ] **danielrispler/Falinks#462:** a turn that changes a worktree produces a card in `cards-v2.json`.
 - [ ] **danielrispler/Falinks#486:** a turn that ends while the app is down gets its card after the app starts.
 - [ ] **danielrispler/Falinks#476:** one real card on a `ci-checks` run: it is ready before the check ends, and the check's exit code settles "Will `<command>` pass?". A check whose exit code does not count (such as `cargo test 2>&1 | tail`) stays not counted; a subagent's check gets no card.
 - [ ] **danielrispler/Falinks#473:** a failed background check ends its time.
