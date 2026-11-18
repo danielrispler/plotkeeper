@@ -279,3 +279,69 @@ fn the_runs_worker_gets_a_card_at_its_commit_and_its_end_and_its_session_one_fro
     assert_eq!(requests[0].prompt, Some(1_793_471_817_301));
     assert_eq!(requests[2].prompt, Some(1_793_471_812_760));
 }
+
+/// Seam 2 (danielrispler/plotkeeper#202): the roots a hook event lists as touched are the roots the
+/// core fingerprints, so a Bash call that works in another worktree gets its card for that change.
+#[test]
+fn a_session_event_whose_touched_roots_hold_a_second_worktree_asks_for_a_fingerprint_there() {
+    let mut studio = Studio::default();
+    let prompt = event(
+        "UserPromptSubmit",
+        1_000,
+        json!({"prompt": "go", "prompt_id": "p1", "studio_turn_start": {"/w": "t0"}}),
+    );
+    apply(&mut studio, &prompt, Some(found()));
+    let bash = |name: &str, extra: Value| {
+        let fields = json!({
+            "tool_name": "Bash", "tool_use_id": "b1", "prompt_id": "p1",
+            "tool_input": {"command": "cd /w/second && touch x"},
+        });
+        let mut fields = fields;
+        fields
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        event(name, 2_000, fields)
+    };
+    let pre = bash(
+        "PreToolUse",
+        json!({"studio_touched_roots": ["/w", "/w/second"]}),
+    );
+    let folders: Vec<_> = studio
+        .fingerprint_folders(&pre)
+        .into_iter()
+        .map(|f| f.folder)
+        .collect();
+    assert_eq!(folders, ["/w/second"]);
+    apply(&mut studio, &pre, Some(found()));
+
+    let stop = event(
+        "Stop",
+        9_000,
+        json!({"prompt_id": "p1", "studio_turn_end": {"/w": "t1", "/w/second": "t2"}}),
+    );
+    let outputs = apply(&mut studio, &stop, Some(found()));
+    let cards = outputs
+        .iter()
+        .filter(|o| matches!(o, Output::Card(_)))
+        .count();
+    assert_eq!(cards, 1);
+}
+
+#[test]
+fn an_event_with_no_touched_roots_is_read_as_before() {
+    let mut studio = Studio::default();
+    let prompt = event(
+        "UserPromptSubmit",
+        1_000,
+        json!({"prompt": "go", "prompt_id": "p1", "studio_turn_start": {"/w": "t0"}}),
+    );
+    apply(&mut studio, &prompt, Some(found()));
+    let pre = event(
+        "PreToolUse",
+        2_000,
+        json!({"tool_name": "Bash", "tool_use_id": "b1", "prompt_id": "p1",
+               "tool_input": {"command": "cd /w/second && touch x"}}),
+    );
+    assert_eq!(studio.fingerprint_folders(&pre), []);
+}
