@@ -7,7 +7,9 @@
 
 use std::io::{BufRead, BufReader};
 use studio_core::Studio;
-use studio_understanding::{Offer, Shape, add_hunks, turn_diffs, worktree_root};
+use studio_understanding::{
+    Offer, OfferKind, TurnFacts, add_hunks, decide, turn_diffs, worktree_root,
+};
 
 fn main() {
     let log = studio_hook::event_log(&std::env::home_dir().expect("a home directory"));
@@ -43,7 +45,11 @@ fn main() {
         readable += 1;
         external += facts.external;
         with_diff += usize::from(facts.files.len() + facts.external as usize > 0);
-        let offer = Shape::of(&facts, "", studio.turn_merged(id)).offer();
+        let turn = TurnFacts {
+            facts,
+            merge: studio.turn_merged(id),
+        };
+        let offer = decide(OfferKind::Turn, &turn, &[]).offer;
         counts[offer as usize] += 1;
         plan.push((*ended, offer));
     }
