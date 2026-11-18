@@ -59,6 +59,12 @@ _Avoid_: Snapshot, checkpoint (the engine's term)
 The one multiple-choice question a turn can have, with the writer's key, which grades Daniel's guess. It is the card's when the turn has a card, and otherwise comes with the turn summary, open under the Headline. One set of rules holds it, and code enforces the guards: [`question-rules.md`](question-rules.md). A learning question stored before the Quiz reads as one. On a check card the quiz asks whether the check will pass, and the check's result is the key.
 _Avoid_: Question (an agent's question to Daniel), Learning section (retired)
 
+**Offer**:
+What one decision gives a change: a card (with its Quiz), a lone Quiz, or nothing, by the table in [`question-rules.md`](question-rules.md). A turn, a worker's card and a **late change** each get one, decided once with the same facts for the card and for the summary. Each is recorded once in `offers.jsonl` ([`storage.md`](behaviour/storage.md)).
+
+**Late change**:
+What a subagent changed in its session's own worktree after the turn ended, which the session's card then covers. It is judged below the card row: it gets a card only when it passes the table's first row, and never a lone Quiz.
+
 **Check card**:
 The card a check of the session's own agent gets at its start when it usually runs over 2 minutes, on the change since the last card, so Daniel can guess while he waits whether the check will pass.
 
