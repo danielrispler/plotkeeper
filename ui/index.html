@@ -171,6 +171,14 @@
       <p class="actions"><button class="btn" value="no">Not now</button> <button class="btn primary" value="yes">Restart terminals</button></p>
     </form>
   </dialog>
+  <!-- The settings page (#193, #195): a dialog over the window; Esc, the X and a click outside close it. `settings-page.ts` draws it. -->
+  <dialog id="settings-dialog" class="settings" aria-labelledby="settings-title">
+    <div class="settings-head">
+      <h1 id="settings-title">Settings</h1>
+      <button id="settings-close" class="btn quiet" type="button" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    </div>
+    <div id="settings-body" class="settings-body"></div>
+  </dialog>
   <span id="probe" aria-hidden="true">MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM</span>
 </body>
 </html>

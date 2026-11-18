@@ -38,4 +38,6 @@
   /* A row's fold and delete: the button and its icon. */
   --control: 20px; --icon: 14px;
   --popover: 380px; --dialog: 560px; --find: 220px; --outcome: 52px; --toast: 360px; --menu: 180px; --session-header: 280px; --layer: 320px; --spine: 14px;
+  /* The settings page (#195): herdr's 880 by 620, and a switch's track. */
+  --settings: 880px; --settings-height: 620px; --switch: 32px; --switch-height: 18px;
 }

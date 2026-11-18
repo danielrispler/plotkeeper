@@ -52,6 +52,9 @@ export interface Files {
   // One line per file that did not parse or key of the wrong type, such as
   // "settings.json: Unexpected end of JSON input".
   errors: string[];
+  // `settings.json` does not parse (a key of the wrong type is not that): `settings` is the last good one, and the settings page
+  // writes nothing (#195).
+  broken: boolean;
 }
 
 export const ZOOM_MIN = 0.5;
@@ -130,7 +133,7 @@ const defaultKeymap: Keymap = {
   },
 };
 
-export const initial: Files = { settings: defaultSettings, keymap: defaultKeymap, errors: [] };
+export const initial: Files = { settings: defaultSettings, keymap: defaultKeymap, errors: [], broken: false };
 
 // Drops comments and trailing commas outside strings, so `JSON.parse` reads Zed's format.
 function parseJsonc(text: string): unknown {
@@ -253,16 +256,18 @@ export type SettingsFiles = { settings: string | null; keymap: string | null };
 // The settings files from their text, each falling back to `previous` when it does not parse.
 export function reload(previous: Files, files: SettingsFiles): Files {
   const errors: string[] = [];
+  let broken = false;
   const read = <T>(name: string, text: string | null, parse: (json: unknown, report: Report) => T, fallback: T, last: T): T => {
     if (text === null || !text.trim()) return fallback;
     try {
       return parse(parseJsonc(text), (problem) => errors.push(`${name}: ${problem}`));
     } catch (e) {
       errors.push(`${name}: ${e instanceof Error ? e.message : e}`);
+      if (name === "settings.json") broken = true;
       return last;
     }
   };
   const settings = read("settings.json", files.settings, readSettings, defaultSettings, previous.settings);
   const keymap = read("keymap.json", files.keymap, readKeymap, defaultKeymap, previous.keymap);
-  return { settings, keymap, errors };
+  return { settings, keymap, errors, broken };
 }

@@ -141,6 +141,24 @@ const pullMain = (extra: Partial<GitState>, disabled: boolean) => (): Fixture =>
   return { ...f, snapScript: pullScript(disabled) };
 };
 
+// The settings page (#195), opened with the top bar's gear on the list. `settings` is the text of `settings.json`; `expect` is a script
+// of checks that logs `snap:fail` for what the page does not show.
+const settingsPage = (settings: string | null, expect: string, extra: Fixture = {}): Fixture => ({
+  ...list(),
+  settings_files: { settings, keymap: null },
+  ...extra,
+  snapScript: `
+    document.getElementById("settings-gear").click();
+    const dialog = document.getElementById("settings-dialog");
+    if (!dialog.open) log("snap:fail the dialog did not open");
+    const titles = [...dialog.querySelectorAll(".setting-title")].map((t) => t.textContent.trim());
+    log("rows: " + titles.join(" | "));
+    const undo = () => dialog.querySelectorAll(".reset").length;
+    const broken = () => dialog.querySelector(".broken")?.textContent ?? "";
+    const toggles = () => [...dialog.querySelectorAll(".switch")].map((t) => t.getAttribute("aria-checked") + (t.disabled ? " disabled" : ""));
+    ${expect}`,
+});
+
 export const fixtures = {
   ...railFixtures,
   recordedTerminal,
@@ -183,6 +201,38 @@ export const fixtures = {
     ];
     return { ...base, sessions, selected: null };
   },
+  // The settings page at its defaults: no undo icon, both toggles at their defaults, the file's two rows.
+  settingsDefaults: () =>
+    settingsPage(null, `
+      if (undo() !== 0) log("snap:fail an undo icon shows at the defaults");
+      if (toggles().join() !== "true,false") log("snap:fail the toggles read " + toggles());
+      if (broken()) log("snap:fail the broken-file line shows");`),
+  // Two values changed in the file: each row shows its undo icon.
+  settingsChanged: () =>
+    settingsPage(`{\n  // Quiet.\n  "sounds": false,\n  "notifications": { "while_focused": true },\n}\n`, `
+      if (undo() !== 2) log("snap:fail expected 2 undo icons, got " + undo());
+      if (toggles().join() !== "false,true") log("snap:fail the toggles read " + toggles());
+      if (dialog.querySelector(".reset").title !== "Reset to default") log("snap:fail the undo icon's tooltip is wrong");
+      if (document.getElementById("settings-close").title !== "Close (Esc)") log("snap:fail the X's tooltip is " + document.getElementById("settings-close").title);`),
+  // A file that does not parse: the line, the button, and every control off.
+  settingsBroken: () =>
+    settingsPage(`{ "sounds": false, `, `
+      if (!broken().startsWith("settings.json has errors: fix it first")) log("snap:fail the line reads: " + broken());
+      if (!toggles().every((t) => t.endsWith("disabled"))) log("snap:fail a toggle is enabled: " + toggles());
+      if ([...dialog.querySelectorAll("button.open")].some((b) => !b.disabled)) log("snap:fail an Open button is enabled");`),
+  // A change saves at once: pressing Sounds sends the write, and the text it returns shows with its undo icon.
+  settingsWrite: () =>
+    settingsPage(null, `
+      dialog.querySelector(".switch").click();
+      await new Promise((done) => setTimeout(done, 200));
+      if (undo() !== 1) log("snap:fail the change did not show its undo icon");
+      if (toggles()[0] !== "false") log("snap:fail Sounds did not turn off: " + toggles());`, { write_setting: '{ "sounds": false }' }),
+  // A refused write shows its reason in the page.
+  settingsRefused: () =>
+    settingsPage(null, `
+      dialog.querySelector(".switch").click();
+      await new Promise((done) => setTimeout(done, 200));
+      if (!dialog.querySelector(".refused")?.textContent.includes("changed since")) log("snap:fail the refusal's reason is not shown");`, { write_setting: { __throw: "settings.json changed since the page read it: try again" } as never }),
   branchOnce,
   pullEnabled: pullMain({}, false),
   pullDisabled: pullMain({ changed: 2, would_overwrite: true }, true),

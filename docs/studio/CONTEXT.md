@@ -248,7 +248,7 @@ A place the control room learns about agent sessions from, such as a worker runt
 A repository added to the control room.
 
 **Settings**:
-Daniel's choices for the studio, kept in `settings.json` in its data folder, in Zed's format: zoom, the terminal's font size, the summary writer's model and effort, and the Doctor menu, whose entries are palette actions. A gear, the last item of the top bar, opens `settings.json`, as the keymap's key for it does; it never folds into the bar's "⋯" menu. "Settings files" means `settings.json` and `keymap.json` together: the studio reloads either when saved, and a file that does not parse is reported while its last good version stays in effect.
+Daniel's choices for the studio, kept in `settings.json` in its data folder, in Zed's format: zoom, the terminal's font size, the summary writer's model and effort, and the Doctor menu, whose entries are palette actions. ⌘, and a gear, the last item of the top bar, open the settings page, a dialog whose controls save each change by editing `settings.json` in place; it never folds into the bar's "⋯" menu. `studio::OpenSettingsFile` opens the raw file. "Settings files" means `settings.json` and `keymap.json` together: the studio reloads either when saved, and a file that does not parse is reported while its last good version stays in effect.
 _Avoid_: Preferences, config
 
 **Sounds**:

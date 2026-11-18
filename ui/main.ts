@@ -24,6 +24,7 @@ import { fetchNow, foundWorkspaces, pullAll, showWorkspaces, sidebarOrder, watch
 import { reload, type SettingsFiles, zoomed } from "./settings.js";
 import { knownProjects } from "./projects.js";
 import { studio } from "./state.js";
+import { closeSettingsPage, settingsPageOpen, showSettingsPage, startSettingsPage } from "./settings-page.js";
 import { showSkills } from "./skills.js";
 import { showView } from "./story.js";
 import { jumpToNeedsYou, showToast } from "./toast.js";
@@ -173,6 +174,8 @@ const actions: Actions = {
     openAsk(selectedId()!, { kind: "headline", turn });
   },
   "studio::Dismiss": () => {
+    // The settings page, a dialog over the window, closes first and leaves the rest as it was.
+    if (settingsPageOpen()) return closeSettingsPage();
     document.body.classList.remove("list-open", "list-peek", "rail-open", "skills-open");
     element("picker").hidden = true;
   },
@@ -218,7 +221,9 @@ const actions: Actions = {
   "studio::PullMain": () => void pullAll(),
   // Asks GitHub again which tasks have landed (#53); it is otherwise asked at a turn's end and at the window's focus.
   "studio::RefreshLanded": () => void invoke("refresh_landed_tasks").catch((e) => console.warn(e)),
-  "studio::OpenSettings": () => void invoke("open_settings", { editor: studio.files.settings.editor }).catch((e) => console.warn(e)),
+  // The settings page (#195); the file itself is `studio::OpenSettingsFile`.
+  "studio::OpenSettings": () => showSettingsPage(),
+  "studio::OpenSettingsFile": () => void invoke("open_settings", { editor: studio.files.settings.editor }).catch((e) => console.warn(e)),
   // The skills browser (danielrispler/Falinks#528), in the rail's place; it leaves focus mode, which hides the rail.
   "studio::Skills": () => {
     if (studio.focus) actions["studio::ToggleFocus"]();
@@ -251,6 +256,7 @@ window.addEventListener("keydown", (event) => {
 // is reported in the notice line and the last good one stays in effect.
 function applySettings(files: SettingsFiles) {
   const previous = studio.files.settings;
+  studio.texts = files;
   studio.files = reload(studio.files, files);
   const { settings, errors } = studio.files;
   element("settings-gear").title = titled(studio.files.keymap, "Settings", "studio::OpenSettings");
@@ -274,6 +280,7 @@ function applySettings(files: SettingsFiles) {
   invoke("check_lists", { lists: settings.checks }).catch((e) => console.warn(e));
   window.dispatchEvent(new Event("settings"));
 }
+startSettingsPage(applySettings);
 listen<SettingsFiles>("settings-files", applySettings);
 invoke("settings_files").then(applySettings);
 // The session's header in the top bar toggles the rail, as ⌘2 does (danielrispler/plotkeeper#127).

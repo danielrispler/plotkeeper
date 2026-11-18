@@ -893,6 +893,8 @@ fn main() {
             settings::settings_files,
             settings::set_zoom,
             settings::open_settings,
+            settings::open_keymap,
+            settings::write_setting,
             summary_settings,
             hunk_opened,
             check_lists,

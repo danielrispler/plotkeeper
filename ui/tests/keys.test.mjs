@@ -322,3 +322,16 @@ test("a button's title names the key the keymap binds its action to now (#159)",
   assert.ok(titled(rebound.keymap, "Settings", "studio::OpenSettings").includes("⌘."), "the rebound key shows");
   assert.equal(titled({}, "Settings", "studio::OpenSettings"), "Settings");
 });
+
+// The settings page (#195): ⌘, opens it, Esc closes it even from a control in it, and the raw file's action is in the palette, unbound.
+test("⌘, opens the settings page, Esc closes it from a control in it, and Open settings file is in the palette unbound", () => {
+  const ran = [];
+  const actions = Object.fromEntries(["studio::OpenSettings", "studio::OpenSettingsFile", "studio::Dismiss"].map((name) => [name, () => ran.push(name)]));
+  run(actions, press("Comma", { metaKey: true }));
+  // A dropdown in the page has focus: it is a field, so only Dismiss runs.
+  run(actions, windowBinding(initial.keymap, key("Escape", {}, "Escape"), true));
+  assert.deepEqual(ran, ["studio::OpenSettings", "studio::Dismiss"]);
+  const entry = paletteEntries(initial.keymap, Object.keys(actions)).find((e) => e.title === "Open settings file");
+  assert.deepEqual(entry?.keys, []);
+  assert.equal(paletteEntries(initial.keymap, Object.keys(actions)).find((e) => e.title === "Open settings")?.keys[0], "⌘,");
+});

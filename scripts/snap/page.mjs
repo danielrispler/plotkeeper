@@ -19,6 +19,8 @@ export const stubSource = (fixture) => `window.__TAURI__ = (() => {
     const reply = fixture[command];
     // A reply that depends on one argument: { __by: "id", values: { <id>: reply } }.
     if (reply?.__by) return reply.values[args?.[reply.__by]] ?? null;
+    // A reply of { __throw: "why" } is a command that fails with that reason.
+    if (reply?.__throw) throw reply.__throw;
     return reply ?? null;
   };
   return { event: { listen }, core: { invoke } };
