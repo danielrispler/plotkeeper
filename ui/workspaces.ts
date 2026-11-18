@@ -339,8 +339,7 @@ function creating(project: string): HTMLElement {
 
 // The workspace the Git line shows, with its project: that of the selected session, or the first project's main checkout with none.
 function shown(): { project: string; workspaces: Workspaces; workspace: Workspace } | null {
-  const cwd = studio.selection?.session.cwd;
-  const owner = cwd ? ownerOf([...read.keys()], read, cwd) : null;
+  const owner = selectedOwner();
   if (owner) return owner;
   const project = firstProject(knownProjects(), read);
   const workspaces = project === undefined ? undefined : read.get(project);
@@ -349,6 +348,13 @@ function shown(): { project: string; workspaces: Workspaces; workspace: Workspac
 
 // The project the Git line shows, else the first one: where the palette's Switch branch works.
 export const shownProject = async (): Promise<string> => shown()?.project ?? mainProject();
+
+// The project and workspace holding the selected session's folder, null with no selection or one outside every project.
+function selectedOwner() {
+  const cwd = studio.selection?.session.cwd;
+  return cwd ? ownerOf([...read.keys()], read, cwd) : null;
+}
+export const selectedProject = (): string | null => selectedOwner()?.project ?? null;
 
 // The repository a worktree belongs to: its own main checkout, project or not, never another project; null when
 // none is found (so a removal there cannot work).
