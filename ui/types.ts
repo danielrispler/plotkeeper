@@ -315,8 +315,11 @@ export type SessionCards = {
   design: DesignLine[];
   recent: StoredCard[];
   older: StoredCard[];
+  // A session's workers' cards, each with the turn of its rail it belongs to (danielrispler/plotkeeper#212).
+  workers: PlacedCard[];
   decisions: Decision[];
 };
+export type PlacedCard = { card: StoredCard; turn: number | null };
 // What a call asks Daniel, by its tool, as the answer hook's `Kind`: a question, a plan, or any other
 // tool's permission.
 export type AskKind = "question" | "plan" | "permission";

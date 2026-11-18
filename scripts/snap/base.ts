@@ -33,7 +33,7 @@ export const base = {
   ask_facts: null,
   ask_why_not: { facts: { sections: [] }, reasons: null },
   branches: [],
-  cards: { brief: null, goal: null, answers: [], open: [], design: [], recent: [], older: [], decisions: [] },
+  cards: { brief: null, goal: null, answers: [], open: [], design: [], recent: [], older: [], workers: [], decisions: [] },
   check_output: null,
   choose_folder: null,
   claude_argv: ["claude"],

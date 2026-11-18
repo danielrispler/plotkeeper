@@ -334,9 +334,14 @@ fn cards(studio: State<Mutex<Studio>>, cards: State<Cards>) -> SessionCards {
         return SessionCards::default();
     };
     let cards = cards.lock().unwrap();
-    let mut shown = cards.session_cards(owner, studio.now());
+    // A session's rail also holds its workers' cards, each with its turn; a worker's view is its own cards.
+    let session = studio.session(owner);
+    let mut shown = match session {
+        Some(session) => cards.rail_cards(session, studio.now()),
+        None => cards.session_cards(owner, studio.now()),
+    };
     // The Open slot is the session's: a worker's view has none.
-    if let Some(session) = studio.session(owner) {
+    if let Some(session) = session {
         shown.open = open_items(session, studio.task_facts(owner), &cards);
     }
     shown
