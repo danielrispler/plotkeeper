@@ -999,3 +999,25 @@ fn a_sessions_touch_of_a_running_workers_home_asks_for_no_fingerprint_of_the_ses
             .all(|(key, folder, _)| !(key == "s1" && folder == "/w2"))
     );
 }
+
+#[test]
+fn a_hook_root_spelled_through_a_symlink_is_the_sessions_own_root() {
+    let at = |name: &str, ms: u64, roots: &[&str]| {
+        let fields = json!({"agent_id": "h1", "agent_type": "general-purpose", "cwd": "/var/w",
+            "tool_name": "Bash", "tool_use_id": format!("h1-{ms}"),
+            "tool_input": {"command": "cd /var/w2 && ls"}, "studio_touched_roots": roots});
+        ev(name, ms, "p1", fields)
+    };
+    let mut studio = Studio::default();
+    let start = json!({"prompt": "Do it", "cwd": "/var/w"});
+    studio.apply(&ev("UserPromptSubmit", 0, "p1", start));
+    studio.apply(&at("PreToolUse", 1_000, &["/private/var/w"]));
+    studio.apply(&at("PostToolUse", 1_500, &["/private/var/w"]));
+
+    // Git spells the roots through `/private`, the event's folder does not.
+    let second = at("PreToolUse", 2_000, &["/private/var/w", "/private/var/w2"]);
+    assert_eq!(
+        folders(&studio, &second),
+        [("h1".into(), "/private/var/w2".into(), Purpose::Base)]
+    );
+}

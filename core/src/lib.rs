@@ -136,6 +136,15 @@ impl Roots {
     }
 }
 
+/// `path` as macOS spells it without its `/private` firmlink, which git adds to a root (`/var` is
+/// `/private/var`) and a session's folder does not: the one spelling two spellings of a root compare in.
+fn plain(path: &str) -> &str {
+    match path.strip_prefix("/private") {
+        Some(rest) if ["/var", "/tmp", "/etc"].iter().any(|d| rest.starts_with(d)) => rest,
+        _ => path,
+    }
+}
+
 /// What the session view shows: the session Daniel selected, and the subagent of it he opened since,
 /// if any. The pane draws the pressed row and the view from it, and keeps no selection of its own.
 #[derive(Debug, PartialEq, Serialize)]
@@ -1271,7 +1280,7 @@ impl Session {
             None => roots.of(&event.cwd) == session_root,
         };
         let mut listed = event.studio_touched_roots.iter().flatten();
-        let other = listed.find(|r| !r.is_empty() && **r != session_root);
+        let other = listed.find(|r| !r.is_empty() && plain(r) != plain(&session_root));
         other.filter(|_| in_session).cloned()
     }
 
