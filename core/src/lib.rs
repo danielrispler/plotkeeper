@@ -1989,6 +1989,9 @@ pub struct Fingerprint {
     pub key: String,
     pub folder: String,
     pub purpose: Purpose,
+    /// When the turn or worker `key` names began, in Unix milliseconds: a worktree made after that is the
+    /// agent's own creation, one made before it is not (danielrispler/plotkeeper#204). `None` when it does not say.
+    pub began: Option<u64>,
 }
 
 /// A check that runs or ran, shown as a pass or fail line once it ends.
@@ -2312,6 +2315,7 @@ impl Studio {
                         key: key.clone(),
                         folder,
                         purpose,
+                        began: None,
                     });
                 }
             }
@@ -2325,6 +2329,7 @@ impl Studio {
                     key: id,
                     folder,
                     purpose: Purpose::Card,
+                    began: None,
                 }),
             }
         }
@@ -2348,10 +2353,15 @@ impl Studio {
         // A session's own fallback is on a prompt's steps only, not between its turns.
         let session_due = |s: &Session| s.in_turn() && due(&s.agent.since);
         let look = |key: &str, folder: &str, purpose| {
+            let began = session.and_then(|s| match s.subagent(key) {
+                Some(agent) => Some(agent.agent.started_at),
+                None => s.turns.last().map(|t| t.started_at),
+            });
             let look = Fingerprint {
                 key: key.into(),
                 folder: folder.into(),
                 purpose,
+                began,
             };
             (!folder.is_empty()).then_some(look)
         };
@@ -2485,6 +2495,7 @@ impl Studio {
             key: key.into(),
             folder: folder.into(),
             purpose: Purpose::Base,
+            began: None,
         };
         folders.map(print).collect()
     }

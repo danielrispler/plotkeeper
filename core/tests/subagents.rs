@@ -647,6 +647,7 @@ fn a_killed_worker_that_its_sessions_stop_ended_first_still_gets_its_end_look() 
         key: "w1".into(),
         folder: "/w/.claude/worktrees/w1".into(),
         purpose: Purpose::Card,
+        began: None,
     };
     assert!(looks.contains(&end), "{looks:?}");
 }

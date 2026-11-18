@@ -179,7 +179,8 @@ fn the_shell_fingerprints_at_the_prompt_and_at_the_stop() {
         [Fingerprint {
             key: SESSION.into(),
             folder: WORKTREE.into(),
-            purpose: Purpose::Base
+            purpose: Purpose::Base,
+            began: None,
         }]
     );
 }
@@ -201,6 +202,7 @@ fn after_a_replay_the_shell_fingerprints_the_prompts_still_open() {
         key: SESSION.into(),
         folder: WORKTREE.into(),
         purpose: Purpose::Base,
+        began: None,
     };
     assert_eq!(waiting(7), [open]);
     assert_eq!(waiting(LOG.lines().count()), []);

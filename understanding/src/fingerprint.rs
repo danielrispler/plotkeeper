@@ -56,7 +56,7 @@ pub fn fingerprint_changes(
     let mut changes = BTreeMap::<String, Change>::new();
     for look in looks {
         let print = prints.entry(look.key.clone()).or_default();
-        let found = print.look(Path::new(&look.folder), look.purpose);
+        let found = print.look_since(Path::new(&look.folder), look.purpose, look.began);
         let Some(found) = found.filter(|_| look.purpose != Purpose::Base) else {
             continue;
         };
@@ -156,6 +156,17 @@ impl Fingerprints {
     /// Like `take`, for a look with `purpose`: the record becomes the next change's base unless
     /// it is a commit check and `HEAD` stayed.
     pub fn look(&mut self, folder: &Path, purpose: Purpose) -> Option<Change> {
+        self.look_since(folder, purpose, None)
+    }
+
+    /// Like `look`, for the turn or worker that began at `began` (Unix milliseconds): a worktree made
+    /// before then is no one's creation to count from. Without it, the first look's time is taken.
+    pub fn look_since(
+        &mut self,
+        folder: &Path,
+        purpose: Purpose,
+        since: Option<u64>,
+    ) -> Option<Change> {
         let root = match self.roots.get(folder) {
             Some(root) => root.clone(),
             None => {
@@ -185,7 +196,8 @@ impl Fingerprints {
         let log = reflog(&root).and_then(|log| fs::metadata(log).ok());
         let log = log.map_or(0, |meta| meta.len());
         let record = Record { head, files, log };
-        let began = *self.began.get_or_insert_with(now);
+        let first = *self.began.get_or_insert_with(now);
+        let began = since.map_or(first, |ms| ms / 1000);
         // A worktree made since the first look has no record: its base is the commit it was created at.
         let made = (!self.records.contains_key(&root))
             .then(|| created(&root).filter(|made| made.at > began))

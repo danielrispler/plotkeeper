@@ -556,3 +556,33 @@ fn a_loaded_root_cache_keeps_the_entries_that_name_a_removed_worktree_as_their_o
     expected.remove(&format!("{w2}/src"));
     assert_eq!(kept, expected);
 }
+
+#[test]
+fn a_worktree_made_before_the_turn_or_worker_began_starts_from_its_files_then() {
+    let (dir, mut prints) = repo();
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    let made = dir
+        .path()
+        .with_file_name(format!("before-{}", std::process::id()));
+    git(
+        dir.path(),
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "before",
+            made.to_str().unwrap(),
+        ],
+    );
+    fs::write(made.join("early.rs"), "fn e() {}\n").unwrap();
+    // The fingerprints began before the worktree, but the worker that looks in it began after.
+    let began = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
+        + 2_000;
+    let found = prints.look_since(&made, Purpose::Base, Some(began));
+    assert_eq!(found.map(|c| c.diff), None);
+    let _ = fs::remove_dir_all(&made);
+}
