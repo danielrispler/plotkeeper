@@ -1641,6 +1641,7 @@ fn turn_of(state: &Mutex<Studio>, id: &str) -> TurnFacts {
     TurnFacts {
         facts: turn_facts(state, id),
         merge: state.lock().unwrap().turn_merged(id),
+        workers: state.lock().unwrap().turn_workers(id),
     }
 }
 

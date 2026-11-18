@@ -50,17 +50,19 @@ impl Shape {
     /// be read counts all its lines as non-trivial. A turn with no files in `facts` reads `diff`,
     /// the change of its card request, which an agent that reports no trees leaves.
     pub fn of(facts: &Facts, diff: &str, merge: bool) -> Shape {
-        Shape::read(facts, of_diff(diff), merge)
+        Shape::read(facts, of_diff(diff), merge, &[])
     }
 
-    /// As `of`, with the files of the card's change already read.
-    fn read(facts: &Facts, change: Vec<Changed>, merge: bool) -> Shape {
+    /// As `of`, with the files of the card's change already read, and leaving out the files in the
+    /// `workers` worktrees, which are judged at the workers' own cards.
+    fn read(facts: &Facts, change: Vec<Changed>, merge: bool, workers: &[String]) -> Shape {
         let failed = facts.checks.iter().any(|c| c.status == CheckStatus::Failed);
         let files = match facts.files.is_empty() {
             true => change,
             false => facts
                 .files
                 .iter()
+                .filter(|f| !workers.contains(&f.file.root))
                 .map(|f| {
                     let lines = f.file.added.unwrap_or(0) + f.file.removed.unwrap_or(0);
                     let non_trivial = match f.hunk.is_empty() {
@@ -116,6 +118,8 @@ pub struct TurnFacts {
     pub facts: Facts,
     /// The turn ran `git merge` or merged a pull request.
     pub merge: bool,
+    /// The worktrees that were a worker's home during the turn: their files are judged at the worker's card.
+    pub workers: Vec<String>,
 }
 
 /// The table's inputs, as the record keeps them.
@@ -144,7 +148,7 @@ pub struct Decision {
 /// reports no trees, and a worker's card. A worker's card, and a subagent's late change, must pass
 /// the table's first row, and get no lone Quiz, since neither has a summary.
 pub fn decide(kind: OfferKind, turn: &TurnFacts, change: &[Changed]) -> Decision {
-    let shape = Shape::read(&turn.facts, change.to_vec(), turn.merge);
+    let shape = Shape::read(&turn.facts, change.to_vec(), turn.merge, &turn.workers);
     let logic: Vec<&Changed> = shape.logic().collect();
     let non_trivial: u64 = logic.iter().map(|f| f.non_trivial).sum();
     let inputs = Inputs {

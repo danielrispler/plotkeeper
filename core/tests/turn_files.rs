@@ -779,3 +779,44 @@ fn a_files_agent_is_the_one_whose_call_names_it_or_the_workers_whose_worktree_ho
         ]
     );
 }
+
+fn turn_id(studio: &Studio) -> String {
+    studio.session(SESSION).unwrap().turns[0]
+        .id
+        .clone()
+        .expect("turn id")
+}
+
+#[test]
+fn the_turns_workers_homes_are_the_worktrees_its_offer_leaves_out() {
+    let mut studio = Studio::replayed([
+        prompt(json!({ ROOT: "s1" })),
+        worker_starts(500, "agent-1", "w1"),
+        edit(
+            1_000,
+            "e1",
+            "/w/repo/.claude/worktrees/w1/x.rs",
+            Some("agent-1"),
+        ),
+        stop(json!({ ROOT: "e1", WORKER_ROOT: "w2" })),
+    ]);
+    ask(&mut studio, AT + 20_000);
+    assert_eq!(studio.turn_workers(&turn_id(&studio)), [WORKER_ROOT]);
+}
+
+#[test]
+fn a_subagent_that_stayed_in_the_sessions_worktree_has_no_home_of_its_own() {
+    let stayed = line(
+        "SubagentStart",
+        500,
+        json!({ "agent_id": "agent-1", "cwd": ROOT }),
+    );
+    let mut studio = Studio::replayed([
+        prompt(json!({ ROOT: "s1" })),
+        stayed,
+        edit(1_000, "e1", "/w/repo/src/a.rs", Some("agent-1")),
+        stop(json!({ ROOT: "e1" })),
+    ]);
+    ask(&mut studio, AT + 20_000);
+    assert!(studio.turn_workers(&turn_id(&studio)).is_empty());
+}

@@ -3657,6 +3657,19 @@ impl Studio {
         found.unwrap_or(false)
     }
 
+    /// The worktrees that were the home of one of the session's workers during the turn named `id`.
+    pub fn turn_workers(&self, id: &str) -> Vec<String> {
+        let found = self.sessions.values().find_map(|s| {
+            let at = s.turns.iter().position(|t| t.id.as_deref() == Some(id))?;
+            let spawned = s.agents.iter().filter(|a| a.turn == Some(at));
+            let homes = spawned.filter(|a| s.has_cards(&a.agent.id));
+            let mut roots: Vec<String> = homes.map(|a| a.root.clone()).collect();
+            roots.dedup();
+            Some(roots)
+        });
+        found.unwrap_or_default()
+    }
+
     /// The facts of the turn `ask` names, from the numstat the shell found (`None` when git could
     /// not diff it): its files without their hunks, which the shell adds, and its checks.
     pub fn summary_facts(&self, ask: &TurnDiff, diffs: Option<Vec<RootDiff>>) -> Facts {
