@@ -778,6 +778,8 @@ fn studio_log() -> tauri::plugin::TauriPlugin<tauri::Wry> {
             Target::new(TargetKind::LogDir {
                 file_name: Some("studio".into()),
             }),
+            // Errors also show in the window's notice line (#191); warnings stay in the file.
+            Target::new(TargetKind::Webview).filter(|m| m.level() == log::Level::Error),
         ])
         .max_file_size(500_000)
         .rotation_strategy(RotationStrategy::KeepSome(2))

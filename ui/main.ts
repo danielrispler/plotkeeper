@@ -4,6 +4,7 @@
 // decides what the window shows; this file wires the shell's events to the regions and lays the
 // columns out by the width rule in `layout.ts`.
 
+import { dismissNotice, onLogRecord, setSettingsErrors } from "./notice.js";
 import { withWriterNotice } from "./writer-notice.js";
 import { startWatching } from "./answer.js";
 import { openAsk } from "./ask.js";
@@ -257,12 +258,7 @@ function applySettings(files: SettingsFiles) {
   studio.files = reload(studio.files, files);
   const { settings, errors } = studio.files;
   element("settings-gear").title = titled(studio.files.keymap, "Settings", "studio::OpenSettings");
-  const notice = element("notice");
-  // Other notices, such as the Claude Code version's, stay beside the settings errors.
-  const others = (notice.textContent ?? "").split("\n").filter((line) => line && !/^(settings|keymap)\.json: /.test(line));
-  notice.textContent = [...others, ...errors].join("\n");
-  if (errors.length) notice.hidden = false;
-  else if (!others.length) notice.hidden = true;
+  setSettingsErrors(errors);
   // Only a changed `zoom` resets the zoom the keys set.
   if (settings.zoom !== previous.zoom) setZoom(settings.zoom);
   invoke("notify_while_focused", { on: settings.notifications.while_focused }).catch(failure("notify_while_focused"));
@@ -343,6 +339,9 @@ listen<string>("notice", (notice) => {
   element("notice").textContent = notice;
   element("notice").hidden = false;
 });
+// The app's errors, from the log plugin's `Webview` target (#191).
+listen<{ level: number; message: string }>("log://log", onLogRecord);
+element("notice-dismiss").addEventListener("click", dismissNotice);
 // No card writer can run, or one can again (danielrispler/plotkeeper#51).
 listen<string | null>("writer-notice", (notice) => {
   const line = element("notice");
