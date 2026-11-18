@@ -570,7 +570,7 @@ body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
 .evidence-rows { list-style: none; margin: 0; padding: 0 0 0 var(--sp-5); }
 .evidence-rows[hidden], .evidence-output[hidden], .evidence-hunk[hidden], .evidence-edit[hidden] { display: none; }
 .evidence-rows li { margin: 0 0 var(--sp-2); min-width: 0; overflow-wrap: anywhere; }
-.evidence-rows .external { color: var(--muted); opacity: 0.7; }
+.evidence-agent { color: var(--muted); margin-left: 0.6em; }
 .evidence-fail { display: block; width: 100%; text-align: start; background: none; border: 0; padding: 0; color: var(--fg); cursor: pointer; }
 .evidence-hunk { margin: var(--sp-2) 0 0; padding: var(--sp-3); overflow: auto; white-space: pre; font-size: var(--size-small); background: var(--surface); border-radius: var(--radius-small); }
 .evidence-edit { margin-top: var(--sp-2); font-size: var(--size-small); }
@@ -589,7 +589,6 @@ body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
 .diff-line.add { background: var(--selected); }
 .diff-line.del { background: var(--needs-you-bg); color: var(--conflict); }
 .diff-line.hunk, .diff-line.meta { color: var(--muted); }
-.diff-external { color: var(--muted); font-size: var(--size-small); }
 .evidence-more[hidden] { display: none; }
 
 /* "Where we were" (#124): the banner above the newest turn. */

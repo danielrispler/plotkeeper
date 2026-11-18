@@ -98,7 +98,7 @@ const check = (command: string, passed: boolean, startedAgo: number, tookMs: num
   command, passed, started_at: Date.now() - startedAgo, ended_at: Date.now() - startedAgo + tookMs, typical_ms: tookMs, turn,
 });
 
-const file = (path: string, added: number, removed: number): TurnFile => ({ root: cwd, path, from: null, added, removed });
+const file = (path: string, added: number, removed: number, agent: string | null = null): TurnFile => ({ root: cwd, path, from: null, added, removed, agent });
 const run = (status: CheckStatus, call: string, exit_code: number) => ({ command: "cargo", status, exit_code, call, agent: null });
 
 const helper = (id: string, name: string, asked: string, type: string, result: string, turn: number, ago: number, running = false): Subagent => ({
@@ -133,7 +133,7 @@ const session = (state: SessionState, { running = false, question = false } = {}
     id: i < 4 || ended ? `t${i}` : null,
     message: "Done.",
     // The newest turns changed files (#113); the second turn ends with a failed check, which its folded line marks (#117).
-    files: i >= 3 ? { files: [file("ui/style.css", 14, 3), file("ui/list.ts", 22, 9), file("ui/tests/rows.test.mjs", 6, 6)], external: i === 4 ? 2 : 0 } : null,
+    files: i >= 3 ? { files: [file("ui/style.css", 14, 3, "claude"), file("ui/list.ts", 22, 9, "claude"), file("ui/tests/rows.test.mjs", 6, 6)] } : null,
     checks: i === 4
       ? [
           { suite: "cargo clippy", status: "passed", retries: 1, runs: [run("failed", "k1", 101), run("passed", "k2", 0)] },
@@ -331,6 +331,10 @@ const evidenceScript = `
   if (!toggle) log("snap:fail there is no evidence line");
   toggle.click();
   await wait();
+  // #207: every file counts, an agent is named only where a call or a worker names it, and nothing is "external".
+  const shown = toggle.parentElement.querySelectorAll(".evidence-rows li");
+  if ([...shown].some((li) => /external/.test(li.textContent))) log("snap:fail the opened line still has an external row");
+  if (toggle.parentElement.querySelectorAll(".evidence-file .evidence-agent").length !== 2) log("snap:fail the files' agents are not named");
   const row = document.querySelector(".evidence-check .evidence-fail");
   if (!row) log("snap:fail the opened line has no failed check");
   row.click();

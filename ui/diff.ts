@@ -75,15 +75,11 @@ export function drawDiff(place: HTMLElement, session: Pick<Session, "id" | "turn
   place.className = "pane turn-diff";
   const turn = session.turns[index];
   const files = turn?.files?.files ?? [];
-  const external = turn?.files?.external ?? 0;
   const head = document.createElement("header");
   head.append(
     text("span", "Full diff", "log-title"),
     text("span", `${files.length} ${files.length === 1 ? "file" : "files"}`, "log-type"),
     pressable(text("button", "Terminal"), false, toTerminal),
   );
-  const rest = document.createElement("details");
-  rest.className = "diff-external";
-  rest.append(text("summary", `+${external} external`), text("p", "Changes in the worktree that the agent did not make.", "empty"));
-  place.replaceChildren(head, ...(files.length ? files.map((f) => fileFold(session.id, index, f)) : [text("p", "This turn changed no files.", "empty")]), ...(external ? [rest] : []));
+  place.replaceChildren(head, ...(files.length ? files.map((f) => fileFold(session.id, index, f)) : [text("p", "This turn changed no files.", "empty")]));
 }

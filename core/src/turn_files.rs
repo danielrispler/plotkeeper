@@ -1,10 +1,10 @@
-//! A turn's changed files (danielrispler/plotkeeper#111): the diff between the git trees the hook
-//! recorded at its start and end, kept for the files the step ledger says its agent or its workers
-//! touched. The rest of the diff is counted as external. The core runs no `git`: it names the trees
-//! to diff (`TurnDiff`), and the shell hands back git's numstat (`RootDiff`).
+//! A turn's changed files (danielrispler/plotkeeper#111, #207): the diff between the git trees the
+//! hook recorded at its start and end. Every file that differs is the turn's, but one that another
+//! session's or turn's call names (`names`). The core runs no `git`: it names the trees to diff
+//! (`TurnDiff`), and the shell hands back git's numstat (`RootDiff`).
 
+use crate::ledger::Row;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
 
 /// The tools whose call changes the file its input names.
 const EDITS: [&str; 4] = ["Edit", "MultiEdit", "Write", "NotebookEdit"];
@@ -54,7 +54,7 @@ pub struct RootDiff {
     pub files: Vec<Numstat>,
 }
 
-/// A file the agent or its workers changed in a turn.
+/// A file a turn changed.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TurnFile {
     /// Its worktree's root, and its path from there; a rename's new path.
@@ -65,42 +65,54 @@ pub struct TurnFile {
     /// Lines added and removed; `None` for a binary file.
     pub added: Option<u64>,
     pub removed: Option<u64>,
+    /// The name of the agent that changed it: the one whose call names it, else the worker whose
+    /// worktree it is in. `None` when neither says, as for Daniel's own edit.
+    #[serde(default)]
+    pub agent: Option<String>,
 }
 
 /// What a turn changed, as far as the trees say.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct TurnFiles {
     pub files: Vec<TurnFile>,
-    /// How many other files the trees differ in, which someone else changed or a shell command did.
-    pub external: u64,
+}
+
+/// Whether the call of `row` names the file at `path` from worktree `root`: an edit of its
+/// absolute path, or a command whose text holds its absolute path, or its path from the root when
+/// the command touched that root. A bare file name never matches, and no shell is parsed.
+pub(crate) fn names(row: &Row, root: &str, path: &str) -> bool {
+    let absolute = format!("{}/{path}", root.trim_end_matches('/'));
+    if edits(&row.tool) {
+        return row.file.as_deref() == Some(absolute.as_str());
+    }
+    let Some(command) = row.command.as_deref() else {
+        return false;
+    };
+    command.contains(&absolute) || (row.roots.iter().any(|r| r == root) && command.contains(path))
 }
 
 impl TurnFiles {
-    /// The files of `diffs` whose absolute path is in `ours`, and the count of the others, but
-    /// those in `theirs`, which another turn changed.
+    /// The files of `diffs` but those `others` name, each with the agent that `agent` finds for it
+    /// (its calls, else its worktree's worker).
     pub(crate) fn of(
         diffs: Vec<RootDiff>,
-        ours: &BTreeSet<String>,
-        theirs: &BTreeSet<String>,
+        others: &[&Row],
+        agent: impl Fn(&RootDiff, &Numstat) -> Option<String>,
     ) -> TurnFiles {
         let mut found = TurnFiles::default();
         for diff in diffs {
-            let at = |path: &str| format!("{}/{path}", diff.root.trim_end_matches('/'));
-            for file in diff.files {
-                let listed = |paths: &BTreeSet<String>| {
-                    paths.contains(&at(&file.path))
-                        || (file.from.as_deref()).is_some_and(|from| paths.contains(&at(from)))
-                };
-                if listed(ours) {
+            for file in &diff.files {
+                let named = |path: &str| others.iter().any(|row| names(row, &diff.root, path));
+                let taken = named(&file.path) || file.from.as_deref().is_some_and(named);
+                if !taken {
                     found.files.push(TurnFile {
                         root: diff.root.clone(),
-                        path: file.path,
-                        from: file.from,
+                        path: file.path.clone(),
+                        from: file.from.clone(),
                         added: file.added,
                         removed: file.removed,
+                        agent: agent(&diff, file),
                     });
-                } else if !listed(theirs) {
-                    found.external += 1;
                 }
             }
         }

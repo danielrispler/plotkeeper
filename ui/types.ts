@@ -102,12 +102,13 @@ export type Turn = {
   checks: Check[];
   files: TurnFiles | null;
 };
-// A file the agent or its workers changed in a turn: its worktree's root, its path from there (a rename's new one),
-// a rename's old path, and its lines added and removed (null for a binary file).
-export type TurnFile = { root: string; path: string; from: string | null; added: number | null; removed: number | null };
-// What a turn changed: the files its ledger says its agent or workers touched, and how many other files differ.
+// A file that differs between a turn's trees: its worktree's root, its path from there (a rename's new one),
+// a rename's old path, its lines added and removed (null for a binary file), and the name of the agent whose call
+// names it or whose worktree holds it (null when none does, as for Daniel's own edit).
+export type TurnFile = { root: string; path: string; from: string | null; added: number | null; removed: number | null; agent: string | null };
+// What a turn changed: every file that differs between its trees, but those another call names.
 // `null` while the trees are not yet diffed, and for an agent that reports no trees.
-export type TurnFiles = { files: TurnFile[]; external: number };
+export type TurnFiles = { files: TurnFile[] };
 // What the session's agent adapter reports, which decides what its view shows (danielrispler/plotkeeper#43, decision 4);
 // `agent` is its mark's name, empty for a status-only row.
 export type Capabilities = {

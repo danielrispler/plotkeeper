@@ -1487,11 +1487,9 @@ impl Session {
             .collect()
     }
 
-    /// The absolute paths its turn `turn`'s agent and workers edited, as the step ledger has them,
-    /// and those other turns' agents and workers edited while its trees ran: from its start to its
-    /// end, or its workers' last end, as a worker edits on after its turn
-    /// (danielrispler/plotkeeper#142). Its trees show their changes too, but they are theirs.
-    fn edited(&self, turn: usize) -> (BTreeSet<String>, BTreeSet<String>) {
+    /// The span of time its turn `turn`'s trees run in, from its start to its end, or its workers'
+    /// last end, as a worker edits on after its turn (danielrispler/plotkeeper#142).
+    fn trees_window(&self, turn: usize) -> (u64, u64) {
         let (since, end) = self
             .turns
             .get(turn)
@@ -1502,21 +1500,7 @@ impl Session {
         let until = end
             .zip(ends)
             .map_or(u64::MAX, |(end, ends)| ends.into_iter().fold(end, u64::max));
-        let rows = self.ledger.rows().iter();
-        let done = rows.filter(|r| turn_files::edits(&r.tool) && !r.failed());
-        let done = done.filter(|r| r.outcome != Some(Outcome::Rejected));
-        let (mut ours, mut theirs) = (BTreeSet::new(), BTreeSet::new());
-        for row in done {
-            let Some(file) = row.file.clone() else {
-                continue;
-            };
-            if row.turn == Some(turn) {
-                ours.insert(file);
-            } else if row.at().is_some_and(|at| (since..=until).contains(&at)) {
-                theirs.insert(file);
-            }
-        }
-        (ours, theirs)
+        (since, until)
     }
 
     /// The backfill of its turn ended at `at` with the hook's trees `ends`: `None` when no worktree
@@ -1897,8 +1881,6 @@ pub struct FactFile {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Facts {
     pub files: Vec<FactFile>,
-    /// How many other files the turn's trees differ in.
-    pub external: u64,
     /// Each check's last run, retries and commands.
     pub checks: Vec<Check>,
 }
@@ -2182,23 +2164,28 @@ impl Studio {
         if event.agent_id.is_some() || event.outside_turns() {
             return Vec::new();
         }
+        let session = self.sessions.get(&event.session_id);
+        let mut roots = self.named_roots(event);
+        roots.retain(|root| !session.is_some_and(|s| s.workers_own(root)));
+        roots
+    }
+
+    /// The worktree roots that the call of `event` names: its folder's, an `Edit` or `Write` path's,
+    /// and those the hook found a command touched (danielrispler/plotkeeper#203).
+    fn named_roots(&self, event: &Event) -> Vec<String> {
         let path = event.tool().and_then(|t| t.path.as_deref());
         let path = path.filter(|p| p.starts_with('/'));
         let folder = path.and_then(|p| std::path::Path::new(p).parent()?.to_str());
         // With no lookup, a path under the event's folder is in its worktree.
         let below = |f: &&str| f.starts_with(&format!("{}/", event.cwd));
         let folder = folder.filter(|f| self.roots.find.is_some() || !below(f));
-        let session = self.sessions.get(&event.session_id);
         let mut roots: Vec<String> = Vec::new();
         let listed = event.studio_touched_roots.iter().flatten();
         let folders = [Some(event.cwd.as_str()), folder].into_iter().flatten();
         // The hook's list holds roots already, so they need no lookup.
         let found = folders.map(|f| self.roots.of(f));
         for root in found.chain(listed.cloned()) {
-            if !root.is_empty()
-                && !roots.contains(&root)
-                && !session.is_some_and(|s| s.workers_own(&root))
-            {
+            if !root.is_empty() && !roots.contains(&root) {
                 roots.push(root);
             }
         }
@@ -2585,6 +2572,11 @@ impl Studio {
         // The card a long check's start requests, which its line keeps.
         let mut check_card = None;
         let touches = self.touches(&event);
+        let called = if event.tool().is_some() {
+            self.named_roots(&event)
+        } else {
+            Vec::new()
+        };
         let command = event.tool().and_then(|t| t.command.as_deref());
         let typical = self.typical(command.unwrap_or_default());
         let roots = &self.roots;
@@ -3173,7 +3165,7 @@ impl Studio {
                 }
                 Happened::ToolStart { tool, .. } => {
                     let turn = session.ledger_turn(&event.agent_id);
-                    session.ledger.start(&event, tool, turn);
+                    session.ledger.start(&event, tool, turn, called.clone());
                     if own {
                         session.returned = None;
                         let step = Step::new(&tool.name, &tool.input, &event.cwd);
@@ -3294,7 +3286,9 @@ impl Studio {
                 }
                 Happened::ToolEnd { tool, failed, .. } => {
                     let turn = session.ledger_turn(&event.agent_id);
-                    session.ledger.end(&event, tool, turn, *failed);
+                    session
+                        .ledger
+                        .end(&event, tool, turn, *failed, called.clone());
                     if let Some(turn) = turn.filter(|_| tool.kind == ToolKind::Command) {
                         let list = self.check_lists.of(&session.cwd);
                         if tool
@@ -3672,8 +3666,7 @@ impl Studio {
         let Some(turn) = session.turns.get(ask.turn) else {
             return Facts::default();
         };
-        let (ours, theirs) = session.edited(ask.turn);
-        let found = diffs.map(|diffs| TurnFiles::of(diffs, &ours, &theirs));
+        let found = diffs.map(|diffs| self.files_of(&ask.session_id, ask.turn, diffs));
         let found = found.unwrap_or_default();
         Facts {
             files: found
@@ -3684,23 +3677,68 @@ impl Studio {
                     hunk: String::new(),
                 })
                 .collect(),
-            external: found.external,
             checks: turn.checks.clone(),
         }
     }
 
     /// Takes what the shell found for `ask`: the numstat of each of its worktrees, `None` when git
-    /// could not diff them. The turn's files are the diff's files that its ledger says its agent or
-    /// its workers edited; the others are counted as external, but those another turn edited.
+    /// could not diff them. The turn's files are every file that differs, but those another
+    /// session's or turn's call names (danielrispler/plotkeeper#207).
     pub fn set_turn_files(&mut self, ask: &TurnDiff, diffs: Option<Vec<RootDiff>>) {
+        let found = diffs.map(|diffs| self.files_of(&ask.session_id, ask.turn, diffs));
         let Some(session) = self.sessions.get_mut(&ask.session_id) else {
             return;
         };
-        let (ours, theirs) = session.edited(ask.turn);
         if let Some(turn) = session.turns.get_mut(ask.turn) {
-            turn.files = diffs.map(|diffs| TurnFiles::of(diffs, &ours, &theirs));
+            turn.files = found;
         }
         session.update_unseen();
+    }
+
+    /// The files of turn `turn` of session `session_id` among `diffs`: those that differ between its
+    /// trees, but the ones another call names, which touched the same worktree while the trees ran.
+    /// Another call is any of another session's, and any of its own session's other turns.
+    fn files_of(&self, session_id: &str, turn: usize, diffs: Vec<RootDiff>) -> TurnFiles {
+        let Some(session) = self.sessions.get(session_id) else {
+            return TurnFiles::default();
+        };
+        let (since, until) = session.trees_window(turn);
+        let made = |r: &&Row| {
+            let rejected = r.outcome == Some(Outcome::Rejected);
+            !rejected && !(turn_files::edits(&r.tool) && r.failed())
+        };
+        let others: Vec<&Row> = (self.sessions.values())
+            .flat_map(|s| {
+                s.ledger
+                    .rows()
+                    .iter()
+                    .map(move |r| (s.agent.id == session_id, r))
+            })
+            .filter(|(own, r)| !*own || r.turn != Some(turn))
+            .map(|(_, r)| r)
+            .filter(made)
+            .filter(|r| r.at().is_some_and(|at| (since..=until).contains(&at)))
+            .collect();
+        let ours: Vec<&Row> = (session.ledger.turn(turn)).filter(made).collect();
+        let name = |agent: &Option<String>| match agent {
+            Some(id) => session.agent_name(id).to_string(),
+            None => session.capabilities.agent.to_string(),
+        };
+        let agent = |diff: &RootDiff, file: &Numstat| {
+            let named = |path: &str| ours.iter().find(|r| turn_files::names(r, &diff.root, path));
+            let call = named(&file.path).or_else(|| file.from.as_deref().and_then(named));
+            let worker = || {
+                let spawned = session.agents.iter().filter(|a| a.turn == Some(turn));
+                let mut own =
+                    spawned.filter(|a| a.root == diff.root && session.has_cards(&a.agent.id));
+                own.next().map(|a| a.agent.id.clone())
+            };
+            match call {
+                Some(row) => Some(name(&row.agent)),
+                None => worker().map(|id| name(&Some(id))),
+            }
+        };
+        TurnFiles::of(diffs, &others, agent)
     }
 
     /// Applies, after the replay, what the live app learned before a restart (danielrispler/Falinks#434, decisions 37 and

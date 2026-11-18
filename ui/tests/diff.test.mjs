@@ -7,7 +7,7 @@ globalThis.document = { createElement: (tag) => new El(tag) };
 const { diffLines, drawDiff, keepsDiff, newestDiff } = await import("../../dist/diff.js");
 
 const file = (path, added, removed, extra = {}) => ({ root: "/r", path, from: null, added, removed, ...extra });
-const turn = (files, external = 0) => ({ files: files && { files, external }, checks: [] });
+const turn = (files) => ({ files: files && { files }, checks: [] });
 
 test("a hunk's lines are classified for the tint, with the sign kept in the text", () => {
   const lines = diffLines("diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1,2 @@\n ctx\n-old\n+new\n");
@@ -31,7 +31,7 @@ test("the shell's re-sent selection keeps the diff; a click or another session e
   assert.equal(keepsDiff(null, { id: "s" }, false), false);
 });
 
-test("the pane lists the agent's files with counts, each hunk read whole, and external changes folded last", async () => {
+test("the pane lists the agent's files with counts, each hunk read whole, and no external fold", async () => {
   const calls = [];
   const hunks = { "a.rs": "@@ -1 +1,2 @@\n a\n+b\n", "img.png": null };
   globalThis.window = {
@@ -39,20 +39,20 @@ test("the pane lists the agent's files with counts, each hunk read whole, and ex
   };
   const place = new El("div");
   let back = 0;
-  drawDiff(place, { id: "s", turns: [turn([file("a.rs", 1, 0), file("img.png", null, null)], 3)] }, 0, () => back++);
+  drawDiff(place, { id: "s", turns: [turn([file("a.rs", 1, 0), file("img.png", null, null)])] }, 0, () => back++);
   await new Promise((resolve) => setTimeout(resolve));
   assert.deepEqual(calls.filter(([c]) => c === "turn_file_hunk").map(([c, a]) => [c, a.all, a.turn, a.path]), [["turn_file_hunk", true, 0, "a.rs"], ["turn_file_hunk", true, 0, "img.png"]]);
   // Opening a hunk is told to the self-test (#130).
   assert.ok(calls.some(([c, a]) => c === "hunk_opened" && a.turn === 0));
   const summaries = place.find("summary").map((s) => s.text);
-  assert.deepEqual(summaries, ["a.rs +1 −0", "img.png", "+3 external"]);
+  assert.deepEqual(summaries, ["a.rs +1 −0", "img.png"]);
   assert.match(place.text, /\+b/);
   assert.match(place.text, /Binary file/);
   place.find("button").find((b) => b.text === "Terminal").listeners.click();
   assert.equal(back, 1);
 });
 
-test("a turn with no files says so, and an external count of zero draws no external line", () => {
+test("a turn with no files says so, and draws no external line", () => {
   const place = new El("div");
   drawDiff(place, { id: "s", turns: [turn([])] }, 0, () => {});
   assert.match(place.text, /changed no files/);

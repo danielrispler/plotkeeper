@@ -27,7 +27,7 @@ fn turn(id: &str, files: bool, checks: &[(&str, &str)]) -> Turn {
         .collect();
     let files = files.then(|| {
         let file = json!({"root": "/r", "path": "a.rs", "from": null, "added": 1, "removed": 0});
-        serde_json::from_value(json!({"files": [file], "external": 0})).unwrap()
+        serde_json::from_value(json!({"files": [file]})).unwrap()
     });
     let mut turn = Turn::default();
     (turn.ended_at, turn.id) = (Some(2), Some(id.into()));

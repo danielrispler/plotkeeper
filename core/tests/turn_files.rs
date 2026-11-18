@@ -67,7 +67,7 @@ fn ask(studio: &mut Studio, now: u64) -> Vec<TurnDiff> {
 }
 
 #[test]
-fn an_ended_turns_files_are_the_diff_kept_to_what_its_agent_edited_and_the_rest_is_external() {
+fn an_ended_turns_files_are_every_file_that_differs_between_its_trees() {
     let mut studio = Studio::replayed([
         prompt(json!({ ROOT: "s1" })),
         edit(1_000, "e1", "/w/repo/src/a.rs", None),
@@ -85,13 +85,13 @@ fn an_ended_turns_files_are_the_diff_kept_to_what_its_agent_edited_and_the_rest_
     }];
     studio.set_turn_files(&asks[0], Some(diff));
     let found = files(&studio).expect("files");
-    assert_eq!(found.files.len(), 1);
+    assert_eq!(found.files.len(), 2);
     assert_eq!(found.files[0].path, "src/a.rs");
     assert_eq!(
         (found.files[0].added, found.files[0].removed),
         (Some(3), Some(1))
     );
-    assert_eq!(found.external, 1);
+    assert_eq!(found.files[1].path, "src/b.rs");
     // An ended turn is asked for once.
     assert!(ask(&mut studio, AT + 40_000).is_empty());
 }
@@ -134,7 +134,6 @@ fn a_workers_edits_in_its_own_worktree_count_in_the_turn_that_spawned_it() {
     let found = files(&studio).unwrap();
     assert_eq!(found.files.len(), 1);
     assert_eq!(found.files[0].root, WORKER_ROOT);
-    assert_eq!(found.external, 0);
 }
 
 /// The diff of each worktree of `ask`, from `files`: the files that differ in each root, by root.
@@ -149,11 +148,10 @@ fn diffs(ask: &TurnDiff, files: &[(&str, &str)]) -> Vec<RootDiff> {
     ask.trees.iter().map(|t| diff(&t.root)).collect()
 }
 
-fn turn_files(studio: &Studio, turn: usize) -> (Vec<String>, u64) {
+fn turn_files(studio: &Studio, turn: usize) -> Vec<String> {
     let found = studio.session(SESSION).unwrap().turns[turn].files.clone();
     let found = found.expect("files");
-    let paths = found.files.iter().map(|f| f.path.clone()).collect();
-    (paths, found.external)
+    found.files.iter().map(|f| f.path.clone()).collect()
 }
 
 #[test]
@@ -228,16 +226,16 @@ fn a_background_workers_late_edits_count_in_the_turn_that_spawned_it_and_not_the
     let worker = first.trees.iter().find(|t| t.root == WORKER_ROOT).unwrap();
     assert_eq!(worker.end.as_deref(), Some("w3"));
     studio.set_turn_files(first, Some(diffs(first, &[(WORKER_ROOT, "late.rs")])));
-    assert_eq!(turn_files(&studio, 0), (vec!["late.rs".into()], 0));
+    assert_eq!(turn_files(&studio, 0), vec!["late.rs".to_string()]);
     let second = asks.iter().find(|a| a.turn == 1).expect("the next turn");
     studio.set_turn_files(second, Some(diffs(second, &[(ROOT, "src/c.rs")])));
-    assert_eq!(turn_files(&studio, 1), (vec!["src/c.rs".into()], 0));
+    assert_eq!(turn_files(&studio, 1), vec!["src/c.rs".to_string()]);
 }
 
 /// Daniel edited b.rs during turn 0, and the agent edited it again in turn 1, after turn 0 and its
-/// workers were done: turn 0's diff still counts it as external.
+/// workers were done: turn 0's diff still counts it as its own.
 #[test]
-fn a_files_later_edit_by_another_turn_does_not_hide_an_external_change_before_it() {
+fn a_files_later_edit_by_another_turn_does_not_take_a_change_before_it() {
     let next = |name: &str, ms: u64, extra: Value| {
         let mut extra = extra;
         extra["prompt_id"] = "p2".into();
@@ -264,17 +262,20 @@ fn a_files_later_edit_by_another_turn_does_not_hide_an_external_change_before_it
     let first = asks.iter().find(|a| a.turn == 0).unwrap();
     let diff = diffs(first, &[(ROOT, "src/a.rs"), (ROOT, "src/b.rs")]);
     studio.set_turn_files(first, Some(diff));
-    assert_eq!(turn_files(&studio, 0), (vec!["src/a.rs".into()], 1));
+    assert_eq!(
+        turn_files(&studio, 0),
+        vec!["src/a.rs".to_string(), "src/b.rs".to_string()]
+    );
     // And turn 1's diff counts b.rs as its own, not as turn 0's.
     let second = asks.iter().find(|a| a.turn == 1).unwrap();
     studio.set_turn_files(second, Some(diffs(second, &[(ROOT, "src/b.rs")])));
-    assert_eq!(turn_files(&studio, 1), (vec!["src/b.rs".into()], 0));
+    assert_eq!(turn_files(&studio, 1), vec!["src/b.rs".to_string()]);
 }
 
 /// A call whose start never landed is placed by its result's time: turn 0's edit of a.rs does not
 /// hide Daniel's change to a.rs during turn 1.
 #[test]
-fn an_earlier_turns_edit_with_no_start_does_not_hide_an_external_change_in_a_later_turn() {
+fn an_earlier_turns_edit_with_no_start_does_not_take_a_change_in_a_later_turn() {
     let next = |name: &str, ms: u64, extra: Value| {
         let mut extra = extra;
         extra["prompt_id"] = "p2".into();
@@ -294,11 +295,11 @@ fn an_earlier_turns_edit_with_no_start_does_not_hide_an_external_change_in_a_lat
     let asks = ask(&mut studio, AT + 40_000);
     let second = asks.iter().find(|a| a.turn == 1).unwrap();
     studio.set_turn_files(second, Some(diffs(second, &[(ROOT, "src/a.rs")])));
-    assert_eq!(turn_files(&studio, 1), (vec![], 1));
+    assert_eq!(turn_files(&studio, 1), vec!["src/a.rs".to_string()]);
 }
 
 #[test]
-fn a_late_edit_of_a_worker_in_the_sessions_worktree_is_not_external_in_the_next_turn() {
+fn a_late_edit_of_a_worker_in_the_sessions_worktree_is_not_the_next_turns() {
     let late = |name: &str, ms: u64, extra: Value| {
         let mut extra = extra;
         extra["prompt_id"] = "p2".into();
@@ -330,10 +331,10 @@ fn a_late_edit_of_a_worker_in_the_sessions_worktree_is_not_external_in_the_next_
     let first = asks.iter().find(|a| a.turn == 0).unwrap();
     assert_eq!(first.trees[0].end.as_deref(), Some("w3"));
     studio.set_turn_files(first, Some(diffs(first, &[(ROOT, "late.rs")])));
-    assert_eq!(turn_files(&studio, 0), (vec!["late.rs".into()], 0));
+    assert_eq!(turn_files(&studio, 0), vec!["late.rs".to_string()]);
     let second = asks.iter().find(|a| a.turn == 1).unwrap();
     studio.set_turn_files(second, Some(diffs(second, &[(ROOT, "late.rs")])));
-    assert_eq!(turn_files(&studio, 1), (vec![], 0));
+    assert_eq!(turn_files(&studio, 1), Vec::<String>::new());
 }
 
 #[test]
@@ -451,9 +452,9 @@ fn a_turns_summary_facts_are_its_files_with_counts_and_its_checks() {
     }];
     let facts = studio.summary_facts(&ask, Some(diff));
 
-    assert_eq!(facts.files.len(), 1);
+    assert_eq!(facts.files.len(), 2);
     assert_eq!(facts.files[0].file.path, "src/a.rs");
-    assert_eq!(facts.external, 1);
+    assert_eq!(facts.files[1].file.path, "src/b.rs");
     assert_eq!(studio.summary_ask("no-such-turn"), None);
 }
 
@@ -517,4 +518,264 @@ fn an_unended_turn_is_asked_again_only_after_its_session_has_an_event() {
     studio.replay(&edit(50_000, "e2", "/w/repo/src/b.rs", None));
     assert_eq!(studio.turn_diffs(AT + 70_000, 10).len(), 1);
     assert!(studio.turn_diffs(AT + 90_000, 10).is_empty());
+}
+
+const OTHER: &str = "9d3f5a62-1c47-4e0b-a2d8-6b7e0c1f4a93";
+const OTHER_ROOT: &str = "/w/other";
+
+/// A finished call of the other session, whose turn starts at 500 ms and runs on: `name` is its
+/// tool, `input` its input, `at` its time, and `cwd` its folder.
+fn other_call(
+    ms: u64,
+    id: &str,
+    tool: &str,
+    input: Value,
+    cwd: &str,
+    roots: Option<Value>,
+) -> String {
+    let mut event = json!({
+        "session_id": OTHER, "hook_event_name": "PostToolUse", "cwd": cwd, "prompt_id": "q1",
+        "studio_received_ms": AT + ms, "tool_name": tool, "tool_input": input,
+        "tool_use_id": id, "tool_response": {},
+    });
+    if let Some(roots) = roots {
+        event["studio_touched_roots"] = roots;
+    }
+    event.to_string()
+}
+
+fn other_prompt() -> String {
+    json!({
+        "session_id": OTHER, "hook_event_name": "UserPromptSubmit", "cwd": ROOT, "prompt_id": "q1",
+        "studio_received_ms": AT + 500, "prompt": "go", "studio_turn_start": { ROOT: "t1" },
+    })
+    .to_string()
+}
+
+fn bash(ms: u64, id: &str, command: &str, roots: Option<Value>) -> String {
+    other_call(ms, id, "Bash", json!({ "command": command }), ROOT, roots)
+}
+
+/// The files of the session's turn 0 when the trees differ in `a.rs` and `b.rs` of the root, and
+/// `others` happened in the turn.
+fn kept(others: Vec<String>) -> Vec<String> {
+    let mut lines = vec![prompt(json!({ ROOT: "s1" })), other_prompt()];
+    lines.extend(others);
+    lines.push(stop(json!({ ROOT: "e1" })));
+    let mut studio = Studio::replayed(lines);
+    let asks = ask(&mut studio, AT + 20_000);
+    let mine = asks.iter().find(|a| a.session_id == SESSION).unwrap();
+    studio.set_turn_files(
+        mine,
+        Some(diffs(mine, &[(ROOT, "src/a.rs"), (ROOT, "src/b.rs")])),
+    );
+    turn_files(&studio, 0)
+}
+
+#[test]
+fn a_file_changed_only_through_bash_is_the_turns_with_its_lines() {
+    let mut studio = Studio::replayed([
+        prompt(json!({ ROOT: "s1" })),
+        line(
+            "PostToolUse",
+            1_000,
+            json!({ "tool_name": "Bash", "tool_input": { "command": "sed -i s/a/b/ src/a.rs" },
+                    "tool_use_id": "b1", "tool_response": {} }),
+        ),
+        stop(json!({ ROOT: "e1" })),
+    ]);
+    let asks = ask(&mut studio, AT + 20_000);
+    let diff = vec![RootDiff {
+        root: ROOT.into(),
+        files: vec![stat("src/a.rs", 4, 2)],
+    }];
+    studio.set_turn_files(&asks[0], Some(diff));
+    let found = files(&studio).unwrap();
+    assert_eq!(found.files.len(), 1);
+    assert_eq!(
+        (found.files[0].added, found.files[0].removed),
+        (Some(4), Some(2))
+    );
+}
+
+#[test]
+fn with_no_other_toucher_of_the_root_every_differing_file_is_the_turns() {
+    assert_eq!(kept(vec![]), ["src/a.rs", "src/b.rs"]);
+    // Another session's call in another root names neither.
+    let elsewhere = other_call(
+        2_000,
+        "x1",
+        "Edit",
+        json!({ "file_path": "/w/other/src/a.rs" }),
+        OTHER_ROOT,
+        None,
+    );
+    assert_eq!(kept(vec![elsewhere]), ["src/a.rs", "src/b.rs"]);
+}
+
+#[test]
+fn another_sessions_edit_of_the_absolute_path_takes_the_file() {
+    let edit = other_call(
+        2_000,
+        "x1",
+        "Edit",
+        json!({ "file_path": "/w/repo/src/a.rs" }),
+        ROOT,
+        None,
+    );
+    assert_eq!(kept(vec![edit]), ["src/b.rs"]);
+}
+
+#[test]
+fn another_sessions_bash_command_holding_the_absolute_path_takes_the_file() {
+    let command = bash(2_000, "x1", "sed -i s/a/b/ /w/repo/src/b.rs", None);
+    assert_eq!(kept(vec![command]), ["src/a.rs"]);
+}
+
+#[test]
+fn another_sessions_bash_command_that_touched_the_root_takes_the_path_from_the_root() {
+    let command = bash(2_000, "x1", "sed -i s/a/b/ src/a.rs", Some(json!([ROOT])));
+    assert_eq!(kept(vec![command]), ["src/b.rs"]);
+}
+
+#[test]
+fn another_sessions_command_with_only_the_bare_name_or_another_root_leaves_the_file() {
+    let bare = bash(2_000, "x1", "touch a.rs && cat b.rs", Some(json!([ROOT])));
+    assert_eq!(kept(vec![bare]), ["src/a.rs", "src/b.rs"]);
+    // The same relative path, from a command that touched another root.
+    let from_other = other_call(
+        2_000,
+        "x2",
+        "Bash",
+        json!({ "command": "sed -i s/a/b/ src/a.rs" }),
+        OTHER_ROOT,
+        Some(json!([OTHER_ROOT])),
+    );
+    assert_eq!(kept(vec![from_other]), ["src/a.rs", "src/b.rs"]);
+}
+
+#[test]
+fn another_sessions_call_outside_the_turns_trees_leaves_the_file() {
+    // Before the turn began, and after its end.
+    let before = other_call(
+        0,
+        "x1",
+        "Edit",
+        json!({ "file_path": "/w/repo/src/a.rs" }),
+        ROOT,
+        None,
+    );
+    let after = other_call(
+        9_500,
+        "x2",
+        "Edit",
+        json!({ "file_path": "/w/repo/src/b.rs" }),
+        ROOT,
+        None,
+    );
+    let mut early: Value = serde_json::from_str(&before).unwrap();
+    early["studio_received_ms"] = (AT - 5_000).into();
+    assert_eq!(
+        kept(vec![early.to_string(), after]),
+        ["src/a.rs", "src/b.rs"]
+    );
+}
+
+#[test]
+fn a_later_turn_of_the_same_session_that_names_a_file_during_the_earlier_trees_takes_it() {
+    let next = |name: &str, ms: u64, extra: Value| {
+        let mut extra = extra;
+        extra["prompt_id"] = "p2".into();
+        line(name, ms, extra)
+    };
+    // Turn 0's worker runs on past its end, so turn 0's trees run until the worker stops; turn 1
+    // edits b.rs meanwhile.
+    let mut studio = Studio::replayed([
+        prompt(json!({ ROOT: "s1" })),
+        line("SubagentStart", 500, json!({ "agent_id": "agent-1" })),
+        line(
+            "Stop",
+            9_000,
+            json!({ "background_tasks": [{ "id": "agent-1", "type": "subagent" }],
+                    "studio_turn_end": { ROOT: "e1" } }),
+        ),
+        next(
+            "UserPromptSubmit",
+            10_000,
+            json!({ "prompt": "next", "studio_turn_start": { ROOT: "s2" } }),
+        ),
+        next(
+            "PostToolUse",
+            12_000,
+            json!({ "tool_name": "Edit", "tool_input": { "file_path": "/w/repo/src/b.rs" },
+                    "tool_use_id": "e2", "tool_response": {} }),
+        ),
+        next(
+            "SubagentStop",
+            15_000,
+            json!({ "agent_id": "agent-1", "studio_turn_end": { ROOT: "w3" } }),
+        ),
+        next("Stop", 20_000, json!({ "studio_turn_end": { ROOT: "e2" } })),
+    ]);
+    let asks = ask(&mut studio, AT + 40_000);
+    let first = asks.iter().find(|a| a.turn == 0).unwrap();
+    studio.set_turn_files(
+        first,
+        Some(diffs(first, &[(ROOT, "src/a.rs"), (ROOT, "src/b.rs")])),
+    );
+    assert_eq!(turn_files(&studio, 0), ["src/a.rs"]);
+    let second = asks.iter().find(|a| a.turn == 1).unwrap();
+    studio.set_turn_files(second, Some(diffs(second, &[(ROOT, "src/b.rs")])));
+    assert_eq!(turn_files(&studio, 1), ["src/b.rs"]);
+}
+
+#[test]
+fn a_files_agent_is_the_one_whose_call_names_it_or_the_workers_whose_worktree_holds_it() {
+    let mut studio = Studio::replayed([
+        prompt(json!({ ROOT: "s1" })),
+        worker_starts(500, "agent-1", "w1"),
+        edit(1_000, "e1", "/w/repo/src/a.rs", None),
+        edit(
+            1_200,
+            "e3",
+            "/w/repo/.claude/worktrees/w1/y.rs",
+            Some("agent-1"),
+        ),
+        line(
+            "PostToolUse",
+            1_500,
+            json!({ "tool_name": "Bash", "tool_input": { "command": "make /w/repo/src/c.rs" },
+                    "tool_use_id": "b1", "tool_response": {} }),
+        ),
+        stop(json!({ ROOT: "e1", WORKER_ROOT: "w2" })),
+    ]);
+    let asks = ask(&mut studio, AT + 20_000);
+    let diff = diffs(
+        &asks[0],
+        &[
+            (ROOT, "src/a.rs"),
+            (ROOT, "src/b.rs"),
+            (ROOT, "src/c.rs"),
+            (WORKER_ROOT, "y.rs"),
+            (WORKER_ROOT, "z.rs"),
+        ],
+    );
+    studio.set_turn_files(&asks[0], Some(diff));
+    let found = files(&studio).unwrap();
+    let agents: Vec<(&str, Option<&str>)> = found
+        .files
+        .iter()
+        .map(|f| (f.path.as_str(), f.agent.as_deref()))
+        .collect();
+    // Daniel's b.rs names nobody; the worker's own call and its worktree name the worker.
+    assert_eq!(
+        agents,
+        [
+            ("src/a.rs", Some("claude")),
+            ("src/b.rs", None),
+            ("src/c.rs", Some("claude")),
+            ("y.rs", Some("agent")),
+            ("z.rs", Some("agent"))
+        ]
+    );
 }
