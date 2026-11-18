@@ -1386,6 +1386,7 @@ fn file(path: &str, added: u64, removed: u64, hunk: &str) -> FactFile {
             from: None,
             added: Some(added),
             removed: Some(removed),
+            agent: None,
         },
         hunk: hunk.into(),
     }
@@ -1413,7 +1414,6 @@ fn with_facts(checks: Vec<Check>) -> SummaryRequest {
     SummaryRequest {
         facts: Facts {
             files: vec![file("src/parser2.rs", 47, 3, hunk)],
-            external: 2,
             checks,
         },
         ..turn("s", 1)
@@ -1489,7 +1489,10 @@ fn the_writers_input_holds_the_turns_files_counts_capped_hunks_and_check_facts()
         input.contains("+line40") && !input.contains("+line41"),
         "{input}"
     );
-    assert!(input.contains("2 other files"), "{input}");
+    assert!(
+        !input.contains("other files") && !input.contains("external"),
+        "{input}"
+    );
 }
 
 #[test]
@@ -1622,6 +1625,7 @@ fn week_old_quiz(dir: &Path) -> (CardStore, u64) {
                     from: None,
                     added: Some(1),
                     removed: Some(1),
+                    agent: None,
                 },
                 hunk: "@@ -1 +1 @@\n-open\n+frozen\n".into(),
             }],

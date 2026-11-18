@@ -253,6 +253,7 @@ fn facts(files: &[(&str, u64)], check: Option<CheckStatus>) -> Facts {
             from: None,
             added: Some(*lines),
             removed: Some(0),
+            agent: None,
         },
         hunk: format!(
             "--- a/{path}\n+++ b/{path}\n@@ -1 +1 @@\n{}",
@@ -267,7 +268,6 @@ fn facts(files: &[(&str, u64)], check: Option<CheckStatus>) -> Facts {
     });
     Facts {
         files: files.iter().map(file).collect(),
-        external: 0,
         checks: check.into_iter().collect(),
     }
 }

@@ -33,9 +33,6 @@ pub(crate) fn facts_text(facts: &Facts) -> String {
     if facts.files.is_empty() {
         text += "none\n";
     }
-    if facts.external > 0 {
-        text += &format!("({} other files changed by someone else)\n", facts.external);
-    }
     text += "Checks, each with its last run's result:\n";
     for c in &facts.checks {
         let retries = match c.retries {
@@ -73,7 +70,7 @@ pub(crate) fn material(request: &SummaryRequest, earlier: &str) -> String {
     );
     let facts = &request.facts;
     text += &format!("{}\n", facts_text(facts));
-    text += &format!("{} {}\n", facts.files.len(), facts.external);
+    text += &format!("{}\n", facts.files.len());
     for f in &facts.files {
         text += &format!("{}\n{}\n", f.file.path, f.hunk);
         text += &format!("{:?} {:?}\n", f.file.added, f.file.removed);

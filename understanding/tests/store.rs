@@ -705,6 +705,7 @@ fn quiz_with_hunk(path: &std::path::Path) -> CardStore {
                     from: None,
                     added: Some(1),
                     removed: Some(1),
+                    agent: None,
                 },
                 hunk: "@@ -1 +1 @@\n-open\n+frozen\n".into(),
             }],
