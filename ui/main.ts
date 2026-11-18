@@ -218,6 +218,8 @@ const actions: Actions = {
   "studio::PullMain": () => void pullAll(),
   // Asks GitHub again which tasks have landed (#53); it is otherwise asked at a turn's end and at the window's focus.
   "studio::RefreshLanded": () => void invoke("refresh_landed_tasks").catch((e) => console.warn(e)),
+  // Finder opens with the Studio log selected.
+  "studio::RevealLog": () => void invoke("reveal_log").catch((e) => console.warn(e)),
   "studio::OpenSettings": () => void invoke("open_settings", { editor: studio.files.settings.editor }).catch((e) => console.warn(e)),
   // The skills browser (danielrispler/Falinks#528), in the rail's place; it leaves focus mode, which hides the rail.
   "studio::Skills": () => {
