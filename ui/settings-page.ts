@@ -251,14 +251,14 @@ function write(key: string, action: Action, picked?: string) {
       refused = null;
       saved({ ...studio.texts, settings: written });
     } catch (e) {
-      // A newer text that arrived meanwhile has already answered the refusal.
-      refused = studio.texts.settings === expected ? { why: String(e), at: expected } : null;
       // The window's text may be older than the file's (a write's reply that crossed an editor's save): read both again, so the next try is made against the file as it is.
       try {
         saved(await invoke("settings_files"));
       } catch (again) {
         console.warn(again);
       }
+      // Set after the read, so the line stays until the text changes again or a write succeeds.
+      refused = { why: String(e), at: studio.texts.settings };
     }
     drawSettingsPage();
   });

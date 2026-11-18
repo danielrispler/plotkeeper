@@ -290,9 +290,13 @@ export const fixtures = {
       await new Promise((done) => setTimeout(done, 200));
       if (undo() !== 1) log("snap:fail the change did not show its undo icon");
       if (toggles()[0] !== "false") log("snap:fail Sounds did not turn off: " + toggles());`, { write_setting: '{ "sounds": false }' }),
-  // A refused write shows its reason in the page, and the line coming leaves the rows' nodes as they were (a focused control stays focused).
+  // A refused write shows its reason in the page, also once the files read again after it bring the newer text, and the line coming
+  // leaves the rows' nodes as they were (a focused control stays focused).
   settingsRefused: () =>
     settingsPage(null, `
+      const invoke = window.__TAURI__.core.invoke;
+      window.__TAURI__.core.invoke = (command, args) =>
+        command === "settings_files" ? Promise.resolve({ settings: '{ "zoom": 1.1 }', keymap: null }) : invoke(command, args);
       const sounds = dialog.querySelector(".switch");
       sounds.click();
       await new Promise((done) => setTimeout(done, 200));
