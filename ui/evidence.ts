@@ -4,7 +4,7 @@
 // and the tail of its output. Opening changes only the nodes it opens: the open state is kept by key, so a redraw of the rail
 // draws the line open again.
 
-import { code, invoke, pressable, text } from "./dom.js";
+import { code, failure, invoke, pressable, text } from "./dom.js";
 import { askAnchor, type Hunk, hunkText } from "./ask.js";
 import { diffRequest } from "./diff.js";
 import { openAt } from "./paths.js";
@@ -139,7 +139,7 @@ export function fileRow(session: string, index: number, row: EvidenceRow, scope 
   const fetch = () => {
     if (kept()) return;
     pre.textContent = "Reading the hunk…";
-    invoke("hunk_opened", { session, turn: index }).catch((e) => console.warn(e));
+    invoke("hunk_opened", { session, turn: index }).catch(failure("hunk_opened"));
     invoke("turn_file_hunk", { session, turn: index, root: file.root, path: file.path, from: file.from })
       .then((h) => {
         hunks.set(key, { hunk: h, ended, added: file.added, removed: file.removed });

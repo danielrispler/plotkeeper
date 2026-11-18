@@ -1,1 +1,1 @@
-{ "identifier": "default", "windows": ["main"], "permissions": ["core:default", "core:window:allow-start-dragging"] }
+{ "identifier": "default", "windows": ["main"], "permissions": ["core:default", "log:default", "core:window:allow-start-dragging"] }

@@ -2,7 +2,7 @@
 // sessions that need Daniel, the unseen ones and the landed ones, each with its Delete, then a row
 // per project to start a session in. The sections are content functions over the studio state.
 
-import { invoke, patch, pressable, text } from "./dom.js";
+import { failure, invoke, patch, pressable, text } from "./dom.js";
 import { quizItem, quizRegion, seedQuiz } from "./quiz.js";
 import { childrenOf, deleting, item, row, showsLanded } from "./list.js";
 import { lastSegment } from "./workspaces.js";
@@ -36,10 +36,10 @@ export function homeRetests(retests: Retest[]): Retest[] {
 function retestRow(retest: Retest, quiz: NonNullable<Retest["quiz"]>): HTMLElement {
   seedQuiz(retest.id, retest.taps);
   // The self-test times the pick from the retest's first showing (#130).
-  if (!retest.taps.some((t) => t.kind === "shown")) void invoke("quiz_tap", { id: retest.id, tap: { kind: "shown" } }).catch((e) => console.warn(e));
+  if (!retest.taps.some((t) => t.kind === "shown")) void invoke("quiz_tap", { id: retest.id, tap: { kind: "shown" } }).catch(failure("quiz_tap"));
   answeredHere.add(retest.id);
   const region = quizRegion(retest.id, quiz, [], {
-    record: (tap) => void invoke("quiz_tap", { id: retest.id, tap }).catch((e) => console.warn(e)),
+    record: (tap) => void invoke("quiz_tap", { id: retest.id, tap }).catch(failure("quiz_tap")),
     explain: () => invoke("ask", { session: retest.session_id, item: quizItem(quiz), question: "I did not get this yet. Explain more." }),
     line: () => document.createElement("li"),
     trial: true,
@@ -67,7 +67,7 @@ function sessionRow(session: Session, landed: boolean): HTMLElement {
 }
 
 function projectRow({ name, path }: HomeProject): HTMLElement {
-  const button = pressable(document.createElement("button"), false, () => void startLast(path, "").catch((e) => console.warn(e)));
+  const button = pressable(document.createElement("button"), false, () => void startLast(path, "").catch(failure("start", "error")));
   button.dataset.key = `project ${path}`;
   button.classList.add("row");
   button.title = `Start a session in ${path}`;

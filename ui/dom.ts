@@ -6,6 +6,7 @@ declare global {
   interface Window {
     __TAURI__: {
       core: { invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> };
+      log: { warn(message: string): Promise<void>; error(message: string): Promise<void> };
       event: { listen<T>(event: string, handler: (event: { payload: T }) => void): Promise<() => void> };
     };
   }
@@ -16,6 +17,22 @@ export const invoke = <C extends Command>(command: C, args?: Record<string, unkn
   window.__TAURI__.core.invoke<Commands[C]>(command, args);
 export const listen = <T>(event: string, handler: (payload: T) => void) =>
   window.__TAURI__.event.listen<T>(event, (e) => handler(e.payload));
+
+// The Studio log (#190): the line is the command's name and the error's message, nothing else of the error. `error` is for a
+// failed action Daniel asked for, `warn` for a call that degrades and carries on. A log that fails is dropped.
+const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e));
+export function logLine(level: "warn" | "error", line: string) {
+  try {
+    window.__TAURI__.log[level](line).catch(() => {});
+  } catch {}
+}
+export const failure = (command: string, level: "warn" | "error" = "warn") => (e: unknown) => logLine(level, `${command}: ${messageOf(e)}`);
+
+// An uncaught error or unhandled rejection in the page goes to the log at `error`.
+export function logUncaught(target: Pick<Window, "addEventListener">) {
+  target.addEventListener("error", (event) => logLine("error", `uncaught: ${event.message}`));
+  target.addEventListener("unhandledrejection", (event) => logLine("error", `unhandled rejection: ${messageOf(event.reason)}`));
+}
 
 export const element = (id: string) => document.getElementById(id)!;
 

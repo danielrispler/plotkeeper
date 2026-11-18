@@ -1,7 +1,7 @@
 // File paths in the terminal pane and in rendered replies: the text a click opens in Daniel's editor
 // (danielrispler/Falinks#557), and a dropped file's path as typed.
 
-import { invoke } from "./dom.js";
+import { failure, invoke } from "./dom.js";
 import { studio } from "./state.js";
 
 // A path's start (home, `.` or `..`, and a root), one of its segments, and its line suffix: `:line`,
@@ -89,5 +89,5 @@ export function openFile(text: string, cwd: string | null) {
 
 // Opens a file already split into its path, line and column.
 export function openAt(target: FileTarget, cwd: string | null) {
-  invoke("open_file", { ...target, cwd, editor: studio.files.settings.editor }).catch((e) => console.warn(e));
+  invoke("open_file", { ...target, cwd, editor: studio.files.settings.editor }).catch(failure("open_file", "error"));
 }

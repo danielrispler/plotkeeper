@@ -3,7 +3,7 @@
 // lets the agent retry it once and Decline closes the card; there is no edit, so what runs is what the card shows.
 
 import { blockedRequestFor, sendBlockedAnswer } from "./answer.js";
-import { code, invoke, text } from "./dom.js";
+import { code, failure, invoke, text } from "./dom.js";
 import { counts, duration } from "./times.js";
 import { typeInto, type TypingIo } from "./typing.js";
 import { blockedWaits, type BlockedCommand, type BlockedStatus } from "./types.js";
@@ -146,7 +146,7 @@ export function blockedElement(session: string, card: BlockedCommand, agent: str
       button.addEventListener("click", async () => {
         if (label === "Ask again") {
           // The pass may have expired or been spent, so the approval is renewed before the line asks for the retry.
-          await invoke("ask_again", { session, command: card.command, cwd: card.cwd }).catch((e) => console.warn(e));
+          await invoke("ask_again", { session, command: card.command, cwd: card.cwd }).catch(failure("ask_again", "error"));
           return retry(card);
         }
         if (request === null) return;

@@ -3,7 +3,7 @@
 // whole from git (`turn_file_hunk`, `all`), added and removed lines marked by a sign and a tint. The other changes in the
 // worktree are one folded line at the end. The pane is drawn once when it opens, so folding a file moves nothing else.
 
-import { invoke, pressable, text } from "./dom.js";
+import { failure, invoke, pressable, text } from "./dom.js";
 import { openAt } from "./paths.js";
 import type { Capabilities, Session, Turn, TurnFile } from "./types.js";
 
@@ -57,7 +57,7 @@ function fileFold(session: string, index: number, file: TurnFile): HTMLElement {
   });
   const edit = pressable(text("button", "Open in editor", "evidence-edit"), false, () => openAt({ path: file.path, line: first, column: 1 }, file.root));
   let first = 1;
-  invoke("hunk_opened", { session, turn: index }).catch((e) => console.warn(e));
+  invoke("hunk_opened", { session, turn: index }).catch(failure("hunk_opened"));
   const body = text("div", "Reading the hunk…", "diff-body");
   fold.append(text("summary", `${file.from ? `${file.from} → ` : ""}${file.path}${counts(file)}`), edit, body);
   invoke("turn_file_hunk", { session, turn: index, root: file.root, path: file.path, from: file.from, all: true })
