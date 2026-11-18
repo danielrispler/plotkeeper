@@ -383,3 +383,34 @@ const cardOpen = new Set<string>();
 
 // Opens card `id`'s line, for a citation of it (#123).
 export const openCard = (id: string) => void cardOpen.add(id);
+
+// A card Daniel has not seen (danielrispler/plotkeeper#211): the store holds no `shown` time for it, and he made no guess, which
+// the store keeps in place of one.
+export const unseen = (stored: StoredCard) => stored.shown_at == null && stored.guess === null;
+
+// A folded turn's row for a card: its title, which opens the card in place. Opening builds the card, which writes its `shown`
+// tap; the row stays while Daniel keeps the card open and goes once it is closed and seen.
+export const rowCards = (cards: StoredCard[]) => cards.filter((stored) => unseen(stored) || cardOpen.has(stored.request.id));
+
+export function unseenRow(stored: StoredCard, turn: CardTurn | null = null): HTMLElement {
+  const id = stored.request.id;
+  const node = document.createElement("details");
+  node.className = "fold unseen-card";
+  node.open = cardOpen.has(id);
+  node.append(fullTitle(prose("summary", stored.card.summary), stored.card.summary));
+  let built = false;
+  const show = () => {
+    if (built) return;
+    built = true;
+    node.append(cardNode(stored, turn));
+    markShown();
+  };
+  if (node.open) show();
+  node.addEventListener("toggle", () => {
+    if (node.open) {
+      cardOpen.add(id);
+      show();
+    } else cardOpen.delete(id);
+  });
+  return node;
+}

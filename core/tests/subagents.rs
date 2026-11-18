@@ -856,3 +856,146 @@ fn an_unattached_subagent_that_its_sessions_stop_does_not_list_ends_at_its_last_
     assert_eq!(status(&studio, "stray2").1, Some(3));
     assert_eq!(status(&studio, "live1"), ("running".into(), None));
 }
+
+/// Seam 1 (danielrispler/plotkeeper#206): a subagent not spawned isolated reports its session's folder
+/// `/w`; the touched roots its hook lists tell where it works.
+fn bash_of(agent: &str, name: &str, at: u64, roots: &[&str]) -> String {
+    let fields = json!({"agent_id": agent, "agent_type": "general-purpose", "cwd": "/w",
+        "tool_name": "Bash", "tool_use_id": format!("{agent}-{at}"),
+        "tool_input": {"command": "cd /w2 && sed -i s/a/b/ f"}, "studio_touched_roots": roots});
+    ev(name, at, "p1", fields)
+}
+
+/// Session `s1` in a turn at `/w` whose subagent `h1` made its first event at 1 000 and its second,
+/// a Bash step that touches `/w2`, at 2 000.
+fn homed() -> Studio {
+    let mut studio = Studio::default();
+    studio.apply(&ev("UserPromptSubmit", 0, "p1", json!({"prompt": "Do it"})));
+    studio.apply(&bash_of("h1", "PreToolUse", 1_000, &["/w"]));
+    studio.apply(&bash_of("h1", "PostToolUse", 1_500, &["/w"]));
+    studio.apply(&bash_of("h1", "PreToolUse", 2_000, &["/w", "/w2"]));
+    studio
+}
+
+fn folders(studio: &Studio, line: &str) -> Vec<(String, String, Purpose)> {
+    let looks = studio.fingerprint_folders(line);
+    looks
+        .into_iter()
+        .map(|l| (l.key, l.folder, l.purpose))
+        .collect()
+}
+
+#[test]
+fn a_subagent_whose_second_event_touches_a_worktree_is_fingerprinted_there() {
+    let mut studio = Studio::default();
+    studio.apply(&ev("UserPromptSubmit", 0, "p1", json!({"prompt": "Do it"})));
+    studio.apply(&bash_of("h1", "PreToolUse", 1_000, &["/w"]));
+    studio.apply(&bash_of("h1", "PostToolUse", 1_500, &["/w"]));
+
+    let second = bash_of("h1", "PreToolUse", 2_000, &["/w", "/w2"]);
+    assert_eq!(
+        folders(&studio, &second),
+        [("h1".into(), "/w2".into(), Purpose::Base)]
+    );
+    studio.apply(&second);
+
+    let after = bash_of("h1", "PostToolUse", 2_500, &["/w", "/w2"]);
+    assert_eq!(
+        folders(&studio, &after),
+        [("h1".into(), "/w2".into(), Purpose::Commit)]
+    );
+}
+
+#[test]
+fn a_subagent_that_touched_a_worktree_is_a_helper_until_something_changes_there_then_a_worker() {
+    let mut studio = homed();
+    let after = bash_of("h1", "PostToolUse", 2_500, &["/w", "/w2"]);
+
+    studio.apply_with_changes(&after, BTreeMap::new());
+    assert_eq!(agent(&studio, "s1", "h1").kind, Helper);
+
+    studio.apply_with_changes(
+        &bash_of("h1", "PostToolUse", 2_600, &["/w2"]),
+        changed("h1"),
+    );
+    assert_eq!(agent(&studio, "s1", "h1").kind, Worker);
+
+    // A worker is fingerprinted for its card at its end and, 20 minutes on, as a fallback, in `/w2`.
+    let late = bash_of("h1", "PostToolUse", 2_600 + 21 * 60 * 1000, &["/w2"]);
+    assert!(folders(&studio, &late).contains(&("h1".into(), "/w2".into(), Purpose::Fallback)));
+    let stop = ev(
+        "SubagentStop",
+        3_000,
+        "p1",
+        json!({"agent_id": "h1", "cwd": "/w"}),
+    );
+    assert!(
+        folders(&studio, &stop)
+            .iter()
+            .any(|(k, f, _)| k == "h1" && f == "/w2")
+    );
+}
+
+#[test]
+fn a_subagent_that_touches_no_other_worktree_stays_in_its_sessions() {
+    let mut studio = Studio::default();
+    studio.apply(&ev("UserPromptSubmit", 0, "p1", json!({"prompt": "Do it"})));
+    let line = bash_of("h1", "PreToolUse", 1_000, &["/w"]);
+    assert_eq!(
+        folders(&studio, &line),
+        [("h1".into(), "/w".into(), Purpose::Base)]
+    );
+    studio.apply(&line);
+
+    let after = bash_of("h1", "PostToolUse", 1_500, &["/w"]);
+    assert_eq!(
+        folders(&studio, &after),
+        [("h1".into(), "/w".into(), Purpose::Commit)]
+    );
+}
+
+#[test]
+fn a_workers_touch_of_a_second_worktree_leaves_its_home() {
+    let mut studio = homed();
+    studio.apply_with_changes(
+        &bash_of("h1", "PostToolUse", 2_600, &["/w2"]),
+        changed("h1"),
+    );
+
+    let third = bash_of("h1", "PreToolUse", 3_000, &["/w", "/w3"]);
+    studio.apply(&third);
+
+    let after = bash_of("h1", "PostToolUse", 3_500, &["/w3"]);
+    assert_eq!(
+        folders(&studio, &after),
+        [("h1".into(), "/w2".into(), Purpose::Commit)]
+    );
+}
+
+#[test]
+fn a_sessions_touch_of_a_running_workers_home_asks_for_no_fingerprint_of_the_sessions() {
+    let mut studio = homed();
+    let own = |name: &str, at: u64| {
+        let fields = json!({"tool_name": "Bash", "tool_use_id": format!("s-{at}"),
+            "tool_input": {"command": "cd /w2 && ls"}, "studio_touched_roots": ["/w", "/w2"]});
+        ev(name, at, "p1", fields)
+    };
+    // While `h1` is a helper, the session's touch is fingerprinted as before.
+    assert!(folders(&studio, &own("PreToolUse", 2_100)).contains(&(
+        "s1".into(),
+        "/w2".into(),
+        Purpose::Base
+    )));
+
+    studio.apply_with_changes(
+        &bash_of("h1", "PostToolUse", 2_600, &["/w2"]),
+        changed("h1"),
+    );
+
+    let looks = folders(&studio, &own("PreToolUse", 2_700));
+    assert!(
+        looks
+            .iter()
+            .all(|(key, folder, _)| !(key == "s1" && folder == "/w2"))
+    );
+}
