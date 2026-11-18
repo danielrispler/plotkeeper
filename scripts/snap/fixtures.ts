@@ -159,13 +159,13 @@ const settingsPage = (settings: string | null, expect: string, extra: Fixture = 
     ${expect}`,
 });
 
-// The page's steppers and dropdowns (#196) with one value changed, the zoom: its stepper and undo icon, the font size's stylesheet value, and the
+// The page's steppers and dropdowns (#196) with one value changed, the zoom: its stepper and undo icon, the font size's stylesheet value, the context warning at 30, and the
 // dropdowns at Haiku and Default.
 const settingsControls = (): Fixture =>
   settingsPage(`{ "zoom": 1.2 }`, `
       const values = () => [...dialog.querySelectorAll(".stepper-value")].map((v) => v.textContent);
       const selects = () => [...dialog.querySelectorAll("select")].map((s) => s.options[s.selectedIndex].textContent);
-      if (values().join() !== "1.2,12.5") log("snap:fail the steppers read " + values());
+      if (values().join() !== "1.2,12.5,30") log("snap:fail the steppers read " + values());
       if (selects().join() !== "Haiku,Default") log("snap:fail the dropdowns read " + selects());
       if (undo() !== 1) log("snap:fail expected one undo icon, got " + undo());
       if (dialog.querySelector(".setting-title").textContent.trim() !== "Default zoom") log("snap:fail the first row is not Default zoom");
