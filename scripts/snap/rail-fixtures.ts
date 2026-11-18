@@ -250,7 +250,7 @@ const build = (state: SessionState, { ask = null as Ask | null, answered = false
     ...common,
     sessions,
     selected: { session: s, agent: null },
-    cards: { brief: null, goal: withBrief ? goal : null, answers: withBrief ? answers : [], open: withBrief ? open : [], design: withBrief ? design.map((line) => ({ ...line, cite: stored.request.id })) : [], recent: [], older: [stored], decisions: withBrief ? decisions : [] },
+    cards: { brief: null, goal: withBrief ? goal : null, answers: withBrief ? answers : [], open: withBrief ? open : [], design: withBrief ? design.map((line) => ({ ...line, cite: stored.request.id })) : [], recent: [], older: [stored], workers: [], decisions: withBrief ? decisions : [] },
     watch: ask,
     ask_facts: {
       sections: [
@@ -455,7 +455,34 @@ const unseenOpenScript = `
   if (document.querySelector(".turn.past .turn-line[aria-expanded=true]")) log("snap:fail the turn unfolded");
   row.scrollIntoView({ block: "start" });`;
 
+// #212: a worker's card sits in the turn its wake-up opened ("worker w1 returned", the third turn): folded it shows a title row, opened
+// the card is in that turn's block, and no other turn holds it.
+const workerCard = (): StoredCard => {
+  const stored = card(`w1@${Date.now() - 100 * MIN}`, false);
+  return { ...stored, request: { ...stored.request, agent: "w1" }, card: { ...stored.card, summary: "The worker made the fold toggle a sibling of the glyph." } };
+};
+const workerCardFixture = (snapScript: string) => {
+  const fixture = build("idle");
+  return { ...fixture, cards: { ...fixture.cards, older: [], workers: [{ card: workerCard(), turn: 2 }] }, snapScript };
+};
+const workerRowScript = `
+  const lines = [...document.querySelectorAll(".turn.past")];
+  const rows = lines.map((t) => t.querySelectorAll(".unseen-card").length);
+  if (JSON.stringify(rows) !== "[0,1,0,0]") return log("snap:fail the worker's row should be under the hand-back turn only: " + rows);
+  lines[1].scrollIntoView({ block: "center" });
+  log("hand-back turn row: " + lines[1].querySelector(".unseen-card summary").textContent);`;
+const workerOpenScript = `
+  const lines = [...document.querySelectorAll(".turn.past")];
+  lines[1].querySelector(".turn-line").click();
+  const open = [...document.querySelectorAll(".turn.past")][1];
+  if (!open.querySelector("article.card")) return log("snap:fail the worker's card is not in the hand-back turn's block");
+  if (document.querySelectorAll("article.card").length !== 1) log("snap:fail the card shows more than once");
+  if (!open.textContent.includes("worker w1 returned")) log("snap:fail the open turn is not the hand-back");
+  open.scrollIntoView({ block: "start" });`;
+
 export const railFixtures = {
+  railWorkerCardRow: () => workerCardFixture(workerRowScript),
+  railWorkerCard: () => workerCardFixture(workerOpenScript),
   railUnseenCard: () => ({ ...build("idle"), snapScript: unseenScript }),
   railUnseenCardOpen: () => ({ ...build("idle"), snapScript: unseenOpenScript }),
   readmeTurn,

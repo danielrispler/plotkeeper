@@ -472,6 +472,9 @@ impl CheckStart {
 pub struct Prompt {
     pub at: u64,
     pub sender: Sender,
+    /// The turn it is in, which a wake-up opened (danielrispler/plotkeeper#212); `None` in a log read before.
+    #[serde(default)]
+    pub turn: Option<usize>,
     /// What it says, which the brief's rewrite reads (danielrispler/Falinks#369, decision 16); the pane never shows it.
     #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     pub text: String,
@@ -1374,6 +1377,25 @@ impl Session {
     fn ledger_turn(&self, agent: &Option<String>) -> Option<usize> {
         let spawned = agent.as_deref().and_then(|a| self.subagent(a)?.turn);
         spawned.or_else(|| self.current_turn())
+    }
+
+    /// The turn of this session's rail that worker card `request` belongs to (danielrispler/plotkeeper#212): the turn the
+    /// wake-up that names the worker opened, for a card asked for at or after the worker's end; else the turn that spawned
+    /// it, which also holds a card of the worker's end until its wake-up arrives.
+    pub fn worker_card_turn(&self, request: &CardRequest) -> Option<usize> {
+        let worker = self.subagent(request.agent.as_deref()?)?;
+        let ended = worker
+            .ended_at
+            .is_some_and(|end| card_time(&request.id) >= end);
+        let woke = |p: &&Prompt| {
+            matches!(p.sender, Sender::WakeUp(_))
+                && matches!(
+                    claude::names(&p.text, &worker.agent.id),
+                    claude::Names::WakeUp
+                )
+        };
+        let wake_up = self.prompts.iter().find(woke).and_then(|p| p.turn);
+        wake_up.filter(|_| ended).or(worker.turn)
     }
 
     /// The index of its latest turn, which a check, subagent or question that starts now is in.
@@ -2700,7 +2722,9 @@ impl Studio {
             session.reopen_turn();
             session.woken = false;
             let queued = std::mem::take(&mut session.queued);
-            for (index, prompt) in queued.into_iter().enumerate() {
+            for (index, mut prompt) in queued.into_iter().enumerate() {
+                // The turn this event opens, pushed below.
+                prompt.turn = Some(session.turns.len());
                 session.take_prompt(prompt, index == 0);
             }
         }
@@ -3020,6 +3044,7 @@ impl Studio {
                     let prompt = Prompt {
                         at,
                         sender,
+                        turn: session.current_turn(),
                         text: prompt.clone(),
                     };
                     // A prompt with its running turn's id is the next turn's (danielrispler/Falinks#434, decision 4).
