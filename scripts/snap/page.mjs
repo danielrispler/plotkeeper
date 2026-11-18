@@ -5,7 +5,12 @@
 export const stubSource = (fixture) => `window.__TAURI__ = (() => {
   const fixture = ${JSON.stringify(fixture)};
   const listeners = {};
-  const listen = async (name, handler) => ((listeners[name] ??= []).push(handler), () => {});
+  // The app's errors are the fixture's appErrors key (none by default), sent on \`log://log\` as its Webview target sends them.
+  const listen = async (name, handler) => {
+    (listeners[name] ??= []).push(handler);
+    if (name === "log://log") for (const message of fixture.appErrors ?? []) setTimeout(() => handler({ payload: { level: 5, message } }));
+    return () => {};
+  };
   // The daemon's terminals are the fixture's terminals key (none by default). A list request is answered with them, which the
   // terminals' revival waits for, and an attach with the terminal's recorded screen, as the daemon replays it at start.
   const terminals = fixture.terminals ?? [];
@@ -22,7 +27,7 @@ export const stubSource = (fixture) => `window.__TAURI__ = (() => {
     return reply ?? null;
   };
   // The UI's own log lines are not echoed back: the app's Webview target drops records from the webview. Only an app error
-  // reaches the page on \`log://log\`, and the snap fixtures have none.
+  // reaches the page on \`log://log\`.
   const log = { warn: async () => {}, error: async () => {} };
   return { event: { listen }, core: { invoke }, log };
 })();`;

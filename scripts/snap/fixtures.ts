@@ -186,15 +186,17 @@ export const fixtures = {
   // Errors in the notice line (#191): two errors and the dismiss control, beside a settings error.
   noticeErrors() {
     const snapScript = `
-      window.__TAURI__.log.error("save_cards: the card store did not save (No space left on device)");
-      window.__TAURI__.log.error("delete_session: could not remove the worktree /w/plotkeeper/.claude/worktrees/issue-191-notice-errors-with-a-very-long-name");
       await new Promise((r) => setTimeout(r, 100));
       const notice = document.getElementById("notice");
       const box = notice.getBoundingClientRect();
       const button = document.getElementById("notice-dismiss").getBoundingClientRect();
       if (notice.hidden || notice.textContent.split("\\n").length !== 3) log("snap:fail the notice line does not hold the settings error and the two errors");
       if (button.right > innerWidth || box.right > button.left) log("snap:fail the notice line or its dismiss control is clipped");`;
-    return { ...list(), settings_files: { settings: "{ bad", keymap: null }, snapScript };
+    const appErrors = [
+      "save_cards: the card store did not save (No space left on device)",
+      "delete_session: could not remove the worktree /w/plotkeeper/.claude/worktrees/issue-191-notice-errors-with-a-very-long-name",
+    ];
+    return { ...list(), settings_files: { settings: "{ bad", keymap: null }, appErrors, snapScript };
   },
   branchOnce,
   pullEnabled: pullMain({}, false),
