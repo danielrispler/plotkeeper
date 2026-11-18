@@ -2,11 +2,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { initial, reload, reloadedZoom, zoomed } from "../../dist/settings.js";
-import { settingsPage as pageOf, stepped } from "../../dist/settings-page.js";
+import { newValue, settingsPage as pageOf, stepped } from "../../dist/settings-page.js";
 
 // The stylesheet's terminal size, which the window reads from `--size-mono`.
 const SHEET = 12.5;
 const settingsPage = (files) => pageOf(files, SHEET);
+const settingsPageAt = (sheet, files) => pageOf(files, sheet);
 const load = (settings, previous = initial) => reload(previous, { settings, keymap: null });
 const rows = (page) => page.sections.flatMap((section) => section.rows);
 const row = (page, title) => rows(page).find((r) => r.title === title);
@@ -106,7 +107,33 @@ test("steppers stay within their bounds and step without float noise", () => {
   assert.deepEqual([size.min, size.max], [8, 40]);
   assert.equal(stepped({ ...size, value: 40 }, 1), 40);
   assert.equal(stepped({ ...size, value: 8 }, -1), 8);
-  assert.equal(stepped(size, 1), 13.5);
+  // An unset size shows the stylesheet's 12.5: the first step goes to a whole number.
+  assert.equal(stepped(size, 1), 13);
+  assert.equal(stepped(size, -1), 12);
+  assert.equal(stepped({ ...size, value: 13 }, 1), 14);
+  assert.equal(stepped({ ...size, value: 13 }, -1), 12);
+  assert.equal(stepped({ ...zoom, value: 1.15 }, 1), 1.2);
+  assert.equal(stepped({ ...zoom, value: 1.15 }, -1), 1.1);
+});
+
+test("a control's change gives the value to write from the row as it is now, and the row's default gives none, so the key is removed", () => {
+  const page = settingsPage(load(`{ "zoom": 1.1, "sounds": false, "summaries": { "model": "opus" } }`));
+  assert.equal(newValue(row(page, "Default zoom"), "up"), 1.2);
+  assert.equal(newValue(row(page, "Default zoom"), "down"), null, "1.0 is the default");
+  assert.equal(newValue(row(page, "Sounds"), "toggle"), null, "back on is the default");
+  assert.equal(newValue(row(page, 'Notify "your turn" while focused'), "toggle"), true);
+  assert.equal(newValue(row(page, "Model"), "select", "sonnet"), "sonnet");
+  assert.equal(newValue(row(page, "Model"), "select", "haiku"), null, "Haiku is the default");
+  assert.equal(newValue(row(page, "Effort"), "select", ""), null, "Default is the default");
+  assert.equal(newValue(row(page, "Effort"), "select", "high"), "high");
+  assert.equal(newValue(row(page, "Model"), "reset"), null);
+  // Two quick clicks on +, each from the row the first one wrote, reach 1.2 and 1.3.
+  const first = newValue(row(page, "Default zoom"), "up");
+  const next = row(settingsPage(load(`{ "zoom": ${first} }`)), "Default zoom");
+  assert.equal(newValue(next, "up"), 1.3);
+  // A font size stepped to the stylesheet's own whole size is the default too.
+  const size = row(settingsPageAt(12, load(`{ "terminal": { "font_size": 13 } }`)), "Terminal font size");
+  assert.equal(newValue(size, "down"), null);
 });
 
 test("the model dropdown offers Haiku, Sonnet, Opus and Fable, and a model from the file that is not listed is its own selected entry", () => {

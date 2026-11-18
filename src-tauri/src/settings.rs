@@ -26,10 +26,17 @@ pub fn settings_files() -> serde_json::Value {
     serde_json::json!({ "settings": settings, "keymap": keymap })
 }
 
-/// Opens one of the two files in Daniel's editor (⌘,, danielrispler/Falinks#575), first creating it empty when missing; an
-/// empty file is the defaults.
-fn open_in_editor(file: usize, editor: Option<Vec<String>>) -> Result<(), String> {
-    let path = paths().ok_or("no home folder")?[file].clone();
+/// One of the two files, in the order of `NAMES`.
+#[derive(Clone, Copy)]
+enum Kind {
+    Settings,
+    Keymap,
+}
+
+/// Opens one of the two files in Daniel's editor (`studio::OpenSettingsFile`, the settings page's rows), first creating it
+/// empty when missing; an empty file is the defaults.
+fn open_in_editor(kind: Kind, editor: Option<Vec<String>>) -> Result<(), String> {
+    let path = paths().ok_or("no home folder")?[kind as usize].clone();
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
@@ -49,13 +56,13 @@ fn open_in_editor(file: usize, editor: Option<Vec<String>>) -> Result<(), String
 /// Opens `settings.json` (`studio::OpenSettingsFile`, and the settings page's row).
 #[tauri::command(async)]
 pub fn open_settings(editor: Option<Vec<String>>) -> Result<(), String> {
-    open_in_editor(0, editor)
+    open_in_editor(Kind::Settings, editor)
 }
 
 /// Opens `keymap.json`, the same way.
 #[tauri::command(async)]
 pub fn open_keymap(editor: Option<Vec<String>>) -> Result<(), String> {
-    open_in_editor(1, editor)
+    open_in_editor(Kind::Keymap, editor)
 }
 
 /// `text` with the setting at `path` set to `value`, or removed when `value` is none, as one minimal edit that leaves
@@ -119,6 +126,41 @@ fn edit_text(
     Ok(root.to_string())
 }
 
+/// Where a write to `file` goes: the end of a chain of symbolic links (dotfiles keep `settings.json` as one), which may not
+/// exist yet.
+fn resolved(file: &Path) -> PathBuf {
+    let mut at = file.to_path_buf();
+    // A loop of links gives up after as many steps as the system follows.
+    for _ in 0..40 {
+        let Ok(to) = fs::read_link(&at) else { break };
+        at = at.parent().unwrap_or(Path::new("")).join(to);
+    }
+    at
+}
+
+/// Saves `text` as `file` whole: written beside it and renamed over it, so a crash never leaves it cut short. A link is
+/// written through to its target and stays a link.
+fn save(file: &Path, text: &str) -> Result<(), String> {
+    let target = resolved(file);
+    if let Some(dir) = target.parent() {
+        fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let mut name = target.file_name().unwrap_or_default().to_os_string();
+    name.push(format!(".{}.tmp", std::process::id()));
+    let temp = target.with_file_name(name);
+    let written = fs::write(&temp, text)
+        .and_then(|()| match fs::metadata(&target) {
+            // The file keeps the mode it had.
+            Ok(meta) => fs::set_permissions(&temp, meta.permissions()),
+            Err(_) => Ok(()),
+        })
+        .and_then(|()| fs::rename(&temp, &target));
+    if written.is_err() {
+        let _ = fs::remove_file(&temp);
+    }
+    written.map_err(|e| e.to_string())
+}
+
 /// The write: edits `file`'s text as `edit_text` does and saves it, returning the new text. `expected` is the text the page last
 /// read (none: no file); a file that differs now, such as one saved from an editor meanwhile, is refused and left as it
 /// was, so the page can show the fresh text and Daniel try again. A missing file is created.
@@ -134,20 +176,18 @@ fn write_in(
         Err(e) => return Err(e.to_string()),
     };
     if now != expected.unwrap_or_default() {
-        return Err("settings.json changed since the page read it: try again".into());
+        let name = file.file_name().unwrap_or_default().to_string_lossy();
+        return Err(format!("{name} changed since the page read it: try again"));
     }
     let edited = edit_text(&now, path, value)?;
     if edited != now {
-        if let Some(dir) = file.parent() {
-            fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-        }
-        fs::write(file, &edited).map_err(|e| e.to_string())?;
+        save(file, &edited)?;
     }
     Ok(edited)
 }
 
 /// Sets the setting at `path`, such as `["terminal", "font_size"]`, to `value` in `settings.json`, or removes it when `value`
-/// is none (the settings page, danielrispler/plotkeeper#195). `expected` is the text the page last read. Returns the new text,
+/// is none (the settings page, #195). `expected` is the text the page last read. Returns the new text,
 /// or why the write was refused; the written file reaches the window through `watch` like any save.
 #[tauri::command(async)]
 pub fn write_setting(
@@ -393,6 +433,63 @@ mod tests {
             write_in(&file, Some(broken), &path(&["sounds"]), Some(&json!(false))).unwrap_err();
         assert!(refused.contains("could not be parsed"), "{refused}");
         assert_eq!(std::fs::read_to_string(&file).unwrap(), broken);
+    }
+
+    #[test]
+    fn a_write_replaces_the_file_whole_and_leaves_nothing_beside_it() {
+        use std::os::unix::fs::MetadataExt;
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("settings.json");
+        std::fs::write(&file, "{ \"sounds\": true }").unwrap();
+        let before = std::fs::metadata(&file).unwrap().ino();
+        write_in(
+            &file,
+            Some("{ \"sounds\": true }"),
+            &path(&["sounds"]),
+            Some(&json!(false)),
+        )
+        .unwrap();
+        // A new file renamed over the old one, so a crash mid-write never leaves a truncated settings.json.
+        assert_ne!(std::fs::metadata(&file).unwrap().ino(), before);
+        let names: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names, ["settings.json"]);
+    }
+
+    #[test]
+    fn a_settings_file_that_is_a_symlink_is_written_through_and_stays_a_link() {
+        let dir = tempfile::tempdir().unwrap();
+        let dotfiles = dir.path().join("dotfiles");
+        std::fs::create_dir(&dotfiles).unwrap();
+        let target = dotfiles.join("settings.json");
+        std::fs::write(&target, "{ \"sounds\": true }").unwrap();
+        let link = dir.path().join("settings.json");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        write_in(
+            &link,
+            Some("{ \"sounds\": true }"),
+            &path(&["sounds"]),
+            Some(&json!(false)),
+        )
+        .unwrap();
+        assert!(std::fs::symlink_metadata(&link).unwrap().is_symlink());
+        assert_eq!(std::fs::read_link(&link).unwrap(), target);
+        assert_eq!(
+            std::fs::read_to_string(&target).unwrap(),
+            "{ \"sounds\": false }"
+        );
+        // A relative link, as dotfile managers make, is followed from the link's folder.
+        let relative = dir.path().join("keymap.json");
+        std::os::unix::fs::symlink("dotfiles/keymap.json", &relative).unwrap();
+        std::fs::write(dotfiles.join("keymap.json"), "{}").unwrap();
+        write_in(&relative, Some("{}"), &path(&["zoom"]), Some(&json!(1.5))).unwrap();
+        assert!(std::fs::symlink_metadata(&relative).unwrap().is_symlink());
+        assert_eq!(
+            parsed(&std::fs::read_to_string(dotfiles.join("keymap.json")).unwrap()),
+            json!({ "zoom": 1.5 })
+        );
     }
 
     #[test]

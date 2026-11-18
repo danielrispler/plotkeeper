@@ -128,7 +128,7 @@ const setZoom = (to: number) => {
   invoke("set_zoom", { zoom }).then(layout, (e) => console.warn(e));
 };
 // The keyboard spine (danielrispler/Falinks#575): ⌘] and ⌘[ step through the sessions, ⌘J goes to the next needs-you, else the next unseen, ↑
-// and ↓ move in the list, 1–4 answer the docked card, ⌘N starts a session, ⌘, opens `settings.json`
+// and ↓ move in the list, 1–4 answer the docked card, ⌘N starts a session, ⌘, opens the settings page
 // and ⌘⇧P opens the palette of every action here.
 const inSidebar = () => sidebarOrder(knownProjects(), foundWorkspaces(), studio.listed);
 const selectedId = () => studio.selection?.session.id ?? null;
@@ -247,14 +247,18 @@ window.addEventListener("keydown", (event) => {
   const typing = target.isContentEditable || target.matches?.("input, textarea, select") === true;
   const inList = target.closest?.(".list") != null;
   const inTerminal = target.closest?.("#terminal") != null;
-  const action = windowBinding(studio.files.keymap, event, typing, inList, !typing && !inTerminal && answerable());
+  const action = windowBinding(studio.files.keymap, event, typing, inList, !typing && !inTerminal && answerable(), settingsPageOpen());
   if (!run(actions, action)) return;
   if (action !== "studio::Dismiss") event.preventDefault();
 });
 
 // `settings.json` and `keymap.json`, at start and each time one is saved. A file that does not parse
 // is reported in the notice line and the last good one stays in effect.
+let applied = false;
 function applySettings(files: SettingsFiles) {
+  // A write's returned text and then the watcher's report of the same file are one change: the second does nothing.
+  if (applied && files.settings === studio.texts.settings && files.keymap === studio.texts.keymap) return;
+  applied = true;
   const previous = studio.files.settings;
   studio.texts = files;
   studio.files = reload(studio.files, files);

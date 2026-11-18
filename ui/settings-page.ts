@@ -7,13 +7,16 @@ import { titled } from "./keys.js";
 import { FONT_MAX, FONT_MIN, initial, ZOOM_MAX, ZOOM_MIN, type Files, type Settings, type SettingsFiles } from "./settings.js";
 import { studio } from "./state.js";
 
+// The two files the page opens.
+type FileName = "settings" | "keymap";
+
 // A row's key in `settings.json`, such as `["terminal", "font_size"]`, and the control that sets it. A new control adds its kind here
 // and to `Row`, and its rows to `SECTIONS`; `settingsPage` and the write stay as they are.
 type Spec = { title: string; description: string } & (
   | { kind: "toggle"; path: string[] }
   | { kind: "stepper"; path: string[]; min: number; max: number; step: number }
   | { kind: "select"; path: string[]; options: [value: string, label: string][] }
-  | { kind: "open"; file: "settings" | "keymap" }
+  | { kind: "open"; file: FileName }
 );
 
 // The page's rows, hand-written as Zed's and herdr's are. A setting's default is the UI's own (`initial`), so one source decides
@@ -67,14 +70,14 @@ const SECTIONS: { heading: string; rows: Spec[] }[] = [
   },
 ];
 
-// What a row shows. `value` is the value in effect, a key of the wrong type being its default; `changed`: it differs from the default,
-// so the undo icon shows. `disabled`: the file does not parse.
+// What a row shows. `value` is the value in effect, a key of the wrong type being its default; `defaultValue` is the default, and
+// `changed`: the value differs from it, so the undo icon shows. `disabled`: the file does not parse.
 export type Row = { title: string; description: string; disabled: boolean } & (
-  | { control: "toggle"; path: string[]; value: boolean; changed: boolean }
-  | { control: "stepper"; path: string[]; value: number; changed: boolean; min: number; max: number; step: number }
+  | { control: "toggle"; path: string[]; value: boolean; defaultValue: boolean; changed: boolean }
+  | { control: "stepper"; path: string[]; value: number; defaultValue: number; changed: boolean; min: number; max: number; step: number }
   // `options` holds a value from the file that the list lacks, as its own entry, so opening the page never changes it.
-  | { control: "select"; path: string[]; value: string; changed: boolean; options: { value: string; label: string }[] }
-  | { control: "open"; file: "settings" | "keymap" }
+  | { control: "select"; path: string[]; value: string; defaultValue: string; changed: boolean; options: { value: string; label: string }[] }
+  | { control: "open"; file: FileName }
 );
 export type Page = { error: string | null; sections: { heading: string; rows: Row[] }[] };
 
@@ -83,9 +86,22 @@ const valueAt = (settings: Settings, path: string[]): unknown =>
 
 export const BROKEN = "settings.json has errors: fix it first";
 
-// The value a stepper's button gives, `by` steps up or down from the row's value, inside its bounds, to one decimal.
-export const stepped = ({ value, min, max, step }: { value: number; min: number; max: number; step: number }, by: 1 | -1) =>
-  Math.min(max, Math.max(min, Math.round((value + by * step) * 10) / 10));
+// The value a stepper's button gives, `by` steps up or down from the row's value, inside its bounds, to one decimal. A value
+// between two steps (the stylesheet's 12.5) goes to the next whole step in that direction, 13 or 12.
+export const stepped = ({ value, min, max, step }: { value: number; min: number; max: number; step: number }, by: 1 | -1) => {
+  const at = Math.round((value / step) * 1e6) / 1e6;
+  const to = Number.isInteger(at) ? at + by : by === 1 ? Math.ceil(at) : Math.floor(at);
+  return Math.min(max, Math.max(min, Math.round(to * step * 10) / 10));
+};
+
+// What a control's change writes to the file, from the row as it is when the write runs: null removes the key, which is what a
+// reset does and what a change to the row's own default does too, so the page never writes a key it cannot undo. `picked` is the
+// dropdown's new value.
+export function newValue(row: Row, action: string, picked = ""): boolean | number | string | null {
+  if (row.control === "open" || action === "reset") return null;
+  const value = row.control === "toggle" ? !row.value : row.control === "stepper" ? stepped(row, action === "up" ? 1 : -1) : picked;
+  return value === row.defaultValue ? null : value;
+}
 
 // `sheetSize` is the stylesheet's terminal size, what an unset font size shows.
 export function settingsPage({ settings, broken }: Files, sheetSize: number): Page {
@@ -96,12 +112,15 @@ export function settingsPage({ settings, broken }: Files, sheetSize: number): Pa
     const { path } = spec;
     // A setting with no default of its own (an unset font size) is the stylesheet's.
     const value = valueAt(settings, path) ?? sheetSize;
-    const changed = value !== (valueAt(initial.settings, path) ?? sheetSize);
-    if (spec.kind === "toggle") return { ...base, control: "toggle", path, value: value as boolean, changed };
-    if (spec.kind === "stepper") return { ...base, control: "stepper", path, value: value as number, changed, min: spec.min, max: spec.max, step: spec.step };
+    const defaultValue = valueAt(initial.settings, path) ?? sheetSize;
+    const changed = value !== defaultValue;
+    if (spec.kind === "toggle") return { ...base, control: "toggle", path, value: value as boolean, defaultValue: defaultValue as boolean, changed };
+    if (spec.kind === "stepper") {
+      return { ...base, control: "stepper", path, value: value as number, defaultValue: defaultValue as number, changed, min: spec.min, max: spec.max, step: spec.step };
+    }
     const options = spec.options.map(([value, label]) => ({ value, label }));
     if (!options.some((o) => o.value === value)) options.push({ value: value as string, label: value as string });
-    return { ...base, control: "select", path, value: value as string, changed, options };
+    return { ...base, control: "select", path, value: value as string, defaultValue: defaultValue as string, changed, options };
   };
   return { error: broken ? BROKEN : null, sections: SECTIONS.map(({ heading, rows }) => ({ heading, rows: rows.map(row) })) };
 }
@@ -110,8 +129,9 @@ export function settingsPage({ settings, broken }: Files, sheetSize: number): Pa
 
 const UNDO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 010 12h-3"/></svg>';
 
-// Why the last write was refused, shown at the top of the page until the next change.
-let refused: string | null = null;
+// Why the last write was refused and the settings text it was refused against, shown at the top of the page until the next
+// change or until the file's text changes, as an edit saved from an editor does.
+let refused: { why: string; at: string | null } | null = null;
 // The writes in the order they were made: a second change waits for the first, so it carries the text the first wrote.
 let queue: Promise<void> = Promise.resolve();
 // What the window does with the text a write returned: parse it as a reload would, without waiting for the file's change.
@@ -122,6 +142,16 @@ const current = () => settingsPage(studio.files, parseFloat(getComputedStyle(doc
 const dialog = () => element("settings-dialog") as HTMLDialogElement;
 const keyOf = (row: Row) => (row.control === "open" ? `open:${row.file}` : row.path.join("."));
 
+// A button (`more` is its classes beside the component's) for the page's `action`, on the row `key`: it works through its dataset, which the page's listeners read.
+function button(label: string, more: string, action: string, key: string, disabled: boolean): HTMLElement {
+  const b = text("button", label, `btn ${more}`);
+  b.setAttribute("type", "button");
+  b.dataset.action = action;
+  b.dataset.key = key;
+  b.toggleAttribute("disabled", disabled);
+  return b;
+}
+
 function drawRow(row: Row): HTMLElement {
   const node = text("div", "", "setting");
   node.dataset.key = keyOf(row);
@@ -130,23 +160,15 @@ function drawRow(row: Row): HTMLElement {
   const info = text("div", "", "setting-text");
   info.append(title, text("div", row.description, "setting-description"));
   if (row.control === "open") {
-    const button = text("button", "Open", "btn open");
-    button.setAttribute("type", "button");
-    button.dataset.action = "open";
-    button.dataset.key = keyOf(row);
-    button.toggleAttribute("disabled", row.disabled);
-    button.setAttribute("aria-label", row.title);
-    node.append(info, button);
+    const open = button("Open", "open", "open", keyOf(row), row.disabled);
+    open.setAttribute("aria-label", row.title);
+    node.append(info, open);
     return node;
   }
   if (row.changed) {
-    const undo = text("button", "", "btn quiet reset");
-    undo.setAttribute("type", "button");
-    undo.dataset.action = "reset";
-    undo.dataset.key = keyOf(row);
+    const undo = button("", "quiet reset", "reset", keyOf(row), row.disabled);
     undo.title = "Reset to default";
     undo.setAttribute("aria-label", `Reset ${row.title} to default`);
-    undo.toggleAttribute("disabled", row.disabled);
     undo.innerHTML = UNDO;
     title.append(undo);
   }
@@ -169,26 +191,18 @@ function control(row: Exclude<Row, { control: "open" }>): HTMLElement {
   }
   if (row.control === "stepper") {
     const group = text("div", "", "stepper");
-    const button = (by: 1 | -1) => {
-      const b = text("button", by === 1 ? "+" : "−", "btn quiet");
-      b.setAttribute("type", "button");
+    const step = (by: 1 | -1) => {
+      const b = button(by === 1 ? "+" : "−", "quiet", by === 1 ? "up" : "down", keyOf(row), row.disabled || stepped(row, by) === row.value);
       b.setAttribute("aria-label", `${by === 1 ? "Increase" : "Decrease"} ${row.title}`);
-      b.dataset.action = by === 1 ? "up" : "down";
-      b.dataset.key = keyOf(row);
-      b.toggleAttribute("disabled", row.disabled || stepped(row, by) === row.value);
       return b;
     };
-    group.append(button(-1), text("span", String(row.value), "stepper-value"), button(1));
+    group.append(step(-1), text("span", String(row.value), "stepper-value"), step(1));
     return group;
   }
-  const toggle = text("button", "", "btn switch");
-  toggle.setAttribute("type", "button");
+  const toggle = button("", "switch", "toggle", keyOf(row), row.disabled);
   toggle.setAttribute("role", "switch");
   toggle.setAttribute("aria-checked", String(row.value));
   toggle.setAttribute("aria-label", row.title);
-  toggle.dataset.action = "toggle";
-  toggle.dataset.key = keyOf(row);
-  toggle.toggleAttribute("disabled", row.disabled);
   return toggle;
 }
 
@@ -199,15 +213,11 @@ export function drawSettingsPage() {
   if (page.error !== null) {
     const line = text("div", "", "broken");
     line.dataset.key = "broken";
-    const open = text("button", "Open settings.json", "btn");
-    open.setAttribute("type", "button");
-    open.dataset.action = "open";
-    open.dataset.key = "open:settings";
-    line.append(text("span", page.error), open);
+    line.append(text("span", page.error), button("Open settings.json", "", "open", "open:settings", false));
     lines.push(line);
   }
   if (refused !== null) {
-    const line = text("div", refused, "refused");
+    const line = text("div", refused.why, "refused");
     line.dataset.key = "refused";
     lines.push(line);
   }
@@ -220,21 +230,26 @@ export function drawSettingsPage() {
 
 const rowFor = (key: string) => current().sections.flatMap((s) => s.rows).find((row) => keyOf(row) === key);
 
-// Writes `value` to `path` in `settings.json`, or removes the key when null, from the text the window last read.
-function write(path: string[], value: boolean | number | string | null) {
+// Changes the row `key` as `action` says (`newValue`), saving it to `settings.json` from the text the window last read. The value is
+// worked out when the write runs, from the row as the write before it left it, so two quick clicks on + step twice.
+function write(key: string, action: string, picked?: string) {
   queue = queue.then(async () => {
+    const row = rowFor(key);
+    if (!row || row.control === "open" || row.disabled) return;
+    const expected = studio.texts.settings;
     try {
-      const written = await invoke("write_setting", { expected: studio.texts.settings, path, value });
+      const written = await invoke("write_setting", { expected, path: row.path, value: newValue(row, action, picked) });
       refused = null;
       saved({ ...studio.texts, settings: written });
     } catch (e) {
-      refused = String(e);
+      // A newer text that arrived meanwhile has already answered the refusal.
+      refused = studio.texts.settings === expected ? { why: String(e), at: expected } : null;
     }
     drawSettingsPage();
   });
 }
 
-function open(file: "settings" | "keymap") {
+function openFile(file: FileName) {
   const command = file === "settings" ? "open_settings" : "open_keymap";
   invoke(command, { editor: studio.files.settings.editor }).catch((e) => console.warn(e));
 }
@@ -256,17 +271,19 @@ export function startSettingsPage(apply: (files: SettingsFiles) => void) {
   // A click on the backdrop lands on the dialog itself: the frame fills it.
   dialog().addEventListener("click", (event) => event.target === dialog() && closeSettingsPage());
   const change = (target: EventTarget | null, what: "click" | "change") => {
-    const button = (target as Element).closest<HTMLElement>("[data-action]");
-    const row = button?.dataset.key ? rowFor(button.dataset.key) : undefined;
-    if (!button || !row || (button as HTMLButtonElement).disabled) return;
-    const action = button.dataset.action;
-    if (row.control === "open") open(row.file);
-    else if (action === "reset") write(row.path, null);
-    else if (row.control === "toggle") write(row.path, !row.value);
-    else if (row.control === "stepper") write(row.path, stepped(row, action === "up" ? 1 : -1));
-    else if (row.control === "select" && what === "change") write(row.path, (button as HTMLSelectElement).value);
+    const clicked = (target as Element).closest<HTMLElement>("[data-action]");
+    const row = clicked?.dataset.key ? rowFor(clicked.dataset.key) : undefined;
+    if (!clicked || !row || (clicked as HTMLButtonElement).disabled) return;
+    const { action = "", key = "" } = clicked.dataset;
+    if (row.control === "open") openFile(row.file);
+    // A dropdown writes on its change, not on the click that opens it.
+    else if (row.control !== "select" || what === "change") write(key, action, (clicked as HTMLSelectElement).value);
   };
   element("settings-body").addEventListener("click", (event) => change(event.target, "click"));
   element("settings-body").addEventListener("change", (event) => change(event.target, "change"));
-  window.addEventListener("settings", () => dialog().open && drawSettingsPage());
+  window.addEventListener("settings", () => {
+    // The settings text changed (an edit saved elsewhere, say): a refusal against the older text no longer holds.
+    if (refused && refused.at !== studio.texts.settings) refused = null;
+    if (dialog().open) drawSettingsPage();
+  });
 }

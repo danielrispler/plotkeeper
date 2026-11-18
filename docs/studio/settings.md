@@ -15,7 +15,7 @@ Cmd+, (`studio::OpenSettings`) and the gear at the top bar's far right open the 
 
 The rest (`doctor`, `checks`, `editor`, `repository`, `quiz_trial`, `quiz_self_test`) stay in the file.
 
-Each change saves at once, by editing `settings.json` in place: the one property's text changes, so comments, trailing commas, formatting and every other key stay as they were; a missing parent object (such as `terminal`) is created, and a missing file is created with the one key. A row whose value differs from its default shows an undo icon, "Reset to default", which removes the key from the file. A key of the wrong type counts as its default.
+Each change saves at once, by editing `settings.json` in place: the one property's text changes, so comments, trailing commas, formatting and every other key stay as they were; a missing parent object (such as `terminal`) is created, and a missing file is created with the one key. A row whose value differs from its default shows an undo icon, "Reset to default", which removes the key from the file; changing a row to its default value does the same. The file is saved whole, through a symbolic link when it is one. While the page is open the window's other keys stay still: only Esc works. A key of the wrong type counts as its default.
 
 The page refuses to write in two cases, and shows the reason at its top:
 
