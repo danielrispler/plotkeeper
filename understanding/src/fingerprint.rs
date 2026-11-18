@@ -98,6 +98,9 @@ pub struct Fingerprints {
     records: HashMap<PathBuf, Record>,
     /// Each folder's worktree root, once a lookup found one; a folder with none is asked again.
     roots: HashMap<PathBuf, PathBuf>,
+    /// The Unix second of the first look, which a worktree made later counts from its creation
+    /// (danielrispler/plotkeeper#204).
+    began: Option<u64>,
 }
 
 impl Fingerprints {
@@ -140,7 +143,17 @@ impl Fingerprints {
         let log = reflog(&root).and_then(|log| fs::metadata(log).ok());
         let log = log.map_or(0, |meta| meta.len());
         let record = Record { head, files, log };
-        let previous = self.records.get(&root);
+        let began = *self.began.get_or_insert_with(now);
+        // A worktree made since the first look has no record: its base is the commit it was created at.
+        let made = (!self.records.contains_key(&root))
+            .then(|| created(&root).filter(|made| made.at > began))
+            .flatten();
+        let made = made.map(|made| Record {
+            head: Some(made.commit),
+            files: BTreeMap::new(),
+            log: made.log,
+        });
+        let previous = self.records.get(&root).or(made.as_ref());
         let found = previous.and_then(|previous| change(&root, previous, &record));
         // A commit check keeps its record only when the agent committed since its base, or when
         // `HEAD` moved and nothing is left to show, so a step that only edits does not eat its card.
@@ -154,6 +167,35 @@ impl Fingerprints {
         }
         found
     }
+}
+
+/// The Unix second now.
+fn now() -> u64 {
+    let since = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH);
+    since.map_or(0, |since| since.as_secs())
+}
+
+/// The first line of a worktree's reflog: the commit it was created at, when, and how many bytes
+/// the line takes.
+struct Created {
+    commit: String,
+    at: u64,
+    log: u64,
+}
+
+/// The first line of the reflog of `HEAD` in the worktree at `root`; `None` when it has none.
+fn created(root: &Path) -> Option<Created> {
+    let log = fs::read_to_string(reflog(root)?).ok()?;
+    let line = log.split_inclusive('\n').next()?;
+    // `<sha> <sha> <name> <<email>> <seconds> <zone>`, then a tab and the subject, when it has one.
+    let who = line.split('\t').next()?.trim_end();
+    let commit = who.split(' ').nth(1)?.into();
+    let at = who.rsplit(' ').nth(1)?.parse().ok()?;
+    Some(Created {
+        commit,
+        at,
+        log: line.len() as u64,
+    })
 }
 
 /// The path of the reflog of `HEAD` in the worktree at `root`.

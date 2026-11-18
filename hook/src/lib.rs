@@ -642,18 +642,27 @@ pub fn trees(
         }
         found
     };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64);
+    // When the turn began, in Unix milliseconds; a record from before it is kept does not say.
+    let mut began = kept["began"].as_u64();
     let mut touches = Vec::new();
     let mut end = Map::new();
     let mut start = Map::new();
     match text("agent_id") {
         None => {
+            let (before, was_ended) = (turn.prompt_id.clone(), turn.ended);
             let (ended, in_turn) = turn.take(name, text("prompt_id"), idle);
+            if turn.prompt_id != before || was_ended && !turn.ended {
+                began = Some(now);
+            }
             end = ended.iter().filter_map(|root| record(root)).collect();
             if in_turn {
                 touches = touched(&mut known);
                 for root in touches.clone() {
                     if !turn.roots.contains(&root)
-                        && let Some((root, tree)) = record(&root)
+                        && let Some((root, tree)) = first_tree(&root, began)
                     {
                         turn.roots.push(root.clone());
                         start.insert(root, tree);
@@ -662,9 +671,10 @@ pub fn trees(
             }
         }
         Some(agent) => {
-            let worker = workers
-                .entry(agent)
-                .or_insert_with(|| json!({ "prompt_id": turn.prompt_id, "roots": [] }));
+            let worker = workers.entry(agent).or_insert_with(
+                || json!({ "prompt_id": turn.prompt_id, "roots": [], "began": now }),
+            );
+            let worker_began = worker["began"].as_u64();
             let mut roots = strings(&worker["roots"]);
             // While its turn runs, that turn's end takes the trees of the worktrees it touched.
             let live = !turn.ended && worker["prompt_id"].as_str() == turn.prompt_id.as_deref();
@@ -680,7 +690,7 @@ pub fn trees(
                     }
                     if live && turn.roots.contains(&root) {
                         roots.push(root);
-                    } else if let Some((root, tree)) = record(&root) {
+                    } else if let Some((root, tree)) = first_tree(&root, worker_began) {
                         roots.push(root.clone());
                         if live {
                             turn.roots.push(root.clone());
@@ -693,7 +703,8 @@ pub fn trees(
         }
     }
     let kept = json!({
-        "prompt_id": turn.prompt_id, "roots": turn.roots, "ended": turn.ended, "workers": workers,
+        "prompt_id": turn.prompt_id, "roots": turn.roots, "ended": turn.ended, "began": began,
+        "workers": workers,
         "worktrees": known,
     });
     file.set_len(0)?;
@@ -729,6 +740,38 @@ fn prune_turns(turns: &Path) {
 /// Worktree `root`'s tree now, as a JSON pair.
 fn record(root: &str) -> Option<(String, serde_json::Value)> {
     record_tree(Path::new(root)).map(|(root, tree)| (root, tree.into()))
+}
+
+/// The commit worktree `root` was created at and the Unix second it was created, from the first
+/// line of its `HEAD` reflog (danielrispler/plotkeeper#204); `None` when it has no such line.
+pub fn creation(root: &Path) -> Option<(String, u64)> {
+    let log = git(root, &["rev-parse", "--git-path", "logs/HEAD"], None)?;
+    let log = fs::read_to_string(root.join(log)).ok()?;
+    let who = log.lines().next()?.split('\t').next()?;
+    let mut shas = who.split(' ');
+    let commit = shas.nth(1)?.to_owned();
+    // `<sha> <sha> <name> <<email>> <seconds> <zone>`
+    let mut tail = who.rsplit(' ');
+    let at = tail.nth(1)?.parse().ok()?;
+    Some((commit, at))
+}
+
+/// Worktree `root`'s start tree for a turn or worker that began at `began` (Unix milliseconds):
+/// the tree of the commit the worktree was created at when that was in a later second, otherwise
+/// its tree now.
+fn first_tree(root: &str, began: Option<u64>) -> Option<(String, serde_json::Value)> {
+    let made = creation(Path::new(root)).filter(|(_, at)| began.is_some_and(|b| *at > b / 1000));
+    let tree = made.and_then(|(commit, _)| {
+        git(
+            Path::new(root),
+            &["rev-parse", &format!("{commit}^{{tree}}")],
+            None,
+        )
+    });
+    match tree {
+        Some(tree) => Some((root.to_owned(), tree.into())),
+        None => record(root),
+    }
 }
 
 #[cfg(test)]

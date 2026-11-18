@@ -254,3 +254,134 @@ fn a_path_in_a_removed_worktree_touches_nothing_but_a_new_folder_in_a_listed_one
         "{write}"
     );
 }
+
+// A worktree made mid-turn (danielrispler/plotkeeper#204): its start is the commit it was created
+// at, which its reflog's first line gives.
+
+/// The reflog resolves to whole seconds, and a worktree counts as made later only in a later second.
+fn next_second() {
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+}
+
+/// Runs `command` as the agent would, outside the hook.
+fn run(dir: &Path, command: &str) {
+    let status = Command::new("sh")
+        .args(["-c", command])
+        .current_dir(dir)
+        .status()
+        .unwrap();
+    assert!(status.success(), "{command}");
+}
+
+/// The files that differ between trees `from` and `to`.
+fn changed(root: &Path, from: &str, to: &str) -> String {
+    git(root, &["diff", "--name-only", from, to])
+}
+
+/// The files in tree `tree`.
+fn files(root: &Path, tree: &str) -> String {
+    git(root, &["ls-tree", "-r", "--name-only", tree])
+}
+
+#[test]
+fn a_worktree_made_and_edited_by_one_command_starts_from_its_creation_commit() {
+    let scene = Scene::new("made-edited");
+    scene.hook("UserPromptSubmit", json!({ "prompt": "go" }));
+    next_second();
+    let made = scene.main.with_file_name("made");
+    let command = format!(
+        "git worktree add -q -b made {0} && echo x > {0}/new.txt",
+        made.display()
+    );
+    scene.bash(&command, json!({}));
+    run(&scene.main, &command);
+
+    let next = scene.bash(
+        &format!("ls {}", made.display()),
+        json!({ "tool_use_id": "b2" }),
+    );
+
+    let made = made.canonicalize().unwrap();
+    let root = made.to_str().unwrap();
+    let start = next["studio_turn_start"][root].as_str().unwrap();
+    assert_eq!(start, git(&made, &["rev-parse", "HEAD^{tree}"]));
+    let stop = scene.hook("Stop", json!({}));
+    let end = stop["studio_turn_end"][root].as_str().unwrap();
+    assert_eq!(changed(&made, start, end), "new.txt");
+}
+
+#[test]
+fn a_worktree_that_existed_before_the_turn_starts_from_its_files_at_first_touch() {
+    let scene = Scene::new("older");
+    let older = scene.worktree(&scene.main.with_file_name("older"));
+    fs::write(older.join("there.txt"), "t\n").unwrap();
+    next_second();
+    scene.hook("UserPromptSubmit", json!({ "prompt": "go" }));
+
+    let call = scene.bash(&format!("ls {}", older.display()), json!({}));
+
+    let root = older.to_str().unwrap();
+    let start = call["studio_turn_start"][root].as_str().unwrap();
+    assert!(files(&older, start).contains("there.txt"));
+    fs::write(older.join("new.txt"), "n\n").unwrap();
+    let stop = scene.hook("Stop", json!({}));
+    let end = stop["studio_turn_end"][root].as_str().unwrap();
+    assert_eq!(changed(&older, start, end), "new.txt");
+}
+
+#[test]
+fn a_worker_is_measured_from_its_own_first_event() {
+    let scene = Scene::new("worker-made");
+    scene.hook("UserPromptSubmit", json!({ "prompt": "go" }));
+    next_second();
+    // Made after the turn began, before the worker's first event: its files at first touch.
+    let before = scene.worktree(&scene.main.with_file_name("before"));
+    fs::write(before.join("there.txt"), "t\n").unwrap();
+    let first = scene.bash(
+        &format!("ls {}", before.display()),
+        json!({ "agent_id": "w1" }),
+    );
+    let before_root = before.to_str().unwrap();
+    let start = first["studio_turn_start"][before_root].as_str().unwrap();
+    assert!(files(&before, start).contains("there.txt"));
+    next_second();
+    // Made after the worker's first event.
+    let made = scene.main.with_file_name("made");
+    let command = format!(
+        "git worktree add -q -b made {0} && echo x > {0}/new.txt",
+        made.display()
+    );
+    scene.bash(&command, json!({ "agent_id": "w1", "tool_use_id": "b2" }));
+    run(&scene.main, &command);
+
+    let next = scene.bash(
+        &format!("ls {}", made.display()),
+        json!({ "agent_id": "w1", "tool_use_id": "b3" }),
+    );
+
+    let made = made.canonicalize().unwrap();
+    let root = made.to_str().unwrap();
+    let start = next["studio_turn_start"][root].as_str().unwrap();
+    assert_eq!(start, git(&made, &["rev-parse", "HEAD^{tree}"]));
+    let stop = scene.hook("Stop", json!({}));
+    let end = stop["studio_turn_end"][root].as_str().unwrap();
+    assert_eq!(changed(&made, start, end), "new.txt");
+}
+
+#[test]
+fn a_worktree_with_no_first_reflog_line_starts_from_its_files_at_first_touch() {
+    let scene = Scene::new("no-reflog");
+    scene.hook("UserPromptSubmit", json!({ "prompt": "go" }));
+    next_second();
+    let made = scene.worktree(&scene.main.with_file_name("made"));
+    fs::write(made.join("new.txt"), "n\n").unwrap();
+    let log = git(&made, &["rev-parse", "--absolute-git-dir"]);
+    fs::write(Path::new(&log).join("logs/HEAD"), "").unwrap();
+
+    let call = scene.bash(&format!("ls {}", made.display()), json!({}));
+
+    let start = call["studio_turn_start"][made.to_str().unwrap()]
+        .as_str()
+        .unwrap();
+    assert!(files(&made, start).contains("new.txt"));
+}
