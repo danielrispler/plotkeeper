@@ -270,8 +270,28 @@ pub struct SessionCards {
     /// The cards added before, or before the store kept the time.
     #[serde(serialize_with = "without_diffs")]
     pub older: Vec<StoredCard>,
+    /// A session's workers' cards, each with the turn of the session's rail it belongs to
+    /// (danielrispler/plotkeeper#212); empty in a worker's own view.
+    pub workers: Vec<PlacedCard>,
     /// Its decision history, oldest first (danielrispler/Falinks#461, decision 17).
     pub decisions: Vec<Decision>,
+}
+
+/// A worker's card with the turn of its session's rail it belongs to, `None` when the session has no turn for it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlacedCard {
+    pub card: StoredCard,
+    pub turn: Option<usize>,
+}
+
+impl Serialize for PlacedCard {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut placed = s.serialize_struct("PlacedCard", 2)?;
+        placed.serialize_field("card", &ShownCard::of(&self.card))?;
+        placed.serialize_field("turn", &self.turn)?;
+        placed.end()
+    }
 }
 
 /// A stored card as the pane reads it: its request without the diff and base, which the pane never
@@ -301,27 +321,33 @@ struct ShownRequest<'a> {
     check: &'a Option<String>,
 }
 
+impl<'a> ShownCard<'a> {
+    fn of(kept: &'a StoredCard) -> Self {
+        ShownCard {
+            request: ShownRequest {
+                session_id: &kept.request.session_id,
+                id: &kept.request.id,
+                prompt: kept.request.prompt,
+                agent: &kept.request.agent,
+                changed_by: &kept.request.changed_by,
+                workers: &kept.request.workers,
+                check: &kept.request.check,
+            },
+            card: &kept.card,
+            added_at: kept.added_at,
+            shown_at: kept.shown_at,
+            guess: &kept.guess,
+            key_wrong: kept.key_wrong,
+            more: &kept.more,
+            rating: &kept.rating,
+            check_result: kept.check_result,
+            taps: &kept.taps,
+        }
+    }
+}
+
 fn without_diffs<S: serde::Serializer>(cards: &[StoredCard], s: S) -> Result<S::Ok, S::Error> {
-    s.collect_seq(cards.iter().map(|kept| ShownCard {
-        request: ShownRequest {
-            session_id: &kept.request.session_id,
-            id: &kept.request.id,
-            prompt: kept.request.prompt,
-            agent: &kept.request.agent,
-            changed_by: &kept.request.changed_by,
-            workers: &kept.request.workers,
-            check: &kept.request.check,
-        },
-        card: &kept.card,
-        added_at: kept.added_at,
-        shown_at: kept.shown_at,
-        guess: &kept.guess,
-        key_wrong: kept.key_wrong,
-        more: &kept.more,
-        rating: &kept.rating,
-        check_result: kept.check_result,
-        taps: &kept.taps,
-    }))
+    s.collect_seq(cards.iter().map(ShownCard::of))
 }
 
 /// The last 30 minutes (danielrispler/Falinks#369, decision 18).
@@ -449,8 +475,26 @@ impl CardStore {
             design,
             recent,
             older,
+            workers: Vec::new(),
             decisions,
         }
+    }
+
+    /// `session`'s cards and brief, and its workers' cards each with its turn: what its rail shows.
+    pub fn rail_cards(&self, session: &Session, now: u64) -> SessionCards {
+        let mut shown = self.session_cards(&session.agent.id, now);
+        shown.workers = self
+            .cards
+            .iter()
+            .filter(|kept| kept.request.session_id == session.agent.id)
+            .filter(|kept| kept.request.agent.is_some())
+            .filter(|kept| session.subagent(kept.request.owner()).is_some())
+            .map(|kept| PlacedCard {
+                turn: session.worker_card_turn(&kept.request),
+                card: kept.clone(),
+            })
+            .collect();
+        shown
     }
 
     /// What `session`'s row says at `now`, in Unix milliseconds (danielrispler/Falinks#410, decision 27): while it needs

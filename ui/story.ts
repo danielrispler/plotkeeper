@@ -37,6 +37,7 @@ import {
   type Selection,
   type SessionState,
   type Session,
+  type PlacedCard,
   type StoredCard,
   type Tap,
   type Subagent,
@@ -277,13 +278,14 @@ export const storyOf = (session: Session, agent: unknown) => (agent === null && 
 
 // What the rail draws for `selected`: its latest turn, which "now" tells, and the feed. Every card is inside its turn. A status-only row
 // (danielrispler/Falinks#560) has no turns or cards to show.
-export function railOf({ session, agent }: Selection, all: StoredCard[]) {
+export function railOf({ session, agent }: Selection, all: StoredCard[], placed: PlacedCard[] = []) {
   if (session.status_only) return { latest: null, blocks: [] };
   const cards = all;
   const own = agent === null;
   const turns = own ? session.turns : [];
   const blocks = feedTurns(turns, {
     cards,
+    placed: own ? placed : [],
     // A subagent's view: its session's checks and subagents are not its own.
     checks: own ? session.checks : [],
     agents: own ? session.agents : [],
@@ -318,7 +320,7 @@ export type FeedTurn = {
 // one last block, so nothing is lost.
 export function feedTurns(
   turns: Turn[],
-  { cards, checks, agents, questions }: Pick<FeedTurn, "cards" | "checks" | "agents" | "questions">,
+  { cards, placed = [], checks, agents, questions }: Pick<FeedTurn, "cards" | "checks" | "agents" | "questions"> & { placed?: PlacedCard[] },
 ): FeedTurn[] {
   const blocks: FeedTurn[] = [...turns.map((turn, index) => ({ index, turn })), { index: null, turn: null }].map((b) => ({
     ...b,
@@ -330,6 +332,12 @@ export function feedTurns(
   const at = (index: number | null) => blocks[index !== null && index < turns.length ? index : turns.length];
   // Each list is oldest first; the blocks show the newest first.
   for (const card of [...cards].reverse()) at(turnAt(turns, cardTime(card.request.id))).cards.push(card);
+  // A worker's card is in the turn the core placed it in (danielrispler/plotkeeper#212), else where its time falls.
+  for (const { card, turn } of placed) {
+    const block = at(turn ?? turnAt(turns, cardTime(card.request.id)));
+    block.cards.push(card);
+    block.cards.sort((a, b) => cardTime(b.request.id) - cardTime(a.request.id));
+  }
   for (const check of [...checks].reverse()) at(check.turn).checks.push(check);
   for (const agent of [...agents].sort((a, b) => b.started_at - a.started_at)) at(agent.turn).agents.push(agent);
   for (const question of [...questions].reverse()) at(question.turn).questions.push(question);
@@ -615,7 +623,7 @@ const turnElement = (session: Session, block: FeedTurn, now: Now | null) =>
 // Draws "now" and the feed from the selection and the cards the shell last sent.
 export function drawFeed() {
   const selected = studio.selection;
-  const { recent, older } = studio.cards;
+  const { recent, older, workers } = studio.cards;
   const all = [...older, ...recent];
   if (selected === null) {
     drawNow(null, null);
@@ -625,7 +633,7 @@ export function drawFeed() {
   }
   const session = selected.session;
   const own = selected.agent === null;
-  const { latest, blocks } = railOf(selected, all);
+  const { latest, blocks } = railOf(selected, all, workers);
   const now = drawNow(session, latest);
   // The banner sits above the newest turn, and holds the Brief while it shows.
   const last = session.turns.at(-1);
