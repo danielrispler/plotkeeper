@@ -14,7 +14,8 @@ type FileName = "settings" | "keymap";
 // and to `Row`, and its rows to `SECTIONS`; `settingsPage` and the write stay as they are.
 type Spec = { title: string; description: string } & (
   | { kind: "toggle"; path: string[] }
-  | { kind: "stepper"; path: string[]; min: number; max: number; step: number }
+  // `zero`: what the stepper shows at 0, for a setting that 0 turns off.
+  | { kind: "stepper"; path: string[]; min: number; max: number; step: number; zero?: string }
   | { kind: "select"; path: string[]; options: [value: string, label: string][] }
   | { kind: "open"; file: FileName }
 );
@@ -34,10 +35,14 @@ const SECTIONS: { heading: string; rows: Spec[] }[] = [
     rows: [
       { kind: "toggle", path: ["sounds"], title: "Sounds", description: "Play a sound when a session needs you or it is your turn." },
       {
-        kind: "toggle",
-        path: ["notifications", "while_focused"],
-        title: 'Notify "your turn" while focused',
-        description: "Also notify while the window is focused, for any session but the selected one.",
+        kind: "stepper",
+        path: ["context_warning"],
+        min: 0,
+        max: 100,
+        step: 5,
+        zero: "Off",
+        title: "Warn at context share",
+        description: "Note a session once its context share passes this percent; Off never does.",
       },
     ],
   },
@@ -74,7 +79,7 @@ const SECTIONS: { heading: string; rows: Spec[] }[] = [
 // `changed`: the value differs from it, so the undo icon shows. `disabled`: the file does not parse.
 export type Row = { title: string; description: string; disabled: boolean } & (
   | { control: "toggle"; path: string[]; value: boolean; defaultValue: boolean; changed: boolean }
-  | { control: "stepper"; path: string[]; value: number; defaultValue: number; changed: boolean; min: number; max: number; step: number }
+  | { control: "stepper"; path: string[]; value: number; defaultValue: number; changed: boolean; min: number; max: number; step: number; zero: string | null }
   // `options` holds a value from the file that the list lacks, as its own entry, so opening the page never changes it.
   | { control: "select"; path: string[]; value: string; defaultValue: string; changed: boolean; options: { value: string; label: string }[] }
   | { control: "open"; file: FileName }
@@ -123,7 +128,8 @@ export function settingsPage({ settings, broken }: Files, sheetSize: number): Pa
     const changed = value !== defaultValue;
     if (spec.kind === "toggle") return { ...base, control: "toggle", path, value: value as boolean, defaultValue: defaultValue as boolean, changed };
     if (spec.kind === "stepper") {
-      return { ...base, control: "stepper", path, value: value as number, defaultValue: defaultValue as number, changed, min: spec.min, max: spec.max, step: spec.step };
+      const { min, max, step, zero = null } = spec;
+      return { ...base, control: "stepper", path, value: value as number, defaultValue: defaultValue as number, changed, min, max, step, zero };
     }
     const options = spec.options.map(([value, label]) => ({ value, label }));
     if (!options.some((o) => o.value === value)) options.push({ value: value as string, label: value as string });
@@ -203,7 +209,7 @@ function control(row: Exclude<Row, { control: "open" }>): HTMLElement {
       b.setAttribute("aria-label", `${by === 1 ? "Increase" : "Decrease"} ${row.title}`);
       return b;
     };
-    group.append(step(-1), text("span", String(row.value), "stepper-value"), step(1));
+    group.append(step(-1), text("span", row.value === 0 && row.zero ? row.zero : String(row.value), "stepper-value"), step(1));
     return group;
   }
   const toggle = button("", "switch", "toggle", keyOf(row), row.disabled);

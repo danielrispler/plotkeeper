@@ -102,6 +102,9 @@ body[data-layout="focus"] #rail-divider { display: none; }
 /* The needs-you chip (danielrispler/Falinks#572): the count of sessions that need Daniel, in the needs-you colour. */
 .top .chip { color: var(--needs-you); background: var(--needs-you-bg); font-weight: 600; }
 .top .chip:hover { color: var(--needs-you); background: var(--needs-you-line); }
+.top .chip.unseen, .top .chip.unseen:hover { color: var(--fg); font-weight: 400; }
+.top .chip.unseen { background: var(--raised); }
+.top .chip.unseen:hover { background: var(--edge); }
 
 /* The session list: full, or a strip that opens over the terminal on hover, on click or on ⌘1; the
    overlay never moves the terminal (danielrispler/Falinks#572). */
@@ -135,6 +138,7 @@ h1 { margin: 0 0 var(--sp-4); }
 .logo { flex: none; display: inline-grid; place-items: center; width: var(--icon); height: var(--icon); color: var(--muted); }
 .logo svg { width: var(--icon); height: var(--icon); }
 .row .id { color: var(--muted); flex: none; font-size: var(--size-small); }
+.row .id.past { color: var(--fg); font-weight: 600; }
 .row .l1 .glyph { margin-inline-start: auto; }
 .row .clock { flex: none; margin-inline-start: auto; font-size: var(--size-xs); }
 .row .row-step { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
@@ -275,6 +279,9 @@ h1 { margin: 0 0 var(--sp-4); }
 .term-find { position: absolute; top: var(--sp-3); right: var(--sp-5); z-index: 10; width: var(--find); font: inherit; }
 /* The needs-you toast (danielrispler/Falinks#573): over the terminal's top-right corner, taking none of its space. */
 .term { position: relative; }
+.toasts { position: absolute; top: var(--sp-5); right: var(--sp-5); z-index: 11; max-width: var(--toast); display: flex;
+          flex-direction: column; align-items: flex-end; gap: var(--sp-3); pointer-events: none; }
+.toasts > .toast { position: static; pointer-events: auto; }
 .toast { position: absolute; top: var(--sp-5); right: var(--sp-5); z-index: 11; max-width: var(--toast); display: grid;
          grid-template-columns: minmax(0, 1fr) auto auto; gap: var(--sp-1) var(--sp-4); align-items: baseline;
          padding: var(--sp-4) var(--sp-5); border-radius: var(--radius); background: var(--needs-you-bg); color: var(--fg);
@@ -287,6 +294,9 @@ h1 { margin: 0 0 var(--sp-4); }
 .toast.start { top: auto; bottom: var(--sp-5); background: var(--raised); cursor: default;
                box-shadow: inset 0 0 0 var(--hair) var(--edge), var(--shadow); }
 .toast.start .name { color: var(--fg); }
+/* The note toast: a turn that ended off screen or a context warning; not in colour. */
+.toast.note { background: var(--raised); box-shadow: inset 0 0 0 var(--hair) var(--edge), var(--shadow); }
+.toast.note .name { color: var(--fg); }
 #probe { position: absolute; visibility: hidden; white-space: pre; font: var(--term-size)/var(--term-line) var(--mono); }
 
 /* The rail (danielrispler/Falinks#574): one header line, the open question docked under it, then the story: "now" and the

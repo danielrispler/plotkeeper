@@ -29,6 +29,7 @@ import { closeSettingsPage, settingsPageOpen, showSettingsPage, startSettingsPag
 import { showSkills } from "./skills.js";
 import { showView } from "./story.js";
 import { jumpToNeedsYou, showToast } from "./toast.js";
+import { finishedNote, showNote, warnContext, watchNotes } from "./notes.js";
 import type { Selection, Session, SessionCards } from "./types.js";
 import { readUsage, timedAgents } from "./usage.js";
 
@@ -272,7 +273,6 @@ function applySettings(files: SettingsFiles) {
   // Only a changed `zoom` resets the zoom the keys set.
   const to = reloadedZoom(zoom, previous, settings);
   if (to !== zoom) setZoom(to);
-  invoke("notify_while_focused", { on: settings.notifications.while_focused }).catch(failure("notify_while_focused"));
   invoke("sounds", { on: settings.sounds }).catch(failure("sounds"));
   const size = settings.terminal.font_size;
   if (size === null) document.documentElement.style.removeProperty("--term-size");
@@ -285,8 +285,19 @@ function applySettings(files: SettingsFiles) {
   window.dispatchEvent(new Event("settings"));
 }
 startSettingsPage(applySettings);
-listen<SettingsFiles>("settings-files", applySettings);
-invoke("settings_files").then(applySettings);
+// The context warning waits for both the settings and the list, so its first pass marks the sessions already past it
+// without a note (`notes.ts`).
+const ready = { settings: false, list: false };
+const warn = () => ready.settings && ready.list && warnContext(studio.listed, studio.files.settings.context_warning);
+listen<SettingsFiles>("settings-files", (files) => {
+  applySettings(files);
+  warn();
+});
+invoke("settings_files").then((files) => {
+  applySettings(files);
+  ready.settings = true;
+  warn();
+});
 // The session's header in the top bar toggles the rail, as ⌘2 does (danielrispler/plotkeeper#127).
 // In the overlay layout a click pins the layer open, and a click on a pinned one closes it (hover.ts).
 element("session-header").addEventListener("click", () => (document.body.dataset.layout === "overlay" ? railHover.click() : toggle("rail-open")));
@@ -322,6 +333,8 @@ element("needs-you").addEventListener("click", () => {
   const first = studio.listed.find((session) => session.state === "needs_you");
   if (first) select(first.id);
 });
+// The unseen chip selects the newest unseen session, as ⌘⇧U does.
+element("unseen").addEventListener("click", () => actions["studio::JumpToUnseen"]());
 // A click outside the picker, but not on its own buttons, closes it.
 document.addEventListener("pointerdown", (event) => {
   const target = event.target as Node;
@@ -333,6 +346,8 @@ const showList = (sessions: Session[]) => {
   showSessions(sessions);
   showWorkspaces();
   showToast();
+  ready.list = true;
+  warn();
 };
 watchWorkspaces();
 listen<Session[]>("sessions", showList);
@@ -340,6 +355,12 @@ invoke("sessions").then(showList);
 // A press on the toast jumps to its session; the press itself keeps the terminal's keyboard focus.
 element("toast").addEventListener("pointerdown", (event) => event.preventDefault());
 element("toast").addEventListener("click", jumpToNeedsYou);
+// A turn that ended off screen in the focused window (the shell's notices): the note toast names it.
+watchNotes();
+listen<string[]>("finished", (ids) => {
+  const note = finishedNote(ids, studio.listed);
+  if (note) showNote(note);
+});
 // While a press waits for its reply, the reply draws the rail once, with its cards; an event between
 // would draw it with the last session's cards for a frame (danielrispler/Falinks#570).
 // The press's settling fetches what it held back.

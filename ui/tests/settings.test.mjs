@@ -18,8 +18,8 @@ test("missing files give the defaults", () => {
   assert.equal(loaded.settings.zoom, 1);
   assert.equal(loaded.settings.terminal.font_size, null);
   assert.deepEqual(loaded.settings.summaries, { model: "haiku", effort: "", on_open: false });
-  assert.deepEqual(loaded.settings.notifications, { while_focused: false });
   assert.equal(loaded.settings.sounds, true);
+  assert.equal(loaded.settings.context_warning, 30);
   assert.deepEqual(loaded.settings.doctor, [
     { label: "Check the installation", command: "claude doctor", kind: "shell" },
     { label: "Full checkup", command: "/doctor", kind: "session" },
@@ -40,12 +40,21 @@ test("a Zed-style file, with comments and trailing commas, sets its keys and lea
   assert.equal(loaded.settings.zoom, 1.5);
   assert.equal(loaded.settings.terminal.font_size, 15);
   assert.deepEqual(loaded.settings.summaries, { model: "sonnet", effort: "", on_open: false });
-  assert.deepEqual(reload(initial, { settings: `{ "notifications": { "while_focused": true } }`, keymap: null }).settings.notifications, {
-    while_focused: true,
-  });
   assert.equal(reload(initial, { settings: `{ "sounds": false }`, keymap: null }).settings.sounds, false);
   assert.deepEqual(loaded.settings.doctor, [{ label: "Audit", command: "/audit", kind: "session" }]);
   assert.deepEqual(loaded.errors, []);
+});
+
+test("the context warning is a whole percent from 0 to 100, and the removed notifications key is ignored", () => {
+  const warning = (value) => reload(initial, { settings: `{ "context_warning": ${value} }`, keymap: null });
+  assert.equal(warning(20).settings.context_warning, 20);
+  assert.equal(warning(0).settings.context_warning, 0);
+  assert.equal(warning(150).settings.context_warning, 100);
+  assert.equal(warning(-5).settings.context_warning, 0);
+  assert.equal(warning(32.6).settings.context_warning, 33);
+  assert.equal(warning(`"high"`).settings.context_warning, 30);
+  const old = reload(initial, { settings: `{ "notifications": { "while_focused": true } }`, keymap: null });
+  assert.deepEqual(old.errors, []);
 });
 
 test("a string holding // or /* is not read as a comment", () => {

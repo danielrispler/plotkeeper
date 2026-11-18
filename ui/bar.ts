@@ -6,12 +6,13 @@ import { element } from "./dom.js";
 import { arrangeBar, type BarItem } from "./layout.js";
 
 // In the bar's order, left to right.
-const order: BarItem[] = ["header", "needs-you", "git", "usage", "new-build", "new-session", "gear"];
+const order: BarItem[] = ["header", "needs-you", "unseen", "git", "usage", "new-build", "new-session", "gear"];
 // The items left of the spacer; the rest sit right of it.
-const left: BarItem[] = ["header", "needs-you", "git"];
+const left: BarItem[] = ["header", "needs-you", "unseen", "git"];
 const ids: Record<BarItem, string> = {
   header: "session-header",
   "needs-you": "needs-you",
+  unseen: "unseen",
   git: "git-line",
   usage: "usage",
   "new-build": "new-build",

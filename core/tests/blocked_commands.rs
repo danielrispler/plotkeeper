@@ -272,10 +272,10 @@ fn the_notice_shows_once_with_others_within_three_seconds_and_not_in_a_focused_w
     let mut notices = studio_core::Notifications::default();
     let title = "Auto mode blocked a command";
     notices.push(title, "repo s-1".into(), Duration::from_secs(10));
-    let due = notices.due(Duration::from_secs(13), || false, |_| false, || None);
+    let due = notices.due(Duration::from_secs(13), || false, |_| false, Vec::new);
     assert_eq!(due.notification, Some((title.into(), "repo s-1".into())));
     notices.push(title, "repo s-1".into(), Duration::from_secs(20));
-    let due = notices.due(Duration::from_secs(23), || true, |_| false, || None);
+    let due = notices.due(Duration::from_secs(23), || true, |_| false, Vec::new);
     assert_eq!(due.notification, None);
 }
 

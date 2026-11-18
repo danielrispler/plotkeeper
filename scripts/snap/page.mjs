@@ -31,7 +31,9 @@ export const stubSource = (fixture) => `window.__TAURI__ = (() => {
   // The UI's own log lines are not echoed back: the app's Webview target drops records from the webview. Only an app error
   // reaches the page on \`log://log\`.
   const log = { warn: async () => {}, error: async () => {} };
-  return { event: { listen }, core: { invoke }, log };
+  // A fixture's script raises a shell event with __emit, as the shell's emit would.
+  const __emit = (name, payload) => (listeners[name] ?? []).forEach((h) => h({ payload }));
+  return { event: { listen }, core: { invoke }, log, __emit };
 })();`;
 
 // What runs in the page's head, after the stub: the body's classes (set once the body exists), then the fixture's script once

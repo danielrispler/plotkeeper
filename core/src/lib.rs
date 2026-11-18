@@ -4424,9 +4424,6 @@ pub struct Notifications {
     first_at: Duration,
     /// The pending needs-you already sounded, with its toast, before `COMBINE` passed.
     sounded: bool,
-    /// The setting that also shows "your turn" while the window is focused, for any session but
-    /// the selected one; off by default (danielrispler/Falinks#517, decision 6).
-    pub while_focused: bool,
     /// The `sounds` setting, on by default (danielrispler/Falinks#556).
     pub sounds: bool,
 }
@@ -4437,7 +4434,6 @@ impl Default for Notifications {
             pending: Vec::new(),
             first_at: Duration::ZERO,
             sounded: false,
-            while_focused: false,
             sounds: true,
         }
     }
@@ -4450,11 +4446,13 @@ pub enum Sound {
     YourTurn,
 }
 
-/// What `Notifications::due` gives the shell: a notification, as its title and body, and a sound.
+/// What `Notifications::due` gives the shell: a notification, as its title and body, a sound, and
+/// the sessions whose turn ended off screen in a focused window, for the window's toast.
 #[derive(Debug, Default, PartialEq)]
 pub struct Due {
     pub notification: Option<(String, String)>,
     pub sound: Option<Sound>,
+    pub finished: Vec<String>,
 }
 
 impl Notifications {
@@ -4495,18 +4493,18 @@ impl Notifications {
 
     /// The notification due at `now`, as its title and body: the pending notices, once `COMBINE`
     /// has passed since the first, less the "needs you" ones whose session `needs_you` says no
-    /// longer needs Daniel. A focused window drops them, since
-    /// Daniel sees the list; with `while_focused` on, it keeps "your turn" on any session but the
-    /// one `selected` names. The sound (danielrispler/Falinks#556), with `sounds` on: focused, only for needs you on a
-    /// session `selected` does not name, at once, with the toast that shows it (danielrispler/Falinks#565, decision 3),
-    /// so a block that clears quickly sounds as it toasts; else only with a notification of needs
-    /// you or your turn.
+    /// longer needs Daniel. A focused window drops them, since Daniel sees the list; a "your turn"
+    /// on a session `on_screen` does not name goes to the window's toast instead, as `finished`.
+    /// The sound (danielrispler/Falinks#556), with `sounds` on: focused, for needs you on a session
+    /// off screen, at once, with the toast that shows it (danielrispler/Falinks#565, decision 3), so
+    /// a block that clears quickly sounds as it toasts, else for your turn off screen; unfocused,
+    /// only with a notification of needs you or your turn.
     pub fn due(
         &mut self,
         now: Duration,
         focused: impl FnOnce() -> bool,
         needs_you: impl Fn(&str) -> bool,
-        selected: impl FnOnce() -> Option<String>,
+        on_screen: impl FnOnce() -> Vec<String>,
     ) -> Due {
         let blocked = |p: &Pending| p.needs_you.as_deref().is_some_and(&needs_you);
         let combined = now >= self.first_at + COMBINE;
@@ -4516,30 +4514,37 @@ impl Notifications {
             return Due::default();
         }
         let focused = focused();
-        let selected = if focused { selected() } else { None };
+        let on_screen = if focused { on_screen() } else { Vec::new() };
+        let off_screen =
+            |id: &Option<String>| id.as_ref().is_some_and(|id| !on_screen.contains(id));
         if !combined {
             let sound =
-                focused && (self.pending.iter()).any(|p| blocked(p) && p.needs_you != selected);
+                focused && (self.pending.iter()).any(|p| blocked(p) && off_screen(&p.needs_you));
             self.sounded = sound;
             let sound = sound.then_some(Sound::NeedsYou);
             return Due {
-                notification: None,
                 sound: sound.filter(|_| self.sounds),
+                ..Due::default()
             };
         }
         let sounded = std::mem::take(&mut self.sounded);
         let mut pending = std::mem::take(&mut self.pending);
         pending.retain(|p| p.needs_you.as_deref().is_none_or(&needs_you));
         let mut sound = None;
-        if !pending.is_empty() && focused {
-            if pending
-                .iter()
-                .any(|p| p.needs_you.is_some() && p.needs_you != selected)
-            {
-                sound = Some(Sound::NeedsYou);
+        let mut finished: Vec<String> = Vec::new();
+        if focused {
+            for id in pending.iter().filter(|p| off_screen(&p.your_turn)) {
+                let id = id.your_turn.clone().unwrap();
+                if !finished.contains(&id) {
+                    finished.push(id);
+                }
             }
-            pending
-                .retain(|p| self.while_focused && p.your_turn.is_some() && p.your_turn != selected);
+            if pending.iter().any(|p| off_screen(&p.needs_you)) {
+                sound = Some(Sound::NeedsYou);
+            } else if !finished.is_empty() {
+                sound = Some(Sound::YourTurn);
+            }
+            pending.clear();
         } else if pending.iter().any(|p| p.needs_you.is_some()) {
             sound = Some(Sound::NeedsYou);
         } else if pending.iter().any(|p| p.your_turn.is_some()) {
@@ -4552,6 +4557,7 @@ impl Notifications {
             return Due {
                 notification: None,
                 sound,
+                finished,
             };
         }
         let pending: Vec<(String, String)> =
@@ -4566,6 +4572,7 @@ impl Notifications {
         Due {
             notification,
             sound,
+            finished,
         }
     }
 }

@@ -24,11 +24,10 @@ export interface Settings {
   // The summary writer's model and effort ("" for the model's default), and whether opening a turn
   // writes its summary.
   summaries: { model: string; effort: string; on_open: boolean };
-  // Whether "your turn" also notifies while the window is focused, for any session but the selected
-  // one (danielrispler/Falinks#517, decision 6).
-  notifications: { while_focused: boolean };
   // The needs-you and your-turn sounds (danielrispler/Falinks#556).
   sounds: boolean;
+  // The context share, a whole percent, past which a session raises its context warning; 0: never.
+  context_warning: number;
   doctor: DoctorEntry[];
   // The command that opens a file at its line (danielrispler/Falinks#557), an argv with `{path}`, `{line}` and `{column}`,
   // never a shell string. null: the shell's default, Zed's CLI when installed, else `open`.
@@ -77,8 +76,8 @@ const defaultSettings: Settings = {
   terminal: { font_size: null },
   // Haiku at its default effort (danielrispler/Falinks#517, decision 14).
   summaries: { model: "haiku", effort: "", on_open: false },
-  notifications: { while_focused: false },
   sounds: true,
+  context_warning: 30,
   doctor: [
     { label: "Check the installation", command: "claude doctor", kind: "shell" },
     { label: "Full checkup", command: "/doctor", kind: "session" },
@@ -158,7 +157,6 @@ function readSettings(json: unknown, report: Report): Settings {
   };
   const terminal = isObject(json.terminal) ? json.terminal : {};
   const summaries = isObject(json.summaries) ? json.summaries : {};
-  const notifications = isObject(json.notifications) ? json.notifications : {};
   const d = defaultSettings;
   // null when unset or of the wrong type: the stylesheet's size.
   const fontSize = pick("terminal.font_size", terminal.font_size ?? undefined, NaN);
@@ -170,10 +168,8 @@ function readSettings(json: unknown, report: Report): Settings {
       effort: pick("summaries.effort", summaries.effort, d.summaries.effort),
       on_open: pick("summaries.on_open", summaries.on_open, d.summaries.on_open),
     },
-    notifications: {
-      while_focused: pick("notifications.while_focused", notifications.while_focused, d.notifications.while_focused),
-    },
     sounds: pick("sounds", json.sounds, d.sounds),
+    context_warning: Math.min(100, Math.max(0, Math.round(pick("context_warning", json.context_warning, d.context_warning)))),
     doctor: Array.isArray(json.doctor)
       ? json.doctor.filter((e, i): e is DoctorEntry => {
           const ok =

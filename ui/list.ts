@@ -50,6 +50,10 @@ export function contextText(context: Context | null): string {
   return context.share === null ? thousands(context.tokens) : `context ${context.share}%`;
 }
 
+// Whether a context share is past the context warning's `threshold`, a whole percent; 0 never is.
+export const pastWarning = (context: Context | null, threshold: number) =>
+  threshold > 0 && context?.share != null && context.share > threshold;
+
 // The context share's hover: its tokens of the window, and what Claude's status line shows: its own
 // percent left.
 export function contextTitle(context: Context | null): string {
@@ -81,7 +85,11 @@ function markNode(session: Session): HTMLElement {
     : session.status_only
     ? "Another agent, followed by its reported status only"
     : contextTitle(session.transcript.context);
-  return fullTitle(text("span", rowMark(session), "id"), title);
+  const node = fullTitle(text("span", rowMark(session), "id"), title);
+  // Past the context warning, the mark reads at full strength, not in colour.
+  const past = !session.shell && !session.status_only && pastWarning(session.transcript.context, studio.files.settings.context_warning);
+  if (past) node.classList.add("past");
+  return node;
 }
 
 // A subagent's state label and its state: "Needs you" while it asks, else its status.
@@ -141,6 +149,12 @@ export function secondLine(
 export function chipText(sessions: Pick<Session, "state">[]): string {
   const count = sessions.filter((session) => session.state === "needs_you").length;
   return count ? `${count} ${count === 1 ? "needs" : "need"} you` : "";
+}
+
+// The unseen chip's text: how many sessions finished a turn Daniel has not seen, "" with none.
+export function unseenText(sessions: Pick<Session, "unseen">[]): string {
+  const count = sessions.filter((session) => session.unseen).length;
+  return count ? `${count} unseen` : "";
 }
 
 // A session's subagents by the id of the agent that spawned them: "session", "unattached" or a
@@ -570,4 +584,7 @@ export function showSessions(sessions: Session[]) {
   const chip = element("needs-you");
   chip.textContent = chipText(sessions);
   chip.hidden = chip.textContent === "";
+  const unseen = element("unseen");
+  unseen.textContent = unseenText(live);
+  unseen.hidden = unseen.textContent === "";
 }

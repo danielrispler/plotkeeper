@@ -1,4 +1,4 @@
-// The top bar's placing (danielrispler/plotkeeper#127): the session header, the needs-you chip and the git line sit left of the
+// The top bar's placing (danielrispler/plotkeeper#127): the session header, the needs-you and unseen chips and the git line sit left of the
 // spacer, the rest right of it, after every placing. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -31,12 +31,14 @@ class Node {
   hidePopover() {}
 }
 
-const widths = { "session-header": 260, "needs-you": 90, "git-line": 400, usage: 120, "new-build": 130, "new-session": 28 };
+const widths = { "session-header": 260, "needs-you": 90, unseen: 80, "git-line": 400, usage: 120, "new-build": 130, "new-session": 28 };
 const top = new Node(".top");
-for (const id of ["session-header", "needs-you", "git-line", ".sp", "usage", "new-build", "new-session", "bar-more", "settings-gear", "bar-menu"])
+for (const id of ["session-header", "needs-you", "unseen", "git-line", ".sp", "usage", "new-build", "new-session", "bar-more", "settings-gear", "bar-menu"])
   top.append(new Node(id, widths[id] ?? 28));
 const nodes = Object.fromEntries(top.children.map((node) => [node.id, node]));
 nodes["new-build"].hidden = true;
+// No session is unseen, so its chip is hidden and stays on its side.
+nodes.unseen.hidden = true;
 
 globalThis.document = { querySelector: () => top, getElementById: (id) => nodes[id] };
 globalThis.getComputedStyle = () => ({ columnGap: "12", paddingLeft: "78", paddingRight: "12" });
@@ -44,7 +46,7 @@ const { placeBar } = await import("../../dist/bar.js");
 
 const inBar = () => top.children.map((node) => node.id).filter((id) => !nodes[id].hidden && id !== "bar-menu");
 
-test("the header, the chip and the git line stay left of the spacer once the bar is placed", () => {
+test("the header, the chips and the git line stay left of the spacer once the bar is placed", () => {
   top.clientWidth = 1728;
   placeBar();
   assert.deepEqual(inBar(), ["session-header", "needs-you", "git-line", ".sp", "usage", "new-session", "settings-gear"]);
