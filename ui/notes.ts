@@ -28,36 +28,32 @@ export function contextNote(sessions: Session[], threshold: number): Note | null
   return { session: sessions[0], count, line: `Context passed ${threshold}%: now ${share}%` };
 }
 
-// The sessions whose context share passed `threshold` since `warned` last saw them, in the list's order. Each warns once: it
-// stays in `warned` until its share falls back to the threshold or under, as after `/compact` or `/clear`, which re-arms
-// it. A share not known keeps its place; an ended session neither warns nor re-arms.
-export function crossings(sessions: Session[], threshold: number, warned: Set<string>): Session[] {
+// The sessions whose context share passed `threshold`, in the list's order, by `armed`: whether each session would warn
+// on passing it. A session's first known share only arms it, when it is not past, so one already past when the app starts,
+// or when its share first shows, raises no note. Each warns once, and is armed again when its share falls back to the
+// threshold or under, as after `/compact` or `/clear`. A share not known keeps its place; an ended session is left as it is.
+export function crossings(sessions: Session[], threshold: number, armed: Map<string, boolean>): Session[] {
   const crossed: Session[] = [];
   for (const session of sessions) {
     const context = session.transcript.context;
     if (session.state === "ended" || context?.share == null) continue;
-    if (!pastWarning(context, threshold)) warned.delete(session.id);
-    else if (!warned.has(session.id)) {
-      warned.add(session.id);
-      crossed.push(session);
-    }
+    const past = pastWarning(context, threshold);
+    if (past && armed.get(session.id)) crossed.push(session);
+    armed.set(session.id, !past);
   }
   return crossed;
 }
 
-// The sessions already warned, `null` until the first list after the settings were read, which marks those already past
-// the threshold without a note; the threshold they were warned at, whose change re-arms every session.
-let warned: Set<string> | null = null;
-let warnedAt = 0;
+// Each session's arming, and the threshold it was armed at, whose change arms every session again.
+const armed = new Map<string, boolean>();
+let armedAt: number | null = null;
 
 // Notes the sessions in `sessions` that passed `threshold`.
 export function warnContext(sessions: Session[], threshold: number) {
-  if (warned !== null && threshold !== warnedAt) warned.clear();
-  warnedAt = threshold;
-  const seeding = warned === null;
-  warned ??= new Set();
-  const note = contextNote(crossings(sessions, threshold, warned), threshold);
-  if (note && !seeding) showNote(note);
+  if (armedAt !== null && threshold !== armedAt) for (const id of armed.keys()) armed.set(id, true);
+  armedAt = threshold;
+  const note = contextNote(crossings(sessions, threshold, armed), threshold);
+  if (note) showNote(note);
 }
 
 let fade: ReturnType<typeof setTimeout> | undefined;

@@ -78,18 +78,13 @@ function nameTitle(session: Session): string {
   return session.name || !session.prompt_name ? "" : `${sessionName(session)} · ${session.identity.name}`;
 }
 
-// The mark's node, with the context share's hover.
+// The mark's node, with the context share's hover; past the context warning, it reads at full strength, not in colour.
 function markNode(session: Session): HTMLElement {
-  const title = session.shell
-    ? "A plain terminal"
-    : session.status_only
-    ? "Another agent, followed by its reported status only"
-    : contextTitle(session.transcript.context);
-  const node = fullTitle(text("span", rowMark(session), "id"), title);
-  // Past the context warning, the mark reads at full strength, not in colour.
-  const past = !session.shell && !session.status_only && pastWarning(session.transcript.context, studio.files.settings.context_warning);
-  if (past) node.classList.add("past");
-  return node;
+  if (session.shell) return fullTitle(text("span", rowMark(session), "id"), "A plain terminal");
+  if (session.status_only) return fullTitle(text("span", rowMark(session), "id"), "Another agent, followed by its reported status only");
+  const context = session.transcript.context;
+  const past = pastWarning(context, studio.files.settings.context_warning);
+  return fullTitle(text("span", rowMark(session), past ? "id past" : "id"), contextTitle(context));
 }
 
 // A subagent's state label and its state: "Needs you" while it asks, else its status.
@@ -408,7 +403,9 @@ export function strip(sessions: Session[]): HTMLElement[] {
     ...shown.map((session, i) => {
       const button = selecting(session.id, null, `strip ${session.id}`);
       button.setAttribute("aria-pressed", String(isSelected(session.id)));
-      button.title = `${sessionName(session)} · ${status(session.state, session.unseen, session.landed)[1]}`;
+      // A share past the context warning shows in the label's hover too.
+      const past = !session.shell && !session.status_only && pastWarning(session.transcript.context, studio.files.settings.context_warning);
+      button.title = `${sessionName(session)} · ${status(session.state, session.unseen, session.landed)[1]}${past ? ` · ${rowMark(session)}` : ""}`;
       button.append(glyph(session.state, session.unseen, session.landed), labels[i]);
       return button;
     }),

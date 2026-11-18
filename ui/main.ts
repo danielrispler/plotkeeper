@@ -285,8 +285,8 @@ function applySettings(files: SettingsFiles) {
   window.dispatchEvent(new Event("settings"));
 }
 startSettingsPage(applySettings);
-// The context warning waits for both the settings and the list, so its first pass marks the sessions already past it
-// without a note (`notes.ts`).
+// The context warning waits for both the settings and the list, so it first arms the sessions at the threshold in the
+// file, not the default's (`notes.ts`).
 const ready = { settings: false, list: false };
 const warn = () => ready.settings && ready.list && warnContext(studio.listed, studio.files.settings.context_warning);
 listen<SettingsFiles>("settings-files", (files) => {

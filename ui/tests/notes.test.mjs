@@ -23,8 +23,8 @@ test("a share past the threshold warns, not one at it, and 0 never warns", () =>
 });
 
 test("a session warns once as it passes the threshold, and again only after falling back", () => {
-  const warned = new Set();
-  const at = (share) => crossings([session("C", share)], 30, warned).map((s) => s.id);
+  const armed = new Map();
+  const at = (share) => crossings([session("C", share)], 30, armed).map((s) => s.id);
   assert.deepEqual(at(28), []);
   assert.deepEqual(at(31), ["C"]);
   assert.deepEqual(at(45), []);
@@ -33,12 +33,29 @@ test("a session warns once as it passes the threshold, and again only after fall
   assert.deepEqual(at(31), ["C"]);
 });
 
-test("an unknown share keeps the session's place, and an ended session neither warns nor re-arms", () => {
-  const warned = new Set(["C"]);
-  assert.deepEqual(crossings([session("C", null)], 30, warned), []);
-  assert.ok(warned.has("C"));
-  assert.deepEqual(crossings([session("D", 50, { state: "ended" })], 30, warned), []);
-  assert.ok(!warned.has("D"));
+test("a session already past when its share first shows raises no note, and warns after falling back", () => {
+  const armed = new Map();
+  const at = (share) => crossings([session("C", share)], 30, armed).map((s) => s.id);
+  assert.deepEqual(at(null), []);
+  assert.deepEqual(at(40), []);
+  assert.deepEqual(at(20), []);
+  assert.deepEqual(at(35), ["C"]);
+});
+
+test("an unknown share keeps the session's place, and an ended session is left as it is", () => {
+  const armed = new Map([["C", false]]);
+  assert.deepEqual(crossings([session("C", null)], 30, armed), []);
+  assert.equal(armed.get("C"), false);
+  assert.deepEqual(crossings([session("D", 50, { state: "ended" })], 30, armed), []);
+  assert.ok(!armed.has("D"));
+});
+
+test("arming every session again warns each one already past, once", () => {
+  const armed = new Map([["A", false], ["B", false]]);
+  const sessions = [session("A", 40), session("B", 10)];
+  for (const id of armed.keys()) armed.set(id, true);
+  assert.deepEqual(crossings(sessions, 30, armed).map((s) => s.id), ["A"]);
+  assert.deepEqual(crossings(sessions, 30, armed), []);
 });
 
 test("the context note names the first session, its share and how many passed", () => {

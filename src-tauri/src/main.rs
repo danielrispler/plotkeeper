@@ -1329,14 +1329,15 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
             .due(uptime(), focused, needs_you, || {
                 let studio = state.lock().unwrap();
                 let selected = studio.selected().map(|s| s.agent.id.clone());
-                let pinned = SPLIT_SHOWN.lock().unwrap().clone();
+                let mut on_screen: Vec<String> = selected.into_iter().collect();
                 // The split's pane shows a terminal: a status-only row's id, or a session's in it.
-                let split = pinned.iter().flat_map(|terminal| {
+                if let Some(terminal) = SPLIT_SHOWN.lock().unwrap().clone() {
                     let in_it = studio.sessions().into_iter();
-                    let in_it = in_it.filter(|s| s.terminal.as_ref() == Some(terminal));
-                    in_it.map(|s| s.agent.id.clone()).chain([terminal.clone()])
-                });
-                selected.into_iter().chain(split).collect()
+                    let in_it = in_it.filter(|s| s.terminal.as_ref() == Some(&terminal));
+                    on_screen.extend(in_it.map(|s| s.agent.id.clone()));
+                    on_screen.push(terminal);
+                }
+                on_screen
             });
         if let Some((title, body)) = due.notification {
             let _ = app.notification().builder().title(title).body(body).show();

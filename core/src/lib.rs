@@ -4533,8 +4533,8 @@ impl Notifications {
         let mut sound = None;
         let mut finished: Vec<String> = Vec::new();
         if focused {
-            for id in pending.iter().filter(|p| off_screen(&p.your_turn)) {
-                let id = id.your_turn.clone().unwrap();
+            let ended = pending.iter().filter(|p| off_screen(&p.your_turn));
+            for id in ended.filter_map(|p| p.your_turn.clone()) {
                 if !finished.contains(&id) {
                     finished.push(id);
                 }
