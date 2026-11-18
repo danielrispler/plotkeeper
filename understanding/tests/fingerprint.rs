@@ -443,6 +443,63 @@ fn committing_only_an_os_file_is_no_change() {
     assert_eq!(diff(&mut prints, dir.path()), None);
 }
 
+// A worktree made after its fingerprints began (danielrispler/plotkeeper#204).
+
+#[test]
+fn a_worktree_made_after_the_first_fingerprint_starts_from_its_creation_commit() {
+    let (dir, mut prints) = repo();
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    let made = dir
+        .path()
+        .with_file_name(format!("made-{}", std::process::id()));
+    git(
+        dir.path(),
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "made",
+            made.to_str().unwrap(),
+        ],
+    );
+    fs::write(made.join("new.rs"), "fn n() {}\n").unwrap();
+
+    let change = "--- a/new.rs\n+++ b/new.rs\n@@ -0,0 +1 @@\n+fn n() {}\n";
+    assert_eq!(diff(&mut prints, &made).as_deref(), Some(change));
+    assert_eq!(diff(&mut prints, &made), None);
+    let _ = fs::remove_dir_all(&made);
+}
+
+#[test]
+fn a_worktree_that_existed_before_the_first_fingerprint_starts_from_its_files_then() {
+    let dir = tempfile::tempdir().unwrap();
+    git(dir.path(), &["init", "-q"]);
+    fs::write(dir.path().join("lib.rs"), "fn a() {}\n").unwrap();
+    git(dir.path(), &["add", "."]);
+    git(dir.path(), &["commit", "-qm", "Start"]);
+    let older = dir
+        .path()
+        .with_file_name(format!("older-{}", std::process::id()));
+    git(
+        dir.path(),
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "older",
+            older.to_str().unwrap(),
+        ],
+    );
+    fs::write(older.join("there.rs"), "fn t() {}\n").unwrap();
+    let mut prints = Fingerprints::default();
+    assert_eq!(diff(&mut prints, dir.path()), None);
+
+    assert_eq!(diff(&mut prints, &older), None);
+    let _ = fs::remove_dir_all(&older);
+}
+
 /// A repository with a worktree `w1` removed and a worktree `w2` listed, both in its `worktrees`
 /// folder (danielrispler/plotkeeper#205); the root, and the folders of `w1` and `w2`.
 fn repo_with_removed_worktree() -> (tempfile::TempDir, String, String, String) {
