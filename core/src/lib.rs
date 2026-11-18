@@ -3687,12 +3687,20 @@ impl Studio {
         found.unwrap_or(false)
     }
 
-    /// The worktrees that were the home of one of the session's workers during the turn named `id`.
+    /// The worktrees that were the home of one of the session's workers during the turn named `id`: a worker
+    /// spawned in an earlier turn that still worked during it counts.
     pub fn turn_workers(&self, id: &str) -> Vec<String> {
         let found = self.sessions.values().find_map(|s| {
             let at = s.turns.iter().position(|t| t.id.as_deref() == Some(id))?;
-            let spawned = s.agents.iter().filter(|a| a.turn == Some(at));
-            let homes = spawned.filter(|a| s.has_cards(&a.agent.id));
+            let turn = &s.turns[at];
+            let (since, until) = (turn.started_at, turn.ended_at.unwrap_or(u64::MAX));
+            // Spawned in this turn or an earlier one, and working at some time during it.
+            let working = s.agents.iter().filter(|a| {
+                a.turn.is_some_and(|spawned| spawned <= at)
+                    && a.agent.started_at <= until
+                    && a.ended_at.is_none_or(|end| end >= since)
+            });
+            let homes = working.filter(|a| s.has_cards(&a.agent.id));
             let mut roots: Vec<String> = homes.map(|a| a.root.clone()).collect();
             roots.dedup();
             Some(roots)

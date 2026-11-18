@@ -946,3 +946,80 @@ fn another_sessions_command_names_a_path_on_its_boundaries_not_as_a_substring() 
     );
     assert_eq!(kept_of(&paths, vec![right]), ["Cargo.toml"]);
 }
+
+#[test]
+fn a_worker_spawned_in_an_earlier_turn_and_still_working_is_a_home_of_a_later_turn() {
+    let later = |name: &str, ms: u64, extra: Value| {
+        let mut extra = extra;
+        extra["prompt_id"] = "p2".into();
+        line(name, ms, extra)
+    };
+    let mut studio = Studio::replayed([
+        prompt(json!({ ROOT: "s1" })),
+        worker_starts(500, "agent-1", "w1"),
+        edit(
+            1_000,
+            "e1",
+            "/w/repo/.claude/worktrees/w1/x.rs",
+            Some("agent-1"),
+        ),
+        line(
+            "Stop",
+            9_000,
+            json!({ "background_tasks": [{ "id": "agent-1", "type": "subagent" }],
+                    "studio_turn_end": { ROOT: "e1" } }),
+        ),
+        later(
+            "UserPromptSubmit",
+            10_000,
+            json!({ "prompt": "next", "studio_turn_start": { ROOT: "s2" } }),
+        ),
+        later("Stop", 20_000, json!({ "studio_turn_end": { ROOT: "e2" } })),
+    ]);
+    ask(&mut studio, AT + 40_000);
+    let id = |turn: usize| {
+        studio.session(SESSION).unwrap().turns[turn]
+            .id
+            .clone()
+            .unwrap()
+    };
+    assert_eq!(studio.turn_workers(&id(0)), [WORKER_ROOT]);
+    assert_eq!(studio.turn_workers(&id(1)), [WORKER_ROOT]);
+}
+
+#[test]
+fn a_worker_that_ended_before_a_turn_began_is_no_home_of_it() {
+    let later = |name: &str, ms: u64, extra: Value| {
+        let mut extra = extra;
+        extra["prompt_id"] = "p2".into();
+        line(name, ms, extra)
+    };
+    let mut studio = Studio::replayed([
+        prompt(json!({ ROOT: "s1" })),
+        worker_starts(500, "agent-1", "w1"),
+        edit(
+            1_000,
+            "e1",
+            "/w/repo/.claude/worktrees/w1/x.rs",
+            Some("agent-1"),
+        ),
+        line(
+            "SubagentStop",
+            2_000,
+            json!({ "agent_id": "agent-1", "studio_turn_end": { WORKER_ROOT: "w2" } }),
+        ),
+        stop(json!({ ROOT: "e1" })),
+        later(
+            "UserPromptSubmit",
+            10_000,
+            json!({ "prompt": "next", "studio_turn_start": { ROOT: "s2" } }),
+        ),
+        later("Stop", 20_000, json!({ "studio_turn_end": { ROOT: "e2" } })),
+    ]);
+    ask(&mut studio, AT + 40_000);
+    let second = studio.session(SESSION).unwrap().turns[1]
+        .id
+        .clone()
+        .unwrap();
+    assert!(studio.turn_workers(&second).is_empty());
+}
