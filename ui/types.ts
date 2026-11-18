@@ -167,6 +167,8 @@ export type Session = {
   prompts: Prompt[];
   turns: Turn[];
   questions: Question[];
+  // Its blocked commands, in block order.
+  blocked_commands: BlockedCommand[];
   // "worker <name> returned", after a wake-up until its next step or Daniel's next prompt.
   returned: string | null;
   transcript: Transcript;
@@ -253,6 +255,35 @@ export type Decision = {
   answer: Record<string, string> | "allow" | "deny";
   at: number;
   source: "card" | "terminal";
+};
+// A Bash command auto mode blocked, as a card on its session's view (danielrispler/plotkeeper#170): the command in full, its
+// folder, the rule that blocked it, the subagent that asked (null for the session's own agent) and where it stands.
+export type BlockedStatus =
+  | "blocked"
+  | "allowed"
+  | "allowed_not_run"
+  | "running"
+  | "finished"
+  | "running_in_background"
+  | "blocked_again"
+  | "declined";
+// Whether a card in `status` waits for Daniel's choice or, once allowed, for the agent's retry.
+export const blockedWaits = (status: BlockedStatus) => ["blocked", "allowed", "allowed_not_run", "blocked_again"].includes(status);
+export type BlockedCommand = {
+  call: string;
+  command: string;
+  cwd: string;
+  reason: string;
+  agent: string | null;
+  at: number;
+  status: BlockedStatus;
+  // The retry's call id once it runs (`check_output` reads its tail), when it started, the agent whose call it is (the
+  // session's own may run a subagent's command), its exit code once finished.
+  run?: string | null;
+  run_at?: number | null;
+  run_by?: string | null;
+  exit_code?: number | null;
+  task?: string | null;
 };
 // A turn's summary (danielrispler/Falinks#526) and, unless the turn has a card, its Quiz, as the store keeps it; a
 // learning section stored before danielrispler/plotkeeper#118 reads as its question.
@@ -363,7 +394,9 @@ export interface Commands {
   agy_plugin_setup: string | null;
   alive: void;
   answer: void;
+  answer_blocked_command: "hook" | "late";
   ask: string;
+  ask_again: void;
   ask_anchor: string;
   ask_facts: Facts | null;
   ask_why_not: { facts: Facts; reasons: string | null };

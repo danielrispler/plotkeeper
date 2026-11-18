@@ -15,6 +15,7 @@ import { encode, request } from "./daemon.js";
 import { agentState, sessionName, showsLanded } from "./list.js";
 import { closePane, openHere } from "./panes.js";
 import { openDecision, type Ask } from "./answer.js";
+import { blockedElement, typeRetry } from "./blocked.js";
 import { briefNodes, cardLine, cardsFor, openCard, quizOpen } from "./cards.js";
 import { type Banner, bannerElement, bannerFor, bannerLives } from "./banner.js";
 import { quizAllowed, quizAnswered, quizItem, quizRegion, seedQuiz, trialOn } from "./quiz.js";
@@ -30,6 +31,7 @@ import {
   askKind,
   stateLabels,
   type AskKind,
+  type BlockedCommand,
   type CheckLine,
   type Question,
   type Selection,
@@ -58,7 +60,7 @@ export function showView(selected: Selection | null) {
   if (selected === null) {
     for (const id of ["state", "block", "mode", "mark", "session-name", "phase", "bar-state"]) element(id).textContent = "";
     showBarName("");
-    showQuestions([]);
+    showQuestions([], []);
     showCleared([]);
     shownSession = null;
     banner = null;
@@ -125,7 +127,10 @@ export function showView(selected: Selection | null) {
   element("command").textContent = step?.command ?? "";
   element("step").classList.toggle("has-command", Boolean(step?.command));
   showIntention(storyOf(session, agent));
-  showQuestions(reports(session, "asks") ? session.questions.filter((question) => question.agent === (agent?.id ?? null)) : []);
+  showQuestions(
+    reports(session, "asks") ? session.questions.filter((question) => question.agent === (agent?.id ?? null)) : [],
+    blockedCards(session, agent),
+  );
   showCleared(agent === null ? session.cleared : []);
   // A subagent's view has no intention of its own: its written summary takes that line (danielrispler/Falinks#535).
   if ((agent?.id ?? null) !== shownAgent) {
@@ -729,13 +734,45 @@ export async function removeWorktree(worktree: string, project: string) {
 }
 
 
+// Types a blocked command's retry line into the session's terminal (danielrispler/plotkeeper#175), as `/rename` is typed.
+function typeRetryLine(session: Session, card: BlockedCommand, agent: string | null) {
+  const notice = (text: string) => {
+    element("notice").textContent = text;
+    element("notice").hidden = false;
+  };
+  const terminal = session.terminal;
+  if (terminal === null || session.state === "ended") return notice("Not typed: the session has no terminal running. Ask it to run the approved command yourself.");
+  const listed = () => studio.listed.find((s) => s.id === session.id);
+  const blocked = () => listed()?.state === "needs_you";
+  // A late Allow's answer reaches the session in the read loop's next pass, which ends its block's needs-you.
+  const answered = () => {
+    const status = listed()?.blocked_commands?.find((c) => c.call === card.call)?.status;
+    return status !== "blocked" && status !== "blocked_again";
+  };
+  typeRetry(card, agent, terminal, blocked, {
+    now: Date.now,
+    sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
+    send: (data) => request({ op: "input", id: terminal, data: encode(new TextEncoder().encode(data)) }),
+    notice,
+  }, answered).catch((e) => console.warn(e));
+}
+
+// The session's blocked commands as cards, in block order: its own view shows them all, naming a subagent's, and a
+// subagent's view only its own (danielrispler/plotkeeper#170).
+function blockedCards(session: Session, agent: Subagent | null): HTMLElement[] {
+  const cards = (session.blocked_commands ?? []).filter((card) => agent === null || card.agent === agent.id);
+  const named = (id: string | null) => (id === null ? null : (session.agents.find((a) => a.id === id)?.name ?? id.slice(0, 5)));
+  const retry = (card: BlockedCommand) => typeRetryLine(session, card, named(card.agent));
+  return cards.flatMap((card) => blockedElement(session.resume_id || session.id, card, named(card.agent), retry) ?? []);
+}
+
 // The open question of the viewed agent, docked at the top of the rail, newest first; a plan or a
 // permission the answer hook waits on docks too, whichever agent asks (danielrispler/Falinks#478). A question never
 // answered shows in its turn; an answered one is in the decision history (danielrispler/Falinks#479).
-function showQuestions(questions: Question[]) {
+function showQuestions(questions: Question[], blocked: HTMLElement[]) {
   const open = [...questions].reverse().filter((question) => question.answer === "open");
   const decision = openDecision();
-  const docked = [...(decision ? [decisionElement(decision)] : []), ...open.map(questionElement)];
+  const docked = [...(decision ? [decisionElement(decision)] : []), ...open.map(questionElement), ...blocked];
   element("dock").replaceChildren(...docked);
   element("dock").hidden = docked.length === 0;
 }

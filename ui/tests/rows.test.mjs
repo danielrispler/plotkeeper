@@ -28,6 +28,19 @@ test("only needs you uses colour in the list, the strip and the top bar", () => 
   assert.deepEqual(coloured.filter((selector) => !/pill|needs_you|\.chip/.test(selector)), []);
 });
 
+test("a row with blocked commands waiting reads how many, ahead of the step but not an open question", () => {
+  const cards = (...statuses) => statuses.map((status) => ({ status }));
+  const row = (state, blocked_commands) => ({ state, line: "Edit src/lib.rs", questions: [], blocked_commands });
+  assert.equal(secondLine(row("running", cards("blocked"))), "1 blocked command waiting");
+  assert.equal(secondLine(row("running", cards("blocked", "allowed", "declined"))), "2 blocked commands waiting");
+  assert.equal(secondLine(row("needs_you", cards("blocked"))), "1 blocked command waiting");
+  assert.equal(secondLine(row("your_turn", cards("allowed"))), "1 blocked command waiting");
+  assert.equal(secondLine(row("running", cards("declined"))), "Edit src/lib.rs");
+  assert.equal(secondLine(row("ended", cards("blocked"))), null);
+  const asked = { tool_use_id: "t", agent: null, answer: "open", questions: [{ question: "Which name?", options: [] }] };
+  assert.equal(secondLine({ ...row("needs_you", cards("blocked")), questions: [asked] }), "Which name?");
+});
+
 test("only running and needs-you rows get a second line: the step, or the question's first line", () => {
   const asked = { tool_use_id: "t", agent: null, answer: "open", questions: [{ question: "Which name?\nMore detail", options: [] }] };
   const done = { ...asked, answer: { answered: {} }, questions: [{ question: "Old", options: [] }] };

@@ -401,7 +401,7 @@ impl Sent {
     /// Sends the session list, the Dock badge and the selection, each only if it changed.
     fn list(&mut self, app: &AppHandle) {
         let list = sessions(app.state(), app.state());
-        let needing = list.iter().filter(|r| r.session.state == NeedsYou).count();
+        let needing = list.iter().filter(|r| r.session.wants_you()).count();
         // macOS shows `Some(0)` as a "0" badge.
         if self.badge != Some(needing)
             && let Some(window) = app.get_webview_window("main")
@@ -888,6 +888,8 @@ fn main() {
             answer::watch,
             answer::alive,
             answer::answer,
+            answer::answer_blocked_command,
+            answer::ask_again,
             settings::settings_files,
             settings::set_zoom,
             settings::open_settings,
@@ -1052,6 +1054,14 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                         refresh_landed(app, Some(session_id.clone()));
                         tell(app, Notice::YourTurn, &session_id, None);
                     }
+                    Output::CommandBlocked { session_id, agent } => {
+                        tell(
+                            app,
+                            Notice::Titled("Auto mode blocked a command"),
+                            &session_id,
+                            agent.as_deref(),
+                        );
+                    }
                     Output::Failed { session_id, agent } => {
                         tell(
                             app,
@@ -1145,6 +1155,15 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                 .pass(&data, studio_hook::answer::now_ms())
         {
             let _ = app.emit("ask", ask);
+        }
+        if let Ok(data) = answer::data()
+            && let Some(blocked) = app
+                .state::<Mutex<answer::Watching>>()
+                .lock()
+                .unwrap()
+                .changed_blocked_requests(&data)
+        {
+            let _ = app.emit("blocked", blocked);
         }
         // Asking for focus waits on the main thread, which never takes this lock.
         let focused = || {

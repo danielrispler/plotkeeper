@@ -248,6 +248,9 @@ pub struct Session {
     /// decision 17). The card store keeps them across restarts and gives them to the pane.
     #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     pub decisions: Vec<Decision>,
+    /// The Bash commands auto mode blocked, in block order (danielrispler/plotkeeper#170).
+    #[serde(default)]
+    pub blocked_commands: Vec<BlockedCommand>,
     /// The questions answered on the studio card, by call, whose result has not landed yet.
     #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     carded: BTreeSet<String>,
@@ -574,6 +577,80 @@ pub struct Decision {
     /// When it was answered, in Unix milliseconds.
     pub at: u64,
     pub source: Source,
+}
+
+/// A Bash command auto mode blocked, as a card on its session's view (danielrispler/plotkeeper#170).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BlockedCommand {
+    /// The denied call's `tool_use_id`.
+    pub call: String,
+    /// The command in full, and the folder it was asked to run in.
+    pub command: String,
+    pub cwd: String,
+    /// The rule that blocked it.
+    pub reason: String,
+    /// The subagent that asked, `None` for the session's own agent.
+    pub agent: Option<String>,
+    /// When it was blocked, in Unix milliseconds.
+    pub at: u64,
+    pub status: BlockedStatus,
+    /// The retry's `tool_use_id` once it runs, which `check_output` reads the tail by, and when it started.
+    #[serde(default)]
+    pub run: Option<String>,
+    #[serde(default)]
+    pub run_at: Option<u64>,
+    /// The agent whose call the retry is, which its tail is read under: the session's own agent may
+    /// run a subagent's command (`None`).
+    #[serde(default)]
+    pub run_by: Option<String>,
+    /// Its exit code once Finished; `None` when it is unknown, as after a background run.
+    #[serde(default)]
+    pub exit_code: Option<i32>,
+    /// The background task a backgrounded retry started, until its wake-up.
+    #[serde(default)]
+    pub task: Option<String>,
+}
+
+impl BlockedCommand {
+    /// Whether `agent`'s call of `tool` in `cwd` is this card's retry: the same command and folder, by
+    /// the agent that was blocked or by the session's own agent, which a subagent's card asks to run it.
+    fn retried_by(&self, tool: &event::Tool, cwd: &str, agent: &Option<String>) -> bool {
+        Some(self.command.as_str()) == tool.command.as_deref()
+            && self.cwd == cwd
+            && (agent.is_none() || self.agent == *agent)
+    }
+}
+
+/// Where a blocked command stands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BlockedStatus {
+    /// Blocked, and Daniel has not chosen.
+    Blocked,
+    /// Daniel allowed it from the card.
+    Allowed,
+    /// Its retry runs, from the matching `PreToolUse`.
+    Running,
+    /// Its retry ended.
+    Finished,
+    /// Its retry runs in the background, until the wake-up that names its task.
+    RunningInBackground,
+    /// A new `PermissionDenied` of the same command followed the Allow.
+    BlockedAgain,
+    /// Its turn ended with no matching call: Daniel's Allow was not used, and "Ask again" retries it.
+    AllowedNotRun,
+    /// Daniel declined it from the card, which closes it.
+    Declined,
+}
+
+impl BlockedStatus {
+    /// Whether a card in this status waits for Daniel's choice or, once allowed, for the agent's retry.
+    pub fn waits(self) -> bool {
+        matches!(
+            self,
+            Self::Blocked | Self::Allowed | Self::AllowedNotRun | Self::BlockedAgain
+        )
+    }
 }
 
 /// Where Daniel answered: the studio card, through the answer hook, or the terminal.
@@ -1155,6 +1232,16 @@ impl Session {
         unrecognised.map_or(Sender::Daniel, Sender::Unrecognised)
     }
 
+    /// Whether a card's Allow covers `agent`'s call of `tool` in `cwd`: its pass lets the call through.
+    fn passes(&self, tool: &event::Tool, cwd: &str, agent: &Option<String>) -> bool {
+        self.blocked_commands.iter().any(|c| {
+            matches!(
+                c.status,
+                BlockedStatus::Allowed | BlockedStatus::AllowedNotRun | BlockedStatus::Running
+            ) && c.retried_by(tool, cwd, agent)
+        })
+    }
+
     /// Whether subagent `id` gets cards of its own: a worker in a worktree of its own.
     fn has_cards(&self, id: &str) -> bool {
         self.subagent(id)
@@ -1442,6 +1529,17 @@ impl Session {
         !self.blocks.is_empty() || self.terminal_blocked
     }
 
+    /// How many blocked commands wait for Daniel's choice (blocked, also again) or, once allowed, for the agent's retry.
+    pub fn blocked_waiting(&self) -> usize {
+        let waits = |c: &&BlockedCommand| c.status.waits();
+        self.blocked_commands.iter().filter(waits).count()
+    }
+
+    /// Whether the Dock badge counts it: it needs you, or a blocked command waits, unless it has ended.
+    pub fn wants_you(&self) -> bool {
+        self.state == State::NeedsYou || (self.state != State::Ended && self.blocked_waiting() > 0)
+    }
+
     /// Its workers that failed: they ended with a status other than `completed`, such as `killed`.
     fn failed_workers(&self) -> Vec<String> {
         self.agents
@@ -1467,6 +1565,7 @@ impl Session {
             calls: Vec::new(),
             at,
             noticed: false,
+            denied: None,
         };
         let mut calls = self.running.iter().filter(|c| block.takes(c));
         let calls: Vec<&Call> = match named {
@@ -1518,6 +1617,9 @@ struct Block {
     at: u64,
     /// A permission notice already echoed it, so the next notice is another agent's.
     noticed: bool,
+    /// For a blocked command, the denied call, which Daniel's choice names.
+    #[serde(default)]
+    denied: Option<String>,
 }
 
 /// What a block waits on.
@@ -1529,6 +1631,8 @@ enum Cause {
     Notice,
     /// An external server's request for input.
     Elicitation,
+    /// A blocked command, whose hook waits for Daniel's card until the agent's next event.
+    Denied,
 }
 
 impl Block {
@@ -1540,6 +1644,8 @@ impl Block {
             Cause::Elicitation => call.kind == ToolKind::External,
             Cause::Notice => call.kind != ToolKind::Spawn,
             Cause::Call => self.tool == call.tool && self.input == call.input,
+            // The denied call never ran, so no call is its.
+            Cause::Denied => false,
         };
         tool && (!self.named || self.agent == call.agent)
     }
@@ -1626,6 +1732,12 @@ pub enum Output {
     /// A session newly needs Daniel: its own agent asks, or `agent`, a subagent at any depth, whose
     /// notice goes on its session's line (danielrispler/Falinks#369, decision 22).
     NeedsYou {
+        session_id: String,
+        agent: Option<String>,
+    },
+    /// Auto mode blocked a Bash command live, `agent` (a subagent, `None` for the session's own agent)
+    /// asking: the macOS notification "Auto mode blocked a command". A replay raises none.
+    CommandBlocked {
         session_id: String,
         agent: Option<String>,
     },
@@ -2677,8 +2789,172 @@ impl Studio {
             session.agent.since.at = at;
             session.agent.since.by.clear();
         }
+        // The agent's next step shows its blocked-command hook has returned.
+        let acts = event.has(|h| {
+            matches!(
+                h,
+                Happened::ToolStart { .. }
+                    | Happened::ToolEnd { .. }
+                    | Happened::TurnStart { .. }
+                    | Happened::TurnEnd { .. }
+                    | Happened::SubagentEnd
+            )
+        });
+        if acts {
+            let agent = &event.agent_id;
+            session
+                .blocks
+                .retain(|w| !(w.cause == Cause::Denied && w.agent == *agent));
+        }
+        // A blocked command's retry follows the run: its start, its end, and the wake-up of a background task.
         for happened in &event.happened {
             match happened {
+                Happened::ToolStart { tool, id } if tool.kind == ToolKind::Command => {
+                    let card = session.blocked_commands.iter_mut().find(|c| {
+                        matches!(
+                            c.status,
+                            BlockedStatus::Allowed | BlockedStatus::AllowedNotRun
+                        ) && c.retried_by(tool, &event.cwd, &event.agent_id)
+                    });
+                    if let Some(card) = card {
+                        card.status = BlockedStatus::Running;
+                        card.run = Some(id.clone());
+                        card.run_at = Some(at);
+                        card.run_by.clone_from(&event.agent_id);
+                    }
+                }
+                // A turn that ends with no retry leaves the approval unused: the session's own turn covers its
+                // own cards and those of subagents that have ended; a running subagent's card waits for
+                // that subagent's own end, since its worker may still retry by itself.
+                Happened::TurnEnd { .. } | Happened::SubagentEnd => {
+                    let ended = |agent: &Option<String>| {
+                        agent.as_deref().is_none_or(|id| {
+                            session.subagent(id).is_none_or(|a| a.ended_at.is_some())
+                        })
+                    };
+                    let own_end = matches!(happened, Happened::SubagentEnd);
+                    let flips: Vec<bool> = session
+                        .blocked_commands
+                        .iter()
+                        .map(|card| match own_end {
+                            true => card.agent.is_some() && card.agent == event.agent_id,
+                            false => ended(&card.agent),
+                        })
+                        .collect();
+                    for (card, flip) in session.blocked_commands.iter_mut().zip(flips) {
+                        if flip && card.status == BlockedStatus::Allowed {
+                            card.status = BlockedStatus::AllowedNotRun;
+                        }
+                    }
+                }
+                // The retry's end: finished with its exit code, or running on in the background.
+                Happened::ToolEnd { id, failed, .. } => {
+                    let card = session
+                        .blocked_commands
+                        .iter_mut()
+                        .find(|c| c.status == BlockedStatus::Running && c.run.as_ref() == Some(id));
+                    if let Some(card) = card {
+                        match event.background_task() {
+                            Some(task) => {
+                                card.status = BlockedStatus::RunningInBackground;
+                                card.task = Some(task.into());
+                            }
+                            None => {
+                                card.status = BlockedStatus::Finished;
+                                card.exit_code = match failed {
+                                    false => Some(0),
+                                    true => event.exit_code(),
+                                };
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        for happened in &event.happened {
+            match happened {
+                Happened::CommandBlocked { tool, id, reason } => {
+                    let command = tool.command.clone().unwrap_or_default();
+                    // The same command blocked again after Allow is its card's, not a new one. A running
+                    // card takes only the block of its own retry: another call's is a card of its own.
+                    let again = session
+                        .blocked_commands
+                        .iter_mut()
+                        .find(|c| match c.status {
+                            BlockedStatus::Allowed | BlockedStatus::AllowedNotRun => {
+                                c.retried_by(tool, &event.cwd, &event.agent_id)
+                            }
+                            BlockedStatus::Running => c.run.as_ref() == Some(id),
+                            _ => false,
+                        });
+                    // The blocked call never ran: it leaves the running calls, its step and its check line.
+                    session.running.retain(|c| c.id.as_ref() != Some(id));
+                    session.checks.retain(|l| l.call != *id);
+                    match &event.agent_id {
+                        Some(agent) => {
+                            let mut agents = session.agents.iter_mut();
+                            if let Some(a) = agents.find(|a| a.agent.id == *agent) {
+                                a.agent.step_done(id, at);
+                            }
+                        }
+                        None => session.agent.step_done(id, at),
+                    }
+                    match again {
+                        Some(card) => {
+                            card.status = BlockedStatus::BlockedAgain;
+                            card.call = id.clone();
+                            card.reason = reason.clone();
+                            card.run = None;
+                            card.run_at = None;
+                        }
+                        None => session.blocked_commands.push(BlockedCommand {
+                            call: id.clone(),
+                            command,
+                            cwd: event.cwd.clone(),
+                            reason: reason.clone(),
+                            agent: event.agent_id.clone(),
+                            at,
+                            status: BlockedStatus::Blocked,
+                            run: None,
+                            run_at: None,
+                            run_by: None,
+                            exit_code: None,
+                            task: None,
+                        }),
+                    }
+                    let agent = event.agent_id.clone();
+                    session.block(
+                        Cause::Denied,
+                        tool.name.clone(),
+                        tool.input.clone(),
+                        agent,
+                        at,
+                    );
+                    session.blocks.last_mut().expect("just pushed").denied = Some(id.clone());
+                }
+                // Daniel's Allow or Decline: the hook has what it waited for, and the decision
+                // enters the history on the card.
+                Happened::BlockedAnswered { tool, id, answer } => {
+                    let allowed = answer["decision"] == "allow";
+                    if let Some(card) = session.blocked_commands.iter_mut().find(|c| c.call == *id)
+                    {
+                        card.status = match allowed {
+                            true => BlockedStatus::Allowed,
+                            false => BlockedStatus::Declined,
+                        };
+                        session.decisions.push(Decision {
+                            call: id.clone(),
+                            agent: card.agent.clone(),
+                            tool: tool.name.clone(),
+                            input: tool.input.clone(),
+                            answer: answer["decision"].clone(),
+                            at,
+                            source: Source::Card,
+                        });
+                    }
+                    session.blocks.retain(|w| w.denied.as_ref() != Some(id));
+                }
                 // A prompt opens a wait, also after an interrupt, which fires no `Stop`.
                 Happened::TurnStart { prompt, origin } => {
                     let sender = match origin {
@@ -2687,6 +2963,18 @@ impl Studio {
                         None => session.sender(prompt),
                     };
                     let wake_up = !sender.is_daniels();
+                    // A background retry ends at the notification that names its task, one of
+                    // perhaps several in the wake-up.
+                    for (task, _) in event.reported() {
+                        for card in &mut session.blocked_commands {
+                            if card.status == BlockedStatus::RunningInBackground
+                                && card.task.as_ref() == Some(task)
+                            {
+                                card.status = BlockedStatus::Finished;
+                                card.exit_code = claude::exit_code_of(prompt, task);
+                            }
+                        }
+                    }
                     match &sender {
                         // The row says which worker returned until the session's next step.
                         Sender::WakeUp(task_id) => {
@@ -2906,7 +3194,11 @@ impl Studio {
                 }
                 // It has no `tool_use_id`, so it names its call by tool and input. With no agent, it is
                 // the session's own agent's.
-                Happened::PermissionAsked { tool } if !tool.asks() => {
+                // A retry's pass from the card allows it at once, so it does not wait on Daniel; its
+                // `PreToolUse` may land after it, as the hooks are async.
+                Happened::PermissionAsked { tool }
+                    if !tool.asks() && !session.passes(tool, &event.cwd, &event.agent_id) =>
+                {
                     let (name, input) = (tool.name.clone(), tool.input.clone());
                     session.block(Cause::Call, name, input, event.agent_id.clone(), at);
                 }
@@ -3118,7 +3410,16 @@ impl Studio {
             since: block.at,
         });
         let phase_started = session.work.phases.len() != phases_before;
-        if !blocked_before && session.state == State::NeedsYou {
+        // A blocked command's own notice stands for its needs-you, so one block shows one notification.
+        let only_denied =
+            !session.blocks.is_empty() && session.blocks.iter().all(|b| b.cause == Cause::Denied);
+        if !replay && event.has(|h| matches!(h, Happened::CommandBlocked { .. })) {
+            outputs.push(Output::CommandBlocked {
+                session_id: event.session_id.clone(),
+                agent: event.agent_id.clone(),
+            });
+        }
+        if !blocked_before && session.state == State::NeedsYou && !only_denied {
             outputs.push(Output::NeedsYou {
                 session_id: event.session_id.clone(),
                 agent: session.asker.as_ref().and_then(|w| w.agent.clone()),

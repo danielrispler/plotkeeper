@@ -40,6 +40,13 @@ export const askFor = (question: Question) =>
 export const openDecision = () =>
   current !== null && askKind(current.ask.tool_name) !== "question" ? current.ask : null;
 
+// A blocked command's request (`hook/src/answer.rs`): `waiting` while its hook still waits for Daniel's click.
+export type BlockedRequest = { nonce: string; tool_use_id: string; waiting: boolean };
+let blockedRequests: BlockedRequest[] = [];
+
+// The request of the denied call `call`, if its card can answer it.
+export const blockedRequestFor = (call: string) => blockedRequests.find((r) => r.tool_use_id === call) ?? null;
+
 const watch = (session: string | null) =>
   invoke("watch", { session }).catch((e) => (console.warn(e), null));
 
@@ -85,12 +92,16 @@ export async function rewatch() {
 export function startWatching(draw: () => void) {
   redraw = draw;
   listen<Ask | null>("ask", (ask) => take(ask));
+  listen<BlockedRequest[]>("blocked", (requests) => {
+    blockedRequests = requests;
+    redraw();
+  });
   document.addEventListener("visibilitychange", rewatch);
   rewatch();
   // Shows the shell the window is alive, so a frozen window lets the hook hand a question to the
   // terminal within seconds (danielrispler/Falinks#569). It asks for nothing; the open request still comes as an event.
   setInterval(() => {
-    if (shown().session !== null) invoke("alive").catch(() => {});
+    if (document.visibilityState === "visible") invoke("alive").catch(() => {});
   }, 1000);
 }
 
@@ -102,4 +113,22 @@ export async function sendAnswer(ask: Ask, reply: Reply) {
   redraw();
   const args = { session, nonce: ask.nonce, answers: null, decision: null, ...reply };
   await invoke("answer", args).catch((e) => console.warn(e));
+}
+
+// Which way the shell took Daniel's answer to a blocked command: to its hook, still waiting, or late, the hook having returned.
+export type BlockedAnswered = "hook" | "late";
+
+// Allow or Decline of a blocked command, and which way it went; null when the shell refused it, which puts the request back so the
+// card keeps its buttons. The card stays until the core takes the answer's line.
+export async function sendBlockedAnswer(session: string, request: BlockedRequest, decision: "allow" | "deny"): Promise<BlockedAnswered | null> {
+  blockedRequests = blockedRequests.filter((r) => r.nonce !== request.nonce);
+  redraw();
+  try {
+    return await invoke("answer_blocked_command",{ session, nonce: request.nonce, decision });
+  } catch (e) {
+    console.warn(e);
+    if (!blockedRequests.some((r) => r.nonce === request.nonce)) blockedRequests = [...blockedRequests, request];
+    redraw();
+    return null;
+  }
 }

@@ -113,6 +113,9 @@ struct Raw {
     /// question, `decision` for a plan or a permission.
     #[serde(default)]
     studio_answer: Value,
+    /// On a `StudioAnswer` line, the event whose call the answer decides.
+    #[serde(default)]
+    studio_asked_by: String,
 }
 
 /// The event of hook line `line`; an error when it is no Claude Code line.
@@ -240,6 +243,20 @@ fn adapt(raw: Raw) -> Event {
         RENAME => happened.push(Happened::Renamed(raw.studio_name.clone())),
         PROMPT_NAME => happened.push(Happened::PromptNamed(raw.studio_name.clone())),
         DELETE => happened.push(Happened::Deleted),
+        "PermissionDenied" if tool(&raw).kind == ToolKind::Command => {
+            happened.push(Happened::CommandBlocked {
+                tool: tool(&raw),
+                id: id.clone(),
+                reason: raw.reason.clone(),
+            })
+        }
+        STUDIO_ANSWER if raw.studio_asked_by == "PermissionDenied" => {
+            happened.push(Happened::BlockedAnswered {
+                tool: tool(&raw),
+                id: id.clone(),
+                answer: raw.studio_answer.clone(),
+            })
+        }
         STUDIO_ANSWER => happened.push(Happened::Answered {
             tool: tool(&raw),
             id: id.clone(),
@@ -304,6 +321,20 @@ pub(crate) fn names(prompt: &str, id: &str) -> Names {
 fn reported(prompt: &str) -> impl Iterator<Item = (&str, &str)> {
     let notices = prompt.split("<task-notification>").skip(1);
     notices.filter_map(|notice| Some((tag(notice, "task-id")?, tag(notice, "status")?)))
+}
+
+/// The exit code a wake-up's summary gives task `id`, as in `Background command "…" completed (exit code 0)`,
+/// `… failed with exit code 1` or `… completed (exit code 1: No matches found)`; `None` when it gives none.
+pub(crate) fn exit_code_of(prompt: &str, id: &str) -> Option<i32> {
+    let notice = prompt
+        .split("<task-notification>")
+        .skip(1)
+        .find(|notice| tag(notice, "task-id") == Some(id))?;
+    let (_, after) = tag(notice, "summary")?.rsplit_once("exit code ")?;
+    let digits = after
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(after.len());
+    after[..digits].parse().ok()
 }
 
 /// The text of the first `<name>` element in `text`.
