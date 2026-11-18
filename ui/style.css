@@ -215,10 +215,13 @@ h1 { margin: 0 0 var(--sp-4); }
 .settings-head svg { width: var(--icon); height: var(--icon); }
 .settings-body { flex: 1; min-height: 0; overflow-y: auto; padding: var(--sp-4) var(--sp-6) var(--sp-7); }
 .settings-body h2 { margin: var(--sp-6) 0 var(--sp-2); font-size: var(--size-small); font-weight: 600; color: var(--muted); }
-.settings-body .broken, .settings-body .refused { margin: var(--sp-4) 0; padding: var(--sp-4) var(--sp-5); border-radius: var(--radius); font-size: var(--size-small);
-                                                  background: var(--needs-you-bg); color: var(--needs-you); border: var(--hair) solid var(--needs-you-line); }
-.settings-body .broken { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-5); }
-.settings-body .broken .btn { flex: none; background: var(--selected); color: var(--fg); }
+/* An error line is neutral, as #notice is: colour is for "needs you". */
+.settings-status:empty { display: none; }
+.settings-status { padding: 0 var(--sp-6); }
+.settings-status .broken, .settings-status .refused { margin: var(--sp-4) 0 0; padding: var(--sp-4) var(--sp-5); border-radius: var(--radius); font-size: var(--size-small);
+                                                      background: var(--raised); color: var(--muted); border: var(--hair) solid var(--line); }
+.settings-status .broken { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-5); }
+.settings-status .broken .btn { flex: none; background: var(--selected); color: var(--fg); }
 .setting { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-6); padding: var(--sp-5) 0; border-bottom: var(--hair) solid var(--line); }
 .setting-text { min-width: 0; }
 .setting-title { display: flex; align-items: center; gap: var(--sp-3); font-size: var(--size); }

@@ -271,6 +271,18 @@ export const fixtures = {
       if (!toggles().every((t) => t.endsWith("disabled"))) log("snap:fail a toggle is enabled: " + toggles());
       if ([...dialog.querySelectorAll("select, .stepper .btn")].some((c) => !c.disabled)) log("snap:fail a stepper or dropdown is enabled");
       if ([...dialog.querySelectorAll("button.open")].some((b) => !b.disabled)) log("snap:fail an Open button is enabled");`),
+  // The undo icon of a changed dropdown row sends the write that removes its key (a click on a dropdown's own control does not).
+  settingsReset: () =>
+    settingsPage(`{ "summaries": { "model": "opus" } }`, `
+      const sent = [];
+      const invoke = window.__TAURI__.core.invoke;
+      window.__TAURI__.core.invoke = (command, args) => (command === "write_setting" && sent.push(args), invoke(command, args));
+      dialog.querySelector('select[data-key="summaries.model"]').click();
+      dialog.querySelector('button[data-key="summaries.model"][data-action="reset"]').click();
+      await new Promise((done) => setTimeout(done, 200));
+      if (sent.length !== 1) log("snap:fail expected one write, got " + sent.length);
+      else if (sent[0].value !== null || sent[0].path.join(".") !== "summaries.model") log("snap:fail the write was " + JSON.stringify(sent[0]));
+      if (undo() !== 0) log("snap:fail the undo icon still shows");`, { write_setting: "{}" }),
   // A change saves at once: pressing Sounds sends the write, and the text it returns shows with its undo icon.
   settingsWrite: () =>
     settingsPage(null, `
@@ -278,11 +290,13 @@ export const fixtures = {
       await new Promise((done) => setTimeout(done, 200));
       if (undo() !== 1) log("snap:fail the change did not show its undo icon");
       if (toggles()[0] !== "false") log("snap:fail Sounds did not turn off: " + toggles());`, { write_setting: '{ "sounds": false }' }),
-  // A refused write shows its reason in the page.
+  // A refused write shows its reason in the page, and the line coming leaves the rows' nodes as they were (a focused control stays focused).
   settingsRefused: () =>
     settingsPage(null, `
-      dialog.querySelector(".switch").click();
+      const sounds = dialog.querySelector(".switch");
+      sounds.click();
       await new Promise((done) => setTimeout(done, 200));
+      if (dialog.querySelector(".switch") !== sounds) log("snap:fail the refusal's line rebuilt the rows");
       if (!dialog.querySelector(".refused")?.textContent.includes("changed since")) log("snap:fail the refusal's reason is not shown");`, { write_setting: { __throw: "settings.json changed since the page read it: try again" } as never }),
   branchOnce,
   pullEnabled: pullMain({}, false),

@@ -84,6 +84,13 @@ export type Page = { error: string | null; sections: { heading: string; rows: Ro
 const valueAt = (settings: Settings, path: string[]): unknown =>
   path.reduce<unknown>((at, name) => (at as Record<string, unknown> | undefined)?.[name], settings);
 
+// What a button or dropdown's `data-action` can be.
+export type Action = "reset" | "toggle" | "up" | "down" | "select" | "open";
+
+// Whether the event `what` on a control for `action` sends a write: a dropdown writes on its change, not on the click that opens
+// it; every button writes on its click (the undo icon of a dropdown's row included).
+export const writesOn = (action: Action, what: "click" | "change"): boolean => action !== "select" || what === "change";
+
 export const BROKEN = "settings.json has errors: fix it first";
 
 // The value a stepper's button gives, `by` steps up or down from the row's value, inside its bounds, to one decimal. A value
@@ -97,7 +104,7 @@ export const stepped = ({ value, min, max, step }: { value: number; min: number;
 // What a control's change writes to the file, from the row as it is when the write runs: null removes the key, which is what a
 // reset does and what a change to the row's own default does too, so the page never writes a key it cannot undo. `picked` is the
 // dropdown's new value.
-export function newValue(row: Row, action: string, picked = ""): boolean | number | string | null {
+export function newValue(row: Row, action: Action, picked = ""): boolean | number | string | null {
   if (row.control === "open" || action === "reset") return null;
   const value = row.control === "toggle" ? !row.value : row.control === "stepper" ? stepped(row, action === "up" ? 1 : -1) : picked;
   return value === row.defaultValue ? null : value;
@@ -143,7 +150,7 @@ const dialog = () => element("settings-dialog") as HTMLDialogElement;
 const keyOf = (row: Row) => (row.control === "open" ? `open:${row.file}` : row.path.join("."));
 
 // A button (`more` is its classes beside the component's) for the page's `action`, on the row `key`: it works through its dataset, which the page's listeners read.
-function button(label: string, more: string, action: string, key: string, disabled: boolean): HTMLElement {
+function button(label: string, more: string, action: Action, key: string, disabled: boolean): HTMLElement {
   const b = text("button", label, `btn ${more}`);
   b.setAttribute("type", "button");
   b.dataset.action = action;
@@ -206,7 +213,8 @@ function control(row: Exclude<Row, { control: "open" }>): HTMLElement {
   return toggle;
 }
 
-// Draws the page from `studio.files`; an open dialog is patched, so a focused control stays focused.
+// Draws the page from `studio.files`; an open dialog is patched, so a focused control stays focused. The error lines are drawn in
+// their own element above the rows, so one coming or going never moves the rows' places in the patch.
 export function drawSettingsPage() {
   const page = current();
   const lines: HTMLElement[] = [];
@@ -222,7 +230,8 @@ export function drawSettingsPage() {
     lines.push(line);
   }
   const sections = page.sections.flatMap(({ heading, rows }) => [text("h2", heading), ...rows.map(drawRow)]);
-  patch(element("settings-body"), [...lines, ...sections]);
+  patch(element("settings-status"), lines);
+  patch(element("settings-body"), sections);
   // A dropdown's selection is a property the patch does not carry: set it from the row.
   for (const select of element("settings-body").querySelectorAll("select")) select.value = select.dataset.value ?? "";
   element("settings-close").title = titled(studio.files.keymap, "Close", "studio::Dismiss");
@@ -232,7 +241,7 @@ const rowFor = (key: string) => current().sections.flatMap((s) => s.rows).find((
 
 // Changes the row `key` as `action` says (`newValue`), saving it to `settings.json` from the text the window last read. The value is
 // worked out when the write runs, from the row as the write before it left it, so two quick clicks on + step twice.
-function write(key: string, action: string, picked?: string) {
+function write(key: string, action: Action, picked?: string) {
   queue = queue.then(async () => {
     const row = rowFor(key);
     if (!row || row.control === "open" || row.disabled) return;
@@ -244,6 +253,12 @@ function write(key: string, action: string, picked?: string) {
     } catch (e) {
       // A newer text that arrived meanwhile has already answered the refusal.
       refused = studio.texts.settings === expected ? { why: String(e), at: expected } : null;
+      // The window's text may be older than the file's (a write's reply that crossed an editor's save): read both again, so the next try is made against the file as it is.
+      try {
+        saved(await invoke("settings_files"));
+      } catch (again) {
+        console.warn(again);
+      }
     }
     drawSettingsPage();
   });
@@ -274,10 +289,9 @@ export function startSettingsPage(apply: (files: SettingsFiles) => void) {
     const clicked = (target as Element).closest<HTMLElement>("[data-action]");
     const row = clicked?.dataset.key ? rowFor(clicked.dataset.key) : undefined;
     if (!clicked || !row || (clicked as HTMLButtonElement).disabled) return;
-    const { action = "", key = "" } = clicked.dataset;
+    const { action, key = "" } = clicked.dataset as { action: Action; key?: string };
     if (row.control === "open") openFile(row.file);
-    // A dropdown writes on its change, not on the click that opens it.
-    else if (row.control !== "select" || what === "change") write(key, action, (clicked as HTMLSelectElement).value);
+    else if (writesOn(action, what)) write(key, action, (clicked as HTMLSelectElement).value);
   };
   element("settings-body").addEventListener("click", (event) => change(event.target, "click"));
   element("settings-body").addEventListener("change", (event) => change(event.target, "change"));

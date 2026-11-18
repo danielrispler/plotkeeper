@@ -5,6 +5,7 @@
 use std::{
     fs,
     path::{Path, PathBuf},
+    sync::Mutex,
     thread,
     time::Duration,
 };
@@ -90,7 +91,19 @@ fn edit_text(
         .transpose()?;
     // An empty file is the defaults: an empty object.
     let source = if text.trim().is_empty() { "{}" } else { text };
-    let root = CstRootNode::parse(source, &ParseOptions::default())
+    // Only what the page's parser reads (`ui/settings.ts`): comments and trailing commas, nothing else JSON5 allows.
+    let jsonc = ParseOptions {
+        allow_loose_object_property_names: false,
+        allow_missing_commas: false,
+        allow_single_quoted_strings: false,
+        allow_hexadecimal_numbers: false,
+        allow_unary_plus_numbers: false,
+        allow_bare_decimal_point_numbers: false,
+        allow_non_finite_numbers: false,
+        allow_extended_string_escapes: false,
+        ..ParseOptions::default()
+    };
+    let root = CstRootNode::parse(source, &jsonc)
         .map_err(|e| format!("settings.json could not be parsed: {e}"))?;
     let mut object = root
         .object_value()
@@ -186,6 +199,9 @@ fn write_in(
     Ok(edited)
 }
 
+/// Held across `write_setting`'s read-compare-save.
+static WRITING: Mutex<()> = Mutex::new(());
+
 /// Sets the setting at `path`, such as `["terminal", "font_size"]`, to `value` in `settings.json`, or removes it when `value`
 /// is none (the settings page, #195). `expected` is the text the page last read. Returns the new text,
 /// or why the write was refused; the written file reaches the window through `watch` like any save.
@@ -196,6 +212,8 @@ pub fn write_setting(
     value: Option<serde_json::Value>,
 ) -> Result<String, String> {
     let [settings, _] = paths().ok_or("no home folder")?;
+    // One write at a time, so two never interleave their read, compare and save.
+    let _one_at_a_time = WRITING.lock().unwrap_or_else(|e| e.into_inner());
     write_in(&settings, expected.as_deref(), &path, value.as_ref())
 }
 
@@ -433,6 +451,27 @@ mod tests {
             write_in(&file, Some(broken), &path(&["sounds"]), Some(&json!(false))).unwrap_err();
         assert!(refused.contains("could not be parsed"), "{refused}");
         assert_eq!(std::fs::read_to_string(&file).unwrap(), broken);
+    }
+
+    #[test]
+    fn a_text_that_is_more_than_jsonc_is_refused_and_the_file_left_as_it_was() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("settings.json");
+        for text in [
+            "{\n \"zoom\": 1\n \"sounds\": true\n}",
+            "{ zoom: 1 }",
+            "{ 'zoom': 1 }",
+            "{ \"zoom\": 0x10 }",
+            "{ \"zoom\": +1 }",
+            "{ \"zoom\": .5 }",
+            "{ \"zoom\": NaN }",
+        ] {
+            std::fs::write(&file, text).unwrap();
+            let refused =
+                write_in(&file, Some(text), &path(&["sounds"]), Some(&json!(false))).unwrap_err();
+            assert!(refused.contains("could not be parsed"), "{text}: {refused}");
+            assert_eq!(std::fs::read_to_string(&file).unwrap(), text);
+        }
     }
 
     #[test]

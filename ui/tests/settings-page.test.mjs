@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { initial, reload, reloadedZoom, zoomed } from "../../dist/settings.js";
-import { newValue, settingsPage as pageOf, stepped } from "../../dist/settings-page.js";
+import { newValue, settingsPage as pageOf, stepped, writesOn } from "../../dist/settings-page.js";
 
 // The stylesheet's terminal size, which the window reads from `--size-mono`.
 const SHEET = 12.5;
@@ -179,4 +179,13 @@ test("a changed default zoom resets the window's zoom, and ⌘+ never writes the
   // The page changing the file's zoom sets the window's.
   assert.equal(reloadedZoom(keys, initial.settings, load(`{ "zoom": 1.5 }`).settings), 1.5);
   assert.equal(reloadedZoom(keys, load(`{ "zoom": 1.5 }`).settings, load(`{ "zoom": 1.5 }`).settings), keys);
+});
+
+test("a dropdown writes on its change, every button on its click, so the undo icon of a dropdown's row resets", () => {
+  assert.equal(writesOn("select", "click"), false, "the click that opens the list");
+  assert.equal(writesOn("select", "change"), true);
+  for (const action of ["reset", "toggle", "up", "down"]) assert.equal(writesOn(action, "click"), true, action);
+  // A reset on a changed dropdown row writes null, which removes the key.
+  const page = settingsPage(load(`{ "summaries": { "model": "opus" } }`));
+  assert.equal(writesOn("reset", "click") && newValue(row(page, "Model"), "reset", "opus"), null);
 });
