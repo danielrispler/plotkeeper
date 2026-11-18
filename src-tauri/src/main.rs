@@ -30,8 +30,8 @@ use studio_understanding::{
     AGY_FIXTURE_VERSION, AgyVersions, CardStore, CardWriter, Changed, ClaudeWriter, Decision,
     FakeWriter, Fingerprints, Offer, Offers, OpenItem, Rating, Row, SessionCards, StoredSummary,
     SummarySetup, Tap, TurnFacts, Versions, add_hunks, backfilled, changed_in, fingerprint_changes,
-    millis, offer_stop, offer_summary, open_items, settle, turn_diffs, turn_hunk, worktree_root,
-    write_agent_summary, write_design, write_goal, write_name, write_retests,
+    live_roots, millis, offer_stop, offer_summary, open_items, settle, turn_diffs, turn_hunk,
+    worktree_root, write_agent_summary, write_design, write_goal, write_name, write_retests,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
@@ -718,9 +718,16 @@ fn roots_file(log: &Path) -> PathBuf {
 // parent's root; check the saved ones with `git` if a session ever shows under the wrong worktree.
 fn saved_roots(log: &Path) -> HashMap<String, String> {
     let saved = std::fs::read(roots_file(log)).ok();
-    saved
+    let saved: HashMap<String, String> = saved
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    // An entry that maps a removed worktree's folder to another root is dropped, and the file
+    // saved without it (danielrispler/plotkeeper#205).
+    let live = live_roots(saved.clone());
+    if live.len() != saved.len() {
+        save_roots(log, &live);
+    }
+    live
 }
 
 /// Takes the state a launch before saved, when it fits the log, and returns the offset to replay the
@@ -1824,7 +1831,40 @@ fn uptime() -> Duration {
 
 #[cfg(test)]
 mod tests {
-    use super::{in_app, log_line, lost_data, scrubbed, shows_in_window};
+    use super::{in_app, log_line, lost_data, saved_roots, scrubbed, shows_in_window};
+
+    #[test]
+    fn a_saved_root_of_a_removed_worktrees_folder_is_dropped_and_the_file_saved_without_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let root = root.to_str().unwrap();
+        let git = |args: &[&str]| {
+            let ok = std::process::Command::new("git")
+                .args(["-c", "user.name=S", "-c", "user.email=s@example.com"])
+                .args(args)
+                .current_dir(root)
+                .status()
+                .unwrap()
+                .success();
+            assert!(ok, "git {args:?}");
+        };
+        git(&["init", "-q"]);
+        git(&["commit", "-q", "--allow-empty", "-m", "base"]);
+        let gone = format!("{root}/worktrees/w1");
+        git(&["worktree", "add", "-q", "-b", "w1", &gone]);
+        git(&["worktree", "remove", &gone]);
+        let log = dir.path().join("events.jsonl");
+        let saved = serde_json::json!({ format!("{gone}/src"): root, root: root });
+        std::fs::write(super::roots_file(&log), saved.to_string()).unwrap();
+        let kept = saved_roots(&log);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept.get(root).map(String::as_str), Some(root));
+        let file = std::fs::read(super::roots_file(&log)).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<super::HashMap<String, String>>(&file).unwrap(),
+            kept
+        );
+    }
 
     #[test]
     fn a_file_line_carries_the_local_time_level_and_target() {

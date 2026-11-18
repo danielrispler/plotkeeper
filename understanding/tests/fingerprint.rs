@@ -2,9 +2,10 @@
 //! temporary repositories, as the engine's tests do (`src/lib.rs`,
 //! `retention_checks_every_blob_of_a_snapshot`).
 
+use std::collections::HashMap;
 use std::{fs, path::Path, process::Command};
 use studio_core::{Base, Purpose};
-use studio_understanding::Fingerprints;
+use studio_understanding::{Fingerprints, live_roots, worktree_root};
 
 /// Runs `git` in `repo`, away from Daniel's own git config, and returns its output.
 fn git(repo: &Path, args: &[&str]) -> String {
@@ -440,4 +441,42 @@ fn committing_only_an_os_file_is_no_change() {
     git(dir.path(), &["commit", "-qm", "Oops"]);
 
     assert_eq!(diff(&mut prints, dir.path()), None);
+}
+
+/// A repository with a worktree `w1` removed and a worktree `w2` listed, both in its `worktrees`
+/// folder (danielrispler/plotkeeper#205); the root, and the folders of `w1` and `w2`.
+fn repo_with_removed_worktree() -> (tempfile::TempDir, String, String, String) {
+    let (dir, _) = repo();
+    let root = fs::canonicalize(dir.path()).unwrap().display().to_string();
+    let [w1, w2] = ["w1", "w2"].map(|name| {
+        let path = format!("{root}/worktrees/{name}");
+        git(dir.path(), &["worktree", "add", "-q", "-b", name, &path]);
+        path
+    });
+    git(dir.path(), &["worktree", "remove", "--force", &w1]);
+    (dir, root, w1, w2)
+}
+
+#[test]
+fn a_path_in_a_removed_worktrees_folder_has_no_root_and_one_in_a_listed_worktree_has_its_own() {
+    let (_dir, root, w1, w2) = repo_with_removed_worktree();
+    assert_eq!(worktree_root(&format!("{w1}/src/a.rs")), None);
+    assert_eq!(worktree_root(&w1), None);
+    assert_eq!(worktree_root(&format!("{w2}/new/dir/a.rs")), Some(w2));
+    assert_eq!(worktree_root(&format!("{root}/new/a.rs")), Some(root));
+}
+
+#[test]
+fn a_loaded_root_cache_drops_the_entry_of_a_removed_worktrees_folder_and_keeps_the_rest() {
+    let (_dir, root, w1, w2) = repo_with_removed_worktree();
+    let saved: HashMap<String, String> = [
+        (format!("{w1}/src"), root.clone()),
+        (w2.clone(), w2.clone()),
+        (root.clone(), root.clone()),
+    ]
+    .into();
+    let kept = live_roots(saved.clone());
+    let mut expected = saved;
+    expected.remove(&format!("{w1}/src"));
+    assert_eq!(kept, expected);
 }
