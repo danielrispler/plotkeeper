@@ -2494,6 +2494,12 @@ impl Studio {
             self.selected = Some(event.session_id.clone());
             self.viewed = None;
         }
+        // So does one whose terminal's own row was selected, a status-only or shell row, whose id is
+        // the terminal's: as agy's at its first prompt, or `claude` typed into a plain terminal.
+        if session.terminal.is_some() && self.selected == session.terminal {
+            self.selected = Some(event.session_id.clone());
+            self.viewed = None;
+        }
         let working = session.state == State::Running;
         session.work.passes(event.studio_received_ms, working);
         let phases_before = session.work.phases.len();
