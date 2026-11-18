@@ -365,7 +365,7 @@ export async function showSession(session: Session | null, clicked = false, agen
   selected = key;
   if (session) starting = null;
   const connected = await ready?.then(() => true, () => false);
-  await revived.catch((e) => console.warn(`terminal: revive: ${e}`));
+  await revived.catch(failure("revive"));
   const current = () => selected === key;
   if (!connected || !current()) return;
   showPanel(session, repo);

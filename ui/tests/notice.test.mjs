@@ -3,10 +3,11 @@ import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 
 const line = { textContent: "", hidden: true };
-globalThis.document = { getElementById: () => line };
+let present = true;
+globalThis.document = { getElementById: () => (present ? line : null) };
 const logged = [];
 globalThis.window = { __TAURI__: { log: { warn: async (m) => logged.push(["warn", m]), error: async (m) => logged.push(["error", m]) } } };
-const { onLogRecord, dismissNotice, setSettingsErrors } = await import("../../dist/notice.js");
+const { onLogRecord, dismissNotice, setSettingsErrors, showNotice } = await import("../../dist/notice.js");
 const { failure, logLine } = await import("../../dist/dom.js");
 const ERROR = 5;
 const WARN = 4;
@@ -67,4 +68,32 @@ test("clearing the settings errors hides a line that holds nothing else", () => 
   assert.equal(line.hidden, false);
   setSettingsErrors([]);
   assert.equal(line.hidden, true);
+});
+
+test("dismissing removes the errors and keeps the version and writer notices beside them", () => {
+  showNotice("Claude Code 3 changed.");
+  line.textContent += "\nCards and briefs are off: no writer";
+  onLogRecord({ level: ERROR, message: "cards did not save" });
+  dismissNotice();
+  assert.deepEqual(lines(), ["Claude Code 3 changed.", "Cards and briefs are off: no writer"]);
+  assert.equal(line.hidden, false);
+});
+
+test("the version notice keeps the errors and settings lines shown beside it", () => {
+  setSettingsErrors(["settings.json: bad"]);
+  onLogRecord({ level: ERROR, message: "cards did not save" });
+  showNotice("Claude Code 3 changed.");
+  assert.deepEqual(lines(), ["settings.json: bad", "cards did not save", "Claude Code 3 changed."]);
+  assert.equal(line.hidden, false);
+});
+
+test("an error with no notice element in the page is still sent to the log, and nothing throws", () => {
+  present = false;
+  try {
+    logged.length = 0;
+    logLine("error", "delete_session: gone");
+    assert.deepEqual(logged, [["error", "delete_session: gone"]]);
+  } finally {
+    present = true;
+  }
 });

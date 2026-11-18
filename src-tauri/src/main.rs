@@ -165,8 +165,7 @@ fn turn_summary(
         return Ok(None);
     };
     let setup = summaries.setup.lock().unwrap().clone();
-    let log = report;
-    if write_summary(&cards, &**writer, &setup, request.clone(), log).is_none() {
+    if write_summary(&cards, &**writer, &setup, request.clone(), report).is_none() {
         summaries
             .waiting
             .lock()
@@ -221,8 +220,9 @@ fn agent_summary(
         return None;
     }
     let setup = summaries.setup.lock().unwrap().clone();
-    let log = report;
-    write_agent_summary(&cards, &**writer, &setup, &agent_id, &prompt, &message, log)
+    write_agent_summary(
+        &cards, &**writer, &setup, &agent_id, &prompt, &message, report,
+    )
 }
 
 /// The session list, in its order.
@@ -516,8 +516,7 @@ fn rate(id: String, rating: Rating, cards: State<Cards>) {
 /// command runs off the main thread. `None` when the writer gave none.
 #[tauri::command(async)]
 fn explain_more(id: String, cards: State<Cards>, writer: State<Writer>) -> Option<String> {
-    let log = report;
-    studio_understanding::explain_more(&cards, &**writer, &id, log)
+    studio_understanding::explain_more(&cards, &**writer, &id, report)
 }
 
 /// Daniel's side `question` on `item`, a response, card or intention of session `session` (danielrispler/Falinks#461,
@@ -811,13 +810,14 @@ fn keep_panics_in_the_log() {
     }));
 }
 
-/// A panic's message when it is text; a message may hold what the code was working on, so only its own words are kept.
+/// A panic's message when it is text, scrubbed like a writer's line: an `unwrap` on an `Err` can carry what the code was working on.
 fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
-    payload
+    let text = payload
         .downcast_ref::<&str>()
         .copied()
         .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
-        .unwrap_or("not text")
+        .unwrap_or("not text");
+    scrubbed(text)
 }
 
 /// Opens Finder with the Studio log selected.
@@ -838,13 +838,17 @@ fn reveal_log(app: AppHandle) -> Result<(), String> {
         .ok_or_else(|| "open -R failed".to_string())
 }
 
-/// What of a line from the writers' code may reach the Studio log: the line up to the first quoted text, so a reply's
-/// words never do.
+/// What of a line from the writers' code may reach the Studio log: the line up to the first quote mark, so a reply's
+/// words never do, whether quoted after a colon or inside a parse error (`invalid type: string "<reply>"`).
 fn scrubbed(line: &str) -> &str {
-    line.split(": \"").next().unwrap_or(line)
+    line.split('"')
+        .next()
+        .unwrap_or(line)
+        .trim_end_matches([':', ' '])
 }
 
-/// Whether a line from the writers' code reports lost data (a save that failed), not a degraded step.
+/// Whether a line from the writers' code reports lost data (a save that failed), not a degraded step. Every such line of
+/// the `understanding` crate starts `save `; a test reads their sources to keep it so.
 fn lost_data(line: &str) -> bool {
     line.starts_with("save ")
 }
@@ -1217,8 +1221,7 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
             }
         }
         // Reads the transcripts' lines and nothing else (`AGENTS.md`).
-        let log = report;
-        let transcripts_changed = state.lock().unwrap().follow_transcripts(log);
+        let transcripts_changed = state.lock().unwrap().follow_transcripts(report);
         // Each live session's context, from its status line snapshot (danielrispler/Falinks#517, decision 1; danielrispler/Falinks#519); the
         // snapshot is named by the conversation's id, which a `/clear` changes.
         let running: Vec<_> = (state.lock().unwrap().sessions().into_iter())
@@ -1471,7 +1474,6 @@ fn write(
         return;
     };
     let job = move || {
-        let log = report;
         let store = app.state::<Cards>();
         // Where the card's code is pulled from: its turn's end trees (danielrispler/plotkeeper#121).
         request.ends = app
@@ -1500,8 +1502,8 @@ fn write(
         // A turn the table gives no card is written none, but still feeds the design.
         let written = match card {
             true if !offered(&app, &request) => false,
-            true => write_stop(&store, &*writer, request, &session, stored, log),
-            false => write_goal(&store, &*writer, &request, &session, log),
+            true => write_stop(&store, &*writer, request, &session, stored, report),
+            false => write_goal(&store, &*writer, &request, &session, report),
         };
         // A Quiz is never beside a decision (danielrispler/plotkeeper#119).
         if card && session.needs_you() {
@@ -1588,7 +1590,6 @@ fn summarize(
     let (app, writer) = (app.clone(), writer.clone());
     let id = request.session_id.clone();
     let job = move || {
-        let log = report;
         let setup = app.state::<Summaries>().setup.lock().unwrap().clone();
         let mut request = request;
         if !settle(&app, &mut request) {
@@ -1596,7 +1597,7 @@ fn summarize(
         }
         let session = request.session_id.clone();
         let (studio, cards) = (app.state::<Mutex<Studio>>(), app.state::<Cards>());
-        if write_summary(&cards, &*writer, &setup, request, log).is_some() {
+        if write_summary(&cards, &*writer, &setup, request, report).is_some() {
             design(&studio, &cards, &*writer, &session);
         }
     };
@@ -1615,10 +1616,9 @@ fn name(
     let (app, writer) = (app.clone(), writer.clone());
     let id = request.session_id.clone();
     let job = move || {
-        let log = report;
         let setup = app.state::<Summaries>().setup.lock().unwrap().clone();
         let response = request.response.as_deref();
-        let Some(name) = write_name(&*writer, &setup, &request.prompt, response, log) else {
+        let Some(name) = write_name(&*writer, &setup, &request.prompt, response, report) else {
             return;
         };
         let line = serde_json::json!({
@@ -1714,6 +1714,52 @@ fn uptime() -> Duration {
 #[cfg(test)]
 mod tests {
     use super::{in_app, lost_data, scrubbed};
+
+    #[test]
+    fn a_logged_line_keeps_no_reply_a_parse_error_quotes() {
+        assert_eq!(
+            scrubbed("no quiz on t1: invalid type: string \"secret reply\", expected usize"),
+            "no quiz on t1: invalid type: string"
+        );
+        assert_eq!(
+            scrubbed(
+                "the card writer's reply does not parse (invalid type: string \"secret\", expected a map at line 1): \"head\""
+            ),
+            "the card writer's reply does not parse (invalid type: string"
+        );
+    }
+
+    #[test]
+    fn a_panic_message_is_scrubbed_like_a_writer_line() {
+        assert_eq!(
+            super::panic_message(&"called `Result::unwrap()` on an `Err` value: Parse(\"secret\")"),
+            "called `Result::unwrap()` on an `Err` value: Parse("
+        );
+    }
+
+    #[test]
+    fn every_save_line_of_the_writers_is_lost_data() {
+        let sources = [
+            include_str!("../../understanding/src/lib.rs"),
+            include_str!("../../understanding/src/brief.rs"),
+            include_str!("../../understanding/src/retest.rs"),
+            include_str!("../../understanding/src/summary.rs"),
+        ];
+        let mut saves = 0;
+        for source in sources {
+            for line in source
+                .lines()
+                .filter_map(|l| l.split("log(format!(\"").nth(1))
+            {
+                let text = line.split('"').next().unwrap_or("");
+                if text.to_lowercase().contains("sav") {
+                    assert!(lost_data(text), "a save line is not lost data: {text}");
+                    saves += 1;
+                }
+            }
+        }
+        assert!(saves >= 9, "found only {saves} save lines");
+    }
 
     #[test]
     fn a_logged_line_keeps_no_quoted_reply() {

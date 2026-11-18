@@ -25,9 +25,7 @@ const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e));
 // An `error` also shows in the notice line (#191); the app's echo of it through the log's `Webview` target is the same line.
 export function logLine(level: "warn" | "error", line: string) {
   if (level === "error") {
-    try {
-      showError(line);
-    } catch {}
+    showError(line);
   }
   try {
     window.__TAURI__.log[level](line).catch(() => {});

@@ -4,7 +4,7 @@
 // decides what the window shows; this file wires the shell's events to the regions and lays the
 // columns out by the width rule in `layout.ts`.
 
-import { dismissNotice, onLogRecord, setSettingsErrors } from "./notice.js";
+import { dismissNotice, onLogRecord, setSettingsErrors, showNotice } from "./notice.js";
 import { withWriterNotice } from "./writer-notice.js";
 import { startWatching } from "./answer.js";
 import { openAsk } from "./ask.js";
@@ -335,10 +335,7 @@ listen<Selection | null>("selected", (selected) => (studio.pending ? (studio.mis
 invoke("selected").then(show);
 listen<SessionCards>("cards", (cards) => (studio.pending ? (studio.missed = true) : showCards(cards)));
 // Claude Code's version changed: re-record the subagent fixture.
-listen<string>("notice", (notice) => {
-  element("notice").textContent = notice;
-  element("notice").hidden = false;
-});
+listen<string>("notice", showNotice);
 // The app's errors, from the log plugin's `Webview` target (#191).
 listen<{ level: number; message: string }>("log://log", onLogRecord);
 element("notice-dismiss").addEventListener("click", dismissNotice);
