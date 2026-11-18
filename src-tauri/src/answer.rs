@@ -129,26 +129,34 @@ pub fn answer_blocked(
     let dir = answer::blocked_dir(data, session);
     let text = fs::read_to_string(dir.join(format!("{nonce}.json"))).map_err(|e| e.to_string())?;
     let request: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    let (command, cwd) = (
+        request["tool_input"]["command"].as_str(),
+        request["cwd"].as_str(),
+    );
+    let (Some(command), Some(cwd)) = (command, cwd) else {
+        return Err("the request names no command or folder".into());
+    };
+    let reply = json!({ "nonce": nonce, "decision": decision });
+    let late = !answer::file_pid_lives(&request);
+    // A late answer: the hook has returned, so no one logs the decision but the studio, which
+    // writes the line the hook would have. Only a logged decision counts: else the request and
+    // the card's buttons stay, and no pass is granted.
+    if late {
+        let mut asked = request.clone();
+        asked["session_id"] = session.into();
+        if !answer::log_answer(data, &answer::answered_line(&asked, &reply)) {
+            return Err("the decision could not be logged; try again".into());
+        }
+    }
     if decision == answer::Verdict::Allow {
-        let command = request["tool_input"]["command"].as_str();
-        let cwd = request["cwd"].as_str();
-        let (Some(command), Some(cwd)) = (command, cwd) else {
-            return Err("the request names no command or folder".into());
-        };
         answer::renew_pass(data, session, command, cwd, answer::now_ms())
             .map_err(|e| e.to_string())?;
     }
-    let reply = json!({ "nonce": nonce, "decision": decision });
-    if answer::file_pid_lives(&request) {
+    if !late {
         answer::write_private(&dir.join(format!("{nonce}.answer.json")), &reply)
             .map_err(|e| e.to_string())?;
         return Ok(Answered::Hook);
     }
-    // A late answer: the hook has returned, so no one logs the decision but the studio, which
-    // writes the line the hook would have and closes the request.
-    let mut asked = request;
-    asked["session_id"] = session.into();
-    answer::log_answer(data, &answer::answered_line(&asked, &reply));
     fs::remove_file(dir.join(format!("{nonce}.json"))).map_err(|e| e.to_string())?;
     Ok(Answered::Late)
 }
@@ -414,6 +422,19 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn a_late_answer_that_could_not_be_logged_keeps_the_request_and_grants_no_pass() {
+        let data = tempfile::tempdir().unwrap();
+        request(data.path(), "n1", 0);
+        // The log cannot be appended to: a directory stands where the file should be.
+        std::fs::create_dir_all(data.path().join("events.jsonl")).unwrap();
+        assert!(answer_blocked(data.path(), "s1", "n1", answer::Verdict::Allow).is_err());
+        let blocked = answer::blocked_dir(data.path(), "s1");
+        assert!(blocked.join("n1.json").exists());
+        let passes = std::fs::read_dir(answer::pass_dir(data.path(), "s1"));
+        assert_eq!(passes.map(|d| d.count()).unwrap_or(0), 0);
     }
 
     #[test]

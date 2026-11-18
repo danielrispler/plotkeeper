@@ -198,7 +198,7 @@ fn markup(prompt: &str) -> String {
             continue;
         };
         let kept = text.trim();
-        if holds_id && id_like(kept) || keeps_text(open, kept) {
+        if holds_id && id_like(kept) {
             out.push_str(kept);
         } else if let Some(summary) = summary_label(open, kept) {
             out.push_str(&summary);
@@ -217,47 +217,36 @@ fn markup(prompt: &str) -> String {
     out
 }
 
-/// Whether `text`, right after tag `open`, stays: a background task's output path (`tasks/<id>.output`),
-/// or a summary of one line that names a recording script's command.
-fn keeps_text(open: &str, text: &str) -> bool {
-    match open {
-        "output-file" => {
-            text.len() <= 200
-                && text.starts_with('/')
-                && text.ends_with(".output")
-                && !text.contains(char::is_whitespace)
-        }
-        _ => false,
-    }
-}
-
 /// A background command's wake-up summary, as in `Background command "Run the gate" completed (exit code 0)`,
-/// without the quoted description: `Background command "…" completed (exit code 0)`. `None` for any other
-/// summary, whose text is content.
+/// without the quoted description: `Background command "…" completed (exit code 0)`, `… failed with exit code
+/// 144`, or `… completed (exit code 1: …)` without the explanation. `None` for any other summary, whose text is
+/// content.
 fn summary_label(open: &str, text: &str) -> Option<String> {
     let (first, last) = (text.find('"')?, text.rfind('"')?);
     let (head, tail) = (&text[..first], text.get(last + 1..)?);
     let word = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_lowercase());
-    let code = |s: &str| {
-        s.strip_prefix('(')
-            .and_then(|s| s.strip_suffix(')'))
-            .and_then(|s| s.strip_prefix("exit code "))
-            .is_some_and(|n| n.parse::<i32>().is_ok())
-    };
+    let number = |s: &str| s.parse::<i32>().is_ok();
     let mut words = tail.split_whitespace();
     let status = words.next().filter(|w| word(w))?;
     let rest = words.collect::<Vec<_>>().join(" ");
-    let shaped = open == "summary"
-        && last > first
-        && head == "Background command "
-        && text.len() <= 400
-        && (rest.is_empty() || code(&rest));
-    shaped.then(|| {
-        format!(
-            "{head}\"…\" {status}{}{rest}",
-            if rest.is_empty() { "" } else { " " }
-        )
-    })
+    let code = match rest
+        .strip_prefix("(exit code ")
+        .and_then(|r| r.strip_suffix(')'))
+    {
+        _ if rest.is_empty() => String::new(),
+        Some(n) if number(n) => format!(" {rest}"),
+        Some(inner) => match inner.split_once(':') {
+            Some((n, _)) if number(n) => format!(" (exit code {n}: …)"),
+            _ => return None,
+        },
+        None => match rest.strip_prefix("with exit code ") {
+            Some(n) if number(n) => format!(" {rest}"),
+            _ => return None,
+        },
+    };
+    let shaped =
+        open == "summary" && last > first && head == "Background command " && text.len() <= 400;
+    shaped.then(|| format!("{head}\"…\" {status}{code}"))
 }
 
 /// The tag at the start of `s`, rebuilt: a tag in `TAGS` with its attributes whose key and value look
@@ -338,7 +327,7 @@ mod tests {
         assert_eq!(
             scrubbed(prompt),
             "<task-notification><task-id>a1191df87fb730aa0</task-id>\
-            <tool-use-id>toolu_01Bg1Ag2Ct3Dv4Ew5Fx6Gy7H</tool-use-id><output-file>/private/tmp/x/tasks/a1191df87fb730aa0.output</output-file>\
+            <tool-use-id>toolu_01Bg1Ag2Ct3Dv4Ew5Fx6Gy7H</tool-use-id><output-file>…</output-file>\
             <status>killed</status><summary>…</summary><result>…</result></task-notification>"
         );
         assert_eq!(
@@ -456,9 +445,29 @@ mod tests {
         assert_eq!(kept["studio_answer"], json!({"decision": "allow"}));
         assert_eq!(
             scrub(wake)["prompt"],
-            "<task-notification><status>completed</status><output-file>/private/tmp/t/a.output</output-file>\
+            "<task-notification><status>completed</status><output-file>…</output-file>\
             <summary>Background command \"…\" completed (exit code 0)</summary>\
             <result>…</result></task-notification>"
+        );
+        let summary = |text: &str| {
+            let prompt =
+                format!("<task-notification><summary>{text}</summary></task-notification>");
+            let event = json!({"hook_event_name": "UserPromptSubmit", "prompt": prompt});
+            scrub(event)["prompt"].as_str().unwrap().to_string()
+        };
+        assert_eq!(
+            summary("Background command \"grep x\" failed with exit code 144"),
+            "<task-notification><summary>Background command \"…\" failed with exit code 144</summary></task-notification>"
+        );
+        assert_eq!(
+            summary(
+                "Background command \"grep x\" completed (exit code 1: No matches found in ~/secret)"
+            ),
+            "<task-notification><summary>Background command \"…\" completed (exit code 1: …)</summary></task-notification>"
+        );
+        assert_eq!(
+            summary("Background command \"grep x\" failed with Daniel's text"),
+            "<task-notification><summary>…</summary></task-notification>"
         );
     }
 

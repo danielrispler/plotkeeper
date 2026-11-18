@@ -388,6 +388,10 @@ fn wait(data: &Path, session: &str, nonce: &str, timeout: Duration) -> Option<Va
 /// answer (nobody watching, a timeout) the request stays, so the card still waits for Daniel.
 fn run_blocked(payload: &Value, data: &Path, timeout: Duration) -> io::Result<Option<Value>> {
     let session = payload["session_id"].as_str().unwrap_or_default();
+    // A claimed pass of this command was its retry's, now denied: it must allow nothing later.
+    for claimed in matching_passes(payload, data, ".claimed") {
+        let _ = fs::remove_file(claimed);
+    }
     let nonce = nonce()?;
     let dir = blocked_dir(data, session);
     let (request, answer_path) = (

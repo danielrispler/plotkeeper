@@ -671,3 +671,170 @@ fn the_recorded_background_command_runs_in_the_background_until_its_wake_up_give
     assert_eq!(card.status, BlockedStatus::Finished);
     assert_eq!(card.exit_code, Some(0));
 }
+
+/// The `PermissionRequest` that a claimed pass's "ask" sends `command` to.
+fn permission_request(at: u64, command: &str) -> String {
+    line(
+        "PermissionRequest",
+        at,
+        json!({ "tool_name": "Bash", "prompt_id": "p-1", "tool_input": { "command": command },
+            "permission_mode": "auto" }),
+    )
+}
+
+#[test]
+fn the_recorded_retries_pass_their_permission_request_without_needing_you_or_a_terminal_decision() {
+    let lines: Vec<String> = RECORDED.lines().map(String::from).collect();
+    let id = serde_json::from_str::<Value>(&lines[0]).unwrap()["session_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let studio = recorded_through("PermissionRequest", 1);
+    assert_eq!(studio.session(&id).unwrap().state, State::Running);
+    let studio = Studio::replayed(&lines);
+    let sources: Vec<Source> = studio
+        .session(&id)
+        .unwrap()
+        .decisions
+        .iter()
+        .map(|d| d.source)
+        .collect();
+    assert_eq!(sources, [Source::Card, Source::Card]);
+    let mut live = Studio::default();
+    let outputs: Vec<_> = lines.iter().flat_map(|l| live.apply(l)).collect();
+    assert!(
+        !outputs
+            .iter()
+            .any(|o| matches!(o, studio_core::Output::NeedsYou { .. }))
+    );
+}
+
+#[test]
+fn a_retrys_permission_request_that_lands_before_its_start_does_not_need_you() {
+    let lines = then(
+        allowed(),
+        vec![
+            permission_request(5_000, COMMAND),
+            retry(5_010, "toolu_2", COMMAND),
+        ],
+    );
+    assert_eq!(session(&lines).state, State::Running);
+    let s = session(&then(
+        lines,
+        vec![ended(
+            6_000,
+            "toolu_2",
+            json!({ "tool_response": { "stdout": "ok" } }),
+        )],
+    ));
+    let sources: Vec<Source> = s.decisions.iter().map(|d| d.source).collect();
+    assert_eq!(sources, [Source::Card]);
+}
+
+#[test]
+fn a_blocked_check_that_never_ran_leaves_no_check_line() {
+    let check = "npm run check";
+    let lines = then(
+        started(),
+        vec![
+            line(
+                "PreToolUse",
+                2_500,
+                json!({ "tool_name": "Bash", "tool_use_id": "toolu_1", "prompt_id": "p-1",
+                    "tool_input": { "command": check } }),
+            ),
+            denied(3_000, "toolu_1", check, None),
+            answer(4_000, "toolu_1", check, "deny"),
+            stop(5_000, None),
+        ],
+    );
+    assert_eq!(session(&lines).checks.len(), 0);
+}
+
+#[test]
+fn a_retry_records_which_agent_ran_it_for_its_output() {
+    let parent = then(
+        allowed_for_subagent(),
+        vec![retry(5_000, "toolu_2", COMMAND)],
+    );
+    let card = &session(&parent).blocked_commands[0];
+    assert_eq!(card.status, BlockedStatus::Running);
+    assert_eq!(card.run_by, None);
+    let mut own = retry(5_000, "toolu_2", COMMAND);
+    own = own.replace("\"tool_name\"", "\"agent_id\":\"a-7aaaa\",\"tool_name\"");
+    let card = &session(&then(allowed_for_subagent(), vec![own])).blocked_commands[0];
+    assert_eq!(card.run_by.as_deref(), Some("a-7aaaa"));
+}
+
+#[test]
+fn another_subagents_run_of_the_same_command_leaves_the_card_and_its_block_gets_its_own() {
+    let other = retry(5_000, "toolu_3", COMMAND)
+        .replace("\"tool_name\"", "\"agent_id\":\"a-8bbbb\",\"tool_name\"");
+    let lines = then(
+        allowed_for_subagent(),
+        vec![other, denied(5_100, "toolu_3", COMMAND, Some("a-8bbbb"))],
+    );
+    let s = session(&lines);
+    let cards: Vec<_> = s
+        .blocked_commands
+        .iter()
+        .map(|c| (c.call.as_str(), c.agent.as_deref(), c.status))
+        .collect();
+    assert_eq!(
+        cards,
+        [
+            ("toolu_1", Some("a-7aaaa"), BlockedStatus::Allowed),
+            ("toolu_3", Some("a-8bbbb"), BlockedStatus::Blocked)
+        ]
+    );
+}
+
+#[test]
+fn a_wake_up_reporting_two_background_retries_finishes_both_cards() {
+    let bash = |name: &str, at, id: &str, command: &str, extra: Value| {
+        let mut extra = extra;
+        extra["tool_name"] = "Bash".into();
+        extra["tool_use_id"] = id.into();
+        extra["prompt_id"] = "p-1".into();
+        extra["tool_input"] = json!({ "command": command });
+        line(name, at, extra)
+    };
+    let bg = |task: &str| json!({ "tool_response": { "backgroundTaskId": task } });
+    let notice = |task: &str, code| {
+        format!(
+            "<task-notification><task-id>{task}</task-id><status>completed</status>\
+            <summary>Background command \"x\" completed (exit code {code})</summary></task-notification>"
+        )
+    };
+    let lines = then(
+        started(),
+        vec![
+            denied(3_000, "toolu_1", "first", None),
+            denied(3_100, "toolu_2", "second", None),
+            answer(4_000, "toolu_1", "first", "allow"),
+            answer(4_100, "toolu_2", "second", "allow"),
+            bash("PreToolUse", 5_000, "toolu_3", "first", json!({})),
+            bash("PostToolUse", 5_100, "toolu_3", "first", bg("bash-1")),
+            bash("PreToolUse", 5_200, "toolu_4", "second", json!({})),
+            bash("PostToolUse", 5_300, "toolu_4", "second", bg("bash-2")),
+            line(
+                "UserPromptSubmit",
+                9_000,
+                json!({ "prompt_id": "p-2", "prompt": format!("{}{}", notice("bash-1", 0), notice("bash-2", 3)) }),
+            ),
+        ],
+    );
+    let s = session(&lines);
+    let cards: Vec<_> = s
+        .blocked_commands
+        .iter()
+        .map(|c| (c.status, c.exit_code))
+        .collect();
+    assert_eq!(
+        cards,
+        [
+            (BlockedStatus::Finished, Some(0)),
+            (BlockedStatus::Finished, Some(3))
+        ]
+    );
+}

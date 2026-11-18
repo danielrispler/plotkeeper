@@ -742,13 +742,19 @@ function typeRetryLine(session: Session, card: BlockedCommand, agent: string | n
   };
   const terminal = session.terminal;
   if (terminal === null || session.state === "ended") return notice("Not typed: the session has no terminal running. Ask it to run the approved command yourself.");
-  const blocked = () => studio.listed.find((s) => s.id === session.id)?.state === "needs_you";
+  const listed = () => studio.listed.find((s) => s.id === session.id);
+  const blocked = () => listed()?.state === "needs_you";
+  // A late Allow's answer reaches the session in the read loop's next pass, which ends its block's needs-you.
+  const answered = () => {
+    const status = listed()?.blocked_commands?.find((c) => c.call === card.call)?.status;
+    return status !== "blocked" && status !== "blocked_again";
+  };
   typeRetry(card, agent, terminal, blocked, {
     now: Date.now,
     sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
     send: (data) => request({ op: "input", id: terminal, data: encode(new TextEncoder().encode(data)) }),
     notice,
-  }).catch((e) => console.warn(e));
+  }, answered).catch((e) => console.warn(e));
 }
 
 // The session's blocked commands as cards, in block order: its own view shows them all, naming a subagent's, and a

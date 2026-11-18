@@ -599,12 +599,26 @@ pub struct BlockedCommand {
     pub run: Option<String>,
     #[serde(default)]
     pub run_at: Option<u64>,
+    /// The agent whose call the retry is, which its tail is read under: the session's own agent may
+    /// run a subagent's command (`None`).
+    #[serde(default)]
+    pub run_by: Option<String>,
     /// Its exit code once Finished; `None` when it is unknown, as after a background run.
     #[serde(default)]
     pub exit_code: Option<i32>,
     /// The background task a backgrounded retry started, until its wake-up.
     #[serde(default)]
     pub task: Option<String>,
+}
+
+impl BlockedCommand {
+    /// Whether `agent`'s call of `tool` in `cwd` is this card's retry: the same command and folder, by
+    /// the agent that was blocked or by the session's own agent, which a subagent's card asks to run it.
+    fn retried_by(&self, tool: &event::Tool, cwd: &str, agent: &Option<String>) -> bool {
+        Some(self.command.as_str()) == tool.command.as_deref()
+            && self.cwd == cwd
+            && (agent.is_none() || self.agent == *agent)
+    }
 }
 
 /// Where a blocked command stands.
@@ -1216,6 +1230,16 @@ impl Session {
             }
         }
         unrecognised.map_or(Sender::Daniel, Sender::Unrecognised)
+    }
+
+    /// Whether a card's Allow covers `agent`'s call of `tool` in `cwd`: its pass lets the call through.
+    fn passes(&self, tool: &event::Tool, cwd: &str, agent: &Option<String>) -> bool {
+        self.blocked_commands.iter().any(|c| {
+            matches!(
+                c.status,
+                BlockedStatus::Allowed | BlockedStatus::AllowedNotRun | BlockedStatus::Running
+            ) && c.retried_by(tool, cwd, agent)
+        })
     }
 
     /// Whether subagent `id` gets cards of its own: a worker in a worktree of its own.
@@ -2784,13 +2808,13 @@ impl Studio {
                         matches!(
                             c.status,
                             BlockedStatus::Allowed | BlockedStatus::AllowedNotRun
-                        ) && Some(c.command.as_str()) == tool.command.as_deref()
-                            && c.cwd == event.cwd
+                        ) && c.retried_by(tool, &event.cwd, &event.agent_id)
                     });
                     if let Some(card) = card {
                         card.status = BlockedStatus::Running;
                         card.run = Some(id.clone());
                         card.run_at = Some(at);
+                        card.run_by.clone_from(&event.agent_id);
                     }
                 }
                 // A turn that ends with no retry leaves the approval unused: the session's own turn covers its
@@ -2848,14 +2872,28 @@ impl Studio {
                     let command = tool.command.clone().unwrap_or_default();
                     // The same command blocked again after Allow is its card's, not a new one. A running
                     // card takes only the block of its own retry: another call's is a card of its own.
-                    let again = session.blocked_commands.iter_mut().find(|c| {
-                        let awaits = match c.status {
-                            BlockedStatus::Allowed | BlockedStatus::AllowedNotRun => true,
+                    let again = session
+                        .blocked_commands
+                        .iter_mut()
+                        .find(|c| match c.status {
+                            BlockedStatus::Allowed | BlockedStatus::AllowedNotRun => {
+                                c.retried_by(tool, &event.cwd, &event.agent_id)
+                            }
                             BlockedStatus::Running => c.run.as_ref() == Some(id),
                             _ => false,
-                        };
-                        awaits && c.command == command && c.cwd == event.cwd
-                    });
+                        });
+                    // The blocked call never ran: it leaves the running calls, its step and its check line.
+                    session.running.retain(|c| c.id.as_ref() != Some(id));
+                    session.checks.retain(|l| l.call != *id);
+                    match &event.agent_id {
+                        Some(agent) => {
+                            let mut agents = session.agents.iter_mut();
+                            if let Some(a) = agents.find(|a| a.agent.id == *agent) {
+                                a.agent.step_done(id, at);
+                            }
+                        }
+                        None => session.agent.step_done(id, at),
+                    }
                     match again {
                         Some(card) => {
                             card.status = BlockedStatus::BlockedAgain;
@@ -2874,6 +2912,7 @@ impl Studio {
                             status: BlockedStatus::Blocked,
                             run: None,
                             run_at: None,
+                            run_by: None,
                             exit_code: None,
                             task: None,
                         }),
@@ -2918,17 +2957,21 @@ impl Studio {
                         None => session.sender(prompt),
                     };
                     let wake_up = !sender.is_daniels();
+                    // A background retry ends at the notification that names its task, one of
+                    // perhaps several in the wake-up.
+                    for (task, _) in event.reported() {
+                        for card in &mut session.blocked_commands {
+                            if card.status == BlockedStatus::RunningInBackground
+                                && card.task.as_ref() == Some(task)
+                            {
+                                card.status = BlockedStatus::Finished;
+                                card.exit_code = claude::exit_code_of(prompt, task);
+                            }
+                        }
+                    }
                     match &sender {
                         // The row says which worker returned until the session's next step.
                         Sender::WakeUp(task_id) => {
-                            for card in &mut session.blocked_commands {
-                                if card.status == BlockedStatus::RunningInBackground
-                                    && card.task.as_ref() == Some(task_id)
-                                {
-                                    card.status = BlockedStatus::Finished;
-                                    card.exit_code = claude::exit_code_of(prompt, task_id);
-                                }
-                            }
                             let returned =
                                 format!("worker {} returned", session.agent_name(task_id));
                             session.returned = Some(returned);
@@ -3145,7 +3188,11 @@ impl Studio {
                 }
                 // It has no `tool_use_id`, so it names its call by tool and input. With no agent, it is
                 // the session's own agent's.
-                Happened::PermissionAsked { tool } if !tool.asks() => {
+                // A retry's pass from the card allows it at once, so it does not wait on Daniel; its
+                // `PreToolUse` may land after it, as the hooks are async.
+                Happened::PermissionAsked { tool }
+                    if !tool.asks() && !session.passes(tool, &event.cwd, &event.agent_id) =>
+                {
                     let (name, input) = (tool.name.clone(), tool.input.clone());
                     session.block(Cause::Call, name, input, event.agent_id.clone(), at);
                 }

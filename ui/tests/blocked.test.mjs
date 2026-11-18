@@ -1,7 +1,7 @@
 // A blocked command's card (danielrispler/plotkeeper#170, #171): its text and buttons by status. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { blockedView } from "../../dist/blocked.js";
+import { blockedView, outputCall } from "../../dist/blocked.js";
 
 const card = (status = "blocked", agent = null) => ({
   call: "toolu_1",
@@ -59,9 +59,21 @@ test("a finished command shows its exit code and the tail of its output, as a fa
   assert.equal(view.state, "Finished");
   assert.equal(view.detail, "exit code 2");
   assert.equal(view.tail, "line one\nboom");
-  assert.equal(blockedView(done, null, false, 0, null).tail, null);
+  assert.equal(blockedView(done, null, false, 0).tail, null, "not read yet");
+  assert.equal(blockedView(done, null, false, 0, null).tail, "No output was recorded.");
+  assert.equal(blockedView(done, null, false, 0, { exit_code: 0, tail: "" }).tail, "No output was recorded.");
   assert.equal(blockedView({ ...done, exit_code: 0 }, null, false, 0, null).detail, "exit code 0");
   assert.equal(blockedView({ ...done, exit_code: null }, null, false, 0, null).detail, "No exit code");
+});
+
+test("a finished background run has no tail and reads no output; a foreground run's is read under the agent that ran it", () => {
+  const bg = { ...card("finished"), run: "toolu_2", task: "bash-7", exit_code: 0 };
+  assert.equal(outputCall(bg), null);
+  assert.equal(blockedView(bg, null, false, 0, { exit_code: null, tail: "" }).tail, null);
+  const parent = { ...card("finished", "a-7aaaa"), run: "toolu_2", run_by: null, exit_code: 0 };
+  assert.deepEqual(outputCall(parent), { agent: null, call: "toolu_2" });
+  assert.deepEqual(outputCall({ ...parent, run_by: "a-7aaaa" }), { agent: "a-7aaaa", call: "toolu_2" });
+  assert.equal(outputCall({ ...parent, status: "running" }), null);
 });
 
 test("a command in the background reads so until its wake-up", () => {
@@ -74,6 +86,7 @@ test("a command blocked again offers Allow and Decline once more", () => {
   const view = blockedView(card("blocked_again"), null, true);
   assert.equal(view.state, "Blocked again");
   assert.deepEqual(view.buttons, ["Allow", "Decline"]);
+  assert.deepEqual(blockedView(card("blocked_again"), null, false).buttons, []);
 });
 
 import { noteKeys } from "../../dist/typing.js";
@@ -140,6 +153,19 @@ test("the retry line waits for Daniel's draft and is never typed into a session 
   assert.equal(await typeRetry(card(), null, "t-needs", () => true, needing.io), false);
   assert.deepEqual(needing.sent, []);
   assert.equal(needing.notices.length, 1);
+});
+
+test("a late Allow's retry line waits for the answer to reach the session, whose needs-you it ends, then types", async () => {
+  const late = fake();
+  let answered = false;
+  const sleep = late.io.sleep;
+  late.io.sleep = async (ms) => {
+    await sleep(ms);
+    if (late.io.now() >= 300) answered = true;
+  };
+  const typed = await typeRetry(card(), null, "t-late", () => !answered, late.io, () => answered);
+  assert.equal(typed, true);
+  assert.equal(late.notices.length, 0);
 });
 
 import { blockedRequestFor, sendBlockedAnswer, startWatching } from "../../dist/answer.js";

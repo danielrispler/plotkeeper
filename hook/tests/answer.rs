@@ -830,3 +830,23 @@ fn scanning_a_sessions_passes_deletes_the_expired_ones() {
     assert_eq!(fs::read_dir(&dir).unwrap().count(), 0);
     let _ = fs::remove_dir_all(&home);
 }
+
+#[test]
+fn a_claimed_pass_whose_retry_is_blocked_again_allows_nothing_later() {
+    let home = scratch("pass-blocked-again");
+    watch(&home, "s-other", std::process::id(), 0);
+    answer::write_pass(&data(&home), SESSION, COMMAND, CWD, now_ms()).unwrap();
+    let run = |payload: Value| {
+        let since = Instant::now();
+        let out = finish(start(&home, WAIT_MS, &payload), since);
+        assert!(out.1 < PROMPTLY);
+        out.0
+    };
+    assert_ne!(run(retried("PreToolUse", COMMAND, CWD, SESSION)), "");
+    // The retry is denied again while nobody watches, so its hook returns at once.
+    fs::remove_file(answer::watching_file(&data(&home))).unwrap();
+    assert_eq!(run(denied()), "");
+    watch(&home, "s-other", std::process::id(), 0);
+    assert_eq!(run(retried("PermissionRequest", COMMAND, CWD, SESSION)), "");
+    let _ = fs::remove_dir_all(&home);
+}

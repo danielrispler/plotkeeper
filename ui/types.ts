@@ -277,9 +277,11 @@ export type BlockedCommand = {
   agent: string | null;
   at: number;
   status: BlockedStatus;
-  // The retry's call id once it runs (`check_output` reads its tail), when it started, its exit code once finished.
+  // The retry's call id once it runs (`check_output` reads its tail), when it started, the agent whose call it is (the
+  // session's own may run a subagent's command), its exit code once finished.
   run?: string | null;
   run_at?: number | null;
+  run_by?: string | null;
   exit_code?: number | null;
   task?: string | null;
 };
