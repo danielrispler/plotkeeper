@@ -47,8 +47,10 @@ export const bound = (keymap: Keymap, context: string, key: Key): Binding | unde
 // and the panel's toggle (danielrispler/Falinks#542), which the terminal never needs.
 // The answer keys answer only while `answerable`: focus is outside the terminal and text fields, and
 // the docked card is on screen (danielrispler/Falinks#575, decision 7). The terminal never loses a digit to the card.
-export function windowBinding(keymap: Keymap, key: Key, typing: boolean, inList = false, answerable = false): Binding | undefined {
+// `modal`: a dialog, the settings page (#193), is open over the window, so only Dismiss runs and the window behind it stays still.
+export function windowBinding(keymap: Keymap, key: Key, typing: boolean, inList = false, answerable = false, modal = false): Binding | undefined {
   const action = (inList ? bound(keymap, "List", key) : undefined) ?? bound(keymap, "Workspace", key);
+  if (modal) return action === "studio::Dismiss" ? action : undefined;
   if (Array.isArray(action) && action[0] === "studio::Answer" && !answerable) return undefined;
   return typing && !key.metaKey && action !== "studio::Dismiss" && action !== "studio::TogglePanel" ? undefined : action;
 }

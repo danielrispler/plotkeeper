@@ -322,3 +322,31 @@ test("a button's title names the key the keymap binds its action to now (#159)",
   assert.ok(titled(rebound.keymap, "Settings", "studio::OpenSettings").includes("⌘."), "the rebound key shows");
   assert.equal(titled({}, "Settings", "studio::OpenSettings"), "Settings");
 });
+
+// The settings page (#195): ⌘, opens it, Esc closes it even from a control in it, and the raw file's action is in the palette, unbound.
+test("⌘, opens the settings page, Esc closes it from a control in it, and Open settings file is in the palette unbound", () => {
+  const ran = [];
+  const actions = Object.fromEntries(["studio::OpenSettings", "studio::OpenSettingsFile", "studio::Dismiss"].map((name) => [name, () => ran.push(name)]));
+  run(actions, press("Comma", { metaKey: true }));
+  // A dropdown in the page has focus: it is a field, so only Dismiss runs.
+  run(actions, windowBinding(initial.keymap, key("Escape", {}, "Escape"), true));
+  assert.deepEqual(ran, ["studio::OpenSettings", "studio::Dismiss"]);
+  const entry = paletteEntries(initial.keymap, Object.keys(actions)).find((e) => e.title === "Open settings file");
+  assert.deepEqual(entry?.keys, []);
+  assert.equal(paletteEntries(initial.keymap, Object.keys(actions)).find((e) => e.title === "Open settings")?.keys[0], "⌘,");
+});
+
+// The settings page is a dialog over the window (#193): while it is open, the window's keys behind it stay still, and only Dismiss runs.
+test("while the settings page is open only Esc runs, not the digits, ⌘N or ⌘T behind it", () => {
+  const answerable = true;
+  const modal = true;
+  assert.equal(windowBinding(initial.keymap, key("Escape", {}, "Escape"), false, false, answerable, modal), "studio::Dismiss");
+  assert.equal(windowBinding(initial.keymap, key("Escape", {}, "Escape"), true, false, answerable, modal), "studio::Dismiss");
+  assert.equal(windowBinding(initial.keymap, key("Digit1", {}, "1"), false, false, answerable, modal), undefined);
+  assert.equal(windowBinding(initial.keymap, key("KeyN", { metaKey: true }), false, false, answerable, modal), undefined);
+  assert.equal(windowBinding(initial.keymap, key("KeyT", { metaKey: true }), false, false, answerable, modal), undefined);
+  assert.equal(windowBinding(initial.keymap, key("KeyD", { metaKey: true }), false, false, answerable, modal), undefined);
+  // Closed, they run as before.
+  assert.deepEqual(windowBinding(initial.keymap, key("Digit1", {}, "1"), false, false, answerable), ["studio::Answer", "1"]);
+  assert.equal(windowBinding(initial.keymap, key("KeyN", { metaKey: true }), false), "studio::NewSession");
+});

@@ -84,6 +84,9 @@ body[data-layout="focus"] #rail-divider { display: none; }
 .top .menu[popover] { top: var(--bar); right: var(--sp-5); left: auto; width: max-content; max-width: calc(100vw - 2 * var(--sp-5)); }
 .top .menu .git-line { flex-wrap: wrap; padding: var(--sp-2) var(--sp-4); }
 .top .menu .chip { text-align: start; }
+/* The settings gear (#194): icon only, the bar's last item. */
+.top .gear { color: var(--muted); display: inline-grid; place-items: center; width: calc(var(--icon) * 2); height: calc(var(--icon) * 2); padding: 0; }
+.top .gear svg { width: var(--icon); height: var(--icon); }
 /* The session's header: its state dot, state and name; the name is the one part that gives way, past a fixed length. */
 .session-header { display: flex; align-items: center; gap: var(--sp-3); font: inherit; font-size: var(--size-small); color: var(--fg); background: none;
                   border: 0; border-radius: var(--radius); padding: var(--sp-1) var(--sp-4); max-width: var(--session-header); cursor: pointer; }
@@ -201,6 +204,44 @@ h1 { margin: 0 0 var(--sp-4); }
 .upgrade ul { margin: 0 0 var(--sp-5); padding-inline-start: var(--sp-6); }
 .upgrade .actions { display: flex; justify-content: flex-end; gap: var(--sp-4); margin: 0; }
 .upgrade .primary { background: var(--selected); }
+/* The settings page (#195): herdr's rows, a title with a muted description and the control at the end. */
+.settings { width: min(var(--settings), calc(100vw - 2 * var(--sp-7))); height: min(var(--settings-height), calc(100vh - 2 * var(--sp-7))); max-width: none; max-height: none;
+            padding: 0; border: 0; border-radius: var(--radius-pane); background: var(--surface); color: var(--fg); box-shadow: var(--shadow); }
+.settings[open] { display: flex; flex-direction: column; }
+.settings::backdrop { background: var(--backdrop); }
+.settings-head { display: flex; align-items: center; justify-content: space-between; padding: var(--sp-4) var(--sp-5) var(--sp-4) var(--sp-6); border-bottom: var(--hair) solid var(--line); }
+.settings-head h1 { margin: 0; font-size: var(--size-large); font-weight: 600; }
+.settings-head .btn { display: inline-grid; place-items: center; width: calc(var(--icon) * 2); height: calc(var(--icon) * 2); padding: 0; color: var(--muted); }
+.settings-head svg { width: var(--icon); height: var(--icon); }
+.settings-body { flex: 1; min-height: 0; overflow-y: auto; padding: var(--sp-4) var(--sp-6) var(--sp-7); }
+.settings-body h2 { margin: var(--sp-6) 0 var(--sp-2); font-size: var(--size-small); font-weight: 600; color: var(--muted); }
+/* An error line is neutral, as #notice is: colour is for "needs you". */
+.settings-status:empty { display: none; }
+.settings-status { padding: 0 var(--sp-6); }
+.settings-status .broken, .settings-status .refused { margin: var(--sp-4) 0 0; padding: var(--sp-4) var(--sp-5); border-radius: var(--radius); font-size: var(--size-small);
+                                                      background: var(--raised); color: var(--muted); border: var(--hair) solid var(--line); }
+.settings-status .broken { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-5); }
+.settings-status .broken .btn { flex: none; background: var(--selected); color: var(--fg); }
+.setting { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-6); padding: var(--sp-5) 0; border-bottom: var(--hair) solid var(--line); }
+.setting-text { min-width: 0; }
+.setting-title { display: flex; align-items: center; gap: var(--sp-3); font-size: var(--size); }
+.setting-description { margin-top: var(--sp-1); font-size: var(--size-small); color: var(--muted); }
+.setting .reset { display: inline-grid; place-items: center; width: var(--control); height: var(--control); padding: 0; color: var(--muted); }
+.setting .reset svg { width: var(--icon); height: var(--icon); }
+.setting .btn.open { flex: none; background: var(--raised); }
+/* A stepper, a value between two buttons, and a dropdown, both in the control's place at the row's end. */
+.stepper { display: flex; flex: none; align-items: center; gap: var(--sp-2); }
+.stepper .btn { display: inline-grid; place-items: center; width: calc(var(--icon) * 2); height: calc(var(--icon) * 2); padding: 0; background: var(--raised); }
+.stepper-value { min-width: var(--stepper-value); text-align: center; font-variant-numeric: tabular-nums; }
+.setting select { flex: none; font: inherit; font-size: var(--size-small); color: inherit; background: var(--raised); border: var(--hair) solid var(--line); border-radius: var(--radius);
+                  padding: var(--sp-2) var(--sp-4); min-width: var(--select); }
+.setting select:disabled { opacity: .45; }
+/* A switch: a track and a thumb, on in the foreground colour. */
+.btn.switch { position: relative; flex: none; width: var(--switch); height: var(--switch-height); padding: 0; border-radius: var(--switch-height); background: var(--raised); box-shadow: inset 0 0 0 var(--hair) var(--line); }
+.btn.switch::after { content: ""; position: absolute; top: var(--sp-1); inset-inline-start: var(--sp-1); width: calc(var(--switch-height) - 2 * var(--sp-1)); height: calc(var(--switch-height) - 2 * var(--sp-1));
+                     border-radius: 50%; background: var(--muted); transition: transform var(--motion), background-color var(--motion); }
+.btn.switch[aria-checked="true"] { background: var(--selected); }
+.btn.switch[aria-checked="true"]::after { transform: translateX(calc(var(--switch) - var(--switch-height))); background: var(--fg); }
 .term-h { height: var(--term-head); display: flex; gap: var(--sp-5); align-items: center; padding: 0 var(--sp-5); font-size: var(--size-xs); color: var(--faint);
           white-space: nowrap; overflow: hidden; }
 .term-body { min-height: 0; min-width: 0; overflow: hidden; padding: var(--sp-3); position: relative; }
@@ -218,8 +259,6 @@ h1 { margin: 0 0 var(--sp-4); }
 .pane.history .row:hover { background: var(--hover); }
 .pane.history .item .delete { visibility: visible; }
 .list-foot { display: flex; align-items: center; justify-content: space-between; }
-.list-foot .gear { margin-right: var(--sp-4); color: var(--muted); display: inline-grid; place-items: center; width: calc(var(--icon) * 2); height: calc(var(--icon) * 2); padding: 0; }
-.list-foot .gear svg { width: var(--icon); height: var(--icon); }
 .history-link { display: block; margin: var(--sp-3) var(--sp-4); color: var(--muted); }
 /* A landed row's Delete is the point of the section, so it shows without hover. */
 .pane.home .item .delete { visibility: visible; }

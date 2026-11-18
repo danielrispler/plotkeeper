@@ -29,8 +29,13 @@ test("the bar holds one '+' and no New terminal button (#159)", async () => {
   assert.ok(!html.includes("New terminal"));
 });
 
-test("the list's footer holds the settings gear beside History (#159)", async () => {
+test("the list's footer holds History and no settings gear, which is the top bar's last item (#194)", async () => {
   const html = (await import("node:fs")).readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const foot = html.match(/<div class="list-foot">[\s\S]*?<\/div>\s*<\/div>/)[0];
-  assert.ok(foot.includes('id="history-link"') && foot.includes('id="settings-gear"'));
+  assert.ok(foot.includes('id="history-link"') && !foot.includes("settings-gear"));
+  const bar = html.match(/<header class="top"[\s\S]*?<\/header>/)[0];
+  const items = [...bar.matchAll(/<(?:button|div|span)\b[^>]*\bid="([^"]+)"/g)].map((m) => m[1]);
+  assert.equal(items.filter((id) => id !== "bar-menu").at(-1), "settings-gear");
+  const gear = bar.match(/<button id="settings-gear"[^>]*>[\s\S]*?<\/button>/)[0];
+  assert.ok(gear.includes('aria-label="Settings"') && !/>\s*[^<\s]/.test(gear.replace(/<svg[\s\S]*?<\/svg>/, "").replace(/^<button[^>]*>/, "")), "icon only");
 });

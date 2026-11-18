@@ -66,4 +66,5 @@ export const base = {
   watch: null,
   workspace_git_state: { branch: "main", upstream: [0, 0], changed: 0, main_behind: 0, on_default: true, would_conflict: false, operation: null },
   workspaces: { main: workspace, tasks: [], hidden: 0 },
+  write_setting: "",
 } satisfies { [C in ReadCommand]: Commands[C] };
