@@ -361,3 +361,73 @@ fn a_terminal_or_codex_daniel_starts_is_selected_when_its_row_arrives() {
         Some("codex-1")
     );
 }
+
+/// The selected session's id, if any.
+fn selected(studio: &Studio) -> Option<&str> {
+    studio.selected().map(|s| s.agent.id.as_str())
+}
+
+#[test]
+fn an_agy_daniel_starts_keeps_the_selection_when_its_first_prompt_links_its_session() {
+    // agy reports 7501 at its prompt, before its first hook: its status-only row takes the selection.
+    let mut studio = Studio::default();
+    studio.select_terminal("agy-1");
+    listed(
+        &mut studio,
+        &[term("agy-1", Some("idle"), Some("antigravity"), T0)],
+        T0,
+    );
+    assert_eq!(selected(&studio), Some("agy-1"));
+
+    // The first prompt's SessionStart names the terminal: the session takes the selection at once.
+    let start = json!({
+        "conversationId": "conv-1",
+        "cwd": "/Users/danielrispler/work/other-project",
+        "hookEventName": "SessionStart",
+        "lastUserInput": "hi",
+        "studio_received_ms": T0 + 1_000,
+        "studio_terminal_id": "agy-1",
+        "transcriptPath": "/tmp/conv-1/transcript_full.jsonl",
+    });
+    studio.apply(&start.to_string());
+    assert_eq!(selected(&studio), Some("conv-1"));
+    listed(
+        &mut studio,
+        &[term(
+            "agy-1",
+            Some("working"),
+            Some("antigravity"),
+            T0 + 2_000,
+        )],
+        T0 + 2_000,
+    );
+    assert!(studio.session("agy-1").is_none());
+    assert_eq!(selected(&studio), Some("conv-1"));
+}
+
+#[test]
+fn a_plain_terminal_keeps_the_selection_when_claude_typed_into_it_links_its_session() {
+    let mut studio = Studio::default();
+    studio.select_terminal("shell-1");
+    listed(&mut studio, &[term("shell-1", None, None, T0)], T0);
+    assert_eq!(selected(&studio), Some("shell-1"));
+
+    let start = json!({
+        "session_id": "s-1",
+        "hook_event_name": "SessionStart",
+        "source": "startup",
+        "cwd": "/Users/danielrispler/work/other-project",
+        "transcript_path": "/tmp/s-1.jsonl",
+        "studio_received_ms": T0 + 1_000,
+        "studio_terminal_id": "shell-1",
+    });
+    studio.apply(&start.to_string());
+    assert_eq!(selected(&studio), Some("s-1"));
+    listed(
+        &mut studio,
+        &[term("shell-1", None, None, T0 + 2_000)],
+        T0 + 2_000,
+    );
+    assert!(studio.session("shell-1").is_none());
+    assert_eq!(selected(&studio), Some("s-1"));
+}
