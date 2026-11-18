@@ -21,11 +21,9 @@ export const stubSource = (fixture) => `window.__TAURI__ = (() => {
     if (reply?.__by) return reply.values[args?.[reply.__by]] ?? null;
     return reply ?? null;
   };
-  // The app echoes an error back to the page through the log plugin's Webview target (\`log://log\`, level 5), as the real one does.
-  const log = {
-    warn: async () => {},
-    error: async (message) => setTimeout(() => (listeners["log://log"] ?? []).forEach((h) => h({ payload: { level: 5, message } }))),
-  };
+  // The UI's own log lines are not echoed back: the app's Webview target drops records from the webview. Only an app error
+  // reaches the page on \`log://log\`, and the snap fixtures have none.
+  const log = { warn: async () => {}, error: async () => {} };
   return { event: { listen }, core: { invoke }, log };
 })();`;
 

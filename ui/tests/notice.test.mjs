@@ -34,12 +34,20 @@ test("an error-level failure from the UI helper shows, and a warn-level one does
   assert.deepEqual(lines(), ["delete_session: gone"]);
 });
 
-test("the same message shows once, also when the app echoes the UI's own line back", () => {
+test("the same message from the app shows once, and the UI's own error is not an app record", () => {
   onLogRecord({ level: ERROR, message: "cards did not save" });
   onLogRecord({ level: ERROR, message: "cards did not save" });
   logLine("error", "delete_session: gone");
-  onLogRecord({ level: ERROR, message: "delete_session: gone" });
   assert.deepEqual(lines(), ["cards did not save", "delete_session: gone"]);
+});
+
+test("a message of several lines, as git's stderr is, shows as one line, once, and a dismiss removes it", () => {
+  onLogRecord({ level: ERROR, message: "branch kept:\nhint: it is not merged\n" });
+  onLogRecord({ level: ERROR, message: "branch kept:\nhint: it is not merged\n" });
+  assert.deepEqual(lines(), ["branch kept: hint: it is not merged"]);
+  dismissNotice();
+  assert.deepEqual(lines(), []);
+  assert.equal(line.hidden, true);
 });
 
 test("dismissing hides the line and clears its errors, and a later error shows it again", () => {

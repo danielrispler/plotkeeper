@@ -12,22 +12,28 @@ let errors: string[] = [];
 const line = (): HTMLElement | null => globalThis.document?.getElementById?.("notice") ?? null;
 const linesOf = (text: string | null) => (text ?? "").split("\n").filter(Boolean);
 
-function add(message: string) {
+// A message of several lines, such as git's stderr, is one line: the line is split on newlines, so a stored message must hold none.
+const oneLine = (message: string) => message.split("\n").map((l) => l.trim()).filter(Boolean).join(" ");
+
+function add(text: string) {
+  const message = oneLine(text);
+  if (!message) return false;
   const notice = line();
   if (!notice) return false;
   const lines = linesOf(notice.textContent);
   if (lines.includes(message)) return false;
   notice.textContent = [...lines, message].join("\n");
   notice.hidden = false;
-  return true;
+  return message;
 }
 
 export function showError(message: string) {
-  if (add(message)) errors.push(message);
+  const added = add(message);
+  if (added) errors.push(added);
 }
 
 // A plain notice, such as Claude Code's version changing: it joins the line and no dismiss removes it.
-export const showNotice = add;
+export const showNotice = (message: string) => void add(message);
 
 // A record of the `Webview` target. The Rust side filters it to `Error`; the page checks the level too.
 export function onLogRecord(record: { level: number; message: string }) {

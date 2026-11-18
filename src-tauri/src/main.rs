@@ -773,16 +773,19 @@ fn studio_log() -> tauri::plugin::TauriPlugin<tauri::Wry> {
     let mut log = tauri_plugin_log::Builder::new()
         .clear_targets()
         .targets([
-            Target::new(TargetKind::Stderr),
+            Target::new(TargetKind::Stderr).format(stamped),
             Target::new(TargetKind::LogDir {
                 file_name: Some("studio".into()),
-            }),
-            // Errors also show in the window's notice line (#191); warnings stay in the file.
-            Target::new(TargetKind::Webview).filter(|m| m.level() == log::Level::Error),
+            })
+            .format(stamped),
+            // Errors also show in the window's notice line (#191), as the bare message; warnings stay in the file.
+            Target::new(TargetKind::Webview).filter(shows_in_window),
         ])
         .max_file_size(500_000)
-        .rotation_strategy(RotationStrategy::KeepSome(2))
+        .rotation_strategy(RotationStrategy::KeepSome(1))
         .timezone_strategy(TimezoneStrategy::UseLocal)
+        // The Builder's own format is the bare message: a target adds the prefix its output wants (the window's does not).
+        .clear_format()
         .level(log::LevelFilter::Warn);
     for own in [
         "studio",
@@ -796,6 +799,43 @@ fn studio_log() -> tauri::plugin::TauriPlugin<tauri::Wry> {
         log = log.level_for(own, log::LevelFilter::Debug);
     }
     log.build()
+}
+
+/// A line of `stderr` and `studio.log`: `[date][time][LEVEL][target] message`, the plugin's own shape, in local time.
+fn log_line(at: [u32; 6], level: log::Level, target: &str, message: &str) -> String {
+    let [year, month, day, hour, minute, second] = at;
+    format!(
+        "[{year:04}-{month:02}-{day:02}][{hour:02}:{minute:02}:{second:02}][{level}][{target}] {message}"
+    )
+}
+
+/// `log_line` for a record now, in local time.
+fn stamped(
+    out: tauri_plugin_log::fern::FormatCallback,
+    message: &std::fmt::Arguments,
+    record: &log::Record,
+) {
+    let now = tauri_plugin_log::TimezoneStrategy::UseLocal.get_now();
+    let at = [
+        now.year() as u32,
+        u8::from(now.month()).into(),
+        now.day().into(),
+        now.hour().into(),
+        now.minute().into(),
+        now.second().into(),
+    ];
+    out.finish(format_args!(
+        "{}",
+        log_line(at, record.level(), record.target(), &message.to_string())
+    ));
+}
+
+/// Whether a record reaches the window's notice line: an `error` that did not come from the UI, which showed its own.
+fn shows_in_window(metadata: &log::Metadata) -> bool {
+    metadata.level() == log::Level::Error
+        && !metadata
+            .target()
+            .starts_with(tauri_plugin_log::WEBVIEW_TARGET)
 }
 
 /// A panic is logged at `error` with its location, then reaches the default panic output.
@@ -1713,7 +1753,31 @@ fn uptime() -> Duration {
 
 #[cfg(test)]
 mod tests {
-    use super::{in_app, lost_data, scrubbed};
+    use super::{in_app, log_line, lost_data, scrubbed, shows_in_window};
+
+    #[test]
+    fn a_file_line_carries_the_local_time_level_and_target() {
+        assert_eq!(
+            log_line(
+                [2026, 11, 18, 9, 5, 7],
+                log::Level::Error,
+                "studio",
+                "no answer"
+            ),
+            "[2026-11-18][09:05:07][ERROR][studio] no answer"
+        );
+    }
+
+    #[test]
+    fn the_window_shows_an_app_error_and_not_a_warning_or_the_uis_own_error() {
+        let on = |level, target| {
+            shows_in_window(&log::Metadata::builder().level(level).target(target).build())
+        };
+        assert!(on(log::Level::Error, "studio"));
+        assert!(!on(log::Level::Warn, "studio"));
+        assert!(!on(log::Level::Error, "webview"));
+        assert!(!on(log::Level::Error, "webview::main.js:3"));
+    }
 
     #[test]
     fn a_logged_line_keeps_no_reply_a_parse_error_quotes() {

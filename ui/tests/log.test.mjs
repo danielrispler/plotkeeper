@@ -32,6 +32,16 @@ test("only the message is kept: not the stack, the cause or other fields", () =>
   assert.deepEqual(last(), ["error", "answer: boom"]);
 });
 
+test("a line is cut at its first quote mark, so a writer's words never reach the log", () => {
+  failure("explain", "error")('no answer: `claude -p` failed (exit status: 1): "secret card text"');
+  assert.deepEqual(last(), ["error", "explain: no answer: `claude -p` failed (exit status: 1)"]);
+});
+
+test("a message of several lines is logged as one line", () => {
+  failure("switch", "error")("not merged\nhint: use -D");
+  assert.deepEqual(last(), ["error", "switch: not merged hint: use -D"]);
+});
+
 test("a log call that itself fails does not throw", async () => {
   window.__TAURI__.log.warn = async () => {
     throw new Error("log gone");

@@ -22,13 +22,16 @@ export const listen = <T>(event: string, handler: (payload: T) => void) =>
 // The Studio log (#190): the line is the command's name and the error's message, nothing else of the error. `error` is for a
 // failed action Daniel asked for, `warn` for a call that degrades and carries on. A log that fails is dropped.
 const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e));
-// An `error` also shows in the notice line (#191); the app's echo of it through the log's `Webview` target is the same line.
+// What of a line may reach the log, as Rust's `scrubbed` keeps it: one line, up to the first quote mark, so a writer's words never do.
+const kept = (line: string) =>
+  line.replace(/\s*\n\s*/g, " ").split('"')[0].replace(/[: ]+$/, "");
+// An `error` also shows in the notice line (#191), whole; the app does not echo the UI's own lines back (its `Webview` target drops them).
 export function logLine(level: "warn" | "error", line: string) {
   if (level === "error") {
     showError(line);
   }
   try {
-    window.__TAURI__.log[level](line).catch(() => {});
+    window.__TAURI__.log[level](kept(line)).catch(() => {});
   } catch {}
 }
 export const failure = (command: string, level: "warn" | "error" = "warn") => (e: unknown) => logLine(level, `${command}: ${messageOf(e)}`);

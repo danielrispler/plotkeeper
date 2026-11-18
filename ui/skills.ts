@@ -54,6 +54,7 @@ export async function showSkills() {
       ]),
     );
   } catch (e) {
+    failure("skills", "error")(e);
     view.replaceChildren(text("p", `No skills: ${e}`, "empty"));
   }
   document.body.classList.add("skills-open", "rail-open");

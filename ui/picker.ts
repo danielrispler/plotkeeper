@@ -19,6 +19,7 @@ import type { Workspace, Workspaces } from "./types.js";
 
 // Git's error, or any other, at the picker's foot.
 function failed(error: unknown) {
+  failure("picker", "error")(error);
   element("picker").querySelector(".picker-error")?.remove();
   element("picker").append(text("pre", String(error), "picker-error"));
 }
@@ -232,6 +233,7 @@ export async function showPicker(kind: Kind = "session") {
     const [workspaces, agents] = await Promise.all([invoke("workspaces", { project }), offeredAgents()]);
     picker.replaceChildren(...picked(project, workspaces, agents, kind));
   } catch (e) {
+    failure("workspaces", "error")(e);
     picker.replaceChildren(text("p", `No worktrees: ${e}`, "empty"));
   }
   picker.hidden = false;
@@ -272,6 +274,7 @@ export async function showBranches(from?: string) {
     );
     picker.replaceChildren(...(blocked ? [text("p", `Switching is off: ${blocked}`, "empty")] : []), ...rows);
   } catch (e) {
+    failure("branches", "error")(e);
     picker.replaceChildren(text("p", `No branches: ${e}`, "empty"));
   }
   picker.hidden = false;

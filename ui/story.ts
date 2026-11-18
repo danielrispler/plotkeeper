@@ -7,7 +7,7 @@
 
 import { modelLine, reports } from "./capabilities.js";
 import { logo, logoKey, noContextNote } from "./logos.js";
-import { age, code, element, failure, fullTitle, invoke, pressable, prose, text } from "./dom.js";
+import { age, code, element, failure, fullTitle, invoke, logLine, pressable, prose, text } from "./dom.js";
 import { select } from "./selection.js";
 import { askAnchor } from "./ask.js";
 import { rendered } from "./markdown.js";
@@ -542,7 +542,7 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
           replies.set(key, reply ?? "");
           fill([reply ?? ""]);
         })
-        .catch(failure("turn_file_hunk"));
+        .catch(failure("turn_reply"));
     };
     const fold = folded(`${key} response`, "Full response", [body], fetch);
     if (fold.hasAttribute("open")) fetch();
@@ -651,11 +651,8 @@ function askName(session: Session) {
       now: Date.now,
       sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
       send: (data) => request({ op: "input", id: terminal, data: encode(new TextEncoder().encode(data)) }),
-      notice: (text) => {
-        element("notice").textContent = text;
-        element("notice").hidden = false;
-      },
-    }).catch(failure("type retry", "error"));
+      notice: (text) => logLine("error", text),
+    }).catch(failure("type /rename", "error"));
   };
   dialog.returnValue = "";
   dialog.showModal();
@@ -675,8 +672,6 @@ function askClose(session: Session) {
 // Shows a failed delete's reason over the story.
 export function report(error: unknown) {
   failure("delete", "error")(error);
-  element("notice").textContent = String(error);
-  element("notice").hidden = false;
 }
 
 // Opens `dialog` and resolves to the button Daniel chose, "" for Esc.
@@ -737,10 +732,7 @@ export async function removeWorktree(worktree: string, project: string) {
 
 // Types a blocked command's retry line into the session's terminal (danielrispler/plotkeeper#175), as `/rename` is typed.
 function typeRetryLine(session: Session, card: BlockedCommand, agent: string | null) {
-  const notice = (text: string) => {
-    element("notice").textContent = text;
-    element("notice").hidden = false;
-  };
+  const notice = (text: string) => logLine("error", text);
   const terminal = session.terminal;
   if (terminal === null || session.state === "ended") return notice("Not typed: the session has no terminal running. Ask it to run the approved command yourself.");
   const listed = () => studio.listed.find((s) => s.id === session.id);
