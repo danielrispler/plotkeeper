@@ -189,6 +189,7 @@ const covered = {
   ".turn .subagents button": "story.ts: the button's title holds its lines",
   ".turn .subagents button > :nth-child(2)": "story.ts: the button's title holds it",
   ".answered-card > summary": "cards.ts: the summary's title",
+  ".unseen-card > summary": "cards.ts: the summary's title",
   ".subagent-log .log-title": "log.ts: the title's title",
   ".subagent-log .log-call summary": "log.ts: the summary's title",
   ".usage-tile .group-name": "usage.ts: the group name's title",

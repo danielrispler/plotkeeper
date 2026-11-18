@@ -230,6 +230,8 @@ export type StoredCard = {
   rating: Rating | null;
   check_result: CheckResult | null;
   taps?: QuizTap[];
+  // When the pane first drew the card's Quiz; null until it did (the store's `shown` tap).
+  shown_at?: number | null;
 };
 // What Daniel did with a Quiz besides a card's pick (danielrispler/plotkeeper#120), each with its time: his pick (a lone Quiz's), "Show
 // the rest anyway", and the three chips.
