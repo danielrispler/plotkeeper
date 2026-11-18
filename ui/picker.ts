@@ -9,11 +9,11 @@
 import { AGENT_NAMES, agentChoice, kept, type Kind, showsAuto } from "./agents.js";
 import { element, failure, fullTitle, invoke, pressable, text } from "./dom.js";
 import type { Entry } from "./keys.js";
-import { setProjects } from "./projects.js";
+import { keepProject, lastProject, pickerProject, projects, setProjects } from "./projects.js";
 import { startAgent } from "./panes.js";
 import { shortPath } from "./paths.js";
 import { studio } from "./state.js";
-import { branchBlocked, branchOptions, refreshAfterSwitch, shownProject, workspaceRows } from "./workspaces.js";
+import { branchBlocked, branchOptions, lastSegment, refreshAfterSwitch, selectedProject, shownProject, workspaceRows } from "./workspaces.js";
 import type { Binding } from "./settings.js";
 import type { Workspace, Workspaces } from "./types.js";
 
@@ -139,15 +139,76 @@ export function workspaceRow(name: string, workspace: Workspace, start: Start): 
   return button;
 }
 
+// The project pill (Superset's, docs/studio/research/new-session-project.md): the project the picker shows; a click
+// lists the projects to show another.
+function projectPill(project: string, kind: Kind): HTMLElement {
+  const pill = pressable(text("button", "", "btn small project-pill"), false, () => void showProjects(project, kind));
+  pill.removeAttribute("aria-pressed");
+  pill.append(text("span", lastSegment(project) || "No project", "name"), " ▾");
+  pill.title = project;
+  return pill;
+}
+
+// The projects whose path holds `query`, ignoring case and the spaces around it.
+export const matchingProjects = (paths: string[], query: string): string[] => {
+  const wanted = query.trim().toLowerCase();
+  return paths.filter((path) => path.toLowerCase().includes(wanted));
+};
+// The pill's list has a search field from five projects, as Conductor's selector does.
+export const searchesProjects = (count: number) => count >= 5;
+
+// The pill's list: the projects, the shown one pressed, then Add project. A pick shows the picker on that project;
+// Enter in the search picks the first match.
+async function showProjects(current: string, kind: Kind) {
+  const picker = element("picker");
+  const paths = await projects().catch(() => [current]);
+  const rows = document.createElement("div");
+  const pick = (path: string) => void drawPicker(kind, path);
+  const draw = (query: string) =>
+    rows.replaceChildren(
+      ...matchingProjects(paths, query).map((path) => {
+        const row = pressable(document.createElement("button"), path === current, () => pick(path));
+        row.classList.add("row");
+        row.append(fullTitle(text("span", lastSegment(path), "name"), path), Object.assign(text("span", shortPath(path), "l2"), { title: path }));
+        return row;
+      }),
+    );
+  const add = pressable(text("button", "Add project…", "name"), false, () => void showAddProject());
+  add.removeAttribute("aria-pressed");
+  add.classList.add("row");
+  const search: HTMLElement[] = [];
+  if (searchesProjects(paths.length)) {
+    const form = document.createElement("form");
+    form.className = "new-task";
+    const field = Object.assign(document.createElement("input"), { placeholder: "Find a project", spellcheck: false });
+    field.setAttribute("aria-label", "Find a project");
+    field.addEventListener("input", () => draw(field.value));
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const first = matchingProjects(paths, field.value)[0];
+      if (first) pick(first);
+    });
+    form.append(field);
+    search.push(form);
+  }
+  draw("");
+  picker.replaceChildren(...search, rows, add);
+  (picker.querySelector("input") ?? rows.querySelector<HTMLElement>("[aria-pressed=true]"))?.focus();
+}
+
 function picked(project: string, workspaces: Workspaces, agents: string[], kind: Kind): HTMLElement[] {
   const { hidden } = workspaces;
   const count = hidden ? [text("p", `${hidden} agent worktree${hidden === 1 ? "" : "s"} hidden`, "hidden-count")] : [];
   const [choice, auto] = autoChoice();
   const { offered, chosen } = agentChoice(agents, lastAgent(), kind);
   const [agentButtons, agent] = agentRow(offered, chosen, choice);
-  const start: Start = (cwd, prompt) => startAgent(agent(), cwd, prompt, auto());
+  const start: Start = (cwd, prompt) => {
+    keepProject(project);
+    return startAgent(agent(), cwd, prompt, auto());
+  };
   const [main, ...tasks] = workspaceRows(workspaces, [], []).map(({ name, workspace }) => workspaceRow(name, workspace, start));
   return [
+    projectPill(project, kind),
     agentButtons,
     text("h1", "In its own task"),
     quickStart(project, workspaces.main, start),
@@ -223,18 +284,27 @@ export function showPalette(entries: Entry[], run: (binding: Binding) => void) {
 }
 
 // Opens the picker, on the last agent for New session or on a plain terminal for New terminal, or
-// closes it when open.
-export async function showPicker(kind: Kind = "session") {
+// closes it when open. It opens on `from`, a project header's "+", else on `pickerProject`'s choice; from a header it
+// never closes, so a second header's "+" shows its own project.
+export async function showPicker(kind: Kind = "session", from?: string) {
+  const label = kind === "terminal" ? "New terminal" : "New session";
+  if (from === undefined) {
+    if (closed(label)) return;
+  } else element("picker").ariaLabel = label;
+  await drawPicker(kind, from ?? pickerProject(selectedProject(), lastProject(), await projects().catch(() => [])));
+}
+
+// The picker on `project`.
+async function drawPicker(kind: Kind, project: string) {
   const picker = element("picker");
-  if (closed(kind === "terminal" ? "New terminal" : "New session")) return;
   // It opens once its rows are read, so no placeholder flashes first in another box (danielrispler/Falinks#570).
   try {
-    const project = await shownProject();
     const [workspaces, agents] = await Promise.all([invoke("workspaces", { project }), offeredAgents()]);
     picker.replaceChildren(...picked(project, workspaces, agents, kind));
   } catch (e) {
     failure("workspaces", "error")(e);
-    picker.replaceChildren(text("p", `No worktrees: ${e}`, "empty"));
+    // The pill stays, so a project that cannot be read is left for another.
+    picker.replaceChildren(projectPill(project, kind), text("p", `No worktrees: ${e}`, "empty"));
   }
   picker.hidden = false;
   picker.querySelector("input")?.focus();

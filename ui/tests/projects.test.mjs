@@ -58,3 +58,14 @@ test("Home's project rows appear once a retried projects read succeeds, with no 
   await mod.projects();
   assert.equal(seen.length, 1);
 });
+
+test("the picker opens on the selected session's project, else the last one started in, else the first", async () => {
+  const { pickerProject } = await import("../../dist/projects.js");
+  const list = ["/plotkeeper", "/falinks", "/notes"];
+  assert.equal(pickerProject("/notes", "/falinks", list), "/notes");
+  assert.equal(pickerProject(null, "/falinks", list), "/falinks");
+  // A last project since removed is skipped, as is none kept yet.
+  assert.equal(pickerProject(null, "/gone", list), "/plotkeeper");
+  assert.equal(pickerProject(null, null, list), "/plotkeeper");
+  assert.equal(pickerProject(null, null, []), "");
+});

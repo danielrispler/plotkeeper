@@ -39,3 +39,13 @@ test("the list's footer holds History and no settings gear, which is the top bar
   const gear = bar.match(/<button id="settings-gear"[^>]*>[\s\S]*?<\/button>/)[0];
   assert.ok(gear.includes('aria-label="Settings"') && !/>\s*[^<\s]/.test(gear.replace(/<svg[\s\S]*?<\/svg>/, "").replace(/^<button[^>]*>/, "")), "icon only");
 });
+
+test("the project pill's list filters by the project's name or path, ignoring case, and shows its search from five projects", async () => {
+  const { matchingProjects, searchesProjects } = await import("../../dist/picker.js");
+  const list = ["/work/plotkeeper", "/work/Falinks", "/notes"];
+  assert.deepEqual(matchingProjects(list, "fal"), ["/work/Falinks"]);
+  assert.deepEqual(matchingProjects(list, " WORK "), ["/work/plotkeeper", "/work/Falinks"]);
+  assert.deepEqual(matchingProjects(list, ""), list);
+  assert.equal(searchesProjects(4), false);
+  assert.equal(searchesProjects(5), true);
+});
