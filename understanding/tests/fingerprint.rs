@@ -537,3 +537,22 @@ fn a_loaded_root_cache_drops_the_entry_of_a_removed_worktrees_folder_and_keeps_t
     expected.remove(&format!("{w1}/src"));
     assert_eq!(kept, expected);
 }
+
+#[test]
+fn a_loaded_root_cache_keeps_the_entries_that_name_a_removed_worktree_as_their_own_root() {
+    let (_dir, root, w1, w2) = repo_with_removed_worktree();
+    let saved: HashMap<String, String> = [
+        (w1.clone(), w1.clone()),
+        (format!("{w1}/src"), w1.clone()),
+        (format!("{w1}/gone"), root.clone()),
+        (format!("{w2}/src"), root.clone()),
+        (format!("{root}/src"), root.clone()),
+    ]
+    .into();
+    let kept = live_roots(saved.clone());
+    let mut expected = saved;
+    // One in a removed worktree that names another root, and one the listed worktree w2 holds.
+    expected.remove(&format!("{w1}/gone"));
+    expected.remove(&format!("{w2}/src"));
+    assert_eq!(kept, expected);
+}

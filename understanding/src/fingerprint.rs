@@ -85,11 +85,53 @@ pub fn worktree_root(folder: &str) -> Option<String> {
     Some(root.trim_end_matches('/').to_owned()).filter(|root| !root.is_empty())
 }
 
-/// `roots` without the entries whose folder no longer resolves to the root they name.
+/// `roots` without the entries that map a folder to another root than the one now holding it: a
+/// folder in a removed worktree that names a listed root, or one a listed worktree has taken. An
+/// entry that names a removed worktree as its own root stays (danielrispler/plotkeeper#205). `git`
+/// lists each repository's worktrees once.
 pub fn live_roots(roots: HashMap<String, String>) -> HashMap<String, String> {
+    let mut lists: HashMap<String, Vec<String>> = HashMap::new();
     let mut roots = roots;
-    roots.retain(|folder, root| worktree_root(folder).as_ref() == Some(root));
+    roots.retain(|folder, root| {
+        if !Path::new(root).join(".git").exists() {
+            return true;
+        }
+        if !lists.contains_key(root) {
+            let list = listed(Path::new(root));
+            // Each worktree of the repository shares the one listing.
+            let owners = list.iter().chain([&*root]);
+            let owners: Vec<String> = owners.cloned().collect();
+            lists.extend(owners.into_iter().map(|r| (r, list.clone())));
+        }
+        let list = &lists[root.as_str()];
+        resolved(folder, list).as_ref() == Some(root)
+    });
     roots
+}
+
+/// The roots `git worktree list` gives for the repository of the worktree at `root`.
+fn listed(root: &Path) -> Vec<String> {
+    let Some(out) = git(root, &["worktree", "list", "--porcelain"]) else {
+        return Vec::new();
+    };
+    let text = String::from_utf8(out).unwrap_or_default();
+    let roots = text.lines().filter_map(|l| l.strip_prefix("worktree "));
+    roots.map(|r| r.trim_end_matches('/').to_owned()).collect()
+}
+
+/// The deepest of the listed `roots` that holds `folder`, looked up from its nearest existing
+/// parent unless that parent is a `worktrees` folder, where the folder of a removed worktree was.
+fn resolved(folder: &str, roots: &[String]) -> Option<String> {
+    let existing = Path::new(folder).ancestors().find(|p| p.is_dir())?;
+    if existing != Path::new(folder) && existing.file_name().is_some_and(|n| n == "worktrees") {
+        return None;
+    }
+    let at = existing.to_str()?;
+    let holds = |r: &&String| {
+        at.strip_prefix(r.as_str())
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+    };
+    roots.iter().filter(holds).max_by_key(|r| r.len()).cloned()
 }
 
 /// Each worktree's latest record, by the worktree's root.
