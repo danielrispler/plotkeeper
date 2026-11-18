@@ -37,7 +37,7 @@ pub use brief::{
 };
 pub use card_code::{CodeRange, pull_code};
 pub use drift::{AGY_FIXTURE_VERSION, AgyVersions, Drift, Versions, drift, dropped_events};
-pub use fingerprint::{Fingerprints, backfilled, fingerprint_changes, worktree_root};
+pub use fingerprint::{Fingerprints, backfilled, fingerprint_changes, live_roots, worktree_root};
 use grounding::words;
 pub use offer::{
     Changed, Decision, Inputs, Offer, OfferKind, Offers, Outcome, Settled, Shape, TurnFacts,

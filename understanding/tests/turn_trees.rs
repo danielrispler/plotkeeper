@@ -420,3 +420,32 @@ fn a_workers_late_edit_in_the_sessions_worktree_is_its_turns_and_not_external_in
     assert_eq!(files(0), (vec!["late.rs".to_owned()], 0));
     assert_eq!(files(1), (vec![], 0));
 }
+
+#[test]
+fn a_turn_whose_trees_name_a_removed_worktree_has_no_diff_for_it_and_none_of_the_main_checkout() {
+    let (_dir, root) = repo();
+    let removed = format!("{root}/worktrees/w1");
+    git(
+        Path::new(&root),
+        &["worktree", "add", "-q", "-b", "w1", &removed],
+    );
+    let start = tree(&removed);
+    fs::write(format!("{removed}/a.rs"), "fn a() {}\nfn more() {}\n").unwrap();
+    let end = tree(&removed);
+    git(
+        Path::new(&root),
+        &["worktree", "remove", "--force", &removed],
+    );
+    fs::write(format!("{root}/a.rs"), "fn main_side() {}\n").unwrap();
+    let ask = studio_core::TurnDiff {
+        session_id: SESSION.into(),
+        turn: 0,
+        ended: true,
+        trees: vec![studio_core::TurnTrees {
+            root: removed,
+            start,
+            end: Some(end),
+        }],
+    };
+    assert_eq!(turn_diffs(&ask), None);
+}
