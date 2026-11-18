@@ -143,16 +143,16 @@ impl TurnFiles {
         let mut found = TurnFiles::default();
         for diff in diffs {
             for file in &diff.files {
+                // A rename counts by its old path too.
+                let by =
+                    |f: &dyn Fn(&str) -> bool| f(&file.path) || file.from.as_deref().is_some_and(f);
                 let named = |path: &str| others.iter().any(|row| names(row, &diff.root, path));
-                let taken = named(&file.path) || file.from.as_deref().is_some_and(named);
-                if taken {
+                if by(&named) {
                     continue;
                 }
                 let moved = |path: &str| diff.moved.iter().any(|m| m == path);
                 let called = |path: &str| ours.iter().any(|row| names(row, &diff.root, path));
-                let brought = moved(&file.path) || file.from.as_deref().is_some_and(moved);
-                let ours = called(&file.path) || file.from.as_deref().is_some_and(called);
-                if brought && !ours {
+                if by(&moved) && !by(&called) {
                     found.merged += 1;
                     continue;
                 }
