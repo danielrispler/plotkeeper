@@ -6,8 +6,9 @@ use studio_core::{
     Base, CardRequest, Check, CheckRun, CheckStatus, FactFile, Facts, SummaryRequest, TurnFile,
 };
 use studio_understanding::{
-    Card, CardStore, CardWriter, FakeWriter, Offer, Place, Shape, SummarySetup, Tap, TurnSummary,
-    write_stop, write_summary,
+    Card, CardStore, CardWriter, FakeWriter, Offer, Offers, Place, Shape, SummarySetup, Tap,
+    TurnFacts, TurnSummary, changed_in, offer_stop, offer_summary, settle, write_stop,
+    write_summary,
 };
 
 /// Replies to the summary with a Headline, one more line of `kind`, and a Quiz.
@@ -311,4 +312,295 @@ fn an_agent_with_no_trees_reads_its_cards_change() {
         Shape::of(&Facts::default(), "", false).offer(),
         Offer::Nothing
     );
+}
+
+// One offer function, and its record (danielrispler/plotkeeper#209).
+
+fn turn_facts(files: &[(&str, u64)], check: Option<CheckStatus>) -> TurnFacts {
+    TurnFacts {
+        facts: facts(files, check),
+        merge: false,
+    }
+}
+
+fn diff_of(lines: usize) -> String {
+    format!(
+        "diff --git a/a.rs b/a.rs\n--- a/a.rs\n+++ b/a.rs\n@@ -1 +1,{lines} @@\n{}",
+        "+let x = 1;\n".repeat(lines)
+    )
+}
+
+fn card_request(id: &str, agent: Option<&str>, diff: &str) -> CardRequest {
+    CardRequest {
+        session_id: "s".into(),
+        id: id.into(),
+        agent: agent.map(Into::into),
+        change: Some(diff.into()),
+        ..CardRequest::default()
+    }
+}
+
+fn lines_of(offers: &Offers) -> Vec<serde_json::Value> {
+    let text = std::fs::read_to_string(offers.path()).unwrap_or_default();
+    text.lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect()
+}
+
+fn offers() -> (tempfile::TempDir, Offers) {
+    let dir = tempfile::tempdir().unwrap();
+    let offers = Offers::beside(&dir.path().join("events.jsonl"));
+    (dir, offers)
+}
+
+fn stop_of(
+    store: &Mutex<CardStore>,
+    offers: &Offers,
+    request: CardRequest,
+    turn: &TurnFacts,
+) -> bool {
+    let session = studio_core::Session::default();
+    offer_stop(
+        store,
+        &FakeWriter,
+        request,
+        &session,
+        turn,
+        offers,
+        || {},
+        |_| {},
+    )
+}
+
+#[test]
+fn the_card_path_and_the_summary_path_agree_on_the_same_facts() {
+    let (_dir, store) = store();
+    let (_o, offers) = offers();
+    let turn = turn_facts(&[("a.rs", 30)], None);
+    // The card's own diff is empty: it is never what the turn is judged on.
+    assert!(stop_of(
+        &store,
+        &offers,
+        card_request("s@1", None, ""),
+        &turn
+    ));
+    let mut request = SummaryRequest {
+        wanted: false,
+        ..turn_request(1)
+    };
+    let settled = settle(&mut request, &turn, &[]);
+    assert_eq!(settled.decision.offer, Offer::Card);
+    assert!(request.no_quiz && !settled.write);
+}
+
+fn turn_request(n: u64) -> SummaryRequest {
+    turn(n)
+}
+
+#[test]
+fn an_agent_with_no_trees_is_judged_on_its_cards_diff_by_both_paths() {
+    let (_dir, store) = store();
+    let (_o, offers) = offers();
+    let none = TurnFacts::default();
+    let diff = diff_of(30);
+    assert!(stop_of(
+        &store,
+        &offers,
+        card_request("s@1", None, &diff),
+        &none
+    ));
+    let mut request = SummaryRequest {
+        wanted: false,
+        ..turn_request(2)
+    };
+    assert_eq!(
+        settle(&mut request, &none, &changed_in(&diff))
+            .decision
+            .offer,
+        Offer::Card
+    );
+    let small = diff_of(10);
+    let mut request = SummaryRequest {
+        wanted: false,
+        ..turn_request(3)
+    };
+    let settled = settle(&mut request, &none, &changed_in(&small));
+    assert_eq!(settled.decision.offer, Offer::Quiz);
+    assert!(settled.write && !request.no_quiz);
+}
+
+#[test]
+fn a_workers_card_passes_the_first_row_or_is_not_written() {
+    let (_dir, store) = store();
+    let (_o, offers) = offers();
+    let none = TurnFacts::default();
+    let big = card_request("w@1", Some("w"), &diff_of(30));
+    assert!(stop_of(&store, &offers, big, &none));
+    let small = card_request("w@2", Some("w"), &diff_of(10));
+    assert!(!stop_of(&store, &offers, small, &none));
+    let kept: Vec<_> = store
+        .lock()
+        .unwrap()
+        .cards()
+        .iter()
+        .map(|k| k.request.id.clone())
+        .collect();
+    assert_eq!(kept, ["w@1"]);
+    let lines = lines_of(&offers);
+    assert_eq!(lines.len(), 2);
+    assert_eq!(lines[0]["kind"], "worker");
+    assert_eq!(lines[0]["offer"], "card");
+    assert_eq!(lines[0]["outcome"], "written");
+    assert_eq!(lines[1]["offer"], "nothing");
+    assert_eq!(lines[1]["reason"], "below the card row");
+    assert_eq!(lines[1]["inputs"]["logic_lines"], 10);
+}
+
+#[test]
+fn a_check_card_is_written_and_leaves_no_line() {
+    let (_dir, store) = store();
+    let (_o, offers) = offers();
+    let request = CardRequest {
+        check: Some("cargo test".into()),
+        ..card_request("s@1", None, "")
+    };
+    assert!(stop_of(&store, &offers, request, &TurnFacts::default()));
+    assert!(lines_of(&offers).is_empty());
+}
+
+#[test]
+fn each_decision_is_a_line_with_its_inputs_and_its_outcome_and_no_text() {
+    let (_dir, store) = store();
+    let (_o, offers) = offers();
+    let turn = turn_facts(&[("a.rs", 30), ("README.md", 4)], Some(CheckStatus::Failed));
+    assert!(stop_of(
+        &store,
+        &offers,
+        card_request("s@1", None, ""),
+        &turn
+    ));
+    let refused = turn_facts(&[("README.md", 40)], None);
+    assert!(!stop_of(
+        &store,
+        &offers,
+        card_request("s@2", None, ""),
+        &refused
+    ));
+    let lines = lines_of(&offers);
+    assert_eq!(lines.len(), 2);
+    let first = &lines[0];
+    assert_eq!(first["session"], "s");
+    assert_eq!(first["id"], "s@1");
+    assert_eq!(first["kind"], "turn");
+    assert!(first["at"].as_u64().unwrap() > 0);
+    let inputs = &first["inputs"];
+    assert_eq!(inputs["logic_lines"], 30);
+    assert_eq!(inputs["logic_files"], 1);
+    assert_eq!(inputs["non_trivial"], 30);
+    assert_eq!(inputs["failed"], true);
+    assert_eq!(inputs["merge"], false);
+    assert_eq!(inputs["test_run"], false);
+    assert_eq!(inputs["docs"], false);
+    assert_eq!(lines[1]["offer"], "nothing");
+    assert_eq!(lines[1]["reason"], "no logic file");
+    assert_eq!(lines[1]["inputs"]["docs"], true);
+    let text = std::fs::read_to_string(offers.path()).unwrap();
+    assert!(!text.contains("let x") && !text.contains("diff --git"));
+}
+
+/// A writer that gives no reply.
+struct Silent;
+
+impl CardWriter for Silent {
+    fn reply(&self, _: &CardRequest, _: &[String]) -> Result<String, String> {
+        Err("no reply".into())
+    }
+    fn more(&self, r: &CardRequest, c: &Card) -> Result<String, String> {
+        FakeWriter.more(r, c)
+    }
+}
+
+#[test]
+fn a_writer_that_gives_no_reply_is_on_the_record() {
+    let (_dir, store) = store();
+    let (_o, offers) = offers();
+    let session = studio_core::Session::default();
+    let written = offer_stop(
+        &store,
+        &Silent,
+        card_request("s@1", None, ""),
+        &session,
+        &turn_facts(&[("a.rs", 30)], None),
+        &offers,
+        || {},
+        |_| {},
+    );
+    assert!(!written);
+    assert_eq!(lines_of(&offers)[0]["outcome"], "no reply from the writer");
+}
+
+#[test]
+fn a_lone_quiz_held_by_the_cap_says_so() {
+    let (_dir, store) = store();
+    let (_o, offers) = offers();
+    for n in 1..=3 {
+        lone(&store, n, 0, false, "why");
+    }
+    let turn = turn_facts(&[("a.rs", 9)], None);
+    let mut request = turn_request(4);
+    let settled = settle(&mut request, &turn, &[]);
+    assert_eq!(settled.decision.offer, Offer::Quiz);
+    let summary = offer_summary(
+        &store,
+        &Canned("why"),
+        &SummarySetup::default(),
+        request,
+        Some(&settled.decision),
+        &offers,
+        |l| panic!("{l}"),
+    );
+    assert_eq!(summary.unwrap().quiz, None);
+    let lines = lines_of(&offers);
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0]["offer"], "quiz");
+    assert_eq!(lines[0]["outcome"], "held by the hourly cap");
+}
+
+#[test]
+fn a_lone_quiz_written_is_on_the_record() {
+    let (_dir, store) = store();
+    let (_o, offers) = offers();
+    let mut request = turn_request(1);
+    let settled = settle(&mut request, &turn_facts(&[("a.rs", 9)], None), &[]);
+    offer_summary(
+        &store,
+        &Canned("why"),
+        &SummarySetup::default(),
+        request,
+        Some(&settled.decision),
+        &offers,
+        |l| panic!("{l}"),
+    );
+    assert_eq!(lines_of(&offers)[0]["outcome"], "written");
+}
+
+#[test]
+fn a_subagents_late_change_below_the_card_row_has_a_line_of_its_own_kind() {
+    let (_dir, store) = store();
+    let (_o, offers) = offers();
+    let mut request = card_request("s@9", None, &diff_of(10));
+    request.changed_by = [("w".to_string(), ["a.rs".to_string()].into())].into();
+    assert!(!stop_of(&store, &offers, request, &TurnFacts::default()));
+    let lines = lines_of(&offers);
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0]["kind"], "late_change");
+}
+
+#[test]
+fn a_replay_of_the_log_appends_no_line() {
+    let (_dir, _store) = store();
+    let (_o, offers) = offers();
+    let mut studio = studio_core::Studio::default();
+    studio.replay(r#"{"session_id":"s","hook_event_name":"SessionStart","studio_received_ms":1}"#);
+    assert!(lines_of(&offers).is_empty());
 }

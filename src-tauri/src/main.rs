@@ -27,11 +27,11 @@ use studio_core::{
     Studio, SummaryRequest, TaskFacts, TaskQuery,
 };
 use studio_understanding::{
-    AGY_FIXTURE_VERSION, AgyVersions, CardStore, CardWriter, ClaudeWriter, FakeWriter,
-    Fingerprints, Offer, OpenItem, Rating, Row, SessionCards, Shape, StoredSummary, SummarySetup,
-    Tap, Versions, add_hunks, backfilled, fingerprint_changes, millis, open_items, turn_diffs,
-    turn_hunk, worktree_root, write_agent_summary, write_design, write_goal, write_name,
-    write_retests, write_stop, write_summary,
+    AGY_FIXTURE_VERSION, AgyVersions, CardStore, CardWriter, Changed, ClaudeWriter, Decision,
+    FakeWriter, Fingerprints, Offer, Offers, OpenItem, Rating, Row, SessionCards, StoredSummary,
+    SummarySetup, Tap, TurnFacts, Versions, add_hunks, backfilled, changed_in, fingerprint_changes,
+    live_roots, millis, offer_stop, offer_summary, open_items, settle, turn_diffs, turn_hunk,
+    worktree_root, write_agent_summary, write_design, write_goal, write_name, write_retests,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
@@ -57,6 +57,11 @@ type Notices = Mutex<Notifications>;
 struct Summaries {
     setup: Mutex<SummarySetup>,
     waiting: Mutex<HashMap<String, SummaryRequest>>,
+    /// The files of each turn card's own change, for a summary of an agent that reports no trees: it is
+    /// judged on the same change as its card (danielrispler/plotkeeper#209).
+    changes: Mutex<HashMap<String, Vec<Changed>>>,
+    /// The turns whose decision was a lone Quiz, by turn id, until their summary puts it on record.
+    lone: Mutex<HashMap<String, Decision>>,
 }
 
 /// The settings' `summaries` (danielrispler/Falinks#517, decision 17): the writer's model and effort, and whether a
@@ -166,7 +171,21 @@ fn turn_summary(
         return Ok(None);
     };
     let setup = summaries.setup.lock().unwrap().clone();
-    if write_summary(&cards, &**writer, &setup, request.clone(), report).is_none() {
+    let lone = summaries.lone.lock().unwrap().remove(&id);
+    if offer_summary(
+        &cards,
+        &**writer,
+        &setup,
+        request.clone(),
+        lone.as_ref(),
+        &offers(),
+        report,
+    )
+    .is_none()
+    {
+        if let Some(lone) = lone {
+            summaries.lone.lock().unwrap().insert(id.clone(), lone);
+        }
         summaries
             .waiting
             .lock()
@@ -694,9 +713,16 @@ fn roots_file(log: &Path) -> PathBuf {
 // parent's root; check the saved ones with `git` if a session ever shows under the wrong worktree.
 fn saved_roots(log: &Path) -> HashMap<String, String> {
     let saved = std::fs::read(roots_file(log)).ok();
-    saved
+    let saved: HashMap<String, String> = saved
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    // An entry that maps a removed worktree's folder to another root is dropped, and the file
+    // saved without it (danielrispler/plotkeeper#205).
+    let live = live_roots(saved.clone());
+    if live.len() != saved.len() {
+        save_roots(log, &live);
+    }
+    live
 }
 
 /// Takes the state a launch before saved, when it fits the log, and returns the offset to replay the
@@ -1529,6 +1555,11 @@ fn write(
 ) {
     let (app, writer) = (app.clone(), writer.clone());
     let id = request.session_id.clone();
+    if request.agent.is_none() && request.check.is_none() && card {
+        let files = changed_in(request.diff());
+        let changes = &app.state::<Summaries>().changes;
+        changes.lock().unwrap().insert(request.id.clone(), files);
+    }
     let Some(session) = app
         .state::<Mutex<Studio>>()
         .lock()
@@ -1566,8 +1597,13 @@ fn write(
         let card_id = request.id.clone();
         // A turn the table gives no card is written none, but still feeds the design.
         let written = match card {
-            true if !offered(&app, &request) => false,
-            true => write_stop(&store, &*writer, request, &session, stored, report),
+            true => {
+                let turn = turn_of(&app.state(), &request.id);
+                let offers = offers();
+                offer_stop(
+                    &store, &*writer, request, &session, &turn, &offers, stored, report,
+                )
+            }
             false => write_goal(&store, &*writer, &request, &session, report),
         };
         // A Quiz is never beside a decision (danielrispler/plotkeeper#119).
@@ -1600,35 +1636,37 @@ fn turn_facts(state: &Mutex<Studio>, id: &str) -> Facts {
     facts
 }
 
-/// What the turn named `id` gets for a Quiz (danielrispler/plotkeeper#119), by its facts, or by `diff`, its card's
-/// change, when an agent reports no trees.
-fn offer_of(state: &Mutex<Studio>, id: &str, diff: &str) -> Offer {
-    let merge = state.lock().unwrap().turn_merged(id);
-    Shape::of(&turn_facts(state, id), diff, merge).offer()
+/// The turn named `id` as the offer reads it (danielrispler/plotkeeper#209): its facts, and whether it merged.
+fn turn_of(state: &Mutex<Studio>, id: &str) -> TurnFacts {
+    TurnFacts {
+        facts: turn_facts(state, id),
+        merge: state.lock().unwrap().turn_merged(id),
+    }
 }
 
-/// Whether the stop card `request` is written: a turn's card only when the table gives it one. A
-/// worker's card and a check's are no turn's and are always written.
-fn offered(app: &AppHandle, request: &CardRequest) -> bool {
-    if request.agent.is_some() || request.check.is_some() {
-        return true;
-    }
-    let offer = offer_of(&app.state(), &request.id, request.diff());
-    if offer != Offer::Card {
-        log::warn!("no card on {}: its change gets {offer:?}", request.id);
-    }
-    offer == Offer::Card
+/// The record of offers, beside the event log.
+fn offers() -> Offers {
+    let home = std::env::home_dir().unwrap_or_default();
+    Offers::beside(&studio_hook::event_log(&home))
 }
 
-/// Fills in `request`'s facts and, by the offer table (danielrispler/plotkeeper#119), whether its summary may keep a Quiz.
-/// Returns whether the summary is written: one asked for the sake of a lone Quiz is dropped when the turn gets none.
-fn settle(app: &AppHandle, request: &mut SummaryRequest) -> bool {
+/// Fills in `request`'s facts and, by the one offer function (danielrispler/plotkeeper#209), whether its summary may
+/// keep a Quiz. Returns whether the summary is written: one asked for the sake of a lone Quiz is dropped when the
+/// turn gets none.
+fn settle_summary(app: &AppHandle, request: &mut SummaryRequest) -> bool {
     let state = app.state::<Mutex<Studio>>();
-    request.facts = turn_facts(&state, &request.id);
-    let merge = state.lock().unwrap().turn_merged(&request.id);
-    let lone = Shape::of(&request.facts, "", merge).offer() == Offer::Quiz;
-    request.no_quiz = !lone;
-    request.wanted || lone
+    let summaries = app.state::<Summaries>();
+    let change = summaries.changes.lock().unwrap().remove(&request.id);
+    let settled = settle(
+        request,
+        &turn_of(&state, &request.id),
+        &change.unwrap_or_default(),
+    );
+    if settled.decision.offer == Offer::Quiz {
+        let mut lone = summaries.lone.lock().unwrap();
+        lone.insert(request.id.clone(), settled.decision);
+    }
+    settled.write
 }
 
 /// Writes the summary of `request`'s turn on its session's queue, after the turn's card. While summaries are written
@@ -1646,7 +1684,7 @@ fn summarize(
         .summaries_on_open()
     {
         let mut request = request;
-        if settle(app, &mut request) {
+        if settle_summary(app, &mut request) {
             let waiting = &app.state::<Summaries>().waiting;
             waiting.lock().unwrap().insert(request.id.clone(), request);
         }
@@ -1657,12 +1695,29 @@ fn summarize(
     let job = move || {
         let setup = app.state::<Summaries>().setup.lock().unwrap().clone();
         let mut request = request;
-        if !settle(&app, &mut request) {
+        if !settle_summary(&app, &mut request) {
             return;
         }
         let session = request.session_id.clone();
         let (studio, cards) = (app.state::<Mutex<Studio>>(), app.state::<Cards>());
-        if write_summary(&cards, &*writer, &setup, request, report).is_some() {
+        let lone = app
+            .state::<Summaries>()
+            .lone
+            .lock()
+            .unwrap()
+            .remove(&request.id);
+        let offers = offers();
+        if offer_summary(
+            &cards,
+            &*writer,
+            &setup,
+            request,
+            lone.as_ref(),
+            &offers,
+            report,
+        )
+        .is_some()
+        {
             design(&studio, &cards, &*writer, &session);
         }
     };
@@ -1771,7 +1826,40 @@ fn uptime() -> Duration {
 
 #[cfg(test)]
 mod tests {
-    use super::{in_app, log_line, lost_data, scrubbed, shows_in_window};
+    use super::{in_app, log_line, lost_data, saved_roots, scrubbed, shows_in_window};
+
+    #[test]
+    fn a_saved_root_of_a_removed_worktrees_folder_is_dropped_and_the_file_saved_without_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let root = root.to_str().unwrap();
+        let git = |args: &[&str]| {
+            let ok = std::process::Command::new("git")
+                .args(["-c", "user.name=S", "-c", "user.email=s@example.com"])
+                .args(args)
+                .current_dir(root)
+                .status()
+                .unwrap()
+                .success();
+            assert!(ok, "git {args:?}");
+        };
+        git(&["init", "-q"]);
+        git(&["commit", "-q", "--allow-empty", "-m", "base"]);
+        let gone = format!("{root}/worktrees/w1");
+        git(&["worktree", "add", "-q", "-b", "w1", &gone]);
+        git(&["worktree", "remove", &gone]);
+        let log = dir.path().join("events.jsonl");
+        let saved = serde_json::json!({ format!("{gone}/src"): root, root: root });
+        std::fs::write(super::roots_file(&log), saved.to_string()).unwrap();
+        let kept = saved_roots(&log);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept.get(root).map(String::as_str), Some(root));
+        let file = std::fs::read(super::roots_file(&log)).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<super::HashMap<String, String>>(&file).unwrap(),
+            kept
+        );
+    }
 
     #[test]
     fn a_file_line_carries_the_local_time_level_and_target() {

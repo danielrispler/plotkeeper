@@ -1107,6 +1107,7 @@ impl Session {
                     .map(|p| p.owner.clone()),
                 None => (roots.of(&self.cwd) == root).then(|| self.agent.id.clone()),
             };
+            let home = self.new_home(id, event, roots);
             let agent = self.agent(id, at);
             agent.agent.last_event_at = agent.agent.last_event_at.max(at);
             if agent.agent_type.is_none() {
@@ -1118,6 +1119,13 @@ impl Session {
                 agent.agent.since.at = at;
                 agent.owner = owner.unwrap_or_else(|| id.clone());
                 agent.root = root;
+            }
+            // The first other worktree it touches is its home from then on (danielrispler/plotkeeper#206).
+            if let Some(home) = home {
+                agent.folder = Some(home.clone());
+                agent.root = home;
+                agent.owner = id.clone();
+                agent.agent.since.at = at;
             }
             // A changed file promotes a helper at that step: an `Edit` or `Write` that succeeded, or
             // a command that changed its worktree and either succeeded or ran and failed (danielrispler/Falinks#434,
@@ -1240,6 +1248,21 @@ impl Session {
                 BlockedStatus::Allowed | BlockedStatus::AllowedNotRun | BlockedStatus::Running
             ) && c.retried_by(tool, cwd, agent)
         })
+    }
+
+    /// The home that `event` gives subagent `id`, if it is not homed yet (danielrispler/plotkeeper#206): a subagent in
+    /// its session's worktree, whose call touches another one, makes the first such worktree its home. An
+    /// isolated subagent, and one already homed, have none to take.
+    fn new_home(&self, id: &str, event: &Event, roots: &Roots) -> Option<String> {
+        let session_root = roots.of(&self.cwd);
+        let agent = self.subagent(id).filter(|a| a.folder.is_some());
+        let in_session = match agent {
+            Some(a) => a.owner == self.agent.id,
+            None => roots.of(&event.cwd) == session_root,
+        };
+        let mut listed = event.studio_touched_roots.iter().flatten();
+        let other = listed.find(|r| !r.is_empty() && **r != session_root);
+        other.filter(|_| in_session).cloned()
     }
 
     /// Whether subagent `id` gets cards of its own: a worker in a worktree of its own.
@@ -2351,9 +2374,17 @@ impl Studio {
             return Vec::new();
         };
         let agent = session.subagent(id);
-        let Some(folder) = agent.and_then(|a| a.folder.as_deref()) else {
+        // The worktree this event makes its home, which its fingerprints are taken in from now on.
+        let home = session.new_home(id, event, &self.roots);
+        let Some(folder) = home
+            .as_deref()
+            .or_else(|| agent.and_then(|a| a.folder.as_deref()))
+        else {
             return look(id, &event.cwd, Purpose::Base).into_iter().collect();
         };
+        if home.is_some() && agent.is_none_or(|a| a.folder.is_none()) {
+            return look(id, folder, Purpose::Base).into_iter().collect();
+        }
         let worker = |a: &Subagent| a.kind == Kind::Worker;
         let bash = event.tool().is_some_and(|t| t.kind == ToolKind::Command);
         // A helper's base right before its command, so only a change across it promotes it.

@@ -35,7 +35,9 @@ By the size of its change, which `Shape::of` reads from the turn's facts (`under
 - A **logic file** is a changed file that is not documentation (`.md`, `.mdx`, `.txt`, `.rst`, a `docs/` folder, `README*`, `LICENSE*`), a lockfile (`*.lock`, `package-lock.json`, `pnpm-lock.yaml`, `go.sum`), generated output (`dist/`, `target/`, `node_modules/`, `generated/`, snapshots, minified files) or a fixture (`fixtures/`, `fixture/`, `testdata/`). Test files are logic files. Only logic files count towards the table's lines and files.
 - A **non-trivial line** is an added or removed line of a logic file that is not blank, a comment (`//`, `#`, `/*`, `*`, `--`, `<!--`), an import (`use`, `import`, `from`, `#include`), only brackets or punctuation, or formatting only (the same text, whitespace aside, is also on the other side of the diff).
 - A **test run** turn changed only test files (a `tests/` folder, `*.test.*`, `*.spec.*`, `test_*`, `*_test.*`). A **bookkeeping** or **docs** turn changed no logic file, so it counts no line and gets nothing. A **merge** turn ran `git merge` or `gh pr merge`; the table's first row still reads its size.
-- A turn the table gives no card is not written a card: nothing is stored for it, and its summary carries the lone Quiz if the second row holds. A worker's card and a check's card are no turn's and keep being written.
+- One function decides (`decide` in `understanding/src/offer.rs`), and the card path and the summary path both call it with the same turn facts, so they cannot disagree. It reads a card's own diff only where there are no turn facts: an agent that reports no trees, and a worker's card. Every decision is one line in `offers.jsonl` (`behaviour/storage.md`).
+- A turn the table gives no card is not written a card: nothing is stored for it, and its summary carries the lone Quiz if the second row holds.
+- A worker's card, and a subagent's late change in its session's own worktree, must pass the first row (25 logic lines or two logic files) or is not written; neither gets a lone Quiz, since neither has a summary. A check's card is not judged by the table and is always written.
 
 ## The cap
 
