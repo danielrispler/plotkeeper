@@ -226,7 +226,7 @@ const actions: Actions = {
   // The skills browser (danielrispler/Falinks#528), in the rail's place; it leaves focus mode, which hides the rail.
   "studio::Skills": () => {
     if (studio.focus) actions["studio::ToggleFocus"]();
-    showSkills().catch(failure("skills", "error"));
+    void showSkills();
   },
   // A Doctor entry from settings, by its command (danielrispler/Falinks#527).
   "studio::Doctor": (command) => {
