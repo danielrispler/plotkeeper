@@ -43,9 +43,16 @@ pub type Core = Arc<Mutex<Studio>>;
 
 enum Queues {
     /// One thread for each session with jobs.
-    Threads(Mutex<HashMap<String, mpsc::Sender<Job>>>),
+    Threads(Mutex<Queued>),
     /// Jobs wait for [`TurnWriting::run_queued`].
     Stepped(Mutex<VecDeque<Job>>),
+}
+
+/// The queues' senders, and the sessions the last prune found live, if it ran.
+#[derive(Default)]
+struct Queued {
+    senders: HashMap<String, mpsc::Sender<Job>>,
+    live: Option<HashSet<String>>,
 }
 
 /// Turn writing: see the module's description.
@@ -197,11 +204,14 @@ impl TurnWriting {
         if let Some(session) = designed {
             let state = self.state.clone();
             let owner = session.clone();
-            self.queue(session, Box::new(move || {
-                if state.design(&owner) {
-                    state.effects.list();
-                }
-            }));
+            self.queue(
+                session,
+                Box::new(move || {
+                    if state.design(&owner) {
+                        state.effects.list();
+                    }
+                }),
+            );
         }
         Ok(summary)
     }
@@ -222,10 +232,20 @@ impl TurnWriting {
         self.state.setup.lock().unwrap().clone()
     }
 
+    /// How many sessions have a queue, with its thread, now.
+    pub fn queues(&self) -> usize {
+        match &self.queues {
+            Queues::Threads(queues) => queues.lock().unwrap().senders.len(),
+            Queues::Stepped(_) => 0,
+        }
+    }
+
     /// The sessions that are live: a queue of any other lets its jobs finish, then ends its thread.
     pub fn prune(&self, live: &HashSet<String>) {
         if let Queues::Threads(queues) = &self.queues {
-            queues.lock().unwrap().retain(|key, _| live.contains(key));
+            let mut queues = queues.lock().unwrap();
+            queues.senders.retain(|key, _| live.contains(key));
+            queues.live = Some(live.clone());
         }
     }
 
@@ -252,12 +272,16 @@ impl TurnWriting {
             Queues::Stepped(jobs) => jobs.lock().unwrap().push_back(job),
             Queues::Threads(queues) => {
                 let mut queues = queues.lock().unwrap();
-                let queue = queues.entry(id).or_insert_with(|| {
+                let queue = queues.senders.entry(id.clone()).or_insert_with(|| {
                     let (queue, jobs) = mpsc::channel::<Job>();
                     thread::spawn(move || jobs.into_iter().for_each(|job| job()));
                     queue
                 });
                 let _ = queue.send(job);
+                // A session that ended gets its job, then no queue: the thread ends when the job is done.
+                if queues.live.as_ref().is_some_and(|live| !live.contains(&id)) {
+                    queues.senders.remove(&id);
+                }
             }
         }
     }

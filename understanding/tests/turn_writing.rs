@@ -761,3 +761,53 @@ fn the_threaded_module_writes_a_card_on_its_sessions_queue_and_prune_ends_the_qu
     }
     assert_eq!(day.card_ids().len(), 1);
 }
+
+#[test]
+fn a_turn_opened_in_an_ended_session_gets_its_summary_and_design_and_its_queue_ends() {
+    let mut day = Day::new();
+    let outputs = day.turn_asking("Add one file", &[("a.rs", 10)], "Done.");
+    let threaded = TurnWriting::new(
+        day.core.clone(),
+        day.store.clone(),
+        Arc::new(Recorded {
+            events: day.events.clone(),
+            failing: Arc::default(),
+            summaries: Arc::default(),
+            why: Arc::new(AtomicBool::new(true)),
+        }),
+        Offers::beside(&day.data.join("events.jsonl")),
+        day.recorder.clone(),
+    );
+    threaded.settings(SummarySetup::default(), true);
+    let id = card_id(&outputs);
+    for output in outputs {
+        match output {
+            Output::Card(request) => threaded.card(request, true),
+            Output::Brief(request) => threaded.brief(request),
+            Output::Summary(request) => threaded.summary(request),
+            _ => {}
+        }
+    }
+    // The session ends: its queue finishes the parking job, then its thread ends.
+    threaded.prune(&Default::default());
+    let mut summary = None;
+    for _ in 0..500 {
+        summary = threaded.opened(&id).unwrap();
+        if summary.is_some() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(summary.is_some(), "the summary is written");
+    for _ in 0..500 {
+        if day.store.lock().unwrap().brief("s1").is_some() && threaded.queues() == 0 {
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        day.store.lock().unwrap().brief("s1").is_some(),
+        "the design is written"
+    );
+    assert_eq!(threaded.queues(), 0, "no queue is left behind");
+}
