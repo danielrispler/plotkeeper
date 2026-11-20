@@ -647,9 +647,51 @@ fn a_killed_worker_that_its_sessions_stop_ended_first_still_gets_its_end_look() 
         key: "w1".into(),
         folder: "/w/.claude/worktrees/w1".into(),
         purpose: Purpose::Card,
-        began: None,
+        began: Some(2),
     };
     assert!(looks.contains(&end), "{looks:?}");
+}
+
+/// danielrispler/plotkeeper#204: a worktree made after the turn or worker began is its own creation, so
+/// each look says when its turn or worker began.
+#[test]
+fn a_workers_end_look_and_a_new_turns_base_look_say_when_theirs_began() {
+    let mut studio = Studio::default();
+    studio.apply(&ev(
+        "UserPromptSubmit",
+        1000,
+        "p1",
+        json!({"prompt": "Do it"}),
+    ));
+    let worktree = json!({"isolation": "worktree"});
+    studio.apply(&launched(2000, "t1", None, "w1", worktree));
+    studio.apply(&step(3000, "w1", "/w/.claude/worktrees/w1"));
+    studio.apply(&ev(
+        "Stop",
+        4000,
+        "p1",
+        json!({"background_tasks": [{"id": "w1"}]}),
+    ));
+
+    let end = ev(
+        "SubagentStop",
+        5000,
+        "p1",
+        json!({"agent_id": "w1", "agent_type": "general-purpose"}),
+    );
+    let looks = studio.fingerprint_folders(&end);
+    let worker = looks
+        .iter()
+        .find(|l| l.key == "w1" && l.purpose == Purpose::Card);
+    assert_eq!(worker.map(|l| l.began), Some(Some(2000)), "{looks:?}");
+
+    // The previous turn began at 1000; the new one at its prompt.
+    let next = ev("UserPromptSubmit", 6000, "p2", json!({"prompt": "More"}));
+    let looks = studio.fingerprint_folders(&next);
+    let base = looks
+        .iter()
+        .find(|l| l.key == "s1" && l.purpose == Purpose::Base);
+    assert_eq!(base.map(|l| l.began), Some(Some(6000)), "{looks:?}");
 }
 
 /// danielrispler/Falinks#535: the rail's history of a session's subagents reads each one off the wire, faded or not: its

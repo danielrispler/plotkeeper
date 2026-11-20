@@ -2329,7 +2329,7 @@ impl Studio {
                     key: id,
                     folder,
                     purpose: Purpose::Card,
-                    began: None,
+                    began: Some(agent.agent.started_at),
                 }),
             }
         }
@@ -2355,6 +2355,10 @@ impl Studio {
         let look = |key: &str, folder: &str, purpose| {
             let began = session.and_then(|s| match s.subagent(key) {
                 Some(agent) => Some(agent.agent.started_at),
+                // A turn that opens with this event begins at it.
+                None if session.is_some_and(|s| s.opens_turn(event)) => {
+                    Some(event.studio_received_ms)
+                }
                 None => s.turns.last().map(|t| t.started_at),
             });
             let look = Fingerprint {
