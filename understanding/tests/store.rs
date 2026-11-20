@@ -1157,6 +1157,24 @@ mod learning {
         }
     }
 
+    /// Facts of one file whose hunk is `+the hunk`.
+    fn hunk_facts() -> studio_core::Facts {
+        studio_core::Facts {
+            files: vec![studio_core::FactFile {
+                file: studio_core::TurnFile {
+                    root: "/r".into(),
+                    path: "a.rs".into(),
+                    from: None,
+                    added: Some(1),
+                    removed: Some(0),
+                    agent: None,
+                },
+                hunk: "+the hunk".into(),
+            }],
+            ..Default::default()
+        }
+    }
+
     /// Turn `t` with a Quiz, offered so that its retest came due `due_ago` before NOW, and that Retest, `retest t`.
     fn seed(store: &mut CardStore, t: &str, due_ago: u64) {
         seed_offered(store, t, NOW - due_ago - RETEST_AFTER_MS);
@@ -1167,6 +1185,7 @@ mod learning {
         let request = studio_core::SummaryRequest {
             id: t.into(),
             session_id: "s1".into(),
+            facts: hunk_facts(),
             ..Default::default()
         };
         let summary: studio_understanding::TurnSummary =
@@ -1435,6 +1454,75 @@ mod learning {
     }
 
     #[test]
+    fn a_retest_skipped_by_an_older_build_counts_as_answered_and_is_never_served() {
+        let (_data, mut store) = empty();
+        seed(&mut store, "skipped", DAY);
+        seed(&mut store, "next", 2 * DAY);
+        store.quiz_tap("retest skipped", Tap::Skip, NOW).unwrap();
+        assert_eq!(served(&store).as_deref(), Some("next"));
+    }
+
+    #[test]
+    fn a_fresh_quiz_is_fresh_by_when_its_turn_ended_not_when_it_was_written() {
+        let (_data, mut store) = empty();
+        // Written now, but the turn (named by the Stop's time after the `@`) ended two days ago.
+        let old = NOW - 2 * DAY;
+        let request = studio_core::SummaryRequest {
+            id: format!("s1@{old}"),
+            session_id: "s1".into(),
+            ..Default::default()
+        };
+        let summary: studio_understanding::TurnSummary = serde_json::from_value(serde_json::json!({
+            "summary": "Did a thing.",
+            "quiz": { "text": "Why?", "key": 0, "options": [
+                { "text": "A", "why": "Yes." }, { "text": "B", "why": "No." }] },
+        }))
+        .unwrap();
+        store.add_summary_at(request, summary.clone(), NOW).unwrap();
+        assert_eq!(served(&store), None);
+        let request = studio_core::SummaryRequest {
+            id: format!("s1@{}", NOW - 5 * MIN),
+            session_id: "s1".into(),
+            ..Default::default()
+        };
+        store.add_summary_at(request, summary, NOW).unwrap();
+        assert_eq!(served(&store), Some(format!("s1@{}", NOW - 5 * MIN)));
+    }
+
+    #[test]
+    fn a_fresh_quiz_carries_the_time_its_turn_ended_and_its_stored_hunk() {
+        let (_data, mut store) = empty();
+        let at = NOW - 5 * MIN;
+        let request = studio_core::SummaryRequest {
+            id: format!("s1@{at}"),
+            session_id: "s1".into(),
+            facts: hunk_facts(),
+            ..Default::default()
+        };
+        let summary: studio_understanding::TurnSummary = serde_json::from_value(serde_json::json!({
+            "summary": "Did a thing.",
+            "quiz": { "text": "Why?", "key": 0, "options": [
+                { "text": "A", "why": "Yes." }, { "text": "B", "why": "No." }] },
+        }))
+        .unwrap();
+        store.add_summary_at(request, summary, NOW).unwrap();
+        let Some(Learning::Fresh { at: got, hunk, .. }) = store.learning(NOW, START) else {
+            panic!()
+        };
+        assert_eq!((got, hunk.as_str()), (at, "--- a.rs\n+the hunk"));
+    }
+
+    #[test]
+    fn a_served_retest_carries_the_stored_hunk_of_its_first_quiz() {
+        let (_data, mut store) = empty();
+        seed(&mut store, "a", DAY);
+        let Some(Learning::Retest(r)) = store.learning(NOW, START) else {
+            panic!()
+        };
+        assert_eq!(r.hunk, "--- a.rs\n+the hunk");
+    }
+
+    #[test]
     fn a_picked_skipped_or_set_aside_fresh_quiz_is_not_served() {
         let (_data, mut store) = empty();
         fresh_summary(&mut store, "picked", MIN);
@@ -1571,4 +1659,28 @@ fn no_retest_is_written_for_a_quiz_due_15_days_ago_or_flagged_key_wrong() {
     let asks = store.retests_to_write(NOW);
     let ofs: Vec<&str> = asks.iter().map(|ask| ask.of.as_str()).collect();
     assert_eq!(ofs, ["fresh", "edge"]);
+}
+
+#[test]
+fn a_tap_of_a_kind_this_build_does_not_know_reads_without_error() {
+    use studio_understanding::{QuizTap, Tap};
+    let tap: QuizTap = serde_json::from_str(r#"{"kind":"from_the_future","at":7,"x":1}"#).unwrap();
+    assert_eq!((tap.tap, tap.at), (Tap::Unknown, 7));
+}
+
+#[test]
+fn a_shown_tap_on_a_card_marks_its_quiz_shown_as_the_rails_show_does_and_never_after_a_guess() {
+    use studio_understanding::Tap;
+    let data = tempfile::tempdir().unwrap();
+    let mut store = two_cards(&data.path().join("cards.json"));
+    let shown = |store: &CardStore, id: &str| {
+        store.cards().iter().find(|c| c.request.id == id).unwrap().shown_at
+    };
+    store.quiz_tap("toolu_01A", Tap::Shown, 5).unwrap();
+    assert_eq!(shown(&store, "toolu_01A"), Some(5));
+    store.quiz_tap("toolu_01A", Tap::Shown, 9).unwrap();
+    assert_eq!(shown(&store, "toolu_01A"), Some(5));
+    store.quiz_tap("toolu_01B", Tap::Pick { option: 0 }, 6).unwrap();
+    store.quiz_tap("toolu_01B", Tap::Shown, 7).unwrap();
+    assert_eq!(shown(&store, "toolu_01B"), None);
 }
