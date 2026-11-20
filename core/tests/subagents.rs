@@ -578,6 +578,23 @@ fn a_turn_that_ends_without_its_stop_ends_its_foreground_subagents_not_its_backg
 }
 
 #[test]
+fn a_turn_the_shells_interrupted_line_ends_ends_its_foreground_subagents_only() {
+    let mut studio = Studio::default();
+    studio.apply(&ev("UserPromptSubmit", 1, "p1", json!({"prompt": "Do it"})));
+    studio.apply(&spawn(2, "t1", None));
+    studio.apply(&launched(3, "t1", None, "w1", json!({})));
+    studio.apply(&step(4, "w1", "/w"));
+    studio.apply(&spawn(5, "t2", None));
+    studio.apply(&step(6, "c1", "/w"));
+
+    // Esc; Claude Code's 7501 `idle` makes the shell append the line.
+    studio.apply(&ev("StudioInterrupted", 10, "p1", json!({})));
+
+    assert_eq!(status(&studio, "c1"), ("interrupted".into(), Some(10)));
+    assert_eq!(status(&studio, "w1"), ("running".into(), None));
+}
+
+#[test]
 fn a_sessions_subagents_end_at_its_session_end() {
     // An unknown id with one Bash step in no subagent's worktree stays unattached; the session ends at
     // line 816.

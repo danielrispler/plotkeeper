@@ -76,9 +76,10 @@ pub struct Studio {
     /// (danielrispler/Falinks#517, decisions 13 and 16), from the settings.
     #[serde(skip)]
     summaries_on_open: bool,
-    /// Since when each Claude session's hook state and its terminal's OSC 7501 state disagree, and
-    /// whether that disagreement was logged (danielrispler/Falinks#560).
-    mismatched: HashMap<String, (u64, bool)>,
+    /// Since when each Claude session's hook state and its terminal's OSC 7501 state disagree, the
+    /// 7501 state it disagrees with, and whether that disagreement was logged (danielrispler/Falinks#560).
+    /// A new 7501 state starts a new disagreement.
+    mismatched: HashMap<String, (u64, String, bool)>,
     /// Whether `terminals` has had its first list: the rows that list finds tell nothing, as Claude
     /// sessions replayed at start tell nothing (danielrispler/Falinks#522).
     listed: bool,
@@ -188,6 +189,10 @@ pub struct Session {
     /// His first prompt, a bare slash command, whose name waits for its turn's end.
     #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     name_after: Option<String>,
+    /// The prompt id of the turn whose prompt asked for the name: when that turn ends without its
+    /// `Stop` and with no call, Daniel cancelled it, and his next prompt asks again.
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
+    naming_turn: Option<String>,
     /// The id `claude --resume` takes: its latest conversation's, which a `/clear` changes while the
     /// row keeps its first id (danielrispler/Falinks#461, decision 18).
     pub resume_id: String,
@@ -1399,9 +1404,14 @@ impl Session {
     }
 
     /// Whether `event` ends its turn, keyed by a prompt id, without a `Stop` (danielrispler/Falinks#434, decision 5): the
-    /// next turn starts, or Claude Code says the agent waits for input. Esc fires no `Stop`.
+    /// next turn starts, Claude Code says the agent waits for input, or the shell's line says Daniel
+    /// interrupted this turn. Esc fires no `Stop`.
     fn ends_turn_early(&self, event: &Event) -> bool {
-        let idle = event.agent_id.is_none() && event.has(|h| matches!(h, Happened::IdlePrompt));
+        let interrupted = event.has(|h| matches!(h, Happened::Interrupted))
+            && event.prompt_id.is_some()
+            && event.prompt_id == self.turn;
+        let idle = event.agent_id.is_none()
+            && (event.has(|h| matches!(h, Happened::IdlePrompt)) || interrupted);
         let keyed = self.turn.is_some();
         keyed && self.in_turn() && !event.turn_ends() && (idle || self.starts_turn(event))
     }
@@ -1859,6 +1869,14 @@ pub enum Output {
     /// A Claude session's hook state and its OSC 7501 state disagreed past `MISMATCH_AFTER_MS`:
     /// `line` goes to the local mismatch log, for debugging (danielrispler/Falinks#560).
     Mismatch { line: String },
+    /// A Claude session's turn has been running by its hooks while its terminal's OSC 7501 state
+    /// said `idle` past `MISMATCH_AFTER_MS`: Daniel interrupted it, which fires no `Stop`. The
+    /// shell appends a `StudioInterrupted` line for turn `prompt_id`, with its end trees, and that
+    /// line ends the turn.
+    Interrupted {
+        session_id: String,
+        prompt_id: String,
+    },
     /// A session's first `Stop`: read Claude Code's version from its transcript, and nothing else
     /// (danielrispler/Falinks#369, decision 9).
     Version { transcript_path: String },
@@ -2186,6 +2204,11 @@ pub const RENAME: &str = "StudioRename";
 /// The line the shell appends when the writer named a session from its first prompt: its
 /// `studio_name`. The log is what a restart replays, so the name survives it.
 pub const PROMPT_NAME: &str = "StudioPromptName";
+
+/// The line the shell appends when Daniel interrupted a session's turn (`Output::Interrupted`): its
+/// `prompt_id` and the turn's end trees. An interrupt fires no `Stop` and no `idle_prompt`, so this
+/// line ends the turn, at once and after a restart; it ends no later turn.
+pub const INTERRUPTED: &str = "StudioInterrupted";
 
 /// The event the shell appends to the log when Daniel deletes a session: its row leaves the list,
 /// at once and after a restart, until a `SessionStart` of it brings it back. Its cards stay.
@@ -2818,6 +2841,16 @@ impl Studio {
         let at = event.studio_received_ms;
         // The turn this event ends, then the one it starts, with the prompts queued for it.
         if ends_early {
+            // A naming turn Daniel cancelled before any call: his next prompt names the session.
+            let naming = session.naming_turn.is_some() && session.naming_turn == session.turn;
+            let called = |id: &str| {
+                (session.ledger.rows().iter()).any(|r| r.prompt_id.as_deref() == Some(id))
+            };
+            if naming && !session.turn.as_deref().is_some_and(called) {
+                session.name_asked = false;
+                session.name_after = None;
+            }
+            session.naming_turn = None;
             let change = changes.remove(&session.agent.id);
             outputs.extend(session.end_turn(change, at));
             if event.capabilities.turn_trees {
@@ -3129,6 +3162,7 @@ impl Studio {
                     // Daniel's first prompt asks for a name; a bare slash command waits for its turn's end.
                     if sender.is_daniels() && !session.name_asked {
                         session.name_asked = true;
+                        session.naming_turn.clone_from(&event.prompt_id);
                         if is_bare_command(prompt) {
                             session.name_after = Some(prompt.clone());
                         } else if !replay {
@@ -4072,11 +4106,31 @@ impl Studio {
                 continue;
             }
             disagreeing.insert(id.clone());
-            let (since, logged) = self.mismatched.entry(id.clone()).or_insert((now, false));
+            let fresh = (now, reported.to_string(), false);
+            let entry = self
+                .mismatched
+                .entry(id.clone())
+                .or_insert_with(|| fresh.clone());
+            if entry.1 != *reported {
+                *entry = fresh;
+            }
+            let (since, _, logged) = entry;
             if !*logged && now.saturating_sub(*since) >= MISMATCH_AFTER_MS {
                 *logged = true;
                 let line = format!("{now} session {id}: hook {hook:?}, 7501 {reported}");
                 outputs.push(Output::Mismatch { line });
+                // A turn that ends normally reports `done`; only an interrupted one goes `idle`.
+                let session = &self.sessions[&id];
+                if hook == State::Running
+                    && *reported == "idle"
+                    && session.in_turn()
+                    && let Some(prompt_id) = session.turn.clone()
+                {
+                    outputs.push(Output::Interrupted {
+                        session_id: id.clone(),
+                        prompt_id,
+                    });
+                }
             }
         }
         self.mismatched.retain(|id, _| disagreeing.contains(id));
