@@ -141,11 +141,6 @@ impl QuizTap {
     }
 }
 
-/// Whether `taps` hold a pick; a skip, a `shown` or a chip is not one.
-fn picked(taps: &[QuizTap]) -> bool {
-    taps.iter().any(|t| matches!(t.tap, Tap::Pick { .. }))
-}
-
 /// Keeps `tap` at `at` in `taps`: the first answer counts, and each chip once. Whether it was kept.
 fn keep_tap(taps: &mut Vec<QuizTap>, tap: Tap, at: u64) -> bool {
     let new = QuizTap { tap, at };
@@ -816,10 +811,11 @@ impl CardStore {
     }
 
     /// How many retests wait unanswered at `now`, as Home could serve them (danielrispler/plotkeeper#215): each holds
-    /// a Quiz with no pick, came due at most `RETEST_REACH_MS` before, and its first Quiz is not flagged Key wrong.
+    /// a Quiz with no pick or skip, came due at most `RETEST_REACH_MS` before, and its first Quiz is not flagged Key
+    /// wrong. A skip counts, since a skipped retest can no longer be picked.
     pub fn waiting_retests(&self, now: u64) -> usize {
         (self.retests.iter())
-            .filter(|r| r.quiz.is_some() && !picked(&r.taps))
+            .filter(|r| r.quiz.is_some() && !r.taps.iter().any(QuizTap::answers))
             .filter(|r| {
                 self.first_quizzes()
                     .find(|first| first.of == r.of)
@@ -848,7 +844,7 @@ impl CardStore {
                 hunk: &kept.hunk,
                 quiz: kept.summary.quiz.as_ref()?,
                 offered: kept.added_at,
-                picked: picked(&kept.taps),
+                picked: kept.taps.iter().any(|t| matches!(t.tap, Tap::Pick { .. })),
                 key_wrong: kept.taps.iter().any(|t| t.tap == Tap::KeyWrong),
             })
         });
@@ -856,10 +852,12 @@ impl CardStore {
     }
 
     /// Keeps the retest of `ask`'s Quiz, `quiz` as the writer wrote it, or `None` when it was rejected, at `at`; and
-    /// saves the retests. A Quiz that has one is not asked again.
-    pub fn add_retest(&mut self, ask: &RetestAsk, quiz: Option<Quiz>, at: u64) -> io::Result<()> {
-        if self.retests.iter().any(|r| r.of == ask.of) {
-            return Ok(());
+    /// saves the retests. A Quiz that has one is not asked again; one that has one already, or that was flagged Key wrong
+    /// while the writer ran, keeps none. Returns whether it was kept.
+    pub fn add_retest(&mut self, ask: &RetestAsk, quiz: Option<Quiz>, at: u64) -> io::Result<bool> {
+        let flagged = |first: FirstQuiz| first.of == ask.of && first.key_wrong;
+        if self.retests.iter().any(|r| r.of == ask.of) || self.first_quizzes().any(flagged) {
+            return Ok(false);
         }
         self.retests.push(Retest {
             id: format!("retest {}", ask.of),
@@ -870,7 +868,7 @@ impl CardStore {
             taps: Vec::new(),
         });
         self.revision += 1;
-        write(&self.path.with_file_name("retests.json"), &self.retests)
+        write(&self.path.with_file_name("retests.json"), &self.retests).map(|()| true)
     }
 
     /// The retests, oldest first.

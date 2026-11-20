@@ -1128,12 +1128,15 @@ fn a_retest_waits_unanswered_while_home_could_serve_it() {
         .quiz_tap("retest fresh", Tap::Pick { option: 1 }, NOW)
         .unwrap();
     assert_eq!(store.waiting_retests(NOW), 1);
+    // Nor does a skipped one, which can no longer be picked.
+    store.quiz_tap("retest edge", Tap::Skip, NOW).unwrap();
+    assert_eq!(store.waiting_retests(NOW), 0);
 
     // A retest kept with no Quiz, after the writer broke the guards twice, does not wait.
     add_quiz(&mut store, "rejected", NOW - DAY - WEEK);
     let ask = store.due_retests(NOW).remove(0);
     store.add_retest(&ask, None, NOW).unwrap();
-    assert_eq!(store.waiting_retests(NOW), 1);
+    assert_eq!(store.waiting_retests(NOW), 0);
 }
 
 #[test]

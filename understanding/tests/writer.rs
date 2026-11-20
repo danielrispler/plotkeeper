@@ -1844,7 +1844,7 @@ fn after_a_pick_on_one_of_three_waiting_the_next_run_writes_the_held_retest() {
 }
 
 #[test]
-fn a_writer_that_gives_no_reply_is_asked_only_for_the_room_left() {
+fn a_writer_that_gives_no_reply_ends_the_run_and_its_quiz_stays_due() {
     let dir = tempfile::tempdir().unwrap();
     let quizzes = [("waiting", T0), ("a", T0), ("b", T0), ("c", T0), ("d", T0)];
     let store = retests_store(dir.path(), &quizzes, &["waiting"]);
@@ -1856,8 +1856,73 @@ fn a_writer_that_gives_no_reply_is_asked_only_for_the_room_left() {
         0
     );
 
-    // Two asks, each tried twice; the others stay due for the next run.
-    assert_eq!(writer.1.get(), 4);
-    assert_eq!(lines.len(), 2, "{lines:?}");
+    // One ask, tried twice; the rest are not asked until the next run.
+    assert_eq!(writer.1.get(), 2);
+    assert_eq!(lines.len(), 1, "{lines:?}");
     assert_eq!(retested(&store), ["waiting"]);
+}
+
+#[test]
+fn a_retest_rejected_twice_does_not_wait_so_the_run_writes_on_until_three_wait() {
+    let dir = tempfile::tempdir().unwrap();
+    let quizzes = [("waiting", T0), ("a", T0), ("b", T0), ("c", T0)];
+    let store = retests_store(dir.path(), &quizzes, &["waiting"]);
+    let (bad, good) = (retest_reply(true), retest_reply(false));
+    let writer = Retesting(vec![bad.clone(), bad, good.clone(), good], Cell::new(0));
+    let mut lines = Vec::new();
+
+    assert_eq!(
+        write_retests(&store, &writer, T0 + 9 * DAY, |l| lines.push(l)),
+        2
+    );
+
+    assert_eq!(writer.1.get(), 4);
+    assert_eq!(retested(&store), ["waiting", "a", "b", "c"]);
+    assert_eq!(store.lock().unwrap().retests()[1].quiz, None);
+}
+
+/// A writer that flags the Quizzes `flag` Key wrong while it writes its first retest, as Daniel might meanwhile.
+struct Flagging<'a> {
+    store: &'a Mutex<CardStore>,
+    flag: [&'a str; 2],
+    calls: Cell<usize>,
+}
+
+impl CardWriter for Flagging<'_> {
+    fn reply(&self, _: &CardRequest, _: &[String]) -> Result<String, String> {
+        Err("no cards".into())
+    }
+    fn more(&self, _: &CardRequest, _: &Card) -> Result<String, String> {
+        Err("no cards".into())
+    }
+    fn retest(&self, _: &studio_understanding::RetestAsk) -> Result<String, String> {
+        if self.calls.replace(self.calls.get() + 1) == 0 {
+            let mut store = self.store.lock().unwrap();
+            for id in self.flag {
+                store
+                    .quiz_tap(id, studio_understanding::Tap::KeyWrong, T0)
+                    .unwrap();
+            }
+        }
+        Ok(retest_reply(false))
+    }
+}
+
+#[test]
+fn a_quiz_flagged_key_wrong_while_the_writer_runs_keeps_no_retest() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = retests_store(dir.path(), &[("a", T0), ("b", T0), ("c", T0)], &[]);
+    // `a` is flagged while its own retest is written, `b` while an earlier one is.
+    let writer = Flagging {
+        store: &store,
+        flag: ["a", "b"],
+        calls: Cell::new(0),
+    };
+
+    assert_eq!(
+        write_retests(&store, &writer, T0 + 9 * DAY, |l| panic!("{l}")),
+        1
+    );
+
+    assert_eq!(retested(&store), ["c"]);
 }
