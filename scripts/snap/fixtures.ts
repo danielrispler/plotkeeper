@@ -172,6 +172,101 @@ const settingsControls = (): Fixture =>
       log("headings: " + [...dialog.querySelectorAll("h2")].map((h) => h.textContent).join(" | "));
       log("scroll: " + dialog.querySelector(".settings-body").scrollHeight + " of " + dialog.querySelector(".settings-body").clientHeight);`);
 
+// The waiting-room prototype (#237), direction A of docs/studio/research/home.md section 7: Home's pane gets the static mock below, over
+// the real shell, and the script checks the learning card sits fully above the fold. Existing tokens only, plus one page-title size.
+type RoomVariant = "main" | "reveal" | "prompts";
+const roomCss = (theme: "dark" | "light") => `
+  ${theme === "light" ? `:root { --chrome: #e8e7e3; --term-bg: #f7f6f3; --term-fg: #26251f; --bg: #f7f6f3; --surface: #ffffff; --raised: #ffffff; --fg: #1f1e1a; --muted: #5f5c55; --faint: #8f8c85;
+    --hover: #0000000d; --selected: #00000014; --pressed: #0000001c; --edge: #00000018; --line: #d9d7d1; --focus: #77746b;
+    --needs-you: #b8441a; --needs-you-bg: #fbe5da; --needs-you-line: #eab9a1; --shadow: 0 8px 24px #0002; }` : ""}
+  :root { --size-title: 22px; }
+  .home-mock { position: absolute; inset: var(--sp-3); overflow-y: auto; padding: var(--sp-5) var(--sp-6); }
+  .home-mock > div { max-width: 640px; margin: 0 auto; }
+  .home-mock h1.title { font-size: var(--size-title); font-weight: 600; color: var(--fg); margin: 0 0 var(--sp-4); }
+  .home-mock h1.title span { color: var(--faint); font-weight: 400; }
+  .home-mock h2 { font-size: var(--size-xs); font-weight: 500; color: var(--faint); margin: var(--sp-6) var(--sp-4) var(--sp-1); display: flex; }
+  .home-mock h2 .clear { margin-inline-start: auto; color: var(--muted); font-weight: 500; }
+  .home-mock .row { display: block; padding: var(--sp-2) var(--sp-4); border-radius: var(--radius); }
+  .home-mock .row .l1 { display: flex; gap: var(--sp-3); align-items: center; white-space: nowrap; overflow: hidden; }
+  .home-mock .row .l2, .home-mock .row .l3 { font-size: var(--size-small); color: var(--muted); padding-inline-start: calc(var(--icon) + var(--sp-3)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .home-mock .row .l3 { color: var(--faint); }
+  .home-mock .row .id { color: var(--muted); font-size: var(--size-small); }
+  .home-mock .row .clock { margin-inline-start: auto; color: var(--muted); font-size: var(--size-xs); }
+  .home-mock .row.unseen .name { font-weight: 600; }
+  .home-mock .needs { background: var(--raised); box-shadow: inset 0 0 0 var(--hair) var(--edge); padding: var(--sp-4) var(--sp-5); }
+  .home-mock .needs .glyph { margin-inline-start: auto; }
+  .home-mock .needs .l2 { color: var(--fg); }
+  .home-mock .learning { background: var(--surface); box-shadow: inset 0 0 0 var(--hair) var(--edge), var(--shadow); border-radius: var(--radius-pane); padding: var(--sp-5) var(--sp-6) var(--sp-5); margin-top: var(--sp-6); }
+  .home-mock .learning .label { font-size: var(--size-xs); font-weight: 500; color: var(--faint); margin: 0; }
+  .home-mock .learning .quiz { margin: var(--sp-3) 0 0; }
+  .home-mock .learning .btn { background: var(--bg); text-align: start; padding: var(--sp-3) var(--sp-5); }
+  .home-mock .learning .btn[aria-pressed="true"] { opacity: 1; font-weight: 600; box-shadow: inset 0 0 0 var(--mark) var(--fg); }
+  .home-mock .learning .skip { margin-top: var(--sp-4); display: flex; gap: var(--sp-3); font-size: var(--size-small); color: var(--muted); }
+  .home-mock .learning .why { color: var(--muted); font-size: var(--size); margin: var(--sp-1) var(--sp-5) var(--sp-3); }
+  .home-mock .learning .hunk { margin: var(--sp-3) 0 0; background: var(--bg); border-radius: var(--radius); padding: var(--sp-3) var(--sp-5); font: var(--size-xs)/1.5 var(--mono); white-space: pre; overflow: hidden; }
+  .home-mock .learning .hunk .add { color: var(--fg); } .home-mock .learning .hunk .del, .home-mock .learning .hunk .ctx { color: var(--muted); }
+  .home-mock .project { display: flex; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); }
+  .home-mock .project .id { color: var(--muted); font-size: var(--size-small); }
+`;
+const roomRows = (variant: RoomVariant) => {
+  const running: [string, string, string, string, string][] = [
+    ["#56 · Row controls", "plotkeeper", "14 min", "Make the row's controls reachable by keyboard.", "Can the delete button take focus before the fold?"],
+    ["#58 · Retest card", "plotkeeper", "9 min", "Draw the quiz region with its options and Not now.", "Keep the card above the fold, whatever the list holds."],
+    ["#59 · Agent deadline", "plotkeeper", "6 min", "Stop an agent that outlives its turn.", "What happens to the log when the deadline hits?"],
+    ["#61 · Sounds setting", "plotkeeper", "2 min", "Add the sounds toggle to the settings page.", "Add a toggle to settings, default on."],
+  ];
+  return running.map(([name, project, elapsed, intention, prompt]) =>
+    `<div class="row"><div class="l1"><span class="logo-slot"></span><span class="name">${name}</span><span class="id">${project}</span><span class="clock">${elapsed}</span></div>` +
+    `<div class="l2">${intention}</div>${variant === "prompts" ? `<div class="l3">${prompt}</div>` : ""}</div>`).join("");
+};
+const roomLearning = (variant: RoomVariant) => {
+  const options = ["Keep the lock across the await so nobody reads half a write", "Release it first and re-read the state after", "Copy the state out and work on the copy"];
+  const revealed = variant === "reveal";
+  return `<div class="learning"><p class="label">Retest · a week after #44</p>
+    <p class="quiz">The settings write held a lock across a read. What did you pick then, and why was it safe?</p>
+    <ul class="options">${options.map((text, i) => `<li><button class="btn" type="button" title="Pick this answer"${revealed ? ` disabled aria-pressed="${i === 1}"` : ""}>${text}</button>${revealed && i === 1 ? `<p class="why">Right: the read can wait on the writer, so a lock held across it deadlocks. Copy what you need, release, then read.</p>` : ""}</li>`).join("")}</ul>
+    ${revealed ? `<pre class="hunk"><span class="del">-    let text = self.read_file(&self.state.lock());</span>
+<span class="add">+    let text = { self.state.lock().file.clone() };</span>
+<span class="ctx">     self.write_file(merge(text, key, value));</span></pre>` : `<div class="skip"><button class="btn quiet" type="button" aria-pressed="false" title="Mark the pick as a guess">Not sure</button><button class="btn quiet" type="button" title="Skip this retest for now">Not now</button></div>`}</div>`;
+};
+const roomHtml = (variant: RoomVariant) => `<div>
+  <h1 class="title">Friday, 20 November <span>· plotkeeper</span></h1>
+  <h2>Needs you</h2>
+  <div class="row needs"><div class="l1"><span class="logo-slot"></span><span class="name">#57 · Name from the prompt</span><span class="id">plotkeeper</span><span class="glyph" data-glyph="pill">Needs you</span></div>
+    <div class="l2">Should the name come from the first prompt or from the branch?</div></div>
+  <h2>Running</h2>${roomRows(variant)}
+  <h2>Unseen</h2>
+  <div class="row unseen"><div class="l1"><span class="logo-slot"></span><span class="name">#55 · Delete default</span><span class="id">plotkeeper</span><span class="clock">22 min ago</span></div><div class="l2">Delete now removes the worktree and keeps the branch.</div></div>
+  ${roomLearning(variant)}
+  <h2>Landed <span class="clear">Clear</span></h2>
+  <div class="row"><div class="l1"><span class="logo-slot"></span><span class="name">#54 · Subagent terminal</span><span class="clock">1 h ago</span></div></div>
+  <div class="row"><div class="l1"><span class="logo-slot"></span><span class="name">#48 · Agent deadline</span><span class="clock">3 h ago</span></div></div>
+  <h2>Start a session in</h2>
+  <div class="project"><span class="name">plotkeeper</span><span class="id">New session</span></div>
+  <div class="project"><span class="name">falinks</span><span class="id">New session</span></div>
+</div>`;
+const homeRoom = (variant: RoomVariant, theme: "dark" | "light"): Fixture => {
+  const f = fixtures.home();
+  const snapScript = `
+      const pane = document.querySelector(".pane.home");
+      const logo = document.querySelector(".logo");
+      if (!pane || !logo) { log("snap:fail Home's pane or the list's logo is missing"); return; }
+      const style = document.createElement("style");
+      style.textContent = ${JSON.stringify(roomCss(theme))};
+      document.head.append(style);
+      pane.hidden = true;
+      const mock = document.createElement("div");
+      mock.className = "home-mock";
+      mock.innerHTML = ${JSON.stringify(roomHtml(variant))};
+      mock.querySelectorAll(".logo-slot").forEach((slot) => slot.replaceWith(logo.cloneNode(true)));
+      pane.parentElement.append(mock);
+      const card = document.querySelector(".home-mock .learning");
+      if (!card) log("snap:fail the mock has no learning card");
+      // The window is 900 high; the page reports less while this script runs (headless Chrome counts its frame), so the fold is fixed.
+      else if (card.getBoundingClientRect().bottom > 900 - 6) log("snap:fail the learning card is below the fold: it ends at " + card.getBoundingClientRect().bottom);`;
+  return { ...f, snapScript };
+};
+
 export const fixtures = {
   ...railFixtures,
   recordedTerminal,
@@ -226,6 +321,13 @@ export const fixtures = {
     ];
     return { ...base, sessions, selected: null };
   },
+  // The prototype of Home as the waiting room (#237), for review at 1400x900: static markup over the real shell, throwaway.
+  homeRoom: () => homeRoom("main", "dark"),
+  homeRoomLight: () => homeRoom("main", "light"),
+  homeRoomReveal: () => homeRoom("reveal", "dark"),
+  homeRoomRevealLight: () => homeRoom("reveal", "light"),
+  homeRoomPrompts: () => homeRoom("prompts", "dark"),
+  homeRoomPromptsLight: () => homeRoom("prompts", "light"),
   // Errors in the notice line (#191): two errors and the dismiss control, beside a settings error.
   noticeErrors() {
     const snapScript = `
