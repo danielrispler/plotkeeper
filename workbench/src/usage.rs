@@ -2,7 +2,7 @@
 //! so a reader for another agent returns the same thing. No reader opens a credential.
 
 use serde::Serialize;
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -233,11 +233,14 @@ pub fn parse_agy(reply: &serde_json::Value, now: i64) -> AgentUsage {
 }
 
 /// Runs `command` and gives what it printed, killing it when `timeout` passes, however long its output stays open: the whole read
-/// is bounded, even when a helper it started holds its stdout. `stdin` is written, then closed. `path` is the `PATH` it runs with.
+/// is bounded, even when a helper it started holds its stdout. `stdin` is written, then closed, unless `answer` is given: then
+/// stdin stays open until a line of the output is the answer, and the command is stopped there, for a server that quits on a
+/// closed stdin before it answers. `path` is the `PATH` it runs with.
 fn run_cli(
     mut command: Command,
     path: Option<&str>,
     stdin: &str,
+    answer: Option<fn(&str) -> bool>,
     timeout: Duration,
 ) -> Result<String, String> {
     if let Some(path) = path {
@@ -249,16 +252,29 @@ fn run_cli(
         .stderr(Stdio::null())
         .spawn()
         .map_err(|e| format!("it did not start ({e})"))?;
-    if let Some(mut input) = child.stdin.take() {
+    let mut input = child.stdin.take();
+    if let Some(input) = input.as_mut() {
         // A command that exits without reading its input is not an error here; its exit says so.
         let _ = input.write_all(stdin.as_bytes());
     }
-    let mut stdout = child.stdout.take().expect("stdout is piped");
+    if answer.is_none() {
+        drop(input.take());
+    }
+    let stdout = child.stdout.take().expect("stdout is piped");
     let (sender, receiver) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let mut out = String::new();
-        let _ = stdout.read_to_string(&mut out);
-        let _ = sender.send(out);
+        let mut stdout = BufReader::new(stdout);
+        let mut line = String::new();
+        while stdout.read_line(&mut line).is_ok_and(|read| read > 0) {
+            out.push_str(&line);
+            if answer.is_some_and(|answer| answer(&line)) {
+                let _ = sender.send((out, true));
+                return;
+            }
+            line.clear();
+        }
+        let _ = sender.send((out, false));
     });
     let deadline = Instant::now() + timeout;
     let stop = |child: &mut std::process::Child, why: String| {
@@ -266,9 +282,16 @@ fn run_cli(
         let _ = child.wait();
         Err(why)
     };
-    let Ok(out) = receiver.recv_timeout(deadline.saturating_duration_since(Instant::now())) else {
+    let Ok((out, answered)) =
+        receiver.recv_timeout(deadline.saturating_duration_since(Instant::now()))
+    else {
         return stop(&mut child, "it did not answer in time".into());
     };
+    if answered {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Ok(out);
+    }
     loop {
         match child.try_wait() {
             Ok(Some(status)) if status.success() => return Ok(out),
@@ -280,8 +303,16 @@ fn run_cli(
     }
 }
 
+/// The answer to Codex's `account/rateLimits/read` when `line` is it.
+fn codex_answer(line: &str) -> Option<serde_json::Value> {
+    serde_json::from_str::<serde_json::Value>(line)
+        .ok()
+        .filter(|message| message.get("id") == Some(&serde_json::json!(2)))
+}
+
 /// Codex's usage, from `codex app-server`: `initialize`, `initialized`, then `account/rateLimits/read` as newline-delimited
-/// JSON-RPC, skipping every message but the answer to the read.
+/// JSON-RPC, skipping every message but the answer to the read. Its stdin stays open until that answer, since the server quits
+/// on a closed stdin before the read, which waits on OpenAI, comes back.
 pub fn read_codex(program: &str, path: Option<&str>, timeout: Duration, now: i64) -> AgentUsage {
     let mut command = Command::new(program);
     command.args(["-s", "read-only", "-a", "never", "app-server"]);
@@ -293,21 +324,16 @@ pub fn read_codex(program: &str, path: Option<&str>, timeout: Duration, now: i64
         r#"{"id":2,"method":"account/rateLimits/read"}"#,
         "\n",
     );
-    match run_cli(command, path, requests, timeout) {
+    let answered = |line: &str| codex_answer(line).is_some();
+    match run_cli(command, path, requests, Some(answered), timeout) {
         Err(why) => AgentUsage::failed("codex", &format!("Codex's usage could not be read: {why}")),
-        Ok(out) => {
-            let answer = out
-                .lines()
-                .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
-                .find(|message| message.get("id") == Some(&serde_json::json!(2)));
-            match answer {
-                Some(reply) => parse_codex(&reply, now),
-                None => AgentUsage::failed(
-                    "codex",
-                    "Codex's usage could not be read: it gave no answer",
-                ),
-            }
-        }
+        Ok(out) => match out.lines().find_map(codex_answer) {
+            Some(reply) => parse_codex(&reply, now),
+            None => AgentUsage::failed(
+                "codex",
+                "Codex's usage could not be read: it gave no answer",
+            ),
+        },
     }
 }
 
@@ -321,7 +347,7 @@ pub fn read_agy(program: &str, path: Option<&str>, timeout: Duration, now: i64) 
         .args(["-p", "/usage", "--output-format", "json"])
         .env("AGY_CLI_DISABLE_AUTO_UPDATE", "true")
         .current_dir(dir.path());
-    match run_cli(command, path, "", timeout) {
+    match run_cli(command, path, "", None, timeout) {
         Err(why) => AgentUsage::failed("agy", &format!("agy's usage could not be read: {why}")),
         Ok(out) => match serde_json::from_str(&out) {
             Ok(reply) => parse_agy(&reply, now),
@@ -377,7 +403,7 @@ pub fn find_in_path(program: &str, path: &str) -> Option<String> {
 pub fn login_shell_path(shell: &str, timeout: Duration) -> Option<String> {
     let mut command = Command::new(shell);
     command.args(["-lc", "printf '\\n%s' \"$PATH\""]);
-    let out = run_cli(command, None, "", timeout).ok()?;
+    let out = run_cli(command, None, "", None, timeout).ok()?;
     out.lines()
         .last()
         .map(str::to_owned)

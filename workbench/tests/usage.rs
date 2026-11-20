@@ -273,7 +273,8 @@ fn the_readers_run_the_cli_and_parse_what_it_prints() {
         dir.path(),
         "codex",
         &format!(
-            "cat >/dev/null; echo '{{\"method\":\"account/updated\"}}'; echo '{}'",
+            // As the real server, it answers the read only after a wait, and quits without answering once its stdin closes.
+            "echo '{{\"method\":\"account/updated\"}}'; (sleep 0.3; echo '{}') & cat >/dev/null; kill $!",
             recorded("codex-rate-limits.json")
         ),
     );
