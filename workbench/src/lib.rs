@@ -14,7 +14,7 @@ use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
     process::Command,
-    sync::Mutex,
+    sync::{Mutex, OnceLock},
 };
 
 /// A main checkout or a task's worktree: its folder, and its branch, `None` at a detached `HEAD`.
@@ -622,13 +622,13 @@ fn branch_taken(repo: &Path, name: &str) -> bool {
 /// `123`) gives `123-<its title>`, or `issue-123` when `gh` cannot read the title; a file of the
 /// main checkout, such as a spec, gives its file name; any other text, a prompt, gives its first
 /// words. A taken name gets the next free number, `-2` and on.
-pub fn create_named_task(repo: &Path, request: &str) -> Result<Workspace, String> {
+pub fn create_named_task(repo: &Path, request: &str, gh: &str) -> Result<Workspace, String> {
     let request = request.trim();
     let main = workspaces(repo)?.main.path;
     let spec = Path::new(&main).join(request);
     let number = request.strip_prefix('#').unwrap_or(request);
     let words = if !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit()) {
-        match issue_title(repo, number) {
+        match issue_title(repo, number, gh) {
             Some(title) => format!("{number} {title}"),
             None => format!("issue {number}"),
         }
@@ -650,9 +650,27 @@ pub fn create_named_task(repo: &Path, request: &str) -> Result<Workspace, String
     create_task(repo, &name)
 }
 
+/// The `gh` to run: the first on Daniel's login shell's `PATH`, found once; bare `gh` when it
+/// finds none.
+pub fn gh_path() -> &'static str {
+    static GH: OnceLock<String> = OnceLock::new();
+    GH.get_or_init(|| {
+        // An app started from the Dock gets launchd's `PATH`, which lacks Homebrew's folder.
+        let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/zsh".into());
+        let found = Command::new(shell).args(["-lc", "command -v gh"]).output();
+        let found = found.ok().filter(|o| o.status.success()).map(|o| o.stdout);
+        found
+            .as_deref()
+            .map(String::from_utf8_lossy)
+            .and_then(|out| out.lines().last().map(str::to_owned))
+            .filter(|path| path.starts_with('/'))
+            .unwrap_or_else(|| "gh".into())
+    })
+}
+
 /// Issue `number`'s title, from `gh` in `repo`.
-fn issue_title(repo: &Path, number: &str) -> Option<String> {
-    let output = Command::new("gh")
+fn issue_title(repo: &Path, number: &str, gh: &str) -> Option<String> {
+    let output = Command::new(gh)
         .args(["issue", "view", number, "--json", "title", "--jq", ".title"])
         .current_dir(repo)
         .output()
@@ -717,15 +735,15 @@ pub fn remove_task(repo: &Path, path: &str, confirmed: bool) -> Result<Option<Lo
 /// Deletes branch `branch` after its task's worktree is gone, never forced: with `git branch -d`, or,
 /// when git refuses one merged by squash, when its tip is the head of a merged pull request from it,
 /// as `gh` lists them. Otherwise git's message is the error and the branch stays.
-pub fn delete_merged_branch(repo: &Path, branch: &str) -> Result<(), String> {
-    delete_branch_merged_at(repo, branch, &merged_heads(repo, branch))
+pub fn delete_merged_branch(repo: &Path, branch: &str, gh: &str) -> Result<(), String> {
+    delete_branch_merged_at(repo, branch, &merged_heads(repo, branch, gh))
 }
 
 /// The head commits of the merged pull requests from `branch`; none when `gh` cannot tell.
-fn merged_heads(repo: &Path, branch: &str) -> Vec<String> {
+fn merged_heads(repo: &Path, branch: &str, gh: &str) -> Vec<String> {
     let args = ["pr", "list", "--head", branch, "--state", "merged"];
     let jq = ["--json", "headRefOid", "--jq", ".[].headRefOid"];
-    Command::new("gh")
+    Command::new(gh)
         .args(args)
         .args(jq)
         .current_dir(repo)

@@ -70,6 +70,20 @@ fn task_path(repos: &Repos, name: &str) -> std::path::PathBuf {
     repos.main.join(".claude/worktrees").join(name)
 }
 
+/// A `gh` that is not there, as when the lookup finds none.
+const NO_GH: &str = "/nonexistent/gh";
+
+/// A stub `gh` beside the repos that prints `output` when run with exactly `args` and fails
+/// otherwise, so no test reaches GitHub.
+fn stub_gh(repos: &Repos, args: &str, output: &str) -> String {
+    use std::os::unix::fs::PermissionsExt;
+    let gh = repos.origin.with_file_name("gh");
+    let script = format!("#!/bin/sh\n[ \"$*\" = '{args}' ] || exit 1\necho '{output}'\n");
+    std::fs::write(&gh, script).unwrap();
+    std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+    gh.display().to_string()
+}
+
 #[test]
 fn a_task_branches_from_origins_default_branch_after_a_fetch_even_when_local_is_behind() {
     let repos = repos();
@@ -120,7 +134,10 @@ fn a_named_task_takes_its_branch_from_the_prompt_the_spec_or_the_issue() {
     std::fs::write(main.join("docs/Picker Spec.md"), "spec").unwrap();
     git(main, &["branch", "fix-the-pickers-outside-click", "HEAD"]);
 
-    let branch = |request: &str| create_named_task(main, request).unwrap().branch.unwrap();
+    let branch = |request: &str| {
+        let task = create_named_task(main, request, NO_GH).unwrap();
+        task.branch.unwrap()
+    };
 
     // A prompt: its first words; a taken name gets the next free number.
     assert_eq!(
@@ -129,9 +146,21 @@ fn a_named_task_takes_its_branch_from_the_prompt_the_spec_or_the_issue() {
     );
     // A spec: its file's name.
     assert_eq!(branch("docs/Picker Spec.md"), "picker-spec");
-    // An issue: its number, then its title, which `gh` cannot read here.
+    // An issue: its number, then its title, which no `gh` reads here.
     assert_eq!(branch("#123"), "issue-123");
     assert_eq!(branch("!!!"), "session");
+}
+
+/// A task started from `#N` is named from the title the `gh` it is given reads.
+#[test]
+fn a_task_started_from_an_issue_is_named_from_its_title() {
+    let repos = repos();
+    let args = "issue view 123 --json title --jq .title";
+    let gh = stub_gh(&repos, args, "Fix the outside click");
+
+    let task = create_named_task(&repos.main, "#123", &gh).unwrap();
+
+    assert_eq!(task.branch.unwrap(), "123-fix-the-outside-click");
 }
 
 #[test]
@@ -223,11 +252,11 @@ fn a_merged_branch_is_deleted_and_an_unmerged_one_kept_with_gits_reason() {
     remove_task(&repos.main, &merged.path, true).unwrap();
     remove_task(&repos.main, &kept.path, true).unwrap();
 
-    assert_eq!(delete_merged_branch(&repos.main, "merged"), Ok(()));
+    assert_eq!(delete_merged_branch(&repos.main, "merged", NO_GH), Ok(()));
     let branches = git(&repos.main, &["branch", "--list", "merged"]);
     assert!(branches.is_empty(), "{branches}");
 
-    let refused = delete_merged_branch(&repos.main, "kept").unwrap_err();
+    let refused = delete_merged_branch(&repos.main, "kept", NO_GH).unwrap_err();
     assert!(refused.contains("not fully merged"), "{refused}");
     assert_eq!(git(&repos.main, &["rev-parse", "kept"]), work);
 }
@@ -257,6 +286,30 @@ fn a_squash_merged_branch_goes_only_at_its_pull_requests_head() {
         delete_branch_merged_at(&repos.main, "squashed", &[tip]),
         Ok(())
     );
+    let branches = git(&repos.main, &["branch", "--list", "squashed"]);
+    assert!(branches.is_empty(), "{branches}");
+}
+
+/// A squash-merged branch goes when the `gh` it is given lists its tip as a merged pull request's
+/// head, and stays with git's refusal when no `gh` is found.
+#[test]
+fn a_squash_merged_branch_is_deleted_through_the_merged_pull_requests_gh_lists() {
+    let repos = repos();
+    let task = create_task(&repos.main, "squashed").unwrap();
+    git(
+        Path::new(&task.path),
+        &["commit", "-q", "--allow-empty", "-m", "Merged by squash"],
+    );
+    let tip = git(&repos.main, &["rev-parse", "squashed"]);
+    remove_task(&repos.main, &task.path, true).unwrap();
+
+    let refused = delete_merged_branch(&repos.main, "squashed", NO_GH).unwrap_err();
+    assert!(refused.contains("not fully merged"), "{refused}");
+    assert_eq!(git(&repos.main, &["rev-parse", "squashed"]), tip);
+
+    let args = "pr list --head squashed --state merged --json headRefOid --jq .[].headRefOid";
+    let gh = stub_gh(&repos, args, &tip);
+    assert_eq!(delete_merged_branch(&repos.main, "squashed", &gh), Ok(()));
     let branches = git(&repos.main, &["branch", "--list", "squashed"]);
     assert!(branches.is_empty(), "{branches}");
 }

@@ -251,7 +251,7 @@ pub fn create_named_task(
     project: String,
     request: String,
 ) -> Result<studio_workbench::Workspace, String> {
-    studio_workbench::create_named_task(Path::new(&project), &request)
+    studio_workbench::create_named_task(Path::new(&project), &request, studio_workbench::gh_path())
 }
 
 /// Removes the task's worktree at `path`, or, unless `confirmed`, returns what that would lose.
@@ -267,7 +267,11 @@ pub fn remove_task(
 /// Deletes branch `branch` of the project when its main checkout holds it.
 #[tauri::command(async)]
 pub fn delete_merged_branch(project: String, branch: String) -> Result<(), String> {
-    studio_workbench::delete_merged_branch(Path::new(&project), &branch)
+    studio_workbench::delete_merged_branch(
+        Path::new(&project),
+        &branch,
+        studio_workbench::gh_path(),
+    )
 }
 
 /// The branches the project's main checkout can switch to.
