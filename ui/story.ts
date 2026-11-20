@@ -419,6 +419,9 @@ export function forgetMissingSummaries() {
 const opened = new Set<string>();
 const replies = new Map<string, string>();
 
+// Opens turn `index` of `session` in the rail, as a click on its line does (#243); the newest turn is always open.
+export const openTurn = (session: string, index: number) => void opened.add(`${session} ${index} turn`);
+
 // A folded block keyed `key`, open while Daniel keeps it open; `onOpen` runs at each opening. `hover` says what it holds.
 function folded(key: string, title: string, hover: string, body: HTMLElement[], onOpen?: () => void): HTMLElement {
   const node = document.createElement("details");

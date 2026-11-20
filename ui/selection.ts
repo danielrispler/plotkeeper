@@ -5,13 +5,14 @@
 import { rewatch } from "./answer.js";
 import { showCards } from "./cards.js";
 import { failure, invoke } from "./dom.js";
+import { openHunk } from "./evidence.js";
 import { showSessions } from "./list.js";
 import { showSession } from "./panes.js";
 import { showWorkspaces } from "./workspaces.js";
 import { studio } from "./state.js";
-import { showView } from "./story.js";
+import { citedTurn, openTurn, showView } from "./story.js";
 import { showToast } from "./toast.js";
-import type { Selection } from "./types.js";
+import type { Selection, Turn, TurnFile } from "./types.js";
 
 // Asks the shell for the selected session's cards and draws them.
 export async function refreshCards() {
@@ -56,6 +57,24 @@ export async function select(id: string, agent: string | null = null) {
     failure("select", "error")(e);
   }
   await catchUp();
+}
+
+// Where the link from Home's answer leads (#243): the turn of Quiz `id` (a turn's, or a card's, which names the turn it was written in),
+// and the first file of that turn, whose hunk opens with it; `file` is null when the turn changed none. Null when no turn is found.
+export function codeTarget(turns: Pick<Turn, "id" | "started_at" | "files">[], id: string): { turn: number; file: TurnFile | null } | null {
+  const turn = citedTurn(turns, id);
+  return turn === null ? null : { turn, file: turns[turn].files?.files[0] ?? null };
+}
+
+// Follows the link: opens the turn, and its hunk when it has one, in the rail, then selects the session, an ended one too, as a row of
+// History does. The window's Home key (#239) brings Daniel back, for it remembers this session.
+export async function followToCode(session: string, id: string) {
+  const target = codeTarget(studio.listed.find((s) => s.id === session)?.turns ?? [], id);
+  if (target) {
+    openTurn(session, target.turn);
+    if (target.file) openHunk(session, target.turn, target.file);
+  }
+  await select(session);
 }
 
 // What the Home key does (#239, like tmux `last-window`): from a session it remembers that session and shows Home; on Home it

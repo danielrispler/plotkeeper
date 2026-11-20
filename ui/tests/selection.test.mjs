@@ -52,3 +52,22 @@ test("on Home with the remembered session gone, the Home key does nothing (#239)
   assert.equal(homeToggle(null, "gone", [{ id: "b" }]), null);
   assert.equal(homeToggle(null, null, [{ id: "b" }]), null);
 });
+
+const file = (path) => ({ root: "/r", path, from: null, added: 1, removed: 0, agent: null });
+const turn = (id, started_at, files) => ({ id, started_at, ended_at: started_at + 5, prompt: "", message: null, checks: [], files: files && { files, merged: 0 } });
+
+test("the link from a Retest names the turn of its first Quiz and that turn's first hunk (#243)", async () => {
+  const { codeTarget } = await import("../../dist/selection.js");
+  const turns = [turn("t0", 100, [file("a.rs")]), turn("t1", 200, [file("b.rs"), file("c.rs")])];
+  assert.deepEqual(codeTarget(turns, "t1"), { turn: 1, file: file("b.rs") });
+  // A card's Quiz names the turn that ran when the card was written.
+  assert.deepEqual(codeTarget(turns, "card@150"), { turn: 0, file: file("a.rs") });
+});
+
+test("a turn with no hunk opens the turn alone, and an unknown turn opens nothing (#243)", async () => {
+  const { codeTarget } = await import("../../dist/selection.js");
+  const turns = [turn("t0", 100, null), turn("t1", 200, [])];
+  assert.deepEqual(codeTarget(turns, "t0"), { turn: 0, file: null });
+  assert.deepEqual(codeTarget(turns, "t1"), { turn: 1, file: null });
+  assert.equal(codeTarget(turns, "gone"), null);
+});

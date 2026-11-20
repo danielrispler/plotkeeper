@@ -14,6 +14,8 @@ A card opens with its Quiz (see "The Quiz"). Tap an option: on any card but a ch
 
 **The trials** of spec #102 test whether the Quiz helps. Retest: a week after a Quiz was offered, the studio writes one fresh Quiz on the same decision, and Home's learning slot serves it, one at a time, and nowhere else: a pick reveals the answer, "Not now" sets it aside until tomorrow, a quiet "Next" follows an answer when another is due within the day's cap of 3, and "Done for today" shows when the cap is reached. Home shows no backlog count. Confidence and "why?": before the pick, "Sure" or "Not sure"; after it, a one-line "In a few words, why?" that Enter skips, shown beside the writer's reason, never graded and never read by a model. Both show on every retest, and on the Quiz of "now" only in a two-week trial that `"quiz_trial": "YYYY-MM-DD"` in `settings.json` starts on that day.
 
+From the reveal on Home, "See the code" leads from the explanation to the code it was about: it selects the Quiz's session (an ended one too, as a row of History does), opens the Quiz's turn in the rail, and opens that turn's first file's hunk when the turn changed any file, else the turn alone. A Retest links to the turn of its first Quiz. The Home key (⌘⇧H) brings you back, since it remembers the session you left Home for. Under the reveal the same hunk shows in place, opened once, which you can fold.
+
 Self-test: `"quiz_self_test": "YYYY-MM-DD"` starts three weeks in which each turn that has a Quiz is assigned at random to quiz-first (as above) or body-only (its Body open and no Quiz, though the Quiz is kept for its retest). Read the result with
 
     cargo run -p studio-understanding --bin self_test

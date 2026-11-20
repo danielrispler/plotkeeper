@@ -8,6 +8,8 @@ import { childrenOf, deleting, glyph, item, row, secondLine, selecting, sessionN
 import { logo, logoKey } from "./logos.js";
 import { foundWorkspaces, lastSegment, sessionProjectName } from "./workspaces.js";
 import { lastHeadline } from "./story.js";
+import { evidenceRows, fileRow, openHunk } from "./evidence.js";
+import { codeTarget, followToCode } from "./selection.js";
 import { startLast } from "./picker.js";
 import { closePane, redrawHome } from "./panes.js";
 import { hideClearToast, showClearToast } from "./toast.js";
@@ -119,9 +121,35 @@ export function slotNode(slot: Slot, redraw: () => void, reask: () => void): HTM
       redraw();
     }));
   }
+  if (quizAnswered(item.id)) wrap.append(...answerCode(item));
   if (actions.childNodes.length) wrap.append(actions);
   wrap.dataset.key = `learning ${item.id}`;
   return wrap;
+}
+
+// Under an answer's reveal (#243): the link to the code the Quiz was about, and that turn's first hunk expanded in place when it has one.
+// A Retest names the turn of its first Quiz. Nothing when the session or its turn is gone.
+const hunkShown = new Set<string>();
+function answerCode(item: Learning): HTMLElement[] {
+  if (item.kind === "done") return [];
+  const quizId = item.kind === "retest" ? item.of : item.id;
+  const session = studio.listed.find((s) => s.id === item.session_id);
+  const target = session && codeTarget(session.turns, quizId);
+  if (!session || !target) return [];
+  const link = pressable(text("button", "See the code", "quiz-code-link"), false, () => void followToCode(session.id, quizId));
+  link.title = "Open the turn, and its change, in the session";
+  const turn = session.turns[target.turn];
+  const row = target.file && evidenceRows({ files: turn.files, checks: [] }).find((r) => r.file === target.file);
+  if (!target.file || !row) return [link];
+  // The hunk opens once per item; Daniel may fold it, and a redraw keeps that.
+  if (!hunkShown.has(item.id)) {
+    hunkShown.add(item.id);
+    openHunk(session.id, target.turn, target.file, "home ");
+  }
+  const hunk = document.createElement("ul");
+  hunk.className = "evidence-rows";
+  hunk.append(fileRow(session.id, target.turn, row, "home ", turn.ended_at != null));
+  return [link, hunk];
 }
 
 // The item the last draw put in the slot, unanswered, whose `shown` is still to be written.
