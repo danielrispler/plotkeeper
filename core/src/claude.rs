@@ -39,7 +39,7 @@ use crate::{DELETE, INTERRUPTED, PROMPT_NAME, RENAME, STUDIO_ANSWER};
 struct ToolResponse {
     #[serde(rename = "backgroundTaskId")]
     background_task_id: Option<String>,
-    /// On an `Agent` call's `PostToolUse`, the child's id and status.
+    /// On the `PostToolUse` of an `Agent` call, or of a forked `Skill` call, the child's id and status.
     #[serde(rename = "agentId")]
     agent_id: Option<String>,
     status: Option<String>,
@@ -203,15 +203,25 @@ fn adapt(raw: Raw) -> Event {
         name @ ("PostToolUse" | "PostToolUseFailure") => {
             let failed = name == "PostToolUseFailure";
             let tool = tool(&raw);
+            // A skill with forked execution starts a subagent too, and its response names the
+            // child as an `Agent` call's does (danielrispler/plotkeeper#223).
             if !failed
-                && tool.kind == ToolKind::Spawn
+                && matches!(tool.kind, ToolKind::Spawn | ToolKind::Skill(_))
                 && let Some(child) = raw.tool_response.agent_id.clone()
             {
                 let input = &raw.tool_input;
+                let name = match &tool.kind {
+                    // As Claude Code's own task list names it: the skill's slash command.
+                    ToolKind::Skill(skill) => skill.as_ref().map(|skill| {
+                        let args = input["args"].as_str().unwrap_or_default();
+                        format!("/{skill} {args}").trim_end().into()
+                    }),
+                    _ => input["description"].as_str().map(Into::into),
+                };
                 happened.push(Happened::SubagentSpawned(Spawned {
                     child,
                     call: id.clone(),
-                    name: input["description"].as_str().map(Into::into),
+                    name,
                     prompt: input["prompt"].as_str().unwrap_or_default().into(),
                     agent_type: input["subagent_type"].as_str().map(Into::into),
                     worktree: input["isolation"] == "worktree",

@@ -917,6 +917,78 @@ fn an_unattached_subagent_that_its_sessions_stop_does_not_list_ends_at_its_last_
     assert_eq!(status(&studio, "live1"), ("running".into(), None));
 }
 
+/// A forked skill's call by `caller` in `cwd`: its `PreToolUse`, its child's `SubagentStart`, then
+/// its response, which names the child, as session `13449ddd` recorded them on 2026-11-20
+/// (danielrispler/plotkeeper#223).
+fn forked_skill(at: u64, caller: Option<&str>, cwd: &str, child: &str) -> [String; 3] {
+    let mut fields = json!({"cwd": cwd, "tool_name": "Skill", "tool_use_id": "skill1",
+        "tool_input": {"skill": "code-review", "args": "high origin/main...HEAD"}});
+    if let Some(caller) = caller {
+        fields["agent_id"] = caller.into();
+    }
+    let start = json!({"cwd": cwd, "agent_id": child, "agent_type": "general-purpose"});
+    let mut response = fields.clone();
+    response["tool_response"] = json!({"agentId": child, "background": true,
+        "commandName": "code-review", "result": "Running in the background as @code-review",
+        "status": "forked", "success": true});
+    [
+        ev("PreToolUse", at, "p1", fields),
+        ev("SubagentStart", at + 1, "p1", start),
+        ev("PostToolUse", at + 2, "p1", response),
+    ]
+}
+
+/// danielrispler/plotkeeper#223: a skill with forked execution starts its subagent with no `Agent`
+/// call, and its response names the child as a spawn's does.
+#[test]
+fn a_forked_skills_subagent_sits_under_the_agent_that_called_the_skill() {
+    let mut studio = Studio::default();
+    studio.apply(&ev("UserPromptSubmit", 1, "p1", json!({"prompt": "Do it"})));
+    for line in forked_skill(2, None, "/w", "r1") {
+        studio.apply(&line);
+    }
+    studio.apply(&step(5, "r1", "/w"));
+
+    let review = agent(&studio, "s1", "r1");
+    assert_eq!(review.parent, Parent::Session);
+    assert_eq!(status(&studio, "r1"), ("running".into(), None));
+}
+
+/// A worker's forked skill: its child's first event is in the worker's worktree with no spawn
+/// call open, as an internal fork's is (danielrispler/plotkeeper#37), until the response names it.
+#[test]
+fn a_workers_forked_skills_subagent_sits_under_the_worker() {
+    let mut studio = Studio::default();
+    studio.apply(&ev("UserPromptSubmit", 1, "p1", json!({"prompt": "Do it"})));
+    let worktree = json!({"isolation": "worktree"});
+    studio.apply(&launched(2, "t1", None, "w1", worktree));
+    let home = "/w/.claude/worktrees/w1";
+    studio.apply(&step(3, "w1", home));
+
+    for line in forked_skill(4, Some("w1"), home, "r1") {
+        studio.apply(&line);
+    }
+    studio.apply(&step(8, "r1", home));
+
+    assert_eq!(
+        agent(&studio, "s1", "r1").parent,
+        Parent::Agent("w1".into())
+    );
+}
+
+/// The row reads as Claude Code's own task list names the child: the skill's slash command.
+#[test]
+fn a_forked_skills_subagent_is_named_by_its_slash_command() {
+    let mut studio = Studio::default();
+    studio.apply(&ev("UserPromptSubmit", 1, "p1", json!({"prompt": "Do it"})));
+    for line in forked_skill(2, None, "/w", "r1") {
+        studio.apply(&line);
+    }
+
+    let review = agent(&studio, "s1", "r1");
+    assert_eq!(review.name, "/code-review high origin/main...HEAD");
+}
+
 /// Seam 1 (danielrispler/plotkeeper#206): a subagent not spawned isolated reports its session's folder
 /// `/w`; the touched roots its hook lists tell where it works.
 fn bash_of(agent: &str, name: &str, at: u64, roots: &[&str]) -> String {
