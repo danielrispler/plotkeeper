@@ -690,6 +690,34 @@ fn a_cards_skip_and_chips_are_stored_beside_its_guess_and_the_key_flag_is_the_on
     assert_eq!(b.taps, []);
 }
 
+#[test]
+fn a_shown_tap_is_kept_once_on_a_card_and_on_a_turns_quiz_and_is_not_an_answer() {
+    use studio_understanding::{QuizTap, Tap};
+    let data = tempfile::tempdir().unwrap();
+    let mut cards = two_cards(&data.path().join("cards.json"));
+    cards.quiz_tap("toolu_01A", Tap::Shown, 3).unwrap();
+    cards.quiz_tap("toolu_01A", Tap::Shown, 4).unwrap();
+    cards
+        .quiz_tap("toolu_01A", Tap::Pick { option: 0 }, 5)
+        .unwrap();
+    let a = &cards.cards()[0];
+    assert_eq!(
+        a.taps,
+        [QuizTap {
+            tap: Tap::Shown,
+            at: 3
+        }]
+    );
+    assert_eq!(a.guess.as_ref().map(|g| g.option), Some(0));
+    let mut turns = lone_quiz(&data.path().join("turns.json"));
+    turns.quiz_tap("t1", Tap::Shown, 6).unwrap();
+    turns.quiz_tap("t1", Tap::Shown, 7).unwrap();
+    turns.quiz_tap("t1", Tap::Pick { option: 1 }, 8).unwrap();
+    let taps = &turns.turn_summary("t1").unwrap().taps;
+    assert_eq!(taps.len(), 2);
+    assert_eq!(taps[0].tap, Tap::Shown);
+}
+
 /// A store at `path` holding a lone Quiz on turn `t1` whose request carries the file's whole hunk.
 fn quiz_with_hunk(path: &std::path::Path) -> CardStore {
     use studio_core::{FactFile, Facts, SummaryRequest, TurnFile};
