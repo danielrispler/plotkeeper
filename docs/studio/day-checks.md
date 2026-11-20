@@ -331,6 +331,7 @@ Save everything in a new folder: `local-evidence/<date>-ui-ux-recheck/` (for exa
   That terminal shows `"state":"working"` and `"app"` set, and `turn` goes up after the turn ends.
 - [ ] **danielrispler/Falinks#555:** quitting the app deletes `present`; a CLI `attach` that detaches leaves it.
 - [ ] **danielrispler/Falinks#470:** after a reboot, every Claude session comes back with its conversation.
+- [ ] **Interrupted turn:** in a studio terminal, send a prompt and press Esc before the reply starts. Within about 5 seconds the row shows your turn, not running, and the Studio log has a `mismatch` line `hook Running, 7501 idle` for it. Send another prompt: the row's name comes from it.
 - [ ] **danielrispler/Falinks#560:** review the mismatch lines of the Studio log, `grep mismatch ~/Library/Logs/dev.falinks.studio/studio.log`: each line is a Claude session whose hook state and OSC 7501 state disagreed for over 5 s. Report any pattern on danielrispler/Falinks#560; no line means none did.
 
 ## 6. The test-day note (danielrispler/Falinks#599)

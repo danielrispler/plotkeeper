@@ -756,10 +756,41 @@ fn listed(app: &AppHandle, terms: Vec<studio_core::Terminal>) {
             }
             Output::YourTurn { session_id } => tell(app, Notice::YourTurn, &session_id, None),
             Output::Mismatch { line } => mismatch(&line),
+            Output::Interrupted {
+                session_id,
+                prompt_id,
+            } => {
+                thread::spawn(move || interrupted(&session_id, &prompt_id));
+            }
             _ => {}
         }
     }
     LIST_CHANGED.store(true, Ordering::Release);
+}
+
+/// Daniel interrupted turn `prompt_id` of session `session_id`, which fires no `Stop`: a
+/// `StudioInterrupted` line in the event log, with the turn's end trees as the hook records them,
+/// which the log thread then applies and a restart replays.
+fn interrupted(session_id: &str, prompt_id: &str) {
+    let mut line = serde_json::Map::new();
+    line.insert("session_id".into(), session_id.into());
+    line.insert("hook_event_name".into(), studio_core::INTERRUPTED.into());
+    line.insert("prompt_id".into(), prompt_id.into());
+    line.insert("studio_received_ms".into(), millis().into());
+    let appended = std::env::home_dir()
+        .ok_or("no home directory".to_owned())
+        .and_then(|home| {
+            let log = studio_hook::event_log(&home);
+            let data = log.parent().ok_or("no data directory")?;
+            // The line goes in the log even when the trees cannot be recorded, as the hook's does.
+            if let Err(e) = studio_hook::trees(&mut line, data) {
+                log::warn!("record the trees of {session_id}'s interrupted turn: {e}");
+            }
+            append(&[line.into()])
+        });
+    if let Err(e) = appended {
+        log::error!("end {session_id}'s interrupted turn: {e}");
+    }
 }
 
 /// Logs `line` at `info` under the `mismatch` target, for debugging (danielrispler/Falinks#560).
@@ -1217,6 +1248,12 @@ fn follow(app: &AppHandle, log: &Path, writer: &Writer) {
                          task {task_id} in markup the studio does not know"
                     ),
                     Output::Mismatch { line } => mismatch(&line),
+                    Output::Interrupted {
+                        session_id,
+                        prompt_id,
+                    } => {
+                        thread::spawn(move || interrupted(&session_id, &prompt_id));
+                    }
                     Output::AgyVersion => match agy_version() {
                         Some(version) => {
                             match agy_versions.check(&version, AGY_FIXTURE_VERSION, millis()) {
