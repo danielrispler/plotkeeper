@@ -56,10 +56,10 @@ A week after a Quiz was offered (answered, skipped or never opened), the studio 
 - The reply passes the guards above, and is asked for once more on a rejection. A second rejection keeps no Quiz, and the first Quiz is not retested again. A writer that gives no reply ends the pass, and is tried again at the next hourly pass.
 - A Quiz gets one retest, and one offered less than seven days ago gets none. A card's Quiz on a check ("Will it pass?") gets none.
 - No retest is written while 3 wait unanswered: holding a Quiz with no pick or skip, due at most 14 days ago, their first Quiz not flagged Key wrong. Below 3, the hourly pass writes due retests until 3 wait, Quizzes Daniel picked first, then the rest, the latest due first within each. A Quiz due more than 14 days ago, or flagged Key wrong, gets none; one whose retest was held stays due.
-- The retest's pick, confidence tap and "why?" line are stored with their times in `retests.json`.
-- The slot serves one Retest at a time, chosen by the card store (`CardStore::learning`), read-only, from the time now and the start of Daniel's local day. A Retest is eligible when it holds a Quiz, has no pick and no "Not now" since the day's start, came due (its first Quiz's offer plus seven days) at most 14 days ago (`RETEST_REACH_MS`), and its first Quiz is not flagged "key wrong". Retests whose first Quiz has a pick come first, then the rest, the latest due first in each. The day's cap is 3 picked Retests (`RETESTS_PER_DAY`); at 3 the slot reads "Done for today", and with none eligible it is absent. No backlog count shows anywhere.
+- The retest's pick and confidence tap are stored with their times in `retests.json`. A Retest is answered on Home only, which has no "why?" line.
+- The slot serves one item at a time, a Retest or a fresh Quiz (a turn's or a card's, of a turn that ended at most 30 minutes ago and that he has not answered or set aside today, newest first), chosen by the card store (`CardStore::learning`), read-only, from the time now and the start of Daniel's local day. While no Retest was picked today, the first eligible Retest comes first; then a fresh Quiz; then the other Retests up to the cap. A Retest is eligible when it holds a Quiz, has no pick and no "Not now" since the day's start, came due (its first Quiz's offer plus seven days) at most 14 days ago (`RETEST_REACH_MS`), and its first Quiz is not flagged "key wrong". Retests whose first Quiz has a pick come first, then the rest, the latest due first in each. The day's cap is 3 picked Retests (`RETESTS_PER_DAY`); at 3 the slot reads "Done for today" when no fresh Quiz waits, and with nothing to serve it is absent. No backlog count shows anywhere.
 - "Not now" is a `not_now` tap on any Quiz's owner. It is not an answer: a later pick still counts, the rail's Quiz ignores it, and it does not count toward the cap. It keeps the item from being served until the next day's start, and hides the slot until Home is entered again or a turn ends.
-- A Retest's `shown` tap is written once, only while it is the item in the slot, Home is the active view and the window is visible and focused.
+- An item's `shown` tap is written once, only while it is the item in the slot, Home is the active view and the window is visible and focused.
 
 ## The trial of confidence and "why?"
 
@@ -68,7 +68,7 @@ Two optional steps, to learn whether his answers mean something:
 - Before the pick, one tap: "Sure" or "Not sure".
 - After the pick and before the reveal, one line, "In a few words, why?", which Enter skips. The line is not graded and no model reads it: it shows beside the writer's reason for the option he picked.
 
-Both show on every retest. On a Quiz of "now" they show only during a two-week trial, which the setting `"quiz_trial": "YYYY-MM-DD"` in `settings.json` starts on that day; after 14 days they stop showing there. Both are stored with the pick (`confidence` and `why` taps). A typed answer graded by a model stays out of scope.
+Both show on a Quiz of "now" in the rail only during a two-week trial, which the setting `"quiz_trial": "YYYY-MM-DD"` in `settings.json` starts on that day; after 14 days they stop showing there. Both are stored with the pick (`confidence` and `why` taps). Home has neither the "Sure / Not sure" row nor the "why?" line: one optional "not sure" toggle sits in its card, and every Home pick writes the confidence tap first, with Home as its surface. A typed answer graded by a model stays out of scope.
 
 ## What the rules do not decide
 
