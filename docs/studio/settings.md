@@ -19,7 +19,7 @@ Each change saves at once, by editing `settings.json` in place: the one property
 
 The page refuses to write in two cases, and shows the reason at its top:
 
-- `settings.json` does not parse. The page shows the settings in effect (the last good ones), the line "settings.json has errors: fix it first" with an "Open settings.json" button, and every control disabled. Nothing is written.
+- `settings.json` does not parse. The page shows the settings in effect (the last good ones), the line "settings.json has errors: fix it first" with an "Open settings.json" button, and every setting's control disabled; the two Open rows stay enabled. Nothing is written.
 - `settings.json` differs from the text the page last read, such as after a save from your editor. Nothing is written; the saved file reaches the page through the reload, and the change can be made again.
 
 `studio::OpenSettingsFile` (in the palette, unbound) opens `settings.json` in your editor, creating it empty when missing; the page's "Open settings.json" and "Open keymap.json" rows do the same for each file.

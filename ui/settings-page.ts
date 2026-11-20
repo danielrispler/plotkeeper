@@ -76,12 +76,13 @@ const SECTIONS: { heading: string; rows: Spec[] }[] = [
 ];
 
 // What a row shows. `value` is the value in effect, a key of the wrong type being its default; `defaultValue` is the default, and
-// `changed`: the value differs from it, so the undo icon shows. `disabled`: the file does not parse.
-export type Row = { title: string; description: string; disabled: boolean } & (
-  | { control: "toggle"; path: string[]; value: boolean; defaultValue: boolean; changed: boolean }
-  | { control: "stepper"; path: string[]; value: number; defaultValue: number; changed: boolean; min: number; max: number; step: number; zero: string | null }
+// `changed`: the value differs from it, so the undo icon shows. `disabled`: the file does not parse. A file row has none: a
+// broken file is when it is needed (#221).
+export type Row = { title: string; description: string } & (
+  | { control: "toggle"; disabled: boolean; path: string[]; value: boolean; defaultValue: boolean; changed: boolean }
+  | { control: "stepper"; disabled: boolean; path: string[]; value: number; defaultValue: number; changed: boolean; min: number; max: number; step: number; zero: string | null }
   // `options` holds a value from the file that the list lacks, as its own entry, so opening the page never changes it.
-  | { control: "select"; path: string[]; value: string; defaultValue: string; changed: boolean; options: { value: string; label: string }[] }
+  | { control: "select"; disabled: boolean; path: string[]; value: string; defaultValue: string; changed: boolean; options: { value: string; label: string }[] }
   | { control: "open"; file: FileName }
 );
 export type Page = { error: string | null; sections: { heading: string; rows: Row[] }[] };
@@ -119,8 +120,8 @@ export function newValue(row: Row, action: Action, picked = ""): boolean | numbe
 export function settingsPage({ settings, broken }: Files, sheetSize: number): Page {
   const row = (spec: Spec): Row => {
     const { title, description } = spec;
+    if (spec.kind === "open") return { title, description, control: "open", file: spec.file };
     const base = { title, description, disabled: broken };
-    if (spec.kind === "open") return { ...base, control: "open", file: spec.file };
     const { path } = spec;
     // A setting with no default of its own (an unset font size) is the stylesheet's.
     const value = valueAt(settings, path) ?? sheetSize;
@@ -175,7 +176,7 @@ function drawRow(row: Row): HTMLElement {
   const info = text("div", "", "setting-text");
   info.append(title, text("div", row.description, "setting-description"));
   if (row.control === "open") {
-    const open = button("Open", "open", "open", keyOf(row), row.disabled, row.disabled ? BROKEN : `Open ${row.file}.json in your editor`);
+    const open = button("Open", "open", "open", keyOf(row), false, `Open ${row.file}.json in your editor`);
     open.setAttribute("aria-label", row.title);
     node.append(info, open);
     return node;
@@ -302,6 +303,8 @@ export function startSettingsPage(apply: (files: SettingsFiles) => void) {
     if (row.control === "open") openFile(row.file);
     else if (writesOn(action, what)) write(key, action, (clicked as HTMLSelectElement).value);
   };
+  // The status line's "Open settings.json" is outside the rows (#221).
+  element("settings-status").addEventListener("click", (event) => change(event.target, "click"));
   element("settings-body").addEventListener("click", (event) => change(event.target, "click"));
   element("settings-body").addEventListener("change", (event) => change(event.target, "change"));
   window.addEventListener("settings", () => {

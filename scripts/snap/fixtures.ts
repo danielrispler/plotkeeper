@@ -293,13 +293,13 @@ export const fixtures = {
       await new Promise((done) => setTimeout(done, 200));
       if (model.options[model.selectedIndex].textContent !== "Opus") log("snap:fail the model did not show Opus");
       if (undo() !== 1) log("snap:fail the change did not show its undo icon");`, { write_setting: '{ "summaries": { "model": "opus" } }' }),
-  // A file that does not parse: the line, the button, and every control off.
+  // A file that does not parse: the line, the button, and every setting's control off; the Open buttons stay on (#221).
   settingsBroken: () =>
     settingsPage(`{ "sounds": false, `, `
       if (!broken().startsWith("settings.json has errors: fix it first")) log("snap:fail the line reads: " + broken());
       if (!toggles().every((t) => t.endsWith("disabled"))) log("snap:fail a toggle is enabled: " + toggles());
       if ([...dialog.querySelectorAll("select, .stepper .btn")].some((c) => !c.disabled)) log("snap:fail a stepper or dropdown is enabled");
-      if ([...dialog.querySelectorAll("button.open")].some((b) => !b.disabled)) log("snap:fail an Open button is enabled");`),
+      if ([...dialog.querySelectorAll("button.open")].some((b) => b.disabled)) log("snap:fail an Open button is disabled");`),
   // The undo icon of a changed dropdown row sends the write that removes its key (a click on a dropdown's own control does not).
   settingsReset: () =>
     settingsPage(`{ "summaries": { "model": "opus" } }`, `
