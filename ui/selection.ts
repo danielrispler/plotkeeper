@@ -87,14 +87,18 @@ export function homeToggle(current: string | null, remembered: string | null, li
 // The session Daniel came from when he last went Home.
 let cameFrom: string | null = null;
 
+// The session left behind when the selection goes from `before` to `after`: the one he left when it ends on none, by any route (the
+// Home key, a click on the list's empty space, a Delete), else what was remembered.
+export function leftSession(before: string | null, after: string | null, remembered: string | null): string | null {
+  return before !== null && after === null ? before : remembered;
+}
+
 // The Home key's action.
 export async function toggleHome() {
   const step = homeToggle(studio.selection?.session.id ?? null, cameFrom, studio.listed);
   if (!step) return;
-  if ("remember" in step) {
-    cameFrom = step.remember;
-    await goHome();
-  } else await select(step.select);
+  if ("remember" in step) await goHome();
+  else await select(step.select);
 }
 
 // Selects no session, which shows Home: the core clears the selection and what is viewed.
@@ -125,6 +129,7 @@ async function catchUp() {
 }
 
 export function show(selected: Selection | null) {
+  cameFrom = leftSession(studio.selection?.session.id ?? null, selected?.session.id ?? null, cameFrom);
   studio.selection = selected;
   showSessions(studio.listed);
   showWorkspaces();

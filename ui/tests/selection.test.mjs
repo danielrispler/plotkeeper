@@ -71,3 +71,15 @@ test("a turn with no hunk opens the turn alone, and an unknown turn opens nothin
   assert.deepEqual(codeTarget(turns, "t1"), { turn: 1, file: null });
   assert.equal(codeTarget(turns, "gone"), null);
 });
+
+test("the session left is remembered on every way to Home, and kept while a session is selected (#226)", async () => {
+  const { leftSession } = await import("../../dist/selection.js");
+  // Home key, a click on the list's empty space or a Delete all end the selection on none.
+  assert.equal(leftSession("a", null, null), "a");
+  // The last session left wins over a stale one.
+  assert.equal(leftSession("b", null, "a"), "b");
+  // Moving between sessions, or staying on Home, keeps what was remembered.
+  assert.equal(leftSession("a", "b", "x"), "x");
+  assert.equal(leftSession(null, null, "x"), "x");
+  assert.equal(leftSession(null, "a", "x"), "x");
+});
