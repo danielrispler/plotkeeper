@@ -295,6 +295,18 @@ pub struct Settled {
     /// Whether the summary is written: it is wanted for itself, or for a lone Quiz.
     pub write: bool,
     pub decision: Decision,
+    /// The decision was made here, not by the turn's card.
+    fresh: bool,
+}
+
+impl Settled {
+    /// Puts on record a decision made here that no card or summary will: any but a lone Quiz, whose
+    /// summary puts its line, and one the turn's card made, which put its own.
+    pub fn record(&self, offers: &Offers, request: &SummaryRequest) {
+        if self.fresh && self.decision.offer != Offer::Quiz {
+            offers.record(&request.session_id, &request.id, &self.decision, None);
+        }
+    }
 }
 
 /// Fills in `request`'s facts from `turn` and whether its summary may keep a Quiz, from the same
@@ -317,11 +329,13 @@ pub fn settle(
     Settled {
         write: request.wanted || lone,
         decision,
+        fresh: decided.is_none(),
     }
 }
 
 /// Writes the stop card of `request` when the table gives it one, and puts the decision on record. A
-/// check's card is not judged. See `write_stop` for the rest.
+/// check's card is not judged. A lone Quiz's line is put by the turn's summary, which `carried` says
+/// will come. See `write_stop` for the rest.
 #[allow(clippy::too_many_arguments)]
 pub fn offer_stop(
     store: &Mutex<CardStore>,
@@ -330,6 +344,7 @@ pub fn offer_stop(
     session: &Session,
     turn: &TurnFacts,
     offers: &Offers,
+    carried: bool,
     stored: impl FnOnce(),
     mut log: impl FnMut(String),
 ) -> (bool, Option<Decision>) {
@@ -340,10 +355,7 @@ pub fn offer_stop(
         );
     }
     // A subagent's change after the turn's `Stop` is no turn's own card, which has the turn's id.
-    let own = session
-        .turns
-        .iter()
-        .any(|t| t.id.as_deref() == Some(&request.id));
+    let own = turns_card(session, &request);
     let kind = match () {
         _ if request.agent.is_some() => OfferKind::Worker,
         _ if !own && !request.changed_by.is_empty() => OfferKind::LateChange,
@@ -362,9 +374,17 @@ pub fn offer_stop(
             offers.record(&session_id, &id, &decision, Some(outcome));
             (written, Some(decision))
         }
-        // Its summary carries the lone Quiz, and puts the line there.
+        // Its summary carries the lone Quiz, and puts the line there; with none to come, it is put now.
         Offer::Quiz => {
             log(format!("no card on {id}: its change gets a lone Quiz"));
+            if !carried {
+                let reason = Some("no summary to carry it");
+                let recorded = Decision {
+                    reason,
+                    ..decision.clone()
+                };
+                offers.record(&session_id, &id, &recorded, None);
+            }
             (false, Some(decision))
         }
         Offer::Nothing => {
@@ -399,6 +419,16 @@ pub fn offer_summary(
         offers.record(&session, &id, decision, Some(outcome));
     }
     written.map(|(summary, _)| summary)
+}
+
+/// Whether `request` is the card of one of `session`'s turns: its session's own, with the id of the
+/// turn's `Stop`, and not a card of a worker, a check, a late change or a 20-minute look.
+pub fn turns_card(session: &Session, request: &CardRequest) -> bool {
+    let own = request.agent.is_none() && request.check.is_none();
+    own && session
+        .turns
+        .iter()
+        .any(|t| t.id.as_deref() == Some(&request.id))
 }
 
 /// The files of a unified diff: one `diff --git` header per file, as `git diff` has, or only the

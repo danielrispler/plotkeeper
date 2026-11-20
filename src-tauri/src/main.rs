@@ -31,7 +31,8 @@ use studio_understanding::{
     FakeWriter, Fingerprints, Offer, Offers, OpenItem, Rating, Row, SessionCards, StoredSummary,
     SummarySetup, Tap, TurnFacts, Versions, add_hunks, backfilled, changed_in, fingerprint_changes,
     live_roots, millis, offer_stop, offer_summary, open_items, settle, turn_diffs, turn_hunk,
-    worktree_root, write_agent_summary, write_design, write_goal, write_name, write_retests,
+    turns_card, worktree_root, write_agent_summary, write_design, write_goal, write_name,
+    write_retests,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
@@ -1572,13 +1573,6 @@ fn write(
 ) {
     let (app, writer) = (app.clone(), writer.clone());
     let id = request.session_id.clone();
-    // Only a live turn's card has a summary to come, which takes what is kept here and clears it.
-    let turn_card = request.agent.is_none() && request.check.is_none() && card && live;
-    if turn_card {
-        let files = changed_in(request.diff());
-        let changes = &app.state::<Summaries>().changes;
-        changes.lock().unwrap().insert(request.id.clone(), files);
-    }
     let Some(session) = app
         .state::<Mutex<Studio>>()
         .lock()
@@ -1588,6 +1582,13 @@ fn write(
     else {
         return;
     };
+    // Only a live turn's own card has a summary to come, which takes what is kept here and clears it.
+    let turn_card = card && live && turns_card(&session, &request);
+    if turn_card {
+        let files = changed_in(request.diff());
+        let changes = &app.state::<Summaries>().changes;
+        changes.lock().unwrap().insert(request.id.clone(), files);
+    }
     let job = move || {
         let store = app.state::<Cards>();
         // Where the card's code is pulled from: its turn's end trees (danielrispler/plotkeeper#121).
@@ -1620,7 +1621,7 @@ fn write(
                 let turn = turn_of(&app.state(), &request.id);
                 let offers = offers();
                 let (written, decided) = offer_stop(
-                    &store, &*writer, request, &session, &turn, &offers, stored, report,
+                    &store, &*writer, request, &session, &turn, &offers, turn_card, stored, report,
                 );
                 if let Some(decided) = decided.filter(|_| turn_card) {
                     let summaries = app.state::<Summaries>();
@@ -1694,6 +1695,7 @@ fn settle_summary(app: &AppHandle, request: &mut SummaryRequest) -> bool {
         &change.unwrap_or_default(),
         decided.as_ref(),
     );
+    settled.record(&offers(), request);
     if settled.decision.offer == Offer::Quiz {
         let mut lone = summaries.lone.lock().unwrap();
         lone.insert(request.id.clone(), settled.decision);
