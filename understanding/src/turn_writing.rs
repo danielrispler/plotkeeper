@@ -192,7 +192,18 @@ impl TurnWriting {
     /// the caller must run off its main thread. `None` when the turn has none. A failed write keeps the
     /// turn waiting and is an error, so the window asks again only at the next opening.
     pub fn opened(&self, id: &str) -> Result<Option<StoredSummary>, String> {
-        self.state.opened(id)
+        let (summary, designed) = self.state.opened(id)?;
+        // Design so far is written on the session's queue, after the summary is on its way back.
+        if let Some(session) = designed {
+            let state = self.state.clone();
+            let owner = session.clone();
+            self.queue(session, Box::new(move || {
+                if state.design(&owner) {
+                    state.effects.list();
+                }
+            }));
+        }
+        Ok(summary)
     }
 
     /// The summary settings changed: the writer's model and effort, and whether a summary is written
@@ -380,12 +391,13 @@ impl State {
         }
     }
 
-    fn opened(&self, id: &str) -> Result<Option<StoredSummary>, String> {
+    /// The summary of turn `id`, written when it waits, and the session whose design is due.
+    fn opened(&self, id: &str) -> Result<(Option<StoredSummary>, Option<String>), String> {
         if let Some(kept) = self.store.lock().unwrap().turn_summary(id) {
-            return Ok(Some(kept.clone()));
+            return Ok((Some(kept.clone()), None));
         }
         let Some(request) = self.waiting.lock().unwrap().remove(id) else {
-            return Ok(None);
+            return Ok((None, None));
         };
         let setup = self.setup.lock().unwrap().clone();
         let lone = self.lone.lock().unwrap().remove(id);
@@ -405,8 +417,8 @@ impl State {
             self.waiting.lock().unwrap().insert(id.to_owned(), request);
             return Err(format!("no summary on {id}"));
         }
-        self.design(&request.session_id);
-        Ok(self.store.lock().unwrap().turn_summary(id).cloned())
+        let summary = self.store.lock().unwrap().turn_summary(id).cloned();
+        Ok((summary, Some(request.session_id)))
     }
 
     fn write_name(&self, request: &NameRequest) {

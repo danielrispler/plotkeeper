@@ -36,6 +36,8 @@ struct Recorded {
     events: Events,
     failing: Arc<AtomicBool>,
     summaries: Arc<AtomicUsize>,
+    /// Whether a summary has a line of why, which Design so far is written from.
+    why: Arc<AtomicBool>,
 }
 
 impl CardWriter for Recorded {
@@ -69,7 +71,14 @@ impl CardWriter for Recorded {
             return Err("the writer is away".into());
         }
         self.events.lock().unwrap().push("summary written".into());
-        FakeWriter.summarize(setup, request, earlier)
+        let reply = FakeWriter.summarize(setup, request, earlier)?;
+        if !self.why.load(Ordering::SeqCst) {
+            return Ok(reply);
+        }
+        let mut value: Value = serde_json::from_str(&reply).unwrap();
+        let why = json!({ "kind": "why", "text": "It was done this way, on purpose." });
+        value["lines"].as_array_mut().unwrap().push(why);
+        Ok(value.to_string())
     }
 
     fn name(
@@ -159,6 +168,7 @@ struct Day {
     recorder: Arc<Recorder>,
     failing: Arc<AtomicBool>,
     summaries: Arc<AtomicUsize>,
+    why: Arc<AtomicBool>,
     writing: TurnWriting,
     _dirs: [tempfile::TempDir; 2],
 }
@@ -182,10 +192,12 @@ impl Day {
             logs: Mutex::default(),
         });
         let (failing, summaries) = (Arc::new(AtomicBool::new(false)), Arc::default());
+        let why = Arc::new(AtomicBool::new(false));
         let writer = Arc::new(Recorded {
             events: events.clone(),
             failing: failing.clone(),
             summaries: Arc::clone(&summaries),
+            why: why.clone(),
         });
         let offers = Offers::beside(&data.path().join("events.jsonl"));
         let writing = TurnWriting::stepped(
@@ -207,6 +219,7 @@ impl Day {
             recorder,
             failing,
             summaries,
+            why,
             writing,
             _dirs: [code, data],
         }
@@ -409,6 +422,68 @@ fn a_summary_set_to_write_on_open_waits_and_opening_the_turn_writes_it_once() {
 }
 
 #[test]
+fn opening_a_turn_returns_its_summary_before_design_so_far_is_written_on_the_queue() {
+    let mut day = Day::new();
+    day.why.store(true, Ordering::SeqCst);
+    let id = on_open(&mut day);
+    let written = day.writing.opened(&id).unwrap();
+    assert!(written.is_some(), "the summary comes back");
+    assert_eq!(day.summary(&id), written);
+    assert!(
+        !day.events().contains(&"design written".to_string()),
+        "the opening writes no design itself"
+    );
+
+    assert_eq!(day.writing.run_queued(), 1);
+    let events = day.events();
+    let at = |what: &str| events.iter().position(|e| e == what).unwrap();
+    assert!(at("summary written") < at("design written"));
+    assert!(day.store.lock().unwrap().brief("s1").is_some());
+}
+
+#[test]
+fn two_designs_of_one_session_leave_the_one_written_from_the_later_sources() {
+    let mut day = Day::new();
+    day.why.store(true, Ordering::SeqCst);
+    let id = on_open(&mut day);
+    day.writing.opened(&id).unwrap();
+    // The design of the opening waits on the queue while the next turn, whose summary is written
+    // at its end, comes in behind it.
+    day.writing.settings(SummarySetup::default(), false);
+    let outputs = day.turn_asking("Add another", &[("b.rs", 10)], &long_reply());
+    day.pass(outputs);
+
+    let designed_from = |day: &Day| day.store.lock().unwrap().brief("s1").unwrap().design_from;
+    // The summary of each turn is a source, and the last write saw both.
+    assert_eq!(designed_from(&day), 2);
+    assert_eq!(day.writing.run_queued(), 0);
+}
+
+#[test]
+fn two_threads_that_record_the_same_decision_leave_one_line_in_the_offers_record() {
+    let data = tempfile::tempdir().unwrap();
+    let decision = Decision {
+        kind: OfferKind::Turn,
+        offer: Offer::Card,
+        inputs: Inputs::default(),
+        reason: None,
+    };
+    for round in 0..40 {
+        let offers = Arc::new(Offers::beside(&data.path().join("events.jsonl")));
+        let id = format!("s1@{round}");
+        let threads: Vec<_> = (0..4)
+            .map(|_| {
+                let (offers, decision, id) = (offers.clone(), decision.clone(), id.clone());
+                thread::spawn(move || offers.record("s1", &id, &decision, Some(Outcome::Written)))
+            })
+            .collect();
+        threads.into_iter().for_each(|t| t.join().unwrap());
+    }
+    let text = fs::read_to_string(data.path().join("offers.jsonl")).unwrap();
+    assert_eq!(text.lines().count(), 40);
+}
+
+#[test]
 fn a_failed_write_on_open_parks_the_turn_again_and_the_next_opening_writes_it() {
     let mut day = Day::new();
     let id = on_open(&mut day);
@@ -585,6 +660,7 @@ fn on_an_empty_core() -> (Arc<TurnWriting>, tempfile::TempDir) {
         events,
         failing: Arc::default(),
         summaries: Arc::default(),
+        why: Arc::default(),
     });
     let offers = Offers::beside(&data.path().join("events.jsonl"));
     let core: Core = Arc::new(Mutex::new(Studio::default()));
@@ -665,6 +741,7 @@ fn the_threaded_module_writes_a_card_on_its_sessions_queue_and_prune_ends_the_qu
             events: day.events.clone(),
             failing: Arc::default(),
             summaries: Arc::default(),
+            why: Arc::default(),
         }),
         Offers::beside(&day.data.join("events.jsonl")),
         day.recorder.clone(),
