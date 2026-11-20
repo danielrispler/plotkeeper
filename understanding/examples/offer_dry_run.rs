@@ -37,7 +37,7 @@ fn main() {
         };
         // Never anchor a ref from a dry run.
         ask.ended = false;
-        let Some(diffs) = turn_diffs(&ask) else {
+        let Some(diffs) = turn_diffs(&ask, &mut drop) else {
             continue;
         };
         let mut facts = studio.summary_facts(&ask, Some(diffs));

@@ -4,7 +4,7 @@
 use serde_json::json;
 use std::{fs, path::Path, process::Command, sync::Mutex};
 use studio_core::Studio;
-use studio_understanding::{hunk, numstat, turn_diffs, turn_hunk};
+use studio_understanding::{MAX_TURN_FILES, hunk, numstat, turn_diffs, turn_hunk};
 
 const SESSION: &str = "5b1c7e30-9d2a-4f8b-8c63-1e0a7d4b9f52";
 const AT: u64 = 1_800_000_000_000;
@@ -115,7 +115,7 @@ fn a_turns_files_equal_numstat_between_its_trees_for_what_its_agent_edited() {
         line("Stop", 9_000, json!({ "studio_turn_end": { &root: &end } })),
     ]);
     let asks = studio.turn_diffs(AT + 20_000, 10);
-    studio.set_turn_files(&asks[0], turn_diffs(&asks[0]));
+    studio.set_turn_files(&asks[0], turn_diffs(&asks[0], &mut drop));
     let files = studio.session(SESSION).unwrap().turns[0]
         .files
         .clone()
@@ -151,7 +151,7 @@ fn a_turns_hunks_are_still_readable_after_git_gc() {
     let asks = studio.turn_diffs(AT + 20_000, 10);
     // Asking anchors the ended turn's trees.
     let _one = HOOK.lock().unwrap_or_else(|e| e.into_inner());
-    assert!(turn_diffs(&asks[0]).is_some());
+    assert!(turn_diffs(&asks[0], &mut drop).is_some());
     drop(_one);
 
     git(Path::new(&root), &["gc", "--prune=now", "-q"]);
@@ -349,7 +349,7 @@ fn a_workers_edits_in_its_own_worktree_count_in_its_turn_even_after_the_turn_end
 
     let mut studio = Studio::replayed(&lines);
     for ask in studio.turn_diffs(AT + 40_000, 10) {
-        studio.set_turn_files(&ask, turn_diffs(&ask));
+        studio.set_turn_files(&ask, turn_diffs(&ask, &mut drop));
     }
     let turns = &studio.session(SESSION).unwrap().turns;
     let files = |turn: usize| {
@@ -413,7 +413,7 @@ fn a_workers_late_edit_in_the_sessions_worktree_is_its_turns_and_not_the_next() 
 
     let mut studio = Studio::replayed(&lines);
     for ask in studio.turn_diffs(AT + 40_000, 10) {
-        studio.set_turn_files(&ask, turn_diffs(&ask));
+        studio.set_turn_files(&ask, turn_diffs(&ask, &mut drop));
     }
     let turns = &studio.session(SESSION).unwrap().turns;
     let files = |turn: usize| {
@@ -452,7 +452,7 @@ fn a_turn_whose_trees_name_a_removed_worktree_has_no_diff_for_it_and_none_of_the
         }],
         window: (0, u64::MAX),
     };
-    assert_eq!(turn_diffs(&ask), None);
+    assert_eq!(turn_diffs(&ask, &mut drop), None);
 }
 
 /// `git` run at second `secs` of the epoch, which dates its reflog entries.
@@ -513,7 +513,7 @@ fn moved_by(root: &str, secs: u64, mv: impl Fn(&Path, u64)) -> Vec<String> {
         }],
         window: (AT, AT + 9_000),
     };
-    let mut moved = turn_diffs(&ask).unwrap().remove(0).moved;
+    let mut moved = turn_diffs(&ask, &mut drop).unwrap().remove(0).moved;
     moved.sort();
     moved
 }
@@ -607,7 +607,7 @@ fn a_turn_that_merges_a_branch_with_two_files_and_edits_a_third_has_one_file_and
     ];
     let mut studio = Studio::replayed(lines);
     let asks = studio.turn_diffs(AT + 20_000, 10);
-    studio.set_turn_files(&asks[0], turn_diffs(&asks[0]));
+    studio.set_turn_files(&asks[0], turn_diffs(&asks[0], &mut drop));
     let files = studio.session(SESSION).unwrap().turns[0]
         .files
         .clone()
@@ -615,4 +615,68 @@ fn a_turn_that_merges_a_branch_with_two_files_and_edits_a_third_has_one_file_and
     let paths: Vec<&str> = files.files.iter().map(|f| f.path.as_str()).collect();
     assert_eq!(paths, ["a.rs"]);
     assert_eq!(files.merged, 2);
+}
+
+/// A turn of `root` from tree `start` to `end`, as the core asks for it.
+fn ask_of(root: &str, start: &str, end: &str) -> studio_core::TurnDiff {
+    let mut studio = Studio::replayed([
+        line(
+            "UserPromptSubmit",
+            0,
+            json!({ "prompt": "go", "studio_turn_start": { root: start } }),
+        ),
+        line("Stop", 9_000, json!({ "studio_turn_end": { root: end } })),
+    ]);
+    studio.turn_diffs(AT + 20_000, 10).remove(0)
+}
+
+fn add_files(root: &str, count: usize) {
+    for n in 0..count {
+        fs::write(format!("{root}/gen{n}.txt"), format!("{n}\n")).unwrap();
+    }
+}
+
+#[test]
+fn a_diff_past_the_cap_is_skipped_with_a_warning_that_names_the_count_and_no_path() {
+    let (_dir, root) = repo();
+    let start = tree(&root);
+    add_files(&root, MAX_TURN_FILES + 1);
+    let end = tree(&root);
+    let ask = ask_of(&root, &start, &end);
+
+    let mut warnings = Vec::new();
+    let _one = HOOK.lock().unwrap_or_else(|e| e.into_inner());
+    let diffs = turn_diffs(&ask, &mut |w| warnings.push(w));
+
+    assert!(diffs.is_none());
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(
+        warnings[0].contains(&(MAX_TURN_FILES + 1).to_string()),
+        "{warnings:?}"
+    );
+    assert!(warnings[0].contains(SESSION), "{warnings:?}");
+    assert!(
+        !warnings[0].contains("gen0") && !warnings[0].contains(&root),
+        "{warnings:?}"
+    );
+}
+
+#[test]
+fn a_diff_at_the_cap_keeps_its_numstat_and_rename_detection() {
+    let (_dir, root) = repo();
+    let start = tree(&root);
+    // The rename is a deletion and an addition to the cheap count: 2 of the cap's files.
+    fs::rename(format!("{root}/old.rs"), format!("{root}/new.rs")).unwrap();
+    add_files(&root, MAX_TURN_FILES - 2);
+    let end = tree(&root);
+    let ask = ask_of(&root, &start, &end);
+
+    let mut warnings = Vec::new();
+    let _one = HOOK.lock().unwrap_or_else(|e| e.into_inner());
+    let diffs = turn_diffs(&ask, &mut |w| warnings.push(w)).unwrap();
+
+    assert!(warnings.is_empty(), "{warnings:?}");
+    assert_eq!(diffs[0].files.len(), MAX_TURN_FILES - 1);
+    let renamed = diffs[0].files.iter().find(|f| f.path == "new.rs").unwrap();
+    assert_eq!(renamed.from.as_deref(), Some("old.rs"));
 }

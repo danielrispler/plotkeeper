@@ -22,9 +22,9 @@ use std::{
     time::{Duration, Instant},
 };
 use studio_core::{
-    CardRequest, Facts, NameRequest, Notifications, Output, Session, Sound,
+    CardRequest, Facts, NameRequest, Notifications, Output, RootDiff, Session, Sound,
     State::{Ended, NeedsYou},
-    Studio, SummaryRequest, TaskFacts, TaskQuery,
+    Studio, SummaryRequest, TaskFacts, TaskQuery, TurnDiff,
 };
 use studio_understanding::{
     AGY_FIXTURE_VERSION, AgyVersions, CardStore, CardWriter, Changed, ClaudeWriter, Decision,
@@ -413,6 +413,20 @@ struct CardsKey {
     placed: Vec<(String, Option<usize>)>,
 }
 
+/// `ask`'s worktrees diffed by `git` with the core unlocked. A turn skipped for holding too many files is warned of in
+/// the Studio log and settled, so no pass asks for it again.
+fn diff_turn(state: &Mutex<Studio>, ask: &TurnDiff) -> Option<Vec<RootDiff>> {
+    let mut skipped = false;
+    let diffs = turn_diffs(ask, &mut |warning| {
+        log::warn!("{warning}");
+        skipped = true;
+    });
+    if skipped && diffs.is_none() {
+        state.lock().unwrap().settle_turn_files(ask);
+    }
+    diffs
+}
+
 /// The turns whose files the core asks for (danielrispler/plotkeeper#111): each is diffed by `git`
 /// with the core unlocked, then handed back. Returns whether any was asked.
 fn turn_files(state: &Mutex<Studio>) -> bool {
@@ -420,7 +434,7 @@ fn turn_files(state: &Mutex<Studio>) -> bool {
     const PER_PASS: usize = 8;
     let asks = state.lock().unwrap().turn_diffs(millis(), PER_PASS);
     for ask in &asks {
-        let diffs = turn_diffs(ask);
+        let diffs = diff_turn(state, ask);
         state.lock().unwrap().set_turn_files(ask, diffs);
     }
     !asks.is_empty()
@@ -1700,7 +1714,7 @@ fn turn_facts(state: &Mutex<Studio>, id: &str) -> Facts {
     let Some(ask) = state.lock().unwrap().summary_ask(id) else {
         return Facts::default();
     };
-    let diffs = turn_diffs(&ask);
+    let diffs = diff_turn(state, &ask);
     let mut facts = state.lock().unwrap().summary_facts(&ask, diffs);
     add_hunks(&ask, &mut facts);
     facts

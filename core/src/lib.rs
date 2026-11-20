@@ -3855,6 +3855,18 @@ impl Studio {
         }
     }
 
+    /// Marks the turn of `ask` as asked for the last time, for one whose diff the shell skipped as too large: it is not
+    /// asked again until a new tree lands.
+    pub fn settle_turn_files(&mut self, ask: &TurnDiff) {
+        let turn = self
+            .sessions
+            .get_mut(&ask.session_id)
+            .and_then(|s| s.turns.get_mut(ask.turn));
+        if let Some(turn) = turn {
+            turn.files_asked = Some((0, true));
+        }
+    }
+
     /// Takes what the shell found for `ask`: the numstat of each of its worktrees, `None` when git
     /// could not diff them. The turn's files are every file that differs, but those another
     /// session's or turn's call names (danielrispler/plotkeeper#207).
