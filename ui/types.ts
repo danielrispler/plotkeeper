@@ -415,6 +415,7 @@ export interface Commands {
   check_output: CheckOutput | null;
   choose_folder: string | null;
   claude_argv: string[];
+  clearing: void;
   closed: void;
   create_named_task: Workspace;
   create_task: Workspace;

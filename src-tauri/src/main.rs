@@ -722,6 +722,59 @@ fn delete_session(id: String) -> Result<(), String> {
     })])
 }
 
+/// The landed sessions Daniel cleared whose undo window is still open (danielrispler/plotkeeper#244): the window tells the shell,
+/// as `(session, terminal)`, so a quit inside the window can commit them.
+#[derive(Default)]
+struct Clearing(Mutex<Vec<Cleared>>);
+
+/// A cleared session and the terminal it runs in.
+#[derive(serde::Deserialize)]
+struct Cleared {
+    id: String,
+    terminal: Option<String>,
+}
+
+/// Replaces the cleared sessions pending their delete; an empty list after Undo or after the window's commit.
+#[tauri::command]
+fn clearing(sessions: Vec<Cleared>, pending: State<Clearing>) {
+    *pending.0.lock().unwrap() = sessions;
+}
+
+/// What committing the cleared `sessions` sends: the daemon's `kill` and `forget` of each terminal, and a `StudioDelete`
+/// line for each session, as Delete does. The cards stay in the store.
+fn clear_commit(sessions: &[Cleared]) -> (Vec<serde_json::Value>, Vec<serde_json::Value>) {
+    let mut requests = Vec::new();
+    for terminal in sessions.iter().filter_map(|s| s.terminal.as_ref()) {
+        requests.push(serde_json::json!({ "op": "kill", "id": terminal }));
+        requests.push(serde_json::json!({ "op": "forget", "id": terminal }));
+    }
+    let lines = sessions
+        .iter()
+        .map(|s| {
+            serde_json::json!({
+                "session_id": s.id,
+                "hook_event_name": studio_core::DELETE,
+                "studio_received_ms": millis(),
+            })
+        })
+        .collect();
+    (requests, lines)
+}
+
+/// The app is quitting: the sessions cleared inside their undo window are deleted now (#244, story 35).
+fn commit_clearing(app: &AppHandle) {
+    let sessions = std::mem::take(&mut *app.state::<Clearing>().0.lock().unwrap());
+    let (requests, lines) = clear_commit(&sessions);
+    for request in requests {
+        let _ = terminal::terminal_send(request, app.state());
+    }
+    if !lines.is_empty()
+        && let Err(e) = append(&lines)
+    {
+        log::warn!("commit the cleared sessions: {e}");
+    }
+}
+
 /// Daniel closed terminal `terminal` (danielrispler/Falinks#461, story 15 and decision 8): a `SessionEnd` line in the event
 /// log for each session in it that has not ended, as its `claude` may die before its own hook runs.
 /// A real `SessionEnd` after it changes nothing.
@@ -1057,6 +1110,7 @@ fn main() {
         .manage(Mutex::new(studio))
         .manage(Cards::new(store))
         .manage(Notices::default())
+        .manage(Clearing::default())
         .manage(writer.clone())
         .manage(Summaries::default())
         .manage(terminal::Daemon::default())
@@ -1079,6 +1133,7 @@ fn main() {
             ask,
             rename,
             delete_session,
+            clearing,
             closed,
             usage,
             terminal::terminal_connect,
@@ -1186,7 +1241,10 @@ fn main() {
         })
         .build(tauri::generate_context!())
         .expect("build the studio")
-        .run(|_, event| {
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                commit_clearing(app);
+            }
             if let Some(path) = presence::path() {
                 presence::run_event(&path, &event);
             }
@@ -2002,6 +2060,37 @@ mod tests {
                 serde_json::json!({ "studio_turn_end": { "/w/repo": "e1" } }),
             ),
         ])
+    }
+
+    #[test]
+    fn a_quit_inside_the_clear_window_kills_each_terminal_and_deletes_each_session() {
+        let cleared = |id: &str, terminal: Option<&str>| super::Cleared {
+            id: id.into(),
+            terminal: terminal.map(Into::into),
+        };
+        let (requests, lines) =
+            super::clear_commit(&[cleared("a", Some("t1")), cleared("b", None)]);
+        assert_eq!(
+            requests,
+            vec![
+                serde_json::json!({ "op": "kill", "id": "t1" }),
+                serde_json::json!({ "op": "forget", "id": "t1" }),
+            ]
+        );
+        let deleted: Vec<_> = lines
+            .iter()
+            .map(|l| {
+                (
+                    l["session_id"].as_str().unwrap(),
+                    l["hook_event_name"].as_str().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            deleted,
+            [("a", studio_core::DELETE), ("b", studio_core::DELETE)]
+        );
+        assert!(super::clear_commit(&[]).1.is_empty());
     }
 
     #[test]

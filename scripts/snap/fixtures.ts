@@ -250,6 +250,20 @@ export const fixtures = {
       else if (learning.getBoundingClientRect().bottom > 900 - 6) log("snap:fail the Retest is below the fold: it ends at " + learning.getBoundingClientRect().bottom);`;
     return { ...base, sessions, learning, projects: ["/w/plotkeeper", "/w/falinks"], selected: null, snapScript };
   },
+  // Home after Clear (#244): the landed rows are hidden, the Landed part is gone, and the toast offers Undo. The script clicks Clear on the heading.
+  homeClearToast(): Fixture {
+    const snapScript = `
+      const clear = document.querySelector(".pane.home h2 .clear");
+      if (!clear) log("snap:fail the Landed heading has no Clear");
+      else {
+        clear.click();
+        await new Promise((r) => setTimeout(r, 100));
+        const toast = document.getElementById("clear-toast");
+        if (toast.hidden || !/Undo/.test(toast.textContent)) log("snap:fail Clear shows no toast with Undo");
+        if (document.querySelector(".pane.home h2 .clear")) log("snap:fail the landed rows are still shown after Clear");
+      }`;
+    return { ...fixtures.home(), snapScript };
+  },
   // Errors in the notice line (#191): two errors and the dismiss control, beside a settings error.
   noticeErrors() {
     const snapScript = `

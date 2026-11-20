@@ -268,6 +268,8 @@ h1 { margin: 0 0 var(--sp-4); }
 .pane.home .home-row .l1 .glyph { margin-inline-start: auto; }
 .pane.home .slot-actions { display: flex; gap: var(--sp-3); margin: var(--sp-2) 0 0; }
 .pane.home .slot-actions .quiz-skip { margin-top: 0; color: var(--muted); }
+.pane.home h2 { display: flex; align-items: baseline; }
+.pane.home h2 .clear { margin-inline-start: auto; color: var(--muted); font-weight: 500; }
 .pane.home .row.more { color: var(--muted); font-size: var(--size-small); text-align: start; }
 /* Needs you's rows are cards on the raised surface; the rest sit on the terminal background. */
 .pane.home .home-row:has(.glyph[data-glyph="pill"]) { background: var(--raised); box-shadow: inset 0 0 0 var(--hair) var(--edge); padding: var(--sp-4) var(--sp-5); }
@@ -308,6 +310,7 @@ h1 { margin: 0 0 var(--sp-4); }
 /* The start-failure toast (danielrispler/Falinks#558): the bottom-right corner, so it never covers the needs-you one; not in colour. */
 .toast.start { top: auto; bottom: var(--sp-5); background: var(--raised); cursor: default;
                box-shadow: inset 0 0 0 var(--hair) var(--edge), var(--shadow); }
+.toast.clear { right: auto; left: var(--sp-5); grid-template-columns: minmax(0, 1fr) auto; }
 .toast.start .name { color: var(--fg); }
 /* The note toast: a turn that ended off screen or a context warning; not in colour. */
 .toast.note { background: var(--raised); box-shadow: inset 0 0 0 var(--hair) var(--edge), var(--shadow); }
