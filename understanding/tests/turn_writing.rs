@@ -838,6 +838,30 @@ fn a_long_checks_card_and_a_workers_card_go_through_the_same_queue_and_only_the_
     );
 }
 
+#[test]
+fn a_workers_card_and_a_checks_card_of_a_turn_that_asked_are_stored_without_a_quiz() {
+    let mut day = Day::new();
+    let outputs = day.event("UserPromptSubmit", json!({ "prompt": "Go" }));
+    day.pass(outputs);
+    let change = diff(&["a.rs", "b.rs"]);
+    let worker = CardRequest {
+        agent: Some("w1".into()),
+        asks: true,
+        ..request("w1@200", &change)
+    };
+    let check = CardRequest {
+        check: Some("cargo test".into()),
+        asks: true,
+        ..request("s1@100", &change)
+    };
+    day.writing.card(worker, true);
+    day.writing.card(check, true);
+    day.writing.run_queued();
+
+    assert_eq!(day.card_ids(), ["w1@200", "s1@100"]);
+    assert_eq!(quizzes(&day), 0);
+}
+
 /// Runs `call` on another thread and fails unless it returns within a few seconds.
 fn returns_in_time<T: Send + 'static>(what: &str, call: impl FnOnce() -> T + Send + 'static) -> T {
     let (done, finished) = mpsc::channel();

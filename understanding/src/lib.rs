@@ -337,18 +337,18 @@ pub fn write_stop(
 /// Holds `card`'s Quiz to the rules for when a Quiz shows (danielrispler/plotkeeper#119, #257): none beside a
 /// decision, which `request` says by how its turn ended and never by the session's state now; then at most
 /// 3 an hour: past it, a session's card shows without its Quiz, and takes the place of the oldest unanswered lone
-/// Quiz of the hour when there is one. A worker's card and a check's are no turn's and are left alone.
+/// Quiz of the hour when there is one. A worker's card and a check's are no turn's: they count for no cap, but keep none beside a decision.
 fn place_card_quiz(
     store: &mut CardStore,
     request: &CardRequest,
     card: &mut Card,
     mut log: impl FnMut(String),
 ) {
-    if card.quiz.is_none() || request.agent.is_some() || request.check.is_some() {
-        return;
-    }
     if request.asks {
         card.quiz = None;
+        return;
+    }
+    if card.quiz.is_none() || request.agent.is_some() || request.check.is_some() {
         return;
     }
     match store.place_quiz(true, millis()) {
