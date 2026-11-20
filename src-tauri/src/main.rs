@@ -1728,6 +1728,7 @@ fn summarize(
             if settle_summary(&app, &mut request) {
                 let waiting = &app.state::<Summaries>().waiting;
                 waiting.lock().unwrap().insert(request.id.clone(), request);
+                app.state::<Cards>().lock().unwrap().waiting_summary();
             }
         };
         queue(queues, id).send(Box::new(job)).ok();

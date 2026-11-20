@@ -1055,3 +1055,12 @@ fn a_summary_file_can_still_be_read_by_the_previous_builds_facts() {
         .unwrap_or_else(|| panic!("no facts in {text}"));
     serde_json::from_value::<MainFacts>(facts.clone()).unwrap();
 }
+
+#[test]
+fn a_summary_that_becomes_waiting_raises_the_revision_so_the_window_asks_again() {
+    let data = tempfile::tempdir().unwrap();
+    let mut store = CardStore::open(data.path().join("cards.json")).unwrap();
+    let before = store.revision();
+    store.waiting_summary();
+    assert!(store.revision() > before);
+}

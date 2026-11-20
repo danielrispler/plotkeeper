@@ -439,6 +439,12 @@ impl CardStore {
         self.revision
     }
 
+    /// A turn's summary now waits for Daniel to open it: the revision rises, so that a window that
+    /// asked for it before and got none asks again.
+    pub fn waiting_summary(&mut self) {
+        self.revision += 1;
+    }
+
     /// The cards, oldest first.
     pub fn cards(&self) -> &[StoredCard] {
         &self.cards
