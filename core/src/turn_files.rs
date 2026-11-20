@@ -150,8 +150,10 @@ impl TurnFiles {
                 // A rename counts by its old path too.
                 let by =
                     |f: &dyn Fn(&str) -> bool| f(&file.path) || file.from.as_deref().is_some_and(f);
-                let named = |path: &str| others.iter().any(|row| names(row, roots, &diff.root, path));
-                let called = |path: &str| ours.iter().any(|row| names(row, roots, &diff.root, path));
+                let named =
+                    |path: &str| others.iter().any(|row| names(row, roots, &diff.root, path));
+                let called =
+                    |path: &str| ours.iter().any(|row| names(row, roots, &diff.root, path));
                 if by(&named) && !by(&called) {
                     continue;
                 }
