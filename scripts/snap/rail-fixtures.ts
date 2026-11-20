@@ -136,10 +136,10 @@ const session = (state: SessionState, { running = false, question = false } = {}
     files: i >= 3 ? { files: [file("ui/style.css", 14, 3, "claude"), file("ui/list.ts", 22, 9, "claude"), file("ui/tests/rows.test.mjs", 6, 6)], merged: 0 } : null,
     checks: i === 4
       ? [
-          { suite: "cargo clippy", status: "passed", retries: 1, runs: [run("failed", "k1", 101), run("passed", "k2", 0)] },
-          { suite: "npm run check", status: "failed", retries: 0, runs: [run("failed", "k3", 1)] },
+          { suite: "cargo clippy", worktree: "/r", foreign: false, status: "passed", retries: 1, runs: [run("failed", "k1", 101), run("passed", "k2", 0)] },
+          { suite: "npm run check", worktree: "/r/.claude/worktrees/fix", foreign: true, status: "failed", retries: 0, runs: [run("failed", "k3", 1)] },
         ]
-      : [{ suite: "check", status: i === 1 ? "failed" : "passed", retries: 0, runs: [] }],
+      : [{ suite: "check", worktree: "/r", foreign: false, status: i === 1 ? "failed" : "passed", retries: 0, runs: [] }],
   }));
   const transcript = {
     intention: ended ? final.split("\n")[0] : intentions[state === "needs_you" ? "needs_you" : "running"],

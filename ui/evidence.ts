@@ -19,6 +19,12 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 const mergedLabel = (n: number) => `+${n} merged`;
 
+// A check's name: its suite, and its worktree's folder name when it ran outside the session's own worktree.
+const named = (c: Check) => {
+  const tree = c.worktree.replace(/\/+$/, "").split("/").pop();
+  return c.foreign && tree ? `${c.suite} in ${tree}` : c.suite;
+};
+
 // A check is listed once it has ended: a running one is not passed, failed or ran.
 const ended = (c: Check) => c.status !== "running";
 
@@ -33,7 +39,7 @@ export function evidenceLine({ files, checks: all }: Facts): string {
     ...(files?.merged ? [mergedLabel(files.merged)] : []),
     ...(passed ? [`${plural(passed, "check")} passed`] : []),
     ...(ran ? [`${plural(ran, "check")} ran`] : []),
-    ...checks.filter((c) => c.status === "failed").map((c) => `✗ ${c.suite} failed`),
+    ...checks.filter((c) => c.status === "failed").map((c) => `✗ ${named(c)} failed`),
   ].join(" · ");
 }
 
@@ -53,7 +59,7 @@ export function evidenceRows({ files, checks: all }: Facts): EvidenceRow[] {
       const last = c.runs.at(-1);
       return {
         kind: "check",
-        label: `${c.suite} ${c.status}${c.status === "ran" ? "" : after}`,
+        label: `${named(c)} ${c.status}${c.status === "ran" ? "" : after}`,
         ...(c.status === "failed" && last ? { call: last.call, agent: last.agent } : {}),
       };
     }),
