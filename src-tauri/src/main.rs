@@ -414,8 +414,8 @@ struct CardsKey {
     placed: Vec<(String, Option<usize>)>,
 }
 
-/// `ask`'s worktrees diffed by `git` with the core unlocked. A turn skipped for holding too many files is warned of in
-/// the Studio log and settled, so no pass asks for it again.
+/// `ask`'s worktrees diffed by `git` with the core unlocked. A turn skipped for holding too many
+/// files is warned of in the Studio log and settled, so no pass asks for it again.
 fn diff_turn(state: &Mutex<Studio>, ask: &TurnDiff) -> Option<Vec<RootDiff>> {
     let mut skipped = false;
     let diffs = turn_diffs(ask, &mut |warning| {
@@ -428,8 +428,8 @@ fn diff_turn(state: &Mutex<Studio>, ask: &TurnDiff) -> Option<Vec<RootDiff>> {
     diffs
 }
 
-/// The files of `ask` among `diffs`, found by `compute` with the core unlocked: the core is locked only to
-/// copy out what the matching reads. `None` when git could not diff the turn.
+/// The files of `ask` among `diffs`, found by `compute` with the core unlocked: the core is locked
+/// only to copy out what the matching reads. `None` when git could not diff the turn.
 fn found_files(
     state: &Mutex<Studio>,
     ask: &TurnDiff,
@@ -2018,6 +2018,9 @@ mod tests {
         });
         let found = found.expect("files");
         assert_eq!(found.files.len(), 1);
+        let id = "5b1c7e30-9d2a-4f8b-8c63-1e0a7d4b9f52";
+        let before = state.lock().unwrap().session(id).unwrap().since().files;
+        assert_eq!(before, 0);
         state
             .lock()
             .unwrap()
@@ -2027,6 +2030,9 @@ mod tests {
             .session("5b1c7e30-9d2a-4f8b-8c63-1e0a7d4b9f52")
             .unwrap();
         assert_eq!(session.turns[0].files, Some(found));
+        // The final write also updates the unseen state: the turn's file now counts.
+        assert!(session.unseen);
+        assert_eq!(session.since().files, 1);
     }
 
     #[test]

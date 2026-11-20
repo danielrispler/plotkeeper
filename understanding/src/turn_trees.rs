@@ -15,8 +15,8 @@ use studio_core::{Facts, Numstat, RootDiff, TurnDiff};
 /// The refs' namespace.
 const REFS: &str = "refs/plotkeeper/turns";
 
-/// The most files one worktree's diff of a turn may hold; a diff of more is skipped, so a leftover build directory
-/// cannot cost minutes of rename detection or fill the session list.
+/// The most files one worktree's diff of a turn may hold; a diff of more is skipped, so a leftover
+/// build directory cannot cost minutes of rename detection or fill the session list.
 pub const MAX_TURN_FILES: usize = 2_000;
 
 /// The files that differ between trees `start` and `end` of the worktree at `root`, with their
@@ -27,8 +27,8 @@ pub fn numstat(root: &Path, start: &str, end: &str) -> Option<Vec<Numstat>> {
     Some(parse(&out))
 }
 
-/// How many files differ between trees `start` and `end`, counted with no rename detection, which is what costs on a
-/// large diff; `None` when `git` fails.
+/// How many files differ between trees `start` and `end`, counted with no rename detection, which
+/// is what costs on a large diff; `None` when `git` fails.
 fn changed(root: &Path, start: &str, end: &str) -> Option<usize> {
     let args = [
         "diff",
@@ -182,7 +182,8 @@ fn hash(root: &Path) -> u32 {
 }
 
 /// The numstat of each worktree `ask` names, for the core's `set_turn_files`: `None` when none
-/// could be diffed, or every one held more than `MAX_TURN_FILES` files, which `warn` hears of (with no file's path). A running turn's end is the worktree's tree now. An ended turn's trees are
+/// could be diffed, or every one held more than `MAX_TURN_FILES` files, which `warn` hears of (with
+/// no file's path). A running turn's end is the worktree's tree now. An ended turn's trees are
 /// anchored first, so they outlive `git gc`.
 pub fn turn_diffs(ask: &TurnDiff, warn: &mut dyn FnMut(String)) -> Option<Vec<RootDiff>> {
     let safe = studio_hook::answer::is_file_safe(&ask.session_id);

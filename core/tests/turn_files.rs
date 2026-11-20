@@ -1217,3 +1217,32 @@ fn a_turns_files_are_computed_from_a_snapshot_and_stored_afterwards() {
     studio.store_turn_files(&asks[0], Some(found.clone()));
     assert_eq!(files(&studio), Some(found));
 }
+
+#[test]
+fn a_running_turn_the_shell_settled_is_not_asked_again_while_it_runs() {
+    let mut studio = Studio::replayed([
+        prompt(json!({ ROOT: "s1" })),
+        edit(1_000, "e1", "/w/repo/src/a.rs", None),
+    ]);
+    let asks = ask(&mut studio, AT + 20_000);
+    assert_eq!(asks.len(), 1);
+    assert!(!asks[0].ended);
+    studio.settle_turn_files(&asks[0]);
+    studio.replay(&edit(25_000, "e2", "/w/repo/src/b.rs", None));
+    assert!(ask(&mut studio, AT + 60_000).is_empty());
+}
+
+#[test]
+fn a_running_turn_the_shell_settled_is_asked_again_once_its_stop_lands_end_trees() {
+    let mut studio = Studio::replayed([
+        prompt(json!({ ROOT: "s1" })),
+        edit(1_000, "e1", "/w/repo/src/a.rs", None),
+    ]);
+    let asks = ask(&mut studio, AT + 20_000);
+    studio.settle_turn_files(&asks[0]);
+    studio.replay(&stop(json!({ ROOT: "e1" })));
+    let again = ask(&mut studio, AT + 60_000);
+    assert_eq!(again.len(), 1);
+    assert!(again[0].ended);
+    assert_eq!(again[0].trees[0].end.as_deref(), Some("e1"));
+}

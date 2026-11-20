@@ -556,6 +556,15 @@ pub enum Sender {
     Unrecognised(String),
 }
 
+impl Turn {
+    /// A turn asked for its files for the last time is asked again once new trees `landed`.
+    fn ask_again_if_last(&mut self, landed: bool) {
+        if landed && self.files_asked.is_some_and(|(_, last)| last) {
+            self.files_asked = None;
+        }
+    }
+}
+
 impl Sender {
     /// Whether the prompt counts as Daniel's: anything but a wake-up, drift included.
     pub fn is_daniels(&self) -> bool {
@@ -1553,6 +1562,7 @@ impl Session {
                 trees.1 = Some(tree.clone());
             }
         }
+        turn.ask_again_if_last(!ends.is_empty());
     }
 
     /// Keeps the trees the hook recorded on worker `event` in the turn that spawned the worker, as
@@ -1575,11 +1585,8 @@ impl Session {
                 trees.1 = Some(tree.clone());
             }
         }
-        // An ended turn asked for its files for the last time is asked again with the new trees.
         let landed = !event.studio_turn_start.is_empty() || !event.studio_turn_end.is_empty();
-        if landed && turn.files_asked.is_some_and(|(_, last)| last) {
-            turn.files_asked = None;
-        }
+        turn.ask_again_if_last(landed);
     }
 
     /// The worktree of each running subagent, with the turn that spawned it: its trees there go on
@@ -3720,7 +3727,8 @@ impl Studio {
                 session.agent.last_event_at,
             );
             for (index, turn) in session.turns.iter_mut().enumerate() {
-                // A turn with no end of an ended session, or before a later turn, is over all the same.
+                // A turn with no end of an ended session, or before a later turn, is over all
+                // the same.
                 let stale = turn.ended_at.is_none() && (session_ended || index + 1 < turns);
                 let ended = turn.ended_at.is_some() || stale;
                 let open = |root: &String| !ended || running.contains(&(index, root.clone()));
@@ -3889,8 +3897,8 @@ impl Studio {
         }
     }
 
-    /// Marks the turn of `ask` as asked for the last time, for one whose diff the shell skipped as too large: it is not
-    /// asked again until a new tree lands.
+    /// Marks the turn of `ask` as asked for the last time, for one whose diff the shell skipped as
+    /// too large: it is not asked again until a new tree lands.
     pub fn settle_turn_files(&mut self, ask: &TurnDiff) {
         let turn = self
             .sessions
