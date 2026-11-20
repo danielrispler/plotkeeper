@@ -587,6 +587,36 @@ fn a_backfilled_card_is_written_and_has_no_summary() {
 }
 
 #[test]
+fn a_backfilled_card_is_judged_by_how_its_turn_ended_and_not_by_its_sessions_state_now() {
+    let mut day = Day::new();
+    let mut ended_asking = down_turn(&mut day, &["a.rs", "b.rs"]);
+    ended_asking.request.asks = true;
+    let (asking, answered) = (
+        ended_asking.request.id.clone(),
+        format!("s1@{}", day.at + 9),
+    );
+    let mut ended_at_your_turn = down_turn(&mut day, &["c.rs", "d.rs"]);
+    ended_at_your_turn.request.id.clone_from(&answered);
+    // The session needs Daniel when the backfill runs.
+    day.event(
+        "PermissionRequest",
+        json!({"tool_name": "Bash", "tool_input": {"command": "ls"}, "tool_use_id": "t1"}),
+    );
+    day.writing.backfill(vec![ended_asking, ended_at_your_turn]);
+    day.writing.run_queued();
+
+    let store = day.store.lock().unwrap();
+    let quiz = |id: &str| {
+        store
+            .cards()
+            .iter()
+            .find(|k| k.request.id == id)
+            .map(|k| k.card.quiz.is_some())
+    };
+    assert_eq!((quiz(&asking), quiz(&answered)), (Some(false), Some(true)));
+}
+
+#[test]
 fn a_turn_already_on_record_is_not_asked_again_at_the_backfill() {
     let mut day = Day::new();
     let turn = down_turn(&mut day, &["a.rs", "b.rs"]);
