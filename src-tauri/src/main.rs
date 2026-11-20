@@ -1375,7 +1375,6 @@ fn follow(app: &AppHandle, log: &Path) {
                 }
             }
             read = read_to > read_from;
-            // Dropping a queue's sender closes it: its thread finishes the jobs it holds, then ends.
             if read {
                 let roots = state.lock().unwrap().known_roots();
                 if roots.len() != roots_saved {
@@ -1384,7 +1383,6 @@ fn follow(app: &AppHandle, log: &Path) {
                 }
                 let keys = state.lock().unwrap().live_keys();
                 fingerprints.retain(|key, _| keys.contains(key));
-                writing.prune(&keys);
                 // The decision history goes to the store, which keeps it across restarts (danielrispler/Falinks#479).
                 let studio = state.lock().unwrap();
                 let mut store = app.state::<Cards>().inner().lock().unwrap();

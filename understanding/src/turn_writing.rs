@@ -234,10 +234,6 @@ impl TurnWriting {
         }
     }
 
-    /// The sessions that are live. A session's queue ends with its last job, so there is nothing to
-    /// end here.
-    pub fn prune(&self, _live: &HashSet<String>) {}
-
     fn write(&self, mut request: CardRequest, card: bool, live: bool) {
         let state = self.state.clone();
         let id = request.session_id.clone();

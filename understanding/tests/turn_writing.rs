@@ -434,7 +434,6 @@ fn two_sessions_whose_cards_arrive_at_the_caps_edge_offer_one_more_quiz_not_two(
     for request in requests {
         threaded.card(request, true);
     }
-    threaded.prune(&Default::default());
     for _ in 0..500 {
         if day.card_ids().len() == 4 {
             break;
@@ -937,7 +936,6 @@ fn every_entry_point_returns_within_a_few_seconds_against_a_core_with_no_such_tu
     });
     called("opened", |w| assert_eq!(w.opened("s1@6"), Ok(None)));
     called("setup", |w| drop(w.setup()));
-    called("prune", |w| w.prune(&Default::default()));
     // The jobs they queued run too, a card's read of its session included, and end with nothing written.
     called("the queued jobs", |w| assert_eq!(w.run_queued(), 5));
     // A summary parked on open, opened against a core with no such turn.
@@ -960,7 +958,7 @@ fn every_entry_point_returns_within_a_few_seconds_against_a_core_with_no_such_tu
 }
 
 #[test]
-fn the_threaded_module_writes_a_card_on_its_sessions_queue_and_prune_ends_the_queue() {
+fn the_threaded_module_writes_a_card_on_its_sessions_queue_and_its_queue_ends() {
     let mut day = Day::new();
     let outputs = day.turn_asking("Add two files", &[("a.rs", 3), ("b.rs", 3)], "Done.");
     let threaded = TurnWriting::new(
@@ -980,8 +978,6 @@ fn the_threaded_module_writes_a_card_on_its_sessions_queue_and_prune_ends_the_qu
             threaded.card(request, true);
         }
     }
-    // Pruning lets the queued job finish, then ends the thread.
-    threaded.prune(&Default::default());
     for _ in 0..500 {
         if !day.card_ids().is_empty() {
             break;
@@ -1017,8 +1013,6 @@ fn a_turn_opened_in_an_ended_session_gets_its_summary_and_design_and_its_queue_e
             _ => {}
         }
     }
-    // The session ends: its queue finishes the parking job, then its thread ends.
-    threaded.prune(&Default::default());
     let mut summary = None;
     for _ in 0..500 {
         summary = threaded.opened(&id).unwrap();
@@ -1094,7 +1088,6 @@ fn two_jobs_queued_for_an_ended_session_run_one_at_a_time_in_order() {
         Offers::beside(&day.data.join("events.jsonl")),
         day.recorder.clone(),
     );
-    threaded.prune(&Default::default());
     for prompt in ["one", "two"] {
         threaded.name(NameRequest {
             session_id: "s1".into(),
