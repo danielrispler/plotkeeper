@@ -30,6 +30,7 @@ mod self_test;
 mod store;
 mod summary;
 mod turn_trees;
+mod turn_writing;
 mod week;
 pub use brief::{
     Answered, DesignLine, OpenItem, OpenKind, answered, design_lines, design_sources, open_items,
@@ -59,6 +60,7 @@ pub use turn_trees::{
     Hunk, MAX_TURN_FILES, add_hunks, anchor, diff_turn, found_files, hunk, hunk_view, numstat,
     turn_diffs, turn_facts, turn_hunk, turn_of,
 };
+pub use turn_writing::{Core, Effects, TurnWriting, Writer};
 pub use week::{Rate, Ratings, Week, week};
 
 /// A card on a change, in the explanation language; code inside its text is in
