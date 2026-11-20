@@ -609,3 +609,19 @@ fn a_file_edited_before_a_new_worktrees_base_look_is_still_the_change_at_its_car
     assert_eq!(card.as_deref(), Some(change));
     let _ = fs::remove_dir_all(&made);
 }
+
+// Roots in git's spelling (danielrispler/plotkeeper#202): a temp dir's `/var` is `/private/var`.
+
+#[test]
+fn a_root_is_spelled_as_git_spells_it_and_a_saved_entry_in_that_spelling_stays_live() {
+    let (dir, _) = repo();
+    let spelled = dir.path().display().to_string();
+    let git_root = fs::canonicalize(dir.path()).unwrap().display().to_string();
+
+    assert_eq!(
+        worktree_root(&format!("{spelled}/src/new")),
+        Some(git_root.clone())
+    );
+    let saved: HashMap<String, String> = [(spelled, git_root)].into();
+    assert_eq!(live_roots(saved.clone()), saved);
+}

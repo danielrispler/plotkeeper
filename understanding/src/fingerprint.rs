@@ -69,8 +69,8 @@ pub fn fingerprint_changes(
     changes
 }
 
-/// The root of the git worktree that holds `folder`, spelled as `folder` is, or `None` when it is
-/// in none. A folder that does not exist yet, such as a new file's, is looked up from its nearest
+/// The root of the git worktree that holds `folder`, spelled as `git` spells it (symlinks resolved, as
+/// the hook's roots are), or `None` when it is in none. A folder that does not exist yet, such as a new file's, is looked up from its nearest
 /// existing parent, unless that parent is a `worktrees` folder, where the folder of a removed
 /// worktree was: only a listed worktree is a root (danielrispler/plotkeeper#205), as the hook's
 /// rule has it.
@@ -79,11 +79,9 @@ pub fn worktree_root(folder: &str) -> Option<String> {
     if existing != Path::new(folder) && existing.file_name().is_some_and(|n| n == "worktrees") {
         return None;
     }
-    let prefix = git(existing, &["rev-parse", "--show-prefix"])?;
-    let prefix = String::from_utf8(prefix).ok()?;
-    let existing = existing.to_str()?.trim_end_matches('/');
-    let root = existing.strip_suffix(prefix.trim_end().trim_end_matches('/'))?;
-    Some(root.trim_end_matches('/').to_owned()).filter(|root| !root.is_empty())
+    let root = git(existing, &["rev-parse", "--show-toplevel"])?;
+    let root = String::from_utf8(root).ok()?;
+    Some(root.trim_end().trim_end_matches('/').to_owned()).filter(|root| !root.is_empty())
 }
 
 /// `roots` without the entries that map a folder to another root than the one now holding it: a
@@ -127,7 +125,8 @@ fn resolved(folder: &str, roots: &[String]) -> Option<String> {
     if existing != Path::new(folder) && existing.file_name().is_some_and(|n| n == "worktrees") {
         return None;
     }
-    let at = existing.to_str()?;
+    let real = existing.canonicalize().ok()?;
+    let at = real.to_str()?;
     let holds = |r: &&String| {
         at.strip_prefix(r.as_str())
             .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))

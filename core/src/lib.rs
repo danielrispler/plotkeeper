@@ -134,14 +134,22 @@ impl Roots {
         known.insert(folder.into(), root.clone());
         root
     }
-}
 
-/// `path` as macOS spells it without its `/private` firmlink, which git adds to a root (`/var` is
-/// `/private/var`) and a session's folder does not: the one spelling two spellings of a root compare in.
-fn plain(path: &str) -> &str {
-    match path.strip_prefix("/private") {
-        Some(rest) if ["/var", "/tmp", "/etc"].iter().any(|d| rest.starts_with(d)) => rest,
-        _ => path,
+    /// `path` relative to worktree `root`, when it lies inside it. A root is spelled as git spells
+    /// it, a path as its tool does: one through a symlink (`/tmp` for `/private/tmp`) is inside the
+    /// root whose top folder holds it, the shortest of its folders that has `root` as its root.
+    fn inside<'a>(&self, root: &str, path: &'a str) -> Option<&'a str> {
+        let direct = path.strip_prefix(root).and_then(|p| p.strip_prefix('/'));
+        if direct.is_some() || root.is_empty() {
+            return direct;
+        }
+        let mut folders: Vec<&std::path::Path> = std::path::Path::new(path).ancestors().collect();
+        folders.reverse();
+        let top = folders.into_iter().skip(1).find_map(|f| {
+            let f = f.to_str()?;
+            (self.of(f) == root).then_some(f)
+        })?;
+        path.strip_prefix(top)?.strip_prefix('/')
     }
 }
 
@@ -1280,7 +1288,7 @@ impl Session {
             None => roots.of(&event.cwd) == session_root,
         };
         let mut listed = event.studio_touched_roots.iter().flatten();
-        let other = listed.find(|r| !r.is_empty() && plain(r) != plain(&session_root));
+        let other = listed.find(|r| !r.is_empty() && **r != session_root);
         other.filter(|_| in_session).cloned()
     }
 
@@ -2820,7 +2828,7 @@ impl Studio {
                 .subagent(agent)
                 .map_or_default(|a| (a.owner.clone(), a.root.clone()));
             // Only a path inside the owner's worktree (danielrispler/Falinks#434, decision 15).
-            let inside = path.strip_prefix(&root).and_then(|p| p.strip_prefix('/'));
+            let inside = self.roots.inside(&root, path);
             if owner != *agent
                 && let Some(inside) = inside.filter(|_| !root.is_empty())
             {

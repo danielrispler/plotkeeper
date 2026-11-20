@@ -1071,7 +1071,8 @@ fn a_hook_root_spelled_through_a_symlink_is_the_sessions_own_root() {
             "tool_input": {"command": "cd /var/w2 && ls"}, "studio_touched_roots": roots});
         ev(name, ms, "p1", fields)
     };
-    let mut studio = Studio::default();
+    // The app's resolver spells a root as git does.
+    let mut studio = Studio::with_roots(|folder| Some(format!("/private{folder}")));
     let start = json!({"prompt": "Do it", "cwd": "/var/w"});
     studio.apply(&ev("UserPromptSubmit", 0, "p1", start));
     studio.apply(&at("PreToolUse", 1_000, &["/private/var/w"]));
