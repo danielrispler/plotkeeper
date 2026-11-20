@@ -1842,3 +1842,22 @@ fn after_a_pick_on_one_of_three_waiting_the_next_run_writes_the_held_retest() {
     assert_eq!(writer.1.get(), 1);
     assert_eq!(retested(&store), ["a", "b", "c", "d"]);
 }
+
+#[test]
+fn a_writer_that_gives_no_reply_is_asked_only_for_the_room_left() {
+    let dir = tempfile::tempdir().unwrap();
+    let quizzes = [("waiting", T0), ("a", T0), ("b", T0), ("c", T0), ("d", T0)];
+    let store = retests_store(dir.path(), &quizzes, &["waiting"]);
+    let writer = Retesting(Vec::new(), Cell::new(0));
+    let mut lines = Vec::new();
+
+    assert_eq!(
+        write_retests(&store, &writer, T0 + 9 * DAY, |l| lines.push(l)),
+        0
+    );
+
+    // Two asks, each tried twice; the others stay due for the next run.
+    assert_eq!(writer.1.get(), 4);
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert_eq!(retested(&store), ["waiting"]);
+}

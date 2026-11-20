@@ -1089,9 +1089,9 @@ fn retest_quiz() -> studio_understanding::Quiz {
 
 const NOW: u64 = 1_790_000_000_000;
 
-/// A store at `path` with a Quiz on `fresh` (due 1 day before `NOW`), `edge` (due 14 days before), `old` (due 15 days
-/// before), and `flagged`, a turn's whose key Daniel flagged wrong, and `card`, a card's he flagged so (both due 1 day before).
-fn first_quizzes(path: &std::path::Path) -> CardStore {
+/// A store at `path` with Quizzes due before `NOW`: `fresh` 1 day, `edge` 14 days and `old` 15 days before; and, 1 day
+/// before, `flagged`, a turn's own, and `card`, a card's, both flagged Key wrong.
+fn retest_cases(path: &std::path::Path) -> CardStore {
     use studio_understanding::Tap;
     let mut store = CardStore::open(path.to_owned()).unwrap();
     for (id, due) in [
@@ -1114,7 +1114,7 @@ fn first_quizzes(path: &std::path::Path) -> CardStore {
 fn a_retest_waits_unanswered_while_home_could_serve_it() {
     use studio_understanding::Tap;
     let data = tempfile::tempdir().unwrap();
-    let mut store = first_quizzes(&data.path().join("cards.json"));
+    let mut store = retest_cases(&data.path().join("cards.json"));
     for ask in store.due_retests(NOW) {
         store.add_retest(&ask, Some(retest_quiz()), NOW).unwrap();
     }
@@ -1139,10 +1139,9 @@ fn a_retest_waits_unanswered_while_home_could_serve_it() {
 #[test]
 fn no_retest_is_written_for_a_quiz_due_15_days_ago_or_flagged_key_wrong() {
     let data = tempfile::tempdir().unwrap();
-    let store = first_quizzes(&data.path().join("cards.json"));
+    let store = retest_cases(&data.path().join("cards.json"));
 
-    let ofs = |asks: Vec<studio_understanding::RetestAsk>| -> Vec<String> {
-        asks.into_iter().map(|ask| ask.of).collect()
-    };
-    assert_eq!(ofs(store.retests_to_write(NOW)), ["fresh", "edge"]);
+    let asks = store.retests_to_write(NOW);
+    let ofs: Vec<&str> = asks.iter().map(|ask| ask.of.as_str()).collect();
+    assert_eq!(ofs, ["fresh", "edge"]);
 }

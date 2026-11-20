@@ -44,9 +44,9 @@ pub fn retest_quiz(reply: &str) -> Result<Quiz, String> {
     Quiz::from_value(serde_json::from_str(object(reply)).unwrap_or_default())
 }
 
-/// Writes the retests due at `now`, the caller's clock, in `CardStore::retests_to_write`'s order, and keeps each, until
-/// `RETESTS_WAITING` wait unanswered (danielrispler/plotkeeper#215); no writer runs while they do. A Quiz whose retest
-/// is held stays due. A reply that breaks a rule is asked for once more; a second rejection keeps no Quiz and logs one
+/// Writes the retests due at `now`, the caller's clock, in `CardStore::retests_to_write`'s order, and keeps each; it asks
+/// for no more than would bring the retests waiting unanswered to `RETESTS_WAITING` (danielrispler/plotkeeper#215), so
+/// no writer runs while they do. A Quiz whose retest is held stays due. A reply that breaks a rule is asked for once more; a second rejection keeps no Quiz and logs one
 /// line, and the Quiz is not asked about again. A writer that gives no reply keeps nothing, so the next call tries again.
 /// The store is not locked while the writer runs. Returns how many retests were written.
 pub fn write_retests(
@@ -61,10 +61,7 @@ pub fn write_retests(
     };
     let room = RETESTS_WAITING.saturating_sub(waiting);
     let mut written = 0;
-    for ask in due {
-        if written == room {
-            break;
-        }
+    for ask in due.into_iter().take(room) {
         // Err holds whether the writer replied, and the line for the log.
         let attempt = || {
             let reply = writer.retest(&ask).map_err(|line| (false, line))?;

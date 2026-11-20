@@ -791,20 +791,23 @@ impl CardStore {
     /// The Quizzes offered `RETEST_AFTER_MS` or more before `now`, a card's or a turn's own, that have no retest yet and
     /// that have a hunk to ask on (danielrispler/plotkeeper#129). `now` is the caller's clock.
     pub fn due_retests(&self, now: u64) -> Vec<RetestAsk> {
-        self.due(now).map(FirstQuiz::ask).collect()
+        self.due_quizzes(now).map(FirstQuiz::ask).collect()
     }
 
     /// The due retests the hourly run writes at `now` (danielrispler/plotkeeper#215), in the order Home serves them
     /// (danielrispler/plotkeeper#226): those whose first Quiz has a pick first, then the rest, the latest due first
     /// within each. None came due more than `RETEST_REACH_MS` before `now`, and none's first Quiz is flagged Key wrong.
     pub fn retests_to_write(&self, now: u64) -> Vec<RetestAsk> {
-        let mut due: Vec<_> = self.due(now).filter(|first| first.servable(now)).collect();
+        let mut due: Vec<_> = self
+            .due_quizzes(now)
+            .filter(|first| first.servable(now))
+            .collect();
         due.sort_by_key(|first| (!first.picked, std::cmp::Reverse(first.offered)));
         due.into_iter().map(FirstQuiz::ask).collect()
     }
 
     /// The Quizzes offered `RETEST_AFTER_MS` or more before `now` that have a hunk and no retest yet.
-    fn due(&self, now: u64) -> impl Iterator<Item = FirstQuiz<'_>> {
+    fn due_quizzes(&self, now: u64) -> impl Iterator<Item = FirstQuiz<'_>> {
         self.first_quizzes().filter(move |first| {
             now >= first.offered.saturating_add(RETEST_AFTER_MS)
                 && !first.hunk.trim().is_empty()
