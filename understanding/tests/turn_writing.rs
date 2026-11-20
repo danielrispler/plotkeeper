@@ -293,11 +293,11 @@ impl Day {
 
 /// The id of the card among `outputs`.
 fn card_id(outputs: &[Output]) -> String {
-    let cards = outputs.iter().filter_map(|o| match o {
+    let mut cards = outputs.iter().filter_map(|o| match o {
         Output::Card(request) => Some(request.id.clone()),
         _ => None,
     });
-    cards.last().expect("a card request")
+    cards.next_back().expect("a card request")
 }
 
 #[test]
@@ -479,7 +479,7 @@ fn a_backfilled_card_is_written_and_has_no_summary() {
     day.writing.backfill(vec![turn]);
     day.writing.run_queued();
 
-    assert_eq!(day.card_ids(), [id.clone()]);
+    assert_eq!(day.card_ids(), std::slice::from_ref(&id));
     assert_eq!(day.summary(&id), None);
     assert_eq!(day.offers().len(), 1);
 }
