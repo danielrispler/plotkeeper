@@ -25,10 +25,15 @@ export const stubSource = (fixture) => `window.__TAURI__ = (() => {
     }
     const reply = fixture[command];
     // A reply that depends on one argument: { __by: "id", values: { <id>: reply } }.
-    if (reply?.__by) return reply.values[args?.[reply.__by]] ?? null;
+    const found = reply?.__by ? (reply.values[args?.[reply.__by]] ?? null) : reply;
     // A reply of { __throw: "why" } is a command that fails with that reason.
-    if (reply?.__throw) throw reply.__throw;
-    return reply ?? null;
+    if (found?.__throw) throw found.__throw;
+    // A reply of { __delay: ms, value } comes after ms: a command whose answer lands after the page has drawn.
+    if (found?.__delay) {
+      await new Promise((done) => setTimeout(done, found.__delay));
+      return found.value ?? null;
+    }
+    return found ?? null;
   };
   // The UI's own log lines are not echoed back: the app's Webview target drops records from the webview. Only an app error
   // reaches the page on \`log://log\`.
