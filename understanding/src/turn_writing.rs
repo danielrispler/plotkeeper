@@ -13,7 +13,7 @@ use crate::{
 };
 use std::{
     collections::{HashMap, HashSet, VecDeque},
-    sync::{Arc, Mutex, mpsc},
+    sync::{Arc, Mutex},
     thread,
 };
 use studio_core::{Backfill, CardRequest, NameRequest, Session, Studio, SummaryRequest};
@@ -42,8 +42,9 @@ pub type Writer = Arc<dyn CardWriter + Send + Sync>;
 pub type Core = Arc<Mutex<Studio>>;
 
 enum Queues {
-    /// One thread for each session with jobs.
-    Threads(Mutex<HashMap<String, mpsc::Sender<Job>>>),
+    /// The jobs waiting for each session, which has one thread while it has any: the thread ends when
+    /// its session's jobs are done, under the lock that adds a job, so no job is lost to an ending thread.
+    Threads(Arc<Mutex<HashMap<String, VecDeque<Job>>>>),
     /// Jobs wait for [`TurnWriting::run_queued`].
     Stepped(Mutex<VecDeque<Job>>),
 }
@@ -86,7 +87,7 @@ impl TurnWriting {
         offers: Offers,
         effects: Arc<dyn Effects>,
     ) -> TurnWriting {
-        let queues = Queues::Threads(Mutex::default());
+        let queues = Queues::Threads(Arc::default());
         Self::build(core, store, writer, offers, effects, queues)
     }
 
@@ -192,7 +193,21 @@ impl TurnWriting {
     /// the caller must run off its main thread. `None` when the turn has none. A failed write keeps the
     /// turn waiting and is an error, so the window asks again only at the next opening.
     pub fn opened(&self, id: &str) -> Result<Option<StoredSummary>, String> {
-        self.state.opened(id)
+        let (summary, designed) = self.state.opened(id)?;
+        // Design so far is written on the session's queue, after the summary is on its way back.
+        if let Some(session) = designed {
+            let state = self.state.clone();
+            let owner = session.clone();
+            self.queue(
+                session,
+                Box::new(move || {
+                    if state.design(&owner) {
+                        state.effects.list();
+                    }
+                }),
+            );
+        }
+        Ok(summary)
     }
 
     /// The summary settings changed: the writer's model and effort, and whether a summary is written
@@ -211,12 +226,17 @@ impl TurnWriting {
         self.state.setup.lock().unwrap().clone()
     }
 
-    /// The sessions that are live: a queue of any other lets its jobs finish, then ends its thread.
-    pub fn prune(&self, live: &HashSet<String>) {
-        if let Queues::Threads(queues) = &self.queues {
-            queues.lock().unwrap().retain(|key, _| live.contains(key));
+    /// How many sessions have a queue, with its thread, now.
+    pub fn queues(&self) -> usize {
+        match &self.queues {
+            Queues::Threads(queues) => queues.lock().unwrap().len(),
+            Queues::Stepped(_) => 0,
         }
     }
+
+    /// The sessions that are live. A session's queue ends with its last job, so there is nothing to
+    /// end here.
+    pub fn prune(&self, _live: &HashSet<String>) {}
 
     fn write(&self, mut request: CardRequest, card: bool, live: bool) {
         let state = self.state.clone();
@@ -240,13 +260,28 @@ impl TurnWriting {
         match &self.queues {
             Queues::Stepped(jobs) => jobs.lock().unwrap().push_back(job),
             Queues::Threads(queues) => {
-                let mut queues = queues.lock().unwrap();
-                let queue = queues.entry(id).or_insert_with(|| {
-                    let (queue, jobs) = mpsc::channel::<Job>();
-                    thread::spawn(move || jobs.into_iter().for_each(|job| job()));
-                    queue
+                let mut waiting = queues.lock().unwrap();
+                if let Some(jobs) = waiting.get_mut(&id) {
+                    jobs.push_back(job);
+                    return;
+                }
+                waiting.insert(id.clone(), VecDeque::from([job]));
+                let queues = queues.clone();
+                thread::spawn(move || {
+                    loop {
+                        let job = {
+                            let mut waiting = queues.lock().unwrap();
+                            match waiting.get_mut(&id).and_then(VecDeque::pop_front) {
+                                Some(job) => job,
+                                None => {
+                                    waiting.remove(&id);
+                                    return;
+                                }
+                            }
+                        };
+                        job();
+                    }
                 });
-                let _ = queue.send(job);
             }
         }
     }
@@ -380,12 +415,13 @@ impl State {
         }
     }
 
-    fn opened(&self, id: &str) -> Result<Option<StoredSummary>, String> {
+    /// The summary of turn `id`, written when it waits, and the session whose design is due.
+    fn opened(&self, id: &str) -> Result<(Option<StoredSummary>, Option<String>), String> {
         if let Some(kept) = self.store.lock().unwrap().turn_summary(id) {
-            return Ok(Some(kept.clone()));
+            return Ok((Some(kept.clone()), None));
         }
         let Some(request) = self.waiting.lock().unwrap().remove(id) else {
-            return Ok(None);
+            return Ok((None, None));
         };
         let setup = self.setup.lock().unwrap().clone();
         let lone = self.lone.lock().unwrap().remove(id);
@@ -405,8 +441,8 @@ impl State {
             self.waiting.lock().unwrap().insert(id.to_owned(), request);
             return Err(format!("no summary on {id}"));
         }
-        self.design(&request.session_id);
-        Ok(self.store.lock().unwrap().turn_summary(id).cloned())
+        let summary = self.store.lock().unwrap().turn_summary(id).cloned();
+        Ok((summary, Some(request.session_id)))
     }
 
     fn write_name(&self, request: &NameRequest) {
