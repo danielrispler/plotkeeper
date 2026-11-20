@@ -742,29 +742,33 @@ fn clearing(sessions: Vec<Cleared>, pending: State<Clearing>) {
 
 /// What committing the cleared `sessions` sends: the daemon's `kill` and `forget` of each terminal, and a `StudioDelete`
 /// line for each session, as Delete does. The cards stay in the store.
-fn clear_commit(sessions: &[Cleared]) -> (Vec<serde_json::Value>, Vec<serde_json::Value>) {
+/// `ends` gives the lines that end the sessions of a terminal, as closing its pane does (`closed`), which come first.
+fn clear_commit(
+    sessions: &[Cleared],
+    ends: impl Fn(&str) -> Vec<serde_json::Value>,
+) -> (Vec<serde_json::Value>, Vec<serde_json::Value>) {
     let mut requests = Vec::new();
+    let mut lines = Vec::new();
     for terminal in sessions.iter().filter_map(|s| s.terminal.as_ref()) {
         requests.push(serde_json::json!({ "op": "kill", "id": terminal }));
         requests.push(serde_json::json!({ "op": "forget", "id": terminal }));
+        lines.extend(ends(terminal));
     }
-    let lines = sessions
-        .iter()
-        .map(|s| {
-            serde_json::json!({
-                "session_id": s.id,
-                "hook_event_name": studio_core::DELETE,
-                "studio_received_ms": millis(),
-            })
+    lines.extend(sessions.iter().map(|s| {
+        serde_json::json!({
+            "session_id": s.id,
+            "hook_event_name": studio_core::DELETE,
+            "studio_received_ms": millis(),
         })
-        .collect();
+    }));
     (requests, lines)
 }
 
 /// The app is quitting: the sessions cleared inside their undo window are deleted now (#244, story 35).
 fn commit_clearing(app: &AppHandle) {
     let sessions = std::mem::take(&mut *app.state::<Clearing>().0.lock().unwrap());
-    let (requests, lines) = clear_commit(&sessions);
+    let studio = app.state::<Mutex<Studio>>();
+    let (requests, lines) = clear_commit(&sessions, |terminal| session_ends(&studio, terminal));
     for request in requests {
         let _ = terminal::terminal_send(request, app.state());
     }
@@ -780,12 +784,17 @@ fn commit_clearing(app: &AppHandle) {
 /// A real `SessionEnd` after it changes nothing.
 #[tauri::command(async)]
 fn closed(terminal: String, studio: State<Mutex<Studio>>) -> Result<(), String> {
-    let lines: Vec<serde_json::Value> = studio
+    append(&session_ends(&studio, &terminal))
+}
+
+/// The `SessionEnd` lines for the sessions of `terminal` that have not ended.
+fn session_ends(studio: &Mutex<Studio>, terminal: &str) -> Vec<serde_json::Value> {
+    studio
         .lock()
         .unwrap()
         .sessions()
         .into_iter()
-        .filter(|s| s.terminal.as_deref() == Some(&terminal) && s.state != Ended)
+        .filter(|s| s.terminal.as_deref() == Some(terminal) && s.state != Ended)
         .filter(|s| !s.status_only)
         .map(|s| {
             serde_json::json!({
@@ -795,8 +804,7 @@ fn closed(terminal: String, studio: State<Mutex<Studio>>) -> Result<(), String> 
                 "studio_received_ms": millis(),
             })
         })
-        .collect();
-    append(&lines)
+        .collect()
 }
 
 /// The worktree roots file beside the event log `log` (danielrispler/plotkeeper#132).
@@ -1111,6 +1119,12 @@ fn main() {
         .manage(Cards::new(store))
         .manage(Notices::default())
         .manage(Clearing::default())
+        // A reload loses the window's undo timer and its hidden rows, which it shows again: nothing is pending a commit then.
+        .on_page_load(|webview, payload| {
+            if let tauri::webview::PageLoadEvent::Started = payload.event() {
+                webview.state::<Clearing>().0.lock().unwrap().clear();
+            }
+        })
         .manage(writer.clone())
         .manage(Summaries::default())
         .manage(terminal::Daemon::default())
@@ -2050,8 +2064,15 @@ mod tests {
             id: id.into(),
             terminal: terminal.map(Into::into),
         };
+        // The sessions that run in terminal t1 and have not ended: the same lines the window's close of the pane writes.
+        let ends = |terminal: &str| {
+            vec![serde_json::json!({
+                "session_id": format!("resume-{terminal}"),
+                "hook_event_name": "SessionEnd",
+            })]
+        };
         let (requests, lines) =
-            super::clear_commit(&[cleared("a", Some("t1")), cleared("b", None)]);
+            super::clear_commit(&[cleared("a", Some("t1")), cleared("b", None)], ends);
         assert_eq!(
             requests,
             vec![
@@ -2068,11 +2089,16 @@ mod tests {
                 )
             })
             .collect();
+        // Its sessions end first, as Delete's closing of the pane does, then each cleared session is deleted.
         assert_eq!(
             deleted,
-            [("a", studio_core::DELETE), ("b", studio_core::DELETE)]
+            [
+                ("resume-t1", "SessionEnd"),
+                ("a", studio_core::DELETE),
+                ("b", studio_core::DELETE)
+            ]
         );
-        assert!(super::clear_commit(&[]).1.is_empty());
+        assert!(super::clear_commit(&[], |_| vec![]).1.is_empty());
     }
 
     #[test]
