@@ -25,13 +25,14 @@ export const loses = (r: Revive) =>
     ? "its screen; the conversation reopens with claude --resume"
     : "the shell's state (history, variables); it restarts in its folder";
 
-// The bar over the terminal: `message`, then a button per action; none hides it.
-function say(message: string | null, actions: [string, () => void][] = []) {
+// The bar over the terminal: `message`, then a button per action, with what it does as its hover; none hides it.
+function say(message: string | null, actions: [string, string, () => void][] = []) {
   const bar = element("restart");
   bar.hidden = message === null;
   bar.replaceChildren(text("span", message ?? ""));
-  for (const [name, act] of actions) {
+  for (const [name, hover, act] of actions) {
     const button = text("button", name, "btn");
+    button.title = hover;
     button.addEventListener("click", act);
     bar.append(button);
   }
@@ -51,7 +52,7 @@ export const offerBuilds = () =>
 // The bar is shared, so an upgrade offer already on it wins; a link that failed has no fix.
 export async function offerPluginFix() {
   const problem = await invoke("plugin_setup").catch((e) => {
-    if (element("restart").hidden) say(`${e}`, [["Dismiss", () => say(null)]]);
+    if (element("restart").hidden) say(`${e}`, [["Dismiss", "Hide this message", () => say(null)]]);
     return null;
   });
   if (!problem || !element("restart").hidden) return;
@@ -60,7 +61,7 @@ export async function offerPluginFix() {
       () => say("Fixed. Shells and claude sessions started from now on load the studio plugin; ~/.zshrc.studio-backup has the old profile."),
       (e) => say(`${e}`),
     );
-  say(problem, [["Fix it", fix], ["Not now", () => say(null)]]);
+  say(problem, [["Fix it", "Point your shell profile's plugin folder at the studio's, after a backup", fix], ["Not now", "Leave the profile as it is", () => say(null)]]);
 }
 
 // The same for agy's copy of the studio plugin (#49): agy copies it on install, so a changed plugin
@@ -73,7 +74,7 @@ export async function offerAgyPluginFix() {
       () => say("Installed. agy sessions started from now on send their events to the studio."),
       (e) => say(`${e}`),
     );
-  say(problem, [["Install it", fix], ["Not now", () => say(null)]]);
+  say(problem, [["Install it", "Install the hook that sends agy's events to the studio", fix], ["Not now", "Leave agy as it is", () => say(null)]]);
 }
 
 const plan = async () => invoke("revival", { terms: await list() });
@@ -104,7 +105,7 @@ function offer(): Promise<"now" | "later"> {
         (busy.length ? ` Busy now: ${busy.map(running).join("; ")}.` : "");
       if (open && message !== shown) {
         shown = message;
-        say(message, [["Restart now…", choose("now")], ["Later", choose("later")]]);
+        say(message, [["Restart now…", "Choose which terminals restart on the new version", choose("now")], ["Later", "Keep the terminals on the old version for now", choose("later")]]);
       }
       await sleep(3000);
     }

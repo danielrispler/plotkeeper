@@ -4,7 +4,7 @@
 // those facts and, for a file, its hunk; the answer stays here, labelled as interpretation under the facts as recorded and the session never sees it. A failed call or a reply with no answer shows why, with
 // a retry.
 
-import { failure, invoke, text } from "./dom.js";
+import { failure, fullTitle, invoke, text } from "./dom.js";
 import { rendered } from "./markdown.js";
 import { studio } from "./state.js";
 
@@ -90,7 +90,8 @@ function askBox(session: string, anchor: Anchor, what: string): HTMLDetailsEleme
   field.rows = 2;
   field.placeholder = "Your question. The session never sees it.";
   field.setAttribute("aria-label", `Your question about ${what}`);
-  const send = button("Ask");
+  const sendHover = "Ask about this, from what was recorded; the session never sees it (⌘↩)";
+  const send = button("Ask", sendHover);
   const reply = document.createElement("div");
   reply.className = "ask-reply";
   reply.setAttribute("aria-live", "polite");
@@ -98,6 +99,7 @@ function askBox(session: string, anchor: Anchor, what: string): HTMLDetailsEleme
     const question = field.value.trim();
     if (!question) return field.focus();
     send.disabled = true;
+    send.title = "Waiting for the answer to your question";
     reply.replaceChildren(text("p", "Asking…", "asking"));
     try {
       const answer = await invoke("ask_anchor", { session, anchor, what, question });
@@ -105,11 +107,12 @@ function askBox(session: string, anchor: Anchor, what: string): HTMLDetailsEleme
       // The recorded facts are above; the answer is the model's reading of them.
       reply.replaceChildren(text("p", "Interpretation", "label"), rendered("div", answer, "", cwd));
     } catch (e) {
-      const retry = button("Retry");
+      const retry = button("Retry", "Ask the same question again");
       retry.addEventListener("click", ask);
       reply.replaceChildren(text("p", `No answer: ${e}.`, "ask-error"), retry);
     }
     send.disabled = false;
+    send.title = sendHover;
   };
   send.addEventListener("click", ask);
   // ⌘↩ asks, as Enter alone makes a new line.
@@ -118,7 +121,7 @@ function askBox(session: string, anchor: Anchor, what: string): HTMLDetailsEleme
   const picks = document.createElement("div");
   picks.className = "ask-suggestions";
   for (const question of suggestions(anchor)) {
-    const pick = button(question);
+    const pick = button(question, "Ask this question about it");
     pick.addEventListener("click", () => {
       field.value = question;
       void ask();
@@ -126,7 +129,7 @@ function askBox(session: string, anchor: Anchor, what: string): HTMLDetailsEleme
     picks.append(pick);
   }
   node.addEventListener("toggle", () => node.open && read());
-  node.append(text("summary", "Ask", "ask-summary"), recorded, picks, field, send, reply, ...(why ? [why] : []));
+  node.append(fullTitle(text("summary", "Ask", "ask-summary"), `Ask a question about ${what}, from what was recorded`), recorded, picks, field, send, reply, ...(why ? [why] : []));
   return node;
 }
 
@@ -144,7 +147,7 @@ export function whyNotElement(name: string, result: { facts: Facts; reasons: str
   }
   if (result.reasons) {
     const reasons = document.createElement("details");
-    reasons.append(text("summary", "possible reasons (not recorded)"), rendered("div", result.reasons, "", cwd));
+    reasons.append(fullTitle(text("summary", "possible reasons (not recorded)"), "Show or hide the writer's guesses, which nothing recorded"), rendered("div", result.reasons, "", cwd));
     node.append(reasons);
   }
   return node;
@@ -157,13 +160,15 @@ function whyNotBox(session: string, turn: number): HTMLElement {
   const field = document.createElement("input");
   field.placeholder = "a file or a name";
   field.setAttribute("aria-label", "A file or a name it did not touch");
-  const go = button("Why didn't it touch this?");
+  const goHover = "Find what was recorded about the name you typed, and why the turn did not touch it (↩)";
+  const go = button("Why didn't it touch this?", goHover);
   const out = document.createElement("div");
   out.setAttribute("aria-live", "polite");
   const run = async () => {
     const name = field.value.trim();
     if (!name) return field.focus();
     go.disabled = true;
+    go.title = "Reading what was recorded";
     out.replaceChildren(text("p", "Reading what was recorded…", "asking"));
     try {
       const result = await invoke("ask_why_not", { session, turn, name });
@@ -174,6 +179,7 @@ function whyNotBox(session: string, turn: number): HTMLElement {
       out.replaceChildren(text("p", `No answer: ${e}.`, "ask-error"));
     }
     go.disabled = false;
+    go.title = goHover;
   };
   go.addEventListener("click", run);
   field.addEventListener("keydown", (event) => event.key === "Enter" && run());
@@ -181,8 +187,9 @@ function whyNotBox(session: string, turn: number): HTMLElement {
   return node;
 }
 
-function button(label: string): HTMLButtonElement {
+function button(label: string, hover: string): HTMLButtonElement {
   const node = text("button", label, "btn") as HTMLButtonElement;
   node.type = "button";
+  node.title = hover;
   return node;
 }

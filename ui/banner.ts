@@ -1,7 +1,7 @@
 // "Where we were" (danielrispler/plotkeeper#124): the banner the rail opens on when Daniel returns to a session. Three lines
 // built from facts: the last Headline with its age, what happened since he looked, and what is open. The Brief folds inside.
 
-import { age, prose, text } from "./dom.js";
+import { age, fullTitle, prose, text } from "./dom.js";
 import type { OpenItem, Session, Since } from "./types.js";
 
 // A session whose last turn ended this long ago, with unseen turns, shows the banner.
@@ -53,7 +53,7 @@ export function bannerElement({ headline, endedAt, since, open, brief }: BannerF
     fold.className = "banner-brief";
     const body = document.createElement("section");
     body.append(...brief);
-    fold.append(text("summary", "Brief"), body);
+    fold.append(fullTitle(text("summary", "Brief"), "Show or hide the Brief: where the session stands"), body);
     node.append(fold);
   }
   return node;

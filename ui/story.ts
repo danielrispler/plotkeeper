@@ -25,6 +25,7 @@ import { decisionElement, questionElement } from "./questions.js";
 import { removeWorktreeByDefault, shortPaths, worktreeOf } from "./paths.js";
 import { checkTime, counts, estimateText, times } from "./times.js";
 import { studio } from "./state.js";
+import { titled } from "./keys.js";
 import { typeInto } from "./typing.js";
 import { repositoryOfWorktree } from "./workspaces.js";
 import {
@@ -45,10 +46,10 @@ import {
   type TurnSummary,
 } from "./types.js";
 
-// The top bar's header name, with the full name on the header's hover, where the name is cut (#162).
+// The top bar's header name, with the full name on the header's hover, where the name is cut (#162), then what a click does (#220).
 export function showBarName(name: string) {
   element("bar-name").textContent = name;
-  element("session-header").title = name || "Session story";
+  element("session-header").title = [name, titled(studio.files.keymap, "Show or hide the session's story", "studio::ToggleRail")].filter(Boolean).join("\n");
 }
 
 export function showView(selected: Selection | null) {
@@ -126,6 +127,10 @@ export function showView(selected: Selection | null) {
   fullTitle(element("detail"), fullDetail);
   element("command").textContent = step?.command ?? "";
   element("step").classList.toggle("has-command", Boolean(step?.command));
+  // Without a command the step has nothing to unfold, but its line keeps its hover, the full path among it (#220).
+  const stepLine = element("step-line");
+  stepLine.title = step?.command ? "Show or hide the step's full command" : "The step the agent is on";
+  stepLine.onclick = (event) => void (step?.command || event.preventDefault());
   showIntention(storyOf(session, agent));
   showQuestions(
     reports(session, "asks") ? session.questions.filter((question) => question.agent === (agent?.id ?? null)) : [],
@@ -400,12 +405,12 @@ export function forgetMissingSummaries() {
 const opened = new Set<string>();
 const replies = new Map<string, string>();
 
-// A folded block keyed `key`, open while Daniel keeps it open; `onOpen` runs at each opening.
-function folded(key: string, title: string, body: HTMLElement[], onOpen?: () => void): HTMLElement {
+// A folded block keyed `key`, open while Daniel keeps it open; `onOpen` runs at each opening. `hover` says what it holds.
+function folded(key: string, title: string, hover: string, body: HTMLElement[], onOpen?: () => void): HTMLElement {
   const node = document.createElement("details");
   node.className = "fold";
   node.open = opened.has(key);
-  node.append(text("summary", title), ...body);
+  node.append(fullTitle(text("summary", title), hover), ...body);
   node.addEventListener("toggle", () => {
     if (node.open) opened.add(key);
     else opened.delete(key);
@@ -544,7 +549,7 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
         })
         .catch(failure("turn_reply"));
     };
-    const fold = folded(`${key} response`, "Full response", [body], fetch);
+    const fold = folded(`${key} response`, "Full response", "Show or hide the agent's whole reply", [body], fetch);
     if (fold.hasAttribute("open")) fetch();
     node.append(fold);
   }
@@ -569,6 +574,8 @@ export function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
       draw();
     });
     button.classList.add("turn-line");
+    // The line's prompt and Headline carry their own full text; the rest of the line says what a click does (#220).
+    button.title = open ? "Fold this turn" : "Unfold this turn";
     button.setAttribute("aria-expanded", String(open));
     button.append(
       ...(line.unanswered ? [text("span", "●", "mark quiz-open")] : []),

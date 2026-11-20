@@ -79,6 +79,7 @@ function quizElements(stored: StoredCard, quiz: Quiz, shown: ReturnType<typeof q
         record("guess", { id, option: i });
       });
       button.disabled = state.answered;
+      button.title = state.answered ? "Already answered: the reasons show under the options" : "Pick this answer";
       item.append(button);
       if (state.reasons) {
         const why = prose("p", option.why);
@@ -97,6 +98,7 @@ function quizElements(stored: StoredCard, quiz: Quiz, shown: ReturnType<typeof q
       return record("quiz_tap", { id, tap: { kind: "skip" } });
     });
     skip.classList.add("quiz-skip");
+    skip.title = "Skip the question and show the card's explanation";
     return [title, ...(trial && check === null ? [confidenceRow(id, send, drawFeed)] : []), options, skip];
   }
   if (waiting) return [title, options, whyInput(id, send, drawFeed)];
@@ -182,6 +184,7 @@ function keyWrongButton(id: string, keyWrong: boolean): HTMLElement {
   const flag = pressable(prose("button", label) as HTMLButtonElement, keyWrong, () => record("quiz_tap", { id, tap: { kind: "key_wrong" } }));
   flag.classList.add("key-wrong");
   flag.disabled = keyWrong;
+  flag.title = keyWrong ? "Already flagged; a flag is kept and never undone" : "Flag the quiz's right answer as wrong";
   return flag;
 }
 
@@ -190,6 +193,7 @@ function understoodButton(id: string, taps: StoredCard["taps"]): HTMLElement {
   const done = taps?.some((tap) => tap.kind === "understood") ?? false;
   const chip = pressable(prose("button", "I get why") as HTMLButtonElement, done, () => record("quiz_tap", { id, tap: { kind: "understood" } }));
   chip.disabled = done;
+  chip.title = done ? "Already noted that you get why" : "Note that the explanation made sense to you";
   return chip;
 }
 
@@ -206,7 +210,7 @@ function moreElement(id: string, more: string | null): HTMLElement {
   node.open = moreOpen.has(id);
   const text = prose("p", more ?? "Writing…");
   text.className = "explanation";
-  node.append(prose("summary", "Explain more"), text);
+  node.append(fullTitle(prose("summary", "Explain more"), "Ask the writer for a longer explanation, then show or hide it"), text);
   node.addEventListener("toggle", () => {
     if (node.open) moreOpen.add(id);
     else moreOpen.delete(id);
@@ -243,7 +247,7 @@ const reasons: [Reason, string][] = [
 // toggling one. `keyWrong` is the quiz's flag, offered as a reason on a card with a quiz.
 function ratingElement(id: string, rating: Rating | null, keyWrong: boolean | null): HTMLElement {
   const choice = (label: string, pressed: boolean, picked: Rating) =>
-    pressable(prose("button", label), pressed, () => record("rate", { id, rating: picked }));
+    fullTitle(pressable(prose("button", label), pressed, () => record("rate", { id, rating: picked })), `Rate this explanation as ${label.toLowerCase()}`);
   const node = document.createElement("div");
   node.className = "rating";
   const row = document.createElement("p");

@@ -9,6 +9,7 @@ import type { LayoutMode } from "./layout.js";
 import { sessionName } from "./list.js";
 import { select } from "./selection.js";
 import { studio } from "./state.js";
+import { titled } from "./keys.js";
 import type { Session } from "./types.js";
 
 export type Toast = { session: Session; count: number };
@@ -44,6 +45,7 @@ export function showToast() {
     const close = text("button", "×", "btn quiet small");
     close.tabIndex = -1;
     close.setAttribute("aria-label", "Dismiss");
+    close.title = "Hide this toast until the session needs you again";
     close.addEventListener("click", (event) => {
       event.stopPropagation();
       for (const id of blocked) if (id !== focused) dismissed.add(id);
@@ -53,6 +55,7 @@ export function showToast() {
     const name = sessionName(shown.session);
     const line = questionLine(shown.session);
     toast.replaceChildren(fullTitle(text("strong", name, "name"), name), ...more, close, fullTitle(text("span", line, "line"), line));
+    toast.title = titled(studio.files.keymap, "Go to this session", "studio::NextNeedsYou");
   }
 }
 
@@ -63,8 +66,9 @@ export function showToast() {
 export function showStartToast(message: string, open: () => void) {
   const toast = element("start-toast");
   const row: HTMLElement[] = [];
-  const button = (label: string, kind: string, click: () => void) => {
+  const button = (label: string, hover: string, kind: string, click: () => void) => {
     const node = text("button", label, `btn ${kind}`);
+    node.title = hover;
     node.tabIndex = -1;
     node.addEventListener("pointerdown", (event) => event.preventDefault());
     node.addEventListener("click", () => {
@@ -74,9 +78,9 @@ export function showStartToast(message: string, open: () => void) {
     });
     return node;
   };
-  const close = button("×", "quiet small", () => {});
+  const close = button("×", "Hide this toast", "quiet small", () => {});
   close.setAttribute("aria-label", "Dismiss");
-  row.push(fullTitle(text("strong", message, "name"), message), button("Show output", "small", open), close);
+  row.push(fullTitle(text("strong", message, "name"), message), button("Show output", "Show the failed terminal's output", "small", open), close);
   toast.append(...row);
   toast.hidden = false;
 }

@@ -156,12 +156,14 @@ const dialog = () => element("settings-dialog") as HTMLDialogElement;
 const keyOf = (row: Row) => (row.control === "open" ? `open:${row.file}` : row.path.join("."));
 
 // A button (`more` is its classes beside the component's) for the page's `action`, on the row `key`: it works through its dataset, which the page's listeners read.
-function button(label: string, more: string, action: Action, key: string, disabled: boolean): HTMLElement {
+// `hover` says what it does, or, disabled, why it is off (#220).
+function button(label: string, more: string, action: Action, key: string, disabled: boolean, hover: string): HTMLElement {
   const b = text("button", label, `btn ${more}`);
   b.setAttribute("type", "button");
   b.dataset.action = action;
   b.dataset.key = key;
   b.toggleAttribute("disabled", disabled);
+  b.title = hover;
   return b;
 }
 
@@ -173,14 +175,13 @@ function drawRow(row: Row): HTMLElement {
   const info = text("div", "", "setting-text");
   info.append(title, text("div", row.description, "setting-description"));
   if (row.control === "open") {
-    const open = button("Open", "open", "open", keyOf(row), row.disabled);
+    const open = button("Open", "open", "open", keyOf(row), row.disabled, row.disabled ? BROKEN : `Open ${row.file}.json in your editor`);
     open.setAttribute("aria-label", row.title);
     node.append(info, open);
     return node;
   }
   if (row.changed) {
-    const undo = button("", "quiet reset", "reset", keyOf(row), row.disabled);
-    undo.title = "Reset to default";
+    const undo = button("", "quiet reset", "reset", keyOf(row), row.disabled, row.disabled ? BROKEN : "Reset to default");
     undo.setAttribute("aria-label", `Reset ${row.title} to default`);
     undo.innerHTML = UNDO;
     title.append(undo);
@@ -205,14 +206,16 @@ function control(row: Exclude<Row, { control: "open" }>): HTMLElement {
   if (row.control === "stepper") {
     const group = text("div", "", "stepper");
     const step = (by: 1 | -1) => {
-      const b = button(by === 1 ? "+" : "−", "quiet", by === 1 ? "up" : "down", keyOf(row), row.disabled || stepped(row, by) === row.value);
+      const atBound = stepped(row, by) === row.value;
+      const hover = row.disabled ? BROKEN : atBound ? `Already at the ${by === 1 ? "highest" : "lowest"} value` : `${by === 1 ? "Increase" : "Decrease"} ${row.title.toLowerCase()}`;
+      const b = button(by === 1 ? "+" : "−", "quiet", by === 1 ? "up" : "down", keyOf(row), row.disabled || atBound, hover);
       b.setAttribute("aria-label", `${by === 1 ? "Increase" : "Decrease"} ${row.title}`);
       return b;
     };
     group.append(step(-1), text("span", row.value === 0 && row.zero ? row.zero : String(row.value), "stepper-value"), step(1));
     return group;
   }
-  const toggle = button("", "switch", "toggle", keyOf(row), row.disabled);
+  const toggle = button("", "switch", "toggle", keyOf(row), row.disabled, row.disabled ? BROKEN : `Turn ${row.value ? "off" : "on"}: ${row.title}`);
   toggle.setAttribute("role", "switch");
   toggle.setAttribute("aria-checked", String(row.value));
   toggle.setAttribute("aria-label", row.title);
@@ -227,7 +230,7 @@ export function drawSettingsPage() {
   if (page.error !== null) {
     const line = text("div", "", "broken");
     line.dataset.key = "broken";
-    line.append(text("span", page.error), button("Open settings.json", "", "open", "open:settings", false));
+    line.append(text("span", page.error), button("Open settings.json", "", "open", "open:settings", false, "Open settings.json in your editor to fix it"));
     lines.push(line);
   }
   if (refused !== null) {
@@ -240,7 +243,7 @@ export function drawSettingsPage() {
   patch(element("settings-body"), sections);
   // A dropdown's selection is a property the patch does not carry: set it from the row.
   for (const select of element("settings-body").querySelectorAll("select")) select.value = select.dataset.value ?? "";
-  element("settings-close").title = titled(studio.files.keymap, "Close", "studio::Dismiss");
+  element("settings-close").title = titled(studio.files.keymap, "Close settings", "studio::Dismiss");
 }
 
 const rowFor = (key: string) => current().sections.flatMap((s) => s.rows).find((row) => keyOf(row) === key);

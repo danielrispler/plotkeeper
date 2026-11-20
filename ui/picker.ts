@@ -50,6 +50,7 @@ export const startLast: Start = (cwd, prompt) => startAgent(lastAgent(), cwd, pr
 export function newTask(
   placeholder: string,
   label: string,
+  hover: string,
   create: (value: string) => Promise<Workspace>,
   prompt: boolean,
   report: (error: unknown) => void = failed,
@@ -62,6 +63,7 @@ export function newTask(
   field.setAttribute("aria-label", placeholder);
   field.spellcheck = false;
   const button = text("button", label, "btn");
+  button.title = hover;
   form.append(field, button);
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -90,7 +92,7 @@ export function newTask(
 export const quickTask = (project: string, main: Workspace, request: string, create: typeof invoke = invoke): Promise<Workspace> =>
   request ? create("create_named_task", { project, request }) : Promise.resolve(main);
 const quickStart = (project: string, main: Workspace, start: Start) =>
-  newTask("Issue #, spec path or prompt; empty for main", "Start", (request) => quickTask(project, main, request), true, failed, start);
+  newTask("Issue #, spec path or prompt; empty for main", "Start", "Start the session: in a new task for an issue, spec or prompt, else in the main checkout (↩)", (request) => quickTask(project, main, request), true, failed, start);
 
 // The Auto mode choice (danielrispler/Falinks#541): off each time the picker opens; the session starts in Claude Code's
 // auto mode when on. Bypass mode is never offered.
@@ -113,11 +115,11 @@ function agentRow(offered: string[], chosen: string, auto: HTMLElement): [HTMLEl
     auto.hidden = !showsAuto(current);
     row.replaceChildren(
       ...offered.map((agent) => {
-        return pressable(text("button", AGENT_NAMES[agent] ?? agent, "btn small"), agent === current, () => {
+        return fullTitle(pressable(text("button", AGENT_NAMES[agent] ?? agent, "btn small"), agent === current, () => {
           current = agent;
           keepAgent(agent);
           draw();
-        });
+        }), agent === "terminal" ? "Start a plain terminal" : `Start the session in ${AGENT_NAMES[agent] ?? agent}`);
       }),
     );
   };
@@ -132,6 +134,7 @@ export function workspaceRow(name: string, workspace: Workspace, start: Start): 
     start(workspace.path, "").catch(failure("start", "error"));
   });
   button.classList.add("row");
+  button.title = "Start the session here";
   const first = text("span", "", "l1");
   first.append(fullTitle(text("span", name, "name"), name));
   const second = Object.assign(text("span", shortPath(workspace.path), "l2"), { title: workspace.path }); // danielrispler/Falinks#571
@@ -145,7 +148,7 @@ function projectPill(project: string, kind: Kind): HTMLElement {
   const pill = pressable(text("button", "", "btn small project-pill"), false, () => void showProjects(project, kind));
   pill.removeAttribute("aria-pressed");
   pill.append(text("span", lastSegment(project) || "No project", "name"), " ▾");
-  pill.title = project;
+  pill.title = `${project}\nShow another project`;
   return pill;
 }
 
@@ -169,11 +172,12 @@ async function showProjects(current: string, kind: Kind) {
       ...matchingProjects(paths, query).map((path) => {
         const row = pressable(document.createElement("button"), path === current, () => pick(path));
         row.classList.add("row");
+        row.title = "Show this project's worktrees";
         row.append(fullTitle(text("span", lastSegment(path), "name"), path), Object.assign(text("span", shortPath(path), "l2"), { title: path }));
         return row;
       }),
     );
-  const add = pressable(text("button", "Add project…", "name"), false, () => void showAddProject());
+  const add = fullTitle(pressable(text("button", "Add project…", "name"), false, () => void showAddProject()), "Add a repository as a project");
   add.removeAttribute("aria-pressed");
   add.classList.add("row");
   const search: HTMLElement[] = [];
@@ -254,6 +258,7 @@ export function showPalette(entries: Entry[], run: (binding: Binding) => void) {
       ...shown().map((entry, index) => {
         const button = pressable(document.createElement("button"), index === highlighted, () => choose(entry));
         button.classList.add("row");
+        button.title = "Run this action (↩)";
         const line = text("span", "", "l1");
         line.append(fullTitle(text("span", entry.title, "name"), entry.title), text("span", entry.keys.join("  "), "row-state"));
         button.append(line, ...(entry.note ? [fullTitle(text("span", entry.note, "l2"), entry.note)] : []));
@@ -311,10 +316,11 @@ async function drawPicker(kind: Kind, project: string) {
 }
 
 // A branch's row: its label, cut to fit, with its full text in a title, and its note.
-export function branchRow(label: string, note: string | null | undefined, disabled: boolean, pick: () => void): HTMLElement {
+export function branchRow(label: string, note: string | null | undefined, disabled: boolean, pick: () => void, why = ""): HTMLElement {
   const button = pressable(document.createElement("button"), false, pick);
   button.classList.add("row");
   button.disabled = disabled;
+  button.title = disabled ? `Can't switch to it: ${why || note || "switching is off"}` : "Switch the main checkout to this branch";
   const line = text("span", "", "l1");
   line.append(fullTitle(text("span", label, "name"), label), ...(note ? [text("span", note, "row-state")] : []));
   button.append(line);
@@ -332,7 +338,7 @@ export async function showBranches(from?: string) {
     const project = from ?? (await shownProject());
     const [workspaces, branches] = await Promise.all([invoke("workspaces", { project }), invoke("branches", { project })]);
     const blocked = branchBlocked(workspaces, studio.listed);
-    const rows = branchOptions(branches, blocked).map(({ branch, label, note, disabled }) =>
+    const rows = branchOptions(branches, blocked).map(({ branch, label, note, disabled, why }) =>
       branchRow(label, note, disabled, () => {
         invoke("switch_branch", { project, branch: branch.name, remote: branch.remote })
           .then(() => {
@@ -340,7 +346,7 @@ export async function showBranches(from?: string) {
             return refreshAfterSwitch(project);
           })
           .catch(failed);
-      }),
+      }, why),
     );
     picker.replaceChildren(...(blocked ? [text("p", `Switching is off: ${blocked}`, "empty")] : []), ...rows);
   } catch (e) {
@@ -375,11 +381,11 @@ export function refuse(error: unknown) {
 export async function showAddProject() {
   const picker = element("picker");
   if (closed("Add project")) return;
-  const choose = pressable(text("button", "Choose folder…", "name"), false, () => {
+  const choose = fullTitle(pressable(text("button", "Choose folder…", "name"), false, () => {
     invoke("choose_folder")
       .then((folder) => (folder ? addProject(folder) : undefined))
       .catch(failed);
-  });
+  }), "Pick a repository's folder to add as a project");
   choose.classList.add("row");
   picker.replaceChildren(choose);
   picker.hidden = false;
@@ -390,6 +396,7 @@ export async function showAddProject() {
     const rows = suggested.map((path) => {
       const row = pressable(document.createElement("button"), false, () => void addProject(path));
       row.classList.add("row");
+      row.title = `Add ${path} as a project`;
       row.append(Object.assign(text("span", shortPath(path), "name"), { title: path }));
       return row;
     });

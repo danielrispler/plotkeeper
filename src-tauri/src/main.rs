@@ -1771,7 +1771,10 @@ fn hover_delay() {
     use objc2::runtime::AnyObject;
     use objc2_foundation::{NSDictionary, NSNumber, NSUserDefaults, ns_string};
     let delay = NSNumber::new_i32(500);
-    let defaults = NSDictionary::<_, AnyObject>::from_slices(&[ns_string!("NSInitialToolTipDelay")], &[&*delay]);
+    let defaults = NSDictionary::<_, AnyObject>::from_slices(
+        &[ns_string!("NSInitialToolTipDelay")],
+        &[&*delay],
+    );
     // SAFETY: the dictionary maps a string key to an NSNumber, the types registerDefaults expects.
     unsafe { NSUserDefaults::standardUserDefaults().registerDefaults(&defaults) };
 }

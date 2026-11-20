@@ -62,10 +62,11 @@ export function questionElement(question: Question): HTMLElement {
               other.querySelector("button")?.setAttribute("aria-pressed", String(next.includes(label)));
             }
             const ready = picked.size === questions.length;
-            block.querySelector<HTMLButtonElement>(".send")?.toggleAttribute("disabled", !ready);
+            readySend(block, ready);
             if (!sendButton) send();
           });
           button.append(...content);
+          button.title = asked.multiSelect ? "Tick or untick this choice" : "Choose this answer";
           item.append(button);
         } else item.append(...content);
         // A label may hold a comma, so only a multi-select answer is split (danielrispler/Falinks#434, decision 41).
@@ -78,7 +79,7 @@ export function questionElement(question: Question): HTMLElement {
     if (chosen !== null) block.append(text("p", `Your answer: ${chosen}`));
   }
   if (ask !== null) block.append(answerButtons(ask, sendButton ? [["Send", send, "send"]] : []));
-  block.querySelector<HTMLButtonElement>(".send")?.toggleAttribute("disabled", picked.size < questions.length);
+  readySend(block, picked.size === questions.length);
   return block;
 }
 
@@ -110,19 +111,35 @@ export function decisionElement(ask: Ask): HTMLElement {
   return block;
 }
 
+// "Send" is enabled once every question has a choice; disabled, its hover says so.
+function readySend(block: HTMLElement, ready: boolean) {
+  const send = block.querySelector<HTMLButtonElement>(".send");
+  send?.toggleAttribute("disabled", !ready);
+  if (send) send.title = ready ? "Send your answers to the agent" : "Choose an answer to every question first";
+}
+
+// What each of the card's buttons does, on its hover.
+const answerHovers: Record<string, string> = {
+  Approve: "Approve the plan; the agent goes on with it",
+  Reject: "Reject the plan; the agent is told",
+  Allow: "Let the agent make this call",
+  Deny: "Refuse this call; the agent is told",
+};
+
 // The card's own buttons, each a label, its click and a class, then "Answer in the terminal". "Send"
 // starts disabled, until every question has a choice.
 function answerButtons(ask: Ask, buttons: [string, () => void, string?][]): HTMLElement {
   const row = document.createElement("p");
   row.className = "answer-buttons";
-  const button = (label: string, click: () => void, className = "") => {
+  const button = (label: string, hover: string, click: () => void, className = "") => {
     const node = text("button", label, `btn ${className}`.trim()) as HTMLButtonElement;
     node.type = "button";
+    node.title = hover;
     node.addEventListener("click", click);
     return node;
   };
-  row.append(...buttons.map(([label, click, className]) => button(label, click, className)));
-  row.querySelector<HTMLButtonElement>(".send")?.toggleAttribute("disabled", true);
-  row.append(button("Answer in the terminal", () => sendAnswer(ask, null)));
+  row.append(...buttons.map(([label, click, className]) => button(label, answerHovers[label] ?? "", click, className)));
+  readySend(row, false);
+  row.append(button("Answer in the terminal", "Leave the card and answer in the session's terminal", () => sendAnswer(ask, null)));
   return row;
 }

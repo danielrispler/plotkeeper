@@ -24,17 +24,18 @@ code:empty { display: none; }
 .btn { font: inherit; color: inherit; background: var(--raised); border: 0; border-radius: var(--radius);
        padding: var(--sp-2) var(--sp-4); cursor: pointer; text-align: start;
        transition: background-color var(--motion), color var(--motion), box-shadow var(--motion); }
-.btn:hover { background: var(--pressed); }
-.btn:active { background: var(--selected); }
+.btn:hover:not(:disabled) { background: var(--pressed); }
+.btn:active:not(:disabled) { background: var(--selected); }
 .btn[aria-pressed="true"] { background: var(--selected); }
-.btn:disabled { opacity: .45; pointer-events: none; }
+/* A disabled button keeps its hover, which says why it is off (#220). */
+.btn:disabled { opacity: .45; cursor: default; }
 /* Quiet: no fill until hovered, for actions that should recede. */
 .btn.quiet, .btn.row, .strip .btn { background: none; }
-.btn.quiet:hover, .btn.row:hover, .strip .btn:hover { background: var(--hover); }
+.btn.quiet:hover:not(:disabled), .btn.row:hover:not(:disabled), .strip .btn:hover { background: var(--hover); }
 /* The selected row: a fill and an edge bar at its start (danielrispler/Falinks#570). */
 .btn.row[aria-pressed="true"], .strip .btn[aria-pressed="true"] { background: var(--selected); box-shadow: inset var(--mark) 0 0 var(--fg); }
 .btn.small { font-size: var(--size-small); padding: var(--sp-1) var(--sp-4); color: var(--muted); }
-.btn.small:hover { color: var(--fg); }
+.btn.small:hover:not(:disabled) { color: var(--fg); }
 
 /* The window: a grid laid right to left, so the list is on the right, the terminal in the centre and
    the rail on the left; each region lays itself out left to right. */
@@ -370,7 +371,7 @@ body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
 .unavailable { color: var(--muted); font-size: var(--size-small); margin: 0 0 var(--sp-2); }
 .step { margin: 0; min-width: 0; font-size: var(--size-small); }
 .step summary { overflow-wrap: anywhere; }
-.step:not(.has-command) summary { list-style: none; pointer-events: none; }
+.step:not(.has-command) summary { list-style: none; cursor: default; }
 .step code { display: block; white-space: pre-wrap; overflow-wrap: anywhere; margin: var(--sp-2) 0 0; }
 .tool-name { font-weight: 600; }
 /* The feed of turns, newest first: each turn one block, told apart by a line, as in the story rail
@@ -414,7 +415,7 @@ body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
 .options { list-style: none; margin: var(--sp-4) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
 .options li p { margin: var(--sp-1) 0 var(--sp-2); color: var(--muted); }
 .card .btn { background: var(--bg); }
-.card .btn:hover { background: var(--hover); }
+.card .btn:hover:not(:disabled) { background: var(--hover); }
 .options .btn { width: 100%; }
 /* The picked one is marked by a line, which carries meaning, and weight. */
 .card .btn[aria-pressed="true"] { font-weight: 600; box-shadow: inset 0 0 0 var(--mark) var(--fg); }
@@ -480,7 +481,7 @@ body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
 .choices li:has(.btn) { padding: 0; }
 .choices li .btn { display: flex; flex-direction: column; align-items: flex-start; width: 100%; padding: var(--sp-3) var(--sp-5);
                    background: none; }
-.choices li .btn:hover { background: var(--hover); }
+.choices li .btn:hover:not(:disabled) { background: var(--hover); }
 .answer-buttons { display: flex; gap: var(--sp-4); }
 /* A plan the card can approve (danielrispler/Falinks#478): its text, scrolled within the dock. */
 .decision .plan { white-space: pre-wrap; max-height: 30vh; overflow-y: auto; margin: var(--sp-3) 0 0; padding: var(--sp-3) var(--sp-5);
@@ -611,4 +612,4 @@ body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
 .project-workspaces .workspace-line { display: flex; align-items: center; gap: var(--sp-2); padding-inline-end: var(--sp-3); }
 .project-workspaces .workspace-line .row { flex: 1; min-width: 0; width: auto; }
 .project-workspaces .workspace .pull { flex: none; color: var(--fg); }
-.project-workspaces .workspace .pull:disabled { pointer-events: auto; cursor: default; color: var(--muted); }
+.project-workspaces .workspace .pull:disabled { color: var(--muted); }

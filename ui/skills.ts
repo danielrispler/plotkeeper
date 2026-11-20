@@ -3,7 +3,7 @@
 // opens to its `SKILL.md`, rendered. "Edit" opens a user or project skill through the opener (danielrispler/Falinks#557);
 // plugin skills are read-only.
 
-import { element, failure, invoke, pressable, text } from "./dom.js";
+import { element, failure, fullTitle, invoke, pressable, text } from "./dom.js";
 import { rendered } from "./markdown.js";
 import { studio } from "./state.js";
 
@@ -22,7 +22,7 @@ function row(skill: Skill): HTMLElement {
   const { description, body } = parts(skill.text);
   const fold = document.createElement("details");
   fold.className = "skill";
-  const summary = text("summary", "");
+  const summary = fullTitle(text("summary", ""), `Show or hide the skill ${skill.name}`);
   summary.append(text("span", skill.name, "name"));
   if (description) summary.append(text("span", description, "l2"));
   fold.append(summary);
@@ -32,7 +32,7 @@ function row(skill: Skill): HTMLElement {
     if (skill.editable) {
       const editor = studio.files.settings.editor;
       const edit = () => void invoke("open_file", { path: skill.path, line: 1, column: 1, cwd: null, editor }).catch(failure("open_file", "error"));
-      fold.append(pressable(text("button", "Edit", "btn small"), false, edit));
+      fold.append(fullTitle(pressable(text("button", "Edit", "btn small"), false, edit), "Open the skill's file in your editor"));
     }
     fold.append(rendered("div", body, "", skill.path.replace(/\/[^/]*$/, "")));
   });

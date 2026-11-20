@@ -10,6 +10,9 @@ declare const marked: typeof import("marked");
 const entities: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 const escape = (text: string) => text.replace(/[&<>"']/g, (c) => entities[c]);
 
+// A link's hover names its target (#220): the page has no status bar to show it.
+const opens = (target: string, where: "editor" | "browser") => escape(`Open ${target} in the ${where}`);
+
 // Set while a link's text renders, so inline code there is not linked again inside it.
 let inLink = false;
 
@@ -23,7 +26,7 @@ const create = () =>
       // Inline code that is a whole file path links to the editor (danielrispler/Falinks#581), unless it is a link's text.
       codespan({ text }) {
         const code = `<code>${escape(text)}</code>`;
-        return !inLink && codePath(text) ? `<a href="${escape(text)}" data-file>${code}</a>` : code;
+        return !inLink && codePath(text) ? `<a href="${escape(text)}" data-file title="${opens(text, "editor")}">${code}</a>` : code;
       },
       link({ href, tokens }) {
         inLink = true;
@@ -33,8 +36,8 @@ const create = () =>
         } finally {
           inLink = false;
         }
-        if (/^https?:\/\//i.test(href)) return `<a href="${escape(href)}">${inner}</a>`;
-        return !href.startsWith("#") && fileTarget(href) ? `<a href="${escape(href)}" data-file>${inner}</a>` : inner;
+        if (/^https?:\/\//i.test(href)) return `<a href="${escape(href)}" title="${opens(href, "browser")}">${inner}</a>`;
+        return !href.startsWith("#") && fileTarget(href) ? `<a href="${escape(href)}" data-file title="${opens(href, "editor")}">${inner}</a>` : inner;
       },
     },
   });

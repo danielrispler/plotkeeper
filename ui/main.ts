@@ -268,7 +268,9 @@ function applySettings(files: SettingsFiles) {
   studio.texts = files;
   studio.files = reload(studio.files, files);
   const { settings, errors } = studio.files;
-  element("settings-gear").title = titled(studio.files.keymap, "Settings", "studio::OpenSettings");
+  element("settings-gear").title = titled(studio.files.keymap, "Open settings", "studio::OpenSettings");
+  element("new-session").title = titled(studio.files.keymap, "Start a new session", "studio::NewSession");
+  element("settings-close").title = titled(studio.files.keymap, "Close settings", "studio::Dismiss");
   setSettingsErrors(errors);
   // Only a changed `zoom` resets the zoom the keys set.
   const to = reloadedZoom(zoom, previous, settings);

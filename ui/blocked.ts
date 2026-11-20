@@ -40,6 +40,13 @@ function detailOf(card: BlockedCommand, now: number): string | null {
   return card.exit_code == null ? "No exit code" : `exit code ${card.exit_code}`;
 }
 
+// What each of a blocked command's buttons does, on its hover.
+const blockedHovers: Record<string, string> = {
+  Allow: "Let the agent run this command once",
+  Decline: "Refuse the command; the agent is told",
+  "Ask again": "Renew the approval and ask the agent to run the command again",
+};
+
 // The buttons of a card that waits: Allow and Decline while Daniel has not chosen, Ask again once his Allow went unused.
 function buttonsOf(status: BlockedStatus, answerable: boolean): string[] {
   if (!blockedWaits(status)) return [];
@@ -143,6 +150,7 @@ export function blockedElement(session: string, card: BlockedCommand, agent: str
     for (const label of view.buttons) {
       const button = text("button", label, "btn") as HTMLButtonElement;
       button.type = "button";
+      button.title = blockedHovers[label] ?? "";
       button.addEventListener("click", async () => {
         if (label === "Ask again") {
           // The pass may have expired or been spent, so the approval is renewed before the line asks for the retry.

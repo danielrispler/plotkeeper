@@ -94,14 +94,16 @@ test("an argument-keyed reply answers by that argument", async () => {
 });
 
 // Runs a page's head script in a stand-in page: `load` fires, then the timers run.
-const runHead = (options) => {
+// `nodes`: what the page's hover check finds, by selector (none by default).
+const runHead = (options, nodes = { controls: [], titled: [] }) => {
   const logged = [];
   const added = [];
   const handlers = {};
   const timers = [];
-  const document = { body: { classList: { add: (...names) => added.push(...names) } }, marker: "drawn" };
+  const querySelectorAll = (selector) => (selector === "[title]" ? nodes.titled : nodes.controls);
+  const document = { body: { classList: { add: (...names) => added.push(...names) } }, marker: "drawn", querySelectorAll };
   vm.runInNewContext(headSource(options), {
-    document, console: { log: (line) => logged.push(line) },
+    document, console: { log: (line) => logged.push(line) }, getComputedStyle: (node) => ({ pointerEvents: node.pointer ?? "auto" }),
     addEventListener: (name, run) => (handlers[name] = run),
     setTimeout: (run) => timers.push(run),
   });
@@ -133,9 +135,27 @@ test("a script that throws logs a snap:fail line, and the body's classes are set
   assert.deepEqual(added, ["rail-open"]);
 });
 
-test("a page without a script has no load handler, and no classes by default", async () => {
+test("a page without a script logs nothing while the hover rule holds, and has no classes by default", async () => {
   const { logged, added } = await runHead({});
   assert.deepEqual([logged, added], [[], []]);
+});
+
+// A stand-in element for the hover check (#220): its tag, label, own title and the nearest title up from it.
+const control = (label, { title = null, hover = title, pointer = "auto" } = {}) => ({
+  tagName: "BUTTON", id: "", className: "btn", textContent: label, title: title ?? "", pointer,
+  hasAttribute: (name) => name === "title" && title !== null,
+  closest: (selector) => (selector === ".xterm" ? null : hover === null ? null : { getAttribute: () => hover }),
+});
+
+test("the hover check fails a control with no hover, one whose hover repeats its label, and a titled node out of reach", async () => {
+  const silent = control("×");
+  const repeats = control("Dismiss", { title: "Dismiss" });
+  const unreachable = control("Pull ↓2", { title: "Uncommitted changes would be overwritten", pointer: "none" });
+  const fine = control("+", { title: "Start a new session (⌘N)" });
+  const inherited = control("Open", { hover: "Resume this session" });
+  const { logged } = await runHead({}, { controls: [silent, repeats, fine, inherited, unreachable], titled: [repeats, fine, unreachable] });
+  assert.deepEqual(logged.map((line) => line.replace(/ on .*/, "")), ["snap:fail hover: no hover", "snap:fail hover: repeats its label", "snap:fail hover: out of the pointer's reach"]);
+  assert.ok(failed(logged));
 });
 
 test("snapPage puts a fixture's script in the page, after the stub and before the app", () => {
