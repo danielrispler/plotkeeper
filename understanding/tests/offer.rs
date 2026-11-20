@@ -820,3 +820,33 @@ fn a_turn_that_changed_nothing_is_not_offered_the_change_of_a_card_in_a_shared_c
         Offer::Card
     );
 }
+
+#[test]
+fn a_turns_own_card_with_a_helpers_edit_is_a_turn_decision_and_keeps_its_lone_quiz() {
+    let (_dir, store) = store();
+    let (_o, offers) = offers();
+    let mut studio = studio_core::Studio::default();
+    for (name, ms) in [("SessionStart", 1), ("UserPromptSubmit", 2), ("Stop", 9)] {
+        let line = json!({ "session_id": "s", "hook_event_name": name, "prompt": "p", "studio_received_ms": ms });
+        studio.replay(&line.to_string());
+    }
+    let session = studio.session("s").cloned().unwrap();
+    assert_eq!(session.turns[0].id.as_deref(), Some("s@9"));
+    let mut request = card_request("s@9", None, &diff_of(10));
+    request.changed_by = [("w".to_string(), ["a.rs".to_string()].into())].into();
+    let (_, decided) = offer_stop(
+        &store,
+        &FakeWriter,
+        request,
+        &session,
+        &TurnFacts::default(),
+        &offers,
+        || {},
+        |_| {},
+    );
+    let decided = decided.unwrap();
+    assert_eq!(
+        (decided.kind, decided.offer),
+        (OfferKind::Turn, Offer::Quiz)
+    );
+}

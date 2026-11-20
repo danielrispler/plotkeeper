@@ -338,9 +338,14 @@ pub fn offer_stop(
             None,
         );
     }
+    // A subagent's change after the turn's `Stop` is no turn's own card, which has the turn's id.
+    let own = session
+        .turns
+        .iter()
+        .any(|t| t.id.as_deref() == Some(&request.id));
     let kind = match () {
         _ if request.agent.is_some() => OfferKind::Worker,
-        _ if turn.facts.files.is_empty() && !request.changed_by.is_empty() => OfferKind::LateChange,
+        _ if !own && !request.changed_by.is_empty() => OfferKind::LateChange,
         _ => OfferKind::Turn,
     };
     let decision = decide(kind, turn, &changed_in(request.diff()));
