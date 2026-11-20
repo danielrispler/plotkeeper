@@ -293,8 +293,9 @@ impl Default for Turn {
 
 impl Turn {
     /// Takes an event `name` of the session's own agent with `prompt_id`; `idle` when it is Claude
-    /// Code's idle notice or the shell's `INTERRUPTED` line. Returns the worktrees whose end tree to record, those of the turn it
-    /// ends, and whether it is in a turn whose first touches record a start tree.
+    /// Code's idle notice or the shell's `INTERRUPTED` line. Returns the worktrees whose end tree
+    /// to record, those of the turn it ends, and whether it is in a turn whose first touches
+    /// record a start tree.
     pub fn take(&mut self, name: &str, prompt_id: Option<&str>, idle: bool) -> (Vec<String>, bool) {
         // The shell's line ends the turn it names, never one that started after it.
         if name == INTERRUPTED && self.prompt_id.as_deref() != prompt_id {

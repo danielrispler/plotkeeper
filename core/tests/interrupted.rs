@@ -255,3 +255,45 @@ fn a_late_stop_after_the_interrupted_line_tells_nothing_again() {
         "{late:?}"
     );
 }
+
+#[test]
+fn a_permission_wait_asks_for_none() {
+    // Needs you comes from the hooks only (danielrispler/Falinks#540); 7501 never changes it.
+    let mut studio = cancelled_first_prompt();
+    studio.apply(&event(
+        "PermissionRequest",
+        T0 + 3_000,
+        json!({ "prompt_id": "p-1", "tool_name": "Bash", "tool_input": { "command": "rm -rf target" } }),
+    ));
+    assert_eq!(state(&studio), State::NeedsYou);
+
+    let mut out = Vec::new();
+    for state in ["blocked", "idle"] {
+        for s in 0..10 {
+            out.extend(listed(&mut studio, state, T0 + 4_000 + s * 1_000));
+        }
+    }
+
+    assert!(interrupts(&out).is_empty(), "{out:?}");
+    assert_eq!(state(&studio), State::NeedsYou);
+}
+
+#[test]
+fn a_long_call_or_a_queued_prompt_reporting_working_asks_for_none() {
+    let mut studio = cancelled_first_prompt();
+    studio.apply(&event(
+        "PreToolUse",
+        T0 + 3_000,
+        json!({ "prompt_id": "p-1", "tool_name": "Bash", "tool_input": { "command": "npm run check" }, "tool_use_id": "t1" }),
+    ));
+    // Typed while it runs: queued with the running turn's id.
+    studio.apply(&prompt(T0 + 4_000, "and push it", "p-1"));
+
+    let mut out = Vec::new();
+    for s in 0..120 {
+        out.extend(listed(&mut studio, "working", T0 + 5_000 + s * 1_000));
+    }
+
+    assert!(interrupts(&out).is_empty(), "{out:?}");
+    assert_eq!(state(&studio), State::Running);
+}

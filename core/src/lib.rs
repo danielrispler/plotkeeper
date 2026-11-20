@@ -175,7 +175,7 @@ pub struct Session {
     /// The prompt id of the turn whose prompt asked for the name: when that turn ends without its
     /// `Stop` and with no call, Daniel cancelled it, and his next prompt asks again.
     #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
-    name_turn: Option<String>,
+    naming_turn: Option<String>,
     /// The id `claude --resume` takes: its latest conversation's, which a `/clear` changes while the
     /// row keeps its first id (danielrispler/Falinks#461, decision 18).
     pub resume_id: String,
@@ -2706,15 +2706,15 @@ impl Studio {
         // The turn this event ends, then the one it starts, with the prompts queued for it.
         if ends_early {
             // A naming turn Daniel cancelled before any call: his next prompt names the session.
-            let named_here = session.name_turn.is_some() && session.name_turn == session.turn;
+            let naming = session.naming_turn.is_some() && session.naming_turn == session.turn;
             let called = |id: &str| {
                 (session.ledger.rows().iter()).any(|r| r.prompt_id.as_deref() == Some(id))
             };
-            if named_here && !session.turn.as_deref().is_some_and(called) {
+            if naming && !session.turn.as_deref().is_some_and(called) {
                 session.name_asked = false;
                 session.name_after = None;
             }
-            session.name_turn = None;
+            session.naming_turn = None;
             let change = changes.remove(&session.agent.id);
             outputs.extend(session.end_turn(change, at));
             if event.capabilities.turn_trees {
@@ -3024,7 +3024,7 @@ impl Studio {
                     // Daniel's first prompt asks for a name; a bare slash command waits for its turn's end.
                     if sender.is_daniels() && !session.name_asked {
                         session.name_asked = true;
-                        session.name_turn.clone_from(&event.prompt_id);
+                        session.naming_turn.clone_from(&event.prompt_id);
                         if is_bare_command(prompt) {
                             session.name_after = Some(prompt.clone());
                         } else if !replay {
@@ -3891,15 +3891,15 @@ impl Studio {
                 continue;
             }
             disagreeing.insert(id.clone());
-            let entry = self.mismatched.entry(id.clone());
             let fresh = (now, reported.to_string(), false);
-            let (since, _, logged) = entry
-                .and_modify(|m| {
-                    if m.1 != *reported {
-                        *m = fresh.clone();
-                    }
-                })
-                .or_insert(fresh);
+            let entry = self
+                .mismatched
+                .entry(id.clone())
+                .or_insert_with(|| fresh.clone());
+            if entry.1 != *reported {
+                *entry = fresh;
+            }
+            let (since, _, logged) = entry;
             if !*logged && now.saturating_sub(*since) >= MISMATCH_AFTER_MS {
                 *logged = true;
                 let line = format!("{now} session {id}: hook {hook:?}, 7501 {reported}");
