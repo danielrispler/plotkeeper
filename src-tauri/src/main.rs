@@ -1914,7 +1914,9 @@ fn mark_unseen(id: String, studio: State<Mutex<Studio>>, cards: State<Cards>) {
 }
 
 /// The `sounds` setting (danielrispler/Falinks#556), from `settings.json`, which the window parses.
-#[tauri::command]
+/// Off the main thread: the read loop asks the window for its focus under the notices' lock, and
+/// that waits on the main thread.
+#[tauri::command(async)]
 fn sounds(on: bool, notices: State<Notices>) {
     notices.lock().unwrap().sounds = on;
 }
