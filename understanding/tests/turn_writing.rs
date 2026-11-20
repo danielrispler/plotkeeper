@@ -373,6 +373,71 @@ fn a_card_of_a_turn_that_ended_in_needs_you_is_stored_without_a_quiz_and_displac
 }
 
 #[test]
+fn two_sessions_whose_cards_arrive_at_the_caps_edge_offer_one_more_quiz_not_two() {
+    let mut day = Day::new();
+    // Two card Quizzes, which a later card does not displace.
+    for (i, files) in [["a.rs", "b.rs"], ["c.rs", "d.rs"]].iter().enumerate() {
+        let files = files.map(|f| (f, 3));
+        day.turn(&format!("Card {i}"), &files, "Done.");
+    }
+    assert_eq!(quizzes(&day), 2);
+    // Two more sessions, each with a card-sized change and a turn of its own.
+    let mut requests = Vec::new();
+    for session in ["s2", "s3"] {
+        for name in ["UserPromptSubmit", "Stop"] {
+            day.at += 1;
+            let line = json!({"session_id": session, "hook_event_name": name, "cwd": day.repo,
+                "studio_received_ms": day.at, "prompt": "Go", "prompt_id": "p1",
+                "last_assistant_message": "Done."});
+            day.core.lock().unwrap().apply(&line.to_string());
+        }
+        requests.push(CardRequest {
+            session_id: session.into(),
+            id: format!("{session}@{}", day.at),
+            change: Some(diff(&["a.rs", "b.rs"])),
+            ..CardRequest::default()
+        });
+    }
+    let threaded = TurnWriting::new(
+        day.core.clone(),
+        day.store.clone(),
+        Arc::new(Recorded {
+            events: day.events.clone(),
+            failing: Arc::default(),
+            summaries: Arc::default(),
+        }),
+        Offers::beside(&day.data.join("events.jsonl")),
+        day.recorder.clone(),
+    );
+    // Each session's queue has its own thread, so the two cards are written at the same time.
+    for request in requests {
+        threaded.card(request, true);
+    }
+    threaded.prune(&Default::default());
+    for _ in 0..500 {
+        if day.card_ids().len() == 4 {
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(day.card_ids().len(), 4);
+    assert_eq!(quizzes(&day), 3, "no fourth Quiz is offered in the hour");
+    let store = day.store.lock().unwrap();
+    let kept = |session: &str| {
+        let cards = store
+            .cards()
+            .iter()
+            .filter(|k| k.request.session_id == session);
+        cards.filter(|k| k.card.quiz.is_some()).count()
+    };
+    assert_eq!(
+        kept("s2") + kept("s3"),
+        1,
+        "exactly one of the two cards keeps its Quiz"
+    );
+}
+
+#[test]
 fn a_card_of_a_turn_that_ended_at_your_turn_keeps_its_quiz_though_its_session_needs_daniel_when_its_job_runs()
  {
     let mut day = Day::new();
