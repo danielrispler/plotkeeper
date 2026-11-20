@@ -232,7 +232,11 @@ fn split(command: &str) -> Vec<Raw> {
                 reader.join(Joiner::Or);
             }
             '|' => reader.join(Joiner::Pipe),
-            '<' if next == Some('<') && chars.get(i + 1) != Some(&'<') => {
+            // `<<<` is a here-string, no heredoc.
+            '<' if next == Some('<')
+                && chars.get(i + 1) != Some(&'<')
+                && !(i >= 2 && chars[i - 2] == '<') =>
+            {
                 i += 1;
                 let strip = chars.get(i) == Some(&'-');
                 if strip {
@@ -650,6 +654,8 @@ pub fn of_turn(
 pub(crate) fn listed(checks: &[Check], typical: &dyn Fn(&str) -> Option<u64>) -> Vec<Listed> {
     let mut listed: Vec<Listed> = checks
         .iter()
+        // A check that passed, as a worker's later run may have it, is not listed.
+        .filter(|check| check.status != Status::Passed)
         .filter_map(|check| check.runs.iter().rfind(|run| run.agent.is_none()))
         .filter(|run| matches!(run.status, Status::Running | Status::Failed))
         .map(|run| Listed {

@@ -247,22 +247,24 @@ impl Ledger {
         tool: &Tool,
         turn: Option<usize>,
         roots: Vec<String>,
-    ) {
+    ) -> Option<usize> {
         let at = event.studio_received_ms;
         let row = self.of(event, tool, turn);
         row.started_at = Some(at);
         row.take_roots(roots);
         row.start = Some(event.line);
         row.settle();
+        row.turn
     }
 
     /// Takes a notification's report, received at `at`, that background task `task` ended as `status`;
-    /// the row of its call, when a row has the task.
+    /// the row of its call, when a row has the task and no report ended it before.
     pub(crate) fn report(&mut self, task: &str, status: &str, at: u64) -> Option<&Row> {
         let row = self
             .rows
             .iter_mut()
-            .find(|r| r.task.as_deref() == Some(task))?;
+            .find(|r| r.task.as_deref() == Some(task))
+            .filter(|r| r.reported.is_none())?;
         row.reported = Some(status.into());
         row.reported_at = Some(at);
         Some(row)
@@ -286,7 +288,7 @@ impl Ledger {
         turn: Option<usize>,
         failed: bool,
         roots: Vec<String>,
-    ) {
+    ) -> Option<usize> {
         let at = event.studio_received_ms;
         let outcome = match failed {
             false => Outcome::Succeeded,
@@ -307,6 +309,7 @@ impl Ledger {
         row.task = task;
         row.end = Some(event.line);
         row.settle();
+        row.turn
     }
 }
 

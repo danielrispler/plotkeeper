@@ -191,3 +191,11 @@ fn a_command_of_two_checks_is_timed_by_both_statements_joined() {
         [("cargo test", None), ("cargo clippy", Some(3 * MIN))]
     );
 }
+
+#[test]
+fn a_check_a_worker_later_passed_is_not_listed_though_the_agents_run_failed() {
+    let mut lines = runs(1_000, 1_000, "t1", "cargo test", None, false);
+    lines.extend(runs(5_000, 1_000, "t2", "cargo test", Some("w1"), true));
+
+    assert_eq!(shown(&listed(lines)), []);
+}

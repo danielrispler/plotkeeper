@@ -699,3 +699,58 @@ fn a_running_or_background_check_of_a_worker_with_no_roots_keeps_its_workers_wor
         [("cargo test", OTHER, CheckStatus::Failed, 0)]
     );
 }
+
+#[test]
+fn a_here_string_does_not_hide_the_commands_after_it() {
+    let found = turns(
+        &passes(1_000, "t1", "grep x <<< \"$v\"\ncargo test", None),
+        0,
+    );
+
+    assert_eq!(shown(&found), [("cargo test", CheckStatus::Passed, 0)]);
+}
+
+#[test]
+fn a_result_that_lands_after_a_new_turn_opened_ends_the_check_of_its_own_turn() {
+    let lines = vec![
+        starts(1_000, "t1", "cargo test"),
+        line(
+            "UserPromptSubmit",
+            2_000,
+            json!({ "prompt": "Next", "prompt_id": "p2" }),
+        ),
+        passes(1_000, "t1", "cargo test", None).pop().unwrap(),
+    ];
+
+    assert_eq!(
+        shown(&turns(&lines, 0)),
+        [("cargo test", CheckStatus::Passed, 0)]
+    );
+}
+
+#[test]
+fn a_repeated_notification_is_not_applied_again() {
+    let mut lines = vec![
+        starts(1_000, "t1", "cargo test"),
+        launches(1_100, "t1", "cargo test", "bk1"),
+    ];
+    lines.extend(notified(5_000, "bk1", "completed"));
+    let once = {
+        let mut all = vec![prompt()];
+        all.extend(lines.iter().cloned());
+        Studio::replayed(&all).typical("", "cargo test")
+    };
+    assert!(once.is_some());
+    let mut again = notified(9_000, "bk1", "failed");
+    again[1] = again[1].replace("\"p2\"", "\"p3\"");
+    lines.extend(again);
+    let mut all = vec![prompt()];
+    all.extend(lines.iter().cloned());
+    let studio = Studio::replayed(&all);
+
+    assert_eq!(studio.typical("", "cargo test"), once);
+    assert_eq!(
+        shown(&studio.session(SESSION).unwrap().turns[0].checks),
+        [("cargo test", CheckStatus::Passed, 0)]
+    );
+}

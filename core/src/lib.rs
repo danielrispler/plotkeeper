@@ -3335,7 +3335,7 @@ impl Studio {
                 }
                 Happened::ToolStart { tool, .. } => {
                     let turn = session.ledger_turn(&event.agent_id);
-                    session.ledger.start(&event, tool, turn, called.clone());
+                    let turn = session.ledger.start(&event, tool, turn, called.clone());
                     if let Some(turn) = turn.filter(|_| tool.kind == ToolKind::Command) {
                         let list = self.check_lists.of(&session.cwd);
                         if tool
@@ -3463,7 +3463,8 @@ impl Studio {
                 }
                 Happened::ToolEnd { tool, failed, .. } => {
                     let turn = session.ledger_turn(&event.agent_id);
-                    session
+                    // The turn its call began in, which a new prompt since may have left.
+                    let turn = session
                         .ledger
                         .end(&event, tool, turn, *failed, called.clone());
                     if let Some(turn) = turn.filter(|_| tool.kind == ToolKind::Command) {
