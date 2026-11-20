@@ -1,8 +1,14 @@
 //! What a turn gets for a Quiz (danielrispler/plotkeeper#119): a card with its Quiz, a lone Quiz, or
 //! nothing, by the size of its change; the rules are in `docs/studio/question-rules.md`.
 
+use crate::summary::write_held;
+use crate::{CardStore, CardWriter, SummarySetup, TurnSummary, write_stop};
+use serde::Serialize;
 use std::collections::HashMap;
-use studio_core::{CheckStatus, Facts};
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use studio_core::{CardRequest, CheckStatus, Facts, Session, SummaryRequest};
 
 /// Changed lines, in logic files, from which a turn gets a card.
 const CARD_LINES: u64 = 25;
@@ -12,7 +18,8 @@ const CARD_FILES: usize = 2;
 const QUIZ_LINES: u64 = 8;
 
 /// What a turn gets.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Offer {
     Card,
     Quiz,
@@ -44,12 +51,26 @@ impl Shape {
     /// be read counts all its lines as non-trivial. A turn with no files in `facts` reads `diff`,
     /// the change of its card request, which an agent that reports no trees leaves.
     pub fn of(facts: &Facts, diff: &str, merge: bool) -> Shape {
+        Shape::read(facts, of_diff(diff), merge, &[], false)
+    }
+
+    /// As `of`, with the files of the card's change already read, and leaving out the files in the
+    /// `workers` worktrees, which are judged at the workers' own cards.
+    /// The card's change is read where the turn is not `traced` and has no files.
+    fn read(
+        facts: &Facts,
+        change: Vec<Changed>,
+        merge: bool,
+        workers: &[String],
+        traced: bool,
+    ) -> Shape {
         let failed = facts.checks.iter().any(|c| c.status == CheckStatus::Failed);
-        let files = match facts.files.is_empty() {
-            true => of_diff(diff),
+        let files = match facts.files.is_empty() && !traced {
+            true => change,
             false => facts
                 .files
                 .iter()
+                .filter(|f| !workers.contains(&f.file.root))
                 .map(|f| {
                     let lines = f.file.added.unwrap_or(0) + f.file.removed.unwrap_or(0);
                     let non_trivial = match f.hunk.is_empty() {
@@ -90,21 +111,355 @@ impl Shape {
     }
 }
 
-/// The files of a unified diff (`git diff`, one `diff --git` header per file).
+/// What a decision is about.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OfferKind {
+    Turn,
+    Worker,
+    LateChange,
+}
+
+/// What the hooks and git recorded of a turn, as the offer reads it: the one input both paths share.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TurnFacts {
+    pub facts: Facts,
+    /// The turn ran `git merge` or merged a pull request.
+    pub merge: bool,
+    /// The worktrees that were a worker's home during the turn: their files are judged at the worker's card.
+    pub workers: Vec<String>,
+    /// The turn's trees were read: its files are its own even when there are none, and the card's
+    /// diff is not read in their place. False for an agent that reports no trees, and a worker's card.
+    pub traced: bool,
+}
+
+/// The table's inputs, as the record keeps them.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct Inputs {
+    pub logic_lines: u64,
+    pub logic_files: usize,
+    pub non_trivial: u64,
+    pub failed: bool,
+    pub merge: bool,
+    pub test_run: bool,
+    pub docs: bool,
+}
+
+/// What a change is offered, with the inputs and the reason for nothing.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Decision {
+    pub kind: OfferKind,
+    pub offer: Offer,
+    pub inputs: Inputs,
+    pub reason: Option<&'static str>,
+}
+
+/// The one function that decides an offer, by the table (danielrispler/plotkeeper#119) read from `turn`'s
+/// files, or from `change`, the files of the card's own diff, where `turn` has no trees: an agent that
+/// reports none, and a worker's card. A worker's card, and a subagent's late change, must pass
+/// the table's first row, and get no lone Quiz, since neither has a summary.
+pub fn decide(kind: OfferKind, turn: &TurnFacts, change: &[Changed]) -> Decision {
+    let shape = Shape::read(
+        &turn.facts,
+        change.to_vec(),
+        turn.merge,
+        &turn.workers,
+        turn.traced,
+    );
+    let logic: Vec<&Changed> = shape.logic().collect();
+    let non_trivial: u64 = logic.iter().map(|f| f.non_trivial).sum();
+    let inputs = Inputs {
+        logic_lines: logic.iter().map(|f| f.lines).sum(),
+        logic_files: logic.len(),
+        non_trivial,
+        failed: shape.failed,
+        merge: shape.merge,
+        test_run: !logic.is_empty() && logic.iter().all(|f| is_test(&f.path)),
+        docs: logic.is_empty() && !shape.files.is_empty(),
+    };
+    let mut offer = shape.offer();
+    let reason = match offer {
+        Offer::Card => None,
+        _ if kind != OfferKind::Turn => {
+            offer = Offer::Nothing;
+            Some("below the card row")
+        }
+        Offer::Quiz => None,
+        Offer::Nothing => Some(match () {
+            _ if shape.files.is_empty() => "no change",
+            _ if logic.is_empty() => "no logic file",
+            _ if non_trivial < QUIZ_LINES => "under 8 non-trivial lines",
+            _ if inputs.failed => "a check ended failed",
+            _ if inputs.merge => "a merge turn",
+            _ => "a test run",
+        }),
+    };
+    Decision {
+        kind,
+        offer,
+        inputs,
+        reason,
+    }
+}
+
+/// The files of the diff of a card request.
+pub fn changed_in(diff: &str) -> Vec<Changed> {
+    of_diff(diff)
+}
+
+/// How a decision ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub enum Outcome {
+    #[serde(rename = "written")]
+    Written,
+    #[serde(rename = "held by the hourly cap")]
+    HeldByCap,
+    #[serde(rename = "no reply from the writer")]
+    NoReply,
+    #[serde(rename = "no quiz in the reply")]
+    NoQuiz,
+}
+
+/// One line of the record.
+#[derive(Serialize)]
+struct Line<'a> {
+    at: u64,
+    session: &'a str,
+    id: &'a str,
+    kind: OfferKind,
+    inputs: &'a Inputs,
+    offer: Offer,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    outcome: Option<Outcome>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<&'static str>,
+}
+
+/// The record of offers (`offers.jsonl`), beside the event log: one JSON line for each offer decided,
+/// with the table's inputs and how it ended, and no diff and no text of a file. Nothing reads it yet.
+pub struct Offers(PathBuf);
+
+impl Offers {
+    /// The record beside the event log `log`.
+    pub fn beside(log: &Path) -> Offers {
+        Offers(log.with_file_name("offers.jsonl"))
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.0
+    }
+
+    /// Whether the record already holds the final decision on `id` of `session`.
+    pub fn settled(&self, session: &str, id: &str) -> bool {
+        let text = std::fs::read_to_string(&self.0).unwrap_or_default();
+        let no_reply = serde_json::to_value(Outcome::NoReply).unwrap_or_default();
+        text.lines()
+            .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+            .any(|l| {
+                l["session"] == session && l["id"] == id && l.get("outcome") != Some(&no_reply)
+            })
+    }
+
+    /// Appends the line of `decision` on `id` of `session`, ending in `outcome` (or, with none,
+    /// in the decision's reason). A failed write is no reason to lose the offer: it is logged.
+    /// A decision already on record, other than a writer's silence, is not recorded again: a turn
+    /// the app asks about again after a restart adds no line.
+    pub fn record(&self, session: &str, id: &str, decision: &Decision, outcome: Option<Outcome>) {
+        if self.settled(session, id) {
+            return;
+        }
+        let line = Line {
+            at: crate::millis(),
+            session,
+            id,
+            kind: decision.kind,
+            inputs: &decision.inputs,
+            offer: decision.offer,
+            outcome,
+            reason: decision.reason,
+        };
+        let mut text = serde_json::to_string(&line).unwrap_or_default();
+        text.push('\n');
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.0);
+        if let Err(e) = file.and_then(|mut f| f.write_all(text.as_bytes())) {
+            eprintln!("save the offers record: {e}");
+        }
+    }
+}
+
+/// What settling a turn's summary found.
+pub struct Settled {
+    /// Whether the summary is written: it is wanted for itself, or for a lone Quiz.
+    pub write: bool,
+    pub decision: Decision,
+    /// The decision was made here, not by the turn's card.
+    fresh: bool,
+}
+
+impl Settled {
+    /// Puts on record a decision made here that no card or summary will: any but a lone Quiz, whose
+    /// summary puts its line, and one the turn's card made, which put its own.
+    pub fn record(&self, offers: &Offers, request: &SummaryRequest) {
+        if self.fresh && self.decision.offer != Offer::Quiz {
+            offers.record(&request.session_id, &request.id, &self.decision, None);
+        }
+    }
+}
+
+/// Fills in `request`'s facts from `turn` and whether its summary may keep a Quiz, from the same
+/// decision the turn's card got: a lone Quiz only when the table gives that, and the card's own
+/// `change` is read only where `turn` has no files. A `decided` decision, the one the card path made
+/// for this turn, is taken as it is: the summary never decides again on facts that moved since.
+pub fn settle(
+    request: &mut SummaryRequest,
+    turn: &TurnFacts,
+    change: &[Changed],
+    decided: Option<&Decision>,
+) -> Settled {
+    request.facts = turn.facts.clone();
+    let decision = match decided {
+        Some(decided) => decided.clone(),
+        None => decide(OfferKind::Turn, turn, change),
+    };
+    let lone = decision.offer == Offer::Quiz;
+    request.no_quiz = !lone;
+    Settled {
+        write: request.wanted || lone,
+        decision,
+        fresh: decided.is_none(),
+    }
+}
+
+/// Writes the stop card of `request` when the table gives it one, and puts the decision on record. A
+/// check's card is not judged. A lone Quiz's line is put by the turn's summary, which `carried` says
+/// will come. See `write_stop` for the rest.
+#[allow(clippy::too_many_arguments)]
+pub fn offer_stop(
+    store: &Mutex<CardStore>,
+    writer: &(impl CardWriter + ?Sized),
+    request: CardRequest,
+    session: &Session,
+    turn: &TurnFacts,
+    offers: &Offers,
+    carried: bool,
+    stored: impl FnOnce(),
+    mut log: impl FnMut(String),
+) -> (bool, Option<Decision>) {
+    if request.check.is_some() {
+        return (
+            write_stop(store, writer, request, session, stored, log),
+            None,
+        );
+    }
+    // A subagent's change after the turn's `Stop` is no turn's own card, which has the turn's id.
+    let own = turns_card(session, &request);
+    let kind = match () {
+        _ if request.agent.is_some() => OfferKind::Worker,
+        _ if !own && !request.changed_by.is_empty() => OfferKind::LateChange,
+        _ => OfferKind::Turn,
+    };
+    let decision = decide(kind, turn, &changed_in(request.diff()));
+    let (id, session_id) = (request.id.clone(), request.session_id.clone());
+    match decision.offer {
+        Offer::Card => {
+            let written = write_stop(store, writer, request, session, stored, &mut log);
+            let outcome = if written {
+                Outcome::Written
+            } else {
+                Outcome::NoReply
+            };
+            offers.record(&session_id, &id, &decision, Some(outcome));
+            (written, Some(decision))
+        }
+        // Its summary carries the lone Quiz, and puts the line there; with none to come, it is put now.
+        Offer::Quiz => {
+            log(format!("no card on {id}: its change gets a lone Quiz"));
+            if !carried {
+                let reason = Some("no summary to carry it");
+                let recorded = Decision {
+                    reason,
+                    ..decision.clone()
+                };
+                offers.record(&session_id, &id, &recorded, None);
+            }
+            (false, Some(decision))
+        }
+        Offer::Nothing => {
+            let why = decision.reason.unwrap_or_default();
+            log(format!("no card on {id}: {why}"));
+            offers.record(&session_id, &id, &decision, None);
+            (false, Some(decision))
+        }
+    }
+}
+
+/// Writes the summary of `request`, and, when `lone` is the decision that gave the turn a lone Quiz,
+/// puts it on record with its outcome.
+pub fn offer_summary(
+    store: &Mutex<CardStore>,
+    writer: &(impl CardWriter + ?Sized),
+    setup: &SummarySetup,
+    request: SummaryRequest,
+    lone: Option<&Decision>,
+    offers: &Offers,
+    log: impl FnMut(String),
+) -> Option<TurnSummary> {
+    let (session, id) = (request.session_id.clone(), request.id.clone());
+    let written = write_held(store, writer, setup, request, log);
+    if let Some(decision) = lone {
+        let outcome = match &written {
+            None => Outcome::NoReply,
+            Some((s, _)) if s.quiz.is_some() => Outcome::Written,
+            Some((_, true)) => Outcome::HeldByCap,
+            Some(_) => Outcome::NoQuiz,
+        };
+        offers.record(&session, &id, decision, Some(outcome));
+    }
+    written.map(|(summary, _)| summary)
+}
+
+/// Whether `request` is the card of one of `session`'s turns: its session's own, with the id of the
+/// turn's `Stop`, and not a card of a worker, a check, a late change or a 20-minute look.
+pub fn turns_card(session: &Session, request: &CardRequest) -> bool {
+    let own = request.agent.is_none() && request.check.is_none();
+    own && session
+        .turns
+        .iter()
+        .any(|t| t.id.as_deref() == Some(&request.id))
+}
+
+/// The files of a unified diff: one `diff --git` header per file, as `git diff` has, or only the
+/// `---`/`+++` pair of each, as a fingerprint's does.
 fn of_diff(diff: &str) -> Vec<Changed> {
-    let mut files: Vec<(String, String)> = Vec::new();
-    for line in diff.lines() {
+    let lines: Vec<&str> = diff.lines().collect();
+    // Each file's path and text, and whether its `---`/`+++` pair was seen.
+    let mut files: Vec<(String, String, bool)> = Vec::new();
+    for (i, line) in lines.iter().enumerate() {
+        let pair = line.starts_with("--- ")
+            && lines.get(i + 1).is_some_and(|l| l.starts_with("+++ "))
+            && lines.get(i + 2).is_some_and(|l| l.starts_with("@@"));
         if let Some(rest) = line.strip_prefix("diff --git ") {
             let path = rest.rsplit_once(" b/").map_or(rest, |(_, b)| b);
-            files.push((path.into(), String::new()));
-        } else if let Some((_, text)) = files.last_mut() {
+            files.push((path.into(), String::new(), false));
+        } else if pair && files.last().is_none_or(|(_, _, seen)| *seen) {
+            let new = lines[i + 1].strip_prefix("+++ ").unwrap_or_default();
+            files.push((
+                new.strip_prefix("b/").unwrap_or(new).into(),
+                String::new(),
+                true,
+            ));
+        } else if let Some((_, text, seen)) = files.last_mut() {
+            *seen |= pair;
             text.push_str(line);
             text.push('\n');
         }
     }
     files
         .into_iter()
-        .map(|(path, text)| Changed {
+        .map(|(path, text, _)| Changed {
             path,
             lines: changes(&text).count() as u64,
             non_trivial: non_trivial(&text),

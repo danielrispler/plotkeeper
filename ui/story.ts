@@ -16,7 +16,7 @@ import { agentState, sessionName, showsLanded } from "./list.js";
 import { closePane, openHere } from "./panes.js";
 import { openDecision, type Ask } from "./answer.js";
 import { blockedElement, typeRetry } from "./blocked.js";
-import { briefNodes, cardLine, cardsFor, openCard, quizOpen } from "./cards.js";
+import { beginFeed, briefNodes, cardLine, cardsFor, endFeed, markShown, openCard, quizOpen, rowCards, unseenRow } from "./cards.js";
 import { type Banner, bannerElement, bannerFor, bannerLives } from "./banner.js";
 import { quizAllowed, quizAnswered, quizItem, quizRegion, seedQuiz, trialOn } from "./quiz.js";
 import { evidenceElement, hasEvidence } from "./evidence.js";
@@ -37,6 +37,7 @@ import {
   type Selection,
   type SessionState,
   type Session,
+  type PlacedCard,
   type StoredCard,
   type Tap,
   type Subagent,
@@ -277,13 +278,14 @@ export const storyOf = (session: Session, agent: unknown) => (agent === null && 
 
 // What the rail draws for `selected`: its latest turn, which "now" tells, and the feed. Every card is inside its turn. A status-only row
 // (danielrispler/Falinks#560) has no turns or cards to show.
-export function railOf({ session, agent }: Selection, all: StoredCard[]) {
+export function railOf({ session, agent }: Selection, all: StoredCard[], placed: PlacedCard[] = []) {
   if (session.status_only) return { latest: null, blocks: [] };
   const cards = all;
   const own = agent === null;
   const turns = own ? session.turns : [];
   const blocks = feedTurns(turns, {
     cards,
+    placed: own ? placed : [],
     // A subagent's view: its session's checks and subagents are not its own.
     checks: own ? session.checks : [],
     agents: own ? session.agents : [],
@@ -318,7 +320,7 @@ export type FeedTurn = {
 // one last block, so nothing is lost.
 export function feedTurns(
   turns: Turn[],
-  { cards, checks, agents, questions }: Pick<FeedTurn, "cards" | "checks" | "agents" | "questions">,
+  { cards, placed = [], checks, agents, questions }: Pick<FeedTurn, "cards" | "checks" | "agents" | "questions"> & { placed?: PlacedCard[] },
 ): FeedTurn[] {
   const blocks: FeedTurn[] = [...turns.map((turn, index) => ({ index, turn })), { index: null, turn: null }].map((b) => ({
     ...b,
@@ -330,6 +332,12 @@ export function feedTurns(
   const at = (index: number | null) => blocks[index !== null && index < turns.length ? index : turns.length];
   // Each list is oldest first; the blocks show the newest first.
   for (const card of [...cards].reverse()) at(turnAt(turns, cardTime(card.request.id))).cards.push(card);
+  // A worker's card is in the turn the core placed it in (danielrispler/plotkeeper#212), else where its time falls.
+  for (const { card, turn } of placed) {
+    const block = at(turn ?? turnAt(turns, cardTime(card.request.id)));
+    block.cards.push(card);
+    block.cards.sort((a, b) => cardTime(b.request.id) - cardTime(a.request.id));
+  }
   for (const check of [...checks].reverse()) at(check.turn).checks.push(check);
   for (const agent of [...agents].sort((a, b) => b.started_at - a.started_at)) at(agent.turn).agents.push(agent);
   for (const question of [...questions].reverse()) at(question.turn).questions.push(question);
@@ -562,7 +570,9 @@ export function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
     const summary = turn.id ? summaryOf(turn.id) : null;
     const { headline } = headlineOf(summary, turn.message);
     const open = opened.has(key);
-    const line = foldedLine(turn, headline, quizAllowed(headlineOf(summary, turn.message).body, false) && (block.cards.some(quizOpen) || (summary?.summary.quiz != null && summary.arm !== "body_only" && !quizAnswered(turn.id!))));
+    const allowed = quizAllowed(headlineOf(summary, turn.message).body, false);
+    const cards = cardsFor(block.cards, allowed);
+    const line = foldedLine(turn, headline, allowed && (block.cards.some(quizOpen) || (summary?.summary.quiz != null && summary.arm !== "body_only" && !quizAnswered(turn.id!))));
     const button = pressable(document.createElement("button"), open, () => {
       if (opened.has(key)) opened.delete(key);
       else opened.add(key);
@@ -578,7 +588,13 @@ export function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
     );
     if (line.unanswered) button.querySelector(".quiz-open")!.setAttribute("title", "A quiz is open");
     if (line.failed) button.querySelector(".check-failed")!.setAttribute("title", "A check ended failed");
-    node.replaceChildren(button, ...(open ? [...turnContent(session, block, null).children] : []));
+    // An unseen card of a folded turn keeps a title row (danielrispler/plotkeeper#211); the open turn shows its cards itself.
+    const turnIndex = block.index!;
+    const cardTurn = turn.files ? { session: session.id, index: turnIndex, files: turn.files.files, ended: turn.ended_at !== null } : null;
+    const rows = open ? [] : rowCards(cards).map((stored) => unseenRow(stored, cardTurn));
+    node.replaceChildren(button, ...rows, ...(open ? [...turnContent(session, block, null).children] : []));
+    // The cards of an unfolded turn are on screen now.
+    if (open) markShown();
   };
   draw();
   return node;
@@ -611,7 +627,7 @@ const turnElement = (session: Session, block: FeedTurn, now: Now | null) =>
 // Draws "now" and the feed from the selection and the cards the shell last sent.
 export function drawFeed() {
   const selected = studio.selection;
-  const { recent, older } = studio.cards;
+  const { recent, older, workers } = studio.cards;
   const all = [...older, ...recent];
   if (selected === null) {
     drawNow(null, null);
@@ -619,9 +635,10 @@ export function drawFeed() {
     element("feed").replaceChildren();
     return;
   }
+  beginFeed();
   const session = selected.session;
   const own = selected.agent === null;
-  const { latest, blocks } = railOf(selected, all);
+  const { latest, blocks } = railOf(selected, all, workers);
   const now = drawNow(session, latest);
   // The banner sits above the newest turn, and holds the Brief while it shows.
   const last = session.turns.at(-1);
@@ -632,6 +649,7 @@ export function drawFeed() {
   );
   element("brief-fold").hidden = lives || briefNodes(cards).length === 0;
   element("feed").replaceChildren(...blocks.map((block, i) => turnElement(session, block, own && i === 0 && block.index !== null ? now : null)));
+  endFeed();
 }
 // Rename (danielrispler/Falinks#469): the row's name, kept in the event log, and `/rename` typed into the session while
 // its claude runs, so Claude Code shows the same name. An empty name gives the row its folder's again.

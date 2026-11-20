@@ -135,6 +135,23 @@ impl Roots {
         known.insert(folder.into(), root.clone());
         root
     }
+
+    /// `path` relative to worktree `root`, when it lies inside it. A root is spelled as git spells
+    /// it, a path as its tool does: one through a symlink (`/tmp` for `/private/tmp`) is inside the
+    /// root whose top folder holds it, the shortest of its folders that has `root` as its root.
+    fn inside<'a>(&self, root: &str, path: &'a str) -> Option<&'a str> {
+        let direct = path.strip_prefix(root).and_then(|p| p.strip_prefix('/'));
+        if direct.is_some() || root.is_empty() {
+            return direct;
+        }
+        let mut folders: Vec<&std::path::Path> = std::path::Path::new(path).ancestors().collect();
+        folders.reverse();
+        let top = folders.into_iter().skip(1).find_map(|f| {
+            let f = f.to_str()?;
+            (self.of(f) == root).then_some(f)
+        })?;
+        path.strip_prefix(top)?.strip_prefix('/')
+    }
 }
 
 /// What the session view shows: the session Daniel selected, and the subagent of it he opened since,
@@ -477,6 +494,9 @@ impl CheckStart {
 pub struct Prompt {
     pub at: u64,
     pub sender: Sender,
+    /// The turn it is in, which a wake-up opened (danielrispler/plotkeeper#212); `None` in a log read before.
+    #[serde(default)]
+    pub turn: Option<usize>,
     /// What it says, which the brief's rewrite reads (danielrispler/Falinks#369, decision 16); the pane never shows it.
     #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     pub text: String,
@@ -684,6 +704,13 @@ pub struct Subagent {
     pub status: Status,
     /// When its end was received, in Unix milliseconds.
     pub ended_at: Option<u64>,
+    /// Each time its end was received, which a step of its own after the end does not take back
+    /// (danielrispler/plotkeeper#212).
+    #[serde(default)]
+    pub ends: Vec<u64>,
+    /// Each time a step of its own after an end ran it again (`SendMessage`), with the turn it ran in.
+    #[serde(default)]
+    pub resumes: Vec<(u64, Option<usize>)>,
     /// The first line of its last message, from its `SubagentStop`.
     pub result: Option<String>,
     /// Its whole last message, which its summary reads (danielrispler/Falinks#535); the pane never shows it.
@@ -776,6 +803,9 @@ impl Subagent {
             self.status = Status::from(status);
         } else if self.status == Status::Running {
             self.status = Status::Completed;
+        }
+        if self.ended_at.is_none() {
+            self.ends.push(at);
         }
         self.ended_at.get_or_insert(at);
     }
@@ -1112,6 +1142,8 @@ impl Session {
                     .map(|p| p.owner.clone()),
                 None => (roots.of(&self.cwd) == root).then(|| self.agent.id.clone()),
             };
+            let home = self.new_home(id, event, roots);
+            let turn = self.current_turn();
             let agent = self.agent(id, at);
             agent.agent.last_event_at = agent.agent.last_event_at.max(at);
             if agent.agent_type.is_none() {
@@ -1123,6 +1155,13 @@ impl Session {
                 agent.agent.since.at = at;
                 agent.owner = owner.unwrap_or_else(|| id.clone());
                 agent.root = root;
+            }
+            // The first other worktree it touches is its home from then on (danielrispler/plotkeeper#206).
+            if let Some(home) = home {
+                agent.folder = Some(home.clone());
+                agent.root = home;
+                agent.owner = id.clone();
+                agent.agent.since.at = at;
             }
             // A changed file promotes a helper at that step: an `Edit` or `Write` that succeeded, or
             // a command that changed its worktree and either succeeded or ran and failed (danielrispler/Falinks#434,
@@ -1137,7 +1176,9 @@ impl Session {
                         let step = Step::new(&tool.name, &tool.input, &event.cwd);
                         agent.agent.step(step, id, at);
                         agent.status = Status::Running;
-                        agent.ended_at = None;
+                        if agent.ended_at.take().is_some() {
+                            agent.resumes.push((at, turn));
+                        }
                     }
                     Happened::ToolEnd { id, .. } => {
                         agent.agent.step_done(id, at);
@@ -1245,6 +1286,21 @@ impl Session {
                 BlockedStatus::Allowed | BlockedStatus::AllowedNotRun | BlockedStatus::Running
             ) && c.retried_by(tool, cwd, agent)
         })
+    }
+
+    /// The home that `event` gives subagent `id`, if it is not homed yet (danielrispler/plotkeeper#206): a subagent in
+    /// its session's worktree, whose call touches another one, makes the first such worktree its home. An
+    /// isolated subagent, and one already homed, have none to take.
+    fn new_home(&self, id: &str, event: &Event, roots: &Roots) -> Option<String> {
+        let session_root = roots.of(&self.cwd);
+        let agent = self.subagent(id).filter(|a| a.folder.is_some());
+        let in_session = match agent {
+            Some(a) => a.owner == self.agent.id,
+            None => roots.of(&event.cwd) == session_root,
+        };
+        let mut listed = event.studio_touched_roots.iter().flatten();
+        let other = listed.find(|r| !r.is_empty() && **r != session_root);
+        other.filter(|_| in_session).cloned()
     }
 
     /// Whether subagent `id` gets cards of its own: a worker in a worktree of its own.
@@ -1386,6 +1442,64 @@ impl Session {
         spawned.or_else(|| self.current_turn())
     }
 
+    /// The turn of this session's rail that worker card `request` belongs to (danielrispler/plotkeeper#212): while the
+    /// worker runs, the turn that spawned it or, after a resume, the turn that resumed it; once it ended, the turn
+    /// opened by the wake-up that reports the card's latest end, or the spawning turn until that wake-up arrives.
+    pub fn worker_card_turn(&self, request: &CardRequest) -> Option<usize> {
+        let worker = self.subagent(request.agent.as_deref()?)?;
+        let at = card_time(&request.id);
+        let mut ends: Vec<u64> = worker
+            .ends
+            .iter()
+            .chain(worker.ended_at.iter())
+            .copied()
+            .collect();
+        ends.sort_unstable();
+        ends.dedup();
+        let ends: Vec<u64> = ends.into_iter().filter(|end| *end <= at).collect();
+        let resumed = worker
+            .resumes
+            .iter()
+            .filter(|(r, _)| *r <= at)
+            .max_by_key(|(r, _)| *r);
+        let Some(&end) = ends.last() else {
+            return worker.turn;
+        };
+        if let Some((resumed_at, turn)) = resumed
+            && *resumed_at > end
+        {
+            return turn.or(worker.turn);
+        }
+        // Each end takes the first wake-up that names the worker after the end before it and the wake-up that one took:
+        // a wake-up may land a little before its end is recorded, as the async `SubagentStop` is.
+        let wake_ups: Vec<&Prompt> = (self.prompts.iter())
+            .filter(|p| {
+                matches!(p.sender, Sender::WakeUp(_))
+                    && matches!(
+                        claude::names(&p.text, &worker.agent.id),
+                        claude::Names::WakeUp
+                    )
+            })
+            .collect();
+        let mut taken = 0;
+        let mut found = None;
+        for after in std::iter::once(0)
+            .chain(ends.iter().copied())
+            .take(ends.len())
+        {
+            found = wake_ups
+                .iter()
+                .enumerate()
+                .skip(taken)
+                .find(|(_, p)| p.at >= after)
+                .map(|(i, p)| (i, p.turn));
+            if let Some((i, _)) = found {
+                taken = i + 1;
+            }
+        }
+        found.and_then(|(_, turn)| turn).or(worker.turn)
+    }
+
     /// The index of its latest turn, which a check, subagent or question that starts now is in.
     fn current_turn(&self) -> Option<usize> {
         self.turns.len().checked_sub(1)
@@ -1474,11 +1588,9 @@ impl Session {
             .collect()
     }
 
-    /// The absolute paths its turn `turn`'s agent and workers edited, as the step ledger has them,
-    /// and those other turns' agents and workers edited while its trees ran: from its start to its
-    /// end, or its workers' last end, as a worker edits on after its turn
-    /// (danielrispler/plotkeeper#142). Its trees show their changes too, but they are theirs.
-    fn edited(&self, turn: usize) -> (BTreeSet<String>, BTreeSet<String>) {
+    /// The span of time its turn `turn`'s trees run in, from its start to its end, or its workers'
+    /// last end, as a worker edits on after its turn (danielrispler/plotkeeper#142).
+    fn trees_window(&self, turn: usize) -> (u64, u64) {
         let (since, end) = self
             .turns
             .get(turn)
@@ -1489,21 +1601,7 @@ impl Session {
         let until = end
             .zip(ends)
             .map_or(u64::MAX, |(end, ends)| ends.into_iter().fold(end, u64::max));
-        let rows = self.ledger.rows().iter();
-        let done = rows.filter(|r| turn_files::edits(&r.tool) && !r.failed());
-        let done = done.filter(|r| r.outcome != Some(Outcome::Rejected));
-        let (mut ours, mut theirs) = (BTreeSet::new(), BTreeSet::new());
-        for row in done {
-            let Some(file) = row.file.clone() else {
-                continue;
-            };
-            if row.turn == Some(turn) {
-                ours.insert(file);
-            } else if row.at().is_some_and(|at| (since..=until).contains(&at)) {
-                theirs.insert(file);
-            }
-        }
-        (ours, theirs)
+        (since, until)
     }
 
     /// The backfill of its turn ended at `at` with the hook's trees `ends`: `None` when no worktree
@@ -1892,10 +1990,12 @@ pub struct FactFile {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Facts {
     pub files: Vec<FactFile>,
-    /// How many other files the turn's trees differ in.
-    pub external: u64,
     /// Each check's last run, retries and commands.
     pub checks: Vec<Check>,
+    /// Unused: kept, always 0, so that the previous build, whose `Facts` requires it, can still read
+    /// `summaries.json`.
+    #[serde(default)]
+    pub external: u64,
 }
 
 /// What the writer reads to name a session from its first prompt.
@@ -1960,6 +2060,9 @@ pub struct Fingerprint {
     pub key: String,
     pub folder: String,
     pub purpose: Purpose,
+    /// When the turn or worker `key` names began, in Unix milliseconds: a worktree made after that is the
+    /// agent's own creation, one made before it is not (danielrispler/plotkeeper#204). `None` when it does not say.
+    pub began: Option<u64>,
 }
 
 /// A check that runs or ran, shown as a pass or fail line once it ends.
@@ -2182,20 +2285,28 @@ impl Studio {
         if event.agent_id.is_some() || event.outside_turns() {
             return Vec::new();
         }
+        let session = self.sessions.get(&event.session_id);
+        let mut roots = self.named_roots(event);
+        roots.retain(|root| !session.is_some_and(|s| s.workers_own(root)));
+        roots
+    }
+
+    /// The worktree roots that the call of `event` names: its folder's, an `Edit` or `Write` path's,
+    /// and those the hook found a command touched (danielrispler/plotkeeper#203).
+    fn named_roots(&self, event: &Event) -> Vec<String> {
         let path = event.tool().and_then(|t| t.path.as_deref());
         let path = path.filter(|p| p.starts_with('/'));
         let folder = path.and_then(|p| std::path::Path::new(p).parent()?.to_str());
         // With no lookup, a path under the event's folder is in its worktree.
         let below = |f: &&str| f.starts_with(&format!("{}/", event.cwd));
         let folder = folder.filter(|f| self.roots.find.is_some() || !below(f));
-        let session = self.sessions.get(&event.session_id);
         let mut roots: Vec<String> = Vec::new();
-        for folder in [Some(event.cwd.as_str()), folder].into_iter().flatten() {
-            let root = self.roots.of(folder);
-            if !root.is_empty()
-                && !roots.contains(&root)
-                && !session.is_some_and(|s| s.workers_own(&root))
-            {
+        let listed = event.studio_touched_roots.iter().flatten();
+        let folders = [Some(event.cwd.as_str()), folder].into_iter().flatten();
+        // The hook's list holds roots already, so they need no lookup.
+        let found = folders.map(|f| self.roots.of(f));
+        for root in found.chain(listed.cloned()) {
+            if !root.is_empty() && !roots.contains(&root) {
                 roots.push(root);
             }
         }
@@ -2280,6 +2391,7 @@ impl Studio {
                         key: key.clone(),
                         folder,
                         purpose,
+                        began: None,
                     });
                 }
             }
@@ -2293,6 +2405,7 @@ impl Studio {
                     key: id,
                     folder,
                     purpose: Purpose::Card,
+                    began: Some(agent.agent.started_at),
                 }),
             }
         }
@@ -2316,10 +2429,19 @@ impl Studio {
         // A session's own fallback is on a prompt's steps only, not between its turns.
         let session_due = |s: &Session| s.in_turn() && due(&s.agent.since);
         let look = |key: &str, folder: &str, purpose| {
+            let began = session.and_then(|s| match s.subagent(key) {
+                Some(agent) => Some(agent.agent.started_at),
+                // A turn that opens with this event begins at it.
+                None if session.is_some_and(|s| s.opens_turn(event)) => {
+                    Some(event.studio_received_ms)
+                }
+                None => s.turns.last().map(|t| t.started_at),
+            });
             let look = Fingerprint {
                 key: key.into(),
                 folder: folder.into(),
                 purpose,
+                began,
             };
             (!folder.is_empty()).then_some(look)
         };
@@ -2384,9 +2506,17 @@ impl Studio {
             return Vec::new();
         };
         let agent = session.subagent(id);
-        let Some(folder) = agent.and_then(|a| a.folder.as_deref()) else {
+        // The worktree this event makes its home, which its fingerprints are taken in from now on.
+        let home = session.new_home(id, event, &self.roots);
+        let Some(folder) = home
+            .as_deref()
+            .or_else(|| agent.and_then(|a| a.folder.as_deref()))
+        else {
             return look(id, &event.cwd, Purpose::Base).into_iter().collect();
         };
+        if home.is_some() {
+            return look(id, folder, Purpose::Base).into_iter().collect();
+        }
         let worker = |a: &Subagent| a.kind == Kind::Worker;
         let bash = event.tool().is_some_and(|t| t.kind == ToolKind::Command);
         // A helper's base right before its command, so only a change across it promotes it.
@@ -2445,6 +2575,7 @@ impl Studio {
             key: key.into(),
             folder: folder.into(),
             purpose: Purpose::Base,
+            began: None,
         };
         folders.map(print).collect()
     }
@@ -2574,6 +2705,11 @@ impl Studio {
         // The card a long check's start requests, which its line keeps.
         let mut check_card = None;
         let touches = self.touches(&event);
+        let called = if event.tool().is_some() {
+            self.named_roots(&event)
+        } else {
+            Vec::new()
+        };
         let command = event.tool().and_then(|t| t.command.as_deref());
         let typical = self.typical(command.unwrap_or_default());
         let roots = &self.roots;
@@ -2730,7 +2866,9 @@ impl Studio {
             session.reopen_turn();
             session.woken = false;
             let queued = std::mem::take(&mut session.queued);
-            for (index, prompt) in queued.into_iter().enumerate() {
+            for (index, mut prompt) in queued.into_iter().enumerate() {
+                // The turn this event opens, pushed below.
+                prompt.turn = Some(session.turns.len());
                 session.take_prompt(prompt, index == 0);
             }
         }
@@ -2768,7 +2906,7 @@ impl Studio {
                 .subagent(agent)
                 .map_or_default(|a| (a.owner.clone(), a.root.clone()));
             // Only a path inside the owner's worktree (danielrispler/Falinks#434, decision 15).
-            let inside = path.strip_prefix(&root).and_then(|p| p.strip_prefix('/'));
+            let inside = self.roots.inside(&root, path);
             if owner != *agent
                 && let Some(inside) = inside.filter(|_| !root.is_empty())
             {
@@ -3051,6 +3189,7 @@ impl Studio {
                     let prompt = Prompt {
                         at,
                         sender,
+                        turn: session.current_turn(),
                         text: prompt.clone(),
                     };
                     // A prompt with its running turn's id is the next turn's (danielrispler/Falinks#434, decision 4).
@@ -3173,7 +3312,7 @@ impl Studio {
                 }
                 Happened::ToolStart { tool, .. } => {
                     let turn = session.ledger_turn(&event.agent_id);
-                    session.ledger.start(&event, tool, turn);
+                    session.ledger.start(&event, tool, turn, called.clone());
                     if own {
                         session.returned = None;
                         let step = Step::new(&tool.name, &tool.input, &event.cwd);
@@ -3294,7 +3433,9 @@ impl Studio {
                 }
                 Happened::ToolEnd { tool, failed, .. } => {
                     let turn = session.ledger_turn(&event.agent_id);
-                    session.ledger.end(&event, tool, turn, *failed);
+                    session
+                        .ledger
+                        .end(&event, tool, turn, *failed, called.clone());
                     if let Some(turn) = turn.filter(|_| tool.kind == ToolKind::Command) {
                         let list = self.check_lists.of(&session.cwd);
                         if tool
@@ -3558,6 +3699,9 @@ impl Studio {
                 continue;
             }
             let running = session.open_roots();
+            let windows: Vec<(u64, u64)> = (0..session.turns.len())
+                .map(|index| session.trees_window(index))
+                .collect();
             for (index, turn) in session.turns.iter_mut().enumerate() {
                 let ended = turn.ended_at.is_some();
                 let open = |root: &String| !ended || running.contains(&(index, root.clone()));
@@ -3598,6 +3742,7 @@ impl Studio {
                         turn: index,
                         ended: last,
                         trees,
+                        window: windows[index],
                     };
                     asks.push((turn.ended_at.unwrap_or(now), ask));
                 }
@@ -3645,6 +3790,7 @@ impl Studio {
             turn: index,
             ended: true,
             trees,
+            window: session.trees_window(index),
         })
     }
 
@@ -3663,6 +3809,27 @@ impl Studio {
         found.unwrap_or(false)
     }
 
+    /// The worktrees that were the home of one of the session's workers during the turn named `id`: a worker
+    /// spawned in an earlier turn that still worked during it counts.
+    pub fn turn_workers(&self, id: &str) -> Vec<String> {
+        let found = self.sessions.values().find_map(|s| {
+            let at = s.turns.iter().position(|t| t.id.as_deref() == Some(id))?;
+            let turn = &s.turns[at];
+            let (since, until) = (turn.started_at, turn.ended_at.unwrap_or(u64::MAX));
+            // Spawned in this turn or an earlier one, and working at some time during it.
+            let working = s.agents.iter().filter(|a| {
+                a.turn.is_some_and(|spawned| spawned <= at)
+                    && a.agent.started_at <= until
+                    && a.ended_at.is_none_or(|end| end >= since)
+            });
+            let homes = working.filter(|a| s.has_cards(&a.agent.id));
+            let mut roots: Vec<String> = homes.map(|a| a.root.clone()).collect();
+            roots.dedup();
+            Some(roots)
+        });
+        found.unwrap_or_default()
+    }
+
     /// The facts of the turn `ask` names, from the numstat the shell found (`None` when git could
     /// not diff it): its files without their hunks, which the shell adds, and its checks.
     pub fn summary_facts(&self, ask: &TurnDiff, diffs: Option<Vec<RootDiff>>) -> Facts {
@@ -3672,8 +3839,7 @@ impl Studio {
         let Some(turn) = session.turns.get(ask.turn) else {
             return Facts::default();
         };
-        let (ours, theirs) = session.edited(ask.turn);
-        let found = diffs.map(|diffs| TurnFiles::of(diffs, &ours, &theirs));
+        let found = diffs.map(|diffs| self.files_of(&ask.session_id, ask.turn, diffs));
         let found = found.unwrap_or_default();
         Facts {
             files: found
@@ -3684,23 +3850,72 @@ impl Studio {
                     hunk: String::new(),
                 })
                 .collect(),
-            external: found.external,
             checks: turn.checks.clone(),
+            external: 0,
         }
     }
 
     /// Takes what the shell found for `ask`: the numstat of each of its worktrees, `None` when git
-    /// could not diff them. The turn's files are the diff's files that its ledger says its agent or
-    /// its workers edited; the others are counted as external, but those another turn edited.
+    /// could not diff them. The turn's files are every file that differs, but those another
+    /// session's or turn's call names (danielrispler/plotkeeper#207).
     pub fn set_turn_files(&mut self, ask: &TurnDiff, diffs: Option<Vec<RootDiff>>) {
+        let found = diffs.map(|diffs| self.files_of(&ask.session_id, ask.turn, diffs));
         let Some(session) = self.sessions.get_mut(&ask.session_id) else {
             return;
         };
-        let (ours, theirs) = session.edited(ask.turn);
         if let Some(turn) = session.turns.get_mut(ask.turn) {
-            turn.files = diffs.map(|diffs| TurnFiles::of(diffs, &ours, &theirs));
+            turn.files = found;
         }
         session.update_unseen();
+    }
+
+    /// The files of turn `turn` of session `session_id` among `diffs`: those that differ between its
+    /// trees, but the ones another call names, which touched the same worktree while the trees ran.
+    /// Another call is any of another session's, and any of its own session's other turns.
+    fn files_of(&self, session_id: &str, turn: usize, diffs: Vec<RootDiff>) -> TurnFiles {
+        let Some(session) = self.sessions.get(session_id) else {
+            return TurnFiles::default();
+        };
+        let (since, until) = session.trees_window(turn);
+        let made = |r: &&Row| {
+            let rejected = r.outcome == Some(Outcome::Rejected);
+            !rejected && !(turn_files::edits(&r.tool) && r.failed())
+        };
+        let others: Vec<&Row> = (self.sessions.values())
+            .flat_map(|s| {
+                s.ledger
+                    .rows()
+                    .iter()
+                    .map(move |r| (s.agent.id == session_id, r))
+            })
+            .filter(|(own, r)| !*own || r.turn != Some(turn))
+            .map(|(_, r)| r)
+            .filter(made)
+            .filter(|r| r.at().is_some_and(|at| (since..=until).contains(&at)))
+            .collect();
+        let ours: Vec<&Row> = (session.ledger.turn(turn)).filter(made).collect();
+        let name = |agent: &Option<String>| match agent {
+            Some(id) => session.agent_name(id).to_string(),
+            None => session.capabilities.agent.to_string(),
+        };
+        let agent = |diff: &RootDiff, file: &Numstat| {
+            let named = |path: &str| {
+                ours.iter()
+                    .find(|r| turn_files::names(r, &self.roots, &diff.root, path))
+            };
+            let call = named(&file.path).or_else(|| file.from.as_deref().and_then(named));
+            let worker = || {
+                let spawned = session.agents.iter().filter(|a| a.turn == Some(turn));
+                let mut own =
+                    spawned.filter(|a| a.root == diff.root && session.has_cards(&a.agent.id));
+                own.next().map(|a| a.agent.id.clone())
+            };
+            match call {
+                Some(row) => Some(name(&row.agent)),
+                None => worker().map(|id| name(&Some(id))),
+            }
+        };
+        TurnFiles::of(diffs, &self.roots, &others, &ours, agent)
     }
 
     /// Applies, after the replay, what the live app learned before a restart (danielrispler/Falinks#434, decisions 37 and
@@ -4436,9 +4651,14 @@ impl Studio {
 /// Whether a shell command merges: `git merge` or `gh pr merge`, alone or in a chain.
 fn merges(command: &str) -> bool {
     let parts = command.split(['&', ';', '|', '\n']);
+    // The word ends there: `git merge-base` is no merge.
+    let word = |c: &str, start: &str| {
+        let rest = c.strip_prefix(start);
+        rest.is_some_and(|r| r.is_empty() || r.starts_with(char::is_whitespace))
+    };
     parts
         .map(str::trim)
-        .any(|c| c.starts_with("git merge") || c.starts_with("gh pr merge"))
+        .any(|c| word(c, "git merge") || word(c, "gh pr merge"))
 }
 
 /// The id of `owner`'s card written at `at`, a worker's or else a session's (`CardRequest::id`).

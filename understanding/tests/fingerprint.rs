@@ -2,9 +2,10 @@
 //! temporary repositories, as the engine's tests do (`src/lib.rs`,
 //! `retention_checks_every_blob_of_a_snapshot`).
 
+use std::collections::HashMap;
 use std::{fs, path::Path, process::Command};
 use studio_core::{Base, Purpose};
-use studio_understanding::Fingerprints;
+use studio_understanding::{Fingerprints, live_roots, worktree_root};
 
 /// Runs `git` in `repo`, away from Daniel's own git config, and returns its output.
 fn git(repo: &Path, args: &[&str]) -> String {
@@ -440,4 +441,187 @@ fn committing_only_an_os_file_is_no_change() {
     git(dir.path(), &["commit", "-qm", "Oops"]);
 
     assert_eq!(diff(&mut prints, dir.path()), None);
+}
+
+// A worktree made after its fingerprints began (danielrispler/plotkeeper#204).
+
+#[test]
+fn a_worktree_made_after_the_first_fingerprint_starts_from_its_creation_commit() {
+    let (dir, mut prints) = repo();
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    let made = dir
+        .path()
+        .with_file_name(format!("made-{}", std::process::id()));
+    git(
+        dir.path(),
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "made",
+            made.to_str().unwrap(),
+        ],
+    );
+    fs::write(made.join("new.rs"), "fn n() {}\n").unwrap();
+
+    let change = "--- a/new.rs\n+++ b/new.rs\n@@ -0,0 +1 @@\n+fn n() {}\n";
+    let first = prints.look(&made, Purpose::Card).map(|c| c.diff);
+    assert_eq!(first.as_deref(), Some(change));
+    assert_eq!(diff(&mut prints, &made), None);
+    let _ = fs::remove_dir_all(&made);
+}
+
+#[test]
+fn a_worktree_that_existed_before_the_first_fingerprint_starts_from_its_files_then() {
+    let dir = tempfile::tempdir().unwrap();
+    git(dir.path(), &["init", "-q"]);
+    fs::write(dir.path().join("lib.rs"), "fn a() {}\n").unwrap();
+    git(dir.path(), &["add", "."]);
+    git(dir.path(), &["commit", "-qm", "Start"]);
+    let older = dir
+        .path()
+        .with_file_name(format!("older-{}", std::process::id()));
+    git(
+        dir.path(),
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "older",
+            older.to_str().unwrap(),
+        ],
+    );
+    fs::write(older.join("there.rs"), "fn t() {}\n").unwrap();
+    let mut prints = Fingerprints::default();
+    assert_eq!(diff(&mut prints, dir.path()), None);
+
+    assert_eq!(diff(&mut prints, &older), None);
+    let _ = fs::remove_dir_all(&older);
+}
+
+/// A repository with a worktree `w1` removed and a worktree `w2` listed, both in its `worktrees`
+/// folder (danielrispler/plotkeeper#205); the root, and the folders of `w1` and `w2`.
+fn repo_with_removed_worktree() -> (tempfile::TempDir, String, String, String) {
+    let (dir, _) = repo();
+    let root = fs::canonicalize(dir.path()).unwrap().display().to_string();
+    let [w1, w2] = ["w1", "w2"].map(|name| {
+        let path = format!("{root}/worktrees/{name}");
+        git(dir.path(), &["worktree", "add", "-q", "-b", name, &path]);
+        path
+    });
+    git(dir.path(), &["worktree", "remove", "--force", &w1]);
+    (dir, root, w1, w2)
+}
+
+#[test]
+fn a_path_in_a_removed_worktrees_folder_has_no_root_and_one_in_a_listed_worktree_has_its_own() {
+    let (_dir, root, w1, w2) = repo_with_removed_worktree();
+    assert_eq!(worktree_root(&format!("{w1}/src/a.rs")), None);
+    assert_eq!(worktree_root(&w1), None);
+    assert_eq!(worktree_root(&format!("{w2}/new/dir/a.rs")), Some(w2));
+    assert_eq!(worktree_root(&format!("{root}/new/a.rs")), Some(root));
+}
+
+#[test]
+fn a_loaded_root_cache_drops_the_entry_of_a_removed_worktrees_folder_and_keeps_the_rest() {
+    let (_dir, root, w1, w2) = repo_with_removed_worktree();
+    let saved: HashMap<String, String> = [
+        (format!("{w1}/src"), root.clone()),
+        (w2.clone(), w2.clone()),
+        (root.clone(), root.clone()),
+    ]
+    .into();
+    let kept = live_roots(saved.clone());
+    let mut expected = saved;
+    expected.remove(&format!("{w1}/src"));
+    assert_eq!(kept, expected);
+}
+
+#[test]
+fn a_loaded_root_cache_keeps_the_entries_that_name_a_removed_worktree_as_their_own_root() {
+    let (_dir, root, w1, w2) = repo_with_removed_worktree();
+    let saved: HashMap<String, String> = [
+        (w1.clone(), w1.clone()),
+        (format!("{w1}/src"), w1.clone()),
+        (format!("{w1}/gone"), root.clone()),
+        (format!("{w2}/src"), root.clone()),
+        (format!("{root}/src"), root.clone()),
+    ]
+    .into();
+    let kept = live_roots(saved.clone());
+    let mut expected = saved;
+    // One in a removed worktree that names another root, and one the listed worktree w2 holds.
+    expected.remove(&format!("{w1}/gone"));
+    expected.remove(&format!("{w2}/src"));
+    assert_eq!(kept, expected);
+}
+
+#[test]
+fn a_worktree_made_before_the_turn_or_worker_began_starts_from_its_files_then() {
+    let (dir, mut prints) = repo();
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    let made = dir
+        .path()
+        .with_file_name(format!("before-{}", std::process::id()));
+    git(
+        dir.path(),
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "before",
+            made.to_str().unwrap(),
+        ],
+    );
+    fs::write(made.join("early.rs"), "fn e() {}\n").unwrap();
+    // The fingerprints began before the worktree, but the worker that looks in it began after.
+    let began = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
+        + 2_000;
+    let found = prints.look_since(&made, Purpose::Base, Some(began));
+    assert_eq!(found.map(|c| c.diff), None);
+    let _ = fs::remove_dir_all(&made);
+}
+
+#[test]
+fn a_file_edited_before_a_new_worktrees_base_look_is_still_the_change_at_its_card() {
+    let (dir, mut prints) = repo();
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    let made = dir
+        .path()
+        .with_file_name(format!("same-call-{}", std::process::id()));
+    let args = ["worktree", "add", "-q", "-b", "same-call"];
+    git(dir.path(), &[&args[..], &[made.to_str().unwrap()]].concat());
+    fs::write(made.join("new.rs"), "fn n() {}\n").unwrap();
+
+    // The first look of the worktree is its base, which no card takes the change of.
+    prints.look_since(&made, Purpose::Base, None);
+    let card = prints
+        .look_since(&made, Purpose::Card, None)
+        .map(|c| c.diff);
+
+    let change = "--- a/new.rs\n+++ b/new.rs\n@@ -0,0 +1 @@\n+fn n() {}\n";
+    assert_eq!(card.as_deref(), Some(change));
+    let _ = fs::remove_dir_all(&made);
+}
+
+// Roots in git's spelling (danielrispler/plotkeeper#202): a temp dir's `/var` is `/private/var`.
+
+#[test]
+fn a_root_is_spelled_as_git_spells_it_and_a_saved_entry_in_that_spelling_stays_live() {
+    let (dir, _) = repo();
+    let spelled = dir.path().display().to_string();
+    let git_root = fs::canonicalize(dir.path()).unwrap().display().to_string();
+
+    assert_eq!(
+        worktree_root(&format!("{spelled}/src/new")),
+        Some(git_root.clone())
+    );
+    let saved: HashMap<String, String> = [(spelled, git_root)].into();
+    assert_eq!(live_roots(saved.clone()), saved);
 }

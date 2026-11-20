@@ -89,6 +89,12 @@ struct Shell {
     _dirs: [tempfile::TempDir; 2],
 }
 
+/// The Unix time now, in milliseconds.
+fn now_ms() -> u64 {
+    let since = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH);
+    since.map_or(0, |d| d.as_millis() as u64)
+}
+
 impl Shell {
     /// A shell on a new repository with one commit, and an empty store.
     fn new() -> Shell {
@@ -104,7 +110,7 @@ impl Shell {
             writer: Recording::default(),
             store: Mutex::new(CardStore::open(data.path().join("cards.json")).unwrap()),
             repo,
-            at: 1_793_400_000_000,
+            at: now_ms(),
             log: Vec::new(),
             _dirs: [code, data],
         }
@@ -112,7 +118,8 @@ impl Shell {
 
     /// Takes event `name`, with `fields` added, and returns the cards and briefs it asks for.
     fn event(&mut self, name: &str, fields: Value) -> Vec<Output> {
-        self.at += 1;
+        // The clock follows the real one, which a worktree's creation time is read against.
+        self.at = (self.at + 1).max(now_ms());
         let mut event = json!({"session_id": "s1", "hook_event_name": name, "cwd": self.repo,
             "studio_received_ms": self.at});
         event

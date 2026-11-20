@@ -13,7 +13,7 @@ const file = (path, added, removed, extra = {}) => ({ root: "/r", path, from: nu
 const run = (status, call, exit_code = null) => ({ command: "cargo test", status, exit_code, call, agent: null });
 const check = (suite, status, retries = 0, runs = [run(status, `c-${suite}`, status === "failed" ? 101 : 0)]) => ({ suite, status, retries, runs });
 const same = (a, b) => a.length === b.length && a.every((node, i) => node === b[i]);
-const files = (list, external = 0) => ({ files: list, external });
+const files = (list, merged = 0) => ({ files: list, merged });
 
 test("the top level: files and each check's final result, singular and plural", () => {
   assert.equal(evidenceLine({ files: files([file("a", 1, 0)]), checks: [] }), "1 file");
@@ -35,16 +35,15 @@ test("a failure is named only for a check whose last run failed; a retried pass 
   assert.equal(evidenceLine({ files: null, checks: [check("a", "passed"), check("b", "ran")] }), "1 check passed · 1 check ran");
 });
 
-test("opened: each file with its line counts, the external count muted, each check with its status", () => {
+test("opened: each file with its line counts and its agent, each check with its status, and no external row", () => {
   const rows = evidenceRows({
-    files: files([file("ui/story.ts", 12, 3), file("img.png", null, null), file("new.ts", 4, 0, { from: "old.ts" })], 2),
+    files: files([file("ui/story.ts", 12, 3), file("img.png", null, null), file("new.ts", 4, 0, { from: "old.ts" })]),
     checks: [check("cargo test", "passed", 1), check("npm run check", "passed"), check("go test", "ran"), check("cargo clippy", "failed", 2)],
   });
   assert.deepEqual(rows.map((r) => [r.kind, r.label]), [
     ["file", "ui/story.ts +12 −3"],
     ["file", "img.png"],
     ["file", "old.ts → new.ts +4 −0"],
-    ["external", "+2 external"],
     ["check", "cargo test passed after 1 retry"],
     ["check", "npm run check passed"],
     ["check", "go test ran"],
@@ -52,7 +51,10 @@ test("opened: each file with its line counts, the external count muted, each che
   ]);
   assert.equal(rows.find((r) => r.label.startsWith("cargo clippy")).call, "c-cargo clippy");
   assert.equal(rows.find((r) => r.label === "go test ran").call, undefined);
-  assert.equal(evidenceRows({ files: files([file("a", 1, 0)], 0), checks: [] }).some((r) => r.kind === "external"), false);
+  assert.equal(evidenceRows({ files: files([file("a", 1, 0)]), checks: [] }).some((r) => r.kind === "external"), false);
+  // A file's row names its agent when the core found one, and none otherwise.
+  const named = evidenceRows({ files: files([file("a", 1, 0, { agent: "claude" }), file("b", 1, 0, { agent: null })]), checks: [] });
+  assert.deepEqual(named.map((r) => r.agent ?? null), ["claude", null]);
 });
 
 test("no line for an agy session, or a turn with no files and no checks", () => {
@@ -65,7 +67,7 @@ test("no line for an agy session, or a turn with no files and no checks", () => 
 
 test("opening the line, then a failed check's output, changes only those nodes, and the open line outlasts a refresh", async () => {
   globalThis.window = { __TAURI__: { core: { invoke: async () => ({ exit_code: 101, tail: "error[E0308]: mismatched types" }) } } };
-  const turn = { files: files([file("a.rs", 3, 1)], 1), checks: [check("cargo test", "failed")] };
+  const turn = { files: files([file("a.rs", 3, 1)]), checks: [check("cargo test", "failed")] };
   const make = () => evidenceElement("s1", 4, turn, { only: "all" });
 
   const rail = new El("ul");
@@ -241,4 +243,23 @@ test("a redraw of an open turn's open hunk reads it again when the file's counts
   await settle();
   assert.equal(reads, 2);
   assert.match(grown.find("pre")[0].text, /read 2/);
+});
+
+test("merged files are counted apart: the line's file count leaves them out, and the rows show \"+2 merged\"", () => {
+  const facts = { files: files([file("a", 1, 0)], 2), checks: [check("cargo test", "passed")] };
+  assert.equal(evidenceLine(facts), "1 file · +2 merged · 1 check passed");
+  assert.equal(evidenceLine({ files: files([], 3), checks: [] }), "+3 merged");
+  assert.equal(evidenceLine({ files: files([file("a", 1, 0)], 0), checks: [] }), "1 file");
+  const rows = evidenceRows(facts);
+  assert.deepEqual(rows.map((r) => [r.kind, r.label]), [["file", "a +1 −0"], ["merged", "+2 merged"], ["check", "cargo test passed"]]);
+  assert.equal(hasEvidence({ files: files([], 2), checks: [] }, { turn_trees: true }), true);
+});
+
+test("the opened line draws the merged row as plain text, without a hunk", () => {
+  const node = evidenceElement("s", 0, { ended_at: 1, files: files([file("a", 1, 0)], 2), checks: [] }, { only: "all" });
+  const items = [];
+  const walk = (n) => (n.className === "evidence-merged" ? items.push(n) : (n.children ?? []).forEach(walk));
+  walk(node);
+  assert.equal(items.length, 1);
+  assert.match(JSON.stringify(items[0]), /\+2 merged/);
 });
