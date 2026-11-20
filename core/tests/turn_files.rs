@@ -1042,3 +1042,17 @@ fn a_worktree_the_session_edits_through_bash_with_no_worker_in_it_counts_for_its
     assert_eq!(turn_files(&studio, 0), ["x.rs"]);
     assert!(studio.turn_workers(&turn_id(&studio)).is_empty());
 }
+
+#[test]
+fn a_file_the_turns_own_call_names_stays_the_turns_though_another_call_names_it_too() {
+    let read = other_call(
+        2_000,
+        "x1",
+        "Bash",
+        json!({ "command": "git diff /w/repo/src/a.rs" }),
+        ROOT,
+        None,
+    );
+    let own = edit(1_000, "e1", "/w/repo/src/a.rs", None);
+    assert_eq!(kept(vec![own, read]), ["src/a.rs", "src/b.rs"]);
+}

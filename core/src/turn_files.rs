@@ -131,7 +131,7 @@ fn mentions(command: &str, path: &str) -> bool {
 }
 
 impl TurnFiles {
-    /// The files of `diffs` but those `others` name, each with the agent that `agent` finds for it
+    /// The files of `diffs` but those `others` name and no call of `ours` does, each with the agent that `agent` finds for it
     /// (its calls, else its worktree's worker). A file a move of `HEAD` brought in, which no call
     /// of `ours` names, is counted in `merged` instead.
     pub(crate) fn of(
@@ -147,11 +147,11 @@ impl TurnFiles {
                 let by =
                     |f: &dyn Fn(&str) -> bool| f(&file.path) || file.from.as_deref().is_some_and(f);
                 let named = |path: &str| others.iter().any(|row| names(row, &diff.root, path));
-                if by(&named) {
+                let called = |path: &str| ours.iter().any(|row| names(row, &diff.root, path));
+                if by(&named) && !by(&called) {
                     continue;
                 }
                 let moved = |path: &str| diff.moved.iter().any(|m| m == path);
-                let called = |path: &str| ours.iter().any(|row| names(row, &diff.root, path));
                 if by(&moved) && !by(&called) {
                     found.merged += 1;
                     continue;

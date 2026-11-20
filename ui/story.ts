@@ -16,7 +16,7 @@ import { agentState, sessionName, showsLanded } from "./list.js";
 import { closePane, openHere } from "./panes.js";
 import { openDecision, type Ask } from "./answer.js";
 import { blockedElement, typeRetry } from "./blocked.js";
-import { briefNodes, cardLine, cardsFor, openCard, quizOpen, rowCards, unseenRow } from "./cards.js";
+import { beginFeed, briefNodes, cardLine, cardsFor, endFeed, markShown, openCard, quizOpen, rowCards, unseenRow } from "./cards.js";
 import { type Banner, bannerElement, bannerFor, bannerLives } from "./banner.js";
 import { quizAllowed, quizAnswered, quizItem, quizRegion, seedQuiz, trialOn } from "./quiz.js";
 import { evidenceElement, hasEvidence } from "./evidence.js";
@@ -570,7 +570,9 @@ export function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
     const summary = turn.id ? summaryOf(turn.id) : null;
     const { headline } = headlineOf(summary, turn.message);
     const open = opened.has(key);
-    const line = foldedLine(turn, headline, quizAllowed(headlineOf(summary, turn.message).body, false) && (block.cards.some(quizOpen) || (summary?.summary.quiz != null && summary.arm !== "body_only" && !quizAnswered(turn.id!))));
+    const allowed = quizAllowed(headlineOf(summary, turn.message).body, false);
+    const cards = cardsFor(block.cards, allowed);
+    const line = foldedLine(turn, headline, allowed && (block.cards.some(quizOpen) || (summary?.summary.quiz != null && summary.arm !== "body_only" && !quizAnswered(turn.id!))));
     const button = pressable(document.createElement("button"), open, () => {
       if (opened.has(key)) opened.delete(key);
       else opened.add(key);
@@ -589,8 +591,10 @@ export function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
     // An unseen card of a folded turn keeps a title row (danielrispler/plotkeeper#211); the open turn shows its cards itself.
     const turnIndex = block.index!;
     const cardTurn = turn.files ? { session: session.id, index: turnIndex, files: turn.files.files, ended: turn.ended_at !== null } : null;
-    const rows = open ? [] : rowCards(block.cards).map((stored) => unseenRow(stored, cardTurn));
+    const rows = open ? [] : rowCards(cards).map((stored) => unseenRow(stored, cardTurn));
     node.replaceChildren(button, ...rows, ...(open ? [...turnContent(session, block, null).children] : []));
+    // The cards of an unfolded turn are on screen now.
+    if (open) markShown();
   };
   draw();
   return node;
@@ -631,6 +635,7 @@ export function drawFeed() {
     element("feed").replaceChildren();
     return;
   }
+  beginFeed();
   const session = selected.session;
   const own = selected.agent === null;
   const { latest, blocks } = railOf(selected, all, workers);
@@ -644,6 +649,7 @@ export function drawFeed() {
   );
   element("brief-fold").hidden = lives || briefNodes(cards).length === 0;
   element("feed").replaceChildren(...blocks.map((block, i) => turnElement(session, block, own && i === 0 && block.index !== null ? now : null)));
+  endFeed();
 }
 // Rename (danielrispler/Falinks#469): the row's name, kept in the event log, and `/rename` typed into the session while
 // its claude runs, so Claude Code shows the same name. An empty name gives the row its folder's again.

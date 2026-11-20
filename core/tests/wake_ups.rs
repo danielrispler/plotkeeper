@@ -379,3 +379,39 @@ fn a_workers_card_of_a_second_end_waits_in_the_spawning_turn_until_its_own_wake_
     assert_eq!(card_turn(&studio, "w1", 10), Some(2));
     assert_eq!(card_turn(&studio, "w1", 25), Some(0));
 }
+
+#[test]
+fn a_card_asked_for_while_a_resumed_worker_runs_is_in_the_turn_that_resumed_it() {
+    let mut studio = spawned_and_woken();
+    studio.apply(&ev("Stop", 21, "p3", json!({"background_tasks": []})));
+    studio.apply(&ev(
+        "UserPromptSubmit",
+        22,
+        "p4",
+        json!({"prompt": "Send w1 on"}),
+    ));
+    let step = json!({"agent_id": "w1", "tool_name": "Read", "tool_input": {"file_path": "/w/a"},
+        "tool_use_id": "r1", "tool_response": {}});
+    studio.apply(&ev("PreToolUse", 23, "p4", step));
+
+    assert_eq!(card_turn(&studio, "w1", 24), Some(3));
+    assert_eq!(card_turn(&studio, "w1", 10), Some(2));
+}
+
+#[test]
+fn a_wake_up_that_lands_before_its_workers_end_is_recorded_still_takes_the_card_of_that_end() {
+    let mut studio = Studio::default();
+    studio.apply(&ev("UserPromptSubmit", 1, "p1", json!({"prompt": "Do it"})));
+    studio.apply(&launched(2, "t1", "w1"));
+    studio.apply(&ev(
+        "Stop",
+        8,
+        "p1",
+        json!({"background_tasks": [{"id": "w1"}]}),
+    ));
+    // The async `SubagentStop`, stamped at 10, is applied before the wake-up stamped at 9.
+    studio.apply(&ev("SubagentStop", 10, "p1", json!({"agent_id": "w1"})));
+    studio.apply(&woken(9, "p2", &["w1"]));
+
+    assert_eq!(card_turn(&studio, "w1", 10), Some(1));
+}
