@@ -923,6 +923,7 @@ fn in_app(url: &tauri::Url) -> bool {
 
 fn main() {
     uptime();
+    hover_delay();
     let log = studio_hook::event_log(&std::env::home_dir().expect("a home directory"));
     // The store sits beside the log, in the studio's data directory.
     let store = CardStore::open_beside(&log).expect("read the card store");
@@ -1764,6 +1765,17 @@ fn play(sound: Sound) {
 }
 
 /// Time since the app started, a monotonic clock for combining notices (danielrispler/Falinks#434, decision 28).
+// A hover's text shows after half a second, not macOS's 1.5 s (#220). WKWebView's `title` tooltips are AppKit's, which read
+// NSInitialToolTipDelay; it is registered, not written, so `defaults write dev.falinks.studio NSInitialToolTipDelay` still wins.
+fn hover_delay() {
+    use objc2::runtime::AnyObject;
+    use objc2_foundation::{NSDictionary, NSNumber, NSUserDefaults, ns_string};
+    let delay = NSNumber::new_i32(500);
+    let defaults = NSDictionary::<_, AnyObject>::from_slices(&[ns_string!("NSInitialToolTipDelay")], &[&*delay]);
+    // SAFETY: the dictionary maps a string key to an NSNumber, the types registerDefaults expects.
+    unsafe { NSUserDefaults::standardUserDefaults().registerDefaults(&defaults) };
+}
+
 fn uptime() -> Duration {
     static STARTED: LazyLock<Instant> = LazyLock::new(Instant::now);
     STARTED.elapsed()
