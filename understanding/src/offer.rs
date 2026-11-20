@@ -50,14 +50,21 @@ impl Shape {
     /// be read counts all its lines as non-trivial. A turn with no files in `facts` reads `diff`,
     /// the change of its card request, which an agent that reports no trees leaves.
     pub fn of(facts: &Facts, diff: &str, merge: bool) -> Shape {
-        Shape::read(facts, of_diff(diff), merge, &[])
+        Shape::read(facts, of_diff(diff), merge, &[], false)
     }
 
     /// As `of`, with the files of the card's change already read, and leaving out the files in the
     /// `workers` worktrees, which are judged at the workers' own cards.
-    fn read(facts: &Facts, change: Vec<Changed>, merge: bool, workers: &[String]) -> Shape {
+    /// The card's change is read where the turn is not `traced` and has no files.
+    fn read(
+        facts: &Facts,
+        change: Vec<Changed>,
+        merge: bool,
+        workers: &[String],
+        traced: bool,
+    ) -> Shape {
         let failed = facts.checks.iter().any(|c| c.status == CheckStatus::Failed);
-        let files = match facts.files.is_empty() {
+        let files = match facts.files.is_empty() && !traced {
             true => change,
             false => facts
                 .files
@@ -120,6 +127,9 @@ pub struct TurnFacts {
     pub merge: bool,
     /// The worktrees that were a worker's home during the turn: their files are judged at the worker's card.
     pub workers: Vec<String>,
+    /// The turn's trees were read: its files are its own even when there are none, and the card's
+    /// diff is not read in their place. False for an agent that reports no trees, and a worker's card.
+    pub traced: bool,
 }
 
 /// The table's inputs, as the record keeps them.
@@ -144,11 +154,17 @@ pub struct Decision {
 }
 
 /// The one function that decides an offer, by the table (danielrispler/plotkeeper#119) read from `turn`'s
-/// files, or from `change`, the files of the card's own diff, where `turn` has none: an agent that
-/// reports no trees, and a worker's card. A worker's card, and a subagent's late change, must pass
+/// files, or from `change`, the files of the card's own diff, where `turn` has no trees: an agent that
+/// reports none, and a worker's card. A worker's card, and a subagent's late change, must pass
 /// the table's first row, and get no lone Quiz, since neither has a summary.
 pub fn decide(kind: OfferKind, turn: &TurnFacts, change: &[Changed]) -> Decision {
-    let shape = Shape::read(&turn.facts, change.to_vec(), turn.merge, &turn.workers);
+    let shape = Shape::read(
+        &turn.facts,
+        change.to_vec(),
+        turn.merge,
+        &turn.workers,
+        turn.traced,
+    );
     let logic: Vec<&Changed> = shape.logic().collect();
     let non_trivial: u64 = logic.iter().map(|f| f.non_trivial).sum();
     let inputs = Inputs {

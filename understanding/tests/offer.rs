@@ -6,8 +6,8 @@ use studio_core::{
     Base, CardRequest, Check, CheckRun, CheckStatus, FactFile, Facts, SummaryRequest, TurnFile,
 };
 use studio_understanding::{
-    Card, CardStore, CardWriter, FakeWriter, Offer, Offers, Place, Shape, SummarySetup, Tap,
-    TurnFacts, TurnSummary, changed_in, offer_stop, offer_summary, settle, write_stop,
+    Card, CardStore, CardWriter, FakeWriter, Offer, OfferKind, Offers, Place, Shape, SummarySetup,
+    Tap, TurnFacts, TurnSummary, changed_in, decide, offer_stop, offer_summary, settle, write_stop,
     write_summary,
 };
 
@@ -322,6 +322,7 @@ fn turn_facts(files: &[(&str, u64)], check: Option<CheckStatus>) -> TurnFacts {
         facts: facts(files, check),
         merge: false,
         workers: Vec::new(),
+        traced: true,
     }
 }
 
@@ -800,4 +801,22 @@ fn the_files_of_a_fingerprints_diff_are_read() {
     let files = changed_in(&change.diff);
     let found: Vec<(&str, u64)> = files.iter().map(|f| (f.path.as_str(), f.lines)).collect();
     assert_eq!(found, [("a.rs", 2), ("new.rs", 1)]);
+}
+
+#[test]
+fn a_turn_that_changed_nothing_is_not_offered_the_change_of_a_card_in_a_shared_checkout() {
+    let traced = TurnFacts {
+        traced: true,
+        ..TurnFacts::default()
+    };
+    let other = changed_in(&diff_of(30));
+    assert_eq!(
+        decide(OfferKind::Turn, &traced, &other).offer,
+        Offer::Nothing
+    );
+    let untraced = TurnFacts::default();
+    assert_eq!(
+        decide(OfferKind::Turn, &untraced, &other).offer,
+        Offer::Card
+    );
 }
