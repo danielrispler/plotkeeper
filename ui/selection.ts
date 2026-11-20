@@ -58,6 +58,26 @@ export async function select(id: string, agent: string | null = null) {
   await catchUp();
 }
 
+// What the Home key does (#239, like tmux `last-window`): from a session it remembers that session and shows Home; on Home it
+// selects the remembered session if the list still holds it, else does nothing.
+export function homeToggle(current: string | null, remembered: string | null, listed: { id: string }[]): { remember: string } | { select: string } | null {
+  if (current !== null) return { remember: current };
+  return remembered !== null && listed.some((s) => s.id === remembered) ? { select: remembered } : null;
+}
+
+// The session Daniel came from when he last went Home.
+let cameFrom: string | null = null;
+
+// The Home key's action.
+export async function toggleHome() {
+  const step = homeToggle(studio.selection?.session.id ?? null, cameFrom, studio.listed);
+  if (!step) return;
+  if ("remember" in step) {
+    cameFrom = step.remember;
+    await goHome();
+  } else await select(step.select);
+}
+
 // Selects no session, which shows Home: the core clears the selection and what is viewed.
 export async function goHome() {
   studio.pending = null;
