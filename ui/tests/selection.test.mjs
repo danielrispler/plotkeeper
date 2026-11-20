@@ -37,3 +37,18 @@ test("Open here shows the live terminal that already runs the conversation, neve
   // Nothing runs it: an exited terminal does not count.
   assert.equal(runningTerminal(session, [term("claude-a", [], "code 0"), term("claude-b", ["claude", "--resume", "other"])]), undefined);
 });
+
+test("the Home key flips between a session and Home (#239)", async () => {
+  const { homeToggle } = await import("../../dist/selection.js");
+  const listed = [{ id: "a" }, { id: "b" }];
+  // From a session it remembers that session and shows Home.
+  assert.deepEqual(homeToggle("a", null, listed), { remember: "a" });
+  // On Home it selects the remembered session.
+  assert.deepEqual(homeToggle(null, "a", listed), { select: "a" });
+});
+
+test("on Home with the remembered session gone, the Home key does nothing (#239)", async () => {
+  const { homeToggle } = await import("../../dist/selection.js");
+  assert.equal(homeToggle(null, "gone", [{ id: "b" }]), null);
+  assert.equal(homeToggle(null, null, [{ id: "b" }]), null);
+});
