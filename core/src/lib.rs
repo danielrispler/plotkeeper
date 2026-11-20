@@ -3865,7 +3865,7 @@ impl Studio {
             None => session.capabilities.agent.to_string(),
         };
         let agent = |diff: &RootDiff, file: &Numstat| {
-            let named = |path: &str| ours.iter().find(|r| turn_files::names(r, &diff.root, path));
+            let named = |path: &str| ours.iter().find(|r| turn_files::names(r, &self.roots, &diff.root, path));
             let call = named(&file.path).or_else(|| file.from.as_deref().and_then(named));
             let worker = || {
                 let spawned = session.agents.iter().filter(|a| a.turn == Some(turn));
@@ -3878,7 +3878,7 @@ impl Studio {
                 None => worker().map(|id| name(&Some(id))),
             }
         };
-        TurnFiles::of(diffs, &others, &ours, agent)
+        TurnFiles::of(diffs, &self.roots, &others, &ours, agent)
     }
 
     /// Applies, after the replay, what the live app learned before a restart (danielrispler/Falinks#434, decisions 37 and

@@ -1056,3 +1056,32 @@ fn a_file_the_turns_own_call_names_stays_the_turns_though_another_call_names_it_
     let own = edit(1_000, "e1", "/w/repo/src/a.rs", None);
     assert_eq!(kept(vec![own, read]), ["src/a.rs", "src/b.rs"]);
 }
+
+#[test]
+fn another_sessions_edit_spelled_through_a_symlink_takes_the_file_from_the_root_git_spells() {
+    // Git spells the root through `/private`; the other session's tool names its file without.
+    let root = "/private/w/repo";
+    let mut studio = Studio::with_roots(|folder| Some(format!("/private{folder}")));
+    let other_edit = other_call(
+        1_000,
+        "x1",
+        "Edit",
+        json!({ "file_path": "/w/repo/src/a.rs" }),
+        ROOT,
+        None,
+    );
+    let other_start = other_prompt();
+    for line in [
+        prompt(json!({ root: "s1" })),
+        other_start,
+        other_edit,
+        stop(json!({ root: "e1" })),
+    ] {
+        studio.replay(&line);
+    }
+    let asks = ask(&mut studio, AT + 20_000);
+    let mine = asks.iter().find(|a| a.session_id == SESSION).unwrap();
+    let both = [(root, "src/a.rs"), (root, "src/b.rs")];
+    studio.set_turn_files(mine, Some(diffs(mine, &both)));
+    assert_eq!(turn_files(&studio, 0), ["src/b.rs"]);
+}

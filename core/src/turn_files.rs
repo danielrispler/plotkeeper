@@ -3,6 +3,7 @@
 //! session's or turn's call names (`names`). The core runs no `git`: it names the trees to diff
 //! (`TurnDiff`), and the shell hands back git's numstat (`RootDiff`).
 
+use crate::Roots;
 use crate::ledger::Row;
 use serde::{Deserialize, Serialize};
 
@@ -89,11 +90,13 @@ pub struct TurnFiles {
 
 /// Whether the call of `row` names the file at `path` from worktree `root`: an edit of its
 /// absolute path, or a command whose text holds its absolute path, or its path from the root when
-/// the command touched that root. A bare file name never matches, and no shell is parsed.
-pub(crate) fn names(row: &Row, root: &str, path: &str) -> bool {
+/// the command touched that root. A bare file name never matches, and no shell is parsed. An edit's
+/// path is the tool's own spelling, so `roots` finds it inside `root` (git's spelling) through a
+/// symlink; a command's text is taken as written.
+pub(crate) fn names(row: &Row, roots: &Roots, root: &str, path: &str) -> bool {
     let absolute = format!("{}/{path}", root.trim_end_matches('/'));
     if edits(&row.tool) {
-        return row.file.as_deref() == Some(absolute.as_str());
+        return row.file.as_deref().and_then(|f| roots.inside(root, f)) == Some(path);
     }
     let Some(command) = row.command.as_deref() else {
         return false;
@@ -136,6 +139,7 @@ impl TurnFiles {
     /// of `ours` names, is counted in `merged` instead.
     pub(crate) fn of(
         diffs: Vec<RootDiff>,
+        roots: &Roots,
         others: &[&Row],
         ours: &[&Row],
         agent: impl Fn(&RootDiff, &Numstat) -> Option<String>,
@@ -146,8 +150,8 @@ impl TurnFiles {
                 // A rename counts by its old path too.
                 let by =
                     |f: &dyn Fn(&str) -> bool| f(&file.path) || file.from.as_deref().is_some_and(f);
-                let named = |path: &str| others.iter().any(|row| names(row, &diff.root, path));
-                let called = |path: &str| ours.iter().any(|row| names(row, &diff.root, path));
+                let named = |path: &str| others.iter().any(|row| names(row, roots, &diff.root, path));
+                let called = |path: &str| ours.iter().any(|row| names(row, roots, &diff.root, path));
                 if by(&named) && !by(&called) {
                     continue;
                 }
