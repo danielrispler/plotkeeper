@@ -6,7 +6,7 @@ use crate::{CardStore, CardWriter, LineKind};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
-use studio_core::{Answer, CheckStatus, Decision, Session, TaskFacts};
+use studio_core::{Answer, Check, CheckStatus, Decision, Session, TaskFacts};
 
 /// A question the agent asked, with Daniel's reply.
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -73,7 +73,14 @@ pub fn open_items(session: &Session, task: Option<TaskFacts>, store: &CardStore)
         }
     }
     let mut suites = BTreeMap::new();
-    for check in session.turns.iter().flat_map(|turn| &turn.checks) {
+    // A check that has not ended changes nothing.
+    let ended = |check: &&Check| check.status != CheckStatus::Running;
+    for check in session
+        .turns
+        .iter()
+        .flat_map(|turn| &turn.checks)
+        .filter(ended)
+    {
         suites.insert(&check.suite, check.status);
     }
     for (suite, status) in suites {

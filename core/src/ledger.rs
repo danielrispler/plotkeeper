@@ -59,6 +59,11 @@ pub struct Row {
     pub ran: bool,
     /// Whether its result is a command's start in the background, which has no result yet.
     pub background: bool,
+    /// The background task a command started, and how its notification says it ended.
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
+    pub task: Option<String>,
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
+    pub reported: Option<String>,
     /// `None` until its result lands.
     pub outcome: Option<Outcome>,
     /// The worktree roots the call touched (danielrispler/plotkeeper#207).
@@ -232,6 +237,17 @@ impl Ledger {
         row.settle();
     }
 
+    /// Takes a notification's report that background task `task` ended as `status`; the turn of its
+    /// call, when a row has the task.
+    pub(crate) fn report(&mut self, task: &str, status: &str) -> Option<Option<usize>> {
+        let row = self
+            .rows
+            .iter_mut()
+            .find(|r| r.task.as_deref() == Some(task))?;
+        row.reported = Some(status.into());
+        Some(row.turn)
+    }
+
     /// Takes the result of `tool`'s call.
     pub(crate) fn end(
         &mut self,
@@ -250,14 +266,15 @@ impl Ledger {
             },
         };
         let took = event.took();
-        let (ran, background) = (event.ran(), event.background_task().is_some());
+        let (ran, task) = (event.ran(), event.background_task().map(String::from));
         let row = self.of(event, tool, turn);
         row.ended_at = Some(at);
         row.take_roots(roots);
         row.took = took;
         row.outcome = Some(outcome);
         row.ran = ran;
-        row.background = background;
+        row.background = task.is_some();
+        row.task = task;
         row.end = Some(event.line);
         row.settle();
     }

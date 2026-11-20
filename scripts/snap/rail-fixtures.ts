@@ -99,7 +99,7 @@ const check = (command: string, passed: boolean, startedAgo: number, tookMs: num
 });
 
 const file = (path: string, added: number, removed: number, agent: string | null = null): TurnFile => ({ root: cwd, path, from: null, added, removed, agent });
-const run = (status: CheckStatus, call: string, exit_code: number) => ({ command: "cargo", statement: "cargo", status, exit_code, call, agent: null });
+const run = (status: CheckStatus, call: string, exit_code: number) => ({ command: "cargo", statement: "cargo", status, exit_code, call, agent: null, started_at: null });
 
 const helper = (id: string, name: string, asked: string, type: string, result: string, turn: number, ago: number, running = false): Subagent => ({
   id, parent: "session", kind: "helper", name, asked, agent_type: type, status: running ? "running" : "completed",

@@ -3194,6 +3194,13 @@ impl Studio {
                     // A background check ends at the notification that names its task.
                     for (task, status) in event.reported() {
                         let (task, status) = (task.as_str(), status.as_str());
+                        // Its turn's checks are read again with what the notification reports.
+                        let turn = session.ledger.report(task, status).flatten();
+                        if let Some(turn) = turn.filter(|t| *t < session.turns.len()) {
+                            let list = self.check_lists.of(&session.cwd);
+                            session.turns[turn].checks =
+                                checks::of_turn(&session.ledger, turn, list);
+                        }
                         let running = session.checks.iter_mut().filter(|l| l.ended_at.is_none());
                         let mut lines = running.filter(|l| l.task.as_deref() == Some(task));
                         if let Some(line) = lines.next() {
@@ -3331,6 +3338,17 @@ impl Studio {
                 Happened::ToolStart { tool, .. } => {
                     let turn = session.ledger_turn(&event.agent_id);
                     session.ledger.start(&event, tool, turn, called.clone());
+                    if let Some(turn) = turn.filter(|_| tool.kind == ToolKind::Command) {
+                        let list = self.check_lists.of(&session.cwd);
+                        if tool
+                            .command
+                            .as_deref()
+                            .is_some_and(|c| matched(list, c).is_some())
+                        {
+                            session.turns[turn].checks =
+                                checks::of_turn(&session.ledger, turn, list);
+                        }
+                    }
                     if own {
                         session.returned = None;
                         let step = Step::new(&tool.name, &tool.input, &event.cwd);

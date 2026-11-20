@@ -35,6 +35,13 @@ test("a failure is named only for a check whose last run failed; a retried pass 
   assert.equal(evidenceLine({ files: null, checks: [check("a", "passed"), check("b", "ran")] }), "1 check passed · 1 check ran");
 });
 
+test("a running check is not listed until it ends", () => {
+  const running = check("cargo test", "running");
+  assert.equal(evidenceLine({ files: null, checks: [running, check("go test", "passed")] }), "1 check passed");
+  assert.deepEqual(evidenceRows({ files: null, checks: [running] }), []);
+  assert.equal(hasEvidence({ files: null, checks: [running] }, { turn_trees: true }), false);
+});
+
 test("opened: each file with its line counts and its agent, each check with its status, and no external row", () => {
   const rows = evidenceRows({
     files: files([file("ui/story.ts", 12, 3), file("img.png", null, null), file("new.ts", 4, 0, { from: "old.ts" })]),
