@@ -1554,7 +1554,7 @@ fn refresh_landed(app: &AppHandle, session: Option<String>) {
             }
             tasks
         };
-        let gh = studio_workbench::gh();
+        let gh = studio_workbench::gh_path();
         for task in tasks {
             // A removed worktree has no facts.
             let facts = Path::new(&task.path)
@@ -1578,7 +1578,7 @@ fn refresh_landed_tasks(app: AppHandle) {
 /// the read loop never waits on the network, and asks again after 5 minutes. `gh` runs as Daniel
 /// with its own login; no credential file is read.
 fn prs(app: &AppHandle) {
-    let gh = studio_workbench::gh();
+    let gh = studio_workbench::gh_path();
     let mut asked = HashMap::<String, Instant>::new();
     loop {
         let branches = app.state::<Mutex<Studio>>().lock().unwrap().branches();
