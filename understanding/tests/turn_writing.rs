@@ -914,8 +914,8 @@ fn every_entry_point_returns_within_a_few_seconds_against_a_core_with_no_such_tu
     called("opened", |w| assert_eq!(w.opened("s1@6"), Ok(None)));
     called("setup", |w| drop(w.setup()));
     called("prune", |w| w.prune(&Default::default()));
-    // The jobs they queued run too, and end with nothing written.
-    called("the queued jobs", |w| assert_eq!(w.run_queued(), 2));
+    // The jobs they queued run too, a card's read of its session included, and end with nothing written.
+    called("the queued jobs", |w| assert_eq!(w.run_queued(), 5));
     // A summary parked on open, opened against a core with no such turn.
     called("settings, on open", |w| {
         w.settings(SummarySetup::default(), true)
@@ -1839,4 +1839,61 @@ fn a_background_helpers_edits_in_another_worktree_get_a_card_when_the_next_turn_
     day.take("Stop", json!({ "cwd": tree }));
 
     the_helpers_card_is_the_sessions(&day);
+}
+
+#[test]
+fn a_worker_that_started_while_its_card_waited_is_read_by_the_card_when_it_is_written() {
+    let (mut day, reading) = reading_day();
+    let outputs = day.event("UserPromptSubmit", json!({ "prompt": "Split the spec" }));
+    day.pass(outputs);
+    let worker = CardRequest {
+        agent: Some("w1".into()),
+        ..request("w1@200", &diff(&["a.rs", "b.rs"]))
+    };
+    day.writing.card(worker, true);
+    // The worker starts while the job waits.
+    day.event("PostToolUse", spawn_child("w1", "Implement #378", true));
+    day.writing.run_queued();
+
+    // The worker's own prompt, not Daniel's, which a session with no such worker falls back to.
+    assert_eq!(*reading.goals.lock().unwrap(), [vec!["…"]]);
+}
+
+#[test]
+fn a_prompt_sent_while_a_card_waited_is_in_the_goal_that_job_writes() {
+    let (mut day, reading) = reading_day();
+    let outputs = day.turn_asking("Add a", &[("a.rs", 3), ("b.rs", 3)], "Done.");
+    let card = outputs.into_iter().find_map(|o| match o {
+        Output::Card(request) => Some(request),
+        _ => None,
+    });
+    day.writing.card(card.expect("a card request"), true);
+    // Daniel's next prompt comes while the job waits.
+    day.event("UserPromptSubmit", json!({ "prompt": "Add b" }));
+    day.writing.run_queued();
+
+    assert_eq!(*reading.goals.lock().unwrap(), [vec!["Add a", "Add b"]]);
+}
+
+#[test]
+fn a_session_deleted_while_its_card_waited_gets_nothing_and_the_queue_goes_on_to_the_next_job() {
+    let mut day = Day::new();
+    let outputs = day.event("UserPromptSubmit", json!({ "prompt": "Add a" }));
+    day.pass(outputs);
+    let other = day.event(
+        "UserPromptSubmit",
+        json!({ "session_id": "s2", "prompt": "Add b" }),
+    );
+    day.pass(other);
+    let gone = request("s1@100", &diff(&["a.rs", "b.rs"]));
+    let next = CardRequest {
+        session_id: "s2".into(),
+        ..request("s2@200", &diff(&["a.rs", "b.rs"]))
+    };
+    day.writing.card(gone, true);
+    day.writing.card(next, true);
+    day.event("StudioDelete", json!({}));
+
+    assert_eq!(day.writing.run_queued(), 2);
+    assert_eq!(day.card_ids(), ["s2@200"]);
 }
