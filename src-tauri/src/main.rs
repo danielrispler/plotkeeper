@@ -809,7 +809,9 @@ fn commit_clearing(app: &AppHandle) {
                 && !cleared.iter().any(|c| c.id == s.agent.id)
         })
     };
-    let (requests, lines) = clear_commit(&sessions, in_use, |terminal| session_ends(&studio, terminal));
+    let (requests, lines) = clear_commit(&sessions, in_use, |terminal| {
+        session_ends(&studio, terminal)
+    });
     for request in requests {
         let _ = terminal::terminal_send(request, app.state());
     }
@@ -2112,8 +2114,11 @@ mod tests {
                 "hook_event_name": "SessionEnd",
             })]
         };
-        let (requests, lines) =
-            super::clear_commit(&[cleared("a", Some("t1")), cleared("b", None)], |_, _| false, ends);
+        let (requests, lines) = super::clear_commit(
+            &[cleared("a", Some("t1")), cleared("b", None)],
+            |_, _| false,
+            ends,
+        );
         assert_eq!(
             requests,
             vec![
@@ -2139,7 +2144,11 @@ mod tests {
                 ("b", studio_core::DELETE)
             ]
         );
-        assert!(super::clear_commit(&[], |_, _| false, |_| vec![]).1.is_empty());
+        assert!(
+            super::clear_commit(&[], |_, _| false, |_| vec![])
+                .1
+                .is_empty()
+        );
     }
 
     fn cleared(id: &str, terminal: Option<&str>) -> super::Cleared {
@@ -2163,7 +2172,8 @@ mod tests {
     }
 
     #[test]
-    fn a_terminal_a_session_not_being_cleared_uses_is_not_killed_but_its_cleared_session_is_still_deleted() {
+    fn a_terminal_a_session_not_being_cleared_uses_is_not_killed_but_its_cleared_session_is_still_deleted()
+     {
         let ends = |t: &str| vec![serde_json::json!({ "session_id": format!("r-{t}") })];
         let (requests, lines) = super::clear_commit(
             &[cleared("a", Some("t1")), cleared("b", Some("t2"))],
@@ -2177,7 +2187,10 @@ mod tests {
                 serde_json::json!({ "op": "forget", "id": "t2" }),
             ]
         );
-        let ids: Vec<_> = lines.iter().map(|l| l["session_id"].as_str().unwrap()).collect();
+        let ids: Vec<_> = lines
+            .iter()
+            .map(|l| l["session_id"].as_str().unwrap())
+            .collect();
         assert_eq!(ids, ["r-t2", "a", "b"]);
     }
 
@@ -2195,7 +2208,10 @@ mod tests {
         ];
         let kept = super::resolve_clearing(pending, current);
         assert_eq!(kept.len(), 1);
-        assert_eq!((kept[0].id.as_str(), kept[0].terminal.as_deref()), ("landed", Some("t9")));
+        assert_eq!(
+            (kept[0].id.as_str(), kept[0].terminal.as_deref()),
+            ("landed", Some("t9"))
+        );
     }
 
     #[test]

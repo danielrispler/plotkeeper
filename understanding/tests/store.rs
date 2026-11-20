@@ -1472,12 +1472,13 @@ mod learning {
             session_id: "s1".into(),
             ..Default::default()
         };
-        let summary: studio_understanding::TurnSummary = serde_json::from_value(serde_json::json!({
-            "summary": "Did a thing.",
-            "quiz": { "text": "Why?", "key": 0, "options": [
-                { "text": "A", "why": "Yes." }, { "text": "B", "why": "No." }] },
-        }))
-        .unwrap();
+        let summary: studio_understanding::TurnSummary =
+            serde_json::from_value(serde_json::json!({
+                "summary": "Did a thing.",
+                "quiz": { "text": "Why?", "key": 0, "options": [
+                    { "text": "A", "why": "Yes." }, { "text": "B", "why": "No." }] },
+            }))
+            .unwrap();
         store.add_summary_at(request, summary.clone(), NOW).unwrap();
         assert_eq!(served(&store), None);
         let request = studio_core::SummaryRequest {
@@ -1499,12 +1500,13 @@ mod learning {
             facts: hunk_facts(),
             ..Default::default()
         };
-        let summary: studio_understanding::TurnSummary = serde_json::from_value(serde_json::json!({
-            "summary": "Did a thing.",
-            "quiz": { "text": "Why?", "key": 0, "options": [
-                { "text": "A", "why": "Yes." }, { "text": "B", "why": "No." }] },
-        }))
-        .unwrap();
+        let summary: studio_understanding::TurnSummary =
+            serde_json::from_value(serde_json::json!({
+                "summary": "Did a thing.",
+                "quiz": { "text": "Why?", "key": 0, "options": [
+                    { "text": "A", "why": "Yes." }, { "text": "B", "why": "No." }] },
+            }))
+            .unwrap();
         store.add_summary_at(request, summary, NOW).unwrap();
         let Some(Learning::Fresh { at: got, hunk, .. }) = store.learning(NOW, START) else {
             panic!()
@@ -1674,13 +1676,20 @@ fn a_shown_tap_on_a_card_marks_its_quiz_shown_as_the_rails_show_does_and_never_a
     let data = tempfile::tempdir().unwrap();
     let mut store = two_cards(&data.path().join("cards.json"));
     let shown = |store: &CardStore, id: &str| {
-        store.cards().iter().find(|c| c.request.id == id).unwrap().shown_at
+        store
+            .cards()
+            .iter()
+            .find(|c| c.request.id == id)
+            .unwrap()
+            .shown_at
     };
     store.quiz_tap("toolu_01A", Tap::Shown, 5).unwrap();
     assert_eq!(shown(&store, "toolu_01A"), Some(5));
     store.quiz_tap("toolu_01A", Tap::Shown, 9).unwrap();
     assert_eq!(shown(&store, "toolu_01A"), Some(5));
-    store.quiz_tap("toolu_01B", Tap::Pick { option: 0 }, 6).unwrap();
+    store
+        .quiz_tap("toolu_01B", Tap::Pick { option: 0 }, 6)
+        .unwrap();
     store.quiz_tap("toolu_01B", Tap::Shown, 7).unwrap();
     assert_eq!(shown(&store, "toolu_01B"), None);
 }

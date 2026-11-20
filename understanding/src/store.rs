@@ -1024,15 +1024,13 @@ impl CardStore {
         let summaries = self.summaries.iter().filter_map(|k| {
             let quiz = k.summary.quiz.as_ref()?;
             let at = ended_at(&k.request.id, k.added_at);
-            (fresh(at) && k.arm != Some(Arm::BodyOnly) && open(&k.taps)).then_some(
-                FreshQuiz {
-                    at,
-                    hunk: &k.hunk,
-                    id: &k.request.id,
-                    session_id: &k.request.session_id,
-                    quiz,
-                },
-            )
+            (fresh(at) && k.arm != Some(Arm::BodyOnly) && open(&k.taps)).then_some(FreshQuiz {
+                at,
+                hunk: &k.hunk,
+                id: &k.request.id,
+                session_id: &k.request.session_id,
+                quiz,
+            })
         });
         cards
             .chain(summaries)
