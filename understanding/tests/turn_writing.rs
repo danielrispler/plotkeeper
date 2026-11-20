@@ -321,6 +321,108 @@ fn a_turns_card_then_its_summary_with_the_summary_taking_the_cards_decision_and_
     );
 }
 
+/// The Quizzes of the store: its cards' and its summaries'.
+fn quizzes(day: &Day) -> usize {
+    let store = day.store.lock().unwrap();
+    let cards = store.cards().iter().filter(|k| k.card.quiz.is_some());
+    cards.count()
+        + store
+            .summaries()
+            .iter()
+            .filter(|k| k.summary.quiz.is_some())
+            .count()
+}
+
+/// `outputs` as the core gives them for a turn that ended in Needs you.
+fn ended_asking(outputs: Vec<Output>) -> Vec<Output> {
+    let asking = |output| match output {
+        Output::Card(request) => Output::Card(CardRequest {
+            asks: true,
+            ..request
+        }),
+        Output::Summary(request) => Output::Summary(SummaryRequest {
+            asks: true,
+            ..request
+        }),
+        other => other,
+    };
+    outputs.into_iter().map(asking).collect()
+}
+
+#[test]
+fn a_card_of_a_turn_that_ended_in_needs_you_is_stored_without_a_quiz_and_displaces_no_lone_quiz() {
+    let mut day = Day::new();
+    for (i, file) in ["x1.rs", "x2.rs", "x3.rs"].iter().enumerate() {
+        day.turn(&format!("Lone {i}"), &[(file, 10)], "Done.");
+    }
+    assert_eq!(quizzes(&day), 3);
+
+    let outputs = day.turn_asking("Add two files", &[("a.rs", 3), ("b.rs", 3)], "Done.");
+    let id = card_id(&outputs);
+    day.pass(ended_asking(outputs));
+
+    let store = day.store.lock().unwrap();
+    let card = store.cards().iter().find(|k| k.request.id == id).unwrap();
+    assert_eq!(card.card.quiz, None);
+    drop(store);
+    assert_eq!(
+        quizzes(&day),
+        3,
+        "the count is unchanged and none displaced"
+    );
+}
+
+#[test]
+fn a_card_of_a_turn_that_ended_at_your_turn_keeps_its_quiz_though_its_session_needs_daniel_when_its_job_runs()
+ {
+    let mut day = Day::new();
+    let outputs = day.turn_asking("Add two files", &[("a.rs", 3), ("b.rs", 3)], "Done.");
+    let id = card_id(&outputs);
+    // Its session asks for a permission after the turn ended, before the job runs.
+    day.event(
+        "PermissionRequest",
+        json!({"tool_name": "Bash", "tool_input": {"command": "ls"}, "tool_use_id": "t1"}),
+    );
+    assert!(day.core.lock().unwrap().session("s1").unwrap().needs_you());
+    day.pass(outputs);
+
+    let store = day.store.lock().unwrap();
+    let card = store.cards().iter().find(|k| k.request.id == id).unwrap();
+    assert!(card.card.quiz.is_some());
+}
+
+#[test]
+fn a_summary_of_a_turn_that_ended_in_needs_you_loses_its_quiz_and_its_cards() {
+    let mut day = Day::new();
+    let outputs = day.turn_asking("Add two files", &[("a.rs", 3), ("b.rs", 3)], &long_reply());
+    let id = card_id(&outputs);
+    day.pass(ended_asking(outputs));
+
+    assert_eq!(day.summary(&id).expect("its summary").summary.quiz, None);
+    assert_eq!(quizzes(&day), 0);
+}
+
+#[test]
+fn a_summary_takes_its_cards_decision_though_the_turns_facts_moved_after_the_card() {
+    let mut day = Day::new();
+    let outputs = day.turn_asking("Add one file", &[("a.rs", 10)], "Done.");
+    let id = card_id(&outputs);
+    let (cards, summaries): (Vec<_>, Vec<_>) = outputs
+        .into_iter()
+        .partition(|o| matches!(o, Output::Card(_)));
+    // The card's decision is a lone Quiz, which its summary carries.
+    day.pass(cards);
+    // The turn then reads as a merge turn, which the table alone gives no Quiz.
+    day.event(
+        "PostToolUse",
+        json!({"tool_name": "Bash", "tool_input": {"command": "git merge main"}, "tool_use_id": "t9"}),
+    );
+    day.pass(summaries);
+
+    let summary = day.summary(&id).expect("the lone Quiz's summary");
+    assert!(summary.summary.quiz.is_some());
+}
+
 #[test]
 fn a_small_change_gets_no_card_and_a_lone_quiz_on_its_summary_with_one_line_on_record() {
     let mut day = Day::new();

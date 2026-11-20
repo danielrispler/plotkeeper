@@ -298,10 +298,6 @@ impl State {
             }
             false => write_goal(&self.store, &*self.writer, request, session, log),
         };
-        // A Quiz is never beside a decision (danielrispler/plotkeeper#119).
-        if card && session.needs_you() {
-            self.unsaved(self.store.lock().unwrap().drop_card_quiz(&card_id));
-        }
         let designed = self.design(&session.agent.id);
         // The brief, which a row's line may show, changed again.
         if written || designed {
@@ -318,12 +314,6 @@ impl State {
         write_design(&self.store, &*self.writer, id, &turns, |l| {
             self.effects.log(l);
         })
-    }
-
-    fn unsaved(&self, saved: std::io::Result<()>) {
-        if let Err(e) = saved {
-            self.effects.log(format!("save the card store: {e}"));
-        }
     }
 
     /// Fills in `request`'s facts and, by the one offer function (danielrispler/plotkeeper#209), whether its summary may
