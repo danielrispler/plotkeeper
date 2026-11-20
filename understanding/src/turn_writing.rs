@@ -221,17 +221,30 @@ impl TurnWriting {
     fn write(&self, mut request: CardRequest, card: bool, live: bool) {
         let state = self.state.clone();
         let id = request.session_id.clone();
-        let Some(session) = state.core.lock().unwrap().session(&id).cloned() else {
-            return;
+        // The job reads its session when it runs, not now: it may wait behind earlier writer calls.
+        let job = move || {
+            let session = state
+                .core
+                .lock()
+                .unwrap()
+                .session(&request.session_id)
+                .cloned();
+            // A session deleted while the job waited gets nothing.
+            let Some(session) = session.filter(|s| !s.is_deleted()) else {
+                return;
+            };
+            // Only a live turn's own card has a summary to come, which takes what is kept here and clears it.
+            let turn_card = card && live && turns_card(&session, &request);
+            if turn_card {
+                let files = changed_in(request.diff());
+                state
+                    .changes
+                    .lock()
+                    .unwrap()
+                    .insert(request.id.clone(), files);
+            }
+            state.write_stop(&mut request, &session, card, turn_card);
         };
-        // Only a live turn's own card has a summary to come, which takes what is kept here and clears it.
-        let turn_card = card && live && turns_card(&session, &request);
-        if turn_card {
-            let files = changed_in(request.diff());
-            let mut changes = state.changes.lock().unwrap();
-            changes.insert(request.id.clone(), files);
-        }
-        let job = move || state.write_stop(&mut request, &session, card, turn_card);
         self.queue(id, Box::new(job));
     }
 

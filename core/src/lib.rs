@@ -1652,6 +1652,11 @@ impl Session {
         }
     }
 
+    /// Whether Daniel deleted it, and it has not started again.
+    pub fn is_deleted(&self) -> bool {
+        self.deleted
+    }
+
     pub fn needs_you(&self) -> bool {
         !self.blocks.is_empty() || self.terminal_blocked
     }
