@@ -1738,11 +1738,15 @@ fn turn_facts(state: &Mutex<Studio>, id: &str) -> Facts {
 
 /// The turn named `id` as the offer reads it (danielrispler/plotkeeper#209): its facts, and whether it merged.
 fn turn_of(state: &Mutex<Studio>, id: &str) -> TurnFacts {
+    let facts = turn_facts(state, id);
+    // One lock for the rest: a guard taken in a field lives until the whole struct is built, so a
+    // second `lock()` there would wait on the thread's own first one for ever.
+    let studio = state.lock().unwrap();
     TurnFacts {
-        facts: turn_facts(state, id),
-        merge: state.lock().unwrap().turn_merged(id),
-        workers: state.lock().unwrap().turn_workers(id),
-        traced: state.lock().unwrap().summary_ask(id).is_some(),
+        facts,
+        merge: studio.turn_merged(id),
+        workers: studio.turn_workers(id),
+        traced: studio.summary_ask(id).is_some(),
     }
 }
 
@@ -1954,7 +1958,7 @@ fn uptime() -> Duration {
 mod tests {
     use super::{
         compute_turn_files, found_files, in_app, log_line, lost_data, saved_roots, scrubbed,
-        shows_in_window,
+        shows_in_window, turn_of,
     };
     use std::sync::Mutex;
     use studio_core::{Numstat, RootDiff, Studio};
@@ -2033,6 +2037,20 @@ mod tests {
         // The final write also updates the unseen state: the turn's file now counts.
         assert!(session.unseen);
         assert_eq!(session.since().files, 1);
+    }
+
+    #[test]
+    fn a_turn_is_read_for_its_offer_without_locking_the_core_while_it_is_held() {
+        let state = std::sync::Arc::new(Mutex::new(Studio::default()));
+        let (done, read) = std::sync::mpsc::channel();
+        let core = state.clone();
+        std::thread::spawn(move || {
+            turn_of(&core, "no-such-turn");
+            let _ = done.send(());
+        });
+        // A lock taken while the thread's own earlier one is still held never returns.
+        let read = read.recv_timeout(std::time::Duration::from_secs(5));
+        assert!(read.is_ok(), "reading the turn locked the core twice");
     }
 
     #[test]
