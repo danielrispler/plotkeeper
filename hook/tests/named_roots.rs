@@ -465,3 +465,27 @@ fn a_path_under_a_root_the_hook_knows_lists_no_worktrees_again() {
         .count();
     assert_eq!(lists, 0, "listed again for a root it knew");
 }
+
+// A worktree about to be made is no touch of the root above it (danielrispler/plotkeeper#202): the
+// known root `/repo` must not hold `/repo/.claude/worktrees/w1` before that folder exists.
+#[test]
+fn a_worktree_about_to_be_made_does_not_touch_a_known_root_above_it() {
+    let scene = Scene::new("about");
+    let other = scene.worktree(&scene.main.with_file_name("other"));
+    fs::create_dir_all(scene.main.join(".claude/worktrees")).unwrap();
+    scene.hook("UserPromptSubmit", json!({ "prompt": "go", "cwd": other }));
+    let known = scene.bash(
+        &format!("cat {}/a.txt", scene.main.display()),
+        json!({ "cwd": other }),
+    );
+    assert!(roots(&known).contains(&scene.main.to_str().unwrap().to_owned()));
+
+    let made = scene.bash(
+        &format!(
+            "git worktree add {}/.claude/worktrees/w1",
+            scene.main.display()
+        ),
+        json!({ "cwd": other, "tool_use_id": "b2" }),
+    );
+    assert_eq!(roots(&made), [other.to_str().unwrap()], "{made}");
+}

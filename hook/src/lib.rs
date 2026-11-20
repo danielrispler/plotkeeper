@@ -526,9 +526,11 @@ impl Named<'_> {
     fn root(&mut self, path: &Path) -> Option<String> {
         let (spelled, existing) = spelled(path)?;
         let at = spelled.to_str()?;
+        // A path whose nearest folder is a `worktrees` folder is a worktree to be made or one removed.
+        let below = existing.file_name().is_some_and(|n| n == "worktrees") && existing != spelled;
         // A root the hook already knows holds the path, with no worktree made between: no listing.
         let known = self.known.iter().filter(|r| holds(r, at));
-        if let Some(deepest) = known.max_by_key(|r| r.len()) {
+        if let Some(deepest) = known.max_by_key(|r| r.len()).filter(|_| !below) {
             let alive = Path::new(deepest).join(".git").exists();
             let between = |p: &&Path| {
                 let at_root = p.to_str().is_some_and(|p| p == deepest);
@@ -567,7 +569,6 @@ impl Named<'_> {
             .max_by_key(|r| r.len())?;
         let gone = |r: &&String| !list.contains(r) && holds(r, at) && r.len() > root.len();
         let removed = self.known.iter().any(|r| gone(&r));
-        let below = existing.file_name().is_some_and(|n| n == "worktrees") && existing != spelled;
         (!removed && !below).then(|| root.clone())
     }
 }
