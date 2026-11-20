@@ -29,9 +29,13 @@ session=$(uuidgen | tr '[:upper:]' '[:lower:]')
 repo=$(cd "$(mktemp -d)" && pwd -P)
 worktree="$repo/.claude/worktrees/issue-1-shapes"
 trap 'git -C "$repo" worktree remove --force "$worktree" 2>/dev/null || true; rm -rf "$repo"' EXIT
+# macOS's `sh` runs no EXIT trap on a signal it dies of, so a signal exits through it.
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
-# The plugin runs the studio-hook built in this checkout.
-cargo build -q --release --manifest-path "$studio/Cargo.toml" -p studio-hook
+# The plugin runs the studio-hook built in this checkout's `target/`, wherever the caller's shell
+# points cargo.
+env -u CARGO_TARGET_DIR cargo build -q --release --manifest-path "$studio/Cargo.toml" -p studio-hook
 git -C "$repo" init -q
 echo "# Fixture" >"$repo/README.md"
 echo ".claude/" >"$repo/.gitignore"
@@ -40,9 +44,13 @@ git -C "$repo" commit -qm "Start"
 
 # `-p` waits for background subagents before it exits, so the worker's events all land. Without
 # `Edit` and `Write` the worker edits through Bash, as the workers that are not isolated do. The
-# prompt is not quoted, so it names `$worktree`; it holds no other `$` or backtick unescaped.
+# prompt is not quoted, so it names `$worktree`; it holds no other `$` or backtick unescaped. The
+# session must not take the terminal of a studio shell this runs in, so it gets no
+# `STUDIO_TERMINAL_ID`. Step b waits before it writes: the hooks are async, and a helper's base is
+# taken when the shell reads its command's `PreToolUse`, so a write that lands first never makes it a
+# worker (the shortcut in `core/src/lib.rs`, danielrispler/Falinks#434, decision 23).
 cd "$repo"
-CLAUDE_CODE_PLUGIN_DIRS="$studio/plugin" claude -p --session-id "$session" \
+env -u STUDIO_TERMINAL_ID CLAUDE_CODE_PLUGIN_DIRS="$studio/plugin" claude -p --session-id "$session" \
   --allowedTools "Bash" --disallowedTools "Edit" "Write" "NotebookEdit" <<PROMPT
 This session is a scripted test. Follow these steps exactly and keep every reply short.
 
@@ -50,7 +58,7 @@ This session is a scripted test. Follow these steps exactly and keep every reply
 
    Work only through the Bash tool and never change folder in a command of its own. Run these steps in order:
    a. git worktree add -b issue-1-shapes $worktree
-   b. One Bash command that starts with \`cd $worktree &&\` and writes the file shapes.py with a heredoc (\`cat > shapes.py <<'EOF'\` ... \`EOF\`), holding exactly these lines:
+   b. One Bash command that starts with \`cd $worktree && sleep 2 &&\` and writes the file shapes.py with a heredoc (\`cat > shapes.py <<'EOF'\` ... \`EOF\`), holding exactly these lines:
       import math
 
 
@@ -98,8 +106,6 @@ This session is a scripted test. Follow these steps exactly and keep every reply
 2. Wait for the subagent's completion notice; do not run sleep. Then reply with one line on what it did.
 PROMPT
 
-# The hooks are async, so the last events may land just after `claude` exits.
-sleep 3
 echo "Session $session with Claude Code $(claude --version)"
 cd "$studio"
 python3 - "$data/events.jsonl" "$data/offers.jsonl" "$session" "$repo" "$worktree" <<'PY'
@@ -107,55 +113,78 @@ import json, subprocess, sys, time
 
 log, offers, session, repo, worktree = sys.argv[1:]
 WAIT = 300
+# The hooks are async and may wait on the log's lock or on git, so the last events land late.
+EVENTS_WAIT = 30
 
 
 def shown(event):
-    keys = ("hook_event_name", "agent_id", "tool_name", "studio_touched_roots",
+    keys = ("hook_event_name", "agent_id", "tool_name", "cwd", "studio_touched_roots",
             "studio_turn_start", "studio_turn_end")
     return json.dumps({k: event[k] for k in keys if k in event})
 
 
-events = []
-with open(log) as f:
-    for line in f:
-        if session not in line:
-            continue
-        try:
-            event = json.loads(line)
-        except ValueError:
-            continue
-        if event.get("session_id") == session:
-            events.append(event)
+def read_events():
+    events = []
+    try:
+        with open(log) as f:
+            for line in f:
+                if session not in line:
+                    continue
+                try:
+                    event = json.loads(line)
+                except ValueError:
+                    continue
+                if event.get("session_id") == session:
+                    events.append(event)
+    except OSError:
+        pass
+    return events
 
 
-def events_check():
-    """The worker's agent id, and why the check failed or None."""
-    touched = [e for e in events
-               if e.get("agent_id") and worktree in e.get("studio_touched_roots", [])]
+def events_check(events):
+    """The worker's agent id, the lines that decided, and why the check failed or None."""
+    # From the session's folder, so the worktree came from the command's text and not the event's.
+    touched = [e for e in events if e.get("agent_id") and e.get("cwd") == repo
+               and worktree in e.get("studio_touched_roots", [])]
     if not touched:
         mine = [e for e in events if e.get("agent_id")]
         last = shown(mine[-1]) if mine else "no subagent event at all"
-        return None, f"no subagent event carries {worktree} in studio_touched_roots; the subagent's last: {last}"
+        return None, [], f"no subagent event from {repo} carries {worktree} in studio_touched_roots; the subagent's last: {last}"
     agent = touched[0]["agent_id"]
-    print(f"events: subagent {agent} touches the worktree: {shown(touched[0])}")
+    said = [f"events: subagent {agent} touches the worktree: {shown(touched[0])}"]
     starts = [i for i, e in enumerate(events) if worktree in e.get("studio_turn_start", {})]
-    if not starts:
-        return agent, f"no event carries a start tree for {worktree}"
-    start = events[starts[0]]
-    ends = [e for e in events[starts[0] + 1:] if worktree in e.get("studio_turn_end", {})]
+    first = next((i for i in starts if events[i].get("agent_id") == agent), None)
+    if first is None:
+        return agent, said, f"no event of {agent} carries a start tree for {worktree}"
+    start = events[first]
+    # The end is the last one before another start of the worktree, which would open another turn's pair.
+    stop = next((i for i in starts if i > first), len(events))
+    ends = [e for e in events[first + 1:stop] if worktree in e.get("studio_turn_end", {})]
     if not ends:
-        return agent, f"no event after the start tree carries an end tree for {worktree}: {shown(start)}"
+        return agent, said, f"no event after {agent}'s start tree carries an end tree for {worktree}: {shown(start)}"
     end = ends[-1]
-    print(f"events: start tree: {shown(start)}")
-    print(f"events: end tree: {shown(end)}")
+    said += [f"events: start tree: {shown(start)}", f"events: end tree: {shown(end)}"]
     start_tree, end_tree = start["studio_turn_start"][worktree], end["studio_turn_end"][worktree]
     diff = subprocess.run(["git", "-C", repo, "diff", "--numstat", start_tree, end_tree],
-                          capture_output=True, text=True).stdout
-    row = next((r for r in diff.splitlines() if r.endswith("\tshapes.py")), None)
-    if row is None or int(row.split("\t")[0]) < 30:
-        return agent, f"the diff of {start_tree[:12]}..{end_tree[:12]} lacks the 30-line edit of shapes.py: {diff.strip() or 'empty'}"
-    print(f"events: the diff of the trees holds the edit: {row}")
-    return agent, None
+                          capture_output=True, text=True)
+    if diff.returncode != 0:
+        return agent, said, f"git diff {start_tree[:12]}..{end_tree[:12]} failed: {diff.stderr.strip()}"
+    row = next((r for r in diff.stdout.splitlines() if r.endswith("\tshapes.py")), None)
+    added = row.split("\t")[0] if row else ""
+    if not added.isdigit() or int(added) < 30:
+        return agent, said, f"the diff of {start_tree[:12]}..{end_tree[:12]} lacks the 30-line edit of shapes.py: {diff.stdout.strip() or 'empty'}"
+    said.append(f"events: the diff of the trees holds the edit: {row}")
+    return agent, said, None
+
+
+deadline = time.time() + EVENTS_WAIT
+while True:
+    agent, said, events_failed = events_check(read_events())
+    if not events_failed or time.time() > deadline:
+        break
+    time.sleep(2)
+for line in said:
+    print(line)
 
 
 def offers_check(agent):
@@ -192,7 +221,6 @@ def offers_check(agent):
         time.sleep(5)
 
 
-agent, events_failed = events_check()
 offers_failed = offers_check(agent)
 for name, failed in (("events", events_failed), ("offers", offers_failed)):
     print(f"{name}: {'FAIL: ' + failed if failed else 'pass'}")
