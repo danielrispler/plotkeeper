@@ -914,8 +914,8 @@ fn every_entry_point_returns_within_a_few_seconds_against_a_core_with_no_such_tu
     called("opened", |w| assert_eq!(w.opened("s1@6"), Ok(None)));
     called("setup", |w| drop(w.setup()));
     called("prune", |w| w.prune(&Default::default()));
-    // The jobs they queued run too, and end with nothing written.
-    called("the queued jobs", |w| assert_eq!(w.run_queued(), 2));
+    // The jobs they queued run too, a card's read of its session included, and end with nothing written.
+    called("the queued jobs", |w| assert_eq!(w.run_queued(), 5));
     // A summary parked on open, opened against a core with no such turn.
     called("settings, on open", |w| {
         w.settings(SummarySetup::default(), true)
