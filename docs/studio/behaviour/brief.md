@@ -1,6 +1,6 @@
 # The Brief and Where we were
 
-**The Brief**, folded under the feed (inside "Where we were" while that shows), is four slots, not prose. Goal is one or two lines the model writes from your prompts, again when a new prompt of yours came. Decisions lists each question the agent asked with your reply. Open is computed from facts and never written: the pending question, each check suite whose last run failed, files changed with no check run since, the latest turn's `open` and `ask` lines, and unpushed work or an unmerged PR; each drops out once settled.
+**The Brief**, folded under the feed (inside "Where we were" while that shows), is four slots, not prose. Goal is one or two lines the model writes from your prompts, again when a new prompt of yours came. Decisions lists each question the agent asked with your reply. Open is computed from facts and never written: the pending question, each check whose last run failed, named with its worktree when it is not the session's own, files changed with no check run since, the latest turn's `open` and `ask` lines, and unpushed work or an unmerged PR; each drops out once settled.
 
 "Design so far" is at most five one-line design decisions with their reasons, which the model writes from the turns' `why` lines and the cards' summaries; each cites the turn or card it came from, a click on the citation opens it in the rail, and code drops a line that cites nothing or something not in the session. A brief stored as prose shows as it is until the session's next Goal.
 
