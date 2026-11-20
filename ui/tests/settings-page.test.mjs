@@ -1,8 +1,10 @@
 // The settings page's rows (#195), run on the `tsc` output: one pure function from the parsed settings files to what each row shows.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { El } from "./dom.mjs";
 import { initial, reload, reloadedZoom, zoomed } from "../../dist/settings.js";
-import { newValue, settingsPage as pageOf, stepped, writesOn } from "../../dist/settings-page.js";
+import { drawSettingsPage, newValue, settingsPage as pageOf, startSettingsPage, stepped, writesOn } from "../../dist/settings-page.js";
+import { studio } from "../../dist/state.js";
 
 // The stylesheet's terminal size, which the window reads from `--size-mono`.
 const SHEET = 12.5;
@@ -50,16 +52,17 @@ test("a row names the key it writes", () => {
   assert.deepEqual(row(page, "Warn at context share").path, ["context_warning"]);
 });
 
-test("a file that does not parse disables every control, says so, and shows the settings in effect", () => {
+test("a file that does not parse disables every setting's control, says so, and shows the settings in effect", () => {
   const last = load(`{ "sounds": false }`);
   const page = settingsPage(load(`{ "sounds": `, last));
+  const settings = (page) => rows(page).filter((r) => r.control !== "open");
   assert.equal(page.error, "settings.json has errors: fix it first");
-  assert.ok(rows(page).every((r) => r.disabled), "every control is disabled");
+  assert.ok(settings(page).every((r) => r.disabled), "every setting's control is disabled");
   assert.equal(row(page, "Sounds").value, false);
   assert.equal(row(page, "Sounds").changed, true);
   const fine = settingsPage(last);
   assert.equal(fine.error, null);
-  assert.ok(rows(fine).every((r) => !r.disabled));
+  assert.ok(settings(fine).every((r) => !r.disabled));
 });
 
 test("a key of the wrong type reads as its default and is not a broken file", () => {
@@ -68,7 +71,7 @@ test("a key of the wrong type reads as its default and is not a broken file", ()
   assert.equal(row(page, "Sounds").changed, false);
   assert.equal(row(page, "Warn at context share").value, 30);
   assert.equal(page.error, null);
-  assert.ok(rows(page).every((r) => !r.disabled));
+  assert.ok(rows(page).every((r) => r.control === "open" || !r.disabled));
 });
 
 test("the context warning steps by 5 from 0, Off, to 100, and its step back to 30 removes the key", () => {
@@ -197,4 +200,59 @@ test("a dropdown writes on its change, every button on its click, so the undo ic
   // A reset on a changed dropdown row writes null, which removes the key.
   const page = settingsPage(load(`{ "summaries": { "model": "opus" } }`));
   assert.equal(writesOn("reset", "click") && newValue(row(page, "Model"), "reset", "opus"), null);
+});
+
+// The dialog (#221), drawn into the stand-in DOM: a control is found by its label, and a click is sent to the region's listener.
+class Control extends El {
+  dataset = {};
+  get disabled() {
+    return this.hasAttribute("disabled");
+  }
+  toggleAttribute(name, on) {
+    if (on) this.setAttribute(name, "");
+    else this.removeAttribute(name);
+  }
+  closest() {
+    return this.dataset.action ? this : null;
+  }
+  querySelectorAll(tag) {
+    return this.find(tag);
+  }
+}
+
+// The settings page over `settings.json`'s text `settings`, wired, with the shell's calls kept in `calls`.
+function dialogOver(settings) {
+  const calls = [];
+  const regions = Object.fromEntries(["settings-dialog", "settings-close", "settings-status", "settings-body"].map((id) => [id, new Control("div")]));
+  globalThis.document = { createElement: (tag) => new Control(tag), getElementById: (id) => regions[id], documentElement: {} };
+  globalThis.getComputedStyle = () => ({ getPropertyValue: () => String(SHEET) });
+  globalThis.window = { addEventListener() {}, __TAURI__: { core: { invoke: async (command, args) => void calls.push([command, args]) } } };
+  studio.files = load(settings);
+  startSettingsPage(() => {});
+  drawSettingsPage();
+  const labelled = (region, label) => regions[region].find("button").filter((b) => (b.getAttribute("aria-label") ?? b.text) === label);
+  const click = (region, control) => regions[region].listeners.click?.({ target: control });
+  return { calls, labelled, click };
+}
+
+test("with a broken settings.json, the status line's Open settings.json asks to open the file", () => {
+  const { calls, labelled, click } = dialogOver(`{ "sounds": `);
+  const [open] = labelled("settings-status", "Open settings.json");
+  assert.ok(open, "the status line has the button");
+  click("settings-status", open);
+  assert.deepEqual(calls.map(([command]) => command), ["open_settings"]);
+});
+
+test("with a broken settings.json, the two Open rows are enabled and open their files, and the other rows stay disabled", () => {
+  const { calls, labelled, click } = dialogOver(`{ "sounds": `);
+  for (const label of ["Open settings.json", "Open keymap.json"]) {
+    const [open] = labelled("settings-body", label);
+    assert.equal(open.disabled, false, label);
+    click("settings-body", open);
+  }
+  assert.deepEqual(calls.map(([command]) => command), ["open_settings", "open_keymap"]);
+  const [sounds] = labelled("settings-body", "Sounds");
+  assert.equal(sounds.disabled, true);
+  click("settings-body", sounds);
+  assert.equal(calls.length, 2, "a disabled row sends nothing");
 });
