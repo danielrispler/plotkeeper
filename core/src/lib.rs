@@ -1447,10 +1447,10 @@ impl Session {
         let Some(&end) = ends.last() else {
             return worker.turn;
         };
-        if let Some((resumed_at, turn)) = resumed {
-            if *resumed_at > end {
-                return turn.or(worker.turn);
-            }
+        if let Some((resumed_at, turn)) = resumed
+            && *resumed_at > end
+        {
+            return turn.or(worker.turn);
         }
         // Each end takes the first wake-up that names the worker after the end before it and the wake-up that one took:
         // a wake-up may land a little before its end is recorded, as the async `SubagentStop` is.
