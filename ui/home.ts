@@ -26,12 +26,21 @@ export type Slot = { item: Learning; next: boolean };
 // The window's Home state: the groups Daniel expanded, kept until Home is left; `quiet`, set by "Not now", which hides the slot
 // until Home is entered again or a turn ends; and `held`, the item he answered in this window, which stays with its reveal
 // until "Next" or until Home is left.
-export type HomeState = { expanded: Set<string>; cleared?: Set<string>; quiet: boolean; held: Learning | null };
-export const homeState: HomeState = { expanded: new Set(), quiet: false, held: null };
+// `cleared` is the rows Clear hides, the one set `landedClear` keeps; leaving Home does not reset it.
+export type HomeState = { expanded: Set<string>; cleared: Set<string>; quiet: boolean; held: Learning | null };
+export const homeState: HomeState = { expanded: new Set(), cleared: new Set(), quiet: false, held: null };
 export function resetHome(state: HomeState = homeState) {
   state.expanded.clear();
   state.quiet = false;
   state.held = null;
+  // What was marked on screen belongs to the visit, so the sets do not grow for the whole session.
+  hunkShown.clear();
+  shownWritten.clear();
+}
+
+// Entering Home from another view starts it afresh; drawing it again while it is on screen keeps what Daniel did there.
+export function enterHome(already: boolean, state: HomeState = homeState) {
+  if (!already) resetHome(state);
 }
 
 export const MAX_RUNNING = 4;
@@ -43,17 +52,17 @@ const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
 // another item; else what the store chose.
 export function learningSlot(asked: Learning | null, state: HomeState): Slot | null {
   if (state.quiet) return null;
-  if (state.held) return { item: state.held, next: asked !== null && asked.kind !== "done" };
+  if (state.held) return { item: state.held, next: asked !== null && asked.kind !== "done" && asked.id !== (state.held as { id: string }).id };
   return asked ? { item: asked, next: false } : null;
 }
 
 export function homeView(sessions: Session[], asked: Learning | null, projects: string[], state: HomeState, headline: (s: Session) => string | null = () => null): HomePart[] {
   const allLanded = sessions.filter((s) => showsLanded(s.state, s.landed));
-  const landed = allLanded.filter((s) => !state.cleared?.has(s.id));
+  const landed = allLanded.filter((s) => !state.cleared.has(s.id));
   const needsYou = sessions.filter((s) => s.state === "needs_you");
   const running = sessions.filter((s) => s.state === "running");
   // A landed session that is also unseen is listed as landed, keeping its unseen styling.
-  const unseen = sessions.filter((s) => s.unseen && s.state !== "needs_you" && !allLanded.includes(s)).sort((a, b) => endOf(b) - endOf(a));
+  const unseen = sessions.filter((s) => s.unseen && s.state === "your_turn" && !allLanded.includes(s)).sort((a, b) => endOf(b) - endOf(a));
   const capped = (key: HomeKey, all: Session[], max: number, rowOf: (s: Session) => HomeRow) => {
     const shown = state.expanded.has(key) ? all : all.slice(0, max);
     return { rows: shown.map(rowOf), more: all.length - shown.length };
@@ -74,6 +83,9 @@ export function homeView(sessions: Session[], asked: Learning | null, projects: 
   return parts.filter((p) => p.rows.length || p.slot || p.projects.length);
 }
 
+// The taps Home sent, in a chain: each waits for the one before it to be stored.
+let sent: Promise<unknown> = Promise.resolve();
+
 // The slot's card: the Quiz of the item the store chose, which records its taps as a Retest's, with "Not now" until it is answered
 // and a quiet "Next" after an answer when another item is due. It writes nothing as it is built: `markLearningShown` writes `shown`.
 export function slotNode(slot: Slot, redraw: () => void, reask: () => void): HTMLElement {
@@ -88,7 +100,9 @@ export function slotNode(slot: Slot, redraw: () => void, reask: () => void): HTM
   seedQuiz(item.id, item.kind === "retest" ? item.taps : []);
   const tap = (tap: Tap) => {
     if (tap.kind === "pick" || tap.kind === "skip") homeState.held = item;
-    void invoke("quiz_tap", { id: item.id, tap })
+    // One after another, so the confidence tap is stored before its pick.
+    sent = sent
+      .then(() => invoke("quiz_tap", { id: item.id, tap }))
       .then(reask)
       .catch(failure("quiz_tap"));
     if (homeState.held) redraw();
@@ -162,11 +176,11 @@ function answerCode(item: Learning): HTMLElement[] {
 let inSlot: Learning | null = null;
 const shownWritten = new Set<string>();
 
-// Whether the item's first showing is written now (#240): the item is a Retest on screen in the slot, Home is the active view and the
+// Whether the item's first showing is written now (#240): the item is on screen in the slot, Home is the active view and the
 // window is visible and focused. Once per item.
 export function shownDue(item: Learning | null, home: boolean, visible: boolean, focused: boolean): boolean {
-  if (item?.kind !== "retest" || !home || !visible || !focused) return false;
-  return !shownWritten.has(item.id) && !item.taps.some((t) => t.kind === "shown");
+  if (!item || item.kind === "done" || !home || !visible || !focused) return false;
+  return !shownWritten.has(item.id) && !(item.kind === "retest" && item.taps.some((t) => t.kind === "shown"));
 }
 
 // Writes the slot's `shown` when its conditions hold; called when Home is drawn and when the window becomes visible or focused.
@@ -190,39 +204,58 @@ export function turnEnded(sessions: Session[]): boolean {
 // that is still landed goes through today's Delete (`commit`); Undo commits nothing. `changed` hears the sessions still pending.
 export type Clock = { set(run: () => void, ms: number): unknown; clear(id: unknown): void };
 export const CLEAR_WINDOW_MS = 8000;
-export function clearing(time: Clock, deps: { landed(id: string): Session | undefined; commit(session: Session): void; changed(pending: Session[]): void }) {
+export function clearing(
+  time: Clock,
+  deps: { landed(id: string): Session | undefined; commit(session: Session): Promise<unknown> | void; changed(pending: Session[]): void },
+  hidden = new Set<string>(),
+) {
   const pending = new Map<string, Session>();
-  const hidden = new Set<string>();
   let timer: unknown = null;
   const stop = () => {
     if (timer !== null) time.clear(timer);
     timer = null;
   };
   const tell = () => deps.changed([...pending.values()]);
-  const forget = () => {
-    stop();
-    pending.clear();
-    hidden.clear();
-    tell();
-  };
   return {
+    // The rows Clear hides: those pending and those committed, until they leave the list.
     hidden,
     clear(sessions: Session[]) {
-      for (const s of sessions) (pending.set(s.id, s), hidden.add(s.id));
+      for (const s of sessions) {
+        pending.set(s.id, s);
+        hidden.add(s.id);
+      }
       stop();
       timer = time.set(() => {
         timer = null;
-        const due = [...pending.keys()].map(deps.landed);
-        forget();
-        for (const s of due) if (s) deps.commit(s);
+        const due = [...pending.keys()].map((id) => ({ id, session: deps.landed(id) }));
+        pending.clear();
+        tell();
+        for (const { id, session } of due) {
+          if (!session) hidden.delete(id);
+          // A row whose Delete failed comes back.
+          else void Promise.resolve(deps.commit(session)).catch(() => {
+              hidden.delete(id);
+              tell();
+            });
+        }
       }, CLEAR_WINDOW_MS);
       tell();
     },
-    undo: forget,
-    // A session that stopped being landed in the window is left alone: it comes back and is not pending.
+    undo() {
+      stop();
+      for (const id of pending.keys()) hidden.delete(id);
+      pending.clear();
+      tell();
+    },
+    // A session that left the list, or stopped being landed, is no longer hidden; one still pending is left alone: it comes back and is
+    // not committed.
     sync() {
       let dropped = false;
-      for (const id of [...pending.keys()]) if (!deps.landed(id)) (pending.delete(id), hidden.delete(id), (dropped = true));
+      for (const id of [...hidden]) {
+        if (deps.landed(id)) continue;
+        hidden.delete(id);
+        dropped = pending.delete(id) || dropped;
+      }
       if (!dropped) return;
       if (pending.size === 0) stop();
       tell();
@@ -230,7 +263,7 @@ export function clearing(time: Clock, deps: { landed(id: string): Session | unde
   };
 }
 
-// The window's one Clear: its hidden rows show in `homeState.cleared`, the toast offers Undo, and the shell is told which sessions a quit
+// The window's one Clear: its hidden rows are `homeState.cleared`, the toast offers Undo, and the shell is told which sessions a quit
 // would commit (`clearing`). A commit is today's Delete: the terminal ended, the row dropped, the cards kept.
 const stillLanded = (id: string) => studio.listed.find((s) => s.id === id && showsLanded(s.state, s.landed));
 export const landedClear = clearing(
@@ -238,10 +271,13 @@ export const landedClear = clearing(
   {
     landed: stillLanded,
     commit: (session) =>
-      void (async () => {
+      (async () => {
         if (session.terminal !== null) await closePane(session.terminal);
         await invoke("delete_session", { id: session.id });
-      })().catch(failure("delete_session", "error")),
+      })().catch((e) => {
+        failure("delete_session", "error")(e);
+        throw e;
+      }),
     changed: (pending) => {
       void invoke("clearing", { sessions: pending.map((s) => ({ id: s.id, terminal: s.terminal })) }).catch(failure("clearing"));
       if (pending.length) showClearToast(pending.length, () => landedClear.undo());
@@ -249,8 +285,8 @@ export const landedClear = clearing(
       redrawHome();
     },
   },
+  homeState.cleared,
 );
-homeState.cleared = landedClear.hidden;
 
 export type HomeProject = { name: string; path: string };
 
@@ -322,7 +358,7 @@ export function drawHome(box: HTMLElement, sessions: Session[], projects: string
   }
   const parts = homeView(sessions, asked, projects, homeState, lastHeadline);
   const slot = parts.find((p) => p.key === "learning")?.slot ?? null;
-  inSlot = slot && slot.item.kind === "retest" && homeState.held !== slot.item ? slot.item : null;
+  inSlot = slot && slot.item.kind !== "done" && homeState.held !== slot.item ? slot.item : null;
   const found = foundWorkspaces();
   const keyed = (node: HTMLElement, key: string) => {
     node.dataset.key = key;

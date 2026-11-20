@@ -11,7 +11,7 @@ const key = (code, k, mods = {}) => ({ key: k, code, metaKey: false, ctrlKey: fa
 
 const turn = (ended_at) => ({ ended_at });
 const live = (id, state, extra = {}) => ({ id, state, unseen: false, landed: false, turns: [], questions: [], transcript: {}, ...extra });
-const fresh = () => ({ expanded: new Set(), quiet: false, held: null });
+const fresh = () => ({ expanded: new Set(), cleared: new Set(), quiet: false, held: null });
 const view = (sessions, state = fresh(), extra = {}) => homeView(sessions, extra.learning ?? null, extra.projects ?? [], state, extra.headline);
 const keys = (parts) => parts.map((p) => p.key);
 const sessionIds = (part) => part.rows.map((r) => r.session.id);
@@ -27,7 +27,7 @@ test("Home's parts come in order, each absent when empty", () => {
   );
   assert.deepEqual(keys(all), ["needs_you", "running", "unseen", "learning", "landed", "start"]);
   assert.deepEqual(keys(view([live("r", "running")])), ["running"]);
-  assert.deepEqual(keys(view([live("d", "idle", { unseen: true })])), ["unseen"]);
+  assert.deepEqual(keys(view([live("d", "your_turn", { unseen: true })])), ["unseen"]);
 });
 
 test("5 running sessions give 4 rows and +1, and expanded gives all 5", () => {
@@ -46,6 +46,12 @@ test("4 unseen sessions give 3 rows and +1, newest turn first; a seen turn leave
   assert.deepEqual([sessionIds(part), part.more], [["b", "c", "d"], 1]);
   assert.deepEqual(sessionIds(view([unseen("a", 10), { ...unseen("b", 40), unseen: false }])[0]), ["a"]);
   assert.deepEqual(view([{ ...unseen("a", 10), unseen: false }]), []);
+});
+
+test("Unseen holds only your-turn sessions: a running session with an unseen earlier turn is listed once, as running", () => {
+  const running = live("r", "running", { unseen: true, turns: [turn(1)] });
+  assert.deepEqual(view([running]).map((p) => [p.key, sessionIds(p)]), [["running", ["r"]]]);
+  assert.deepEqual(keys(view([live("i", "idle", { unseen: true })])), []);
 });
 
 test("an unseen row holds its turn's Headline; a needs-you row holds its question's first line", () => {
@@ -126,6 +132,8 @@ test("an item answered here stays with its reveal, and Next shows only when anot
   assert.deepEqual([slotOf(retest("b", quiz), answered).item.id, slotOf(retest("b", quiz), answered).next], ["a", true]);
   assert.equal(slotOf({ kind: "done" }, answered).next, false);
   assert.equal(slotOf(null, answered).next, false);
+  // The store's answer that is still the answered item (a re-ask that landed before the pick) is not another item.
+  assert.equal(slotOf(retest("a", quiz), answered).next, false);
   // Unanswered, the slot shows what the store chose, and no Next.
   assert.equal(slotOf(retest("b", quiz), null).next, false);
 });
@@ -139,7 +147,47 @@ test("shown is due only with Home active, the window visible and focused, and th
   assert.equal(shownDue(item, true, true, false), false);
   assert.equal(shownDue(null, true, true, true), false);
   assert.equal(shownDue({ kind: "done" }, true, true, true), false);
+  // A fresh Quiz counts too, once.
+  assert.equal(shownDue({ kind: "fresh", id: "t9", session_id: "s", quiz }, true, true, true), true);
   assert.equal(shownDue(retest("s2", quiz, [{ kind: "shown", at: 1 }]), true, true, true), false);
+});
+
+test("a fresh Quiz in the slot is marked shown through the owner's tap, once", async () => {
+  const { El: Base } = await import("./dom.mjs");
+  class El extends Base {
+    dataset = {};
+    title = "";
+    textContent = "";
+    disabled = false;
+  }
+  const calls = [];
+  globalThis.window = { __TAURI__: { core: { invoke: async (command, args) => (calls.push([command, args]), null) } } };
+  globalThis.document = { createElement: (tag) => new El(tag), visibilityState: "visible", hasFocus: () => true, getElementById: () => Object.assign(new El("div"), { replaceChildren() {} }) };
+  const { drawHome, markLearningShown } = await import("../../dist/home.js");
+  const box = new El("div");
+  drawHome(box, [], [], { kind: "fresh", id: "t5", session_id: "s", quiz: { text: "q", key: 0, options: [{ text: "A", why: "a" }] } });
+  markLearningShown(true);
+  assert.deepEqual(calls, [["quiz_tap", { id: "t5", tap: { kind: "shown" } }]]);
+});
+
+test("entering Home from another view starts it afresh, and drawing it again while on it keeps a reveal and the expanded groups", async () => {
+  const { enterHome } = await import("../../dist/home.js");
+  const state = { ...fresh(), expanded: new Set(["running"]), quiet: true, held: retest("a", quiz) };
+  enterHome(true, state);
+  assert.deepEqual([[...state.expanded], state.quiet, state.held?.id], [["running"], true, "a"]);
+  enterHome(false, state);
+  assert.deepEqual([[...state.expanded], state.quiet, state.held], [[], false, null]);
+});
+
+test("the newest request wins: a slower, older reply is dropped", async () => {
+  const { newest } = await import("../../dist/dom.js");
+  const take = newest();
+  let first, second;
+  const a = take(new Promise((r) => (first = r)));
+  const b = take(new Promise((r) => (second = r)));
+  second("newer");
+  first("older");
+  assert.deepEqual([await a, await b], [undefined, "newer"]);
 });
 
 test("building the slot writes nothing; shown is written once, when its conditions hold", async () => {
@@ -173,7 +221,7 @@ test("building the slot writes nothing; shown is written once, when its conditio
 });
 
 // The slot's card (#242): the options, then "Not sure" and "Not now" inside it; a pick writes the confidence tap first.
-async function slotCard(id, extra = {}) {
+async function slotCard(id, extra = {}, send = null) {
   const { El: Base } = await import("./dom.mjs");
   class El extends Base {
     dataset = {};
@@ -182,7 +230,7 @@ async function slotCard(id, extra = {}) {
     dir = "";
   }
   const calls = [];
-  globalThis.window = { __TAURI__: { core: { invoke: async (command, args) => (calls.push([command, args]), null) } } };
+  globalThis.window = { __TAURI__: { core: { invoke: send ?? (async (command, args) => (calls.push([command, args]), null)) } } };
   globalThis.document = { createElement: (tag) => new El(tag), visibilityState: "visible", hasFocus: () => true, getElementById: () => Object.assign(new El("div"), { replaceChildren() {} }) };
   const { slotNode } = await import("../../dist/home.js");
   const item = retest(id, { text: "q", key: 1, options: [{ text: "A", why: "a" }, { text: "B", why: "b" }] }, []);
@@ -192,11 +240,35 @@ async function slotCard(id, extra = {}) {
   return { calls, node, buttons, press, labels: () => buttons().map((b) => b.textContent) };
 }
 const taps = (calls) => calls.map(([, args]) => args.tap);
+const settle = () => new Promise((r) => setTimeout(r, 30));
 
 test("a confident Home pick is one click: a sure confidence tap for Home, then the pick, and no why", async () => {
   const { calls, press } = await slotCard("c1");
   press("A");
+  await settle();
   assert.deepEqual(taps(calls), [{ kind: "confidence", sure: true, surface: "home" }, { kind: "pick", option: 0 }]);
+});
+
+test("the pick is sent only after the confidence tap has landed", async () => {
+  const events = [];
+  const { press } = await slotCard("c0", {}, async (command, args) => {
+    events.push(`start ${args.tap.kind}`);
+    if (args.tap.kind === "confidence") await new Promise((r) => setTimeout(r, 15));
+    events.push(`end ${args.tap.kind}`);
+    return null;
+  });
+  press("A");
+  await new Promise((r) => setTimeout(r, 60));
+  assert.deepEqual(events, ["start confidence", "end confidence", "start pick", "end pick"]);
+});
+
+test("a pick on a card's fresh Quiz on Home records its guess, and the rail shows it answered", async () => {
+  const { calls, press } = await slotCard("t7", { kind: "fresh", session_id: "s", of: undefined });
+  press("B");
+  await settle();
+  const { quizAnswered } = await import("../../dist/quiz.js");
+  assert.equal(quizAnswered("t7"), true);
+  assert.deepEqual(taps(calls).at(-1), { kind: "pick", option: 1 });
 });
 
 test("with the not sure toggle on, the Home pick writes sure false first", async () => {
@@ -204,6 +276,7 @@ test("with the not sure toggle on, the Home pick writes sure false first", async
   press("Not sure");
   assert.deepEqual(calls, []);
   press("B");
+  await settle();
   assert.deepEqual(taps(calls), [{ kind: "confidence", sure: false, surface: "home" }, { kind: "pick", option: 1 }]);
 });
 
@@ -255,9 +328,23 @@ test("Clear hides every landed row, and the window's end deletes each once", () 
   assert.deepEqual(deleted, []);
   time.tick(1);
   assert.deepEqual(deleted, ["a", "b"]);
-  assert.deepEqual([...m.hidden], []);
   time.tick(CLEAR_WINDOW_MS * 3);
   assert.deepEqual(deleted, ["a", "b"]);
+});
+
+test("committed rows stay hidden until they leave the list, and a Clear before then does not commit them again", () => {
+  const { m, time, live: sessions, deleted } = clearMachine([landed("a"), landed("b")]);
+  m.clear([landed("a")]);
+  time.tick(CLEAR_WINDOW_MS);
+  assert.deepEqual([...m.hidden], ["a"]);
+  // Home offers only the rows still shown, which leave "a" out.
+  m.clear([landed("b")]);
+  time.tick(CLEAR_WINDOW_MS);
+  assert.deepEqual(deleted, ["a", "b"]);
+  // The delete lands: the sessions leave the list and their rows stop being hidden.
+  sessions.clear();
+  m.sync();
+  assert.deepEqual([...m.hidden], []);
 });
 
 test("Undo restores the rows and nothing is ever deleted", () => {

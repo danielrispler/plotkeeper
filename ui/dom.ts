@@ -19,6 +19,16 @@ export const invoke = <C extends Command>(command: C, args?: Record<string, unkn
 export const listen = <T>(event: string, handler: (payload: T) => void) =>
   window.__TAURI__.event.listen<T>(event, (e) => handler(e.payload));
 
+// Tells the newest of a series of requests: the promise it returns for a request resolves to `undefined` once a later request was
+// made, so a slow, older reply never lands over a newer one.
+export function newest() {
+  let latest = 0;
+  return <T>(request: Promise<T>) => {
+    const mine = ++latest;
+    return request.then((value): T | undefined => (mine === latest ? value : undefined));
+  };
+}
+
 // The Studio log (#190): the line is the command's name and the error's message, nothing else of the error. `error` is for a
 // failed action Daniel asked for, `warn` for a call that degrades and carries on. A log that fails is dropped.
 const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e));

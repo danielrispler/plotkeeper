@@ -14,8 +14,8 @@ import type * as Xterm from "@xterm/xterm";
 import { connect, list, onEvent, request, type Listed } from "./daemon.js";
 import { diffRequest, drawDiff, keepsDiff } from "./diff.js";
 import { drawHistory } from "./history.js";
-import { drawHome, landedClear, markLearningShown, resetHome } from "./home.js";
-import { element, failure, fullTitle, invoke, listen, pressable, text } from "./dom.js";
+import { drawHome, enterHome, landedClear, markLearningShown } from "./home.js";
+import { element, failure, fullTitle, invoke, listen, newest, pressable, text } from "./dom.js";
 import { onProjects, projects } from "./projects.js";
 import { followLog, showLog, showMissing } from "./log.js";
 import { type Box, paneBoxes } from "./layout.js";
@@ -58,17 +58,17 @@ const readHomeProjects = () =>
 
 // Asks the card store for the learning item (#240), with the clock and the start of Daniel's local day, and draws Home with it; a
 // failed read leaves the item as it was. Asked when Home is drawn, when a turn ends and after each tap.
+// Only the newest read lands: an older reply, which may predate a tap, is dropped.
+const latestLearning = newest();
 export const readLearning = () => {
   const now = Date.now();
   const day = new Date(now);
   day.setHours(0, 0, 0, 0);
-  return invoke("learning", { now, dayStart: day.getTime() }).then(
-    (found) => {
-      asked = found;
-      redrawHome();
-    },
-    failure("learning"),
-  );
+  return latestLearning(invoke("learning", { now, dayStart: day.getTime() })).then((found) => {
+    if (found === undefined) return;
+    asked = found;
+    redrawHome();
+  }, failure("learning"));
 };
 
 // Connects, shows Home, then brings back every terminal;
@@ -200,9 +200,12 @@ export async function closePane(id: string) {
 // terminal panel.
 const HOME = "home";
 export function showHome() {
+  const entering = shown !== HOME;
   show(HOME, () => null);
-  // Home's expanded groups, "Not now" and the answered item last until it is left.
-  resetHome();
+  // Home's expanded groups, "Not now" and the answered item last until it is left; what the store chose before is not shown
+  // again until it answers, since it may be an item set aside.
+  enterHome(!entering);
+  if (entering) asked = null;
   drawHome(box(HOME), studio.listed, projectPaths, asked, redrawHome, () => void readLearning());
   void readLearning();
   element("terminal-head").hidden = true;
