@@ -164,7 +164,7 @@ _Avoid_: Restore (nothing of the old process survives)
 The studio's own diagnostics: its errors, warnings and panics, one line each with a local time and a level, in `~/Library/Logs/dev.falinks.studio/`. Not the event log, which holds the agents' hook events.
 
 **Mismatch log**:
-The lines in the **Studio log**, marked `mismatch`, of the Claude sessions whose hook state and OSC 7501 state disagree for more than a few seconds: one line each, with the time, the session and both states. They used to be a file of their own, `mismatch.log`, which is no longer written.
+The lines in the **Studio log**, marked `mismatch`, of the Claude sessions whose hook state and OSC 7501 state disagree for more than a few seconds: one line each, with the time, the session and both states; a new 7501 state starts a new line. A turn running by its hooks whose 7501 state stays `idle` was interrupted, and that line also ends it. They used to be a file of their own, `mismatch.log`, which is no longer written.
 
 **Decision**:
 A question, plan, permission or blocked command Daniel answered, with his answer and where he gave it: on the card or in the terminal. A session's decisions, newest first, are its decision history.
@@ -178,7 +178,7 @@ _Avoid_: Denied command (a command Daniel declined)
 The name an agent session gets from its work: its issue, its PR and its worktree, such as "danielrispler/Falinks#480 · PR danielrispler/Falinks#490 · agent-a1b2". A name Daniel gives it replaces it.
 
 **Session name**:
-What the list and the rail call an agent session: the name Daniel gave it, else its prompt name, else its identity. The prompt name is a few words a writer call makes from Daniel's first prompt, so wake-ups never name a session; it keeps the identity's issue in front, such as "#37 · One event internal".
+What the list and the rail call an agent session: the name Daniel gave it, else its prompt name, else its identity. The prompt name is a few words a writer call makes from Daniel's first prompt, so wake-ups never name a session; when he cancels that prompt's turn before any call, his next prompt names it again; it keeps the identity's issue in front, such as "#37 · One event internal".
 _Avoid_: Title
 
 **Context share**:

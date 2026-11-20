@@ -293,9 +293,13 @@ impl Default for Turn {
 
 impl Turn {
     /// Takes an event `name` of the session's own agent with `prompt_id`; `idle` when it is Claude
-    /// Code's idle notice. Returns the worktrees whose end tree to record, those of the turn it
+    /// Code's idle notice or the shell's `INTERRUPTED` line. Returns the worktrees whose end tree to record, those of the turn it
     /// ends, and whether it is in a turn whose first touches record a start tree.
     pub fn take(&mut self, name: &str, prompt_id: Option<&str>, idle: bool) -> (Vec<String>, bool) {
+        // The shell's line ends the turn it names, never one that started after it.
+        if name == INTERRUPTED && self.prompt_id.as_deref() != prompt_id {
+            return (Vec::new(), false);
+        }
         let prompt = name == "UserPromptSubmit";
         let starts = !idle
             && prompt_id.is_some()
@@ -477,6 +481,10 @@ fn git(folder: &Path, args: &[&str], index: Option<&Path>) -> Option<String> {
     status.success().then(|| out.trim_end().to_owned())
 }
 
+/// The line the studio's shell appends for a turn Daniel interrupted, which fires no `Stop`: as
+/// `studio_core::INTERRUPTED`. The shell runs `trees` on it, so it carries that turn's end trees.
+pub const INTERRUPTED: &str = "StudioInterrupted";
+
 /// Adds to `event` the trees of the turn it ends, `studio_turn_end`, and of the worktrees its turn
 /// touches first with it, `studio_turn_start`, each by worktree root. Like the core, it takes an
 /// event's folder and an `Edit` or `Write` path as what it touches (danielrispler/Falinks#434,
@@ -493,7 +501,8 @@ pub fn trees(
     use std::io::{Seek, Write};
     let text = |key: &str| event.get(key).and_then(Value::as_str);
     let name = text("hook_event_name").unwrap_or_default();
-    let idle = name == "Notification" && text("notification_type") == Some("idle_prompt");
+    let idle = name == "Notification" && text("notification_type") == Some("idle_prompt")
+        || name == INTERRUPTED;
     let outside = matches!(name, "SessionStart" | "SessionEnd" | "Notification");
     let session = text("session_id").unwrap_or_default();
     // The id names a file, so it must be a plain one.
@@ -629,7 +638,7 @@ fn record(root: &str) -> Option<(String, serde_json::Value)> {
 mod tests {
     use std::path::Path;
 
-    use super::{Turn, command};
+    use super::{INTERRUPTED, Turn, command};
 
     /// The hook's view of one session's turns, after `events`, each a name and a prompt id.
     fn after(turn: &mut Turn, name: &str, prompt: &str) -> (Vec<String>, bool) {
@@ -667,6 +676,24 @@ mod tests {
             turn.take("Notification", Some("p2"), true),
             (vec!["/w/a".into()], false)
         );
+    }
+
+    /// The shell's line for an interrupted turn ends that turn only, never a later one.
+    #[test]
+    fn the_shells_interrupted_line_ends_its_own_turn_only() {
+        let mut turn = Turn::default();
+        after(&mut turn, "UserPromptSubmit", "p1");
+        turn.roots.push("/w/a".into());
+        assert_eq!(
+            turn.take(INTERRUPTED, Some("p1"), true),
+            (vec!["/w/a".into()], false)
+        );
+
+        after(&mut turn, "UserPromptSubmit", "p2");
+        turn.roots.push("/w/a".into());
+        assert_eq!(turn.take(INTERRUPTED, Some("p1"), true), (vec![], false));
+        assert!(!turn.ended);
+        assert_eq!(turn.roots, ["/w/a"]);
     }
 
     #[test]

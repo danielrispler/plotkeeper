@@ -93,6 +93,8 @@ pub(crate) enum Happened {
     PermissionNotice,
     /// A notice that the agent waits for input.
     IdlePrompt,
+    /// The shell's line for a turn Daniel interrupted, by its prompt id (`crate::INTERRUPTED`).
+    Interrupted,
     /// Any other notice.
     OtherNotice,
     ElicitationAsked,
@@ -345,6 +347,7 @@ impl Event {
                     | Happened::SessionEnd
                     | Happened::PermissionNotice
                     | Happened::IdlePrompt
+                    | Happened::Interrupted
                     | Happened::OtherNotice
             )
         })

@@ -7,6 +7,8 @@
 - `studio_terminal_id`: the session's `STUDIO_TERMINAL_ID`, when set;
 - `studio_received_ms`: when the hook received the event, in Unix milliseconds.
 
+The app appends lines of its own, named `Studio…`, such as `StudioInterrupted`, which ends a turn Daniel interrupted, by its `prompt_id`, with that turn's end trees.
+
 The hooks are async, so Claude Code never waits for them, and they append whether the app runs or not. Two events that fire within a few milliseconds can land in either order.
 
 The log holds tool inputs and results: commands and their output, errors, exit codes, the text an edit replaced and its hunks, and a written file's content. It leaves out two fields no reader takes (danielrispler/plotkeeper#132): an Edit's or Write's `originalFile`, the whole file before the change, and a Read's file `content`.
