@@ -949,6 +949,26 @@ fn a_subagent_whose_second_event_touches_a_worktree_is_fingerprinted_there() {
     );
 }
 
+/// danielrispler/plotkeeper#206: whatever tool first names a worktree gives the subagent its base of it,
+/// so its later edits there are not absorbed into a base.
+#[test]
+fn a_subagents_first_edit_or_write_of_a_worktree_takes_its_base_there() {
+    for tool in ["Edit", "Write"] {
+        let mut studio = Studio::default();
+        studio.apply(&ev("UserPromptSubmit", 0, "p1", json!({"prompt": "Do it"})));
+        studio.apply(&bash_of("h1", "PreToolUse", 1_000, &["/w"]));
+        let fields = json!({"agent_id": "h1", "agent_type": "general-purpose", "cwd": "/w",
+            "tool_name": tool, "tool_use_id": "e1", "tool_input": {"file_path": "/w2/f.rs"},
+            "studio_touched_roots": ["/w2"]});
+        let edit = ev("PreToolUse", 2_000, "p1", fields);
+        assert_eq!(
+            folders(&studio, &edit),
+            [("h1".into(), "/w2".into(), Purpose::Base)],
+            "{tool}"
+        );
+    }
+}
+
 #[test]
 fn a_subagent_that_touched_a_worktree_is_a_helper_until_something_changes_there_then_a_worker() {
     let mut studio = homed();

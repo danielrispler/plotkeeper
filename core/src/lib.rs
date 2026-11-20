@@ -2438,7 +2438,7 @@ impl Studio {
         else {
             return look(id, &event.cwd, Purpose::Base).into_iter().collect();
         };
-        if home.is_some() && agent.is_none_or(|a| a.folder.is_none()) {
+        if home.is_some() {
             return look(id, folder, Purpose::Base).into_iter().collect();
         }
         let worker = |a: &Subagent| a.kind == Kind::Worker;
