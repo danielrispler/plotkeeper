@@ -41,6 +41,14 @@ The window calls the shell only through `invoke` (`ui/dom.ts`), which takes a co
 
 `npm run check` runs them all in order: `cargo fmt --all --check`, `npm run build`, `cargo clippy --locked --workspace --all-targets -- -D warnings`, `cargo nextest run --locked --workspace` (the shell included) and `npm run test:node`. nextest runs the same tests as `cargo test`, but runs every binary's at once, not one binary after another; install it with `brew install cargo-nextest`. CI runs `npm ci` and `npm run check` in one job, and `npm run build` and `npm run snap:all` in another, in `.github/workflows/studio.yml`, on macOS. It runs for each push to `main` or to an `issue-*` branch, and for each pull request from any other branch. The engine's `checks.yml` and `ci-checks` skip the studio.
 
+## The live run
+
+The tests above run on events written by hand. `core/tests/run-unisolated-worker.sh` proves that Claude Code's real events have the shape they assume (#214): a scripted session in a temporary repository, with this checkout's plugin, spawns a background subagent that is not isolated, which makes a worktree with `git worktree add`, writes a 40-line file in it through Bash from the session's folder and commits. The script passes when the subagent's events carry the worktree in `studio_touched_roots` with a start and an end tree whose diff holds the file, and when `offers.jsonl` gained a line for that worker with a card offered; it prints pass or fail for each with the line that decided it.
+
+Run it with Studio open on the build under test, since the app writes the offers record; with Studio closed, or on an older build, the offers check fails. It adds one throwaway session to your list, copies nothing into the repository and removes its temporary repository and worktree. It runs a nested `claude` on your subscription, so run it yourself, outside auto mode:
+
+    core/tests/run-unisolated-worker.sh | tee run.txt
+
 ## Recorded logs
 
 Three fixtures in `core/tests/fixtures/` are real event logs, scrubbed by `scrub` (`core/src/bin/scrub.rs`). Each event keeps its shape and loses its content: text becomes `…`, and lists and objects become empty, except for what stays. What stays: ids, event names, `cwd`, the permission mode, a session's start source and end reason, agent ids and types, the `description` of a spawn or a Bash command, `isolation`, the paths of the files a tool reads or writes, skill names, the types and statuses in tool results, background tasks without their commands, exit codes, numbers, flags and timings.
