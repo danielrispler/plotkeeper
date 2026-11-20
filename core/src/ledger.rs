@@ -64,6 +64,9 @@ pub struct Row {
     pub task: Option<String>,
     #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     pub reported: Option<String>,
+    /// When that notification was received.
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
+    reported_at: Option<u64>,
     /// `None` until its result lands.
     pub outcome: Option<Outcome>,
     /// The worktree roots the call touched (danielrispler/plotkeeper#207).
@@ -119,6 +122,22 @@ impl Row {
     /// When it happened: its start, else its result, as the hooks are async.
     pub(crate) fn at(&self) -> Option<u64> {
         self.started_at.or(self.ended_at)
+    }
+
+    /// When it started: its start, else its result's time less how long it took, as the hooks are async.
+    pub(crate) fn began(&self) -> Option<u64> {
+        let end = self.ended_at.zip(self.duration_ms);
+        self.started_at
+            .or(end.map(|(end, took)| end.saturating_sub(took)))
+    }
+
+    /// When it ended: its result's time, or for a command in the background its notification's;
+    /// `None` while it runs.
+    pub(crate) fn finished(&self) -> Option<u64> {
+        match self.background {
+            true => self.reported_at,
+            false => self.ended_at,
+        }
     }
 
     /// Whether it ended in failure.
@@ -237,15 +256,26 @@ impl Ledger {
         row.settle();
     }
 
-    /// Takes a notification's report that background task `task` ended as `status`; the turn of its
-    /// call, when a row has the task.
-    pub(crate) fn report(&mut self, task: &str, status: &str) -> Option<Option<usize>> {
+    /// Takes a notification's report, received at `at`, that background task `task` ended as `status`;
+    /// the row of its call, when a row has the task.
+    pub(crate) fn report(&mut self, task: &str, status: &str, at: u64) -> Option<&Row> {
         let row = self
             .rows
             .iter_mut()
             .find(|r| r.task.as_deref() == Some(task))?;
         row.reported = Some(status.into());
-        Some(row.turn)
+        row.reported_at = Some(at);
+        Some(row)
+    }
+
+    /// The call `call` of `agent` was blocked, so it never ran: it has no result to wait for.
+    pub(crate) fn block(&mut self, agent: Option<&str>, call: &str) {
+        let key = (agent.map(Into::into), call.to_string());
+        if let Some(&i) = self.index.get(&key)
+            && self.rows[i].outcome.is_none()
+        {
+            self.rows[i].outcome = Some(Outcome::Rejected);
+        }
     }
 
     /// Takes the result of `tool`'s call.

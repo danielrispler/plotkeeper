@@ -471,6 +471,22 @@ pub struct Run {
     pub agent: Option<String>,
     /// When it started, in Unix milliseconds, when the log says.
     pub started_at: Option<u64>,
+    /// When it ended, when it has: its result's time, or for a background run its notification's.
+    pub ended_at: Option<u64>,
+}
+
+/// A check the feed lists under its turn: the latest run of a check of the session's own agent, while
+/// it runs or after it failed.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Listed {
+    /// The run's own statement.
+    pub statement: String,
+    pub status: Status,
+    pub started_at: u64,
+    /// `None` while it runs.
+    pub ended_at: Option<u64>,
+    /// Its command's typical duration.
+    pub typical_ms: Option<u64>,
 }
 
 /// A suite of a turn: the list entry its commands matched (`cargo test`, `npm run check`), whose
@@ -549,7 +565,8 @@ fn runs<'a>(row: &Row, list: &'a [String], home: &str) -> Vec<(&'a str, String, 
                 exit_code,
                 call: row.call.clone(),
                 agent: row.agent.clone(),
-                started_at: row.started_at,
+                started_at: row.began(),
+                ended_at: row.finished(),
             };
             Some((s.suite?, worktree(row, s.cd.as_deref(), home), run))
         })
