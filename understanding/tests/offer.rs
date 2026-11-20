@@ -270,6 +270,7 @@ fn facts(files: &[(&str, u64)], check: Option<CheckStatus>) -> Facts {
     Facts {
         files: files.iter().map(file).collect(),
         checks: check.into_iter().collect(),
+        ..Facts::default()
     }
 }
 

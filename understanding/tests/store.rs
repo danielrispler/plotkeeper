@@ -1028,3 +1028,26 @@ fn a_sessions_rail_cards_include_its_workers_each_with_its_turn_and_the_workers_
     assert_eq!(ids(&own.recent), ["w1@9", "w1@11"]);
     assert!(own.workers.is_empty());
 }
+
+/// The previous build's `Facts`, which requires `external`.
+#[derive(serde::Deserialize)]
+#[allow(dead_code)]
+struct MainFacts {
+    files: Vec<serde_json::Value>,
+    checks: Vec<serde_json::Value>,
+    external: u64,
+}
+
+#[test]
+fn a_summary_file_can_still_be_read_by_the_previous_builds_facts() {
+    let data = tempfile::tempdir().unwrap();
+    let _store = quiz_with_hunk(&data.path().join("cards.json"));
+    let text = std::fs::read_to_string(data.path().join("summaries.json")).unwrap();
+    let saved: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let facts = saved
+        .as_array()
+        .and_then(|all| all.first())
+        .and_then(|first| first.pointer("/request/facts"))
+        .unwrap_or_else(|| panic!("no facts in {text}"));
+    serde_json::from_value::<MainFacts>(facts.clone()).unwrap();
+}
