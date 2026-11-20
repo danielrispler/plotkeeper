@@ -1113,6 +1113,82 @@ fn two_jobs_queued_for_an_ended_session_run_one_at_a_time_in_order() {
     assert_eq!(threaded.queues(), 0);
 }
 
+/// A writer whose name panics for the prompt "boom".
+struct Panicking(Events);
+
+impl CardWriter for Panicking {
+    fn reply(&self, request: &CardRequest, earlier: &[String]) -> Result<String, String> {
+        FakeWriter.reply(request, earlier)
+    }
+
+    fn more(&self, request: &CardRequest, card: &Card) -> Result<String, String> {
+        FakeWriter.more(request, card)
+    }
+
+    fn goal(&self, prompts: &[&str]) -> Result<String, String> {
+        FakeWriter.goal(prompts)
+    }
+
+    fn design(&self, sources: &[(String, String)]) -> Result<String, String> {
+        FakeWriter.design(sources)
+    }
+
+    fn summarize(
+        &self,
+        setup: &SummarySetup,
+        request: &SummaryRequest,
+        earlier: &[TurnSummary],
+    ) -> Result<String, String> {
+        FakeWriter.summarize(setup, request, earlier)
+    }
+
+    fn name(
+        &self,
+        setup: &SummarySetup,
+        prompt: &str,
+        response: Option<&str>,
+    ) -> Result<String, String> {
+        assert_ne!(prompt, "boom", "the writer panics");
+        self.0.lock().unwrap().push(format!("named {prompt}"));
+        FakeWriter.name(setup, prompt, response)
+    }
+}
+
+#[test]
+fn a_job_that_panics_does_not_stop_the_later_jobs_of_its_session() {
+    let day = Day::new();
+    let events = Events::default();
+    let threaded = TurnWriting::new(
+        day.core.clone(),
+        day.store.clone(),
+        Arc::new(Panicking(events.clone())),
+        Offers::beside(&day.data.join("events.jsonl")),
+        day.recorder.clone(),
+    );
+    let name = |prompt: &str| {
+        threaded.name(NameRequest {
+            session_id: "s1".into(),
+            prompt: prompt.into(),
+            response: None,
+        });
+    };
+    name("boom");
+    for _ in 0..1000 {
+        if threaded.queues() == 0 {
+            break;
+        }
+        thread::sleep(Duration::from_millis(2));
+    }
+    name("after");
+    for _ in 0..1000 {
+        if !events.lock().unwrap().is_empty() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(*events.lock().unwrap(), ["named after"]);
+}
+
 // The turns of the stand-in's tests (`prompt_cards.rs`, danielrispler/plotkeeper#261), written through the real offer:
 // every change that expects a card is two logic files of three lines.
 

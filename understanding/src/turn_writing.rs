@@ -281,6 +281,9 @@ impl TurnWriting {
                 waiting.insert(id.clone(), VecDeque::from([job]));
                 let queues = queues.clone();
                 thread::spawn(move || {
+                    // A job that panics unwinds this thread: its session's queue goes with it, so the
+                    // next job starts a new one.
+                    let _ends = EndsQueue(&queues, &id);
                     loop {
                         let job = {
                             let mut waiting = queues.lock().unwrap();
@@ -295,6 +298,19 @@ impl TurnWriting {
                         job();
                     }
                 });
+            }
+        }
+    }
+}
+
+/// Removes a session's queue from `.0` when dropped, which is on the unwind of a job that panicked.
+struct EndsQueue<'a>(&'a Mutex<HashMap<String, VecDeque<Job>>>, &'a str);
+
+impl Drop for EndsQueue<'_> {
+    fn drop(&mut self) {
+        if thread::panicking() {
+            if let Ok(mut waiting) = self.0.lock() {
+                waiting.remove(self.1);
             }
         }
     }
