@@ -1016,6 +1016,10 @@ fn a_sessions_rail_cards_include_its_workers_each_with_its_turn_and_the_workers_
     }
 
     let rail = store.rail_cards(studio.session("s1").unwrap(), 1_761_743_990_000);
+    assert_eq!(
+        store.placements(studio.session("s1").unwrap()),
+        [("w1@9".to_string(), Some(0)), ("w1@11".to_string(), Some(2))]
+    );
 
     let placed: Vec<(&str, Option<usize>)> = rail
         .workers

@@ -409,6 +409,8 @@ struct CardsKey {
     revision: u64,
     minute: u64,
     open: Vec<OpenItem>,
+    /// The turn each worker card is placed in, which a wake-up can move with no store change.
+    placed: Vec<(String, Option<usize>)>,
 }
 
 /// The turns whose files the core asks for (danielrispler/plotkeeper#111): each is diffed by `git`
@@ -464,6 +466,7 @@ impl Sent {
                 revision: cards.revision(),
                 minute: studio.now() / 60_000,
                 open: open.unwrap_or_default(),
+                placed: session.map_or_default(|s| cards.placements(s)),
             }
         };
         if self.cards.as_ref() != Some(&key) {
