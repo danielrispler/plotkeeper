@@ -1597,10 +1597,19 @@ impl Session {
             .map_or((0, None), |t| (t.started_at, t.ended_at));
         let spawned = self.agents.iter().filter(|a| a.turn == Some(turn));
         let ends: Option<Vec<u64>> = spawned.map(|a| a.ended_at).collect();
+        // A turn with no end that nothing runs in any more stops at the next turn's start, or at the
+        // session's last event once it ended.
+        let stale = self
+            .turns
+            .get(turn + 1)
+            .map(|t| t.started_at)
+            .or(self.ended.then_some(self.agent.last_event_at));
         // Until now while it or a worker it spawned runs.
-        let until = end
-            .zip(ends)
-            .map_or(u64::MAX, |(end, ends)| ends.into_iter().fold(end, u64::max));
+        let until = match (end, ends, stale) {
+            (Some(end), Some(ends), _) => ends.into_iter().fold(end, u64::max),
+            (None, Some(ends), Some(stale)) => ends.into_iter().fold(stale, u64::max),
+            _ => u64::MAX,
+        };
         (since, until)
     }
 
@@ -3695,15 +3704,22 @@ impl Studio {
     pub fn turn_diffs(&mut self, now: u64, limit: usize) -> Vec<TurnDiff> {
         let mut asks = Vec::new();
         for session in self.sessions.values_mut() {
-            if !session.capabilities.turn_trees {
+            if !session.capabilities.turn_trees || session.deleted {
                 continue;
             }
             let running = session.open_roots();
             let windows: Vec<(u64, u64)> = (0..session.turns.len())
                 .map(|index| session.trees_window(index))
                 .collect();
+            let (turns, session_ended, last_event) = (
+                session.turns.len(),
+                session.ended,
+                session.agent.last_event_at,
+            );
             for (index, turn) in session.turns.iter_mut().enumerate() {
-                let ended = turn.ended_at.is_some();
+                // A turn with no end of an ended session, or before a later turn, is over all the same.
+                let stale = turn.ended_at.is_none() && (session_ended || index + 1 < turns);
+                let ended = turn.ended_at.is_some() || stale;
                 let open = |root: &String| !ended || running.contains(&(index, root.clone()));
                 // Final once it ended and no worker it spawned runs on in one of its worktrees.
                 let last = ended && !turn.trees.keys().any(open);
@@ -3744,7 +3760,14 @@ impl Studio {
                         trees,
                         window: windows[index],
                     };
-                    asks.push((turn.ended_at.unwrap_or(now), ask));
+                    // A stale turn sorts by its start, or the session's last event, never as now.
+                    let at = match turn.ended_at {
+                        Some(at) => at,
+                        None if !stale => now,
+                        None if session_ended => last_event,
+                        None => turn.started_at,
+                    };
+                    asks.push((at, ask));
                 }
             }
         }

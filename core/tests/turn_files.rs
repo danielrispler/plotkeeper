@@ -1085,3 +1085,106 @@ fn another_sessions_edit_spelled_through_a_symlink_takes_the_file_from_the_root_
     studio.set_turn_files(mine, Some(diffs(mine, &both)));
     assert_eq!(turn_files(&studio, 0), ["src/b.rs"]);
 }
+
+/// A second prompt of the session at `ms`; a resume before it leaves the first turn with no end.
+fn second_prompt(ms: u64, start: Value) -> String {
+    line(
+        "UserPromptSubmit",
+        ms,
+        json!({ "prompt": "next", "prompt_id": "p2", "studio_turn_start": start }),
+    )
+}
+
+#[test]
+fn a_deleted_sessions_turns_are_not_asked_until_it_starts_again() {
+    let mut studio = Studio::replayed([
+        prompt(json!({ ROOT: "s1" })),
+        edit(1_000, "e1", "/w/repo/src/a.rs", None),
+        stop(json!({ ROOT: "e1" })),
+        line("StudioDelete", 10_000, json!({})),
+    ]);
+    assert!(ask(&mut studio, AT + 20_000).is_empty());
+    assert!(ask(&mut studio, AT + 25_000).is_empty());
+    studio.replay(&line("SessionStart", 30_000, json!({ "source": "resume" })));
+    assert_eq!(ask(&mut studio, AT + 40_000).len(), 1);
+}
+
+#[test]
+fn an_unclosed_turn_of_an_ended_session_never_diffs_live_and_is_settled() {
+    // The session's end lands before its delayed prompt, so the turn never closes.
+    let mut studio = Studio::replayed([
+        line("SessionEnd", 500, json!({})),
+        prompt(json!({ ROOT: "s1" })),
+    ]);
+    assert!(studio.session(SESSION).unwrap().turns[0].ended_at.is_none());
+    assert!(ask(&mut studio, AT + 20_000).is_empty());
+    studio.replay(&edit(2_000, "e1", "/w/repo/src/a.rs", None));
+    assert!(ask(&mut studio, AT + 40_000).is_empty());
+}
+
+#[test]
+fn an_unclosed_turn_of_an_ended_session_caps_its_window_at_the_sessions_last_event() {
+    let mut studio = Studio::replayed([
+        line("SessionEnd", 500, json!({})),
+        prompt(json!({ ROOT: "s1" })),
+        worker_starts(600, "agent-1", "w1"),
+        line(
+            "SubagentStop",
+            2_000,
+            json!({ "agent_id": "agent-1", "studio_turn_end": { WORKER_ROOT: "w2" } }),
+        ),
+    ]);
+    let asks = ask(&mut studio, AT + 20_000);
+    assert_eq!(asks.len(), 1);
+    assert_eq!(asks[0].window, (AT, AT + 2_000));
+}
+
+#[test]
+fn a_non_final_unclosed_turn_never_diffs_live_and_caps_its_window_at_the_next_turns_start() {
+    let mut studio = Studio::replayed([
+        prompt(json!({ ROOT: "s1" })),
+        edit(1_000, "e1", "/w/repo/src/a.rs", None),
+        line("SessionStart", 3_000, json!({ "source": "resume" })),
+        second_prompt(5_000, json!({ ROOT: "s2" })),
+    ]);
+    let asks = ask(&mut studio, AT + 10_000);
+    // Only the later turn, which runs, is asked.
+    assert_eq!(asks.len(), 1);
+    assert_eq!(asks[0].turn, 1);
+    assert_eq!(asks[0].window.1, u64::MAX);
+    assert!(ask(&mut studio, AT + 30_000).is_empty());
+}
+
+#[test]
+fn a_non_final_unclosed_turns_window_ends_where_the_next_turn_starts() {
+    let mut studio = Studio::replayed([
+        prompt(json!({ ROOT: "s1" })),
+        worker_starts(500, "agent-1", "w1"),
+        line(
+            "SubagentStop",
+            2_000,
+            json!({ "agent_id": "agent-1", "studio_turn_end": { WORKER_ROOT: "w2" } }),
+        ),
+        line("SessionStart", 3_000, json!({ "source": "resume" })),
+        second_prompt(5_000, json!({ ROOT: "s2" })),
+    ]);
+    let asks = ask(&mut studio, AT + 10_000);
+    let first = asks.iter().find(|a| a.turn == 0).unwrap();
+    assert_eq!(first.window, (AT, AT + 5_000));
+}
+
+#[test]
+fn a_stale_turn_with_a_running_worker_sorts_behind_the_running_turn() {
+    let mut studio = Studio::replayed([
+        prompt(json!({ ROOT: "s1" })),
+        worker_starts(500, "agent-1", "w1"),
+        line("SessionStart", 3_000, json!({ "source": "resume" })),
+        second_prompt(5_000, json!({ ROOT: "s2" })),
+    ]);
+    let asks = ask(&mut studio, AT + 10_000);
+    let turns: Vec<usize> = asks.iter().map(|a| a.turn).collect();
+    assert_eq!(turns, [1, 0]);
+    // The worker still runs, so the window stays open.
+    assert_eq!(asks[1].window.1, u64::MAX);
+    assert_eq!(studio.turn_diffs(AT + 10_000, 1).len(), 0);
+}
