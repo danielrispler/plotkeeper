@@ -59,6 +59,12 @@ export class El {
   appendChild(item) {
     this.childNodes.push(item);
   }
+  insertBefore(item, ref) {
+    const was = this.childNodes.indexOf(item);
+    if (was >= 0) this.childNodes.splice(was, 1);
+    const at = ref ? this.childNodes.indexOf(ref) : this.childNodes.length;
+    this.childNodes.splice(at < 0 ? this.childNodes.length : at, 0, item);
+  }
   removeChild(item) {
     this.childNodes.splice(this.childNodes.indexOf(item), 1);
   }
