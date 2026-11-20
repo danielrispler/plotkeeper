@@ -207,7 +207,7 @@ function control(row: Exclude<Row, { control: "open" }>): HTMLElement {
     const group = text("div", "", "stepper");
     const step = (by: 1 | -1) => {
       const atBound = stepped(row, by) === row.value;
-      const hover = row.disabled ? BROKEN : atBound ? `Already at the ${by === 1 ? "highest" : "lowest"} value` : `${by === 1 ? "Increase" : "Decrease"} ${row.title.toLowerCase()}`;
+      const hover = row.disabled ? BROKEN : atBound ? `Already at the ${by === 1 ? "highest" : "lowest"} value` : `${by === 1 ? "Increase" : "Decrease"}: ${row.title}`;
       const b = button(by === 1 ? "+" : "−", "quiet", by === 1 ? "up" : "down", keyOf(row), row.disabled || atBound, hover);
       b.setAttribute("aria-label", `${by === 1 ? "Increase" : "Decrease"} ${row.title}`);
       return b;

@@ -10,6 +10,7 @@ import { fileRow } from "./evidence.js";
 import { drawFeed, forgetMissingSummaries, openCitation } from "./story.js";
 import { confidenceRow, pickedHere, trialStage, whyInput, whyWaiting } from "./quiz.js";
 import type { CardRequest, CheckResult, Guess, Level, Quiz, Rating, Reason, SessionCards, StoredCard, Tap, TurnFile } from "./types.js";
+import { HOVERS } from "./hovers.js";
 
 // The turn a card is drawn in: its file chips open the file's hunk between the turn's trees, as its evidence line's rows do.
 export type CardTurn = { session: string; index: number; files: TurnFile[]; ended: boolean };
@@ -79,7 +80,7 @@ function quizElements(stored: StoredCard, quiz: Quiz, shown: ReturnType<typeof q
         record("guess", { id, option: i });
       });
       button.disabled = state.answered;
-      button.title = state.answered ? "Already answered: the reasons show under the options" : "Pick this answer";
+      button.title = state.answered ? HOVERS.answered : HOVERS.pickAnswer;
       item.append(button);
       if (state.reasons) {
         const why = prose("p", option.why);
@@ -184,7 +185,7 @@ function keyWrongButton(id: string, keyWrong: boolean): HTMLElement {
   const flag = pressable(prose("button", label) as HTMLButtonElement, keyWrong, () => record("quiz_tap", { id, tap: { kind: "key_wrong" } }));
   flag.classList.add("key-wrong");
   flag.disabled = keyWrong;
-  flag.title = keyWrong ? "Already flagged; a flag is kept and never undone" : "Flag the quiz's right answer as wrong";
+  flag.title = keyWrong ? "Already flagged; a flag is kept and never undone" : HOVERS.keyWrong;
   return flag;
 }
 
@@ -193,7 +194,7 @@ function understoodButton(id: string, taps: StoredCard["taps"]): HTMLElement {
   const done = taps?.some((tap) => tap.kind === "understood") ?? false;
   const chip = pressable(prose("button", "I get why") as HTMLButtonElement, done, () => record("quiz_tap", { id, tap: { kind: "understood" } }));
   chip.disabled = done;
-  chip.title = done ? "Already noted that you get why" : "Note that the explanation made sense to you";
+  chip.title = done ? "Already noted that you get why" : HOVERS.understood;
   return chip;
 }
 
@@ -210,7 +211,7 @@ function moreElement(id: string, more: string | null): HTMLElement {
   node.open = moreOpen.has(id);
   const text = prose("p", more ?? "Writing…");
   text.className = "explanation";
-  node.append(fullTitle(prose("summary", "Explain more"), "Ask the writer for a longer explanation, then show or hide it"), text);
+  node.append(fullTitle(prose("summary", "Explain more"), `${HOVERS.explainMore}, then show or hide it`), text);
   node.addEventListener("toggle", () => {
     if (node.open) moreOpen.add(id);
     else moreOpen.delete(id);

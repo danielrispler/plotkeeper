@@ -11,6 +11,7 @@ import { select } from "./selection.js";
 import { studio } from "./state.js";
 import { titled } from "./keys.js";
 import type { Session } from "./types.js";
+import { HOVERS } from "./hovers.js";
 
 export type Toast = { session: Session; count: number };
 
@@ -55,7 +56,7 @@ export function showToast() {
     const name = sessionName(shown.session);
     const line = questionLine(shown.session);
     toast.replaceChildren(fullTitle(text("strong", name, "name"), name), ...more, close, fullTitle(text("span", line, "line"), line));
-    toast.title = titled(studio.files.keymap, "Go to this session", "studio::NextNeedsYou");
+    toast.title = titled(studio.files.keymap, HOVERS.goToSession, "studio::NextNeedsYou");
   }
 }
 
@@ -80,7 +81,7 @@ export function showStartToast(message: string, open: () => void) {
   };
   const close = button("×", "Hide this toast", "quiet small", () => {});
   close.setAttribute("aria-label", "Dismiss");
-  row.push(fullTitle(text("strong", message, "name"), message), button("Show output", "Show the failed terminal's output", "small", open), close);
+  row.push(fullTitle(text("strong", message, "name"), message), button("Show output", HOVERS.failedOutput, "small", open), close);
   toast.append(...row);
   toast.hidden = false;
 }

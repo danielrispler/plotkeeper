@@ -32,6 +32,7 @@ import { jumpToNeedsYou, showToast } from "./toast.js";
 import { finishedNote, showNote, warnContext, watchNotes } from "./notes.js";
 import type { Selection, Session, SessionCards } from "./types.js";
 import { readUsage, timedAgents } from "./usage.js";
+import { HOVERS } from "./hovers.js";
 
 // The terminal's cell, measured from a probe in its font, sets the columns' layout.
 function cell(): number {
@@ -330,6 +331,9 @@ dragPanel();
 element("new-session").addEventListener("click", () => void showPicker());
 element("add-project").addEventListener("click", () => void showAddProject());
 element("settings-gear").addEventListener("click", () => void run(actions, "studio::OpenSettings"));
+// The shell's own elements whose hover another place shows too (#220); the needs-you toast's adds its key when it shows.
+element("add-project").title = HOVERS.addProject;
+element("toast").title = element("note-toast").title = HOVERS.goToSession;
 // A click on the session list's empty space selects none and shows Home.
 document.querySelector(".list")!.addEventListener("click", (event) => listSpace(event.target as HTMLElement) && void goHome());
 // The needs-you chip (danielrispler/Falinks#572) selects the first session that needs Daniel.

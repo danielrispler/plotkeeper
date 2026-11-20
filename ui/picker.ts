@@ -16,6 +16,7 @@ import { studio } from "./state.js";
 import { branchBlocked, branchOptions, lastSegment, refreshAfterSwitch, selectedProject, shownProject, workspaceRows } from "./workspaces.js";
 import type { Binding } from "./settings.js";
 import type { Workspace, Workspaces } from "./types.js";
+import { HOVERS } from "./hovers.js";
 
 // Git's error, or any other, at the picker's foot.
 function failed(error: unknown) {
@@ -177,7 +178,7 @@ async function showProjects(current: string, kind: Kind) {
         return row;
       }),
     );
-  const add = fullTitle(pressable(text("button", "Add project…", "name"), false, () => void showAddProject()), "Add a repository as a project");
+  const add = fullTitle(pressable(text("button", "Add project…", "name"), false, () => void showAddProject()), HOVERS.addProject);
   add.removeAttribute("aria-pressed");
   add.classList.add("row");
   const search: HTMLElement[] = [];

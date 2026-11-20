@@ -115,11 +115,13 @@ export function decisionElement(ask: Ask): HTMLElement {
 function readySend(block: HTMLElement, ready: boolean) {
   const send = block.querySelector<HTMLButtonElement>(".send");
   send?.toggleAttribute("disabled", !ready);
-  if (send) send.title = ready ? "Send your answers to the agent" : "Choose an answer to every question first";
+  if (send) send.title = ready ? answerHovers.Send : "Choose an answer to every question first";
 }
 
-// What each of the card's buttons does, on its hover.
-const answerHovers: Record<string, string> = {
+// What each of the card's buttons does, on its hover: a label without one does not compile.
+type AnswerButton = "Send" | "Approve" | "Reject" | "Allow" | "Deny";
+const answerHovers: Record<AnswerButton, string> = {
+  Send: "Send your answers to the agent",
   Approve: "Approve the plan; the agent goes on with it",
   Reject: "Reject the plan; the agent is told",
   Allow: "Let the agent make this call",
@@ -128,7 +130,7 @@ const answerHovers: Record<string, string> = {
 
 // The card's own buttons, each a label, its click and a class, then "Answer in the terminal". "Send"
 // starts disabled, until every question has a choice.
-function answerButtons(ask: Ask, buttons: [string, () => void, string?][]): HTMLElement {
+function answerButtons(ask: Ask, buttons: [AnswerButton, () => void, string?][]): HTMLElement {
   const row = document.createElement("p");
   row.className = "answer-buttons";
   const button = (label: string, hover: string, click: () => void, className = "") => {
@@ -138,7 +140,7 @@ function answerButtons(ask: Ask, buttons: [string, () => void, string?][]): HTML
     node.addEventListener("click", click);
     return node;
   };
-  row.append(...buttons.map(([label, click, className]) => button(label, answerHovers[label] ?? "", click, className)));
+  row.append(...buttons.map(([label, click, className]) => button(label, answerHovers[label], click, className)));
   readySend(row, false);
   row.append(button("Answer in the terminal", "Leave the card and answer in the session's terminal", () => sendAnswer(ask, null)));
   return row;

@@ -5,6 +5,7 @@
 
 import { failure, pressable, prose, text } from "./dom.js";
 import type { Quiz, QuizTap, SummaryLine, Tap } from "./types.js";
+import { HOVERS } from "./hovers.js";
 
 export type QuizStage = "open" | "picked" | "skipped";
 export type QuizView = { reasons: boolean; rest: boolean; chips: boolean; skip: boolean };
@@ -35,9 +36,9 @@ export function trialOn(start: string | null, now: number): boolean {
 
 type Chip = "understood" | "explain_more" | "key_wrong";
 const chipHovers: Record<Chip, string> = {
-  understood: "Note that the explanation made sense to you",
-  explain_more: "Ask the writer for a longer explanation",
-  key_wrong: "Flag the quiz's right answer as wrong",
+  understood: HOVERS.understood,
+  explain_more: HOVERS.explainMore,
+  key_wrong: HOVERS.keyWrong,
 };
 type Kept = {
   pick: number | null;
@@ -183,7 +184,7 @@ export function quizRegion(id: string, quiz: Quiz, held: SummaryLine[], deps: Qu
           tap({ kind: "pick", option: i });
         });
         button.disabled = stage !== "open";
-        button.title = stage === "open" ? "Pick this answer" : "Already answered: the reasons show under the options";
+        button.title = stage === "open" ? HOVERS.pickAnswer : HOVERS.answered;
         item.append(button);
         if (view.reasons) {
           const why = prose("p", option.why);

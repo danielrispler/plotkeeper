@@ -6,6 +6,7 @@
 import { failure, fullTitle, invoke, pressable, text } from "./dom.js";
 import { openAt } from "./paths.js";
 import type { Capabilities, Session, Turn, TurnFile } from "./types.js";
+import { HOVERS } from "./hovers.js";
 
 export type DiffLineKind = "add" | "del" | "hunk" | "meta" | "ctx";
 export type DiffLine = { kind: DiffLineKind; text: string };
@@ -55,7 +56,7 @@ function fileFold(session: string, index: number, file: TurnFile): HTMLElement {
     if (fold.open) folded.delete(key);
     else folded.add(key);
   });
-  const edit = fullTitle(pressable(text("button", "Open in editor", "evidence-edit"), false, () => openAt({ path: file.path, line: first, column: 1 }, file.root)), "Open the file in your editor at its first changed line");
+  const edit = fullTitle(pressable(text("button", "Open in editor", "evidence-edit"), false, () => openAt({ path: file.path, line: first, column: 1 }, file.root)), HOVERS.editAtFirstChange);
   let first = 1;
   invoke("hunk_opened", { session, turn: index }).catch(failure("hunk_opened"));
   const body = text("div", "Reading the hunk…", "diff-body");

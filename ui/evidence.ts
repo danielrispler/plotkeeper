@@ -9,6 +9,7 @@ import { askAnchor, type Hunk, hunkText } from "./ask.js";
 import { diffRequest } from "./diff.js";
 import { openAt } from "./paths.js";
 import type { Capabilities, Check, Turn, TurnFile } from "./types.js";
+import { HOVERS } from "./hovers.js";
 
 type Facts = Pick<Turn, "files" | "checks">;
 type Ended = { ended_at: Turn["ended_at"] };
@@ -125,7 +126,7 @@ export function fileRow(session: string, index: number, row: EvidenceRow, scope 
   });
   edit.classList.add("evidence-edit");
   edit.textContent = "Open in editor";
-  edit.title = "Open the file in your editor at its first changed line";
+  edit.title = HOVERS.editAtFirstChange;
   const left = (h: Hunk | null) => {
     more.textContent = `${h?.left_out ?? 0} more lines`;
     if (openHunks.has(openKey) && h?.left_out) more.removeAttribute("hidden");
@@ -133,7 +134,7 @@ export function fileRow(session: string, index: number, row: EvidenceRow, scope 
   };
   const more = pressable(document.createElement("button"), false, () => diffRequest.open(session, index));
   more.classList.add("evidence-more");
-  more.title = "Show the turn's whole diff in the terminal column";
+  more.title = HOVERS.wholeDiff;
   const show = () => {
     const open = openHunks.has(openKey);
     for (const node of [pre, edit]) open ? node.removeAttribute("hidden") : node.setAttribute("hidden", "");
@@ -175,7 +176,7 @@ export function fileRow(session: string, index: number, row: EvidenceRow, scope 
 // "Open full diff": the turn's whole diff in the terminal column (`diff.ts`).
 function fullDiffRow(session: string, index: number): HTMLElement {
   const item = document.createElement("li");
-  item.append(fullTitle(pressable(text("button", "Open full diff", "evidence-edit"), false, () => diffRequest.open(session, index)), "Show the turn's whole diff in the terminal column"));
+  item.append(fullTitle(pressable(text("button", "Open full diff", "evidence-edit"), false, () => diffRequest.open(session, index)), HOVERS.wholeDiff));
   return item;
 }
 

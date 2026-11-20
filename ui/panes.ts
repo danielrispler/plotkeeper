@@ -28,6 +28,7 @@ import { sessionName } from "./list.js";
 import { FAILED_OSC, openPane, startNotice } from "./terminal.js";
 import { showStartToast } from "./toast.js";
 import type { Retest, Session } from "./types.js";
+import { HOVERS } from "./hovers.js";
 
 type Pane = { box: HTMLElement; term: Xterm.Terminal | null; title: string };
 const panes = new Map<string, Pane>();
@@ -435,6 +436,6 @@ function failedAtStart({ id, name, status, lines }: { id: string; name: string; 
   showStartToast(notice, output);
   if (!failureTakesPane(id, shown)) return;
   box(ELSEWHERE).classList.add("elsewhere");
-  box(ELSEWHERE).replaceChildren(text("p", notice, "empty"), text("pre", lines.join("\n"), "last-lines"), fullTitle(pressable(text("button", "Show output"), false, output), "Show the failed terminal's output"));
+  box(ELSEWHERE).replaceChildren(text("p", notice, "empty"), text("pre", lines.join("\n"), "last-lines"), fullTitle(pressable(text("button", "Show output"), false, output), HOVERS.failedOutput));
   show(ELSEWHERE, () => null);
 }
