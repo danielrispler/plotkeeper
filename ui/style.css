@@ -272,7 +272,7 @@ h1 { margin: 0 0 var(--sp-4); }
 .pane.home h2 .clear { margin-inline-start: auto; color: var(--muted); font-weight: 500; }
 .pane.home .row.more { color: var(--muted); font-size: var(--size-small); text-align: start; }
 /* Needs you's rows are cards on the raised surface; the rest sit on the terminal background. */
-.pane.home .home-row:has(.glyph[data-glyph="pill"]) { background: var(--raised); box-shadow: inset 0 0 0 var(--hair) var(--edge); padding: var(--sp-4) var(--sp-5); }
+.pane.home .home-row:has(.glyph[data-glyph="pill"]) { background: var(--raised); box-shadow: inset 0 0 0 var(--hair) var(--needs-you-line); padding: var(--sp-4) var(--sp-5); }
 .pane.home .home-row:has(.glyph[data-glyph="pill"]) .l2 { color: var(--fg); }
 /* History (#94): as Home, with its search box above the rows; it adds no colour. */
 .pane.history { overflow-y: auto; padding: var(--sp-5) var(--sp-6); max-width: var(--dialog); margin: 0 auto; }
@@ -281,8 +281,6 @@ h1 { margin: 0 0 var(--sp-4); }
 .pane.history .item .delete { visibility: visible; }
 .list-foot { display: flex; align-items: center; justify-content: space-between; }
 .history-link { display: block; margin: var(--sp-3) var(--sp-4); color: var(--muted); }
-/* A landed row's Delete is the point of the section, so it shows without hover. */
-.pane.home .item .delete { visibility: visible; }
 .pane[hidden] { display: block; }
 .pane[hidden], .pane.fitting { visibility: hidden; }
 /* A split's divider (danielrispler/Falinks#529), in the gap between its two panes. */

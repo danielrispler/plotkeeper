@@ -13,7 +13,7 @@ import { askAnchor } from "./ask.js";
 import { rendered } from "./markdown.js";
 import { encode, request } from "./daemon.js";
 import { agentState, sessionName, showsLanded } from "./list.js";
-import { closePane, openHere } from "./panes.js";
+import { closePane, openHere, refreshHome } from "./panes.js";
 import { openDecision, type Ask } from "./answer.js";
 import { blockedElement, typeRetry } from "./blocked.js";
 import { beginFeed, briefNodes, cardLine, cardsFor, endFeed, markShown, openCard, quizOpen, rowCards, unseenRow } from "./cards.js";
@@ -391,6 +391,8 @@ const askSummary = oneAtATime((id) =>
     .finally(() => {
       asking.delete(id);
       drawFeed();
+      // Home's Unseen rows show this Headline, and the card store may now hold a fresh Quiz.
+      refreshHome();
     }),
 );
 

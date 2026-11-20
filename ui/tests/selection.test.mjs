@@ -42,7 +42,7 @@ test("the Home key flips between a session and Home (#239)", async () => {
   const { homeToggle } = await import("../../dist/selection.js");
   const listed = [{ id: "a" }, { id: "b" }];
   // From a session it remembers that session and shows Home.
-  assert.deepEqual(homeToggle("a", null, listed), { remember: "a" });
+  assert.deepEqual(homeToggle("a", null, listed), { show: "a" });
   // On Home it selects the remembered session.
   assert.deepEqual(homeToggle(null, "a", listed), { select: "a" });
 });

@@ -190,6 +190,8 @@ export function quizRegion(id: string, quiz: Quiz, held: SummaryLine[], deps: Qu
             deps.record({ kind: "confidence", sure: one.sure, surface: "home" });
           }
           one.pick = i;
+          // Home has no "why?" line: the rail must not wait for one on a Quiz answered here.
+          if (deps.home) one.whyDone = true;
           tap({ kind: "pick", option: i });
         });
         button.disabled = stage !== "open";

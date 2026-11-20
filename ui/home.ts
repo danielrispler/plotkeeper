@@ -11,7 +11,8 @@ import { lastHeadline } from "./story.js";
 import { hunkFiles } from "./ask.js";
 import { codeTarget, followToCode } from "./selection.js";
 import { startLast } from "./picker.js";
-import { closePane, redrawHome } from "./panes.js";
+import { counts } from "./times.js";
+import { closePane, forgetAsked, redrawHome } from "./panes.js";
 import { hideClearToast, showClearToast } from "./toast.js";
 import { studio } from "./state.js";
 import type { Learning, Session, Tap } from "./types.js";
@@ -218,14 +219,26 @@ export function markLearningShown(home: boolean) {
   void invoke("quiz_tap", { id, tap: { kind: "shown" } }).catch(failure("quiz_tap"));
 }
 
-// Tells that a turn ended: its end time is later than the latest one seen. The first call only learns it.
-let lastEnd: number | null = null;
-export function turnEnded(sessions: Session[]): boolean {
-  const end = Math.max(0, ...sessions.map((s) => s.turns.at(-1)?.ended_at ?? 0));
-  const ended = lastEnd !== null && end > lastEnd;
-  lastEnd = end;
-  return ended;
+// Tells that a turn ended: a session has a turn whose end is later than what was seen of that session (for one new to the list, than the
+// latest end seen anywhere). Any turn counts, not only the last, so a queued prompt that starts the next turn at once hides no end, and
+// a session starting a new turn never moves anything back. The first call only learns.
+export function endTracker() {
+  let latest: number | null = null;
+  const seen = new Map<string, number>();
+  return (sessions: Pick<Session, "id" | "turns">[]): boolean => {
+    let ended = false;
+    let top = latest ?? 0;
+    for (const s of sessions) {
+      const end = Math.max(0, ...s.turns.map((t) => t.ended_at ?? 0));
+      if (latest !== null && end > (seen.get(s.id) ?? latest)) ended = true;
+      seen.set(s.id, Math.max(end, seen.get(s.id) ?? 0));
+      top = Math.max(top, end);
+    }
+    latest = top;
+    return ended;
+  };
 }
+export const turnEnded = endTracker();
 
 // Clear landed (#244): Clear hides every landed row and offers Undo for CLEAR_WINDOW_MS. When the window closes each hidden session
 // that is still landed goes through today's Delete (`commit`); Undo commits nothing. `changed` hears the sessions still pending.
@@ -359,8 +372,10 @@ function waitingRow({ session, line, note }: HomeRow, part: HomeKey, project: st
   button.classList.toggle("unseen", !!session.unseen);
   button.title = `${sessionName(session)} · ${status(session.state, session.unseen, session.landed)[1]}`;
   const first = text("span", "", "l1");
-  const clock = part === "running" && session.turn_span ? age(session.turn_span.start) : part === "unseen" ? `${age(session.turns.at(-1)?.ended_at ?? session.last_event_at)} ago` : "";
-  first.append(logo(logoKey(session)), fullTitle(text("span", sessionName(session), "name"), sessionName(session)), text("span", project, "id"), ...(clock ? [text("span", clock, "clock")] : []), ...(part === "needs_you" ? [glyph(session.state)] : []));
+  // The clock counts up like the list's (#226), not frozen at the draw.
+  const since = part === "running" ? session.turn_span?.start : part === "unseen" ? (session.turns.at(-1)?.ended_at ?? session.last_event_at) : undefined;
+  const clock = since === undefined ? [] : [counts(text("span", "", "clock"), (now) => (part === "unseen" ? `${age(since, now)} ago` : age(since, now)))];
+  first.append(logo(logoKey(session)), fullTitle(text("span", sessionName(session), "name"), sessionName(session)), text("span", project, "id"), ...clock, ...(part === "needs_you" || part === "unseen" ? [glyph(session.state, session.unseen, session.landed)] : []));
   button.append(first);
   if (line) {
     const second = text("span", "", "l2");
@@ -399,6 +414,12 @@ export function drawHome(box: HTMLElement, sessions: Session[], projects: string
   box.classList.add("home");
   // A turn's end brings the slot back after "Not now", and asks the store again.
   if (turnEnded(sessions)) {
+    // What was asked while the slot was quiet may be the item set aside or one Daniel never saw: it is not drawn or marked shown before
+    // the store answers again.
+    if (homeState.quiet) {
+      forgetAsked();
+      asked = null;
+    }
     homeState.quiet = false;
     reask();
   }

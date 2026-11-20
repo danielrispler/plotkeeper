@@ -4,6 +4,7 @@
 
 import { code, element, failure, fullTitle, invoke, pressable, prose, text } from "./dom.js";
 import { refreshCards } from "./selection.js";
+import { refreshHome } from "./panes.js";
 import { studio } from "./state.js";
 import { showDecisions } from "./decisions.js";
 import { fileRow } from "./evidence.js";
@@ -373,6 +374,8 @@ export function showCards(cards: SessionCards) {
   // The store changed: a summary missing before may be in it now.
   forgetMissingSummaries();
   drawFeed();
+  // A card stored while Home is shown may be its next Quiz.
+  refreshHome();
   markShown();
 }
 
