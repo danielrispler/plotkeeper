@@ -381,21 +381,35 @@ pub fn offer_summary(
     summary
 }
 
-/// The files of a unified diff (`git diff`, one `diff --git` header per file).
+/// The files of a unified diff: one `diff --git` header per file, as `git diff` has, or only the
+/// `---`/`+++` pair of each, as a fingerprint's does.
 fn of_diff(diff: &str) -> Vec<Changed> {
-    let mut files: Vec<(String, String)> = Vec::new();
-    for line in diff.lines() {
+    let lines: Vec<&str> = diff.lines().collect();
+    // Each file's path and text, and whether its `---`/`+++` pair was seen.
+    let mut files: Vec<(String, String, bool)> = Vec::new();
+    for (i, line) in lines.iter().enumerate() {
+        let pair = line.starts_with("--- ")
+            && lines.get(i + 1).is_some_and(|l| l.starts_with("+++ "))
+            && lines.get(i + 2).is_some_and(|l| l.starts_with("@@"));
         if let Some(rest) = line.strip_prefix("diff --git ") {
             let path = rest.rsplit_once(" b/").map_or(rest, |(_, b)| b);
-            files.push((path.into(), String::new()));
-        } else if let Some((_, text)) = files.last_mut() {
+            files.push((path.into(), String::new(), false));
+        } else if pair && files.last().is_none_or(|(_, _, seen)| *seen) {
+            let new = lines[i + 1].strip_prefix("+++ ").unwrap_or_default();
+            files.push((
+                new.strip_prefix("b/").unwrap_or(new).into(),
+                String::new(),
+                true,
+            ));
+        } else if let Some((_, text, seen)) = files.last_mut() {
+            *seen |= pair;
             text.push_str(line);
             text.push('\n');
         }
     }
     files
         .into_iter()
-        .map(|(path, text)| Changed {
+        .map(|(path, text, _)| Changed {
             path,
             lines: changes(&text).count() as u64,
             non_trivial: non_trivial(&text),

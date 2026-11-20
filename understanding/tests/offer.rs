@@ -762,3 +762,42 @@ fn a_worktree_the_session_edits_itself_counts_for_its_turn_when_no_worker_is_in_
         Offer::Card
     );
 }
+
+// The diff a fingerprint really produces (danielrispler/plotkeeper#202).
+
+#[test]
+fn the_files_of_a_fingerprints_diff_are_read() {
+    use std::process::Command;
+    use studio_understanding::Fingerprints;
+    let dir = tempfile::tempdir().unwrap();
+    let git = |args: &[&str]| {
+        let out = Command::new("git")
+            .args([
+                "-c",
+                "user.name=Studio",
+                "-c",
+                "user.email=studio@example.com",
+            ])
+            .args(args)
+            .current_dir(dir.path())
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}");
+    };
+    git(&["init", "-q"]);
+    std::fs::write(dir.path().join("a.rs"), "fn a() {}\n").unwrap();
+    git(&["add", "."]);
+    git(&["commit", "-qm", "Start"]);
+    let mut prints = Fingerprints::default();
+    assert!(prints.take(dir.path()).is_none());
+
+    std::fs::write(dir.path().join("a.rs"), "fn a() {}\nfn b() {}\nfn c() {}\n").unwrap();
+    std::fs::write(dir.path().join("new.rs"), "fn d() {}\n").unwrap();
+    let change = prints.take(dir.path()).unwrap();
+
+    let files = changed_in(&change.diff);
+    let found: Vec<(&str, u64)> = files.iter().map(|f| (f.path.as_str(), f.lines)).collect();
+    assert_eq!(found, [("a.rs", 2), ("new.rs", 1)]);
+}
