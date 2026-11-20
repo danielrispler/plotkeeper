@@ -1395,6 +1395,7 @@ fn file(path: &str, added: u64, removed: u64, hunk: &str) -> FactFile {
 fn check(status: CheckStatus, retries: u32, exit_code: i32) -> Check {
     let run = CheckRun {
         command: "npm run check".into(),
+        statement: "npm run check".into(),
         status,
         exit_code: Some(exit_code),
         call: "c1".into(),

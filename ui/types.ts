@@ -91,7 +91,7 @@ export type Check = {
   suite: string;
   status: CheckStatus;
   retries: number;
-  runs: { command: string; status: CheckStatus; exit_code: number | null; call: string; agent: string | null }[];
+  runs: { command: string; statement: string; status: CheckStatus; exit_code: number | null; call: string; agent: string | null }[];
 };
 export type Turn = {
   started_at: number;

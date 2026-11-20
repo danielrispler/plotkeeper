@@ -24,7 +24,6 @@ mod turn_files;
 mod work;
 pub use agy::{CAPABILITIES as AGY_CAPABILITIES, Drift as AgyDrift, DriftKind as AgyDriftKind};
 pub use ask::{Anchor, AskFact, AskFacts, AskSection};
-pub(crate) use checks::is_check;
 pub use checks::{
     Check, CheckLists, Output as CheckOutput, Run as CheckRun, Status as CheckStatus,
     output as check_output,
@@ -3336,7 +3335,9 @@ impl Studio {
                         session.returned = None;
                         let step = Step::new(&tool.name, &tool.input, &event.cwd);
                         session.agent.step(step, event.call_id(), at);
-                        session.work.call(tool, at);
+                        session
+                            .work
+                            .call(tool, at, self.check_lists.of(&session.cwd));
                         // A check's line runs from its start (danielrispler/Falinks#461, decision 13).
                         if let Some(start) = &start {
                             let call = event.call_id();

@@ -215,3 +215,97 @@ fn a_checks_exit_code_and_output_tail_are_read_through_its_offset() {
     assert_eq!(passed.tail, "ok\nall passed");
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+/// The suites and statuses of the checks a turn with the one command `command` shows.
+fn of_command(command: &str) -> Vec<(String, CheckStatus)> {
+    checks(&[passes(1_000, "t1", command, None)])
+        .iter()
+        .map(|c| (c.suite.clone(), c.status))
+        .collect()
+}
+
+#[test]
+fn a_word_that_is_only_an_argument_or_in_a_heredocs_body_or_quoted_is_no_check() {
+    for command in [
+        "strings target/debug/ci-checks",
+        "echo cargo test",
+        "cat > notes.md <<'EOF'\ncargo test\nEOF",
+        "gh pr create --body \"run cargo test first\"",
+        "echo \"say \\\" cargo test\"",
+        "perl -e 'exec @ARGV' cargo test",
+    ] {
+        assert_eq!(of_command(command), [], "{command}");
+    }
+}
+
+#[test]
+fn a_backslash_escaped_quote_does_not_open_the_rest_of_the_command() {
+    assert_eq!(
+        of_command("echo \\\" && cargo test"),
+        [("cargo test".to_string(), CheckStatus::Passed)]
+    );
+}
+
+#[test]
+fn a_check_still_matches_behind_each_allowed_wrapper() {
+    for command in [
+        "time cargo test",
+        "timeout 60 cargo test",
+        "env RUST_LOG=1 cargo test",
+        "RUST_LOG=1 cargo test",
+        "nice cargo test",
+        "exec cargo test",
+        "command cargo test",
+        "for x in a; do cargo test; done",
+        "if true; then cargo test; fi",
+        "cd x && cargo test",
+        "(cargo test)",
+        "cargo +nightly test -p core",
+        "cargo test 2>&1",
+    ] {
+        let found = of_command(command);
+        assert_eq!(found.len(), 1, "{command}: {found:?}");
+        assert_eq!(found[0].0, "cargo test", "{command}");
+    }
+}
+
+#[test]
+fn cargo_run_bin_is_a_run_of_a_one_word_entry() {
+    assert_eq!(
+        of_command("cargo run -q --bin ci-checks"),
+        [("ci-checks".to_string(), CheckStatus::Passed)]
+    );
+    assert_eq!(of_command("cargo run -q --bin other"), []);
+}
+
+#[test]
+fn a_command_with_two_checks_gives_a_check_of_each_with_its_own_statement_not_counted() {
+    for command in [
+        "cargo test -p core; cargo clippy --all 2>&1",
+        "cargo test -p core && cargo clippy --all",
+    ] {
+        let found = checks(&[passes(1_000, "t1", command, None)]);
+        let statements: Vec<(&str, &str, CheckStatus)> = found
+            .iter()
+            .map(|c| (c.suite.as_str(), c.runs[0].statement.as_str(), c.status))
+            .collect();
+        assert_eq!(
+            statements,
+            [
+                ("cargo test", "cargo test -p core", CheckStatus::Ran),
+                ("cargo clippy", "cargo clippy --all", CheckStatus::Ran),
+            ],
+            "{command}"
+        );
+    }
+}
+
+#[test]
+fn a_heredoc_edit_followed_by_cargo_test_gives_a_run_whose_statement_is_the_cargo_test() {
+    let command = "cd core && python3 - <<'EOF'\nprint('cargo test')\nEOF\ncargo test -q";
+
+    let found = checks(&[passes(1_000, "t1", command, None)]);
+
+    assert_eq!(shown(&found), [("cargo test", CheckStatus::Passed, 0)]);
+    assert_eq!(found[0].runs[0].statement, "cargo test -q");
+}
