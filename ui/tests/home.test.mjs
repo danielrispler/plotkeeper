@@ -290,6 +290,14 @@ test("Home's card holds the options, then Not sure and Not now, with no Sure row
   assert.deepEqual(labels(), ["A", "B", "Not sure", "Not now"]);
 });
 
+test("an item that arrives already answered still offers a way on: Next sets it aside", async () => {
+  const { calls, press, labels } = await slotCard("c5", { taps: [{ kind: "skip", at: 1 }] });
+  assert.ok(labels().includes("Next"), labels().join());
+  press("Next");
+  await settle();
+  assert.deepEqual(taps(calls), [{ kind: "not_now" }]);
+});
+
 test("the reveal shows the turn's date and Key wrong", async () => {
   const { node, press, labels } = await slotCard("c4", { of_at: Date.UTC(2026, 10, 13, 12) });
   press("A");
@@ -316,12 +324,14 @@ function clearMachine(sessions) {
   const live = new Map(sessions.map((s) => [s.id, s]));
   const deleted = [];
   const pending = [];
+  const written = [];
+  const commits = [];
   const m = clearing(time, {
     landed: (id) => (live.get(id)?.landed ? live.get(id) : undefined),
-    commit: (s) => deleted.push(s.id),
-    changed: (list) => pending.push(list.map((s) => s.id)),
+    commit: (s) => (deleted.push(s.id), new Promise((resolve, reject) => commits.push({ id: s.id, resolve, reject }))),
+    changed: (list, writing = []) => (pending.push(list.map((s) => s.id)), written.push(writing.map((s) => s.id))),
   });
-  return { m, time, live, deleted, pending };
+  return { m, time, live, deleted, pending, written, commits };
 }
 const landed = (id) => live(id, "idle", { landed: true });
 
@@ -350,6 +360,21 @@ test("committed rows stay hidden until they leave the list, and a Clear before t
   sessions.clear();
   m.sync();
   assert.deepEqual([...m.hidden], []);
+});
+
+test("a session stays told to the shell until its delete is written, and a failed delete brings the row back", async () => {
+  const { m, time, written, commits } = clearMachine([landed("a"), landed("b")]);
+  m.clear([landed("a"), landed("b")]);
+  time.tick(CLEAR_WINDOW_MS);
+  // The window closed with both deletes in flight: the shell still hears both, so a quit now commits them.
+  assert.deepEqual(written.at(-1), ["a", "b"]);
+  commits[0].resolve();
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(written.at(-1), ["b"]);
+  commits[1].reject(new Error("no"));
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(written.at(-1), []);
+  assert.deepEqual([...m.hidden], ["a"]);
 });
 
 test("Undo restores the rows and nothing is ever deleted", () => {

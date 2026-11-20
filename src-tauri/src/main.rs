@@ -745,11 +745,17 @@ fn clearing(sessions: Vec<Cleared>, pending: State<Clearing>) {
 /// `ends` gives the lines that end the sessions of a terminal, as closing its pane does (`closed`), which come first.
 fn clear_commit(
     sessions: &[Cleared],
+    in_use: impl Fn(&str, &[Cleared]) -> bool,
     ends: impl Fn(&str) -> Vec<serde_json::Value>,
 ) -> (Vec<serde_json::Value>, Vec<serde_json::Value>) {
     let mut requests = Vec::new();
     let mut lines = Vec::new();
+    let mut ended = std::collections::HashSet::new();
     for terminal in sessions.iter().filter_map(|s| s.terminal.as_ref()) {
+        // Each terminal once, and never one a session that is not being cleared still uses.
+        if in_use(terminal, sessions) || !ended.insert(terminal) {
+            continue;
+        }
         requests.push(serde_json::json!({ "op": "kill", "id": terminal }));
         requests.push(serde_json::json!({ "op": "forget", "id": terminal }));
         lines.extend(ends(terminal));
@@ -764,11 +770,46 @@ fn clear_commit(
     (requests, lines)
 }
 
+/// The cleared `pending` sessions as they are now, from `current(id)`, which gives whether the session is still landed and the terminal
+/// it runs in now: a session that is gone or no longer landed is dropped, and each keeps its current terminal.
+fn resolve_clearing(
+    pending: Vec<Cleared>,
+    current: impl Fn(&str) -> Option<(bool, Option<String>)>,
+) -> Vec<Cleared> {
+    (pending.into_iter())
+        .filter_map(|cleared| {
+            let (landed, terminal) = current(&cleared.id)?;
+            landed.then_some(Cleared {
+                id: cleared.id,
+                terminal,
+            })
+        })
+        .collect()
+}
+
 /// The app is quitting: the sessions cleared inside their undo window are deleted now (#244, story 35).
 fn commit_clearing(app: &AppHandle) {
-    let sessions = std::mem::take(&mut *app.state::<Clearing>().0.lock().unwrap());
+    let pending = std::mem::take(&mut *app.state::<Clearing>().0.lock().unwrap());
     let studio = app.state::<Mutex<Studio>>();
-    let (requests, lines) = clear_commit(&sessions, |terminal| session_ends(&studio, terminal));
+    // The window's list may be stale: what is landed and where it runs is read again from the studio now.
+    let sessions = {
+        let studio = studio.lock().unwrap();
+        let all = studio.sessions();
+        resolve_clearing(pending, |id| {
+            let session = all.iter().find(|s| s.agent.id == id)?;
+            Some((studio.landed(session), session.terminal.clone()))
+        })
+    };
+    let in_use = |terminal: &str, cleared: &[Cleared]| {
+        let studio = studio.lock().unwrap();
+        (studio.sessions().into_iter()).any(|s| {
+            s.terminal.as_deref() == Some(terminal)
+                && s.state != Ended
+                && !s.status_only
+                && !cleared.iter().any(|c| c.id == s.agent.id)
+        })
+    };
+    let (requests, lines) = clear_commit(&sessions, in_use, |terminal| session_ends(&studio, terminal));
     for request in requests {
         let _ = terminal::terminal_send(request, app.state());
     }
@@ -2072,7 +2113,7 @@ mod tests {
             })]
         };
         let (requests, lines) =
-            super::clear_commit(&[cleared("a", Some("t1")), cleared("b", None)], ends);
+            super::clear_commit(&[cleared("a", Some("t1")), cleared("b", None)], |_, _| false, ends);
         assert_eq!(
             requests,
             vec![
@@ -2098,7 +2139,63 @@ mod tests {
                 ("b", studio_core::DELETE)
             ]
         );
-        assert!(super::clear_commit(&[], |_| vec![]).1.is_empty());
+        assert!(super::clear_commit(&[], |_, _| false, |_| vec![]).1.is_empty());
+    }
+
+    fn cleared(id: &str, terminal: Option<&str>) -> super::Cleared {
+        super::Cleared {
+            id: id.into(),
+            terminal: terminal.map(Into::into),
+        }
+    }
+
+    #[test]
+    fn two_cleared_sessions_in_one_terminal_end_it_once() {
+        let ends = |t: &str| vec![serde_json::json!({ "session_id": format!("r-{t}") })];
+        let (requests, lines) = super::clear_commit(
+            &[cleared("a", Some("t1")), cleared("b", Some("t1"))],
+            |_, _| false,
+            ends,
+        );
+        assert_eq!(requests.len(), 2);
+        // One session end, then the two deletes.
+        assert_eq!(lines.len(), 3);
+    }
+
+    #[test]
+    fn a_terminal_a_session_not_being_cleared_uses_is_not_killed_but_its_cleared_session_is_still_deleted() {
+        let ends = |t: &str| vec![serde_json::json!({ "session_id": format!("r-{t}") })];
+        let (requests, lines) = super::clear_commit(
+            &[cleared("a", Some("t1")), cleared("b", Some("t2"))],
+            |t, _| t == "t1",
+            ends,
+        );
+        assert_eq!(
+            requests,
+            vec![
+                serde_json::json!({ "op": "kill", "id": "t2" }),
+                serde_json::json!({ "op": "forget", "id": "t2" }),
+            ]
+        );
+        let ids: Vec<_> = lines.iter().map(|l| l["session_id"].as_str().unwrap()).collect();
+        assert_eq!(ids, ["r-t2", "a", "b"]);
+    }
+
+    #[test]
+    fn a_quit_commits_only_sessions_still_landed_each_in_the_terminal_it_has_now() {
+        let current = |id: &str| match id {
+            "landed" => Some((true, Some("t9".to_string()))),
+            "moved on" => Some((false, Some("t2".to_string()))),
+            _ => None,
+        };
+        let pending = vec![
+            cleared("landed", None),
+            cleared("moved on", Some("t2")),
+            cleared("gone", Some("t3")),
+        ];
+        let kept = super::resolve_clearing(pending, current);
+        assert_eq!(kept.len(), 1);
+        assert_eq!((kept[0].id.as_str(), kept[0].terminal.as_deref()), ("landed", Some("t9")));
     }
 
     #[test]

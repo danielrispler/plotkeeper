@@ -148,6 +148,17 @@ export function slotNode(slot: Slot, redraw: () => void, reask: () => void): HTM
   wrap.append(text("p", slotLabel(item, session), "label"), region);
   // After an answer: the link to the code and the hunk (#243), then a quiet "Next" when another item is due.
   if (quizAnswered(item.id)) wrap.append(...answerCode(item));
+  // An item that arrives answered without being held here (a stored skip, say) would leave no way on: "Next" sets it aside.
+  const stuck = quizAnswered(item.id) && homeState.held !== item;
+  if (stuck && !slot.next) {
+    const actions = text("p", "", "slot-actions");
+    actions.append(button("Next", "Set this aside until tomorrow", () => {
+      homeState.quiet = true;
+      tap({ kind: "not_now" });
+      redraw();
+    }));
+    wrap.append(actions);
+  }
   if (slot.next) {
     const actions = text("p", "", "slot-actions");
     actions.append(button("Next", "The next question", () => {
@@ -219,16 +230,18 @@ export type Clock = { set(run: () => void, ms: number): unknown; clear(id: unkno
 export const CLEAR_WINDOW_MS = 8000;
 export function clearing(
   time: Clock,
-  deps: { landed(id: string): Session | undefined; commit(session: Session): Promise<unknown> | void; changed(pending: Session[]): void },
+  deps: { landed(id: string): Session | undefined; commit(session: Session): Promise<unknown> | void; changed(pending: Session[], writing: Session[]): void },
   hidden = new Set<string>(),
 ) {
   const pending = new Map<string, Session>();
+  // The sessions whose delete is in flight: the shell still hears them, so a quit before the write commits them (#244).
+  const writing = new Map<string, Session>();
   let timer: unknown = null;
   const stop = () => {
     if (timer !== null) time.clear(timer);
     timer = null;
   };
-  const tell = () => deps.changed([...pending.values()]);
+  const tell = () => deps.changed([...pending.values()], [...writing.values()]);
   return {
     // The rows Clear hides: those pending and those committed, until they leave the list.
     hidden,
@@ -242,14 +255,23 @@ export function clearing(
         timer = null;
         const due = [...pending.keys()].map((id) => ({ id, session: deps.landed(id) }));
         pending.clear();
+        for (const { id, session } of due) if (session) writing.set(id, session);
         tell();
         for (const { id, session } of due) {
           if (!session) hidden.delete(id);
-          // A row whose Delete failed comes back.
-          else void Promise.resolve(deps.commit(session)).catch(() => {
-              hidden.delete(id);
-              tell();
-            });
+          else
+            void Promise.resolve(deps.commit(session)).then(
+              () => {
+                writing.delete(id);
+                tell();
+              },
+              // A row whose Delete failed comes back.
+              () => {
+                writing.delete(id);
+                hidden.delete(id);
+                tell();
+              },
+            );
         }
       }, CLEAR_WINDOW_MS);
       tell();
@@ -268,6 +290,7 @@ export function clearing(
         if (deps.landed(id)) continue;
         hidden.delete(id);
         dropped = pending.delete(id) || dropped;
+        dropped = writing.delete(id) || dropped;
       }
       if (!dropped) return;
       if (pending.size === 0) stop();
@@ -279,20 +302,27 @@ export function clearing(
 // The window's one Clear: its hidden rows are `homeState.cleared`, the toast offers Undo, and the shell is told which sessions a quit
 // would commit (`clearing`). A commit is today's Delete: the terminal ended, the row dropped, the cards kept.
 const stillLanded = (id: string) => studio.listed.find((s) => s.id === id && showsLanded(s.state, s.landed));
+// A terminal is ended once, and never while a session that is not being cleared still runs in it: an ended session keeps the terminal
+// a later one may now use (#244).
+const closed = new Set<string>();
+const terminalFree = (terminal: string) =>
+  !closed.has(terminal) &&
+  !studio.listed.some((s) => s.terminal === terminal && s.state !== "ended" && !landedClear.hidden.has(s.id)) &&
+  (closed.add(terminal), true);
 export const landedClear = clearing(
   { set: (run, ms) => setTimeout(run, ms), clear: (id) => clearTimeout(id as number) },
   {
     landed: stillLanded,
     commit: (session) =>
       (async () => {
-        if (session.terminal !== null) await closePane(session.terminal);
+        if (session.terminal !== null && terminalFree(session.terminal)) await closePane(session.terminal);
         await invoke("delete_session", { id: session.id });
       })().catch((e) => {
         failure("delete_session", "error")(e);
         throw e;
       }),
-    changed: (pending) => {
-      void invoke("clearing", { sessions: pending.map((s) => ({ id: s.id, terminal: s.terminal })) }).catch(failure("clearing"));
+    changed: (pending, writing) => {
+      void invoke("clearing", { sessions: [...pending, ...writing].map((s) => ({ id: s.id, terminal: s.terminal })) }).catch(failure("clearing"));
       if (pending.length) showClearToast(pending.length, () => landedClear.undo());
       else hideClearToast();
       redrawHome();
