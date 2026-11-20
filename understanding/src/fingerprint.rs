@@ -19,6 +19,7 @@ use studio_core::{Backfill, Base, CardRequest, Change, Fingerprint, Purpose};
 
 /// A worktree's `HEAD`, and the files `git status` listed, by path from the worktree's root, with
 /// their content: `None` for a file that is gone.
+#[derive(Clone)]
 struct Record {
     head: Option<String>,
     files: BTreeMap<String, Option<Content>>,
@@ -56,7 +57,7 @@ pub fn fingerprint_changes(
     let mut changes = BTreeMap::<String, Change>::new();
     for look in looks {
         let print = prints.entry(look.key.clone()).or_default();
-        let found = print.look(Path::new(&look.folder), look.purpose);
+        let found = print.look_since(Path::new(&look.folder), look.purpose, look.began);
         let Some(found) = found.filter(|_| look.purpose != Purpose::Base) else {
             continue;
         };
@@ -68,16 +69,69 @@ pub fn fingerprint_changes(
     changes
 }
 
-/// The root of the git worktree that holds `folder`, spelled as `folder` is, or `None` when it is
-/// in none. A folder that does not exist yet, such as a new file's, is looked up from its nearest
-/// existing parent.
+/// The root of the git worktree that holds `folder`, spelled as `git` spells it (symlinks resolved, as
+/// the hook's roots are), or `None` when it is in none. A folder that does not exist yet, such as a new file's, is looked up from its nearest
+/// existing parent, unless that parent is a `worktrees` folder, where the folder of a removed
+/// worktree was: only a listed worktree is a root (danielrispler/plotkeeper#205), as the hook's
+/// rule has it.
 pub fn worktree_root(folder: &str) -> Option<String> {
     let existing = Path::new(folder).ancestors().find(|p| p.is_dir())?;
-    let prefix = git(existing, &["rev-parse", "--show-prefix"])?;
-    let prefix = String::from_utf8(prefix).ok()?;
-    let existing = existing.to_str()?.trim_end_matches('/');
-    let root = existing.strip_suffix(prefix.trim_end().trim_end_matches('/'))?;
-    Some(root.trim_end_matches('/').to_owned()).filter(|root| !root.is_empty())
+    if existing != Path::new(folder) && existing.file_name().is_some_and(|n| n == "worktrees") {
+        return None;
+    }
+    let root = git(existing, &["rev-parse", "--show-toplevel"])?;
+    let root = String::from_utf8(root).ok()?;
+    Some(root.trim_end().trim_end_matches('/').to_owned()).filter(|root| !root.is_empty())
+}
+
+/// `roots` without the entries that map a folder to another root than the one now holding it: a
+/// folder in a removed worktree that names a listed root, or one a listed worktree has taken. An
+/// entry that names a removed worktree as its own root stays (danielrispler/plotkeeper#205). `git`
+/// lists each repository's worktrees once.
+pub fn live_roots(roots: HashMap<String, String>) -> HashMap<String, String> {
+    let mut lists: HashMap<String, Vec<String>> = HashMap::new();
+    let mut roots = roots;
+    roots.retain(|folder, root| {
+        if !Path::new(root).join(".git").exists() {
+            return true;
+        }
+        if !lists.contains_key(root) {
+            let list = listed(Path::new(root));
+            // Each worktree of the repository shares the one listing.
+            let owners = list.iter().chain([&*root]);
+            let owners: Vec<String> = owners.cloned().collect();
+            lists.extend(owners.into_iter().map(|r| (r, list.clone())));
+        }
+        let list = &lists[root.as_str()];
+        resolved(folder, list).as_ref() == Some(root)
+    });
+    roots
+}
+
+/// The roots `git worktree list` gives for the repository of the worktree at `root`.
+fn listed(root: &Path) -> Vec<String> {
+    let Some(out) = git(root, &["worktree", "list", "--porcelain"]) else {
+        return Vec::new();
+    };
+    let text = String::from_utf8(out).unwrap_or_default();
+    let roots = text.lines().filter_map(|l| l.strip_prefix("worktree "));
+    roots.map(|r| r.trim_end_matches('/').to_owned()).collect()
+}
+
+/// The deepest of the listed `roots` that holds `folder`, looked up from its nearest existing
+/// parent unless that parent is a `worktrees` folder, where the folder of a removed worktree was.
+fn resolved(folder: &str, roots: &[String]) -> Option<String> {
+    let existing = Path::new(folder).ancestors().find(|p| p.is_dir())?;
+    if existing != Path::new(folder) && existing.file_name().is_some_and(|n| n == "worktrees") {
+        return None;
+    }
+    let real = existing.canonicalize().ok()?;
+    let at = real.to_str()?;
+    let holds = |r: &&String| {
+        at.strip_prefix(r.as_str())
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+    };
+    roots.iter().filter(holds).max_by_key(|r| r.len()).cloned()
 }
 
 /// Each worktree's latest record, by the worktree's root.
@@ -86,6 +140,9 @@ pub struct Fingerprints {
     records: HashMap<PathBuf, Record>,
     /// Each folder's worktree root, once a lookup found one; a folder with none is asked again.
     roots: HashMap<PathBuf, PathBuf>,
+    /// The Unix second of the first look, which a worktree made later counts from its creation
+    /// (danielrispler/plotkeeper#204).
+    began: Option<u64>,
 }
 
 impl Fingerprints {
@@ -99,6 +156,17 @@ impl Fingerprints {
     /// Like `take`, for a look with `purpose`: the record becomes the next change's base unless
     /// it is a commit check and `HEAD` stayed.
     pub fn look(&mut self, folder: &Path, purpose: Purpose) -> Option<Change> {
+        self.look_since(folder, purpose, None)
+    }
+
+    /// Like `look`, for the turn or worker that began at `began` (Unix milliseconds): a worktree made
+    /// before then is no one's creation to count from. Without it, the first look's time is taken.
+    pub fn look_since(
+        &mut self,
+        folder: &Path,
+        purpose: Purpose,
+        since: Option<u64>,
+    ) -> Option<Change> {
         let root = match self.roots.get(folder) {
             Some(root) => root.clone(),
             None => {
@@ -128,7 +196,18 @@ impl Fingerprints {
         let log = reflog(&root).and_then(|log| fs::metadata(log).ok());
         let log = log.map_or(0, |meta| meta.len());
         let record = Record { head, files, log };
-        let previous = self.records.get(&root);
+        let first = *self.began.get_or_insert_with(now);
+        let began = since.map_or(first, |ms| ms / 1000);
+        // A worktree made since the first look has no record: its base is the commit it was created at.
+        let made = (!self.records.contains_key(&root))
+            .then(|| created(&root).filter(|made| made.at > began))
+            .flatten();
+        let made = made.map(|made| Record {
+            head: Some(made.commit),
+            files: BTreeMap::new(),
+            log: made.log,
+        });
+        let previous = self.records.get(&root).or(made.as_ref());
         let found = previous.and_then(|previous| change(&root, previous, &record));
         // A commit check keeps its record only when the agent committed since its base, or when
         // `HEAD` moved and nothing is left to show, so a step that only edits does not eat its card.
@@ -137,6 +216,12 @@ impl Fingerprints {
                 || previous.is_none_or(|p| p.head != record.head),
                 |c| c.head != c.base.head,
             );
+        // A base that finds a worktree's edit since its creation keeps the creation's record, so the
+        // card at the turn's or worker's end still sees the edit (danielrispler/plotkeeper#204).
+        let record = match (purpose, &made, &found) {
+            (Purpose::Base, Some(made), Some(_)) => made.clone(),
+            _ => record,
+        };
         if keep {
             self.records.insert(root, record);
         }
@@ -144,8 +229,37 @@ impl Fingerprints {
     }
 }
 
+/// The Unix second now.
+fn now() -> u64 {
+    let since = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH);
+    since.map_or(0, |since| since.as_secs())
+}
+
+/// The first line of a worktree's reflog: the commit it was created at, when, and how many bytes
+/// the line takes.
+struct Created {
+    commit: String,
+    at: u64,
+    log: u64,
+}
+
+/// The first line of the reflog of `HEAD` in the worktree at `root`; `None` when it has none.
+fn created(root: &Path) -> Option<Created> {
+    let log = fs::read_to_string(reflog(root)?).ok()?;
+    let line = log.split_inclusive('\n').next()?;
+    // `<sha> <sha> <name> <<email>> <seconds> <zone>`, then a tab and the subject, when it has one.
+    let who = line.split('\t').next()?.trim_end();
+    let commit = who.split(' ').nth(1)?.into();
+    let at = who.rsplit(' ').nth(1)?.parse().ok()?;
+    Some(Created {
+        commit,
+        at,
+        log: line.len() as u64,
+    })
+}
+
 /// The path of the reflog of `HEAD` in the worktree at `root`.
-fn reflog(root: &Path) -> Option<PathBuf> {
+pub(crate) fn reflog(root: &Path) -> Option<PathBuf> {
     let path = git(root, &["rev-parse", "--git-path", "logs/HEAD"])?;
     Some(root.join(String::from_utf8(path).ok()?.trim_end()))
 }
@@ -167,6 +281,12 @@ fn moves(root: &Path, from: u64) -> Vec<(String, String, String)> {
     moves.collect()
 }
 
+/// Whether a reflog `subject` is the agent's own commit, not a move of `HEAD` that brings in other work.
+pub(crate) fn is_own(subject: &str) -> bool {
+    let own = ["commit:", "commit (amend):", "commit (initial):"];
+    own.iter().any(|own| subject.starts_with(own))
+}
+
 /// The change in the worktree at `root` from record `previous`, its base, to `record`. Only the
 /// agent's own commits count (danielrispler/Falinks#434, decisions 12 to 14): any other move of `HEAD` since the base
 /// moves the base to where it left `HEAD`, keeping the change of the agent's commits before it, and
@@ -177,8 +297,7 @@ fn change(root: &Path, previous: &Record, record: &Record) -> Option<Change> {
     let mut moved = false;
     if previous.head != record.head {
         for (old, new, subject) in moves(root, previous.log) {
-            let own = ["commit:", "commit (amend):", "commit (initial):"];
-            if own.iter().any(|own| subject.starts_with(own)) {
+            if is_own(&subject) {
                 continue;
             }
             let unborn = old.bytes().all(|byte| byte == b'0');
@@ -246,7 +365,7 @@ pub fn backfilled(backfill: Backfill) -> Option<CardRequest> {
 }
 
 /// The paths that differ between commits, or trees, `from` and `to`; every path of `to` when `from` is `None`.
-fn names(root: &Path, from: Option<&str>, to: &str) -> Vec<String> {
+pub(crate) fn names(root: &Path, from: Option<&str>, to: &str) -> Vec<String> {
     let out = match from {
         Some(from) => git(
             root,

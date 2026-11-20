@@ -102,12 +102,14 @@ export type Turn = {
   checks: Check[];
   files: TurnFiles | null;
 };
-// A file the agent or its workers changed in a turn: its worktree's root, its path from there (a rename's new one),
-// a rename's old path, and its lines added and removed (null for a binary file).
-export type TurnFile = { root: string; path: string; from: string | null; added: number | null; removed: number | null };
-// What a turn changed: the files its ledger says its agent or workers touched, and how many other files differ.
+// A file that differs between a turn's trees: its worktree's root, its path from there (a rename's new one),
+// a rename's old path, its lines added and removed (null for a binary file), and the name of the agent whose call
+// names it or whose worktree holds it (null when none does, as for Daniel's own edit).
+export type TurnFile = { root: string; path: string; from: string | null; added: number | null; removed: number | null; agent: string | null };
+// What a turn changed: every file that differs between its trees, but those another call names, and the files
+// a move of `HEAD` (a merge, a pull, a rebase, a checkout) brought in, which are only counted in `merged`.
 // `null` while the trees are not yet diffed, and for an agent that reports no trees.
-export type TurnFiles = { files: TurnFile[]; external: number };
+export type TurnFiles = { files: TurnFile[]; merged: number };
 // What the session's agent adapter reports, which decides what its view shows (danielrispler/plotkeeper#43, decision 4);
 // `agent` is its mark's name, empty for a status-only row.
 export type Capabilities = {
@@ -230,6 +232,8 @@ export type StoredCard = {
   rating: Rating | null;
   check_result: CheckResult | null;
   taps?: QuizTap[];
+  // When the pane first drew the card's Quiz; null until it did (the store's `shown` tap).
+  shown_at?: number | null;
 };
 // What Daniel did with a Quiz besides a card's pick (danielrispler/plotkeeper#120), each with its time: his pick (a lone Quiz's), "Show
 // the rest anyway", and the three chips.
@@ -312,8 +316,11 @@ export type SessionCards = {
   design: DesignLine[];
   recent: StoredCard[];
   older: StoredCard[];
+  // A session's workers' cards, each with the turn of its rail it belongs to (danielrispler/plotkeeper#212).
+  workers: PlacedCard[];
   decisions: Decision[];
 };
+export type PlacedCard = { card: StoredCard; turn: number | null };
 // What a call asks Daniel, by its tool, as the answer hook's `Kind`: a question, a plan, or any other
 // tool's permission.
 export type AskKind = "question" | "plan" | "permission";

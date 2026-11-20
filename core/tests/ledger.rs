@@ -317,3 +317,29 @@ fn an_agy_session_gets_rows_from_its_tool_events() {
         assert!(serde_json::from_str::<Value>(text).is_ok(), "{text}");
     }
 }
+
+#[test]
+fn a_calls_row_keeps_the_roots_of_its_start_and_of_its_end() {
+    let input = json!({ "command": "git worktree remove /w/second" });
+    let touched = |name: &str, ms: u64, roots: Value| {
+        let mut event: Value = serde_json::from_str(&line(
+            name,
+            ms,
+            json!({
+                "tool_name": "Bash", "tool_input": input.clone(), "tool_use_id": "t1",
+                "tool_response": {},
+            }),
+        ))
+        .unwrap();
+        event["studio_touched_roots"] = roots;
+        event.to_string()
+    };
+    let studio = Studio::replayed([
+        prompt(0),
+        touched("PreToolUse", 1_000, json!(["/w", "/w/second"])),
+        touched("PostToolUse", 1_200, json!(["/w"])),
+    ]);
+    let roots = &rows(&studio)[0].roots;
+    assert!(roots.iter().any(|r| r == "/w/second"), "{roots:?}");
+    assert!(roots.iter().any(|r| r == "/w"), "{roots:?}");
+}

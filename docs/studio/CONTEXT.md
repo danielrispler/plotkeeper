@@ -23,7 +23,7 @@ An agent session's work on one prompt, Daniel's or a wake-up, from its first eve
 _Avoid_: Step (one tool call inside a turn)
 
 **Turn files**:
-The files a turn's agent and its workers changed, with their added and removed lines: the diff between the git trees the hook recorded at the turn's start and end, kept to the files the step ledger says they edited. The other files that differ are counted as external (Daniel's own edits, a formatter's, a lockfile's), as a number only. A running turn's end tree is taken on demand. The ended turn's trees are kept under `refs/plotkeeper/turns/` so `git gc` does not prune its hunks. An agent that reports no trees (agy) has none, by its capability `turn_trees`.
+The files a turn's agent and its workers changed, with their added and removed lines: every file that differs between the git trees the hook recorded at the turn's start and end, less the files another session's or turn's call names (unless a call of the turn itself names them too) and the files a merge brought in (those are counted as "+N merged" in the **Evidence line**). There is no external count: a hand edit of Daniel's during the turn shows as the turn's. A running turn's end tree is taken on demand. The ended turn's trees are kept under `refs/plotkeeper/turns/` so `git gc` does not prune its hunks. An agent that reports no trees (agy) has none, by its capability `turn_trees`.
 
 **Intention**:
 The latest thing the agent wrote in its own words during a turn, such as why it is about to read an issue. It stays shown, with its age, until the agent writes again, so it covers the steps that follow it. While a turn runs, its intentions are the last line of each of its responses. When the turn ends, its final response's intention becomes that response's first line, so a footer a plugin adds is never the intention. The rail shows it only while the session is Running (boxed) or Needs you (small, as "Why it asks"); at your turn the turn's Headline says what happened, and the summary's first line never replaces the intention. A side question ("ask about this") gets these intentions as context.
@@ -59,6 +59,12 @@ _Avoid_: Snapshot, checkpoint (the engine's term)
 The one multiple-choice question a turn can have, with the writer's key, which grades Daniel's guess. It is the card's when the turn has a card, and otherwise comes with the turn summary, open under the Headline. One set of rules holds it, and code enforces the guards: [`question-rules.md`](question-rules.md). A learning question stored before the Quiz reads as one. On a check card the quiz asks whether the check will pass, and the check's result is the key.
 _Avoid_: Question (an agent's question to Daniel), Learning section (retired)
 
+**Offer**:
+What one decision gives a change: a card (with its Quiz), a lone Quiz, or nothing, by the table in [`question-rules.md`](question-rules.md). A turn, a worker's card and a **late change** each get one, decided once with the same facts for the card and for the summary. Each is recorded once in `offers.jsonl` ([`storage.md`](behaviour/storage.md)).
+
+**Late change**:
+What a subagent changed in its session's own worktree after the turn ended, which the session's card then covers. It is judged below the card row: it gets a card only when it passes the table's first row, and never a lone Quiz.
+
 **Check card**:
 The card a check of the session's own agent gets at its start when it usually runs over 2 minutes, on the change since the last card, so Daniel can guess while he waits whether the check will pass.
 
@@ -75,7 +81,7 @@ A check card's guess whose check ended with an exit code that does not say wheth
 The index of an agent session's tool calls, workers' included, kept as one row per call: its tool, file, command or pattern, turn, subagent, duration and result or exit code, and where in the event log its start and result lines are. It holds no output; a call's details are read from the log by those offsets.
 
 **Evidence line**:
-The line under a turn's Headline that states what the hooks and git recorded for the turn: the files it changed and each check's last result, such as `3 files · 2 checks passed`. It opens in place to each file with its line counts, the external changes, and each check with its status; a failed check opens its exit code and the tail of its output. It has no model in it, and an agent that reports no trees has none.
+The line under a turn's Headline that states what the hooks and git recorded for the turn: the files it changed and each check's last result, such as `3 files · 2 checks passed`, with "+N merged" when a merge brought files in. It opens in place to each file with its line counts, the merged files, and each check with its status; a failed check opens its exit code and the tail of its output. It has no model in it, and an agent that reports no trees has none.
 
 **Brief**:
 What Daniel reads to resume an agent session he lost track of, folded under its feed (inside **Where we were** while that shows): slots, not prose. **Goal** is one or two lines a model writes from Daniel's prompts, again when a new prompt of his came; it is the only part a model writes. **Decisions** lists each question the agent asked with Daniel's reply, in order. **Open** is computed from facts, never written: the pending question, each check suite whose last run failed, files changed with no check run since, the latest turn's `open` and `ask` lines, and unpushed work or an unmerged PR; each drops out once it is settled. **Design so far** is at most five one-line design decisions with their reasons, which a model writes from the turns' `why` lines and the cards' summaries only; each cites the turn or card it came from, a click on the citation opens it in the rail, and code drops a line that cites nothing or something not in the session. A session with no `why` line and no card has none. A brief stored before the slots, as prose, shows as it is until the session's next Goal.
@@ -164,7 +170,7 @@ _Avoid_: Restore (nothing of the old process survives)
 The studio's own diagnostics: its errors, warnings and panics, one line each with a local time and a level, in `~/Library/Logs/dev.falinks.studio/`. Not the event log, which holds the agents' hook events.
 
 **Mismatch log**:
-The lines in the **Studio log**, marked `mismatch`, of the Claude sessions whose hook state and OSC 7501 state disagree for more than a few seconds: one line each, with the time, the session and both states. They used to be a file of their own, `mismatch.log`, which is no longer written.
+The lines in the **Studio log**, marked `mismatch`, of the Claude sessions whose hook state and OSC 7501 state disagree for more than a few seconds: one line each, with the time, the session and both states; a new 7501 state starts a new line. A turn running by its hooks whose 7501 state stays `idle` was interrupted, and that line also ends it. They used to be a file of their own, `mismatch.log`, which is no longer written.
 
 **Decision**:
 A question, plan, permission or blocked command Daniel answered, with his answer and where he gave it: on the card or in the terminal. A session's decisions, newest first, are its decision history.
@@ -178,7 +184,7 @@ _Avoid_: Denied command (a command Daniel declined)
 The name an agent session gets from its work: its issue, its PR and its worktree, such as "danielrispler/Falinks#480 · PR danielrispler/Falinks#490 · agent-a1b2". A name Daniel gives it replaces it.
 
 **Session name**:
-What the list and the rail call an agent session: the name Daniel gave it, else its prompt name, else its identity. The prompt name is a few words a writer call makes from Daniel's first prompt, so wake-ups never name a session; it keeps the identity's issue in front, such as "#37 · One event internal".
+What the list and the rail call an agent session: the name Daniel gave it, else its prompt name, else its identity. The prompt name is a few words a writer call makes from Daniel's first prompt, so wake-ups never name a session; when he cancels that prompt's turn before any call, his next prompt names it again; it keeps the identity's issue in front, such as "#37 · One event internal".
 _Avoid_: Title
 
 **Context share**:
@@ -227,7 +233,7 @@ An agent that an agent session, or another subagent, spawned to do part of its w
 _Avoid_: Task (the workbench's unit of work)
 
 **Worker**:
-A subagent spawned with its own git worktree, or one that changes files. A helper becomes a worker at its first change. Daniel follows a worker like a session, with its own cards and brief. A finished worker folds into its parent's line as a helper does, and its session's rail keeps it in the subagent history. A worker is not a task.
+A subagent spawned with its own git worktree, or one that changes files. A helper becomes a worker at its first change. Its home is its own worktree: the one it was spawned isolated in, or the first worktree its commands name that is not its session's. Daniel follows a worker like a session, with its own cards and brief. A finished worker folds into its parent's line as a helper does, and its session's rail keeps it in the subagent history. A worker is not a task.
 
 **Helper**:
 A subagent that is not a worker, such as a review or a search. It shows as one line under the agent that spawned it.

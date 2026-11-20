@@ -1,11 +1,11 @@
 # Agents that edit through Bash
 
-> **Answer:** No primary source explains a switch on 2026-11-15/16. What the sources do show is that Claude Code's auto mode has told the model, since about 2026-08, to do much of its work through Bash, with `sed`, heredocs and short scripts "instead of the dedicated Read, Edit, or Write tools". Today's wording leaves the choice to the model. Plotkeeper's own transcripts show that this text was already in the subagents' context on 11-14 and 11-15, while they still used `Edit`, and that the subagents' model (`claude-sonnet-5-5`) and the CLI (`2.1.311`) did not change across the switch. So the instruction is the likely enabler, not the trigger; the trigger is unknown.
+> **Answer:** No primary source explains a switch on 2026-11-15/16. What the sources do show is that Claude Code's auto mode has told the model, since about 2026-08, to do much of its work through Bash, with `sed`, heredocs and short scripts "instead of the dedicated Read, Edit, or Write tools". Today's wording leaves the choice to the model. Plotkeeper's own transcripts show that this text was already in the subagents' context from 10-13, while they still used `Edit`, and that the CLI (`2.1.311`) did not change across the switch. The subagents' model did change, on 11-14 15:22 (Opus 5.5 to Sonnet 5.5). The diagnosis finds the trigger in the studio's own setup: the orchestrators stopped spawning workers isolated, and subagents that share the session's folder edit through Bash. No flag is needed.
 > **Hooks:** a `PostToolUse` hook for `Bash` carries `tool_input.command`, the event's `cwd` and, in auto mode, `tool_response.bashEditDiff.changedFiles`: absolute paths of the files the command changed in a Git repository (official, "best effort", public beta). There is also a `FileChanged` hook, which fires from a filesystem watcher whatever wrote the file, but it watches only files you name up front. No setting forces agents back to `Edit`; `CLAUDE.md` is "context, not enforced configuration", and a `PreToolUse` hook that denies the Bash write is the documented way to enforce it.
 > **Evidence:** Strong for the hook fields and for plotkeeper's own logs. Medium for the instruction's history: it rests on GitHub issues from users, which quote the text and date it, plus one official sentence that says Claude Code directs Claude to edit through Bash. Weak for the cause of the 11-15/16 switch: nothing found.
 > **For the studio:** `bashEditDiff` is the cheapest signal, but in plotkeeper's log it is missing on 638 of 771 subagent Bash edits whose event `cwd` is the main checkout (section 7). A `git status` or `git diff` of the worktree at `Stop` finds those edits regardless.
 
-Research date: 2026-11-18. Ticket: [#186](https://github.com/danielrispler/plotkeeper/issues/186). The studio's code is read at commit [`5f4e517`](https://github.com/danielrispler/plotkeeper/tree/5f4e517466094ca9d632fb17b516ed86cd2cd2ad); code links below point there. Claude Code docs, its changelog and its GitHub issues were read on 2026-11-18.
+Research date: 2026-11-18. **Corrected after the diagnosis, on 2026-11-18:** sections 1, 3, 5 and 12 held errors, which [the diagnosis of #186, section 6](https://github.com/danielrispler/plotkeeper/issues/186#issuecomment-6973817740) lists and which are fixed below. Sections 6 to 9 stand. Ticket: [#186](https://github.com/danielrispler/plotkeeper/issues/186). The studio's code is read at commit [`5f4e517`](https://github.com/danielrispler/plotkeeper/tree/5f4e517466094ca9d632fb17b516ed86cd2cd2ad); code links below point there. Claude Code docs, its changelog and its GitHub issues were read on 2026-11-18.
 
 **How to read this.** A sentence with a link is established by that source. A sentence marked **Inference** is my own reading, which the sources do not state. **Unverified** marks something that would need a run to confirm. A GitHub issue on `anthropics/claude-code` is a **user report**: it shows what the reporter saw and what text the harness showed them, not Anthropic's intent. "Plotkeeper's event log, analysed 2026-11-18" is Daniel's local `events.jsonl`; I re-ran some counts from it (section 1) and say so.
 
@@ -23,13 +23,13 @@ Research date: 2026-11-18. Ticket: [#186](https://github.com/danielrispler/plotk
 
 From plotkeeper's event log, analysed 2026-11-18, as briefed: CLI `2.1.311` since 2026-11-03; subagents in `permission_mode: auto` from 11-13; subagent `Edit`/`Write` calls 131 (11-14), 52 (11-15), 1 (11-16), 1 (11-17); subagent Bash edits 89, 208, 391, 316. No `Edit` or `Write` call was denied or failed.
 
-Three more facts I read from the local files on 2026-11-18 (counts of fields only; no scored run, no credential file):
+Three more facts I read from the local files on 2026-11-18 (counts of fields only; no scored run, no credential file), as corrected by the diagnosis:
 
-1. **The model did not change.** In the subagent transcripts (`~/.claude/projects/*plotkeeper*/**/subagents/*.jsonl`), the tool calls of 11-14 to 11-18 come almost all from `claude-sonnet-5-5`. On 11-14 that model made 113 `Edit` and 34 `Write` calls and 870 Bash calls. On 11-16 it made 0 `Edit`, 1 `Write` and 1502 Bash calls. Every one of those lines carries CLI version `2.1.311`.
-2. **The steer did not change.** Claude Code writes an `auto_mode` attachment into the transcript when it injects the steer (described in a comment of 2026-09-05 on [anthropics/claude-code#90450](https://github.com/anthropics/claude-code/issues/90450), user report). Every one I found, main and subagent, 2026-11-14 to 2026-11-18, reads `bashFirst: true, bashFirstSteer: "relaxed", steerOnly: true`: 66 on 11-14, 57 on 11-15, 44 on 11-16, 101 on 11-17, 12 on 11-18. The earliest transcript with the record is 11-14, so I cannot say what came before.
+1. **The subagents' model did change.** In the subagent transcripts (`~/.claude/projects/*plotkeeper*/**/subagents/*.jsonl`), the subagents moved from Opus 5.5 to Sonnet 5.5 on 11-14 at 15:22 (`env.CLAUDE_CODE_SUBAGENT_MODEL = "sonnet"`, in Daniel's `/doctor` session). The first version of this note compared 11-14 as a whole with 11-16 and called the model unchanged. On 11-14 `claude-sonnet-5-5` made 113 `Edit` and 34 `Write` calls and 870 Bash calls; on 11-16 it made 0 `Edit`, 1 `Write` and 1502 Bash calls. Every one of those lines carries CLI version `2.1.311`, which did not change.
+2. **The steer did not change, and it is older than 11-14.** Claude Code writes an `auto_mode` attachment into the transcript when it injects the steer (described in a comment of 2026-09-05 on [anthropics/claude-code#90450](https://github.com/anthropics/claude-code/issues/90450), user report). It reads `bashFirst: true, bashFirstSteer: "relaxed", steerOnly: true` in the transcripts from 10-13 on, the earliest the diagnosis checked, and was the same on both sides of the switch.
 3. **The main session did not switch.** The same log shows the main session still using `Edit` (126 calls on 11-16, 84 on 11-17) and `Write`, next to its own Bash calls. Only the subagents moved.
 
-**Inference:** the three things a user can see (CLI, model, steer text) are the same on both sides of the switch, so the cause is outside them. Candidates this note cannot rule out are a server-side change or per-session flag (section 3), the sampling of the model itself, and the briefs the subagents were given (section 5).
+**What moved them.** The diagnosis (section 3) found that the fall is the end of isolated spawns: `Agent` calls with `isolation: "worktree"` per day from 11-14 were 14, 13, 0, 0, 0, and subagent `Edit`+`Write` calls were 131 (113 by isolated workers), 52 (43), 1, 1. A subagent that shares the session's folder used `Edit` or `Write` for 3% of its edits on Sonnet 5.5 (72% for an isolated Opus 5.5 one, 63% for an isolated Sonnet 5.5 one). **Inference:** the two changes of 11-14 (model and plugins) came within 22 minutes, so the data cannot say which of them matters for the shared-folder rows; isolation is what moves the share.
 
 ---
 
@@ -77,7 +77,7 @@ All of these are **user reports**.
 
 What the reports establish: the steer exists since at least 2026-08-19; the relaxed wording is in use since at least 2026-09-22; other people see subagents edit through Bash against their `CLAUDE.md` in the same week (2026-11-11), with a Sonnet subagent model. What they do not establish: when the relaxed wording became the default, or whether any flag value changed on 11-15/16. The flag claims come from commenters reading the client, not from Anthropic.
 
-**Inference:** because a remote flag is assigned per session and "subagents inherit the parent's" (user report), a server-side change of the flag or of how the Sonnet subagent model weighs the steer would show up without any CLI change. This fits the data (same CLI, model and steer text, different behaviour) but nothing I read confirms it. **Unverified.**
+**Inference, withdrawn:** the first version of this note said a remote flag, assigned per session, could explain a change with no CLI change, and that it fit the data. No flag is needed: the diagnosis finds the fall in the end of isolated spawns (section 1), with the same CLI and the same steer text on both sides.
 
 ---
 
@@ -90,7 +90,7 @@ The changelog has no dates (section 2.3), so I cannot place any entry against 11
 ## 5. Things on the plotkeeper side that I checked
 
 - The repo's own instructions do not tell agents to edit through Bash. `docs/agents/ticket-authoring.md` line 13 says the opposite for issue bodies: "change it with the Edit tool … Do not … rewrite it with a script" (commit `5f4e517`). I found no `heredoc`, `sed -i` or "through Bash" in `AGENTS.md`, `docs/agents/` or `.claude/` at that commit.
-- Commits that change the briefs for parallel workers landed near the window: `9053cbe1c` (11-15 00:15, "Steer parallel /implement-spec workers") and `b4e1232ba` (11-17 12:15). The first is about target dirs and merges, not about tools. I did not read the briefs that `/implement-spec` actually sent, so a wording change there is **Unverified**.
+- The briefs were read by the diagnosis, which is the reading the first version of this note lacked. None names an edit tool. They do show how the orchestrators stopped isolating: before the target-dir rule (`9053cbe1c`, 11-15 00:15, "Steer parallel /implement-spec workers") they pointed every worker at the shared target; after it, each brief hands the worker a target dir, a branch and a worktree named by its ticket, made with `git worktree add`, where an isolated worktree is named `agent-<id>`, which the orchestrator cannot know before the spawn. From 11-15 10:19, 9 of 10 `/implement-spec` runs did not isolate their workers.
 
 ---
 
@@ -187,10 +187,8 @@ None of this is official guidance. Each point rests on the sources above.
 
 ## 12. What I could not establish
 
-- **Why the subagents switched on 11-15/16.** I found no dated Anthropic source for it, and the local CLI, model and steer text did not change.
-- **When the relaxed wording became the default.** User reports show it by 2026-09-22; the local transcripts show it from 11-14. Earlier local transcripts are gone.
-- **Whether a remote flag changed on those days.** The flag names and the per-session assignment come from commenters reading the client, not from Anthropic. No official page names them.
-- **What the `/implement-spec` briefs said in the days around the switch.** I did not read what was sent.
+- **Why the orchestrators stopped isolating.** The diagnosis narrows it to the two `AGENTS.md` rules of 11-14 and 11-15 (worktrees under `.claude/worktrees/`, a target dir per worker), with the plugins that went off on 11-14 as a second candidate; the data cannot split them, and the orchestrators' thinking is not kept.
+- **When the relaxed wording became the default.** User reports show it by 2026-09-22; the local transcripts show it from 10-13. Earlier local transcripts are gone.
 - **Which directory `bashEditDiff` uses** when a command `cd`s elsewhere, and how a subagent's `cwd` is set. The docs are silent; section 7 is observation only.
 - **That the steer is the cause at all.** It is the best-supported enabler. A model that was told it may edit through Bash can still choose either, and the main session in the same period kept using `Edit`.
 

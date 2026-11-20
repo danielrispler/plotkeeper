@@ -29,8 +29,9 @@ const QUESTION_TOOL: &str = "AskUserQuestion";
 const PLAN_TOOL: &str = "ExitPlanMode";
 
 /// The line the shell appends when Daniel renames a session (`crate::RENAME`), deletes one
-/// (`crate::DELETE`), or answers from a card (`crate::STUDIO_ANSWER`).
-use crate::{DELETE, PROMPT_NAME, RENAME, STUDIO_ANSWER};
+/// (`crate::DELETE`), answers from a card (`crate::STUDIO_ANSWER`), or interrupted a turn
+/// (`crate::INTERRUPTED`).
+use crate::{DELETE, INTERRUPTED, PROMPT_NAME, RENAME, STUDIO_ANSWER};
 
 /// The four fields of a tool response the core reads (danielrispler/Falinks#410, decision 20). The rest, file contents
 /// included, is skipped without building a JSON tree.
@@ -106,6 +107,8 @@ struct Raw {
     /// The trees the hook recorded at the end of the turn this event ends, by root.
     #[serde(default)]
     studio_turn_end: BTreeMap<String, String>,
+    /// The worktree roots the hook found the call touched.
+    studio_touched_roots: Option<Vec<String>>,
     /// On the studio's own `StudioRename` line, the session's new name; empty for none.
     #[serde(default)]
     studio_name: String,
@@ -243,6 +246,7 @@ fn adapt(raw: Raw) -> Event {
         RENAME => happened.push(Happened::Renamed(raw.studio_name.clone())),
         PROMPT_NAME => happened.push(Happened::PromptNamed(raw.studio_name.clone())),
         DELETE => happened.push(Happened::Deleted),
+        INTERRUPTED => happened.push(Happened::Interrupted),
         "PermissionDenied" if tool(&raw).kind == ToolKind::Command => {
             happened.push(Happened::CommandBlocked {
                 tool: tool(&raw),
@@ -288,6 +292,7 @@ fn adapt(raw: Raw) -> Event {
         studio_terminal_id: raw.studio_terminal_id,
         studio_turn_start: raw.studio_turn_start,
         studio_turn_end: raw.studio_turn_end,
+        studio_touched_roots: raw.studio_touched_roots,
         capabilities: CAPABILITIES,
         line: Bytes::default(),
         happened,

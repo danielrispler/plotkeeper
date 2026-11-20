@@ -7,7 +7,9 @@
 
 use std::io::{BufRead, BufReader};
 use studio_core::Studio;
-use studio_understanding::{Offer, Shape, add_hunks, turn_diffs, worktree_root};
+use studio_understanding::{
+    Offer, OfferKind, TurnFacts, add_hunks, decide, turn_diffs, worktree_root,
+};
 
 fn main() {
     let log = studio_hook::event_log(&std::env::home_dir().expect("a home directory"));
@@ -26,7 +28,7 @@ fn main() {
     }
     ids.sort();
     let (mut turns, mut readable) = (ids.len(), 0);
-    let (mut external, mut with_diff) = (0, 0);
+    let mut with_diff = 0;
     let mut counts = [0usize; 3];
     let mut plan: Vec<(u64, Offer)> = Vec::new();
     for (ended, id) in &ids {
@@ -41,9 +43,14 @@ fn main() {
         let mut facts = studio.summary_facts(&ask, Some(diffs));
         add_hunks(&ask, &mut facts);
         readable += 1;
-        external += facts.external;
-        with_diff += usize::from(facts.files.len() + facts.external as usize > 0);
-        let offer = Shape::of(&facts, "", studio.turn_merged(id)).offer();
+        with_diff += usize::from(!facts.files.is_empty());
+        let turn = TurnFacts {
+            facts,
+            merge: studio.turn_merged(id),
+            workers: studio.turn_workers(id),
+            traced: true,
+        };
+        let offer = decide(OfferKind::Turn, &turn, &[]).offer;
         counts[offer as usize] += 1;
         plan.push((*ended, offer));
     }
@@ -69,7 +76,7 @@ fn main() {
     println!("turns with an id and an end: {turns}");
     turns = readable;
     println!("turns whose trees are readable: {turns}");
-    println!("turns whose trees differ: {with_diff}, other files in them: {external}");
+    println!("turns whose trees differ: {with_diff}");
     println!("today: {with_diff} cards (every turn whose trees differ)");
     println!(
         "the table: {} cards, {} lone Quizzes, {} nothing",

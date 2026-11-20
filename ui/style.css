@@ -559,6 +559,10 @@ body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
 .turn-line .prompt { flex: 0 1 35%; min-width: 0; margin: 0; }
 .turn-line .headline-text { flex: 1 1 0; min-width: 0; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: var(--size-small); }
 .turn-line .mark { flex: none; font-size: var(--size-small); color: var(--muted); }
+/* An unseen card's title row under a folded turn (#211): one muted line, opening the card in place. */
+.unseen-card { margin: 0 0 var(--sp-2) var(--sp-5); }
+.unseen-card > summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.unseen-card > .card { margin-top: var(--sp-3); }
 .turn .subagents button { flex-direction: row; align-items: baseline; gap: var(--sp-4); white-space: nowrap; overflow: hidden; }
 .turn .subagents button > :nth-child(2) { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .answered-card > summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -572,7 +576,7 @@ body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
 .evidence-rows { list-style: none; margin: 0; padding: 0 0 0 var(--sp-5); }
 .evidence-rows[hidden], .evidence-output[hidden], .evidence-hunk[hidden], .evidence-edit[hidden] { display: none; }
 .evidence-rows li { margin: 0 0 var(--sp-2); min-width: 0; overflow-wrap: anywhere; }
-.evidence-rows .external { color: var(--muted); opacity: 0.7; }
+.evidence-agent { color: var(--muted); margin-left: 0.6em; }
 .evidence-fail { display: block; width: 100%; text-align: start; background: none; border: 0; padding: 0; color: var(--fg); cursor: pointer; }
 .evidence-hunk { margin: var(--sp-2) 0 0; padding: var(--sp-3); overflow: auto; white-space: pre; font-size: var(--size-small); background: var(--surface); border-radius: var(--radius-small); }
 .evidence-edit { margin-top: var(--sp-2); font-size: var(--size-small); }
@@ -591,7 +595,6 @@ body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
 .diff-line.add { background: var(--selected); }
 .diff-line.del { background: var(--needs-you-bg); color: var(--conflict); }
 .diff-line.hunk, .diff-line.meta { color: var(--muted); }
-.diff-external { color: var(--muted); font-size: var(--size-small); }
 .evidence-more[hidden] { display: none; }
 
 /* "Where we were" (#124): the banner above the newest turn. */

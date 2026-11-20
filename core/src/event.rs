@@ -27,6 +27,8 @@ pub(crate) struct Event {
     pub studio_turn_start: BTreeMap<String, String>,
     /// The trees the hook recorded at the end of the turn this event ends, by root.
     pub studio_turn_end: BTreeMap<String, String>,
+    /// The worktree roots the hook found the call touched, or `None` for an event with no list.
+    pub studio_touched_roots: Option<Vec<String>>,
     /// What the adapter that read the line reports.
     pub capabilities: Capabilities,
     /// Where the log line it came from is in the event log.
@@ -93,6 +95,8 @@ pub(crate) enum Happened {
     PermissionNotice,
     /// A notice that the agent waits for input.
     IdlePrompt,
+    /// The shell's line for a turn Daniel interrupted, by its prompt id (`crate::INTERRUPTED`).
+    Interrupted,
     /// Any other notice.
     OtherNotice,
     ElicitationAsked,
@@ -345,6 +349,7 @@ impl Event {
                     | Happened::SessionEnd
                     | Happened::PermissionNotice
                     | Happened::IdlePrompt
+                    | Happened::Interrupted
                     | Happened::OtherNotice
             )
         })

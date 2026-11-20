@@ -293,9 +293,14 @@ impl Default for Turn {
 
 impl Turn {
     /// Takes an event `name` of the session's own agent with `prompt_id`; `idle` when it is Claude
-    /// Code's idle notice. Returns the worktrees whose end tree to record, those of the turn it
-    /// ends, and whether it is in a turn whose first touches record a start tree.
+    /// Code's idle notice or the shell's `INTERRUPTED` line. Returns the worktrees whose end tree
+    /// to record, those of the turn it ends, and whether it is in a turn whose first touches
+    /// record a start tree.
     pub fn take(&mut self, name: &str, prompt_id: Option<&str>, idle: bool) -> (Vec<String>, bool) {
+        // The shell's line ends the turn it names, never one that started after it.
+        if name == INTERRUPTED && self.prompt_id.as_deref() != prompt_id {
+            return (Vec::new(), false);
+        }
         let prompt = name == "UserPromptSubmit";
         let starts = !idle
             && prompt_id.is_some()
@@ -477,6 +482,106 @@ fn git(folder: &Path, args: &[&str], index: Option<&Path>) -> Option<String> {
     status.success().then(|| out.trim_end().to_owned())
 }
 
+/// The roots of the worktrees `git worktree list` gives for the repository that holds `folder`, as
+/// it spells them; empty outside a repository.
+fn listed_worktrees(folder: &Path) -> Vec<String> {
+    let Some(existing) = folder.ancestors().find(|p| p.is_dir()) else {
+        return Vec::new();
+    };
+    let list = git(existing, &["worktree", "list", "--porcelain"], None).unwrap_or_default();
+    let roots = list
+        .lines()
+        .filter_map(|line| line.strip_prefix("worktree "));
+    roots.map(Into::into).collect()
+}
+
+/// Whether `root` holds `path`: the path is the root or lies below it, on a path boundary.
+fn holds(root: &str, path: &str) -> bool {
+    path.strip_prefix(root)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('/') || root.ends_with('/'))
+}
+
+/// The absolute paths a Bash `command` names, as the text spells them.
+fn named_paths(command: &str) -> Vec<&str> {
+    let separators = |c: char| c.is_whitespace() || "\"'`;&|<>()=,:{}$*?[]".contains(c);
+    let tokens = command.split(separators);
+    let paths = tokens.filter(|t| t.starts_with('/') && t.len() > 1);
+    paths.collect()
+}
+
+/// `path` with its nearest existing folder spelled as `git` spells it, and that folder.
+fn spelled(path: &Path) -> Option<(PathBuf, PathBuf)> {
+    let existing = path.ancestors().find(|p| p.is_dir())?;
+    let real = existing.canonicalize().ok()?;
+    let rest = path.strip_prefix(existing).ok()?;
+    Some((real.join(rest), real))
+}
+
+/// The worktree roots the folders and paths a call names touch (danielrispler/plotkeeper#202). A
+/// path counts for the deepest listed root that holds it. The lists come from `git worktree list`
+/// at the first path of a repository the call names, so a worktree an earlier command made is
+/// found. A path in the folder of a worktree that is no longer listed, which `known` remembers
+/// from earlier lists or which sits in a `worktrees` folder, gives no root.
+struct Named<'a> {
+    lists: Vec<Vec<String>>,
+    known: &'a mut Vec<String>,
+}
+
+impl Named<'_> {
+    fn root(&mut self, path: &Path) -> Option<String> {
+        let (spelled, existing) = spelled(path)?;
+        let at = spelled.to_str()?;
+        // A path whose nearest folder is a `worktrees` folder is a worktree to be made or one removed.
+        let below = existing.file_name().is_some_and(|n| n == "worktrees") && existing != spelled;
+        // A root the hook already knows holds the path, with no worktree made between: no listing.
+        let known = self.known.iter().filter(|r| holds(r, at));
+        if let Some(deepest) = known.max_by_key(|r| r.len()).filter(|_| !below) {
+            let alive = Path::new(deepest).join(".git").exists();
+            let between = |p: &&Path| {
+                let at_root = p.to_str().is_some_and(|p| p == deepest);
+                let unknown = |p: &Path| {
+                    p.to_str()
+                        .is_some_and(|p| !self.known.iter().any(|r| r == p))
+                };
+                !at_root && p.join(".git").exists() && unknown(p)
+            };
+            let made = existing.ancestors().take_while(|p| p.starts_with(deepest));
+            if !alive {
+                return None;
+            }
+            if made.clone().all(|p| !between(&p)) {
+                return Some(deepest.clone());
+            }
+        }
+        let held = |list: &Vec<String>| list.iter().any(|r| holds(r, at));
+        let index = match self.lists.iter().position(held) {
+            Some(index) => index,
+            None => {
+                let list = listed_worktrees(&existing);
+                for root in &list {
+                    if !self.known.contains(root) {
+                        self.known.push(root.clone());
+                    }
+                }
+                self.lists.push(list);
+                self.lists.len() - 1
+            }
+        };
+        let list = &self.lists[index];
+        let root = list
+            .iter()
+            .filter(|r| holds(r, at))
+            .max_by_key(|r| r.len())?;
+        let gone = |r: &&String| !list.contains(r) && holds(r, at) && r.len() > root.len();
+        let removed = self.known.iter().any(|r| gone(&r));
+        (!removed && !below).then(|| root.clone())
+    }
+}
+
+/// The line the studio's shell appends for a turn Daniel interrupted, which fires no `Stop`: as
+/// `studio_core::INTERRUPTED`. The shell runs `trees` on it, so it carries that turn's end trees.
+pub const INTERRUPTED: &str = "StudioInterrupted";
+
 /// Adds to `event` the trees of the turn it ends, `studio_turn_end`, and of the worktrees its turn
 /// touches first with it, `studio_turn_start`, each by worktree root. Like the core, it takes an
 /// event's folder and an `Edit` or `Write` path as what it touches (danielrispler/Falinks#434,
@@ -493,7 +598,8 @@ pub fn trees(
     use std::io::{Seek, Write};
     let text = |key: &str| event.get(key).and_then(Value::as_str);
     let name = text("hook_event_name").unwrap_or_default();
-    let idle = name == "Notification" && text("notification_type") == Some("idle_prompt");
+    let idle = name == "Notification" && text("notification_type") == Some("idle_prompt")
+        || name == INTERRUPTED;
     let outside = matches!(name, "SessionStart" | "SessionEnd" | "Notification");
     let session = text("session_id").unwrap_or_default();
     // The id names a file, so it must be a plain one.
@@ -542,18 +648,52 @@ pub fn trees(
         .and_then(|input| input.get("file_path")?.as_str());
     let path = path.filter(|p| p.starts_with('/') && matches!(tool, Some("Edit" | "Write")));
     let folder = path.and_then(|p| Path::new(p).parent()?.to_str());
-    let folders = [text("cwd"), folder];
-    let touched = || (folders.into_iter().flatten()).filter_map(|f| worktree_root(Path::new(f)));
+    let cwd = text("cwd");
+    let command = text("tool_name")
+        .filter(|t| *t == "Bash")
+        .and_then(|_| event.get("tool_input")?.get("command")?.as_str());
+    let named = command.map(named_paths).unwrap_or_default();
+    let mut known = strings(&kept["worktrees"]);
+    // The worktrees the call touches, listed once: the folder's, an `Edit` or `Write` path's, and
+    // those a Bash command names.
+    let touched = |known: &mut Vec<String>| {
+        let mut found: Vec<String> = Vec::new();
+        let mut names = Named {
+            lists: Vec::new(),
+            known,
+        };
+        let roots = cwd.and_then(|f| names.root(Path::new(f))).into_iter();
+        let roots = roots.chain(folder.and_then(|f| names.root(Path::new(f))));
+        let mut roots: Vec<String> = roots.collect();
+        roots.extend(named.iter().filter_map(|p| names.root(Path::new(p))));
+        for root in roots {
+            if !found.contains(&root) {
+                found.push(root);
+            }
+        }
+        found
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64);
+    // When the turn began, in Unix milliseconds; a record from before it is kept does not say.
+    let mut began = kept["began"].as_u64();
+    let mut touches = Vec::new();
     let mut end = Map::new();
     let mut start = Map::new();
     match text("agent_id") {
         None => {
+            let (before, was_ended) = (turn.prompt_id.clone(), turn.ended);
             let (ended, in_turn) = turn.take(name, text("prompt_id"), idle);
+            if turn.prompt_id != before || was_ended && !turn.ended {
+                began = Some(now);
+            }
             end = ended.iter().filter_map(|root| record(root)).collect();
             if in_turn {
-                for root in touched() {
+                touches = touched(&mut known);
+                for root in touches.clone() {
                     if !turn.roots.contains(&root)
-                        && let Some((root, tree)) = record(&root)
+                        && let Some((root, tree)) = first_tree(&root, began)
                     {
                         turn.roots.push(root.clone());
                         start.insert(root, tree);
@@ -562,9 +702,10 @@ pub fn trees(
             }
         }
         Some(agent) => {
-            let worker = workers
-                .entry(agent)
-                .or_insert_with(|| json!({ "prompt_id": turn.prompt_id, "roots": [] }));
+            let worker = workers.entry(agent).or_insert_with(
+                || json!({ "prompt_id": turn.prompt_id, "roots": [], "began": now }),
+            );
+            let worker_began = worker["began"].as_u64();
             let mut roots = strings(&worker["roots"]);
             // While its turn runs, that turn's end takes the trees of the worktrees it touched.
             let live = !turn.ended && worker["prompt_id"].as_str() == turn.prompt_id.as_deref();
@@ -573,13 +714,14 @@ pub fn trees(
                     end = roots.iter().filter_map(|root| record(root)).collect();
                 }
             } else {
-                for root in touched() {
+                touches = touched(&mut known);
+                for root in touches.clone() {
                     if roots.contains(&root) {
                         continue;
                     }
                     if live && turn.roots.contains(&root) {
                         roots.push(root);
-                    } else if let Some((root, tree)) = record(&root) {
+                    } else if let Some((root, tree)) = first_tree(&root, worker_began) {
                         roots.push(root.clone());
                         if live {
                             turn.roots.push(root.clone());
@@ -592,11 +734,17 @@ pub fn trees(
         }
     }
     let kept = json!({
-        "prompt_id": turn.prompt_id, "roots": turn.roots, "ended": turn.ended, "workers": workers,
+        "prompt_id": turn.prompt_id, "roots": turn.roots, "ended": turn.ended, "began": began,
+        "workers": workers,
+        "worktrees": known,
     });
     file.set_len(0)?;
     file.rewind()?;
     file.write_all(kept.to_string().as_bytes())?;
+    // The roots the call touched, which the core reads for the session's own touches.
+    if !touches.is_empty() {
+        event.insert("studio_touched_roots".into(), touches.into());
+    }
     for (key, trees) in [("studio_turn_end", end), ("studio_turn_start", start)] {
         if !trees.is_empty() {
             event.insert(key.into(), trees.into());
@@ -625,11 +773,43 @@ fn record(root: &str) -> Option<(String, serde_json::Value)> {
     record_tree(Path::new(root)).map(|(root, tree)| (root, tree.into()))
 }
 
+/// The commit worktree `root` was created at and the Unix second it was created, from the first
+/// line of its `HEAD` reflog (danielrispler/plotkeeper#204); `None` when it has no such line.
+pub fn creation(root: &Path) -> Option<(String, u64)> {
+    let log = git(root, &["rev-parse", "--git-path", "logs/HEAD"], None)?;
+    let log = fs::read_to_string(root.join(log)).ok()?;
+    let who = log.lines().next()?.split('\t').next()?;
+    let mut shas = who.split(' ');
+    let commit = shas.nth(1)?.to_owned();
+    // `<sha> <sha> <name> <<email>> <seconds> <zone>`
+    let mut tail = who.rsplit(' ');
+    let at = tail.nth(1)?.parse().ok()?;
+    Some((commit, at))
+}
+
+/// Worktree `root`'s start tree for a turn or worker that began at `began` (Unix milliseconds):
+/// the tree of the commit the worktree was created at when that was in a later second, otherwise
+/// its tree now.
+fn first_tree(root: &str, began: Option<u64>) -> Option<(String, serde_json::Value)> {
+    let made = creation(Path::new(root)).filter(|(_, at)| began.is_some_and(|b| *at > b / 1000));
+    let tree = made.and_then(|(commit, _)| {
+        git(
+            Path::new(root),
+            &["rev-parse", &format!("{commit}^{{tree}}")],
+            None,
+        )
+    });
+    match tree {
+        Some(tree) => Some((root.to_owned(), tree.into())),
+        None => record(root),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::Path;
 
-    use super::{Turn, command};
+    use super::{INTERRUPTED, Turn, command};
 
     /// The hook's view of one session's turns, after `events`, each a name and a prompt id.
     fn after(turn: &mut Turn, name: &str, prompt: &str) -> (Vec<String>, bool) {
@@ -667,6 +847,24 @@ mod tests {
             turn.take("Notification", Some("p2"), true),
             (vec!["/w/a".into()], false)
         );
+    }
+
+    /// The shell's line for an interrupted turn ends that turn only, never a later one.
+    #[test]
+    fn the_shells_interrupted_line_ends_its_own_turn_only() {
+        let mut turn = Turn::default();
+        after(&mut turn, "UserPromptSubmit", "p1");
+        turn.roots.push("/w/a".into());
+        assert_eq!(
+            turn.take(INTERRUPTED, Some("p1"), true),
+            (vec!["/w/a".into()], false)
+        );
+
+        after(&mut turn, "UserPromptSubmit", "p2");
+        turn.roots.push("/w/a".into());
+        assert_eq!(turn.take(INTERRUPTED, Some("p1"), true), (vec![], false));
+        assert!(!turn.ended);
+        assert_eq!(turn.roots, ["/w/a"]);
     }
 
     #[test]

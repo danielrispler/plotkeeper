@@ -2,7 +2,7 @@
 //! check which of a session's prompts Claude Code sent to wake it, and which are Daniel's.
 
 use serde_json::json;
-use studio_core::{Output, Sender, State, Studio};
+use studio_core::{CardRequest, Output, Sender, State, Studio};
 
 fn replay(log: &str) -> Studio {
     Studio::replayed(log.lines())
@@ -222,4 +222,196 @@ fn a_wake_up_leaves_the_session_needing_daniel_until_the_step_that_asks_resolves
 
     studio.apply(&event("PostToolUse", push));
     assert_eq!(state(&studio), State::Running);
+}
+
+/// Session `s1`'s event `name` at `at`, in prompt `prompt`'s turn, with `fields` added.
+fn ev(name: &str, at: u64, prompt: &str, fields: serde_json::Value) -> String {
+    let mut event = json!({
+        "session_id": "s1",
+        "hook_event_name": name,
+        "cwd": "/w",
+        "prompt_id": prompt,
+        "studio_received_ms": at,
+    });
+    event
+        .as_object_mut()
+        .unwrap()
+        .extend(fields.as_object().unwrap().clone());
+    event.to_string()
+}
+
+/// A background spawn's response, which names its child `child` at once.
+fn launched(at: u64, call: &str, child: &str) -> String {
+    let fields = json!({"tool_name": "Agent", "tool_use_id": call, "tool_input": {},
+        "tool_response": {"agentId": child, "status": "async_launched"}});
+    ev("PostToolUse", at, "p1", fields)
+}
+
+/// The wake-up that names `tasks`, which opens the turn of prompt `prompt`.
+fn woken(at: u64, prompt: &str, tasks: &[&str]) -> String {
+    let notices: String = tasks
+        .iter()
+        .map(|t| format!("<task-notification><task-id>{t}</task-id><status>completed</status></task-notification>"))
+        .collect();
+    ev("UserPromptSubmit", at, prompt, json!({ "prompt": notices }))
+}
+
+/// The turn of the card `id` of worker `worker`, as session `s1`'s rail places it.
+fn card_turn(studio: &Studio, worker: &str, at: u64) -> Option<usize> {
+    let request = CardRequest {
+        session_id: "s1".into(),
+        id: format!("{worker}@{at}"),
+        agent: Some(worker.into()),
+        ..CardRequest::default()
+    };
+    studio.session("s1").unwrap().worker_card_turn(&request)
+}
+
+/// Turn 0 spawns `w1`, `w2` and `w3`; `w1` and `w2` end at 10 and 11; Daniel's prompt at 12 opens turn 1; the one wake-up
+/// that names `w1` and `w2` at 20 opens turn 2. `w3` is named by no wake-up.
+fn spawned_and_woken() -> Studio {
+    let mut studio = Studio::default();
+    studio.apply(&ev("UserPromptSubmit", 1, "p1", json!({"prompt": "Do it"})));
+    for (at, call, child) in [(2, "t1", "w1"), (3, "t2", "w2"), (4, "t3", "w3")] {
+        studio.apply(&launched(at, call, child));
+    }
+    let tasks = json!({"background_tasks": [{"id": "w1"}, {"id": "w2"}, {"id": "w3"}]});
+    studio.apply(&ev("Stop", 8, "p1", tasks));
+    for (at, child) in [(10, "w1"), (11, "w2")] {
+        studio.apply(&ev("SubagentStop", at, "p1", json!({"agent_id": child})));
+    }
+    studio.apply(&ev(
+        "UserPromptSubmit",
+        12,
+        "p2",
+        json!({"prompt": "Meanwhile, rename it"}),
+    ));
+    studio.apply(&ev("Stop", 14, "p2", json!({"background_tasks": []})));
+    studio.apply(&woken(20, "p3", &["w1", "w2"]));
+    studio
+}
+
+#[test]
+fn a_workers_card_of_its_end_is_in_the_turn_its_wake_up_opened_not_the_one_daniel_opened_between() {
+    let studio = spawned_and_woken();
+    let turns = &studio.session("s1").unwrap().turns;
+    assert_eq!(turns.len(), 3);
+    assert_eq!(turns[2].prompt, "worker w1 returned");
+
+    assert_eq!(card_turn(&studio, "w1", 10), Some(2));
+    assert_eq!(card_turn(&studio, "w1", 13), Some(2));
+}
+
+#[test]
+fn one_wake_up_takes_the_cards_of_both_workers_it_names() {
+    let studio = spawned_and_woken();
+
+    assert_eq!(card_turn(&studio, "w1", 10), Some(2));
+    assert_eq!(card_turn(&studio, "w2", 11), Some(2));
+}
+
+#[test]
+fn a_card_asked_for_while_the_worker_runs_is_in_the_turn_that_spawned_it() {
+    let studio = spawned_and_woken();
+
+    assert_eq!(card_turn(&studio, "w1", 9), Some(0));
+}
+
+#[test]
+fn the_cards_of_a_worker_no_wake_up_names_are_in_the_turn_that_spawned_it() {
+    let studio = spawned_and_woken();
+
+    assert_eq!(card_turn(&studio, "w3", 9), Some(0));
+    assert_eq!(card_turn(&studio, "w3", 30), Some(0));
+}
+
+#[test]
+fn a_card_of_a_worker_that_ended_waits_in_the_spawning_turn_until_its_wake_up_arrives() {
+    let mut studio = Studio::default();
+    studio.apply(&ev("UserPromptSubmit", 1, "p1", json!({"prompt": "Do it"})));
+    studio.apply(&launched(2, "t1", "w1"));
+    studio.apply(&ev("SubagentStop", 10, "p1", json!({"agent_id": "w1"})));
+    studio.apply(&ev("Stop", 11, "p1", json!({"background_tasks": []})));
+    studio.apply(&ev(
+        "UserPromptSubmit",
+        12,
+        "p2",
+        json!({"prompt": "Meanwhile"}),
+    ));
+
+    assert_eq!(card_turn(&studio, "w1", 10), Some(0));
+}
+
+/// `spawned_and_woken`, then `w1` is sent on at 22 with a step of its own, ends again at 25, and a second wake-up at 30
+/// names it.
+fn resumed_and_woken_again() -> Studio {
+    let mut studio = spawned_and_woken();
+    studio.apply(&ev("Stop", 21, "p3", json!({"background_tasks": []})));
+    let step = json!({"agent_id": "w1", "tool_name": "Read", "tool_input": {"file_path": "/w/a"},
+        "tool_use_id": "r1", "tool_response": {}});
+    studio.apply(&ev("PreToolUse", 22, "p3", step));
+    studio.apply(&ev("SubagentStop", 25, "p3", json!({"agent_id": "w1"})));
+    studio.apply(&woken(30, "p4", &["w1"]));
+    studio
+}
+
+#[test]
+fn a_workers_card_stays_in_the_turn_of_the_wake_up_for_its_end_after_the_worker_resumes() {
+    let studio = resumed_and_woken_again();
+    assert_eq!(studio.session("s1").unwrap().turns.len(), 4);
+
+    // The end at 10 is the first wake-up's, the end at 25 the second's, whatever the worker did between.
+    assert_eq!(card_turn(&studio, "w1", 10), Some(2));
+    assert_eq!(card_turn(&studio, "w1", 13), Some(2));
+    assert_eq!(card_turn(&studio, "w1", 25), Some(3));
+    assert_eq!(card_turn(&studio, "w1", 9), Some(0));
+}
+
+#[test]
+fn a_workers_card_of_a_second_end_waits_in_the_spawning_turn_until_its_own_wake_up_arrives() {
+    let mut studio = spawned_and_woken();
+    studio.apply(&ev("Stop", 21, "p3", json!({"background_tasks": []})));
+    let step = json!({"agent_id": "w1", "tool_name": "Read", "tool_input": {"file_path": "/w/a"},
+        "tool_use_id": "r1", "tool_response": {}});
+    studio.apply(&ev("PreToolUse", 22, "p3", step));
+    studio.apply(&ev("SubagentStop", 25, "p3", json!({"agent_id": "w1"})));
+
+    assert_eq!(card_turn(&studio, "w1", 10), Some(2));
+    assert_eq!(card_turn(&studio, "w1", 25), Some(0));
+}
+
+#[test]
+fn a_card_asked_for_while_a_resumed_worker_runs_is_in_the_turn_that_resumed_it() {
+    let mut studio = spawned_and_woken();
+    studio.apply(&ev("Stop", 21, "p3", json!({"background_tasks": []})));
+    studio.apply(&ev(
+        "UserPromptSubmit",
+        22,
+        "p4",
+        json!({"prompt": "Send w1 on"}),
+    ));
+    let step = json!({"agent_id": "w1", "tool_name": "Read", "tool_input": {"file_path": "/w/a"},
+        "tool_use_id": "r1", "tool_response": {}});
+    studio.apply(&ev("PreToolUse", 23, "p4", step));
+
+    assert_eq!(card_turn(&studio, "w1", 24), Some(3));
+    assert_eq!(card_turn(&studio, "w1", 10), Some(2));
+}
+
+#[test]
+fn a_wake_up_that_lands_before_its_workers_end_is_recorded_still_takes_the_card_of_that_end() {
+    let mut studio = Studio::default();
+    studio.apply(&ev("UserPromptSubmit", 1, "p1", json!({"prompt": "Do it"})));
+    studio.apply(&launched(2, "t1", "w1"));
+    studio.apply(&ev(
+        "Stop",
+        8,
+        "p1",
+        json!({"background_tasks": [{"id": "w1"}]}),
+    ));
+    // The async `SubagentStop`, stamped at 10, is applied before the wake-up stamped at 9.
+    studio.apply(&ev("SubagentStop", 10, "p1", json!({"agent_id": "w1"})));
+    studio.apply(&woken(9, "p2", &["w1"]));
+
+    assert_eq!(card_turn(&studio, "w1", 10), Some(1));
 }

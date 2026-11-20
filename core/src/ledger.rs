@@ -61,6 +61,9 @@ pub struct Row {
     pub background: bool,
     /// `None` until its result lands.
     pub outcome: Option<Outcome>,
+    /// The worktree roots the call touched (danielrispler/plotkeeper#207).
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
+    pub roots: Vec<String>,
     /// The log lines it came from: its start, and its result.
     pub start: Option<Bytes>,
     pub end: Option<Bytes>,
@@ -81,6 +84,16 @@ pub struct Details {
 }
 
 impl Row {
+    /// Adds the worktree roots `roots` a call's event touched: a call that removes a worktree lists
+    /// it at its start and no longer at its end.
+    fn take_roots(&mut self, roots: Vec<String>) {
+        for root in roots {
+            if !self.roots.contains(&root) {
+                self.roots.push(root);
+            }
+        }
+    }
+
     /// Reads the two events of this call from the event log at `log`: one seek and one read of each
     /// line's length. The log must be the file the offsets were taken from.
     pub fn details(&self, log: &Path) -> io::Result<Details> {
@@ -204,16 +217,30 @@ impl Ledger {
     }
 
     /// Takes the start of `tool`'s call, which `turn` holds.
-    pub(crate) fn start(&mut self, event: &Event, tool: &Tool, turn: Option<usize>) {
+    pub(crate) fn start(
+        &mut self,
+        event: &Event,
+        tool: &Tool,
+        turn: Option<usize>,
+        roots: Vec<String>,
+    ) {
         let at = event.studio_received_ms;
         let row = self.of(event, tool, turn);
         row.started_at = Some(at);
+        row.take_roots(roots);
         row.start = Some(event.line);
         row.settle();
     }
 
     /// Takes the result of `tool`'s call.
-    pub(crate) fn end(&mut self, event: &Event, tool: &Tool, turn: Option<usize>, failed: bool) {
+    pub(crate) fn end(
+        &mut self,
+        event: &Event,
+        tool: &Tool,
+        turn: Option<usize>,
+        failed: bool,
+        roots: Vec<String>,
+    ) {
         let at = event.studio_received_ms;
         let outcome = match failed {
             false => Outcome::Succeeded,
@@ -226,6 +253,7 @@ impl Ledger {
         let (ran, background) = (event.ran(), event.background_task().is_some());
         let row = self.of(event, tool, turn);
         row.ended_at = Some(at);
+        row.take_roots(roots);
         row.took = took;
         row.outcome = Some(outcome);
         row.ran = ran;
