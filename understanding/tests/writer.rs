@@ -17,8 +17,8 @@ use studio_core::{
 };
 use studio_understanding::{
     Card, CardStore, CardWriter, Choice, ClaudeWriter, FakeWriter, LineKind, Quiz, SummarySetup,
-    TurnSummary, explain_more, find_claude, write_agent_summary, write_card, write_retests,
-    write_summary,
+    TurnSummary, explain_more, find_claude, retest_quiz, write_agent_summary, write_card,
+    write_retests, write_summary,
 };
 
 const CLAUDE: &str = "/opt/homebrew/bin/claude";
@@ -1612,11 +1612,21 @@ fn a_summary_stored_before_the_headline_still_reads() {
     assert_eq!(summary.lines, []);
 }
 
-/// A store holding one Quiz on turn `t1` with its hunk, and its `ask` when a week has passed.
+/// A store holding one Quiz on turn `t1` with its hunk, and when it was offered.
 fn week_old_quiz(dir: &Path) -> (CardStore, u64) {
     let mut store = CardStore::open(dir.join("cards.json")).unwrap();
+    add_quiz(&mut store, "t1", T0);
+    (store, T0)
+}
+
+/// A fixed clock for the retests' tests.
+const T0: u64 = 1_790_000_000_000;
+const DAY: u64 = 24 * 3600 * 1000;
+
+/// Keeps a Quiz on turn `id` with its hunk, offered at `at`.
+fn add_quiz(store: &mut CardStore, id: &str, at: u64) {
     let request = SummaryRequest {
-        id: "t1".into(),
+        id: id.into(),
         session_id: "s1".into(),
         facts: Facts {
             files: vec![FactFile {
@@ -1641,9 +1651,7 @@ fn week_old_quiz(dir: &Path) -> (CardStore, u64) {
             { "text": "Speed", "why": "No." }] },
     }))
     .unwrap();
-    store.add_summary(request, summary).unwrap();
-    let offered = store.turn_summary("t1").unwrap().added_at;
-    (store, offered)
+    store.add_summary_at(request, summary, at).unwrap();
 }
 
 #[test]
@@ -1742,4 +1750,179 @@ fn a_retest_that_breaks_the_guards_twice_is_kept_as_none_and_not_asked_again() {
     assert_eq!(writer.1.get(), 2);
     assert_eq!(lines.len(), 1, "{lines:?}");
     assert_eq!(store.lock().unwrap().retests()[0].quiz, None);
+}
+
+/// A store with a Quiz offered on each of `quizzes`, `(id, at)`, and a retest already written on each of `waiting`.
+fn retests_store(dir: &Path, quizzes: &[(&str, u64)], waiting: &[&str]) -> Mutex<CardStore> {
+    let mut store = CardStore::open(dir.join("cards.json")).unwrap();
+    for (id, at) in quizzes {
+        add_quiz(&mut store, id, *at);
+    }
+    let now = T0 + 8 * DAY;
+    for ask in store.due_retests(now) {
+        if waiting.contains(&ask.of.as_str()) {
+            let quiz = retest_quiz(&retest_reply(false)).unwrap();
+            store.add_retest(&ask, Some(quiz), now).unwrap();
+        }
+    }
+    Mutex::new(store)
+}
+
+/// The Quizzes the store holds a retest of, in the order they were written.
+fn retested(store: &Mutex<CardStore>) -> Vec<String> {
+    let store = store.lock().unwrap();
+    store.retests().iter().map(|r| r.of.clone()).collect()
+}
+
+#[test]
+fn with_three_retests_waiting_a_run_writes_none_and_calls_no_writer() {
+    let dir = tempfile::tempdir().unwrap();
+    let quizzes = [("a", T0), ("b", T0), ("c", T0), ("d", T0)];
+    let store = retests_store(dir.path(), &quizzes, &["a", "b", "c"]);
+    let writer = Retesting(vec![retest_reply(false); 4], Cell::new(0));
+
+    assert_eq!(
+        write_retests(&store, &writer, T0 + 8 * DAY, |l| panic!("{l}")),
+        0
+    );
+
+    assert_eq!(writer.1.get(), 0);
+    assert_eq!(retested(&store), ["a", "b", "c"]);
+}
+
+#[test]
+fn with_one_waiting_a_run_writes_two_picked_quizzes_first_and_the_latest_due_first() {
+    use studio_understanding::Tap;
+    let dir = tempfile::tempdir().unwrap();
+    let quizzes = [
+        ("waiting", T0),
+        ("a", T0),
+        ("b", T0 + DAY),
+        ("c", T0 + 5 * DAY),
+        ("d", T0 + 4 * DAY),
+        ("e", T0 + 3 * DAY),
+    ];
+    let store = retests_store(dir.path(), &quizzes, &["waiting"]);
+    for id in ["a", "b"] {
+        let mut store = store.lock().unwrap();
+        store
+            .quiz_tap(id, Tap::Pick { option: 1 }, T0 + 2 * DAY)
+            .unwrap();
+    }
+    let writer = Retesting(vec![retest_reply(false); 5], Cell::new(0));
+
+    // c, d and e came due later than a and b, but were never picked.
+    assert_eq!(
+        write_retests(&store, &writer, T0 + 13 * DAY, |l| panic!("{l}")),
+        2
+    );
+
+    assert_eq!(writer.1.get(), 2);
+    assert_eq!(retested(&store), ["waiting", "b", "a"]);
+}
+
+#[test]
+fn after_a_pick_on_one_of_three_waiting_the_next_run_writes_the_held_retest() {
+    use studio_understanding::Tap;
+    let dir = tempfile::tempdir().unwrap();
+    let quizzes = [("a", T0), ("b", T0), ("c", T0), ("d", T0)];
+    let store = retests_store(dir.path(), &quizzes, &["a", "b", "c"]);
+    let writer = Retesting(vec![retest_reply(false)], Cell::new(0));
+    let now = T0 + 9 * DAY;
+    assert_eq!(write_retests(&store, &writer, now, |l| panic!("{l}")), 0);
+
+    (store.lock().unwrap())
+        .quiz_tap("retest a", Tap::Pick { option: 0 }, now)
+        .unwrap();
+
+    assert_eq!(
+        write_retests(&store, &writer, now + 3600 * 1000, |l| panic!("{l}")),
+        1
+    );
+    assert_eq!(writer.1.get(), 1);
+    assert_eq!(retested(&store), ["a", "b", "c", "d"]);
+}
+
+#[test]
+fn a_writer_that_gives_no_reply_ends_the_run_and_its_quiz_stays_due() {
+    let dir = tempfile::tempdir().unwrap();
+    let quizzes = [("waiting", T0), ("a", T0), ("b", T0), ("c", T0), ("d", T0)];
+    let store = retests_store(dir.path(), &quizzes, &["waiting"]);
+    let writer = Retesting(Vec::new(), Cell::new(0));
+    let mut lines = Vec::new();
+
+    assert_eq!(
+        write_retests(&store, &writer, T0 + 9 * DAY, |l| lines.push(l)),
+        0
+    );
+
+    // One ask, tried twice; the rest are not asked until the next run.
+    assert_eq!(writer.1.get(), 2);
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert_eq!(retested(&store), ["waiting"]);
+}
+
+#[test]
+fn a_retest_rejected_twice_does_not_wait_so_the_run_writes_on_until_three_wait() {
+    let dir = tempfile::tempdir().unwrap();
+    let quizzes = [("waiting", T0), ("a", T0), ("b", T0), ("c", T0)];
+    let store = retests_store(dir.path(), &quizzes, &["waiting"]);
+    let (bad, good) = (retest_reply(true), retest_reply(false));
+    let writer = Retesting(vec![bad.clone(), bad, good.clone(), good], Cell::new(0));
+    let mut lines = Vec::new();
+
+    assert_eq!(
+        write_retests(&store, &writer, T0 + 9 * DAY, |l| lines.push(l)),
+        2
+    );
+
+    assert_eq!(writer.1.get(), 4);
+    assert_eq!(retested(&store), ["waiting", "a", "b", "c"]);
+    assert_eq!(store.lock().unwrap().retests()[1].quiz, None);
+}
+
+/// A writer that flags the Quizzes `flag` Key wrong while it writes its first retest, as Daniel might meanwhile.
+struct Flagging<'a> {
+    store: &'a Mutex<CardStore>,
+    flag: [&'a str; 2],
+    calls: Cell<usize>,
+}
+
+impl CardWriter for Flagging<'_> {
+    fn reply(&self, _: &CardRequest, _: &[String]) -> Result<String, String> {
+        Err("no cards".into())
+    }
+    fn more(&self, _: &CardRequest, _: &Card) -> Result<String, String> {
+        Err("no cards".into())
+    }
+    fn retest(&self, _: &studio_understanding::RetestAsk) -> Result<String, String> {
+        if self.calls.replace(self.calls.get() + 1) == 0 {
+            let mut store = self.store.lock().unwrap();
+            for id in self.flag {
+                store
+                    .quiz_tap(id, studio_understanding::Tap::KeyWrong, T0)
+                    .unwrap();
+            }
+        }
+        Ok(retest_reply(false))
+    }
+}
+
+#[test]
+fn a_quiz_flagged_key_wrong_while_the_writer_runs_keeps_no_retest() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = retests_store(dir.path(), &[("a", T0), ("b", T0), ("c", T0)], &[]);
+    // `a` is flagged while its own retest is written, `b` while an earlier one is.
+    let writer = Flagging {
+        store: &store,
+        flag: ["a", "b"],
+        calls: Cell::new(0),
+    };
+
+    assert_eq!(
+        write_retests(&store, &writer, T0 + 9 * DAY, |l| panic!("{l}")),
+        1
+    );
+
+    assert_eq!(retested(&store), ["c"]);
 }

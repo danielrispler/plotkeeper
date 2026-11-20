@@ -53,8 +53,9 @@ A turn that ends with an `ask` line, or in Needs you, has no open Quiz: its summ
 A week after a Quiz was offered (answered, skipped or never opened), the studio writes one fresh Quiz on the same decision (`write_retests` in `understanding/src/retest.rs`) and offers it on Home, in a "Retest" section and nowhere else. Nothing interrupts for it.
 
 - The writer reads the turn's stored hunk (a card's diff, or the hunks kept with the turn's summary), the first Quiz's question and the reason of its key. It is told to ask from another side, not to reword the first Quiz.
-- The reply passes the guards above, and is asked for once more on a rejection. A second rejection keeps no Quiz, and the first Quiz is not retested again. A writer that gives no reply is tried again at the next hourly pass.
+- The reply passes the guards above, and is asked for once more on a rejection. A second rejection keeps no Quiz, and the first Quiz is not retested again. A writer that gives no reply ends the pass, and is tried again at the next hourly pass.
 - A Quiz gets one retest, and one offered less than seven days ago gets none. A card's Quiz on a check ("Will it pass?") gets none.
+- No retest is written while 3 wait unanswered: holding a Quiz with no pick or skip, due at most 14 days ago, their first Quiz not flagged Key wrong. Below 3, the hourly pass writes due retests until 3 wait, Quizzes Daniel picked first, then the rest, the latest due first within each. A Quiz due more than 14 days ago, or flagged Key wrong, gets none; one whose retest was held stays due.
 - The retest's pick, confidence tap and "why?" line are stored with their times in `retests.json`.
 
 ## The trial of confidence and "why?"

@@ -692,10 +692,16 @@ fn a_cards_skip_and_chips_are_stored_beside_its_guess_and_the_key_flag_is_the_on
 
 /// A store at `path` holding a lone Quiz on turn `t1` whose request carries the file's whole hunk.
 fn quiz_with_hunk(path: &std::path::Path) -> CardStore {
-    use studio_core::{FactFile, Facts, SummaryRequest, TurnFile};
     let mut store = CardStore::open(path.to_owned()).unwrap();
+    add_quiz(&mut store, "t1", studio_understanding::millis());
+    store
+}
+
+/// Keeps a lone Quiz on turn `id`, offered at `at`, whose request carries the file's whole hunk.
+fn add_quiz(store: &mut CardStore, id: &str, at: u64) {
+    use studio_core::{FactFile, Facts, SummaryRequest, TurnFile};
     let request = SummaryRequest {
-        id: "t1".into(),
+        id: id.into(),
         session_id: "s1".into(),
         facts: Facts {
             files: vec![FactFile {
@@ -719,8 +725,7 @@ fn quiz_with_hunk(path: &std::path::Path) -> CardStore {
             { "text": "A", "why": "Because the pairs must not move." }, { "text": "B", "why": "No." }] },
     }))
     .unwrap();
-    store.add_summary(request, summary).unwrap();
-    store
+    store.add_summary_at(request, summary, at).unwrap();
 }
 
 const WEEK: u64 = 7 * 24 * 60 * 60 * 1000;
@@ -1066,4 +1071,80 @@ fn a_summary_that_becomes_waiting_raises_the_revision_so_the_window_asks_again()
     let before = store.revision();
     store.waiting_summary();
     assert!(store.revision() > before);
+}
+
+/// A retest's Quiz of two options.
+fn retest_quiz() -> studio_understanding::Quiz {
+    use studio_understanding::{Choice, Quiz};
+    let option = |text: &str| Choice {
+        text: text.into(),
+        why: "w".into(),
+    };
+    Quiz {
+        text: "What stays true?".into(),
+        options: vec![option("A"), option("B")],
+        key: 0,
+    }
+}
+
+const NOW: u64 = 1_790_000_000_000;
+
+/// A store at `path` with Quizzes due before `NOW`: `fresh` 1 day, `edge` 14 days and `old` 15 days before; and, 1 day
+/// before, `flagged`, a turn's own, and `card`, a card's, both flagged Key wrong.
+fn retest_cases(path: &std::path::Path) -> CardStore {
+    use studio_understanding::Tap;
+    let mut store = CardStore::open(path.to_owned()).unwrap();
+    for (id, due) in [
+        ("fresh", NOW - DAY),
+        ("edge", NOW - 14 * DAY),
+        ("old", NOW - 15 * DAY),
+        ("flagged", NOW - DAY),
+    ] {
+        add_quiz(&mut store, id, due - WEEK);
+    }
+    store.quiz_tap("flagged", Tap::KeyWrong, NOW - DAY).unwrap();
+    let request = edit("card", "src/lib.rs");
+    let card = card(&request);
+    store.add(request, card, NOW - DAY - WEEK).unwrap();
+    store.key_wrong("card").unwrap();
+    store
+}
+
+#[test]
+fn a_retest_waits_unanswered_while_home_could_serve_it() {
+    use studio_understanding::Tap;
+    let data = tempfile::tempdir().unwrap();
+    let mut store = retest_cases(&data.path().join("cards.json"));
+    for ask in store.due_retests(NOW) {
+        store.add_retest(&ask, Some(retest_quiz()), NOW).unwrap();
+    }
+    // Of the five, only `fresh` and `edge` wait: `old` came due 15 days ago, and the others' keys are flagged wrong.
+    assert_eq!(store.waiting_retests(NOW), 2);
+
+    // A shown retest still waits; a picked one does not.
+    store.quiz_tap("retest fresh", Tap::Shown, NOW).unwrap();
+    assert_eq!(store.waiting_retests(NOW), 2);
+    store
+        .quiz_tap("retest fresh", Tap::Pick { option: 1 }, NOW)
+        .unwrap();
+    assert_eq!(store.waiting_retests(NOW), 1);
+    // Nor does a skipped one, which can no longer be picked.
+    store.quiz_tap("retest edge", Tap::Skip, NOW).unwrap();
+    assert_eq!(store.waiting_retests(NOW), 0);
+
+    // A retest kept with no Quiz, after the writer broke the guards twice, does not wait.
+    add_quiz(&mut store, "rejected", NOW - DAY - WEEK);
+    let ask = store.due_retests(NOW).remove(0);
+    store.add_retest(&ask, None, NOW).unwrap();
+    assert_eq!(store.waiting_retests(NOW), 0);
+}
+
+#[test]
+fn no_retest_is_written_for_a_quiz_due_15_days_ago_or_flagged_key_wrong() {
+    let data = tempfile::tempdir().unwrap();
+    let store = retest_cases(&data.path().join("cards.json"));
+
+    let asks = store.retests_to_write(NOW);
+    let ofs: Vec<&str> = asks.iter().map(|ask| ask.of.as_str()).collect();
+    assert_eq!(ofs, ["fresh", "edge"]);
 }
