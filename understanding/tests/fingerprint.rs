@@ -466,7 +466,8 @@ fn a_worktree_made_after_the_first_fingerprint_starts_from_its_creation_commit()
     fs::write(made.join("new.rs"), "fn n() {}\n").unwrap();
 
     let change = "--- a/new.rs\n+++ b/new.rs\n@@ -0,0 +1 @@\n+fn n() {}\n";
-    assert_eq!(diff(&mut prints, &made).as_deref(), Some(change));
+    let first = prints.look(&made, Purpose::Card).map(|c| c.diff);
+    assert_eq!(first.as_deref(), Some(change));
     assert_eq!(diff(&mut prints, &made), None);
     let _ = fs::remove_dir_all(&made);
 }
@@ -584,5 +585,27 @@ fn a_worktree_made_before_the_turn_or_worker_began_starts_from_its_files_then() 
         + 2_000;
     let found = prints.look_since(&made, Purpose::Base, Some(began));
     assert_eq!(found.map(|c| c.diff), None);
+    let _ = fs::remove_dir_all(&made);
+}
+
+#[test]
+fn a_file_edited_before_a_new_worktrees_base_look_is_still_the_change_at_its_card() {
+    let (dir, mut prints) = repo();
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    let made = dir
+        .path()
+        .with_file_name(format!("same-call-{}", std::process::id()));
+    let args = ["worktree", "add", "-q", "-b", "same-call"];
+    git(dir.path(), &[&args[..], &[made.to_str().unwrap()]].concat());
+    fs::write(made.join("new.rs"), "fn n() {}\n").unwrap();
+
+    // The first look of the worktree is its base, which no card takes the change of.
+    prints.look_since(&made, Purpose::Base, None);
+    let card = prints
+        .look_since(&made, Purpose::Card, None)
+        .map(|c| c.diff);
+
+    let change = "--- a/new.rs\n+++ b/new.rs\n@@ -0,0 +1 @@\n+fn n() {}\n";
+    assert_eq!(card.as_deref(), Some(change));
     let _ = fs::remove_dir_all(&made);
 }

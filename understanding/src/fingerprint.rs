@@ -19,6 +19,7 @@ use studio_core::{Backfill, Base, CardRequest, Change, Fingerprint, Purpose};
 
 /// A worktree's `HEAD`, and the files `git status` listed, by path from the worktree's root, with
 /// their content: `None` for a file that is gone.
+#[derive(Clone)]
 struct Record {
     head: Option<String>,
     files: BTreeMap<String, Option<Content>>,
@@ -216,6 +217,12 @@ impl Fingerprints {
                 || previous.is_none_or(|p| p.head != record.head),
                 |c| c.head != c.base.head,
             );
+        // A base that finds a worktree's edit since its creation keeps the creation's record, so the
+        // card at the turn's or worker's end still sees the edit (danielrispler/plotkeeper#204).
+        let record = match (purpose, &made, &found) {
+            (Purpose::Base, Some(made), Some(_)) => made.clone(),
+            _ => record,
+        };
         if keep {
             self.records.insert(root, record);
         }
