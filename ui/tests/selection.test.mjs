@@ -72,6 +72,14 @@ test("a turn with no hunk opens the turn alone, and an unknown turn opens nothin
   assert.equal(codeTarget(turns, "gone"), null);
 });
 
+test("the link opens the hunk the summary names, else the turn's first file, and a worker card's turn when the core placed it (#243)", async () => {
+  const { codeTarget } = await import("../../dist/selection.js");
+  const turns = [turn("t0", 100, [file("a.rs")]), turn("t1", 200, [file("b.rs"), file("c.rs")])];
+  assert.deepEqual(codeTarget(turns, "t1", "--- c.rs\n@@ -1 +1 @@\n+x\n"), { turn: 1, file: file("c.rs") });
+  assert.deepEqual(codeTarget(turns, "t1", "--- gone.rs\n+x\n"), { turn: 1, file: file("b.rs") });
+  assert.deepEqual(codeTarget(turns, "w@150", undefined, 1), { turn: 1, file: file("b.rs") });
+});
+
 test("the session left is remembered on every way to Home, and kept while a session is selected (#226)", async () => {
   const { leftSession } = await import("../../dist/selection.js");
   // Home key, a click on the list's empty space or a Delete all end the selection on none.

@@ -3,14 +3,15 @@
 // selection it returns in the list, the rail and the terminal (danielrispler/Falinks#567).
 
 import { rewatch } from "./answer.js";
-import { showCards } from "./cards.js";
-import { failure, invoke } from "./dom.js";
+import { hunkFiles } from "./ask.js";
+import { openCard, showCards } from "./cards.js";
+import { element, failure, invoke } from "./dom.js";
 import { openHunk } from "./evidence.js";
 import { showSessions } from "./list.js";
 import { showSession } from "./panes.js";
 import { showWorkspaces } from "./workspaces.js";
 import { studio } from "./state.js";
-import { citedTurn, openTurn, showView } from "./story.js";
+import { citedTurn, drawFeed, openTurn, showView } from "./story.js";
 import { showToast } from "./toast.js";
 import type { Selection, Turn, TurnFile } from "./types.js";
 
@@ -59,22 +60,34 @@ export async function select(id: string, agent: string | null = null) {
   await catchUp();
 }
 
-// Where the link from Home's answer leads (#243): the turn of Quiz `id` (a turn's, or a card's, which names the turn it was written in),
-// and the first file of that turn, whose hunk opens with it; `file` is null when the turn changed none. Null when no turn is found.
-export function codeTarget(turns: Pick<Turn, "id" | "started_at" | "files">[], id: string): { turn: number; file: TurnFile | null } | null {
-  const turn = citedTurn(turns, id);
-  return turn === null ? null : { turn, file: turns[turn].files?.files[0] ?? null };
+// Where the link from Home's answer leads (#243): the turn of Quiz `id` (a turn's, or a card's, which names the turn it was written in;
+// a worker card's is `placed`, the turn the core put it in), and the file whose hunk opens with it: the one the stored `hunk` names first,
+// else the turn's first; `file` is null when the turn changed none. Null when no turn is found.
+export function codeTarget(turns: Pick<Turn, "id" | "started_at" | "files">[], id: string, hunk = "", placed: number | null = null): { turn: number; file: TurnFile | null } | null {
+  const turn = placed !== null && placed < turns.length ? placed : citedTurn(turns, id);
+  if (turn === null) return null;
+  const files = turns[turn].files?.files ?? [];
+  const named = hunkFiles(hunk)[0]?.path;
+  return { turn, file: files.find((f) => f.path === named) ?? files[0] ?? null };
 }
 
-// Follows the link: opens the turn, and its hunk when it has one, in the rail, then selects the session, an ended one too, as a row of
-// History does. The window's Home key (#239) brings Daniel back, for it remembers this session.
-export async function followToCode(session: string, id: string) {
-  const target = codeTarget(studio.listed.find((s) => s.id === session)?.turns ?? [], id);
-  if (target) {
-    openTurn(session, target.turn);
-    if (target.file) openHunk(session, target.turn, target.file);
-  }
+// Follows the link: selects the session, an ended one too, as a row of History does, then opens the turn in the rail (opening the rail
+// in the overlay layout), the card when the Quiz is a card's, and the hunk when the turn has one, and scrolls the turn into view.
+// The Home key (#239) brings Daniel back, for it remembers this session. Daniel's own click, so the hunk counts as opened.
+export async function followToCode(session: string, id: string, hunk = "") {
   await select(session);
+  const selected = studio.selection;
+  if (selected?.session.id !== session) return;
+  const placed = studio.cards.workers.find(({ card }) => card.request.id === id)?.turn ?? null;
+  const target = codeTarget(selected.session.turns, id, hunk, placed);
+  if (!target) return;
+  if (document.body.dataset.layout === "overlay") document.body.classList.add("rail-open");
+  openTurn(session, target.turn);
+  openCard(id);
+  if (target.file) openHunk(session, target.turn, target.file);
+  drawFeed();
+  const node = element("feed").children[selected.session.turns.length - 1 - target.turn];
+  (node as HTMLElement | undefined)?.scrollIntoView?.({ block: "start" });
 }
 
 // What the Home key does (#239, like tmux `last-window`): from a session it remembers that session and shows Home; on Home it

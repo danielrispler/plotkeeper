@@ -20,6 +20,16 @@ export type Facts = { sections: { label: string; facts: { at: number | null; tex
 
 export type Hunk = { text: string; left_out: number; binary: boolean; first_line: number };
 // A hunk as plain text; `more` ends it with "… N more lines" when the cap left some out, for a view with no button of its own.
+// A stored hunk (`--- path`, then that file's lines, per file) as its files in order; none for an empty text.
+export function hunkFiles(stored: string): { path: string; lines: string }[] {
+  const files: { path: string; lines: string }[] = [];
+  for (const line of stored.split("\n")) {
+    if (line.startsWith("--- ")) files.push({ path: line.slice(4), lines: "" });
+    else if (files.length) files.at(-1)!.lines += `${line}\n`;
+  }
+  return files.map((f) => ({ ...f, lines: f.lines.replace(/\n+$/, "") }));
+}
+
 export const hunkText = (h: Hunk | null, more = true) =>
   h === null ? "The hunk could not be read." : h.binary ? "Binary file: no lines to show." : h.text + (more && h.left_out ? `… ${h.left_out} more lines` : "");
 
