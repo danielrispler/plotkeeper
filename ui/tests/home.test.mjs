@@ -242,7 +242,8 @@ async function slotCard(id, extra = {}, send = null) {
   const node = slotNode({ item: { ...item, ...extra }, next: false }, () => {}, () => {});
   const buttons = () => node.find("button");
   const press = (label) => buttons().find((b) => b.textContent === label).listeners.click();
-  return { calls, node, buttons, press, labels: () => buttons().map((b) => b.textContent) };
+  const again = () => slotNode({ item: { ...item, ...extra }, next: false }, () => {}, () => {});
+  return { calls, node, again, buttons, press, labels: () => buttons().map((b) => b.textContent) };
 }
 const taps = (calls) => calls.map(([, args]) => args.tap);
 const settle = () => new Promise((r) => setTimeout(r, 30));
@@ -304,6 +305,33 @@ test("the reveal shows the turn's date and Key wrong", async () => {
   assert.ok(node.text.includes("13 November"), node.text);
   assert.ok(labels().includes("Key wrong"));
   assert.ok(!labels().includes("Not now"));
+});
+
+test("a fresh Quiz's reveal shows the turn's date from `at`", async () => {
+  const { node, press } = await slotCard("c6", { kind: "fresh", at: Date.UTC(2026, 10, 19, 12) });
+  press("A");
+  assert.ok(node.text.includes("19 November"), node.text);
+});
+
+const stored = ["--- ui/settings.rs", "@@ -1,2 +1,2 @@", "-old line", "+new line", "--- core/lib.rs", "@@ -5 +5 @@", "+other", ""].join("\n");
+
+test("a pick draws the item's stored hunk in place, a caption and code per file, with no git read and no hunk_opened", async () => {
+  const { calls, again, press } = await slotCard("c7", { hunk: stored });
+  press("A");
+  await settle();
+  // Home redraws the slot after the pick.
+  const node = again();
+  const pres = node.find("pre");
+  assert.equal(pres.length, 2);
+  assert.ok(pres[0].textContent.includes("+new line") && !pres[0].textContent.includes("other"), pres[0].textContent);
+  assert.ok(node.text.includes("ui/settings.rs") && node.text.includes("core/lib.rs"), node.text);
+  assert.deepEqual(calls.map(([c]) => c).filter((c) => c === "turn_file_hunk" || c === "hunk_opened"), []);
+});
+
+test("an item with no stored hunk shows no hunk block", async () => {
+  const { again, press } = await slotCard("c8", { hunk: undefined });
+  press("A");
+  assert.equal(again().find("pre").length, 0);
 });
 
 // Clear landed (#244), a state machine on an injected clock (prior art hover.test.mjs).

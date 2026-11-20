@@ -642,3 +642,4 @@ body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
 .pane.home .slot-card .evidence-fail { font-size: var(--size-xs); color: var(--faint); background: none; box-shadow: none; padding: var(--sp-3) 0 0; }
 .pane.home .slot-card .evidence-edit, .pane.home .slot-card .ask-about { display: none; }
 .pane.home .slot-card .evidence-hunk { background: var(--bg); font: var(--size-xs)/1.5 var(--mono); padding: var(--sp-3) var(--sp-5); }
+.pane.home .slot-card .evidence-caption { margin: var(--sp-3) 0 0; font-size: var(--size-xs); color: var(--faint); }

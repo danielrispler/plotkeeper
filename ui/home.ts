@@ -8,7 +8,7 @@ import { childrenOf, deleting, glyph, item, row, secondLine, selecting, sessionN
 import { logo, logoKey } from "./logos.js";
 import { foundWorkspaces, lastSegment, sessionProjectName } from "./workspaces.js";
 import { lastHeadline } from "./story.js";
-import { evidenceRows, fileRow, openHunk } from "./evidence.js";
+import { hunkFiles } from "./ask.js";
 import { codeTarget, followToCode } from "./selection.js";
 import { startLast } from "./picker.js";
 import { closePane, redrawHome } from "./panes.js";
@@ -34,7 +34,6 @@ export function resetHome(state: HomeState = homeState) {
   state.quiet = false;
   state.held = null;
   // What was marked on screen belongs to the visit, so the sets do not grow for the whole session.
-  hunkShown.clear();
   shownWritten.clear();
 }
 
@@ -126,7 +125,8 @@ export function slotNode(slot: Slot, redraw: () => void, reask: () => void): HTM
     one.textContent = label;
     return one;
   };
-  const date = item.kind === "retest" && item.of_at ? new Date(item.of_at).toLocaleDateString("en-GB", { day: "numeric", month: "long" }) : null;
+  const when = item.kind === "retest" ? item.of_at : item.kind === "fresh" ? item.at : null;
+  const date = when ? new Date(when).toLocaleDateString("en-GB", { day: "numeric", month: "long" }) : null;
   const region = quizRegion(item.id, quiz, [], {
     record: tap,
     explain: () => invoke("ask", { session: item.session_id, item: quizItem(quiz), question: "I did not get this yet. Explain more." }),
@@ -171,29 +171,32 @@ export function slotNode(slot: Slot, redraw: () => void, reask: () => void): HTM
   return wrap;
 }
 
-// Under an answer's reveal (#243): the link to the code the Quiz was about, and that turn's first hunk expanded in place when it has one.
-// A Retest names the turn of its first Quiz. Nothing when the session or its turn is gone.
-const hunkShown = new Set<string>();
+// Under an answer's reveal (#243): the link to the code the Quiz was about, and the Quiz's stored hunk in place, compact: each file as a
+// faint caption and its code lines. The hunk is the item's own text, so no git read and no `hunk_opened`: a hunk counts as opened only
+// on Daniel's own action. A Retest names the turn of its first Quiz. No link when the session or its turn is gone; no hunk without text.
 function answerCode(item: Learning): HTMLElement[] {
   if (item.kind === "done") return [];
   const quizId = item.kind === "retest" ? item.of : item.id;
+  const stored = item.hunk ?? "";
   const session = studio.listed.find((s) => s.id === item.session_id);
-  const target = session && codeTarget(session.turns, quizId);
-  if (!session || !target) return [];
-  const link = pressable(text("button", "See the code", "quiz-code-link"), false, () => void followToCode(session.id, quizId));
-  link.title = "Open the turn, and its change, in the session";
-  const turn = session.turns[target.turn];
-  const row = target.file && evidenceRows({ files: turn.files, checks: [] }).find((r) => r.file === target.file);
-  if (!target.file || !row) return [link];
-  // The hunk opens once per item; Daniel may fold it, and a redraw keeps that.
-  if (!hunkShown.has(item.id)) {
-    hunkShown.add(item.id);
-    openHunk(session.id, target.turn, target.file, "home ");
+  const out: HTMLElement[] = [];
+  if (session && codeTarget(session.turns, quizId, stored)) {
+    const link = pressable(text("button", "See the code", "quiz-code-link"), false, () => void followToCode(session.id, quizId, stored));
+    link.title = "Open the turn, and its change, in the session";
+    out.push(link);
   }
-  const hunk = document.createElement("ul");
-  hunk.className = "evidence-rows";
-  hunk.append(fileRow(session.id, target.turn, row, "home ", turn.ended_at != null));
-  return [link, hunk];
+  const files = hunkFiles(stored);
+  if (files.length) {
+    const hunk = document.createElement("ul");
+    hunk.className = "evidence-rows";
+    for (const file of files) {
+      const li = document.createElement("li");
+      li.append(text("p", file.path, "evidence-caption"), text("pre", file.lines, "evidence-hunk"));
+      hunk.append(li);
+    }
+    out.push(hunk);
+  }
+  return out;
 }
 
 // The item the last draw put in the slot, unanswered, whose `shown` is still to be written.
