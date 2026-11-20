@@ -17,9 +17,11 @@ concurrency:
 permissions:
   contents: read
 
+# A pull request from an `issue-*` branch skips both jobs: the push to that branch already runs them.
 jobs:
   macos:
     # The studio is a Tauri app built and used on macOS only.
+    if: github.event_name == 'push' || !startsWith(github.head_ref, 'issue-')
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
@@ -34,9 +36,27 @@ jobs:
         with:
           rustflags: ""
           cache-workspaces: . -> target
+      # `check` runs the Rust tests with nextest.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
       - run: npm ci
       # The same command an agent runs locally (package.json, `check`).
       - run: npm run check
-      # Every snap fixture rendered in the runner's Chrome; it fails on an uncaught page error. Left out of `check`,
-      # which stays fast for agents running it in parallel (#144).
+
+  # Every snap fixture rendered in the runner's Chrome; it fails on an uncaught page error. Left out of `check`,
+  # which stays fast for agents running it in parallel (#144), and a job of its own, as it needs only the built UI.
+  snap:
+    if: github.event_name == 'push' || !startsWith(github.head_ref, 'issue-')
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npm run build
       - run: npm run snap:all
