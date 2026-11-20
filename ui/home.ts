@@ -318,13 +318,14 @@ export function clearing(
 // The window's one Clear: its hidden rows are `homeState.cleared`, the toast offers Undo, and the shell is told which sessions a quit
 // would commit (`clearing`). A commit is today's Delete: the terminal ended, the row dropped, the cards kept.
 const stillLanded = (id: string) => studio.listed.find((s) => s.id === id && showsLanded(s.state, s.landed));
-// A terminal is ended once, and never while a session that is not being cleared still runs in it: an ended session keeps the terminal
-// a later one may now use (#244).
+// Clear's and Delete's one rule (#244, #270): a terminal is in use while a session that is not leaving the list, and not ended, runs in
+// it. An ended session keeps the terminal a later one may now use.
+export const terminalInUse = (terminal: string, listed: Session[], leaving: (id: string) => boolean) =>
+  listed.some((s) => s.terminal === terminal && s.state !== "ended" && !leaving(s.id));
+// A terminal is ended once, and never while a session that is not being cleared still runs in it.
 const closed = new Set<string>();
 const terminalFree = (terminal: string) =>
-  !closed.has(terminal) &&
-  !studio.listed.some((s) => s.terminal === terminal && s.state !== "ended" && !landedClear.hidden.has(s.id)) &&
-  (closed.add(terminal), true);
+  !closed.has(terminal) && !terminalInUse(terminal, studio.listed, (id) => landedClear.hidden.has(id)) && (closed.add(terminal), true);
 export const landedClear = clearing(
   { set: (run, ms) => setTimeout(run, ms), clear: (id) => clearTimeout(id as number) },
   {

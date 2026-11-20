@@ -444,6 +444,18 @@ test("a second Clear inside the window restarts it and keeps the first rows hidd
   assert.deepEqual(deleted, ["a", "b"]);
 });
 
+// One rule for Clear and Delete (#270): an ended session keeps its terminal, which a later session may now run in.
+test("a terminal is in use while a session not leaving, and not ended, runs in it", async () => {
+  const { terminalInUse } = await import("../../dist/home.js");
+  const old = live("old", "ended", { terminal: "t1" });
+  const now = live("now", "running", { terminal: "t1" });
+  const leaving = (ids) => (id) => ids.includes(id);
+  assert.equal(terminalInUse("t1", [old, now], leaving(["old"])), true);
+  assert.equal(terminalInUse("t1", [old, now], leaving(["old", "now"])), false);
+  assert.equal(terminalInUse("t1", [old, live("gone", "ended", { terminal: "t1" })], leaving(["old"])), false);
+  assert.equal(terminalInUse("t1", [old, live("other", "running", { terminal: "t2" })], leaving(["old"])), false);
+});
+
 test("Home hides the cleared rows, and shows the Landed part again after Undo", () => {
   const sessions = [landed("a"), landed("b")];
   const hidden = { expanded: new Set(), cleared: new Set(["a", "b"]) };
