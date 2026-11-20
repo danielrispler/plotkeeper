@@ -12,7 +12,7 @@ use crate::{
     write_goal, write_name,
 };
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, VecDeque},
     sync::{Arc, Mutex},
     thread,
 };
