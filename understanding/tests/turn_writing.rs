@@ -811,3 +811,75 @@ fn a_turn_opened_in_an_ended_session_gets_its_summary_and_design_and_its_queue_e
     );
     assert_eq!(threaded.queues(), 0, "no queue is left behind");
 }
+
+/// A writer whose names take a moment, telling `events` when each starts and ends.
+struct Slow(Events);
+
+impl CardWriter for Slow {
+    fn reply(&self, request: &CardRequest, earlier: &[String]) -> Result<String, String> {
+        FakeWriter.reply(request, earlier)
+    }
+
+    fn more(&self, request: &CardRequest, card: &Card) -> Result<String, String> {
+        FakeWriter.more(request, card)
+    }
+
+    fn goal(&self, prompts: &[&str]) -> Result<String, String> {
+        FakeWriter.goal(prompts)
+    }
+
+    fn design(&self, sources: &[(String, String)]) -> Result<String, String> {
+        FakeWriter.design(sources)
+    }
+
+    fn summarize(
+        &self,
+        setup: &SummarySetup,
+        request: &SummaryRequest,
+        earlier: &[TurnSummary],
+    ) -> Result<String, String> {
+        FakeWriter.summarize(setup, request, earlier)
+    }
+
+    fn name(
+        &self,
+        setup: &SummarySetup,
+        prompt: &str,
+        response: Option<&str>,
+    ) -> Result<String, String> {
+        self.0.lock().unwrap().push(format!("start {prompt}"));
+        thread::sleep(Duration::from_millis(40));
+        self.0.lock().unwrap().push(format!("end {prompt}"));
+        FakeWriter.name(setup, prompt, response)
+    }
+}
+
+#[test]
+fn two_jobs_queued_for_an_ended_session_run_one_at_a_time_in_order() {
+    let day = Day::new();
+    let events = Events::default();
+    let threaded = TurnWriting::new(
+        day.core.clone(),
+        day.store.clone(),
+        Arc::new(Slow(events.clone())),
+        Offers::beside(&day.data.join("events.jsonl")),
+        day.recorder.clone(),
+    );
+    threaded.prune(&Default::default());
+    for prompt in ["one", "two"] {
+        threaded.name(NameRequest {
+            session_id: "s1".into(),
+            prompt: prompt.into(),
+            response: None,
+        });
+    }
+    for _ in 0..1000 {
+        if events.lock().unwrap().len() == 4 && threaded.queues() == 0 {
+            break;
+        }
+        thread::sleep(Duration::from_millis(2));
+    }
+    let seen = events.lock().unwrap().clone();
+    assert_eq!(seen, ["start one", "end one", "start two", "end two"]);
+    assert_eq!(threaded.queues(), 0);
+}

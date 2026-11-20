@@ -13,7 +13,7 @@ use crate::{
 };
 use std::{
     collections::{HashMap, HashSet, VecDeque},
-    sync::{Arc, Mutex, mpsc},
+    sync::{Arc, Mutex},
     thread,
 };
 use studio_core::{Backfill, CardRequest, NameRequest, Session, Studio, SummaryRequest};
@@ -42,17 +42,11 @@ pub type Writer = Arc<dyn CardWriter + Send + Sync>;
 pub type Core = Arc<Mutex<Studio>>;
 
 enum Queues {
-    /// One thread for each session with jobs.
-    Threads(Mutex<Queued>),
+    /// The jobs waiting for each session, which has one thread while it has any: the thread ends when
+    /// its session's jobs are done, under the lock that adds a job, so no job is lost to an ending thread.
+    Threads(Arc<Mutex<HashMap<String, VecDeque<Job>>>>),
     /// Jobs wait for [`TurnWriting::run_queued`].
     Stepped(Mutex<VecDeque<Job>>),
-}
-
-/// The queues' senders, and the sessions the last prune found live, if it ran.
-#[derive(Default)]
-struct Queued {
-    senders: HashMap<String, mpsc::Sender<Job>>,
-    live: Option<HashSet<String>>,
 }
 
 /// Turn writing: see the module's description.
@@ -93,7 +87,7 @@ impl TurnWriting {
         offers: Offers,
         effects: Arc<dyn Effects>,
     ) -> TurnWriting {
-        let queues = Queues::Threads(Mutex::default());
+        let queues = Queues::Threads(Arc::default());
         Self::build(core, store, writer, offers, effects, queues)
     }
 
@@ -235,19 +229,14 @@ impl TurnWriting {
     /// How many sessions have a queue, with its thread, now.
     pub fn queues(&self) -> usize {
         match &self.queues {
-            Queues::Threads(queues) => queues.lock().unwrap().senders.len(),
+            Queues::Threads(queues) => queues.lock().unwrap().len(),
             Queues::Stepped(_) => 0,
         }
     }
 
-    /// The sessions that are live: a queue of any other lets its jobs finish, then ends its thread.
-    pub fn prune(&self, live: &HashSet<String>) {
-        if let Queues::Threads(queues) = &self.queues {
-            let mut queues = queues.lock().unwrap();
-            queues.senders.retain(|key, _| live.contains(key));
-            queues.live = Some(live.clone());
-        }
-    }
+    /// The sessions that are live. A session's queue ends with its last job, so there is nothing to
+    /// end here.
+    pub fn prune(&self, _live: &HashSet<String>) {}
 
     fn write(&self, mut request: CardRequest, card: bool, live: bool) {
         let state = self.state.clone();
@@ -271,17 +260,28 @@ impl TurnWriting {
         match &self.queues {
             Queues::Stepped(jobs) => jobs.lock().unwrap().push_back(job),
             Queues::Threads(queues) => {
-                let mut queues = queues.lock().unwrap();
-                let queue = queues.senders.entry(id.clone()).or_insert_with(|| {
-                    let (queue, jobs) = mpsc::channel::<Job>();
-                    thread::spawn(move || jobs.into_iter().for_each(|job| job()));
-                    queue
-                });
-                let _ = queue.send(job);
-                // A session that ended gets its job, then no queue: the thread ends when the job is done.
-                if queues.live.as_ref().is_some_and(|live| !live.contains(&id)) {
-                    queues.senders.remove(&id);
+                let mut waiting = queues.lock().unwrap();
+                if let Some(jobs) = waiting.get_mut(&id) {
+                    jobs.push_back(job);
+                    return;
                 }
+                waiting.insert(id.clone(), VecDeque::from([job]));
+                let queues = queues.clone();
+                thread::spawn(move || {
+                    loop {
+                        let job = {
+                            let mut waiting = queues.lock().unwrap();
+                            match waiting.get_mut(&id).and_then(VecDeque::pop_front) {
+                                Some(job) => job,
+                                None => {
+                                    waiting.remove(&id);
+                                    return;
+                                }
+                            }
+                        };
+                        job();
+                    }
+                });
             }
         }
     }
