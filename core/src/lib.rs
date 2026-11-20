@@ -24,11 +24,11 @@ mod turn_files;
 mod work;
 pub use agy::{CAPABILITIES as AGY_CAPABILITIES, Drift as AgyDrift, DriftKind as AgyDriftKind};
 pub use ask::{Anchor, AskFact, AskFacts, AskSection};
+use checks::matched;
 pub use checks::{
     Check, CheckLists, Listed, Output as CheckOutput, Run as CheckRun, Status as CheckStatus,
     output as check_output,
 };
-use checks::matched;
 pub use claude::CAPABILITIES as CLAUDE_CAPABILITIES;
 pub use event::{Capabilities, TranscriptFormat};
 use event::{Event, Happened, Origin, Start, ToolKind};
@@ -2712,6 +2712,7 @@ impl Studio {
         // The card a long check's start requests, which its line keeps.
         let mut check_card = None;
         let touches = self.touches(&event);
+        let command = event.tool().and_then(|t| t.command.as_deref());
         let called = if event.tool().is_some() {
             self.named_roots(&event)
         } else {
@@ -3052,6 +3053,17 @@ impl Studio {
             match happened {
                 Happened::CommandBlocked { tool, id, reason } => {
                     let command = tool.command.clone().unwrap_or_default();
+                    // The blocked call never ran, so it is no run of a check.
+                    session.check_cards.retain(|c| c.call != *id);
+                    session.ledger.block(event.agent_id.as_deref(), id);
+                    let turn = session.ledger.row(event.agent_id.as_deref(), id);
+                    let turn = turn
+                        .and_then(|r| r.turn)
+                        .filter(|t| *t < session.turns.len());
+                    if let Some(turn) = turn {
+                        let list = self.check_lists.of(&session.cwd);
+                        session.recheck(turn, list, &self.roots, &self.durations);
+                    }
                     // The same command blocked again after Allow is its card's, not a new one. A running
                     // card takes only the block of its own retry: another call's is a card of its own.
                     let again = session
@@ -3064,9 +3076,8 @@ impl Studio {
                             BlockedStatus::Running => c.run.as_ref() == Some(id),
                             _ => false,
                         });
-                    // The blocked call never ran: it leaves the running calls, its step and its check line.
+                    // The blocked call never ran: it leaves the running calls and its step.
                     session.running.retain(|c| c.id.as_ref() != Some(id));
-                    session.checks.retain(|l| l.call != *id);
                     match &event.agent_id {
                         Some(agent) => {
                             let mut agents = session.agents.iter_mut();
@@ -3182,18 +3193,19 @@ impl Studio {
                     for (task, status) in event.reported() {
                         let (task, status) = (task.as_str(), status.as_str());
                         // Its turn's checks are read again with what the notification reports.
-                        let turn = session.ledger.report(task, status).flatten();
-                        if let Some(turn) = turn.filter(|t| *t < session.turns.len()) {
-                            let list = self.check_lists.of(&session.cwd);
-                            session.recheck(turn, list, &self.roots, &self.durations);
-                        }
-                        let running = session.checks.iter_mut().filter(|l| l.ended_at.is_none());
-                        let mut lines = running.filter(|l| l.task.as_deref() == Some(task));
-                        if let Some(line) = lines.next() {
-                            line.end(status != "completed", at, &mut self.durations);
-                            if !matches!(status, "completed" | "failed") {
-                                line.passed = None;
+                        let row = session.ledger.report(task, status, at).cloned();
+                        let list = self.check_lists.of(&session.cwd);
+                        if let Some(row) = row {
+                            let key = checks::key(list, row.command.as_deref().unwrap_or_default());
+                            let ran = row.began().zip(key).filter(|_| row.agent.is_none());
+                            if let (Some((began, key)), "completed") = (ran, status) {
+                                let runs = self.durations.entry(key).or_default();
+                                runs.push(at.saturating_sub(began));
                             }
+                            if let Some(turn) = row.turn.filter(|t| *t < session.turns.len()) {
+                                session.recheck(turn, list, &self.roots, &self.durations);
+                            }
+                            session.settle_cards(list);
                         }
                     }
                     session.work.prompt(prompt, at);
@@ -3341,19 +3353,14 @@ impl Studio {
                         session
                             .work
                             .call(tool, at, self.check_lists.of(&session.cwd));
-                        // A check's line runs from its start (danielrispler/Falinks#461, decision 13).
-                        if let Some(start) = &start {
-                            let call = event.call_id();
-                            let mut line = CheckLine::new(
-                                &start.command,
-                                start.counts,
-                                call,
-                                at,
-                                start.typical,
-                            );
-                            line.card = check_card.take();
-                            line.turn = session.current_turn();
-                            session.checks.push(line);
+                        // The card a long check's start requested is settled by its result.
+                        if let Some(card) = check_card.take() {
+                            session.check_cards.push(CheckCard {
+                                card,
+                                call: event.call_id().into(),
+                                ended: false,
+                                passed: None,
+                            });
                         }
                     }
                     let call = Call {
@@ -3533,45 +3540,19 @@ impl Studio {
                     if own {
                         session.agent.step_done(event.call_id(), at);
                     }
-                    // A check gets its line whether it passed or failed; one that did not run loses
-                    // the line its start gave it. A child's checks are its own, so they add no line.
-                    let command = tool.command.as_deref().unwrap_or_default();
+                    // A check's time counts toward its typical duration when it ran and did not fail.
                     let list = self.check_lists.of(&session.cwd);
-                    if own && tool.kind == ToolKind::Command && matched(list, command).is_some() {
-                        let index = session
-                            .checks
-                            .iter()
-                            .position(|l| l.call == event.call_id());
-                        let index = match index {
-                            _ if !ran => {
-                                session.checks.retain(|l| l.call != event.call_id());
-                                None
-                            }
-                            Some(index) => Some(index),
-                            // The hooks are async, so its result can land before its start.
-                            None => {
-                                let start = at.saturating_sub(event.took().unwrap_or_default());
-                                let mut line = CheckLine::new(
-                                    command,
-                                    exit_code_counts(list, command),
-                                    event.call_id(),
-                                    start,
-                                    typical,
-                                );
-                                line.turn = session.current_turn();
-                                session.checks.push(line);
-                                Some(session.checks.len() - 1)
-                            }
-                        };
-                        let task = event.background_task().map(String::from);
-                        if let Some(line) = index.map(|i| &mut session.checks[i]) {
-                            // In the background it runs on until its notification.
-                            match task {
-                                Some(task) => line.task = Some(task),
-                                None => line.end(failed, at, &mut self.durations),
-                            }
-                        }
+                    let row = session
+                        .ledger
+                        .row(event.agent_id.as_deref(), event.call_id());
+                    let key = checks::key(list, tool.command.as_deref().unwrap_or_default());
+                    let took = row.and_then(|r| r.began().zip(r.finished()));
+                    let counted = own && ran && !failed && row.is_some_and(|r| !r.background);
+                    if let (Some(key), Some((began, ended)), true) = (key, took, counted) {
+                        let runs = self.durations.entry(key).or_default();
+                        runs.push(ended.saturating_sub(began));
                     }
+                    session.settle_cards(list);
                 }
                 _ => {}
             }

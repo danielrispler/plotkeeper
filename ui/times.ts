@@ -1,7 +1,7 @@
 // Times (danielrispler/Falinks#473): how long a session, its turn, its step and its checks have run, from the core's
 // timestamps. Running times count up once a second.
 
-import type { CheckLine, Phase, Session, Span, Work } from "./types.js";
+import type { ListedCheck, Phase, Session, Span, Work } from "./types.js";
 
 // A duration, such as "45s", "12m" or "2h 05m".
 export function duration(ms: number): string {
@@ -37,9 +37,9 @@ export function times(session: Pick<Session, "state" | "started_at" | "last_even
 export const timeNode = ([title, draw]: Time) => Object.assign(counts(document.createElement("span"), draw), { title });
 
 // A check's time: how long it took, or while it runs, against its typical time ("3m of usually 7m").
-export function checkTime(line: CheckLine, now: number): string {
+export function checkTime(line: ListedCheck, now: number): string {
   const took = duration((line.ended_at ?? now) - line.started_at);
-  return line.ended_at === null && line.typical_ms !== null ? `${took} of usually ${duration(line.typical_ms)}` : took;
+  return line.status === "running" && line.typical_ms !== null ? `${took} of usually ${duration(line.typical_ms)}` : took;
 }
 
 const phaseNames: Record<Phase, string> = {

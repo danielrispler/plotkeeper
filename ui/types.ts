@@ -32,16 +32,14 @@ export type Identity = { issue: number | null; branch: string | null; pr: number
 export type SessionState = "needs_you" | "running" | "your_turn" | "idle" | "ended";
 // When something started and ended, in Unix milliseconds; `end` is null while it runs.
 export type Span = { start: number; end: number | null };
-// A check that runs or ran, oldest first: a pass or fail line once it ends. `passed` is null when its
-// exit code is masked, and while it runs. `typical_ms` is its typical duration when it started (danielrispler/Falinks#473).
-export type CheckLine = {
-  command: string;
-  passed: boolean | null;
+// A check the feed lists under its turn (#268): the latest run of a check of the session's own agent, while it runs or
+// after it failed. `ended_at` is null while it runs; `typical_ms` is its command's typical duration.
+export type ListedCheck = {
+  statement: string;
+  status: CheckStatus;
   started_at: number;
   ended_at: number | null;
   typical_ms: number | null;
-  // The turn it started in, an index into `Session.turns` (danielrispler/Falinks#574).
-  turn: number | null;
 };
 // Who spawned a subagent: the session's own agent, another subagent, or no known spawn.
 export type Parent = "session" | "unattached" | { agent: string };
@@ -103,6 +101,8 @@ export type Turn = {
   id: string | null;
   message: string | null;
   checks: Check[];
+  // The checks its feed block lists, newest first (the core's rule, not the window's).
+  listed: ListedCheck[];
   files: TurnFiles | null;
 };
 // A file that differs between a turn's trees: its worktree's root, its path from there (a rename's new one),
@@ -166,7 +166,6 @@ export type Session = {
   turn_span: Span | null;
   step_span: Span | null;
   state: SessionState;
-  checks: CheckLine[];
   agents: Subagent[];
   asker: Asker | null;
   prompts: Prompt[];

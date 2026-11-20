@@ -5,7 +5,7 @@
 // Git line with several tokens. Times are relative to the moment a fixture renders.
 
 import type { Ask } from "../../ui/answer.ts";
-import type { CheckLine, CheckStatus, Decision, OpenItem, Quiz, Session, SessionState, StoredCard, Subagent, Turn, TurnFile, TurnSummary } from "../../ui/types.ts";
+import type { ListedCheck, CheckStatus, Decision, OpenItem, Quiz, Session, SessionState, StoredCard, Subagent, Turn, TurnFile, TurnSummary } from "../../ui/types.ts";
 import { base, type Fixture } from "./base.ts";
 
 const MIN = 60e3;
@@ -94,12 +94,12 @@ const card = (id: string, answered: boolean): StoredCard => ({
   check_result: null,
 });
 
-const check = (command: string, passed: boolean, startedAgo: number, tookMs: number, turn: number): CheckLine => ({
-  command, passed, started_at: Date.now() - startedAgo, ended_at: Date.now() - startedAgo + tookMs, typical_ms: tookMs, turn,
+const listed = (statement: string, status: CheckStatus, startedAgo: number, tookMs: number, typical_ms: number | null = null): ListedCheck => ({
+  statement, status, started_at: Date.now() - startedAgo, ended_at: status === "running" ? null : Date.now() - startedAgo + tookMs, typical_ms,
 });
 
 const file = (path: string, added: number, removed: number, agent: string | null = null): TurnFile => ({ root: cwd, path, from: null, added, removed, agent });
-const run = (status: CheckStatus, call: string, exit_code: number) => ({ command: "cargo", statement: "cargo", status, exit_code, call, agent: null, started_at: null });
+const run = (status: CheckStatus, call: string, exit_code: number) => ({ command: "cargo", statement: "cargo", status, exit_code, call, agent: null, started_at: null, ended_at: null });
 
 const helper = (id: string, name: string, asked: string, type: string, result: string, turn: number, ago: number, running = false): Subagent => ({
   id, parent: "session", kind: "helper", name, asked, agent_type: type, status: running ? "running" : "completed",
@@ -134,6 +134,10 @@ const session = (state: SessionState, { running = false, question = false } = {}
     message: "Done.",
     // The newest turns changed files (#113); the second turn ends with a failed check, which its folded line marks (#117).
     files: i >= 3 ? { files: [file("ui/style.css", 14, 3, "claude"), file("ui/list.ts", 22, 9, "claude"), file("ui/tests/rows.test.mjs", 6, 6)], merged: 0 } : null,
+    // The feed lists the newest turn's check that runs or failed (#268).
+    listed: i !== 4 ? [] : running
+      ? [listed("npm run check", "running", 3 * MIN, 0, 5 * MIN + 40e3)]
+      : [listed("cargo clippy --locked --workspace --all-targets -- -D warnings", "failed", 38 * MIN, 41e3)],
     checks: i === 4
       ? [
           { suite: "cargo clippy", worktree: "/r", foreign: false, status: "passed", retries: 1, runs: [run("failed", "k1", 101), run("passed", "k2", 0)] },
@@ -156,11 +160,7 @@ const session = (state: SessionState, { running = false, question = false } = {}
     prompt_name: "Row controls", resume_id: "s1", permission_mode: "auto", started_mode: "auto", cleared: [], asks_before_closing: state !== "idle",
     landed: false, last_step: ended ? { tool: "Bash", detail: "Run the full check", command: "npm run check" } : stepTools,
     started_at: now - 5 * 60 * MIN, last_event_at: now - 30e3, turn_span: running ? { start: now - 14 * MIN, end: null } : null,
-    step_span: running ? { start: now - 90e3, end: null } : null, state, checks: [
-      check("cargo clippy --locked --workspace --all-targets -- -D warnings", false, 38 * MIN, 41e3, 4),
-      check("cargo clippy --locked --workspace --all-targets -- -D warnings", true, 22 * MIN, 38e3, 4),
-      check("npm run check", true, 20 * MIN, 5 * MIN + 40e3, 4),
-    ].slice(0, running ? 1 : 3), agents: (running ? (all: Subagent[]) => all.filter((a) => a.id !== "a2") : (all: Subagent[]) => all)([
+    step_span: running ? { start: now - 90e3, end: null } : null, state, agents: (running ? (all: Subagent[]) => all.filter((a) => a.id !== "a2") : (all: Subagent[]) => all)([
       helper("a2", "Write tests for the fold toggle", "Write node tests for the fold toggle in ui/list.ts", "general-purpose", "Added 4 tests; all pass.", 1, 4 * 60 * MIN - 5 * MIN),
       helper("a3", "Find where the delete is styled", "Find every rule that styles `.delete`.", "Explore", "Two rules in `ui/style.css`, none in `ui/list.ts`.", 3, 2 * 60 * MIN),
       helper("a1", "Review the diff", "Review the diff on this branch and list anything that breaks the token rules.", "Explore", "No raw colours; two spacing values bypass the tokens.", 4, 30 * MIN, running),
@@ -192,7 +192,7 @@ const others = () => {
   const now = Date.now();
   const other = (id: string, name: string, state: SessionState, extra: Partial<Session> = {}): Session => ({
     ...session("your_turn"), id, resume_id: id, prompt_name: name.slice(name.indexOf("·") + 2), identity: { issue: Number(name.slice(1, 3)), branch: null, pr: null, worktree: "", name },
-    cwd: `/Users/danielrispler/work/plotkeeper/.claude/worktrees/issue-${name.slice(1, 3)}`, folder_name: `issue-${name.slice(1, 3)}`, state, checks: [], agents: [], questions: [], turns: [],
+    cwd: `/Users/danielrispler/work/plotkeeper/.claude/worktrees/issue-${name.slice(1, 3)}`, folder_name: `issue-${name.slice(1, 3)}`, state, agents: [], questions: [], turns: [],
     asker: null, unseen: false, line: undefined, landed: false, started_at: now - 3600e3, ...extra,
     transcript: { ...session("your_turn").transcript, context: { tokens: 120000, window: 1000000, share: 12, left: 88 } },
   });

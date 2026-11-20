@@ -1401,6 +1401,7 @@ fn check(status: CheckStatus, retries: u32, exit_code: i32) -> Check {
         call: "c1".into(),
         agent: None,
         started_at: None,
+        ended_at: None,
     };
     Check {
         suite: "npm run check".into(),

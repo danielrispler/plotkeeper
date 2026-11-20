@@ -4,7 +4,7 @@
 //! minutes, then a session that runs them in the foreground in 7, in the background in 8.5 (launch
 //! to its `<task-notification>`), and once more, still running at the log's end.
 
-use studio_core::{Span, Studio};
+use studio_core::{CheckRun, CheckStatus, Span, Studio};
 
 const TIMES: &str = include_str!("fixtures/times.jsonl");
 const SESSION: &str = "0b1c2d3e-0000-4a00-8000-00000000b002";
@@ -15,6 +15,17 @@ const MIN: u64 = 60_000;
 /// The studio after the fixture's first `n` lines.
 fn first(n: usize) -> Studio {
     Studio::replayed(TIMES.lines().take(n))
+}
+
+/// The runs of the session's turns' checks, oldest first.
+fn runs(studio: &Studio) -> Vec<CheckRun> {
+    let session = studio.session(SESSION).unwrap();
+    let mut runs: Vec<CheckRun> = (session.turns.iter())
+        .flat_map(|t| &t.checks)
+        .flat_map(|c| c.runs.clone())
+        .collect();
+    runs.sort_by_key(|r| r.started_at);
+    runs
 }
 
 fn span(start: u64, end: Option<u64>) -> Option<Span> {
@@ -50,37 +61,45 @@ fn session_turn_and_step_times_match_the_fixtures_timestamps() {
 fn a_backgrounded_check_runs_from_its_launch_to_its_completion_notification() {
     // Its call returns in about a second, and the check still runs.
     let studio = first(16);
-    let line = &studio.session(SESSION).unwrap().checks[1];
+    let run = &runs(&studio)[1];
     assert_eq!(
-        (line.started_at, line.ended_at, line.passed),
-        (T1 + 600_000, None, None)
+        (run.started_at, run.ended_at, run.status),
+        (Some(T1 + 600_000), None, CheckStatus::Running)
     );
 
     let studio = first(17);
-    let line = &studio.session(SESSION).unwrap().checks[1];
-    assert_eq!(line.command, CHECKS);
-    assert_eq!(line.started_at, T1 + 600_000);
-    assert_eq!(line.ended_at, Some(T1 + 1_110_000));
-    assert_eq!(line.passed, Some(true));
+    let run = &runs(&studio)[1];
+    assert_eq!(run.statement, CHECKS);
+    assert_eq!(run.started_at, Some(T1 + 600_000));
+    assert_eq!(run.ended_at, Some(T1 + 1_110_000));
+    assert_eq!(run.status, CheckStatus::Passed);
 }
 
 #[test]
 fn typical_durations_come_from_history_and_a_running_check_shows_them() {
     // The earlier session's 6 and 8 minutes, before this session ran any.
-    assert_eq!(first(7).typical(CHECKS), Some(6 * MIN));
+    assert_eq!(first(7).typical("", CHECKS), Some(6 * MIN));
     // Then 6, 7, 8 and 8.5 minutes, the backgrounded run's included.
     let studio = Studio::replayed(TIMES.lines());
-    assert_eq!(studio.typical(CHECKS), Some(7 * MIN));
-    assert_eq!(studio.typical("cargo test"), None);
+    assert_eq!(studio.typical("", CHECKS), Some(7 * MIN));
+    assert_eq!(studio.typical("", "cargo test"), None);
 
-    let checks = &studio.session(SESSION).unwrap().checks;
-    let running = checks.last().unwrap();
+    let last = runs(&studio).pop().unwrap();
     assert_eq!(
-        (running.started_at, running.ended_at),
-        (T1 + 1_140_000, None)
+        (last.started_at, last.ended_at),
+        (Some(T1 + 1_140_000), None)
     );
+    let listed = &studio
+        .session(SESSION)
+        .unwrap()
+        .turns
+        .last()
+        .unwrap()
+        .listed;
+    let [running] = &listed[..] else {
+        panic!("one listed check: {listed:?}");
+    };
+    assert_eq!(running.statement, CHECKS);
     assert_eq!(running.typical_ms, Some(7 * MIN));
-    // The first run had only the earlier session's history.
-    assert_eq!(checks[0].typical_ms, Some(6 * MIN));
-    assert_eq!(checks[0].ended_at, Some(T1 + 440_000));
+    assert_eq!(runs(&studio)[0].ended_at, Some(T1 + 440_000));
 }

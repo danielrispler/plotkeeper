@@ -12,10 +12,10 @@ test("durations read in seconds, minutes, then hours and minutes", () => {
 });
 
 test("a running check shows its time against its typical time; an ended one how long it took", () => {
-  const line = { command: "cargo run --bin ci-checks", passed: null, started_at: 0, ended_at: null, typical_ms: 7 * MIN };
+  const line = { statement: "cargo run --bin ci-checks", status: "running", started_at: 0, ended_at: null, typical_ms: 7 * MIN };
   assert.equal(checkTime(line, 3 * MIN + 10_000), "3m of usually 7m");
   assert.equal(checkTime({ ...line, typical_ms: null }, 3 * MIN), "3m");
-  assert.equal(checkTime({ ...line, ended_at: 8 * MIN + 30_000, passed: true }, 99 * MIN), "8m");
+  assert.equal(checkTime({ ...line, ended_at: 8 * MIN + 30_000, status: "failed" }, 99 * MIN), "8m");
 });
 
 // Each time as its text at `now` and its hover.

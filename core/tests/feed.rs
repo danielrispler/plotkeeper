@@ -51,16 +51,18 @@ fn the_feed_of_turns_opens_by_prompts_ends_by_stops_and_groups_what_started_in_e
     let reply = studio.turn_reply(SESSION, session.turns.len() - 1).unwrap();
     assert!(reply.starts_with(last.message.as_deref().unwrap()));
 
-    // Turns group their checks, subagents and questions by when they started.
-    assert_eq!(session.checks.len(), 9);
-    for check in &session.checks {
+    // Turns hold their checks, and group subagents and questions by when they started.
+    let runs: Vec<_> = (session.turns.iter().enumerate())
+        .flat_map(|(n, t)| t.checks.iter().flat_map(|c| &c.runs).map(move |r| (n, r)))
+        .collect();
+    assert_eq!(runs.len(), 9);
+    for (turn, run) in runs {
         assert_eq!(
-            check.turn,
-            turn_at(session, check.started_at),
+            Some(turn),
+            turn_at(session, run.started_at.unwrap()),
             "{}",
-            check.command
+            run.command
         );
-        assert!(check.turn.is_some());
     }
     for agent in &session.agents {
         assert_eq!(
@@ -74,7 +76,6 @@ fn the_feed_of_turns_opens_by_prompts_ends_by_stops_and_groups_what_started_in_e
     assert_eq!(session.questions.len(), 4);
     assert!(session.questions.iter().all(|q| q.turn.is_some()));
     // The checks fall in three turns, so the feed shows them under those three and no other.
-    let mut turns: Vec<usize> = session.checks.iter().filter_map(|c| c.turn).collect();
-    turns.dedup();
-    assert_eq!(turns.len(), 3);
+    let with_checks = session.turns.iter().filter(|t| !t.checks.is_empty());
+    assert_eq!(with_checks.count(), 3);
 }

@@ -42,7 +42,14 @@ fn starts(ms: u64, id: &str, command: &str) -> String {
 }
 
 /// A call of `agent` that starts at `ms` and ends at `ms + took`, passing or with exit code 1.
-fn runs(ms: u64, took: u64, id: &str, command: &str, agent: Option<&str>, pass: bool) -> Vec<String> {
+fn runs(
+    ms: u64,
+    took: u64,
+    id: &str,
+    command: &str,
+    agent: Option<&str>,
+    pass: bool,
+) -> Vec<String> {
     let start = call(id, command, agent);
     let mut end = start.clone();
     let name = if pass {
@@ -131,7 +138,14 @@ fn a_blocked_check_is_not_listed() {
 #[test]
 fn a_running_check_shows_the_typical_duration_of_its_statement_across_worktrees() {
     let mut lines = runs(1_000, 6 * MIN, "t1", "cargo test", None, true);
-    let mut other = runs(7 * MIN, 8 * MIN, "t2", &format!("cd {OTHER} && cargo test"), None, true);
+    let mut other = runs(
+        7 * MIN,
+        8 * MIN,
+        "t2",
+        &format!("cd {OTHER} && cargo test"),
+        None,
+        true,
+    );
     for l in &mut other {
         let mut event: Value = serde_json::from_str(l).unwrap();
         event["studio_touched_roots"] = json!([OTHER]);
@@ -139,7 +153,11 @@ fn a_running_check_shows_the_typical_duration_of_its_statement_across_worktrees(
     }
     lines.extend(other);
     // Behind a heredoc edit, in a command of its own.
-    lines.push(starts(20 * MIN, "t3", "python3 - <<'EOF'\nprint(1)\nEOF\ncargo test"));
+    lines.push(starts(
+        20 * MIN,
+        "t3",
+        "python3 - <<'EOF'\nprint(1)\nEOF\ncargo test",
+    ));
     let found = listed(lines);
 
     assert_eq!(shown(&found), [("cargo test", CheckStatus::Running)]);
@@ -148,7 +166,14 @@ fn a_running_check_shows_the_typical_duration_of_its_statement_across_worktrees(
 
 #[test]
 fn a_command_of_two_checks_is_timed_by_both_statements_joined() {
-    let mut lines = runs(1_000, 3 * MIN, "t1", "cargo test && cargo clippy", None, true);
+    let mut lines = runs(
+        1_000,
+        3 * MIN,
+        "t1",
+        "cargo test && cargo clippy",
+        None,
+        true,
+    );
     lines.push(starts(10 * MIN, "t2", "cargo test && cargo clippy"));
     lines.push(starts(11 * MIN, "t3", "cargo test"));
     let mut all = vec![prompt()];

@@ -2,10 +2,19 @@
 //! session's check lines (danielrispler/Falinks#369, decision 14). The fixture follows the real payload shapes of the
 //! other fixtures; a check that fails comes as `PostToolUseFailure` with its exit code in `error`.
 
-use studio_core::{CheckLine, Output, Studio};
+use studio_core::{CheckStatus, Output, Studio};
+
+/// A run of a check as the turn's checks tell it: its command, whether it ended, and whether it passed
+/// when its exit code says.
+#[derive(Debug, PartialEq)]
+struct Line {
+    command: String,
+    ended: bool,
+    passed: Option<bool>,
+}
 
 /// What a line shows once its check ended: its command and whether it passed.
-fn shown(lines: Vec<CheckLine>) -> Vec<(String, Option<bool>)> {
+fn shown(lines: Vec<Line>) -> Vec<(String, Option<bool>)> {
     lines.into_iter().map(|l| (l.command, l.passed)).collect()
 }
 
@@ -30,13 +39,27 @@ fn live(log: &str) -> Vec<Vec<Output>> {
     log.lines().map(&mut outputs).collect()
 }
 
-/// The session's check lines once `log` arrived live.
-fn lines(log: &str) -> Vec<CheckLine> {
+/// The runs of the session's turns' checks once `log` arrived live, oldest first.
+fn lines(log: &str) -> Vec<Line> {
     let mut studio = Studio::default();
     log.lines().for_each(|line| drop(studio.apply(line)));
-    studio
-        .session(SESSION)
-        .map_or_else(Vec::new, |s| s.checks.clone())
+    let Some(session) = studio.session(SESSION) else {
+        return Vec::new();
+    };
+    let runs = session.turns.iter().flat_map(|t| &t.checks);
+    let mut runs: Vec<_> = runs.flat_map(|c| &c.runs).collect();
+    runs.sort_by_key(|r| r.started_at);
+    runs.into_iter()
+        .map(|r| Line {
+            command: r.command.clone(),
+            ended: r.status != CheckStatus::Running,
+            passed: match r.status {
+                CheckStatus::Passed => Some(true),
+                CheckStatus::Failed => Some(false),
+                _ => None,
+            },
+        })
+        .collect()
 }
 
 /// Before danielrispler/Falinks#375 the wait's first check asked "Will it pass?" (danielrispler/Falinks#343).
@@ -143,7 +166,7 @@ fn a_check_run_in_the_background_runs_until_its_notification() {
     let [line] = &lines(&log)[..] else {
         panic!("one check line");
     };
-    assert_eq!((line.ended_at, line.passed), (None, None));
+    assert_eq!((line.ended, line.passed), (false, None));
 }
 
 #[test]

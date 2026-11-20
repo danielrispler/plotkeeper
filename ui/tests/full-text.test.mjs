@@ -130,7 +130,7 @@ test("a toast's name and line hold their full text, and a start toast's message"
 
 test("a check's command holds its full text in a title", () => {
   const command = "cargo test --locked --workspace --all-targets -- --some-long-flag";
-  const node = checkElement({ command, ended_at: 2, passed: true, started_at: 1 });
+  const node = checkElement({ statement: command, status: "failed", ended_at: 2, started_at: 1, typical_ms: null });
   const code = every(node).find((n) => n.tag === "code");
   assert.ok(code, "the command is drawn");
   assert.ok(titled(code).some((title) => title.includes(command)));

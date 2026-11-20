@@ -14,7 +14,7 @@ use std::{
 /// The saved state's format. Bump it when a saved field changes meaning or a field the pane's JSON
 /// leaves out is added, so an older file is not read as the new shape: a field the old file lacks
 /// makes it unreadable anyway, unless it has a default.
-const FORMAT: u32 = 5;
+const FORMAT: u32 = 6;
 
 thread_local! {
     static SAVING: Cell<bool> = const { Cell::new(false) };

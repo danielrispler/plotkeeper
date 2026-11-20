@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { blockKind, cardTime, feedTurns, foldedLine, headlineOf, nowOf, oneAtATime, shownChecks, turnAt } from "../../dist/story.js";
+import { blockKind, cardTime, feedTurns, foldedLine, headlineOf, nowOf, oneAtATime, turnAt } from "../../dist/story.js";
 
 test("summaries on open are written one at a time, in the order asked, newest first", async () => {
   const started = [];
@@ -41,18 +41,12 @@ test("a card belongs to the turn it was written in, by its id's time", () => {
   assert.equal(turnAt(turns, 25), 1);
 });
 
-test("turns render newest first, each with its cards, checks, subagents and questions", () => {
+test("turns render newest first, each with its cards, subagents and questions", () => {
   const turns = [turn(10, "Fix the parser"), turn(20, "worker w1 returned"), turn(30, "Open the PR")];
-  const checks = [
-    { command: "cargo test", started_at: 12, turn: 0 },
-    { command: "cargo run --bin ci-checks", started_at: 31, turn: 2 },
-    { command: "cargo test", started_at: 32, turn: 2 },
-  ];
   const agents = [{ id: "w1", started_at: 11, turn: 0 }];
   const questions = [{ tool_use_id: "q1", answer: "not_answered", turn: 1 }];
-  const feed = feedTurns(turns, { cards: [card(15), card(35)], checks, agents, questions });
+  const feed = feedTurns(turns, { cards: [card(15), card(35)], agents, questions });
   assert.deepEqual(feed.map((b) => b.turn.prompt), ["Open the PR", "worker w1 returned", "Fix the parser"]);
-  assert.deepEqual(feed[0].checks.map((c) => c.started_at), [32, 31]);
   assert.deepEqual(feed[0].cards.map((c) => c.request.id), ["s@35"]);
   assert.deepEqual(feed[1].questions.map((q) => q.tool_use_id), ["q1"]);
   assert.deepEqual(feed[2].agents.map((a) => a.id), ["w1"]);
@@ -60,11 +54,11 @@ test("turns render newest first, each with its cards, checks, subagents and ques
 });
 
 test("what started in no turn, such as a subagent's cards, goes in one last block", () => {
-  const feed = feedTurns([], { cards: [card(1), card(2)], checks: [], agents: [], questions: [] });
+  const feed = feedTurns([], { cards: [card(1), card(2)], agents: [], questions: [] });
   assert.equal(feed.length, 1);
   assert.equal(feed[0].turn, null);
   assert.deepEqual(feed[0].cards.map((c) => c.request.id), ["s@2", "s@1"]);
-  assert.deepEqual(feedTurns([], { cards: [], checks: [], agents: [], questions: [] }), []);
+  assert.deepEqual(feedTurns([], { cards: [], agents: [], questions: [] }), []);
 });
 
 const summary = { summary: { summary: "Fixed the lint.\nThe test reads the token.\nNot checked: the strip.", quiz: null } };
@@ -130,16 +124,4 @@ test("a folded turn's line holds the prompt and Headline, a dot for an open Quiz
   assert.equal(line([{ ...run("passed"), retries: 1 }], false).failed, false);
   assert.deepEqual(line([run("ran")], false, null), { prompt: "Fix the parser", headline: null, unanswered: false, failed: false });
   assert.equal(foldedLine({ prompt: "", checks: [] }, null, false).prompt, "No prompt");
-});
-
-test("the feed lists a check that is running or whose last run failed, and folds a passed one into the evidence count", () => {
-  const line = (command, passed, ended_at) => ({ command, passed, started_at: 1, ended_at, typical_ms: null, turn: 0 });
-  const lines = [line("passed", true, 5), line("failed", false, 5), line("running", null, null), line("ran", null, 5)];
-  assert.deepEqual(shownChecks(lines).map((l) => l.command), ["failed", "running"]);
-});
-
-test("a check that failed and then passed on a retry has no row, and one that passed and then failed has its failure", () => {
-  const line = (command, passed) => ({ command, passed, started_at: 1, ended_at: 5, typical_ms: null, turn: 0 });
-  assert.deepEqual(shownChecks([line("cargo test", false), line("cargo test 2>&1 | tail", true)]), []);
-  assert.deepEqual(shownChecks([line("cargo test", true), line("cargo test", false), line("npm run check", false)]).map((l) => l.command), ["cargo test", "npm run check"]);
 });

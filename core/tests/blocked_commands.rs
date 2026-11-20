@@ -748,7 +748,13 @@ fn a_blocked_check_that_never_ran_leaves_no_check_line() {
             stop(5_000, None),
         ],
     );
-    assert_eq!(session(&lines).checks.len(), 0);
+    let session = session(&lines);
+    assert!(
+        session
+            .turns
+            .iter()
+            .all(|t| t.checks.is_empty() && t.listed.is_empty())
+    );
 }
 
 #[test]
