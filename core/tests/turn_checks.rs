@@ -310,6 +310,12 @@ fn a_chain_that_exits_zero_passes_each_check_in_its_last_group() {
         statuses("cargo test && cargo clippy"),
         [CheckStatus::Passed, CheckStatus::Passed]
     );
+    // Each run keeps its own statement.
+    let statements: Vec<String> = runs_of("cargo test -p core && cargo clippy -q", None)
+        .into_iter()
+        .map(|r| r.0)
+        .collect();
+    assert_eq!(statements, ["cargo test -p core", "cargo clippy -q"]);
     // An earlier group is never counted.
     assert_eq!(
         statuses("cargo test; cargo clippy"),
