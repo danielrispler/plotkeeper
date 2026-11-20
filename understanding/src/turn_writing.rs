@@ -304,10 +304,10 @@ struct EndsQueue<'a>(&'a Mutex<HashMap<String, VecDeque<Job>>>, &'a str);
 
 impl Drop for EndsQueue<'_> {
     fn drop(&mut self) {
-        if thread::panicking() {
-            if let Ok(mut waiting) = self.0.lock() {
-                waiting.remove(self.1);
-            }
+        if thread::panicking()
+            && let Ok(mut waiting) = self.0.lock()
+        {
+            waiting.remove(self.1);
         }
     }
 }
