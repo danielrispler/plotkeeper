@@ -850,3 +850,24 @@ fn a_turns_own_card_with_a_helpers_edit_is_a_turn_decision_and_keeps_its_lone_qu
         (OfferKind::Turn, Offer::Quiz)
     );
 }
+
+#[test]
+fn a_lone_quiz_dropped_for_an_ask_line_under_a_full_cap_is_not_held_by_the_cap() {
+    let (_dir, store) = store();
+    let (_o, offers) = offers();
+    for n in 1..=3 {
+        lone(&store, n, 0, false, "why");
+    }
+    let mut request = turn_request(4);
+    let settled = settle(&mut request, &turn_facts(&[("a.rs", 9)], None), &[], None);
+    offer_summary(
+        &store,
+        &Canned("ask"),
+        &SummarySetup::default(),
+        request,
+        Some(&settled.decision),
+        &offers,
+        |l| panic!("{l}"),
+    );
+    assert_eq!(lines_of(&offers)[0]["outcome"], "no quiz in the reply");
+}

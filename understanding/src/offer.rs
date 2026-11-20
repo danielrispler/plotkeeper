@@ -1,7 +1,8 @@
 //! What a turn gets for a Quiz (danielrispler/plotkeeper#119): a card with its Quiz, a lone Quiz, or
 //! nothing, by the size of its change; the rules are in `docs/studio/question-rules.md`.
 
-use crate::{CardStore, CardWriter, Place, SummarySetup, TurnSummary, write_stop, write_summary};
+use crate::summary::write_held;
+use crate::{CardStore, CardWriter, SummarySetup, TurnSummary, write_stop};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::io::Write;
@@ -387,19 +388,17 @@ pub fn offer_summary(
     log: impl FnMut(String),
 ) -> Option<TurnSummary> {
     let (session, id) = (request.session_id.clone(), request.id.clone());
-    let summary = write_summary(store, writer, setup, request, log);
+    let written = write_held(store, writer, setup, request, log);
     if let Some(decision) = lone {
-        let outcome = match &summary {
+        let outcome = match &written {
             None => Outcome::NoReply,
-            Some(s) if s.quiz.is_some() => Outcome::Written,
-            Some(_) if store.lock().unwrap().place_quiz(false, crate::millis()) != Place::Offer => {
-                Outcome::HeldByCap
-            }
+            Some((s, _)) if s.quiz.is_some() => Outcome::Written,
+            Some((_, true)) => Outcome::HeldByCap,
             Some(_) => Outcome::NoQuiz,
         };
         offers.record(&session, &id, decision, Some(outcome));
     }
-    summary
+    written.map(|(summary, _)| summary)
 }
 
 /// The files of a unified diff: one `diff --git` header per file, as `git diff` has, or only the

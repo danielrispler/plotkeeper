@@ -48,6 +48,7 @@ fn main() {
             facts,
             merge: studio.turn_merged(id),
             workers: studio.turn_workers(id),
+            traced: true,
         };
         let offer = decide(OfferKind::Turn, &turn, &[]).offer;
         counts[offer as usize] += 1;
