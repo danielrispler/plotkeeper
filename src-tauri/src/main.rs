@@ -1494,24 +1494,6 @@ fn split_shown(terminal: Option<String>) {
     *SPLIT_SHOWN.lock().unwrap() = terminal;
 }
 
-/// The `gh` to run: the first on Daniel's login shell's `PATH`, found once.
-fn gh_path() -> String {
-    static GH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    GH.get_or_init(|| {
-        // An app started from the Dock gets launchd's `PATH`, which lacks Homebrew's folder.
-        let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/zsh".into());
-        let found = Command::new(shell).args(["-lc", "command -v gh"]).output();
-        let found = found.ok().filter(|o| o.status.success()).map(|o| o.stdout);
-        found
-            .as_deref()
-            .map(String::from_utf8_lossy)
-            .and_then(|out| out.lines().last().map(str::to_owned))
-            .filter(|path| path.starts_with('/'))
-            .unwrap_or_else(|| "gh".into())
-    })
-    .clone()
-}
-
 /// agy's version, from `agy --version` run in Daniel's login shell, so a Dock-started app finds it
 /// on his `PATH`; `None` when agy is missing or fails.
 fn agy_version() -> Option<String> {
@@ -1572,12 +1554,12 @@ fn refresh_landed(app: &AppHandle, session: Option<String>) {
             }
             tasks
         };
-        let gh = gh_path();
+        let gh = studio_workbench::gh_path();
         for task in tasks {
             // A removed worktree has no facts.
             let facts = Path::new(&task.path)
                 .exists()
-                .then(|| lookup_task(&gh, &task));
+                .then(|| lookup_task(gh, &task));
             let changed = studio.lock().unwrap().set_task_facts(&task.path, facts);
             if changed {
                 LIST_CHANGED.store(true, Ordering::Release);
@@ -1596,7 +1578,7 @@ fn refresh_landed_tasks(app: AppHandle) {
 /// the read loop never waits on the network, and asks again after 5 minutes. `gh` runs as Daniel
 /// with its own login; no credential file is read.
 fn prs(app: &AppHandle) {
-    let gh = gh_path();
+    let gh = studio_workbench::gh_path();
     let mut asked = HashMap::<String, Instant>::new();
     loop {
         let branches = app.state::<Mutex<Studio>>().lock().unwrap().branches();
@@ -1608,7 +1590,7 @@ fn prs(app: &AppHandle) {
                 continue;
             }
             asked.insert(branch.clone(), Instant::now());
-            let output = Command::new(&gh)
+            let output = Command::new(gh)
                 .args(["pr", "view", &branch, "--json", "number", "--jq", ".number"])
                 .current_dir(&cwd)
                 .output();
