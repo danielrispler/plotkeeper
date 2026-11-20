@@ -105,7 +105,7 @@ _Formerly_: Place
 _Avoid_: Location
 
 **Home**:
-The view in the terminal column while no session is selected, such as after a delete: the sessions that need Daniel or are unseen, then the landed ones, then one row per project, in project order, to start a session there. Workspaces stays the home of tasks.
+The waiting room: the page Daniel parks on while agents run, in the terminal column while no session is selected (such as after a delete or a click on the list's empty space). Under a quiet title (the date) its parts come in order, each absent when empty: **Needs you** (each session with its question's first line, the only colour on the page), **Running** (two lines each: logo, name, project and elapsed time, then its **Intention**, muted, with its age; at most 4, then "+N running"), **Unseen** (the sessions whose last turn he has not seen, newest turn first, each with its **Headline**; at most 3, then "+N unseen"), the Retest, **Landed** and a row per project to start a session in. A "+N" row expands its group inline until Home is left. With no session needing him it reads "Nothing needs you". Workspaces stays the home of tasks.
 _Avoid_: Dashboard, board
 
 **History**:

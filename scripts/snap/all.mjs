@@ -12,8 +12,8 @@ import { fixtures } from "./fixtures.ts";
 // The sample fixture whose script fails on purpose (rail-fixtures.ts).
 const failsOnPurpose = new Set(["railIdleFail"]);
 
-// The waiting-room prototype's renders (#237) are drawn at 1400x900, the rest at snap's default size.
-const sizeOf = (name) => (name.startsWith("homeRoom") ? "1400x900" : undefined);
+// Home, the waiting room (#238), is drawn at 1400x900, the rest at snap's default size.
+const sizeOf = (name) => (name === "home" ? "1400x900" : undefined);
 
 const snap = join(dirname(fileURLToPath(import.meta.url)), "snap.mjs");
 const folder = mkdtempSync(join(tmpdir(), "snap-all-"));

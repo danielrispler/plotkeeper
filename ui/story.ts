@@ -403,6 +403,12 @@ function summaryOf(id: string): TurnSummary | null {
   return null;
 }
 
+// The Headline of a session's latest turn, for Home's Unseen rows; null when it has no turn.
+export function lastHeadline(session: Pick<Session, "turns">): string | null {
+  const turn = session.turns.at(-1);
+  return turn ? headlineOf(turn.id ? summaryOf(turn.id) : null, turn.message).headline : null;
+}
+
 // A new card store revision may hold a summary that was missing: ask again for those.
 export function forgetMissingSummaries() {
   for (const [id, summary] of summaries) if (summary === null) summaries.delete(id);
