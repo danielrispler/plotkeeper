@@ -15,7 +15,7 @@ import { connect, list, onEvent, request, type Listed } from "./daemon.js";
 import { diffRequest, drawDiff, keepsDiff } from "./diff.js";
 import { drawHistory } from "./history.js";
 import { drawHome } from "./home.js";
-import { element, failure, invoke, listen, pressable, text } from "./dom.js";
+import { element, failure, fullTitle, invoke, listen, pressable, text } from "./dom.js";
 import { onProjects, projects } from "./projects.js";
 import { followLog, showLog, showMissing } from "./log.js";
 import { type Box, paneBoxes } from "./layout.js";
@@ -28,6 +28,7 @@ import { sessionName } from "./list.js";
 import { FAILED_OSC, openPane, startNotice } from "./terminal.js";
 import { showStartToast } from "./toast.js";
 import type { Retest, Session } from "./types.js";
+import { HOVERS } from "./hovers.js";
 
 type Pane = { box: HTMLElement; term: Xterm.Terminal | null; title: string };
 const panes = new Map<string, Pane>();
@@ -404,7 +405,7 @@ export async function showSession(session: Session | null, clicked = false, agen
   if ("terminal" in view) return show(view.terminal, () => openPane(box(view.terminal), view.terminal, terminal!.cwd, terminal!.argv));
   const resume = () => openHere(session).catch(failure("resume", "error"));
   box(ELSEWHERE).classList.add("elsewhere");
-  box(ELSEWHERE).replaceChildren(text("p", view.message, "empty"), pressable(text("button", "Open here"), false, resume));
+  box(ELSEWHERE).replaceChildren(text("p", view.message, "empty"), fullTitle(pressable(text("button", "Open here"), false, resume), "Resume this session in a terminal in this window"));
   show(ELSEWHERE, () => null);
 }
 const ELSEWHERE = "elsewhere";
@@ -435,6 +436,6 @@ function failedAtStart({ id, name, status, lines }: { id: string; name: string; 
   showStartToast(notice, output);
   if (!failureTakesPane(id, shown)) return;
   box(ELSEWHERE).classList.add("elsewhere");
-  box(ELSEWHERE).replaceChildren(text("p", notice, "empty"), text("pre", lines.join("\n"), "last-lines"), pressable(text("button", "Show output"), false, output));
+  box(ELSEWHERE).replaceChildren(text("p", notice, "empty"), text("pre", lines.join("\n"), "last-lines"), fullTitle(pressable(text("button", "Show output"), false, output), HOVERS.failedOutput));
   show(ELSEWHERE, () => null);
 }

@@ -99,7 +99,7 @@ function drawLog(place: HTMLElement, agent: Subagent | null, log: SubagentLog | 
     fullTitle(text("span", agent?.name ?? "Subagent", "log-title"), agent?.name ?? "Subagent"),
     ...(agent?.agent_type ? [text("span", agent.agent_type, "log-type")] : []),
     ...(agent ? [text("span", stateLabel(agent.status), `log-state ${agent.status === "running" ? "running" : "done"}`)] : []),
-    pressable(text("button", "Parent's terminal"), false, toParent),
+    fullTitle(pressable(text("button", "Parent's terminal"), false, toParent), "Back to the terminal of the session that started this subagent"),
   );
   const note = logNote(log, agent?.status ?? "");
   const body = note ? [text("p", note, "empty")] : logRows(log!.entries).map(drawRow);
@@ -115,7 +115,7 @@ function drawRow(row: LogRow): HTMLElement {
   fold.open = expanded.has(row.id);
   fold.addEventListener("toggle", () => (fold.open ? expanded.add(row.id) : expanded.delete(row.id)));
   fold.className = failed ? "log-call failed" : "log-call";
-  const summary = fullTitle(text("summary", callTitle(row)), callTitle(row));
+  const summary = fullTitle(text("summary", callTitle(row)), `Show or hide this call's result: ${callTitle(row)}`);
   if (failed) summary.append(text("span", "error", "log-error"));
   fold.append(summary, text("pre", out + (cut ? "\n… cut" : ""), "log-result"));
   return fold;

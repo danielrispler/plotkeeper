@@ -186,6 +186,18 @@ export const fixtures = {
   usagePopover() {
     return { ...list(), usage: usageTiles(), snapScript: `document.getElementById("usage-popover").showPopover();` };
   },
+  // The New session picker open (#220), so every page's hover check reaches its agent choice, quick start and worktree rows.
+  pickerOpen() {
+    const f = branchOnce();
+    return { ...f, agents: ["claude", "agy", "codex"], snapScript: `document.getElementById("new-session").click(); await new Promise((done) => setTimeout(done, 500));` };
+  },
+  // The palette open (#220), so the hover check reaches its rows.
+  paletteOpen() {
+    const snapScript = `document.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyP", key: "P", metaKey: true, shiftKey: true, bubbles: true }));
+      await new Promise((done) => setTimeout(done, 300));
+      if (!document.querySelector("#picker .row")) log("snap:fail the palette did not open");`;
+    return { ...list(), snapScript };
+  },
   // The list with each agent's logo in each state (#158): Claude, agy, status-only Codex, another program and a shell.
   logos() {
     const agy = { capabilities: { agent: "agy", asks: false, background_tasks: false, replies: false, permission_mode: false, durations: false, transcript_version: false, context: false, turn_trees: false }, model: "gemini-3.8-flash-high" };
@@ -243,7 +255,7 @@ export const fixtures = {
       const warning = [...dialog.querySelectorAll(".stepper-value")].map((v) => v.textContent)[2];
       if (warning !== "20") log("snap:fail the context warning reads " + warning);
       if (dialog.querySelector(".reset").title !== "Reset to default") log("snap:fail the undo icon's tooltip is wrong");
-      if (document.getElementById("settings-close").title !== "Close (Esc)") log("snap:fail the X's tooltip is " + document.getElementById("settings-close").title);`),
+      if (document.getElementById("settings-close").title !== "Close settings (Esc)") log("snap:fail the X's tooltip is " + document.getElementById("settings-close").title);`),
   // The page's steppers and dropdowns (#196) with one value changed, the zoom: its stepper and undo icon, the font size's stylesheet
   // value, and the dropdowns at Haiku and Default.
   settingsControls,

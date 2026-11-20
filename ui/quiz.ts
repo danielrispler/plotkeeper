@@ -5,6 +5,7 @@
 
 import { failure, pressable, prose, text } from "./dom.js";
 import type { Quiz, QuizTap, SummaryLine, Tap } from "./types.js";
+import { HOVERS } from "./hovers.js";
 
 export type QuizStage = "open" | "picked" | "skipped";
 export type QuizView = { reasons: boolean; rest: boolean; chips: boolean; skip: boolean };
@@ -34,6 +35,11 @@ export function trialOn(start: string | null, now: number): boolean {
 }
 
 type Chip = "understood" | "explain_more" | "key_wrong";
+const chipHovers: Record<Chip, string> = {
+  understood: HOVERS.understood,
+  explain_more: HOVERS.explainMore,
+  key_wrong: HOVERS.keyWrong,
+};
 type Kept = {
   pick: number | null;
   skipped: boolean;
@@ -86,6 +92,7 @@ export function confidenceRow(id: string, record: (tap: Tap) => void, redraw: ()
       redraw();
     });
     button.disabled = one.sure !== null;
+    button.title = one.sure !== null ? "Already answered; your confidence is kept" : `Say you are ${label.toLowerCase()} before you pick`;
     return button;
   };
   row.append(sure(true, "Sure"), sure(false, "Not sure"));
@@ -158,6 +165,7 @@ export function quizRegion(id: string, quiz: Quiz, held: SummaryLine[], deps: Qu
       tap({ kind });
     });
     button.disabled = one.chips.has(kind);
+    button.title = one.chips.has(kind) ? "Already tapped; a tap is kept once" : chipHovers[kind];
     return button;
   };
   const draw = () => {
@@ -176,6 +184,7 @@ export function quizRegion(id: string, quiz: Quiz, held: SummaryLine[], deps: Qu
           tap({ kind: "pick", option: i });
         });
         button.disabled = stage !== "open";
+        button.title = stage === "open" ? HOVERS.pickAnswer : HOVERS.answered;
         item.append(button);
         if (view.reasons) {
           const why = prose("p", option.why);
@@ -201,6 +210,7 @@ export function quizRegion(id: string, quiz: Quiz, held: SummaryLine[], deps: Qu
         tap({ kind: "skip" });
       });
       skip.classList.add("quiz-skip");
+      skip.title = "Skip the question and show the rest of the turn";
       box.append(skip);
     }
     if (view.chips) {

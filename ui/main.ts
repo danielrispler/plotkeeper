@@ -27,11 +27,12 @@ import { knownProjects } from "./projects.js";
 import { studio } from "./state.js";
 import { closeSettingsPage, settingsPageOpen, showSettingsPage, startSettingsPage } from "./settings-page.js";
 import { showSkills } from "./skills.js";
-import { showView } from "./story.js";
+import { showBarName, showView } from "./story.js";
 import { jumpToNeedsYou, showToast } from "./toast.js";
 import { finishedNote, showNote, warnContext, watchNotes } from "./notes.js";
 import type { Selection, Session, SessionCards } from "./types.js";
 import { readUsage, timedAgents } from "./usage.js";
+import { HOVERS } from "./hovers.js";
 
 // The terminal's cell, measured from a probe in its font, sets the columns' layout.
 function cell(): number {
@@ -268,7 +269,11 @@ function applySettings(files: SettingsFiles) {
   studio.texts = files;
   studio.files = reload(studio.files, files);
   const { settings, errors } = studio.files;
-  element("settings-gear").title = titled(studio.files.keymap, "Settings", "studio::OpenSettings");
+  element("settings-gear").title = titled(studio.files.keymap, "Open settings", "studio::OpenSettings");
+  element("new-session").title = titled(studio.files.keymap, "Start a new session", "studio::NewSession");
+  element("settings-close").title = titled(studio.files.keymap, "Close settings", "studio::Dismiss");
+  // The header's hover names a key too: draw it again with the keymap now in effect.
+  showBarName(element("bar-name").textContent ?? "");
   setSettingsErrors(errors);
   // Only a changed `zoom` resets the zoom the keys set.
   const to = reloadedZoom(zoom, previous, settings);
@@ -326,6 +331,9 @@ dragPanel();
 element("new-session").addEventListener("click", () => void showPicker());
 element("add-project").addEventListener("click", () => void showAddProject());
 element("settings-gear").addEventListener("click", () => void run(actions, "studio::OpenSettings"));
+// The shell's own elements whose hover another place shows too (#220); the needs-you toast's adds its key when it shows.
+element("add-project").title = HOVERS.addProject;
+element("toast").title = element("note-toast").title = HOVERS.goToSession;
 // A click on the session list's empty space selects none and shows Home.
 document.querySelector(".list")!.addEventListener("click", (event) => listSpace(event.target as HTMLElement) && void goHome());
 // The needs-you chip (danielrispler/Falinks#572) selects the first session that needs Daniel.

@@ -131,6 +131,7 @@ Open the sessions for the day's work: at least two in parallel, one in a task wo
 - [ ] **danielrispler/Falinks#571:** only the selected row shows a time ("Turn 12m"). No clock shows seconds or changes more than once a minute. The rail shows "Step" only once a step has run a minute.
 - [ ] **danielrispler/Falinks#571:** no "no estimate", "Step 0s", grid size such as `169 × 38`, or raw `**` anywhere. A long path shows its last 2 segments; hovering shows the full line. A row whose line had a link shows the link's text, and hovering shows the URL.
 - [ ] **#162:** in the real app, hover a session name the list cuts with an ellipsis: its full text shows as a tooltip.
+- [ ] **#220:** in the real app, rest the pointer on any button, such as the gear, the "⋯" or a row's ×: within about half a second a tooltip says what it does, with its key when it has one. A disabled one, such as a stepper at its bound, says why it is off.
 - [ ] **#165:** open the top bar's usage popover: each agent's tile matches that agent's own usage screen (Claude's `/usage`, Codex's, agy's `/usage`), its shares used and its reset times, group by group.
 - [ ] **danielrispler/Falinks#519:** a row and the rail show `context N%` with the same number as Claude's status line. The hover reads "… tokens used · Claude's status line shows this as M% left".
 - [ ] **danielrispler/Falinks#523:** the rail header shows the model and effort, such as `claude-opus-5-5 · effort medium`, on hover.

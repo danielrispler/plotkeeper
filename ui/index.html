@@ -32,9 +32,9 @@
       <!-- Plan usage (danielrispler/plotkeeper#163): the tightest window; a click opens the popover of each agent's tile. -->
       <button id="usage" class="btn small usage" type="button" popovertarget="usage-popover">Usage</button>
       <!-- A new build to restart into (danielrispler/Falinks#470); sessions live in the daemon, so they stay. -->
-      <button id="new-build" class="btn small" type="button" title="A new build is ready. Sessions keep running." hidden>Restart to update</button>
+      <button id="new-build" class="btn small" type="button" title="Restart Studio into the new build. Sessions keep running." hidden>Restart to update</button>
       <button id="new-session" class="btn small" type="button" title="New session" aria-label="New session">+</button>
-      <button id="bar-more" class="btn small" type="button" popovertarget="bar-menu" aria-label="More" hidden>⋯</button>
+      <button id="bar-more" class="btn small" type="button" popovertarget="bar-menu" aria-label="More" title="Show the top bar's items that do not fit" hidden>⋯</button>
       <!-- The gear (#159, #194) runs Open settings, as ⌘, does; its title names the key the keymap binds. It is the bar's last item and never folds into "⋯". -->
       <button id="settings-gear" class="btn small quiet gear" type="button" aria-label="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="7"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg></button>
       <div id="bar-menu" class="menu bar-menu" popover></div>
@@ -77,7 +77,7 @@
     </section>
 
     <!-- The rail's spine (danielrispler/plotkeeper#128): in the overlay layout, resting on it opens the rail; it shows the session's state. -->
-    <div id="spine" class="spine" title="Session story" hidden><span id="spine-dot" class="dot"></span></div>
+    <div id="spine" class="spine" title="Open the session's story" hidden><span id="spine-dot" class="dot"></span></div>
 
     <aside class="rail" aria-label="Session story">
       <!-- One line (danielrispler/Falinks#574): the verdict, the permission mode unless default (danielrispler/Falinks#541), always shown, and
@@ -89,18 +89,18 @@
           <p id="session-name" class="session-name"></p>
           <p id="phase" class="phase"></p>
         </div>
-        <button id="rail-more" class="btn small" type="button" popovertarget="rail-actions" aria-label="More actions" hidden>⋯</button>
+        <button id="rail-more" class="btn small" type="button" popovertarget="rail-actions" aria-label="More actions" title="Rename, mark unseen, close or delete this session" hidden>⋯</button>
         <div id="rail-actions" class="menu" popover>
           <!-- An ended session opens again with `claude --resume` (danielrispler/Falinks#467). -->
-          <button id="reopen" class="btn small" type="button" hidden>Open</button>
+          <button id="reopen" class="btn small" type="button" title="Resume this ended session in a terminal" hidden>Open</button>
           <!-- Rename and close (danielrispler/Falinks#469). -->
-          <button id="rename" class="btn small" type="button" hidden>Rename</button>
+          <button id="rename" class="btn small" type="button" title="Give this session a name of your own" hidden>Rename</button>
           <!-- Unseen (danielrispler/Falinks#556): the row's mark comes back until Daniel selects it again. -->
-          <button id="mark-unseen" class="btn small" type="button" hidden>Mark unseen</button>
-          <button id="close" class="btn small" type="button" hidden>Close</button>
-          <button id="open-all" class="btn small" type="button">Open all</button>
-          <button id="close-all" class="btn small" type="button">Close all</button>
-          <button id="delete" class="btn small" type="button" hidden>Delete</button>
+          <button id="mark-unseen" class="btn small" type="button" title="Mark this session unseen, to come back to it" hidden>Mark unseen</button>
+          <button id="close" class="btn small" type="button" title="End this session's terminal; the session stays in History" hidden>Close</button>
+          <button id="open-all" class="btn small" type="button" title="Unfold every turn and section in the story">Open all</button>
+          <button id="close-all" class="btn small" type="button" title="Fold every turn and section in the story">Close all</button>
+          <button id="delete" class="btn small" type="button" title="Remove this session from the list; its cards are kept" hidden>Delete</button>
         </div>
       </div>
       <!-- "Now" starts with the open question, docked so it never scrolls away. -->
@@ -108,7 +108,7 @@
       <div id="story" class="story">
         <div class="notice-row">
           <p id="notice" role="status" hidden></p>
-          <button id="notice-dismiss" class="btn small" type="button" title="Dismiss">Dismiss</button>
+          <button id="notice-dismiss" class="btn small" type="button" title="Hide this notice">Dismiss</button>
         </div>
         <p id="empty" class="empty">Pick a session in the list.</p>
         <section id="view" hidden>
@@ -118,16 +118,16 @@
           <div id="intention" class="intention">
             <p id="intention-label" class="label" hidden>Why it asks</p>
             <p><span id="intention-text"></span> <span id="intention-age" class="age"></span></p>
-            <details id="unavailable" class="unavailable" hidden><summary>Steps only</summary><span id="unavailable-why"></span></details>
-            <details id="step" class="step"><summary><span id="tool" class="tool-name"></span> <span id="detail"></span></summary><code id="command"></code></details>
+            <details id="unavailable" class="unavailable" hidden><summary title="Why only the steps are shown">Steps only</summary><span id="unavailable-why"></span></details>
+            <details id="step" class="step"><summary id="step-line" title="The step the agent is on"><span id="tool" class="tool-name"></span> <span id="detail"></span></summary><code id="command"></code></details>
           </div>
           <!-- The feed of turns, newest first, the first being "now" at your turn: each with its prompt, Headline, Quiz, cards,
                subagents (danielrispler/Falinks#535), checks and folded response. -->
           <section id="banner-slot"></section>
           <ol id="feed" class="feed"></ol>
-          <details id="brief-fold" class="decisions" hidden><summary>Brief</summary><section id="brief" class="brief"></section></details>
+          <details id="brief-fold" class="decisions" hidden><summary title="Show or hide the Brief: where the session stands">Brief</summary><section id="brief" class="brief"></section></details>
           <!-- Decision history (danielrispler/Falinks#479), folded under the feed. -->
-          <details id="decisions" class="decisions" hidden><summary id="decisions-title"></summary><ol id="decisions-list"></ol></details>
+          <details id="decisions" class="decisions" hidden><summary id="decisions-title" title="Show or hide the decisions made in this session"></summary><ol id="decisions-list"></ol></details>
         </section>
       </div>
       <!-- The skills browser (danielrispler/Falinks#528), in the rail's place while open; Esc returns. -->
@@ -143,14 +143,14 @@
       <label for="rename-field">Name this session</label>
       <input id="rename-field" autocomplete="off" spellcheck="false" autofocus>
       <!-- The default button comes first, so Enter in the field renames. -->
-      <div class="ask-buttons"><button class="btn" value="rename">Rename</button><button class="btn" value="cancel">Cancel</button></div>
+      <div class="ask-buttons"><button class="btn" value="rename" title="Save this name (↩)">Rename</button><button class="btn" value="cancel" title="Keep the old name (Esc)">Cancel</button></div>
     </form>
   </dialog>
   <dialog id="close-dialog" class="ask">
     <form method="dialog">
       <p><strong id="close-name"></strong> is still working: it is in a turn or has background tasks.</p>
       <p>Closing ends its terminal and every process in it.</p>
-      <div class="ask-buttons"><button class="btn" value="close">Close</button><button class="btn" value="cancel" autofocus>Cancel</button></div>
+      <div class="ask-buttons"><button class="btn" value="close" title="End its terminal and every process in it">Close</button><button class="btn" value="cancel" autofocus title="Leave it running (Esc)">Cancel</button></div>
     </form>
   </dialog>
   <!-- Delete: the row leaves the list; its worktree and merged branch only when ticked. -->
@@ -161,14 +161,14 @@
       <label id="delete-worktree-option"><input id="delete-worktree" type="checkbox"> Also remove its worktree
         <code id="delete-worktree-path"></code> and, if merged, its branch</label>
       <p id="delete-shared" hidden>Another session still works in this worktree.</p>
-      <div class="ask-buttons"><button class="btn" value="delete">Delete</button><button class="btn" value="cancel" autofocus>Cancel</button></div>
+      <div class="ask-buttons"><button class="btn" value="delete" title="Remove it from the list, and its worktree when ticked">Delete</button><button class="btn" value="cancel" autofocus title="Keep it (Esc)">Cancel</button></div>
     </form>
   </dialog>
   <dialog id="delete-losses" class="ask">
     <form method="dialog">
       <p>The worktree has work that is not on origin:</p>
       <div id="delete-losses-list"></div>
-      <div class="ask-buttons"><button class="btn" value="remove">Remove anyway</button><button class="btn" value="keep" autofocus>Keep the worktree</button></div>
+      <div class="ask-buttons"><button class="btn" value="remove" title="Remove the worktree and lose the work listed above">Remove anyway</button><button class="btn" value="keep" autofocus title="Delete the session but keep its worktree and work (Esc)">Keep the worktree</button></div>
     </form>
   </dialog>
   <!-- The daemon upgrade's question (danielrispler/Falinks#470, danielrispler/Falinks#322 resolution point 4). -->
@@ -177,7 +177,7 @@
       <h1 id="upgrade-title">Restart your terminals on the new version?</h1>
       <p>Studio was updated, but your terminals still run on the old version. A restart ends each terminal and brings it back:</p>
       <ul id="upgrade-terms"></ul>
-      <p class="actions"><button class="btn" value="no">Not now</button> <button class="btn primary" value="yes">Restart terminals</button></p>
+      <p class="actions"><button class="btn" value="no" title="Keep the terminals on the old version for now (Esc)">Not now</button> <button class="btn primary" value="yes" title="End each terminal listed and bring it back on the new version">Restart terminals</button></p>
     </form>
   </dialog>
   <!-- The settings page (#193, #195): a dialog over the window; Esc, the X and a click outside close it. `settings-page.ts` draws it. -->

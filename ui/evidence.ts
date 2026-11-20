@@ -4,11 +4,12 @@
 // and the tail of its output. Opening changes only the nodes it opens: the open state is kept by key, so a redraw of the rail
 // draws the line open again.
 
-import { code, failure, invoke, pressable, text } from "./dom.js";
+import { code, failure, fullTitle, invoke, pressable, text } from "./dom.js";
 import { askAnchor, type Hunk, hunkText } from "./ask.js";
 import { diffRequest } from "./diff.js";
 import { openAt } from "./paths.js";
 import type { Capabilities, Check, Turn, TurnFile } from "./types.js";
+import { HOVERS } from "./hovers.js";
 
 type Facts = Pick<Turn, "files" | "checks">;
 type Ended = { ended_at: Turn["ended_at"] };
@@ -92,6 +93,7 @@ function checkRow(session: string, row: EvidenceRow): HTMLElement {
     if (openOutputs.has(key)) fetch();
   });
   button.classList.add("evidence-fail");
+  button.title = `Show or hide the output of ${row.label}`;
   button.setAttribute("aria-expanded", String(openOutputs.has(key)));
   button.append(text("span", "✗", "mark"), code(row.label));
   show();
@@ -127,6 +129,7 @@ export function fileRow(session: string, index: number, row: EvidenceRow, scope 
   });
   edit.classList.add("evidence-edit");
   edit.textContent = "Open in editor";
+  edit.title = HOVERS.editAtFirstChange;
   const left = (h: Hunk | null) => {
     more.textContent = `${h?.left_out ?? 0} more lines`;
     if (openHunks.has(openKey) && h?.left_out) more.removeAttribute("hidden");
@@ -134,6 +137,7 @@ export function fileRow(session: string, index: number, row: EvidenceRow, scope 
   };
   const more = pressable(document.createElement("button"), false, () => diffRequest.open(session, index));
   more.classList.add("evidence-more");
+  more.title = HOVERS.wholeDiff;
   const show = () => {
     const open = openHunks.has(openKey);
     for (const node of [pre, edit]) open ? node.removeAttribute("hidden") : node.setAttribute("hidden", "");
@@ -163,6 +167,7 @@ export function fileRow(session: string, index: number, row: EvidenceRow, scope 
     if (openHunks.has(openKey)) fetch();
   });
   button.classList.add("evidence-fail");
+  button.title = `Show or hide this file's change: ${file.path}`;
   button.setAttribute("aria-expanded", String(openHunks.has(openKey)));
   button.append(text("span", row.label), ...(row.agent ? [text("span", row.agent, "evidence-agent")] : []));
   show();
@@ -179,7 +184,7 @@ function mergedRow(row: EvidenceRow): HTMLElement {
 // "Open full diff": the turn's whole diff in the terminal column (`diff.ts`).
 function fullDiffRow(session: string, index: number): HTMLElement {
   const item = document.createElement("li");
-  item.append(pressable(text("button", "Open full diff", "evidence-edit"), false, () => diffRequest.open(session, index)));
+  item.append(fullTitle(pressable(text("button", "Open full diff", "evidence-edit"), false, () => diffRequest.open(session, index)), HOVERS.wholeDiff));
   return item;
 }
 
@@ -208,6 +213,7 @@ export function evidenceElement(session: string, index: number, turn: Facts & En
     show();
   });
   button.classList.add("evidence-toggle");
+  button.title = "Show or hide this turn's files and checks";
   button.setAttribute("aria-expanded", String(openLines.has(key)));
   button.append(text("span", line));
   show();

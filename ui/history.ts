@@ -38,6 +38,7 @@ export function historyLink(sessions: Pick<Session, "state">[], open: () => void
   const count = sessions.filter((s) => s.state === "ended").length;
   if (!count) return [];
   const link = pressable(text("button", `History · ${count}`, "history-link"), false, open);
+  link.title = "Show the ended sessions";
   link.removeAttribute("aria-pressed");
   link.dataset.key = "history";
   return [link];

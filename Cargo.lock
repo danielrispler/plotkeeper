@@ -3445,6 +3445,8 @@ dependencies = [
  "dispatch2",
  "jsonc-parser",
  "log",
+ "objc2",
+ "objc2-foundation",
  "serde",
  "serde_json",
  "studio-core",

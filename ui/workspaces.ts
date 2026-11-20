@@ -224,14 +224,16 @@ export function branchBlocked(found: Workspaces, sessions: Pick<Session, "cwd" |
   return null;
 }
 
-export type BranchOption = { branch: Branch; label: string; note: string; disabled: boolean };
+// `why`: the reason a disabled row gives on hover (#220); empty when it is enabled.
+export type BranchOption = { branch: Branch; label: string; note: string; disabled: boolean; why: string };
 
 // The branch picker's rows: every branch, disabled all together by `blocked`, and one a task holds or the
 // main checkout is on by its own reason (#95).
 export function branchOptions(branches: Branch[], blocked: string | null): BranchOption[] {
   return branches.map((branch) => {
     const note = branch.task ? `in task ${branch.task}` : branch.current ? "current" : branch.remote ? "at origin" : "";
-    return { branch, label: branch.name, note, disabled: blocked !== null || branch.task !== null || branch.current };
+    const why = blocked ?? (branch.task ? `the task ${branch.task} has it checked out` : branch.current ? "the main checkout is on it" : "");
+    return { branch, label: branch.name, note, disabled: blocked !== null || branch.task !== null || branch.current, why };
   });
 }
 
@@ -295,7 +297,7 @@ export function workspaceRow(project: string, { workspace, name, facts, actions,
     drawSidebar();
   });
   button.classList.add("row");
-  button.title = workspace.path;
+  button.title = `${workspace.path}\nShow or hide its actions`;
   button.setAttribute("aria-expanded", String(opened.has(workspace.path)));
   const line = text("span", "", "l1");
   line.append(fullTitle(text("span", name, "name"), name));
@@ -310,11 +312,11 @@ export function workspaceRow(project: string, { workspace, name, facts, actions,
   } else row.append(button);
   if (!opened.has(workspace.path)) return row;
   const act = (label: string) =>
-    pressable(text("button", label, "small"), false, () => {
+    fullTitle(pressable(text("button", label, "small"), false, () => {
       opened.delete(workspace.path);
       const done = label === "Remove" ? removeWorktree(workspace.path, project).then(() => readWorkspaces(true)) : startLast(workspace.path, "");
       done.catch(fail(project));
-    });
+    }), label === "Remove" ? "Remove this worktree" : "Start a session in this worktree");
   const buttons = text("div", "", "workspace-actions");
   buttons.append(...actions.map(act));
   row.append(buttons);
@@ -332,7 +334,7 @@ function pullButton(project: string, { behind, refused }: Pull): HTMLButtonEleme
 
 // A new task in a project, named by its branch; a session starts in it.
 function creating(project: string): HTMLElement {
-  const form = newTask("New task: branch name", "Create", async (name) => invoke("create_task", { project, name }).finally(() => readWorkspaces(true)), false, fail(project));
+  const form = newTask("New task: branch name", "Create", "Create a worktree on a new branch and start a session in it (↩)", async (name) => invoke("create_task", { project, name }).finally(() => readWorkspaces(true)), false, fail(project));
   form.dataset.key = "new-task";
   return form;
 }

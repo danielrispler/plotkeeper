@@ -193,6 +193,16 @@ test("the branch options grey out a task's branch as 'in task X' and the current
   assert.deepEqual(shown("a session here is running").map((row) => row[2]), [true, true, true]);
 });
 
+test("a disabled branch gives its reason on hover (#220): the block, the task that holds it, or that it is current", () => {
+  const branches = [
+    { name: "main", remote: false, task: null, current: true },
+    { name: "issue-1", remote: false, task: "issue-1", current: false },
+    { name: "teammate", remote: true, task: null, current: false },
+  ];
+  assert.deepEqual(branchOptions(branches, null).map(({ why }) => why), ["the main checkout is on it", "the task issue-1 has it checked out", ""]);
+  assert.deepEqual(branchOptions(branches, "a session here is running").map(({ why }) => why), Array(3).fill("a session here is running"));
+});
+
 test("the picker is the main checkout's only: its token and the palette action open it, and it has no New branch", () => {
   assert.match(read("main.ts"), /"studio::SwitchBranch": \(\) => void showBranches\(\)/);
   assert.match(read("workspaces.ts"), /workspace !== workspaces\.main/);

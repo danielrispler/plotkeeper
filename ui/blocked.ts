@@ -14,7 +14,7 @@ export type BlockedView = {
   folder: string;
   reason: string;
   agent: string | null;
-  buttons: string[];
+  buttons: BlockedButton[];
   // Running: the time since its retry started. Finished: its exit code. The tail is the output's last lines, once read;
   // a background run has none.
   detail: string | null;
@@ -40,8 +40,16 @@ function detailOf(card: BlockedCommand, now: number): string | null {
   return card.exit_code == null ? "No exit code" : `exit code ${card.exit_code}`;
 }
 
+// What each of a blocked command's buttons does, on its hover: a label without one does not compile.
+type BlockedButton = "Allow" | "Decline" | "Ask again";
+const blockedHovers: Record<BlockedButton, string> = {
+  Allow: "Let the agent run this command once",
+  Decline: "Refuse the command; the agent is told",
+  "Ask again": "Renew the approval and ask the agent to run the command again",
+};
+
 // The buttons of a card that waits: Allow and Decline while Daniel has not chosen, Ask again once his Allow went unused.
-function buttonsOf(status: BlockedStatus, answerable: boolean): string[] {
+function buttonsOf(status: BlockedStatus, answerable: boolean): BlockedButton[] {
   if (!blockedWaits(status)) return [];
   if (status === "allowed_not_run") return ["Ask again"];
   return (status === "blocked" || status === "blocked_again") && answerable ? ["Allow", "Decline"] : [];
@@ -143,6 +151,7 @@ export function blockedElement(session: string, card: BlockedCommand, agent: str
     for (const label of view.buttons) {
       const button = text("button", label, "btn") as HTMLButtonElement;
       button.type = "button";
+      button.title = blockedHovers[label];
       button.addEventListener("click", async () => {
         if (label === "Ask again") {
           // The pass may have expired or been spent, so the approval is renewed before the line asks for the retry.

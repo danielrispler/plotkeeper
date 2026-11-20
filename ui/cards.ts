@@ -10,6 +10,7 @@ import { fileRow } from "./evidence.js";
 import { drawFeed, forgetMissingSummaries, openCitation } from "./story.js";
 import { confidenceRow, pickedHere, trialStage, whyInput, whyWaiting } from "./quiz.js";
 import type { CardRequest, CheckResult, Guess, Level, Quiz, Rating, Reason, SessionCards, StoredCard, Tap, TurnFile } from "./types.js";
+import { HOVERS } from "./hovers.js";
 
 // The turn a card is drawn in: its file chips open the file's hunk between the turn's trees, as its evidence line's rows do.
 export type CardTurn = { session: string; index: number; files: TurnFile[]; ended: boolean };
@@ -79,6 +80,7 @@ function quizElements(stored: StoredCard, quiz: Quiz, shown: ReturnType<typeof q
         record("guess", { id, option: i });
       });
       button.disabled = state.answered;
+      button.title = state.answered ? HOVERS.answered : HOVERS.pickAnswer;
       item.append(button);
       if (state.reasons) {
         const why = prose("p", option.why);
@@ -97,6 +99,7 @@ function quizElements(stored: StoredCard, quiz: Quiz, shown: ReturnType<typeof q
       return record("quiz_tap", { id, tap: { kind: "skip" } });
     });
     skip.classList.add("quiz-skip");
+    skip.title = "Skip the question and show the card's explanation";
     return [title, ...(trial && check === null ? [confidenceRow(id, send, drawFeed)] : []), options, skip];
   }
   if (waiting) return [title, options, whyInput(id, send, drawFeed)];
@@ -182,6 +185,7 @@ function keyWrongButton(id: string, keyWrong: boolean): HTMLElement {
   const flag = pressable(prose("button", label) as HTMLButtonElement, keyWrong, () => record("quiz_tap", { id, tap: { kind: "key_wrong" } }));
   flag.classList.add("key-wrong");
   flag.disabled = keyWrong;
+  flag.title = keyWrong ? "Already flagged; a flag is kept and never undone" : HOVERS.keyWrong;
   return flag;
 }
 
@@ -190,6 +194,7 @@ function understoodButton(id: string, taps: StoredCard["taps"]): HTMLElement {
   const done = taps?.some((tap) => tap.kind === "understood") ?? false;
   const chip = pressable(prose("button", "I get why") as HTMLButtonElement, done, () => record("quiz_tap", { id, tap: { kind: "understood" } }));
   chip.disabled = done;
+  chip.title = done ? "Already noted that you get why" : HOVERS.understood;
   return chip;
 }
 
@@ -206,7 +211,7 @@ function moreElement(id: string, more: string | null): HTMLElement {
   node.open = moreOpen.has(id);
   const text = prose("p", more ?? "Writing…");
   text.className = "explanation";
-  node.append(prose("summary", "Explain more"), text);
+  node.append(fullTitle(prose("summary", "Explain more"), `${HOVERS.explainMore}, then show or hide it`), text);
   node.addEventListener("toggle", () => {
     if (node.open) moreOpen.add(id);
     else moreOpen.delete(id);
@@ -243,7 +248,7 @@ const reasons: [Reason, string][] = [
 // toggling one. `keyWrong` is the quiz's flag, offered as a reason on a card with a quiz.
 function ratingElement(id: string, rating: Rating | null, keyWrong: boolean | null): HTMLElement {
   const choice = (label: string, pressed: boolean, picked: Rating) =>
-    pressable(prose("button", label), pressed, () => record("rate", { id, rating: picked }));
+    fullTitle(pressable(prose("button", label), pressed, () => record("rate", { id, rating: picked })), `Rate this explanation as ${label.toLowerCase()}`);
   const node = document.createElement("div");
   node.className = "rating";
   const row = document.createElement("p");
@@ -387,7 +392,7 @@ export function cardLine(stored: StoredCard, turn: CardTurn | null = null, trial
   const node = document.createElement("details");
   node.className = "fold answered-card";
   node.open = cardOpen.has(id);
-  node.append(fullTitle(prose("summary", quiz.text), quiz.text), cardNode(stored, turn, trial));
+  node.append(fullTitle(prose("summary", quiz.text), `Show or hide this card: ${quiz.text}`), cardNode(stored, turn, trial));
   node.addEventListener("toggle", () => {
     if (node.open) cardOpen.add(id);
     else cardOpen.delete(id);
@@ -412,7 +417,7 @@ export function unseenRow(stored: StoredCard, turn: CardTurn | null = null): HTM
   const node = document.createElement("details");
   node.className = "fold unseen-card";
   node.open = cardOpen.has(id);
-  node.append(fullTitle(prose("summary", stored.card.summary), stored.card.summary));
+  node.append(fullTitle(prose("summary", stored.card.summary), `Open this card: ${stored.card.summary}`));
   let built = false;
   const show = () => {
     if (built) return;

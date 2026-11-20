@@ -13,6 +13,7 @@ import { projectGroups, foundWorkspaces, tokenOf, workspaceSection, type Project
 import { redrawHistory, redrawHome, showHistory } from "./panes.js";
 import { isSelected, select } from "./selection.js";
 import { studio } from "./state.js";
+import { titled } from "./keys.js";
 import { blockedWaits, stateLabels, type BlockedCommand, type Context, type Session, type SessionState, type Subagent } from "./types.js";
 import { askDelete, report } from "./story.js";
 
@@ -352,7 +353,7 @@ export function deleting(session: Session): HTMLElement | null {
   // `patch` keeps the first button and its listener, so the press reads the session as it is now.
   const now = () => studio.listed.find((listed) => listed.id === session.id) ?? session;
   const button = icon("delete", CROSS, () => void askDelete(now()).catch(report));
-  button.title = "Delete…";
+  button.title = "Delete this session from the list…";
   button.setAttribute("aria-label", `Delete ${sessionName(session)}…`);
   return button;
 }
@@ -394,7 +395,7 @@ export function stripLabels(sessions: Pick<Session, "name" | "identity" | "folde
 export function strip(sessions: Session[]): HTMLElement[] {
   const toggle = () => document.body.classList.toggle("list-open");
   const open = pressable(text("button", "☰", "open"), false, toggle);
-  open.title = "Open list (⌘1)";
+  open.title = titled(studio.files.keymap, "Open the session list", "studio::ToggleList");
   const shown = sessions.filter((session) => !collapsed.includes(session.state));
   const labels = stripLabels(shown);
   const rest = sessions.length - shown.length;
@@ -409,7 +410,7 @@ export function strip(sessions: Session[]): HTMLElement[] {
       button.append(glyph(session.state, session.unseen, session.landed), labels[i]);
       return button;
     }),
-    ...(rest ? [Object.assign(pressable(text("button", `${rest} idle`), false, toggle), { title: "Idle" })] : []),
+    ...(rest ? [Object.assign(pressable(text("button", `${rest} idle`), false, toggle), { title: titled(studio.files.keymap, "Open the session list, idle sessions among it", "studio::ToggleList") })] : []),
   ];
 }
 
@@ -542,7 +543,7 @@ function projectNode(group: ProjectGroup<Session>): HTMLElement {
     const id = `${group.key} ${state}`;
     folded.open = opened.has(id);
     folded.addEventListener("toggle", () => (folded.open ? opened.add(id) : opened.delete(id)));
-    folded.append(text("summary", `${stateLabels[state]} · ${sessions.length}`), ...rows);
+    folded.append(fullTitle(text("summary", `${stateLabels[state]} · ${sessions.length}`), `Show or hide the ${stateLabels[state].toLowerCase()} sessions`), ...rows);
     body.append(folded);
   }
   if (group.project) {
@@ -590,7 +591,9 @@ export function showSessions(sessions: Session[]) {
   const chip = element("needs-you");
   chip.textContent = chipText(sessions);
   chip.hidden = chip.textContent === "";
+  chip.title = "Go to the first session that needs you";
   const unseen = element("unseen");
   unseen.textContent = unseenText(live);
   unseen.hidden = unseen.textContent === "";
+  unseen.title = titled(studio.files.keymap, "Go to the newest unseen session", "studio::JumpToUnseen");
 }
