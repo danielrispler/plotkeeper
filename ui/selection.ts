@@ -7,7 +7,7 @@ import { showCards } from "./cards.js";
 import { failure, invoke } from "./dom.js";
 import { openHunk } from "./evidence.js";
 import { showSessions } from "./list.js";
-import { showSession } from "./panes.js";
+import { homeShown, showSession } from "./panes.js";
 import { showWorkspaces } from "./workspaces.js";
 import { studio } from "./state.js";
 import { citedTurn, openTurn, showView } from "./story.js";
@@ -77,10 +77,11 @@ export async function followToCode(session: string, id: string) {
   await select(session);
 }
 
-// What the Home key does (#239, like tmux `last-window`): from a session it remembers that session and shows Home; on Home it
-// selects the remembered session if the list still holds it, else does nothing.
-export function homeToggle(current: string | null, remembered: string | null, listed: { id: string }[]): { remember: string } | { select: string } | null {
-  if (current !== null) return { remember: current };
+// What the Home key does (#239, like tmux `last-window`): from any view but Home (a session, History, a full diff, a new terminal) it shows
+// Home, remembering the session when one is selected; on Home it selects the remembered session if the list still holds it, else does
+// nothing.
+export function homeToggle(current: string | null, remembered: string | null, listed: { id: string }[], home = current === null): { show: string | null } | { select: string } | null {
+  if (!home) return { show: current };
   return remembered !== null && listed.some((s) => s.id === remembered) ? { select: remembered } : null;
 }
 
@@ -95,9 +96,10 @@ export function leftSession(before: string | null, after: string | null, remembe
 
 // The Home key's action.
 export async function toggleHome() {
-  const step = homeToggle(studio.selection?.session.id ?? null, cameFrom, studio.listed);
+  const step = homeToggle(studio.selection?.session.id ?? null, cameFrom, studio.listed, homeShown());
   if (!step) return;
-  if ("remember" in step) await goHome();
+  // Leaving a selected session for none remembers it (`show`); from a view with none selected, what was remembered stays.
+  if ("show" in step) await goHome();
   else await select(step.select);
 }
 

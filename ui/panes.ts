@@ -211,6 +211,19 @@ export function showHome() {
   element("terminal-head").hidden = true;
 }
 
+// Forgets the item the store last chose, until it answers again.
+export const forgetAsked = () => void (asked = null);
+
+// Whether Home is the view shown.
+export const homeShown = () => shown === HOME;
+
+// A card or summary was stored, or a turn ended: what the store chooses for the slot, and the Headlines of the rows, may have changed.
+export function refreshHome() {
+  if (shown !== HOME) return;
+  void readLearning();
+  redrawHome();
+}
+
 // Writes the slot's `shown` when the window turns visible or focused with Home on screen.
 export const markHomeShown = () => markLearningShown(shown === HOME);
 
@@ -389,7 +402,8 @@ export async function showSession(session: Session | null, clicked = false, agen
     return;
   }
   selected = key;
-  if (session) starting = null;
+  // Home asked for by a click ends a pane just started too.
+  if (session || clicked) starting = null;
   const connected = await ready?.then(() => true, () => false);
   await revived.catch(failure("revive"));
   const current = () => selected === key;
