@@ -273,6 +273,18 @@ function ratingElement(id: string, rating: Rating | null, keyWrong: boolean | nu
 // time, which the weekly rates measure guesses from.
 const unshown = new Set<string>();
 
+// The ids of the cards built since the feed last began to draw: only those are on screen.
+const built = new Set<string>();
+
+// The feed starts to draw: every card it builds from here on is on screen.
+export const beginFeed = () => built.clear();
+
+// The feed finished drawing: a card that waited while the window was hidden and was folded away since is not shown, so it is
+// never tapped (a wake-up may fold the newest turn while the window is hidden).
+export function endFeed() {
+  for (const id of unshown) if (!built.has(id)) unshown.delete(id);
+}
+
 export function markShown() {
   if (document.visibilityState !== "visible") return;
   if (unshown.size) invoke("shown", { ids: [...unshown] });
@@ -332,6 +344,7 @@ function showBrief(cards: SessionCards) {
 // Card `stored`'s node, drawn again only when its record changed.
 export function cardNode(stored: StoredCard, turn: CardTurn | null = null, trial = false): HTMLElement {
   const id = stored.request.id;
+  built.add(id);
   const record = JSON.stringify([stored, turn, trial ? trialStage(id) : null]);
   if (drawn.get(id)?.record !== record) {
     if (!drawn.has(id) && stored.guess === null) unshown.add(id);
@@ -344,6 +357,8 @@ export function showCards(cards: SessionCards) {
   studio.cards = cards;
   showBrief(cards);
   showDecisions(cards.decisions);
+  // A card drawn in a visible window is tapped before a switch of session drops it.
+  markShown();
   const ids = new Set([...cards.recent, ...cards.older, ...cards.workers.map(({ card }) => card)].map(({ request }) => request.id));
   for (const id of drawn.keys()) {
     if (ids.has(id)) continue;
@@ -410,7 +425,11 @@ export function unseenRow(stored: StoredCard, turn: CardTurn | null = null): HTM
     if (node.open) {
       cardOpen.add(id);
       show();
-    } else cardOpen.delete(id);
+    } else {
+      cardOpen.delete(id);
+      // Seen, the card keeps no row once it is closed.
+      if (built || !unseen(stored)) node.remove();
+    }
   });
   return node;
 }
