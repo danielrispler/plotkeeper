@@ -102,6 +102,22 @@ fn coin() -> bool {
         == 1
 }
 
+/// Where a confidence tap was made (danielrispler/plotkeeper#242): Home's learning slot, or the rail, which a tap stored before
+/// the field existed reads as. The rail's taps are written without it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Surface {
+    #[default]
+    Rail,
+    Home,
+}
+
+impl Surface {
+    fn is_rail(&self) -> bool {
+        *self == Surface::Rail
+    }
+}
+
 /// What Daniel does with a Quiz (danielrispler/plotkeeper#120): a pick, "Show the rest anyway" (a skip, which reveals as a pick
 /// does), and the three chips under the revealed answer. The trial's two (danielrispler/plotkeeper#129): how sure he is
 /// before the pick, and an optional line on why after it, which no model reads.
@@ -113,6 +129,8 @@ pub enum Tap {
     },
     Confidence {
         sure: bool,
+        #[serde(default, skip_serializing_if = "Surface::is_rail")]
+        surface: Surface,
     },
     Why {
         text: String,
@@ -124,6 +142,13 @@ pub enum Tap {
     Understood,
     ExplainMore,
     KeyWrong,
+    /// "Not now" (danielrispler/plotkeeper#240): Daniel set the Quiz aside from Home's learning slot. It is not an answer, and
+    /// each tap is kept, one per day it was tapped.
+    NotNow,
+    /// A tap of a kind this build does not know, such as one a later build wrote: it reads, and counts as nothing, so a later
+    /// tap kind never makes this build refuse the store.
+    #[serde(other)]
+    Unknown,
 }
 
 /// A tap and when, in Unix milliseconds.
@@ -139,32 +164,94 @@ impl QuizTap {
     fn answers(&self) -> bool {
         matches!(self.tap, Tap::Pick { .. } | Tap::Skip)
     }
+
+    /// Whether it is a pick.
+    fn picks(&self) -> bool {
+        matches!(self.tap, Tap::Pick { .. })
+    }
+
+    /// Whether it is a "Not now" tapped at or after `day_start`.
+    fn set_aside_since(&self, day_start: u64) -> bool {
+        self.at >= day_start && matches!(self.tap, Tap::NotNow)
+    }
+
+    /// Whether it flags the key as wrong.
+    fn flags_key(&self) -> bool {
+        self.tap == Tap::KeyWrong
+    }
 }
 
 /// Keeps `tap` at `at` in `taps`: the first answer counts, and each chip once. Whether it was kept.
 fn keep_tap(taps: &mut Vec<QuizTap>, tap: Tap, at: u64) -> bool {
     let new = QuizTap { tap, at };
-    let taken = taps.iter().any(|kept| {
-        if new.answers() {
-            kept.answers()
-        } else {
-            std::mem::discriminant(&kept.tap) == std::mem::discriminant(&new.tap)
-        }
-    });
+    let taken = !matches!(new.tap, Tap::NotNow)
+        && taps.iter().any(|kept| {
+            if new.answers() {
+                kept.answers()
+            } else {
+                std::mem::discriminant(&kept.tap) == std::mem::discriminant(&new.tap)
+            }
+        });
     if !taken {
         taps.push(new);
     }
     !taken
 }
 
+/// A Retest the learning slot may serve, with its first Quiz's pick, when it came due and when that Quiz was offered.
+struct Eligible<'a> {
+    picked: bool,
+    due: u64,
+    retest: &'a Retest,
+    offered: u64,
+    hunk: &'a str,
+}
+
+/// A fresh Quiz the learning slot may serve, when its turn ended, and the turn's stored hunk.
+struct FreshQuiz<'a> {
+    at: u64,
+    hunk: &'a str,
+    id: &'a String,
+    session_id: &'a String,
+    quiz: &'a Quiz,
+}
+
+/// When the turn of the Quiz named `id` ended: the time after the `@` of its id, which the hook received the `Stop` at, else
+/// `written`, when it was written (danielrispler/plotkeeper#241).
+fn ended_at(id: &str, written: u64) -> u64 {
+    (id.rsplit_once('@'))
+        .and_then(|(_, at)| at.parse().ok())
+        .unwrap_or(written)
+}
+
 /// How long after a Quiz was offered its retest is due: seven days (danielrispler/plotkeeper#129).
 pub const RETEST_AFTER_MS: u64 = 7 * 24 * 60 * 60 * 1000;
 
-/// How long after it came due a retest is still served and written: fourteen days (danielrispler/plotkeeper#226).
+/// How far back a Retest may have come due and still be served by the learning slot: 14 days (danielrispler/plotkeeper#240).
 pub const RETEST_REACH_MS: u64 = 14 * 24 * 60 * 60 * 1000;
+
+/// How many Retests the learning slot serves in a day, counted by the picks of the day (danielrispler/plotkeeper#240).
+pub const RETESTS_PER_DAY: usize = 3;
 
 /// How many retests may wait unanswered before no more are written (danielrispler/plotkeeper#215).
 pub const RETESTS_WAITING: usize = 3;
+
+/// What Home's learning slot serves (danielrispler/plotkeeper#240): one Retest, or, once the day's cap is reached, "done for
+/// today", or a fresh Quiz of a turn or card (#241); nothing is `None` beside it.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Learning {
+    Retest(Retest),
+    Fresh {
+        id: String,
+        session_id: String,
+        quiz: Quiz,
+        /// When its turn ended (danielrispler/plotkeeper#242), and the turn's stored hunk, for the reveal.
+        at: u64,
+        hunk: String,
+    },
+    Done,
+}
 
 /// A fresh Quiz on the decision of an earlier one, offered on Home a week after it (danielrispler/plotkeeper#129). `quiz`
 /// is `None` when the writer's replies broke the rules twice: the retest is then not asked for again.
@@ -175,6 +262,13 @@ pub struct Retest {
     pub of: String,
     pub session_id: String,
     pub added_at: u64,
+    /// When the first Quiz was offered, the turn's date (danielrispler/plotkeeper#242). Not stored: `learning` fills it in on the
+    /// item it serves.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub of_at: Option<u64>,
+    /// The first Quiz's stored hunk, for the reveal. Not stored: `learning` fills it in on the item it serves.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub hunk: String,
     pub quiz: Option<Quiz>,
     #[serde(default)]
     pub taps: Vec<QuizTap>,
@@ -744,13 +838,21 @@ impl CardStore {
                 Tap::Skip if answered => Ok(()),
                 _ => {
                     let key_wrong = matches!(tap, Tap::KeyWrong);
+                    // Shown on Home is shown as the rail's `show` marks it, so weekly and the rail's unseen count it.
+                    let marked = matches!(tap, Tap::Shown)
+                        && kept.shown_at.is_none()
+                        && kept.guess.is_none()
+                        && {
+                            kept.shown_at = Some(at);
+                            true
+                        };
                     if keep_tap(&mut kept.taps, tap, at) {
                         if key_wrong {
                             kept.key_wrong = true;
                         }
                         return self.save();
                     }
-                    Ok(())
+                    if marked { self.save() } else { Ok(()) }
                 }
             };
         }
@@ -833,8 +935,8 @@ impl CardStore {
                 hunk: kept.request.diff(),
                 quiz: (kept.card.quiz.as_ref()).filter(|_| kept.request.check.is_none())?,
                 offered: kept.added_at.or(kept.shown_at)?,
-                picked: kept.guess.is_some(),
-                key_wrong: kept.key_wrong,
+                picked: kept.guess.is_some() || kept.taps.iter().any(QuizTap::picks),
+                key_wrong: kept.key_wrong || kept.taps.iter().any(QuizTap::flags_key),
             })
         });
         let summaries = self.summaries.iter().filter_map(|kept| {
@@ -844,11 +946,102 @@ impl CardStore {
                 hunk: &kept.hunk,
                 quiz: kept.summary.quiz.as_ref()?,
                 offered: kept.added_at,
-                picked: kept.taps.iter().any(|t| matches!(t.tap, Tap::Pick { .. })),
-                key_wrong: kept.taps.iter().any(|t| t.tap == Tap::KeyWrong),
+                picked: kept.taps.iter().any(QuizTap::picks),
+                key_wrong: kept.taps.iter().any(QuizTap::flags_key),
             })
         });
         cards.chain(summaries)
+    }
+
+    /// The item Home's learning slot serves at `now`, given `day_start`, the start of Daniel's local day (danielrispler/plotkeeper#240):
+    /// a Retest, a fresh Quiz of a turn or card (#241), "done for today", or nothing. It reads and writes nothing.
+    pub fn learning(&self, now: u64, day_start: u64) -> Option<Learning> {
+        let picked_today = self
+            .retests
+            .iter()
+            .filter(|r| r.taps.iter().any(|t| t.at >= day_start && t.picks()))
+            .count();
+        let capped = picked_today >= RETESTS_PER_DAY;
+        let mut eligible: Vec<Eligible> = self
+            .retests
+            .iter()
+            .filter(|r| r.quiz.is_some())
+            // A skip by an older build answers it, as `waiting_retests` counts it.
+            .filter(|r| !r.taps.iter().any(QuizTap::answers))
+            .filter(|r| !r.taps.iter().any(|t| t.set_aside_since(day_start)))
+            .filter_map(|retest| {
+                let first = self.first_quizzes().find(|first| first.of == retest.of)?;
+                first.servable(now).then_some(Eligible {
+                    picked: first.picked,
+                    due: first.offered.saturating_add(RETEST_AFTER_MS),
+                    retest,
+                    offered: first.offered,
+                    hunk: first.hunk,
+                })
+            })
+            .collect();
+        eligible.sort_by_key(|e| (std::cmp::Reverse(e.picked), std::cmp::Reverse(e.due)));
+        let retest = eligible.first().map(|e| {
+            Learning::Retest(Retest {
+                of_at: Some(e.offered),
+                hunk: e.hunk.into(),
+                ..e.retest.clone()
+            })
+        });
+        // One Retest comes first each day; then a fresh Quiz; then more Retests, up to the cap.
+        if picked_today == 0 && retest.is_some() {
+            return retest;
+        }
+        if let Some(fresh) = self.fresh_quiz(now, day_start) {
+            return Some(fresh);
+        }
+        if capped {
+            return Some(Learning::Done);
+        }
+        retest
+    }
+
+    /// The newest Quiz of a turn summary or a card, a worker's included, whose turn ended at most `RECENT_MS` before `now` and that
+    /// Daniel has not picked or skipped, nor set aside since `day_start` (danielrispler/plotkeeper#241).
+    fn fresh_quiz(&self, now: u64, day_start: u64) -> Option<Learning> {
+        let open = |taps: &[QuizTap]| {
+            !taps.iter().any(QuizTap::answers)
+                && !taps.iter().any(|t| t.set_aside_since(day_start))
+                && !taps.iter().any(QuizTap::flags_key)
+        };
+        let fresh = |at: u64| at <= now && now - at <= RECENT_MS;
+        let cards = self.cards.iter().filter_map(|k| {
+            let at = ended_at(&k.request.id, k.added_at.or(k.shown_at)?);
+            let quiz = k.card.quiz.as_ref().filter(|_| k.request.check.is_none())?;
+            (fresh(at) && k.guess.is_none() && !k.key_wrong && open(&k.taps)).then_some(FreshQuiz {
+                at,
+                hunk: k.request.diff(),
+                id: &k.request.id,
+                session_id: &k.request.session_id,
+                quiz,
+            })
+        });
+        let summaries = self.summaries.iter().filter_map(|k| {
+            let quiz = k.summary.quiz.as_ref()?;
+            let at = ended_at(&k.request.id, k.added_at);
+            (fresh(at) && k.arm != Some(Arm::BodyOnly) && open(&k.taps)).then_some(FreshQuiz {
+                at,
+                hunk: &k.hunk,
+                id: &k.request.id,
+                session_id: &k.request.session_id,
+                quiz,
+            })
+        });
+        cards
+            .chain(summaries)
+            .max_by_key(|f| f.at)
+            .map(|f| Learning::Fresh {
+                id: f.id.clone(),
+                session_id: f.session_id.clone(),
+                quiz: f.quiz.clone(),
+                at: f.at,
+                hunk: f.hunk.into(),
+            })
     }
 
     /// Keeps the retest of `ask`'s Quiz, `quiz` as the writer wrote it, or `None` when it was rejected, at `at`; and
@@ -864,6 +1057,8 @@ impl CardStore {
             of: ask.of.clone(),
             session_id: ask.session_id.clone(),
             added_at: at,
+            of_at: None,
+            hunk: String::new(),
             quiz,
             taps: Vec::new(),
         });

@@ -17,7 +17,7 @@
   /* Type: five sizes. */
   --font: -apple-system, system-ui, "SF Pro Text", "Helvetica Neue", sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, monospace;
-  --size-xs: 11.5px; --size-small: 12.5px; --size: 14px; --size-read: 15.5px; --size-large: 16.5px;
+  --size-xs: 11.5px; --size-small: 12.5px; --size: 14px; --size-read: 15.5px; --size-large: 16.5px; --size-title: 22px;
   --size-mono: var(--size-small); --term-size: var(--size-mono); --term-line: 1.5;
 
   /* Spacing steps. */

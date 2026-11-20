@@ -73,7 +73,7 @@ _Avoid_: Card writing (one part of it)
 The card a check of the session's own agent gets at its start when it usually runs over 2 minutes, on the change since the last card, so Daniel can guess while he waits whether the check will pass.
 
 **Guess**:
-Daniel's answer to a card's quiz. The card writer's key grades it, and the card shows right or wrong, with the reasons, as soon as he answers. On a check card the check's result settles it instead, and the card shows right or wrong, with the reasons, once the check ends. It is never shown as a score.
+Daniel's answer to a card's quiz. The card writer's key grades it, and the card shows right or wrong, with the reasons, as soon as he answers. On a check card the check's result settles it instead, and the card shows right or wrong, with the reasons, once the check ends. It is never shown as a raw score; only numbers that inform are allowed, as calibration against his own past ([the Quiz](behaviour/quiz.md#numbers-that-inform)). On Home a guess is preceded by a confidence tap, "not sure" or not, with Home as its surface.
 
 **Settle**:
 To grade the guess on a check card by the check's result, once the check ends. A tap after the result is no guess.
@@ -109,7 +109,7 @@ _Formerly_: Place
 _Avoid_: Location
 
 **Home**:
-The view in the terminal column while no session is selected, such as after a delete: the sessions that need Daniel or are unseen, then the landed ones, then one row per project, in project order, to start a session there. Workspaces stays the home of tasks.
+The waiting room: the page Daniel parks on while agents run, in the terminal column while no session is selected (such as after a delete or a click on the list's empty space). Under a quiet title (the date) its parts come in order, each absent when empty: **Needs you** (each session with its question's first line, the only colour on the page), **Running** (two lines each: logo, name, project and elapsed time, then its **Intention**, muted, with its age; at most 4, then "+N running"), **Unseen** (the sessions whose last turn he has not seen, newest turn first, each with its **Headline**; at most 3, then "+N unseen"), the learning item (a fresh Quiz or a Retest, or "Done for today"), **Landed** and a row per project to start a session in. A "+N" row expands its group inline until Home is left. With no session needing him it reads "Nothing needs you". Workspaces stays the home of tasks.
 _Avoid_: Dashboard, board
 
 **History**:

@@ -240,13 +240,15 @@ export type StoredCard = {
 // The trial's two (#129): how sure he was before the pick, and one optional line on why after it.
 export type Tap =
   | { kind: "pick"; option: number }
-  | { kind: "confidence"; sure: boolean }
+  | { kind: "confidence"; sure: boolean; surface?: "home" }
   | { kind: "why"; text: string }
   | { kind: "shown" | "hunk" }
-  | { kind: "skip" | "understood" | "explain_more" | "key_wrong" };
+  | { kind: "skip" | "understood" | "explain_more" | "key_wrong" | "not_now" };
 export type QuizTap = Tap & { at: number };
 // A fresh Quiz on the decision of an earlier one, a week after it, which Home offers (#129). `id` names it for `quiz_tap`.
-export type Retest = { id: string; of: string; session_id: string; added_at: number; quiz: Quiz | null; taps: QuizTap[] };
+// What Home's learning slot serves (#240): a Retest, a fresh Quiz of a turn or card (#241), or "done for today"; null: nothing.
+export type Learning = ({ kind: "retest" } & Retest) | { kind: "fresh"; id: string; session_id: string; quiz: Quiz; at: number; hunk: string } | { kind: "done" };
+export type Retest = { id: string; of: string; session_id: string; added_at: number; of_at?: number | null; hunk?: string; quiz: Quiz | null; taps: QuizTap[] };
 // The selected session's brief, and its cards, split at 30 minutes by the shell's tick, each oldest
 // first.
 // An answered question, plan or permission in the session's decision history (danielrispler/Falinks#479): the call's input,
@@ -413,6 +415,7 @@ export interface Commands {
   check_output: CheckOutput | null;
   choose_folder: string | null;
   claude_argv: string[];
+  clearing: void;
   closed: void;
   create_named_task: Workspace;
   create_task: Workspace;
@@ -445,7 +448,7 @@ export interface Commands {
   reorder_projects: string[];
   repository_of: string | null;
   restart_into: void;
-  retests: Retest[];
+  learning: Learning | null;
   revival: Revive[];
   select: Selection | null;
   select_terminal: Selection | null;

@@ -19,6 +19,16 @@ export const invoke = <C extends Command>(command: C, args?: Record<string, unkn
 export const listen = <T>(event: string, handler: (payload: T) => void) =>
   window.__TAURI__.event.listen<T>(event, (e) => handler(e.payload));
 
+// Tells the newest of a series of requests: the promise it returns for a request resolves to `undefined` once a later request was
+// made, so a slow, older reply never lands over a newer one.
+export function newest() {
+  let latest = 0;
+  return <T>(request: Promise<T>) => {
+    const mine = ++latest;
+    return request.then((value): T | undefined => (mine === latest ? value : undefined));
+  };
+}
+
 // The Studio log (#190): the line is the command's name and the error's message, nothing else of the error. `error` is for a
 // failed action Daniel asked for, `warn` for a call that degrades and carries on. A log that fails is dropped.
 const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -77,24 +87,43 @@ export function pressable<T extends HTMLElement>(button: T, pressed: boolean, cl
 
 // Makes `parent`'s children match `next`, keeping each node that stays, so the focused element and
 // the text selection survive an update (danielrispler/Falinks#570). A node stays when its tag and `data-key` match, and
-// takes the new one's attributes and text. Give a node with a listener a key that pins what the
+// takes the new one's attributes and text. A keyed node is found by its key wherever it was, so rows added or dropped before it
+// do not replace it; an unkeyed one is matched by its place. Give a node with a listener a key that pins what the
 // listener does, such as its session's id.
 export function patch(parent: Node, next: Node[]) {
   const old = [...parent.childNodes];
-  next.forEach((node, i) => {
-    const was = old[i];
-    if (!was) parent.appendChild(node);
-    else if (was.nodeName !== node.nodeName || key(was) !== key(node)) parent.replaceChild(node, was);
-    else if (was.nodeType !== 1) {
-      if (was.nodeValue !== node.nodeValue) was.nodeValue = node.nodeValue;
-    } else {
-      const [from, to] = [was as Element, node as Element];
-      for (const { name, value } of [...to.attributes]) if (from.getAttribute(name) !== value) from.setAttribute(name, value);
-      for (const { name } of [...from.attributes]) if (!to.hasAttribute(name)) from.removeAttribute(name);
-      patch(from, [...to.childNodes]);
-    }
+  const byKey = new Map<string, Node>();
+  for (const node of old) {
+    const k = key(node);
+    if (k !== null && !byKey.has(k)) byKey.set(k, node);
+  }
+  const claimed = new Set<Node>();
+  const targets = next.map((node, i) => {
+    const k = key(node);
+    const was = k === null ? old[i] : byKey.get(k);
+    if (!was || claimed.has(was) || was.nodeName !== node.nodeName || key(was) !== k) return { node, was: null };
+    claimed.add(was);
+    return { node: was, was };
   });
-  for (const extra of old.slice(next.length)) parent.removeChild(extra);
+  for (const node of old) if (!claimed.has(node)) parent.removeChild(node);
+  targets.forEach(({ node }, i) => {
+    const at = parent.childNodes[i];
+    if (at === node) return;
+    if (at) parent.insertBefore(node, at);
+    else parent.appendChild(node);
+  });
+  targets.forEach(({ was }, i) => {
+    if (!was) return;
+    const to = next[i];
+    if (was.nodeType !== 1) {
+      if (was.nodeValue !== to.nodeValue) was.nodeValue = to.nodeValue;
+      return;
+    }
+    const [from, goal] = [was as Element, to as Element];
+    for (const { name, value } of [...goal.attributes]) if (from.getAttribute(name) !== value) from.setAttribute(name, value);
+    for (const { name } of [...from.attributes]) if (!goal.hasAttribute(name)) from.removeAttribute(name);
+    patch(from, [...goal.childNodes]);
+  });
 }
 const key = (node: Node) => (node.nodeType === 1 ? (node as Element).getAttribute("data-key") : null);
 

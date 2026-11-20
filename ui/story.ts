@@ -13,7 +13,7 @@ import { askAnchor } from "./ask.js";
 import { rendered } from "./markdown.js";
 import { encode, request } from "./daemon.js";
 import { agentState, sessionName, showsLanded } from "./list.js";
-import { closePane, openHere } from "./panes.js";
+import { closePane, openHere, refreshHome } from "./panes.js";
 import { openDecision, type Ask } from "./answer.js";
 import { blockedElement, typeRetry } from "./blocked.js";
 import { beginFeed, briefNodes, cardLine, cardsFor, endFeed, markShown, openCard, quizOpen, rowCards, unseenRow } from "./cards.js";
@@ -391,6 +391,8 @@ const askSummary = oneAtATime((id) =>
     .finally(() => {
       asking.delete(id);
       drawFeed();
+      // Home's Unseen rows show this Headline, and the card store may now hold a fresh Quiz.
+      refreshHome();
     }),
 );
 
@@ -403,6 +405,12 @@ function summaryOf(id: string): TurnSummary | null {
   return null;
 }
 
+// The Headline of a session's latest turn, for Home's Unseen rows; null when it has no turn.
+export function lastHeadline(session: Pick<Session, "turns">): string | null {
+  const turn = session.turns.at(-1);
+  return turn ? headlineOf(turn.id ? summaryOf(turn.id) : null, turn.message).headline : null;
+}
+
 // A new card store revision may hold a summary that was missing: ask again for those.
 export function forgetMissingSummaries() {
   for (const [id, summary] of summaries) if (summary === null) summaries.delete(id);
@@ -412,6 +420,9 @@ export function forgetMissingSummaries() {
 // replies, fetched at their first opening.
 const opened = new Set<string>();
 const replies = new Map<string, string>();
+
+// Opens turn `index` of `session` in the rail, as a click on its line does (#243); the newest turn is always open.
+export const openTurn = (session: string, index: number) => void opened.add(`${session} ${index} turn`);
 
 // A folded block keyed `key`, open while Daniel keeps it open; `onOpen` runs at each opening. `hover` says what it holds.
 function folded(key: string, title: string, hover: string, body: HTMLElement[], onOpen?: () => void): HTMLElement {

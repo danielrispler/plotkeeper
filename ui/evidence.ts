@@ -107,6 +107,12 @@ const openHunks = new Set<string>();
 // file's line counts stay as they were at the read, and a turn that ended since is read again.
 const hunks = new Map<string, { hunk: Hunk | null; ended: boolean; added: number | null; removed: number | null }>();
 
+// Opens `file`'s hunk in turn `index` of `session`, and the evidence line that holds it; `scope` is the place that draws it (#243).
+export function openHunk(session: string, index: number, file: TurnFile, scope = "") {
+  openHunks.add(`${scope}${session} ${index} ${file.root} ${file.path}`);
+  if (!scope) openLines.add(`${session} ${index} evidence`);
+}
+
 // A file's row: its label, which opens the real hunk between the turn's two trees under it, with "Open in editor" at its
 // first changed line. Only this row changes.
 export function fileRow(session: string, index: number, row: EvidenceRow, scope = "", ended = false): HTMLElement {

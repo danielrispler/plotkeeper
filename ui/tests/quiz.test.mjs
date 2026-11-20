@@ -187,3 +187,14 @@ test("the why line keeps its draft and focus when the rail draws the Quiz again"
   assert.deepEqual(focused, [redrawn]);
   delete El.prototype.focus;
 });
+
+test("a stored not_now tap leaves the Quiz open: neither skipped nor a chip (#240)", () => {
+  seedQuiz("n1", [{ kind: "not_now", at: 1 }]);
+  assert.equal(quizAnswered("n1"), false);
+  assert.doesNotMatch(make("n1").text, /Scores come later/);
+  // A pick after it still reveals, and no chip is lit by the not_now.
+  seedQuiz("n2", [{ kind: "not_now", at: 1 }, { kind: "pick", option: 0, at: 2 }]);
+  const chips = make("n2").find("button").filter((b) => /I get why|explain more|Key wrong/.test(b.text));
+  assert.equal(chips.length, 3);
+  assert.ok(chips.every((b) => !b.disabled));
+});

@@ -17,9 +17,9 @@ import { hover, realClock, shownGate } from "./hover.js";
 import { arrange, defaultWidths, type LayoutMode, railShown, resized, type Widths } from "./layout.js";
 import { listSpace } from "./home.js";
 import { showSessions } from "./list.js";
-import { goHome, select, show } from "./selection.js";
+import { goHome, select, show, toggleHome } from "./selection.js";
 import { dragPanel, placePanel, togglePanel } from "./panel.js";
-import { dragSplit, focusPane, placePanes, runDoctor, showHistory, split, startPanes, toggleSplit } from "./panes.js";
+import { dragSplit, focusPane, markHomeShown, placePanes, runDoctor, showHistory, split, startPanes, toggleSplit } from "./panes.js";
 import { showAddProject, showBranches, showPalette, showPicker } from "./picker.js";
 import { fetchNow, foundWorkspaces, pullAll, showWorkspaces, sidebarOrder, watchWorkspaces } from "./workspaces.js";
 import { reload, reloadedZoom, type SettingsFiles, zoomed } from "./settings.js";
@@ -216,7 +216,7 @@ const actions: Actions = {
   "studio::AddProject": () => void showAddProject(),
   // Home, in the terminal column: selects no session.
   "studio::JumpToUnseen": () => void go(newestUnseen(inSidebar())),
-  "studio::GoHome": () => void goHome(),
+  "studio::GoHome": () => void toggleHome(),
   // History (#94), in the terminal column: the ended sessions, searchable.
   "studio::ShowHistory": () => showHistory(),
   // Fetches the repository now (#33); the workspaces' states follow.
@@ -319,6 +319,8 @@ element("close-all").addEventListener("click", () => blocks().forEach((block) =>
 element("rail-actions").addEventListener("click", () => element("rail-actions").hidePopover());
 
 document.addEventListener("visibilitychange", markShown);
+document.addEventListener("visibilitychange", markHomeShown);
+window.addEventListener("focus", markHomeShown);
 window.addEventListener("focus", () => actions["studio::RefreshLanded"]());
 
 // A login shell in the configured repository, then a pane per session terminal (danielrispler/Falinks#467).

@@ -259,8 +259,21 @@ h1 { margin: 0 0 var(--sp-4); }
 .pane { position: absolute; inset: var(--sp-3); }
 /* Home (spec #53): in the terminal column while no session is selected; rows as the list's, in a column of readable width. */
 .pane.home { overflow-y: auto; padding: var(--sp-5) var(--sp-6); max-width: var(--dialog); margin: 0 auto; }
-.pane.home h1 { margin: var(--sp-6) var(--sp-4) var(--sp-2); }
+.pane.home h1.title { font-size: var(--size-title); font-weight: 600; color: var(--fg); margin: 0 0 var(--sp-4); }
+.pane.home h2 { font-size: var(--size-xs); font-weight: 500; color: var(--faint); margin: var(--sp-6) var(--sp-4) var(--sp-1); }
+.pane.home .empty { margin: 0 var(--sp-4); }
 .pane.home .row:hover { background: var(--hover); }
+.pane.home .home-row .l2 { padding-inline-start: calc(var(--icon) + var(--sp-3)); }
+.pane.home .home-row .l1 .clock { color: var(--muted); }
+.pane.home .home-row .l1 .glyph { margin-inline-start: auto; }
+.pane.home .slot-actions { display: flex; gap: var(--sp-3); margin: var(--sp-2) 0 0; }
+.pane.home .slot-actions .quiz-skip { margin-top: 0; color: var(--muted); }
+.pane.home h2 { display: flex; align-items: baseline; }
+.pane.home h2 .clear { margin-inline-start: auto; color: var(--muted); font-weight: 500; }
+.pane.home .row.more { color: var(--muted); font-size: var(--size-small); text-align: start; }
+/* Needs you's rows are cards on the raised surface; the rest sit on the terminal background. */
+.pane.home .home-row:has(.glyph[data-glyph="pill"]) { background: var(--raised); box-shadow: inset 0 0 0 var(--hair) var(--needs-you-line); padding: var(--sp-4) var(--sp-5); }
+.pane.home .home-row:has(.glyph[data-glyph="pill"]) .l2 { color: var(--fg); }
 /* History (#94): as Home, with its search box above the rows; it adds no colour. */
 .pane.history { overflow-y: auto; padding: var(--sp-5) var(--sp-6); max-width: var(--dialog); margin: 0 auto; }
 .pane.history input { width: 100%; box-sizing: border-box; margin-bottom: var(--sp-3); font: inherit; padding: var(--sp-3); background: var(--raised); color: var(--fg); border: var(--hair) solid var(--edge); border-radius: var(--radius-small); }
@@ -268,8 +281,6 @@ h1 { margin: 0 0 var(--sp-4); }
 .pane.history .item .delete { visibility: visible; }
 .list-foot { display: flex; align-items: center; justify-content: space-between; }
 .history-link { display: block; margin: var(--sp-3) var(--sp-4); color: var(--muted); }
-/* A landed row's Delete is the point of the section, so it shows without hover. */
-.pane.home .item .delete { visibility: visible; }
 .pane[hidden] { display: block; }
 .pane[hidden], .pane.fitting { visibility: hidden; }
 /* A split's divider (danielrispler/Falinks#529), in the gap between its two panes. */
@@ -297,6 +308,7 @@ h1 { margin: 0 0 var(--sp-4); }
 /* The start-failure toast (danielrispler/Falinks#558): the bottom-right corner, so it never covers the needs-you one; not in colour. */
 .toast.start { top: auto; bottom: var(--sp-5); background: var(--raised); cursor: default;
                box-shadow: inset 0 0 0 var(--hair) var(--edge), var(--shadow); }
+.toast.clear { right: auto; left: var(--sp-5); grid-template-columns: minmax(0, 1fr) auto; }
 .toast.start .name { color: var(--fg); }
 /* The note toast: a turn that ended off screen or a context warning; not in colour. */
 .toast.note { background: var(--raised); box-shadow: inset 0 0 0 var(--hair) var(--edge), var(--shadow); }
@@ -616,3 +628,16 @@ body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
 .project-workspaces .workspace-line .row { flex: 1; min-width: 0; width: auto; }
 .project-workspaces .workspace .pull { flex: none; color: var(--fg); }
 .project-workspaces .workspace .pull:disabled { color: var(--muted); }
+/* The learning item is the one card at the page's centre (#226, "The look"): its label, the Quiz, then after an answer the link to the
+   code, the hunk in place, compact (no "Open in editor", no "Ask"), and Next, all inside it. */
+.pane.home .slot-card { background: var(--surface); box-shadow: inset 0 0 0 var(--hair) var(--edge), var(--shadow); border-radius: var(--radius-pane);
+                        padding: var(--sp-5) var(--sp-6); margin-top: var(--sp-6); }
+.pane.home .slot-card .label { font-size: var(--size-xs); font-weight: 500; color: var(--faint); margin: 0 0 var(--sp-3); }
+.pane.home .slot-card .quiz-box { background: none; padding: 0; margin: 0; }
+.pane.home .slot-card .quiz-code-link { margin-top: var(--sp-4); font-size: var(--size); }
+.pane.home .slot-card .evidence-rows { list-style: none; margin: var(--sp-3) 0 0; padding: 0; }
+.pane.home .slot-card .evidence-rows li { margin: 0; }
+.pane.home .slot-card .evidence-fail { font-size: var(--size-xs); color: var(--faint); background: none; box-shadow: none; padding: var(--sp-3) 0 0; }
+.pane.home .slot-card .evidence-edit, .pane.home .slot-card .ask-about { display: none; }
+.pane.home .slot-card .evidence-hunk { background: var(--bg); font: var(--size-xs)/1.5 var(--mono); padding: var(--sp-3) var(--sp-5); }
+.pane.home .slot-card .evidence-caption { margin: var(--sp-3) 0 0; font-size: var(--size-xs); color: var(--faint); }

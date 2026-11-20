@@ -226,7 +226,7 @@ function rowLines(button: HTMLElement, state: string, name: HTMLElement[], below
 
 // A row's button, keyed by what it selects (`patch` keeps it across updates). It selects on the press,
 // so the row shows selected at once (danielrispler/Falinks#570); a click without a pointer, from the keyboard, selects too.
-function selecting(id: string, agent: string | null, key = `${id} ${agent ?? ""}`): HTMLButtonElement {
+export function selecting(id: string, agent: string | null, key = `${id} ${agent ?? ""}`): HTMLButtonElement {
   const button = pressable(document.createElement("button"), isSelected(id, agent), (event: MouseEvent) => event.detail === 0 && select(id, agent));
   button.dataset.key = key;
   button.addEventListener("pointerdown", (event) => event.button === 0 && select(id, agent));

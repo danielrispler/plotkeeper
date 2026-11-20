@@ -12,6 +12,9 @@ import { fixtures } from "./fixtures.ts";
 // The sample fixture whose script fails on purpose (rail-fixtures.ts).
 const failsOnPurpose = new Set(["railIdleFail"]);
 
+// Home, the waiting room (#238), is drawn at 1400x900, the rest at snap's default size.
+const sizeOf = (name) => (name === "home" || name === "homeClearToast" || name === "homeReveal243" || name === "homeRefresh" ? "1400x900" : name.startsWith("homeSeeCode") ? "900x900" : undefined);
+
 const snap = join(dirname(fileURLToPath(import.meta.url)), "snap.mjs");
 const folder = mkdtempSync(join(tmpdir(), "snap-all-"));
 const queue = Object.keys(fixtures).filter((name) => !failsOnPurpose.has(name));
@@ -21,7 +24,7 @@ let failure;
 // A fixture's output is printed whole once it finishes, so parallel renders don't interleave.
 const render = (name) =>
   new Promise((done) => {
-    const child = spawn(process.execPath, [snap, name, join(folder, `${name}.png`)], { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(process.execPath, [snap, name, join(folder, `${name}.png`)], { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, ...(sizeOf(name) && { SNAP_SIZE: sizeOf(name) }) } });
     let output = "";
     child.stdout.on("data", (chunk) => (output += chunk));
     child.stderr.on("data", (chunk) => (output += chunk));
