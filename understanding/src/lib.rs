@@ -321,20 +321,25 @@ pub fn write_stop(
     let Some(mut card) = write_card(writer, &request, &earlier, &mut log) else {
         return false;
     };
-    place_card_quiz(store, &request, &mut card, &mut log);
-    if let Err(e) = store.lock().unwrap().add(request.clone(), card, millis()) {
-        log(format!("save the card store: {e}"));
+    // The cap check and the store are one step: another session's card cannot slip between them.
+    {
+        let mut store = store.lock().unwrap();
+        place_card_quiz(&mut store, &request, &mut card, &mut log);
+        if let Err(e) = store.add(request.clone(), card, millis()) {
+            log(format!("save the card store: {e}"));
+        }
     }
     stored();
     write_goal(store, writer, &request, session, log);
     true
 }
 
-/// Holds `card`'s Quiz to the cap on Quizzes per hour (danielrispler/plotkeeper#119): past it, a session's
-/// card shows without its Quiz, and takes the place of the oldest unanswered lone Quiz of the hour
-/// when there is one. A worker's card and a check's are no turn's and are left alone.
+/// Holds `card`'s Quiz to the rules for when a Quiz shows (danielrispler/plotkeeper#119, #257): none beside a
+/// decision, which `request` says by how its turn ended and never by the session's state now; then at most
+/// 3 an hour: past it, a session's card shows without its Quiz, and takes the place of the oldest unanswered lone
+/// Quiz of the hour when there is one. A worker's card and a check's are no turn's and are left alone.
 fn place_card_quiz(
-    store: &Mutex<CardStore>,
+    store: &mut CardStore,
     request: &CardRequest,
     card: &mut Card,
     mut log: impl FnMut(String),
@@ -342,7 +347,10 @@ fn place_card_quiz(
     if card.quiz.is_none() || request.agent.is_some() || request.check.is_some() {
         return;
     }
-    let mut store = store.lock().unwrap();
+    if request.asks {
+        card.quiz = None;
+        return;
+    }
     match store.place_quiz(true, millis()) {
         Place::Offer => {}
         Place::Withhold => card.quiz = None,

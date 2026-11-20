@@ -1383,6 +1383,7 @@ impl Session {
             workers: since.cards,
             check: None,
             ends: BTreeMap::new(),
+            asks: self.needs_you(),
         }
     }
 
@@ -1639,6 +1640,7 @@ impl Session {
             session_id: self.agent.id.clone(),
             id: card_id(&self.agent.id, at),
             prompt: daniels.map(|p| p.at),
+            asks: self.needs_you(),
             ..CardRequest::default()
         };
         (!trees.is_empty()).then_some(Backfill { request, trees })
@@ -1960,6 +1962,10 @@ pub struct CardRequest {
     /// writer runs: where the card's code is pulled from (danielrispler/plotkeeper#121).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub ends: BTreeMap<String, String>,
+    /// Whether the turn ended in Needs you, as the core recorded at its end: a Quiz is never beside a decision
+    /// (danielrispler/plotkeeper#257). A request stored before this reads as "did not".
+    #[serde(default)]
+    pub asks: bool,
 }
 
 /// A turn that gets a summary (danielrispler/Falinks#517, decisions 12, 13 and 15): what the summary writer reads of it.
