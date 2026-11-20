@@ -215,7 +215,7 @@ export const fixtures = {
     const snapScript = `[...document.querySelectorAll("summary, button")].find((el) => /^Idle/.test(el.textContent.trim()))?.click();`;
     return { ...base, sessions, selected: { session: sessions[1], agent: null }, snapScript };
   },
-  // Home, the waiting room (#238), at 1400x900: 4 running, 1 needs you, 1 unseen, the Retest where the learning slot will be, 2 landed and
+  // Home, the waiting room (#238), at 1400x900: 4 running, 1 needs you, 1 unseen, the learning slot with a Retest, 2 landed and
   // 2 projects. The script checks the Retest sits fully above the fold.
   home() {
     const now = Date.now();
@@ -238,17 +238,17 @@ export const fixtures = {
       session("s3", "#54 · Subagent terminal", "idle", { cwd: "/w/plotkeeper", landed: true }),
       session("s5", "#48 · Agent deadline", "ended", { cwd: "/w/plotkeeper", landed: true }),
     ];
-    const retests = [{ id: "r1", of: "r1", session_id: "s3", added_at: now - 7 * 864e5, taps: [], quiz: { text: "The settings write held a lock across a read. Why was it safe?", key: 1, options: [
+    const learning = { kind: "retest" as const, id: "r1", of: "r1", session_id: "s3", added_at: now - 7 * 864e5, taps: [], quiz: { text: "The settings write held a lock across a read. Why was it safe?", key: 1, options: [
       { text: "Keep the lock across the await so nobody reads half a write", why: "A lock across the await deadlocks." },
       { text: "Release it first and re-read the state after", why: "The read can wait on the writer." },
       { text: "Copy the state out and work on the copy", why: "It still races." },
-    ] } }];
+    ] } };
     const snapScript = `
       const learning = document.querySelector(".pane.home .quiz-region");
       if (!learning) log("snap:fail Home has no Retest");
       // The window is 900 high; the page reports less while this script runs (headless Chrome counts its frame), so the fold is fixed.
       else if (learning.getBoundingClientRect().bottom > 900 - 6) log("snap:fail the Retest is below the fold: it ends at " + learning.getBoundingClientRect().bottom);`;
-    return { ...base, sessions, retests, projects: ["/w/plotkeeper", "/w/falinks"], selected: null, snapScript };
+    return { ...base, sessions, learning, projects: ["/w/plotkeeper", "/w/falinks"], selected: null, snapScript };
   },
   // Errors in the notice line (#191): two errors and the dismiss control, beside a settings error.
   noticeErrors() {

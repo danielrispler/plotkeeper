@@ -72,7 +72,7 @@ export function seedQuiz(id: string, taps: QuizTap[] | undefined) {
     else if (tap.kind === "why") one.why ??= tap.text;
     else if (tap.kind === "skip") {
       if (one.pick === null) one.skipped = true;
-    } else if (tap.kind !== "shown" && tap.kind !== "hunk") one.chips.add(tap.kind);
+    } else if (tap.kind !== "shown" && tap.kind !== "hunk" && tap.kind !== "not_now") one.chips.add(tap.kind);
   }
 }
 

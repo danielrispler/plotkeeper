@@ -1,43 +1,59 @@
 // Home (spec #53, #226): the waiting room, the view in the terminal column while no session is selected. `homeView` is a pure
-// function of the sessions, the retests, the projects and the window's Home state: an ordered list of parts, each absent when
+// function of the sessions, the learning item the card store chose, the projects and the window's Home state: an ordered list of parts, each absent when
 // empty. Needs you is the only colour. `drawHome` draws it, patched by key so focus survives updates.
 
 import { age, failure, fullTitle, invoke, patch, pressable, text } from "./dom.js";
-import { quizItem, quizRegion, seedQuiz } from "./quiz.js";
+import { quizAnswered, quizItem, quizRegion, seedQuiz } from "./quiz.js";
 import { childrenOf, deleting, glyph, item, row, secondLine, selecting, sessionName, showsLanded, status } from "./list.js";
 import { logo, logoKey } from "./logos.js";
 import { foundWorkspaces, lastSegment, sessionProjectName } from "./workspaces.js";
 import { lastHeadline } from "./story.js";
 import { startLast } from "./picker.js";
-import type { Retest, Session } from "./types.js";
+import type { Learning, Session, Tap } from "./types.js";
 
 export type HomeKey = "needs_you" | "running" | "unseen" | "learning" | "landed" | "start";
 // A session's row on Home: its second line, and a muted note beside it (the intention's age).
 export type HomeRow = { session: Session; line: string; note: string };
 // One part of the page: `rows` are its sessions, `more` the sessions hidden behind its "+N" row.
-export type HomePart = { key: HomeKey; title: string; colour: boolean; rows: HomeRow[]; more: number; retests: Retest[]; projects: HomeProject[] };
-// The window's Home state: the groups Daniel expanded, kept until Home is left.
-export type HomeState = { expanded: Set<string> };
-export const homeState: HomeState = { expanded: new Set() };
+export type HomePart = { key: HomeKey; title: string; colour: boolean; rows: HomeRow[]; more: number; slot: Slot | null; projects: HomeProject[] };
+// The learning slot (#240): the item it serves, and whether a quiet "Next" follows an answer, because another item is due.
+export type Slot = { item: Learning; next: boolean };
+// The window's Home state: the groups Daniel expanded, kept until Home is left; `quiet`, set by "Not now", which hides the slot
+// until Home is entered again or a turn ends; and `held`, the item he answered in this window, which stays with its reveal
+// until "Next" or until Home is left.
+export type HomeState = { expanded: Set<string>; quiet: boolean; held: Learning | null };
+export const homeState: HomeState = { expanded: new Set(), quiet: false, held: null };
+export function resetHome(state: HomeState = homeState) {
+  state.expanded.clear();
+  state.quiet = false;
+  state.held = null;
+}
 
 export const MAX_RUNNING = 4;
 export const MAX_UNSEEN = 3;
 const endOf = (s: Session) => s.turns.at(-1)?.ended_at ?? s.last_event_at ?? 0;
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
 
-export function homeView(sessions: Session[], retests: Retest[], projects: string[], state: HomeState, headline: (s: Session) => string | null = () => null): HomePart[] {
+// What the slot shows: nothing while quiet; an item answered here, with "Next" when `asked`, the store's choice after that answer, is
+// another item; else what the store chose.
+export function learningSlot(asked: Learning | null, state: HomeState): Slot | null {
+  if (state.quiet) return null;
+  if (state.held) return { item: state.held, next: asked !== null && asked.kind !== "done" };
+  return asked ? { item: asked, next: false } : null;
+}
+
+export function homeView(sessions: Session[], asked: Learning | null, projects: string[], state: HomeState, headline: (s: Session) => string | null = () => null): HomePart[] {
   const landed = sessions.filter((s) => showsLanded(s.state, s.landed));
   const needsYou = sessions.filter((s) => s.state === "needs_you");
   const running = sessions.filter((s) => s.state === "running");
   // A landed session that is also unseen is listed as landed, keeping its unseen styling.
   const unseen = sessions.filter((s) => s.unseen && s.state !== "needs_you" && !landed.includes(s)).sort((a, b) => endOf(b) - endOf(a));
-  const offered = homeRetests(retests);
   const capped = (key: HomeKey, all: Session[], max: number, rowOf: (s: Session) => HomeRow) => {
     const shown = state.expanded.has(key) ? all : all.slice(0, max);
     return { rows: shown.map(rowOf), more: all.length - shown.length };
   };
   const plain = (rowOf: (s: Session) => HomeRow) => (all: Session[]) => ({ rows: all.map(rowOf), more: 0 });
-  const part = (key: HomeKey, title: string, rows: { rows: HomeRow[]; more: number }, extra: Partial<HomePart> = {}): HomePart => ({ key, title, colour: key === "needs_you", retests: [], projects: [], ...rows, ...extra });
+  const part = (key: HomeKey, title: string, rows: { rows: HomeRow[]; more: number }, extra: Partial<HomePart> = {}): HomePart => ({ key, title, colour: key === "needs_you", slot: null, projects: [], ...rows, ...extra });
   const parts: HomePart[] = [
     part("needs_you", "Needs you", plain((s) => ({ session: s, line: secondLine(s) ?? "", note: "" }))(needsYou)),
     part("running", "Running", capped("running", running, MAX_RUNNING, (s) => {
@@ -45,34 +61,91 @@ export function homeView(sessions: Session[], retests: Retest[], projects: strin
       return { session: s, line: s.transcript?.intention ?? s.line ?? "", note: steps === 0 ? "" : `${plural(steps, "step")} ago` };
     })),
     part("unseen", "Unseen", capped("unseen", unseen, MAX_UNSEEN, (s) => ({ session: s, line: headline(s) ?? "", note: "" }))),
-    part("learning", "Retest", { rows: [], more: 0 }, { retests: offered }),
+    part("learning", "Retest", { rows: [], more: 0 }, { slot: learningSlot(asked, state) }),
     part("landed", "Landed", plain((s) => ({ session: s, line: "", note: "" }))(landed)),
     part("start", "Start a session in", { rows: [], more: 0 }, { projects: homeProjects(projects) }),
   ];
-  return parts.filter((p) => p.rows.length || p.retests.length || p.projects.length);
+  return parts.filter((p) => p.rows.length || p.slot || p.projects.length);
 }
 
-// The retests Home offers (#129): those with a Quiz that he has not answered, and those he answered while this window showed
-// them, so the answer's reasons stay until the window is closed. Nothing else shows a retest.
-const answeredHere = new Set<string>();
-export function homeRetests(retests: Retest[]): Retest[] {
-  const answered = (r: Retest) => r.taps.some((t) => t.kind === "pick" || t.kind === "skip");
-  return retests.filter((r) => r.quiz && (answeredHere.has(r.id) || !answered(r)));
-}
-
-function retestRow(retest: Retest, quiz: NonNullable<Retest["quiz"]>): HTMLElement {
-  seedQuiz(retest.id, retest.taps);
-  // The self-test times the pick from the retest's first showing (#130).
-  if (!retest.taps.some((t) => t.kind === "shown")) void invoke("quiz_tap", { id: retest.id, tap: { kind: "shown" } }).catch(failure("quiz_tap"));
-  answeredHere.add(retest.id);
-  const region = quizRegion(retest.id, quiz, [], {
-    record: (tap) => void invoke("quiz_tap", { id: retest.id, tap }).catch(failure("quiz_tap")),
-    explain: () => invoke("ask", { session: retest.session_id, item: quizItem(quiz), question: "I did not get this yet. Explain more." }),
+// The slot's card: the Quiz of the item the store chose, which records its taps as a Retest's, with "Not now" until it is answered
+// and a quiet "Next" after an answer when another item is due. It writes nothing as it is built: `markLearningShown` writes `shown`.
+export function slotNode(slot: Slot, redraw: () => void, reask: () => void): HTMLElement {
+  const { item } = slot;
+  const wrap = document.createElement("div");
+  if (item.kind === "done") {
+    wrap.append(text("p", "Done for today", "empty"));
+    return wrap;
+  }
+  const quiz = item.quiz;
+  if (!quiz) return wrap;
+  seedQuiz(item.id, item.kind === "retest" ? item.taps : []);
+  const tap = (tap: Tap) => {
+    if (tap.kind === "pick" || tap.kind === "skip") homeState.held = item;
+    void invoke("quiz_tap", { id: item.id, tap })
+      .then(reask)
+      .catch(failure("quiz_tap"));
+    if (homeState.held) redraw();
+  };
+  const region = quizRegion(item.id, quiz, [], {
+    record: tap,
+    explain: () => invoke("ask", { session: item.session_id, item: quizItem(quiz), question: "I did not get this yet. Explain more." }),
     line: () => document.createElement("li"),
     trial: true,
   });
-  region.dataset.key = `retest ${retest.id}`;
-  return region;
+  wrap.append(region);
+  const actions = text("p", "", "slot-actions");
+  const button = (label: string, title: string, run: () => void) => {
+    const one = pressable(document.createElement("button"), false, run);
+    one.classList.add("quiz-skip");
+    one.title = title;
+    one.textContent = label;
+    return one;
+  };
+  if (!quizAnswered(item.id) && homeState.held !== item) {
+    actions.append(button("Not now", "Set this aside until tomorrow", () => {
+      homeState.quiet = true;
+      tap({ kind: "not_now" });
+      redraw();
+    }));
+  }
+  if (slot.next) {
+    actions.append(button("Next", "The next question", () => {
+      homeState.held = null;
+      redraw();
+    }));
+  }
+  if (actions.childNodes.length) wrap.append(actions);
+  wrap.dataset.key = `learning ${item.id}`;
+  return wrap;
+}
+
+// The item the last draw put in the slot, unanswered, whose `shown` is still to be written.
+let inSlot: Learning | null = null;
+const shownWritten = new Set<string>();
+
+// Whether the item's first showing is written now (#240): the item is a Retest on screen in the slot, Home is the active view and the
+// window is visible and focused. Once per item.
+export function shownDue(item: Learning | null, home: boolean, visible: boolean, focused: boolean): boolean {
+  if (item?.kind !== "retest" || !home || !visible || !focused) return false;
+  return !shownWritten.has(item.id) && !item.taps.some((t) => t.kind === "shown");
+}
+
+// Writes the slot's `shown` when its conditions hold; called when Home is drawn and when the window becomes visible or focused.
+export function markLearningShown(home: boolean) {
+  if (!shownDue(inSlot, home, document.visibilityState === "visible", document.hasFocus())) return;
+  const id = (inSlot as { id: string }).id;
+  shownWritten.add(id);
+  void invoke("quiz_tap", { id, tap: { kind: "shown" } }).catch(failure("quiz_tap"));
+}
+
+// Tells that a turn ended: its end time is later than the latest one seen. The first call only learns it.
+let lastEnd: number | null = null;
+export function turnEnded(sessions: Session[]): boolean {
+  const end = Math.max(0, ...sessions.map((s) => s.turns.at(-1)?.ended_at ?? 0));
+  const ended = lastEnd !== null && end > lastEnd;
+  lastEnd = end;
+  return ended;
 }
 
 export type HomeProject = { name: string; path: string };
@@ -136,9 +209,16 @@ function projectRow({ name, path }: HomeProject): HTMLElement {
 }
 
 // Draws Home into `box`, patched, so focus survives the list's updates; `redraw` draws it again after an expansion.
-export function drawHome(box: HTMLElement, sessions: Session[], projects: string[], retests: Retest[] = [], redraw: () => void = () => {}) {
+export function drawHome(box: HTMLElement, sessions: Session[], projects: string[], asked: Learning | null = null, redraw: () => void = () => {}, reask: () => void = () => {}) {
   box.classList.add("home");
-  const parts = homeView(sessions, retests, projects, homeState, lastHeadline);
+  // A turn's end brings the slot back after "Not now", and asks the store again.
+  if (turnEnded(sessions)) {
+    homeState.quiet = false;
+    reask();
+  }
+  const parts = homeView(sessions, asked, projects, homeState, lastHeadline);
+  const slot = parts.find((p) => p.key === "learning")?.slot ?? null;
+  inSlot = slot && slot.item.kind === "retest" && homeState.held !== slot.item ? slot.item : null;
   const found = foundWorkspaces();
   const keyed = (node: HTMLElement, key: string) => {
     node.dataset.key = key;
@@ -149,7 +229,7 @@ export function drawHome(box: HTMLElement, sessions: Session[], projects: string
     heading(part.title, `h ${part.key}`),
     ...part.rows.map((r) => (part.key === "landed" ? sessionRow(r.session, true) : waitingRow(r, part.key, sessionProjectName(projects, found, r.session)))),
     ...(part.more ? [moreRow(part.key, part.more, redraw)] : []),
-    ...part.retests.flatMap((r) => (r.quiz ? [retestRow(r, r.quiz)] : [])),
+    ...(part.slot ? [slotNode(part.slot, redraw, reask)] : []),
     ...part.projects.map(projectRow),
   ];
   patch(box, [
@@ -157,4 +237,5 @@ export function drawHome(box: HTMLElement, sessions: Session[], projects: string
     ...(parts.some((p) => p.key === "needs_you") ? [] : [keyed(text("p", "Nothing needs you", "empty"), "none")]),
     ...parts.flatMap(drawPart),
   ]);
+  markLearningShown(true);
 }

@@ -11,18 +11,19 @@ const key = (code, k, mods = {}) => ({ key: k, code, metaKey: false, ctrlKey: fa
 
 const turn = (ended_at) => ({ ended_at });
 const live = (id, state, extra = {}) => ({ id, state, unseen: false, landed: false, turns: [], questions: [], transcript: {}, ...extra });
-const view = (sessions, state = { expanded: new Set() }, extra = {}) => homeView(sessions, extra.retests ?? [], extra.projects ?? [], state, extra.headline);
+const fresh = () => ({ expanded: new Set(), quiet: false, held: null });
+const view = (sessions, state = fresh(), extra = {}) => homeView(sessions, extra.learning ?? null, extra.projects ?? [], state, extra.headline);
 const keys = (parts) => parts.map((p) => p.key);
 const sessionIds = (part) => part.rows.map((r) => r.session.id);
 const quiz = { text: "q", key: 0, options: [] };
-const retest = (id, quiz_, taps = []) => ({ id, of: id, session_id: "s", added_at: 1, quiz: quiz_, taps });
+const retest = (id, quiz_, taps = []) => ({ kind: "retest", id, of: id, session_id: "s", added_at: 1, quiz: quiz_, taps });
 
 test("Home's parts come in order, each absent when empty", () => {
   assert.deepEqual(keys(view([])), []);
   const all = view(
     [live("l", "idle", { landed: true }), live("u", "your_turn", { unseen: true }), live("r", "running"), live("n", "needs_you")],
     undefined,
-    { retests: [retest("a", quiz)], projects: ["/w/plotkeeper"] },
+    { learning: retest("a", quiz), projects: ["/w/plotkeeper"] },
   );
   assert.deepEqual(keys(all), ["needs_you", "running", "unseen", "learning", "landed", "start"]);
   assert.deepEqual(keys(view([live("r", "running")])), ["running"]);
@@ -33,7 +34,7 @@ test("5 running sessions give 4 rows and +1, and expanded gives all 5", () => {
   const five = ["a", "b", "c", "d", "e"].map((id) => live(id, "running"));
   const [part] = view(five);
   assert.deepEqual([sessionIds(part), part.more], [["a", "b", "c", "d"], 1]);
-  const [open] = view(five, { expanded: new Set(["running"]) });
+  const [open] = view(five, { ...fresh(), expanded: new Set(["running"]) });
   assert.deepEqual([sessionIds(open), open.more], [["a", "b", "c", "d", "e"], 0]);
   assert.equal(view(five.slice(0, 4))[0].more, 0);
 });
@@ -66,7 +67,7 @@ test("Needs you is the only part with the colour class", () => {
   const all = view(
     [live("l", "idle", { landed: true }), live("u", "your_turn", { unseen: true }), live("r", "running"), live("n", "needs_you")],
     undefined,
-    { retests: [retest("a", quiz)], projects: ["/w/plotkeeper"] },
+    { learning: retest("a", quiz), projects: ["/w/plotkeeper"] },
   );
   assert.deepEqual(all.filter((p) => p.colour).map((p) => p.key), ["needs_you"]);
 });
@@ -99,13 +100,69 @@ test("a click on the list's empty space goes home; a click on a row, a heading o
   assert.equal(listSpace(target("button")), false);
 });
 
-test("Home offers the retests that have a Quiz and are not answered, and keeps one it showed answered", async () => {
-  const { homeRetests } = await import("../../dist/home.js");
-  const quiz = { text: "q", key: 0, options: [] };
-  const retest = (id, quiz_, taps = []) => ({ id, of: id, session_id: "s", added_at: 1, quiz: quiz_, taps });
-  // One rejected by the guards has no Quiz; an answered one that was never shown is done.
-  assert.deepEqual(
-    homeRetests([retest("a", quiz), retest("b", null), retest("c", quiz, [{ kind: "pick", option: 0, at: 2 }]), retest("d", quiz, [{ kind: "confidence", sure: true, at: 2 }])]).map((r) => r.id),
-    ["a", "d"],
-  );
+test("quiet hides the learning slot until the Home state is reset", async () => {
+  const { resetHome } = await import("../../dist/home.js");
+  const state = { ...fresh(), quiet: true };
+  assert.deepEqual(keys(view([], state, { learning: retest("a", quiz) })), []);
+  resetHome(state);
+  assert.deepEqual(keys(view([], state, { learning: retest("a", quiz) })), ["learning"]);
+});
+
+test("done for today shows only in its case", () => {
+  const slotOf = (learning) => view([], undefined, { learning }).find((p) => p.key === "learning")?.slot;
+  assert.equal(slotOf({ kind: "done" }).item.kind, "done");
+  assert.equal(slotOf(retest("a", quiz)).item.kind, "retest");
+  assert.equal(slotOf(null), undefined);
+});
+
+test("an item answered here stays with its reveal, and Next shows only when another item is due", () => {
+  const answered = retest("a", quiz, [{ kind: "pick", option: 0, at: 2 }]);
+  const slotOf = (learning, held) => view([], { ...fresh(), held }, { learning }).find((p) => p.key === "learning")?.slot;
+  assert.deepEqual([slotOf(retest("b", quiz), answered).item.id, slotOf(retest("b", quiz), answered).next], ["a", true]);
+  assert.equal(slotOf({ kind: "done" }, answered).next, false);
+  assert.equal(slotOf(null, answered).next, false);
+  // Unanswered, the slot shows what the store chose, and no Next.
+  assert.equal(slotOf(retest("b", quiz), null).next, false);
+});
+
+test("shown is due only with Home active, the window visible and focused, and the Retest on screen", async () => {
+  const { shownDue } = await import("../../dist/home.js");
+  const item = retest("s1", quiz);
+  assert.equal(shownDue(item, true, true, true), true);
+  assert.equal(shownDue(item, false, true, true), false);
+  assert.equal(shownDue(item, true, false, true), false);
+  assert.equal(shownDue(item, true, true, false), false);
+  assert.equal(shownDue(null, true, true, true), false);
+  assert.equal(shownDue({ kind: "done" }, true, true, true), false);
+  assert.equal(shownDue(retest("s2", quiz, [{ kind: "shown", at: 1 }]), true, true, true), false);
+});
+
+test("building the slot writes nothing; shown is written once, when its conditions hold", async () => {
+  const { El: Base } = await import("./dom.mjs");
+  class El extends Base {
+    dataset = {};
+    title = "";
+    textContent = "";
+    disabled = false;
+  }
+  const calls = [];
+  globalThis.window = { __TAURI__: { core: { invoke: async (command, args) => (calls.push([command, args]), null) } } };
+  globalThis.document = { createElement: (tag) => new El(tag), visibilityState: "hidden", hasFocus: () => true, getElementById: () => Object.assign(new El("div"), { replaceChildren() {} }) };
+  const { slotNode, drawHome, markLearningShown } = await import("../../dist/home.js");
+  const item = { ...retest("w1", { text: "q", key: 0, options: [{ text: "A", why: "a" }] }) };
+  slotNode({ item, next: false }, () => {}, () => {});
+  assert.deepEqual(calls, []);
+  const box = new El("div");
+  box.dataset = {};
+  drawHome(box, [], [], item);
+  // The window is hidden: the background mount wrote nothing.
+  assert.deepEqual(calls, []);
+  markLearningShown(true);
+  assert.deepEqual(calls, []);
+  document.visibilityState = "visible";
+  markLearningShown(false);
+  assert.deepEqual(calls, []);
+  markLearningShown(true);
+  markLearningShown(true);
+  assert.deepEqual(calls, [["quiz_tap", { id: "w1", tap: { kind: "shown" } }]]);
 });

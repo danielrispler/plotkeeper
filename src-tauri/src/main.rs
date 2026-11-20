@@ -540,12 +540,15 @@ fn quiz_tap(id: String, tap: Tap, cards: State<Cards>) -> Option<StoredSummary> 
     store.turn_summary(&id).cloned()
 }
 
-/// The retests that have a Quiz (danielrispler/plotkeeper#129), which Home offers.
+/// What Home's learning slot serves at `now` (danielrispler/plotkeeper#240), given the start of Daniel's local day: the card store
+/// chooses it, and reads and writes nothing.
 #[tauri::command]
-fn retests(cards: State<Cards>) -> Vec<studio_understanding::Retest> {
-    let store = cards.lock().unwrap();
-    let kept = store.retests().iter();
-    kept.filter(|r| r.quiz.is_some()).cloned().collect()
+fn learning(
+    now: u64,
+    day_start: u64,
+    cards: State<Cards>,
+) -> Option<studio_understanding::Learning> {
+    cards.lock().unwrap().learning(now, day_start)
 }
 
 /// Writes the retests that fell due, once an hour from a minute after the start, off the read loop; Home reads them
@@ -1070,7 +1073,7 @@ fn main() {
             guess,
             key_wrong,
             quiz_tap,
-            retests,
+            learning,
             rate,
             explain_more,
             ask,

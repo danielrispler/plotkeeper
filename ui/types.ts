@@ -243,9 +243,11 @@ export type Tap =
   | { kind: "confidence"; sure: boolean }
   | { kind: "why"; text: string }
   | { kind: "shown" | "hunk" }
-  | { kind: "skip" | "understood" | "explain_more" | "key_wrong" };
+  | { kind: "skip" | "understood" | "explain_more" | "key_wrong" | "not_now" };
 export type QuizTap = Tap & { at: number };
 // A fresh Quiz on the decision of an earlier one, a week after it, which Home offers (#129). `id` names it for `quiz_tap`.
+// What Home's learning slot serves (#240): a Retest, a fresh Quiz of a turn or card (#241), or "done for today"; null: nothing.
+export type Learning = ({ kind: "retest" } & Retest) | { kind: "fresh"; id: string; session_id: string; quiz: Quiz } | { kind: "done" };
 export type Retest = { id: string; of: string; session_id: string; added_at: number; quiz: Quiz | null; taps: QuizTap[] };
 // The selected session's brief, and its cards, split at 30 minutes by the shell's tick, each oldest
 // first.
@@ -445,7 +447,7 @@ export interface Commands {
   reorder_projects: string[];
   repository_of: string | null;
   restart_into: void;
-  retests: Retest[];
+  learning: Learning | null;
   revival: Revive[];
   select: Selection | null;
   select_terminal: Selection | null;

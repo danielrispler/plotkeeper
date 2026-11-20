@@ -124,6 +124,9 @@ pub enum Tap {
     Understood,
     ExplainMore,
     KeyWrong,
+    /// "Not now" (danielrispler/plotkeeper#240): Daniel set the Quiz aside from Home's learning slot. It is not an answer, and
+    /// each tap is kept, one per day it was tapped.
+    NotNow,
 }
 
 /// A tap and when, in Unix milliseconds.
@@ -144,21 +147,49 @@ impl QuizTap {
 /// Keeps `tap` at `at` in `taps`: the first answer counts, and each chip once. Whether it was kept.
 fn keep_tap(taps: &mut Vec<QuizTap>, tap: Tap, at: u64) -> bool {
     let new = QuizTap { tap, at };
-    let taken = taps.iter().any(|kept| {
-        if new.answers() {
-            kept.answers()
-        } else {
-            std::mem::discriminant(&kept.tap) == std::mem::discriminant(&new.tap)
-        }
-    });
+    let taken = !matches!(new.tap, Tap::NotNow)
+        && taps.iter().any(|kept| {
+            if new.answers() {
+                kept.answers()
+            } else {
+                std::mem::discriminant(&kept.tap) == std::mem::discriminant(&new.tap)
+            }
+        });
     if !taken {
         taps.push(new);
     }
     !taken
 }
 
+/// What the learning slot reads of a Retest's first Quiz.
+struct FirstQuiz {
+    offered: u64,
+    picked: bool,
+    key_wrong: bool,
+}
+
 /// How long after a Quiz was offered its retest is due: seven days (danielrispler/plotkeeper#129).
 pub const RETEST_AFTER_MS: u64 = 7 * 24 * 60 * 60 * 1000;
+
+/// How far back a Retest may have come due and still be served by the learning slot: 14 days (danielrispler/plotkeeper#240).
+pub const RETEST_REACH_MS: u64 = 14 * 24 * 60 * 60 * 1000;
+
+/// How many Retests the learning slot serves in a day, counted by the picks of the day (danielrispler/plotkeeper#240).
+pub const RETESTS_PER_DAY: usize = 3;
+
+/// What Home's learning slot serves (danielrispler/plotkeeper#240): one Retest, or, once the day's cap is reached, "done for
+/// today". `Fresh` is the fresh Quiz of a turn or card, which a later ticket (#241) serves; nothing is `None` beside it.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Learning {
+    Retest(Retest),
+    Fresh {
+        id: String,
+        session_id: String,
+        quiz: Quiz,
+    },
+    Done,
+}
 
 /// A fresh Quiz on the decision of an earlier one, offered on Home a week after it (danielrispler/plotkeeper#129). `quiz`
 /// is `None` when the writer's replies broke the rules twice: the retest is then not asked for again.
@@ -779,6 +810,63 @@ impl CardStore {
                 first: quiz.clone(),
             })
             .collect()
+    }
+
+    /// The item Home's learning slot serves at `now`, given `day_start`, the start of Daniel's local day (danielrispler/plotkeeper#240):
+    /// nothing, or a Retest, or "done for today". It reads and writes nothing.
+    pub fn learning(&self, now: u64, day_start: u64) -> Option<Learning> {
+        let picked = |taps: &[QuizTap]| taps.iter().any(|t| matches!(t.tap, Tap::Pick { .. }));
+        let today = |taps: &[QuizTap], is: fn(&Tap) -> bool| {
+            taps.iter().any(|t| t.at >= day_start && is(&t.tap))
+        };
+        let picked_today = self
+            .retests
+            .iter()
+            .filter(|r| today(&r.taps, |t| matches!(t, Tap::Pick { .. })))
+            .count();
+        if picked_today >= RETESTS_PER_DAY {
+            return Some(Learning::Done);
+        }
+        // Each eligible Retest with its first Quiz's pick, and when it came due.
+        let mut eligible: Vec<(bool, u64, &Retest)> = self
+            .retests
+            .iter()
+            .filter(|r| r.quiz.is_some() && !picked(&r.taps))
+            .filter(|r| !today(&r.taps, |t| matches!(t, Tap::NotNow)))
+            .filter_map(|r| {
+                let first = self.first_quiz(&r.of)?;
+                let due = first.offered.saturating_add(RETEST_AFTER_MS);
+                (!first.key_wrong && now.saturating_sub(due) <= RETEST_REACH_MS).then_some((
+                    first.picked,
+                    due,
+                    r,
+                ))
+            })
+            .collect();
+        eligible
+            .sort_by_key(|(picked, due, _)| (std::cmp::Reverse(*picked), std::cmp::Reverse(*due)));
+        eligible
+            .first()
+            .map(|(.., r)| Learning::Retest((*r).clone()))
+    }
+
+    /// What the learning slot reads of the first Quiz, a card's or a turn's own, that retest `of` is of.
+    fn first_quiz(&self, of: &str) -> Option<FirstQuiz> {
+        let flagged = |taps: &[QuizTap]| taps.iter().any(|t| t.tap == Tap::KeyWrong);
+        let picked = |taps: &[QuizTap]| taps.iter().any(|t| matches!(t.tap, Tap::Pick { .. }));
+        if let Some(kept) = self.cards.iter().find(|kept| kept.request.id == of) {
+            return Some(FirstQuiz {
+                offered: kept.added_at.or(kept.shown_at)?,
+                picked: kept.guess.is_some() || picked(&kept.taps),
+                key_wrong: kept.key_wrong || flagged(&kept.taps),
+            });
+        }
+        let kept = self.summaries.iter().find(|kept| kept.request.id == of)?;
+        Some(FirstQuiz {
+            offered: kept.added_at,
+            picked: picked(&kept.taps),
+            key_wrong: flagged(&kept.taps),
+        })
     }
 
     /// Keeps the retest of `ask`'s Quiz, `quiz` as the writer wrote it, or `None` when it was rejected, at `at`; and

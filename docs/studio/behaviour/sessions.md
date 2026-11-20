@@ -16,13 +16,13 @@ A session with blocked commands waiting shows "N blocked commands waiting" ("1 b
 
 ## Home
 
-With no session selected the terminal column shows Home, the waiting room, as a page of parts in a fixed order under a quiet title (the date). A part with nothing in it is absent: Needs you, Running, Unseen, the Retest, Landed, and the projects to start a session in.
+With no session selected the terminal column shows Home, the waiting room, as a page of parts in a fixed order under a quiet title (the date). A part with nothing in it is absent: Needs you, Running, Unseen, the learning slot (one Retest), Landed, and the projects to start a session in.
 
 Needs you lists each session that needs Daniel as a card on the raised surface, with its "Needs you" pill and its question's first line. It is the only colour on the page; with no session needing him Home says "Nothing needs you".
 
 Running shows at most 4 sessions, two lines each: the agent's logo, the session's name, its project and how long its turn has run, then its intention as the rail shows it, muted, with its age in steps. More hide behind "+N running". Unseen shows at most 3 of the sessions whose last turn Daniel has not seen, newest turn first, one line each with the turn's Headline, then "+N unseen". A row leaves once its turn is seen, whether or not he replies. Clicking a "+N" row shows the rest in place, until Home is left. Clicking a row selects its session.
 
-Landed keeps each row's Delete, and the Retest section and the project rows work as before. Drawing is patched by key, so focus survives an update.
+Landed keeps each row's Delete, and the project rows work as before. Drawing is patched by key, so focus survives an update.
 
 ## Sessions in the studio
 

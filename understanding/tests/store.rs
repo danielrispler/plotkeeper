@@ -1067,3 +1067,215 @@ fn a_summary_that_becomes_waiting_raises_the_revision_so_the_window_asks_again()
     store.waiting_summary();
     assert!(store.revision() > before);
 }
+
+// Home's learning slot (danielrispler/plotkeeper#240): the store chooses the item.
+mod learning {
+    use super::*;
+    use studio_understanding::{
+        Choice, Learning, Quiz, RETEST_AFTER_MS, RETEST_REACH_MS, RetestAsk, Tap,
+    };
+
+    const DAY: u64 = 24 * 60 * 60 * 1000;
+    /// The start of "today" in these tests, and the clock: noon of that day.
+    const START: u64 = 400 * DAY;
+    const NOW: u64 = START + DAY / 2;
+
+    fn quiz() -> Quiz {
+        Quiz {
+            text: "Why?".into(),
+            options: vec![
+                Choice {
+                    text: "A".into(),
+                    why: "Yes.".into(),
+                },
+                Choice {
+                    text: "B".into(),
+                    why: "No.".into(),
+                },
+            ],
+            key: 0,
+        }
+    }
+
+    /// Turn `t` with a Quiz, offered so that its retest came due `due_ago` before NOW, and that Retest, `retest t`.
+    fn seed(store: &mut CardStore, t: &str, due_ago: u64) {
+        let request = studio_core::SummaryRequest {
+            id: t.into(),
+            session_id: "s1".into(),
+            ..Default::default()
+        };
+        let summary: studio_understanding::TurnSummary =
+            serde_json::from_value(serde_json::json!({
+                "summary": "Did a thing.",
+                "quiz": { "text": "Why?", "key": 0, "options": [
+                    { "text": "A", "why": "Yes." }, { "text": "B", "why": "No." }] },
+            }))
+            .unwrap();
+        let offered = NOW - due_ago - RETEST_AFTER_MS;
+        store.add_summary_at(request, summary, offered).unwrap();
+        let ask = RetestAsk {
+            of: t.into(),
+            session_id: "s1".into(),
+            hunk: String::new(),
+            first: quiz(),
+        };
+        store.add_retest(&ask, Some(quiz()), NOW - due_ago).unwrap();
+    }
+
+    fn empty() -> (tempfile::TempDir, CardStore) {
+        let data = tempfile::tempdir().unwrap();
+        let store = CardStore::open(data.path().join("cards.json")).unwrap();
+        (data, store)
+    }
+
+    /// What the slot serves at `now`: the turn the Retest is of, "done", or the fresh Quiz's id.
+    fn served_at(store: &CardStore, now: u64, start: u64) -> Option<String> {
+        match store.learning(now, start) {
+            Some(Learning::Retest(r)) => Some(r.of),
+            Some(Learning::Done) => Some("done".into()),
+            Some(Learning::Fresh { id, .. }) => Some(id),
+            None => None,
+        }
+    }
+
+    fn served(store: &CardStore) -> Option<String> {
+        served_at(store, NOW, START)
+    }
+
+    #[test]
+    fn the_latest_due_retest_is_served_and_nothing_is_served_when_none_is_eligible() {
+        let (_data, mut store) = empty();
+        assert_eq!(served(&store), None);
+        seed(&mut store, "old", 3 * DAY);
+        seed(&mut store, "new", DAY);
+        assert_eq!(served(&store).as_deref(), Some("new"));
+    }
+    fn pick(store: &mut CardStore, id: &str, at: u64) {
+        store.quiz_tap(id, Tap::Pick { option: 0 }, at).unwrap();
+    }
+
+    #[test]
+    fn a_retest_of_an_answered_quiz_beats_a_later_due_one_of_an_unanswered_quiz() {
+        let (_data, mut store) = empty();
+        seed(&mut store, "answered", 5 * DAY);
+        seed(&mut store, "answered too", 4 * DAY);
+        seed(&mut store, "unanswered", DAY);
+        pick(&mut store, "answered", START - 6 * DAY);
+        pick(&mut store, "answered too", START - 6 * DAY);
+        // Within the group the latest due comes first.
+        assert_eq!(served(&store).as_deref(), Some("answered too"));
+        store
+            .quiz_tap("retest answered too", Tap::NotNow, NOW)
+            .unwrap();
+        assert_eq!(served(&store).as_deref(), Some("answered"));
+        store.quiz_tap("retest answered", Tap::NotNow, NOW).unwrap();
+        assert_eq!(served(&store).as_deref(), Some("unanswered"));
+    }
+
+    #[test]
+    fn a_retest_due_more_than_14_days_ago_is_not_served() {
+        let (_data, mut store) = empty();
+        seed(&mut store, "late", RETEST_REACH_MS + 1);
+        assert_eq!(served(&store), None);
+        seed(&mut store, "edge", RETEST_REACH_MS);
+        assert_eq!(served(&store).as_deref(), Some("edge"));
+    }
+
+    #[test]
+    fn a_retest_whose_first_quiz_is_flagged_key_wrong_is_not_served() {
+        let (_data, mut store) = empty();
+        seed(&mut store, "wrong", DAY);
+        store.quiz_tap("wrong", Tap::KeyWrong, START - DAY).unwrap();
+        assert_eq!(served(&store), None);
+    }
+
+    #[test]
+    fn a_picked_retest_is_not_served() {
+        let (_data, mut store) = empty();
+        seed(&mut store, "a", DAY);
+        pick(&mut store, "retest a", NOW);
+        assert_eq!(served(&store), None);
+    }
+
+    #[test]
+    fn after_a_not_now_the_item_waits_for_the_next_day_and_the_tap_does_not_count_toward_the_cap() {
+        let (_data, mut store) = empty();
+        for (i, t) in ["a", "b", "c", "d"].iter().enumerate() {
+            seed(&mut store, t, (i as u64 + 1) * DAY / 4);
+        }
+        for t in ["a", "b", "c"] {
+            assert_eq!(served(&store).as_deref(), Some(t));
+            store
+                .quiz_tap(&format!("retest {t}"), Tap::NotNow, NOW)
+                .unwrap();
+        }
+        // Three taps of "Not now" are not three answers: the fourth item is served, not "done for today".
+        assert_eq!(served(&store).as_deref(), Some("d"));
+        pick(&mut store, "retest d", NOW);
+        assert_eq!(served(&store), None);
+        // The next day the others are served again.
+        assert_eq!(
+            served_at(&store, NOW + DAY, START + DAY).as_deref(),
+            Some("a")
+        );
+        // And can be set aside again that day.
+        store.quiz_tap("retest a", Tap::NotNow, NOW + DAY).unwrap();
+        assert_eq!(
+            served_at(&store, NOW + DAY, START + DAY).as_deref(),
+            Some("b")
+        );
+    }
+
+    #[test]
+    fn after_three_picked_retests_it_is_done_for_today_and_the_count_resets_at_the_next_day() {
+        let (_data, mut store) = empty();
+        for (i, t) in ["a", "b", "c", "d"].iter().enumerate() {
+            seed(&mut store, t, (i as u64 + 1) * DAY / 4);
+        }
+        for t in ["a", "b"] {
+            pick(&mut store, &format!("retest {t}"), START + 1);
+        }
+        assert_eq!(served(&store).as_deref(), Some("c"));
+        pick(&mut store, "retest c", START + 2);
+        assert_eq!(served(&store).as_deref(), Some("done"));
+        assert_eq!(
+            served_at(&store, NOW + DAY, START + DAY).as_deref(),
+            Some("d")
+        );
+    }
+
+    #[test]
+    fn a_pick_after_a_not_now_still_counts_on_a_card_a_summary_and_a_retest() {
+        let data = tempfile::tempdir().unwrap();
+        let mut store = two_cards(&data.path().join("cards.json"));
+        store.quiz_tap("toolu_01A", Tap::NotNow, 1).unwrap();
+        store
+            .quiz_tap("toolu_01A", Tap::Pick { option: 1 }, 2)
+            .unwrap();
+        assert_eq!(
+            store
+                .cards()
+                .iter()
+                .find(|c| c.request.id == "toolu_01A")
+                .unwrap()
+                .guess
+                .as_ref()
+                .map(|g| g.option),
+            Some(1)
+        );
+
+        let (_data, mut store) = empty();
+        seed(&mut store, "t", DAY);
+        for id in ["t", "retest t"] {
+            store.quiz_tap(id, Tap::NotNow, 1).unwrap();
+            store.quiz_tap(id, Tap::NotNow, 2).unwrap();
+            pick(&mut store, id, 3);
+        }
+        let kinds = |taps: &[studio_understanding::QuizTap]| {
+            taps.iter().map(|t| t.tap.clone()).collect::<Vec<_>>()
+        };
+        let expected = [Tap::NotNow, Tap::NotNow, Tap::Pick { option: 0 }];
+        assert_eq!(kinds(&store.turn_summary("t").unwrap().taps), expected);
+        assert_eq!(kinds(&store.retests()[0].taps), expected);
+    }
+}
