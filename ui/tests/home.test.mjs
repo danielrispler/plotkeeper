@@ -393,3 +393,25 @@ test("Home hides the cleared rows, and shows the Landed part again after Undo", 
   assert.deepEqual(sessionIds(view(sessions, { expanded: new Set(), cleared: new Set(["a"]) })[0]), ["b"]);
   assert.deepEqual(sessionIds(view(sessions, { expanded: new Set(), cleared: new Set() })[0]), ["a", "b"]);
 });
+
+test("the card's label names the Retest's age and the session of its first Quiz; a fresh Quiz names its session; done has none", async () => {
+  const { slotLabel } = await import("../../dist/home.js");
+  const now = Date.UTC(2026, 10, 20);
+  const day = 864e5;
+  const session = { name: null, identity: { issue: 44, name: "" }, folder_name: "plotkeeper" };
+  const aged = { ...retest("r", quiz), of_at: now - 8 * day };
+  assert.equal(slotLabel(aged, session, now), "Retest · 8 days after #44");
+  assert.equal(slotLabel({ ...aged, of_at: now - 7 * day }, session, now), "Retest · 7 days after #44");
+  // The session is gone: only the age.
+  assert.equal(slotLabel(aged, undefined, now), "Retest · 8 days ago");
+  assert.equal(slotLabel(retest("r", quiz), undefined, now), "Retest");
+  assert.equal(slotLabel({ kind: "fresh", id: "t1", session_id: "s", quiz }, session, now), "Quiz · #44");
+  assert.equal(slotLabel({ kind: "fresh", id: "t1", session_id: "s", quiz }, undefined, now), "Quiz");
+  assert.equal(slotLabel({ kind: "done" }, session, now), "");
+  // A session with no issue number is named as the list names it.
+  assert.equal(slotLabel({ kind: "fresh", id: "t1", session_id: "s", quiz }, { name: "Row controls", identity: { issue: null, name: "" }, folder_name: "x" }, now), "Quiz · Row controls");
+});
+
+test("the learning part has no heading of its own, as the card carries its label", () => {
+  assert.equal(view([], undefined, { learning: retest("a", quiz) }).find((p) => p.key === "learning").title, "");
+});

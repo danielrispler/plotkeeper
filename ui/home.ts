@@ -76,7 +76,7 @@ export function homeView(sessions: Session[], asked: Learning | null, projects: 
       return { session: s, line: s.transcript?.intention ?? s.line ?? "", note: steps === 0 ? "" : `${plural(steps, "step")} ago` };
     })),
     part("unseen", "Unseen", capped("unseen", unseen, MAX_UNSEEN, (s) => ({ session: s, line: headline(s) ?? "", note: "" }))),
-    part("learning", "Retest", { rows: [], more: 0 }, { slot: learningSlot(asked, state) }),
+    part("learning", "", { rows: [], more: 0 }, { slot: learningSlot(asked, state) }),
     part("landed", "Landed", plain((s) => ({ session: s, line: "", note: "" }))(landed)),
     part("start", "Start a session in", { rows: [], more: 0 }, { projects: homeProjects(projects) }),
   ];
@@ -86,12 +86,24 @@ export function homeView(sessions: Session[], asked: Learning | null, projects: 
 // The taps Home sent, in a chain: each waits for the one before it to be stored.
 let sent: Promise<unknown> = Promise.resolve();
 
+// The small label at the top of the slot's card: a Retest's age and the session of its first Quiz, a fresh Quiz's session, none for "Done for today".
+export function slotLabel(item: Learning, session: Pick<Session, "name" | "identity" | "folder_name"> | undefined, now = Date.now()): string {
+  if (item.kind === "done") return "";
+  const ref = session ? (session.identity.issue === null ? sessionName(session) : `#${session.identity.issue}`) : null;
+  if (item.kind === "fresh") return ref ? `Quiz · ${ref}` : "Quiz";
+  if (!item.of_at) return "Retest";
+  const days = Math.floor((now - item.of_at) / 864e5);
+  return `Retest · ${plural(days, "day")} ${ref ? `after ${ref}` : "ago"}`;
+}
+
 // The slot's card: the Quiz of the item the store chose, which records its taps as a Retest's, with "Not now" until it is answered
 // and a quiet "Next" after an answer when another item is due. It writes nothing as it is built: `markLearningShown` writes `shown`.
 export function slotNode(slot: Slot, redraw: () => void, reask: () => void): HTMLElement {
   const { item } = slot;
   const wrap = document.createElement("div");
+  wrap.className = "slot-card";
   if (item.kind === "done") {
+    wrap.className = "";
     wrap.append(text("p", "Done for today", "empty"));
     return wrap;
   }
@@ -132,7 +144,8 @@ export function slotNode(slot: Slot, redraw: () => void, reask: () => void): HTM
             })],
     },
   });
-  wrap.append(region);
+  const session = studio.listed.find((s) => s.id === item.session_id);
+  wrap.append(text("p", slotLabel(item, session), "label"), region);
   // After an answer: the link to the code and the hunk (#243), then a quiet "Next" when another item is due.
   if (quizAnswered(item.id)) wrap.append(...answerCode(item));
   if (slot.next) {
@@ -374,7 +387,7 @@ export function drawHome(box: HTMLElement, sessions: Session[], projects: string
     return node;
   };
   const drawPart = (part: HomePart): HTMLElement[] => [
-    heading(part.title, `h ${part.key}`),
+    ...(part.title ? [heading(part.title, `h ${part.key}`)] : []),
     ...part.rows.map((r) => (part.key === "landed" ? sessionRow(r.session, true) : waitingRow(r, part.key, sessionProjectName(projects, found, r.session)))),
     ...(part.more ? [moreRow(part.key, part.more, redraw)] : []),
     ...(part.slot ? [slotNode(part.slot, redraw, reask)] : []),

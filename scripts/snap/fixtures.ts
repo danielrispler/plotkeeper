@@ -235,7 +235,7 @@ export const fixtures = {
         cwd: "/w/plotkeeper", unseen: true, last_event_at: now - 22 * 60e3,
         turns: [{ started_at: now - 40 * 60e3, ended_at: now - 22 * 60e3, prompt: "Make delete keep the branch", id: null, message: "Delete now removes the worktree and keeps the branch.", checks: [], files: null }],
       }),
-      session("s3", "#54 · Subagent terminal", "idle", { cwd: "/w/plotkeeper", landed: true }),
+      session("s3", "#54 · Subagent terminal", "idle", { cwd: "/w/plotkeeper", landed: true, identity: { issue: 54, branch: null, pr: null, worktree: "", name: "#54 · Subagent terminal" } }),
       session("s5", "#48 · Agent deadline", "ended", { cwd: "/w/plotkeeper", landed: true }),
     ];
     const learning = { kind: "retest" as const, id: "r1", of: "r1", session_id: "s3", added_at: now - 7 * 864e5, of_at: now - 8 * 864e5, taps: [], quiz: { text: "The settings write held a lock across a read. Why was it safe?", key: 1, options: [
@@ -244,8 +244,10 @@ export const fixtures = {
       { text: "Copy the state out and work on the copy", why: "It still races." },
     ] } };
     const snapScript = `
-      const learning = document.querySelector(".pane.home .quiz-region");
-      if (!learning) log("snap:fail Home has no Retest");
+      const learning = document.querySelector(".pane.home .slot-card");
+      if (!learning) log("snap:fail Home has no learning card");
+      else if (!/^Retest · \\d+ days after #54/.test(learning.querySelector(".label")?.textContent ?? "")) log("snap:fail the card has no Retest label");
+      else if ([...document.querySelectorAll(".pane.home h2")].some((h) => h.textContent === "Retest")) log("snap:fail Home still has a Retest heading");
       // The window is 900 high; the page reports less while this script runs (headless Chrome counts its frame), so the fold is fixed.
       else if (learning.getBoundingClientRect().bottom > 900 - 6) log("snap:fail the Retest is below the fold: it ends at " + learning.getBoundingClientRect().bottom);`;
     return { ...base, sessions, learning, projects: ["/w/plotkeeper", "/w/falinks"], selected: null, snapScript };
@@ -277,10 +279,12 @@ export const fixtures = {
     const hunk = { text: ["@@ -41,3 +41,3 @@", "-    let text = self.read_file(&self.state.lock());", "+    let text = { self.state.lock().file.clone() };", "     self.write_file(merge(text, key, value));", ""].join("\n"), left_out: 0, binary: false, first_line: 41 };
     const snapScript = `
       await new Promise((done) => setTimeout(done, 300));
-      if (!document.querySelector(".pane.home .quiz-code-link")) log("snap:fail the reveal has no link to the code");
-      if (!document.querySelector(".pane.home .evidence-hunk:not([hidden])")?.textContent.includes("self.state.lock().file.clone()")) log("snap:fail the hunk is not open in place");
+      const card = document.querySelector(".pane.home .slot-card");
+      if (!card?.querySelector(".quiz-code-link")) log("snap:fail the reveal has no link to the code inside the card");
+      if (!card?.querySelector(".evidence-hunk:not([hidden])")?.textContent.includes("self.state.lock().file.clone()")) log("snap:fail the hunk is not open in place inside the card");
+      for (const control of card?.querySelectorAll(".evidence-edit, .ask-about") ?? []) if (getComputedStyle(control).display !== "none") log("snap:fail the compact hunk shows " + control.className);
       // The card sits below the fold of a full page: scroll it into view to see the reveal whole.
-      document.querySelector(".pane.home .quiz-region")?.scrollIntoView({ block: "start" });`;
+      card?.scrollIntoView({ block: "start" });`;
     return { ...f, sessions, learning, turn_file_hunk: hunk, snapScript };
   },
   // Home after Clear (#244): the landed rows are hidden, the Landed part is gone, and the toast offers Undo. The script clicks Clear on the heading.
