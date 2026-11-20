@@ -1,6 +1,6 @@
 # Home as the waiting room
 
-> **Answer:** No benchmark tool has a dashboard home: the session list grouped by project is the main surface, needs-attention rises to the top, and finished work is cleared by a reversible archive, in bulk with an undo (Cursor) or by itself once its PR merges (Claude Code, T3 Code). None puts anything about learning on its home. That part is the studio's own: one optional recall item, served at the moment Daniel waits, since retrieval spaced over days is what makes a change stick, and a list of past explanations is only re-reading. Numbers that inform, against Daniel's own past, are allowed; streaks and live percent-correct move showing up, not learning, and are tried only as reversible trials.
+> **Answer:** No benchmark tool has a dashboard home: the session list grouped by project is the main surface, needs-attention rises to the top, and finished work is cleared by a reversible archive, in bulk with an undo (Cursor) or by itself once its PR merges (Claude Code, T3 Code). None puts anything about learning on its home. That part is the studio's own: one optional recall item, served at the moment Daniel waits, since retrieval spaced over days is what best helps a change be remembered (see the limits in section 5), and a list of past explanations is only re-reading. Numbers that inform, against Daniel's own past, are allowed; streaks and live percent-correct move showing up, not learning, and are tried only as reversible trials.
 > **Evidence:** Moderate for the shell patterns (official docs for Claude Code, Zed, GitHub; forum and changelog posts for Cursor, T3 Code, Superset; thin for Codex, Antigravity, Windsurf). Strong for retrieval practice and spacing. Moderate for what scores and streaks do to motivation and showing up, mostly from mass-market apps and schoolchildren; none tests a solo developer's private prompts. Nothing was run.
 
 Research date: 2026-11-20, for #218 ([resolution](https://github.com/danielrispler/plotkeeper/issues/218#issuecomment-7037432816)). Studio's code is read on `main` at `2769fc239`. Raw reports, with every source: `local-evidence/2026-11-20-issue-218-home/reports/` (`agent-ides.md`, `litt.md`, `learning-tools.md`, `home-data.md`, `visual-design.md`, `no-score-origin.md`, `retention-science.md`, `adherence-evidence.md`). Studio terms follow `docs/studio/CONTEXT.md`.
@@ -50,10 +50,14 @@ Daniel's `problems.md` (2026-10-23) listed "Guessing, not testing … with no sc
 | Confidence before the pick, then the outcome | Better calibration | Neutral | Moderate |
 | Streak | None shown | Up while alive, down when broken, most with self-blame ([Silverman & Barasch 2023](https://doi.org/10.1093/jcr/ucac029)); developers kept GitHub streaks until the counter went ([Moldon et al.](https://arxiv.org/abs/2006.02371)) | Moderate |
 | Points, levels | Quantity up, quality flat | Up, fades with novelty | Moderate |
-| Better scheduling of items | Aimed at learning | +12% daily engagement ([Settles & Meeder 2016](https://aclanthology.org/P16-1174/)) | Moderate |
-| One prompt at a natural break, low friction | — | Raises seen and answered | Strong in general, untested here |
+| Better scheduling of items | Aimed at learning | Against the Leitner baseline, activity +0.3% and practice sessions −7.3%; the often-quoted +12% compares two variants of the new model ([Settles & Meeder 2016](https://aclanthology.org/P16-1174/), user experiments I and II) | Moderate; says nothing about serving order or a daily cap |
+| One prompt at a natural break, low friction | — | Lower frustration and faster reaction in diagram editing; for programming the trend matched but was not significant (8 users per task, [Iqbal & Bailey 2008](https://interruptions.net/literature/Iqbal-CHI08.pdf)) | Moderate in general, weak for programmers, untested here |
 
 Duolingo's streak figures (about +14% retention from the streak wager) are company-reported ([Lenny's Newsletter](https://lennysnewsletter.com/p/behind-the-product-duolingo-streaks)). Several classic citations above came from the agents' recall; the raw reports mark which.
+
+**Limits of the recall item.** The retention evidence is mostly for facts and concepts; a Quiz and its Retest are two multiple-choice questions a week apart, a light dose, and whether recall carries over to new problems is less certain than recall itself. Code also changes after the turn, so a Retest can ask about a design that has since been replaced; spec #226 shows the turn's date on the reveal for that reason.
+
+Corrected on 2026-11-20 after a review of spec #226 ([amendment](https://github.com/danielrispler/plotkeeper/issues/226#issuecomment-7039182317)): the scheduling and natural-break rows were checked against the papers.
 
 ## 6. What Home had to work with
 
