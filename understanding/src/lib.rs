@@ -17,7 +17,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use studio_core::{CardRequest, Kind, Session, Status, SummaryRequest, Transcript};
+use studio_core::{CardRequest, Session, SummaryRequest, Transcript};
 
 mod brief;
 mod card_code;
@@ -290,22 +290,21 @@ pub trait CardWriter {
 
 /// The card on a session's or a worker's change, from `session`'s state, and its Goal (danielrispler/Falinks#369,
 /// decisions 11 and 12; danielrispler/plotkeeper#122). `writer` writes the card on `request` with the
-/// summaries of the earlier cards of its prompt, and it goes in `store`. A card with no change is a
-/// session's that changed nothing itself: it is written from its workers' card summaries instead
-/// (`workers`). The Goal is written after `stored` runs on the card stored, so the shell sends the
+/// summaries of the earlier cards of its prompt, and it goes in `store`. A request with no change
+/// writes no card. The Goal is written after `stored` runs on the card stored, so the shell sends the
 /// list and the "New card" notice first (danielrispler/Falinks#434, decision 32). The store is not locked while
 /// the writer runs, which takes seconds. Each problem is one line for `log`. Returns whether a card
 /// was added.
 pub fn write_stop(
     store: &Mutex<CardStore>,
     writer: &(impl CardWriter + ?Sized),
-    mut request: CardRequest,
+    request: CardRequest,
     session: &Session,
     stored: impl FnOnce(),
     mut log: impl FnMut(String),
 ) -> bool {
     let owner = request.owner().to_owned();
-    let (earlier, workers) = {
+    let earlier = {
         let store = store.lock().unwrap();
         let cards = store
             .cards()
@@ -313,18 +312,11 @@ pub fn write_stop(
             .filter(|kept| kept.request.owner() == owner);
         let same_prompt =
             cards.filter(|kept| request.prompt.is_some() && kept.request.prompt == request.prompt);
-        let earlier: Vec<String> = same_prompt.filter_map(summary).collect();
-        (earlier, workers(&store, &request, session))
+        same_prompt.filter_map(summary).collect::<Vec<String>>()
     };
+    // A session that changed nothing itself gets no card, whatever its workers wrote.
     if request.change.is_none() {
-        let Some(workers) = workers else {
-            log(format!(
-                "no card on {}: its workers' cards are not in the store",
-                request.id
-            ));
-            return false;
-        };
-        request.change = Some(workers);
+        return false;
     }
     let Some(mut card) = write_card(writer, &request, &earlier, &mut log) else {
         return false;
@@ -407,41 +399,6 @@ pub fn write_goal(
         }
     }
 }
-
-/// What the workers of `session` did since its last card, for its card or its brief, from the
-/// summaries of their cards among `request.workers`, not their diffs: each worker that has one of
-/// those cards or still runs, with its task, its status and those summaries. `None` when none of
-/// those cards is in the store.
-fn workers(store: &CardStore, request: &CardRequest, session: &Session) -> Option<String> {
-    let cards: Vec<&StoredCard> = store
-        .cards()
-        .iter()
-        .filter(|kept| request.workers.contains(&kept.request.id))
-        .collect();
-    if cards.is_empty() {
-        return None;
-    }
-    let lines = session.agents.iter().filter_map(|agent| {
-        let of = cards
-            .iter()
-            .filter(|kept| kept.request.owner() == agent.agent.id);
-        // A card with no summary adds nothing (danielrispler/Falinks#434, decision 35).
-        let summaries: Vec<String> = of.filter_map(|kept| summary(kept)).collect();
-        let running = agent.status == Status::Running && agent.kind == Kind::Worker;
-        let name = &agent.name;
-        let did = match &summaries[..] {
-            [] if running => "no card yet".into(),
-            [] => return None,
-            summaries => summaries.join(" "),
-        };
-        Some(format!("- `{name}` ({}): {did}\n", agent.status))
-    });
-    Some(format!("{WORKERS}{}", lines.collect::<String>()))
-}
-
-/// The head of a change built from workers' cards, which the writer's instructions name.
-const WORKERS: &str = "No diff: the agent changed nothing itself since its last card. Its workers, \
-                       each with its status and the summaries of its cards since then:\n";
 
 /// The answer to Daniel's side `question` on `item` (danielrispler/Falinks#461, decision 20), from one call to `writer`
 /// with the intentions of `transcript`'s turn, one per response. It stays in the studio: the session
@@ -1162,10 +1119,7 @@ Reply with one JSON object and nothing else:
 
 "#,
     quiz_rules!("your `summary`"),
-    r#"
-
-When the change is not a diff but the agent's workers with the summaries of their cards, the agent changed nothing itself and handed the work to them: the card explains what it split up among them, what came back and what is still open, paths and ranges are empty, and the quiz is on how the work was split.
-"#
+    r#""#
 );
 
 /// The card writer's instructions for a check's card (danielrispler/Falinks#461, decision 15), written while the check
@@ -1228,8 +1182,6 @@ const MORE: &str = concat!(
     r#"A developer read a card that explains a change a coding agent made to his code, and asked for more. Explain the change in more depth than the card: how the changed code works, step by step, and why it was done this way and not another. Do not repeat the card.
 
 Answer from the change below. Use only this input: do not use tools or read files.
-
-When the change is not a diff but the agent's workers with the summaries of their cards, the agent changed nothing itself and handed the work to them: explain how the work was split and what came back, and do not invent code you were not shown.
 
 "#,
     explanation_language!(),

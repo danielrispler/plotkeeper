@@ -178,6 +178,38 @@ fn explain_more_calls_the_writer_once_and_a_second_tap_shows_the_kept_text() {
     assert_eq!(more, [Some(expected), None]);
 }
 
+#[test]
+fn an_older_card_whose_change_is_its_workers_summaries_loads_shows_and_explains_more() {
+    let data = tempfile::tempdir().unwrap();
+    let path = data.path().join("cards.json");
+    let request = CardRequest {
+        change: Some("No diff: the agent changed nothing itself since its last card. Its workers, each with its status and the summaries of its cards since then:\n- `Implement #378` (completed): Sample change.\n".into()),
+        workers: vec!["w1@1".into()],
+        ..edit("s1@2", "a.rs")
+    };
+    let mut store = CardStore::open(path.clone()).unwrap();
+    store
+        .add(request.clone(), card(&request), 1_761_743_990_000)
+        .unwrap();
+    drop(store);
+
+    let store = Mutex::new(CardStore::open(path).unwrap());
+    let shown: Vec<_> = store
+        .lock()
+        .unwrap()
+        .cards()
+        .iter()
+        .map(|kept| kept.request.id.clone())
+        .collect();
+    let more = explain_more(&store, &FakeWriter, "s1@2", |line| panic!("{line}"));
+
+    assert_eq!(shown, ["s1@2"]);
+    assert_eq!(
+        more,
+        Some(FakeWriter.more(&request, &card(&request)).unwrap())
+    );
+}
+
 /// A fake writer whose "explain more" replies with no text.
 struct Blank;
 

@@ -6,7 +6,7 @@ A worker is explained like a session. It gets a card at each commit in its workt
 
 On any step of a worker, or of a prompt of yours before its turn ends, when 20 minutes or more have passed since the last card on that worktree, or since its last such look that found no change, the app looks again: a card is written when it changed, and a look that finds no change starts a new 20-minute wait. So after 20 quiet minutes, a change gets its card up to 20 minutes later.
 
-At a session's `Stop`, when it changed nothing itself but its workers wrote cards since its last card, its card is written from their summaries, not their diffs: what it split up, what came back and what is still open. A turn's facts, its files and checks, include its workers'. When a wake-up opened that turn, there is no card of its own. A file a helper, or another subagent with no worktree of its own, edits or writes in its parent's worktree shows on the parent's card under that subagent's name.
+A session that changed nothing itself gets no card at its `Stop`, whatever its workers wrote. A turn's facts, its files and checks, include its workers'. A file a helper, or another subagent with no worktree of its own, edits or writes in its parent's worktree shows on the parent's card under that subagent's name.
 
 A card's code is pulled from git, never retyped by the model: the writer names a path and a line range, and the app reads those lines from the turn's end tree, at most 12 lines of one range; a range whose lines are not in the file is dropped, and a check's card has no code. A card's file chips that are among its turn's files open the same hunk as the file's row in the evidence line, in place.
 
