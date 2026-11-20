@@ -403,21 +403,33 @@ pub fn matched<'a, S: AsRef<str>>(list: &'a [S], command: &str) -> Option<&'a st
     statements(list, command).iter().find_map(|s| s.suite)
 }
 
-/// Whether a check's exit code says whether it passed (danielrispler/Falinks#328, module 4). A command exits with its
-/// last statement group's code, so the check must be in the last group, and nothing in it may mask the
-/// code: `|| true` exits 0, `!` flips it, `&` runs the check in the background, and a pipe exits
-/// with its last command's code unless an earlier `set` turns on `pipefail`. A command with more
-/// than one check does not count, until the chain rule (spec #254) says which one failed.
-pub fn exit_code_counts<S: AsRef<str>>(list: &[S], command: &str) -> bool {
-    let statements = statements(list, command);
-    let mut runs = statements.iter().filter(|s| s.suite.is_some());
-    let (Some(run), None) = (runs.next(), runs.next()) else {
-        return false;
-    };
+/// Whether a check run's exit code counts, for each way its command can end.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Counts {
+    /// Exit 0 says it passed.
+    pub zero: bool,
+    /// A non-zero exit says it failed.
+    pub failure: bool,
+}
+
+/// Whether the statement `text` only sets the scene for the next one: `cd`, `export`, `set` or a
+/// variable assignment.
+fn is_prelude(text: &str) -> bool {
+    let first = text.split_whitespace().next().unwrap_or_default();
+    matches!(first, "" | "cd" | "export" | "set") || is_assignment(first)
+}
+
+/// Whether the exit code of statement `at` of `statements` counts for it (danielrispler/Falinks#328, module 4, and
+/// spec #254). A command exits with its last statement group's code, so the run must be in the last
+/// group, and nothing in it may mask the code: `|| true` exits 0, `!` flips it, `&` runs it in the
+/// background, and a pipe exits with its last command's code unless an earlier `set` turns on
+/// `pipefail`. Exit 0 then says every run of the group passed; a non-zero exit names the run only
+/// when it is the group's one statement besides `cd`, `export`, `set` and assignments.
+fn counts_of(statements: &[Statement], at: usize) -> Counts {
     let pipefail = statements.iter().any(|s| s.pipefail);
     let last = statements.last().map_or(0, |s| s.group);
     let group = || statements.iter().filter(|s| s.group == last);
-    run.group == last
+    let clear = statements[at].group == last
         && !group().next().is_some_and(|s| s.negated)
         && !group().any(|s| {
             [s.before, s.after]
@@ -428,7 +440,20 @@ pub fn exit_code_counts<S: AsRef<str>>(list: &[S], command: &str) -> bool {
                     Joiner::Pipe => !pipefail,
                     Joiner::Semi | Joiner::And => false,
                 })
-        })
+        });
+    Counts {
+        zero: clear,
+        failure: clear && group().filter(|s| !is_prelude(&s.text)).count() == 1,
+    }
+}
+
+/// Whether the exit code counts for the first check of `command`; neither way when it has none.
+pub fn exit_code_counts<S: AsRef<str>>(list: &[S], command: &str) -> Counts {
+    let statements = statements(list, command);
+    statements
+        .iter()
+        .position(|s| s.suite.is_some())
+        .map_or_else(Counts::default, |at| counts_of(&statements, at))
 }
 
 /// How a check, or one run of it, ended.
@@ -480,32 +505,33 @@ fn runs<'a>(row: &Row, list: &'a [String]) -> Vec<(&'a str, Run)> {
     let Some(command) = row.command.as_deref() else {
         return Vec::new();
     };
-    let counts = exit_code_counts(list, command);
-    let (status, exit_code) = match (&row.outcome, row.ran) {
+    let statements = statements(list, command);
+    let outcome = |counts: Counts| match (&row.outcome, row.ran) {
         // Started, no result yet.
-        (None, _) => (Status::Running, None),
+        (None, _) => Some((Status::Running, None)),
         // A background task keeps what its notification reports.
-        (Some(Outcome::Succeeded), _) if row.background => match row.reported.as_deref() {
+        (Some(Outcome::Succeeded), _) if row.background => Some(match row.reported.as_deref() {
             None => (Status::Running, None),
-            Some("completed") if counts => (Status::Passed, None),
-            Some("failed") if counts => (Status::Failed, None),
+            Some("completed") if counts.zero => (Status::Passed, None),
+            Some("failed") if counts.failure => (Status::Failed, None),
             Some(_) => (Status::Ran, None),
-        },
-        (Some(Outcome::Succeeded), _) if counts => (Status::Passed, Some(0)),
-        (Some(Outcome::Succeeded), _) => (Status::Ran, None),
-        (Some(Outcome::Failed { exit_code }), true) if counts => (Status::Failed, *exit_code),
-        (Some(Outcome::Failed { exit_code }), true) => (Status::Ran, *exit_code),
-        (Some(Outcome::Failed { .. } | Outcome::Rejected), false)
-        | (Some(Outcome::Rejected), _) => {
-            return Vec::new();
+        }),
+        (Some(Outcome::Succeeded), _) if counts.zero => Some((Status::Passed, Some(0))),
+        (Some(Outcome::Succeeded), _) => Some((Status::Ran, None)),
+        (Some(Outcome::Failed { exit_code }), true) if counts.failure => {
+            Some((Status::Failed, *exit_code))
         }
+        (Some(Outcome::Failed { exit_code }), true) => Some((Status::Ran, *exit_code)),
+        (Some(Outcome::Failed { .. } | Outcome::Rejected), false)
+        | (Some(Outcome::Rejected), _) => None,
     };
-    statements(list, command)
-        .into_iter()
-        .filter_map(|s| {
+    (0..statements.len())
+        .filter_map(|at| {
+            let (status, exit_code) = outcome(counts_of(&statements, at))?;
+            let s = &statements[at];
             let run = Run {
                 command: command.into(),
-                statement: s.text,
+                statement: s.text.clone(),
                 status,
                 exit_code,
                 call: row.call.clone(),

@@ -28,7 +28,7 @@ pub use checks::{
     Check, CheckLists, Output as CheckOutput, Run as CheckRun, Status as CheckStatus,
     output as check_output,
 };
-use checks::{exit_code_counts, matched};
+use checks::{Counts, exit_code_counts, matched};
 pub use claude::CAPABILITIES as CLAUDE_CAPABILITIES;
 pub use event::{Capabilities, TranscriptFormat};
 use event::{Event, Happened, Origin, Start, ToolKind};
@@ -480,7 +480,7 @@ const LONG_CHECK_MS: u64 = 2 * 60 * 1000;
 /// (`Studio::typical`).
 struct CheckStart {
     command: String,
-    counts: bool,
+    counts: Counts,
     typical: Option<u64>,
 }
 
@@ -2107,13 +2107,16 @@ pub struct CheckLine {
     call: String,
     #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     task: Option<String>,
-    /// Whether its exit code says whether it passed (`exit_code_counts`).
+    /// Whether its exit code says it passed, and whether a non-zero one says it failed
+    /// (`exit_code_counts`).
     #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     counts: bool,
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
+    counts_failure: bool,
 }
 
 impl CheckLine {
-    fn new(command: &str, counts: bool, call: &str, at: u64, typical_ms: Option<u64>) -> Self {
+    fn new(command: &str, counts: Counts, call: &str, at: u64, typical_ms: Option<u64>) -> Self {
         CheckLine {
             command: command.lines().next().unwrap_or_default().into(),
             passed: None,
@@ -2124,14 +2127,19 @@ impl CheckLine {
             turn: None,
             call: call.into(),
             task: None,
-            counts,
+            counts: counts.zero,
+            counts_failure: counts.failure,
         }
     }
 
     /// It ended at `at`, failed or not, which its typical duration counts only when it did not fail.
     fn end(&mut self, failed: bool, at: u64, durations: &mut HashMap<String, Vec<u64>>) {
         self.ended_at = Some(at);
-        self.passed = self.counts.then_some(!failed);
+        self.passed = if failed {
+            self.counts_failure.then_some(false)
+        } else {
+            self.counts.then_some(true)
+        };
         if !failed {
             let runs = durations.entry(check_key(&self.command)).or_default();
             runs.push(at.saturating_sub(self.started_at));

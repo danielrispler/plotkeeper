@@ -278,25 +278,87 @@ fn cargo_run_bin_is_a_run_of_a_one_word_entry() {
     assert_eq!(of_command("cargo run -q --bin other"), []);
 }
 
+/// The statuses of the runs of a turn with the one command `command`, which exits as `exit` says:
+/// `None` for 0, else a failure with that code.
+fn runs_of(command: &str, exit: Option<i32>) -> Vec<(String, CheckStatus, Option<i32>)> {
+    let call = match exit {
+        None => passes(1_000, "t1", command, None),
+        Some(code) => fails(1_000, "t1", command, &format!("Exit code {code}\nfailures")),
+    };
+    checks(&[call])
+        .iter()
+        .map(|c| {
+            (
+                c.runs[0].statement.clone(),
+                c.runs[0].status,
+                c.runs[0].exit_code,
+            )
+        })
+        .collect()
+}
+
 #[test]
-fn a_command_with_two_checks_gives_a_check_of_each_with_its_own_statement_not_counted() {
+fn a_chain_that_exits_zero_passes_each_check_in_its_last_group() {
+    let statuses =
+        |command| -> Vec<CheckStatus> { runs_of(command, None).into_iter().map(|r| r.1).collect() };
+
+    assert_eq!(
+        statuses("cargo fmt --check && cargo clippy"),
+        [CheckStatus::Passed]
+    );
+    assert_eq!(
+        statuses("cargo test && cargo clippy"),
+        [CheckStatus::Passed, CheckStatus::Passed]
+    );
+    // An earlier group is never counted.
+    assert_eq!(
+        statuses("cargo test; cargo clippy"),
+        [CheckStatus::Ran, CheckStatus::Passed]
+    );
+}
+
+#[test]
+fn a_chain_that_exits_non_zero_blames_a_check_only_when_it_is_the_one_statement() {
+    let ran = |statement: &str, code| (statement.to_string(), CheckStatus::Ran, Some(code));
+
+    // Two checks: neither can be named.
+    assert_eq!(
+        runs_of("cargo test && cargo clippy", Some(101)),
+        [ran("cargo test", 101), ran("cargo clippy", 101)]
+    );
+    // A `cd` does not hide it.
+    assert_eq!(
+        runs_of("cd x && cargo test", Some(101)),
+        [("cargo test".to_string(), CheckStatus::Failed, Some(101))]
+    );
+    // Another statement may be the one that failed.
+    assert_eq!(
+        runs_of("git add -A && cargo test", Some(1)),
+        [ran("cargo test", 1)]
+    );
+    // The earlier group is never counted; the last follows the rule.
+    assert_eq!(
+        runs_of("cargo test; cargo clippy", Some(101)),
+        [
+            ran("cargo test", 101),
+            ("cargo clippy".to_string(), CheckStatus::Failed, Some(101))
+        ]
+    );
+}
+
+#[test]
+fn a_masked_check_is_not_counted_whatever_the_exit_code() {
     for command in [
-        "cargo test -p core; cargo clippy --all 2>&1",
-        "cargo test -p core && cargo clippy --all",
+        "cargo test | tail",
+        "cargo test || true",
+        "! cargo test",
+        "cargo test & wait",
     ] {
-        let found = checks(&[passes(1_000, "t1", command, None)]);
-        let statements: Vec<(&str, &str, CheckStatus)> = found
-            .iter()
-            .map(|c| (c.suite.as_str(), c.runs[0].statement.as_str(), c.status))
-            .collect();
-        assert_eq!(
-            statements,
-            [
-                ("cargo test", "cargo test -p core", CheckStatus::Ran),
-                ("cargo clippy", "cargo clippy --all", CheckStatus::Ran),
-            ],
-            "{command}"
-        );
+        for exit in [None, Some(1)] {
+            let runs = runs_of(command, exit);
+            assert_eq!(runs.len(), 1, "{command}");
+            assert_eq!(runs[0].1, CheckStatus::Ran, "{command} {exit:?}");
+        }
     }
 }
 

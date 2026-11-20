@@ -115,3 +115,34 @@ fn a_long_check_that_fails_settles_its_guess_as_failed() {
         .collect();
     assert_eq!(settled, [Some(true), Some(false)]);
 }
+
+#[test]
+fn a_long_check_in_a_chain_that_fails_is_not_counted_and_settles_no_guess() {
+    let mut log = log();
+    later(&mut log, 9, 200_000);
+    let prompt: Value = serde_json::from_str(&log[11]).unwrap();
+    let edit = |line: &String, after: u64| {
+        let mut event: Value = serde_json::from_str(line).unwrap();
+        event["prompt_id"] = prompt["prompt_id"].clone();
+        let at = prompt["studio_received_ms"].as_u64().unwrap();
+        event["studio_received_ms"] = (at + after).into();
+        event.to_string()
+    };
+    let (pre, post) = (edit(&log[6], 1000), edit(&log[7], 1100));
+    log.splice(12..12, [pre, post]);
+    // `git add` could be what failed, so the failed third run says nothing of the check.
+    let log: Vec<String> = log
+        .iter()
+        .map(|l| l.replace(COMMAND, "git add -A && cargo test"))
+        .collect();
+
+    let (studio, _) = check_cards(&log);
+
+    let checks = &studio.session(SESSION).unwrap().checks;
+    let settled: Vec<Option<bool>> = checks
+        .iter()
+        .filter(|l| l.card.is_some())
+        .map(|l| l.passed)
+        .collect();
+    assert_eq!(settled, [Some(true), None]);
+}
