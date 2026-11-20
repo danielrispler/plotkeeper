@@ -9,8 +9,13 @@
 //!   `--prune=now`); a ref keeps the tree and every blob it holds, so a turn's hunks stay readable.
 
 use crate::fingerprint::{git, is_own, names, reflog};
+use std::sync::Mutex;
 use std::{fs, path::Path};
-use studio_core::{Facts, Numstat, RootDiff, TurnDiff};
+use studio_core::{
+    Facts, Numstat, RootDiff, Studio, TurnDiff, TurnFiles, TurnFilesSnapshot, compute_turn_files,
+};
+
+use crate::offer::TurnFacts;
 
 /// The refs' namespace.
 const REFS: &str = "refs/plotkeeper/turns";
@@ -264,6 +269,66 @@ pub fn add_hunks(ask: &TurnDiff, facts: &mut Facts) {
         let root = Path::new(&file.root);
         let hunk = hunk(root, &trees.start, end, &file.path, file.from.as_deref());
         fact.hunk = hunk.unwrap_or_default();
+    }
+}
+
+/// `ask`'s worktrees diffed by `git` with the core unlocked. A turn skipped for holding too many
+/// files is warned of through `warn` and settled, so no pass asks for it again.
+pub fn diff_turn(
+    state: &Mutex<Studio>,
+    ask: &TurnDiff,
+    warn: &mut dyn FnMut(String),
+) -> Option<Vec<RootDiff>> {
+    let mut skipped = false;
+    let diffs = turn_diffs(ask, &mut |warning| {
+        warn(warning);
+        skipped = true;
+    });
+    if skipped && diffs.is_none() {
+        state.lock().unwrap().settle_turn_files(ask);
+    }
+    diffs
+}
+
+/// The files of `ask` among `diffs`, found by `compute` with the core unlocked: the core is locked
+/// only to copy out what the matching reads. `None` when git could not diff the turn.
+pub fn found_files(
+    state: &Mutex<Studio>,
+    ask: &TurnDiff,
+    diffs: Option<Vec<RootDiff>>,
+    compute: impl FnOnce(&TurnFilesSnapshot, Vec<RootDiff>) -> TurnFiles,
+) -> Option<TurnFiles> {
+    let diffs = diffs?;
+    let snapshot = state.lock().unwrap().turn_files_snapshot(ask, &diffs);
+    Some(compute(&snapshot, diffs))
+}
+
+/// What the hooks and git recorded of the turn named `id`, for its summary writer
+/// (danielrispler/plotkeeper#115): its files with their counts and hunks, and its checks. Empty for
+/// a turn with no trees.
+pub fn turn_facts(state: &Mutex<Studio>, id: &str, warn: &mut dyn FnMut(String)) -> Facts {
+    let Some(ask) = state.lock().unwrap().summary_ask(id) else {
+        return Facts::default();
+    };
+    let diffs = diff_turn(state, &ask, warn);
+    let found = found_files(state, &ask, diffs, compute_turn_files);
+    let mut facts = state.lock().unwrap().facts_of(&ask, found);
+    add_hunks(&ask, &mut facts);
+    facts
+}
+
+/// The turn named `id` as the offer reads it (danielrispler/plotkeeper#209): its facts, and whether
+/// it merged.
+pub fn turn_of(state: &Mutex<Studio>, id: &str, warn: &mut dyn FnMut(String)) -> TurnFacts {
+    let facts = turn_facts(state, id, warn);
+    // One lock for the rest: a guard taken in a field lives until the whole struct is built, so a
+    // second `lock()` there would wait on the thread's own first one for ever.
+    let studio = state.lock().unwrap();
+    TurnFacts {
+        facts,
+        merge: studio.turn_merged(id),
+        workers: studio.turn_workers(id),
+        traced: studio.summary_ask(id).is_some(),
     }
 }
 
