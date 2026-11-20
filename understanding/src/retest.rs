@@ -3,7 +3,7 @@
 //! (`docs/studio/question-rules.md`) and waits on Home.
 
 use crate::{CardStore, CardWriter, RETESTS_WAITING};
-use crate::{ClaudeWriter, Quiz, RetestAsk, explanation_language, object, quiz_rules};
+use crate::{ClaudeWriter, Quiz, RetestAsk, explanation_language, quiz_rules};
 use std::{process::Command, sync::Mutex};
 
 /// The retest writer's instructions.
@@ -41,7 +41,7 @@ impl ClaudeWriter {
 
 /// The retest in a writer's `reply`, or why it breaks the Quiz rules.
 pub fn retest_quiz(reply: &str) -> Result<Quiz, String> {
-    Quiz::from_value(serde_json::from_str(object(reply)).unwrap_or_default())
+    Quiz::from_value(crate::parse_object(reply).unwrap_or_default())
 }
 
 /// Writes the retests due at `now`, the caller's clock, in `CardStore::retests_to_write`'s order, and keeps each, until
@@ -68,10 +68,9 @@ pub fn write_retests(
         // Err holds whether the writer replied, and the line for the log.
         let attempt = || {
             let reply = writer.retest(&ask).map_err(|line| (false, line))?;
-            Quiz::from_value(serde_json::from_str(object(&reply)).unwrap_or_default())
-                .map_err(|line| (true, line))
+            retest_quiz(&reply).map_err(|line| (true, line))
         };
-        let quiz = match attempt().or_else(|_| attempt()) {
+        let quiz = match crate::once_more(attempt(), Result::is_err, attempt, |second, _| second) {
             Ok(quiz) => Some(quiz),
             Err((replied, line)) => {
                 log(format!("no retest on {}: {line}", ask.of));

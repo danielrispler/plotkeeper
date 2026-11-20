@@ -196,7 +196,7 @@ impl Card {
             let head: String = reply.chars().take(300).collect();
             format!("the card writer's reply does not parse ({error}): {head:?}")
         };
-        let mut value: serde_json::Value = serde_json::from_str(object(reply)).map_err(fail)?;
+        let mut value = parse_object(reply).map_err(fail)?;
         let quiz = value.get_mut("quiz").map(serde_json::Value::take);
         let mut card: Card = serde_json::from_value(value).map_err(fail)?;
         // The writer names ranges, never code: a copy it made anyway is dropped.
@@ -410,7 +410,7 @@ pub fn ask_about(
     question: &str,
 ) -> Result<String, String> {
     let reply = writer.ask(item, &transcript.intentions(), question)?;
-    let value: serde_json::Value = serde_json::from_str(object(&reply)).unwrap_or_default();
+    let value = parse_object(&reply).unwrap_or_default();
     match value["answer"].as_str().map(str::trim) {
         Some(answer) if !answer.is_empty() => Ok(answer.into()),
         _ => Err("the writer's reply holds no answer".into()),
@@ -467,6 +467,26 @@ fn object(reply: &str) -> &str {
     object.map_or("", |(start, end)| &reply[start..=end])
 }
 
+/// The JSON object in a writer's reply, parsed: the one place a reply is read.
+pub(crate) fn parse_object(reply: &str) -> Result<serde_json::Value, serde_json::Error> {
+    serde_json::from_str(object(reply))
+}
+
+/// Asks a writer once more when `retry` says the `first` result cannot stand, and `pick` chooses between the second
+/// result and the first. Each writer keeps its own `retry` and `pick`.
+pub(crate) fn once_more<T, E>(
+    first: Result<T, E>,
+    retry: impl FnOnce(&Result<T, E>) -> bool,
+    ask: impl FnOnce() -> Result<T, E>,
+    pick: impl FnOnce(Result<T, E>, Result<T, E>) -> Result<T, E>,
+) -> Result<T, E> {
+    if retry(&first) {
+        pick(ask(), first)
+    } else {
+        first
+    }
+}
+
 /// Why a reply gave no goal, for the log.
 const HOLDS_NONE: &str = "the reply holds none";
 
@@ -477,7 +497,7 @@ fn summary(kept: &StoredCard) -> Option<String> {
 
 /// The Goal in a writer's reply, when it holds one that is not empty, or else why not, for the log.
 fn goal_in(reply: &str) -> Result<String, String> {
-    let value: serde_json::Value = serde_json::from_str(object(reply)).unwrap_or_default();
+    let value = parse_object(reply).unwrap_or_default();
     match value["goal"].as_str().map(str::trim) {
         Some(goal) if !goal.is_empty() => Ok(goal.into()),
         _ => Err(HOLDS_NONE.into()),
@@ -548,8 +568,12 @@ pub fn write_card(
     // A reply with no card, or whose quiz breaks a rule (danielrispler/plotkeeper#118), is asked for once more; the
     // second stands, with no quiz when it breaks one again, or the first when the second gives no card.
     let first = card();
-    let retry = !matches!(&first, Ok((_, None)));
-    match if retry { card().or(first) } else { first } {
+    match once_more(
+        first,
+        |first| !matches!(first, Ok((_, None))),
+        card,
+        |second, first| second.or(first),
+    ) {
         Ok((card, problem)) => {
             if let Some(problem) = problem {
                 log(format!("no quiz on {}: {problem}", request.id));
@@ -570,7 +594,7 @@ pub fn write_card(
 /// `if_it_fails` as the reasons, in that order. Its key is "It passes" until the result settles it
 /// (`CardStore::settle`).
 fn check_quiz(check: &str, reply: &str) -> Quiz {
-    let value: serde_json::Value = serde_json::from_str(object(reply)).unwrap_or_default();
+    let value = parse_object(reply).unwrap_or_default();
     let why = |field: &str| value[field].as_str().unwrap_or_default().to_owned();
     let first = check.lines().next().unwrap_or_default();
     Quiz {
@@ -1205,3 +1229,48 @@ Answer from the input below: the intentions of the item's turn, oldest first, th
 Reply with one JSON object and nothing else: {"answer": string}, the answer in at most three short paragraphs.
 "#
 );
+
+#[cfg(test)]
+mod reply_tests {
+    use super::{once_more, parse_object};
+
+    #[test]
+    fn a_reply_in_a_code_fence_parses_to_its_object() {
+        let value = parse_object("Here:\n```json\n{\"goal\": \"x\"}\n```").unwrap();
+        assert_eq!(value["goal"], "x");
+        assert!(parse_object("no object here").is_err());
+    }
+
+    #[test]
+    fn a_first_result_that_can_stand_is_not_asked_again() {
+        let mut asked = false;
+        let got = once_more(
+            Ok::<_, String>(1),
+            |_| false,
+            || {
+                asked = true;
+                Ok(2)
+            },
+            |second, _| second,
+        );
+        assert_eq!((got, asked), (Ok(1), false));
+    }
+
+    #[test]
+    fn the_picked_result_stands_after_a_second_ask() {
+        let keep_first_when_second_fails = once_more(
+            Ok::<_, String>(1),
+            |_| true,
+            || Err("no".into()),
+            |second, first| second.or(first),
+        );
+        assert_eq!(keep_first_when_second_fails, Ok(1));
+        let second_stands = once_more(
+            Err::<i32, _>("a".to_string()),
+            |_| true,
+            || Err("b".into()),
+            |second, _| second,
+        );
+        assert_eq!(second_stands, Err("b".into()));
+    }
+}
