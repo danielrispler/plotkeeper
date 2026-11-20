@@ -1016,6 +1016,13 @@ fn a_sessions_rail_cards_include_its_workers_each_with_its_turn_and_the_workers_
     }
 
     let rail = store.rail_cards(studio.session("s1").unwrap(), 1_761_743_990_000);
+    assert_eq!(
+        store.placements(studio.session("s1").unwrap()),
+        [
+            ("w1@9".to_string(), Some(0)),
+            ("w1@11".to_string(), Some(2))
+        ]
+    );
 
     let placed: Vec<(&str, Option<usize>)> = rail
         .workers
@@ -1027,4 +1034,36 @@ fn a_sessions_rail_cards_include_its_workers_each_with_its_turn_and_the_workers_
     let own = store.session_cards("w1", 1_761_743_990_000);
     assert_eq!(ids(&own.recent), ["w1@9", "w1@11"]);
     assert!(own.workers.is_empty());
+}
+
+/// The previous build's `Facts`, which requires `external`.
+#[derive(serde::Deserialize)]
+#[allow(dead_code)]
+struct MainFacts {
+    files: Vec<serde_json::Value>,
+    checks: Vec<serde_json::Value>,
+    external: u64,
+}
+
+#[test]
+fn a_summary_file_can_still_be_read_by_the_previous_builds_facts() {
+    let data = tempfile::tempdir().unwrap();
+    let _store = quiz_with_hunk(&data.path().join("cards.json"));
+    let text = std::fs::read_to_string(data.path().join("summaries.json")).unwrap();
+    let saved: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let facts = saved
+        .as_array()
+        .and_then(|all| all.first())
+        .and_then(|first| first.pointer("/request/facts"))
+        .unwrap_or_else(|| panic!("no facts in {text}"));
+    serde_json::from_value::<MainFacts>(facts.clone()).unwrap();
+}
+
+#[test]
+fn a_summary_that_becomes_waiting_raises_the_revision_so_the_window_asks_again() {
+    let data = tempfile::tempdir().unwrap();
+    let mut store = CardStore::open(data.path().join("cards.json")).unwrap();
+    let before = store.revision();
+    store.waiting_summary();
+    assert!(store.revision() > before);
 }

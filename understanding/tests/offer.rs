@@ -6,9 +6,9 @@ use studio_core::{
     Base, CardRequest, Check, CheckRun, CheckStatus, FactFile, Facts, SummaryRequest, TurnFile,
 };
 use studio_understanding::{
-    Card, CardStore, CardWriter, FakeWriter, Offer, Offers, Place, Shape, SummarySetup, Tap,
-    TurnFacts, TurnSummary, changed_in, offer_stop, offer_summary, settle, write_stop,
-    write_summary,
+    Card, CardStore, CardWriter, FakeWriter, Offer, OfferKind, Offers, Place, Shape, SummarySetup,
+    Tap, TurnFacts, TurnSummary, changed_in, decide, offer_stop, offer_summary, settle, turns_card,
+    write_stop, write_summary,
 };
 
 /// Replies to the summary with a Headline, one more line of `kind`, and a Quiz.
@@ -270,6 +270,7 @@ fn facts(files: &[(&str, u64)], check: Option<CheckStatus>) -> Facts {
     Facts {
         files: files.iter().map(file).collect(),
         checks: check.into_iter().collect(),
+        ..Facts::default()
     }
 }
 
@@ -321,6 +322,7 @@ fn turn_facts(files: &[(&str, u64)], check: Option<CheckStatus>) -> TurnFacts {
         facts: facts(files, check),
         merge: false,
         workers: Vec::new(),
+        traced: true,
     }
 }
 
@@ -402,6 +404,7 @@ fn stop_of(
         &session,
         turn,
         offers,
+        true,
         || {},
         |_| {},
     )
@@ -568,6 +571,7 @@ fn a_writer_that_gives_no_reply_is_on_the_record() {
         &session,
         &turn_facts(&[("a.rs", 30)], None),
         &offers,
+        true,
         || {},
         |_| {},
     )
@@ -669,6 +673,7 @@ fn a_writer_that_gave_no_reply_is_asked_again_and_the_line_stays_one_per_outcome
             &session,
             &turn,
             &offers,
+            true,
             || {},
             |_| {},
         )
@@ -695,6 +700,7 @@ fn the_summary_takes_the_decision_the_card_made_not_a_new_one() {
             &session,
             &at_card,
             &offers,
+            true,
             || {},
             |_| {},
         )
@@ -734,6 +740,7 @@ fn a_workers_200_lines_are_offered_once_on_the_workers_card_and_not_again_on_the
             &session,
             &TurnFacts::default(),
             &offers,
+            true,
             || {},
             |_| {},
         )
@@ -760,4 +767,178 @@ fn a_worktree_the_session_edits_itself_counts_for_its_turn_when_no_worker_is_in_
         settle(&mut request, &turn, &[], None).decision.offer,
         Offer::Card
     );
+}
+
+// The diff a fingerprint really produces (danielrispler/plotkeeper#202).
+
+#[test]
+fn the_files_of_a_fingerprints_diff_are_read() {
+    use std::process::Command;
+    use studio_understanding::Fingerprints;
+    let dir = tempfile::tempdir().unwrap();
+    let git = |args: &[&str]| {
+        let out = Command::new("git")
+            .args([
+                "-c",
+                "user.name=Studio",
+                "-c",
+                "user.email=studio@example.com",
+            ])
+            .args(args)
+            .current_dir(dir.path())
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}");
+    };
+    git(&["init", "-q"]);
+    std::fs::write(dir.path().join("a.rs"), "fn a() {}\n").unwrap();
+    git(&["add", "."]);
+    git(&["commit", "-qm", "Start"]);
+    let mut prints = Fingerprints::default();
+    assert!(prints.take(dir.path()).is_none());
+
+    std::fs::write(dir.path().join("a.rs"), "fn a() {}\nfn b() {}\nfn c() {}\n").unwrap();
+    std::fs::write(dir.path().join("new.rs"), "fn d() {}\n").unwrap();
+    let change = prints.take(dir.path()).unwrap();
+
+    let files = changed_in(&change.diff);
+    let found: Vec<(&str, u64)> = files.iter().map(|f| (f.path.as_str(), f.lines)).collect();
+    assert_eq!(found, [("a.rs", 2), ("new.rs", 1)]);
+}
+
+#[test]
+fn a_turn_that_changed_nothing_is_not_offered_the_change_of_a_card_in_a_shared_checkout() {
+    let traced = TurnFacts {
+        traced: true,
+        ..TurnFacts::default()
+    };
+    let other = changed_in(&diff_of(30));
+    assert_eq!(
+        decide(OfferKind::Turn, &traced, &other).offer,
+        Offer::Nothing
+    );
+    let untraced = TurnFacts::default();
+    assert_eq!(
+        decide(OfferKind::Turn, &untraced, &other).offer,
+        Offer::Card
+    );
+}
+
+#[test]
+fn a_turns_own_card_with_a_helpers_edit_is_a_turn_decision_and_keeps_its_lone_quiz() {
+    let (_dir, store) = store();
+    let (_o, offers) = offers();
+    let mut studio = studio_core::Studio::default();
+    for (name, ms) in [("SessionStart", 1), ("UserPromptSubmit", 2), ("Stop", 9)] {
+        let line = json!({ "session_id": "s", "hook_event_name": name, "prompt": "p", "studio_received_ms": ms });
+        studio.replay(&line.to_string());
+    }
+    let session = studio.session("s").cloned().unwrap();
+    assert_eq!(session.turns[0].id.as_deref(), Some("s@9"));
+    let mut request = card_request("s@9", None, &diff_of(10));
+    request.changed_by = [("w".to_string(), ["a.rs".to_string()].into())].into();
+    let (_, decided) = offer_stop(
+        &store,
+        &FakeWriter,
+        request,
+        &session,
+        &TurnFacts::default(),
+        &offers,
+        true,
+        || {},
+        |_| {},
+    );
+    let decided = decided.unwrap();
+    assert_eq!(
+        (decided.kind, decided.offer),
+        (OfferKind::Turn, Offer::Quiz)
+    );
+}
+
+#[test]
+fn a_lone_quiz_dropped_for_an_ask_line_under_a_full_cap_is_not_held_by_the_cap() {
+    let (_dir, store) = store();
+    let (_o, offers) = offers();
+    for n in 1..=3 {
+        lone(&store, n, 0, false, "why");
+    }
+    let mut request = turn_request(4);
+    let settled = settle(&mut request, &turn_facts(&[("a.rs", 9)], None), &[], None);
+    offer_summary(
+        &store,
+        &Canned("ask"),
+        &SummarySetup::default(),
+        request,
+        Some(&settled.decision),
+        &offers,
+        |l| panic!("{l}"),
+    );
+    assert_eq!(lines_of(&offers)[0]["outcome"], "no quiz in the reply");
+}
+
+/// A session whose turn `s@9` stopped, as the shell reads it.
+fn stopped_session() -> studio_core::Session {
+    let mut studio = studio_core::Studio::default();
+    for (name, ms) in [("SessionStart", 1), ("UserPromptSubmit", 2), ("Stop", 9)] {
+        let line = json!({ "session_id": "s", "hook_event_name": name, "prompt": "p", "studio_received_ms": ms });
+        studio.replay(&line.to_string());
+    }
+    studio.session("s").cloned().unwrap()
+}
+
+#[test]
+fn a_decision_the_summary_path_makes_alone_is_on_the_record_once() {
+    let (_o, offers) = offers();
+    for (n, files, offer) in [(1, 2, Offer::Nothing), (2, 30, Offer::Card)] {
+        let turn = turn_facts(&[("a.rs", files)], None);
+        let mut request = turn_request(n);
+        let settled = settle(&mut request, &turn, &[], None);
+        assert_eq!(settled.decision.offer, offer);
+        for _ in 0..2 {
+            settled.record(&offers, &request);
+        }
+        assert!(offers.settled("s", &format!("s@{n}")));
+    }
+    assert_eq!(lines_of(&offers).len(), 2);
+    // A lone Quiz is put on record by its summary, and the card path's decision by its card.
+    let turn = turn_facts(&[("a.rs", 9)], None);
+    let mut request = turn_request(3);
+    settle(&mut request, &turn, &[], None).record(&offers, &request);
+    let decided = decide(OfferKind::Turn, &turn, &[]);
+    let mut request = turn_request(4);
+    settle(&mut request, &turn, &[], Some(&decided)).record(&offers, &request);
+    assert_eq!(lines_of(&offers).len(), 2);
+}
+
+#[test]
+fn a_quiz_decision_with_no_summary_to_carry_it_is_on_the_record_at_once() {
+    let (_dir, store) = store();
+    let (_o, offers) = offers();
+    let turn = turn_facts(&[("a.rs", 9)], None);
+    for _ in 0..2 {
+        let request = card_request("s@1", None, "");
+        offer_stop(
+            &store,
+            &FakeWriter,
+            request,
+            &studio_core::Session::default(),
+            &turn,
+            &offers,
+            false,
+            || {},
+            |_| {},
+        );
+    }
+    assert_eq!(lines_of(&offers).len(), 1);
+    assert!(offers.settled("s", "s@1"));
+}
+
+#[test]
+fn only_a_card_with_its_turns_id_is_the_turns_card() {
+    let session = stopped_session();
+    assert!(turns_card(&session, &card_request("s@9", None, "")));
+    assert!(!turns_card(&session, &card_request("s@20", None, "")));
+    assert!(!turns_card(&session, &card_request("s@9", Some("w"), "")));
 }

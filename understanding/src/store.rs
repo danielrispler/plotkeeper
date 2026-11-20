@@ -439,6 +439,12 @@ impl CardStore {
         self.revision
     }
 
+    /// A turn's summary now waits for Daniel to open it: the revision rises, so that a window that
+    /// asked for it before and got none asks again.
+    pub fn waiting_summary(&mut self) {
+        self.revision += 1;
+    }
+
     /// The cards, oldest first.
     pub fn cards(&self) -> &[StoredCard] {
         &self.cards
@@ -484,17 +490,34 @@ impl CardStore {
     pub fn rail_cards(&self, session: &Session, now: u64) -> SessionCards {
         let mut shown = self.session_cards(&session.agent.id, now);
         shown.workers = self
-            .cards
-            .iter()
-            .filter(|kept| kept.request.session_id == session.agent.id)
-            .filter(|kept| kept.request.agent.is_some())
-            .filter(|kept| session.subagent(kept.request.owner()).is_some())
+            .worker_cards(session)
             .map(|kept| PlacedCard {
                 turn: session.worker_card_turn(&kept.request),
                 card: kept.clone(),
             })
             .collect();
         shown
+    }
+
+    /// The cards of `session`'s workers.
+    fn worker_cards<'a>(&'a self, session: &'a Session) -> impl Iterator<Item = &'a StoredCard> {
+        let own = move |kept: &&StoredCard| kept.request.session_id == session.agent.id;
+        let known = move |kept: &&StoredCard| session.subagent(kept.request.owner()).is_some();
+        let workers = self
+            .cards
+            .iter()
+            .filter(|kept| kept.request.agent.is_some());
+        workers.filter(own).filter(known)
+    }
+
+    /// The turn each of `session`'s worker cards is placed in, by card id: the rail redraws when one
+    /// moves, as a wake-up that arrives after the card was stored moves it.
+    pub fn placements(&self, session: &Session) -> Vec<(String, Option<usize>)> {
+        let placed = self.worker_cards(session).map(|kept| {
+            let turn = session.worker_card_turn(&kept.request);
+            (kept.request.id.clone(), turn)
+        });
+        placed.collect()
     }
 
     /// What `session`'s row says at `now`, in Unix milliseconds (danielrispler/Falinks#410, decision 27): while it needs

@@ -205,9 +205,20 @@ pub fn write_summary(
     store: &Mutex<CardStore>,
     writer: &(impl CardWriter + ?Sized),
     setup: &SummarySetup,
+    request: SummaryRequest,
+    log: impl FnMut(String),
+) -> Option<TurnSummary> {
+    write_held(store, writer, setup, request, log).map(|(summary, _)| summary)
+}
+
+/// As `write_summary`, and whether the hourly cap took its Quiz.
+pub(crate) fn write_held(
+    store: &Mutex<CardStore>,
+    writer: &(impl CardWriter + ?Sized),
+    setup: &SummarySetup,
     mut request: SummaryRequest,
     mut log: impl FnMut(String),
-) -> Option<TurnSummary> {
+) -> Option<(TurnSummary, bool)> {
     // A card the offer did not write is no card: the turn's summary may carry its Quiz instead.
     if let Some(card) = &request.card
         && !store
@@ -244,11 +255,11 @@ pub fn write_summary(
             }
             let id = request.id.clone();
             let mut store = store.lock().unwrap();
-            quiz_cap(&mut store, &request, &mut summary, &mut log);
+            let held = quiz_cap(&mut store, &request, &mut summary, &mut log);
             if let Err(e) = store.add_summary(request, summary.clone()) {
                 log(format!("save the summaries of {id}: {e}"));
             }
-            Some(summary)
+            Some((summary, held))
         }
         Err(line) => {
             log(format!("no summary on {}: {line}", request.id));
@@ -259,13 +270,14 @@ pub fn write_summary(
 
 /// Holds the Quiz of `summary` and of its turn's card to the rules for when a Quiz shows
 /// (danielrispler/plotkeeper#119): none beside a decision, a turn that asks Daniel something or ended in Needs
-/// you, and at most 3 in an hour, which a lone Quiz past the cap does not get.
+/// you, and at most 3 in an hour, which a lone Quiz past the cap does not get. Returns whether the
+/// cap took the Quiz.
 fn quiz_cap(
     store: &mut CardStore,
     request: &SummaryRequest,
     summary: &mut TurnSummary,
     mut log: impl FnMut(String),
-) {
+) -> bool {
     let asks = request.asks || summary.lines.iter().any(|l| l.kind == LineKind::Ask);
     if asks {
         summary.quiz = None;
@@ -274,8 +286,12 @@ fn quiz_cap(
         {
             log(format!("save the card store: {e}"));
         }
+        false
     } else if summary.quiz.is_some() && store.place_quiz(false, millis()) != Place::Offer {
         summary.quiz = None;
+        true
+    } else {
+        false
     }
 }
 

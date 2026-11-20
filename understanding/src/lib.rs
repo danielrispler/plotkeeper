@@ -41,7 +41,7 @@ pub use fingerprint::{Fingerprints, backfilled, fingerprint_changes, live_roots,
 use grounding::words;
 pub use offer::{
     Changed, Decision, Inputs, Offer, OfferKind, Offers, Outcome, Settled, Shape, TurnFacts,
-    changed_in, decide, is_logic, offer_stop, offer_summary, settle,
+    changed_in, decide, is_logic, offer_stop, offer_summary, settle, turns_card,
 };
 pub use retest::{retest_quiz, write_retests};
 pub use self_test::{ArmReport, SelfTest, self_test};

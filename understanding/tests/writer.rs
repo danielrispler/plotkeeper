@@ -1415,6 +1415,7 @@ fn with_facts(checks: Vec<Check>) -> SummaryRequest {
         facts: Facts {
             files: vec![file("src/parser2.rs", 47, 3, hunk)],
             checks,
+            ..Facts::default()
         },
         ..turn("s", 1)
     }

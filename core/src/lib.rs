@@ -1974,6 +1974,10 @@ pub struct Facts {
     pub files: Vec<FactFile>,
     /// Each check's last run, retries and commands.
     pub checks: Vec<Check>,
+    /// Unused: kept, always 0, so that the previous build, whose `Facts` requires it, can still read
+    /// `summaries.json`.
+    #[serde(default)]
+    pub external: u64,
 }
 
 /// What the writer reads to name a session from its first prompt.
@@ -3813,6 +3817,7 @@ impl Studio {
                 })
                 .collect(),
             checks: turn.checks.clone(),
+            external: 0,
         }
     }
 

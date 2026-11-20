@@ -1,7 +1,8 @@
 //! What a turn gets for a Quiz (danielrispler/plotkeeper#119): a card with its Quiz, a lone Quiz, or
 //! nothing, by the size of its change; the rules are in `docs/studio/question-rules.md`.
 
-use crate::{CardStore, CardWriter, Place, SummarySetup, TurnSummary, write_stop, write_summary};
+use crate::summary::write_held;
+use crate::{CardStore, CardWriter, SummarySetup, TurnSummary, write_stop};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::io::Write;
@@ -50,14 +51,21 @@ impl Shape {
     /// be read counts all its lines as non-trivial. A turn with no files in `facts` reads `diff`,
     /// the change of its card request, which an agent that reports no trees leaves.
     pub fn of(facts: &Facts, diff: &str, merge: bool) -> Shape {
-        Shape::read(facts, of_diff(diff), merge, &[])
+        Shape::read(facts, of_diff(diff), merge, &[], false)
     }
 
     /// As `of`, with the files of the card's change already read, and leaving out the files in the
     /// `workers` worktrees, which are judged at the workers' own cards.
-    fn read(facts: &Facts, change: Vec<Changed>, merge: bool, workers: &[String]) -> Shape {
+    /// The card's change is read where the turn is not `traced` and has no files.
+    fn read(
+        facts: &Facts,
+        change: Vec<Changed>,
+        merge: bool,
+        workers: &[String],
+        traced: bool,
+    ) -> Shape {
         let failed = facts.checks.iter().any(|c| c.status == CheckStatus::Failed);
-        let files = match facts.files.is_empty() {
+        let files = match facts.files.is_empty() && !traced {
             true => change,
             false => facts
                 .files
@@ -120,6 +128,9 @@ pub struct TurnFacts {
     pub merge: bool,
     /// The worktrees that were a worker's home during the turn: their files are judged at the worker's card.
     pub workers: Vec<String>,
+    /// The turn's trees were read: its files are its own even when there are none, and the card's
+    /// diff is not read in their place. False for an agent that reports no trees, and a worker's card.
+    pub traced: bool,
 }
 
 /// The table's inputs, as the record keeps them.
@@ -144,11 +155,17 @@ pub struct Decision {
 }
 
 /// The one function that decides an offer, by the table (danielrispler/plotkeeper#119) read from `turn`'s
-/// files, or from `change`, the files of the card's own diff, where `turn` has none: an agent that
-/// reports no trees, and a worker's card. A worker's card, and a subagent's late change, must pass
+/// files, or from `change`, the files of the card's own diff, where `turn` has no trees: an agent that
+/// reports none, and a worker's card. A worker's card, and a subagent's late change, must pass
 /// the table's first row, and get no lone Quiz, since neither has a summary.
 pub fn decide(kind: OfferKind, turn: &TurnFacts, change: &[Changed]) -> Decision {
-    let shape = Shape::read(&turn.facts, change.to_vec(), turn.merge, &turn.workers);
+    let shape = Shape::read(
+        &turn.facts,
+        change.to_vec(),
+        turn.merge,
+        &turn.workers,
+        turn.traced,
+    );
     let logic: Vec<&Changed> = shape.logic().collect();
     let non_trivial: u64 = logic.iter().map(|f| f.non_trivial).sum();
     let inputs = Inputs {
@@ -278,6 +295,18 @@ pub struct Settled {
     /// Whether the summary is written: it is wanted for itself, or for a lone Quiz.
     pub write: bool,
     pub decision: Decision,
+    /// The decision was made here, not by the turn's card.
+    fresh: bool,
+}
+
+impl Settled {
+    /// Puts on record a decision made here that no card or summary will: any but a lone Quiz, whose
+    /// summary puts its line, and one the turn's card made, which put its own.
+    pub fn record(&self, offers: &Offers, request: &SummaryRequest) {
+        if self.fresh && self.decision.offer != Offer::Quiz {
+            offers.record(&request.session_id, &request.id, &self.decision, None);
+        }
+    }
 }
 
 /// Fills in `request`'s facts from `turn` and whether its summary may keep a Quiz, from the same
@@ -300,11 +329,13 @@ pub fn settle(
     Settled {
         write: request.wanted || lone,
         decision,
+        fresh: decided.is_none(),
     }
 }
 
 /// Writes the stop card of `request` when the table gives it one, and puts the decision on record. A
-/// check's card is not judged. See `write_stop` for the rest.
+/// check's card is not judged. A lone Quiz's line is put by the turn's summary, which `carried` says
+/// will come. See `write_stop` for the rest.
 #[allow(clippy::too_many_arguments)]
 pub fn offer_stop(
     store: &Mutex<CardStore>,
@@ -313,6 +344,7 @@ pub fn offer_stop(
     session: &Session,
     turn: &TurnFacts,
     offers: &Offers,
+    carried: bool,
     stored: impl FnOnce(),
     mut log: impl FnMut(String),
 ) -> (bool, Option<Decision>) {
@@ -322,9 +354,11 @@ pub fn offer_stop(
             None,
         );
     }
+    // A subagent's change after the turn's `Stop` is no turn's own card, which has the turn's id.
+    let own = turns_card(session, &request);
     let kind = match () {
         _ if request.agent.is_some() => OfferKind::Worker,
-        _ if turn.facts.files.is_empty() && !request.changed_by.is_empty() => OfferKind::LateChange,
+        _ if !own && !request.changed_by.is_empty() => OfferKind::LateChange,
         _ => OfferKind::Turn,
     };
     let decision = decide(kind, turn, &changed_in(request.diff()));
@@ -340,9 +374,17 @@ pub fn offer_stop(
             offers.record(&session_id, &id, &decision, Some(outcome));
             (written, Some(decision))
         }
-        // Its summary carries the lone Quiz, and puts the line there.
+        // Its summary carries the lone Quiz, and puts the line there; with none to come, it is put now.
         Offer::Quiz => {
             log(format!("no card on {id}: its change gets a lone Quiz"));
+            if !carried {
+                let reason = Some("no summary to carry it");
+                let recorded = Decision {
+                    reason,
+                    ..decision.clone()
+                };
+                offers.record(&session_id, &id, &recorded, None);
+            }
             (false, Some(decision))
         }
         Offer::Nothing => {
@@ -366,36 +408,58 @@ pub fn offer_summary(
     log: impl FnMut(String),
 ) -> Option<TurnSummary> {
     let (session, id) = (request.session_id.clone(), request.id.clone());
-    let summary = write_summary(store, writer, setup, request, log);
+    let written = write_held(store, writer, setup, request, log);
     if let Some(decision) = lone {
-        let outcome = match &summary {
+        let outcome = match &written {
             None => Outcome::NoReply,
-            Some(s) if s.quiz.is_some() => Outcome::Written,
-            Some(_) if store.lock().unwrap().place_quiz(false, crate::millis()) != Place::Offer => {
-                Outcome::HeldByCap
-            }
+            Some((s, _)) if s.quiz.is_some() => Outcome::Written,
+            Some((_, true)) => Outcome::HeldByCap,
             Some(_) => Outcome::NoQuiz,
         };
         offers.record(&session, &id, decision, Some(outcome));
     }
-    summary
+    written.map(|(summary, _)| summary)
 }
 
-/// The files of a unified diff (`git diff`, one `diff --git` header per file).
+/// Whether `request` is the card of one of `session`'s turns: its session's own, with the id of the
+/// turn's `Stop`, and not a card of a worker, a check, a late change or a 20-minute look.
+pub fn turns_card(session: &Session, request: &CardRequest) -> bool {
+    let own = request.agent.is_none() && request.check.is_none();
+    own && session
+        .turns
+        .iter()
+        .any(|t| t.id.as_deref() == Some(&request.id))
+}
+
+/// The files of a unified diff: one `diff --git` header per file, as `git diff` has, or only the
+/// `---`/`+++` pair of each, as a fingerprint's does.
 fn of_diff(diff: &str) -> Vec<Changed> {
-    let mut files: Vec<(String, String)> = Vec::new();
-    for line in diff.lines() {
+    let lines: Vec<&str> = diff.lines().collect();
+    // Each file's path and text, and whether its `---`/`+++` pair was seen.
+    let mut files: Vec<(String, String, bool)> = Vec::new();
+    for (i, line) in lines.iter().enumerate() {
+        let pair = line.starts_with("--- ")
+            && lines.get(i + 1).is_some_and(|l| l.starts_with("+++ "))
+            && lines.get(i + 2).is_some_and(|l| l.starts_with("@@"));
         if let Some(rest) = line.strip_prefix("diff --git ") {
             let path = rest.rsplit_once(" b/").map_or(rest, |(_, b)| b);
-            files.push((path.into(), String::new()));
-        } else if let Some((_, text)) = files.last_mut() {
+            files.push((path.into(), String::new(), false));
+        } else if pair && files.last().is_none_or(|(_, _, seen)| *seen) {
+            let new = lines[i + 1].strip_prefix("+++ ").unwrap_or_default();
+            files.push((
+                new.strip_prefix("b/").unwrap_or(new).into(),
+                String::new(),
+                true,
+            ));
+        } else if let Some((_, text, seen)) = files.last_mut() {
+            *seen |= pair;
             text.push_str(line);
             text.push('\n');
         }
     }
     files
         .into_iter()
-        .map(|(path, text)| Changed {
+        .map(|(path, text, _)| Changed {
             path,
             lines: changes(&text).count() as u64,
             non_trivial: non_trivial(&text),
