@@ -250,6 +250,24 @@ export const fixtures = {
       else if (learning.getBoundingClientRect().bottom > 900 - 6) log("snap:fail the Retest is below the fold: it ends at " + learning.getBoundingClientRect().bottom);`;
     return { ...base, sessions, learning, projects: ["/w/plotkeeper", "/w/falinks"], selected: null, snapScript };
   },
+  // Home with a Retest answered (#243): the reveal, the link to the code, and the turn's first hunk in place. The script checks both show.
+  homeReveal243(): Fixture {
+    const f = fixtures.home();
+    const now = Date.now();
+    const file = { root: "/w/plotkeeper", path: "ui/settings.rs", from: null, added: 1, removed: 1, agent: null };
+    const sessions = f.sessions.map((s) =>
+      s.id === "s3" ? { ...s, turns: [{ started_at: now - 8 * 864e5, ended_at: now - 8 * 864e5 + 600e3, prompt: "Fix the settings write", id: "r1", message: null, checks: [], files: { files: [file], merged: 0 } }] } : s,
+    );
+    const learning = { ...f.learning, taps: [{ kind: "pick" as const, option: 0, at: now }] };
+    const hunk = { text: ["@@ -41,3 +41,3 @@", "-    let text = self.read_file(&self.state.lock());", "+    let text = { self.state.lock().file.clone() };", "     self.write_file(merge(text, key, value));", ""].join("\n"), left_out: 0, binary: false, first_line: 41 };
+    const snapScript = `
+      await new Promise((done) => setTimeout(done, 300));
+      if (!document.querySelector(".pane.home .quiz-code-link")) log("snap:fail the reveal has no link to the code");
+      if (!document.querySelector(".pane.home .evidence-hunk:not([hidden])")?.textContent.includes("self.state.lock().file.clone()")) log("snap:fail the hunk is not open in place");
+      // The card sits below the fold of a full page: scroll it into view to see the reveal whole.
+      document.querySelector(".pane.home .quiz-region")?.scrollIntoView({ block: "start" });`;
+    return { ...f, sessions, learning, turn_file_hunk: hunk, snapScript };
+  },
   // Home after Clear (#244): the landed rows are hidden, the Landed part is gone, and the toast offers Undo. The script clicks Clear on the heading.
   homeClearToast(): Fixture {
     const snapScript = `

@@ -630,3 +630,5 @@ body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
 .project-workspaces .workspace-line .row { flex: 1; min-width: 0; width: auto; }
 .project-workspaces .workspace .pull { flex: none; color: var(--fg); }
 .project-workspaces .workspace .pull:disabled { color: var(--muted); }
+.pane.home .quiz-code-link { margin-top: var(--sp-3); font-size: var(--size); }
+.pane.home .evidence-rows { list-style: none; margin: var(--sp-3) 0 0; padding: 0; }
