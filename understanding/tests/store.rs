@@ -1126,6 +1126,11 @@ mod learning {
 
     /// Turn `t` with a Quiz, offered so that its retest came due `due_ago` before NOW, and that Retest, `retest t`.
     fn seed(store: &mut CardStore, t: &str, due_ago: u64) {
+        seed_offered(store, t, NOW - due_ago - RETEST_AFTER_MS);
+    }
+
+    /// Turn `t` with a Quiz offered at `offered`, and its Retest.
+    fn seed_offered(store: &mut CardStore, t: &str, offered: u64) {
         let request = studio_core::SummaryRequest {
             id: t.into(),
             session_id: "s1".into(),
@@ -1138,7 +1143,6 @@ mod learning {
                     { "text": "A", "why": "Yes." }, { "text": "B", "why": "No." }] },
             }))
             .unwrap();
-        let offered = NOW - due_ago - RETEST_AFTER_MS;
         store.add_summary_at(request, summary, offered).unwrap();
         let ask = RetestAsk {
             of: t.into(),
@@ -1146,7 +1150,9 @@ mod learning {
             hunk: String::new(),
             first: quiz(),
         };
-        store.add_retest(&ask, Some(quiz()), NOW - due_ago).unwrap();
+        store
+            .add_retest(&ask, Some(quiz()), offered + RETEST_AFTER_MS)
+            .unwrap();
     }
 
     fn empty() -> (tempfile::TempDir, CardStore) {
@@ -1217,6 +1223,14 @@ mod learning {
         assert_eq!(served(&store), None);
         seed(&mut store, "edge", RETEST_REACH_MS);
         assert_eq!(served(&store).as_deref(), Some("edge"));
+    }
+
+    #[test]
+    fn a_retest_not_yet_due_is_not_served() {
+        let (_data, mut store) = empty();
+        // Offered six days ago: due tomorrow.
+        seed_offered(&mut store, "early", NOW - 6 * DAY);
+        assert_eq!(served(&store), None);
     }
 
     #[test]

@@ -160,6 +160,21 @@ impl QuizTap {
     fn answers(&self) -> bool {
         matches!(self.tap, Tap::Pick { .. } | Tap::Skip)
     }
+
+    /// Whether it is a pick.
+    fn picks(&self) -> bool {
+        matches!(self.tap, Tap::Pick { .. })
+    }
+
+    /// Whether it is a "Not now" tapped at or after `day_start`.
+    fn set_aside_since(&self, day_start: u64) -> bool {
+        self.at >= day_start && matches!(self.tap, Tap::NotNow)
+    }
+
+    /// Whether it flags the key as wrong.
+    fn flags_key(&self) -> bool {
+        self.tap == Tap::KeyWrong
+    }
 }
 
 /// Keeps `tap` at `at` in `taps`: the first answer counts, and each chip once. Whether it was kept.
@@ -186,14 +201,27 @@ struct FirstQuiz {
     key_wrong: bool,
 }
 
+/// A Retest the learning slot may serve, with its first Quiz's pick, when it came due and when that Quiz was offered.
+struct Eligible<'a> {
+    picked: bool,
+    due: u64,
+    retest: &'a Retest,
+    offered: u64,
+}
+
+/// A fresh Quiz the learning slot may serve, and when its turn or card was written.
+struct FreshQuiz<'a> {
+    at: u64,
+    id: &'a String,
+    session_id: &'a String,
+    quiz: &'a Quiz,
+}
+
 /// How long after a Quiz was offered its retest is due: seven days (danielrispler/plotkeeper#129).
 pub const RETEST_AFTER_MS: u64 = 7 * 24 * 60 * 60 * 1000;
 
 /// How far back a Retest may have come due and still be served by the learning slot: 14 days (danielrispler/plotkeeper#240).
 pub const RETEST_REACH_MS: u64 = 14 * 24 * 60 * 60 * 1000;
-
-/// How recently a turn ended for its Quiz to be fresh on Home's learning slot: 30 minutes (danielrispler/plotkeeper#241).
-pub const FRESH_MS: u64 = RECENT_MS;
 
 /// How many Retests the learning slot serves in a day, counted by the picks of the day (danielrispler/plotkeeper#240).
 pub const RETESTS_PER_DAY: usize = 3;
@@ -838,41 +866,38 @@ impl CardStore {
     }
 
     /// The item Home's learning slot serves at `now`, given `day_start`, the start of Daniel's local day (danielrispler/plotkeeper#240):
-    /// nothing, or a Retest, or "done for today". It reads and writes nothing.
+    /// a Retest, a fresh Quiz of a turn or card (#241), "done for today", or nothing. It reads and writes nothing.
     pub fn learning(&self, now: u64, day_start: u64) -> Option<Learning> {
-        let picked = |taps: &[QuizTap]| taps.iter().any(|t| matches!(t.tap, Tap::Pick { .. }));
-        let today = |taps: &[QuizTap], is: fn(&Tap) -> bool| {
-            taps.iter().any(|t| t.at >= day_start && is(&t.tap))
-        };
         let picked_today = self
             .retests
             .iter()
-            .filter(|r| today(&r.taps, |t| matches!(t, Tap::Pick { .. })))
+            .filter(|r| r.taps.iter().any(|t| t.at >= day_start && t.picks()))
             .count();
         let capped = picked_today >= RETESTS_PER_DAY;
-        // Each eligible Retest with its first Quiz's pick, and when it came due.
-        let mut eligible: Vec<(bool, u64, &Retest, u64)> = self
+        let mut eligible: Vec<Eligible> = self
             .retests
             .iter()
-            .filter(|r| r.quiz.is_some() && !picked(&r.taps))
-            .filter(|r| !today(&r.taps, |t| matches!(t, Tap::NotNow)))
-            .filter_map(|r| {
-                let first = self.first_quiz(&r.of)?;
+            .filter(|r| r.quiz.is_some())
+            .filter(|r| !r.taps.iter().any(QuizTap::picks))
+            .filter(|r| !r.taps.iter().any(|t| t.set_aside_since(day_start)))
+            .filter_map(|retest| {
+                let first = self.first_quiz(&retest.of)?;
                 let due = first.offered.saturating_add(RETEST_AFTER_MS);
-                (!first.key_wrong && now.saturating_sub(due) <= RETEST_REACH_MS).then_some((
-                    first.picked,
-                    due,
-                    r,
-                    first.offered,
-                ))
+                (!first.key_wrong && due <= now && now - due <= RETEST_REACH_MS).then_some(
+                    Eligible {
+                        picked: first.picked,
+                        due,
+                        retest,
+                        offered: first.offered,
+                    },
+                )
             })
             .collect();
-        eligible
-            .sort_by_key(|(picked, due, ..)| (std::cmp::Reverse(*picked), std::cmp::Reverse(*due)));
-        let retest = eligible.first().map(|(_, _, r, offered)| {
+        eligible.sort_by_key(|e| (std::cmp::Reverse(e.picked), std::cmp::Reverse(e.due)));
+        let retest = eligible.first().map(|e| {
             Learning::Retest(Retest {
-                of_at: Some(*offered),
-                ..(*r).clone()
+                of_at: Some(e.offered),
+                ..e.retest.clone()
             })
         });
         // One Retest comes first each day; then a fresh Quiz; then more Retests, up to the cap.
@@ -888,62 +913,60 @@ impl CardStore {
         retest
     }
 
-    /// The newest Quiz of a turn summary or a card, a worker's included, that ended at most `FRESH_MS` before `now` and that
+    /// The newest Quiz of a turn summary or a card, a worker's included, that ended at most `RECENT_MS` before `now` and that
     /// Daniel has not picked or skipped, nor set aside since `day_start` (danielrispler/plotkeeper#241).
     fn fresh_quiz(&self, now: u64, day_start: u64) -> Option<Learning> {
         let open = |taps: &[QuizTap]| {
             !taps.iter().any(QuizTap::answers)
-                && !taps
-                    .iter()
-                    .any(|t| t.at >= day_start && matches!(t.tap, Tap::NotNow))
-                && !taps.iter().any(|t| t.tap == Tap::KeyWrong)
+                && !taps.iter().any(|t| t.set_aside_since(day_start))
+                && !taps.iter().any(QuizTap::flags_key)
         };
-        let fresh = |at: u64| at <= now && now - at <= FRESH_MS;
+        let fresh = |at: u64| at <= now && now - at <= RECENT_MS;
         let cards = self.cards.iter().filter_map(|k| {
             let at = k.added_at.or(k.shown_at).filter(|at| fresh(*at))?;
             let quiz = k.card.quiz.as_ref().filter(|_| k.request.check.is_none())?;
-            (k.guess.is_none() && !k.key_wrong && open(&k.taps)).then_some((
+            (k.guess.is_none() && !k.key_wrong && open(&k.taps)).then_some(FreshQuiz {
                 at,
-                &k.request.id,
-                &k.request.session_id,
+                id: &k.request.id,
+                session_id: &k.request.session_id,
                 quiz,
-            ))
+            })
         });
         let summaries = self.summaries.iter().filter_map(|k| {
             let quiz = k.summary.quiz.as_ref()?;
-            (fresh(k.added_at) && k.arm != Some(Arm::BodyOnly) && open(&k.taps)).then_some((
-                k.added_at,
-                &k.request.id,
-                &k.request.session_id,
-                quiz,
-            ))
+            (fresh(k.added_at) && k.arm != Some(Arm::BodyOnly) && open(&k.taps)).then_some(
+                FreshQuiz {
+                    at: k.added_at,
+                    id: &k.request.id,
+                    session_id: &k.request.session_id,
+                    quiz,
+                },
+            )
         });
         cards
             .chain(summaries)
-            .max_by_key(|(at, ..)| *at)
-            .map(|(_, id, session_id, quiz)| Learning::Fresh {
-                id: id.clone(),
-                session_id: session_id.clone(),
-                quiz: quiz.clone(),
+            .max_by_key(|f| f.at)
+            .map(|f| Learning::Fresh {
+                id: f.id.clone(),
+                session_id: f.session_id.clone(),
+                quiz: f.quiz.clone(),
             })
     }
 
     /// What the learning slot reads of the first Quiz, a card's or a turn's own, that retest `of` is of.
     fn first_quiz(&self, of: &str) -> Option<FirstQuiz> {
-        let flagged = |taps: &[QuizTap]| taps.iter().any(|t| t.tap == Tap::KeyWrong);
-        let picked = |taps: &[QuizTap]| taps.iter().any(|t| matches!(t.tap, Tap::Pick { .. }));
         if let Some(kept) = self.cards.iter().find(|kept| kept.request.id == of) {
             return Some(FirstQuiz {
                 offered: kept.added_at.or(kept.shown_at)?,
-                picked: kept.guess.is_some() || picked(&kept.taps),
-                key_wrong: kept.key_wrong || flagged(&kept.taps),
+                picked: kept.guess.is_some() || kept.taps.iter().any(QuizTap::picks),
+                key_wrong: kept.key_wrong || kept.taps.iter().any(QuizTap::flags_key),
             });
         }
         let kept = self.summaries.iter().find(|kept| kept.request.id == of)?;
         Some(FirstQuiz {
             offered: kept.added_at,
-            picked: picked(&kept.taps),
-            key_wrong: flagged(&kept.taps),
+            picked: kept.taps.iter().any(QuizTap::picks),
+            key_wrong: kept.taps.iter().any(QuizTap::flags_key),
         })
     }
 
