@@ -238,7 +238,7 @@ export const fixtures = {
       session("s3", "#54 · Subagent terminal", "idle", { cwd: "/w/plotkeeper", landed: true }),
       session("s5", "#48 · Agent deadline", "ended", { cwd: "/w/plotkeeper", landed: true }),
     ];
-    const learning = { kind: "retest" as const, id: "r1", of: "r1", session_id: "s3", added_at: now - 7 * 864e5, taps: [], quiz: { text: "The settings write held a lock across a read. Why was it safe?", key: 1, options: [
+    const learning = { kind: "retest" as const, id: "r1", of: "r1", session_id: "s3", added_at: now - 7 * 864e5, of_at: now - 8 * 864e5, taps: [], quiz: { text: "The settings write held a lock across a read. Why was it safe?", key: 1, options: [
       { text: "Keep the lock across the await so nobody reads half a write", why: "A lock across the await deadlocks." },
       { text: "Release it first and re-read the state after", why: "The read can wait on the writer." },
       { text: "Copy the state out and work on the copy", why: "It still races." },
@@ -249,6 +249,21 @@ export const fixtures = {
       // The window is 900 high; the page reports less while this script runs (headless Chrome counts its frame), so the fold is fixed.
       else if (learning.getBoundingClientRect().bottom > 900 - 6) log("snap:fail the Retest is below the fold: it ends at " + learning.getBoundingClientRect().bottom);`;
     return { ...base, sessions, learning, projects: ["/w/plotkeeper", "/w/falinks"], selected: null, snapScript };
+  },
+  // Home's reveal (#242): the script picks the second option of the Retest; the card then shows the turn's date and Key wrong, and no Not now.
+  homeReveal(): Fixture {
+    const snapScript = `
+      const option = document.querySelectorAll(".pane.home .quiz-region .options button")[1];
+      if (!option) log("snap:fail Home's Retest has no options");
+      else {
+        option.click();
+        await new Promise((r) => setTimeout(r, 100));
+        const card = document.querySelector(".pane.home .quiz-region")?.textContent ?? "";
+        if (!/The turn of \\d+ \\w+/.test(card)) log("snap:fail the reveal shows no date of the turn");
+        if (!/Key wrong/.test(card)) log("snap:fail the reveal has no Key wrong");
+        if (/Not now|Show the rest anyway|why\\?/.test(card)) log("snap:fail the reveal shows a rail control");
+      }`;
+    return { ...fixtures.home(), snapScript };
   },
   // Home after Clear (#244): the landed rows are hidden, the Landed part is gone, and the toast offers Undo. The script clicks Clear on the heading.
   homeClearToast(): Fixture {

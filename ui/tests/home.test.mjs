@@ -167,6 +167,54 @@ test("building the slot writes nothing; shown is written once, when its conditio
   assert.deepEqual(calls, [["quiz_tap", { id: "w1", tap: { kind: "shown" } }]]);
 });
 
+// The slot's card (#242): the options, then "Not sure" and "Not now" inside it; a pick writes the confidence tap first.
+async function slotCard(id, extra = {}) {
+  const { El: Base } = await import("./dom.mjs");
+  class El extends Base {
+    dataset = {};
+    title = "";
+    disabled = false;
+    dir = "";
+  }
+  const calls = [];
+  globalThis.window = { __TAURI__: { core: { invoke: async (command, args) => (calls.push([command, args]), null) } } };
+  globalThis.document = { createElement: (tag) => new El(tag), visibilityState: "visible", hasFocus: () => true, getElementById: () => Object.assign(new El("div"), { replaceChildren() {} }) };
+  const { slotNode } = await import("../../dist/home.js");
+  const item = retest(id, { text: "q", key: 1, options: [{ text: "A", why: "a" }, { text: "B", why: "b" }] }, []);
+  const node = slotNode({ item: { ...item, ...extra }, next: false }, () => {}, () => {});
+  const buttons = () => node.find("button");
+  const press = (label) => buttons().find((b) => b.textContent === label).listeners.click();
+  return { calls, node, buttons, press, labels: () => buttons().map((b) => b.textContent) };
+}
+const taps = (calls) => calls.map(([, args]) => args.tap);
+
+test("a confident Home pick is one click: a sure confidence tap for Home, then the pick, and no why", async () => {
+  const { calls, press } = await slotCard("c1");
+  press("A");
+  assert.deepEqual(taps(calls), [{ kind: "confidence", sure: true, surface: "home" }, { kind: "pick", option: 0 }]);
+});
+
+test("with the not sure toggle on, the Home pick writes sure false first", async () => {
+  const { calls, press } = await slotCard("c2");
+  press("Not sure");
+  assert.deepEqual(calls, []);
+  press("B");
+  assert.deepEqual(taps(calls), [{ kind: "confidence", sure: false, surface: "home" }, { kind: "pick", option: 1 }]);
+});
+
+test("Home's card holds the options, then Not sure and Not now, with no Sure row and no Show the rest anyway", async () => {
+  const { labels } = await slotCard("c3");
+  assert.deepEqual(labels(), ["A", "B", "Not sure", "Not now"]);
+});
+
+test("the reveal shows the turn's date and Key wrong", async () => {
+  const { node, press, labels } = await slotCard("c4", { of_at: Date.UTC(2026, 10, 13, 12) });
+  press("A");
+  assert.ok(node.text.includes("13 November"), node.text);
+  assert.ok(labels().includes("Key wrong"));
+  assert.ok(!labels().includes("Not now"));
+});
+
 // Clear landed (#244), a state machine on an injected clock (prior art hover.test.mjs).
 import { clearing, CLEAR_WINDOW_MS } from "../../dist/home.js";
 

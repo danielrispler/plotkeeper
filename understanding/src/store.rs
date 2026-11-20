@@ -102,6 +102,22 @@ fn coin() -> bool {
         == 1
 }
 
+/// Where a confidence tap was made (danielrispler/plotkeeper#242): Home's learning slot, or the rail, which a tap stored before
+/// the field existed reads as. The rail's taps are written without it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Surface {
+    #[default]
+    Rail,
+    Home,
+}
+
+impl Surface {
+    fn is_rail(&self) -> bool {
+        *self == Surface::Rail
+    }
+}
+
 /// What Daniel does with a Quiz (danielrispler/plotkeeper#120): a pick, "Show the rest anyway" (a skip, which reveals as a pick
 /// does), and the three chips under the revealed answer. The trial's two (danielrispler/plotkeeper#129): how sure he is
 /// before the pick, and an optional line on why after it, which no model reads.
@@ -113,6 +129,8 @@ pub enum Tap {
     },
     Confidence {
         sure: bool,
+        #[serde(default, skip_serializing_if = "Surface::is_rail")]
+        surface: Surface,
     },
     Why {
         text: String,
@@ -200,6 +218,10 @@ pub struct Retest {
     pub of: String,
     pub session_id: String,
     pub added_at: u64,
+    /// When the first Quiz was offered, the turn's date (danielrispler/plotkeeper#242). Not stored: `learning` fills it in on the
+    /// item it serves.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub of_at: Option<u64>,
     pub quiz: Option<Quiz>,
     #[serde(default)]
     pub taps: Vec<QuizTap>,
@@ -828,7 +850,7 @@ impl CardStore {
             return Some(Learning::Done);
         }
         // Each eligible Retest with its first Quiz's pick, and when it came due.
-        let mut eligible: Vec<(bool, u64, &Retest)> = self
+        let mut eligible: Vec<(bool, u64, &Retest, u64)> = self
             .retests
             .iter()
             .filter(|r| r.quiz.is_some() && !picked(&r.taps))
@@ -840,14 +862,18 @@ impl CardStore {
                     first.picked,
                     due,
                     r,
+                    first.offered,
                 ))
             })
             .collect();
         eligible
-            .sort_by_key(|(picked, due, _)| (std::cmp::Reverse(*picked), std::cmp::Reverse(*due)));
-        eligible
-            .first()
-            .map(|(.., r)| Learning::Retest((*r).clone()))
+            .sort_by_key(|(picked, due, ..)| (std::cmp::Reverse(*picked), std::cmp::Reverse(*due)));
+        eligible.first().map(|(_, _, r, offered)| {
+            Learning::Retest(Retest {
+                of_at: Some(*offered),
+                ..(*r).clone()
+            })
+        })
     }
 
     /// What the learning slot reads of the first Quiz, a card's or a turn's own, that retest `of` is of.
@@ -880,6 +906,7 @@ impl CardStore {
             of: ask.of.clone(),
             session_id: ask.session_id.clone(),
             added_at: at,
+            of_at: None,
             quiz,
             taps: Vec::new(),
         });

@@ -4,7 +4,7 @@
 use std::{cell::Cell, sync::Mutex};
 use studio_core::{Base, CardRequest, Change, LiveFacts, Output, Studio};
 use studio_understanding::{
-    Card, CardStore, CardWriter, FakeWriter, Guess, Level, Rating, Reason, StoredCard,
+    Card, CardStore, CardWriter, FakeWriter, Guess, Level, Rating, Reason, StoredCard, Surface,
     explain_more, write_card,
 };
 
@@ -774,7 +774,14 @@ fn a_retests_confidence_why_and_pick_are_stored_with_their_times_and_survive_a_r
     store.add_retest(&ask, Some(quiz), offered + WEEK).unwrap();
     let id = "retest t1";
     store
-        .quiz_tap(id, Tap::Confidence { sure: false }, 1)
+        .quiz_tap(
+            id,
+            Tap::Confidence {
+                sure: false,
+                surface: Surface::Rail,
+            },
+            1,
+        )
         .unwrap();
     store.quiz_tap(id, Tap::Pick { option: 1 }, 2).unwrap();
     store
@@ -788,7 +795,14 @@ fn a_retests_confidence_why_and_pick_are_stored_with_their_times_and_survive_a_r
         .unwrap();
     // Only the first of each counts, and no such option records nothing.
     store
-        .quiz_tap(id, Tap::Confidence { sure: true }, 4)
+        .quiz_tap(
+            id,
+            Tap::Confidence {
+                sure: true,
+                surface: Surface::Rail,
+            },
+            4,
+        )
         .unwrap();
     store.quiz_tap(id, Tap::Pick { option: 0 }, 5).unwrap();
 
@@ -800,7 +814,10 @@ fn a_retests_confidence_why_and_pick_are_stored_with_their_times_and_survive_a_r
         retest.taps,
         [
             QuizTap {
-                tap: Tap::Confidence { sure: false },
+                tap: Tap::Confidence {
+                    sure: false,
+                    surface: Surface::Rail
+                },
                 at: 1
             },
             QuizTap {
@@ -825,7 +842,14 @@ fn a_confidence_tap_and_a_why_line_on_a_lone_quiz_are_stored_too() {
     let data = tempfile::tempdir().unwrap();
     let mut store = lone_quiz(&data.path().join("cards.json"));
     store
-        .quiz_tap("t1", Tap::Confidence { sure: true }, 1)
+        .quiz_tap(
+            "t1",
+            Tap::Confidence {
+                sure: true,
+                surface: Surface::Rail,
+            },
+            1,
+        )
         .unwrap();
     store
         .quiz_tap("t1", Tap::Why { text: "x".into() }, 2)
@@ -834,7 +858,10 @@ fn a_confidence_tap_and_a_why_line_on_a_lone_quiz_are_stored_too() {
         store.turn_summary("t1").unwrap().taps,
         [
             QuizTap {
-                tap: Tap::Confidence { sure: true },
+                tap: Tap::Confidence {
+                    sure: true,
+                    surface: Surface::Rail
+                },
                 at: 1
             },
             QuizTap {
@@ -1150,6 +1177,17 @@ mod learning {
         seed(&mut store, "new", DAY);
         assert_eq!(served(&store).as_deref(), Some("new"));
     }
+
+    #[test]
+    fn a_served_retest_carries_the_date_its_first_quiz_was_offered() {
+        let (_data, mut store) = empty();
+        seed(&mut store, "a", DAY);
+        let Some(Learning::Retest(r)) = store.learning(NOW, START) else {
+            panic!()
+        };
+        assert_eq!(r.of_at, Some(NOW - DAY - RETEST_AFTER_MS));
+    }
+
     fn pick(store: &mut CardStore, id: &str, at: u64) {
         store.quiz_tap(id, Tap::Pick { option: 0 }, at).unwrap();
     }
@@ -1278,4 +1316,51 @@ mod learning {
         assert_eq!(kinds(&store.turn_summary("t").unwrap().taps), expected);
         assert_eq!(kinds(&store.retests()[0].taps), expected);
     }
+}
+
+#[test]
+fn a_confidence_tap_keeps_its_surface_and_one_without_reads_as_the_rails() {
+    use studio_understanding::{QuizTap, Tap};
+    let data = tempfile::tempdir().unwrap();
+    let path = data.path().join("cards.json");
+    let mut store = lone_quiz(&path);
+    store
+        .quiz_tap(
+            "t1",
+            Tap::Confidence {
+                sure: false,
+                surface: Surface::Home,
+            },
+            1,
+        )
+        .unwrap();
+    let reopened = CardStore::open(path).unwrap();
+    assert_eq!(
+        reopened.turn_summary("t1").unwrap().taps,
+        [QuizTap {
+            tap: Tap::Confidence {
+                sure: false,
+                surface: Surface::Home
+            },
+            at: 1
+        }]
+    );
+    // A tap stored before the field existed, and one the rail sends, are the rail's.
+    let old: QuizTap = serde_json::from_str(r#"{"kind":"confidence","sure":true,"at":2}"#).unwrap();
+    assert_eq!(
+        old.tap,
+        Tap::Confidence {
+            sure: true,
+            surface: Surface::Rail
+        }
+    );
+    let home: Tap =
+        serde_json::from_str(r#"{"kind":"confidence","sure":true,"surface":"home"}"#).unwrap();
+    assert_eq!(
+        home,
+        Tap::Confidence {
+            sure: true,
+            surface: Surface::Home
+        }
+    );
 }

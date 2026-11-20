@@ -3,7 +3,7 @@
 // empty. Needs you is the only colour. `drawHome` draws it, patched by key so focus survives updates.
 
 import { age, failure, fullTitle, invoke, patch, pressable, text } from "./dom.js";
-import { quizAnswered, quizItem, quizRegion, seedQuiz } from "./quiz.js";
+import { quizItem, quizRegion, seedQuiz } from "./quiz.js";
 import { childrenOf, deleting, glyph, item, row, secondLine, selecting, sessionName, showsLanded, status } from "./list.js";
 import { logo, logoKey } from "./logos.js";
 import { foundWorkspaces, lastSegment, sessionProjectName } from "./workspaces.js";
@@ -91,14 +91,6 @@ export function slotNode(slot: Slot, redraw: () => void, reask: () => void): HTM
       .catch(failure("quiz_tap"));
     if (homeState.held) redraw();
   };
-  const region = quizRegion(item.id, quiz, [], {
-    record: tap,
-    explain: () => invoke("ask", { session: item.session_id, item: quizItem(quiz), question: "I did not get this yet. Explain more." }),
-    line: () => document.createElement("li"),
-    trial: true,
-  });
-  wrap.append(region);
-  const actions = text("p", "", "slot-actions");
   const button = (label: string, title: string, run: () => void) => {
     const one = pressable(document.createElement("button"), false, run);
     one.classList.add("quiz-skip");
@@ -106,20 +98,30 @@ export function slotNode(slot: Slot, redraw: () => void, reask: () => void): HTM
     one.textContent = label;
     return one;
   };
-  if (!quizAnswered(item.id) && homeState.held !== item) {
-    actions.append(button("Not now", "Set this aside until tomorrow", () => {
-      homeState.quiet = true;
-      tap({ kind: "not_now" });
-      redraw();
-    }));
-  }
-  if (slot.next) {
-    actions.append(button("Next", "The next question", () => {
-      homeState.held = null;
-      redraw();
-    }));
-  }
-  if (actions.childNodes.length) wrap.append(actions);
+  const date = item.kind === "retest" && item.of_at ? new Date(item.of_at).toLocaleDateString("en-GB", { day: "numeric", month: "long" }) : null;
+  const region = quizRegion(item.id, quiz, [], {
+    record: tap,
+    explain: () => invoke("ask", { session: item.session_id, item: quizItem(quiz), question: "I did not get this yet. Explain more." }),
+    line: () => document.createElement("li"),
+    // "Not now" sits in the card until it is answered, and a quiet "Next" after an answer when another item is due.
+    home: {
+      date,
+      actions: (answered) =>
+        answered
+          ? slot.next
+            ? [button("Next", "The next question", () => {
+                homeState.held = null;
+                redraw();
+              })]
+            : []
+          : [button("Not now", "Set this aside until tomorrow", () => {
+              homeState.quiet = true;
+              tap({ kind: "not_now" });
+              redraw();
+            })],
+    },
+  });
+  wrap.append(region);
   wrap.dataset.key = `learning ${item.id}`;
   return wrap;
 }

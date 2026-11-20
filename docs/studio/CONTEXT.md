@@ -69,7 +69,7 @@ What a subagent changed in its session's own worktree after the turn ended, whic
 The card a check of the session's own agent gets at its start when it usually runs over 2 minutes, on the change since the last card, so Daniel can guess while he waits whether the check will pass.
 
 **Guess**:
-Daniel's answer to a card's quiz. The card writer's key grades it, and the card shows right or wrong, with the reasons, as soon as he answers. On a check card the check's result settles it instead, and the card shows right or wrong, with the reasons, once the check ends. It is never shown as a score.
+Daniel's answer to a card's quiz. The card writer's key grades it, and the card shows right or wrong, with the reasons, as soon as he answers. On a check card the check's result settles it instead, and the card shows right or wrong, with the reasons, once the check ends. It is never shown as a raw score; only numbers that inform are allowed, as calibration against his own past ([the Quiz](behaviour/quiz.md#numbers-that-inform)). On Home a guess is preceded by a confidence tap, "not sure" or not, with Home as its surface.
 
 **Settle**:
 To grade the guess on a check card by the check's result, once the check ends. A tap after the result is no guess.
