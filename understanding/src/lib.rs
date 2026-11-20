@@ -56,7 +56,8 @@ pub use summary::{
     Line, LineKind, SummarySetup, TurnSummary, write_agent_summary, write_name, write_summary,
 };
 pub use turn_trees::{
-    Hunk, MAX_TURN_FILES, add_hunks, anchor, hunk, hunk_view, numstat, turn_diffs, turn_hunk,
+    Hunk, MAX_TURN_FILES, add_hunks, anchor, diff_turn, found_files, hunk, hunk_view, numstat,
+    turn_diffs, turn_facts, turn_hunk, turn_of,
 };
 pub use week::{Rate, Ratings, Week, week};
 

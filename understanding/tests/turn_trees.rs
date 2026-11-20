@@ -3,8 +3,10 @@
 
 use serde_json::json;
 use std::{fs, path::Path, process::Command, sync::Mutex};
-use studio_core::Studio;
-use studio_understanding::{MAX_TURN_FILES, hunk, numstat, turn_diffs, turn_hunk};
+use studio_core::{Numstat, RootDiff, Studio, compute_turn_files};
+use studio_understanding::{
+    MAX_TURN_FILES, diff_turn, found_files, hunk, numstat, turn_diffs, turn_hunk, turn_of,
+};
 
 const SESSION: &str = "5b1c7e30-9d2a-4f8b-8c63-1e0a7d4b9f52";
 const AT: u64 = 1_800_000_000_000;
@@ -679,4 +681,114 @@ fn a_diff_at_the_cap_keeps_its_numstat_and_rename_detection() {
     assert_eq!(diffs[0].files.len(), MAX_TURN_FILES - 1);
     let renamed = diffs[0].files.iter().find(|f| f.path == "new.rs").unwrap();
     assert_eq!(renamed.from.as_deref(), Some("old.rs"));
+}
+
+/// A turn of one finished edit of `src/a.rs`, asked for with the trees `s1` and `e1`.
+fn ended_turn() -> Studio {
+    let edit = json!({
+        "tool_name": "Edit", "tool_input": { "file_path": "/w/repo/src/a.rs" },
+        "tool_use_id": "e1", "tool_response": {}
+    });
+    let lines = [
+        line(
+            "UserPromptSubmit",
+            0,
+            json!({ "prompt": "go", "studio_turn_start": { "/w/repo": "s1" } }),
+        ),
+        line("PostToolUse", 1_000, edit),
+        line(
+            "Stop",
+            9_000,
+            json!({ "studio_turn_end": { "/w/repo": "e1" } }),
+        ),
+    ];
+    // The helper's own events carry cwd "/", the turn's worktree is "/w/repo".
+    Studio::replayed(lines.map(|l| l.replace("\"cwd\":\"/\"", "\"cwd\":\"/w/repo\"")))
+}
+
+#[test]
+fn a_turns_files_are_matched_with_the_core_unlocked_and_stored_after() {
+    let mut studio = ended_turn();
+    let ask = studio.turn_diffs(AT + 20_000, 10).remove(0);
+    let state = Mutex::new(studio);
+    let diffs = vec![RootDiff {
+        root: "/w/repo".into(),
+        moved: vec![],
+        files: vec![Numstat {
+            path: "src/a.rs".into(),
+            from: None,
+            added: Some(1),
+            removed: Some(0),
+        }],
+    }];
+    let found = found_files(&state, &ask, Some(diffs), |snapshot, diffs| {
+        // Another thread takes the core while the matching runs.
+        let free = std::thread::scope(|s| s.spawn(|| state.try_lock().is_ok()).join().unwrap());
+        assert!(free, "the core is locked while the files are matched");
+        compute_turn_files(snapshot, diffs)
+    });
+    let found = found.expect("files");
+    assert_eq!(found.files.len(), 1);
+    let before = state
+        .lock()
+        .unwrap()
+        .session(SESSION)
+        .unwrap()
+        .since()
+        .files;
+    assert_eq!(before, 0);
+    state
+        .lock()
+        .unwrap()
+        .store_turn_files(&ask, Some(found.clone()));
+    let guard = state.lock().unwrap();
+    let session = guard.session(SESSION).unwrap();
+    assert_eq!(session.turns[0].files, Some(found));
+    // The final write also updates the unseen state: the turn's file now counts.
+    assert!(session.unseen);
+    assert_eq!(session.since().files, 1);
+}
+
+#[test]
+fn a_turn_is_read_for_its_offer_without_locking_the_core_while_it_is_held() {
+    let state = std::sync::Arc::new(Mutex::new(Studio::default()));
+    let (done, read) = std::sync::mpsc::channel();
+    let core = state.clone();
+    std::thread::spawn(move || {
+        turn_of(&core, "no-such-turn", &mut drop);
+        let _ = done.send(());
+    });
+    // A lock taken while the thread's own earlier one is still held never returns.
+    let read = read.recv_timeout(std::time::Duration::from_secs(5));
+    assert!(read.is_ok(), "reading the turn locked the core twice");
+}
+
+#[test]
+fn an_oversized_turn_is_warned_of_and_settled_so_no_pass_asks_again() {
+    let (_dir, root) = repo();
+    let start = tree(&root);
+    add_files(&root, MAX_TURN_FILES + 1);
+    let end = tree(&root);
+    let mut studio = Studio::replayed([
+        line(
+            "UserPromptSubmit",
+            0,
+            json!({ "prompt": "go", "studio_turn_start": { root.as_str(): start } }),
+        ),
+        line(
+            "Stop",
+            9_000,
+            json!({ "studio_turn_end": { root.as_str(): end } }),
+        ),
+    ]);
+    let ask = studio.turn_diffs(AT + 20_000, 10).remove(0);
+    let state = Mutex::new(studio);
+    let mut warnings = Vec::new();
+    let diffs = {
+        let _one = HOOK.lock().unwrap_or_else(|e| e.into_inner());
+        diff_turn(&state, &ask, &mut |w| warnings.push(w))
+    };
+    assert!(diffs.is_none());
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(state.lock().unwrap().turn_diffs(AT + 30_000, 10).is_empty());
 }
