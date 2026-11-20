@@ -22,6 +22,8 @@ Needs you lists each session that needs Daniel as a card on the raised surface, 
 
 Running shows at most 4 sessions, two lines each: the agent's logo, the session's name, its project and how long its turn has run, then its intention as the rail shows it, muted, with its age in steps. More hide behind "+N running". Unseen shows at most 3 of the sessions whose last turn Daniel has not seen, newest turn first, one line each with the turn's Headline, then "+N unseen". A row leaves once its turn is seen, whether or not he replies. Clicking a "+N" row shows the rest in place, until Home is left. Clicking a row selects its session.
 
+Landed has one "Clear" on its heading, and each row keeps its Delete on hover. Clear hides every landed row at once and shows a toast, "Cleared N landed", with Undo for 8 seconds. Undo brings the rows back and nothing was deleted. When the 8 seconds pass, or the app quits inside them, each hidden session goes through Delete: its terminal ends and its row drops, and its cards stay, so its Retests still come. A session that stops being landed inside the window is left alone. A second Clear inside the window adds its rows and restarts the 8 seconds.
+
 Landed keeps each row's Delete, and the Retest section and the project rows work as before. Drawing is patched by key, so focus survives an update.
 
 ## Sessions in the studio

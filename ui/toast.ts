@@ -100,6 +100,7 @@ export function jumpToNeedsYou(): boolean {
 export function showClearToast(count: number, undo: () => void) {
   const toast = element("clear-toast");
   const undoButton = text("button", "Undo", "btn small");
+  undoButton.title = "Bring the cleared sessions back";
   undoButton.tabIndex = -1;
   undoButton.addEventListener("pointerdown", (event) => event.preventDefault());
   undoButton.addEventListener("click", undo);

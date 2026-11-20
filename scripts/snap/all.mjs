@@ -13,7 +13,7 @@ import { fixtures } from "./fixtures.ts";
 const failsOnPurpose = new Set(["railIdleFail"]);
 
 // Home, the waiting room (#238), is drawn at 1400x900, the rest at snap's default size.
-const sizeOf = (name) => (name === "home" ? "1400x900" : undefined);
+const sizeOf = (name) => (name === "home" || name === "homeClearToast" ? "1400x900" : undefined);
 
 const snap = join(dirname(fileURLToPath(import.meta.url)), "snap.mjs");
 const folder = mkdtempSync(join(tmpdir(), "snap-all-"));
