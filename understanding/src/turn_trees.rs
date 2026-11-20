@@ -15,12 +15,31 @@ use studio_core::{Facts, Numstat, RootDiff, TurnDiff};
 /// The refs' namespace.
 const REFS: &str = "refs/plotkeeper/turns";
 
+/// The most files one worktree's diff of a turn may hold; a diff of more is skipped, so a leftover
+/// build directory cannot cost minutes of rename detection or fill the session list.
+pub const MAX_TURN_FILES: usize = 2_000;
+
 /// The files that differ between trees `start` and `end` of the worktree at `root`, with their
 /// line counts; `None` when `git` fails, such as for a tree that was pruned.
 pub fn numstat(root: &Path, start: &str, end: &str) -> Option<Vec<Numstat>> {
     let args = ["diff", "--numstat", "-z", "-M", "--no-ext-diff", start, end];
     let out = String::from_utf8(git(root, &args)?).ok()?;
     Some(parse(&out))
+}
+
+/// How many files differ between trees `start` and `end`, counted with no rename detection, which
+/// is what costs on a large diff; `None` when `git` fails.
+fn changed(root: &Path, start: &str, end: &str) -> Option<usize> {
+    let args = [
+        "diff",
+        "--name-only",
+        "-z",
+        "--no-renames",
+        "--no-ext-diff",
+        start,
+        end,
+    ];
+    Some(git(root, &args)?.iter().filter(|b| **b == 0).count())
 }
 
 /// Parses `--numstat -z`: `added TAB removed TAB path NUL`, and for a rename an empty path, then
@@ -163,9 +182,10 @@ fn hash(root: &Path) -> u32 {
 }
 
 /// The numstat of each worktree `ask` names, for the core's `set_turn_files`: `None` when none
-/// could be diffed. A running turn's end is the worktree's tree now. An ended turn's trees are
+/// could be diffed, or every one held more than `MAX_TURN_FILES` files, which `warn` hears of (with
+/// no file's path). A running turn's end is the worktree's tree now. An ended turn's trees are
 /// anchored first, so they outlive `git gc`.
-pub fn turn_diffs(ask: &TurnDiff) -> Option<Vec<RootDiff>> {
+pub fn turn_diffs(ask: &TurnDiff, warn: &mut dyn FnMut(String)) -> Option<Vec<RootDiff>> {
     let safe = studio_hook::answer::is_file_safe(&ask.session_id);
     let diffs: Vec<RootDiff> = ask
         .trees
@@ -180,6 +200,14 @@ pub fn turn_diffs(ask: &TurnDiff) -> Option<Vec<RootDiff>> {
                 for (side, tree) in [("start", &trees.start), ("end", &end)] {
                     anchor(root, &ask.session_id, ask.turn, side, tree);
                 }
+            }
+            let count = changed(root, &trees.start, &end)?;
+            if count > MAX_TURN_FILES {
+                warn(format!(
+                    "turn {} of session {}: {count} changed files, over the cap of {MAX_TURN_FILES}; its files are skipped",
+                    ask.turn, ask.session_id
+                ));
+                return None;
             }
             let files = numstat(root, &trees.start, &end)?;
             let moved = moved(root, ask.window);

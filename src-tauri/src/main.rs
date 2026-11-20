@@ -22,9 +22,10 @@ use std::{
     time::{Duration, Instant},
 };
 use studio_core::{
-    CardRequest, Facts, NameRequest, Notifications, Output, Session, Sound,
+    CardRequest, Facts, NameRequest, Notifications, Output, RootDiff, Session, Sound,
     State::{Ended, NeedsYou},
-    Studio, SummaryRequest, TaskFacts, TaskQuery,
+    Studio, SummaryRequest, TaskFacts, TaskQuery, TurnDiff, TurnFiles, TurnFilesSnapshot,
+    compute_turn_files,
 };
 use studio_understanding::{
     AGY_FIXTURE_VERSION, AgyVersions, CardStore, CardWriter, Changed, ClaudeWriter, Decision,
@@ -413,6 +414,33 @@ struct CardsKey {
     placed: Vec<(String, Option<usize>)>,
 }
 
+/// `ask`'s worktrees diffed by `git` with the core unlocked. A turn skipped for holding too many
+/// files is warned of in the Studio log and settled, so no pass asks for it again.
+fn diff_turn(state: &Mutex<Studio>, ask: &TurnDiff) -> Option<Vec<RootDiff>> {
+    let mut skipped = false;
+    let diffs = turn_diffs(ask, &mut |warning| {
+        log::warn!("{warning}");
+        skipped = true;
+    });
+    if skipped && diffs.is_none() {
+        state.lock().unwrap().settle_turn_files(ask);
+    }
+    diffs
+}
+
+/// The files of `ask` among `diffs`, found by `compute` with the core unlocked: the core is locked
+/// only to copy out what the matching reads. `None` when git could not diff the turn.
+fn found_files(
+    state: &Mutex<Studio>,
+    ask: &TurnDiff,
+    diffs: Option<Vec<RootDiff>>,
+    compute: impl FnOnce(&TurnFilesSnapshot, Vec<RootDiff>) -> TurnFiles,
+) -> Option<TurnFiles> {
+    let diffs = diffs?;
+    let snapshot = state.lock().unwrap().turn_files_snapshot(ask, &diffs);
+    Some(compute(&snapshot, diffs))
+}
+
 /// The turns whose files the core asks for (danielrispler/plotkeeper#111): each is diffed by `git`
 /// with the core unlocked, then handed back. Returns whether any was asked.
 fn turn_files(state: &Mutex<Studio>) -> bool {
@@ -420,8 +448,9 @@ fn turn_files(state: &Mutex<Studio>) -> bool {
     const PER_PASS: usize = 8;
     let asks = state.lock().unwrap().turn_diffs(millis(), PER_PASS);
     for ask in &asks {
-        let diffs = turn_diffs(ask);
-        state.lock().unwrap().set_turn_files(ask, diffs);
+        let diffs = diff_turn(state, ask);
+        let found = found_files(state, ask, diffs, compute_turn_files);
+        state.lock().unwrap().store_turn_files(ask, found);
     }
     !asks.is_empty()
 }
@@ -1700,8 +1729,9 @@ fn turn_facts(state: &Mutex<Studio>, id: &str) -> Facts {
     let Some(ask) = state.lock().unwrap().summary_ask(id) else {
         return Facts::default();
     };
-    let diffs = turn_diffs(&ask);
-    let mut facts = state.lock().unwrap().summary_facts(&ask, diffs);
+    let diffs = diff_turn(state, &ask);
+    let found = found_files(state, &ask, diffs, compute_turn_files);
+    let mut facts = state.lock().unwrap().facts_of(&ask, found);
     add_hunks(&ask, &mut facts);
     facts
 }
@@ -1922,7 +1952,88 @@ fn uptime() -> Duration {
 
 #[cfg(test)]
 mod tests {
-    use super::{in_app, log_line, lost_data, saved_roots, scrubbed, shows_in_window};
+    use super::{
+        compute_turn_files, found_files, in_app, log_line, lost_data, saved_roots, scrubbed,
+        shows_in_window,
+    };
+    use std::sync::Mutex;
+    use studio_core::{Numstat, RootDiff, Studio};
+
+    /// A turn of one finished edit of `src/a.rs`, asked for with the trees `s1` and `e1`.
+    fn ended_turn() -> Studio {
+        let at = 1_800_000_000_000_u64;
+        let line = |name: &str, ms: u64, extra: serde_json::Value| {
+            let mut event = serde_json::json!({
+                "session_id": "5b1c7e30-9d2a-4f8b-8c63-1e0a7d4b9f52", "hook_event_name": name,
+                "cwd": "/w/repo", "prompt_id": "p1", "studio_received_ms": at + ms,
+            });
+            event
+                .as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            event.to_string()
+        };
+        Studio::replayed([
+            line(
+                "UserPromptSubmit",
+                0,
+                serde_json::json!({
+                "prompt": "go", "studio_turn_start": { "/w/repo": "s1" } }),
+            ),
+            line(
+                "PostToolUse",
+                1_000,
+                serde_json::json!({
+                "tool_name": "Edit", "tool_input": { "file_path": "/w/repo/src/a.rs" },
+                "tool_use_id": "e1", "tool_response": {} }),
+            ),
+            line(
+                "Stop",
+                9_000,
+                serde_json::json!({ "studio_turn_end": { "/w/repo": "e1" } }),
+            ),
+        ])
+    }
+
+    #[test]
+    fn a_turns_files_are_matched_with_the_core_unlocked_and_stored_after() {
+        let mut studio = ended_turn();
+        let ask = studio.turn_diffs(1_800_000_020_000, 10).remove(0);
+        let state = Mutex::new(studio);
+        let diffs = vec![RootDiff {
+            root: "/w/repo".into(),
+            moved: vec![],
+            files: vec![Numstat {
+                path: "src/a.rs".into(),
+                from: None,
+                added: Some(1),
+                removed: Some(0),
+            }],
+        }];
+        let found = found_files(&state, &ask, Some(diffs), |snapshot, diffs| {
+            // Another thread takes the core while the matching runs.
+            let free = std::thread::scope(|s| s.spawn(|| state.try_lock().is_ok()).join().unwrap());
+            assert!(free, "the core is locked while the files are matched");
+            compute_turn_files(snapshot, diffs)
+        });
+        let found = found.expect("files");
+        assert_eq!(found.files.len(), 1);
+        let id = "5b1c7e30-9d2a-4f8b-8c63-1e0a7d4b9f52";
+        let before = state.lock().unwrap().session(id).unwrap().since().files;
+        assert_eq!(before, 0);
+        state
+            .lock()
+            .unwrap()
+            .store_turn_files(&ask, Some(found.clone()));
+        let guard = state.lock().unwrap();
+        let session = guard
+            .session("5b1c7e30-9d2a-4f8b-8c63-1e0a7d4b9f52")
+            .unwrap();
+        assert_eq!(session.turns[0].files, Some(found));
+        // The final write also updates the unseen state: the turn's file now counts.
+        assert!(session.unseen);
+        assert_eq!(session.since().files, 1);
+    }
 
     #[test]
     fn a_saved_root_of_a_removed_worktrees_folder_is_dropped_and_the_file_saved_without_it() {

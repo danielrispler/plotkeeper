@@ -35,7 +35,10 @@ pub use event::{Capabilities, TranscriptFormat};
 use event::{Event, Happened, Origin, Start, ToolKind};
 pub use ledger::{Bytes, Details, Ledger, Outcome, Row};
 pub use transcript::{Context, LogEntry, SubagentLog, Transcript};
-pub use turn_files::{Numstat, RootDiff, TurnDiff, TurnFile, TurnFiles, TurnTrees};
+pub use turn_files::{
+    Numstat, RootDiff, TurnDiff, TurnFile, TurnFiles, TurnFilesSnapshot, TurnTrees,
+    compute_turn_files,
+};
 pub use work::{Estimate, MIN_HISTORY, Phase, PhaseStart, Work, range};
 
 #[derive(Default, Serialize, Deserialize)]
@@ -551,6 +554,15 @@ pub enum Sender {
     WakeUp(String),
     /// A known task id in markup the studio does not know: drift, counted as Daniel's.
     Unrecognised(String),
+}
+
+impl Turn {
+    /// A turn asked for its files for the last time is asked again once new trees `landed`.
+    fn ask_again_if_last(&mut self, landed: bool) {
+        if landed && self.files_asked.is_some_and(|(_, last)| last) {
+            self.files_asked = None;
+        }
+    }
 }
 
 impl Sender {
@@ -1550,6 +1562,7 @@ impl Session {
                 trees.1 = Some(tree.clone());
             }
         }
+        turn.ask_again_if_last(!ends.is_empty());
     }
 
     /// Keeps the trees the hook recorded on worker `event` in the turn that spawned the worker, as
@@ -1572,11 +1585,8 @@ impl Session {
                 trees.1 = Some(tree.clone());
             }
         }
-        // An ended turn asked for its files for the last time is asked again with the new trees.
         let landed = !event.studio_turn_start.is_empty() || !event.studio_turn_end.is_empty();
-        if landed && turn.files_asked.is_some_and(|(_, last)| last) {
-            turn.files_asked = None;
-        }
+        turn.ask_again_if_last(landed);
     }
 
     /// The worktree of each running subagent, with the turn that spawned it: its trees there go on
@@ -1597,10 +1607,19 @@ impl Session {
             .map_or((0, None), |t| (t.started_at, t.ended_at));
         let spawned = self.agents.iter().filter(|a| a.turn == Some(turn));
         let ends: Option<Vec<u64>> = spawned.map(|a| a.ended_at).collect();
+        // A turn with no end that nothing runs in any more stops at the next turn's start, or at the
+        // session's last event once it ended.
+        let stale = self
+            .turns
+            .get(turn + 1)
+            .map(|t| t.started_at)
+            .or(self.ended.then_some(self.agent.last_event_at));
         // Until now while it or a worker it spawned runs.
-        let until = end
-            .zip(ends)
-            .map_or(u64::MAX, |(end, ends)| ends.into_iter().fold(end, u64::max));
+        let until = match (end, ends, stale) {
+            (Some(end), Some(ends), _) => ends.into_iter().fold(end, u64::max),
+            (None, Some(ends), Some(stale)) => ends.into_iter().fold(stale, u64::max),
+            _ => u64::MAX,
+        };
         (since, until)
     }
 
@@ -3695,15 +3714,23 @@ impl Studio {
     pub fn turn_diffs(&mut self, now: u64, limit: usize) -> Vec<TurnDiff> {
         let mut asks = Vec::new();
         for session in self.sessions.values_mut() {
-            if !session.capabilities.turn_trees {
+            if !session.capabilities.turn_trees || session.deleted {
                 continue;
             }
             let running = session.open_roots();
             let windows: Vec<(u64, u64)> = (0..session.turns.len())
                 .map(|index| session.trees_window(index))
                 .collect();
+            let (turns, session_ended, last_event) = (
+                session.turns.len(),
+                session.ended,
+                session.agent.last_event_at,
+            );
             for (index, turn) in session.turns.iter_mut().enumerate() {
-                let ended = turn.ended_at.is_some();
+                // A turn with no end of an ended session, or before a later turn, is over all
+                // the same.
+                let stale = turn.ended_at.is_none() && (session_ended || index + 1 < turns);
+                let ended = turn.ended_at.is_some() || stale;
                 let open = |root: &String| !ended || running.contains(&(index, root.clone()));
                 // Final once it ended and no worker it spawned runs on in one of its worktrees.
                 let last = ended && !turn.trees.keys().any(open);
@@ -3744,7 +3771,14 @@ impl Studio {
                         trees,
                         window: windows[index],
                     };
-                    asks.push((turn.ended_at.unwrap_or(now), ask));
+                    // A stale turn sorts by its start, or the session's last event, never as now.
+                    let at = match turn.ended_at {
+                        Some(at) => at,
+                        None if !stale => now,
+                        None if session_ended => last_event,
+                        None => turn.started_at,
+                    };
+                    asks.push((at, ask));
                 }
             }
         }
@@ -3833,13 +3867,21 @@ impl Studio {
     /// The facts of the turn `ask` names, from the numstat the shell found (`None` when git could
     /// not diff it): its files without their hunks, which the shell adds, and its checks.
     pub fn summary_facts(&self, ask: &TurnDiff, diffs: Option<Vec<RootDiff>>) -> Facts {
+        let found = diffs.map(|diffs| {
+            let snapshot = self.turn_files_snapshot(ask, &diffs);
+            compute_turn_files(&snapshot, diffs)
+        });
+        self.facts_of(ask, found)
+    }
+
+    /// The facts of the turn `ask` names, from the files `compute_turn_files` found for it.
+    pub fn facts_of(&self, ask: &TurnDiff, found: Option<TurnFiles>) -> Facts {
         let Some(session) = self.sessions.get(&ask.session_id) else {
             return Facts::default();
         };
         let Some(turn) = session.turns.get(ask.turn) else {
             return Facts::default();
         };
-        let found = diffs.map(|diffs| self.files_of(&ask.session_id, ask.turn, diffs));
         let found = found.unwrap_or_default();
         Facts {
             files: found
@@ -3855,11 +3897,33 @@ impl Studio {
         }
     }
 
+    /// Marks the turn of `ask` as asked for the last time, for one whose diff the shell skipped as
+    /// too large: it is not asked again until a new tree lands.
+    pub fn settle_turn_files(&mut self, ask: &TurnDiff) {
+        let turn = self
+            .sessions
+            .get_mut(&ask.session_id)
+            .and_then(|s| s.turns.get_mut(ask.turn));
+        if let Some(turn) = turn {
+            turn.files_asked = Some((0, true));
+        }
+    }
+
     /// Takes what the shell found for `ask`: the numstat of each of its worktrees, `None` when git
     /// could not diff them. The turn's files are every file that differs, but those another
-    /// session's or turn's call names (danielrispler/plotkeeper#207).
+    /// session's or turn's call names (danielrispler/plotkeeper#207). The shell does the three
+    /// steps apart, the matching with the core unlocked: `turn_files_snapshot`,
+    /// `compute_turn_files`, `store_turn_files`.
     pub fn set_turn_files(&mut self, ask: &TurnDiff, diffs: Option<Vec<RootDiff>>) {
-        let found = diffs.map(|diffs| self.files_of(&ask.session_id, ask.turn, diffs));
+        let found = diffs.map(|diffs| {
+            let snapshot = self.turn_files_snapshot(ask, &diffs);
+            compute_turn_files(&snapshot, diffs)
+        });
+        self.store_turn_files(ask, found);
+    }
+
+    /// Stores the files `compute_turn_files` found for `ask`, `None` when git could not diff the turn.
+    pub fn store_turn_files(&mut self, ask: &TurnDiff, found: Option<TurnFiles>) {
         let Some(session) = self.sessions.get_mut(&ask.session_id) else {
             return;
         };
@@ -3869,12 +3933,14 @@ impl Studio {
         session.update_unseen();
     }
 
-    /// The files of turn `turn` of session `session_id` among `diffs`: those that differ between its
-    /// trees, but the ones another call names, which touched the same worktree while the trees ran.
-    /// Another call is any of another session's, and any of its own session's other turns.
-    fn files_of(&self, session_id: &str, turn: usize, diffs: Vec<RootDiff>) -> TurnFiles {
+    /// What the matching of the files of `ask` among `diffs` reads: the calls that touched the same
+    /// worktrees while its trees ran, which name the files that differ but are not the turn's, and
+    /// the turn's own, which name those that are. Another call is any of another session's, and any
+    /// of its own session's other turns.
+    pub fn turn_files_snapshot(&self, ask: &TurnDiff, diffs: &[RootDiff]) -> TurnFilesSnapshot {
+        let (session_id, turn) = (&ask.session_id, ask.turn);
         let Some(session) = self.sessions.get(session_id) else {
-            return TurnFiles::default();
+            return TurnFilesSnapshot::default();
         };
         let (since, until) = session.trees_window(turn);
         let made = |r: &&Row| {
@@ -3886,7 +3952,7 @@ impl Studio {
                 s.ledger
                     .rows()
                     .iter()
-                    .map(move |r| (s.agent.id == session_id, r))
+                    .map(move |r| (s.agent.id == *session_id, r))
             })
             .filter(|(own, r)| !*own || r.turn != Some(turn))
             .map(|(_, r)| r)
@@ -3898,24 +3964,19 @@ impl Studio {
             Some(id) => session.agent_name(id).to_string(),
             None => session.capabilities.agent.to_string(),
         };
-        let agent = |diff: &RootDiff, file: &Numstat| {
-            let named = |path: &str| {
-                ours.iter()
-                    .find(|r| turn_files::names(r, &self.roots, &diff.root, path))
-            };
-            let call = named(&file.path).or_else(|| file.from.as_deref().and_then(named));
-            let worker = || {
-                let spawned = session.agents.iter().filter(|a| a.turn == Some(turn));
-                let mut own =
-                    spawned.filter(|a| a.root == diff.root && session.has_cards(&a.agent.id));
-                own.next().map(|a| a.agent.id.clone())
-            };
-            match call {
-                Some(row) => Some(name(&row.agent)),
-                None => worker().map(|id| name(&Some(id))),
-            }
+        let worker = |root: &str| {
+            let spawned = session.agents.iter().filter(|a| a.turn == Some(turn));
+            let mut own = spawned.filter(|a| a.root == root && session.has_cards(&a.agent.id));
+            own.next().map(|a| name(&Some(a.agent.id.clone())))
         };
-        TurnFiles::of(diffs, &self.roots, &others, &ours, agent)
+        TurnFilesSnapshot::of(
+            &self.roots,
+            diffs.iter().map(|d| d.root.as_str()),
+            &others,
+            &ours,
+            |row| name(&row.agent),
+            worker,
+        )
     }
 
     /// Applies, after the replay, what the live app learned before a restart (danielrispler/Falinks#434, decisions 37 and

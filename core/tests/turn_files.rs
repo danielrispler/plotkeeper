@@ -1085,3 +1085,164 @@ fn another_sessions_edit_spelled_through_a_symlink_takes_the_file_from_the_root_
     studio.set_turn_files(mine, Some(diffs(mine, &both)));
     assert_eq!(turn_files(&studio, 0), ["src/b.rs"]);
 }
+
+/// A second prompt of the session at `ms`; a resume before it leaves the first turn with no end.
+fn second_prompt(ms: u64, start: Value) -> String {
+    line(
+        "UserPromptSubmit",
+        ms,
+        json!({ "prompt": "next", "prompt_id": "p2", "studio_turn_start": start }),
+    )
+}
+
+#[test]
+fn a_deleted_sessions_turns_are_not_asked_until_it_starts_again() {
+    let mut studio = Studio::replayed([
+        prompt(json!({ ROOT: "s1" })),
+        edit(1_000, "e1", "/w/repo/src/a.rs", None),
+        stop(json!({ ROOT: "e1" })),
+        line("StudioDelete", 10_000, json!({})),
+    ]);
+    assert!(ask(&mut studio, AT + 20_000).is_empty());
+    assert!(ask(&mut studio, AT + 25_000).is_empty());
+    studio.replay(&line("SessionStart", 30_000, json!({ "source": "resume" })));
+    assert_eq!(ask(&mut studio, AT + 40_000).len(), 1);
+}
+
+#[test]
+fn an_unclosed_turn_of_an_ended_session_never_diffs_live_and_is_settled() {
+    // The session's end lands before its delayed prompt, so the turn never closes.
+    let mut studio = Studio::replayed([
+        line("SessionEnd", 500, json!({})),
+        prompt(json!({ ROOT: "s1" })),
+    ]);
+    assert!(studio.session(SESSION).unwrap().turns[0].ended_at.is_none());
+    assert!(ask(&mut studio, AT + 20_000).is_empty());
+    studio.replay(&edit(2_000, "e1", "/w/repo/src/a.rs", None));
+    assert!(ask(&mut studio, AT + 40_000).is_empty());
+}
+
+#[test]
+fn an_unclosed_turn_of_an_ended_session_caps_its_window_at_the_sessions_last_event() {
+    let mut studio = Studio::replayed([
+        line("SessionEnd", 500, json!({})),
+        prompt(json!({ ROOT: "s1" })),
+        worker_starts(600, "agent-1", "w1"),
+        line(
+            "SubagentStop",
+            2_000,
+            json!({ "agent_id": "agent-1", "studio_turn_end": { WORKER_ROOT: "w2" } }),
+        ),
+    ]);
+    let asks = ask(&mut studio, AT + 20_000);
+    assert_eq!(asks.len(), 1);
+    assert_eq!(asks[0].window, (AT, AT + 2_000));
+}
+
+#[test]
+fn a_non_final_unclosed_turn_never_diffs_live_and_caps_its_window_at_the_next_turns_start() {
+    let mut studio = Studio::replayed([
+        prompt(json!({ ROOT: "s1" })),
+        edit(1_000, "e1", "/w/repo/src/a.rs", None),
+        line("SessionStart", 3_000, json!({ "source": "resume" })),
+        second_prompt(5_000, json!({ ROOT: "s2" })),
+    ]);
+    let asks = ask(&mut studio, AT + 10_000);
+    // Only the later turn, which runs, is asked.
+    assert_eq!(asks.len(), 1);
+    assert_eq!(asks[0].turn, 1);
+    assert_eq!(asks[0].window.1, u64::MAX);
+    assert!(ask(&mut studio, AT + 30_000).is_empty());
+}
+
+#[test]
+fn a_non_final_unclosed_turns_window_ends_where_the_next_turn_starts() {
+    let mut studio = Studio::replayed([
+        prompt(json!({ ROOT: "s1" })),
+        worker_starts(500, "agent-1", "w1"),
+        line(
+            "SubagentStop",
+            2_000,
+            json!({ "agent_id": "agent-1", "studio_turn_end": { WORKER_ROOT: "w2" } }),
+        ),
+        line("SessionStart", 3_000, json!({ "source": "resume" })),
+        second_prompt(5_000, json!({ ROOT: "s2" })),
+    ]);
+    let asks = ask(&mut studio, AT + 10_000);
+    let first = asks.iter().find(|a| a.turn == 0).unwrap();
+    assert_eq!(first.window, (AT, AT + 5_000));
+}
+
+#[test]
+fn a_stale_turn_with_a_running_worker_sorts_behind_the_running_turn() {
+    let mut studio = Studio::replayed([
+        prompt(json!({ ROOT: "s1" })),
+        worker_starts(500, "agent-1", "w1"),
+        line("SessionStart", 3_000, json!({ "source": "resume" })),
+        second_prompt(5_000, json!({ ROOT: "s2" })),
+    ]);
+    let asks = ask(&mut studio, AT + 10_000);
+    let turns: Vec<usize> = asks.iter().map(|a| a.turn).collect();
+    assert_eq!(turns, [1, 0]);
+    // The worker still runs, so the window stays open.
+    assert_eq!(asks[1].window.1, u64::MAX);
+    assert_eq!(studio.turn_diffs(AT + 10_000, 1).len(), 0);
+}
+
+/// The matching runs on a snapshot, with the core free to change: a snapshot taken, the core
+/// replayed on, the files computed from the snapshot alone and stored in a short write.
+#[test]
+fn a_turns_files_are_computed_from_a_snapshot_and_stored_afterwards() {
+    let mut studio = Studio::replayed([
+        prompt(json!({ ROOT: "s1" })),
+        edit(1_000, "e1", "/w/repo/src/a.rs", None),
+        stop(json!({ ROOT: "e1" })),
+    ]);
+    let asks = ask(&mut studio, AT + 20_000);
+    let diff = diffs(&asks[0], &[(ROOT, "src/a.rs"), (ROOT, "src/b.rs")]);
+    let snapshot = studio.turn_files_snapshot(&asks[0], &diff);
+    // Another session's edit of b.rs lands after the snapshot: the snapshot does not see it.
+    studio.replay(&line(
+        "PostToolUse",
+        2_000,
+        json!({ "session_id": "other", "tool_name": "Edit", "tool_use_id": "o1", "tool_response": {},
+                "tool_input": { "file_path": "/w/repo/src/b.rs" } }),
+    ));
+    let found = studio_core::compute_turn_files(&snapshot, diff);
+    let paths: Vec<_> = found.files.iter().map(|f| f.path.as_str()).collect();
+    assert_eq!(paths, ["src/a.rs", "src/b.rs"]);
+    assert!(found.files[0].agent.is_some());
+    assert_eq!(found.files[1].agent, None);
+    assert!(studio.session(SESSION).unwrap().turns[0].files.is_none());
+    studio.store_turn_files(&asks[0], Some(found.clone()));
+    assert_eq!(files(&studio), Some(found));
+}
+
+#[test]
+fn a_running_turn_the_shell_settled_is_not_asked_again_while_it_runs() {
+    let mut studio = Studio::replayed([
+        prompt(json!({ ROOT: "s1" })),
+        edit(1_000, "e1", "/w/repo/src/a.rs", None),
+    ]);
+    let asks = ask(&mut studio, AT + 20_000);
+    assert_eq!(asks.len(), 1);
+    assert!(!asks[0].ended);
+    studio.settle_turn_files(&asks[0]);
+    studio.replay(&edit(25_000, "e2", "/w/repo/src/b.rs", None));
+    assert!(ask(&mut studio, AT + 60_000).is_empty());
+}
+
+#[test]
+fn a_running_turn_the_shell_settled_is_asked_again_once_its_stop_lands_end_trees() {
+    let mut studio = Studio::replayed([
+        prompt(json!({ ROOT: "s1" })),
+        edit(1_000, "e1", "/w/repo/src/a.rs", None),
+    ]);
+    let asks = ask(&mut studio, AT + 20_000);
+    studio.settle_turn_files(&asks[0]);
+    studio.replay(&stop(json!({ ROOT: "e1" })));
+    let again = ask(&mut studio, AT + 60_000);
+    assert_eq!(again.len(), 1);
+    assert!(again[0].ended);
+    assert_eq!(again[0].trees[0].end.as_deref(), Some("e1"));
+}
