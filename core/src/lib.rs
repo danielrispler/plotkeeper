@@ -35,7 +35,10 @@ pub use event::{Capabilities, TranscriptFormat};
 use event::{Event, Happened, Origin, Start, ToolKind};
 pub use ledger::{Bytes, Details, Ledger, Outcome, Row};
 pub use transcript::{Context, LogEntry, SubagentLog, Transcript};
-pub use turn_files::{Numstat, RootDiff, TurnDiff, TurnFile, TurnFiles, TurnTrees};
+pub use turn_files::{
+    Numstat, RootDiff, TurnDiff, TurnFile, TurnFiles, TurnFilesSnapshot, TurnTrees,
+    compute_turn_files,
+};
 pub use work::{Estimate, MIN_HISTORY, Phase, PhaseStart, Work, range};
 
 #[derive(Default, Serialize, Deserialize)]
@@ -3856,13 +3859,21 @@ impl Studio {
     /// The facts of the turn `ask` names, from the numstat the shell found (`None` when git could
     /// not diff it): its files without their hunks, which the shell adds, and its checks.
     pub fn summary_facts(&self, ask: &TurnDiff, diffs: Option<Vec<RootDiff>>) -> Facts {
+        let found = diffs.map(|diffs| {
+            let snapshot = self.turn_files_snapshot(ask, &diffs);
+            compute_turn_files(&snapshot, diffs)
+        });
+        self.facts_of(ask, found)
+    }
+
+    /// The facts of the turn `ask` names, from the files `compute_turn_files` found for it.
+    pub fn facts_of(&self, ask: &TurnDiff, found: Option<TurnFiles>) -> Facts {
         let Some(session) = self.sessions.get(&ask.session_id) else {
             return Facts::default();
         };
         let Some(turn) = session.turns.get(ask.turn) else {
             return Facts::default();
         };
-        let found = diffs.map(|diffs| self.files_of(&ask.session_id, ask.turn, diffs));
         let found = found.unwrap_or_default();
         Facts {
             files: found
@@ -3892,9 +3903,19 @@ impl Studio {
 
     /// Takes what the shell found for `ask`: the numstat of each of its worktrees, `None` when git
     /// could not diff them. The turn's files are every file that differs, but those another
-    /// session's or turn's call names (danielrispler/plotkeeper#207).
+    /// session's or turn's call names (danielrispler/plotkeeper#207). The shell does the three
+    /// steps apart, the matching with the core unlocked: `turn_files_snapshot`,
+    /// `compute_turn_files`, `store_turn_files`.
     pub fn set_turn_files(&mut self, ask: &TurnDiff, diffs: Option<Vec<RootDiff>>) {
-        let found = diffs.map(|diffs| self.files_of(&ask.session_id, ask.turn, diffs));
+        let found = diffs.map(|diffs| {
+            let snapshot = self.turn_files_snapshot(ask, &diffs);
+            compute_turn_files(&snapshot, diffs)
+        });
+        self.store_turn_files(ask, found);
+    }
+
+    /// Stores the files `compute_turn_files` found for `ask`, `None` when git could not diff the turn.
+    pub fn store_turn_files(&mut self, ask: &TurnDiff, found: Option<TurnFiles>) {
         let Some(session) = self.sessions.get_mut(&ask.session_id) else {
             return;
         };
@@ -3904,12 +3925,14 @@ impl Studio {
         session.update_unseen();
     }
 
-    /// The files of turn `turn` of session `session_id` among `diffs`: those that differ between its
-    /// trees, but the ones another call names, which touched the same worktree while the trees ran.
-    /// Another call is any of another session's, and any of its own session's other turns.
-    fn files_of(&self, session_id: &str, turn: usize, diffs: Vec<RootDiff>) -> TurnFiles {
+    /// What the matching of the files of `ask` among `diffs` reads: the calls that touched the same
+    /// worktrees while its trees ran, which name the files that differ but are not the turn's, and
+    /// the turn's own, which name those that are. Another call is any of another session's, and any
+    /// of its own session's other turns.
+    pub fn turn_files_snapshot(&self, ask: &TurnDiff, diffs: &[RootDiff]) -> TurnFilesSnapshot {
+        let (session_id, turn) = (&ask.session_id, ask.turn);
         let Some(session) = self.sessions.get(session_id) else {
-            return TurnFiles::default();
+            return TurnFilesSnapshot::default();
         };
         let (since, until) = session.trees_window(turn);
         let made = |r: &&Row| {
@@ -3921,7 +3944,7 @@ impl Studio {
                 s.ledger
                     .rows()
                     .iter()
-                    .map(move |r| (s.agent.id == session_id, r))
+                    .map(move |r| (s.agent.id == *session_id, r))
             })
             .filter(|(own, r)| !*own || r.turn != Some(turn))
             .map(|(_, r)| r)
@@ -3933,24 +3956,19 @@ impl Studio {
             Some(id) => session.agent_name(id).to_string(),
             None => session.capabilities.agent.to_string(),
         };
-        let agent = |diff: &RootDiff, file: &Numstat| {
-            let named = |path: &str| {
-                ours.iter()
-                    .find(|r| turn_files::names(r, &self.roots, &diff.root, path))
-            };
-            let call = named(&file.path).or_else(|| file.from.as_deref().and_then(named));
-            let worker = || {
-                let spawned = session.agents.iter().filter(|a| a.turn == Some(turn));
-                let mut own =
-                    spawned.filter(|a| a.root == diff.root && session.has_cards(&a.agent.id));
-                own.next().map(|a| a.agent.id.clone())
-            };
-            match call {
-                Some(row) => Some(name(&row.agent)),
-                None => worker().map(|id| name(&Some(id))),
-            }
+        let worker = |root: &str| {
+            let spawned = session.agents.iter().filter(|a| a.turn == Some(turn));
+            let mut own = spawned.filter(|a| a.root == root && session.has_cards(&a.agent.id));
+            own.next().map(|a| name(&Some(a.agent.id.clone())))
         };
-        TurnFiles::of(diffs, &self.roots, &others, &ours, agent)
+        TurnFilesSnapshot::of(
+            &self.roots,
+            diffs.iter().map(|d| d.root.as_str()),
+            &others,
+            &ours,
+            |row| name(&row.agent),
+            worker,
+        )
     }
 
     /// Applies, after the replay, what the live app learned before a restart (danielrispler/Falinks#434, decisions 37 and

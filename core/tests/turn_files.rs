@@ -1188,3 +1188,32 @@ fn a_stale_turn_with_a_running_worker_sorts_behind_the_running_turn() {
     assert_eq!(asks[1].window.1, u64::MAX);
     assert_eq!(studio.turn_diffs(AT + 10_000, 1).len(), 0);
 }
+
+/// The matching runs on a snapshot, with the core free to change: a snapshot taken, the core
+/// replayed on, the files computed from the snapshot alone and stored in a short write.
+#[test]
+fn a_turns_files_are_computed_from_a_snapshot_and_stored_afterwards() {
+    let mut studio = Studio::replayed([
+        prompt(json!({ ROOT: "s1" })),
+        edit(1_000, "e1", "/w/repo/src/a.rs", None),
+        stop(json!({ ROOT: "e1" })),
+    ]);
+    let asks = ask(&mut studio, AT + 20_000);
+    let diff = diffs(&asks[0], &[(ROOT, "src/a.rs"), (ROOT, "src/b.rs")]);
+    let snapshot = studio.turn_files_snapshot(&asks[0], &diff);
+    // Another session's edit of b.rs lands after the snapshot: the snapshot does not see it.
+    studio.replay(&line(
+        "PostToolUse",
+        2_000,
+        json!({ "session_id": "other", "tool_name": "Edit", "tool_use_id": "o1", "tool_response": {},
+                "tool_input": { "file_path": "/w/repo/src/b.rs" } }),
+    ));
+    let found = studio_core::compute_turn_files(&snapshot, diff);
+    let paths: Vec<_> = found.files.iter().map(|f| f.path.as_str()).collect();
+    assert_eq!(paths, ["src/a.rs", "src/b.rs"]);
+    assert!(found.files[0].agent.is_some());
+    assert_eq!(found.files[1].agent, None);
+    assert!(studio.session(SESSION).unwrap().turns[0].files.is_none());
+    studio.store_turn_files(&asks[0], Some(found.clone()));
+    assert_eq!(files(&studio), Some(found));
+}
