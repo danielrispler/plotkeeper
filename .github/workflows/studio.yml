@@ -17,10 +17,10 @@ concurrency:
 permissions:
   contents: read
 
-# A pull request from an `issue-*` branch skips both jobs: the push to that branch already runs them.
 jobs:
   macos:
     # The studio is a Tauri app built and used on macOS only.
+    # A pull request from an `issue-*` branch skips both jobs: the push to that branch already runs them.
     if: github.event_name == 'push' || !startsWith(github.head_ref, 'issue-')
     runs-on: macos-latest
     timeout-minutes: 30
