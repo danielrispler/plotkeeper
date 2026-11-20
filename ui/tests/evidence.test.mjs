@@ -44,6 +44,13 @@ test("a suite in two worktrees is two checks in the count, and a check outside t
   assert.deepEqual(evidenceRows({ files: null, checks: [other("go test", "ran")] }).map((r) => r.label), ["go test in other ran"]);
 });
 
+test("a running check is not listed until it ends", () => {
+  const running = check("cargo test", "running");
+  assert.equal(evidenceLine({ files: null, checks: [running, check("go test", "passed")] }), "1 check passed");
+  assert.deepEqual(evidenceRows({ files: null, checks: [running] }), []);
+  assert.equal(hasEvidence({ files: null, checks: [running] }, { turn_trees: true }), false);
+});
+
 test("opened: each file with its line counts and its agent, each check with its status, and no external row", () => {
   const rows = evidenceRows({
     files: files([file("ui/story.ts", 12, 3), file("img.png", null, null), file("new.ts", 4, 0, { from: "old.ts" })]),

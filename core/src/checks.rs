@@ -452,6 +452,8 @@ pub enum Status {
     /// It ran, but its exit code does not say whether it passed (a pipe), so it is never counted as
     /// passed: **Not counted**.
     Ran,
+    /// It started and has no result yet: not ended, so neither passed nor failed.
+    Running,
 }
 
 /// One run of a check.
@@ -467,6 +469,8 @@ pub struct Run {
     /// Its call's id and its worker, which find its row in the ledger (`Ledger::row`).
     pub call: String,
     pub agent: Option<String>,
+    /// When it started, in Unix milliseconds, when the log says.
+    pub started_at: Option<u64>,
 }
 
 /// A suite of a turn: the list entry its commands matched (`cargo test`, `npm run check`), whose
@@ -509,19 +513,31 @@ fn worktree(row: &Row, cd: Option<&str>, home: &str) -> String {
 }
 
 /// The runs `row` holds, one for each statement of its command that runs an entry of `list`: none for
-/// a call that is no check run, one that did not run (denied or interrupted) or one that has no result
-/// yet.
+/// a call that is no check run, or one that did not run (denied or interrupted). A call with no result
+/// yet is running.
 fn runs<'a>(row: &Row, list: &'a [String], home: &str) -> Vec<(&'a str, String, Run)> {
     let Some(command) = row.command.as_deref() else {
         return Vec::new();
     };
     let counts = exit_code_counts(list, command);
-    let (status, exit_code) = match row.outcome {
-        Some(Outcome::Succeeded) if counts && !row.background => (Status::Passed, Some(0)),
-        Some(Outcome::Succeeded) => (Status::Ran, None),
-        Some(Outcome::Failed { exit_code }) if row.ran && counts => (Status::Failed, exit_code),
-        Some(Outcome::Failed { exit_code }) if row.ran => (Status::Ran, exit_code),
-        Some(Outcome::Failed { .. } | Outcome::Rejected) | None => return Vec::new(),
+    let (status, exit_code) = match (&row.outcome, row.ran) {
+        // Started, no result yet.
+        (None, _) => (Status::Running, None),
+        // A background task keeps what its notification reports.
+        (Some(Outcome::Succeeded), _) if row.background => match row.reported.as_deref() {
+            None => (Status::Running, None),
+            Some("completed") if counts => (Status::Passed, None),
+            Some("failed") if counts => (Status::Failed, None),
+            Some(_) => (Status::Ran, None),
+        },
+        (Some(Outcome::Succeeded), _) if counts => (Status::Passed, Some(0)),
+        (Some(Outcome::Succeeded), _) => (Status::Ran, None),
+        (Some(Outcome::Failed { exit_code }), true) if counts => (Status::Failed, *exit_code),
+        (Some(Outcome::Failed { exit_code }), true) => (Status::Ran, *exit_code),
+        (Some(Outcome::Failed { .. } | Outcome::Rejected), false)
+        | (Some(Outcome::Rejected), _) => {
+            return Vec::new();
+        }
     };
     statements(list, command)
         .into_iter()
@@ -533,6 +549,7 @@ fn runs<'a>(row: &Row, list: &'a [String], home: &str) -> Vec<(&'a str, String, 
                 exit_code,
                 call: row.call.clone(),
                 agent: row.agent.clone(),
+                started_at: row.started_at,
             };
             Some((s.suite?, worktree(row, s.cd.as_deref(), home), run))
         })

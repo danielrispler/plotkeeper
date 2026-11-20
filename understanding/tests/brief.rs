@@ -316,3 +316,17 @@ fn design_is_written_again_only_when_its_sources_changed_and_not_without_any() {
             .is_empty()
     );
 }
+
+#[test]
+fn a_running_check_is_not_ended_so_it_neither_closes_nor_opens_a_failed_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store(dir.path());
+    let mut session = session();
+    session
+        .turns
+        .push(turn("s@3", false, &[("cargo test", "running")]));
+
+    let items = open_items(&session, None, &store);
+    let texts: Vec<&str> = items.iter().map(|i| i.text.as_str()).collect();
+    assert!(texts.contains(&"cargo test ended failed"));
+}

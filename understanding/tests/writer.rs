@@ -1400,6 +1400,7 @@ fn check(status: CheckStatus, retries: u32, exit_code: i32) -> Check {
         exit_code: Some(exit_code),
         call: "c1".into(),
         agent: None,
+        started_at: None,
     };
     Check {
         suite: "npm run check".into(),

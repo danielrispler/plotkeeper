@@ -25,9 +25,13 @@ const named = (c: Check) => {
   return c.foreign && tree ? `${c.suite} in ${tree}` : c.suite;
 };
 
+// A check is listed once it has ended: a running one is not passed, failed or ran.
+const ended = (c: Check) => c.status !== "running";
+
 // The top level: "3 files · +2 merged · 2 checks passed". A check's status is its last run's, so only one that ended failed is named;
 // one that only "ran" is counted apart.
-export function evidenceLine({ files, checks }: Facts): string {
+export function evidenceLine({ files, checks: all }: Facts): string {
+  const checks = all.filter(ended);
   const count = (status: Check["status"]) => checks.filter((c) => c.status === status).length;
   const [passed, ran] = [count("passed"), count("ran")];
   return [
@@ -41,10 +45,11 @@ export function evidenceLine({ files, checks }: Facts): string {
 
 // Whether the turn has an evidence line: its agent reports trees (agy's does not), and it has files or checks.
 export const hasEvidence = (turn: Facts, capabilities: Pick<Capabilities, "turn_trees">): boolean =>
-  capabilities.turn_trees && (turn.files?.files.length ?? 0) + (turn.files?.merged ?? 0) + turn.checks.length > 0;
+  capabilities.turn_trees && (turn.files?.files.length ?? 0) + (turn.files?.merged ?? 0) + turn.checks.filter(ended).length > 0;
 
 // The opened list: each file with its agent, and each check with its status.
-export function evidenceRows({ files, checks }: Facts): EvidenceRow[] {
+export function evidenceRows({ files, checks: all }: Facts): EvidenceRow[] {
+  const checks = all.filter(ended);
   const counts = (added: number | null, removed: number | null) => (added === null || removed === null ? "" : ` +${added} −${removed}`);
   return [
     ...(files?.files ?? []).map((f): EvidenceRow => ({ kind: "file", label: `${f.from ? `${f.from} → ` : ""}${f.path}${counts(f.added, f.removed)}`, agent: f.agent, file: f })),

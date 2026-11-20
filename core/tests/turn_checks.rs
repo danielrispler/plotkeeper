@@ -455,3 +455,179 @@ fn the_banners_counts_keep_a_failure_in_one_worktree_apart_from_a_pass_in_anothe
 
     assert_eq!((since.passed, since.failed, since.ran), (1, 1, 0));
 }
+
+/// The start of a Bash call of the session's own agent, with no result yet.
+fn starts(ms: u64, id: &str, command: &str) -> String {
+    let call =
+        json!({ "tool_name": "Bash", "tool_input": { "command": command }, "tool_use_id": id });
+    line("PreToolUse", ms, call)
+}
+
+/// The result of a Bash call that started a background task `task`.
+fn launches(ms: u64, id: &str, command: &str, task: &str) -> String {
+    let call = json!({
+        "tool_name": "Bash",
+        "tool_input": { "command": command, "run_in_background": true },
+        "tool_use_id": id,
+        "tool_response": { "stdout": "", "stderr": "", "backgroundTaskId": task, "interrupted": false },
+    });
+    line("PostToolUse", ms, call)
+}
+
+/// The turn's end, then a wake-up prompt that reports `task` as `status`: the next turn.
+fn notified(ms: u64, task: &str, status: &str) -> Vec<String> {
+    let note = format!(
+        "<task-notification><task-id>{task}</task-id><tool-use-id>x</tool-use-id><output-file>o</output-file><status>{status}</status><summary>s</summary></task-notification>"
+    );
+    vec![
+        line("Stop", ms, json!({ "last_assistant_message": "waiting" })),
+        line(
+            "UserPromptSubmit",
+            ms + 10,
+            json!({ "prompt": note, "prompt_id": "p2" }),
+        ),
+    ]
+}
+
+fn turns(lines: &[String], of: usize) -> Vec<Check> {
+    let mut all = vec![prompt()];
+    all.extend(lines.iter().cloned());
+    let studio = Studio::replayed(&all);
+    studio.session(SESSION).unwrap().turns[of].checks.clone()
+}
+
+#[test]
+fn a_check_that_started_is_running_with_its_start_until_its_result_ends_it() {
+    let start = starts(1_000, "t1", "cargo test");
+    let found = turns(std::slice::from_ref(&start), 0);
+
+    assert_eq!(shown(&found), [("cargo test", CheckStatus::Running, 0)]);
+    assert_eq!(found[0].runs[0].started_at, Some(1_793_265_001_000));
+
+    let mut lines = vec![start];
+    lines.push(passes(1_000, "t1", "cargo test", None).pop().unwrap());
+    let found = turns(&lines, 0);
+    assert_eq!(shown(&found), [("cargo test", CheckStatus::Passed, 0)]);
+}
+
+#[test]
+fn a_result_that_landed_before_its_start_is_one_check() {
+    let [start, end] = &passes(1_000, "t1", "cargo test", None)[..] else {
+        panic!("two lines");
+    };
+    let found = turns(&[end.clone(), start.clone()], 0);
+
+    assert_eq!(shown(&found), [("cargo test", CheckStatus::Passed, 0)]);
+    assert_eq!(found[0].runs.len(), 1);
+}
+
+#[test]
+fn a_check_that_did_not_run_is_not_in_the_turn_even_after_it_started() {
+    let found = turns(
+        &fails(
+            1_000,
+            "t1",
+            "cargo test",
+            "The user doesn't want to proceed with this tool use.",
+        ),
+        0,
+    );
+
+    assert_eq!(shown(&found), []);
+}
+
+#[test]
+fn a_background_check_runs_until_its_notification_then_holds_what_it_reports() {
+    let report = |status: &str| {
+        let mut lines = vec![
+            starts(1_000, "t1", "cargo test"),
+            launches(1_100, "t1", "cargo test", "bk1"),
+        ];
+        let running = turns(&lines, 0);
+        assert_eq!(shown(&running), [("cargo test", CheckStatus::Running, 0)]);
+        lines.extend(notified(5_000, "bk1", status));
+        // The turn that started it shows the result, though the notification landed in the next.
+        shown_owned(turns(&lines, 0))
+    };
+
+    assert_eq!(
+        report("completed"),
+        [("cargo test".into(), CheckStatus::Passed, 0)]
+    );
+    assert_eq!(
+        report("failed"),
+        [("cargo test".into(), CheckStatus::Failed, 0)]
+    );
+    assert_eq!(
+        report("killed"),
+        [("cargo test".into(), CheckStatus::Ran, 0)]
+    );
+}
+
+fn shown_owned(checks: Vec<Check>) -> Vec<(String, CheckStatus, u32)> {
+    checks
+        .into_iter()
+        .map(|c| (c.suite, c.status, c.retries))
+        .collect()
+}
+
+#[test]
+fn a_shell_background_check_is_not_counted() {
+    let found = checks(&[passes(1_000, "t1", "cargo test &", None)]);
+
+    assert_eq!(shown(&found), [("cargo test", CheckStatus::Ran, 0)]);
+}
+
+#[test]
+fn a_turn_with_only_a_running_check_has_nothing_passed_or_failed_to_count() {
+    let mut all = vec![prompt(), starts(1_000, "t1", "cargo test")];
+    all.push(line(
+        "Stop",
+        2_000,
+        json!({ "last_assistant_message": "x" }),
+    ));
+    let studio = Studio::replayed(&all);
+    let session = studio.session(SESSION).unwrap();
+
+    let since = session.since();
+    assert_eq!((since.passed, since.failed, since.ran), (0, 0, 0));
+}
+
+#[test]
+fn a_running_or_background_check_of_a_worker_with_no_roots_keeps_its_workers_worktree() {
+    let worker = line(
+        "SubagentStart",
+        500,
+        json!({ "agent_id": "w1", "agent_type": "general-purpose", "cwd": OTHER }),
+    );
+    let call = |ms, id, extra: &str| {
+        let call = json!({ "tool_name": "Bash", "tool_input": { "command": "cargo test", "run_in_background": extra == "end" }, "tool_use_id": id, "agent_id": "w1", "cwd": "" });
+        let mut call = call;
+        if extra == "end" {
+            call["tool_response"] = json!({ "stdout": "", "stderr": "", "backgroundTaskId": "bk1", "interrupted": false });
+        }
+        line(
+            if extra == "end" {
+                "PostToolUse"
+            } else {
+                "PreToolUse"
+            },
+            ms,
+            call,
+        )
+    };
+
+    let running = turns(&[worker.clone(), call(1_000, "t1", "start")], 0);
+    assert_eq!(
+        trees(&running),
+        [("cargo test", OTHER, CheckStatus::Running, 0)]
+    );
+
+    let mut lines = vec![worker, call(1_000, "t1", "start"), call(1_100, "t1", "end")];
+    lines.extend(notified(5_000, "bk1", "failed"));
+    let reported = turns(&lines, 0);
+    assert_eq!(
+        trees(&reported),
+        [("cargo test", OTHER, CheckStatus::Failed, 0)]
+    );
+}
