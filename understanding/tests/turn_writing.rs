@@ -425,6 +425,7 @@ fn two_sessions_whose_cards_arrive_at_the_caps_edge_offer_one_more_quiz_not_two(
             events: day.events.clone(),
             failing: Arc::default(),
             summaries: Arc::default(),
+            why: Arc::default(),
         }),
         Offers::beside(&day.data.join("events.jsonl")),
         day.recorder.clone(),
