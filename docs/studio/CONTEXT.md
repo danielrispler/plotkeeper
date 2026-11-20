@@ -65,6 +65,10 @@ What one decision gives a change: a card (with its Quiz), a lone Quiz, or nothin
 **Late change**:
 What a subagent changed in its session's own worktree after the turn ended, which the session's card then covers. It is judged below the card row: it gets a card only when it passes the table's first row, and never a lone Quiz.
 
+**Turn writing**:
+What the understanding layer writes when a turn ends, a long check starts or a worker returns: the card its **offer** gives, the turn summary with its Quiz, the session's name, and the Brief's Goal and Design so far. A session's pieces are written one at a time, in the order they were asked for, so a turn's summary follows its card.
+_Avoid_: Card writing (one part of it)
+
 **Check card**:
 The card a check of the session's own agent gets at its start when it usually runs over 2 minutes, on the change since the last card, so Daniel can guess while he waits whether the check will pass.
 

@@ -2,7 +2,7 @@
 //! from the turn's stored hunk and the reason of the first Quiz's key. It follows the same rules and guards as any Quiz
 //! (`docs/studio/question-rules.md`) and waits on Home.
 
-use crate::{CardStore, CardWriter};
+use crate::{CardStore, CardWriter, RETESTS_WAITING};
 use crate::{ClaudeWriter, Quiz, RetestAsk, explanation_language, object, quiz_rules};
 use std::{process::Command, sync::Mutex};
 
@@ -44,19 +44,27 @@ pub fn retest_quiz(reply: &str) -> Result<Quiz, String> {
     Quiz::from_value(serde_json::from_str(object(reply)).unwrap_or_default())
 }
 
-/// Writes the retest of each Quiz offered a week or more before `now`, the caller's clock, that has none, and keeps it.
-/// A reply that breaks a rule is asked for once more; a second rejection keeps no Quiz and logs one line, and the Quiz
-/// is not asked about again. A writer that gives no reply keeps nothing, so the next call tries again. The store is not
-/// locked while the writer runs. Returns how many retests were written.
+/// Writes the retests due at `now`, the caller's clock, in `CardStore::retests_to_write`'s order, and keeps each, until
+/// `RETESTS_WAITING` wait unanswered (danielrispler/plotkeeper#215); no writer runs while they do. A Quiz whose retest
+/// is held stays due. A reply that breaks a rule is asked for once more; a second rejection keeps no Quiz and logs one
+/// line, and the Quiz is not asked about again. A writer that gives no reply keeps nothing and ends the run, so the
+/// next call tries again. The store is not locked while the writer runs. Returns how many retests were written.
 pub fn write_retests(
     store: &Mutex<CardStore>,
     writer: &(impl CardWriter + ?Sized),
     now: u64,
     mut log: impl FnMut(String),
 ) -> usize {
-    let due = store.lock().unwrap().due_retests(now);
+    let (due, waiting) = {
+        let store = store.lock().unwrap();
+        (store.retests_to_write(now), store.waiting_retests(now))
+    };
+    let room = RETESTS_WAITING.saturating_sub(waiting);
     let mut written = 0;
     for ask in due {
+        if written == room {
+            break;
+        }
         // Err holds whether the writer replied, and the line for the log.
         let attempt = || {
             let reply = writer.retest(&ask).map_err(|line| (false, line))?;
@@ -67,16 +75,17 @@ pub fn write_retests(
             Ok(quiz) => Some(quiz),
             Err((replied, line)) => {
                 log(format!("no retest on {}: {line}", ask.of));
-                // A writer that gave no reply is tried again later; one whose replies broke the rules is not.
+                // A writer that gave no reply is tried again at the next run; one whose replies broke the rules is not.
                 if !replied {
-                    continue;
+                    break;
                 }
                 None
             }
         };
-        written += usize::from(quiz.is_some());
-        if let Err(e) = store.lock().unwrap().add_retest(&ask, quiz, now) {
-            log(format!("save the retests: {e}"));
+        let has_quiz = quiz.is_some();
+        match store.lock().unwrap().add_retest(&ask, quiz, now) {
+            Ok(kept) => written += usize::from(kept && has_quiz),
+            Err(e) => log(format!("save the retests: {e}")),
         }
     }
     written

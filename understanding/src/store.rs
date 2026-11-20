@@ -194,13 +194,6 @@ fn keep_tap(taps: &mut Vec<QuizTap>, tap: Tap, at: u64) -> bool {
     !taken
 }
 
-/// What the learning slot reads of a Retest's first Quiz.
-struct FirstQuiz {
-    offered: u64,
-    picked: bool,
-    key_wrong: bool,
-}
-
 /// A Retest the learning slot may serve, with its first Quiz's pick, when it came due and when that Quiz was offered.
 struct Eligible<'a> {
     picked: bool,
@@ -225,6 +218,9 @@ pub const RETEST_REACH_MS: u64 = 14 * 24 * 60 * 60 * 1000;
 
 /// How many Retests the learning slot serves in a day, counted by the picks of the day (danielrispler/plotkeeper#240).
 pub const RETESTS_PER_DAY: usize = 3;
+
+/// How many retests may wait unanswered before no more are written (danielrispler/plotkeeper#215).
+pub const RETESTS_WAITING: usize = 3;
 
 /// What Home's learning slot serves (danielrispler/plotkeeper#240): one Retest, or, once the day's cap is reached, "done for
 /// today", or a fresh Quiz of a turn or card (#241); nothing is `None` beside it.
@@ -265,6 +261,35 @@ pub struct RetestAsk {
     pub session_id: String,
     pub hunk: String,
     pub first: Quiz,
+}
+
+/// A Quiz that can be retested, as `CardStore::first_quizzes` reads it.
+struct FirstQuiz<'a> {
+    of: &'a str,
+    session_id: &'a str,
+    hunk: &'a str,
+    quiz: &'a Quiz,
+    offered: u64,
+    picked: bool,
+    key_wrong: bool,
+}
+
+impl FirstQuiz<'_> {
+    /// What its retest's writer reads.
+    fn ask(self) -> RetestAsk {
+        RetestAsk {
+            of: self.of.into(),
+            session_id: self.session_id.into(),
+            hunk: self.hunk.into(),
+            first: self.quiz.clone(),
+        }
+    }
+
+    /// Whether its retest can be served at `now`: due at most `RETEST_REACH_MS` before, and its key not flagged wrong.
+    fn servable(&self, now: u64) -> bool {
+        let due = self.offered.saturating_add(RETEST_AFTER_MS);
+        !self.key_wrong && (due..=due.saturating_add(RETEST_REACH_MS)).contains(&now)
+    }
 }
 
 /// Daniel's rating of a card's explanation: a level and the reasons he picked. His fifth reason, "the
@@ -835,34 +860,69 @@ impl CardStore {
     /// The Quizzes offered `RETEST_AFTER_MS` or more before `now`, a card's or a turn's own, that have no retest yet and
     /// that have a hunk to ask on (danielrispler/plotkeeper#129). `now` is the caller's clock.
     pub fn due_retests(&self, now: u64) -> Vec<RetestAsk> {
-        let due = |offered: u64| now >= offered.saturating_add(RETEST_AFTER_MS);
+        self.due_quizzes(now).map(FirstQuiz::ask).collect()
+    }
+
+    /// The due retests the hourly run writes at `now` (danielrispler/plotkeeper#215), in the order Home serves them
+    /// (danielrispler/plotkeeper#226): those whose first Quiz has a pick first, then the rest, the latest due first
+    /// within each. None came due more than `RETEST_REACH_MS` before `now`, and none's first Quiz is flagged Key wrong.
+    pub fn retests_to_write(&self, now: u64) -> Vec<RetestAsk> {
+        let mut due: Vec<_> = self
+            .due_quizzes(now)
+            .filter(|first| first.servable(now))
+            .collect();
+        due.sort_by_key(|first| (!first.picked, std::cmp::Reverse(first.offered)));
+        due.into_iter().map(FirstQuiz::ask).collect()
+    }
+
+    /// The Quizzes offered `RETEST_AFTER_MS` or more before `now` that have a hunk and no retest yet.
+    fn due_quizzes(&self, now: u64) -> impl Iterator<Item = FirstQuiz<'_>> {
+        self.first_quizzes().filter(move |first| {
+            now >= first.offered.saturating_add(RETEST_AFTER_MS)
+                && !first.hunk.trim().is_empty()
+                && self.retests.iter().all(|r| r.of != first.of)
+        })
+    }
+
+    /// How many retests wait unanswered at `now`, as Home could serve them (danielrispler/plotkeeper#215): each holds
+    /// a Quiz with no pick or skip, came due at most `RETEST_REACH_MS` before, and its first Quiz is not flagged Key
+    /// wrong. A skip counts, since a skipped retest can no longer be picked.
+    pub fn waiting_retests(&self, now: u64) -> usize {
+        (self.retests.iter())
+            .filter(|r| r.quiz.is_some() && !r.taps.iter().any(QuizTap::answers))
+            .filter(|r| {
+                self.first_quizzes()
+                    .find(|first| first.of == r.of)
+                    .is_some_and(|first| first.servable(now))
+            })
+            .count()
+    }
+
+    /// Each Quiz that can be retested, a card's or a turn's own, with what the retests read of it.
+    fn first_quizzes(&self) -> impl Iterator<Item = FirstQuiz<'_>> {
         let cards = self.cards.iter().filter_map(|kept| {
-            let offered = kept.added_at.or(kept.shown_at)?;
-            let quiz = kept
-                .card
-                .quiz
-                .as_ref()
-                .filter(|_| kept.request.check.is_none())?;
-            let ask = (due(offered), kept.request.diff());
-            Some((ask, &kept.request.id, &kept.request.session_id, quiz))
+            Some(FirstQuiz {
+                of: &kept.request.id,
+                session_id: &kept.request.session_id,
+                hunk: kept.request.diff(),
+                quiz: (kept.card.quiz.as_ref()).filter(|_| kept.request.check.is_none())?,
+                offered: kept.added_at.or(kept.shown_at)?,
+                picked: kept.guess.is_some() || kept.taps.iter().any(QuizTap::picks),
+                key_wrong: kept.key_wrong || kept.taps.iter().any(QuizTap::flags_key),
+            })
         });
         let summaries = self.summaries.iter().filter_map(|kept| {
-            let quiz = kept.summary.quiz.as_ref()?;
-            let ask = (due(kept.added_at), kept.hunk.as_str());
-            Some((ask, &kept.request.id, &kept.request.session_id, quiz))
+            Some(FirstQuiz {
+                of: &kept.request.id,
+                session_id: &kept.request.session_id,
+                hunk: &kept.hunk,
+                quiz: kept.summary.quiz.as_ref()?,
+                offered: kept.added_at,
+                picked: kept.taps.iter().any(QuizTap::picks),
+                key_wrong: kept.taps.iter().any(QuizTap::flags_key),
+            })
         });
-        cards
-            .chain(summaries)
-            .filter(|((due, hunk), of, ..)| {
-                *due && !hunk.trim().is_empty() && self.retests.iter().all(|r| &r.of != *of)
-            })
-            .map(|((_, hunk), of, session, quiz)| RetestAsk {
-                of: of.clone(),
-                session_id: session.clone(),
-                hunk: hunk.into(),
-                first: quiz.clone(),
-            })
-            .collect()
+        cards.chain(summaries)
     }
 
     /// The item Home's learning slot serves at `now`, given `day_start`, the start of Daniel's local day (danielrispler/plotkeeper#240):
@@ -881,16 +941,13 @@ impl CardStore {
             .filter(|r| !r.taps.iter().any(QuizTap::picks))
             .filter(|r| !r.taps.iter().any(|t| t.set_aside_since(day_start)))
             .filter_map(|retest| {
-                let first = self.first_quiz(&retest.of)?;
-                let due = first.offered.saturating_add(RETEST_AFTER_MS);
-                (!first.key_wrong && due <= now && now - due <= RETEST_REACH_MS).then_some(
-                    Eligible {
-                        picked: first.picked,
-                        due,
-                        retest,
-                        offered: first.offered,
-                    },
-                )
+                let first = self.first_quizzes().find(|first| first.of == retest.of)?;
+                first.servable(now).then_some(Eligible {
+                    picked: first.picked,
+                    due: first.offered.saturating_add(RETEST_AFTER_MS),
+                    retest,
+                    offered: first.offered,
+                })
             })
             .collect();
         eligible.sort_by_key(|e| (std::cmp::Reverse(e.picked), std::cmp::Reverse(e.due)));
@@ -953,28 +1010,13 @@ impl CardStore {
             })
     }
 
-    /// What the learning slot reads of the first Quiz, a card's or a turn's own, that retest `of` is of.
-    fn first_quiz(&self, of: &str) -> Option<FirstQuiz> {
-        if let Some(kept) = self.cards.iter().find(|kept| kept.request.id == of) {
-            return Some(FirstQuiz {
-                offered: kept.added_at.or(kept.shown_at)?,
-                picked: kept.guess.is_some() || kept.taps.iter().any(QuizTap::picks),
-                key_wrong: kept.key_wrong || kept.taps.iter().any(QuizTap::flags_key),
-            });
-        }
-        let kept = self.summaries.iter().find(|kept| kept.request.id == of)?;
-        Some(FirstQuiz {
-            offered: kept.added_at,
-            picked: kept.taps.iter().any(QuizTap::picks),
-            key_wrong: kept.taps.iter().any(QuizTap::flags_key),
-        })
-    }
-
     /// Keeps the retest of `ask`'s Quiz, `quiz` as the writer wrote it, or `None` when it was rejected, at `at`; and
-    /// saves the retests. A Quiz that has one is not asked again.
-    pub fn add_retest(&mut self, ask: &RetestAsk, quiz: Option<Quiz>, at: u64) -> io::Result<()> {
-        if self.retests.iter().any(|r| r.of == ask.of) {
-            return Ok(());
+    /// saves the retests. A Quiz that has one is not asked again; one that has one already, or that was flagged Key wrong
+    /// while the writer ran, keeps none. Returns whether it was kept.
+    pub fn add_retest(&mut self, ask: &RetestAsk, quiz: Option<Quiz>, at: u64) -> io::Result<bool> {
+        let flagged = |first: FirstQuiz| first.of == ask.of && first.key_wrong;
+        if self.retests.iter().any(|r| r.of == ask.of) || self.first_quizzes().any(flagged) {
+            return Ok(false);
         }
         self.retests.push(Retest {
             id: format!("retest {}", ask.of),
@@ -986,7 +1028,7 @@ impl CardStore {
             taps: Vec::new(),
         });
         self.revision += 1;
-        write(&self.path.with_file_name("retests.json"), &self.retests)
+        write(&self.path.with_file_name("retests.json"), &self.retests).map(|()| true)
     }
 
     /// The retests, oldest first.

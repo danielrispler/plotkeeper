@@ -49,7 +49,9 @@ pub use store::{
     Arm, Brief, CardStore, CheckResult, Guess, Learning, Level, PlacedCard, QuizTap, Rating,
     Reason, Retest, RetestAsk, Row, SessionCards, StoredCard, StoredSummary, Surface, Tap, millis,
 };
-pub use store::{Place, QUIZZES_PER_HOUR, RETEST_AFTER_MS, RETEST_REACH_MS, RETESTS_PER_DAY};
+pub use store::{
+    Place, QUIZZES_PER_HOUR, RETEST_AFTER_MS, RETEST_REACH_MS, RETESTS_PER_DAY, RETESTS_WAITING,
+};
 pub use summary::{
     Line, LineKind, SummarySetup, TurnSummary, write_agent_summary, write_name, write_summary,
 };
