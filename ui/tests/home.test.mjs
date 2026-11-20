@@ -48,10 +48,15 @@ test("4 unseen sessions give 3 rows and +1, newest turn first; a seen turn leave
   assert.deepEqual(view([{ ...unseen("a", 10), unseen: false }]), []);
 });
 
-test("Unseen holds only your-turn sessions: a running session with an unseen earlier turn is listed once, as running", () => {
-  const running = live("r", "running", { unseen: true, turns: [turn(1)] });
-  assert.deepEqual(view([running]).map((p) => [p.key, sessionIds(p)]), [["running", ["r"]]]);
-  assert.deepEqual(keys(view([live("i", "idle", { unseen: true })])), []);
+test("an unseen session that went idle stays under Unseen, and a running one is listed only under Running", () => {
+  const parts = view([live("i", "idle", { unseen: true }), live("r", "running", { unseen: true })]);
+  assert.deepEqual(
+    parts.map((p) => [p.key, sessionIds(p)]),
+    [
+      ["running", ["r"]],
+      ["unseen", ["i"]],
+    ],
+  );
 });
 
 test("an unseen row holds its turn's Headline; a needs-you row holds its question's first line", () => {

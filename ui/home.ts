@@ -62,7 +62,7 @@ export function homeView(sessions: Session[], asked: Learning | null, projects: 
   const needsYou = sessions.filter((s) => s.state === "needs_you");
   const running = sessions.filter((s) => s.state === "running");
   // A landed session that is also unseen is listed as landed, keeping its unseen styling.
-  const unseen = sessions.filter((s) => s.unseen && s.state === "your_turn" && !allLanded.includes(s)).sort((a, b) => endOf(b) - endOf(a));
+  const unseen = sessions.filter((s) => s.unseen && (s.state === "your_turn" || s.state === "idle") && !allLanded.includes(s)).sort((a, b) => endOf(b) - endOf(a));
   const capped = (key: HomeKey, all: Session[], max: number, rowOf: (s: Session) => HomeRow) => {
     const shown = state.expanded.has(key) ? all : all.slice(0, max);
     return { rows: shown.map(rowOf), more: all.length - shown.length };
