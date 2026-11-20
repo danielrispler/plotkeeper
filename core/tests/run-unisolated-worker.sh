@@ -2,7 +2,7 @@
 # Proves that Claude Code's real events have the shape spec #202's tests assume (#214, seam 5): a
 # short scripted Claude Code session in a temporary repository, with this checkout's plugin, spawns
 # one background subagent that is not isolated. From the session's folder the subagent makes a
-# worktree with `git worktree add`, writes a 40-line file in it through Bash and commits, as the
+# worktree with `git worktree add`, writes a 42-line file in it through Bash and commits, as the
 # workers of #186's diagnosis do. The script then reads the session's events in the event log and the
 # offers record, and prints pass or fail for each of its two checks with the line that decided it:
 #
@@ -39,7 +39,8 @@ git -C "$repo" add README.md .gitignore
 git -C "$repo" commit -qm "Start"
 
 # `-p` waits for background subagents before it exits, so the worker's events all land. Without
-# `Edit` and `Write` the worker edits through Bash, as the workers that are not isolated do.
+# `Edit` and `Write` the worker edits through Bash, as the workers that are not isolated do. The
+# prompt is not quoted, so it names `$worktree`; it holds no other `$` or backtick unescaped.
 cd "$repo"
 CLAUDE_CODE_PLUGIN_DIRS="$studio/plugin" claude -p --session-id "$session" \
   --allowedTools "Bash" --disallowedTools "Edit" "Write" "NotebookEdit" <<PROMPT
@@ -147,12 +148,12 @@ def events_check():
     end = ends[-1]
     print(f"events: start tree: {shown(start)}")
     print(f"events: end tree: {shown(end)}")
-    a, b = start["studio_turn_start"][worktree], end["studio_turn_end"][worktree]
-    diff = subprocess.run(["git", "-C", repo, "diff", "--numstat", a, b],
+    start_tree, end_tree = start["studio_turn_start"][worktree], end["studio_turn_end"][worktree]
+    diff = subprocess.run(["git", "-C", repo, "diff", "--numstat", start_tree, end_tree],
                           capture_output=True, text=True).stdout
     row = next((r for r in diff.splitlines() if r.endswith("\tshapes.py")), None)
     if row is None or int(row.split("\t")[0]) < 30:
-        return agent, f"the diff of {a[:12]}..{b[:12]} lacks the 30-line edit of shapes.py: {diff.strip() or 'empty'}"
+        return agent, f"the diff of {start_tree[:12]}..{end_tree[:12]} lacks the 30-line edit of shapes.py: {diff.strip() or 'empty'}"
     print(f"events: the diff of the trees holds the edit: {row}")
     return agent, None
 
@@ -170,9 +171,9 @@ def offers_check(agent):
                 record = json.loads(line)
             except ValueError:
                 continue
-            id = str(record.get("id", ""))
+            record_id = str(record.get("id", ""))
             if (record.get("session") == session and record.get("kind") == "worker"
-                    and (agent is None or id.startswith(agent + "@"))):
+                    and (agent is None or record_id.startswith(agent + "@"))):
                 found.append((line, record))
         return found
 
