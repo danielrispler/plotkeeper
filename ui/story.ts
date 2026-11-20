@@ -28,6 +28,7 @@ import { studio } from "./state.js";
 import { titled } from "./keys.js";
 import { typeInto } from "./typing.js";
 import { repositoryOfWorktree } from "./workspaces.js";
+import { terminalInUse } from "./home.js";
 import {
   askKind,
   stateLabels,
@@ -702,9 +703,9 @@ function choice(dialog: HTMLDialogElement): Promise<string> {
   });
 }
 
-// Delete: ends the session's terminal, removes its worktree when ticked, asking first when that would
-// lose work, and its branch when the main checkout holds it, then drops its row. A branch git keeps
-// is reported, and the row goes anyway.
+// Delete: ends the session's terminal unless another live session runs in it, removes its worktree
+// when ticked, asking first when that would lose work, and its branch when the main checkout holds
+// it, then drops its row. A branch git keeps is reported, and the row goes anyway.
 export async function askDelete(session: Session) {
   const dialog = element("delete-dialog") as HTMLDialogElement;
   const found = worktreeOf(session.cwd);
@@ -719,7 +720,7 @@ export async function askDelete(session: Session) {
   const others = studio.listed.filter((s) => s.id !== session.id && s.state !== "ended" && worktreeOf(s.cwd) === worktree);
   element("delete-shared").hidden = worktree === null || others.length === 0;
   if ((await choice(dialog)) !== "delete") return;
-  if (session.terminal !== null) await closePane(session.terminal);
+  if (session.terminal !== null && !terminalInUse(session.terminal, studio.listed, (id) => id === session.id)) await closePane(session.terminal);
   if (worktree !== null && ticked.checked) await removeWorktree(worktree, repository!);
   await invoke("delete_session", { id: session.id });
 }
