@@ -95,3 +95,19 @@ export function jumpToNeedsYou(): boolean {
   select(shown.session.id);
   return true;
 }
+
+// The Clear toast (#244): "Cleared N landed" and Undo, for the window `clearing` holds open. Like the others it never takes focus.
+export function showClearToast(count: number, undo: () => void) {
+  const toast = element("clear-toast");
+  const undoButton = text("button", "Undo", "btn small");
+  undoButton.tabIndex = -1;
+  undoButton.addEventListener("pointerdown", (event) => event.preventDefault());
+  undoButton.addEventListener("click", undo);
+  const message = `Cleared ${count} landed`;
+  toast.replaceChildren(fullTitle(text("strong", message, "name"), message), undoButton);
+  toast.hidden = false;
+}
+
+export function hideClearToast() {
+  element("clear-toast").hidden = true;
+}

@@ -9,6 +9,9 @@ import { logo, logoKey } from "./logos.js";
 import { foundWorkspaces, lastSegment, sessionProjectName } from "./workspaces.js";
 import { lastHeadline } from "./story.js";
 import { startLast } from "./picker.js";
+import { closePane, redrawHome } from "./panes.js";
+import { hideClearToast, showClearToast } from "./toast.js";
+import { studio } from "./state.js";
 import type { Retest, Session } from "./types.js";
 
 export type HomeKey = "needs_you" | "running" | "unseen" | "learning" | "landed" | "start";
@@ -17,7 +20,7 @@ export type HomeRow = { session: Session; line: string; note: string };
 // One part of the page: `rows` are its sessions, `more` the sessions hidden behind its "+N" row.
 export type HomePart = { key: HomeKey; title: string; colour: boolean; rows: HomeRow[]; more: number; retests: Retest[]; projects: HomeProject[] };
 // The window's Home state: the groups Daniel expanded, kept until Home is left.
-export type HomeState = { expanded: Set<string> };
+export type HomeState = { expanded: Set<string>; cleared?: Set<string> };
 export const homeState: HomeState = { expanded: new Set() };
 
 export const MAX_RUNNING = 4;
@@ -26,11 +29,12 @@ const endOf = (s: Session) => s.turns.at(-1)?.ended_at ?? s.last_event_at ?? 0;
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
 
 export function homeView(sessions: Session[], retests: Retest[], projects: string[], state: HomeState, headline: (s: Session) => string | null = () => null): HomePart[] {
-  const landed = sessions.filter((s) => showsLanded(s.state, s.landed));
+  const allLanded = sessions.filter((s) => showsLanded(s.state, s.landed));
+  const landed = allLanded.filter((s) => !state.cleared?.has(s.id));
   const needsYou = sessions.filter((s) => s.state === "needs_you");
   const running = sessions.filter((s) => s.state === "running");
   // A landed session that is also unseen is listed as landed, keeping its unseen styling.
-  const unseen = sessions.filter((s) => s.unseen && s.state !== "needs_you" && !landed.includes(s)).sort((a, b) => endOf(b) - endOf(a));
+  const unseen = sessions.filter((s) => s.unseen && s.state !== "needs_you" && !allLanded.includes(s)).sort((a, b) => endOf(b) - endOf(a));
   const offered = homeRetests(retests);
   const capped = (key: HomeKey, all: Session[], max: number, rowOf: (s: Session) => HomeRow) => {
     const shown = state.expanded.has(key) ? all : all.slice(0, max);
@@ -74,6 +78,72 @@ function retestRow(retest: Retest, quiz: NonNullable<Retest["quiz"]>): HTMLEleme
   region.dataset.key = `retest ${retest.id}`;
   return region;
 }
+
+// Clear landed (#244): Clear hides every landed row and offers Undo for CLEAR_WINDOW_MS. When the window closes each hidden session
+// that is still landed goes through today's Delete (`commit`); Undo commits nothing. `changed` hears the sessions still pending.
+export type Clock = { set(run: () => void, ms: number): unknown; clear(id: unknown): void };
+export const CLEAR_WINDOW_MS = 8000;
+export function clearing(time: Clock, deps: { landed(id: string): Session | undefined; commit(session: Session): void; changed(pending: Session[]): void }) {
+  const pending = new Map<string, Session>();
+  const hidden = new Set<string>();
+  let timer: unknown = null;
+  const stop = () => {
+    if (timer !== null) time.clear(timer);
+    timer = null;
+  };
+  const tell = () => deps.changed([...pending.values()]);
+  const forget = () => {
+    stop();
+    pending.clear();
+    hidden.clear();
+    tell();
+  };
+  return {
+    hidden,
+    clear(sessions: Session[]) {
+      for (const s of sessions) (pending.set(s.id, s), hidden.add(s.id));
+      stop();
+      timer = time.set(() => {
+        timer = null;
+        const due = [...pending.keys()].map(deps.landed);
+        forget();
+        for (const s of due) if (s) deps.commit(s);
+      }, CLEAR_WINDOW_MS);
+      tell();
+    },
+    undo: forget,
+    // A session that stopped being landed in the window is left alone: it comes back and is not pending.
+    sync() {
+      let dropped = false;
+      for (const id of [...pending.keys()]) if (!deps.landed(id)) (pending.delete(id), hidden.delete(id), (dropped = true));
+      if (!dropped) return;
+      if (pending.size === 0) stop();
+      tell();
+    },
+  };
+}
+
+// The window's one Clear: its hidden rows show in `homeState.cleared`, the toast offers Undo, and the shell is told which sessions a quit
+// would commit (`clearing`). A commit is today's Delete: the terminal ended, the row dropped, the cards kept.
+const stillLanded = (id: string) => studio.listed.find((s) => s.id === id && showsLanded(s.state, s.landed));
+export const landedClear = clearing(
+  { set: (run, ms) => setTimeout(run, ms), clear: (id) => clearTimeout(id as number) },
+  {
+    landed: stillLanded,
+    commit: (session) =>
+      void (async () => {
+        if (session.terminal !== null) await closePane(session.terminal);
+        await invoke("delete_session", { id: session.id });
+      })().catch(failure("delete_session", "error")),
+    changed: (pending) => {
+      void invoke("clearing", { sessions: pending.map((s) => ({ id: s.id, terminal: s.terminal })) }).catch(failure("clearing"));
+      if (pending.length) showClearToast(pending.length, () => landedClear.undo());
+      else hideClearToast();
+      redrawHome();
+    },
+  },
+);
+homeState.cleared = landedClear.hidden;
 
 export type HomeProject = { name: string; path: string };
 
@@ -144,7 +214,15 @@ export function drawHome(box: HTMLElement, sessions: Session[], projects: string
     node.dataset.key = key;
     return node;
   };
-  const heading = (title: string, key: string) => keyed(text("h2", title), key);
+  const heading = (title: string, key: string) => {
+    const node = keyed(text("h2", title), key);
+    if (key !== "h landed") return node;
+    const clear = text("button", "Clear", "btn quiet small clear");
+    clear.title = "Clear every landed session; Undo for a few seconds";
+    clear.addEventListener("click", () => landedClear.clear(studio.listed.filter((s) => showsLanded(s.state, s.landed) && !landedClear.hidden.has(s.id))));
+    node.append(clear);
+    return node;
+  };
   const drawPart = (part: HomePart): HTMLElement[] => [
     heading(part.title, `h ${part.key}`),
     ...part.rows.map((r) => (part.key === "landed" ? sessionRow(r.session, true) : waitingRow(r, part.key, sessionProjectName(projects, found, r.session)))),

@@ -109,3 +109,90 @@ test("Home offers the retests that have a Quiz and are not answered, and keeps o
     ["a", "d"],
   );
 });
+
+// Clear landed (#244), a state machine on an injected clock (prior art hover.test.mjs).
+import { clearing, CLEAR_WINDOW_MS } from "../../dist/home.js";
+
+function clearMachine(sessions) {
+  let now = 0;
+  const timers = new Map();
+  let next = 1;
+  const time = {
+    set: (run, ms) => (timers.set(next, { at: now + ms, run }), next++),
+    clear: (id) => timers.delete(id),
+    tick(ms) {
+      now += ms;
+      for (const [id, t] of [...timers]) if (t.at <= now) (timers.delete(id), t.run());
+    },
+  };
+  const live = new Map(sessions.map((s) => [s.id, s]));
+  const deleted = [];
+  const pending = [];
+  const m = clearing(time, {
+    landed: (id) => (live.get(id)?.landed ? live.get(id) : undefined),
+    commit: (s) => deleted.push(s.id),
+    changed: (list) => pending.push(list.map((s) => s.id)),
+  });
+  return { m, time, live, deleted, pending };
+}
+const landed = (id) => live(id, "idle", { landed: true });
+
+test("Clear hides every landed row, and the window's end deletes each once", () => {
+  const { m, time, deleted } = clearMachine([landed("a"), landed("b")]);
+  m.clear([landed("a"), landed("b")]);
+  assert.deepEqual([...m.hidden], ["a", "b"]);
+  time.tick(CLEAR_WINDOW_MS - 1);
+  assert.deepEqual(deleted, []);
+  time.tick(1);
+  assert.deepEqual(deleted, ["a", "b"]);
+  assert.deepEqual([...m.hidden], []);
+  time.tick(CLEAR_WINDOW_MS * 3);
+  assert.deepEqual(deleted, ["a", "b"]);
+});
+
+test("Undo restores the rows and nothing is ever deleted", () => {
+  const { m, time, deleted, pending } = clearMachine([landed("a")]);
+  m.clear([landed("a")]);
+  m.undo();
+  assert.deepEqual([...m.hidden], []);
+  time.tick(CLEAR_WINDOW_MS * 3);
+  assert.deepEqual(deleted, []);
+  assert.deepEqual(pending, [["a"], []]);
+});
+
+test("a session no longer landed when the window closes is spared", () => {
+  const { m, time, live: sessions, deleted } = clearMachine([landed("a"), landed("b")]);
+  m.clear([landed("a"), landed("b")]);
+  sessions.set("b", live("b", "running", { landed: false }));
+  sessions.delete("a");
+  time.tick(CLEAR_WINDOW_MS);
+  assert.deepEqual(deleted, []);
+});
+
+test("sync forgets a session that stopped being landed, so the shell commits only the rest", () => {
+  const { m, live: sessions, pending } = clearMachine([landed("a"), landed("b")]);
+  m.clear([landed("a"), landed("b")]);
+  sessions.delete("a");
+  m.sync();
+  assert.deepEqual([...m.hidden], ["b"]);
+  assert.deepEqual(pending.at(-1), ["b"]);
+});
+
+test("a second Clear inside the window restarts it and keeps the first rows hidden", () => {
+  const { m, time, deleted } = clearMachine([landed("a"), landed("b")]);
+  m.clear([landed("a")]);
+  time.tick(CLEAR_WINDOW_MS - 1);
+  m.clear([landed("b")]);
+  time.tick(CLEAR_WINDOW_MS - 1);
+  assert.deepEqual(deleted, []);
+  time.tick(1);
+  assert.deepEqual(deleted, ["a", "b"]);
+});
+
+test("Home hides the cleared rows, and shows the Landed part again after Undo", () => {
+  const sessions = [landed("a"), landed("b")];
+  const hidden = { expanded: new Set(), cleared: new Set(["a", "b"]) };
+  assert.deepEqual(keys(view(sessions, hidden)), []);
+  assert.deepEqual(sessionIds(view(sessions, { expanded: new Set(), cleared: new Set(["a"]) })[0]), ["b"]);
+  assert.deepEqual(sessionIds(view(sessions, { expanded: new Set(), cleared: new Set() })[0]), ["a", "b"]);
+});

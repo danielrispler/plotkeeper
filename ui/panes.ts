@@ -14,7 +14,7 @@ import type * as Xterm from "@xterm/xterm";
 import { connect, list, onEvent, request, type Listed } from "./daemon.js";
 import { diffRequest, drawDiff, keepsDiff } from "./diff.js";
 import { drawHistory } from "./history.js";
-import { drawHome, homeState } from "./home.js";
+import { drawHome, homeState, landedClear } from "./home.js";
 import { element, failure, fullTitle, invoke, listen, pressable, text } from "./dom.js";
 import { onProjects, projects } from "./projects.js";
 import { followLog, showLog, showMissing } from "./log.js";
@@ -205,6 +205,7 @@ export function showHome() {
 
 // Draws Home again when the list changed under it.
 export function redrawHome() {
+  landedClear.sync();
   if (shown === HOME) drawHome(box(HOME), studio.listed, projectPaths, retests, redrawHome);
 }
 
