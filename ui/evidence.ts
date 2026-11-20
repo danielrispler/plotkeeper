@@ -19,6 +19,12 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 const mergedLabel = (n: number) => `+${n} merged`;
 
+// A check's name: its suite, and its worktree's folder name when it ran outside the session's own worktree.
+const named = (c: Check) => {
+  const tree = c.worktree.replace(/\/+$/, "").split("/").pop();
+  return c.foreign && tree ? `${c.suite} in ${tree}` : c.suite;
+};
+
 // The top level: "3 files · +2 merged · 2 checks passed". A check's status is its last run's, so only one that ended failed is named;
 // one that only "ran" is counted apart.
 export function evidenceLine({ files, checks }: Facts): string {
@@ -29,7 +35,7 @@ export function evidenceLine({ files, checks }: Facts): string {
     ...(files?.merged ? [mergedLabel(files.merged)] : []),
     ...(passed ? [`${plural(passed, "check")} passed`] : []),
     ...(ran ? [`${plural(ran, "check")} ran`] : []),
-    ...checks.filter((c) => c.status === "failed").map((c) => `✗ ${c.suite} failed`),
+    ...checks.filter((c) => c.status === "failed").map((c) => `✗ ${named(c)} failed`),
   ].join(" · ");
 }
 
@@ -48,7 +54,7 @@ export function evidenceRows({ files, checks }: Facts): EvidenceRow[] {
       const last = c.runs.at(-1);
       return {
         kind: "check",
-        label: `${c.suite} ${c.status}${c.status === "ran" ? "" : after}`,
+        label: `${named(c)} ${c.status}${c.status === "ran" ? "" : after}`,
         ...(c.status === "failed" && last ? { call: last.call, agent: last.agent } : {}),
       };
     }),

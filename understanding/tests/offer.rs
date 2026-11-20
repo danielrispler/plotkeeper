@@ -263,6 +263,8 @@ fn facts(files: &[(&str, u64)], check: Option<CheckStatus>) -> Facts {
     };
     let check = check.map(|status| Check {
         suite: "cargo test".into(),
+        worktree: String::new(),
+        foreign: false,
         status,
         retries: 0,
         runs: Vec::<CheckRun>::new(),

@@ -88,6 +88,8 @@ pub(crate) struct Statement<'a> {
     pub negated: bool,
     /// It is `set` with `pipefail`.
     pub pipefail: bool,
+    /// The folder of the last `cd` with an absolute path in a statement before it.
+    pub cd: Option<String>,
 }
 
 /// A word of a statement: its text as written, and whether it holds no quote or escape.
@@ -369,12 +371,21 @@ fn runs_entry(entry: &str, words: &[Word]) -> bool {
 
 /// The statements of `command`, each with the entry of `list` it runs, if any.
 pub(crate) fn statements<'a, S: AsRef<str>>(list: &'a [S], command: &str) -> Vec<Statement<'a>> {
+    let mut cd: Option<String> = None;
     split(command)
         .into_iter()
         .map(|raw| {
             let words = without_redirections(raw.words);
             let at = command_at(&words);
             let own = &words[at..];
+            let before_cd = cd.clone();
+            if own.first().is_some_and(|w| w.plain && w.text == "cd") {
+                let target = own[1..].iter().find(|w| !w.text.starts_with('-'));
+                let target = target.map(|w| w.text.trim_matches(['"', '\'']));
+                if let Some(folder) = target.filter(|f| f.starts_with('/')) {
+                    cd = Some(folder.trim_end_matches('/').to_string());
+                }
+            }
             let suite = list
                 .iter()
                 .map(AsRef::as_ref)
@@ -392,6 +403,7 @@ pub(crate) fn statements<'a, S: AsRef<str>>(list: &'a [S], command: &str) -> Vec
                 negated: words[..at].iter().any(|w| w.plain && w.text == "!"),
                 pipefail: own.first().is_some_and(|w| w.plain && w.text == "set")
                     && own.iter().any(|w| w.text.contains("pipefail")),
+                cd: before_cd,
             }
         })
         .collect()
@@ -462,6 +474,12 @@ pub struct Run {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Check {
     pub suite: String,
+    /// The worktree it ran in, as its root.
+    #[serde(default)]
+    pub worktree: String,
+    /// It ran outside the session's own worktree, so a row names its worktree.
+    #[serde(default)]
+    pub foreign: bool,
     pub status: Status,
     /// How many runs before the last one failed.
     pub retries: u32,
@@ -469,10 +487,31 @@ pub struct Check {
     pub runs: Vec<Run>,
 }
 
+/// The worktree a run is in: the root that holds the folder of the last absolute `cd` before it, when
+/// one of the call's roots does; else the call's first root; else `home`, the worktree of the session's
+/// folder or of the worker that made the call.
+fn worktree(row: &Row, cd: Option<&str>, home: &str) -> String {
+    let holds = |root: &&String, folder: &str| {
+        folder == root.as_str()
+            || folder
+                .strip_prefix(root.as_str())
+                .is_some_and(|r| r.starts_with('/'))
+    };
+    let held = cd.and_then(|folder| {
+        row.roots
+            .iter()
+            .filter(|root| holds(root, folder))
+            .max_by_key(|root| root.len())
+    });
+    held.or(row.roots.first())
+        .map_or(home, String::as_str)
+        .into()
+}
+
 /// The runs `row` holds, one for each statement of its command that runs an entry of `list`: none for
 /// a call that is no check run, one that did not run (denied or interrupted) or one that has no result
 /// yet.
-fn runs<'a>(row: &Row, list: &'a [String]) -> Vec<(&'a str, Run)> {
+fn runs<'a>(row: &Row, list: &'a [String], home: &str) -> Vec<(&'a str, String, Run)> {
     let Some(command) = row.command.as_deref() else {
         return Vec::new();
     };
@@ -495,31 +534,44 @@ fn runs<'a>(row: &Row, list: &'a [String]) -> Vec<(&'a str, Run)> {
                 call: row.call.clone(),
                 agent: row.agent.clone(),
             };
-            Some((s.suite?, run))
+            Some((s.suite?, worktree(row, s.cd.as_deref(), home), run))
         })
         .collect()
 }
 
 /// Turn `turn`'s checks, its workers' included: the ledger's rows of the turn that match `list`,
-/// grouped by suite in the order each first ran.
-pub fn of_turn(ledger: &Ledger, turn: usize, list: &[String]) -> Vec<Check> {
+/// grouped by suite and worktree in the order each first ran. `home` gives the worktree of a call that
+/// recorded none: the session's folder's for `None`, else the worker's own.
+pub fn of_turn(
+    ledger: &Ledger,
+    turn: usize,
+    list: &[String],
+    home: &dyn Fn(Option<&str>) -> String,
+) -> Vec<Check> {
+    let own = home(None);
     let mut checks: Vec<Check> = Vec::new();
-    for (suite, run) in ledger.turn(turn).flat_map(|row| runs(row, list)) {
-        let at = checks.iter().position(|c| c.suite == suite);
-        let check = match at {
-            Some(at) => &mut checks[at],
-            None => {
-                checks.push(Check {
-                    suite: suite.into(),
-                    status: run.status,
-                    retries: 0,
-                    runs: Vec::new(),
-                });
-                checks.last_mut().expect("just pushed")
-            }
-        };
-        check.status = run.status;
-        check.runs.push(run);
+    for row in ledger.turn(turn) {
+        for (suite, worktree, run) in runs(row, list, &home(row.agent.as_deref())) {
+            let at = checks
+                .iter()
+                .position(|c| c.suite == suite && c.worktree == worktree);
+            let check = match at {
+                Some(at) => &mut checks[at],
+                None => {
+                    checks.push(Check {
+                        suite: suite.into(),
+                        foreign: worktree != own,
+                        worktree,
+                        status: run.status,
+                        retries: 0,
+                        runs: Vec::new(),
+                    });
+                    checks.last_mut().expect("just pushed")
+                }
+            };
+            check.status = run.status;
+            check.runs.push(run);
+        }
     }
     for check in &mut checks {
         let earlier = &check.runs[..check.runs.len() - 1];

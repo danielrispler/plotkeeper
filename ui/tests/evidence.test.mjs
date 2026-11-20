@@ -11,7 +11,7 @@ const { evidenceLine, evidenceRows, evidenceElement, fileRow, hasEvidence } = aw
 
 const file = (path, added, removed, extra = {}) => ({ root: "/r", path, from: null, added, removed, ...extra });
 const run = (status, call, exit_code = null) => ({ command: "cargo test", status, exit_code, call, agent: null });
-const check = (suite, status, retries = 0, runs = [run(status, `c-${suite}`, status === "failed" ? 101 : 0)]) => ({ suite, status, retries, runs });
+const check = (suite, status, retries = 0, runs = [run(status, `c-${suite}`, status === "failed" ? 101 : 0)], worktree = "/r", foreign = false) => ({ suite, worktree, foreign, status, retries, runs });
 const same = (a, b) => a.length === b.length && a.every((node, i) => node === b[i]);
 const files = (list, merged = 0) => ({ files: list, merged });
 
@@ -33,6 +33,15 @@ test("a failure is named only for a check whose last run failed; a retried pass 
   assert.doesNotMatch(retried, /✗|failed/);
   assert.equal(evidenceLine({ files: null, checks: [check("cargo test", "ran"), check("go test", "ran")] }), "2 checks ran");
   assert.equal(evidenceLine({ files: null, checks: [check("a", "passed"), check("b", "ran")] }), "1 check passed · 1 check ran");
+});
+
+test("a suite in two worktrees is two checks in the count, and a check outside the session's own worktree names its worktree", () => {
+  const other = (suite, status) => check(suite, status, 0, undefined, "/w/other", true);
+  const checks = [check("cargo test", "failed"), other("cargo test", "passed")];
+  assert.equal(evidenceLine({ files: null, checks }), "1 check passed · ✗ cargo test failed");
+  assert.equal(evidenceLine({ files: null, checks: [other("cargo test", "failed")] }), "✗ cargo test in other failed");
+  assert.deepEqual(evidenceRows({ files: null, checks }).map((r) => r.label), ["cargo test failed", "cargo test in other passed"]);
+  assert.deepEqual(evidenceRows({ files: null, checks: [other("go test", "ran")] }).map((r) => r.label), ["go test in other ran"]);
 });
 
 test("opened: each file with its line counts and its agent, each check with its status, and no external row", () => {

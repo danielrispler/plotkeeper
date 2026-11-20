@@ -1314,6 +1314,16 @@ impl Session {
         other.filter(|_| in_session).cloned()
     }
 
+    /// Turn `turn`'s checks against `list`. A call that recorded no worktree is in the session's
+    /// folder's, or its worker's own.
+    fn checks_of(&self, turn: usize, list: &[String], roots: &Roots) -> Vec<checks::Check> {
+        let home = |agent: Option<&str>| match agent.and_then(|id| self.subagent(id)) {
+            Some(worker) if !worker.root.is_empty() => worker.root.clone(),
+            _ => roots.of(&self.cwd),
+        };
+        checks::of_turn(&self.ledger, turn, list, &home)
+    }
+
     /// Whether subagent `id` gets cards of its own: a worker in a worktree of its own.
     fn has_cards(&self, id: &str) -> bool {
         self.subagent(id)
@@ -3463,8 +3473,7 @@ impl Studio {
                             .as_deref()
                             .is_some_and(|c| matched(list, c).is_some())
                         {
-                            session.turns[turn].checks =
-                                checks::of_turn(&session.ledger, turn, list);
+                            session.turns[turn].checks = session.checks_of(turn, list, &self.roots);
                         }
                     }
                     session.running.retain(|c| c.id != id);
@@ -4382,7 +4391,7 @@ impl Studio {
         for session in self.sessions.values_mut() {
             let list = self.check_lists.of(&session.cwd);
             for turn in 0..session.turns.len() {
-                session.turns[turn].checks = checks::of_turn(&session.ledger, turn, list);
+                session.turns[turn].checks = session.checks_of(turn, list, &self.roots);
             }
             session.update_unseen();
         }

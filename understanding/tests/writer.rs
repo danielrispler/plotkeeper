@@ -1403,6 +1403,8 @@ fn check(status: CheckStatus, retries: u32, exit_code: i32) -> Check {
     };
     Check {
         suite: "npm run check".into(),
+        worktree: String::new(),
+        foreign: false,
         status,
         retries,
         runs: vec![run],

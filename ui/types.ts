@@ -85,10 +85,13 @@ export type Question = { tool_use_id: string; agent: string | null; questions: A
 // `id` names its card and summary once its `Stop` came; `message` is its final reply's first line.
 // How a check, or one run of it, ended (danielrispler/plotkeeper#112): "ran" is a check whose exit code does not say.
 export type CheckStatus = "passed" | "failed" | "ran";
-// A check suite of a turn: the list entry its commands matched, its last run's status, how many earlier runs
+// A check of a turn: a suite, the list entry its commands matched, in a worktree; its last run's status, how many earlier runs
 // failed, and each run with its own command. `call` and `agent` find a run's output (`check_output`).
 export type Check = {
   suite: string;
+  // The worktree it ran in, as its root, and whether that is not the session's own, so a row names it.
+  worktree: string;
+  foreign: boolean;
   status: CheckStatus;
   retries: number;
   runs: { command: string; statement: string; status: CheckStatus; exit_code: number | null; call: string; agent: string | null }[];

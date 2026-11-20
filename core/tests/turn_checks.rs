@@ -309,3 +309,149 @@ fn a_heredoc_edit_followed_by_cargo_test_gives_a_run_whose_statement_is_the_carg
     assert_eq!(shown(&found), [("cargo test", CheckStatus::Passed, 0)]);
     assert_eq!(found[0].runs[0].statement, "cargo test -q");
 }
+
+/// `calls` as one worktree-aware replay: every line of `calls[i]` gets `extra[i]`'s fields.
+fn with(calls: Vec<String>, extra: Value) -> Vec<String> {
+    calls
+        .into_iter()
+        .map(|l| {
+            let mut v: Value = serde_json::from_str(&l).unwrap();
+            v.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            v.to_string()
+        })
+        .collect()
+}
+
+/// The worktree and status of each check of the turn.
+fn trees(checks: &[Check]) -> Vec<(&str, &str, CheckStatus, u32)> {
+    checks
+        .iter()
+        .map(|c| (c.suite.as_str(), c.worktree.as_str(), c.status, c.retries))
+        .collect()
+}
+
+const OTHER: &str = "/Users/danielrispler/work/other";
+
+#[test]
+fn the_same_suite_in_two_worktrees_is_two_checks_and_one_pass_does_not_cover_the_other() {
+    let found = checks(&[
+        fails(1_000, "t1", "cargo test", "Exit code 101\nfailures"),
+        with(
+            passes(2_000, "t2", &format!("cd {OTHER} && cargo test"), None),
+            json!({ "studio_touched_roots": [OTHER] }),
+        ),
+    ]);
+
+    assert_eq!(
+        trees(&found),
+        [
+            ("cargo test", CWD, CheckStatus::Failed, 0),
+            ("cargo test", OTHER, CheckStatus::Passed, 0),
+        ]
+    );
+    assert!(!found[0].foreign);
+    assert!(found[1].foreign);
+}
+
+#[test]
+fn a_failed_run_then_a_passing_run_in_the_same_worktree_is_one_passed_check_with_one_retry() {
+    let found = checks(&[
+        with(
+            fails(1_000, "t1", "cargo test", "Exit code 101\nfailures"),
+            json!({ "studio_touched_roots": [OTHER] }),
+        ),
+        with(
+            passes(2_000, "t2", "cargo test", None),
+            json!({ "studio_touched_roots": [OTHER] }),
+        ),
+    ]);
+
+    assert_eq!(trees(&found), [("cargo test", CWD, CheckStatus::Passed, 1)]);
+}
+
+#[test]
+fn a_run_is_in_the_worktree_of_the_last_absolute_cd_that_a_recorded_root_holds() {
+    let roots = json!({ "studio_touched_roots": [OTHER, "/w/third"] });
+    let command = format!("cd /w/third && cd {OTHER}/core && cargo test");
+
+    let found = checks(&[with(passes(1_000, "t1", &command, None), roots)]);
+
+    assert_eq!(
+        trees(&found),
+        [("cargo test", OTHER, CheckStatus::Passed, 0)]
+    );
+}
+
+#[test]
+fn a_run_with_no_cd_a_relative_cd_or_a_cd_no_root_holds_is_in_the_calls_first_root() {
+    let roots = json!({ "studio_touched_roots": [OTHER] });
+    for command in [
+        "cargo test",
+        "cd core && cargo test",
+        "cd /elsewhere && cargo test",
+        &format!("cd {OTHER} && cd core && cargo test"),
+    ] {
+        let found = checks(&[with(passes(1_000, "t1", command, None), roots.clone())]);
+        let want = if command.starts_with("cd /Users") {
+            OTHER
+        } else {
+            CWD
+        };
+        assert_eq!(
+            trees(&found),
+            [("cargo test", want, CheckStatus::Passed, 0)],
+            "{command}"
+        );
+    }
+}
+
+#[test]
+fn a_call_with_no_recorded_roots_is_in_the_sessions_worktree_or_its_workers_own() {
+    let mut lines = vec![prompt()];
+    lines.push(line(
+        "SubagentStart",
+        500,
+        json!({ "agent_id": "w1", "agent_type": "general-purpose", "cwd": OTHER }),
+    ));
+    lines.extend(with(
+        passes(1_000, "t1", "cargo test", None),
+        json!({ "cwd": "" }),
+    ));
+    lines.extend(with(
+        passes(2_000, "t2", "cargo clippy", Some("w1")),
+        json!({ "cwd": "" }),
+    ));
+    let studio = Studio::replayed(&lines);
+
+    let found = &studio.session(SESSION).unwrap().turns[0].checks;
+
+    assert_eq!(
+        trees(found),
+        [
+            ("cargo test", CWD, CheckStatus::Passed, 0),
+            ("cargo clippy", OTHER, CheckStatus::Passed, 0),
+        ]
+    );
+}
+
+#[test]
+fn the_banners_counts_keep_a_failure_in_one_worktree_apart_from_a_pass_in_another() {
+    let mut lines = vec![prompt()];
+    lines.extend(fails(1_000, "t1", "cargo test", "Exit code 101\nfailures"));
+    lines.extend(with(
+        passes(2_000, "t2", &format!("cd {OTHER} && cargo test"), None),
+        json!({ "studio_touched_roots": [OTHER] }),
+    ));
+    lines.push(line(
+        "Stop",
+        5_000,
+        json!({ "last_assistant_message": "done" }),
+    ));
+    let studio = Studio::replayed(&lines);
+
+    let since = studio.session(SESSION).unwrap().since();
+
+    assert_eq!((since.passed, since.failed, since.ran), (1, 1, 0));
+}

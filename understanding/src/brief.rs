@@ -55,8 +55,8 @@ pub fn answered(decisions: &[Decision]) -> Vec<Answered> {
         .collect()
 }
 
-/// The Open slot of `session`, from facts: the questions it waits on, each check suite whose last
-/// run failed, files changed with no check run since, the latest ended turn's `open` and `ask`
+/// The Open slot of `session`, from facts: the questions it waits on, each check, by suite and worktree,
+/// whose last run failed, files changed with no check run since, the latest ended turn's `open` and `ask`
 /// lines, and, with `task`'s facts, unpushed work and an unmerged PR. Each drops out once settled:
 /// the question answered, the suite passing in a later turn, a check run, the next turn started, the
 /// work pushed and merged.
@@ -72,13 +72,20 @@ pub fn open_items(session: &Session, task: Option<TaskFacts>, store: &CardStore)
             ));
         }
     }
-    let mut suites = BTreeMap::new();
+    // Each check's latest status, by suite and worktree: only its own later pass closes it.
+    let mut checks = BTreeMap::new();
     for check in session.turns.iter().flat_map(|turn| &turn.checks) {
-        suites.insert(&check.suite, check.status);
+        checks.insert((&check.suite, &check.worktree), check);
     }
-    for (suite, status) in suites {
-        if status == CheckStatus::Failed {
-            open.push(item(OpenKind::Check, format!("{suite} ended failed")));
+    for check in checks.into_values() {
+        if check.status == CheckStatus::Failed {
+            let tree = check.worktree.trim_end_matches('/').rsplit('/').next();
+            let named = tree.filter(|t| check.foreign && !t.is_empty());
+            let line = match named {
+                Some(tree) => format!("{} in {tree} ended failed", check.suite),
+                None => format!("{} ended failed", check.suite),
+            };
+            open.push(item(OpenKind::Check, line));
         }
     }
     let changed = session
