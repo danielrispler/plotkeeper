@@ -418,9 +418,8 @@ fn card_of_turn(asking: bool) -> CardRequest {
         json!({"prompt": "Go", "prompt_id": "p1"}),
     )];
     if asking {
-        lines.push(line("PreToolUse", 2, Some("w1"), bash));
-        let notice = json!({"notification_type": "permission_prompt"});
-        lines.push(line("Notification", 3, None, notice));
+        lines.push(line("PreToolUse", 2, Some("w1"), bash.clone()));
+        lines.push(line("PermissionRequest", 3, Some("w1"), bash));
     }
     lines.push(line(
         "Stop",
