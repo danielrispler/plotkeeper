@@ -1316,6 +1316,91 @@ mod learning {
         assert_eq!(kinds(&store.turn_summary("t").unwrap().taps), expected);
         assert_eq!(kinds(&store.retests()[0].taps), expected);
     }
+
+    const MIN: u64 = 60 * 1000;
+
+    /// A turn `t` with a Quiz whose turn ended `ago` before NOW.
+    fn fresh_summary(store: &mut CardStore, t: &str, ago: u64) {
+        let request = studio_core::SummaryRequest {
+            id: t.into(),
+            session_id: "s1".into(),
+            ..Default::default()
+        };
+        let summary: studio_understanding::TurnSummary =
+            serde_json::from_value(serde_json::json!({
+                "summary": "Did a thing.",
+                "quiz": { "text": "Why?", "key": 0, "options": [
+                    { "text": "A", "why": "Yes." }, { "text": "B", "why": "No." }] },
+            }))
+            .unwrap();
+        store.add_summary_at(request, summary, NOW - ago).unwrap();
+    }
+
+    /// A card `id` of session `session` (a worker's, say) whose Quiz was added `ago` before NOW.
+    fn fresh_card(store: &mut CardStore, id: &str, session: &str, ago: u64) {
+        let mut request = super::edit(id, "src/lib.rs");
+        request.session_id = session.into();
+        let card = super::card(&request);
+        store.add(request, card, NOW - ago).unwrap();
+    }
+
+    #[test]
+    fn with_no_retest_picked_today_an_eligible_retest_beats_a_fresh_quiz_and_after_one_the_fresh_quiz_comes_first()
+     {
+        let (_data, mut store) = empty();
+        seed(&mut store, "a", DAY);
+        seed(&mut store, "b", 2 * DAY);
+        fresh_summary(&mut store, "now", 5 * MIN);
+        assert_eq!(served(&store).as_deref(), Some("a"));
+        pick(&mut store, "retest a", NOW);
+        assert_eq!(served(&store).as_deref(), Some("now"));
+        // Answered, it gives way to the next Retest.
+        pick(&mut store, "now", NOW);
+        assert_eq!(served(&store).as_deref(), Some("b"));
+    }
+
+    #[test]
+    fn a_fresh_quiz_is_served_with_no_retest_eligible_and_even_after_the_cap_and_newest_first() {
+        let (_data, mut store) = empty();
+        fresh_summary(&mut store, "older", 20 * MIN);
+        fresh_summary(&mut store, "newer", 2 * MIN);
+        assert_eq!(served(&store).as_deref(), Some("newer"));
+        for t in ["a", "b", "c"] {
+            seed(&mut store, t, DAY);
+            pick(&mut store, &format!("retest {t}"), START + 1);
+        }
+        assert_eq!(served(&store).as_deref(), Some("newer"));
+        pick(&mut store, "newer", NOW);
+        pick(&mut store, "older", NOW);
+        assert_eq!(served(&store).as_deref(), Some("done"));
+    }
+
+    #[test]
+    fn a_worker_cards_fresh_quiz_counts_and_a_turn_ended_31_minutes_ago_is_not_fresh() {
+        let (_data, mut store) = empty();
+        fresh_card(&mut store, "worker card", "worker 1", 10 * MIN);
+        fresh_summary(&mut store, "late", 31 * MIN);
+        assert_eq!(served(&store).as_deref(), Some("worker card"));
+        pick(&mut store, "worker card", NOW);
+        assert_eq!(served(&store), None);
+        fresh_summary(&mut store, "edge", 30 * MIN);
+        assert_eq!(served(&store).as_deref(), Some("edge"));
+    }
+
+    #[test]
+    fn a_picked_skipped_or_set_aside_fresh_quiz_is_not_served() {
+        let (_data, mut store) = empty();
+        fresh_summary(&mut store, "picked", MIN);
+        fresh_summary(&mut store, "skipped", 2 * MIN);
+        fresh_summary(&mut store, "aside", 3 * MIN);
+        fresh_card(&mut store, "card aside", "s1", 4 * MIN);
+        fresh_summary(&mut store, "open", 5 * MIN);
+        pick(&mut store, "picked", NOW);
+        store.quiz_tap("skipped", Tap::Skip, NOW).unwrap();
+        store.quiz_tap("aside", Tap::NotNow, NOW).unwrap();
+        store.quiz_tap("card aside", Tap::NotNow, NOW).unwrap();
+        assert_eq!(served(&store).as_deref(), Some("open"));
+    }
 }
 
 #[test]

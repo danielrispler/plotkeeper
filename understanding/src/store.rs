@@ -192,11 +192,14 @@ pub const RETEST_AFTER_MS: u64 = 7 * 24 * 60 * 60 * 1000;
 /// How far back a Retest may have come due and still be served by the learning slot: 14 days (danielrispler/plotkeeper#240).
 pub const RETEST_REACH_MS: u64 = 14 * 24 * 60 * 60 * 1000;
 
+/// How recently a turn ended for its Quiz to be fresh on Home's learning slot: 30 minutes (danielrispler/plotkeeper#241).
+pub const FRESH_MS: u64 = RECENT_MS;
+
 /// How many Retests the learning slot serves in a day, counted by the picks of the day (danielrispler/plotkeeper#240).
 pub const RETESTS_PER_DAY: usize = 3;
 
 /// What Home's learning slot serves (danielrispler/plotkeeper#240): one Retest, or, once the day's cap is reached, "done for
-/// today". `Fresh` is the fresh Quiz of a turn or card, which a later ticket (#241) serves; nothing is `None` beside it.
+/// today", or a fresh Quiz of a turn or card (#241); nothing is `None` beside it.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Learning {
@@ -846,9 +849,7 @@ impl CardStore {
             .iter()
             .filter(|r| today(&r.taps, |t| matches!(t, Tap::Pick { .. })))
             .count();
-        if picked_today >= RETESTS_PER_DAY {
-            return Some(Learning::Done);
-        }
+        let capped = picked_today >= RETESTS_PER_DAY;
         // Each eligible Retest with its first Quiz's pick, and when it came due.
         let mut eligible: Vec<(bool, u64, &Retest, u64)> = self
             .retests
@@ -868,12 +869,63 @@ impl CardStore {
             .collect();
         eligible
             .sort_by_key(|(picked, due, ..)| (std::cmp::Reverse(*picked), std::cmp::Reverse(*due)));
-        eligible.first().map(|(_, _, r, offered)| {
+        let retest = eligible.first().map(|(_, _, r, offered)| {
             Learning::Retest(Retest {
                 of_at: Some(*offered),
                 ..(*r).clone()
             })
-        })
+        });
+        // One Retest comes first each day; then a fresh Quiz; then more Retests, up to the cap.
+        if picked_today == 0 && retest.is_some() {
+            return retest;
+        }
+        if let Some(fresh) = self.fresh_quiz(now, day_start) {
+            return Some(fresh);
+        }
+        if capped {
+            return Some(Learning::Done);
+        }
+        retest
+    }
+
+    /// The newest Quiz of a turn summary or a card, a worker's included, that ended at most `FRESH_MS` before `now` and that
+    /// Daniel has not picked or skipped, nor set aside since `day_start` (danielrispler/plotkeeper#241).
+    fn fresh_quiz(&self, now: u64, day_start: u64) -> Option<Learning> {
+        let open = |taps: &[QuizTap]| {
+            !taps.iter().any(QuizTap::answers)
+                && !taps
+                    .iter()
+                    .any(|t| t.at >= day_start && matches!(t.tap, Tap::NotNow))
+                && !taps.iter().any(|t| t.tap == Tap::KeyWrong)
+        };
+        let fresh = |at: u64| at <= now && now - at <= FRESH_MS;
+        let cards = self.cards.iter().filter_map(|k| {
+            let at = k.added_at.or(k.shown_at).filter(|at| fresh(*at))?;
+            let quiz = k.card.quiz.as_ref().filter(|_| k.request.check.is_none())?;
+            (k.guess.is_none() && !k.key_wrong && open(&k.taps)).then_some((
+                at,
+                &k.request.id,
+                &k.request.session_id,
+                quiz,
+            ))
+        });
+        let summaries = self.summaries.iter().filter_map(|k| {
+            let quiz = k.summary.quiz.as_ref()?;
+            (fresh(k.added_at) && k.arm != Some(Arm::BodyOnly) && open(&k.taps)).then_some((
+                k.added_at,
+                &k.request.id,
+                &k.request.session_id,
+                quiz,
+            ))
+        });
+        cards
+            .chain(summaries)
+            .max_by_key(|(at, ..)| *at)
+            .map(|(_, id, session_id, quiz)| Learning::Fresh {
+                id: id.clone(),
+                session_id: session_id.clone(),
+                quiz: quiz.clone(),
+            })
     }
 
     /// What the learning slot reads of the first Quiz, a card's or a turn's own, that retest `of` is of.

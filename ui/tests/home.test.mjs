@@ -115,6 +115,11 @@ test("done for today shows only in its case", () => {
   assert.equal(slotOf(null), undefined);
 });
 
+test("a fresh Quiz fills the slot as the store chose it", () => {
+  const slotOf = (learning) => view([], undefined, { learning }).find((p) => p.key === "learning")?.slot;
+  assert.equal(slotOf({ kind: "fresh", id: "t1", session_id: "s1", quiz }).item.kind, "fresh");
+});
+
 test("an item answered here stays with its reveal, and Next shows only when another item is due", () => {
   const answered = retest("a", quiz, [{ kind: "pick", option: 0, at: 2 }]);
   const slotOf = (learning, held) => view([], { ...fresh(), held }, { learning }).find((p) => p.key === "learning")?.slot;
