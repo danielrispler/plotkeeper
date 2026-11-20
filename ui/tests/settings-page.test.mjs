@@ -13,6 +13,8 @@ const settingsPageAt = (sheet, files) => pageOf(files, sheet);
 const load = (settings, previous = initial) => reload(previous, { settings, keymap: null });
 const rows = (page) => page.sections.flatMap((section) => section.rows);
 const row = (page, title) => rows(page).find((r) => r.title === title);
+// The rows that set a key: every row but the two that open a file.
+const settingRows = (page) => rows(page).filter((r) => r.control !== "open");
 
 test("the page has its four headings, with their rows", () => {
   const page = settingsPage(initial);
@@ -55,14 +57,13 @@ test("a row names the key it writes", () => {
 test("a file that does not parse disables every setting's control, says so, and shows the settings in effect", () => {
   const last = load(`{ "sounds": false }`);
   const page = settingsPage(load(`{ "sounds": `, last));
-  const settings = (page) => rows(page).filter((r) => r.control !== "open");
   assert.equal(page.error, "settings.json has errors: fix it first");
-  assert.ok(settings(page).every((r) => r.disabled), "every setting's control is disabled");
+  assert.ok(settingRows(page).every((r) => r.disabled), "every setting's control is disabled");
   assert.equal(row(page, "Sounds").value, false);
   assert.equal(row(page, "Sounds").changed, true);
   const fine = settingsPage(last);
   assert.equal(fine.error, null);
-  assert.ok(settings(fine).every((r) => !r.disabled));
+  assert.ok(settingRows(fine).every((r) => !r.disabled));
 });
 
 test("a key of the wrong type reads as its default and is not a broken file", () => {
@@ -71,7 +72,7 @@ test("a key of the wrong type reads as its default and is not a broken file", ()
   assert.equal(row(page, "Sounds").changed, false);
   assert.equal(row(page, "Warn at context share").value, 30);
   assert.equal(page.error, null);
-  assert.ok(rows(page).every((r) => r.control === "open" || !r.disabled));
+  assert.ok(settingRows(page).every((r) => !r.disabled));
 });
 
 test("the context warning steps by 5 from 0, Off, to 100, and its step back to 30 removes the key", () => {
