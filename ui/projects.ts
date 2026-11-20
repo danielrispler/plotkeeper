@@ -51,3 +51,25 @@ export const knownProjects = (): string[] => known;
 // The first project, "" when there is none: where a view with no project of its own (the palette's
 // Fetch, a branch switch with no workspace shown) works.
 export const mainProject = async (): Promise<string> => (await projects())[0] ?? "";
+
+// The project New session opens on: the selected session's, else the last one a session was started in from the
+// picker while it is still a project, else the first; "" with none. Superset's and T3 Code's order
+// (docs/studio/research/new-session-project.md).
+export const pickerProject = (selected: string | null, last: string | null, paths: string[]): string =>
+  selected ?? (last && paths.includes(last) ? last : (paths[0] ?? ""));
+
+// The project a session was last started in from the picker, kept across runs.
+export function lastProject(): string | null {
+  try {
+    return localStorage.getItem("project");
+  } catch {
+    return null;
+  }
+}
+export function keepProject(project: string) {
+  try {
+    localStorage.setItem("project", project);
+  } catch {
+    // Not kept: the next picker with no selection opens on the first project.
+  }
+}

@@ -155,6 +155,9 @@ h1 { margin: 0 0 var(--sp-4); }
 .project-toggle .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-toggle .glyph { margin-inline-start: auto; }
 .project-head[draggable="true"] { cursor: grab; }
+/* A project's "+" (Zed's, T3 Code's): hidden until its header is hovered or holds the focus. */
+.project-new { flex: none; padding: var(--sp-1) var(--sp-3); font-size: var(--size-small); color: var(--muted); opacity: 0; }
+.project-head:is(:hover, :focus-within) .project-new { opacity: 1; }
 .project-action { flex: none; padding: var(--sp-1) var(--sp-3); font-size: var(--size-xs); color: var(--muted); }
 .add-project { margin: var(--sp-4) var(--sp-2); }
 .project.outside { opacity: 0.6; }
@@ -488,6 +491,8 @@ body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
 .picker { position: fixed; top: calc(var(--bar) + var(--sp-2)); right: var(--sp-5); z-index: 8; width: var(--popover); max-height: 70vh;
           overflow-y: auto; background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); padding: var(--sp-3); }
 .picker .row .l2 { font-family: var(--mono); font-size: var(--size-xs); }
+.picker .project-pill { margin: var(--sp-1) var(--sp-2) var(--sp-2); max-width: calc(100% - 2 * var(--sp-2)); }
+.picker .project-pill .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .picker .agent-choice { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin: var(--sp-2) var(--sp-2) var(--sp-3); }
 .picker .auto-mode { display: block; font-size: var(--size-small); margin: var(--sp-2) var(--sp-4) var(--sp-3); }
 .picker .row:disabled { opacity: 0.5; cursor: default; }

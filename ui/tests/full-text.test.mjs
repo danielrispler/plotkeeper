@@ -180,6 +180,7 @@ const covered = {
   ".row .row-step": "list.ts: the step's title",
   ".row .token": "list.ts: the token's title",
   ".project-toggle .name": "list.ts: the toggle's title is the project's path",
+  ".picker .project-pill .name": "picker.ts: the pill's title is the project's path",
   ".project-workspaces .row .facts": "workspaces.ts: the facts' title",
   ".session-header .name": "story.ts: the header's title holds the full name",
   ".toast .name": "toast.ts: the name's title",

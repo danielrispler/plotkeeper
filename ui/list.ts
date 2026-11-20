@@ -8,7 +8,7 @@ import { shortPaths } from "./paths.js";
 import { historyLink } from "./history.js";
 import { logo, logoKey, noContextNote } from "./logos.js";
 import { knownProjects, onProjects, projects, projectsError, setProjects } from "./projects.js";
-import { addProject, refuse } from "./picker.js";
+import { addProject, refuse, showPicker } from "./picker.js";
 import { projectGroups, foundWorkspaces, tokenOf, workspaceSection, type ProjectGroup } from "./workspaces.js";
 import { redrawHistory, redrawHome, showHistory } from "./panes.js";
 import { isSelected, select } from "./selection.js";
@@ -445,7 +445,8 @@ export function headAction(group: { key: string; project: boolean }, main: strin
 
 // A project's header (#97): its name and, even while folded, its most urgent state: needs you over running. The
 // header carries the project's own actions (#98): Remove, and Add as project on a folder outside every project; a
-// project's header is dragged to reorder the projects.
+// project's header is dragged to reorder the projects. A project's header also holds a "+", shown on hover or focus,
+// that opens New session on that project, as in Zed, T3 Code, Superset and cmux (docs/studio/research/new-session-project.md).
 export function projectHead(group: ProjectGroup<Session>): HTMLElement {
   const head = document.createElement("div");
   head.className = "project-head";
@@ -462,6 +463,14 @@ export function projectHead(group: ProjectGroup<Session>): HTMLElement {
   toggle.append(text("span", group.name, "name"));
   if (group.rollup) toggle.append(glyph(group.rollup));
   head.append(toggle);
+  if (group.project) {
+    const plus = pressable(text("button", "+", "project-new"), false, () => void showPicker("session", group.key));
+    plus.removeAttribute("aria-pressed");
+    plus.dataset.key = `new ${group.key}`;
+    plus.title = `New session in ${group.name}`;
+    plus.setAttribute("aria-label", plus.title);
+    head.append(plus);
+  }
   const action = headAction(group, group.project ? null : repositoryOf(group.key), knownProjects());
   if (action) {
     const remove = action.kind === "remove";
