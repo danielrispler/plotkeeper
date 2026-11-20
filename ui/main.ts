@@ -27,7 +27,7 @@ import { knownProjects } from "./projects.js";
 import { studio } from "./state.js";
 import { closeSettingsPage, settingsPageOpen, showSettingsPage, startSettingsPage } from "./settings-page.js";
 import { showSkills } from "./skills.js";
-import { showView } from "./story.js";
+import { showBarName, showView } from "./story.js";
 import { jumpToNeedsYou, showToast } from "./toast.js";
 import { finishedNote, showNote, warnContext, watchNotes } from "./notes.js";
 import type { Selection, Session, SessionCards } from "./types.js";
@@ -271,6 +271,8 @@ function applySettings(files: SettingsFiles) {
   element("settings-gear").title = titled(studio.files.keymap, "Open settings", "studio::OpenSettings");
   element("new-session").title = titled(studio.files.keymap, "Start a new session", "studio::NewSession");
   element("settings-close").title = titled(studio.files.keymap, "Close settings", "studio::Dismiss");
+  // The header's hover names a key too: draw it again with the keymap now in effect.
+  showBarName(element("bar-name").textContent ?? "");
   setSettingsErrors(errors);
   // Only a changed `zoom` resets the zoom the keys set.
   const to = reloadedZoom(zoom, previous, settings);

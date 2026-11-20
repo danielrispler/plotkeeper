@@ -41,15 +41,21 @@ export const stubSource = (fixture) => `window.__TAURI__ = (() => {
 // What runs in the page's head, after the stub: the body's classes (set once the body exists), then the fixture's script once
 // the UI has drawn (the page has loaded and its first replies have landed). The script is the body of an async function that
 // gets `log`; what it logs reaches snap's output, and a line that starts `snap:fail` makes snap exit non-zero. A script that
-// throws logs a `snap:fail` line. The hover rule's check runs after it, in every page (hover.mjs).
+// throws logs a `snap:fail` line. The hover rule's check runs after it in every page, also after a script that returned early or
+// threw (hover.mjs).
 export const headSource = ({ bodyClasses = [], script = null } = {}) => `
   addEventListener("DOMContentLoaded", () => document.body.classList.add(...${JSON.stringify(bodyClasses)}));
   addEventListener("load", () => setTimeout(async () => {
     const log = (...parts) => console.log(parts.join(" "));
     try {
-      await (async (log) => {\n${script ?? ""}\n${hoverAudit}\n})(log);
+      await (async (log) => {\n${script ?? ""}\n})(log);
     } catch (error) {
       log("snap:fail the script threw: " + error);
+    }
+    try {
+      await (async (log) => {\n${hoverAudit}\n})(log);
+    } catch (error) {
+      log("snap:fail the hover check threw: " + error);
     }
   }, 2500));`;
 

@@ -233,7 +233,7 @@ export function branchOptions(branches: Branch[], blocked: string | null): Branc
   return branches.map((branch) => {
     const note = branch.task ? `in task ${branch.task}` : branch.current ? "current" : branch.remote ? "at origin" : "";
     const why = blocked ?? (branch.task ? `the task ${branch.task} has it checked out` : branch.current ? "the main checkout is on it" : "");
-    return { branch, label: branch.name, note, disabled: why !== "", why };
+    return { branch, label: branch.name, note, disabled: blocked !== null || branch.task !== null || branch.current, why };
   });
 }
 

@@ -243,7 +243,6 @@ export function drawSettingsPage() {
   patch(element("settings-body"), sections);
   // A dropdown's selection is a property the patch does not carry: set it from the row.
   for (const select of element("settings-body").querySelectorAll("select")) select.value = select.dataset.value ?? "";
-  element("settings-close").title = titled(studio.files.keymap, "Close settings", "studio::Dismiss");
 }
 
 const rowFor = (key: string) => current().sections.flatMap((s) => s.rows).find((row) => keyOf(row) === key);

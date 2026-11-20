@@ -158,6 +158,14 @@ test("the hover check fails a control with no hover, one whose hover repeats its
   assert.ok(failed(logged));
 });
 
+test("the hover check runs after a script that returns early or throws", async () => {
+  const nodes = { controls: [control("×")], titled: [] };
+  for (const script of ["return;", 'throw new Error("no rail");']) {
+    const { logged } = await runHead({ script }, nodes);
+    assert.ok(logged.some((line) => line.startsWith("snap:fail hover: no hover")), script);
+  }
+});
+
 test("snapPage puts a fixture's script in the page, after the stub and before the app", () => {
   const index = '<head><script type="module" src="main.js"></script></head>';
   const page = snapPage(index, { snapScript: "log(1)" });

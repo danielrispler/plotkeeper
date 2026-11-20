@@ -1764,7 +1764,6 @@ fn play(sound: Sound) {
     });
 }
 
-/// Time since the app started, a monotonic clock for combining notices (danielrispler/Falinks#434, decision 28).
 // A hover's text shows after half a second, not macOS's 1.5 s (#220). WKWebView's `title` tooltips are AppKit's, which read
 // NSInitialToolTipDelay; it is registered, not written, so `defaults write dev.falinks.studio NSInitialToolTipDelay` still wins.
 fn hover_delay() {
@@ -1779,6 +1778,7 @@ fn hover_delay() {
     unsafe { NSUserDefaults::standardUserDefaults().registerDefaults(&defaults) };
 }
 
+/// Time since the app started, a monotonic clock for combining notices (danielrispler/Falinks#434, decision 28).
 fn uptime() -> Duration {
     static STARTED: LazyLock<Instant> = LazyLock::new(Instant::now);
     STARTED.elapsed()
