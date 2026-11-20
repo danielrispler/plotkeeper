@@ -13,8 +13,8 @@ use std::{
 };
 use studio_core::{CardRequest, Kind, Output, Studio};
 use studio_understanding::{
-    Card, CardStore, CardWriter, FakeWriter, Fingerprints, explain_more, fingerprint_changes,
-    worktree_root, write_goal, write_stop,
+    Card, CardStore, CardWriter, FakeWriter, Fingerprints, fingerprint_changes, worktree_root,
+    write_goal, write_stop,
 };
 
 /// The fake writer, keeping what each call read: a card's earlier summaries and each Goal's prompts.
@@ -147,8 +147,7 @@ impl Shell {
         match output {
             Output::Card(request) => {
                 let notice = || self.writer.sent.borrow_mut().push("notice");
-                let written = write_stop(&self.store, &self.writer, request, session, notice, log);
-                assert!(written)
+                write_stop(&self.store, &self.writer, request, session, notice, log);
             }
             Output::Promoted { agent } => self.store.lock().unwrap().promoted(&agent).unwrap(),
             Output::Brief(request) => {
@@ -156,18 +155,6 @@ impl Shell {
             }
             _ => {}
         }
-    }
-
-    /// The app restarts as the shell starts: the store read from disk, the log replayed, the store's
-    /// facts and cards applied, and the turns and subagents still open fingerprinted.
-    fn restart(&mut self) {
-        let path = self._dirs[1].path().join("cards.json");
-        self.store = Mutex::new(CardStore::open(path).unwrap());
-        self.studio = Studio::with_roots(worktree_root);
-        self.log.iter().for_each(|line| self.studio.replay(line));
-        self.store.lock().unwrap().restore(&mut self.studio);
-        self.fingerprints = HashMap::new();
-        fingerprint_changes(self.studio.waiting_folders(), &mut self.fingerprints);
     }
 
     /// Takes event `name`, with `fields` added, and writes the cards and briefs it asks for.
@@ -316,57 +303,20 @@ fn worker_writes_and_ends(shell: &mut Shell) {
 }
 
 #[test]
-fn a_parent_that_changed_nothing_itself_gets_one_card_from_its_workers_summaries_not_diffs() {
+fn a_parent_that_changed_nothing_itself_gets_no_card_though_its_workers_wrote_theirs() {
     let mut shell = Shell::new();
     shell.take("UserPromptSubmit", json!({ "prompt": "Implement #378" }));
     worker_writes_and_ends(&mut shell);
+    let before = shell.writer.cards.borrow().len();
     shell.take("Stop", json!({}));
 
     let store = shell.store.lock().unwrap();
     let own: Vec<&CardRequest> = store.cards().iter().map(|kept| &kept.request).collect();
-    let [worker, own] = own[..] else {
-        panic!("a worker's card and its parent's: {own:?}");
+    let [worker] = own[..] else {
+        panic!("only the worker's card: {own:?}");
     };
-    assert_eq!(own.agent, None);
-    assert_eq!(own.workers, std::slice::from_ref(&worker.id));
-    let read = own.diff().to_owned();
-    assert!(
-        read.contains(&format!(
-            "- `Implement #378` (completed): {}\n",
-            summary("a.rs")
-        )),
-        "{read}"
-    );
-    assert!(!read.contains("+++"), "{read}");
-    let id = own.id.clone();
-    drop(store);
-    // "Explain more" reads the workers' text the stored card keeps.
-    explain_more(&shell.store, &shell.writer, &id, |line| panic!("{line}")).unwrap();
-    assert_eq!(*shell.writer.mores.borrow(), [read]);
-}
-
-#[test]
-fn a_worker_card_with_an_empty_summary_is_left_out_of_its_parents_input() {
-    let mut shell = Shell::new();
-    shell.writer.blank.borrow_mut().push("w2".into());
-    shell.take(
-        "UserPromptSubmit",
-        json!({ "prompt": "Implement #378 and #379" }),
-    );
-    worker_writes_and_ends(&mut shell);
-    shell.take("PostToolUse", spawn_child("w2", "Implement #379", true));
-    let tree = shell.worktree("w2");
-    shell.child("w2", &tree, "SubagentStart", json!({}));
-    fs::write(tree.join("b.rs"), "fn b1() {}\n").unwrap();
-    shell.child("w2", &tree, "SubagentStop", json!({}));
-    shell.take("Stop", json!({}));
-
-    let store = shell.store.lock().unwrap();
-    let parent = &store.cards().last().unwrap().request;
-    assert_eq!(parent.workers.len(), 2, "{parent:?}");
-    let read = parent.diff();
-    assert!(read.contains("`Implement #378`"), "{read}");
-    assert!(!read.contains("`Implement #379`"), "{read}");
+    assert_eq!(worker.agent.as_deref(), Some("w1"));
+    assert_eq!(shell.writer.cards.borrow().len(), before);
 }
 
 #[test]
@@ -656,38 +606,6 @@ fn a_rows_line_is_who_needs_you_then_the_stopped_line_then_who_returned_then_the
     // Once the turn is over: the stopped line.
     shell.event("Stop", json!({ "last_assistant_message": "Done." }));
     assert_eq!(shell.line(), "Done.");
-}
-
-/// danielrispler/Falinks#434, decisions 37 and 38: after a restart the shell's join still knows the helper promoted live
-/// and the worker cards its session collected, from the store on disk.
-#[test]
-fn after_a_restart_a_promoted_helper_is_a_worker_and_the_stop_writes_its_card_from_the_workers() {
-    let mut shell = Shell::new();
-    let repo = shell.repo.clone();
-    shell.take("UserPromptSubmit", json!({ "prompt": "Implement #378" }));
-    worker_writes_and_ends(&mut shell);
-    shell.take("PostToolUse", spawn_child("h1", "Format", false));
-    shell.child("h1", &repo, "SubagentStart", json!({}));
-    shell.child("h1", &repo, "PreToolUse", bash("cargo fmt"));
-    fs::write(repo.join("lib.rs"), "fn a() {}\n\n").unwrap();
-    shell.child("h1", &repo, "PostToolUse", bash("cargo fmt"));
-    // Its change is undone, so the session's own worktree ends where its turn began.
-    git(&repo, &["checkout", "-q", "lib.rs"]);
-
-    shell.restart();
-    let kind = |shell: &Shell| shell.studio.session("s1").unwrap().agents[1].kind;
-    assert_eq!(kind(&shell), Kind::Worker);
-    shell.take("Stop", json!({}));
-
-    let store = shell.store.lock().unwrap();
-    let requests: Vec<&CardRequest> = store.cards().iter().map(|kept| &kept.request).collect();
-    let [worker, own] = requests[..] else {
-        panic!("a worker's card and its parent's: {requests:?}");
-    };
-    assert_eq!(
-        (own.agent.as_deref(), &own.workers[..]),
-        (None, std::slice::from_ref(&worker.id))
-    );
 }
 
 /// The session's own cards, each as the diff it asked the writer about.

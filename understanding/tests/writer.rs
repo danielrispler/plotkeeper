@@ -567,28 +567,29 @@ fn explain_more_runs_the_same_writer_on_the_cards_explanation_and_its_change() {
 }
 
 #[test]
-fn explain_more_on_a_card_built_from_workers_tells_the_writer_there_is_no_diff() {
+fn the_writers_instructions_no_longer_describe_a_change_that_is_workers_summaries() {
     let folder = Path::new("/h/Library/Application Support/dev.falinks.studio/card-writer");
     let writer = ClaudeWriter::new(CLAUDE.into(), folder.into());
-    let workers = CardRequest {
+    // A card of that kind still in the store: its change is the workers' text.
+    let older = CardRequest {
         change: Some("No diff: the agent changed nothing itself since its last card. Its workers, each with its status and the summaries of its cards since then:\n- `Implement #378` (completed): `a.rs` נוסף.\n".into()),
         ..edit()
     };
 
-    let (_, prompt) = writer.more_command(&workers, &good_card());
+    let (_, prompt) = writer.more_command(&older, &good_card());
+    let (_, card) = writer.command(&older, &[]);
 
-    let (_, card) = writer.command(&workers, &[]);
-    let clause = card
-        .lines()
-        .find(|line| line.starts_with("When the change is not a diff"))
-        .unwrap();
-    assert!(clause.contains("how the work was split"), "{clause}");
-    assert!(prompt.contains("When the change is not a diff"), "{prompt}");
-    assert!(
-        prompt.contains("how the work was split and what came back"),
-        "{prompt}"
-    );
-    assert!(prompt.ends_with(workers.diff()));
+    for instructions in [&card, &prompt] {
+        assert!(
+            !instructions.contains("When the change is not a diff"),
+            "{instructions}"
+        );
+        assert!(
+            !instructions.contains("how the work was split"),
+            "{instructions}"
+        );
+    }
+    assert!(prompt.ends_with(older.diff()));
 }
 
 #[test]
