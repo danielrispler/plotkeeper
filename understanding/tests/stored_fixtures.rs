@@ -11,7 +11,7 @@ use std::path::Path;
 use studio_core::CheckStatus as Status;
 use studio_core::Source;
 use studio_understanding::{CardStore, Level, Reason};
-use studio_understanding::{CheckResult, Tap};
+use studio_understanding::{CheckResult, Surface, Tap};
 
 const FILES: [&str; 7] = [
     "cards-v2.json",
@@ -120,7 +120,17 @@ fn the_minimal_samples_of_every_stored_file_load_with_their_values() {
     assert_eq!(card.request.id, "sess-1@1761743900000");
     assert_eq!(card.card.explanation, "Sample explanation.");
     assert_eq!(card.added_at, None);
-    assert!(card.card.quiz.is_none() && card.taps.is_empty());
+    assert!(card.card.quiz.is_none());
+    let [tap] = &card.taps[..] else {
+        panic!("one tap")
+    };
+    assert_eq!(
+        tap.tap,
+        Tap::Confidence {
+            sure: true,
+            surface: Surface::Rail
+        }
+    );
 
     assert_eq!(store.brief("sess-1").unwrap().goal, None);
     assert!(store.facts().promoted.is_empty());
