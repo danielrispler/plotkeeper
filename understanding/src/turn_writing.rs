@@ -240,14 +240,7 @@ impl TurnWriting {
         let id = request.session_id.clone();
         // The job reads its session when it runs, not now: it may wait behind earlier writer calls.
         let job = move || {
-            let session = state
-                .core
-                .lock()
-                .unwrap()
-                .session(&request.session_id)
-                .cloned();
-            // A session deleted while the job waited gets nothing.
-            let Some(session) = session.filter(|s| !s.is_deleted()) else {
+            let Some(session) = state.present(&request.session_id) else {
                 return;
             };
             // Only a live turn's own card has a summary to come, which takes what is kept here and clears it.
@@ -302,6 +295,13 @@ impl TurnWriting {
 }
 
 impl State {
+    /// Session `id` when it is there and not deleted: a job whose session is gone when it runs ends
+    /// without writing. An ended session is not gone.
+    fn present(&self, id: &str) -> Option<Session> {
+        let session = self.core.lock().unwrap().session(id).cloned();
+        session.filter(|s| !s.is_deleted())
+    }
+
     /// A card job: the card, or only the Goal when `card` is false, then Design so far.
     fn write_stop(
         &self,
@@ -356,7 +356,7 @@ impl State {
 
     /// Writes "Design so far" of session `id` when its sources changed (danielrispler/plotkeeper#123). Returns whether it did.
     fn design(&self, id: &str) -> bool {
-        let turns: Vec<String> = match self.core.lock().unwrap().session(id) {
+        let turns: Vec<String> = match self.present(id) {
             Some(session) => session.turns.iter().filter_map(|t| t.id.clone()).collect(),
             None => return false,
         };
@@ -388,6 +388,9 @@ impl State {
 
     /// The summary job of a summary written at the turn's end.
     fn write_summary(&self, mut request: SummaryRequest) {
+        if self.present(&request.session_id).is_none() {
+            return;
+        }
         let setup = self.setup.lock().unwrap().clone();
         if !self.settle(&mut request) {
             return;
@@ -410,6 +413,9 @@ impl State {
 
     /// The summary job of a summary that waits for Daniel to open its turn.
     fn park(&self, mut request: SummaryRequest) {
+        if self.present(&request.session_id).is_none() {
+            return;
+        }
         if self.settle(&mut request) {
             self.waiting
                 .lock()
@@ -450,6 +456,9 @@ impl State {
     }
 
     fn write_name(&self, request: &NameRequest) {
+        if self.present(&request.session_id).is_none() {
+            return;
+        }
         let setup = self.setup.lock().unwrap().clone();
         let response = request.response.as_deref();
         let name = write_name(&*self.writer, &setup, &request.prompt, response, |l| {

@@ -938,7 +938,7 @@ fn every_entry_point_returns_within_a_few_seconds_against_a_core_with_no_such_tu
     called("setup", |w| drop(w.setup()));
     // The jobs they queued run too, a card's read of its session included, and end with nothing written.
     called("the queued jobs", |w| assert_eq!(w.run_queued(), 5));
-    // A summary parked on open, opened against a core with no such turn.
+    // A summary of a session that is not there parks nothing, so opening its turn finds none.
     called("settings, on open", |w| {
         w.settings(SummarySetup::default(), true)
     });
@@ -954,7 +954,7 @@ fn every_entry_point_returns_within_a_few_seconds_against_a_core_with_no_such_tu
             writing.opened("s1@7")
         }
     });
-    assert!(opened.is_ok_and(|s| s.is_some_and(|s| s.request.id == "s1@7")));
+    assert_eq!(opened, Ok(None));
 }
 
 #[test]
@@ -1079,7 +1079,8 @@ impl CardWriter for Slow {
 
 #[test]
 fn two_jobs_queued_for_an_ended_session_run_one_at_a_time_in_order() {
-    let day = Day::new();
+    let mut day = Day::new();
+    day.event("UserPromptSubmit", json!({ "prompt": "Fix the build" }));
     let events = Events::default();
     let threaded = TurnWriting::new(
         day.core.clone(),
@@ -1153,7 +1154,8 @@ impl CardWriter for Panicking {
 
 #[test]
 fn a_job_that_panics_does_not_stop_the_later_jobs_of_its_session() {
-    let day = Day::new();
+    let mut day = Day::new();
+    day.event("UserPromptSubmit", json!({ "prompt": "Fix the build" }));
     let events = Events::default();
     let threaded = TurnWriting::new(
         day.core.clone(),
@@ -1989,4 +1991,37 @@ fn a_session_deleted_while_its_card_waited_gets_nothing_and_the_queue_goes_on_to
 
     assert_eq!(day.writing.run_queued(), 2);
     assert_eq!(day.card_ids(), ["s2@200"]);
+}
+
+#[test]
+fn a_session_deleted_while_its_summary_waited_gets_no_offer_line_summary_or_writer_call() {
+    let mut day = Day::new();
+    let outputs = day.turn_asking("Add one file", &[("a.rs", 10)], &long_reply());
+    let id = card_id(&outputs);
+    for output in outputs {
+        if let Output::Summary(request) = output {
+            day.writing.summary(request);
+        }
+    }
+    day.event("StudioDelete", json!({}));
+    day.writing.run_queued();
+
+    assert_eq!(day.offers(), Vec::<Value>::new());
+    assert_eq!(day.summary(&id), None);
+    assert_eq!(day.summaries.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn a_session_deleted_while_its_name_waited_is_not_named() {
+    let mut day = Day::new();
+    let outputs = day.event("UserPromptSubmit", json!({ "prompt": "Fix the build" }));
+    for output in outputs {
+        if let Output::Name(request) = output {
+            day.writing.name(request);
+        }
+    }
+    day.event("StudioDelete", json!({}));
+    day.writing.run_queued();
+
+    assert_eq!(day.events(), Vec::<String>::new());
 }
