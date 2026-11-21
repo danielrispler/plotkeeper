@@ -989,6 +989,85 @@ fn a_forked_skills_subagent_is_named_by_its_slash_command() {
     assert_eq!(review.name, "/code-review high origin/main...HEAD");
 }
 
+/// A forked skill Daniel types: no `Skill` call, only his prompt and its child's `SubagentStart`,
+/// which share the prompt's id, as session `0451d8cc` recorded them on 2026-11-21.
+fn typed_skill(at: u64) -> String {
+    ev(
+        "UserPromptSubmit",
+        at,
+        "p1",
+        json!({"prompt": "/code-review high pr 274"}),
+    )
+}
+
+fn subagent_start(at: u64, child: &str, prompt: &str) -> String {
+    let start = json!({"agent_id": child, "agent_type": "general-purpose"});
+    ev("SubagentStart", at, prompt, start)
+}
+
+/// A slash command Daniel types forks its skill with no call to name the child; the prompt's id
+/// ties them.
+#[test]
+fn a_typed_forked_skills_subagent_sits_under_the_session_named_by_its_slash_command() {
+    let mut studio = Studio::default();
+    studio.apply(&typed_skill(1));
+    studio.apply(&subagent_start(2, "r1", "p1"));
+    studio.apply(&step(3, "r1", "/w"));
+
+    let review = agent(&studio, "s1", "r1");
+    assert_eq!(review.parent, Parent::Session);
+    assert_eq!(review.name, "/code-review high pr 274");
+}
+
+/// The hooks are async: session `77cc968f` recorded the child's start before the prompt.
+#[test]
+fn a_typed_forked_skills_subagent_that_starts_before_the_prompt_sits_under_the_session() {
+    let mut studio = Studio::default();
+    studio.apply(&subagent_start(1, "r1", "p1"));
+    studio.apply(&typed_skill(2));
+
+    assert_eq!(agent(&studio, "s1", "r1").parent, Parent::Session);
+}
+
+/// A skill typed inline that spawns: a child whose start beats its spawn call is taken for the
+/// fork until its spawn's response names it.
+#[test]
+fn an_inline_typed_skills_spawned_child_ends_named_by_its_spawn() {
+    let mut studio = Studio::default();
+    studio.apply(&typed_skill(1));
+    studio.apply(&subagent_start(2, "c1", "p1"));
+    studio.apply(&spawn(3, "t1", None));
+    studio.apply(&launched(
+        4,
+        "t1",
+        None,
+        "c1",
+        json!({"description": "Find X"}),
+    ));
+
+    let child = agent(&studio, "s1", "c1");
+    assert_eq!(child.parent, Parent::Session);
+    assert_eq!(child.name, "Find X");
+}
+
+/// Only a child of that prompt is tied to it, and a stray id with no type (danielrispler/plotkeeper#67)
+/// is not.
+#[test]
+fn a_typed_slash_command_ties_no_child_of_another_prompt_nor_a_stray_id() {
+    let mut studio = Studio::default();
+    studio.apply(&typed_skill(1));
+    studio.apply(&subagent_start(2, "r0", "p0"));
+    studio.apply(&ev(
+        "SubagentStop",
+        3,
+        "p1",
+        json!({"agent_id": "x1", "agent_type": ""}),
+    ));
+
+    assert_eq!(agent(&studio, "s1", "r0").parent, Parent::Unattached);
+    assert_eq!(agent(&studio, "s1", "x1").parent, Parent::Unattached);
+}
+
 /// Seam 1 (danielrispler/plotkeeper#206): a subagent not spawned isolated reports its session's folder
 /// `/w`; the touched roots its hook lists tell where it works.
 fn bash_of(agent: &str, name: &str, at: u64, roots: &[&str]) -> String {

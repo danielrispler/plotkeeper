@@ -242,6 +242,9 @@ pub struct Session {
     /// Its subagents at any depth, in the order they were first seen (danielrispler/Falinks#369, decision 5).
     #[serde(serialize_with = "serialize_agents")]
     pub agents: Vec<Subagent>,
+    /// The slash command Daniel typed whose forked child is not yet seen, by its prompt id.
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
+    typed_skill: Option<(String, String)>,
     /// Who asks Daniel, and since when, while it needs him.
     pub asker: Option<Asker>,
     /// Its prompts, oldest first, each marked with who sent it (danielrispler/Falinks#369, decision 7).
@@ -747,6 +750,9 @@ pub struct Subagent {
     /// Its spawn's call, by `tool_use_id`, and the agent that made it, `None` for the session's own.
     #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     spawn: Option<(String, Option<String>)>,
+    /// The prompt id of its first event.
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
+    first_prompt: Option<String>,
 }
 
 /// The state a session's own agent and each subagent share (danielrispler/Falinks#410, decision 22). Its id is the owner
@@ -1141,7 +1147,9 @@ impl Session {
                     .filter(|c| c.agent.as_ref() != Some(id))
                     .find(|c| !bound(&c.id));
                 let spawn = call.and_then(|c| Some((c.id.clone()?, c.agent.clone())));
-                self.agent(id, at).spawn = spawn;
+                let agent = self.agent(id, at);
+                agent.spawn = spawn;
+                agent.first_prompt.clone_from(&event.prompt_id);
             }
             // Its owner, at its first folder: itself in a worktree other than its parent's, else its
             // parent's owner.
@@ -1252,7 +1260,26 @@ impl Session {
                         }
                     }
                 }
+                Happened::SkillTyped(command) => {
+                    self.typed_skill = event.prompt_id.clone().zip(Some(command.clone()));
+                }
                 _ => {}
+            }
+        }
+        // A skill Daniel typed forks its child with no call that names it: its first child of
+        // the same prompt id with no spawn call is the fork, whichever of the two the hooks
+        // deliver first. A stray id with no type (danielrispler/plotkeeper#67) is none.
+        if let Some((prompt, command)) = &self.typed_skill {
+            let fork = self.agents.iter_mut().find(|a| {
+                a.parent == Parent::Unattached
+                    && a.spawn.is_none()
+                    && a.first_prompt.as_ref() == Some(prompt)
+                    && a.agent_type.as_ref().is_some_and(|t| !t.is_empty())
+            });
+            if let Some(fork) = fork {
+                fork.parent = Parent::Session;
+                fork.name.clone_from(command);
+                self.typed_skill = None;
             }
         }
         // A subagent that ended asks Daniel nothing, and its calls never resolve.
