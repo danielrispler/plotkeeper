@@ -1,6 +1,10 @@
 // Studio records trees from several threads at once (the follow loop, the file and ask commands,
 // the card jobs): each call needs a scratch index of its own.
-use std::{fs, path::PathBuf, thread};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    thread,
+};
 use studio_hook::{record_tree, record_tree_within};
 use studio_test_support::git;
 
@@ -41,7 +45,7 @@ fn repo(name: &str) -> PathBuf {
 }
 
 /// The paths in `tree` of the repository `dir`.
-fn paths(dir: &PathBuf, tree: &str) -> Vec<String> {
+fn paths(dir: &Path, tree: &str) -> Vec<String> {
     git(dir, &["ls-tree", "-r", "--name-only", tree])
         .lines()
         .map(Into::into)

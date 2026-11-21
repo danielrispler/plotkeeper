@@ -9,6 +9,9 @@ use studio_understanding::{
 
 pub type Reply = Result<String, String>;
 
+/// What `Answer::Run` runs.
+pub type Run = dyn Fn(&str) -> Option<Reply> + Send + Sync;
+
 /// What a `Scripted` method answers.
 pub enum Answer {
     /// What `FakeWriter` answers.
@@ -20,7 +23,7 @@ pub enum Answer {
     /// Decided by the call's subject, a card's id or a name's prompt (any other method's is
     /// empty); `None` is what `FakeWriter` answers. It runs with nothing locked, so it may take
     /// its time.
-    Run(Box<dyn Fn(&str) -> Option<Reply> + Send + Sync>),
+    Run(Box<Run>),
 }
 
 impl Answer {

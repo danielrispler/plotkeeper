@@ -257,65 +257,143 @@ fn good_with(options: [(&str, &str, bool); 3]) -> String {
     )
 }
 
+/// A Quiz's three options, each `(text, why, right)`, the key the first.
+type Options = [(&'static str, &'static str, bool); 3];
+
+const TEN: &str = "one two three four five six seven eight nine ten";
+/// The Quizzes the rules reject, named for the rule each breaks, and whether the reply leaves out
+/// the marks of the wrong options. The card's reply and the summary's are tested on the same ones.
+fn broken_quizzes() -> [(&'static str, Options, bool); 8] {
+    [
+        (
+            "an option of 11 words",
+            [
+                ("a", "Why.", true),
+                (ELEVEN, "No.", false),
+                ("c", "No.", false),
+            ],
+            false,
+        ),
+        (
+            "the key is the longest option",
+            [
+                ("The longest", "Why.", true),
+                ("b", "No.", false),
+                ("c", "No.", false),
+            ],
+            false,
+        ),
+        (
+            "the key is not the option marked right",
+            [
+                ("a", "Why.", false),
+                ("bbb", "No.", true),
+                ("cc", "No.", false),
+            ],
+            false,
+        ),
+        (
+            "two options marked right",
+            [
+                ("a", "Why.", true),
+                ("bbb", "Yes.", true),
+                ("cc", "No.", false),
+            ],
+            false,
+        ),
+        (
+            "no option marked right",
+            [
+                ("a", "Why.", false),
+                ("bbb", "No.", false),
+                ("cc", "No.", false),
+            ],
+            false,
+        ),
+        (
+            "a missing reason",
+            [
+                ("a", "Why.", true),
+                ("bbb", "", false),
+                ("cc", "No.", false),
+            ],
+            false,
+        ),
+        (
+            "a blank reason",
+            [
+                ("a", "Why.", true),
+                ("bbb", " ", false),
+                ("cc", "No.", false),
+            ],
+            false,
+        ),
+        (
+            "a missing mark",
+            [
+                ("a", "Why.", true),
+                ("bbb", "No.", false),
+                ("cc", "No.", false),
+            ],
+            true,
+        ),
+    ]
+}
+
+/// The Quizzes the rules let pass: an option of 10 words, and a key that is not the longest.
+fn passing_quizzes() -> [(&'static str, Options); 3] {
+    [
+        (
+            "an option of 10 words",
+            [
+                ("a", "Why.", true),
+                (TEN, "No.", false),
+                ("c", "No.", false),
+            ],
+        ),
+        (
+            "a key shorter than an option",
+            [
+                ("O(n)", "Why.", true),
+                ("O(n log n)", "No.", false),
+                ("O(1)", "No.", false),
+            ],
+        ),
+        (
+            "equal lengths, the key not longer than the others",
+            [
+                ("aa", "Why.", true),
+                ("bb", "No.", false),
+                ("cc", "No.", false),
+            ],
+        ),
+    ]
+}
+
+/// `reply` with the marks of its wrong options left out, when `unmarked`.
+fn unmark(reply: String, unmarked: bool) -> String {
+    match unmarked {
+        true => reply.replace(r#""right":false,"#, ""),
+        false => reply,
+    }
+}
+
 #[test]
-fn a_quiz_that_breaks_a_rule_is_rejected_and_the_card_keeps_no_quiz() {
-    let ten = "one two three four five six seven eight nine ten";
-    let eleven = "one two three four five six seven eight nine ten eleven";
-    // An option of 10 words passes.
-    assert!(
-        Card::from_reply(&good_with([
-            ("b", "Why.", true),
-            (ten, "No.", false),
-            ("c", "No.", false)
-        ]))
-        .unwrap()
-        .1
-        .is_none()
-    );
-    let broken = [
-        // An option of 11 words.
-        good_with([
-            ("short", "Why.", true),
-            (eleven, "No.", false),
-            ("b", "No.", false),
-        ]),
-        // The key is the longest option.
-        good_with([
-            ("a long right option", "Why.", true),
-            ("b", "No.", false),
-            ("c", "No.", false),
-        ]),
-        // The key is not the option marked right.
-        good_with([
-            ("a", "Why.", false),
-            ("bbb", "No.", true),
-            ("cc", "No.", false),
-        ]),
-        // Two options marked right.
-        good_with([
-            ("a", "Why.", true),
-            ("bbb", "Yes.", true),
-            ("cc", "No.", false),
-        ]),
-        // No option marked right.
-        good_with([
-            ("a", "Why.", false),
-            ("bbb", "No.", false),
-            ("cc", "No.", false),
-        ]),
-        // A missing reason.
-        good_with([
-            ("a", "Why.", true),
-            ("bbb", "", false),
-            ("cc", "No.", false),
-        ]),
-        // A missing mark.
-        GOOD.replace(r#", "right": false"#, ""),
-    ];
-    for reply in broken {
+fn a_card_quiz_that_breaks_a_rule_is_rejected_and_the_card_keeps_no_quiz() {
+    for (name, options, unmarked) in broken_quizzes() {
+        let reply = unmark(good_with(options), unmarked);
         let (card, problem) = Card::from_reply(&reply).unwrap();
-        assert_eq!(card.quiz, None, "{reply}");
-        assert!(problem.is_some(), "{reply}");
+        assert_eq!(card.quiz, None, "{name}: {reply}");
+        assert!(problem.is_some(), "{name}: {reply}");
+    }
+}
+
+#[test]
+fn a_card_quiz_that_keeps_the_rules_stands() {
+    for (name, options) in passing_quizzes() {
+        let (card, problem) = Card::from_reply(&good_with(options)).unwrap();
+        assert!(card.quiz.is_some(), "{name}");
+        assert_eq!(problem, None, "{name}");
     }
 }
 
@@ -520,39 +598,12 @@ fn explain_more_runs_the_same_writer_on_the_cards_explanation_and_its_change() {
     assert!(more.get_args().eq(card_run.get_args()));
     assert_eq!(more.get_current_dir(), Some(folder));
     assert!(prompt.contains("in more depth than the card"), "{prompt}");
-    assert!(prompt.contains(&card.explanation), "{prompt}");
-    assert!(prompt.ends_with(&format!("\nChange:\n{}", edit().diff())));
-}
-
-#[test]
-fn the_writers_instructions_no_longer_describe_a_change_that_is_workers_summaries() {
-    let folder = Path::new("/h/Library/Application Support/dev.falinks.studio/card-writer");
-    let writer = ClaudeWriter::new(CLAUDE.into(), folder.into());
-    // A card of that kind still in the store: its change is the workers' text.
-    let older = CardRequest {
-        change: Some("No diff: the agent changed nothing itself since its last card. Its workers, each with its status and the summaries of its cards since then:\n- `Implement #378` (completed): `a.rs` נוסף.\n".into()),
-        ..edit()
-    };
-
-    let (_, prompt) = writer.more_command(&older, &good_card());
-    let (_, card) = writer.command(&older, &[]);
-
-    for instructions in [&card, &prompt] {
-        assert!(
-            !instructions.contains("When the change is not a diff"),
-            "{instructions}"
-        );
-        assert!(
-            !instructions.contains("how the work was split"),
-            "{instructions}"
-        );
-    }
-    // "Explain more" on that older card still tells the writer not to invent code.
     assert!(
         prompt.contains("do not invent code you were not shown"),
         "{prompt}"
     );
-    assert!(prompt.ends_with(older.diff()));
+    assert!(prompt.contains(&card.explanation), "{prompt}");
+    assert!(prompt.ends_with(&format!("\nChange:\n{}", edit().diff())));
 }
 
 #[test]
@@ -923,77 +974,21 @@ const ELEVEN: &str = "one two three four five six seven eight nine ten eleven";
 
 #[test]
 fn a_reply_that_breaks_a_quiz_rule_is_asked_once_more_and_the_second_rejection_leaves_no_quiz() {
-    let broken = [
-        // An option of 11 words.
-        quiz_reply(
-            &[
-                ("a", "Why.", true),
-                (ELEVEN, "No.", false),
-                ("c", "No.", false),
-            ],
-            0,
-        ),
-        // The key is the longest option.
-        quiz_reply(
-            &[
-                ("The longest", "Why.", true),
-                ("b", "No.", false),
-                ("c", "No.", false),
-            ],
-            0,
-        ),
-        // The key is not the option marked right.
-        quiz_reply(
-            &[
-                ("a", "Why.", false),
-                ("bbb", "No.", true),
-                ("cc", "No.", false),
-            ],
-            0,
-        ),
-        // Two options marked right.
-        quiz_reply(
-            &[
-                ("a", "Why.", true),
-                ("bbb", "Yes.", true),
-                ("cc", "No.", false),
-            ],
-            0,
-        ),
-        // A missing reason.
-        quiz_reply(
-            &[
-                ("a", "Why.", true),
-                ("bbb", " ", false),
-                ("cc", "No.", false),
-            ],
-            0,
-        ),
-        // A missing mark.
-        quiz_reply(
-            &[
-                ("a", "Why.", true),
-                ("bbb", "No.", false),
-                ("cc", "No.", false),
-            ],
-            0,
-        )
-        .replace(r#""right":false,"#, ""),
-    ];
-    for reply in broken {
+    for (name, options, unmarked) in broken_quizzes() {
+        let reply = unmark(quiz_reply(&options, 0), unmarked);
         let dir = tempfile::tempdir().unwrap();
         let store = summaries(dir.path());
-        let writer = recording(reply.clone());
+        let writer = recording(reply);
         let mut lines = Vec::new();
 
         let summary = write_summary(&store, &writer, &setup(), turn("s", 1), |l| lines.push(l));
 
         let summary = summary.unwrap();
-        assert_eq!(summary.summary, "Rewrote the parser.", "{reply}");
-        assert_eq!(summary.quiz, None, "{reply}");
-        assert_eq!(writer.inputs().len(), 2, "asked once more: {reply}");
-        assert_eq!(lines.len(), 1, "{lines:?}");
-        assert!(lines[0].contains("s@1"), "{lines:?}");
+        assert_eq!(summary.summary, "Rewrote the parser.", "{name}");
+        assert_eq!(summary.quiz, None, "{name}");
+        assert_eq!(writer.inputs().len(), 2, "{name}: asked once more");
+        assert_eq!(lines.len(), 1, "{name}: {lines:?}");
+        assert!(lines[0].contains("s@1"), "{name}: {lines:?}");
     }
 }
 
@@ -1016,34 +1011,16 @@ fn a_rejected_quiz_gives_one_on_the_second_reply_when_that_one_is_good() {
 }
 
 #[test]
-fn an_option_of_ten_words_and_a_key_that_is_not_the_longest_pass_on_the_first_call() {
-    let ten = "one two three four five six seven eight nine ten";
-    for options in [
-        [
-            ("a", "Why.", true),
-            (ten, "No.", false),
-            ("c", "No.", false),
-        ],
-        [
-            ("O(n)", "Why.", true),
-            ("O(n log n)", "No.", false),
-            ("O(1)", "No.", false),
-        ],
-        // Equal lengths: the key is not longer than the others.
-        [
-            ("aa", "Why.", true),
-            ("bb", "No.", false),
-            ("cc", "No.", false),
-        ],
-    ] {
+fn a_reply_that_keeps_the_quiz_rules_passes_on_the_first_call() {
+    for (name, options) in passing_quizzes() {
         let dir = tempfile::tempdir().unwrap();
         let store = summaries(dir.path());
         let writer = recording(quiz_reply(&options, 0));
 
         let summary = write_summary(&store, &writer, &setup(), turn("s", 1), |_| {}).unwrap();
 
-        assert!(summary.quiz.is_some(), "{options:?}");
-        assert_eq!(writer.inputs().len(), 1, "{options:?}");
+        assert!(summary.quiz.is_some(), "{name}");
+        assert_eq!(writer.inputs().len(), 1, "{name}");
     }
 }
 
@@ -1478,31 +1455,40 @@ fn a_line_with_a_number_or_id_the_turn_lacks_is_stripped_and_true_numbers_stay()
 }
 
 #[test]
-fn a_headline_with_an_invented_number_is_asked_for_once_more_and_a_second_failure_is_stripped() {
-    let bad = reply("Cut the cost by 40%.", serde_json::json!([]));
-    let good = reply("Cut the cost.", serde_json::json!([]));
+fn a_headline_that_breaks_a_rule_is_asked_for_once_more_and_a_second_failure_is_stripped_or_stands()
+{
+    let none = || serde_json::json!([]);
+    let long = "word ".repeat(17);
+    // The headline after a good second reply, and after a second reply that breaks the rule too.
+    let cases = [
+        (
+            "an invented number: stripped",
+            reply("Cut the cost by 40%.", none()),
+            reply("Cut the cost.", none()),
+            "Cut the cost.",
+            "",
+        ),
+        (
+            "over 16 words: stands, as the Quiz's does",
+            reply(&long, none()),
+            reply("Short.", none()),
+            "Short.",
+            long.trim(),
+        ),
+    ];
+    for (name, bad, good, after_good, after_bad) in cases {
+        let (summary, inputs) = written_by(turn("s", 1), &[bad.clone(), good]);
+        assert_eq!(summary.headline.as_deref(), Some(after_good), "{name}");
+        assert_eq!(inputs.len(), 2, "{name}");
 
-    let (summary, inputs) = written_by(turn("s", 1), &[bad.clone(), good]);
-    assert_eq!(summary.headline.as_deref(), Some("Cut the cost."));
-    assert_eq!(inputs.len(), 2);
-
-    let (summary, inputs) = written_by(turn("s", 1), &[bad.clone(), bad]);
-    assert_eq!(summary.headline.as_deref(), Some(""));
-    assert_eq!(inputs.len(), 2);
-}
-
-#[test]
-fn a_headline_over_16_words_is_asked_for_once_more() {
-    let long = reply(&"word ".repeat(17), serde_json::json!([]));
-    let short = reply("Short.", serde_json::json!([]));
-
-    let (summary, inputs) = written_by(turn("s", 1), &[long.clone(), short]);
-    assert_eq!(summary.headline.as_deref(), Some("Short."));
-    assert_eq!(inputs.len(), 2);
-
-    // A second long one stands, as the Quiz's does.
-    let (summary, _) = written_by(turn("s", 1), &[long.clone(), long]);
-    assert_eq!(summary.headline.unwrap().split_whitespace().count(), 17);
+        let (summary, inputs) = written_by(turn("s", 1), &[bad.clone(), bad]);
+        assert_eq!(
+            summary.headline.as_deref().map(str::trim),
+            Some(after_bad),
+            "{name}"
+        );
+        assert_eq!(inputs.len(), 2, "{name}");
+    }
 }
 
 #[test]

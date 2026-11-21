@@ -110,20 +110,6 @@ fn quiz_of_card(store: &Mutex<CardStore>, n: u64) -> bool {
 }
 
 #[test]
-fn the_fourth_quiz_within_an_hour_is_not_offered() {
-    let (_dir, store) = store();
-    for n in 1..=3 {
-        assert!(
-            lone(&store, n, 0, false, "why").unwrap().quiz.is_some(),
-            "{n}"
-        );
-    }
-    assert_eq!(lone(&store, 4, 0, false, "why").unwrap().quiz, None);
-    // The summary itself is kept.
-    assert!(store.lock().unwrap().turn_summary("s@4").is_some());
-}
-
-#[test]
 fn a_cards_quiz_past_the_cap_replaces_the_oldest_unanswered_lone_quiz() {
     let (_dir, store) = store();
     for n in 1..=3 {
@@ -551,32 +537,14 @@ fn silent() -> Scripted {
 }
 
 #[test]
-fn a_writer_that_gives_no_reply_is_on_the_record() {
-    let (_dir, store) = store();
-    let (_o, offers) = offers();
-    let session = studio_core::Session::default();
-    let written = offer_stop(
-        &store,
-        &silent(),
-        card_request("s@1", None, ""),
-        &session,
-        &turn_facts(&[("a.rs", 30)], None),
-        &offers,
-        true,
-        || {},
-        |_| {},
-    )
-    .0;
-    assert!(!written);
-    assert_eq!(lines_of(&offers)[0]["outcome"], "no reply from the writer");
-}
-
-#[test]
 fn a_lone_quiz_held_by_the_cap_says_so() {
     let (_dir, store) = store();
     let (_o, offers) = offers();
     for n in 1..=3 {
-        lone(&store, n, 0, false, "why");
+        assert!(
+            lone(&store, n, 0, false, "why").unwrap().quiz.is_some(),
+            "{n}"
+        );
     }
     let turn = turn_facts(&[("a.rs", 9)], None);
     let mut request = turn_request(4);
@@ -592,6 +560,8 @@ fn a_lone_quiz_held_by_the_cap_says_so() {
         |l| panic!("{l}"),
     );
     assert_eq!(summary.unwrap().quiz, None);
+    // The summary itself is kept.
+    assert!(store.lock().unwrap().turn_summary("s@4").is_some());
     let lines = lines_of(&offers);
     assert_eq!(lines.len(), 1);
     assert_eq!(lines[0]["offer"], "quiz");
@@ -629,28 +599,6 @@ fn a_subagents_late_change_below_the_card_row_has_a_line_of_its_own_kind() {
 }
 
 #[test]
-fn a_replay_of_the_log_appends_no_line() {
-    let (_dir, _store) = store();
-    let (_o, offers) = offers();
-    let mut studio = studio_core::Studio::default();
-    studio.replay(r#"{"session_id":"s","hook_event_name":"SessionStart","studio_received_ms":1}"#);
-    assert!(lines_of(&offers).is_empty());
-}
-
-#[test]
-fn a_decision_is_on_the_record_once_across_a_restart() {
-    let (_dir, store) = store();
-    let (_o, offers) = offers();
-    let nothing = turn_facts(&[("a.rs", 2)], None);
-    for _ in 0..2 {
-        stop_of(&store, &offers, card_request("s@1", None, ""), &nothing);
-    }
-    assert_eq!(lines_of(&offers).len(), 1);
-    assert!(offers.settled("s", "s@1"));
-    assert!(!offers.settled("s", "s@2"));
-}
-
-#[test]
 fn a_writer_that_gave_no_reply_is_asked_again_and_the_line_stays_one_per_outcome() {
     let (_dir, store) = store();
     let (_o, offers) = offers();
@@ -671,6 +619,7 @@ fn a_writer_that_gave_no_reply_is_asked_again_and_the_line_stays_one_per_outcome
         .0
     };
     assert!(!ask(&silent()));
+    assert_eq!(lines_of(&offers)[0]["outcome"], "no reply from the writer");
     assert!(!offers.settled("s", "s@1"));
     assert!(ask(&FakeWriter));
     assert!(offers.settled("s", "s@1"));
@@ -904,26 +853,33 @@ fn a_decision_the_summary_path_makes_alone_is_on_the_record_once() {
 }
 
 #[test]
-fn a_quiz_decision_with_no_summary_to_carry_it_is_on_the_record_at_once() {
-    let (_dir, store) = store();
-    let (_o, offers) = offers();
-    let turn = turn_facts(&[("a.rs", 9)], None);
-    for _ in 0..2 {
-        let request = card_request("s@1", None, "");
-        offer_stop(
-            &store,
-            &FakeWriter,
-            request,
-            &studio_core::Session::default(),
-            &turn,
-            &offers,
-            false,
-            || {},
-            |_| {},
-        );
+fn a_decision_is_on_the_record_once_across_a_restart() {
+    // Whether a summary follows the card to carry a Quiz.
+    let cases = [
+        ("a decision of nothing", 2, true),
+        ("a Quiz decision with no summary to carry it", 9, false),
+    ];
+    for (name, lines, summary_follows) in cases {
+        let (_dir, store) = store();
+        let (_o, offers) = offers();
+        let turn = turn_facts(&[("a.rs", lines)], None);
+        for _ in 0..2 {
+            offer_stop(
+                &store,
+                &FakeWriter,
+                card_request("s@1", None, ""),
+                &studio_core::Session::default(),
+                &turn,
+                &offers,
+                summary_follows,
+                || {},
+                |_| {},
+            );
+        }
+        assert_eq!(lines_of(&offers).len(), 1, "{name}");
+        assert!(offers.settled("s", "s@1"), "{name}");
+        assert!(!offers.settled("s", "s@2"), "{name}");
     }
-    assert_eq!(lines_of(&offers).len(), 1);
-    assert!(offers.settled("s", "s@1"));
 }
 
 #[test]

@@ -1282,36 +1282,37 @@ mod learning {
     }
 
     #[test]
-    fn a_retest_due_more_than_14_days_ago_is_not_served() {
+    fn a_retest_due_exactly_14_days_ago_is_still_served() {
         let (_data, mut store) = empty();
-        seed(&mut store, "late", RETEST_REACH_MS + 1);
-        assert_eq!(served(&store), None);
         seed(&mut store, "edge", RETEST_REACH_MS);
         assert_eq!(served(&store).as_deref(), Some("edge"));
     }
 
     #[test]
-    fn a_retest_not_yet_due_is_not_served() {
-        let (_data, mut store) = empty();
-        // Offered six days ago: due tomorrow.
-        seed_offered(&mut store, "early", NOW - 6 * DAY);
-        assert_eq!(served(&store), None);
-    }
-
-    #[test]
-    fn a_retest_whose_first_quiz_is_flagged_key_wrong_is_not_served() {
-        let (_data, mut store) = empty();
-        seed(&mut store, "wrong", DAY);
-        store.quiz_tap("wrong", Tap::KeyWrong, START - DAY).unwrap();
-        assert_eq!(served(&store), None);
-    }
-
-    #[test]
-    fn a_picked_retest_is_not_served() {
-        let (_data, mut store) = empty();
-        seed(&mut store, "a", DAY);
-        pick(&mut store, "retest a", NOW);
-        assert_eq!(served(&store), None);
+    fn a_retest_that_is_too_late_too_early_flagged_or_picked_is_not_served() {
+        type Setup = fn(&mut CardStore);
+        let cases: [(&str, Setup); 4] = [
+            ("due more than 14 days ago", |store| {
+                seed(store, "late", RETEST_REACH_MS + 1)
+            }),
+            // Offered six days ago: due tomorrow.
+            ("not yet due", |store| {
+                seed_offered(store, "early", NOW - 6 * DAY)
+            }),
+            ("its first quiz flagged key wrong", |store| {
+                seed(store, "wrong", DAY);
+                store.quiz_tap("wrong", Tap::KeyWrong, START - DAY).unwrap();
+            }),
+            ("picked", |store| {
+                seed(store, "a", DAY);
+                pick(store, "retest a", NOW);
+            }),
+        ];
+        for (name, setup) in cases {
+            let (_data, mut store) = empty();
+            setup(&mut store);
+            assert_eq!(served(&store), None, "{name}");
+        }
     }
 
     #[test]
