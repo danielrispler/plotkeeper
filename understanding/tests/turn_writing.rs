@@ -1141,6 +1141,10 @@ impl CardWriter for Panicking {
         prompt: &str,
         response: Option<&str>,
     ) -> Result<String, String> {
+        if prompt == "boom" {
+            // Long enough for the next job to be queued behind this one.
+            thread::sleep(Duration::from_millis(100));
+        }
         assert_ne!(prompt, "boom", "the writer panics");
         self.0.lock().unwrap().push(format!("named {prompt}"));
         FakeWriter.name(setup, prompt, response)
@@ -1166,12 +1170,6 @@ fn a_job_that_panics_does_not_stop_the_later_jobs_of_its_session() {
         });
     };
     name("boom");
-    for _ in 0..1000 {
-        if threaded.queues() == 0 {
-            break;
-        }
-        thread::sleep(Duration::from_millis(2));
-    }
     name("after");
     for _ in 0..1000 {
         if !events.lock().unwrap().is_empty() {
@@ -1180,6 +1178,8 @@ fn a_job_that_panics_does_not_stop_the_later_jobs_of_its_session() {
         thread::sleep(Duration::from_millis(2));
     }
     assert_eq!(*events.lock().unwrap(), ["named after"]);
+    let logs = day.recorder.logs.lock().unwrap();
+    assert_eq!(logs.len(), 1, "{logs:?}");
 }
 
 // The turns of the stand-in's tests (`prompt_cards.rs`, danielrispler/plotkeeper#261), written through the real offer:
