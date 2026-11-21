@@ -175,6 +175,9 @@ fn adapt(raw: Raw) -> Event {
                 prompt: raw.prompt.clone(),
                 origin: None,
             });
+            if raw.prompt.starts_with('/') {
+                happened.push(Happened::SkillTyped(raw.prompt.trim_end().into()));
+            }
             let reported: Vec<(String, String)> = reported(&raw.prompt)
                 .map(|(id, status)| (id.into(), status.into()))
                 .collect();

@@ -242,6 +242,9 @@ pub struct Session {
     /// Its subagents at any depth, in the order they were first seen (danielrispler/Falinks#369, decision 5).
     #[serde(serialize_with = "serialize_agents")]
     pub agents: Vec<Subagent>,
+    /// The slash command Daniel typed whose forked child is not yet seen, by its prompt id.
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
+    typed_skill: Option<(String, String)>,
     /// Who asks Daniel, and since when, while it needs him.
     pub asker: Option<Asker>,
     /// Its prompts, oldest first, each marked with who sent it (danielrispler/Falinks#369, decision 7).
@@ -750,6 +753,9 @@ pub struct Subagent {
     /// Its spawn's call, by `tool_use_id`, and the agent that made it, `None` for the session's own.
     #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     spawn: Option<(String, Option<String>)>,
+    /// The prompt id of its first event.
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
+    first_prompt: Option<String>,
 }
 
 /// The state a session's own agent and each subagent share (danielrispler/Falinks#410, decision 22). Its id is the owner
@@ -1144,7 +1150,9 @@ impl Session {
                     .filter(|c| c.agent.as_ref() != Some(id))
                     .find(|c| !bound(&c.id));
                 let spawn = call.and_then(|c| Some((c.id.clone()?, c.agent.clone())));
-                self.agent(id, at).spawn = spawn;
+                let agent = self.agent(id, at);
+                agent.spawn = spawn;
+                agent.first_prompt.clone_from(&event.prompt_id);
             }
             // Its owner, at its first folder: itself in a worktree other than its parent's, else its
             // parent's owner.
@@ -1255,7 +1263,26 @@ impl Session {
                         }
                     }
                 }
+                Happened::SkillTyped(command) => {
+                    self.typed_skill = event.prompt_id.clone().zip(Some(command.clone()));
+                }
                 _ => {}
+            }
+        }
+        // A skill Daniel typed forks its child with no call that names it: its first child of
+        // the same prompt id with no spawn call is the fork, whichever of the two the hooks
+        // deliver first. A stray id with no type (danielrispler/plotkeeper#67) is none.
+        if let Some((prompt, command)) = &self.typed_skill {
+            let fork = self.agents.iter_mut().find(|a| {
+                a.parent == Parent::Unattached
+                    && a.spawn.is_none()
+                    && a.first_prompt.as_ref() == Some(prompt)
+                    && a.agent_type.as_ref().is_some_and(|t| !t.is_empty())
+            });
+            if let Some(fork) = fork {
+                fork.parent = Parent::Session;
+                fork.name.clone_from(command);
+                self.typed_skill = None;
             }
         }
         // A subagent that ended asks Daniel nothing, and its calls never resolve.
@@ -1423,6 +1450,7 @@ impl Session {
             workers: since.cards,
             check: None,
             ends: BTreeMap::new(),
+            asks: self.needs_you(),
         }
     }
 
@@ -1679,6 +1707,8 @@ impl Session {
             session_id: self.agent.id.clone(),
             id: card_id(&self.agent.id, at),
             prompt: daniels.map(|p| p.at),
+            // The blocks the replay saw only: a resumed terminal state is not about this turn.
+            asks: !self.blocks.is_empty(),
             ..CardRequest::default()
         };
         (!trees.is_empty()).then_some(Backfill { request, trees })
@@ -1690,6 +1720,11 @@ impl Session {
         for span in spans.into_iter().flatten().filter(|s| s.end.is_none()) {
             span.end = Some(at);
         }
+    }
+
+    /// Whether Daniel deleted it, and it has not started again.
+    pub fn is_deleted(&self) -> bool {
+        self.deleted
     }
 
     pub fn needs_you(&self) -> bool {
@@ -1968,9 +2003,9 @@ pub struct CardRequest {
     /// was written at.
     pub id: String,
     pub base: Base,
-    /// The diff of each file that changed since the base, commits included. The core gives none on
-    /// a card built from `workers`' cards; the understanding layer fills it with their text before
-    /// it asks the writer and stores the card.
+    /// The diff of each file that changed since the base, commits included. A request with none of
+    /// its own writes no card (danielrispler/plotkeeper#260); older stored cards hold their workers'
+    /// text here instead.
     #[serde(default)]
     pub change: Option<String>,
     /// When the hook received the prompt of Daniel's that the card belongs to: its session's latest
@@ -1984,7 +2019,8 @@ pub struct CardRequest {
     /// The files other subagents edited or wrote in its worktree, by subagent (danielrispler/Falinks#369, story 20).
     #[serde(default)]
     pub changed_by: BTreeMap<String, BTreeSet<String>>,
-    /// A session's workers' cards since its last card, at any depth.
+    /// A session's workers' cards since its last card, at any depth. No longer read to write a card;
+    /// kept because older stored cards carry it.
     #[serde(default)]
     pub workers: Vec<String>,
     /// The command of the check whose start requested it, which the card is on (danielrispler/Falinks#461, decision 15);
@@ -1995,6 +2031,10 @@ pub struct CardRequest {
     /// writer runs: where the card's code is pulled from (danielrispler/plotkeeper#121).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub ends: BTreeMap<String, String>,
+    /// Whether the turn ended in Needs you, as the core recorded at its end: a Quiz is never beside a decision
+    /// (danielrispler/plotkeeper#257). A request stored before this reads as "did not".
+    #[serde(default)]
+    pub asks: bool,
 }
 
 /// A turn that gets a summary (danielrispler/Falinks#517, decisions 12, 13 and 15): what the summary writer reads of it.

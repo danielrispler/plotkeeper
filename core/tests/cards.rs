@@ -60,6 +60,7 @@ fn a_prompt_whose_worktree_changed_gets_one_card_on_the_whole_change_at_its_stop
             workers: vec![],
             check: None,
             ends: Default::default(),
+            asks: false,
         }]
     );
 }
@@ -389,4 +390,58 @@ fn a_session_event_whose_touched_roots_hold_a_running_workers_home_asks_for_no_f
     );
 
     assert_eq!(asked(&studio), Vec::<String>::new());
+}
+
+/// A hook line of session `s1` at `at`, by `agent`, with `fields`.
+fn line(name: &str, at: u64, agent: Option<&str>, fields: Value) -> String {
+    let mut event = json!({"session_id": "s1", "hook_event_name": name, "cwd": "/w",
+        "studio_received_ms": 1_793_265_000_000_u64 + at});
+    if let Some(agent) = agent {
+        event["agent_id"] = agent.into();
+    }
+    event
+        .as_object_mut()
+        .unwrap()
+        .extend(fields.as_object().unwrap().clone());
+    event.to_string()
+}
+
+/// The card of a turn whose subagent `w1` asks for a permission, with its `Stop` at the turn's end.
+/// A subagent's notice outlasts the `Stop`, so the turn ends in Needs you when `asking`.
+fn card_of_turn(asking: bool) -> CardRequest {
+    let mut studio = Studio::default();
+    let bash = json!({"tool_name": "Bash", "tool_use_id": "w1-test", "tool_input": {"command": "cargo test"}});
+    let mut lines = vec![line(
+        "UserPromptSubmit",
+        1,
+        None,
+        json!({"prompt": "Go", "prompt_id": "p1"}),
+    )];
+    if asking {
+        lines.push(line("PreToolUse", 2, Some("w1"), bash.clone()));
+        lines.push(line("PermissionRequest", 3, Some("w1"), bash));
+    }
+    lines.push(line(
+        "Stop",
+        4,
+        None,
+        json!({"prompt_id": "p1", "last_assistant_message": "Done."}),
+    ));
+    let outputs: Vec<Output> = (lines.iter())
+        .flat_map(|l| apply(&mut studio, l, Some(found())))
+        .collect();
+    assert_eq!(studio.session("s1").unwrap().needs_you(), asking);
+    outputs
+        .into_iter()
+        .find_map(|o| match o {
+            Output::Card(request) => Some(request),
+            _ => None,
+        })
+        .expect("a card request")
+}
+
+#[test]
+fn a_card_records_whether_its_turn_ended_in_needs_you() {
+    assert!(card_of_turn(true).asks);
+    assert!(!card_of_turn(false).asks);
 }

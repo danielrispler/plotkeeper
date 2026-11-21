@@ -174,7 +174,7 @@ pub fn design_sources(store: &CardStore, owner: &str, turns: &[String]) -> Vec<(
 /// at most `DESIGN_LINES`. A line with no citation, or one that cites something not in the session,
 /// is dropped, and so is a line past the fifth. Returns the kept lines and how many were dropped.
 pub fn design_lines(reply: &str, known: &BTreeSet<&str>) -> Option<(Vec<DesignLine>, usize)> {
-    let value: serde_json::Value = serde_json::from_str(crate::object(reply)).ok()?;
+    let value: serde_json::Value = crate::parse_object(reply).ok()?;
     let asked = value["design"].as_array()?;
     let mut kept = Vec::new();
     for line in asked {
