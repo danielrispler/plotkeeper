@@ -73,7 +73,7 @@ fn follow(studio: &mut Studio) -> Vec<String> {
 fn the_intention_is_the_agents_latest_line_and_ages_with_each_step_after_it() {
     let file = common::temp_file(&first(8));
     let path = file.path();
-    let mut studio = session_at(&path);
+    let mut studio = session_at(path);
 
     assert_eq!(follow(&mut studio), Vec::<String>::new());
     let transcript = &studio.session(SESSION).unwrap().transcript;
@@ -83,7 +83,7 @@ fn the_intention_is_the_agents_latest_line_and_ages_with_each_step_after_it() {
     );
     assert_eq!(transcript.steps_ago, 2);
 
-    std::fs::write(&path, first(13)).unwrap();
+    std::fs::write(path, first(13)).unwrap();
     follow(&mut studio);
     let transcript = &studio.session(SESSION).unwrap().transcript;
     assert_eq!(
@@ -92,7 +92,7 @@ fn the_intention_is_the_agents_latest_line_and_ages_with_each_step_after_it() {
     );
     assert_eq!(transcript.steps_ago, 3);
 
-    std::fs::write(&path, first(14)).unwrap();
+    std::fs::write(path, first(14)).unwrap();
     follow(&mut studio);
     let transcript = &studio.session(SESSION).unwrap().transcript;
     assert_eq!(
@@ -114,7 +114,7 @@ fn the_intention_is_the_agents_latest_line_and_ages_with_each_step_after_it() {
 fn a_new_prompt_starts_the_turn_with_no_intention() {
     let file = common::temp_file(CHAIN);
     let path = file.path();
-    let mut studio = session_at(&path);
+    let mut studio = session_at(path);
 
     follow(&mut studio);
 
@@ -148,7 +148,7 @@ fn assert_fallback(studio: &mut Studio, logged: Vec<String>) {
 fn a_corrupted_line_falls_back_to_the_step_with_one_stderr_line() {
     let file = common::temp_file(&(first(8) + "{\"type\":\"assistant\",\"mess\n"));
     let path = file.path();
-    let mut studio = session_at(&path);
+    let mut studio = session_at(path);
 
     let logged = follow(&mut studio);
 
@@ -160,7 +160,7 @@ fn a_missing_field_falls_back_to_the_step() {
     let no_content = "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\"}}\n";
     let file = common::temp_file(&(first(8) + no_content));
     let path = file.path();
-    let mut studio = session_at(&path);
+    let mut studio = session_at(path);
 
     let logged = follow(&mut studio);
 
@@ -197,7 +197,7 @@ fn the_session_runs_at_its_latest_model_and_effort_across_turns() {
         + &format!("{helper}\n{error}\n{prompt}\n");
     let file = common::temp_file(&lines);
     let path = file.path();
-    let mut studio = session_at(&path);
+    let mut studio = session_at(path);
 
     follow(&mut studio);
     let transcript = &studio.session(SESSION).unwrap().transcript;
@@ -209,7 +209,7 @@ fn the_session_runs_at_its_latest_model_and_effort_across_turns() {
 fn a_transcript_without_model_or_effort_has_neither() {
     let file = common::temp_file(&first(2));
     let path = file.path();
-    let mut studio = session_at(&path);
+    let mut studio = session_at(path);
 
     follow(&mut studio);
     let transcript = &studio.session(SESSION).unwrap().transcript;
@@ -230,7 +230,7 @@ fn a_turn_ends_on_its_final_replys_first_line_not_its_footer() {
     let reply = "Fixed the typo.\n\nThe probe now reads right.\n\nNot checked: the CI run.";
     let file = common::temp_file(&(first(13) + &assistant_text(reply)));
     let path = file.path();
-    let mut studio = session_at(&path);
+    let mut studio = session_at(path);
 
     // While the turn runs, the intention is the latest response's last line.
     follow(&mut studio);
