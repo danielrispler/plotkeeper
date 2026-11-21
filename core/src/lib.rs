@@ -1936,9 +1936,9 @@ pub struct CardRequest {
     /// was written at.
     pub id: String,
     pub base: Base,
-    /// The diff of each file that changed since the base, commits included. The core gives none on
-    /// a card built from `workers`' cards; the understanding layer fills it with their text before
-    /// it asks the writer and stores the card.
+    /// The diff of each file that changed since the base, commits included. A request with none of
+    /// its own writes no card (danielrispler/plotkeeper#260); older stored cards hold their workers'
+    /// text here instead.
     #[serde(default)]
     pub change: Option<String>,
     /// When the hook received the prompt of Daniel's that the card belongs to: its session's latest
@@ -1952,7 +1952,8 @@ pub struct CardRequest {
     /// The files other subagents edited or wrote in its worktree, by subagent (danielrispler/Falinks#369, story 20).
     #[serde(default)]
     pub changed_by: BTreeMap<String, BTreeSet<String>>,
-    /// A session's workers' cards since its last card, at any depth.
+    /// A session's workers' cards since its last card, at any depth. No longer read to write a card;
+    /// kept because older stored cards carry it.
     #[serde(default)]
     pub workers: Vec<String>,
     /// The command of the check whose start requested it, which the card is on (danielrispler/Falinks#461, decision 15);
