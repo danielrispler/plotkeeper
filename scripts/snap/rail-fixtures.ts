@@ -99,7 +99,7 @@ const listed = (statement: string, status: CheckStatus, startedAgo: number, took
 });
 
 const file = (path: string, added: number, removed: number, agent: string | null = null): TurnFile => ({ root: cwd, path, from: null, added, removed, agent });
-const run = (status: CheckStatus, call: string, exit_code: number) => ({ command: "cargo", statement: "cargo", status, exit_code, call, agent: null, started_at: null, ended_at: null });
+const run = (status: CheckStatus, call: string, exit_code: number, agent: string | null = null) => ({ command: "cargo", statement: "cargo", status, exit_code, call, agent, started_at: null, ended_at: null });
 
 const helper = (id: string, name: string, asked: string, type: string, result: string, turn: number, ago: number, running = false): Subagent => ({
   id, parent: "session", kind: "helper", name, asked, agent_type: type, status: running ? "running" : "completed",
@@ -140,7 +140,7 @@ const session = (state: SessionState, { running = false, question = false } = {}
       : [listed("cargo clippy --locked --workspace --all-targets -- -D warnings", "failed", 38 * MIN, 41e3)],
     checks: i === 4
       ? [
-          { suite: "cargo clippy", worktree: "/r", foreign: false, status: "passed", retries: 1, runs: [run("failed", "k1", 101), run("passed", "k2", 0)] },
+          { suite: "cargo clippy", worktree: "/r", foreign: false, status: "passed", retries: 1, runs: [run("failed", "k1", 101), run("passed", "k2", 0, "w1")] },
           { suite: "npm run check", worktree: "/r/.claude/worktrees/fix", foreign: true, status: "failed", retries: 0, runs: [run("failed", "k3", 1)] },
         ]
       : [{ suite: "check", worktree: "/r", foreign: false, status: i === 1 ? "failed" : "passed", retries: 0, runs: [] }],
@@ -335,6 +335,8 @@ const evidenceScript = `
   const shown = toggle.parentElement.querySelectorAll(".evidence-rows li");
   if ([...shown].some((li) => /external/.test(li.textContent))) log("snap:fail the opened line still has an external row");
   if (toggle.parentElement.querySelectorAll(".evidence-file .evidence-agent").length !== 2) log("snap:fail the files' agents are not named");
+  // A check whose last run is a worker's names the worker, as a file does.
+  if (toggle.parentElement.querySelectorAll(".evidence-check .evidence-agent").length !== 1) log("snap:fail the worker's check does not name its worker");
   const row = document.querySelector(".evidence-check .evidence-fail");
   if (!row) log("snap:fail the opened line has no failed check");
   row.click();
