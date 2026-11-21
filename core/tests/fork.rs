@@ -3,6 +3,7 @@
 //! the same terminal, and the old id went on sending late events. A `/resume` from a fresh `claude`
 //! leaves a throwaway `startup` id too, which ends with reason `resume`.
 
+use crate::common;
 use serde_json::{Value, json};
 use studio_core::{State, Studio};
 
@@ -13,17 +14,10 @@ const THROWAWAY: &str = "8bfb6191-cf3e-4c02-b28e-165efd3c5585";
 const FORK: &str = "e0842765-2d76-4242-844e-e30a23f75973";
 
 fn event(id: &str, name: &str, at: u64, extra: Value) -> String {
-    let mut event = json!({
-        "session_id": id,
-        "hook_event_name": name,
-        "cwd": FOLDER,
-        "studio_terminal_id": TERMINAL,
-        "transcript_path": format!("/h/.claude/projects/x/{id}.jsonl"),
-        "studio_received_ms": at,
-    });
-    let fields = event.as_object_mut().unwrap();
-    fields.extend(extra.as_object().unwrap().clone());
-    event.to_string()
+    let mut base = common::base(id, name, FOLDER, at);
+    base["studio_terminal_id"] = json!(TERMINAL);
+    base["transcript_path"] = json!(format!("/h/.claude/projects/x/{id}.jsonl"));
+    common::with(base, extra)
 }
 
 /// A session that asked a question Daniel answered, then forked mid-turn, as on 2026-11-09.

@@ -9,12 +9,9 @@ use studio_core::{
     Subagent,
 };
 
+use crate::common::{self, replay};
 use Kind::{Helper, Worker};
 use State::{NeedsYou, Running, YourTurn};
-
-fn replay(log: &str) -> Studio {
-    Studio::replayed(log.lines())
-}
 
 /// The checkpoint day of danielrispler/Falinks#347, scrubbed (danielrispler/Falinks#370).
 const DAY: &str = include_str!("fixtures/checkpoint-day.jsonl");
@@ -635,8 +632,7 @@ fn a_killed_subagents_running_descendants_end_with_it() {
         json!({"background_tasks": [{"id": "w1"}]}),
     ));
 
-    let killed =
-        "<task-notification><task-id>w1</task-id><status>killed</status></task-notification>";
+    let killed = common::task_notification("w1", "killed");
     studio.apply(&ev(
         "UserPromptSubmit",
         9,

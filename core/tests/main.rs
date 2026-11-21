@@ -1,6 +1,5 @@
 //! The integration tests of the core, one binary: each file is a module.
 
-mod common;
 mod agy;
 mod ask_facts;
 mod backfill;
@@ -11,6 +10,7 @@ mod check_feed;
 mod checks;
 mod clear;
 mod close_rename;
+mod common;
 mod decisions;
 mod feed;
 mod fork;

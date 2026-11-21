@@ -5,18 +5,8 @@
 
 use studio_core::{Output, State, Studio};
 
+use crate::common::states;
 use State::{Ended, NeedsYou, Running, YourTurn};
-
-/// The session's state after each line of the log, replayed.
-fn states(log: &str, session: &str) -> Vec<Option<State>> {
-    let mut studio = Studio::default();
-    log.lines()
-        .map(|line| {
-            studio.replay(line);
-            studio.session(session).map(|s| s.state)
-        })
-        .collect()
-}
 
 /// The "needs you" notices when the log's lines arrive live.
 fn live(log: &str) -> Vec<Output> {

@@ -2,6 +2,7 @@
 //! core and check its notices. Each belongs to a top-level session and names the subagent it comes
 //! from (danielrispler/Falinks#369, decision 22).
 
+use crate::common::{FIRST, SECOND, TWO, stop};
 use std::time::Duration;
 use studio_core::{Due, Notifications, Output, State, Studio};
 
@@ -202,23 +203,6 @@ fn a_needs_you_notice_shows_while_its_session_still_needs_you() {
 #[test]
 fn a_permission_answered_within_3_seconds_shows_no_needs_you_notice() {
     assert_eq!(needs_you_notification(5), None);
-}
-
-/// `two-sessions.jsonl`'s sessions, both in a turn at its end: the first in `Falinks`, the second in
-/// the `issue-322-terminals` worktree.
-const TWO: &str = include_str!("fixtures/two-sessions.jsonl");
-const FIRST: &str = "c41d8e27-6a3f-4b90-8e15-2f7a9b0c3d64";
-const SECOND: &str = "9e0b5f13-d72a-4c6e-b8f4-61a3c2d9e807";
-
-/// Session `id`'s `Stop`, under the prompt id its turn runs under.
-fn stop(id: &str) -> String {
-    let prompt_id = match id {
-        FIRST => "e2a7c9d1-3f5b-4a8e-9c6d-0b1a2f3e4d5c",
-        _ => "71c3e5a9-b2d4-4f6e-8a0c-1e3d5f7a9b2c",
-    };
-    format!(
-        r#"{{"session_id":"{id}","prompt_id":"{prompt_id}","hook_event_name":"Stop","stop_hook_active":false,"studio_received_ms":1793261020000}}"#
-    )
 }
 
 /// What is due 3 seconds after the sessions `stopped` reach "your turn" live, each queued as the

@@ -2,17 +2,14 @@
 //! with the shell's ticks at explicit times, and check each session's state, the list and the
 //! selection.
 
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::collections::{BTreeSet, HashMap};
 use studio_core::{State, Studio};
 
+use crate::common::{self, replay};
 use State::{Ended, Idle, NeedsYou, Running, YourTurn};
 
 const HOUR: u64 = 60 * 60 * 1000;
-
-fn replay(log: &str) -> Studio {
-    Studio::replayed(log.lines())
-}
 
 /// One prompt and a failed command, ending at its `Stop`.
 const PROBE: &str = "7f3c2a9e-4b1d-4c8e-9a2f-1d6b5e8c0a31";
@@ -20,12 +17,7 @@ const PROBE_STOPPED_AT: u64 = 1_793_260_011_904;
 
 /// An event of session `session`, received at `at`.
 fn event(session: &str, name: &str, at: u64) -> Value {
-    json!({
-        "session_id": session,
-        "hook_event_name": name,
-        "cwd": "/Users/danielrispler/work/Falinks",
-        "studio_received_ms": at,
-    })
+    common::base(session, name, "/Users/danielrispler/work/Falinks", at)
 }
 
 fn state(studio: &Studio, session: &str) -> Option<State> {

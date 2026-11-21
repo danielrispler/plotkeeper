@@ -3,24 +3,18 @@
 //! conversation may run in two terminals at once. The row keeps its terminal through the first and
 //! stays on one through the second, so the pane never shows "Open here" for a terminal that runs.
 
+use crate::common;
 use serde_json::{Value, json};
 use studio_core::{Studio, Terminal};
 
 const ID: &str = "5b1e0c7a-2d94-4f63-a8e1-9c3f6d20b417";
 
 fn event(name: &str, at: u64, terminal: Option<&str>, extra: Value) -> String {
-    let mut event = json!({
-        "session_id": ID,
-        "hook_event_name": name,
-        "cwd": "/tmp",
-        "studio_received_ms": at,
-    });
-    let fields = event.as_object_mut().unwrap();
+    let mut base = common::base(ID, name, "/tmp", at);
     if let Some(terminal) = terminal {
-        fields.insert("studio_terminal_id".into(), terminal.into());
+        base["studio_terminal_id"] = json!(terminal);
     }
-    fields.extend(extra.as_object().unwrap().clone());
-    event.to_string()
+    common::with(base, extra)
 }
 
 fn tool(at: u64, terminal: Option<&str>) -> String {

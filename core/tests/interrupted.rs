@@ -3,6 +3,7 @@
 //! ends it: past `MISMATCH_AFTER_MS` the core asks the shell for a `StudioInterrupted` line, and
 //! that line, as a restart replays it, ends the turn.
 
+use crate::common;
 use serde_json::{Value, json};
 use studio_core::{Output, State, Studio, Terminal};
 
@@ -11,18 +12,9 @@ const TERMINAL: &str = "claude-ae926462";
 const T0: u64 = 1_795_168_437_000;
 
 fn event(name: &str, at: u64, extra: Value) -> String {
-    let mut event = json!({
-        "session_id": ID,
-        "hook_event_name": name,
-        "cwd": "/Users/danielrispler/work/plotkeeper",
-        "studio_received_ms": at,
-        "studio_terminal_id": TERMINAL,
-    });
-    event
-        .as_object_mut()
-        .unwrap()
-        .extend(extra.as_object().unwrap().clone());
-    event.to_string()
+    let mut base = common::base(ID, name, "/Users/danielrispler/work/plotkeeper", at);
+    base["studio_terminal_id"] = json!(TERMINAL);
+    common::with(base, extra)
 }
 
 fn prompt(at: u64, text: &str, prompt_id: &str) -> String {

@@ -2,8 +2,8 @@
 //! taken live, then the same lines replayed into a new core with the card store's live-only facts and
 //! cards applied, as the shell does at start, then the rest live.
 
+use crate::common;
 use serde_json::{Value, json};
-use std::collections::BTreeMap;
 use studio_core::{Base, CardRequest, Change, Kind, LiveFacts, Output, Purpose, Studio};
 
 /// The scripted run of `record-subagent-run.sh` (danielrispler/Falinks#370): its worktree worker commits (line 15) and
@@ -23,10 +23,9 @@ fn change() -> Change {
 
 /// Takes `line` live, as the shell does when the fingerprints of `changed` keys find a change.
 fn live(studio: &mut Studio, line: &str, changed: &[&str]) -> Vec<Output> {
-    let looks = studio.fingerprint_folders(line).into_iter();
-    let changes = looks.filter(|look| changed.contains(&look.key.as_str()));
-    let changes: BTreeMap<String, Change> = changes.map(|look| (look.key, change())).collect();
-    studio.apply_with_changes(line, changes)
+    common::apply_looking(studio, line, |look| {
+        changed.contains(&look.key.as_str()).then(change)
+    })
 }
 
 /// The app restarted after `lines`: a new core with them replayed, then `facts` and `cards` applied.
@@ -132,11 +131,7 @@ fn after_a_restart_mid_run_the_parents_stop_still_writes_its_card_from_both_work
 
 /// Session `s1`'s event `name` at `at` in `/w`, with `fields` added.
 fn event(name: &str, at: u64, fields: Value) -> String {
-    let mut event =
-        json!({"session_id": "s1", "hook_event_name": name, "cwd": "/w", "studio_received_ms": at});
-    let fields = fields.as_object().unwrap().clone();
-    event.as_object_mut().unwrap().extend(fields);
-    event.to_string()
+    common::event("s1", name, "/w", at, fields)
 }
 
 const MINUTE: u64 = 60 * 1000;
@@ -183,8 +178,7 @@ fn after_a_restart_a_workers_fallback_waits_20_minutes_from_its_newest_stored_ca
 
 #[test]
 fn worker_cards_a_woken_turns_brief_took_are_not_collected_again_after_a_restart() {
-    let woken =
-        "<task-notification><task-id>w1</task-id><status>completed</status></task-notification>";
+    let woken = common::task_notification("w1", "completed");
     let lines = [
         event("UserPromptSubmit", 100, json!({"prompt": "Implement #378"})),
         event("PostToolUse", 110, spawn()),

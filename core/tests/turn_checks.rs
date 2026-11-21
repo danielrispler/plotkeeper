@@ -2,6 +2,7 @@
 //! (danielrispler/plotkeeper#112): hook events replayed through the core, and how each turn's checks
 //! ended, from the step ledger's rows.
 
+use crate::common;
 use serde_json::{Value, json};
 use studio_core::{Check, CheckStatus, Studio, check_output};
 
@@ -9,17 +10,9 @@ const SESSION: &str = "7d3e9a51-2b8c-4f6e-a0d7-5c1b9e3f8a24";
 const CWD: &str = "/Users/danielrispler/work/plotkeeper";
 
 fn line(name: &str, ms: u64, extra: Value) -> String {
-    let mut line = json!({
-        "session_id": SESSION,
-        "hook_event_name": name,
-        "cwd": CWD,
-        "prompt_id": "p1",
-        "studio_received_ms": 1_793_265_000_000u64 + ms,
-    });
-    line.as_object_mut()
-        .unwrap()
-        .extend(extra.as_object().unwrap().clone());
-    line.to_string()
+    let mut base = common::base(SESSION, name, CWD, 1_793_265_000_000u64 + ms);
+    base["prompt_id"] = json!("p1");
+    common::with(base, extra)
 }
 
 fn prompt() -> String {
@@ -199,21 +192,18 @@ fn a_checks_exit_code_and_output_tail_are_read_through_its_offset() {
     let mut lines = vec![prompt()];
     lines.extend(calls.concat());
     let text: String = lines.iter().map(|l| format!("{l}\n")).collect();
-    let dir = std::env::temp_dir().join(format!("turn-checks-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let log = dir.join("events.jsonl");
-    std::fs::write(&log, text).unwrap();
+    let log = common::temp_file(&text);
+    let log = log.path();
     let studio = Studio::replayed(&lines);
     let ledger = &studio.session(SESSION).unwrap().ledger;
 
-    let failed = check_output(ledger.row(None, "t1").unwrap(), &log).unwrap();
-    let passed = check_output(ledger.row(None, "t2").unwrap(), &log).unwrap();
+    let failed = check_output(ledger.row(None, "t1").unwrap(), log).unwrap();
+    let passed = check_output(ledger.row(None, "t2").unwrap(), log).unwrap();
 
     assert_eq!(failed.exit_code, Some(2));
     assert!(failed.tail.ends_with("error: it broke"), "{}", failed.tail);
     assert_eq!(passed.exit_code, Some(0));
     assert_eq!(passed.tail, "ok\nall passed");
-    std::fs::remove_dir_all(dir).unwrap();
 }
 
 /// The suites and statuses of the checks a turn with the one command `command` shows.

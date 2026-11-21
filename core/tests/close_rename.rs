@@ -3,24 +3,17 @@
 //! (`Stop`'s `background_tasks`), and a session's name is a line of the event log, so a restart,
 //! which replays the log, keeps it.
 
+use crate::common;
 use serde_json::{Value, json};
 use studio_core::{State, Studio};
 
 const ID: &str = "5b1e0c7a-2d94-4f63-a8e1-9c3f6d20b417";
 
 fn event(name: &str, at: u64, extra: Value) -> String {
-    let mut event = json!({
-        "session_id": ID,
-        "hook_event_name": name,
-        "cwd": "/Users/danielrispler/work/Falinks/.claude/worktrees/issue-469-close-rename",
-        "studio_terminal_id": "claude-1",
-        "studio_received_ms": at,
-    });
-    event
-        .as_object_mut()
-        .unwrap()
-        .extend(extra.as_object().unwrap().clone());
-    event.to_string()
+    let cwd = "/Users/danielrispler/work/Falinks/.claude/worktrees/issue-469-close-rename";
+    let mut base = common::base(ID, name, cwd, at);
+    base["studio_terminal_id"] = json!("claude-1");
+    common::with(base, extra)
 }
 
 fn asks(studio: &Studio) -> bool {

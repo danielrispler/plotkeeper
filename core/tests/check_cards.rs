@@ -2,8 +2,8 @@
 //! whose typical duration is over 2 minutes requests one card on the change so far, which names the
 //! check; a shorter or unknown one requests none. The check's result settles the guess on it.
 
+use crate::common;
 use serde_json::Value;
-use std::collections::BTreeMap;
 use studio_core::{Base, CardRequest, Change, Output, Purpose, Studio};
 
 const CHECKS: &str = include_str!("fixtures/checks.jsonl");
@@ -36,20 +36,14 @@ fn check_cards(log: &[String]) -> (Studio, Vec<(usize, CardRequest)>) {
     let mut studio = Studio::default();
     let mut cards = Vec::new();
     for (index, line) in log.iter().enumerate() {
-        let changes: BTreeMap<String, Change> = studio
-            .fingerprint_folders(line)
-            .into_iter()
-            .filter(|look| look.purpose != Purpose::Base)
-            .map(|look| {
-                let change = Change {
-                    base: Base::default(),
-                    diff: DIFF.into(),
-                    head: None,
-                };
-                (look.key, change)
+        let outputs = common::apply_looking(&mut studio, line, |look| {
+            (look.purpose != Purpose::Base).then(|| Change {
+                base: Base::default(),
+                diff: DIFF.into(),
+                head: None,
             })
-            .collect();
-        for output in studio.apply_with_changes(line, changes) {
+        });
+        for output in outputs {
             if let Output::Card(request) = output
                 && request.check.is_some()
             {

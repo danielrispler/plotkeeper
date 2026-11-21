@@ -2,8 +2,8 @@
 //! whole change, at its `Stop`. The shell fingerprints the worktree where the core asks it to and
 //! passes in what changed; these tests play the shell's part.
 
+use crate::common;
 use serde_json::{Value, json};
-use std::collections::BTreeMap;
 use studio_core::{Base, CardRequest, Change, Fingerprint, Output, Purpose, Stopped, Studio};
 
 const LOG: &str = include_str!("fixtures/bash-steps.jsonl");
@@ -25,9 +25,7 @@ fn found() -> Change {
 
 /// Takes `line` live, as the shell does when each fingerprint it takes before it finds `found`.
 fn apply(studio: &mut Studio, line: &str, found: Option<Change>) -> Vec<Output> {
-    let looks = studio.fingerprint_folders(line).into_iter();
-    let changes = looks.filter_map(|look| Some((look.key, found.clone()?)));
-    studio.apply_with_changes(line, changes.collect())
+    common::apply_looking(studio, line, |_| found.clone())
 }
 
 /// The card requests when every line of `log` arrives live and each fingerprint finds `found`.
@@ -102,13 +100,7 @@ fn a_stop_keeps_its_cards_id_and_the_first_line_of_its_message_until_the_next_pr
 
 /// Session `s1`'s event `name` at `at`, with `fields` added.
 fn event(name: &str, at: u64, fields: Value) -> String {
-    let mut event =
-        json!({"session_id": "s1", "hook_event_name": name, "cwd": "/w", "studio_received_ms": at});
-    event
-        .as_object_mut()
-        .unwrap()
-        .extend(fields.as_object().unwrap().clone());
-    event.to_string()
+    common::event("s1", name, "/w", at, fields)
 }
 
 #[test]
@@ -129,8 +121,7 @@ fn a_wake_ups_card_belongs_to_daniels_prompt_before_it() {
     let spawn = json!({"tool_name": "Agent", "tool_input": {}, "tool_response": {"agentId": "a1"}});
     studio.apply(&event("PostToolUse", 110, spawn));
     let first = stop(&mut studio, 120);
-    let wake_up =
-        "<task-notification><task-id>a1</task-id><status>completed</status></task-notification>";
+    let wake_up = common::task_notification("a1", "completed");
     studio.apply(&event(
         "UserPromptSubmit",
         200,
@@ -152,7 +143,7 @@ fn a_wake_ups_card_belongs_to_daniels_prompt_before_it() {
         .iter()
         .map(|p| p.text.as_str())
         .collect();
-    assert_eq!(texts, ["Split the spec", wake_up, "What did a1 do?"]);
+    assert_eq!(texts, ["Split the spec", &wake_up, "What did a1 do?"]);
 }
 
 #[test]
@@ -224,20 +215,16 @@ fn the_runs_worker_gets_a_card_at_its_commit_and_its_end_and_its_session_one_fro
     let mut requests = Vec::new();
     for (index, line) in RUN.lines().enumerate() {
         // The worker's worktree changed, with a commit, at each look but its first.
-        let mut changes = BTreeMap::new();
-        for look in studio.fingerprint_folders(line) {
+        let outputs = common::apply_looking(&mut studio, line, |look| {
             let seen = looked.iter().any(|(_, key, _)| key == &look.key);
             looked.push((index + 1, look.key.clone(), look.purpose));
-            if look.key == RUN_WORKER && seen {
-                let change = Change {
-                    base: Base::default(),
-                    diff: "--- a/hello.txt\n+++ b/hello.txt\n@@ -0,0 +1 @@\n+hello\n".into(),
-                    head: Some("c0ffee".into()),
-                };
-                changes.insert(look.key, change);
-            }
-        }
-        for output in studio.apply_with_changes(line, changes) {
+            (look.key == RUN_WORKER && seen).then(|| Change {
+                base: Base::default(),
+                diff: "--- a/hello.txt\n+++ b/hello.txt\n@@ -0,0 +1 @@\n+hello\n".into(),
+                head: Some("c0ffee".into()),
+            })
+        });
+        for output in outputs {
             if let Output::Card(request) = output {
                 requests.push(request);
             }
@@ -394,16 +381,11 @@ fn a_session_event_whose_touched_roots_hold_a_running_workers_home_asks_for_no_f
 
 /// A hook line of session `s1` at `at`, by `agent`, with `fields`.
 fn line(name: &str, at: u64, agent: Option<&str>, fields: Value) -> String {
-    let mut event = json!({"session_id": "s1", "hook_event_name": name, "cwd": "/w",
-        "studio_received_ms": 1_793_265_000_000_u64 + at});
+    let mut base = common::base("s1", name, "/w", 1_793_265_000_000_u64 + at);
     if let Some(agent) = agent {
-        event["agent_id"] = agent.into();
+        base["agent_id"] = agent.into();
     }
-    event
-        .as_object_mut()
-        .unwrap()
-        .extend(fields.as_object().unwrap().clone());
-    event.to_string()
+    common::with(base, fields)
 }
 
 /// The card of a turn whose subagent `w1` asks for a permission, with its `Stop` at the turn's end.
