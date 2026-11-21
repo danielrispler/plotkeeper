@@ -86,8 +86,9 @@ pub(crate) struct Statement<'a> {
     pub after: Option<Joiner>,
     /// It starts with `!`.
     pub negated: bool,
-    /// It is `set` with `pipefail`.
-    pub pipefail: bool,
+    /// It is `set` with `pipefail`: `Some(true)` turns it on (`-o pipefail`), `Some(false)` off
+    /// (`+o pipefail`).
+    pub pipefail: Option<bool>,
     /// The folder of the last `cd` with an absolute path in a statement before it.
     pub cd: Option<String>,
 }
@@ -148,7 +149,8 @@ fn split(command: &str) -> Vec<Raw> {
                 group: self.group,
             });
             self.before = Some(joiner);
-            if joiner == Joiner::Semi {
+            // `;` and `&` each end a group: what follows runs in the foreground, after it.
+            if matches!(joiner, Joiner::Semi | Joiner::Background) {
                 self.group += 1;
             }
         }
@@ -180,6 +182,45 @@ fn split(command: &str) -> Vec<Raw> {
                 }
                 None => reader.push(c, false),
             },
+            // `$(…)` and `$((…))` belong to the word they stand in, whatever quotes or parentheses
+            // they hold; what they run is no statement of the command.
+            '$' if next == Some('(') => {
+                reader.push(c, false);
+                let mut depth = 0;
+                while i < chars.len() {
+                    let inner = chars[i];
+                    i += 1;
+                    reader.push(inner, false);
+                    match inner {
+                        '(' => depth += 1,
+                        ')' => {
+                            depth -= 1;
+                            if depth == 0 {
+                                break;
+                            }
+                        }
+                        '\\' if i < chars.len() => {
+                            reader.push(chars[i], false);
+                            i += 1;
+                        }
+                        '\'' | '"' => {
+                            while i < chars.len() {
+                                let quoted = chars[i];
+                                i += 1;
+                                reader.push(quoted, false);
+                                if quoted == inner {
+                                    break;
+                                }
+                                if quoted == '\\' && inner == '"' && i < chars.len() {
+                                    reader.push(chars[i], false);
+                                    i += 1;
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
             '\'' | '"' => {
                 reader.push(c, false);
                 while i < chars.len() {
@@ -312,8 +353,9 @@ fn is_assignment(word: &str) -> bool {
 /// Where a statement's command starts among its words, past what may stand before it.
 fn command_at(words: &[Word]) -> usize {
     let mut at = 0;
-    while let Some(word) = words.get(at).filter(|w| w.plain) {
-        let wraps = wrapper(&word.text);
+    // A variable's value may be quoted: only the name before the `=` must be plain.
+    while let Some(word) = words.get(at) {
+        let wraps = word.plain.then(|| wrapper(&word.text)).flatten();
         if wraps.is_none() && !is_assignment(&word.text) {
             break;
         }
@@ -373,6 +415,19 @@ fn runs_entry(entry: &str, words: &[Word]) -> bool {
             })
 }
 
+/// What the statement `own` does to `pipefail`, if it is a `set` that names it.
+fn pipefail_of(own: &[Word]) -> Option<bool> {
+    if !own.first().is_some_and(|w| w.plain && w.text == "set") {
+        return None;
+    }
+    let at = own.iter().position(|w| w.plain && w.text == "pipefail")?;
+    let option = own.get(at.checked_sub(1)?)?;
+    option
+        .text
+        .starts_with(['-', '+'])
+        .then(|| option.text.starts_with('-'))
+}
+
 /// The statements of `command`, each with the entry of `list` it runs, if any.
 pub(crate) fn statements<'a, S: AsRef<str>>(list: &'a [S], command: &str) -> Vec<Statement<'a>> {
     let mut cd: Option<String> = None;
@@ -405,8 +460,7 @@ pub(crate) fn statements<'a, S: AsRef<str>>(list: &'a [S], command: &str) -> Vec
                 before: raw.before,
                 after: raw.after,
                 negated: words[..at].iter().any(|w| w.plain && w.text == "!"),
-                pipefail: own.first().is_some_and(|w| w.plain && w.text == "set")
-                    && own.iter().any(|w| w.text.contains("pipefail")),
+                pipefail: pipefail_of(own),
                 cd: before_cd,
             }
         })
@@ -442,24 +496,35 @@ fn is_prelude(text: &str) -> bool {
 /// `pipefail`. Exit 0 then says every run of the group passed; a non-zero exit names the run only
 /// when it is the group's one statement besides `cd`, `export`, `set` and assignments.
 fn counts_of(statements: &[Statement], at: usize) -> Counts {
-    let pipefail = statements.iter().any(|s| s.pipefail);
+    // On when the last `set` before the run that names it turned it on.
+    let pipefail = statements[..at]
+        .iter()
+        .rev()
+        .find_map(|s| s.pipefail)
+        .unwrap_or(false);
     let last = statements.last().map_or(0, |s| s.group);
     let group = || statements.iter().filter(|s| s.group == last);
     let clear = statements[at].group == last
-        && !group().next().is_some_and(|s| s.negated)
         && !group().any(|s| {
-            [s.before, s.after]
-                .into_iter()
-                .flatten()
-                .any(|joiner| match joiner {
-                    Joiner::Or | Joiner::Background => true,
-                    Joiner::Pipe => !pipefail,
-                    Joiner::Semi | Joiner::And => false,
-                })
+            // A `&` ends a group, so it masks only the statement before it.
+            s.negated
+                || [(s.before, false), (s.after, true)]
+                    .into_iter()
+                    .any(|(joiner, after)| match joiner {
+                        Some(Joiner::Or) => true,
+                        Some(Joiner::Background) => after,
+                        Some(Joiner::Pipe) => !pipefail,
+                        Some(Joiner::Semi | Joiner::And) | None => false,
+                    })
         });
+    // Under `pipefail` a pipeline exits non-zero for its failed command, so it counts as one statement.
+    let alone = group()
+        .filter(|s| !is_prelude(&s.text) && !(pipefail && s.before == Some(Joiner::Pipe)))
+        .count()
+        == 1;
     Counts {
         zero: clear,
-        failure: clear && group().filter(|s| !is_prelude(&s.text)).count() == 1,
+        failure: clear && alone,
     }
 }
 

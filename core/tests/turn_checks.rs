@@ -754,3 +754,64 @@ fn a_repeated_notification_is_not_applied_again() {
         [("cargo test", CheckStatus::Passed, 0)]
     );
 }
+
+#[test]
+fn a_quoted_assignment_or_a_command_substitution_before_a_check_does_not_hide_it() {
+    for command in [
+        "RUSTFLAGS=\"-D warnings\" cargo test",
+        "FOO='bar' npm run check",
+        "CARGO_BUILD_JOBS=$(( $(sysctl -n hw.ncpu) / 3 )) NEXTEST_TEST_THREADS=$(( $(sysctl -n hw.ncpu) / 3 )) npm run check",
+        "X=$(echo \"a ) b\") cargo test",
+        "echo $((1<<2))\ncargo test",
+    ] {
+        let found = of_command(command);
+        assert_eq!(found.len(), 1, "{command}");
+        assert_eq!(found[0].1, CheckStatus::Passed, "{command}");
+    }
+    // What a substitution runs is no statement of the command.
+    assert_eq!(of_command("echo $(cargo test)"), []);
+}
+
+#[test]
+fn a_negation_anywhere_in_the_last_group_masks_the_exit_code() {
+    for exit in [None, Some(1)] {
+        let runs = runs_of("cd /repo && ! cargo test", exit);
+        assert_eq!(runs[0].1, CheckStatus::Ran, "{exit:?}");
+    }
+}
+
+#[test]
+fn pipefail_counts_only_when_an_earlier_statement_turns_it_on() {
+    let status = |command: &str, exit| runs_of(command, exit)[0].1;
+
+    for on in ["set -o pipefail", "set -euo pipefail", "set -eo pipefail"] {
+        let command = format!("{on}; cargo test 2>&1 | tail -20");
+        assert_eq!(status(&command, None), CheckStatus::Passed, "{command}");
+        assert_eq!(status(&command, Some(101)), CheckStatus::Failed, "{command}");
+    }
+    for command in [
+        "set +o pipefail; cargo test | tail",
+        "set -o pipefail; set +o pipefail; cargo test | tail",
+        "cargo test | tail; set -o pipefail",
+        "cargo test | tail",
+    ] {
+        for exit in [None, Some(101)] {
+            assert_eq!(status(command, exit), CheckStatus::Ran, "{command} {exit:?}");
+        }
+    }
+}
+
+#[test]
+fn a_foreground_check_after_a_background_statement_is_counted() {
+    for command in ["server &\ncargo test", "server & cargo test"] {
+        assert_eq!(runs_of(command, None)[0].1, CheckStatus::Passed, "{command}");
+        assert_eq!(
+            runs_of(command, Some(101))[0].1,
+            CheckStatus::Failed,
+            "{command}"
+        );
+    }
+    for exit in [None, Some(1)] {
+        assert_eq!(runs_of("cargo test &", exit)[0].1, CheckStatus::Ran);
+    }
+}
