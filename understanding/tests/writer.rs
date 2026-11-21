@@ -589,6 +589,11 @@ fn the_writers_instructions_no_longer_describe_a_change_that_is_workers_summarie
             "{instructions}"
         );
     }
+    // "Explain more" on that older card still tells the writer not to invent code.
+    assert!(
+        prompt.contains("do not invent code you were not shown"),
+        "{prompt}"
+    );
     assert!(prompt.ends_with(older.diff()));
 }
 

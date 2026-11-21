@@ -1213,7 +1213,7 @@ Reply with one JSON object and nothing else: {"design": [{"text": string, "cite"
 const MORE: &str = concat!(
     r#"A developer read a card that explains a change a coding agent made to his code, and asked for more. Explain the change in more depth than the card: how the changed code works, step by step, and why it was done this way and not another. Do not repeat the card.
 
-Answer from the change below. Use only this input: do not use tools or read files.
+Answer from the change below. Use only this input: do not use tools or read files. When the change below is not a diff, explain only what it says: do not invent code you were not shown.
 
 "#,
     explanation_language!(),
