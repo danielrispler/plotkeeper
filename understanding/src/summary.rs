@@ -3,9 +3,7 @@
 //! session's last 3 summaries.
 
 use crate::grounding::{HEADLINE_WORDS, agent_says, facts_text, grounded, material, words};
-use crate::{
-    CardStore, CardWriter, ClaudeWriter, MAX_CHANGE, Place, Quiz, millis, object, quiz_rules,
-};
+use crate::{CardStore, CardWriter, ClaudeWriter, MAX_CHANGE, Place, Quiz, millis, quiz_rules};
 use serde::{Deserialize, Serialize};
 use std::{process::Command, sync::Mutex};
 
@@ -126,7 +124,7 @@ impl TurnSummary {
     ) -> Result<(TurnSummary, Option<Unusable>), String> {
         let card = request.card.is_some();
         let head: String = reply.chars().take(300).collect();
-        let value: serde_json::Value = serde_json::from_str(object(reply))
+        let value: serde_json::Value = crate::parse_object(reply)
             .map_err(|e| format!("the summary reply does not parse ({e}): {head:?}"))?;
         let headline = value["headline"]
             .as_str()
@@ -244,11 +242,11 @@ pub(crate) fn write_held(
         )
     };
     let first = summary();
-    let retry = match &first {
+    let retry = |first: &Result<_, _>| match first {
         Err(_) => true,
         Ok((_, problem)) => matches!(problem, Some(Unusable::Quiz(_) | Unusable::Headline(_))),
     };
-    match if retry { summary().or(first) } else { first } {
+    match crate::once_more(first, retry, summary, |second, first| second.or(first)) {
         Ok((mut summary, problem)) => {
             if let Some(problem) = problem {
                 log(format!("no quiz on {}: {problem}", request.id));
@@ -379,7 +377,7 @@ pub fn write_agent_summary(
     let summary = writer
         .summarize_agent(setup, prompt, message)
         .and_then(|reply| {
-            let value: serde_json::Value = serde_json::from_str(object(&reply)).unwrap_or_default();
+            let value = crate::parse_object(&reply).unwrap_or_default();
             match value["summary"].as_str().map(str::trim) {
                 Some(summary) if !summary.is_empty() => Ok(summary.to_string()),
                 _ => Err(format!(
@@ -487,7 +485,7 @@ pub fn write_name(
     mut log: impl FnMut(String),
 ) -> Option<String> {
     let name = writer.name(setup, prompt, response).and_then(|reply| {
-        let value: serde_json::Value = serde_json::from_str(object(&reply)).unwrap_or_default();
+        let value = crate::parse_object(&reply).unwrap_or_default();
         let name = value["name"].as_str().unwrap_or_default();
         let words: Vec<&str> = name.split_whitespace().take(NAME_WORDS).collect();
         match words.is_empty() {

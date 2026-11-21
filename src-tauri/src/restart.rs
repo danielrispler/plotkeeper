@@ -5,13 +5,14 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
     sync::{
-        LazyLock, Mutex,
+        LazyLock,
         atomic::{AtomicBool, Ordering},
     },
     thread,
     time::{Duration, SystemTime},
 };
-use studio_core::{Revive, Studio, Terminal};
+use studio_core::{Revive, Terminal};
+use studio_understanding::Core;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 /// Set once the read loop has replayed the event log, so the core knows every session's terminal.
@@ -20,7 +21,7 @@ pub static REPLAYED: AtomicBool = AtomicBool::new(false);
 /// How each terminal of the daemon's `list`, or of a dead daemon's record, comes back, and what runs
 /// in it now; after the event log's replay.
 #[tauri::command(async)]
-pub fn revival(terms: Vec<Terminal>, studio: State<Mutex<Studio>>) -> Vec<Revive> {
+pub fn revival(terms: Vec<Terminal>, studio: State<Core>) -> Vec<Revive> {
     while !REPLAYED.load(Ordering::Acquire) {
         thread::sleep(Duration::from_millis(50));
     }

@@ -237,12 +237,12 @@ struct Line<'a> {
 
 /// The record of offers (`offers.jsonl`), beside the event log: one JSON line for each offer decided,
 /// with the table's inputs and how it ended, and no diff and no text of a file. Nothing reads it yet.
-pub struct Offers(PathBuf);
+pub struct Offers(PathBuf, std::sync::Mutex<()>);
 
 impl Offers {
     /// The record beside the event log `log`.
     pub fn beside(log: &Path) -> Offers {
-        Offers(log.with_file_name("offers.jsonl"))
+        Offers(log.with_file_name("offers.jsonl"), Default::default())
     }
 
     pub fn path(&self) -> &Path {
@@ -265,6 +265,8 @@ impl Offers {
     /// A decision already on record, other than a writer's silence, is not recorded again: a turn
     /// the app asks about again after a restart adds no line.
     pub fn record(&self, session: &str, id: &str, decision: &Decision, outcome: Option<Outcome>) {
+        // One lock across "is it on record" and the append: two threads cannot both find it absent.
+        let _held = self.1.lock().unwrap_or_else(|e| e.into_inner());
         if self.settled(session, id) {
             return;
         }

@@ -46,7 +46,11 @@ At most 3 Quizzes are offered in any rolling hour, across the studio, answered o
 
 ## Never beside a decision
 
-A turn that ends with an `ask` line, or in Needs you, has no open Quiz: its summary's Quiz and its card's Quiz are dropped.
+A turn that ends in Needs you has no open Quiz: its card's Quiz is never stored or counted. A turn whose summary has an `ask` line has none either: when the summary is written, its Quiz and its card's Quiz, already stored, are removed.
+
+The rule is judged from how the turn ended, never from the session's state when the writing job runs: the core records at the turn's end whether it ended in Needs you (`asks` on the card request and the summary request), and a request stored without it reads as "did not". At a card the order is the rule, then the hourly cap, then the store, with the cap check and the store under one lock. A backfilled card is judged by how its turn ended, not by the session's state at the restart.
+
+The rail has its own display rule, which this does not change: it hides an open Quiz while its session needs Daniel and shows it again after.
 
 ## The retest
 
