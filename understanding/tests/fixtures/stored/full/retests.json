@@ -1,0 +1,19 @@
+[
+  {
+    "id": "retest sess-1@1761743900000",
+    "of": "sess-1@1761743900000",
+    "session_id": "sess-1",
+    "added_at": 1762348700000,
+    "of_at": 1761743900000,
+    "hunk": "@@ -1 +1 @@\n-old\n+new\n",
+    "quiz": {
+      "text": "Sample retest question?",
+      "options": [
+        { "text": "Sample key", "why": "It is the key." },
+        { "text": "Sample other", "why": "It is not." }
+      ],
+      "key": 0
+    },
+    "taps": [{ "kind": "shown", "at": 1762348800000 }]
+  }
+]

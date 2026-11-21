@@ -517,7 +517,12 @@ pub struct CardStore {
 /// error, so it is never overwritten.
 fn read<T: Default + for<'de> Deserialize<'de>>(path: &Path) -> io::Result<T> {
     match fs::read(path) {
-        Ok(bytes) => Ok(serde_json::from_slice(&bytes)?),
+        Ok(bytes) => serde_json::from_slice(&bytes).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("{}: {e}", path.display()),
+            )
+        }),
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(T::default()),
         Err(e) => Err(e),
     }

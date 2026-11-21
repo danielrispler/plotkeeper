@@ -1,0 +1,46 @@
+[
+  {
+    "request": {
+      "session_id": "sess-1",
+      "id": "worker-1@1761743900000",
+      "base": { "head": "5f0c1e2d9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d", "files": ["README.md"] },
+      "change": "--- a/a.rs\n+++ b/a.rs\n@@ -1 +1 @@\n-old\n+new\n",
+      "prompt": 1761743800000,
+      "agent": "worker-1",
+      "changed_by": { "helper-1": ["a.rs"] },
+      "workers": ["w1@1"],
+      "check": "cargo test",
+      "ends": { "/work/sample": "4b825dc642cb6eb9a060e54bf8d69288fbee4904" },
+      "asks": true
+    },
+    "card": {
+      "explanation": "Sample explanation.",
+      "summary": "Sample one-line summary.",
+      "paths": ["a.rs"],
+      "code": "a.rs:1-1\nnew",
+      "ranges": [{ "path": "a.rs", "from": 1, "to": 1 }],
+      "why_it_matters": "Sample reason it matters.",
+      "not_checked": "Sample unchecked part.",
+      "architecture": "Sample structural change.",
+      "quiz": {
+        "text": "Sample question?",
+        "options": [
+          { "text": "Sample key", "why": "It is the key." },
+          { "text": "Sample other", "why": "It is not." }
+        ],
+        "key": 0
+      }
+    },
+    "added_at": 1761743990000,
+    "shown_at": 1761743995000,
+    "guess": { "option": 1, "right": false, "at": 1761744000000 },
+    "key_wrong": true,
+    "more": "A longer explanation.",
+    "rating": { "level": "fair", "reasons": ["unclear", "too_easy"] },
+    "check_result": "passed",
+    "taps": [
+      { "kind": "pick", "option": 1, "at": 1761744000000 },
+      { "kind": "confidence", "sure": true, "surface": "home", "at": 1761743999000 }
+    ]
+  }
+]

@@ -15,6 +15,7 @@ mod samples;
 mod saved_state;
 mod self_test;
 mod store;
+mod stored_fixtures;
 mod turn_trees;
 mod turn_writing;
 mod week;

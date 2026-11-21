@@ -1,0 +1,13 @@
+{
+  "sess-1": [
+    {
+      "call": "toolu_1",
+      "agent": null,
+      "tool": "AskUserQuestion",
+      "input": { "questions": [{ "question": "Sample?", "options": [{ "label": "Yes" }, { "label": "No" }] }] },
+      "answer": { "Sample?": "Yes" },
+      "at": 1761743950000,
+      "source": "card"
+    }
+  ]
+}
