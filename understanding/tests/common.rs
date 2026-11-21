@@ -37,7 +37,9 @@ impl Answer {
 
     /// These replies in turn, the last again after that.
     pub fn replies(replies: impl IntoIterator<Item = String>) -> Self {
-        Answer::Sequence(replies.into_iter().map(|r| Some(Ok(r))).collect())
+        let replies: Vec<_> = replies.into_iter().map(|r| Some(Ok(r))).collect();
+        assert!(!replies.is_empty(), "a sequence needs at least one reply");
+        Answer::Sequence(replies)
     }
 
     /// `FakeWriter`'s answer, after the calls that `run` takes on.

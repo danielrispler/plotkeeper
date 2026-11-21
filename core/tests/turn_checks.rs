@@ -379,6 +379,7 @@ fn the_default_list_names_which_commands_are_checks() {
         "cargo check",
         "cargo build --release",
         "cargo run --bin ci-checks -- --all",
+        "cargo +nightly test",
         "cargo -q clippy --workspace",
         "cargo --locked build",
         "cd tests/go && go vet ./...",

@@ -130,6 +130,13 @@ const fresh = (five, readAt) => ({
   reason: null,
 });
 
+test("load, focus and the timer read Claude only; only the popover's open reads every agent", () => {
+  const main = fs.readFileSync(new URL("../main.ts", import.meta.url), "utf8");
+  assert.equal(main.match(/readUsageOf\(null\)/g).length, 1);
+  assert.match(main, /newState === "open"\) readUsageOf\(null\)/);
+  assert.match(main, /readUsageOf\(timedAgents\);\naddEventListener\("focus", \(\) => readUsageOf\(timedAgents\)\)/);
+});
+
 test("a slow read that resolves after a newer one does not overwrite that agent's newer reading", async () => {
   const slow = deferred();
   const calls = [slow.promise, Promise.resolve([fresh(70, nowS())])];
