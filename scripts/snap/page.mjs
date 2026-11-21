@@ -80,3 +80,8 @@ export const consoleLines = (stderr) =>
 // Whether the run failed: a log line that starts `snap:fail`, or an uncaught exception or unhandled rejection in the page,
 // which Chrome logs as `Uncaught …` (#144).
 export const failed = (lines) => lines.some((line) => line.startsWith("snap:fail") || line.startsWith("Uncaught"));
+
+// What `snap` prints when Chrome exits non-zero: the status and the last lines of its stderr, which the console lines leave out.
+// A zero status reports nothing.
+export const chromeFailure = (status, stderr, tail = 10) =>
+  status === 0 ? "" : `chrome: exit status ${status}\n${stderr.trimEnd().split("\n").slice(-tail).join("\n")}`;
