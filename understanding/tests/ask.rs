@@ -1,39 +1,15 @@
 //! "Ask about this" (danielrispler/Falinks#461, decision 20): a side question on a response, card or intention, answered
 //! by the card writer's own call with the turn's intentions; the session never sees it.
 
-use std::cell::RefCell;
-use studio_core::{CardRequest, Transcript};
-use studio_understanding::{Card, CardWriter, ClaudeWriter, ask_about};
+use crate::common::{Answer, Scripted};
+use studio_core::Transcript;
+use studio_understanding::{ClaudeWriter, ask_about};
 
-/// What a writer was asked: the item, the turn's intentions and the question.
-type Asking = (String, Vec<String>, String);
-
-/// A fake writer that records what it was asked and gives `reply`.
-struct Asked {
-    reply: Result<String, String>,
-    asked: RefCell<Vec<Asking>>,
-}
-
-impl Asked {
-    fn replying(reply: Result<&str, &str>) -> Self {
-        Self {
-            reply: reply.map(Into::into).map_err(Into::into),
-            asked: RefCell::default(),
-        }
-    }
-}
-
-impl CardWriter for Asked {
-    fn reply(&self, _: &CardRequest, _: &[String]) -> Result<String, String> {
-        unreachable!()
-    }
-    fn more(&self, _: &CardRequest, _: &Card) -> Result<String, String> {
-        unreachable!()
-    }
-    fn ask(&self, item: &str, intentions: &[String], question: &str) -> Result<String, String> {
-        let asked = (item.into(), intentions.to_vec(), question.into());
-        self.asked.borrow_mut().push(asked);
-        self.reply.clone()
+/// A writer whose answer to a side question is `reply`.
+fn asked(reply: Result<&str, &str>) -> Scripted {
+    Scripted {
+        ask: Answer::Fixed(reply.map(Into::into).map_err(Into::into)),
+        ..Scripted::bare()
     }
 }
 
@@ -52,7 +28,7 @@ fn transcript() -> Transcript {
 
 #[test]
 fn the_request_carries_the_item_the_question_and_the_turns_intentions_and_the_answer_comes_back() {
-    let writer = Asked::replying(Ok(r#"{"answer": "It checks the writer first."}"#));
+    let writer = asked(Ok(r#"{"answer": "It checks the writer first."}"#));
 
     let answer = ask_about(&writer, &transcript(), "The writer is fine.", "Why first?");
 
@@ -62,7 +38,7 @@ fn the_request_carries_the_item_the_question_and_the_turns_intentions_and_the_an
         "Now I run the tests.".to_string(),
     ];
     assert_eq!(
-        writer.asked.into_inner(),
+        writer.asked(),
         [(
             "The writer is fine.".to_string(),
             intentions,
@@ -73,14 +49,14 @@ fn the_request_carries_the_item_the_question_and_the_turns_intentions_and_the_an
 
 #[test]
 fn an_ended_turns_final_intention_is_its_first_line_not_its_footer() {
-    let writer = Asked::replying(Ok(r#"{"answer": "It ran them."}"#));
+    let writer = asked(Ok(r#"{"answer": "It ran them."}"#));
     let mut transcript = transcript();
     transcript.responses[1].push_str("\n\nNot checked: the CI run.");
     transcript.ended = true;
 
     ask_about(&writer, &transcript, "item", "Did it test?").unwrap();
 
-    let (_, intentions, _) = writer.asked.into_inner().remove(0);
+    let (_, intentions, _) = writer.asked().remove(0);
     assert_eq!(
         intentions,
         ["Then I look at the writer.", "The writer is fine."]
@@ -95,7 +71,7 @@ fn a_reply_that_does_not_parse_or_a_failed_call_gives_an_error() {
         Err("`claude -p` printed nothing"),
     ];
     for reply in replies {
-        let writer = Asked::replying(reply);
+        let writer = asked(reply);
         let answer = ask_about(&writer, &transcript(), "item", "question");
         assert!(answer.is_err(), "{reply:?} gave {answer:?}");
     }
@@ -132,7 +108,7 @@ fn the_real_call_runs_as_the_card_writer_does_with_tools_off_in_english() {
 fn opening_ask_on_an_anchor_shows_its_facts_and_never_calls_the_writer() {
     // The facts are the core's, read from the ledger and the log: `ask_facts` takes no writer, and the stand-in
     // that would record a call stays untouched.
-    let writer = Asked::replying(Ok("never"));
+    let writer = asked(Ok("never"));
     let session = "7d3e9a51-2b8c-4f6e-a0d7-5c1b9e3f8a24";
     let prompt = serde_json::json!({
         "session_id": session, "hook_event_name": "UserPromptSubmit", "cwd": "/Users/danielrispler/work/Falinks", "prompt_id": "p1",
@@ -146,7 +122,7 @@ fn opening_ask_on_an_anchor_shows_its_facts_and_never_calls_the_writer() {
     let anchor = studio_core::Anchor::Headline { turn: 0 };
     let facts = studio.ask_facts(session, &anchor, &log).unwrap();
     assert_eq!(facts.sections[0].facts[0].text, "Fix it");
-    assert!(writer.asked.borrow().is_empty());
+    assert!(writer.asked().is_empty());
 }
 
 fn parse_session() -> (studio_core::Studio, std::path::PathBuf, tempfile::TempDir) {
@@ -191,12 +167,12 @@ fn a_question_on_a_file_gives_the_writer_its_editing_steps_the_prompt_and_the_hu
         from: None,
     };
     let facts = studio.ask_facts(SESSION, &anchor, &log).unwrap();
-    let writer = Asked::replying(Ok(r#"{"answer": "Because it fixes the parser."}"#));
+    let writer = asked(Ok(r#"{"answer": "Because it fixes the parser."}"#));
 
     let item = studio_understanding::ask_item("this file", &facts, Some("-old\n+new"));
     ask_about(&writer, &transcript(), &item, "Why did it touch this file?").unwrap();
 
-    let (item, _, question) = writer.asked.into_inner().remove(0);
+    let (item, _, question) = writer.asked().remove(0);
     assert!(item.contains("Daniel asked:\nFix the parser"), "{item}");
     assert!(
         item.contains("Steps that edited it:\nEdit by the session's agent"),
@@ -240,21 +216,21 @@ fn a_question_on_a_failed_check_gives_its_command_exit_code_and_output_tail() {
 #[test]
 fn why_didnt_it_touch_a_name_the_session_never_saw_says_so_with_no_model_call() {
     let (studio, _log, _dir) = parse_session();
-    let writer = Asked::replying(Ok("never"));
+    let writer = asked(Ok("never"));
     let facts = studio.ask_named(SESSION, 0, "lexer.rs").unwrap();
 
     let result = studio_understanding::why_not(&writer, &transcript(), "lexer.rs", facts).unwrap();
 
     assert!(result.facts.sections.is_empty());
     assert_eq!(result.reasons, None);
-    assert!(writer.asked.borrow().is_empty());
+    assert!(writer.asked().is_empty());
 }
 
 #[test]
 fn why_didnt_it_touch_a_name_it_read_gives_the_writer_the_recorded_facts_and_returns_the_reasons_apart()
  {
     let (studio, _log, _dir) = parse_session();
-    let writer = Asked::replying(Ok(r#"{"answer": "Perhaps the prompt did not need it."}"#));
+    let writer = asked(Ok(r#"{"answer": "Perhaps the prompt did not need it."}"#));
     let facts = studio.ask_named(SESSION, 0, "parser").unwrap();
 
     let result = studio_understanding::why_not(&writer, &transcript(), "parser", facts).unwrap();
@@ -264,7 +240,7 @@ fn why_didnt_it_touch_a_name_it_read_gives_the_writer_the_recorded_facts_and_ret
         Some("Perhaps the prompt did not need it.")
     );
     assert_eq!(result.facts.sections[0].label, "Named in Daniel's prompt");
-    let (item, _, question) = writer.asked.into_inner().remove(0);
+    let (item, _, question) = writer.asked().remove(0);
     assert!(
         item.contains("Named in Daniel's prompt:\nFix the parser"),
         "{item}"

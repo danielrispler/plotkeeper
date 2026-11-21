@@ -3,6 +3,8 @@ name = "studio-understanding"
 version = "0.0.0"
 edition = "2024"
 publish = false
+# One test binary, `tests/main.rs`, that declares every file beside it.
+autotests = false
 
 [dependencies]
 libc = "0.2"
@@ -14,9 +16,14 @@ studio-core = { path = "../core" }
 studio-hook = { path = "../hook" }
 
 [dev-dependencies]
+studio-test-support = { path = "../test-support" }
 tempfile = "3"
 
 # Its timing summary has unit tests, which `cargo test` runs without a model call.
 [[example]]
 name = "writer_timing"
 test = true
+
+[[test]]
+name = "it"
+path = "tests/main.rs"

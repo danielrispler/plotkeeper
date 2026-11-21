@@ -1,11 +1,11 @@
 // The event log's growth (danielrispler/plotkeeper#132): the hook leaves out the two heavy fields,
 // and a prune moves the sessions that ended more than 30 days ago to the archive.
+use crate::common::{feed, hook, scratch as scratch_home};
 use serde_json::{Value, json};
 use std::{
     fs,
-    io::Write,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::Stdio,
     thread,
     time::Duration,
 };
@@ -15,8 +15,7 @@ const DAY: u64 = 24 * 60 * 60 * 1000;
 const NOW: u64 = 100 * DAY;
 
 fn scratch(name: &str) -> PathBuf {
-    let home = std::env::temp_dir().join(format!("studio-prune-{name}-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&home);
+    let home = scratch_home(&format!("prune-{name}"));
     fs::create_dir_all(studio_hook::event_log(&home).parent().unwrap()).unwrap();
     home
 }
@@ -65,17 +64,9 @@ fn read() -> Value {
 fn the_hook_leaves_out_an_edits_original_file_and_a_reads_content() {
     let home = scratch("hook");
     for event in [edit(), read()] {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_studio-hook"))
-            .env("HOME", &home)
-            .env_remove("STUDIO_TERMINAL_ID")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .spawn()
-            .unwrap();
-        let mut stdin = child.stdin.take().unwrap();
-        stdin.write_all(event.to_string().as_bytes()).unwrap();
-        drop(stdin);
-        assert!(child.wait().unwrap().success());
+        let mut cmd = hook(&home);
+        cmd.stdout(Stdio::null());
+        assert!(feed(cmd, &event).wait().unwrap().success());
     }
 
     let logged = lines(&studio_hook::event_log(&home));

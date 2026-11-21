@@ -1,10 +1,10 @@
 // Seam 4 (danielrispler/Falinks#461): the answer hook's contract. The binary gets a hook payload on stdin, a scratch `HOME`
 // in which the test plays the studio (its watching file and its answer file), and is checked on
 // stdout.
+use crate::common::{feed, scratch as scratch_home};
 use serde_json::{Value, json};
 use std::{
     fs,
-    io::Write,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
@@ -28,10 +28,7 @@ fn now_ms() -> u64 {
 }
 
 fn scratch(name: &str) -> PathBuf {
-    let home = std::env::temp_dir().join(format!("studio-answer-{name}-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&home);
-    fs::create_dir_all(&home).unwrap();
-    home
+    scratch_home(&format!("answer-{name}"))
 }
 
 fn data(home: &Path) -> PathBuf {
@@ -119,16 +116,11 @@ fn decided(name: &str, payload: &Value, answer: Value) -> Value {
 }
 
 fn start(home: &Path, timeout_ms: u64, payload: &Value) -> Child {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_studio-answer"))
-        .env("HOME", home)
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_studio-answer"));
+    cmd.env("HOME", home)
         .env("STUDIO_ANSWER_TIMEOUT_MS", timeout_ms.to_string())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .unwrap();
-    let mut stdin = child.stdin.take().unwrap();
-    stdin.write_all(payload.to_string().as_bytes()).unwrap();
-    child
+        .stdout(Stdio::piped());
+    feed(cmd, payload)
 }
 
 /// What the hook printed, and how long it took from `since`.

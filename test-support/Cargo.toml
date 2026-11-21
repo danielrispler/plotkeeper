@@ -1,0 +1,9 @@
+[package]
+name = "studio-test-support"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Shared by the crates' tests as a dev-dependency, so it depends on none of them.
+[dependencies]
+tempfile = "3"

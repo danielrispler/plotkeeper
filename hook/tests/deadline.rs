@@ -1,16 +1,15 @@
 // Seam 4 (#43): the hook's deadline. The binary runs with a scratch `HOME`; the test holds the
 // event log's lock, as a stuck hook would.
+use crate::common::{feed, hook as hook_command, scratch as scratch_home};
 use std::{
     fs,
-    io::Write,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::Stdio,
     time::{Duration, Instant},
 };
 
 fn scratch(name: &str) -> PathBuf {
-    let home = std::env::temp_dir().join(format!("studio-deadline-{name}-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&home);
+    let home = scratch_home(&format!("deadline-{name}"));
     fs::create_dir_all(studio_hook::event_log(&home).parent().unwrap()).unwrap();
     home
 }
@@ -18,21 +17,11 @@ fn scratch(name: &str) -> PathBuf {
 /// Runs the hook with `event` and returns how long it took.
 fn hook(home: &Path, patience_ms: u64, event: serde_json::Value) -> Duration {
     let start = Instant::now();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_studio-hook"))
-        .env("HOME", home)
-        .env("STUDIO_TERMINAL_ID", "t-1")
+    let mut cmd = hook_command(home);
+    cmd.env("STUDIO_TERMINAL_ID", "t-1")
         .env("STUDIO_HOOK_PATIENCE_MS", patience_ms.to_string())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .unwrap();
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(event.to_string().as_bytes())
-        .unwrap();
-    let out = child.wait_with_output().unwrap();
+        .stdout(Stdio::piped());
+    let out = feed(cmd, &event).wait_with_output().unwrap();
     assert!(out.status.success());
     assert!(out.stdout.is_empty());
     start.elapsed()

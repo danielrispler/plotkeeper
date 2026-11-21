@@ -1,31 +1,16 @@
 // Seam 4 (#43, decision 9): `studio-hook` writes an agy event only inside a studio terminal. agy's
 // hooks fire for every agy on the machine; Claude's rows without a terminal stay as they were.
-use std::{
-    fs,
-    io::Write,
-    process::{Command, Stdio},
-};
+use crate::common::{feed, hook, scratch};
+use std::{fs, process::Stdio};
 
 fn run(terminal: Option<&str>, payload: serde_json::Value, name: &str) -> (bool, String) {
-    let home = std::env::temp_dir().join(format!("studio-agy-{name}-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&home);
-    fs::create_dir_all(&home).unwrap();
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_studio-hook"));
-    cmd.env("HOME", &home)
-        .env_remove("STUDIO_TERMINAL_ID")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped());
+    let home = scratch(&format!("agy-{name}"));
+    let mut cmd = hook(&home);
+    cmd.stdout(Stdio::piped());
     if let Some(t) = terminal {
         cmd.env("STUDIO_TERMINAL_ID", t);
     }
-    let mut child = cmd.spawn().unwrap();
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(payload.to_string().as_bytes())
-        .unwrap();
-    let out = child.wait_with_output().unwrap();
+    let out = feed(cmd, &payload).wait_with_output().unwrap();
     assert!(out.status.success());
     assert!(out.stdout.is_empty());
     let log = studio_hook::event_log(&home);

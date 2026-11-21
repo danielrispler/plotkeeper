@@ -1,7 +1,8 @@
 //! The card store (danielrispler/Falinks#328, module 6; danielrispler/Falinks#369, decisions 15 and 17): cards, their base, Daniel's guesses,
 //! his flags, his ratings and the longer explanations he asked for survive a restart.
 
-use std::{cell::Cell, sync::Mutex};
+use crate::common::{Answer, Scripted};
+use std::sync::Mutex;
 use studio_core::{Base, CardRequest, Change, LiveFacts, Output, Studio};
 use studio_understanding::{
     Card, CardStore, CardWriter, FakeWriter, Guess, Level, Rating, Reason, StoredCard, Surface,
@@ -139,34 +140,19 @@ fn a_rating_with_its_reasons_survives_a_restart_beside_the_one_key_is_wrong_flag
     assert_eq!(records, [(Some(poor), true), (Some(fair), false)]);
 }
 
-/// The fake writer, counting its calls for "explain more".
-#[derive(Default)]
-struct Counting(Cell<usize>);
-
-impl CardWriter for Counting {
-    fn reply(&self, request: &CardRequest, earlier: &[String]) -> Result<String, String> {
-        FakeWriter.reply(request, earlier)
-    }
-
-    fn more(&self, request: &CardRequest, card: &Card) -> Result<String, String> {
-        self.0.set(self.0.get() + 1);
-        FakeWriter.more(request, card)
-    }
-}
-
 #[test]
 fn explain_more_calls_the_writer_once_and_a_second_tap_shows_the_kept_text() {
     let data = tempfile::tempdir().unwrap();
     let path = data.path().join("cards.json");
     let store = Mutex::new(two_cards(&path));
-    let writer = Counting::default();
+    let writer = Scripted::fake();
     let request = edit("toolu_01A", "src/lib.rs");
     let expected = FakeWriter.more(&request, &card(&request)).unwrap();
 
     let first = explain_more(&store, &writer, "toolu_01A", |line| panic!("{line}"));
     let second = explain_more(&store, &writer, "toolu_01A", |line| panic!("{line}"));
 
-    assert_eq!(writer.0.get(), 1);
+    assert_eq!(writer.calls("more"), 1);
     assert_eq!(first.as_ref(), Some(&expected));
     assert_eq!(second.as_ref(), Some(&expected));
     let reopened = CardStore::open(path).unwrap();
@@ -210,19 +196,6 @@ fn an_older_card_whose_change_is_its_workers_summaries_loads_shows_and_explains_
     );
 }
 
-/// A fake writer whose "explain more" replies with no text.
-struct Blank;
-
-impl CardWriter for Blank {
-    fn reply(&self, request: &CardRequest, earlier: &[String]) -> Result<String, String> {
-        FakeWriter.reply(request, earlier)
-    }
-
-    fn more(&self, _: &CardRequest, _: &Card) -> Result<String, String> {
-        Ok("\n".into())
-    }
-}
-
 #[test]
 fn explain_more_with_no_text_logs_one_line_and_keeps_nothing() {
     let data = tempfile::tempdir().unwrap();
@@ -230,7 +203,15 @@ fn explain_more_with_no_text_logs_one_line_and_keeps_nothing() {
     let store = Mutex::new(two_cards(&path));
     let mut lines = Vec::new();
 
-    let more = explain_more(&store, &Blank, "toolu_01A", |line| lines.push(line));
+    let more = explain_more(
+        &store,
+        &Scripted {
+            more: Answer::ok("\n"),
+            ..Scripted::fake()
+        },
+        "toolu_01A",
+        |line| lines.push(line),
+    );
 
     assert_eq!(more, None);
     let [line] = &lines[..] else {
@@ -1301,36 +1282,37 @@ mod learning {
     }
 
     #[test]
-    fn a_retest_due_more_than_14_days_ago_is_not_served() {
+    fn a_retest_due_exactly_14_days_ago_is_still_served() {
         let (_data, mut store) = empty();
-        seed(&mut store, "late", RETEST_REACH_MS + 1);
-        assert_eq!(served(&store), None);
         seed(&mut store, "edge", RETEST_REACH_MS);
         assert_eq!(served(&store).as_deref(), Some("edge"));
     }
 
     #[test]
-    fn a_retest_not_yet_due_is_not_served() {
-        let (_data, mut store) = empty();
-        // Offered six days ago: due tomorrow.
-        seed_offered(&mut store, "early", NOW - 6 * DAY);
-        assert_eq!(served(&store), None);
-    }
-
-    #[test]
-    fn a_retest_whose_first_quiz_is_flagged_key_wrong_is_not_served() {
-        let (_data, mut store) = empty();
-        seed(&mut store, "wrong", DAY);
-        store.quiz_tap("wrong", Tap::KeyWrong, START - DAY).unwrap();
-        assert_eq!(served(&store), None);
-    }
-
-    #[test]
-    fn a_picked_retest_is_not_served() {
-        let (_data, mut store) = empty();
-        seed(&mut store, "a", DAY);
-        pick(&mut store, "retest a", NOW);
-        assert_eq!(served(&store), None);
+    fn a_retest_that_is_too_late_too_early_flagged_or_picked_is_not_served() {
+        type Setup = fn(&mut CardStore);
+        let cases: [(&str, Setup); 4] = [
+            ("due more than 14 days ago", |store| {
+                seed(store, "late", RETEST_REACH_MS + 1)
+            }),
+            // Offered six days ago: due tomorrow.
+            ("not yet due", |store| {
+                seed_offered(store, "early", NOW - 6 * DAY)
+            }),
+            ("its first quiz flagged key wrong", |store| {
+                seed(store, "wrong", DAY);
+                store.quiz_tap("wrong", Tap::KeyWrong, START - DAY).unwrap();
+            }),
+            ("picked", |store| {
+                seed(store, "a", DAY);
+                pick(store, "retest a", NOW);
+            }),
+        ];
+        for (name, setup) in cases {
+            let (_data, mut store) = empty();
+            setup(&mut store);
+            assert_eq!(served(&store), None, "{name}");
+        }
     }
 
     #[test]

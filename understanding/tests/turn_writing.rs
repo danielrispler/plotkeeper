@@ -6,12 +6,12 @@
 //! (`TurnWriting::stepped`); the threaded module has its own tests where the thread is the point.
 //! A test that expects a card edits two logic files, so the real offer gives one.
 
+use crate::common::{Answer, Scripted};
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     fs,
     path::{Path, PathBuf},
-    process::Command,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -24,6 +24,7 @@ use studio_core::{
     Backfill, CardRequest, Kind, NameRequest, Output, Studio, SummaryRequest, Trees,
 };
 use studio_hook::record_tree;
+use studio_test_support::git;
 use studio_understanding::{
     Card, CardStore, CardWriter, Core, Decision, Effects, FakeWriter, Fingerprints, Inputs, Offer,
     OfferKind, Offers, Outcome, StoredSummary, SummarySetup, TurnSummary, TurnWriting, Writer,
@@ -126,23 +127,6 @@ impl Effects for Recorder {
     fn log(&self, line: String) {
         self.logs.lock().unwrap().push(line);
     }
-}
-
-fn git(repo: &Path, args: &[&str]) {
-    let status = Command::new("git")
-        .args([
-            "-c",
-            "user.name=Studio",
-            "-c",
-            "user.email=studio@example.com",
-        ])
-        .args(args)
-        .current_dir(repo)
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .status()
-        .unwrap();
-    assert!(status.success(), "git {args:?}");
 }
 
 /// The Unix time now, in milliseconds.
@@ -1036,44 +1020,16 @@ fn a_turn_opened_in_an_ended_session_gets_its_summary_and_design_and_its_queue_e
 }
 
 /// A writer whose names take a moment, telling `events` when each starts and ends.
-struct Slow(Events);
-
-impl CardWriter for Slow {
-    fn reply(&self, request: &CardRequest, earlier: &[String]) -> Result<String, String> {
-        FakeWriter.reply(request, earlier)
-    }
-
-    fn more(&self, request: &CardRequest, card: &Card) -> Result<String, String> {
-        FakeWriter.more(request, card)
-    }
-
-    fn goal(&self, prompts: &[&str]) -> Result<String, String> {
-        FakeWriter.goal(prompts)
-    }
-
-    fn design(&self, sources: &[(String, String)]) -> Result<String, String> {
-        FakeWriter.design(sources)
-    }
-
-    fn summarize(
-        &self,
-        setup: &SummarySetup,
-        request: &SummaryRequest,
-        earlier: &[TurnSummary],
-    ) -> Result<String, String> {
-        FakeWriter.summarize(setup, request, earlier)
-    }
-
-    fn name(
-        &self,
-        setup: &SummarySetup,
-        prompt: &str,
-        response: Option<&str>,
-    ) -> Result<String, String> {
-        self.0.lock().unwrap().push(format!("start {prompt}"));
-        thread::sleep(Duration::from_millis(40));
-        self.0.lock().unwrap().push(format!("end {prompt}"));
-        FakeWriter.name(setup, prompt, response)
+fn slow(events: &Events) -> Scripted {
+    let events = events.clone();
+    Scripted {
+        name: Answer::run(move |prompt| {
+            events.lock().unwrap().push(format!("start {prompt}"));
+            thread::sleep(Duration::from_millis(40));
+            events.lock().unwrap().push(format!("end {prompt}"));
+            None
+        }),
+        ..Scripted::fake()
     }
 }
 
@@ -1085,7 +1041,7 @@ fn two_jobs_queued_for_an_ended_session_run_one_at_a_time_in_order() {
     let threaded = TurnWriting::new(
         day.core.clone(),
         day.store.clone(),
-        Arc::new(Slow(events.clone())),
+        Arc::new(slow(&events)),
         Offers::beside(&day.data.join("events.jsonl")),
         day.recorder.clone(),
     );
@@ -1108,47 +1064,19 @@ fn two_jobs_queued_for_an_ended_session_run_one_at_a_time_in_order() {
 }
 
 /// A writer whose name panics for the prompt "boom".
-struct Panicking(Events);
-
-impl CardWriter for Panicking {
-    fn reply(&self, request: &CardRequest, earlier: &[String]) -> Result<String, String> {
-        FakeWriter.reply(request, earlier)
-    }
-
-    fn more(&self, request: &CardRequest, card: &Card) -> Result<String, String> {
-        FakeWriter.more(request, card)
-    }
-
-    fn goal(&self, prompts: &[&str]) -> Result<String, String> {
-        FakeWriter.goal(prompts)
-    }
-
-    fn design(&self, sources: &[(String, String)]) -> Result<String, String> {
-        FakeWriter.design(sources)
-    }
-
-    fn summarize(
-        &self,
-        setup: &SummarySetup,
-        request: &SummaryRequest,
-        earlier: &[TurnSummary],
-    ) -> Result<String, String> {
-        FakeWriter.summarize(setup, request, earlier)
-    }
-
-    fn name(
-        &self,
-        setup: &SummarySetup,
-        prompt: &str,
-        response: Option<&str>,
-    ) -> Result<String, String> {
-        if prompt == "boom" {
-            // Long enough for the next job to be queued behind this one.
-            thread::sleep(Duration::from_millis(100));
-        }
-        assert_ne!(prompt, "boom", "the writer panics");
-        self.0.lock().unwrap().push(format!("named {prompt}"));
-        FakeWriter.name(setup, prompt, response)
+fn panicking(events: &Events) -> Scripted {
+    let events = events.clone();
+    Scripted {
+        name: Answer::run(move |prompt| {
+            if prompt == "boom" {
+                // Long enough for the next job to be queued behind this one.
+                thread::sleep(Duration::from_millis(100));
+            }
+            assert_ne!(prompt, "boom", "the writer panics");
+            events.lock().unwrap().push(format!("named {prompt}"));
+            None
+        }),
+        ..Scripted::fake()
     }
 }
 
@@ -1160,7 +1088,7 @@ fn a_job_that_panics_does_not_stop_the_later_jobs_of_its_session() {
     let threaded = TurnWriting::new(
         day.core.clone(),
         day.store.clone(),
-        Arc::new(Panicking(events.clone())),
+        Arc::new(panicking(&events)),
         Offers::beside(&day.data.join("events.jsonl")),
         day.recorder.clone(),
     );

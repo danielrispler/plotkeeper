@@ -5,26 +5,8 @@
 use std::collections::HashMap;
 use std::{fs, path::Path, process::Command};
 use studio_core::{Base, Purpose};
+use studio_test_support::git;
 use studio_understanding::{Fingerprints, live_roots, worktree_root};
-
-/// Runs `git` in `repo`, away from Daniel's own git config, and returns its output.
-fn git(repo: &Path, args: &[&str]) -> String {
-    let output = Command::new("git")
-        .args([
-            "-c",
-            "user.name=Studio",
-            "-c",
-            "user.email=studio@example.com",
-        ])
-        .args(args)
-        .current_dir(repo)
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "git {args:?}");
-    String::from_utf8(output.stdout).unwrap().trim_end().into()
-}
 
 /// The diff of the worktree that holds `folder` since its previous fingerprint.
 fn diff(prints: &mut Fingerprints, folder: &Path) -> Option<String> {
