@@ -1,12 +1,12 @@
 //! The Brief's slots (danielrispler/plotkeeper#122): Open is computed from the core's facts and the
 //! turns' summaries, Decisions from the decision history.
 
+use crate::common::{Answer, Scripted};
 use serde_json::json;
 use std::sync::Mutex;
-use studio_core::{CardRequest, Check, Decision, Session, SummaryRequest, TaskFacts, Turn};
+use studio_core::{Check, Decision, Session, SummaryRequest, TaskFacts, Turn};
 use studio_understanding::{
-    Card, CardStore, CardWriter, Line, LineKind, OpenKind, TurnSummary, answered, open_items,
-    write_design,
+    CardStore, Line, LineKind, OpenKind, TurnSummary, answered, open_items, write_design,
 };
 
 fn line(kind: LineKind, text: &str) -> Line {
@@ -223,22 +223,6 @@ fn decisions_list_each_answered_question_with_daniels_reply_in_order() {
     assert_eq!(shown, pairs);
 }
 
-/// A writer whose Design reply is canned, and which counts its calls.
-struct Canned(String, Mutex<u32>);
-
-impl CardWriter for Canned {
-    fn reply(&self, _: &CardRequest, _: &[String]) -> Result<String, String> {
-        Err("no cards".into())
-    }
-    fn more(&self, _: &CardRequest, _: &Card) -> Result<String, String> {
-        Err("no more".into())
-    }
-    fn design(&self, _: &[(String, String)]) -> Result<String, String> {
-        *self.1.lock().unwrap() += 1;
-        Ok(self.0.clone())
-    }
-}
-
 /// A store with the summary of turn `s@2`, whose `why` line is a source.
 fn design_store(dir: &std::path::Path) -> Mutex<CardStore> {
     Mutex::new(store(dir))
@@ -264,7 +248,10 @@ fn design_keeps_cited_lines_and_drops_the_uncited_the_unknown_and_a_sixth() {
         line("Seven, because g.", Some("s@1")),
         line("Eight, because h.", Some("s@2")),
     ]});
-    let writer = Canned(reply.to_string(), Mutex::new(0));
+    let writer = Scripted {
+        design: Answer::ok(reply.to_string()),
+        ..Scripted::bare()
+    };
     let turns = vec!["s@1".to_string(), "s@2".to_string()];
     let mut logged = Vec::new();
 
@@ -290,15 +277,21 @@ fn design_is_written_again_only_when_its_sources_changed_and_not_without_any() {
     let dir = tempfile::tempdir().unwrap();
     let store = design_store(dir.path());
     let reply = json!({"design": [{"text": "One, because a.", "cite": "s@2"}]});
-    let writer = Canned(reply.to_string(), Mutex::new(0));
+    let writer = Scripted {
+        design: Answer::ok(reply.to_string()),
+        ..Scripted::bare()
+    };
     let turns = vec!["s@2".to_string()];
 
     assert!(write_design(&store, &writer, "sess", &turns, drop));
     assert!(!write_design(&store, &writer, "sess", &turns, drop));
-    assert_eq!(*writer.1.lock().unwrap(), 1);
+    assert_eq!(writer.calls("design"), 1);
 
     // A session whose turns have no summary and which has no card has no Design so far.
-    let none = Canned(reply.to_string(), Mutex::new(0));
+    let none = Scripted {
+        design: Answer::ok(reply.to_string()),
+        ..Scripted::bare()
+    };
     assert!(!write_design(
         &store,
         &none,
@@ -306,7 +299,7 @@ fn design_is_written_again_only_when_its_sources_changed_and_not_without_any() {
         &["s@7".to_string()],
         drop
     ));
-    assert_eq!(*none.1.lock().unwrap(), 0);
+    assert_eq!(none.calls("design"), 0);
     assert!(
         store
             .lock()

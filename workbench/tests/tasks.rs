@@ -1,69 +1,38 @@
 //! Seam 2 (danielrispler/Falinks#328 and danielrispler/Falinks#461, Testing Decisions): creating and removing tasks (danielrispler/Falinks#468) with real `git`
 //! in temporary repositories that have a bare `origin`.
 
-use std::{path::Path, process::Command};
+use std::{ops::Deref, path::Path};
+use studio_test_support::{Origin, git, origin};
 use studio_workbench::{
     Branch, GitState, Losses, Workspace, branches, create_named_task, create_task,
     delete_branch_merged_at, delete_merged_branch, git_state, losses, remove_task, switch_branch,
     workspaces,
 };
 
-/// Runs `git` in `dir`, away from Daniel's own git config, and returns its trimmed output.
-fn git(dir: &Path, args: &[&str]) -> String {
-    let output = Command::new("git")
-        .args([
-            "-c",
-            "user.name=Studio",
-            "-c",
-            "user.email=studio@example.com",
-        ])
-        .args(args)
-        .current_dir(dir)
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "git {args:?}");
-    String::from_utf8_lossy(&output.stdout).trim().into()
-}
-
-/// A bare `origin` whose default branch is `trunk`, with two commits, and a clone of it whose
-/// local `trunk` is one commit behind. Returns the folders, the clone's real path, and the two
-/// commits.
+/// The shared `origin` with a second commit pushed after the clone, so the clone's `trunk` is one
+/// commit behind.
 struct Repos {
-    _dir: tempfile::TempDir,
-    origin: std::path::PathBuf,
-    main: std::path::PathBuf,
-    first: String,
+    base: Origin,
     second: String,
 }
 
-fn repos() -> Repos {
-    let dir = tempfile::tempdir().unwrap();
-    let root = dir.path().canonicalize().unwrap();
-    let origin = root.join("origin.git");
-    let seed = root.join("seed");
-    let main = root.join("main");
-    git(
-        &root,
-        &["init", "-q", "--bare", "-b", "trunk", "origin.git"],
-    );
-    git(&root, &["clone", "-q", "origin.git", "seed"]);
-    git(&seed, &["commit", "-q", "--allow-empty", "-m", "First"]);
-    git(&seed, &["push", "-q", "origin", "trunk"]);
-    git(&root, &["clone", "-q", "origin.git", "main"]);
-    let first = git(&main, &["rev-parse", "HEAD"]);
-    // `origin` moves on after the clone, so the clone's `trunk` is behind.
-    git(&seed, &["commit", "-q", "--allow-empty", "-m", "Second"]);
-    git(&seed, &["push", "-q", "origin", "trunk"]);
-    let second = git(&seed, &["rev-parse", "HEAD"]);
-    Repos {
-        _dir: dir,
-        origin,
-        main,
-        first,
-        second,
+impl Deref for Repos {
+    type Target = Origin;
+
+    fn deref(&self) -> &Origin {
+        &self.base
     }
+}
+
+fn repos() -> Repos {
+    let base = origin();
+    git(
+        &base.seed,
+        &["commit", "-q", "--allow-empty", "-m", "Second"],
+    );
+    git(&base.seed, &["push", "-q", "origin", "trunk"]);
+    let second = git(&base.seed, &["rev-parse", "HEAD"]);
+    Repos { base, second }
 }
 
 fn task_path(repos: &Repos, name: &str) -> std::path::PathBuf {

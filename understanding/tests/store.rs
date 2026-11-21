@@ -1,7 +1,8 @@
 //! The card store (danielrispler/Falinks#328, module 6; danielrispler/Falinks#369, decisions 15 and 17): cards, their base, Daniel's guesses,
 //! his flags, his ratings and the longer explanations he asked for survive a restart.
 
-use std::{cell::Cell, sync::Mutex};
+use crate::common::{Answer, Scripted};
+use std::sync::Mutex;
 use studio_core::{Base, CardRequest, Change, LiveFacts, Output, Studio};
 use studio_understanding::{
     Card, CardStore, CardWriter, FakeWriter, Guess, Level, Rating, Reason, StoredCard, Surface,
@@ -139,34 +140,19 @@ fn a_rating_with_its_reasons_survives_a_restart_beside_the_one_key_is_wrong_flag
     assert_eq!(records, [(Some(poor), true), (Some(fair), false)]);
 }
 
-/// The fake writer, counting its calls for "explain more".
-#[derive(Default)]
-struct Counting(Cell<usize>);
-
-impl CardWriter for Counting {
-    fn reply(&self, request: &CardRequest, earlier: &[String]) -> Result<String, String> {
-        FakeWriter.reply(request, earlier)
-    }
-
-    fn more(&self, request: &CardRequest, card: &Card) -> Result<String, String> {
-        self.0.set(self.0.get() + 1);
-        FakeWriter.more(request, card)
-    }
-}
-
 #[test]
 fn explain_more_calls_the_writer_once_and_a_second_tap_shows_the_kept_text() {
     let data = tempfile::tempdir().unwrap();
     let path = data.path().join("cards.json");
     let store = Mutex::new(two_cards(&path));
-    let writer = Counting::default();
+    let writer = Scripted::fake();
     let request = edit("toolu_01A", "src/lib.rs");
     let expected = FakeWriter.more(&request, &card(&request)).unwrap();
 
     let first = explain_more(&store, &writer, "toolu_01A", |line| panic!("{line}"));
     let second = explain_more(&store, &writer, "toolu_01A", |line| panic!("{line}"));
 
-    assert_eq!(writer.0.get(), 1);
+    assert_eq!(writer.calls("more"), 1);
     assert_eq!(first.as_ref(), Some(&expected));
     assert_eq!(second.as_ref(), Some(&expected));
     let reopened = CardStore::open(path).unwrap();
@@ -210,19 +196,6 @@ fn an_older_card_whose_change_is_its_workers_summaries_loads_shows_and_explains_
     );
 }
 
-/// A fake writer whose "explain more" replies with no text.
-struct Blank;
-
-impl CardWriter for Blank {
-    fn reply(&self, request: &CardRequest, earlier: &[String]) -> Result<String, String> {
-        FakeWriter.reply(request, earlier)
-    }
-
-    fn more(&self, _: &CardRequest, _: &Card) -> Result<String, String> {
-        Ok("\n".into())
-    }
-}
-
 #[test]
 fn explain_more_with_no_text_logs_one_line_and_keeps_nothing() {
     let data = tempfile::tempdir().unwrap();
@@ -230,7 +203,15 @@ fn explain_more_with_no_text_logs_one_line_and_keeps_nothing() {
     let store = Mutex::new(two_cards(&path));
     let mut lines = Vec::new();
 
-    let more = explain_more(&store, &Blank, "toolu_01A", |line| lines.push(line));
+    let more = explain_more(
+        &store,
+        &Scripted {
+            more: Answer::ok("\n"),
+            ..Scripted::fake()
+        },
+        "toolu_01A",
+        |line| lines.push(line),
+    );
 
     assert_eq!(more, None);
     let [line] = &lines[..] else {

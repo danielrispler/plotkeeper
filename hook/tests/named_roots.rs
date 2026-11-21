@@ -1,25 +1,15 @@
 // Seam 1 (danielrispler/plotkeeper#202, Testing Decisions): the hook binary with a scratch `HOME`
 // and a temporary repository with a second worktree. A Bash call touches every worktree whose
 // path its command names.
+use crate::common::{feed, hook};
 use std::{
     fs,
-    io::Write,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::Command,
 };
 
 use serde_json::{Value, json};
-
-fn git(dir: &Path, args: &[&str]) -> String {
-    let out = Command::new("git")
-        .args(["-c", "user.name=t", "-c", "user.email=t@t"])
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .unwrap();
-    assert!(out.status.success(), "git {args:?}");
-    String::from_utf8(out.stdout).unwrap().trim().to_owned()
-}
+use studio_test_support::git;
 
 /// A scratch home, a repository `main` with a commit, and the git-spelled root of each.
 struct Scene {
@@ -76,20 +66,9 @@ impl Scene {
             .as_object_mut()
             .unwrap()
             .extend(extra.as_object().unwrap().clone());
-        let mut child = Command::new(env!("CARGO_BIN_EXE_studio-hook"))
-            .env("HOME", &self.home)
-            .env_remove("STUDIO_TERMINAL_ID")
-            .env("PATH", self.path())
-            .stdin(Stdio::piped())
-            .spawn()
-            .unwrap();
-        child
-            .stdin
-            .take()
-            .unwrap()
-            .write_all(event.to_string().as_bytes())
-            .unwrap();
-        assert!(child.wait().unwrap().success());
+        let mut cmd = hook(&self.home);
+        cmd.env("PATH", self.path());
+        assert!(feed(cmd, &event).wait().unwrap().success());
         let log = fs::read_to_string(studio_hook::event_log(&self.home)).unwrap();
         serde_json::from_str(log.lines().last().unwrap()).unwrap()
     }

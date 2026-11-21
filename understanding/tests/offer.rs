@@ -1,43 +1,35 @@
 //! What a turn gets for a Quiz and the cap per hour (danielrispler/plotkeeper#119), with canned writer replies.
 
+use crate::common::{Answer, Scripted};
 use serde_json::json;
 use std::sync::Mutex;
 use studio_core::{
     Base, CardRequest, Check, CheckRun, CheckStatus, FactFile, Facts, SummaryRequest, TurnFile,
 };
 use studio_understanding::{
-    Card, CardStore, CardWriter, FakeWriter, Offer, OfferKind, Offers, Place, Shape, SummarySetup,
-    Tap, TurnFacts, TurnSummary, changed_in, decide, offer_stop, offer_summary, settle, turns_card,
+    CardStore, CardWriter, FakeWriter, Offer, OfferKind, Offers, Place, Shape, SummarySetup, Tap,
+    TurnFacts, TurnSummary, changed_in, decide, offer_stop, offer_summary, settle, turns_card,
     write_stop, write_summary,
 };
 
-/// Replies to the summary with a Headline, one more line of `kind`, and a Quiz.
-struct Canned(&'static str);
-
-impl CardWriter for Canned {
-    fn reply(&self, r: &CardRequest, e: &[String]) -> Result<String, String> {
-        FakeWriter.reply(r, e)
-    }
-    fn more(&self, r: &CardRequest, c: &Card) -> Result<String, String> {
-        FakeWriter.more(r, c)
-    }
-    fn summarize(
-        &self,
-        _: &SummarySetup,
-        _: &SummaryRequest,
-        _: &[TurnSummary],
-    ) -> Result<String, String> {
-        let option = |text: &str, why: &str, right: bool| json!({ "text": text, "why": why, "right": right });
-        Ok(json!({
-            "headline": "Rewrote the parser.",
-            "lines": [{ "kind": self.0, "text": "A line." }],
-            "quiz": { "text": "Why a stack?", "key": 0, "options": [
-                option("A stack.", "It nests.", true),
-                option("A queue of tokens.", "It does not nest.", false),
-                option("A recursive descent only.", "It overflows.", false),
-            ]},
-        })
-        .to_string())
+/// A writer that replies to the summary with a Headline, one more line of `kind`, and a Quiz.
+fn canned(kind: &str) -> Scripted {
+    let option =
+        |text: &str, why: &str, right: bool| json!({ "text": text, "why": why, "right": right });
+    let summary = json!({
+        "headline": "Rewrote the parser.",
+        "lines": [{ "kind": kind, "text": "A line." }],
+        "quiz": { "text": "Why a stack?", "key": 0, "options": [
+            option("A stack.", "It nests.", true),
+            option("A queue of tokens.", "It does not nest.", false),
+            option("A recursive descent only.", "It overflows.", false),
+        ]},
+    });
+    Scripted {
+        reply: Answer::Fake,
+        more: Answer::Fake,
+        summarize: Answer::ok(summary.to_string()),
+        ..Scripted::bare()
     }
 }
 
@@ -81,7 +73,7 @@ fn lone(
     let _ = at;
     write_summary(
         store,
-        &Canned(kind),
+        &canned(kind),
         &SummarySetup::default(),
         request,
         |l| panic!("{l}"),
@@ -212,7 +204,7 @@ fn a_turn_the_table_gives_no_quiz_keeps_its_summary_without_one() {
     };
     let summary = write_summary(
         &store,
-        &Canned("why"),
+        &canned("why"),
         &SummarySetup::default(),
         request,
         |l| panic!("{l}"),
@@ -236,7 +228,7 @@ fn a_turn_that_asks_has_no_quiz_beside_the_decision() {
     };
     write_summary(
         &store,
-        &Canned("ask"),
+        &canned("ask"),
         &SummarySetup::default(),
         request,
         |l| panic!("{l}"),
@@ -550,14 +542,11 @@ fn each_decision_is_a_line_with_its_inputs_and_its_outcome_and_no_text() {
 }
 
 /// A writer that gives no reply.
-struct Silent;
-
-impl CardWriter for Silent {
-    fn reply(&self, _: &CardRequest, _: &[String]) -> Result<String, String> {
-        Err("no reply".into())
-    }
-    fn more(&self, r: &CardRequest, c: &Card) -> Result<String, String> {
-        FakeWriter.more(r, c)
+fn silent() -> Scripted {
+    Scripted {
+        reply: Answer::err("no reply"),
+        more: Answer::Fake,
+        ..Scripted::bare()
     }
 }
 
@@ -568,7 +557,7 @@ fn a_writer_that_gives_no_reply_is_on_the_record() {
     let session = studio_core::Session::default();
     let written = offer_stop(
         &store,
-        &Silent,
+        &silent(),
         card_request("s@1", None, ""),
         &session,
         &turn_facts(&[("a.rs", 30)], None),
@@ -595,7 +584,7 @@ fn a_lone_quiz_held_by_the_cap_says_so() {
     assert_eq!(settled.decision.offer, Offer::Quiz);
     let summary = offer_summary(
         &store,
-        &Canned("why"),
+        &canned("why"),
         &SummarySetup::default(),
         request,
         Some(&settled.decision),
@@ -617,7 +606,7 @@ fn a_lone_quiz_written_is_on_the_record() {
     let settled = settle(&mut request, &turn_facts(&[("a.rs", 9)], None), &[], None);
     offer_summary(
         &store,
-        &Canned("why"),
+        &canned("why"),
         &SummarySetup::default(),
         request,
         Some(&settled.decision),
@@ -681,7 +670,7 @@ fn a_writer_that_gave_no_reply_is_asked_again_and_the_line_stays_one_per_outcome
         )
         .0
     };
-    assert!(!ask(&Silent));
+    assert!(!ask(&silent()));
     assert!(!offers.settled("s", "s@1"));
     assert!(ask(&FakeWriter));
     assert!(offers.settled("s", "s@1"));
@@ -870,7 +859,7 @@ fn a_lone_quiz_dropped_for_an_ask_line_under_a_full_cap_is_not_held_by_the_cap()
     let settled = settle(&mut request, &turn_facts(&[("a.rs", 9)], None), &[], None);
     offer_summary(
         &store,
-        &Canned("ask"),
+        &canned("ask"),
         &SummarySetup::default(),
         request,
         Some(&settled.decision),

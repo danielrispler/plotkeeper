@@ -1,9 +1,9 @@
 # The studio's own workspace, kept apart from the engine's (danielrispler/Falinks#328, "Where the code lives").
 [workspace]
-members = ["core", "wayfinder", "hook", "understanding", "terminal-daemon", "workbench", "src-tauri"]
+members = ["core", "wayfinder", "hook", "understanding", "terminal-daemon", "workbench", "src-tauri", "test-support"]
 # The shell embeds the built frontend (`dist/`) at compile time, so plain `cargo test` leaves it out;
 # `npm run tauri build` builds it.
-default-members = ["core", "wayfinder", "hook", "understanding", "terminal-daemon", "workbench"]
+default-members = ["core", "wayfinder", "hook", "understanding", "terminal-daemon", "workbench", "test-support"]
 resolver = "3"
 
 # Lighter debug info links faster; line tables keep file and line in backtraces.

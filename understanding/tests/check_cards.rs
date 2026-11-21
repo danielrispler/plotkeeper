@@ -2,36 +2,18 @@
 //! the writer with the change so far and the check's command, the card's guess is whether the check
 //! passes, and the check's result settles it.
 
+use crate::common::Scripted;
 use serde_json::Value;
-use std::{cell::RefCell, collections::BTreeMap, sync::Mutex};
+use std::{collections::BTreeMap, sync::Mutex};
 use studio_core::{Base, CardRequest, Change, Output, Purpose, Studio};
 use studio_understanding::{
-    Card, CardStore, CardWriter, ClaudeWriter, FakeWriter, Rate, week, write_card, write_stop,
+    CardStore, ClaudeWriter, FakeWriter, Rate, week, write_card, write_stop,
 };
 
 const CHECKS: &str = include_str!("../../core/tests/fixtures/checks.jsonl");
 const SESSION: &str = "a3e6c9f2-1b4d-4e7a-8c0f-5d2b9e6a3c18";
 const COMMAND: &str = "cd apps/studio && cargo test";
 const DIFF: &str = "--- a/ui/style.css\n+++ b/ui/style.css\n@@ -1 +1 @@\n-a\n+b\n";
-
-/// The fake writer, keeping each request it was asked to write a card on.
-#[derive(Default)]
-struct Recording(RefCell<Vec<CardRequest>>);
-
-impl CardWriter for Recording {
-    fn reply(&self, request: &CardRequest, earlier: &[String]) -> Result<String, String> {
-        self.0.borrow_mut().push(request.clone());
-        FakeWriter.reply(request, earlier)
-    }
-
-    fn more(&self, request: &CardRequest, card: &Card) -> Result<String, String> {
-        FakeWriter.more(request, card)
-    }
-
-    fn goal(&self, prompts: &[&str]) -> Result<String, String> {
-        FakeWriter.goal(prompts)
-    }
-}
 
 /// `checks.jsonl` with its first check's result 200 s late, so the second, which passes, usually
 /// takes over 2 minutes.
@@ -65,7 +47,7 @@ fn changed(studio: &Studio, line: &str) -> BTreeMap<String, Change> {
 fn a_long_checks_card_request_reaches_the_writer_with_the_change_so_far_and_the_command() {
     let data = tempfile::tempdir().unwrap();
     let store = Mutex::new(CardStore::open(data.path().join("cards.json")).unwrap());
-    let writer = Recording::default();
+    let writer = Scripted::fake();
     let mut studio = Studio::default();
     for line in long_check_log() {
         let changes = changed(&studio, &line);
@@ -80,7 +62,7 @@ fn a_long_checks_card_request_reaches_the_writer_with_the_change_so_far_and_the_
         }
     }
 
-    let asked = writer.0.borrow();
+    let asked = writer.requests();
     let [request] = &asked[..] else {
         panic!("one check card: {asked:?}");
     };

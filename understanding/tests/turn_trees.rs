@@ -4,30 +4,13 @@
 use serde_json::json;
 use std::{fs, path::Path, process::Command, sync::Mutex};
 use studio_core::{Numstat, RootDiff, Studio, compute_turn_files};
+use studio_test_support::git;
 use studio_understanding::{
     MAX_TURN_FILES, diff_turn, found_files, hunk, numstat, turn_diffs, turn_hunk, turn_of,
 };
 
 const SESSION: &str = "5b1c7e30-9d2a-4f8b-8c63-1e0a7d4b9f52";
 const AT: u64 = 1_800_000_000_000;
-
-fn git(repo: &Path, args: &[&str]) -> String {
-    let output = Command::new("git")
-        .args([
-            "-c",
-            "user.name=Studio",
-            "-c",
-            "user.email=studio@example.com",
-        ])
-        .args(args)
-        .current_dir(repo)
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "git {args:?}");
-    String::from_utf8(output.stdout).unwrap().trim_end().into()
-}
 
 /// A repository with `a.rs`, `b.rs` and `old.rs` committed; its root and the tree of its files now.
 fn repo() -> (tempfile::TempDir, String) {
