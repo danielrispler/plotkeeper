@@ -19,7 +19,7 @@ Raw evidence from finished real runs (run directories, screenshots, terminal out
 
 - **Grill, spec, ticket, then build.** By default, work moves through `$grilling`, then `$to-spec`, then `$to-tickets`, and only then to implementation, of one ticket or a whole spec. `$to-spec` and `$to-tickets` are user-invoked: they load when Daniel types them. Without them, follow `docs/agents/ticket-authoring.md`.
 - **Implement in a worktree.** Each change gets its own worktree under `.claude/worktrees/`, on a new branch from `origin/main`; the main checkout stays on `main`. Work in the main checkout only when Daniel says so.
-- **Finish with a PR.** When an implementation is done and `npm run check` passes, push its branch and open a PR against `main`, its body written with `$pr`. Daniel reviews and merges it.
+- **Finish with a PR.** When an implementation is done and `npm run check` passes, push its branch and open a PR against `main`, its body written with `$pr`. Before opening it, run the correctness pass in `docs/agents/issue-tracker.md` (Claim) if the PR changes Rust or TypeScript. Daniel reviews it; merge only when he asks, by the merge procedure in `docs/agents/issue-tracker.md` (`/ship <pr>`).
 - **Blocked commands go to Daniel.** When auto mode blocks a Bash command you need, it reaches Daniel on a studio card with Allow and Decline; wait for his click, and on Allow run that exact command once yourself, with the same quoting and folder. Hand over only a command that needs his keyboard: write it into `<scratchpad>/run-<name>.sh`, end your reply with that path, and he runs `bash <path>` in the terminal panel. Other blocks (a tool other than Bash, a permission rule) keep Claude Code's own notice.
 
 ## Implementation language
@@ -37,6 +37,12 @@ To prove native window or key behaviour without Daniel pressing keys, read `docs
 A worktree builds in its own `target/`, cargo's default: never point `CARGO_TARGET_DIR` at the main checkout's target or at a dir another worktree has used, and that holds for `/implement-spec` implementers and mergers too. A workspace crate's build lands at the same path whichever checkout built it, and cargo trusts it while the sources are older than that build, so a shared or reused dir builds another checkout's copy of a crate: in #26's run every parallel implementer hit errors that didn't match its source, and a check can pass against code the worktree doesn't hold ([resolution](https://github.com/danielrispler/plotkeeper/issues/38#issuecomment-6955167603), which also lists the options rejected). A worktree's first check starts cold, about 84 s against 50 s warm (danielrispler/Falinks#549). A run has at most 3 implementers at once (`docs/agents/issue-tracker.md`), so give each worker's builds and tests a third of the cores: prefix them with `CARGO_BUILD_JOBS=$(( $(sysctl -n hw.ncpu) / 3 )) NEXTEST_TEST_THREADS=$(( $(sysctl -n hw.ncpu) / 3 ))` (#141).
 
 Wait on a check through its own process: run it in the foreground with a long timeout, or start it as a background task and wait for its completion notice, so a finished worker leaves no polling loop behind. A wait that matches the check's text, such as `until ! pgrep -f "npm run check"; do sleep 5; done`, matches its own shell's command line and never ends: in spec #102's run three implementers sat an hour past their green checks that way (#141).
+
+Never edit a frozen sample in `understanding/tests/fixtures/stored/`: a failing one is fixed in the reading code, and a changed stored type adds a new sample beside the old (its `README.md`).
+
+A red `snap` job on a fixture the diff didn't touch gets one rerun of the failed job (`gh run rerun <id> --failed`), said in the PR; a second failure is real. `snap:all` has no automatic retry. A failing `snap` prints the tail of Chrome's own stderr.
+
+Rust is formatted by `cargo fmt`. TS, JS and Markdown have no formatter, so never run one (Prettier, Biome, …).
 
 ## Agent skills
 

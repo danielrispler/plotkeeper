@@ -1,0 +1,10 @@
+{
+  "sess-1": {
+    "text": "Sample prose brief.",
+    "goal": "Sample goal.",
+    "goal_prompts": 2,
+    "design": [{ "text": "Sample design decision.", "cite": "sess-1@1761743800000" }],
+    "design_from": 1,
+    "updates": 4
+  }
+}

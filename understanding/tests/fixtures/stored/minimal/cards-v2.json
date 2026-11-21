@@ -1,0 +1,7 @@
+[
+  {
+    "request": { "session_id": "sess-1", "id": "sess-1@1761743900000", "base": { "files": [] } },
+    "card": { "explanation": "Sample explanation." },
+    "taps": [{ "kind": "confidence", "sure": true, "at": 1761743999000 }]
+  }
+]

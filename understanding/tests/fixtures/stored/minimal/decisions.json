@@ -1,0 +1,5 @@
+{
+  "sess-1": [
+    { "call": "toolu_1", "tool": "ExitPlanMode", "input": {}, "answer": "allow", "at": 1761743950000, "source": "terminal" }
+  ]
+}
