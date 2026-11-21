@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { fixtures } from "./fixtures.ts";
-import { consoleLines, failed, snapPage } from "./page.mjs";
+import { chromeFailure, consoleLines, failed, snapPage } from "./page.mjs";
 
 const [name, out] = process.argv.slice(2);
 // Optional, from the environment: SNAP_SIZE=1728x1117 is the window's size (default 1900x900), and SNAP_BODY=rail-open,list-open
@@ -59,6 +59,9 @@ rmSync(site, { recursive: true, force: true });
 rmSync(profile, { recursive: true, force: true });
 const log = consoleLines(run.stderr ?? "");
 if (log.length) console.log(log.join("\n"));
-if (run.status !== 0) process.exit(run.status ?? 1);
+if (run.status !== 0) {
+  console.error(chromeFailure(run.status, run.stderr ?? ""));
+  process.exit(run.status ?? 1);
+}
 if (failed(log)) process.exit(1);
 console.log(`wrote ${out}`);
