@@ -36,7 +36,7 @@ jobs:
         with:
           rustflags: ""
           cache-workspaces: . -> target
-      # `check` runs the Rust tests with nextest.
+      # `check` runs the Rust tests with nextest, then type-checks the wire samples they wrote (`scripts/wire/`, #246).
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-nextest

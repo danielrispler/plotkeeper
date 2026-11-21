@@ -12,7 +12,7 @@
     "start": "tauri build && open target/release/bundle/macos/Studio.app",
     "test": "tsc && npm run test:node",
     "test:node": "node --test terminal-daemon/tests/replay.test.mjs ui/tests/*.test.mjs",
-    "check": "cargo fmt --all --check && npm run build && cargo clippy --locked --workspace --all-targets -- -D warnings && cargo nextest run --locked --workspace && npm run test:node"
+    "check": "cargo fmt --all --check && npm run build && cargo clippy --locked --workspace --all-targets -- -D warnings && cargo nextest run --locked --workspace && tsc -p scripts/wire && npm run test:node"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.12.3",

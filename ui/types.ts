@@ -1,4 +1,6 @@
 // What the shell sends the window: sessions, the selection and a session's cards.
+// A field the shell sends that the window never reads is optional here, so the snap fixtures may leave it out. The wire
+// check (`scripts/wire/`, #246) types real values of the shell's against these, so a field one lacks fails `npm run check`.
 
 import type { Ask } from "./answer.js";
 import type { Facts, Hunk } from "./ask.js";
@@ -55,7 +57,11 @@ export type Subagent = {
   // "running", then its wake-up's status, such as "completed" or "killed".
   status: string;
   started_at: number;
+  last_event_at?: number;
   ended_at: number | null;
+  // Each time its end was received, and each time a step of its own after an end ran it again, with the turn it ran in.
+  ends?: number[];
+  resumes?: [number, number | null][];
   last_step: Step | null;
   step_span: Span | null;
   result: string | null;
@@ -71,7 +77,8 @@ export type Asker = { agent: string | null; since: number };
 // Who sent a prompt: Daniel, a wake-up naming the task that returned, or a known task id in markup
 // the studio does not know, which counts as Daniel's.
 export type Sender = "daniel" | { wake_up: string } | { unrecognised: string };
-export type Prompt = { at: number; sender: Sender };
+// `turn` is the turn it is in, null in a log read before the core kept it.
+export type Prompt = { at: number; sender: Sender; turn?: number | null };
 // An AskUserQuestion call, as the tool input gives it, with Daniel's choice for each question by its text
 // once he answers in the terminal.
 export type Choice = { label: string; description?: string };
@@ -92,7 +99,7 @@ export type Check = {
   foreign: boolean;
   status: CheckStatus;
   retries: number;
-  runs: { command: string; statement: string; status: CheckStatus; exit_code: number | null; call: string; agent: string | null; started_at: number | null }[];
+  runs: { command: string; statement: string; status: CheckStatus; exit_code: number | null; call: string; agent: string | null; started_at: number | null; ended_at?: number | null }[];
 };
 export type Turn = {
   started_at: number;
@@ -127,6 +134,8 @@ export type Capabilities = {
   context: boolean;
   // It records a git tree of each worktree a turn touches, so a turn has files (danielrispler/plotkeeper#111).
   turn_trees: boolean;
+  // How its transcript's lines read.
+  transcript_format?: "claude" | "agy";
 };
 export type Session = {
   id: string;
@@ -165,6 +174,8 @@ export type Session = {
   last_event_at: number;
   turn_span: Span | null;
   step_span: Span | null;
+  // Its latest `Stop`, until its next prompt: the id a card on it has, whether it requested one, its last message's first line.
+  stopped?: { card: string; requested: boolean; message: string | null } | null;
   state: SessionState;
   agents: Subagent[];
   asker: Asker | null;
@@ -185,19 +196,24 @@ export type Session = {
   unseen?: boolean;
   // How many of its turns Daniel has seen (danielrispler/plotkeeper#124).
   seen: number;
+  // How many it had seen when Daniel selected it, which "Since you looked" counts from.
+  seen_at_selection?: number;
   // What happened after the turns he had seen when he selected it, from the core's `Session::since`, as `since_looked` (the agent has its own `since`): the banner's count.
   since_looked: Since;
 };
 // What happened in a session since Daniel looked (danielrispler/plotkeeper#124).
 export type Since = { turns: number; files: number; passed: number; failed: number; ran: number };
-// The shell sends a card's request without its diff and base, which the pane never reads. `agent`
-// is the worker whose card it is; `changed_by` holds the files other subagents edited in its
-// worktree, by subagent. `check` is the command of the check whose start requested the card (danielrispler/Falinks#476).
+// The shell sends a card's request without its diff and base, which the pane never reads. `prompt` is when the
+// prompt it is on arrived; `agent` is the worker whose card it is; `changed_by` holds the files other subagents edited
+// in its worktree, by subagent; `workers` the workers whose changes it covers. `check` is the command of the check whose
+// start requested the card (danielrispler/Falinks#476).
 export type CardRequest = {
   session_id: string;
   id: string;
+  prompt?: number | null;
   agent: string | null;
   changed_by: Record<string, string[]>;
+  workers?: string[];
   check: string | null;
 };
 // A check's result, which settles the guess on its card; null while the check runs.
@@ -210,6 +226,8 @@ export type Card = {
   explanation: string;
   paths: string[];
   code: string;
+  // The line ranges `code` was pulled from; absent when the writer named none.
+  ranges?: { path: string; from: number; to: number }[];
   why_it_matters: string;
   not_checked: string;
   architecture: string | null;
@@ -228,6 +246,8 @@ export type Rating = { level: Level; reasons: Reason[] };
 export type StoredCard = {
   request: CardRequest;
   card: Card;
+  // When it reached the store; null in a store from before the time was kept.
+  added_at?: number | null;
   guess: Guess | null;
   key_wrong: boolean;
   more: string | null;
@@ -298,7 +318,24 @@ export type BlockedCommand = {
 // `headline` and `lines` are the turn writer's Headline and typed Body lines (danielrispler/plotkeeper#115); a summary stored
 // before them has neither, and its `summary` text reads as a Headline and `reported` lines.
 export type SummaryLine = { kind: "why" | "reported" | "open" | "ask"; text: string };
+// The shell sends the summary as the store keeps it: also the request it was written from, when it arrived and the
+// turn's hunks, which the window never reads.
+export type SummaryRequest = {
+  session_id: string;
+  id: string;
+  prompt: string;
+  responses: string[];
+  intentions: string[];
+  card: string | null;
+  facts: { files: TurnFile[]; checks: Check[]; external: number };
+  wanted: boolean;
+  asks: boolean;
+  no_quiz: boolean;
+};
 export type TurnSummary = {
+  request?: SummaryRequest;
+  added_at?: number;
+  hunk?: string;
   summary: { summary: string; headline?: string | null; lines?: SummaryLine[]; quiz: Quiz | null };
   taps?: QuizTap[];
   // The self-test's arm (#130): body-only shows the Body open and no Quiz; absent is quiz-first.
