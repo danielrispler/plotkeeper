@@ -81,5 +81,13 @@ fn the_wire_samples_of_the_workbench_are_written_for_tsc() {
             json(AgentUsage::failed("codex", "Codex is not installed")),
         ),
     ];
-    write(env!("CARGO_MANIFEST_DIR"), "workbench", &samples);
+    let types = [
+        "Workspaces",
+        "Workspace",
+        "GitState",
+        "Branch",
+        "Losses",
+        "AgentUsage",
+    ];
+    write(env!("CARGO_MANIFEST_DIR"), "workbench", &types, &samples);
 }

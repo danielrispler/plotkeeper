@@ -21,8 +21,11 @@ const ELSEWHERE: [(&str, &str); 4] = [
     ("Hunk", "ask.ts"),
 ];
 
-/// Writes `samples` into `scripts/wire/<name>.ts`, from the crate at `manifest_dir`.
-pub fn write(manifest_dir: &str, name: &str, samples: &[Sample]) {
+/// Writes `samples` into `scripts/wire/<name>.ts`, from the crate at `manifest_dir`, once each of `types` has one.
+pub fn write(manifest_dir: &str, name: &str, types: &[&str], samples: &[Sample]) {
+    for ty in types {
+        assert!(samples.iter().any(|(t, _)| t == ty), "no sample of {ty}");
+    }
     let mut types: Vec<&str> = samples.iter().map(|(t, _)| *t).collect();
     types.sort();
     types.dedup();

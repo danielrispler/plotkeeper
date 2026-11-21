@@ -9,29 +9,24 @@ use samples::{Sample, json, write};
 use std::path::PathBuf;
 use studio_core::{AskFact, AskFacts, AskSection, CheckOutput, Studio};
 
-/// The fixtures whose sessions are the samples: every hand-written and recorded log but the two day-long ones, which
-/// would make the file megabytes long.
-const LOGS: [&str; 19] = [
-    include_str!("fixtures/ask-then-plan.jsonl"),
-    include_str!("fixtures/background-agent.jsonl"),
-    include_str!("fixtures/bash-steps.jsonl"),
-    include_str!("fixtures/blocked-run.jsonl"),
-    include_str!("fixtures/checks.jsonl"),
-    include_str!("fixtures/child-question.jsonl"),
-    include_str!("fixtures/closed-at-plan.jsonl"),
-    include_str!("fixtures/elicitation.jsonl"),
-    include_str!("fixtures/failing-bash.jsonl"),
-    include_str!("fixtures/interrupt-by-esc.jsonl"),
-    include_str!("fixtures/interrupt-then-prompt.jsonl"),
-    include_str!("fixtures/permission-denied.jsonl"),
-    include_str!("fixtures/permission-write.jsonl"),
-    include_str!("fixtures/queued-prompt.jsonl"),
-    include_str!("fixtures/sandbox-network.jsonl"),
-    include_str!("fixtures/subagent-run.jsonl"),
-    include_str!("fixtures/subagent-tree.jsonl"),
-    include_str!("fixtures/times.jsonl"),
-    include_str!("fixtures/two-sessions.jsonl"),
-];
+/// The fixtures whose sessions are the samples: every log in `tests/fixtures/` but the two day-long ones, which would
+/// make the file megabytes long.
+fn logs() -> Vec<String> {
+    const DAY_LONG: [&str; 2] = ["checkpoint-day.jsonl", "ordinary-tickets.jsonl"];
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let mut paths: Vec<PathBuf> = (std::fs::read_dir(dir).unwrap())
+        .map(|entry| entry.unwrap().path())
+        .filter(|p| p.extension().is_some_and(|e| e == "jsonl"))
+        .filter(|p| !DAY_LONG.iter().any(|day| p.ends_with(day)))
+        .collect();
+    paths.sort();
+    let logs: Vec<String> = paths
+        .iter()
+        .map(|p| std::fs::read_to_string(p).unwrap())
+        .collect();
+    assert!(logs.len() > 10, "the fixtures");
+    logs
+}
 
 /// The recorded agy run, whose subagent has a log the core reads from its brain folder.
 fn agy() -> Studio {
@@ -43,7 +38,7 @@ fn agy() -> Studio {
 
 #[test]
 fn the_wire_samples_of_the_core_are_written_for_tsc() {
-    let mut studios: Vec<Studio> = LOGS
+    let mut studios: Vec<Studio> = logs()
         .iter()
         .map(|log| Studio::replayed(log.lines()))
         .collect();
@@ -101,13 +96,13 @@ fn the_wire_samples_of_the_core_are_written_for_tsc() {
         }],
     };
     samples.push(("Facts", json(facts)));
-    assert!(
-        samples.iter().any(|(t, _)| *t == "Check"),
-        "a sample of each type"
-    );
-    assert!(
-        samples.iter().any(|(t, _)| *t == "SubagentLog"),
-        "a sample of each type"
-    );
-    write(env!("CARGO_MANIFEST_DIR"), "core", &samples);
+    let types = [
+        "Session",
+        "Selection",
+        "Check",
+        "SubagentLog",
+        "CheckOutput",
+        "Facts",
+    ];
+    write(env!("CARGO_MANIFEST_DIR"), "core", &types, &samples);
 }

@@ -342,5 +342,19 @@ fn the_wire_samples_of_the_understanding_layer_are_written_for_tsc() {
         samples.push(("Learning", json(item)));
     }
 
-    write(env!("CARGO_MANIFEST_DIR"), "understanding", &samples);
+    let types = [
+        "Session",
+        "SessionCards",
+        "StoredCard",
+        "OpenItem",
+        "TurnSummary",
+        "Hunk",
+        "Learning",
+    ];
+    write(
+        env!("CARGO_MANIFEST_DIR"),
+        "understanding",
+        &types,
+        &samples,
+    );
 }
