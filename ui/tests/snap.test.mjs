@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import vm from "node:vm";
-import { consoleLines, failed, headSource, snapPage, stubSource } from "../../scripts/snap/page.mjs";
+import { chromeFailure, consoleLines, failed, headSource, snapPage, stubSource } from "../../scripts/snap/page.mjs";
 import { fixtures } from "../../scripts/snap/fixtures.ts";
 import { railStates } from "../../scripts/snap/rail-fixtures.ts";
 
@@ -242,4 +242,14 @@ const runTerminalScript = async (rows) => {
 test("recordedTerminal's script fails the run when the terminal shows no rows, and not when it shows some", async () => {
   assert.ok(failed(await runTerminalScript(["", "  "])));
   assert.ok(!failed(await runTerminalScript(["", "Welcome to Claude Code"])));
+});
+
+test("a non-zero Chrome status reports the status and the last lines of its stderr; a zero status reports nothing", () => {
+  const stderr = Array.from({ length: 40 }, (_, i) => `line ${i + 1}`).join("\n") + "\n";
+  const report = chromeFailure(2, stderr);
+  assert.match(report, /exit status 2/);
+  assert.ok(report.includes("line 40") && report.includes("line 31"));
+  assert.ok(!report.includes("line 1\n") && !report.includes("line 20"));
+  assert.match(chromeFailure(null, ""), /exit status null/);
+  assert.equal(chromeFailure(0, stderr), "");
 });
