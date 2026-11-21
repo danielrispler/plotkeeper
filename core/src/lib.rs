@@ -69,8 +69,8 @@ pub struct Studio {
     log_end: u64,
     /// The turns the replay saw end with both trees, for `backfill`.
     ended: Vec<Backfill>,
-    /// How long each command of checks ran when it did not fail, by `checks::key`, oldest first (danielrispler/Falinks#461, decision 13).
-    durations: HashMap<String, Vec<u64>>,
+    /// How long each command of checks ran when it did not fail (danielrispler/Falinks#461, decision 13).
+    durations: checks::Durations,
     /// The row of each session that continues another after a `/clear`, by its own id (danielrispler/Falinks#461,
     /// decision 18). A session not here is its own row.
     rows: HashMap<String, String>,
@@ -476,10 +476,6 @@ struct Since {
 /// 20 minutes, a starting guess (danielrispler/Falinks#369, decision 11 and Further Notes).
 const FALLBACK_MS: u64 = 20 * 60 * 1000;
 
-/// 2 minutes, a starting guess (danielrispler/Falinks#461, decision 22): a check that usually runs longer gets a card at
-/// its start (decision 15).
-const LONG_CHECK_MS: u64 = 2 * 60 * 1000;
-
 /// A check a `PreToolUse` starts (`Studio::check_start`): its whole command, and its typical duration
 /// (`Studio::typical`).
 struct CheckStart {
@@ -490,7 +486,7 @@ struct CheckStart {
 impl CheckStart {
     /// It usually takes over 2 minutes, so it gets a card at its start (danielrispler/Falinks#461, decision 15).
     fn long(&self) -> bool {
-        self.typical.is_some_and(|ms| ms > LONG_CHECK_MS)
+        checks::is_long(self.typical)
     }
 }
 
@@ -1361,13 +1357,10 @@ impl Session {
         turn: usize,
         list: &[String],
         roots: &Roots,
-        durations: &HashMap<String, Vec<u64>>,
+        durations: &checks::Durations,
     ) {
         let found = self.checks_of(turn, list, roots);
-        let typical = |command: &str| {
-            let key = checks::key(list, command)?;
-            median(durations.get(&key)?)
-        };
+        let typical = |command: &str| durations.typical(list, command);
         self.turns[turn].listed = checks::listed(&found, &typical);
         self.turns[turn].checks = found;
     }
@@ -2175,13 +2168,6 @@ pub struct CheckCard {
     pub ended: bool,
     /// Whether it passed, when its exit code says (the check model's rule); `None` otherwise.
     pub passed: Option<bool>,
-}
-
-/// The lower median of `runs`, `None` when there is none.
-fn median(runs: &[u64]) -> Option<u64> {
-    let mut runs = runs.to_vec();
-    runs.sort_unstable();
-    runs.get(runs.len().checked_sub(1)? / 2).copied()
 }
 
 /// The worktree a card's change starts from (danielrispler/Falinks#369, decision 10): the session's previous card, or its
@@ -3236,11 +3222,11 @@ impl Studio {
                         let row = session.ledger.report(task, status, at).cloned();
                         let list = self.check_lists.of(&session.cwd);
                         if let Some(row) = row {
-                            let key = checks::key(list, row.command.as_deref().unwrap_or_default());
-                            let ran = row.began().zip(key).filter(|_| row.agent.is_none());
-                            if let (Some((began, key)), "completed") = (ran, status) {
-                                let runs = self.durations.entry(key).or_default();
-                                runs.push(at.saturating_sub(began));
+                            let ran = row.began().filter(|_| row.agent.is_none());
+                            if let (Some(began), "completed") = (ran, status) {
+                                let command = row.command.as_deref().unwrap_or_default();
+                                let took = at.saturating_sub(began);
+                                self.durations.record(list, command, took);
                             }
                             if let Some(turn) = row.turn.filter(|t| *t < session.turns.len()) {
                                 session.recheck(turn, list, &self.roots, &self.durations);
@@ -3586,12 +3572,12 @@ impl Studio {
                     let row = session
                         .ledger
                         .row(event.agent_id.as_deref(), event.call_id());
-                    let key = checks::key(list, tool.command.as_deref().unwrap_or_default());
                     let took = row.and_then(|r| r.began().zip(r.finished()));
                     let counted = own && ran && !failed && row.is_some_and(|r| !r.background);
-                    if let (Some(key), Some((began, ended)), true) = (key, took, counted) {
-                        let runs = self.durations.entry(key).or_default();
-                        runs.push(ended.saturating_sub(began));
+                    if let (Some((began, ended)), true) = (took, counted) {
+                        let command = tool.command.as_deref().unwrap_or_default();
+                        self.durations
+                            .record(list, command, ended.saturating_sub(began));
                     }
                     session.settle_cards(list);
                 }
@@ -4561,8 +4547,7 @@ impl Studio {
     /// `None` when it never ran. Runs group by their check statements (`checks::key`) under the list
     /// of a session working in `cwd`.
     pub fn typical(&self, cwd: &str, command: &str) -> Option<u64> {
-        let key = checks::key(self.check_lists.of(cwd), command)?;
-        median(self.durations.get(&key)?)
+        self.durations.typical(self.check_lists.of(cwd), command)
     }
 
     /// The check `event` starts: a new Bash call of its session's own agent that runs a check. A

@@ -95,7 +95,7 @@ impl fmt::Debug for Studio {
             .field("held", held)
             .field("log_end", log_end)
             .field("ended", ended)
-            .field("durations", &durations.iter().collect::<BTreeMap<_, _>>())
+            .field("durations", &durations.sorted())
             .field("rows", &rows.iter().collect::<BTreeMap<_, _>>())
             .field("mismatched", &mismatched.iter().collect::<BTreeMap<_, _>>())
             .field("listed", listed)

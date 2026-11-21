@@ -12,7 +12,7 @@ A command is read as statements, split at `;`, line breaks, `&&`, `||`, `|` and 
 
 A statement runs an entry when the entry's first word is the statement's command and its other words follow in order among the words that are not flags, with a toolchain between (`cargo +nightly test`). A path to the command matches (`./target/debug/ci-checks`). `cargo run … --bin ci-checks` runs the one-word entry `ci-checks`.
 
-Before its command a statement may hold only variable assignments and these words: `time`, `timeout` with its duration, `env`, `nice`, `exec`, `command`, `do`, `then`, `else`, `if`, `while`, `until`, `!` and `{`. A check behind any other wrapper is no check. A word that is only an argument is no check (`strings target/debug/ci-checks`), nor is quoted text, so a PR body that names `cargo test` runs nothing, nor is a heredoc's body.
+Before its command a statement may hold only variable assignments (their value may be quoted or a `$(…)` or `$((…))`, which is read as part of the word, never as statements) and these words: `time`, `timeout` with its duration, `env`, `nice`, `exec`, `command`, `do`, `then`, `else`, `if`, `while`, `until`, `!` and `{`. A check behind any other wrapper is no check. A word that is only an argument is no check (`strings target/debug/ci-checks`), nor is quoted text, so a PR body that names `cargo test` runs nothing, nor is a heredoc's body.
 
 Each statement that runs an entry is one run, so `cargo test && cargo clippy` is a run of two checks, and a `cargo test` that follows a heredoc edit in the same command is `cargo test`. A run is named by its own statement: its words from the command on. That is what a feed line shows, and what typical durations are kept under. Any command tool counts, not only Claude Code's `Bash`, so agy's commands are matched too.
 
@@ -42,10 +42,10 @@ A full run that fails, followed by a narrower run of the same suite that passes,
 
 ### When an exit code counts
 
-A command exits with its last group's code: the statements after the last `;` or line break. A check in an earlier group is Ran, whatever the exit code. In the last group, each of its checks is Ran when the group holds a `||`, a leading `!`, a `&` that sends a statement to the background, or a pipe with no earlier `set` that turns on `pipefail`. Otherwise:
+A command exits with its last group's code: the statements after the last `;`, `&` or line break. A check in an earlier group is Ran, whatever the exit code. In the last group, each of its checks is Ran when the group holds a `||`, a `!` on any of its statements, a `&` that sends a statement to the background (the statement after a `&` is in the foreground, so `server & cargo test` counts), or a pipe when no `set` before the check turned `pipefail` on (`set -o pipefail`, `set -euo pipefail`) and none after it turned it off (`set +o pipefail`). Otherwise:
 
 - Exit 0 says each check in the group passed, so `cargo fmt --check && cargo clippy` passing is two passes.
-- A non-zero exit says a check failed only when it is the group's one statement besides `cd`, `export`, `set` and variable assignments, so `cd x && cargo test` failing is failed. When the group holds two checks, or a check and another command, the code cannot say which failed or whether a later one ran, and each check in it is Ran, never failed.
+- A non-zero exit says a check failed only when it is the group's one statement besides `cd`, `export`, `set` and variable assignments (under `pipefail` a pipeline is one statement, so `set -o pipefail; cargo test 2>&1 | tail` failing is failed), so `cd x && cargo test` failing is failed. When the group holds two checks, or a check and another command, the code cannot say which failed or whether a later one ran, and each check in it is Ran, never failed.
 
 ### Background runs
 

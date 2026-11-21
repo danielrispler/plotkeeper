@@ -3,7 +3,7 @@
 
 use crate::ledger::{Ledger, Outcome, Row};
 use serde::{Deserialize, Serialize};
-use std::{io, path::Path};
+use std::{collections::{BTreeMap, HashMap}, io, path::Path};
 
 /// The checks a project without a list of its own has: the fixed list of danielrispler/Falinks#328 plus this
 /// repository's own, `npm run check` (danielrispler/plotkeeper#112).
@@ -545,6 +545,42 @@ pub(crate) fn key<S: AsRef<str>>(list: &[S], command: &str) -> Option<String> {
         .map(|s| s.text)
         .collect();
     (!keys.is_empty()).then(|| keys.join("\n"))
+}
+
+/// 2 minutes, a starting guess (danielrispler/Falinks#461, decision 22): a check that usually runs
+/// longer gets a card at its start (decision 15).
+const LONG_MS: u64 = 2 * 60 * 1000;
+
+/// Whether a check whose typical duration is `typical` usually takes over 2 minutes.
+pub(crate) fn is_long(typical: Option<u64>) -> bool {
+    typical.is_some_and(|ms| ms > LONG_MS)
+}
+
+/// How long each command of checks ran when it did not fail, by `key`, oldest first
+/// (danielrispler/Falinks#461, decision 13), kept in the studio's saved state as the plain map.
+#[derive(Default, Serialize, Deserialize)]
+#[serde(transparent)]
+pub(crate) struct Durations(HashMap<String, Vec<u64>>);
+
+impl Durations {
+    /// Keeps that `command`, under `list`, took `ms`; nothing for a command that runs no check.
+    pub(crate) fn record<S: AsRef<str>>(&mut self, list: &[S], command: &str, ms: u64) {
+        if let Some(key) = key(list, command) {
+            self.0.entry(key).or_default().push(ms);
+        }
+    }
+
+    /// The lower median of how long `command`'s earlier runs took, `None` when it never ran.
+    pub(crate) fn typical<S: AsRef<str>>(&self, list: &[S], command: &str) -> Option<u64> {
+        let mut runs = self.0.get(&key(list, command)?)?.clone();
+        runs.sort_unstable();
+        runs.get(runs.len().checked_sub(1)? / 2).copied()
+    }
+
+    /// The durations in key order, to compare two studios.
+    pub(crate) fn sorted(&self) -> BTreeMap<&String, &Vec<u64>> {
+        self.0.iter().collect()
+    }
 }
 
 /// How a check, or one run of it, ended.
