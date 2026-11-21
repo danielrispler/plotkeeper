@@ -1,13 +1,16 @@
 // Pull main's flow (#164): a pull's error survives the read that follows it, even when a read was already in flight. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { El } from "./dom.mjs";
+import { El, fakeDocument } from "./dom.mjs";
 
 // The document is set after the import: times.ts starts a timer when one exists at load.
 const { readWorkspaces, pullAll } = await import("../../dist/workspaces.js");
-const make = (tag) => Object.assign(new El(tag), { dataset: {}, style: {}, classList: { add() {}, toggle() {}, contains: () => false } });
 const els = new Map();
-globalThis.document = { createElement: make, getElementById: (id) => els.get(id) ?? (els.set(id, make("div")), els.get(id)), visibilityState: "hidden", hasFocus: () => false };
+globalThis.document = fakeDocument({
+  getElementById: (id) => els.get(id) ?? (els.set(id, new El("div")), els.get(id)),
+  visibilityState: "hidden",
+  hasFocus: () => false,
+});
 const calls = [];
 let gate = null;
 globalThis.window = {

@@ -1,17 +1,12 @@
 // A worker's card shows in its session's rail, in the turn the core placed it in (danielrispler/plotkeeper#212). Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { El } from "./dom.mjs";
+import { fakeDocument, tauri } from "./dom.mjs";
 
-globalThis.window = { __TAURI__: { core: { invoke: async () => null } } };
+tauri([]);
 // The document is set after the import: times.ts starts a timer when one exists at load.
 const { feedTurns, foldedTurn, railOf } = await import("../../dist/story.js");
-globalThis.document = {
-  createElement: (tag) => Object.assign(new El(tag), { dataset: {}, style: {}, classList: { add() {}, toggle() {}, contains: () => false }, removeAttribute() {}, toggleAttribute() {} }),
-  getElementById: () => new El("div"),
-  visibilityState: "visible",
-  body: { dataset: {} },
-};
+globalThis.document = fakeDocument({ visibilityState: "visible", body: { dataset: {} } });
 
 const stored = (id, title, agent = null, shown_at = null) => ({
   request: { session_id: "s", id, agent, changed_by: {}, check: null },

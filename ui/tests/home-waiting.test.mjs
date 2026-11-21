@@ -1,21 +1,12 @@
 // Home's waiting room, after the outside review of #253. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { El as Base } from "./dom.mjs";
+import { Field, fakeDocument, tauri } from "./dom.mjs";
 
-class El extends Base {
-  dataset = {};
-  title = "";
-  disabled = false;
-  dir = "";
-  classList = { add() {}, toggle() {}, remove() {}, contains: () => false };
-  removeAttribute() {}
-  toggleAttribute() {}
-}
 const calls = [];
-globalThis.window = { __TAURI__: { core: { invoke: async (command, args) => (calls.push([command, args]), null) } } };
+tauri(calls);
 const { drawHome, resetHome, homeState } = await import("../../dist/home.js");
-globalThis.document = { createElement: (tag) => new El(tag), visibilityState: "visible", hasFocus: () => true, getElementById: () => Object.assign(new El("div"), { replaceChildren() {} }) };
+globalThis.document = fakeDocument({ visibilityState: "visible", hasFocus: () => true }, Field);
 
 const quiz = { text: "q", key: 1, options: [{ text: "A", why: "a" }, { text: "B", why: "b" }] };
 const retest = (id) => ({ kind: "retest", id, of: id, session_id: "s", added_at: 1, quiz, taps: [] });
@@ -39,7 +30,7 @@ test("turn ends are tracked per session: a quick follow-on prompt hides none, an
 test("a turn ending on a quiet Home does not mark the stale item set aside before it shown (C8)", async () => {
   calls.length = 0;
   resetHome();
-  const box = new El("div");
+  const box = new Field("div");
   const r3 = retest("r3");
   drawHome(box, [live("a", "running", { turns: [{ ended_at: 1 }] })], [], null);
   homeState.quiet = true;
@@ -61,7 +52,7 @@ test("a pick on Home leaves no why waiting in the rail, even under the trial (C9
 
 test("a running row's elapsed time and an unseen row's age count up like the list's (C12)", () => {
   resetHome();
-  const box = new El("div");
+  const box = new Field("div");
   const now = Date.now();
   drawHome(box, [live("r", "running", { turn_span: { start: now - 60_000 } }), live("u", "your_turn", { unseen: true, turns: [{ ended_at: now - 60_000 }] })], [], null);
   const clocks = box.find("span").filter((n) => n.className === "clock");
@@ -71,7 +62,7 @@ test("a running row's elapsed time and an unseen row's age count up like the lis
 
 test("an unseen row has two lines and the status shape beside the name (S6)", () => {
   resetHome();
-  const box = new El("div");
+  const box = new Field("div");
   drawHome(box, [live("u", "your_turn", { unseen: true, turns: [{ ended_at: Date.now() }] })], [], null);
   const row = box.find("button").find((b) => b.dataset.key === "unseen u");
   assert.ok(row.find("span").some((n) => n.dataset.glyph === "filled"));
@@ -79,8 +70,8 @@ test("an unseen row has two lines and the status shape beside the name (S6)", ()
 
 test("patching by key keeps the slot's card when rows above it change (C11)", async () => {
   const { patch } = await import("../../dist/dom.js");
-  const keyed = (tag, key, text) => Object.assign(new El(tag, {}, text ? [text] : []), { attrs: new Map([["data-key", key]]) });
-  const parent = new El("div");
+  const keyed = (tag, key, text) => Object.assign(new Field(tag, {}, text ? [text] : []), { attrs: new Map([["data-key", key]]) });
+  const parent = new Field("div");
   const [a, b, slot] = [keyed("button", "a", "a"), keyed("button", "b", "b"), keyed("div", "slot", "card")];
   parent.childNodes = [a, b, slot];
   // A row above is dropped.
@@ -92,20 +83,10 @@ test("patching by key keeps the slot's card when rows above it change (C11)", as
   assert.deepEqual(parent.childNodes.map((n) => n.getAttribute("data-key")), ["a", "c", "slot"]);
   assert.equal(parent.childNodes[2], slot);
   // Unkeyed nodes still match by place.
-  const t = new El("div", {}, ["x"]);
-  const p2 = new El("div", {}, []);
+  const t = new Field("div", {}, ["x"]);
+  const p2 = new Field("div", {}, []);
   p2.childNodes = [t];
-  patch(p2, [new El("div", {}, ["y"])]);
+  patch(p2, [new Field("div", {}, ["y"])]);
   assert.equal(p2.childNodes[0], t);
 });
 
-test("the Home key shows Home from any view that is not Home, and remembers the session if one was selected (C10)", async () => {
-  const { homeToggle } = await import("../../dist/selection.js");
-  const listed = [{ id: "a" }];
-  // History, a full diff or a new terminal: Home is not shown and no session is selected.
-  assert.deepEqual(homeToggle(null, "a", listed, false), { show: null });
-  assert.deepEqual(homeToggle("a", null, listed, false), { show: "a" });
-  // On Home it goes back to the remembered session if listed, else nothing.
-  assert.deepEqual(homeToggle(null, "a", listed, true), { select: "a" });
-  assert.equal(homeToggle(null, "gone", listed, true), null);
-});

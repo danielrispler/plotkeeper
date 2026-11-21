@@ -1,9 +1,9 @@
 // The evidence line under a turn's Headline (danielrispler/plotkeeper#113). Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { El } from "./dom.mjs";
+import { El, fakeDocument, tauri } from "./dom.mjs";
 
-globalThis.document = { createElement: (tag) => new El(tag), getElementById: () => new El("div") };
+globalThis.document = fakeDocument();
 const { diffRequest } = await import("../../dist/diff.js");
 const diffOpens = [];
 diffRequest.open = (session, turn) => diffOpens.push([session, turn]);
@@ -82,7 +82,7 @@ test("no line for an agy session, or a turn with no files and no checks", () => 
 });
 
 test("opening the line, then a failed check's output, changes only those nodes, and the open line outlasts a refresh", async () => {
-  globalThis.window = { __TAURI__: { core: { invoke: async () => ({ exit_code: 101, tail: "error[E0308]: mismatched types" }) } } };
+  tauri([], () => ({ exit_code: 101, tail: "error[E0308]: mismatched types" }));
   const turn = { files: files([file("a.rs", 3, 1)]), checks: [check("cargo test", "failed")] };
   const make = () => evidenceElement("s1", 4, turn, { only: "all" });
 
@@ -130,16 +130,7 @@ test("while running, only a check whose last run failed shows", () => {
 test("a file row opens its hunk in place, opens the editor at the first changed line, and stays open across a refresh", async () => {
   const calls = [];
   const hunk = { text: "@@ -1 +1,2 @@\n a\n+b\n", left_out: 12, binary: false, first_line: 2 };
-  globalThis.window = {
-    __TAURI__: {
-      core: {
-        invoke: async (command, args) => {
-          calls.push([command, args]);
-          return command === "turn_file_hunk" ? hunk : null;
-        },
-      },
-    },
-  };
+  tauri(calls, (command) => (command === "turn_file_hunk" ? hunk : null));
   const turn = {
     files: files([file("a.rs", 1, 0), file("new.rs", 1, 1, { from: "old.rs" }), file("img.png", null, null)]),
     checks: [check("cargo test", "failed")],
@@ -191,7 +182,7 @@ test("a file row opens its hunk in place, opens the editor at the first changed 
 
 test("a binary file's hunk says so and a hunk that cannot be read says that", async () => {
   let answer = { text: "", left_out: 0, binary: true, first_line: 1 };
-  globalThis.window = { __TAURI__: { core: { invoke: async () => answer } } };
+  tauri([], () => answer);
   const turn = { files: files([file("img.png", null, null), file("gone.rs", 1, 0)]), checks: [] };
   const line = evidenceElement("s3", 1, turn, { only: "all" });
   line.find("button")[0].listeners.click();
@@ -215,9 +206,7 @@ test("the opened line offers the full diff only when the turn has files", () => 
 
 test("an open turn's hunk is read again at each opening and once the turn ended, and an ended turn's is kept", async () => {
   let reads = 0;
-  globalThis.window = {
-    __TAURI__: { core: { invoke: async (command) => (command === "turn_file_hunk" ? { text: `read ${++reads}`, left_out: 0, binary: false, first_line: 1 } : null) } },
-  };
+  tauri([], (command) => (command === "turn_file_hunk" ? { text: `read ${++reads}`, left_out: 0, binary: false, first_line: 1 } : null));
   const row = { kind: "file", label: "k.rs", file: file("k.rs", 1, 0) };
   const settle = () => new Promise((resolve) => setTimeout(resolve));
   const toggle = async (item) => (item.find("button")[0].listeners.click(), settle());
@@ -242,9 +231,7 @@ test("an open turn's hunk is read again at each opening and once the turn ended,
 
 test("a redraw of an open turn's open hunk reads it again when the file's counts changed, and not when they did not", async () => {
   let reads = 0;
-  globalThis.window = {
-    __TAURI__: { core: { invoke: async (command) => (command === "turn_file_hunk" ? { text: `read ${++reads}`, left_out: 0, binary: false, first_line: 1 } : null) } },
-  };
+  tauri([], (command) => (command === "turn_file_hunk" ? { text: `read ${++reads}`, left_out: 0, binary: false, first_line: 1 } : null));
   const settle = () => new Promise((resolve) => setTimeout(resolve));
   const draw = (added) => fileRow("s4", 1, { kind: "file", label: "m.rs", file: file("m.rs", added, 0) }, "", false);
   const first = draw(1);

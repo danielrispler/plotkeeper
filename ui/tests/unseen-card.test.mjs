@@ -1,18 +1,13 @@
 // A folded turn keeps one title row for each card Daniel has not seen (danielrispler/plotkeeper#211). Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { El } from "./dom.mjs";
+import { fakeDocument, tauri } from "./dom.mjs";
 
 const calls = [];
-globalThis.window = { __TAURI__: { core: { invoke: async (command, args) => (calls.push([command, args]), null) } } };
+tauri(calls);
 // The document is set after the import: times.ts starts a timer when one exists at load.
 const { foldedTurn } = await import("../../dist/story.js");
-globalThis.document = {
-  createElement: (tag) => Object.assign(new El(tag), { dataset: {}, style: {}, classList: { add() {}, toggle() {}, contains: () => false }, removeAttribute() {}, toggleAttribute() {} }),
-  getElementById: () => new El("div"),
-  visibilityState: "visible",
-  body: { dataset: {} },
-};
+globalThis.document = fakeDocument({ visibilityState: "visible", body: { dataset: {} } });
 
 const stored = (id, title, shown_at = null) => ({
   request: { session_id: "s", id, agent: null, changed_by: {}, check: null },

@@ -45,6 +45,8 @@ test("the Home key flips between a session and Home (#239)", async () => {
   assert.deepEqual(homeToggle("a", null, listed), { show: "a" });
   // On Home it selects the remembered session.
   assert.deepEqual(homeToggle(null, "a", listed), { select: "a" });
+  // From a view with no session selected where Home is not shown (History, a full diff, a new terminal), it shows Home.
+  assert.deepEqual(homeToggle(null, "a", listed, false), { show: null });
 });
 
 test("on Home with the remembered session gone, the Home key does nothing (#239)", async () => {

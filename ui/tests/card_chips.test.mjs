@@ -1,17 +1,15 @@
 // A card's file chips open the file's real hunk, as its row in the evidence line does (danielrispler/plotkeeper#121). Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { El } from "./dom.mjs";
+import { fakeDocument, tauri } from "./dom.mjs";
 
 const calls = [];
 const hunk = { text: "@@ -1 +1 @@\n-a\n+b\n", left_out: 0, binary: false, first_line: 1 };
-globalThis.window = {
-  __TAURI__: { core: { invoke: async (command, args) => (calls.push([command, args]), command === "guess" ? new Promise(() => {}) : command === "turn_file_hunk" ? hunk : null) } },
-};
+tauri(calls, (command) => (command === "guess" ? new Promise(() => {}) : command === "turn_file_hunk" ? hunk : null));
 // The document is set after the import: times.ts starts a timer when one exists at load.
 const { cardLine, cardsFor, openCard, quizOpen } = await import("../../dist/cards.js");
 const { fileRow } = await import("../../dist/evidence.js");
-globalThis.document = { createElement: (tag) => new El(tag), getElementById: () => new El("div"), visibilityState: "hidden" };
+globalThis.document = fakeDocument({ visibilityState: "hidden" });
 
 const stored = (card, id = "s1@1") => ({
   request: { session_id: "s1", id, agent: null, changed_by: {}, check: null },

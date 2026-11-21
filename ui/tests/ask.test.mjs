@@ -2,11 +2,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
-import { El } from "./dom.mjs";
+import { fakeDocument, tauri } from "./dom.mjs";
 
 globalThis.marked = createRequire(import.meta.url)("marked");
 
-globalThis.document = { createElement: (tag) => new El(tag), getElementById: () => new El("div") };
+globalThis.document = fakeDocument();
 const { suggestions, whyNotElement } = await import("../../dist/ask.js");
 
 test("each anchor type offers two or three suggested questions", () => {
@@ -45,7 +45,7 @@ test("the palette has an Ask about action", async () => {
 
 test("Ask on a renamed file reads the hunk with the file's old path", async () => {
   const calls = [];
-  globalThis.window = { __TAURI__: { core: { invoke: async (command, args) => (calls.push([command, args]), command === "ask_facts" ? { sections: [] } : null) } } };
+  tauri(calls, (command) => (command === "ask_facts" ? { sections: [] } : null));
   const { askAnchor } = await import("../../dist/ask.js");
   const node = askAnchor("s1", { kind: "file", turn: 3, root: "/r", path: "new.rs", from: "old.rs" }, "the file new.rs");
   node.open = true;

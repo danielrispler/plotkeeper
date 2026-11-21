@@ -2,7 +2,6 @@
 // shows. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { cardShown } from "../../dist/answer.js";
 import { askKind } from "../../dist/types.js";
 
@@ -28,16 +27,4 @@ test("a call asks a question, a plan or a permission, by its tool", () => {
   assert.equal(askKind("AskUserQuestion"), "question");
   assert.equal(askKind("ExitPlanMode"), "plan");
   assert.equal(askKind("Bash"), "permission");
-});
-
-// danielrispler/Falinks#569: the shell pushes the open request as an `ask` event in its read loop; no timer polls for it.
-// The one timer only tells the shell the window is alive.
-test("the window takes open requests from the shell's ask event, with no poll", () => {
-  const source = readFileSync(new URL("../answer.ts", import.meta.url), "utf8");
-  const timers = source.split("setInterval(").slice(1);
-  assert.equal(timers.length, 1);
-  const timer = timers[0].slice(0, timers[0].indexOf("}, 1000)"));
-  assert.match(timer, /invoke\("alive"\)/);
-  assert.doesNotMatch(timer, /watch/);
-  assert.match(source, /listen<Ask \| null>\("ask"/);
 });

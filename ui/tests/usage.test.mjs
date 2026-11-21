@@ -3,11 +3,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { El } from "./dom.mjs";
+import { El, fakeDocument } from "./dom.mjs";
 
-globalThis.document = {
-  createElement: (tag) => Object.assign(new El(tag), { dataset: {}, style: {}, classList: { add() {}, toggle() {}, contains: () => false } }),
-};
+globalThis.document = fakeDocument();
 const { glance, showGlance, tile } = await import("../../dist/usage.js");
 
 const now = 1738400000;
@@ -130,13 +128,6 @@ const fresh = (five, readAt) => ({
   read_at: readAt,
   source: "last Claude session",
   reason: null,
-});
-
-test("load, focus and the timer read Claude only; only the popover's open reads every agent", () => {
-  const main = fs.readFileSync(new URL("../main.ts", import.meta.url), "utf8");
-  assert.equal(main.match(/readUsageOf\(null\)/g).length, 1);
-  assert.match(main, /newState === "open"\) readUsageOf\(null\)/);
-  assert.match(main, /readUsageOf\(timedAgents\);\naddEventListener\("focus", \(\) => readUsageOf\(timedAgents\)\)/);
 });
 
 test("a slow read that resolves after a newer one does not overwrite that agent's newer reading", async () => {

@@ -1,7 +1,7 @@
 // The settings page's rows (#195), run on the `tsc` output: one pure function from the parsed settings files to what each row shows.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { El } from "./dom.mjs";
+import { El, fakeDocument } from "./dom.mjs";
 import { initial, reload, reloadedZoom, zoomed } from "../../dist/settings.js";
 import { drawSettingsPage, newValue, settingsPage as pageOf, startSettingsPage, stepped, writesOn } from "../../dist/settings-page.js";
 import { studio } from "../../dist/state.js";
@@ -205,7 +205,6 @@ test("a dropdown writes on its change, every button on its click, so the undo ic
 
 // The dialog (#221), drawn into the stand-in DOM: a control is found by its label, and a click is sent to the region's listener.
 class Control extends El {
-  dataset = {};
   get disabled() {
     return this.hasAttribute("disabled");
   }
@@ -225,7 +224,7 @@ class Control extends El {
 function dialogOver(settings) {
   const calls = [];
   const regions = Object.fromEntries(["settings-dialog", "settings-close", "settings-status", "settings-body"].map((id) => [id, new Control("div")]));
-  globalThis.document = { createElement: (tag) => new Control(tag), getElementById: (id) => regions[id], documentElement: {} };
+  globalThis.document = fakeDocument({ getElementById: (id) => regions[id], documentElement: {} }, Control);
   globalThis.getComputedStyle = () => ({ getPropertyValue: () => String(SHEET) });
   globalThis.window = { addEventListener() {}, __TAURI__: { core: { invoke: async (command, args) => void calls.push([command, args]) } } };
   studio.files = load(settings);
