@@ -76,6 +76,9 @@ pub(crate) enum Happened {
     StartedFrom(Start),
     /// The session ended by a `/clear`.
     EndedByClear,
+    /// Daniel typed a slash command, by its text: a skill with forked execution starts its
+    /// subagent with no call that names it, in a turn of the same prompt id.
+    SkillTyped(String),
     PermissionAsked {
         tool: Tool,
     },
