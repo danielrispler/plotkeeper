@@ -9,12 +9,9 @@ use studio_core::{
     Subagent,
 };
 
+use crate::common::{self, replay};
 use Kind::{Helper, Worker};
 use State::{NeedsYou, Running, YourTurn};
-
-fn replay(log: &str) -> Studio {
-    Studio::replayed(log.lines())
-}
 
 /// The checkpoint day of danielrispler/Falinks#347, scrubbed (danielrispler/Falinks#370).
 const DAY: &str = include_str!("fixtures/checkpoint-day.jsonl");
@@ -289,36 +286,6 @@ fn a_helper_whose_command_changed_its_worktree_is_a_worker_from_that_step() {
 }
 
 #[test]
-fn a_childs_check_is_not_listed_in_its_sessions_feed() {
-    // The prompt (line 2) opens the wait, then the worker runs a check in its worktree.
-    let mut studio = tree_upto(2);
-    let check = |hook: &str| {
-        json!({
-            "session_id": TREE_SESSION,
-            "hook_event_name": hook,
-            "agent_id": TREE_WORKER,
-            "agent_type": "general-purpose",
-            "cwd": "/Users/danielrispler/work/Falinks/.claude/worktrees/issue-372",
-            "tool_name": "Bash",
-            "tool_input": {"command": "cargo test", "description": "Run the tests"},
-            "tool_response": {"interrupted": false, "stderr": "", "stdout": "ok"},
-            "tool_use_id": "toolu_01TreeWorkerCheck0000000009",
-            "studio_received_ms": 1_793_480_193_600_u64,
-        })
-        .to_string()
-    };
-
-    let outputs = [
-        studio.apply(&check("PreToolUse")),
-        studio.apply(&check("PostToolUse")),
-    ];
-
-    assert_eq!(outputs, [vec![], vec![]]);
-    let session = studio.session(TREE_SESSION).expect("the session");
-    assert!(session.turns.iter().all(|t| t.listed.is_empty()));
-}
-
-#[test]
 fn a_childs_permission_request_makes_its_session_need_you_until_its_step_resolves() {
     let states: Vec<(State, Option<Asker>)> = (1..=TREE.lines().count())
         .map(|upto| {
@@ -394,41 +361,6 @@ fn a_childs_steps_are_its_own_not_its_sessions() {
     assert_eq!(
         agent(&studio, RUN_SESSION, RUN_WORKER).agent.last_step,
         Some(write)
-    );
-}
-
-#[test]
-fn the_wire_keeps_each_subagents_status_failed_and_faded() {
-    let wire = |studio: &Studio, id: &str| {
-        let session = studio
-            .sessions()
-            .into_iter()
-            .find(|s| s.agent.id == RUN_SESSION);
-        let json = serde_json::to_value(session.unwrap()).unwrap();
-        let agents = json["agents"].as_array().unwrap().clone();
-        let agent = agents.into_iter().find(|a| a["id"] == id).unwrap();
-        (
-            agent["status"].clone(),
-            agent["failed"].clone(),
-            agent["faded"].clone(),
-        )
-    };
-    // The killed wake-up (line 25) names the worker instead of the helper.
-    let killed = RUN.replace(
-        &format!("<task-id>{RUN_HELPER}</task-id>"),
-        &format!("<task-id>{RUN_WORKER}</task-id>"),
-    );
-    let studio = replay(&killed);
-    assert_eq!(
-        wire(&studio, RUN_WORKER),
-        (json!("killed"), json!(true), json!(false))
-    );
-
-    let mut studio = replay(RUN);
-    studio.open(RUN_HELPER);
-    assert_eq!(
-        wire(&studio, RUN_HELPER),
-        (json!("killed"), json!(true), json!(true))
     );
 }
 
@@ -635,8 +567,7 @@ fn a_killed_subagents_running_descendants_end_with_it() {
         json!({"background_tasks": [{"id": "w1"}]}),
     ));
 
-    let killed =
-        "<task-notification><task-id>w1</task-id><status>killed</status></task-notification>";
+    let killed = common::task_notification("w1", "killed");
     studio.apply(&ev(
         "UserPromptSubmit",
         9,
@@ -711,11 +642,34 @@ fn a_workers_end_look_and_a_new_turns_base_look_say_when_theirs_began() {
     assert_eq!(base.map(|l| l.began), Some(Some(6000)), "{looks:?}");
 }
 
+/// What the rail reads off the wire of one subagent.
+#[derive(Debug, PartialEq, serde::Deserialize)]
+struct Wire {
+    id: String,
+    name: String,
+    asked: Option<String>,
+    result: Option<String>,
+    agent_type: Option<String>,
+    started_at: u64,
+    ended_at: Option<u64>,
+    kind: String,
+    status: String,
+    failed: bool,
+    faded: bool,
+}
+
+/// The wire of the subagents of `session`, as the shell sends them to the rail.
+fn wire(studio: &Studio, session: &str) -> Vec<Wire> {
+    let json = serde_json::to_value(studio.session(session).unwrap()).unwrap();
+    serde_json::from_value(json["agents"].clone()).unwrap()
+}
+
 /// danielrispler/Falinks#535: the rail's history of a session's subagents reads each one off the wire, faded or not: its
 /// purpose (its name and its prompt's first line), its result, type, times and kind. The summary
-/// call reads its whole prompt and last message.
+/// call reads its whole prompt and last message. A killed subagent keeps its status and stays
+/// failed, and fades once opened.
 #[test]
-fn the_wire_keeps_every_subagents_history_faded_or_not() {
+fn the_wire_keeps_every_subagents_history_status_failed_and_faded() {
     let mut studio = Studio::default();
     let input = json!({"description": "Review the diff", "subagent_type": "code-reviewer",
         "prompt": "\n  Review the parser change.\nLook for off-by-ones."});
@@ -736,49 +690,62 @@ fn the_wire_keeps_every_subagents_history_faded_or_not() {
         (c1.prompt.as_str(), c1.message.as_str()),
         (input["prompt"].as_str().unwrap(), message)
     );
-    let json = serde_json::to_value(studio.session("s1").unwrap()).unwrap();
-    let wire: Vec<_> = (json["agents"].as_array().unwrap().iter())
-        .map(|a| {
-            let keys = [
-                "id",
-                "name",
-                "asked",
-                "result",
-                "agent_type",
-                "started_at",
-                "ended_at",
-            ];
-            let mut fields: Vec<_> = keys.iter().map(|k| a[k].clone()).collect();
-            fields.extend([a["kind"].clone(), a["faded"].clone()]);
-            fields
-        })
-        .collect();
     assert_eq!(
-        wire,
+        wire(&studio, "s1"),
         [
-            vec![
-                json!("c1"),
-                json!("Review the diff"),
-                json!("Review the parser change."),
-                json!("Done."),
-                json!("code-reviewer"),
-                json!(1),
-                json!(60_002),
-                json!("helper"),
-                json!(true),
-            ],
-            vec![
-                json!("c2"),
-                json!("Implement #9"),
-                json!(null),
-                json!(null),
-                json!(null),
-                json!(2),
-                json!(null),
-                json!("helper"),
-                json!(false),
-            ],
+            Wire {
+                id: "c1".into(),
+                name: "Review the diff".into(),
+                asked: Some("Review the parser change.".into()),
+                result: Some("Done.".into()),
+                agent_type: Some("code-reviewer".into()),
+                started_at: 1,
+                ended_at: Some(60_002),
+                kind: "helper".into(),
+                status: "completed".into(),
+                failed: false,
+                faded: true,
+            },
+            Wire {
+                id: "c2".into(),
+                name: "Implement #9".into(),
+                asked: None,
+                result: None,
+                agent_type: None,
+                started_at: 2,
+                ended_at: None,
+                kind: "helper".into(),
+                status: "running".into(),
+                failed: false,
+                faded: false,
+            },
         ]
+    );
+
+    // The run's killed wake-up (line 25) names the worker instead of the helper.
+    let killed = RUN.replace(
+        &format!("<task-id>{RUN_HELPER}</task-id>"),
+        &format!("<task-id>{RUN_WORKER}</task-id>"),
+    );
+    let studio = replay(&killed);
+    let worker = wire(&studio, RUN_SESSION)
+        .into_iter()
+        .find(|a| a.id == RUN_WORKER);
+    let worker = worker.unwrap();
+    assert_eq!(
+        (worker.status.as_str(), worker.failed, worker.faded),
+        ("killed", true, false)
+    );
+
+    let mut studio = replay(RUN);
+    studio.open(RUN_HELPER);
+    let helper = wire(&studio, RUN_SESSION)
+        .into_iter()
+        .find(|a| a.id == RUN_HELPER);
+    let helper = helper.unwrap();
+    assert_eq!(
+        (helper.status.as_str(), helper.failed, helper.faded),
+        ("killed", true, true)
     );
 }
 

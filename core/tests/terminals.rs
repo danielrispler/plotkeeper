@@ -2,6 +2,7 @@
 //! carries its studio terminal, `STUDIO_TERMINAL_ID` as the hook records it, so a row maps to the
 //! terminal its pane shows.
 
+use crate::common::{TWO, replay};
 use serde_json::json;
 use studio_core::Studio;
 
@@ -13,13 +14,9 @@ fn terminal<'a>(studio: &'a Studio, session: &str) -> Option<&'a str> {
     studio.session(session)?.terminal.as_deref()
 }
 
-fn replay() -> Studio {
-    Studio::replayed(include_str!("fixtures/two-sessions.jsonl").lines())
-}
-
 #[test]
 fn a_session_carries_its_terminal_and_one_started_elsewhere_none() {
-    let studio = replay();
+    let studio = replay(TWO);
 
     assert_eq!(terminal(&studio, IN_STUDIO), Some("t-2"));
     assert_eq!(terminal(&studio, OUTSIDE), None);
@@ -32,7 +29,7 @@ fn a_session_carries_its_terminal_and_one_started_elsewhere_none() {
 
 #[test]
 fn a_session_resumed_in_a_new_terminal_maps_to_the_new_one() {
-    let mut studio = replay();
+    let mut studio = replay(TWO);
     let event = |name: &str, terminal: Option<&str>, at: u64| {
         let mut event = json!({
             "session_id": IN_STUDIO,
@@ -99,7 +96,7 @@ fn a_click_before_the_new_session_arrives_keeps_the_selection() {
 /// selection follows to the resumed session, so it stays live and visible.
 #[test]
 fn a_resume_in_a_new_terminal_moves_the_selection_to_the_resumed_session() {
-    let mut studio = replay();
+    let mut studio = replay(TWO);
     let start = |id: &str, source: &str, at: u64| {
         json!({
             "session_id": id,

@@ -2,6 +2,7 @@
 // its ways in. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { Field, fakeDocument, tauri } from "./dom.mjs";
 import { homeView } from "../../dist/home.js";
 import { initial } from "../../dist/settings.js";
 import { windowBinding } from "../../dist/keys.js";
@@ -157,24 +158,6 @@ test("shown is due only with Home active, the window visible and focused, and th
   assert.equal(shownDue(retest("s2", quiz, [{ kind: "shown", at: 1 }]), true, true, true), false);
 });
 
-test("a fresh Quiz in the slot is marked shown through the owner's tap, once", async () => {
-  const { El: Base } = await import("./dom.mjs");
-  class El extends Base {
-    dataset = {};
-    title = "";
-    textContent = "";
-    disabled = false;
-  }
-  const calls = [];
-  globalThis.window = { __TAURI__: { core: { invoke: async (command, args) => (calls.push([command, args]), null) } } };
-  globalThis.document = { createElement: (tag) => new El(tag), visibilityState: "visible", hasFocus: () => true, getElementById: () => Object.assign(new El("div"), { replaceChildren() {} }) };
-  const { drawHome, markLearningShown } = await import("../../dist/home.js");
-  const box = new El("div");
-  drawHome(box, [], [], { kind: "fresh", id: "t5", session_id: "s", quiz: { text: "q", key: 0, options: [{ text: "A", why: "a" }] } });
-  markLearningShown(true);
-  assert.deepEqual(calls, [["quiz_tap", { id: "t5", tap: { kind: "shown" } }]]);
-});
-
 test("entering Home from another view starts it afresh, and drawing it again while on it keeps a reveal and the expanded groups", async () => {
   const { enterHome } = await import("../../dist/home.js");
   const state = { ...fresh(), expanded: new Set(["running"]), quiet: true, held: retest("a", quiz) };
@@ -195,48 +178,39 @@ test("the newest request wins: a slower, older reply is dropped", async () => {
   assert.deepEqual([await a, await b], [undefined, "newer"]);
 });
 
-test("building the slot writes nothing; shown is written once, when its conditions hold", async () => {
-  const { El: Base } = await import("./dom.mjs");
-  class El extends Base {
-    dataset = {};
-    title = "";
-    textContent = "";
-    disabled = false;
-  }
+test("building the slot writes nothing; shown is written once, when its conditions hold, for a Retest and a fresh Quiz", async () => {
   const calls = [];
-  globalThis.window = { __TAURI__: { core: { invoke: async (command, args) => (calls.push([command, args]), null) } } };
-  globalThis.document = { createElement: (tag) => new El(tag), visibilityState: "hidden", hasFocus: () => true, getElementById: () => Object.assign(new El("div"), { replaceChildren() {} }) };
+  tauri(calls);
+  globalThis.document = fakeDocument({ visibilityState: "hidden", hasFocus: () => true }, Field);
   const { slotNode, drawHome, markLearningShown } = await import("../../dist/home.js");
-  const item = { ...retest("w1", { text: "q", key: 0, options: [{ text: "A", why: "a" }] }) };
-  slotNode({ item, next: false }, () => {}, () => {});
-  assert.deepEqual(calls, []);
-  const box = new El("div");
-  box.dataset = {};
-  drawHome(box, [], [], item);
-  // The window is hidden: the background mount wrote nothing.
-  assert.deepEqual(calls, []);
-  markLearningShown(true);
-  assert.deepEqual(calls, []);
-  document.visibilityState = "visible";
-  markLearningShown(false);
-  assert.deepEqual(calls, []);
-  markLearningShown(true);
-  markLearningShown(true);
-  assert.deepEqual(calls, [["quiz_tap", { id: "w1", tap: { kind: "shown" } }]]);
+  const quiz = { text: "q", key: 0, options: [{ text: "A", why: "a" }] };
+  const items = [{ ...retest("w1", quiz) }, { kind: "fresh", id: "t5", session_id: "s", quiz }];
+  for (const item of items) {
+    calls.length = 0;
+    document.visibilityState = "hidden";
+    slotNode({ item, next: false }, () => {}, () => {});
+    assert.deepEqual(calls, []);
+    const box = new Field("div");
+    drawHome(box, [], [], item);
+    // The window is hidden: the background mount wrote nothing.
+    assert.deepEqual(calls, []);
+    markLearningShown(true);
+    assert.deepEqual(calls, []);
+    document.visibilityState = "visible";
+    markLearningShown(false);
+    assert.deepEqual(calls, []);
+    markLearningShown(true);
+    markLearningShown(true);
+    assert.deepEqual(calls, [["quiz_tap", { id: item.id, tap: { kind: "shown" } }]], item.kind);
+  }
 });
 
 // The slot's card (#242): the options, then "Not sure" and "Not now" inside it; a pick writes the confidence tap first.
 async function slotCard(id, extra = {}, send = null) {
-  const { El: Base } = await import("./dom.mjs");
-  class El extends Base {
-    dataset = {};
-    title = "";
-    disabled = false;
-    dir = "";
-  }
   const calls = [];
-  globalThis.window = { __TAURI__: { core: { invoke: send ?? (async (command, args) => (calls.push([command, args]), null)) } } };
-  globalThis.document = { createElement: (tag) => new El(tag), visibilityState: "visible", hasFocus: () => true, getElementById: () => Object.assign(new El("div"), { replaceChildren() {} }) };
+  tauri(calls);
+  if (send) globalThis.window.__TAURI__.core.invoke = send;
+  globalThis.document = fakeDocument({ visibilityState: "visible", hasFocus: () => true }, Field);
   const { slotNode } = await import("../../dist/home.js");
   const item = retest(id, { text: "q", key: 1, options: [{ text: "A", why: "a" }, { text: "B", why: "b" }] }, []);
   const node = slotNode({ item: { ...item, ...extra }, next: false }, () => {}, () => {});

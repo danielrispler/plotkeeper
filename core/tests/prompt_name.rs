@@ -2,23 +2,15 @@
 //! check when a session asks for its name from Daniel's first prompt, and that the written name,
 //! a `StudioPromptName` line of the log, shows, yields to his rename and survives a replay.
 
+use crate::common;
 use serde_json::{Value, json};
 use studio_core::{NameRequest, Output, Studio};
 
 const ID: &str = "8c2f4b6d-1a3e-4d57-9b80-7e5a2c1f3d96";
 
 fn event(name: &str, at: u64, extra: Value) -> String {
-    let mut event = json!({
-        "session_id": ID,
-        "hook_event_name": name,
-        "cwd": "/Users/danielrispler/work/plotkeeper/.claude/worktrees/issue-37-one-event",
-        "studio_received_ms": at,
-    });
-    event
-        .as_object_mut()
-        .unwrap()
-        .extend(extra.as_object().unwrap().clone());
-    event.to_string()
+    let cwd = "/Users/danielrispler/work/plotkeeper/.claude/worktrees/issue-37-one-event";
+    common::event(ID, name, cwd, at, extra)
 }
 
 fn prompt(at: u64, text: &str) -> String {
@@ -69,8 +61,8 @@ fn a_wake_up_never_asks() {
         json!({ "tool_name": "Bash", "tool_input": { "command": "sleep 9", "run_in_background": true }, "tool_response": { "backgroundTaskId": "bash-7" }, "tool_use_id": "t1" }),
     ));
     studio.apply(&stop(2_000, "Started."));
-    let wake = "<task-notification><task-id>bash-7</task-id><status>completed</status></task-notification>";
-    assert!(named(studio.apply(&prompt(3_000, wake))).is_empty());
+    let wake = common::task_notification("bash-7", "completed");
+    assert!(named(studio.apply(&prompt(3_000, &wake))).is_empty());
 }
 
 #[test]

@@ -1,12 +1,9 @@
 //! Seam 1 (danielrispler/Falinks#369, Testing Decisions) for wake-ups (danielrispler/Falinks#373): replay hook events through the core and
 //! check which of a session's prompts Claude Code sent to wake it, and which are Daniel's.
 
+use crate::common::{self, replay};
 use serde_json::json;
 use studio_core::{CardRequest, Output, Sender, State, Studio};
-
-fn replay(log: &str) -> Studio {
-    Studio::replayed(log.lines())
-}
 
 /// The checkpoint day of danielrispler/Falinks#347, scrubbed (danielrispler/Falinks#370).
 const DAY: &str = include_str!("fixtures/checkpoint-day.jsonl");
@@ -56,9 +53,10 @@ fn a_wake_up_from_a_task_with_no_subagent_names_it_by_its_short_id() {
     let mut studio = replay(DAY);
 
     // `brh86k1fz` is the day's background command, which no subagent record names.
-    studio.apply(&prompt(
-        "<task-notification><task-id>brh86k1fz</task-id><status>completed</status></task-notification>",
-    ));
+    studio.apply(&prompt(&common::task_notification(
+        "brh86k1fz",
+        "completed",
+    )));
 
     let session = studio.session(IMPLEMENT_SPEC).unwrap();
     assert_eq!(session.returned.as_deref(), Some("worker brh86 returned"));
@@ -77,9 +75,10 @@ fn a_wake_up_is_the_rows_text_until_the_sessions_next_step() {
     let before = session(&studio).agent.last_step.clone();
     assert!(before.is_some());
 
-    studio.apply(&prompt(
-        "<task-notification><task-id>a1191df87fb730aa0</task-id><status>completed</status></task-notification>",
-    ));
+    studio.apply(&prompt(&common::task_notification(
+        "a1191df87fb730aa0",
+        "completed",
+    )));
 
     // The row reads "worker Implement danielrispler/Falinks#355 relocation returned", and the last step stays true.
     let woken = session(&studio);
@@ -91,9 +90,10 @@ fn a_wake_up_is_the_rows_text_until_the_sessions_next_step() {
     // Daniel's own prompt ends the line too.
     studio.apply(&prompt("carry on"));
     assert_eq!(session(&studio).returned, None);
-    studio.apply(&prompt(
-        "<task-notification><task-id>a1191df87fb730aa0</task-id><status>completed</status></task-notification>",
-    ));
+    studio.apply(&prompt(&common::task_notification(
+        "a1191df87fb730aa0",
+        "completed",
+    )));
     assert!(session(&studio).returned.is_some());
     let step = json!({
         "session_id": IMPLEMENT_SPEC,
@@ -215,8 +215,7 @@ fn a_wake_up_leaves_the_session_needing_daniel_until_the_step_that_asks_resolves
     studio.apply(&event("PermissionRequest", push.clone()));
     assert_eq!(state(&studio), State::NeedsYou);
 
-    let wake_up =
-        "<task-notification><task-id>a1</task-id><status>completed</status></task-notification>";
+    let wake_up = common::task_notification("a1", "completed");
     studio.apply(&event("UserPromptSubmit", json!({ "prompt": wake_up })));
     assert_eq!(state(&studio), State::NeedsYou);
 
@@ -251,7 +250,7 @@ fn launched(at: u64, call: &str, child: &str) -> String {
 fn woken(at: u64, prompt: &str, tasks: &[&str]) -> String {
     let notices: String = tasks
         .iter()
-        .map(|t| format!("<task-notification><task-id>{t}</task-id><status>completed</status></task-notification>"))
+        .map(|t| common::task_notification(t, "completed"))
         .collect();
     ev("UserPromptSubmit", at, prompt, json!({ "prompt": notices }))
 }

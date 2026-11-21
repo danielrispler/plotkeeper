@@ -3,6 +3,12 @@ name = "studio-core"
 version = "0.0.0"
 edition = "2024"
 publish = false
+# One test binary: every file of `tests/` is a module of `tests/main.rs`.
+autotests = false
+
+[[test]]
+name = "it"
+path = "tests/main.rs"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

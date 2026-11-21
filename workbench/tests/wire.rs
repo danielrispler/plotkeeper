@@ -3,10 +3,7 @@
 //! (`scripts/wire/samples.rs`). Each optional field is filled once and left empty once; an optional field no sample
 //! fills is not checked.
 
-#[path = "../../scripts/wire/samples.rs"]
-mod samples;
-
-use samples::{Sample, json, write};
+use crate::samples::{Sample, json, write};
 use studio_workbench::{
     AgentUsage, Branch, GitState, LimitGroup, Losses, UsageWindow, Workspace, Workspaces,
 };

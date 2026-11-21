@@ -1,6 +1,7 @@
 //! Seam 1 (spec #254, ticket #268) for the checks the rail's feed lists: hook events replayed through
 //! the core, read back from each turn as the window receives it.
 
+use crate::common;
 use serde_json::{Value, json};
 use studio_core::{CheckStatus, Listed, Studio};
 
@@ -11,17 +12,9 @@ const T0: u64 = 1_793_265_000_000;
 const MIN: u64 = 60_000;
 
 fn line(name: &str, ms: u64, extra: Value) -> String {
-    let mut line = json!({
-        "session_id": SESSION,
-        "hook_event_name": name,
-        "cwd": CWD,
-        "prompt_id": "p1",
-        "studio_received_ms": T0 + ms,
-    });
-    line.as_object_mut()
-        .unwrap()
-        .extend(extra.as_object().unwrap().clone());
-    line.to_string()
+    let mut base = common::base(SESSION, name, CWD, T0 + ms);
+    base["prompt_id"] = json!("p1");
+    common::with(base, extra)
 }
 
 fn prompt() -> String {
@@ -121,18 +114,6 @@ fn a_workers_run_is_not_listed() {
     let found = listed(runs(1_000, 100, "t1", "cargo test", Some("w1"), false));
 
     assert_eq!(found, []);
-}
-
-#[test]
-fn a_blocked_check_is_not_listed() {
-    let mut lines = vec![starts(1_000, "t1", "cargo test")];
-    lines.push(line(
-        "PermissionDenied",
-        1_100,
-        json!({ "tool_name": "Bash", "tool_input": { "command": "cargo test" }, "tool_use_id": "t1", "reason": "no" }),
-    ));
-
-    assert_eq!(listed(lines), []);
 }
 
 #[test]

@@ -1,6 +1,7 @@
 //! Seam 1 (danielrispler/plotkeeper#102, Testing Decisions) for the facts Ask shows first
 //! (danielrispler/plotkeeper#125): hook events replayed through the core, and what is recorded of each anchor.
 
+use crate::common;
 use serde_json::{Value, json};
 use studio_core::{Anchor, Studio};
 
@@ -8,17 +9,9 @@ const SESSION: &str = "7d3e9a51-2b8c-4f6e-a0d7-5c1b9e3f8a24";
 const CWD: &str = "/w/repo";
 
 fn line(name: &str, ms: u64, extra: Value) -> String {
-    let mut line = json!({
-        "session_id": SESSION,
-        "hook_event_name": name,
-        "cwd": CWD,
-        "prompt_id": "p1",
-        "studio_received_ms": 1_793_265_000_000u64 + ms,
-    });
-    line.as_object_mut()
-        .unwrap()
-        .extend(extra.as_object().unwrap().clone());
-    line.to_string()
+    let mut base = common::base(SESSION, name, CWD, 1_793_265_000_000u64 + ms);
+    base["prompt_id"] = json!("p1");
+    common::with(base, extra)
 }
 
 fn call(ms: u64, id: &str, tool: &str, input: Value, agent: Option<&str>) -> Vec<String> {

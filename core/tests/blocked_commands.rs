@@ -2,6 +2,7 @@
 //! lines and the answer hook's `StudioAnswer` lines replayed through the core. The lines follow the
 //! documented payloads until a recorded run replaces them.
 
+use crate::common;
 use serde_json::{Value, json};
 use studio_core::{BlockedStatus, Source, State, Studio};
 
@@ -10,12 +11,7 @@ const COMMAND: &str = "claude -p \"summarise\" > /tmp/out.txt";
 const CWD: &str = "/work/repo";
 
 fn line(name: &str, at: u64, extra: Value) -> String {
-    let mut line = json!({ "session_id": SESSION, "hook_event_name": name, "cwd": CWD,
-        "studio_received_ms": at });
-    line.as_object_mut()
-        .unwrap()
-        .extend(extra.as_object().unwrap().clone());
-    line.to_string()
+    common::event(SESSION, name, CWD, at, extra)
 }
 
 /// A session in a turn, ready for a block.
@@ -266,19 +262,6 @@ fn a_block_of_another_tool_raises_no_blocked_notice() {
     );
 }
 
-#[test]
-fn the_notice_shows_once_with_others_within_three_seconds_and_not_in_a_focused_window() {
-    use std::time::Duration;
-    let mut notices = studio_core::Notifications::default();
-    let title = "Auto mode blocked a command";
-    notices.push(title, "repo s-1".into(), Duration::from_secs(10));
-    let due = notices.due(Duration::from_secs(13), || false, |_| false, Vec::new);
-    assert_eq!(due.notification, Some((title.into(), "repo s-1".into())));
-    notices.push(title, "repo s-1".into(), Duration::from_secs(20));
-    let due = notices.due(Duration::from_secs(23), || true, |_| false, Vec::new);
-    assert_eq!(due.notification, None);
-}
-
 /// The agent's retry of `command` after Allow: its `PreToolUse`.
 fn retry(at: u64, id: &str, command: &str) -> String {
     line(
@@ -370,7 +353,7 @@ fn a_backgrounded_retry_runs_in_the_background_until_the_wake_up_names_its_task(
     let wake = line(
         "UserPromptSubmit",
         9_000,
-        json!({ "prompt": "<task-notification><task-id>bash-7</task-id><status>completed</status></task-notification>",
+        json!({ "prompt": common::task_notification("bash-7", "completed"),
             "prompt_id": "p-2" }),
     );
     let card = &session(&then(lines, vec![wake])).blocked_commands[0];

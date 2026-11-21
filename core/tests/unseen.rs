@@ -1,24 +1,9 @@
 //! Seam 1 for danielrispler/Falinks#556: a your-turn session stays unseen until Daniel looks at it in a focused window,
 //! and the sounds that go with needs you and your turn.
 
+use crate::common::{FIRST, SECOND, TWO, stop};
 use std::time::Duration;
 use studio_core::{Due, LiveFacts, Notifications, Output, Sound, State, Studio};
-
-/// `two-sessions.jsonl`'s sessions, both in a turn at its end.
-const TWO: &str = include_str!("fixtures/two-sessions.jsonl");
-const FIRST: &str = "c41d8e27-6a3f-4b90-8e15-2f7a9b0c3d64";
-const SECOND: &str = "9e0b5f13-d72a-4c6e-b8f4-61a3c2d9e807";
-
-/// Session `id`'s `Stop`, under the prompt id its turn runs under.
-fn stop(id: &str) -> String {
-    let prompt_id = match id {
-        FIRST => "e2a7c9d1-3f5b-4a8e-9c6d-0b1a2f3e4d5c",
-        _ => "71c3e5a9-b2d4-4f6e-8a0c-1e3d5f7a9b2c",
-    };
-    format!(
-        r#"{{"session_id":"{id}","prompt_id":"{prompt_id}","hook_event_name":"Stop","stop_hook_active":false,"studio_received_ms":1793261020000}}"#
-    )
-}
 
 fn unseen(studio: &Studio, id: &str) -> bool {
     studio.session(id).expect("the session").unseen
@@ -266,15 +251,9 @@ mod since {
     const AT: u64 = 1_800_000_000_000;
 
     fn line(name: &str, turn: u32, ms: u64, extra: Value) -> String {
-        let mut event = json!({
-            "session_id": ID, "hook_event_name": name, "cwd": ROOT,
-            "prompt_id": format!("p{turn}"), "studio_received_ms": AT + ms,
-        });
-        event
-            .as_object_mut()
-            .unwrap()
-            .extend(extra.as_object().unwrap().clone());
-        event.to_string()
+        let mut base = crate::common::base(ID, name, ROOT, AT + ms);
+        base["prompt_id"] = json!(format!("p{turn}"));
+        crate::common::with(base, extra)
     }
 
     /// Turn `turn`: a prompt, an edit of `file`, `npm run check` with `exit_code`, and a `Stop`.

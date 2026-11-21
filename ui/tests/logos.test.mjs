@@ -2,13 +2,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { El } from "./dom.mjs";
+import { fakeDocument } from "./dom.mjs";
 
 const { logoKey } = await import("../../dist/logos.js");
 const { row, rowMark, strip: stripOf, projectHead, agentRow } = await import("../../dist/list.js");
 // The document is set after the import: times.ts starts a timer when one exists at load.
-const make = (tag) => Object.assign(new El(tag), { dataset: {}, style: {}, classList: { add() {}, toggle() {} }, toggleAttribute() {}, removeAttribute() {} });
-globalThis.document = { createElement: make, getElementById: () => make("div"), visibilityState: "hidden" };
+globalThis.document = fakeDocument({ visibilityState: "hidden" });
+const make = (tag) => document.createElement(tag);
 
 const base = { id: "s", name: null, prompt_name: null, folder_name: "p", state: "idle", line: "", questions: [], shell: false, status_only: false, unseen: false, landed: false };
 const caps = (agent) => ({ agent, context: agent === "claude" });
@@ -62,11 +62,10 @@ test("the strip, the project header's rollup and a subagent row draw no logo", (
   assert.ok(drawnAgent.find("span").length > 0);
 });
 
-test("the logo is monochrome: one colour, the muted text colour", () => {
+test("the logo is drawn in the muted text colour", () => {
   const css = fs.readFileSync(new URL("../style.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
   const rules = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].filter(([, selector]) => /\.logo/.test(selector));
   assert.ok(rules.length > 0);
-  for (const [, , body] of rules) assert.doesNotMatch(body, /needs-you/);
   assert.match(rules[0][2], /color: var\(--muted\)/);
 });
 

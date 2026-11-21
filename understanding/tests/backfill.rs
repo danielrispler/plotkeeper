@@ -1,29 +1,11 @@
 //! Seam 2 (danielrispler/Falinks#461, Testing Decisions) for the backfill (danielrispler/Falinks#486): the hook's tree of a worktree, and the
 //! diff between two of them, against real `git` in a temporary repository.
 
-use std::{fs, path::Path, process::Command};
+use std::{fs, path::Path};
 use studio_core::{Backfill, CardRequest, Trees};
 use studio_hook::record_tree;
+use studio_test_support::git;
 use studio_understanding::backfilled;
-
-/// Runs `git` in `repo`, away from Daniel's own git config, and returns its output.
-fn git(repo: &Path, args: &[&str]) -> String {
-    let output = Command::new("git")
-        .args([
-            "-c",
-            "user.name=Studio",
-            "-c",
-            "user.email=studio@example.com",
-        ])
-        .args(args)
-        .current_dir(repo)
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "git {args:?}");
-    String::from_utf8(output.stdout).unwrap().trim_end().into()
-}
 
 /// The working tree's files, by path, with their content.
 type Files = Vec<(String, Vec<u8>)>;

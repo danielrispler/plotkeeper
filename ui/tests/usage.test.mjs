@@ -3,11 +3,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { El } from "./dom.mjs";
+import { El, fakeDocument } from "./dom.mjs";
 
-globalThis.document = {
-  createElement: (tag) => Object.assign(new El(tag), { dataset: {}, style: {}, classList: { add() {}, toggle() {}, contains: () => false } }),
-};
+globalThis.document = fakeDocument();
 const { glance, showGlance, tile } = await import("../../dist/usage.js");
 
 const now = 1738400000;

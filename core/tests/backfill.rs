@@ -2,6 +2,7 @@
 //! tree at a turn's start and end, so a turn that ended while the app was down gets its card request
 //! after the replay. The shell turns the two trees into the card's diff.
 
+use crate::common;
 use serde_json::json;
 use studio_core::{Backfill, CardRequest, Studio, Trees};
 
@@ -14,18 +15,9 @@ const NOW: u64 = 1_800_000_000_000;
 
 /// One event of the session's own agent in turn `prompt`, received at `at`, with `extra` fields.
 fn line(name: &str, prompt: &str, at: u64, extra: serde_json::Value) -> String {
-    let mut event = json!({
-        "session_id": SESSION,
-        "hook_event_name": name,
-        "cwd": ROOT,
-        "prompt_id": prompt,
-        "studio_received_ms": at,
-    });
-    event
-        .as_object_mut()
-        .unwrap()
-        .extend(extra.as_object().unwrap().clone());
-    event.to_string()
+    let mut base = common::base(SESSION, name, ROOT, at);
+    base["prompt_id"] = json!(prompt);
+    common::with(base, extra)
 }
 
 /// A turn whose prompt records `start` and an edit of another worktree records `other`, and whose

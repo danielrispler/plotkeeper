@@ -1,6 +1,8 @@
 //! Seam 1 (danielrispler/Falinks#461, Testing Decisions) for the intention and step line (danielrispler/Falinks#472, decision 12): hook events
 //! through the core, with transcript fixtures whose content is scrubbed (shape kept, text made up).
 
+use crate::common;
+use serde_json::json;
 use studio_core::{Step, Studio};
 
 const BASH: &str = include_str!("fixtures/bash-steps.jsonl");
@@ -29,25 +31,27 @@ fn a_bash_step_shows_its_description_and_keeps_the_full_command() {
 const CHAIN: &str = include_str!("fixtures/transcripts/chain.jsonl");
 const SESSION: &str = "5b9e1d3a-7c2f-4a8e-b6d0-3f1a9c7e2b54";
 
-/// A session whose transcript is at `path`, prompted and at its first step.
-fn session_at(path: &std::path::Path) -> Studio {
-    let path = path.display();
-    Studio::replayed([
-        format!(
-            r#"{{"session_id":"{SESSION}","hook_event_name":"UserPromptSubmit","prompt":"(scrubbed)","transcript_path":"{path}","cwd":"/Users/danielrispler/work/Falinks","studio_received_ms":1793265000000}}"#
-        ),
-        format!(
-            r#"{{"session_id":"{SESSION}","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{{"command":"cat probe.txt","description":"Show the probe"}},"tool_use_id":"toolu_1","transcript_path":"{path}","cwd":"/Users/danielrispler/work/Falinks","studio_received_ms":1793265001000}}"#
-        ),
-    ])
+/// A hook event of the session at transcript `path`.
+fn event(name: &str, path: &std::path::Path, at: u64, extra: serde_json::Value) -> String {
+    let cwd = "/Users/danielrispler/work/Falinks";
+    let mut base = common::base(SESSION, name, cwd, at);
+    base["transcript_path"] = json!(path);
+    common::with(base, extra)
 }
 
-/// A transcript file of its own for test `name`, holding `lines`.
-fn transcript(name: &str, lines: &str) -> std::path::PathBuf {
-    let file = format!("studio-intention-{name}-{}.jsonl", std::process::id());
-    let path = std::env::temp_dir().join(file);
-    std::fs::write(&path, lines).expect("write the transcript");
-    path
+/// A session whose transcript is at `path`, prompted and at its first step.
+fn session_at(path: &std::path::Path) -> Studio {
+    let step = json!({"tool_name": "Bash", "tool_use_id": "toolu_1",
+        "tool_input": {"command": "cat probe.txt", "description": "Show the probe"}});
+    Studio::replayed([
+        event(
+            "UserPromptSubmit",
+            path,
+            1793265000000,
+            json!({"prompt": "(scrubbed)"}),
+        ),
+        event("PreToolUse", path, 1793265001000, step),
+    ])
 }
 
 fn first(lines: usize) -> String {
@@ -67,8 +71,9 @@ fn follow(studio: &mut Studio) -> Vec<String> {
 
 #[test]
 fn the_intention_is_the_agents_latest_line_and_ages_with_each_step_after_it() {
-    let path = transcript("chain", &first(8));
-    let mut studio = session_at(&path);
+    let file = common::temp_file(&first(8));
+    let path = file.path();
+    let mut studio = session_at(path);
 
     assert_eq!(follow(&mut studio), Vec::<String>::new());
     let transcript = &studio.session(SESSION).unwrap().transcript;
@@ -78,7 +83,7 @@ fn the_intention_is_the_agents_latest_line_and_ages_with_each_step_after_it() {
     );
     assert_eq!(transcript.steps_ago, 2);
 
-    std::fs::write(&path, first(13)).unwrap();
+    std::fs::write(path, first(13)).unwrap();
     follow(&mut studio);
     let transcript = &studio.session(SESSION).unwrap().transcript;
     assert_eq!(
@@ -87,7 +92,7 @@ fn the_intention_is_the_agents_latest_line_and_ages_with_each_step_after_it() {
     );
     assert_eq!(transcript.steps_ago, 3);
 
-    std::fs::write(&path, first(14)).unwrap();
+    std::fs::write(path, first(14)).unwrap();
     follow(&mut studio);
     let transcript = &studio.session(SESSION).unwrap().transcript;
     assert_eq!(
@@ -107,8 +112,9 @@ fn the_intention_is_the_agents_latest_line_and_ages_with_each_step_after_it() {
 
 #[test]
 fn a_new_prompt_starts_the_turn_with_no_intention() {
-    let path = transcript("next-turn", CHAIN);
-    let mut studio = session_at(&path);
+    let file = common::temp_file(CHAIN);
+    let path = file.path();
+    let mut studio = session_at(path);
 
     follow(&mut studio);
 
@@ -140,11 +146,9 @@ fn assert_fallback(studio: &mut Studio, logged: Vec<String>) {
 
 #[test]
 fn a_corrupted_line_falls_back_to_the_step_with_one_stderr_line() {
-    let path = transcript(
-        "corrupted",
-        &(first(8) + "{\"type\":\"assistant\",\"mess\n"),
-    );
-    let mut studio = session_at(&path);
+    let file = common::temp_file(&(first(8) + "{\"type\":\"assistant\",\"mess\n"));
+    let path = file.path();
+    let mut studio = session_at(path);
 
     let logged = follow(&mut studio);
 
@@ -154,8 +158,9 @@ fn a_corrupted_line_falls_back_to_the_step_with_one_stderr_line() {
 #[test]
 fn a_missing_field_falls_back_to_the_step() {
     let no_content = "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\"}}\n";
-    let path = transcript("no-content", &(first(8) + no_content));
-    let mut studio = session_at(&path);
+    let file = common::temp_file(&(first(8) + no_content));
+    let path = file.path();
+    let mut studio = session_at(path);
 
     let logged = follow(&mut studio);
 
@@ -164,7 +169,8 @@ fn a_missing_field_falls_back_to_the_step() {
 
 #[test]
 fn a_missing_file_falls_back_to_the_step_with_one_stderr_line() {
-    let path = std::env::temp_dir().join("studio-intention-gone.jsonl");
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("gone.jsonl");
     let mut studio = session_at(&path);
 
     let logged = follow(&mut studio);
@@ -189,8 +195,9 @@ fn the_session_runs_at_its_latest_model_and_effort_across_turns() {
         + &assistant_at("claude-sonnet-5", "high")
         + &assistant_at("claude-opus-5-5", "medium")
         + &format!("{helper}\n{error}\n{prompt}\n");
-    let path = transcript("model", &lines);
-    let mut studio = session_at(&path);
+    let file = common::temp_file(&lines);
+    let path = file.path();
+    let mut studio = session_at(path);
 
     follow(&mut studio);
     let transcript = &studio.session(SESSION).unwrap().transcript;
@@ -200,8 +207,9 @@ fn the_session_runs_at_its_latest_model_and_effort_across_turns() {
 
 #[test]
 fn a_transcript_without_model_or_effort_has_neither() {
-    let path = transcript("no-model", &first(2));
-    let mut studio = session_at(&path);
+    let file = common::temp_file(&first(2));
+    let path = file.path();
+    let mut studio = session_at(path);
 
     follow(&mut studio);
     let transcript = &studio.session(SESSION).unwrap().transcript;
@@ -220,8 +228,9 @@ fn assistant_text(text: &str) -> String {
 #[test]
 fn a_turn_ends_on_its_final_replys_first_line_not_its_footer() {
     let reply = "Fixed the typo.\n\nThe probe now reads right.\n\nNot checked: the CI run.";
-    let path = transcript("footer", &(first(13) + &assistant_text(reply)));
-    let mut studio = session_at(&path);
+    let file = common::temp_file(&(first(13) + &assistant_text(reply)));
+    let path = file.path();
+    let mut studio = session_at(path);
 
     // While the turn runs, the intention is the latest response's last line.
     follow(&mut studio);
@@ -231,10 +240,8 @@ fn a_turn_ends_on_its_final_replys_first_line_not_its_footer() {
         Some("Not checked: the CI run.")
     );
 
-    let path = path.display();
-    studio.apply(&format!(
-        r#"{{"session_id":"{SESSION}","hook_event_name":"Stop","last_assistant_message":"(scrubbed)","transcript_path":"{path}","cwd":"/Users/danielrispler/work/Falinks","studio_received_ms":1793265009000}}"#
-    ));
+    let reply = json!({"last_assistant_message": "(scrubbed)"});
+    studio.apply(&event("Stop", path, 1793265009000, reply));
     follow(&mut studio);
     let transcript = &studio.session(SESSION).unwrap().transcript;
     assert_eq!(transcript.intention.as_deref(), Some("Fixed the typo."));

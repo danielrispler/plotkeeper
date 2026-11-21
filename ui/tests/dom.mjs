@@ -18,7 +18,9 @@ export class El {
   nodeType = 1;
   attrs = new Map();
   listeners = {};
-  classList = { add() {} };
+  dataset = {};
+  style = {};
+  classList = { add() {}, remove() {}, toggle() {}, contains: () => false };
   className = "";
   constructor(tag, attrs = {}, children = []) {
     this.tag = tag;
@@ -41,6 +43,7 @@ export class El {
   removeAttribute(name) {
     this.attrs.delete(name);
   }
+  toggleAttribute() {}
   hasAttribute(name) {
     return this.attrs.has(name);
   }
@@ -89,3 +92,22 @@ export class El {
     return out;
   }
 }
+
+// An element with the form-control fields the Home slot reads and writes.
+export class Field extends El {
+  title = "";
+  disabled = false;
+  dir = "";
+}
+
+// A document whose elements are `Element`s, for `globalThis.document`; `extra` adds or replaces members.
+export const fakeDocument = (extra = {}, Element = El) => ({
+  createElement: (tag) => new Element(tag),
+  getElementById: () => new Element("div"),
+  ...extra,
+});
+
+// Installs `window.__TAURI__` so that every `invoke` is recorded in `calls` as `[command, args]` and answers `reply(command, args)`.
+export const tauri = (calls, reply = () => null) => {
+  globalThis.window = { __TAURI__: { core: { invoke: async (command, args) => (calls.push([command, args]), reply(command, args)) } } };
+};

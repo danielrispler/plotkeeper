@@ -3,10 +3,7 @@
 //! (`scripts/wire/samples.rs`). The store's values are built whole, every optional field filled once and left empty
 //! once, so the samples hold every shape; still, an optional field no sample fills is not checked.
 
-#[path = "../../scripts/wire/samples.rs"]
-mod samples;
-
-use samples::{Sample, json, write};
+use crate::samples::{Sample, json, write};
 use std::collections::{BTreeMap, BTreeSet};
 use studio_core::{Base, CardRequest, FactFile, Facts, Studio, SummaryRequest, TurnFile};
 use studio_understanding::{

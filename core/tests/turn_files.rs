@@ -2,6 +2,7 @@
 //! (danielrispler/plotkeeper#111): hook events with the hook's trees replayed through the core, and
 //! the numstat the shell hands back, as `git diff --numstat` would give it.
 
+use crate::common;
 use serde_json::{Value, json};
 use studio_core::{CheckStatus, Numstat, RootDiff, Studio, TurnDiff};
 
@@ -11,18 +12,9 @@ const WORKER_ROOT: &str = "/w/repo/.claude/worktrees/w1";
 const AT: u64 = 1_800_000_000_000;
 
 fn line(name: &str, ms: u64, extra: Value) -> String {
-    let mut event = json!({
-        "session_id": SESSION,
-        "hook_event_name": name,
-        "cwd": ROOT,
-        "prompt_id": "p1",
-        "studio_received_ms": AT + ms,
-    });
-    event
-        .as_object_mut()
-        .unwrap()
-        .extend(extra.as_object().unwrap().clone());
-    event.to_string()
+    let mut base = common::base(SESSION, name, ROOT, AT + ms);
+    base["prompt_id"] = json!("p1");
+    common::with(base, extra)
 }
 
 fn prompt(start: Value) -> String {

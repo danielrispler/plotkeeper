@@ -2,6 +2,7 @@
 //! with reason `clear` and starts a new one, under a new id, with source `clear`. The new one continues
 //! the row on the same studio terminal, or in the same folder outside studio terminals.
 
+use crate::common;
 use serde_json::{Value, json};
 use std::time::Duration;
 use studio_core::{Notifications, Output, State, Studio};
@@ -12,16 +13,9 @@ const NEW: &str = "9a7d3e21-0c4b-4e8f-b6a2-71d5c0e9f384";
 const OTHER: &str = "c3f0a8d2-6e17-4b59-9d4c-2a8e5f1b7c06";
 
 fn event(id: &str, name: &str, at: u64, terminal: Option<&str>, extra: Value) -> String {
-    let mut event = json!({
-        "session_id": id,
-        "hook_event_name": name,
-        "cwd": FOLDER,
-        "studio_terminal_id": terminal,
-        "studio_received_ms": at,
-    });
-    let fields = event.as_object_mut().unwrap();
-    fields.extend(extra.as_object().unwrap().clone());
-    event.to_string()
+    let mut base = common::base(id, name, FOLDER, at);
+    base["studio_terminal_id"] = json!(terminal);
+    common::with(base, extra)
 }
 
 /// A session that asked a question Daniel answered, renamed, then cleared, in `terminal`.

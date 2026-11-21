@@ -2,17 +2,13 @@
 // Superset and cmux (docs/studio/research/new-session-project.md). Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { El } from "./dom.mjs";
+import { fakeDocument, tauri } from "./dom.mjs";
 
 const { projectHead } = await import("../../dist/list.js");
 // The document is set after the import: times.ts starts a timer when one exists at load.
-globalThis.document = {
-  createElement: (tag) => Object.assign(new El(tag), { dataset: {}, style: {}, classList: { add() {}, toggle() {} }, removeAttribute() {}, toggleAttribute() {} }),
-  getElementById: () => new El("div"),
-  visibilityState: "hidden",
-};
+globalThis.document = fakeDocument({ visibilityState: "hidden" });
 // An outside folder's header asks for its repository; none is found.
-globalThis.window = { __TAURI__: { core: { invoke: async () => null } } };
+tauri([]);
 
 const group = (key, name, project) => ({ key, name, project, rollup: null, states: [], workspaces: null });
 const plus = (head) => head.childNodes.find((node) => node.className === "project-new");

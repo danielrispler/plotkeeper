@@ -2,40 +2,11 @@
 //! repositories, as the engine's tests do (`src/lib.rs`, `retention_checks_every_blob_of_a_snapshot`).
 
 use std::{path::Path, process::Command};
+use studio_test_support::{git, repo};
 use studio_workbench::{
     GitState, Workspace, add_project, claude, fetch, git_state, merge_tree_runs, projects,
     remove_project, reorder_projects, suggest_projects, workspaces,
 };
-
-/// Runs `git` in `repo`, away from Daniel's own git config.
-fn git(repo: &Path, args: &[&str]) {
-    let output = Command::new("git")
-        .args([
-            "-c",
-            "user.name=Studio",
-            "-c",
-            "user.email=studio@example.com",
-        ])
-        .args(args)
-        .current_dir(repo)
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "git {args:?}");
-}
-
-/// A repository with one commit on `main`, at its real path, as `git` spells it.
-fn repo() -> (tempfile::TempDir, String) {
-    let dir = tempfile::tempdir().unwrap();
-    let main = dir.path().canonicalize().unwrap().display().to_string();
-    git(dir.path(), &["init", "-q", "-b", "main"]);
-    git(
-        dir.path(),
-        &["commit", "-q", "--allow-empty", "-m", "Start"],
-    );
-    (dir, main)
-}
 
 fn workspace(path: &str, branch: Option<&str>) -> Workspace {
     Workspace {

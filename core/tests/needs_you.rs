@@ -5,18 +5,8 @@
 
 use studio_core::{Output, State, Studio};
 
-use State::{Ended, NeedsYou, Running, YourTurn};
-
-/// The session's state after each line of the log, replayed.
-fn states(log: &str, session: &str) -> Vec<Option<State>> {
-    let mut studio = Studio::default();
-    log.lines()
-        .map(|line| {
-            studio.replay(line);
-            studio.session(session).map(|s| s.state)
-        })
-        .collect()
-}
+use crate::common::states;
+use State::{NeedsYou, Running, YourTurn};
 
 /// The "needs you" notices when the log's lines arrive live.
 fn live(log: &str) -> Vec<Output> {
@@ -78,48 +68,136 @@ fn a_stop_clears_every_block_even_when_its_message_asks() {
     assert_eq!(live(&asked), [notice(PROBE)]);
 }
 
-#[test]
-fn a_permission_prompt_needs_you_until_its_tool_runs() {
-    let log = include_str!("fixtures/permission-write.jsonl");
-
-    // UserPromptSubmit, PreToolUse, PermissionRequest, Notification, PostToolUse.
-    let expected = [Running, Running, NeedsYou, NeedsYou, Running].map(Some);
-    assert_eq!(states(log, PROBE), expected);
+/// `log`'s lines in `order`: the hooks are async, so a line can land before the one it follows.
+fn reordered(log: &str, order: &[usize]) -> String {
+    let lines: Vec<&str> = log.lines().collect();
+    let lines: Vec<&str> = order.iter().map(|&i| lines[i]).collect();
+    lines.join("\n")
 }
 
-#[test]
-fn a_denied_permission_stops_needing_you_when_its_tool_fails() {
-    let log = include_str!("fixtures/permission-denied.jsonl");
-
-    // UserPromptSubmit, PreToolUse, PermissionRequest, PostToolUseFailure.
-    let expected = [Running, Running, NeedsYou, Running].map(Some);
-    assert_eq!(states(log, PROBE), expected);
-}
+const PERMISSION: &str = include_str!("fixtures/permission-write.jsonl");
+const ELICITATION: &str = include_str!("fixtures/elicitation.jsonl");
+const SANDBOX: &str = include_str!("fixtures/sandbox-network.jsonl");
 
 #[test]
-fn a_permission_prompt_that_lands_before_its_tool_call_still_ends_when_the_tool_runs() {
-    // The hooks are async, so a PermissionRequest can land before its PreToolUse.
-    let lines: Vec<&str> = include_str!("fixtures/permission-write.jsonl")
-        .lines()
-        .collect();
-    let log = [lines[0], lines[2], lines[1], lines[3], lines[4]].join("\n");
+fn a_permission_notification_that_lands_before_its_request_gives_one_notice() {
+    let log = reordered(PERMISSION, &[0, 1, 3, 2, 4]);
 
-    // UserPromptSubmit, PermissionRequest, PreToolUse, Notification, PostToolUse.
-    let expected = [Running, NeedsYou, NeedsYou, NeedsYou, Running].map(Some);
-    assert_eq!(states(&log, PROBE), expected);
-}
-
-#[test]
-fn a_permission_prompts_notification_that_lands_before_its_request_ends_with_the_tool() {
-    let lines: Vec<&str> = include_str!("fixtures/permission-write.jsonl")
-        .lines()
-        .collect();
-    let log = [lines[0], lines[1], lines[3], lines[2], lines[4]].join("\n");
-
-    // UserPromptSubmit, PreToolUse, Notification, PermissionRequest, PostToolUse.
-    let expected = [Running, Running, NeedsYou, NeedsYou, Running].map(Some);
-    assert_eq!(states(&log, PROBE), expected);
     assert_eq!(live(&log), [notice(PROBE)]);
+}
+
+/// A session's state after each line of a log: it needs Daniel from its request for input until its
+/// tool, or the turn, ends.
+#[test]
+fn a_request_for_input_needs_you_until_its_tool_ends() {
+    use State::*;
+    let background = "c41d8e27-6a3f-4b90-8e15-2f7a9b0c3d64";
+    let plan = "5b9e1c7a-2f4d-4a6b-8e0c-3d5f7a9b1c24";
+    let asker = "2d8a6f41-c95e-4b37-a1d0-7e3f8b2c6a95";
+    let cases = [
+        (
+            "a permission prompt",
+            PERMISSION.to_string(),
+            PROBE,
+            // UserPromptSubmit, PreToolUse, PermissionRequest, Notification, PostToolUse.
+            vec![Running, Running, NeedsYou, NeedsYou, Running],
+        ),
+        (
+            "a denied permission",
+            include_str!("fixtures/permission-denied.jsonl").to_string(),
+            PROBE,
+            // UserPromptSubmit, PreToolUse, PermissionRequest, PostToolUseFailure.
+            vec![Running, Running, NeedsYou, Running],
+        ),
+        (
+            "a permission request before its tool call",
+            reordered(PERMISSION, &[0, 2, 1, 3, 4]),
+            PROBE,
+            // UserPromptSubmit, PermissionRequest, PreToolUse, Notification, PostToolUse.
+            vec![Running, NeedsYou, NeedsYou, NeedsYou, Running],
+        ),
+        (
+            "a permission notification before its request",
+            reordered(PERMISSION, &[0, 1, 3, 2, 4]),
+            PROBE,
+            // UserPromptSubmit, PreToolUse, Notification, PermissionRequest, PostToolUse.
+            vec![Running, Running, NeedsYou, NeedsYou, Running],
+        ),
+        (
+            "a background agent's events around the main agent's block",
+            include_str!("fixtures/background-agent.jsonl").to_string(),
+            background,
+            vec![
+                // UserPromptSubmit, a background Agent's PreToolUse and PostToolUse.
+                Running, Running, Running,
+                // The main agent's Write: PreToolUse, PermissionRequest.
+                Running, NeedsYou,
+                // The background agent's Glob and failing Bash, each PreToolUse and its result.
+                NeedsYou, NeedsYou, NeedsYou, NeedsYou,
+                // Notification, then the Write's PostToolUse.
+                NeedsYou, Running,
+            ],
+        ),
+        (
+            "a sandboxed command's network request",
+            SANDBOX.to_string(),
+            PROBE,
+            // UserPromptSubmit, PreToolUse, Notification `permission_prompt` with no
+            // PermissionRequest, PostToolUse, Stop.
+            vec![Running, Running, NeedsYou, Running, YourTurn],
+        ),
+        (
+            "an MCP server's request for input",
+            ELICITATION.to_string(),
+            PROBE,
+            // UserPromptSubmit, PreToolUse, Elicitation, PostToolUse, Stop.
+            vec![Running, Running, NeedsYou, Running, YourTurn],
+        ),
+        (
+            "an elicitation before its tool call",
+            reordered(ELICITATION, &[0, 2, 1, 3, 4]),
+            PROBE,
+            // UserPromptSubmit, the request, PreToolUse, PostToolUse, Stop.
+            vec![Running, NeedsYou, NeedsYou, Running, YourTurn],
+        ),
+        (
+            "a network request before its tool call",
+            reordered(SANDBOX, &[0, 2, 1, 3, 4]),
+            PROBE,
+            vec![Running, NeedsYou, NeedsYou, Running, YourTurn],
+        ),
+        (
+            "a session closed at a plan approval",
+            include_str!("fixtures/closed-at-plan.jsonl").to_string(),
+            plan,
+            // UserPromptSubmit, PreToolUse, PermissionRequest, SessionEnd: no PostToolUse, no Stop.
+            vec![Running, NeedsYou, NeedsYou, Ended],
+        ),
+        (
+            "a question and a plan",
+            include_str!("fixtures/ask-then-plan.jsonl").to_string(),
+            asker,
+            vec![
+                // AskUserQuestion: UserPromptSubmit, PreToolUse, PermissionRequest, Notification,
+                // PostToolUse.
+                Running, NeedsYou, NeedsYou, NeedsYou, Running,
+                // Stop: "Should I plan the fix first, or edit it directly?" A text question blocks
+                // nothing.
+                YourTurn,
+                // UserPromptSubmit, then a Bash and a plan file, each PreToolUse and PostToolUse.
+                Running, Running, Running, Running, Running,
+                // ExitPlanMode: PreToolUse, PermissionRequest, Notification, PostToolUse.
+                NeedsYou, NeedsYou, NeedsYou, Running,
+                // An Edit, then Stop: "Fixed the install line in `README.md`."
+                Running, Running, YourTurn,
+            ],
+        ),
+    ];
+
+    for (name, log, session, expected) in cases {
+        let expected: Vec<Option<State>> = expected.into_iter().map(Some).collect();
+        assert_eq!(states(&log, session), expected, "{name}");
+    }
 }
 
 #[test]
@@ -143,101 +221,6 @@ fn a_command_that_never_reported_back_holds_no_block_in_the_next_turn() {
     .join("\n");
 
     assert_eq!(states(&log, PROBE).last(), Some(&Some(Running)));
-}
-
-#[test]
-fn a_background_agents_events_leave_the_main_agents_block_in_place() {
-    let log = include_str!("fixtures/background-agent.jsonl");
-
-    let expected = [
-        // UserPromptSubmit, a background Agent's PreToolUse and PostToolUse.
-        Running, Running, Running,
-        // The main agent's Write: PreToolUse, PermissionRequest.
-        Running, NeedsYou,
-        // The background agent's Glob and failing Bash, each PreToolUse and its result.
-        NeedsYou, NeedsYou, NeedsYou, NeedsYou,
-        // Notification, then the Write's PostToolUse.
-        NeedsYou, Running,
-    ]
-    .map(Some);
-    assert_eq!(
-        states(log, "c41d8e27-6a3f-4b90-8e15-2f7a9b0c3d64"),
-        expected
-    );
-}
-
-#[test]
-fn a_sandboxed_commands_network_request_needs_you_until_the_command_ends() {
-    let log = include_str!("fixtures/sandbox-network.jsonl");
-
-    // UserPromptSubmit, PreToolUse, Notification `permission_prompt` with no PermissionRequest,
-    // PostToolUse, Stop.
-    let expected = [Running, Running, NeedsYou, Running, YourTurn].map(Some);
-    assert_eq!(states(log, PROBE), expected);
-}
-
-#[test]
-fn an_mcp_servers_request_for_input_needs_you_until_its_tool_ends() {
-    let log = include_str!("fixtures/elicitation.jsonl");
-
-    // UserPromptSubmit, PreToolUse, Elicitation, PostToolUse, Stop.
-    let expected = [Running, Running, NeedsYou, Running, YourTurn].map(Some);
-    assert_eq!(states(log, PROBE), expected);
-}
-
-#[test]
-fn a_request_that_lands_before_its_tool_call_still_ends_when_the_tool_ends() {
-    // The hooks are async, so an Elicitation or a network request can land before its PreToolUse.
-    let logs = [
-        ("elicitation", include_str!("fixtures/elicitation.jsonl")),
-        (
-            "sandbox-network",
-            include_str!("fixtures/sandbox-network.jsonl"),
-        ),
-    ];
-    for (name, log) in logs {
-        let lines: Vec<&str> = log.lines().collect();
-        let log = [lines[0], lines[2], lines[1], lines[3], lines[4]].join("\n");
-
-        // UserPromptSubmit, the request, PreToolUse, PostToolUse, Stop.
-        let expected = [Running, NeedsYou, NeedsYou, Running, YourTurn].map(Some);
-        assert_eq!(states(&log, PROBE), expected, "{name}");
-    }
-}
-
-#[test]
-fn a_session_closed_at_a_plan_approval_stops_needing_you() {
-    let log = include_str!("fixtures/closed-at-plan.jsonl");
-
-    // UserPromptSubmit, PreToolUse, PermissionRequest, SessionEnd: no PostToolUse and no Stop.
-    let expected = [Running, NeedsYou, NeedsYou, Ended].map(Some);
-    assert_eq!(
-        states(log, "5b9e1c7a-2f4d-4a6b-8e0c-3d5f7a9b1c24"),
-        expected
-    );
-}
-
-#[test]
-fn a_question_and_a_plan_need_you_until_answered_and_each_turn_ends_on_your_turn() {
-    let log = include_str!("fixtures/ask-then-plan.jsonl");
-
-    let expected = [
-        // AskUserQuestion: UserPromptSubmit, PreToolUse, PermissionRequest, Notification, PostToolUse.
-        Running, NeedsYou, NeedsYou, NeedsYou, Running,
-        // Stop: "Should I plan the fix first, or edit it directly?" A text question blocks nothing.
-        YourTurn,
-        // UserPromptSubmit, then a Bash and a plan file, each PreToolUse and PostToolUse.
-        Running, Running, Running, Running, Running,
-        // ExitPlanMode: PreToolUse, PermissionRequest, Notification, PostToolUse.
-        NeedsYou, NeedsYou, NeedsYou, Running,
-        // An Edit, then Stop: "Fixed the install line in `README.md`."
-        Running, Running, YourTurn,
-    ]
-    .map(Some);
-    assert_eq!(
-        states(log, "2d8a6f41-c95e-4b37-a1d0-7e3f8b2c6a95"),
-        expected
-    );
 }
 
 // Needs you across agents (danielrispler/Falinks#434, decisions 24 to 26): the four cases of danielrispler/Falinks#434's first version (B4) and

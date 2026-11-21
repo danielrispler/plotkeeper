@@ -1,13 +1,13 @@
 // A blocked command's Running card ticks its elapsed time (danielrispler/plotkeeper#181). Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { El } from "./dom.mjs";
+import { fakeDocument } from "./dom.mjs";
 
 // The page's one second timer, captured; the clock is ours. Both are set before the import: times.ts starts its timer at load.
 let timer = null;
 let clock = 100_000;
 globalThis.setInterval = (run, ms) => ((timer = { run, ms }), 0);
-globalThis.document = { createElement: (tag) => Object.assign(new El(tag), { dataset: {} }), addEventListener() {}, visibilityState: "hidden" };
+globalThis.document = fakeDocument({ addEventListener() {}, visibilityState: "hidden" });
 globalThis.window = { __TAURI__: { core: { invoke: async () => null }, event: { listen: async () => {} } } };
 Date.now = () => clock;
 const { blockedElement } = await import("../../dist/blocked.js");

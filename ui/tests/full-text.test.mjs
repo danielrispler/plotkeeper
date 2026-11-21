@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { El } from "./dom.mjs";
+import { El, fakeDocument } from "./dom.mjs";
 import { row, projectHead } from "../../dist/list.js";
 import { showPalette, workspaceRow as pickerRow, branchRow } from "../../dist/picker.js";
 import { showStartToast, showToast } from "../../dist/toast.js";
@@ -13,11 +13,10 @@ import { studio } from "../../dist/state.js";
 
 // The stand-in page: elements by id, as the shell's index.html has them.
 const page = new Map();
-globalThis.document = {
-  createElement: (tag) => Object.assign(new El(tag), { dataset: {}, style: {}, classList: { add() {}, toggle() {}, contains: () => false }, removeAttribute() {}, toggleAttribute() {} }),
+globalThis.document = fakeDocument({
   getElementById: (id) => page.get(id) ?? page.set(id, document.createElement("div")).get(id),
   body: { dataset: { layout: "focus" } },
-};
+});
 
 const every = (node, out = []) => {
   if (node instanceof El) {

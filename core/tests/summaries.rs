@@ -2,6 +2,8 @@
 //! which turns get one. The turn-end intention no longer switches to the summary's first line
 //! (danielrispler/plotkeeper#116).
 
+use crate::common;
+use serde_json::json;
 use studio_core::{Change, Output, Studio, SummaryRequest};
 
 const SESSION: &str = "7d3e9a51-2b8c-4f6e-a0d7-5c1b9e3f8a24";
@@ -15,36 +17,33 @@ fn assistant(text: &str) -> String {
     ) + "\n"
 }
 
-/// A transcript of its own for test `name`: Daniel's prompt, then `reply`.
-fn transcript(name: &str, reply: &str) -> std::path::PathBuf {
-    let path = std::env::temp_dir().join(format!(
-        "studio-summaries-{name}-{}.jsonl",
-        std::process::id()
-    ));
+/// A transcript: Daniel's prompt, then `reply`.
+fn transcript(reply: &str) -> tempfile::NamedTempFile {
     let prompt = r#"{"isSidechain":false,"type":"user","message":{"role":"user","content":"Explain the parser"}}"#;
-    std::fs::write(&path, format!("{prompt}\n{}", assistant(reply))).unwrap();
-    path
+    common::temp_file(&format!("{prompt}\n{}", assistant(reply)))
+}
+
+/// A hook event of the session at transcript `path`.
+fn event(name: &str, path: &std::path::Path, at: u64, extra: serde_json::Value) -> String {
+    let mut base = common::base(SESSION, name, CWD, at);
+    base["transcript_path"] = json!(path);
+    common::with(base, extra)
 }
 
 /// A session prompted and at its first step, with its transcript at `path`.
 fn prompted(path: &std::path::Path) -> Studio {
-    let path = path.display();
+    let step = json!({"tool_name": "Read", "tool_use_id": "toolu_1",
+        "tool_input": {"file_path": format!("{CWD}/src/parser.rs")}});
+    let prompt = json!({"prompt": "Explain the parser"});
     Studio::replayed([
-        format!(
-            r#"{{"session_id":"{SESSION}","hook_event_name":"UserPromptSubmit","prompt":"Explain the parser","transcript_path":"{path}","cwd":"{CWD}","studio_received_ms":1793265000000}}"#
-        ),
-        format!(
-            r#"{{"session_id":"{SESSION}","hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{{"file_path":"{CWD}/src/parser.rs"}},"tool_use_id":"toolu_1","transcript_path":"{path}","cwd":"{CWD}","studio_received_ms":1793265001000}}"#
-        ),
+        event("UserPromptSubmit", path, 1793265000000, prompt),
+        event("PreToolUse", path, 1793265001000, step),
     ])
 }
 
 fn stop(path: &std::path::Path, reply: &str) -> String {
-    let reply = serde_json::to_string(reply).unwrap();
-    let path = path.display();
-    format!(
-        r#"{{"session_id":"{SESSION}","hook_event_name":"Stop","last_assistant_message":{reply},"transcript_path":"{path}","cwd":"{CWD}","studio_received_ms":1793265009000}}"#
-    )
+    let fields = json!({"last_assistant_message": reply});
+    event("Stop", path, 1793265009000, fields)
 }
 
 /// The summary request among a live `Stop`'s outputs, if any.
@@ -56,24 +55,29 @@ fn requested(outputs: Vec<Output>) -> Option<SummaryRequest> {
 }
 
 /// The turn ends on `reply`, after the transcript was read; the summary request, if any.
-fn ended(name: &str, reply: &str, change: Option<Change>) -> (Studio, Option<SummaryRequest>) {
-    let path = transcript(name, reply);
-    let mut studio = prompted(&path);
+fn ended(
+    reply: &str,
+    change: Option<Change>,
+) -> (Studio, Option<SummaryRequest>, tempfile::NamedTempFile) {
+    let file = transcript(reply);
+    let path = file.path();
+    let mut studio = prompted(path);
     studio.follow_transcripts(|_| {});
     let changes = change
         .map(|c| (SESSION.to_owned(), c))
         .into_iter()
         .collect();
-    let outputs = studio.apply_with_changes(&stop(&path, reply), changes);
+    let outputs = studio.apply_with_changes(&stop(path, reply), changes);
     studio.follow_transcripts(|_| {});
-    (studio, requested(outputs))
+    (studio, requested(outputs), file)
 }
 
 /// The outputs of a live `Stop` that changed code, in order.
-fn stop_outputs(name: &str) -> Vec<Output> {
+fn stop_outputs() -> Vec<Output> {
     let reply = long_reply();
-    let path = transcript(name, &reply);
-    let mut studio = prompted(&path);
+    let file = transcript(&reply);
+    let path = file.path();
+    let mut studio = prompted(path);
     studio.follow_transcripts(|_| {});
     let change = Change {
         base: Default::default(),
@@ -81,7 +85,7 @@ fn stop_outputs(name: &str) -> Vec<Output> {
         head: None,
     };
     let changes = [(SESSION.to_owned(), change)].into_iter().collect();
-    studio.apply_with_changes(&stop(&path, &reply), changes)
+    studio.apply_with_changes(&stop(path, &reply), changes)
 }
 
 fn long_reply() -> String {
@@ -92,7 +96,7 @@ fn long_reply() -> String {
 #[test]
 fn a_long_reply_gets_a_summary_request_with_the_turns_prompt_and_responses() {
     let reply = long_reply();
-    let (_, request) = ended("long", &reply, None);
+    let (_, request, _file) = ended(&reply, None);
 
     let request = request.expect("a long reply gets a summary");
     assert_eq!(request.session_id, SESSION);
@@ -105,14 +109,10 @@ fn a_long_reply_gets_a_summary_request_with_the_turns_prompt_and_responses() {
 
 #[test]
 fn a_turn_ending_in_a_question_gets_one_and_a_short_reply_does_not() {
-    let (_, asks) = ended(
-        "asks",
-        "Two ways fit.\n\nShall I keep the old parser?",
-        None,
-    );
+    let (_, asks, _file) = ended("Two ways fit.\n\nShall I keep the old parser?", None);
     assert!(asks.is_some());
 
-    let (_, short) = ended("short", "Saved as #09.", None);
+    let (_, short, _file) = ended("Saved as #09.", None);
     assert_eq!(short, None);
 }
 
@@ -123,7 +123,7 @@ fn a_turn_with_a_card_gets_a_summary_that_points_to_its_card() {
         diff: "--- a/src/parser.rs\n+++ b/src/parser.rs\n".into(),
         head: None,
     };
-    let (_, request) = ended("card", &long_reply(), Some(change));
+    let (_, request, _file) = ended(&long_reply(), Some(change));
 
     let request = request.expect("a long reply gets a summary");
     assert_eq!(request.card, Some(format!("{SESSION}@1793265009000")));
@@ -131,7 +131,7 @@ fn a_turn_with_a_card_gets_a_summary_that_points_to_its_card() {
 
 #[test]
 fn the_turn_end_intention_stays_the_replys_first_line_when_the_summary_arrives() {
-    let (mut studio, request) = ended("stays", &long_reply(), None);
+    let (mut studio, request, _file) = ended(&long_reply(), None);
     assert!(request.is_some());
     studio.follow_transcripts(|_| {});
     let transcript = &studio.session(SESSION).unwrap().transcript;
@@ -141,7 +141,7 @@ fn the_turn_end_intention_stays_the_replys_first_line_when_the_summary_arrives()
 
 #[test]
 fn a_turns_card_is_queued_before_its_summary() {
-    let outputs = stop_outputs("order");
+    let outputs = stop_outputs();
     let at = |f: fn(&Output) -> bool| outputs.iter().position(f).expect("both are emitted");
     let card = at(|o| matches!(o, Output::Card(_)));
     let summary = at(|o| matches!(o, Output::Summary(_)));

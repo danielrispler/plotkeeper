@@ -11,11 +11,11 @@ const AGENT: &str = "a7e2c4f6b8d0a1c3e";
 
 /// A session whose transcript is `<dir>/s1.jsonl`, with subagent `AGENT` seen at a step. Returns the studio
 /// and the folder where its log belongs, created.
-fn setup(name: &str, transcript_name: &str) -> (Studio, PathBuf) {
-    let dir = std::env::temp_dir().join(format!("studio-sublog-{name}-{}", std::process::id()));
-    let logs = dir.join(SESSION).join("subagents");
+fn setup(transcript_name: &str) -> (Studio, PathBuf, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    let logs = dir.path().join(SESSION).join("subagents");
     fs::create_dir_all(&logs).unwrap();
-    let transcript = dir.join(transcript_name);
+    let transcript = dir.path().join(transcript_name);
     let event = json!({
         "session_id": SESSION, "hook_event_name": "PreToolUse", "cwd": "/w", "agent_id": AGENT,
         "tool_name": "Bash", "tool_use_id": "t0", "tool_input": {"command": "ls"},
@@ -26,7 +26,11 @@ fn setup(name: &str, transcript_name: &str) -> (Studio, PathBuf) {
         "session_id": SESSION, "hook_event_name": "UserPromptSubmit", "cwd": "/w", "prompt": "Go.",
         "transcript_path": transcript, "studio_received_ms": 0,
     });
-    (Studio::replayed([own.to_string(), event.to_string()]), logs)
+    (
+        Studio::replayed([own.to_string(), event.to_string()]),
+        logs,
+        dir,
+    )
 }
 
 fn write(logs: &std::path::Path, lines: &[serde_json::Value]) {
@@ -83,7 +87,7 @@ fn conversation() -> Vec<serde_json::Value> {
 
 #[test]
 fn entries_come_in_order_without_thinking_meta_attachments_or_other_agents() {
-    let (studio, logs) = setup("order", "s1.jsonl");
+    let (studio, logs, _dir) = setup("s1.jsonl");
     write(&logs, &conversation());
 
     let log = studio.subagent_log(SESSION, AGENT, 0).expect("a log");
@@ -127,7 +131,7 @@ fn entries_come_in_order_without_thinking_meta_attachments_or_other_agents() {
 
 #[test]
 fn a_long_result_is_capped_and_marked_cut() {
-    let (studio, logs) = setup("cap", "s1.jsonl");
+    let (studio, logs, _dir) = setup("s1.jsonl");
     let long = "x".repeat(10_000);
     write(
         &logs,
@@ -147,7 +151,7 @@ fn a_long_result_is_capped_and_marked_cut() {
 
 #[test]
 fn reading_on_from_the_offset_returns_only_new_complete_lines() {
-    let (studio, logs) = setup("offset", "s1.jsonl");
+    let (studio, logs, _dir) = setup("s1.jsonl");
     let path = logs.join(format!("agent-{AGENT}.jsonl"));
     write(&logs, &conversation()[..1]);
     let first = studio.subagent_log(SESSION, AGENT, 0).unwrap();
@@ -178,16 +182,16 @@ fn reading_on_from_the_offset_returns_only_new_complete_lines() {
 
 #[test]
 fn a_missing_log_an_unknown_subagent_and_a_non_jsonl_path_read_as_no_log() {
-    let (studio, _) = setup("none", "s1.jsonl");
+    let (studio, _logs, _dir) = setup("s1.jsonl");
     assert_eq!(studio.subagent_log(SESSION, AGENT, 0), None);
 
-    let (studio, logs) = setup("unknown", "s1.jsonl");
+    let (studio, logs, _dir) = setup("s1.jsonl");
     write(&logs, &conversation());
     assert_eq!(studio.subagent_log(SESSION, "nobody", 0), None);
     assert_eq!(studio.subagent_log("nosession", AGENT, 0), None);
 
     // The transcript path has no `.jsonl`, so the folder cannot be worked out.
-    let (studio, logs) = setup("ext", "s1.txt");
+    let (studio, logs, _dir) = setup("s1.txt");
     write(&logs, &conversation());
     assert_eq!(studio.subagent_log(SESSION, AGENT, 0), None);
 }

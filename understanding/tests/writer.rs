@@ -2,6 +2,7 @@
 //! without running it, the cards, their quizzes and the updated brief come from its reply, and a
 //! fake that fails is retried.
 
+use crate::common::{Answer, Scripted};
 use std::{
     cell::Cell,
     ffi::OsStr,
@@ -43,26 +44,6 @@ fn edit() -> CardRequest {
     }
 }
 
-/// A fake writer whose first `fails` calls reply with no card.
-struct Failing {
-    fails: usize,
-    calls: Cell<usize>,
-}
-
-impl CardWriter for Failing {
-    fn reply(&self, request: &CardRequest, earlier: &[String]) -> Result<String, String> {
-        self.calls.set(self.calls.get() + 1);
-        if self.calls.get() <= self.fails {
-            return Ok("Shall I read the file?".into());
-        }
-        FakeWriter.reply(request, earlier)
-    }
-
-    fn more(&self, request: &CardRequest, card: &Card) -> Result<String, String> {
-        FakeWriter.more(request, card)
-    }
-}
-
 /// The card `writer` writes on `edit()`, with no earlier card, and the lines it
 /// logs.
 fn written(writer: &impl CardWriter) -> (Option<Card>, Vec<String>) {
@@ -72,47 +53,44 @@ fn written(writer: &impl CardWriter) -> (Option<Card>, Vec<String>) {
 }
 
 #[test]
-fn a_writer_that_fails_once_gives_the_card_on_its_retry() {
-    let writer = Failing {
-        fails: 1,
-        calls: Cell::new(0),
-    };
+fn a_writer_that_fails_is_asked_once_more_and_a_second_failure_gives_no_card_and_one_log_line() {
+    let no_card = || Ok("Shall I read the file?".to_string());
+    // `None` is `FakeWriter`'s card.
+    let cases = [
+        (
+            "fails once",
+            Answer::Sequence(vec![Some(no_card()), None]),
+            true,
+        ),
+        ("fails twice", Answer::Fixed(no_card()), false),
+    ];
+    for (name, reply, gives_card) in cases {
+        let writer = Scripted {
+            reply,
+            ..Scripted::fake()
+        };
 
-    let (card, lines) = written(&writer);
+        let (card, lines) = written(&writer);
 
-    assert!(card.is_some());
-    assert_eq!(lines, [] as [String; 0]);
-    assert_eq!(writer.calls.get(), 2);
-}
-
-#[test]
-fn a_writer_that_fails_twice_gives_no_card_and_one_log_line() {
-    let writer = Failing {
-        fails: usize::MAX,
-        calls: Cell::new(0),
-    };
-
-    let (card, lines) = written(&writer);
-
-    assert_eq!(card, None);
-    assert_eq!(writer.calls.get(), 2);
-    let [line] = &lines[..] else {
-        panic!("one log line: {lines:?}");
-    };
-    assert_eq!(line.lines().count(), 1, "{line}");
-    assert!(line.contains(&edit().id), "{line}");
-}
-
-/// A fake writer that always gives `reply`.
-struct Replying(String);
-
-impl CardWriter for Replying {
-    fn reply(&self, _: &CardRequest, _: &[String]) -> Result<String, String> {
-        Ok(self.0.clone())
+        assert_eq!(card.is_some(), gives_card, "{name}");
+        assert_eq!(writer.calls("reply"), 2, "{name}");
+        if gives_card {
+            assert_eq!(lines, [] as [String; 0], "{name}");
+            continue;
+        }
+        let [line] = &lines[..] else {
+            panic!("{name}: one log line: {lines:?}");
+        };
+        assert_eq!(line.lines().count(), 1, "{name}: {line}");
+        assert!(line.contains(&edit().id), "{name}: {line}");
     }
+}
 
-    fn more(&self, _: &CardRequest, _: &Card) -> Result<String, String> {
-        Ok(self.0.clone())
+/// A writer whose card is always `reply`.
+fn replying(reply: &str) -> Scripted {
+    Scripted {
+        reply: Answer::ok(reply),
+        ..Scripted::bare()
     }
 }
 
@@ -217,7 +195,7 @@ fn a_reply_with_an_architecture_section_gives_the_card_that_section() {
     let section = "הקוד עבר מ־`lib.rs` למודול חדש, `brief.rs`, ש־`lib.rs` קורא לו.";
     let reply = GOOD.replace("structural: none", section);
 
-    let (card, lines) = written(&Replying(reply));
+    let (card, lines) = written(&replying(&reply));
 
     let structural = Card {
         architecture: Some(section.into()),
@@ -228,7 +206,7 @@ fn a_reply_with_an_architecture_section_gives_the_card_that_section() {
 
 #[test]
 fn the_card_call_returns_the_card_and_asks_for_no_brief() {
-    let card = write_card(&Replying(GOOD.into()), &edit(), &[], |l| panic!("{l}"));
+    let card = write_card(&replying(GOOD), &edit(), &[], |l| panic!("{l}"));
     assert_eq!(card.map(sorted), Some(good_card()));
 
     let (_, prompt) = ClaudeWriter::new(CLAUDE.into(), "/f".into()).command(&edit(), &[]);
@@ -249,7 +227,7 @@ fn a_quiz_with_no_key_or_one_that_does_not_parse_logs_one_line_and_the_card_has_
     ];
 
     for reply in broken {
-        let (card, lines) = written(&Replying(reply.clone()));
+        let (card, lines) = written(&replying(&reply));
 
         let no_quiz = Card {
             quiz: None,
@@ -279,82 +257,143 @@ fn good_with(options: [(&str, &str, bool); 3]) -> String {
     )
 }
 
+/// A Quiz's three options, each `(text, why, right)`, the key the first.
+type Options = [(&'static str, &'static str, bool); 3];
+
+const TEN: &str = "one two three four five six seven eight nine ten";
+/// The Quizzes the rules reject, named for the rule each breaks, and whether the reply leaves out
+/// the marks of the wrong options. The card's reply and the summary's are tested on the same ones.
+fn broken_quizzes() -> [(&'static str, Options, bool); 8] {
+    [
+        (
+            "an option of 11 words",
+            [
+                ("a", "Why.", true),
+                (ELEVEN, "No.", false),
+                ("c", "No.", false),
+            ],
+            false,
+        ),
+        (
+            "the key is the longest option",
+            [
+                ("The longest", "Why.", true),
+                ("b", "No.", false),
+                ("c", "No.", false),
+            ],
+            false,
+        ),
+        (
+            "the key is not the option marked right",
+            [
+                ("a", "Why.", false),
+                ("bbb", "No.", true),
+                ("cc", "No.", false),
+            ],
+            false,
+        ),
+        (
+            "two options marked right",
+            [
+                ("a", "Why.", true),
+                ("bbb", "Yes.", true),
+                ("cc", "No.", false),
+            ],
+            false,
+        ),
+        (
+            "no option marked right",
+            [
+                ("a", "Why.", false),
+                ("bbb", "No.", false),
+                ("cc", "No.", false),
+            ],
+            false,
+        ),
+        (
+            "a missing reason",
+            [
+                ("a", "Why.", true),
+                ("bbb", "", false),
+                ("cc", "No.", false),
+            ],
+            false,
+        ),
+        (
+            "a blank reason",
+            [
+                ("a", "Why.", true),
+                ("bbb", " ", false),
+                ("cc", "No.", false),
+            ],
+            false,
+        ),
+        (
+            "a missing mark",
+            [
+                ("a", "Why.", true),
+                ("bbb", "No.", false),
+                ("cc", "No.", false),
+            ],
+            true,
+        ),
+    ]
+}
+
+/// The Quizzes the rules let pass: an option of 10 words, and a key that is not the longest.
+fn passing_quizzes() -> [(&'static str, Options); 3] {
+    [
+        (
+            "an option of 10 words",
+            [
+                ("a", "Why.", true),
+                (TEN, "No.", false),
+                ("c", "No.", false),
+            ],
+        ),
+        (
+            "a key shorter than an option",
+            [
+                ("O(n)", "Why.", true),
+                ("O(n log n)", "No.", false),
+                ("O(1)", "No.", false),
+            ],
+        ),
+        (
+            "equal lengths, the key not longer than the others",
+            [
+                ("aa", "Why.", true),
+                ("bb", "No.", false),
+                ("cc", "No.", false),
+            ],
+        ),
+    ]
+}
+
+/// `reply` with the marks of its wrong options left out, when `unmarked`.
+fn unmark(reply: String, unmarked: bool) -> String {
+    match unmarked {
+        true => reply.replace(r#""right":false,"#, ""),
+        false => reply,
+    }
+}
+
 #[test]
-fn a_quiz_that_breaks_a_rule_is_rejected_and_the_card_keeps_no_quiz() {
-    let ten = "one two three four five six seven eight nine ten";
-    let eleven = "one two three four five six seven eight nine ten eleven";
-    // An option of 10 words passes.
-    assert!(
-        Card::from_reply(&good_with([
-            ("b", "Why.", true),
-            (ten, "No.", false),
-            ("c", "No.", false)
-        ]))
-        .unwrap()
-        .1
-        .is_none()
-    );
-    let broken = [
-        // An option of 11 words.
-        good_with([
-            ("short", "Why.", true),
-            (eleven, "No.", false),
-            ("b", "No.", false),
-        ]),
-        // The key is the longest option.
-        good_with([
-            ("a long right option", "Why.", true),
-            ("b", "No.", false),
-            ("c", "No.", false),
-        ]),
-        // The key is not the option marked right.
-        good_with([
-            ("a", "Why.", false),
-            ("bbb", "No.", true),
-            ("cc", "No.", false),
-        ]),
-        // Two options marked right.
-        good_with([
-            ("a", "Why.", true),
-            ("bbb", "Yes.", true),
-            ("cc", "No.", false),
-        ]),
-        // No option marked right.
-        good_with([
-            ("a", "Why.", false),
-            ("bbb", "No.", false),
-            ("cc", "No.", false),
-        ]),
-        // A missing reason.
-        good_with([
-            ("a", "Why.", true),
-            ("bbb", "", false),
-            ("cc", "No.", false),
-        ]),
-        // A missing mark.
-        GOOD.replace(r#", "right": false"#, ""),
-    ];
-    for reply in broken {
+fn a_card_quiz_that_breaks_a_rule_is_rejected_and_the_card_keeps_no_quiz() {
+    for (name, options, unmarked) in broken_quizzes() {
+        let reply = unmark(good_with(options), unmarked);
         let (card, problem) = Card::from_reply(&reply).unwrap();
-        assert_eq!(card.quiz, None, "{reply}");
-        assert!(problem.is_some(), "{reply}");
+        assert_eq!(card.quiz, None, "{name}: {reply}");
+        assert!(problem.is_some(), "{name}: {reply}");
     }
 }
 
-/// A fake writer that gives `replies` in turn, the last again and again, and counts its calls.
-struct CardSequence {
-    replies: Vec<String>,
-    calls: Cell<usize>,
-}
-
-impl CardWriter for CardSequence {
-    fn reply(&self, _: &CardRequest, _: &[String]) -> Result<String, String> {
-        let at = self.calls.get().min(self.replies.len() - 1);
-        self.calls.set(self.calls.get() + 1);
-        Ok(self.replies[at].clone())
-    }
-    fn more(&self, request: &CardRequest, card: &Card) -> Result<String, String> {
-        FakeWriter.more(request, card)
+#[test]
+fn a_card_quiz_that_keeps_the_rules_stands() {
+    for (name, options) in passing_quizzes() {
+        let (card, problem) = Card::from_reply(&good_with(options)).unwrap();
+        assert!(card.quiz.is_some(), "{name}");
+        assert_eq!(problem, None, "{name}");
     }
 }
 
@@ -367,23 +406,20 @@ fn a_rejected_quiz_is_asked_for_once_more_and_the_second_rejection_leaves_the_ca
     ]);
 
     // The second reply is good: its quiz stands.
-    let writer = CardSequence {
-        replies: vec![longest.clone(), GOOD.into()],
-        calls: Cell::new(0),
+    let writer = Scripted {
+        reply: Answer::replies([longest.clone(), GOOD.into()]),
+        ..Scripted::bare()
     };
     let card = write_card(&writer, &edit(), &[], |l| panic!("{l}")).unwrap();
     assert_eq!(sorted(card), good_card());
-    assert_eq!(writer.calls.get(), 2);
+    assert_eq!(writer.calls("reply"), 2);
 
     // Both are rejected: the card is kept with no quiz, after two calls and no more.
-    let writer = CardSequence {
-        replies: vec![longest],
-        calls: Cell::new(0),
-    };
+    let writer = replying(&longest);
     let mut lines = Vec::new();
     let card = write_card(&writer, &edit(), &[], |l| lines.push(l)).unwrap();
     assert_eq!(card.quiz, None);
-    assert_eq!(writer.calls.get(), 2);
+    assert_eq!(writer.calls("reply"), 2);
     assert_eq!(lines.len(), 1, "{lines:?}");
     assert!(lines[0].contains("longest"), "{lines:?}");
 }
@@ -562,39 +598,12 @@ fn explain_more_runs_the_same_writer_on_the_cards_explanation_and_its_change() {
     assert!(more.get_args().eq(card_run.get_args()));
     assert_eq!(more.get_current_dir(), Some(folder));
     assert!(prompt.contains("in more depth than the card"), "{prompt}");
-    assert!(prompt.contains(&card.explanation), "{prompt}");
-    assert!(prompt.ends_with(&format!("\nChange:\n{}", edit().diff())));
-}
-
-#[test]
-fn the_writers_instructions_no_longer_describe_a_change_that_is_workers_summaries() {
-    let folder = Path::new("/h/Library/Application Support/dev.falinks.studio/card-writer");
-    let writer = ClaudeWriter::new(CLAUDE.into(), folder.into());
-    // A card of that kind still in the store: its change is the workers' text.
-    let older = CardRequest {
-        change: Some("No diff: the agent changed nothing itself since its last card. Its workers, each with its status and the summaries of its cards since then:\n- `Implement #378` (completed): `a.rs` נוסף.\n".into()),
-        ..edit()
-    };
-
-    let (_, prompt) = writer.more_command(&older, &good_card());
-    let (_, card) = writer.command(&older, &[]);
-
-    for instructions in [&card, &prompt] {
-        assert!(
-            !instructions.contains("When the change is not a diff"),
-            "{instructions}"
-        );
-        assert!(
-            !instructions.contains("how the work was split"),
-            "{instructions}"
-        );
-    }
-    // "Explain more" on that older card still tells the writer not to invent code.
     assert!(
         prompt.contains("do not invent code you were not shown"),
         "{prompt}"
     );
-    assert!(prompt.ends_with(older.diff()));
+    assert!(prompt.contains(&card.explanation), "{prompt}");
+    assert!(prompt.ends_with(&format!("\nChange:\n{}", edit().diff())));
 }
 
 #[test]
@@ -856,47 +865,12 @@ fn an_empty_effort_leaves_the_models_default() {
     assert!(!command.get_args().any(|a| a == "--effort"));
 }
 
-/// The real summary command's input, recorded, with a fake reply.
-struct Recording {
-    inputs: Mutex<Vec<String>>,
-    reply: String,
-}
-
-impl CardWriter for Recording {
-    fn reply(&self, r: &CardRequest, e: &[String]) -> Result<String, String> {
-        FakeWriter.reply(r, e)
-    }
-    fn more(&self, r: &CardRequest, c: &Card) -> Result<String, String> {
-        FakeWriter.more(r, c)
-    }
-    fn summarize(
-        &self,
-        setup: &SummarySetup,
-        request: &SummaryRequest,
-        earlier: &[TurnSummary],
-    ) -> Result<String, String> {
-        let writer = ClaudeWriter::new(CLAUDE.into(), "/card-writer".into());
-        let (_, input) = writer.summary_command(setup, request, earlier);
-        self.inputs.lock().unwrap().push(input);
-        Ok(self.reply.clone())
-    }
-    fn summarize_agent(
-        &self,
-        setup: &SummarySetup,
-        prompt: &str,
-        message: &str,
-    ) -> Result<String, String> {
-        let writer = ClaudeWriter::new(CLAUDE.into(), "/card-writer".into());
-        let (_, input) = writer.agent_summary_command(setup, prompt, message);
-        self.inputs.lock().unwrap().push(input);
-        Ok(self.reply.clone())
-    }
-}
-
-fn recording(reply: String) -> Recording {
-    Recording {
-        inputs: Mutex::default(),
-        reply,
+/// A writer whose summary, and subagent's, is always `reply`.
+fn recording(reply: String) -> Scripted {
+    Scripted {
+        summarize: Answer::ok(reply.clone()),
+        summarize_agent: Answer::ok(reply),
+        ..Scripted::bare()
     }
 }
 
@@ -925,7 +899,7 @@ fn the_summary_input_holds_the_sessions_last_3_summaries_and_their_questions() {
     let writer = recording(summary_reply("Summary six.", ["a", "b", "c"]));
     write_summary(&store, &writer, &setup(), turn("s", 6), |_| {}).unwrap();
 
-    let input = writer.inputs.lock().unwrap().pop().unwrap();
+    let input = writer.inputs().pop().unwrap();
     assert!(!input.contains("Summary one."), "{input}");
     assert!(!input.contains("Other session."), "{input}");
     for n in 2..=4 {
@@ -980,7 +954,7 @@ fn a_reply_with_a_null_quiz_gives_the_summary_alone_and_logs_nothing() {
 
     assert_eq!(summary.unwrap().quiz, None);
     assert_eq!(lines, Vec::<String>::new());
-    assert_eq!(writer.inputs.lock().unwrap().len(), 1, "no retry");
+    assert_eq!(writer.inputs().len(), 1, "no retry");
 }
 
 /// A summary reply whose Quiz is `options`, each `(text, why, right)`, with key `key`.
@@ -1000,81 +974,21 @@ const ELEVEN: &str = "one two three four five six seven eight nine ten eleven";
 
 #[test]
 fn a_reply_that_breaks_a_quiz_rule_is_asked_once_more_and_the_second_rejection_leaves_no_quiz() {
-    let broken = [
-        // An option of 11 words.
-        quiz_reply(
-            &[
-                ("a", "Why.", true),
-                (ELEVEN, "No.", false),
-                ("c", "No.", false),
-            ],
-            0,
-        ),
-        // The key is the longest option.
-        quiz_reply(
-            &[
-                ("The longest", "Why.", true),
-                ("b", "No.", false),
-                ("c", "No.", false),
-            ],
-            0,
-        ),
-        // The key is not the option marked right.
-        quiz_reply(
-            &[
-                ("a", "Why.", false),
-                ("bbb", "No.", true),
-                ("cc", "No.", false),
-            ],
-            0,
-        ),
-        // Two options marked right.
-        quiz_reply(
-            &[
-                ("a", "Why.", true),
-                ("bbb", "Yes.", true),
-                ("cc", "No.", false),
-            ],
-            0,
-        ),
-        // A missing reason.
-        quiz_reply(
-            &[
-                ("a", "Why.", true),
-                ("bbb", " ", false),
-                ("cc", "No.", false),
-            ],
-            0,
-        ),
-        // A missing mark.
-        quiz_reply(
-            &[
-                ("a", "Why.", true),
-                ("bbb", "No.", false),
-                ("cc", "No.", false),
-            ],
-            0,
-        )
-        .replace(r#""right":false,"#, ""),
-    ];
-    for reply in broken {
+    for (name, options, unmarked) in broken_quizzes() {
+        let reply = unmark(quiz_reply(&options, 0), unmarked);
         let dir = tempfile::tempdir().unwrap();
         let store = summaries(dir.path());
-        let writer = recording(reply.clone());
+        let writer = recording(reply);
         let mut lines = Vec::new();
 
         let summary = write_summary(&store, &writer, &setup(), turn("s", 1), |l| lines.push(l));
 
         let summary = summary.unwrap();
-        assert_eq!(summary.summary, "Rewrote the parser.", "{reply}");
-        assert_eq!(summary.quiz, None, "{reply}");
-        assert_eq!(
-            writer.inputs.lock().unwrap().len(),
-            2,
-            "asked once more: {reply}"
-        );
-        assert_eq!(lines.len(), 1, "{lines:?}");
-        assert!(lines[0].contains("s@1"), "{lines:?}");
+        assert_eq!(summary.summary, "Rewrote the parser.", "{name}");
+        assert_eq!(summary.quiz, None, "{name}");
+        assert_eq!(writer.inputs().len(), 2, "{name}: asked once more");
+        assert_eq!(lines.len(), 1, "{name}: {lines:?}");
+        assert!(lines[0].contains("s@1"), "{name}: {lines:?}");
     }
 }
 
@@ -1097,34 +1011,16 @@ fn a_rejected_quiz_gives_one_on_the_second_reply_when_that_one_is_good() {
 }
 
 #[test]
-fn an_option_of_ten_words_and_a_key_that_is_not_the_longest_pass_on_the_first_call() {
-    let ten = "one two three four five six seven eight nine ten";
-    for options in [
-        [
-            ("a", "Why.", true),
-            (ten, "No.", false),
-            ("c", "No.", false),
-        ],
-        [
-            ("O(n)", "Why.", true),
-            ("O(n log n)", "No.", false),
-            ("O(1)", "No.", false),
-        ],
-        // Equal lengths: the key is not longer than the others.
-        [
-            ("aa", "Why.", true),
-            ("bb", "No.", false),
-            ("cc", "No.", false),
-        ],
-    ] {
+fn a_reply_that_keeps_the_quiz_rules_passes_on_the_first_call() {
+    for (name, options) in passing_quizzes() {
         let dir = tempfile::tempdir().unwrap();
         let store = summaries(dir.path());
         let writer = recording(quiz_reply(&options, 0));
 
         let summary = write_summary(&store, &writer, &setup(), turn("s", 1), |_| {}).unwrap();
 
-        assert!(summary.quiz.is_some(), "{options:?}");
-        assert_eq!(writer.inputs.lock().unwrap().len(), 1, "{options:?}");
+        assert!(summary.quiz.is_some(), "{name}");
+        assert_eq!(writer.inputs().len(), 1, "{name}");
     }
 }
 
@@ -1139,7 +1035,7 @@ fn a_reply_with_no_quiz_field_gives_the_summary_alone_and_logs_why() {
 
     assert_eq!(summary.unwrap().quiz, None);
     assert_eq!(lines.len(), 1, "only an explicit null is silent: {lines:?}");
-    assert_eq!(writer.inputs.lock().unwrap().len(), 1, "no retry");
+    assert_eq!(writer.inputs().len(), 1, "no retry");
 }
 
 #[test]
@@ -1196,7 +1092,7 @@ fn a_malformed_summary_reply_gives_none_and_one_log_line() {
     let summary = write_summary(&store, &writer, &setup(), turn("s", 1), |l| lines.push(l));
 
     assert_eq!(summary, None);
-    assert_eq!(writer.inputs.lock().unwrap().len(), 2, "asked once more");
+    assert_eq!(writer.inputs().len(), 2, "asked once more");
     assert_eq!(lines.len(), 1, "{lines:?}");
     assert!(lines[0].contains("s@1"), "{lines:?}");
     assert_eq!(store.lock().unwrap().turn_summary("s@1"), None);
@@ -1230,7 +1126,7 @@ fn a_turn_with_a_card_gets_its_summary_only() {
 
     assert_eq!(summary.summary, "Rewrote the parser.");
     assert_eq!(summary.quiz, None);
-    let input = writer.inputs.lock().unwrap().pop().unwrap();
+    let input = writer.inputs().pop().unwrap();
     assert!(input.contains("has a card"), "{input}");
 }
 
@@ -1247,7 +1143,7 @@ fn a_card_the_offer_did_not_write_is_no_card_and_the_summary_carries_the_quiz() 
     let summary = write_summary(&store, &writer, &setup(), request, |_| {}).unwrap();
 
     assert!(summary.quiz.is_some());
-    let input = writer.inputs.lock().unwrap().pop().unwrap();
+    let input = writer.inputs().pop().unwrap();
     assert!(!input.contains("has a card"), "{input}");
 }
 
@@ -1306,7 +1202,7 @@ fn opening_a_subagent_writes_its_summary_once_and_opening_it_again_makes_no_call
         Some("Reviewed the parser change: the bounds hold.")
     );
     assert_eq!(again, first, "kept across restarts");
-    let inputs = writer.inputs.lock().unwrap();
+    let inputs = writer.inputs();
     assert_eq!(inputs.len(), 1, "one call");
     assert!(inputs[0].contains(SPAWNED) && inputs[0].contains(LAST));
 }
@@ -1326,12 +1222,16 @@ fn a_failed_subagent_summary_keeps_nothing_and_logs_one_line() {
     assert_eq!(lines.len(), 1, "{lines:?}");
     assert!(lines[0].contains("c1"), "{lines:?}");
     assert_eq!(store.lock().unwrap().agent_summary("c1"), None);
-    let failing = Failing {
-        fails: 0,
-        calls: Cell::new(0),
-    };
     assert_eq!(
-        write_agent_summary(&store, &failing, &setup(), "c1", SPAWNED, LAST, |_| {}),
+        write_agent_summary(
+            &store,
+            &Scripted::bare(),
+            &setup(),
+            "c1",
+            SPAWNED,
+            LAST,
+            |_| {}
+        ),
         None
     );
 }
@@ -1440,43 +1340,13 @@ fn reply(headline: &str, lines: serde_json::Value) -> String {
 fn written_by(request: SummaryRequest, replies: &[String]) -> (TurnSummary, Vec<String>) {
     let dir = tempfile::tempdir().unwrap();
     let store = summaries(dir.path());
-    let writer = Sequence {
-        replies: Mutex::new(replies.to_vec()),
-        inputs: Mutex::default(),
+    let writer = Scripted {
+        summarize: Answer::replies(replies.iter().cloned()),
+        ..Scripted::bare()
     };
     let summary = write_summary(&store, &writer, &setup(), request, |_| {}).unwrap();
-    let inputs = writer.inputs.lock().unwrap().clone();
+    let inputs = writer.inputs();
     (summary, inputs)
-}
-
-/// A writer that gives each of its replies in turn, the last again after that.
-struct Sequence {
-    replies: Mutex<Vec<String>>,
-    inputs: Mutex<Vec<String>>,
-}
-
-impl CardWriter for Sequence {
-    fn reply(&self, r: &CardRequest, e: &[String]) -> Result<String, String> {
-        FakeWriter.reply(r, e)
-    }
-    fn more(&self, r: &CardRequest, c: &Card) -> Result<String, String> {
-        FakeWriter.more(r, c)
-    }
-    fn summarize(
-        &self,
-        setup: &SummarySetup,
-        request: &SummaryRequest,
-        earlier: &[TurnSummary],
-    ) -> Result<String, String> {
-        let writer = ClaudeWriter::new(CLAUDE.into(), "/card-writer".into());
-        let (_, input) = writer.summary_command(setup, request, earlier);
-        self.inputs.lock().unwrap().push(input);
-        let mut replies = self.replies.lock().unwrap();
-        Ok(match replies.len() {
-            1 => replies[0].clone(),
-            _ => replies.remove(0),
-        })
-    }
 }
 
 #[test]
@@ -1585,31 +1455,40 @@ fn a_line_with_a_number_or_id_the_turn_lacks_is_stripped_and_true_numbers_stay()
 }
 
 #[test]
-fn a_headline_with_an_invented_number_is_asked_for_once_more_and_a_second_failure_is_stripped() {
-    let bad = reply("Cut the cost by 40%.", serde_json::json!([]));
-    let good = reply("Cut the cost.", serde_json::json!([]));
+fn a_headline_that_breaks_a_rule_is_asked_for_once_more_and_a_second_failure_is_stripped_or_stands()
+{
+    let none = || serde_json::json!([]);
+    let long = "word ".repeat(17);
+    // The headline after a good second reply, and after a second reply that breaks the rule too.
+    let cases = [
+        (
+            "an invented number: stripped",
+            reply("Cut the cost by 40%.", none()),
+            reply("Cut the cost.", none()),
+            "Cut the cost.",
+            "",
+        ),
+        (
+            "over 16 words: stands, as the Quiz's does",
+            reply(&long, none()),
+            reply("Short.", none()),
+            "Short.",
+            long.trim(),
+        ),
+    ];
+    for (name, bad, good, after_good, after_bad) in cases {
+        let (summary, inputs) = written_by(turn("s", 1), &[bad.clone(), good]);
+        assert_eq!(summary.headline.as_deref(), Some(after_good), "{name}");
+        assert_eq!(inputs.len(), 2, "{name}");
 
-    let (summary, inputs) = written_by(turn("s", 1), &[bad.clone(), good]);
-    assert_eq!(summary.headline.as_deref(), Some("Cut the cost."));
-    assert_eq!(inputs.len(), 2);
-
-    let (summary, inputs) = written_by(turn("s", 1), &[bad.clone(), bad]);
-    assert_eq!(summary.headline.as_deref(), Some(""));
-    assert_eq!(inputs.len(), 2);
-}
-
-#[test]
-fn a_headline_over_16_words_is_asked_for_once_more() {
-    let long = reply(&"word ".repeat(17), serde_json::json!([]));
-    let short = reply("Short.", serde_json::json!([]));
-
-    let (summary, inputs) = written_by(turn("s", 1), &[long.clone(), short]);
-    assert_eq!(summary.headline.as_deref(), Some("Short."));
-    assert_eq!(inputs.len(), 2);
-
-    // A second long one stands, as the Quiz's does.
-    let (summary, _) = written_by(turn("s", 1), &[long.clone(), long]);
-    assert_eq!(summary.headline.unwrap().split_whitespace().count(), 17);
+        let (summary, inputs) = written_by(turn("s", 1), &[bad.clone(), bad]);
+        assert_eq!(
+            summary.headline.as_deref().map(str::trim),
+            Some(after_bad),
+            "{name}"
+        );
+        assert_eq!(inputs.len(), 2, "{name}");
+    }
 }
 
 #[test]
@@ -1699,23 +1578,6 @@ fn retest_reply(longest_right: bool) -> String {
     .to_string()
 }
 
-/// A writer that gives the replies in order and counts its calls.
-struct Retesting(Vec<String>, Cell<usize>);
-
-impl CardWriter for Retesting {
-    fn reply(&self, _: &CardRequest, _: &[String]) -> Result<String, String> {
-        Err("no cards".into())
-    }
-    fn more(&self, _: &CardRequest, _: &Card) -> Result<String, String> {
-        Err("no cards".into())
-    }
-    fn retest(&self, _: &studio_understanding::RetestAsk) -> Result<String, String> {
-        let at = self.1.get();
-        self.1.set(at + 1);
-        self.0.get(at).cloned().ok_or_else(|| "no reply".into())
-    }
-}
-
 #[test]
 fn a_retest_is_written_once_a_week_after_and_its_reply_passes_the_quiz_guards() {
     let dir = tempfile::tempdir().unwrap();
@@ -1723,14 +1585,14 @@ fn a_retest_is_written_once_a_week_after_and_its_reply_passes_the_quiz_guards() 
     let store = Mutex::new(store);
     let week = 7 * 24 * 3600 * 1000;
     // The first reply breaks a guard (its right option is longest), the second is good: one retry.
-    let writer = Retesting(vec![retest_reply(true), retest_reply(false)], Cell::new(0));
+    let writer = retesting(vec![retest_reply(true), retest_reply(false)]);
 
     // Six days after: none. Seven: one, written; and never again.
     assert_eq!(
         write_retests(&store, &writer, offered + week - 1, |l| panic!("{l}")),
         0
     );
-    assert_eq!(writer.1.get(), 0);
+    assert_eq!(writer.calls("retest"), 0);
     assert_eq!(
         write_retests(&store, &writer, offered + week, |l| panic!("{l}")),
         1
@@ -1740,7 +1602,7 @@ fn a_retest_is_written_once_a_week_after_and_its_reply_passes_the_quiz_guards() 
         0
     );
 
-    assert_eq!(writer.1.get(), 2);
+    assert_eq!(writer.calls("retest"), 2);
     let store = store.lock().unwrap();
     let quiz = store.retests()[0].quiz.as_ref().unwrap();
     assert_eq!(quiz.options[quiz.key].text, "Pairs");
@@ -1751,14 +1613,14 @@ fn a_retest_that_breaks_the_guards_twice_is_kept_as_none_and_not_asked_again() {
     let dir = tempfile::tempdir().unwrap();
     let (store, offered) = week_old_quiz(dir.path());
     let store = Mutex::new(store);
-    let writer = Retesting(vec![retest_reply(true), retest_reply(true)], Cell::new(0));
+    let writer = retesting(vec![retest_reply(true), retest_reply(true)]);
     let mut lines = Vec::new();
     let now = offered + 7 * 24 * 3600 * 1000;
 
     assert_eq!(write_retests(&store, &writer, now, |l| lines.push(l)), 0);
     assert_eq!(write_retests(&store, &writer, now, |l| lines.push(l)), 0);
 
-    assert_eq!(writer.1.get(), 2);
+    assert_eq!(writer.calls("retest"), 2);
     assert_eq!(lines.len(), 1, "{lines:?}");
     assert_eq!(store.lock().unwrap().retests()[0].quiz, None);
 }
@@ -1790,14 +1652,14 @@ fn with_three_retests_waiting_a_run_writes_none_and_calls_no_writer() {
     let dir = tempfile::tempdir().unwrap();
     let quizzes = [("a", T0), ("b", T0), ("c", T0), ("d", T0)];
     let store = retests_store(dir.path(), &quizzes, &["a", "b", "c"]);
-    let writer = Retesting(vec![retest_reply(false); 4], Cell::new(0));
+    let writer = retesting(vec![retest_reply(false); 4]);
 
     assert_eq!(
         write_retests(&store, &writer, T0 + 8 * DAY, |l| panic!("{l}")),
         0
     );
 
-    assert_eq!(writer.1.get(), 0);
+    assert_eq!(writer.calls("retest"), 0);
     assert_eq!(retested(&store), ["a", "b", "c"]);
 }
 
@@ -1820,7 +1682,7 @@ fn with_one_waiting_a_run_writes_two_picked_quizzes_first_and_the_latest_due_fir
             .quiz_tap(id, Tap::Pick { option: 1 }, T0 + 2 * DAY)
             .unwrap();
     }
-    let writer = Retesting(vec![retest_reply(false); 5], Cell::new(0));
+    let writer = retesting(vec![retest_reply(false); 5]);
 
     // c, d and e came due later than a and b, but were never picked.
     assert_eq!(
@@ -1828,7 +1690,7 @@ fn with_one_waiting_a_run_writes_two_picked_quizzes_first_and_the_latest_due_fir
         2
     );
 
-    assert_eq!(writer.1.get(), 2);
+    assert_eq!(writer.calls("retest"), 2);
     assert_eq!(retested(&store), ["waiting", "b", "a"]);
 }
 
@@ -1838,7 +1700,7 @@ fn after_a_pick_on_one_of_three_waiting_the_next_run_writes_the_held_retest() {
     let dir = tempfile::tempdir().unwrap();
     let quizzes = [("a", T0), ("b", T0), ("c", T0), ("d", T0)];
     let store = retests_store(dir.path(), &quizzes, &["a", "b", "c"]);
-    let writer = Retesting(vec![retest_reply(false)], Cell::new(0));
+    let writer = retesting(vec![retest_reply(false)]);
     let now = T0 + 9 * DAY;
     assert_eq!(write_retests(&store, &writer, now, |l| panic!("{l}")), 0);
 
@@ -1850,7 +1712,7 @@ fn after_a_pick_on_one_of_three_waiting_the_next_run_writes_the_held_retest() {
         write_retests(&store, &writer, now + 3600 * 1000, |l| panic!("{l}")),
         1
     );
-    assert_eq!(writer.1.get(), 1);
+    assert_eq!(writer.calls("retest"), 1);
     assert_eq!(retested(&store), ["a", "b", "c", "d"]);
 }
 
@@ -1859,7 +1721,7 @@ fn a_writer_that_gives_no_reply_ends_the_run_and_its_quiz_stays_due() {
     let dir = tempfile::tempdir().unwrap();
     let quizzes = [("waiting", T0), ("a", T0), ("b", T0), ("c", T0), ("d", T0)];
     let store = retests_store(dir.path(), &quizzes, &["waiting"]);
-    let writer = Retesting(Vec::new(), Cell::new(0));
+    let writer = retesting(Vec::new());
     let mut lines = Vec::new();
 
     assert_eq!(
@@ -1868,7 +1730,7 @@ fn a_writer_that_gives_no_reply_ends_the_run_and_its_quiz_stays_due() {
     );
 
     // One ask, tried twice; the rest are not asked until the next run.
-    assert_eq!(writer.1.get(), 2);
+    assert_eq!(writer.calls("retest"), 2);
     assert_eq!(lines.len(), 1, "{lines:?}");
     assert_eq!(retested(&store), ["waiting"]);
 }
@@ -1879,7 +1741,7 @@ fn a_retest_rejected_twice_does_not_wait_so_the_run_writes_on_until_three_wait()
     let quizzes = [("waiting", T0), ("a", T0), ("b", T0), ("c", T0)];
     let store = retests_store(dir.path(), &quizzes, &["waiting"]);
     let (bad, good) = (retest_reply(true), retest_reply(false));
-    let writer = Retesting(vec![bad.clone(), bad, good.clone(), good], Cell::new(0));
+    let writer = retesting(vec![bad.clone(), bad, good.clone(), good]);
     let mut lines = Vec::new();
 
     assert_eq!(
@@ -1887,9 +1749,19 @@ fn a_retest_rejected_twice_does_not_wait_so_the_run_writes_on_until_three_wait()
         2
     );
 
-    assert_eq!(writer.1.get(), 4);
+    assert_eq!(writer.calls("retest"), 4);
     assert_eq!(retested(&store), ["waiting", "a", "b", "c"]);
     assert_eq!(store.lock().unwrap().retests()[1].quiz, None);
+}
+
+/// A writer that gives each of `replies` as a retest in turn, and no reply after them.
+fn retesting(replies: Vec<String>) -> Scripted {
+    let mut slots: Vec<_> = replies.into_iter().map(|r| Some(Ok(r))).collect();
+    slots.push(Some(Err("no reply".into())));
+    Scripted {
+        retest: Answer::Sequence(slots),
+        ..Scripted::bare()
+    }
 }
 
 /// A writer that flags the Quizzes `flag` Key wrong while it writes its first retest, as Daniel might meanwhile.

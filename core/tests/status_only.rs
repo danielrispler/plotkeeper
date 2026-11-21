@@ -2,6 +2,7 @@
 //! whose program is not Claude Code and reports OSC 7501 gets a status-only row; a Claude session
 //! keeps its hook state, and a lasting disagreement with its 7501 state appends one mismatch line.
 
+use crate::common::{TWO, replay};
 use serde_json::{Value, json};
 use studio_core::{Output, State, Studio, Terminal};
 
@@ -218,13 +219,9 @@ fn an_unknown_state_leaves_the_row_as_it_was() {
     assert!(out.is_empty(), "{out:?}");
 }
 
-fn replay() -> Studio {
-    Studio::replayed(include_str!("fixtures/two-sessions.jsonl").lines())
-}
-
 #[test]
 fn a_claude_sessions_state_is_unchanged_by_its_7501_reports() {
-    let mut studio = replay();
+    let mut studio = replay(TWO);
     let before = state(&studio, IN_STUDIO).unwrap();
     let rows = studio.sessions().len();
     let other = if before == State::NeedsYou {
@@ -262,7 +259,7 @@ fn mismatches(outputs: &[Output]) -> Vec<&str> {
 
 #[test]
 fn a_lasting_disagreement_appends_one_mismatch_line_and_a_brief_one_none() {
-    let mut studio = replay();
+    let mut studio = replay(TWO);
     let hook = state(&studio, IN_STUDIO).unwrap();
     let other = if hook == State::NeedsYou {
         "working"

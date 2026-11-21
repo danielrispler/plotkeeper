@@ -2,10 +2,7 @@
 //! selection and a subagent's log, written into `scripts/wire/core.ts` (`scripts/wire/samples.rs`). It sees only the
 //! shapes these samples produce: an optional field no sample fills is not checked.
 
-#[path = "../../scripts/wire/samples.rs"]
-mod samples;
-
-use samples::{Sample, json, write};
+use crate::samples::{Sample, json, write};
 use std::path::PathBuf;
 use studio_core::{AskFact, AskFacts, AskSection, CheckOutput, Studio};
 

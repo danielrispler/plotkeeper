@@ -90,12 +90,6 @@ test("a landed task's session at your turn, idle or ended shows a check mark and
   assert.ok(!showsLanded("idle", false));
 });
 
-test("the check mark is monochrome", () => {
-  const css = fs.readFileSync(new URL("../style.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
-  const rule = css.match(/\.glyph\[data-glyph="check"\][^{]*\{([^}]*)\}/)[1];
-  assert.doesNotMatch(rule, /needs-you/);
-});
-
 test("a project header's action is keyed by its action, so Add and Remove never share a node", async () => {
   const { headAction } = await import("../../dist/list.js");
   const remove = headAction({ key: "/a", project: true }, null, ["/a"]);

@@ -3,8 +3,9 @@
 //! 2afc85f5 and the prompt Daniel queued during it, and the Esc in session 5bb84a4a.
 
 use serde_json::{Value, json};
-use studio_core::{CardRequest, Change, Fingerprint, Output, Purpose, State, Studio};
+use studio_core::{CardRequest, Change, Output, Purpose, State, Studio};
 
+use crate::common;
 use State::{Running, YourTurn};
 
 /// Lines 1297 to 1329 of the day, session 2afc85f5 only: its worker's handback (lines 1 to 5), the
@@ -23,12 +24,11 @@ const ESC_SESSION: &str = "5bb84a4a-6f08-46b4-8329-b0b88df06518";
 
 /// The session's state after each line of `log`, replayed.
 fn states(log: &str, session: &str) -> Vec<State> {
-    let mut studio = Studio::default();
-    let states = log.lines().map(|line| {
-        studio.replay(line);
-        studio.session(session).expect("the session").state
-    });
-    states.collect()
+    let states = common::states(log, session);
+    states
+        .into_iter()
+        .map(|s| s.expect("the session"))
+        .collect()
 }
 
 fn received(line: &str) -> u64 {
@@ -52,11 +52,13 @@ fn live(log: &str, session: &str) -> (Vec<(usize, Purpose)>, Vec<CardRequest>) {
     let mut looks = Vec::new();
     let mut cards = Vec::new();
     for (index, line) in log.lines().enumerate() {
-        let taken: Vec<Fingerprint> = studio.fingerprint_folders(line);
-        let ours = taken.iter().filter(|look| look.key == session);
-        looks.extend(ours.map(|look| (index + 1, look.purpose)));
-        let changes = taken.into_iter().map(|look| (look.key, found()));
-        for output in studio.apply_with_changes(line, changes.collect()) {
+        let outputs = common::apply_looking(&mut studio, line, |look| {
+            if look.key == session {
+                looks.push((index + 1, look.purpose));
+            }
+            Some(found())
+        });
+        for output in outputs {
             if let Output::Card(request) = output {
                 cards.push(request);
             }

@@ -1,39 +1,11 @@
 //! A card's code comes from git (danielrispler/plotkeeper#121): the writer names a path and a line range, and the card
 //! shows those lines of the turn's end tree, in a real temporary repository.
 
-use std::{collections::BTreeMap, fs, path::Path, process::Command};
+use crate::common::{Answer, Scripted};
+use std::{collections::BTreeMap, fs};
 use studio_core::CardRequest;
-use studio_understanding::{Card, CardWriter, write_card};
-
-struct Replying(String);
-
-impl CardWriter for Replying {
-    fn reply(&self, _: &CardRequest, _: &[String]) -> Result<String, String> {
-        Ok(self.0.clone())
-    }
-
-    fn more(&self, _: &CardRequest, _: &Card) -> Result<String, String> {
-        Err("no".into())
-    }
-}
-
-fn git(repo: &Path, args: &[&str]) -> String {
-    let out = Command::new("git")
-        .args([
-            "-c",
-            "user.name=Studio",
-            "-c",
-            "user.email=studio@example.com",
-        ])
-        .args(args)
-        .current_dir(repo)
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .output()
-        .unwrap();
-    assert!(out.status.success(), "git {args:?}");
-    String::from_utf8(out.stdout).unwrap().trim().into()
-}
+use studio_test_support::git;
+use studio_understanding::{Card, write_card};
 
 /// A repository whose end tree has `lib.rs` of five lines, and the request that names it.
 fn request() -> (tempfile::TempDir, CardRequest) {
@@ -64,7 +36,11 @@ fn reply(ranges: &str, code: &str) -> String {
 }
 
 fn written(reply: String, request: &CardRequest) -> Card {
-    write_card(&Replying(reply), request, &[], |_| {}).unwrap()
+    let writer = Scripted {
+        reply: Answer::ok(reply),
+        ..Scripted::bare()
+    };
+    write_card(&writer, request, &[], |_| {}).unwrap()
 }
 
 #[test]

@@ -1,6 +1,7 @@
 //! Seams 2 and 3 of danielrispler/plotkeeper#43 for the agy adapter: the fixture recorded from real
 //! agy (`record-agy-run.sh`) replayed through the core, and hand-written cases for its rules.
 
+use crate::common;
 use serde_json::{Value, json};
 use std::path::PathBuf;
 use studio_core::{AgyDriftKind, LogEntry, Parent, Sender, State, Status, Studio};
@@ -83,7 +84,7 @@ fn the_adapter_declares_what_it_reports_and_emits_no_claude_only_variant() {
 }
 
 fn line(session: &str, event: &str, at: u64, fields: Value) -> String {
-    let mut line = json!({
+    let base = json!({
         "conversationId": session,
         "hookEventName": event,
         "cwd": "/tmp/agy-fixture",
@@ -92,10 +93,7 @@ fn line(session: &str, event: &str, at: u64, fields: Value) -> String {
         "studio_terminal_id": "t-1",
         "transcriptPath": format!("{}/{session}/.system_generated/logs/transcript_full.jsonl", brain()),
     });
-    line.as_object_mut()
-        .unwrap()
-        .extend(fields.as_object().unwrap().clone());
-    line.to_string()
+    common::with(base, fields)
 }
 
 fn tool(session: &str, event: &str, at: u64, step: u64) -> String {

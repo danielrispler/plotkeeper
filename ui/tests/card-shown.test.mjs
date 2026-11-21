@@ -2,43 +2,27 @@
 // Run: `npm test`.
 import { beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { El } from "./dom.mjs";
+import { El, fakeDocument, tauri } from "./dom.mjs";
 
 const calls = [];
-globalThis.window = {
-  __TAURI__: {
-    core: {
-      invoke: async (command, args) => {
-        calls.push([command, args]);
-        if (command === "turn_summary") return { summary: { summary: "", headline: "Done", lines: [{ kind: "ask", text: "Pick one" }], quiz: null } };
-        return null;
-      },
-    },
-  },
-};
+tauri(calls, (command) => (command === "turn_summary" ? { summary: { summary: "", headline: "Done", lines: [{ kind: "ask", text: "Pick one" }], quiz: null } } : null));
 // The document is set after the import: times.ts starts a timer when one exists at load.
 import { createRequire } from "node:module";
 globalThis.marked = createRequire(import.meta.url)("marked");
 const { foldedTurn, drawFeed } = await import("../../dist/story.js");
 const { cardNode, showCards, markShown } = await import("../../dist/cards.js");
 const { studio } = await import("../../dist/state.js");
-const document = {
+const document = fakeDocument({
   createElement: (tag) =>
     Object.assign(new El(tag), {
-      dataset: {},
-      style: {},
-      classList: { add() {}, toggle() {}, contains: () => false },
-      removeAttribute() {},
-      toggleAttribute() {},
       querySelector: () => new El("span"),
       remove() {
         this.removed = true;
       },
     }),
-  getElementById: () => new El("div"),
   visibilityState: "visible",
   body: { dataset: {} },
-};
+});
 globalThis.document = document;
 
 const stored = (id, title, quiz = null) => ({

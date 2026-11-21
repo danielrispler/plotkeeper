@@ -1,0 +1,45 @@
+//! The integration tests of the core, one binary: each file is a module.
+
+mod agy;
+mod ask_facts;
+mod backfill;
+mod blocked_commands;
+mod cards;
+mod check_cards;
+mod check_feed;
+mod clear;
+mod close_rename;
+mod common;
+mod decisions;
+mod feed;
+mod fork;
+mod idle;
+mod intention;
+mod interrupted;
+mod landed;
+mod ledger;
+mod naming;
+mod needs_you;
+mod notices;
+mod phases;
+mod prompt_name;
+mod questions;
+mod replay;
+mod restart;
+#[path = "../../scripts/wire/samples.rs"]
+mod samples;
+mod saved;
+mod sessions;
+mod status_only;
+mod subagent_log;
+mod subagents;
+mod summaries;
+mod terminal_link;
+mod terminals;
+mod times;
+mod turn_checks;
+mod turn_files;
+mod turns;
+mod unseen;
+mod wake_ups;
+mod wire;

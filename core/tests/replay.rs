@@ -2,11 +2,8 @@
 //! check what the pane would show. The fixtures follow the real v0 payload sequences
 //! (https://github.com/danielrispler/Falinks/issues/321#issuecomment-6492980442, "Hook payloads").
 
+use crate::common::replay;
 use studio_core::{Step, Studio};
-
-fn replay(log: &str) -> Studio {
-    Studio::replayed(log.lines())
-}
 
 fn step(tool: &str, detail: Option<&str>) -> Option<Step> {
     Some(Step {

@@ -3480,6 +3480,7 @@ dependencies = [
  "libc",
  "serde",
  "serde_json",
+ "studio-test-support",
 ]
 
 [[package]]
@@ -3493,6 +3494,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "studio-test-support"
+version = "0.0.0"
+dependencies = [
+ "tempfile",
+]
+
+[[package]]
 name = "studio-understanding"
 version = "0.0.0"
 dependencies = [
@@ -3502,6 +3510,7 @@ dependencies = [
  "similar",
  "studio-core",
  "studio-hook",
+ "studio-test-support",
  "tempfile",
 ]
 
@@ -3519,6 +3528,7 @@ version = "0.0.0"
 dependencies = [
  "serde",
  "serde_json",
+ "studio-test-support",
  "tempfile",
 ]
 

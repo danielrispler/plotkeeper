@@ -1,11 +1,11 @@
 // A turn's Quiz is one open question; one click answers it in place (danielrispler/plotkeeper#118, #120). Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { El } from "./dom.mjs";
+import { El, fakeDocument } from "./dom.mjs";
 
 // The fake document is set after the import: times.ts starts a timer when a document exists at load.
 const { quizAllowed, quizRegion, quizStage, quizView, seedQuiz, quizAnswered } = await import("../../dist/quiz.js");
-globalThis.document = { createElement: (tag) => new El(tag), getElementById: () => Object.assign(new El("div"), { replaceChildren() {} }) };
+globalThis.document = fakeDocument();
 
 const quiz = {
   text: "What does the frozen gate fix?",

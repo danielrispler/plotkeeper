@@ -2,6 +2,7 @@
 //! decisions 1 and 2): hook events through the core, with a made-up transcript fixture (generator in
 //! the PR's notes).
 
+use crate::common;
 use serde_json::{Value, json};
 use studio_core::{Context, Studio};
 
@@ -11,28 +12,28 @@ const TASK: &str = "/Users/danielrispler/work/Falinks/.claude/worktrees/agent-a1
 const MAIN: &str = "/Users/danielrispler/work/Falinks";
 
 /// A hook event of the session's own agent in folder `cwd`, with transcript `path`.
-fn event(name: &str, cwd: &str, path: &std::path::Path, extra: &str) -> String {
-    format!(
-        r#"{{"session_id":"{SESSION}","hook_event_name":"{name}","cwd":"{cwd}","transcript_path":"{}","studio_received_ms":1793300000000{extra}}}"#,
-        path.display()
-    )
+fn event(name: &str, cwd: &str, path: &std::path::Path, extra: Value) -> String {
+    let mut base = common::base(SESSION, name, cwd, 1793300000000);
+    base["transcript_path"] = json!(path);
+    common::with(base, extra)
 }
 
-/// A session in `cwd` at its first step, `command`, with a transcript of its own for test `name`
-/// holding `lines`.
-fn session(name: &str, cwd: &str, lines: &str, command: &str) -> (Studio, std::path::PathBuf) {
-    let file = format!("studio-naming-{name}-{}.jsonl", std::process::id());
-    let path = std::env::temp_dir().join(file);
-    std::fs::write(&path, lines).expect("write the transcript");
-    let step = format!(
-        r#","tool_name":"Bash","tool_input":{{"command":{}}},"tool_use_id":"toolu_1""#,
-        serde_json::to_string(command).unwrap()
-    );
+/// A session in `cwd` at its first step, `command`, with a transcript of its own holding `lines`.
+fn session(cwd: &str, lines: &str, command: &str) -> (Studio, tempfile::NamedTempFile) {
+    let file = common::temp_file(lines);
+    let path = file.path();
+    let step =
+        json!({"tool_name": "Bash", "tool_input": {"command": command}, "tool_use_id": "toolu_1"});
     let studio = Studio::replayed([
-        event("UserPromptSubmit", cwd, &path, r#","prompt":"(scrubbed)""#),
-        event("PreToolUse", cwd, &path, &step),
+        event(
+            "UserPromptSubmit",
+            cwd,
+            path,
+            json!({"prompt": "(scrubbed)"}),
+        ),
+        event("PreToolUse", cwd, path, step),
     ]);
-    (studio, path)
+    (studio, file)
 }
 
 fn first(lines: usize) -> String {
@@ -74,7 +75,7 @@ fn snapshot(cached: u64, percentages: Option<(u64, u64)>) -> Option<Value> {
 
 #[test]
 fn the_context_follows_the_last_assistant_messages_token_counts() {
-    let (mut studio, path) = session("context", TASK, &first(3), "gh issue view 480");
+    let (mut studio, file) = session(TASK, &first(3), "gh issue view 480");
 
     follow(&mut studio);
     // 2 + 30,000 + 70,000 input tokens.
@@ -82,12 +83,12 @@ fn the_context_follows_the_last_assistant_messages_token_counts() {
     assert_eq!(tokens(&studio), Some(100_002));
 
     // A helper's line is its own context; the agent's next message counts.
-    std::fs::write(&path, first(6)).unwrap();
+    std::fs::write(file.path(), first(6)).unwrap();
     follow(&mut studio);
     assert_eq!(tokens(&studio), Some(250_004));
 
     // A new prompt starts a turn, not a context.
-    std::fs::write(&path, first(7)).unwrap();
+    std::fs::write(file.path(), first(7)).unwrap();
     follow(&mut studio);
     assert_eq!(tokens(&studio), Some(250_004));
 }
@@ -96,7 +97,7 @@ fn the_context_follows_the_last_assistant_messages_token_counts() {
 fn with_a_snapshot_the_context_is_claudes_status_line_view() {
     // danielrispler/Falinks#517, measurement 1's turn: the snapshot counts 2 + 4,901 + 84,899 = 89,802 tokens, its 9% used
     // and 91% left, whatever the transcript's latest message says.
-    let (mut studio, path) = session("snapshot", TASK, &first(3), "gh issue view 480");
+    let (mut studio, file) = session(TASK, &first(3), "gh issue view 480");
     follow(&mut studio);
     let claudes = snapshot(84_899, Some((9, 91)));
 
@@ -108,7 +109,7 @@ fn with_a_snapshot_the_context_is_claudes_status_line_view() {
     // The same snapshot again changes nothing.
     assert!(!studio.set_snapshot(SESSION, claudes));
     // The transcript's next message keeps the snapshot's view.
-    std::fs::write(&path, first(6)).unwrap();
+    std::fs::write(file.path(), first(6)).unwrap();
     follow(&mut studio);
     assert_eq!(
         measured(&studio),
@@ -118,7 +119,7 @@ fn with_a_snapshot_the_context_is_claudes_status_line_view() {
 
 #[test]
 fn a_snapshot_without_percentages_rounds_to_nearest() {
-    let (mut studio, _) = session("rounding", TASK, &first(3), "gh issue view 480");
+    let (mut studio, _file) = session(TASK, &first(3), "gh issue view 480");
     follow(&mut studio);
 
     // 2 + 4,901 + 197,797 = 202,700 tokens, 20.27% of the window: 20 used, 80 left, not 21.
@@ -131,7 +132,7 @@ fn a_snapshot_without_percentages_rounds_to_nearest() {
 
 #[test]
 fn before_the_first_api_call_the_transcript_counts_in_the_snapshots_window() {
-    let (mut studio, _) = session("no-usage", TASK, &first(3), "gh issue view 480");
+    let (mut studio, _file) = session(TASK, &first(3), "gh issue view 480");
     follow(&mut studio);
 
     let mut start = snapshot(0, None).unwrap();
@@ -146,7 +147,7 @@ fn before_the_first_api_call_the_transcript_counts_in_the_snapshots_window() {
 
 #[test]
 fn with_no_snapshot_a_session_has_a_token_count_and_no_share() {
-    let (mut studio, _) = session("no-snapshot", TASK, &first(3), "gh issue view 480");
+    let (mut studio, _file) = session(TASK, &first(3), "gh issue view 480");
 
     follow(&mut studio);
     assert!(!studio.set_snapshot(SESSION, None));
@@ -159,7 +160,7 @@ fn name(studio: &Studio) -> String {
 
 #[test]
 fn an_issue_branch_names_its_issue_its_pr_and_its_worktree() {
-    let (mut studio, _) = session("issue", TASK, &first(3), "gh issue view 480");
+    let (mut studio, _file) = session(TASK, &first(3), "gh issue view 480");
     follow(&mut studio);
     assert_eq!(name(&studio), "#480 · agent-a1b2c3d4");
 
@@ -177,7 +178,7 @@ fn an_issue_branch_names_its_issue_its_pr_and_its_worktree() {
 #[test]
 fn a_branch_that_names_no_issue_shows_itself() {
     let lines = first(3).replace("issue-480-naming", "fix-typo");
-    let (mut studio, _) = session("branch", TASK, &lines, "cargo test");
+    let (mut studio, _file) = session(TASK, &lines, "cargo test");
     follow(&mut studio);
     studio.set_pr("fix-typo", Some(12));
     assert_eq!(name(&studio), "fix-typo · PR #12 · agent-a1b2c3d4");
@@ -187,13 +188,13 @@ fn a_branch_that_names_no_issue_shows_itself() {
 fn a_worktree_named_after_its_branch_is_not_named_twice() {
     let task = "/Users/danielrispler/work/Falinks/.claude/worktrees/issue-480-naming";
     let lines = first(3).replace(TASK, task);
-    let (mut studio, _) = session("same", task, &lines, "cargo test");
+    let (mut studio, _file) = session(task, &lines, "cargo test");
     follow(&mut studio);
     assert_eq!(name(&studio), "#480 · issue-480-naming");
 
     let task = "/Users/danielrispler/work/Falinks/.claude/worktrees/fix-typo";
     let lines = lines.replace("issue-480-naming", "fix-typo");
-    let (mut studio, _) = session("same-branch", task, &lines, "cargo test");
+    let (mut studio, _file) = session(task, &lines, "cargo test");
     follow(&mut studio);
     assert_eq!(name(&studio), "fix-typo");
 }
@@ -203,12 +204,11 @@ fn the_main_checkout_shows_its_branch_and_folder_and_a_claimed_issue() {
     let lines = first(3)
         .replace("issue-480-naming", "main")
         .replace(TASK, MAIN);
-    let (mut studio, _) = session("main", MAIN, &lines, "cargo test");
+    let (mut studio, _file) = session(MAIN, &lines, "cargo test");
     follow(&mut studio);
     assert_eq!(name(&studio), "main · Falinks");
 
-    let (mut studio, _) = session(
-        "claim",
+    let (mut studio, _file) = session(
         MAIN,
         &lines,
         "cargo run --bin wayfinder-startup -- 266 --claim 480",
@@ -219,6 +219,6 @@ fn the_main_checkout_shows_its_branch_and_folder_and_a_claimed_issue() {
 
 #[test]
 fn before_its_transcript_is_read_a_session_is_named_by_its_worktree() {
-    let (studio, _) = session("unread", TASK, &first(3), "cargo test");
+    let (studio, _file) = session(TASK, &first(3), "cargo test");
     assert_eq!(name(&studio), "agent-a1b2c3d4");
 }

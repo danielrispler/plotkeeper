@@ -1,6 +1,7 @@
 //! Seam 1 (danielrispler/plotkeeper#102, Testing Decisions) for the step ledger
 //! (danielrispler/plotkeeper#110): hook events replayed through the core, and the rows they give.
 
+use crate::common;
 use serde_json::{Value, json};
 use std::path::PathBuf;
 use studio_core::{Bytes, Outcome, Row, Studio};
@@ -11,17 +12,9 @@ const SUBAGENT_RUN: &str = include_str!("fixtures/subagent-run.jsonl");
 
 /// A hook line of the session, at `ms` after the start, with `extra`'s fields.
 fn line(name: &str, ms: u64, extra: Value) -> String {
-    let mut line = json!({
-        "session_id": SESSION,
-        "hook_event_name": name,
-        "cwd": CWD,
-        "prompt_id": "p1",
-        "studio_received_ms": 1_793_265_000_000u64 + ms,
-    });
-    line.as_object_mut()
-        .unwrap()
-        .extend(extra.as_object().unwrap().clone());
-    line.to_string()
+    let mut base = common::base(SESSION, name, CWD, 1_793_265_000_000u64 + ms);
+    base["prompt_id"] = json!("p1");
+    common::with(base, extra)
 }
 
 fn prompt(ms: u64) -> String {
@@ -242,11 +235,10 @@ fn details_come_from_one_seek_and_one_read_of_the_rows_lines() {
         }
         offset += l.len() + 1;
     }
-    let path: PathBuf = std::env::temp_dir().join(format!("ledger-details-{}", std::process::id()));
-    std::fs::write(&path, &file).unwrap();
+    let mut log = tempfile::NamedTempFile::new().unwrap();
+    std::io::Write::write_all(&mut log, &file).unwrap();
 
-    let details = rows[1].details(&path).unwrap();
-    std::fs::remove_file(&path).unwrap();
+    let details = rows[1].details(log.path()).unwrap();
 
     let start = details.start.expect("the start line");
     let end = details.end.expect("the result line");

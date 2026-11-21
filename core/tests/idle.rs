@@ -3,6 +3,7 @@
 //! no Claude session is in a turn or has background tasks. The same answer names how each terminal
 //! comes back: a Claude terminal with `claude --resume <session_id>`, a shell as a shell.
 
+use crate::common;
 use serde_json::{Value, json};
 use studio_core::{Studio, Terminal};
 
@@ -10,19 +11,10 @@ const SESSION: &str = "5b1f0c2e-8d3a-4e7b-9a6c-1f2e3d4c5b6a";
 const CWD: &str = "/Users/danielrispler/work/Falinks";
 
 fn event(name: &str, extra: Value) -> String {
-    let mut event = json!({
-        "session_id": SESSION,
-        "hook_event_name": name,
-        "cwd": CWD,
-        "prompt_id": "p-1",
-        "studio_terminal_id": "claude-1",
-        "studio_received_ms": 1_793_262_000_000u64,
-    });
-    event
-        .as_object_mut()
-        .unwrap()
-        .extend(extra.as_object().unwrap().clone());
-    event.to_string()
+    let mut base = common::base(SESSION, name, CWD, 1_793_262_000_000u64);
+    base["prompt_id"] = json!("p-1");
+    base["studio_terminal_id"] = json!("claude-1");
+    common::with(base, extra)
 }
 
 /// A row of the daemon's `list`: the terminal's leader is `leader`, its foreground `foreground`.
