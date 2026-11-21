@@ -19,9 +19,19 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 const mergedLabel = (n: number) => `+${n} merged`;
 
+// A check's name: its suite, and its worktree's folder name when it ran outside the session's own worktree.
+const named = (c: Check) => {
+  const tree = c.worktree.replace(/\/+$/, "").split("/").pop();
+  return c.foreign && tree ? `${c.suite} in ${tree}` : c.suite;
+};
+
+// A check is listed once it has ended: a running one is not passed, failed or ran.
+const ended = (c: Check) => c.status !== "running";
+
 // The top level: "3 files · +2 merged · 2 checks passed". A check's status is its last run's, so only one that ended failed is named;
 // one that only "ran" is counted apart.
-export function evidenceLine({ files, checks }: Facts): string {
+export function evidenceLine({ files, checks: all }: Facts): string {
+  const checks = all.filter(ended);
   const count = (status: Check["status"]) => checks.filter((c) => c.status === status).length;
   const [passed, ran] = [count("passed"), count("ran")];
   return [
@@ -29,16 +39,17 @@ export function evidenceLine({ files, checks }: Facts): string {
     ...(files?.merged ? [mergedLabel(files.merged)] : []),
     ...(passed ? [`${plural(passed, "check")} passed`] : []),
     ...(ran ? [`${plural(ran, "check")} ran`] : []),
-    ...checks.filter((c) => c.status === "failed").map((c) => `✗ ${c.suite} failed`),
+    ...checks.filter((c) => c.status === "failed").map((c) => `✗ ${named(c)} failed`),
   ].join(" · ");
 }
 
 // Whether the turn has an evidence line: its agent reports trees (agy's does not), and it has files or checks.
 export const hasEvidence = (turn: Facts, capabilities: Pick<Capabilities, "turn_trees">): boolean =>
-  capabilities.turn_trees && (turn.files?.files.length ?? 0) + (turn.files?.merged ?? 0) + turn.checks.length > 0;
+  capabilities.turn_trees && (turn.files?.files.length ?? 0) + (turn.files?.merged ?? 0) + turn.checks.filter(ended).length > 0;
 
 // The opened list: each file with its agent, and each check with its status.
-export function evidenceRows({ files, checks }: Facts): EvidenceRow[] {
+export function evidenceRows({ files, checks: all }: Facts): EvidenceRow[] {
+  const checks = all.filter(ended);
   const counts = (added: number | null, removed: number | null) => (added === null || removed === null ? "" : ` +${added} −${removed}`);
   return [
     ...(files?.files ?? []).map((f): EvidenceRow => ({ kind: "file", label: `${f.from ? `${f.from} → ` : ""}${f.path}${counts(f.added, f.removed)}`, agent: f.agent, file: f })),
@@ -48,7 +59,9 @@ export function evidenceRows({ files, checks }: Facts): EvidenceRow[] {
       const last = c.runs.at(-1);
       return {
         kind: "check",
-        label: `${c.suite} ${c.status}${c.status === "ran" ? "" : after}`,
+        label: `${named(c)} ${c.status}${c.status === "ran" ? "" : after}`,
+        // The worker that made the last run, named as a file's agent is; a failed run's call reads its output.
+        ...(last?.agent ? { agent: last.agent } : {}),
         ...(c.status === "failed" && last ? { call: last.call, agent: last.agent } : {}),
       };
     }),
@@ -67,7 +80,7 @@ function checkRow(session: string, row: EvidenceRow): HTMLElement {
   const item = document.createElement("li");
   item.className = "evidence-check";
   if (row.call === undefined) {
-    item.append(text("span", row.label));
+    item.append(text("span", row.label), ...(row.agent ? [text("span", row.agent, "evidence-agent")] : []));
     return item;
   }
   const key = `${session} ${row.agent ?? ""} ${row.call}`;
@@ -95,7 +108,7 @@ function checkRow(session: string, row: EvidenceRow): HTMLElement {
   button.classList.add("evidence-fail");
   button.title = `Show or hide the output of ${row.label}`;
   button.setAttribute("aria-expanded", String(openOutputs.has(key)));
-  button.append(text("span", "✗", "mark"), code(row.label));
+  button.append(text("span", "✗", "mark"), code(row.label), ...(row.agent ? [text("span", row.agent, "evidence-agent")] : []));
   show();
   if (openOutputs.has(key)) fetch();
   item.append(button, pre, askAnchor(session, { kind: "check", agent: row.agent ?? null, call: row.call }, "this failed check"));

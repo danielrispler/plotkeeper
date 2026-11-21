@@ -33,7 +33,7 @@ import {
   stateLabels,
   type AskKind,
   type BlockedCommand,
-  type CheckLine,
+  type ListedCheck,
   type Question,
   type Selection,
   type SessionState,
@@ -291,8 +291,7 @@ export function railOf({ session, agent }: Selection, all: StoredCard[], placed:
   const blocks = feedTurns(turns, {
     cards,
     placed: own ? placed : [],
-    // A subagent's view: its session's checks and subagents are not its own.
-    checks: own ? session.checks : [],
+    // A subagent's view: its session's subagents are not its own.
     agents: own ? session.agents : [],
     questions: session.questions.filter((question) => question.agent === agent),
   });
@@ -315,22 +314,20 @@ export type FeedTurn = {
   index: number | null;
   turn: Turn | null;
   cards: StoredCard[];
-  checks: CheckLine[];
   agents: Subagent[];
   questions: Question[];
 };
 
 // The feed (danielrispler/Falinks#574): one block per turn, newest first, each holding the cards written in it (by their
-// id's time), and the checks, subagents and questions the core put in it. What has no turn goes in
+// id's time), and the subagents and questions the core put in it. What has no turn goes in
 // one last block, so nothing is lost.
 export function feedTurns(
   turns: Turn[],
-  { cards, placed = [], checks, agents, questions }: Pick<FeedTurn, "cards" | "checks" | "agents" | "questions"> & { placed?: PlacedCard[] },
+  { cards, placed = [], agents, questions }: Pick<FeedTurn, "cards" | "agents" | "questions"> & { placed?: PlacedCard[] },
 ): FeedTurn[] {
   const blocks: FeedTurn[] = [...turns.map((turn, index) => ({ index, turn })), { index: null, turn: null }].map((b) => ({
     ...b,
     cards: [],
-    checks: [],
     agents: [],
     questions: [],
   }));
@@ -343,11 +340,10 @@ export function feedTurns(
     block.cards.push(card);
     block.cards.sort((a, b) => cardTime(b.request.id) - cardTime(a.request.id));
   }
-  for (const check of [...checks].reverse()) at(check.turn).checks.push(check);
   for (const agent of [...agents].sort((a, b) => b.started_at - a.started_at)) at(agent.turn).agents.push(agent);
   for (const question of [...questions].reverse()) at(question.turn).questions.push(question);
   const rest = blocks.pop()!;
-  const empty = !rest.cards.length && !rest.checks.length && !rest.agents.length && !rest.questions.length;
+  const empty = !rest.cards.length && !rest.agents.length && !rest.questions.length;
   return [...blocks.reverse(), ...(empty ? [] : [rest])];
 }
 
@@ -450,26 +446,13 @@ function drawNow(session: Session | null, latest: Turn | null): Now | null {
   return now;
 }
 
-// What names "the same check" across runs: the command's first line up to any pipe or output redirection, as the typical
-// durations group them in core (`check_key`), so a retry of `cargo test 2>&1 | tail` is the same check.
-const checkKey = (command: string): string => command.split("\n")[0].split("|")[0].replace(/2>&1/g, "").split(/\s+/).filter(Boolean).join(" ");
-
-// The checks the feed lists under a turn: one still running and one whose last run failed. A check that passed, or that
-// failed and then passed on a retry, folds into the evidence line's count (danielrispler/plotkeeper#102, story 20).
-// `lines` run oldest first, so the last of a check's runs is its latest.
-export const shownChecks = (lines: CheckLine[]): CheckLine[] => {
-  const latest = new Map<string, CheckLine>();
-  for (const line of lines) latest.set(checkKey(line.command), line);
-  return lines.filter((line) => latest.get(checkKey(line.command)) === line && (line.ended_at === null || line.passed === false));
-};
-
 // A check line: its outcome, its command, and how long it took or, while it runs, its time against
 // its typical time. No colour, as colour is only for "needs you".
-export function checkElement(line: CheckLine): HTMLElement {
+export function checkElement(line: ListedCheck): HTMLElement {
   const item = document.createElement("li");
-  const label = line.ended_at === null ? "Running" : line.passed === null ? "Ran" : line.passed ? "Passed" : "Failed";
+  const label = line.status === "running" ? "Running" : "Failed";
   const time = counts(text("span", "", "check-time"), (now) => checkTime(line, now));
-  item.append(text("span", label, "outcome"), fullTitle(code(line.command), line.command), time);
+  item.append(text("span", label, "outcome"), fullTitle(code(line.statement), line.statement), time);
   return item;
 }
 
@@ -542,7 +525,7 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
     list.append(...entries.map((entry) => historyElement(session.id, entry)));
     node.append(list);
   }
-  const checksShown = shownChecks(block.checks);
+  const checksShown = turn?.listed ?? [];
   if (checksShown.length) {
     const list = document.createElement("ul");
     list.className = "checks";

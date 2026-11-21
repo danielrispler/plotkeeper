@@ -80,7 +80,7 @@ impl Work {
     }
 
     /// The session's own agent started a call of `tool` at `at`.
-    pub(crate) fn call(&mut self, tool: &Tool, at: u64) {
+    pub(crate) fn call(&mut self, tool: &Tool, at: u64, list: &[String]) {
         let skill = match &tool.kind {
             ToolKind::Skill(skill) => skill.as_deref(),
             _ => None,
@@ -96,7 +96,7 @@ impl Work {
         let next = match (&tool.kind, skill) {
             (_, Some(skill)) => skill_phase(without_plugin(skill)),
             (ToolKind::Command, _) => {
-                command_phase(tool.command.as_deref().unwrap_or_default(), current)
+                command_phase(tool.command.as_deref().unwrap_or_default(), current, list)
             }
             _ => None,
         };
@@ -164,8 +164,9 @@ fn skill_phase(skill: &str) -> Option<Phase> {
 }
 
 /// A command's phase. Tests run while implementing; the full checks once there is code to check, so a
-/// baseline run before any is part of orienting.
-fn command_phase(command: &str, current: Phase) -> Option<Phase> {
+/// baseline run before any is part of orienting. A check is an entry of the session's list: the light
+/// entries of the default list are tests, any other is a full check.
+fn command_phase(command: &str, current: Phase, list: &[String]) -> Option<Phase> {
     let has = |words: &str| command.contains(words);
     if has("gh pr merge") {
         Some(Phase::Merged)
@@ -173,9 +174,19 @@ fn command_phase(command: &str, current: Phase) -> Option<Phase> {
         Some(Phase::WaitingOnCi)
     } else if has("gh pr create") {
         Some(Phase::OpeningPr)
-    } else if has("ci-checks") || has("cargo clippy") {
-        (current >= Phase::Implementing).then_some(Phase::Checking)
-    } else if crate::is_check(command) || has("npm test") {
+    } else if let suites = crate::checks::suites(list, command)
+        && !suites.is_empty()
+    {
+        // Any entry besides the light ones makes the chain a full check.
+        let tests = |suite: &&str| {
+            crate::checks::DEFAULT.contains(suite) && !["ci-checks", "cargo clippy"].contains(suite)
+        };
+        if suites.iter().all(tests) {
+            Some(Phase::Implementing)
+        } else {
+            (current >= Phase::Implementing).then_some(Phase::Checking)
+        }
+    } else if has("npm test") {
         Some(Phase::Implementing)
     } else {
         None

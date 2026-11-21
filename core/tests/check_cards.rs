@@ -75,15 +75,14 @@ fn a_check_over_2_minutes_requests_one_card_at_its_start_on_the_change_so_far_an
     assert_eq!(request.session_id, SESSION);
 
     // The check's result settles the guess on its card.
-    let checks = &studio.session(SESSION).unwrap().checks;
-    let carded: Vec<_> = checks.iter().filter(|l| l.card.is_some()).collect();
+    let carded = &studio.session(SESSION).unwrap().check_cards;
     let [line] = &carded[..] else {
-        panic!("one check line with a card");
+        panic!("one check card");
     };
-    assert_eq!(line.card.as_ref(), Some(&request.id));
+    assert_eq!(line.card, request.id);
     // It passed, and its exit code counts, so the guess on its card is settled.
     assert_eq!(line.passed, Some(true));
-    assert!(line.ended_at.is_some());
+    assert!(line.ended);
 }
 
 #[test]
@@ -107,11 +106,34 @@ fn a_long_check_that_fails_settles_its_guess_as_failed() {
 
     let lines: Vec<usize> = cards.iter().map(|(line, _)| *line).collect();
     assert_eq!(lines, [9, 15]);
-    let checks = &studio.session(SESSION).unwrap().checks;
-    let settled: Vec<Option<bool>> = checks
-        .iter()
-        .filter(|l| l.card.is_some())
-        .map(|l| l.passed)
-        .collect();
+    let carded = &studio.session(SESSION).unwrap().check_cards;
+    let settled: Vec<Option<bool>> = carded.iter().map(|c| c.passed).collect();
     assert_eq!(settled, [Some(true), Some(false)]);
+}
+
+#[test]
+fn a_long_check_in_a_chain_that_fails_is_not_counted_and_settles_no_guess() {
+    let mut log = log();
+    later(&mut log, 9, 200_000);
+    let prompt: Value = serde_json::from_str(&log[11]).unwrap();
+    let edit = |line: &String, after: u64| {
+        let mut event: Value = serde_json::from_str(line).unwrap();
+        event["prompt_id"] = prompt["prompt_id"].clone();
+        let at = prompt["studio_received_ms"].as_u64().unwrap();
+        event["studio_received_ms"] = (at + after).into();
+        event.to_string()
+    };
+    let (pre, post) = (edit(&log[6], 1000), edit(&log[7], 1100));
+    log.splice(12..12, [pre, post]);
+    // `git add` could be what failed, so the failed third run says nothing of the check.
+    let log: Vec<String> = log
+        .iter()
+        .map(|l| l.replace(COMMAND, "git add -A && cargo test"))
+        .collect();
+
+    let (studio, _) = check_cards(&log);
+
+    let carded = &studio.session(SESSION).unwrap().check_cards;
+    let settled: Vec<Option<bool>> = carded.iter().map(|c| c.passed).collect();
+    assert_eq!(settled, [Some(true), None]);
 }

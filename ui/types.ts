@@ -32,16 +32,14 @@ export type Identity = { issue: number | null; branch: string | null; pr: number
 export type SessionState = "needs_you" | "running" | "your_turn" | "idle" | "ended";
 // When something started and ended, in Unix milliseconds; `end` is null while it runs.
 export type Span = { start: number; end: number | null };
-// A check that runs or ran, oldest first: a pass or fail line once it ends. `passed` is null when its
-// exit code is masked, and while it runs. `typical_ms` is its typical duration when it started (danielrispler/Falinks#473).
-export type CheckLine = {
-  command: string;
-  passed: boolean | null;
+// A check the feed lists under its turn (#268): the latest run of a check of the session's own agent, while it runs or
+// after it failed. `ended_at` is null while it runs; `typical_ms` is its command's typical duration.
+export type ListedCheck = {
+  statement: string;
+  status: CheckStatus;
   started_at: number;
   ended_at: number | null;
   typical_ms: number | null;
-  // The turn it started in, an index into `Session.turns` (danielrispler/Falinks#574).
-  turn: number | null;
 };
 // Who spawned a subagent: the session's own agent, another subagent, or no known spawn.
 export type Parent = "session" | "unattached" | { agent: string };
@@ -83,15 +81,18 @@ export type Answer = "open" | "not_answered" | { answered: Record<string, string
 export type Question = { tool_use_id: string; agent: string | null; questions: Asked[]; answer: Answer; turn: number | null };
 // A turn, a block in the rail's feed (danielrispler/Falinks#574): its prompt's first line, or "worker <name> returned";
 // `id` names its card and summary once its `Stop` came; `message` is its final reply's first line.
-// How a check, or one run of it, ended (danielrispler/plotkeeper#112): "ran" is a check whose exit code does not say.
-export type CheckStatus = "passed" | "failed" | "ran";
-// A check suite of a turn: the list entry its commands matched, its last run's status, how many earlier runs
+// How a check, or one run of it, ended (danielrispler/plotkeeper#112): "ran" is a check whose exit code does not say, and "running" one that has not ended.
+export type CheckStatus = "passed" | "failed" | "ran" | "running";
+// A check of a turn: a suite, the list entry its commands matched, in a worktree; its last run's status, how many earlier runs
 // failed, and each run with its own command. `call` and `agent` find a run's output (`check_output`).
 export type Check = {
   suite: string;
+  // The worktree it ran in, as its root, and whether that is not the session's own, so a row names it.
+  worktree: string;
+  foreign: boolean;
   status: CheckStatus;
   retries: number;
-  runs: { command: string; status: CheckStatus; exit_code: number | null; call: string; agent: string | null }[];
+  runs: { command: string; statement: string; status: CheckStatus; exit_code: number | null; call: string; agent: string | null; started_at: number | null }[];
 };
 export type Turn = {
   started_at: number;
@@ -100,6 +101,8 @@ export type Turn = {
   id: string | null;
   message: string | null;
   checks: Check[];
+  // The checks its feed block lists, newest first (the core's rule, not the window's).
+  listed: ListedCheck[];
   files: TurnFiles | null;
 };
 // A file that differs between a turn's trees: its worktree's root, its path from there (a rename's new one),
@@ -163,7 +166,6 @@ export type Session = {
   turn_span: Span | null;
   step_span: Span | null;
   state: SessionState;
-  checks: CheckLine[];
   agents: Subagent[];
   asker: Asker | null;
   prompts: Prompt[];

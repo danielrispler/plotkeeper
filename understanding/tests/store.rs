@@ -1725,3 +1725,43 @@ fn a_shown_tap_on_a_card_marks_its_quiz_shown_as_the_rails_show_does_and_never_a
     store.quiz_tap("toolu_01B", Tap::Shown, 7).unwrap();
     assert_eq!(shown(&store, "toolu_01B"), None);
 }
+
+#[test]
+fn a_summary_stored_before_the_checks_grew_fields_still_opens() {
+    let data = tempfile::tempdir().unwrap();
+    let log = data.path().join("events.jsonl");
+    let mut store = CardStore::open(data.path().join("cards-v2.json")).unwrap();
+    let check = serde_json::json!({
+        "suite": "cargo test", "worktree": "/w", "foreign": false, "status": "passed", "retries": 0,
+        "runs": [{ "command": "cargo test", "statement": "cargo test", "status": "passed",
+            "exit_code": 0, "call": "t1", "agent": null, "started_at": 1, "ended_at": 2 }],
+    });
+    let request = studio_core::SummaryRequest {
+        id: "t1".into(),
+        facts: studio_core::Facts {
+            checks: vec![serde_json::from_value(check).unwrap()],
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let summary: studio_understanding::TurnSummary =
+        serde_json::from_value(serde_json::json!({ "summary": "Did a thing." })).unwrap();
+    store.add_summary(request, summary).unwrap();
+    // What the build before the checks module wrote: no statement, times, worktree or foreign.
+    let path = data.path().join("summaries.json");
+    let mut stored: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let check = &mut stored[0]["request"]["facts"]["checks"][0];
+    check.as_object_mut().unwrap().remove("worktree");
+    check.as_object_mut().unwrap().remove("foreign");
+    for field in ["statement", "started_at", "ended_at"] {
+        check["runs"][0].as_object_mut().unwrap().remove(field);
+    }
+    std::fs::write(&path, stored.to_string()).unwrap();
+
+    let reopened = CardStore::open_beside(&log).unwrap();
+
+    let kept = &reopened.summaries()[0].request.facts.checks[0];
+    assert_eq!(kept.runs[0].statement, "");
+    assert_eq!(kept.worktree, "");
+}

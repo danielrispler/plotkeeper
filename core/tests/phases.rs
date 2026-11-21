@@ -215,3 +215,57 @@ fn the_agents_time_leaves_out_time_between_turns_and_time_that_needs_daniel() {
     assert_eq!(work.phases[1].phase, Phase::Implementing);
     assert_eq!(work.phases[1].agent_ms, 2 * MIN);
 }
+
+/// The phases of a session of a project whose list is `cargo test` and `make verify`, after it ran
+/// `commands`.
+fn phases_of_project(commands: &[&str]) -> Vec<Phase> {
+    let mut studio = Studio::default();
+    studio.set_check_lists([(
+        "/w".to_string(),
+        vec!["cargo test".to_string(), "make verify".to_string()],
+    )]);
+    let mut lines = vec![
+        event(MADE_UP, "SessionStart", 0, r#""source":"startup""#),
+        event(
+            MADE_UP,
+            "UserPromptSubmit",
+            0,
+            r#""prompt":"/implement issue 1""#,
+        ),
+    ];
+    for (n, command) in commands.iter().enumerate() {
+        lines.extend(bash(
+            MADE_UP,
+            &format!("b{n}"),
+            (n as u64 + 1) * MIN,
+            command,
+        ));
+    }
+    lines.iter().for_each(|l| studio.replay(l));
+    let work = &session(&studio, "5e1f0c2a").work;
+    work.phases.iter().map(|p| p.phase).collect()
+}
+
+#[test]
+fn a_command_that_runs_an_entry_of_the_projects_own_list_starts_the_checking_phase() {
+    assert_eq!(
+        phases_of_project(&["cargo test", "make verify -j4"]),
+        [Phase::Orienting, Phase::Implementing, Phase::Checking]
+    );
+}
+
+#[test]
+fn a_command_of_the_default_list_that_the_projects_list_lacks_starts_no_phase() {
+    assert_eq!(
+        phases_of_project(&["cargo test", "cargo clippy"]),
+        [Phase::Orienting, Phase::Implementing]
+    );
+}
+
+#[test]
+fn a_chain_that_runs_a_full_check_after_a_test_starts_the_checking_phase() {
+    assert_eq!(
+        phases_of_project(&["cargo test", "cargo test && make verify"]),
+        [Phase::Orienting, Phase::Implementing, Phase::Checking]
+    );
+}

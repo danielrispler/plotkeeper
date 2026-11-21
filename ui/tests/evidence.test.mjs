@@ -11,7 +11,7 @@ const { evidenceLine, evidenceRows, evidenceElement, fileRow, hasEvidence } = aw
 
 const file = (path, added, removed, extra = {}) => ({ root: "/r", path, from: null, added, removed, ...extra });
 const run = (status, call, exit_code = null) => ({ command: "cargo test", status, exit_code, call, agent: null });
-const check = (suite, status, retries = 0, runs = [run(status, `c-${suite}`, status === "failed" ? 101 : 0)]) => ({ suite, status, retries, runs });
+const check = (suite, status, retries = 0, runs = [run(status, `c-${suite}`, status === "failed" ? 101 : 0)], worktree = "/r", foreign = false) => ({ suite, worktree, foreign, status, retries, runs });
 const same = (a, b) => a.length === b.length && a.every((node, i) => node === b[i]);
 const files = (list, merged = 0) => ({ files: list, merged });
 
@@ -33,6 +33,22 @@ test("a failure is named only for a check whose last run failed; a retried pass 
   assert.doesNotMatch(retried, /✗|failed/);
   assert.equal(evidenceLine({ files: null, checks: [check("cargo test", "ran"), check("go test", "ran")] }), "2 checks ran");
   assert.equal(evidenceLine({ files: null, checks: [check("a", "passed"), check("b", "ran")] }), "1 check passed · 1 check ran");
+});
+
+test("a suite in two worktrees is two checks in the count, and a check outside the session's own worktree names its worktree", () => {
+  const other = (suite, status) => check(suite, status, 0, undefined, "/w/other", true);
+  const checks = [check("cargo test", "failed"), other("cargo test", "passed")];
+  assert.equal(evidenceLine({ files: null, checks }), "1 check passed · ✗ cargo test failed");
+  assert.equal(evidenceLine({ files: null, checks: [other("cargo test", "failed")] }), "✗ cargo test in other failed");
+  assert.deepEqual(evidenceRows({ files: null, checks }).map((r) => r.label), ["cargo test failed", "cargo test in other passed"]);
+  assert.deepEqual(evidenceRows({ files: null, checks: [other("go test", "ran")] }).map((r) => r.label), ["go test in other ran"]);
+});
+
+test("a running check is not listed until it ends", () => {
+  const running = check("cargo test", "running");
+  assert.equal(evidenceLine({ files: null, checks: [running, check("go test", "passed")] }), "1 check passed");
+  assert.deepEqual(evidenceRows({ files: null, checks: [running] }), []);
+  assert.equal(hasEvidence({ files: null, checks: [running] }, { turn_trees: true }), false);
 });
 
 test("opened: each file with its line counts and its agent, each check with its status, and no external row", () => {
@@ -262,4 +278,18 @@ test("the opened line draws the merged row as plain text, without a hunk", () =>
   walk(node);
   assert.equal(items.length, 1);
   assert.match(JSON.stringify(items[0]), /\+2 merged/);
+});
+
+test("a check whose last run is a worker's shows that worker, as a file row does, and a failed one keeps its call", () => {
+  const byWorker = (status, agent) => check("cargo test", status, 0, [{ ...run(status, "w-call", status === "failed" ? 101 : 0), agent }]);
+  const passed = evidenceRows({ files: null, checks: [byWorker("passed", "w1"), check("cargo clippy", "passed")] });
+  assert.deepEqual(passed.map((r) => r.agent ?? null), ["w1", null]);
+  assert.equal(passed[0].call, undefined);
+  const failed = evidenceRows({ files: null, checks: [byWorker("failed", "w1")] });
+  assert.deepEqual([failed[0].call, failed[0].agent], ["w-call", "w1"]);
+
+  const agents = (checks) => evidenceElement("s5", 2, { files: null, checks }, { only: "all" }).find("span").filter((s) => s.className === "evidence-agent");
+  assert.deepEqual(agents([byWorker("passed", "w1")]).map((s) => s.text), ["w1"]);
+  assert.deepEqual(agents([byWorker("failed", "w1")]).map((s) => s.text), ["w1"]);
+  assert.deepEqual(agents([check("cargo test", "passed")]), []);
 });

@@ -3,7 +3,7 @@
 //! the numstat the shell hands back, as `git diff --numstat` would give it.
 
 use serde_json::{Value, json};
-use studio_core::{Numstat, RootDiff, Studio, TurnDiff};
+use studio_core::{CheckStatus, Numstat, RootDiff, Studio, TurnDiff};
 
 const SESSION: &str = "5b1c7e30-9d2a-4f8b-8c63-1e0a7d4b9f52";
 const ROOT: &str = "/w/repo";
@@ -1245,4 +1245,44 @@ fn a_running_turn_the_shell_settled_is_asked_again_once_its_stop_lands_end_trees
     assert_eq!(again.len(), 1);
     assert!(again[0].ended);
     assert_eq!(again[0].trees[0].end.as_deref(), Some("e1"));
+}
+
+/// A Bash call of the session's own agent: its start, and its result unless `ends` is false.
+fn check_call(ms: u64, id: &str, command: &str, ends: bool) -> Vec<String> {
+    let call =
+        json!({ "tool_name": "Bash", "tool_input": { "command": command }, "tool_use_id": id });
+    let mut lines = vec![line("PreToolUse", ms, call.clone())];
+    if ends {
+        let mut end = call;
+        end["tool_response"] = json!({ "stdout": "ok", "stderr": "" });
+        lines.push(line("PostToolUse", ms + 100, end));
+    }
+    lines
+}
+
+#[test]
+fn a_summarys_facts_hold_only_the_checks_and_runs_that_ended() {
+    let mut lines = vec![
+        prompt(json!({ ROOT: "s1" })),
+        edit(1_000, "e1", "/w/repo/src/a.rs", None),
+    ];
+    lines.extend(check_call(2_000, "t1", "cargo test", true));
+    // The same check runs again, and another check has only started.
+    lines.extend(check_call(3_000, "t2", "cargo test", false));
+    lines.extend(check_call(3_500, "t3", "npm run check", false));
+    lines.push(stop(json!({ ROOT: "e1" })));
+    let studio = Studio::replayed(lines);
+    let turn = &studio.session(SESSION).unwrap().turns[0];
+    assert_eq!(turn.checks.len(), 2);
+    let ask = studio.summary_ask(turn.id.as_deref().unwrap()).unwrap();
+
+    let facts = studio.summary_facts(&ask, None);
+
+    let shown: Vec<_> = facts
+        .checks
+        .iter()
+        .map(|c| (c.suite.as_str(), c.status, c.runs.len()))
+        .collect();
+    assert_eq!(shown, [("cargo test", CheckStatus::Passed, 1)]);
+    assert!(!serde_json::to_string(&facts).unwrap().contains("running"));
 }

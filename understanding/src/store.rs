@@ -51,7 +51,7 @@ pub struct StoredCard {
 }
 
 /// What a check's result says about the guess on its card: it passed, it failed, or its exit code
-/// does not say (`CheckLine::passed`), so the guess is not counted.
+/// does not say (`CheckCard::passed`), so the guess is not counted.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CheckResult {
@@ -815,10 +815,8 @@ impl CardStore {
     /// Settles the cards of `session`'s checks that ended (`settle`). The shell calls it after each
     /// log read, once a card is stored and before a tap, so a tap after the result never counts.
     pub fn settle_checks(&mut self, session: &Session) -> io::Result<()> {
-        for line in session.checks.iter().filter(|l| l.ended_at.is_some()) {
-            if let Some(card) = &line.card {
-                self.settle(card, line.passed)?;
-            }
+        for check in session.check_cards.iter().filter(|c| c.ended) {
+            self.settle(&check.card, check.passed)?;
         }
         Ok(())
     }

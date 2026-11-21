@@ -59,6 +59,14 @@ pub struct Row {
     pub ran: bool,
     /// Whether its result is a command's start in the background, which has no result yet.
     pub background: bool,
+    /// The background task a command started, and how its notification says it ended.
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
+    pub task: Option<String>,
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
+    pub reported: Option<String>,
+    /// When that notification was received.
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
+    reported_at: Option<u64>,
     /// `None` until its result lands.
     pub outcome: Option<Outcome>,
     /// The worktree roots the call touched (danielrispler/plotkeeper#207).
@@ -114,6 +122,22 @@ impl Row {
     /// When it happened: its start, else its result, as the hooks are async.
     pub(crate) fn at(&self) -> Option<u64> {
         self.started_at.or(self.ended_at)
+    }
+
+    /// When it started: its start, else its result's time less how long it took, as the hooks are async.
+    pub(crate) fn began(&self) -> Option<u64> {
+        let end = self.ended_at.zip(self.duration_ms);
+        self.started_at
+            .or(end.map(|(end, took)| end.saturating_sub(took)))
+    }
+
+    /// When it ended: its result's time, or for a command in the background its notification's;
+    /// `None` while it runs.
+    pub(crate) fn finished(&self) -> Option<u64> {
+        match self.background {
+            true => self.reported_at,
+            false => self.ended_at,
+        }
     }
 
     /// Whether it ended in failure.
@@ -223,13 +247,37 @@ impl Ledger {
         tool: &Tool,
         turn: Option<usize>,
         roots: Vec<String>,
-    ) {
+    ) -> Option<usize> {
         let at = event.studio_received_ms;
         let row = self.of(event, tool, turn);
         row.started_at = Some(at);
         row.take_roots(roots);
         row.start = Some(event.line);
         row.settle();
+        row.turn
+    }
+
+    /// Takes a notification's report, received at `at`, that background task `task` ended as `status`;
+    /// the row of its call, when a row has the task and no report ended it before.
+    pub(crate) fn report(&mut self, task: &str, status: &str, at: u64) -> Option<&Row> {
+        let row = self
+            .rows
+            .iter_mut()
+            .find(|r| r.task.as_deref() == Some(task))
+            .filter(|r| r.reported.is_none())?;
+        row.reported = Some(status.into());
+        row.reported_at = Some(at);
+        Some(row)
+    }
+
+    /// The call `call` of `agent` was blocked, so it never ran: it has no result to wait for.
+    pub(crate) fn block(&mut self, agent: Option<&str>, call: &str) {
+        let key = (agent.map(Into::into), call.to_string());
+        if let Some(&i) = self.index.get(&key)
+            && self.rows[i].outcome.is_none()
+        {
+            self.rows[i].outcome = Some(Outcome::Rejected);
+        }
     }
 
     /// Takes the result of `tool`'s call.
@@ -240,7 +288,7 @@ impl Ledger {
         turn: Option<usize>,
         failed: bool,
         roots: Vec<String>,
-    ) {
+    ) -> Option<usize> {
         let at = event.studio_received_ms;
         let outcome = match failed {
             false => Outcome::Succeeded,
@@ -250,16 +298,18 @@ impl Ledger {
             },
         };
         let took = event.took();
-        let (ran, background) = (event.ran(), event.background_task().is_some());
+        let (ran, task) = (event.ran(), event.background_task().map(String::from));
         let row = self.of(event, tool, turn);
         row.ended_at = Some(at);
         row.take_roots(roots);
         row.took = took;
         row.outcome = Some(outcome);
         row.ran = ran;
-        row.background = background;
+        row.background = task.is_some();
+        row.task = task;
         row.end = Some(event.line);
         row.settle();
+        row.turn
     }
 }
 

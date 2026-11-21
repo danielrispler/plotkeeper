@@ -24,12 +24,11 @@ mod turn_files;
 mod work;
 pub use agy::{CAPABILITIES as AGY_CAPABILITIES, Drift as AgyDrift, DriftKind as AgyDriftKind};
 pub use ask::{Anchor, AskFact, AskFacts, AskSection};
-pub(crate) use checks::is_check;
+use checks::matched;
 pub use checks::{
-    Check, CheckLists, Output as CheckOutput, Run as CheckRun, Status as CheckStatus,
+    Check, CheckLists, Listed, Output as CheckOutput, Run as CheckRun, Status as CheckStatus,
     output as check_output,
 };
-use checks::{exit_code_counts, matched};
 pub use claude::CAPABILITIES as CLAUDE_CAPABILITIES;
 pub use event::{Capabilities, TranscriptFormat};
 use event::{Event, Happened, Origin, Start, ToolKind};
@@ -70,8 +69,8 @@ pub struct Studio {
     log_end: u64,
     /// The turns the replay saw end with both trees, for `backfill`.
     ended: Vec<Backfill>,
-    /// How long each check ran when it did not fail, by `check_key`, oldest first (danielrispler/Falinks#461, decision 13).
-    durations: HashMap<String, Vec<u64>>,
+    /// How long each command of checks ran when it did not fail (danielrispler/Falinks#461, decision 13).
+    durations: checks::Durations,
     /// The row of each session that continues another after a `/clear`, by its own id (danielrispler/Falinks#461,
     /// decision 18). A session not here is its own row.
     rows: HashMap<String, String>,
@@ -223,9 +222,10 @@ pub struct Session {
     /// Its latest `Stop` listed background tasks.
     #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     background: bool,
-    /// The checks that ran, oldest first: pass or fail lines in the session's timeline (danielrispler/Falinks#369,
-    /// decision 14).
-    pub checks: Vec<CheckLine>,
+    /// The cards that long checks requested at their start, whose guess their result settles
+    /// (danielrispler/Falinks#461, decision 15), oldest first.
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
+    pub check_cards: Vec<CheckCard>,
     /// The tool calls whose `PreToolUse` landed and whose `PostToolUse` has not.
     #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     running: Vec<Call>,
@@ -476,22 +476,17 @@ struct Since {
 /// 20 minutes, a starting guess (danielrispler/Falinks#369, decision 11 and Further Notes).
 const FALLBACK_MS: u64 = 20 * 60 * 1000;
 
-/// 2 minutes, a starting guess (danielrispler/Falinks#461, decision 22): a check that usually runs longer gets a card at
-/// its start (decision 15).
-const LONG_CHECK_MS: u64 = 2 * 60 * 1000;
-
 /// A check a `PreToolUse` starts (`Studio::check_start`): its whole command, and its typical duration
 /// (`Studio::typical`).
 struct CheckStart {
     command: String,
-    counts: bool,
     typical: Option<u64>,
 }
 
 impl CheckStart {
     /// It usually takes over 2 minutes, so it gets a card at its start (danielrispler/Falinks#461, decision 15).
     fn long(&self) -> bool {
-        self.typical.is_some_and(|ms| ms > LONG_CHECK_MS)
+        checks::is_long(self.typical)
     }
 }
 
@@ -546,6 +541,10 @@ pub struct Turn {
     files_asked: Option<(u64, bool)>,
     /// How its checks ended, its workers' included: each suite's last run (danielrispler/plotkeeper#112).
     pub checks: Vec<Check>,
+    /// The checks the feed lists under it: of its own agent, each one's latest run while it runs or
+    /// after it failed, newest first.
+    #[serde(default)]
+    pub listed: Vec<Listed>,
 }
 
 /// Who sent a prompt: Daniel, or Claude Code waking the session when one of its tasks returns.
@@ -1342,6 +1341,40 @@ impl Session {
         other.filter(|_| in_session).cloned()
     }
 
+    /// Turn `turn`'s checks against `list`. A call that recorded no worktree is in the session's
+    /// folder's, or its worker's own.
+    fn checks_of(&self, turn: usize, list: &[String], roots: &Roots) -> Vec<checks::Check> {
+        let home = |agent: Option<&str>| match agent.and_then(|id| self.subagent(id)) {
+            Some(worker) if !worker.root.is_empty() => worker.root.clone(),
+            _ => roots.of(&self.cwd),
+        };
+        checks::of_turn(&self.ledger, turn, list, &home)
+    }
+
+    /// Turn `turn`'s checks and the ones its feed lists, read again from the ledger.
+    fn recheck(
+        &mut self,
+        turn: usize,
+        list: &[String],
+        roots: &Roots,
+        durations: &checks::Durations,
+    ) {
+        let found = self.checks_of(turn, list, roots);
+        let typical = |command: &str| durations.typical(list, command);
+        self.turns[turn].listed = checks::listed(&found, &typical);
+        self.turns[turn].checks = found;
+    }
+
+    /// Settles what the check cards wait on: the checks of their calls that ended.
+    fn settle_cards(&mut self, list: &[String]) {
+        for card in self.check_cards.iter_mut().filter(|c| !c.ended) {
+            let row = self.ledger.row(None, &card.call);
+            if let Some(passed) = row.and_then(|row| checks::settled(row, list)) {
+                (card.ended, card.passed) = (true, passed);
+            }
+        }
+    }
+
     /// Whether subagent `id` gets cards of its own: a worker in a worktree of its own.
     fn has_cards(&self, id: &str) -> bool {
         self.subagent(id)
@@ -2124,76 +2157,17 @@ pub struct Fingerprint {
     pub began: Option<u64>,
 }
 
-/// A check that runs or ran, shown as a pass or fail line once it ends.
+/// The card a long check's start requested (danielrispler/Falinks#461, decision 15), and how the check ended.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct CheckLine {
-    /// The command's first line.
-    pub command: String,
-    /// Whether the command exited 0, when that says whether the check passed: nothing in the
-    /// command masks the check's exit code (`exit_code_counts`). `None` otherwise, and while it runs.
-    pub passed: Option<bool>,
-    /// When it started, and when it ended: its result, or for a command in the background its
-    /// `<task-notification>`; `None` while it runs (danielrispler/Falinks#461, decision 13).
-    pub started_at: u64,
-    pub ended_at: Option<u64>,
-    /// Its typical duration when it started, from the checks that ran before (`Studio::typical`).
-    pub typical_ms: Option<u64>,
-    /// The card its start requested, when it usually takes over 2 minutes (danielrispler/Falinks#461, decision 15),
-    /// whose guess its result settles.
-    pub card: Option<String>,
-    /// The turn of its session it started in (`Session::turns`).
-    pub turn: Option<usize>,
-    /// Its call's `tool_use_id`, and its background task's id once it moved to the background.
-    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
+pub struct CheckCard {
+    /// The card's id (`CardRequest::id`).
+    pub card: String,
+    /// The check's call: its row in the ledger.
     call: String,
-    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
-    task: Option<String>,
-    /// Whether its exit code says whether it passed (`exit_code_counts`).
-    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
-    counts: bool,
-}
-
-impl CheckLine {
-    fn new(command: &str, counts: bool, call: &str, at: u64, typical_ms: Option<u64>) -> Self {
-        CheckLine {
-            command: command.lines().next().unwrap_or_default().into(),
-            passed: None,
-            started_at: at,
-            ended_at: None,
-            typical_ms,
-            card: None,
-            turn: None,
-            call: call.into(),
-            task: None,
-            counts,
-        }
-    }
-
-    /// It ended at `at`, failed or not, which its typical duration counts only when it did not fail.
-    fn end(&mut self, failed: bool, at: u64, durations: &mut HashMap<String, Vec<u64>>) {
-        self.ended_at = Some(at);
-        self.passed = self.counts.then_some(!failed);
-        if !failed {
-            let runs = durations.entry(check_key(&self.command)).or_default();
-            runs.push(at.saturating_sub(self.started_at));
-        }
-    }
-}
-
-/// What typical durations group check runs by: the command's first line, up to any pipe or output
-/// redirection, so `cargo test 2>&1 | tail` counts with `cargo test`.
-fn check_key(command: &str) -> String {
-    let first = command.lines().next().unwrap_or_default();
-    let first = first.split('|').next().unwrap_or_default();
-    let first = first.replace("2>&1", "");
-    first.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-/// The lower median of `runs`, `None` when there is none.
-fn median(runs: &[u64]) -> Option<u64> {
-    let mut runs = runs.to_vec();
-    runs.sort_unstable();
-    runs.get(runs.len().checked_sub(1)? / 2).copied()
+    /// Whether the check ended, so that its result settles the guess.
+    pub ended: bool,
+    /// Whether it passed, when its exit code says (the check model's rule); `None` otherwise.
+    pub passed: Option<bool>,
 }
 
 /// The worktree a card's change starts from (danielrispler/Falinks#369, decision 10): the session's previous card, or its
@@ -2764,13 +2738,12 @@ impl Studio {
         // The card a long check's start requests, which its line keeps.
         let mut check_card = None;
         let touches = self.touches(&event);
+        let command = event.tool().and_then(|t| t.command.as_deref());
         let called = if event.tool().is_some() {
             self.named_roots(&event)
         } else {
             Vec::new()
         };
-        let command = event.tool().and_then(|t| t.command.as_deref());
-        let typical = self.typical(command.unwrap_or_default());
         let roots = &self.roots;
         let session = self
             .sessions
@@ -3106,6 +3079,17 @@ impl Studio {
             match happened {
                 Happened::CommandBlocked { tool, id, reason } => {
                     let command = tool.command.clone().unwrap_or_default();
+                    // The blocked call never ran, so it is no run of a check.
+                    session.check_cards.retain(|c| c.call != *id);
+                    session.ledger.block(event.agent_id.as_deref(), id);
+                    let turn = session.ledger.row(event.agent_id.as_deref(), id);
+                    let turn = turn
+                        .and_then(|r| r.turn)
+                        .filter(|t| *t < session.turns.len());
+                    if let Some(turn) = turn {
+                        let list = self.check_lists.of(&session.cwd);
+                        session.recheck(turn, list, &self.roots, &self.durations);
+                    }
                     // The same command blocked again after Allow is its card's, not a new one. A running
                     // card takes only the block of its own retry: another call's is a card of its own.
                     let again = session
@@ -3118,9 +3102,8 @@ impl Studio {
                             BlockedStatus::Running => c.run.as_ref() == Some(id),
                             _ => false,
                         });
-                    // The blocked call never ran: it leaves the running calls, its step and its check line.
+                    // The blocked call never ran: it leaves the running calls and its step.
                     session.running.retain(|c| c.id.as_ref() != Some(id));
-                    session.checks.retain(|l| l.call != *id);
                     match &event.agent_id {
                         Some(agent) => {
                             let mut agents = session.agents.iter_mut();
@@ -3235,13 +3218,20 @@ impl Studio {
                     // A background check ends at the notification that names its task.
                     for (task, status) in event.reported() {
                         let (task, status) = (task.as_str(), status.as_str());
-                        let running = session.checks.iter_mut().filter(|l| l.ended_at.is_none());
-                        let mut lines = running.filter(|l| l.task.as_deref() == Some(task));
-                        if let Some(line) = lines.next() {
-                            line.end(status != "completed", at, &mut self.durations);
-                            if !matches!(status, "completed" | "failed") {
-                                line.passed = None;
+                        // Its turn's checks are read again with what the notification reports.
+                        let row = session.ledger.report(task, status, at).cloned();
+                        let list = self.check_lists.of(&session.cwd);
+                        if let Some(row) = row {
+                            let ran = row.began().filter(|_| row.agent.is_none());
+                            if let (Some(began), "completed") = (ran, status) {
+                                let command = row.command.as_deref().unwrap_or_default();
+                                let took = at.saturating_sub(began);
+                                self.durations.record(list, command, took);
                             }
+                            if let Some(turn) = row.turn.filter(|t| *t < session.turns.len()) {
+                                session.recheck(turn, list, &self.roots, &self.durations);
+                            }
+                            session.settle_cards(list);
                         }
                     }
                     session.work.prompt(prompt, at);
@@ -3371,25 +3361,32 @@ impl Studio {
                 }
                 Happened::ToolStart { tool, .. } => {
                     let turn = session.ledger_turn(&event.agent_id);
-                    session.ledger.start(&event, tool, turn, called.clone());
+                    let turn = session.ledger.start(&event, tool, turn, called.clone());
+                    if let Some(turn) = turn.filter(|_| tool.kind == ToolKind::Command) {
+                        let list = self.check_lists.of(&session.cwd);
+                        if tool
+                            .command
+                            .as_deref()
+                            .is_some_and(|c| matched(list, c).is_some())
+                        {
+                            session.recheck(turn, list, &self.roots, &self.durations);
+                        }
+                    }
                     if own {
                         session.returned = None;
                         let step = Step::new(&tool.name, &tool.input, &event.cwd);
                         session.agent.step(step, event.call_id(), at);
-                        session.work.call(tool, at);
-                        // A check's line runs from its start (danielrispler/Falinks#461, decision 13).
-                        if let Some(start) = &start {
-                            let call = event.call_id();
-                            let mut line = CheckLine::new(
-                                &start.command,
-                                start.counts,
-                                call,
-                                at,
-                                start.typical,
-                            );
-                            line.card = check_card.take();
-                            line.turn = session.current_turn();
-                            session.checks.push(line);
+                        session
+                            .work
+                            .call(tool, at, self.check_lists.of(&session.cwd));
+                        // The card a long check's start requested is settled by its result.
+                        if let Some(card) = check_card.take() {
+                            session.check_cards.push(CheckCard {
+                                card,
+                                call: event.call_id().into(),
+                                ended: false,
+                                passed: None,
+                            });
                         }
                     }
                     let call = Call {
@@ -3492,7 +3489,8 @@ impl Studio {
                 }
                 Happened::ToolEnd { tool, failed, .. } => {
                     let turn = session.ledger_turn(&event.agent_id);
-                    session
+                    // The turn its call began in, which a new prompt since may have left.
+                    let turn = session
                         .ledger
                         .end(&event, tool, turn, *failed, called.clone());
                     if let Some(turn) = turn.filter(|_| tool.kind == ToolKind::Command) {
@@ -3502,8 +3500,7 @@ impl Studio {
                             .as_deref()
                             .is_some_and(|c| matched(list, c).is_some())
                         {
-                            session.turns[turn].checks =
-                                checks::of_turn(&session.ledger, turn, list);
+                            session.recheck(turn, list, &self.roots, &self.durations);
                         }
                     }
                     session.running.retain(|c| c.id != id);
@@ -3570,45 +3567,19 @@ impl Studio {
                     if own {
                         session.agent.step_done(event.call_id(), at);
                     }
-                    // A check gets its line whether it passed or failed; one that did not run loses
-                    // the line its start gave it. A child's checks are its own, so they add no line.
-                    let command = tool.command.as_deref().unwrap_or_default();
+                    // A check's time counts toward its typical duration when it ran and did not fail.
                     let list = self.check_lists.of(&session.cwd);
-                    if own && tool.kind == ToolKind::Command && matched(list, command).is_some() {
-                        let index = session
-                            .checks
-                            .iter()
-                            .position(|l| l.call == event.call_id());
-                        let index = match index {
-                            _ if !ran => {
-                                session.checks.retain(|l| l.call != event.call_id());
-                                None
-                            }
-                            Some(index) => Some(index),
-                            // The hooks are async, so its result can land before its start.
-                            None => {
-                                let start = at.saturating_sub(event.took().unwrap_or_default());
-                                let mut line = CheckLine::new(
-                                    command,
-                                    exit_code_counts(list, command),
-                                    event.call_id(),
-                                    start,
-                                    typical,
-                                );
-                                line.turn = session.current_turn();
-                                session.checks.push(line);
-                                Some(session.checks.len() - 1)
-                            }
-                        };
-                        let task = event.background_task().map(String::from);
-                        if let Some(line) = index.map(|i| &mut session.checks[i]) {
-                            // In the background it runs on until its notification.
-                            match task {
-                                Some(task) => line.task = Some(task),
-                                None => line.end(failed, at, &mut self.durations),
-                            }
-                        }
+                    let row = session
+                        .ledger
+                        .row(event.agent_id.as_deref(), event.call_id());
+                    let took = row.and_then(|r| r.began().zip(r.finished()));
+                    let counted = own && ran && !failed && row.is_some_and(|r| !r.background);
+                    if let (Some((began, ended)), true) = (took, counted) {
+                        let command = tool.command.as_deref().unwrap_or_default();
+                        self.durations
+                            .record(list, command, ended.saturating_sub(began));
                     }
+                    session.settle_cards(list);
                 }
                 _ => {}
             }
@@ -3932,7 +3903,7 @@ impl Studio {
                     hunk: String::new(),
                 })
                 .collect(),
-            checks: turn.checks.clone(),
+            checks: checks::ended(&turn.checks),
             external: 0,
         }
     }
@@ -4421,7 +4392,7 @@ impl Studio {
         for session in self.sessions.values_mut() {
             let list = self.check_lists.of(&session.cwd);
             for turn in 0..session.turns.len() {
-                session.turns[turn].checks = checks::of_turn(&session.ledger, turn, list);
+                session.recheck(turn, list, &self.roots, &self.durations);
             }
             session.update_unseen();
         }
@@ -4573,9 +4544,10 @@ impl Studio {
 
     /// The typical duration of check `command`, in milliseconds: the median of how long its earlier
     /// runs took when they did not fail, its backgrounded runs included (danielrispler/Falinks#461, decisions 13 to 15).
-    /// `None` when it never ran. Runs group by `check_key`.
-    pub fn typical(&self, command: &str) -> Option<u64> {
-        median(self.durations.get(&check_key(command))?)
+    /// `None` when it never ran. Runs group by their check statements (`checks::key`) under the list
+    /// of a session working in `cwd`.
+    pub fn typical(&self, cwd: &str, command: &str) -> Option<u64> {
+        self.durations.typical(self.check_lists.of(cwd), command)
     }
 
     /// The check `event` starts: a new Bash call of its session's own agent that runs a check. A
@@ -4584,14 +4556,13 @@ impl Studio {
         let tool = event.tool()?;
         let command = tool.command.as_deref()?;
         let session = self.sessions.get(&event.session_id);
-        let known = session.is_some_and(|s| s.checks.iter().any(|l| l.call == event.call_id()));
+        let known = session.is_some_and(|s| s.ledger.row(None, event.call_id()).is_some());
         let start = event.tool_starts() && event.agent_id.is_none();
         let list = self.check_lists.of(session.map_or("", |s| &s.cwd));
         let is_check = matched(list, command).is_some();
         (start && tool.kind == ToolKind::Command && is_check && !known).then(|| CheckStart {
             command: command.into(),
-            counts: exit_code_counts(list, command),
-            typical: self.typical(command),
+            typical: self.typical(session.map_or("", |s| &s.cwd), command),
         })
     }
 

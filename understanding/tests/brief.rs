@@ -124,6 +124,53 @@ fn open_lists_each_unsettled_thing_and_drops_each_once_it_is_settled() {
     assert_eq!(kinds(&session, Some(landed), &store), []);
 }
 
+/// A turn with the checks `checks` says: suite, worktree, status; a worktree but "/r" is foreign.
+fn turn_in(id: &str, checks: &[(&str, &str, &str)]) -> Turn {
+    let checks: Vec<Check> = checks
+        .iter()
+        .map(|(suite, worktree, status)| {
+            let check = json!({"suite": suite, "worktree": worktree, "foreign": *worktree != "/r",
+                "status": status, "retries": 0, "runs": []});
+            serde_json::from_value(check).unwrap()
+        })
+        .collect();
+    let mut turn = Turn::default();
+    (turn.ended_at, turn.id, turn.checks) = (Some(2), Some(id.into()), checks);
+    turn
+}
+
+fn open_checks(session: &Session) -> Vec<String> {
+    let dir = tempfile::tempdir().unwrap();
+    let store = CardStore::open(dir.path().join("cards.json")).unwrap();
+    let items = open_items(session, None, &store);
+    let checks = items.into_iter().filter(|i| i.kind == OpenKind::Check);
+    checks.map(|i| i.text).collect()
+}
+
+#[test]
+fn a_failed_check_stays_open_after_the_suite_passes_in_another_worktree_and_closes_in_its_own() {
+    let mut session = Session::default();
+    session.turns = vec![
+        turn_in("s@1", &[("cargo test", "/r", "failed")]),
+        turn_in("s@2", &[("cargo test", "/w/other", "passed")]),
+    ];
+
+    assert_eq!(open_checks(&session), ["cargo test ended failed"]);
+
+    session
+        .turns
+        .push(turn_in("s@3", &[("cargo test", "/r", "passed")]));
+    assert_eq!(open_checks(&session), Vec::<String>::new());
+}
+
+#[test]
+fn the_open_line_names_a_worktree_that_is_not_the_sessions_own() {
+    let mut session = Session::default();
+    session.turns = vec![turn_in("s@1", &[("cargo test", "/w/other", "failed")])];
+
+    assert_eq!(open_checks(&session), ["cargo test in other ended failed"]);
+}
+
 #[test]
 fn a_turn_still_running_drops_the_lines_of_the_one_before_and_no_task_facts_show_no_git_items() {
     let dir = tempfile::tempdir().unwrap();
@@ -268,4 +315,33 @@ fn design_is_written_again_only_when_its_sources_changed_and_not_without_any() {
             .design
             .is_empty()
     );
+}
+
+#[test]
+fn a_running_check_is_not_ended_so_it_neither_closes_nor_opens_a_failed_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store(dir.path());
+    let mut session = session();
+    session
+        .turns
+        .push(turn("s@3", false, &[("cargo test", "running")]));
+
+    let items = open_items(&session, None, &store);
+    let texts: Vec<&str> = items.iter().map(|i| i.text.as_str()).collect();
+    assert!(texts.contains(&"cargo test ended failed"));
+}
+
+#[test]
+fn a_turn_whose_only_check_is_still_running_leaves_the_files_unchecked() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store(dir.path());
+    let mut session = session();
+    session
+        .turns
+        .push(turn("s@3", false, &[("cargo test", "running")]));
+
+    assert!(kinds(&session, Some(UNSETTLED), &store).contains(&OpenKind::Unchecked));
+
+    session.turns[2] = turn("s@3", false, &[("cargo test", "passed")]);
+    assert!(!kinds(&session, Some(UNSETTLED), &store).contains(&OpenKind::Unchecked));
 }

@@ -66,8 +66,8 @@ test("railYourTurn: a summary, an unanswered quiz, and a passed and a failed che
   const [stored] = f.cards.older;
   assert.ok(stored.card.quiz.options.length > 1);
   assert.equal(stored.guess, null);
-  const checks = f.selected.session.checks;
-  assert.ok(checks.some((c) => c.passed) && checks.some((c) => !c.passed));
+  const listed = f.selected.session.turns.flatMap((t) => t.listed);
+  assert.ok(listed.length && listed.every((c) => c.status === "failed"));
 });
 
 test("railNeeds: the session needs you, with a question docked", () => {

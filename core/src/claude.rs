@@ -143,7 +143,9 @@ fn tool(raw: &Raw) -> Tool {
         path: (kind == ToolKind::Edit)
             .then(|| input["file_path"].as_str().map(Into::into))
             .flatten(),
-        command: input["command"].as_str().map(Into::into),
+        command: (kind == ToolKind::Command)
+            .then(|| input["command"].as_str().map(Into::into))
+            .flatten(),
         input: input.clone(),
         name,
         kind,

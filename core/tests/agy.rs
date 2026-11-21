@@ -422,3 +422,31 @@ fn an_agy_subagents_log_is_its_own_transcript() {
         ]
     );
 }
+
+#[test]
+fn a_command_of_an_agy_session_that_runs_a_list_entry_is_a_check() {
+    let call = |event: &str, at: u64| {
+        line(
+            "s",
+            event,
+            at,
+            json!({ "stepIdx": 2, "toolCall": { "name": "run_command", "args": { "CommandLine": "cargo test", "toolSummary": "Test" } } }),
+        )
+    };
+    let studio = Studio::replayed([
+        line("s", "SessionStart", 1, json!({})),
+        line(
+            "s",
+            "PreInvocation",
+            2,
+            json!({ "invocationNum": 0, "initialNumSteps": 1, "lastUserInput": "go" }),
+        ),
+        call("PreToolUse", 3),
+        call("PostToolUse", 4),
+    ]);
+
+    let checks = &studio.session("s").unwrap().turns[0].checks;
+
+    let found: Vec<&str> = checks.iter().map(|c| c.suite.as_str()).collect();
+    assert_eq!(found, ["cargo test"]);
+}

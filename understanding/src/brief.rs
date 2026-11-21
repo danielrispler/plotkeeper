@@ -6,7 +6,7 @@ use crate::{CardStore, CardWriter, LineKind};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
-use studio_core::{Answer, CheckStatus, Decision, Session, TaskFacts};
+use studio_core::{Answer, Check, CheckStatus, Decision, Session, TaskFacts};
 
 /// A question the agent asked, with Daniel's reply.
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -55,8 +55,14 @@ pub fn answered(decisions: &[Decision]) -> Vec<Answered> {
         .collect()
 }
 
-/// The Open slot of `session`, from facts: the questions it waits on, each check suite whose last
-/// run failed, files changed with no check run since, the latest ended turn's `open` and `ask`
+/// Whether `check` has an ended run: only an ended check says the files were checked.
+fn has_ended_run(check: &Check) -> bool {
+    check.status != CheckStatus::Running
+        || check.runs.iter().any(|r| r.status != CheckStatus::Running)
+}
+
+/// The Open slot of `session`, from facts: the questions it waits on, each check, by suite and worktree,
+/// whose last run failed, files changed with no check run since, the latest ended turn's `open` and `ask`
 /// lines, and, with `task`'s facts, unpushed work and an unmerged PR. Each drops out once settled:
 /// the question answered, the suite passing in a later turn, a check run, the next turn started, the
 /// work pushed and merged.
@@ -72,13 +78,27 @@ pub fn open_items(session: &Session, task: Option<TaskFacts>, store: &CardStore)
             ));
         }
     }
-    let mut suites = BTreeMap::new();
-    for check in session.turns.iter().flat_map(|turn| &turn.checks) {
-        suites.insert(&check.suite, check.status);
+    // Each check's latest status, by suite and worktree: only its own later pass closes it. A check
+    // that has not ended changes nothing.
+    let mut checks = BTreeMap::new();
+    let ended = |check: &&Check| check.status != CheckStatus::Running;
+    for check in session
+        .turns
+        .iter()
+        .flat_map(|turn| &turn.checks)
+        .filter(ended)
+    {
+        checks.insert((&check.suite, &check.worktree), check);
     }
-    for (suite, status) in suites {
-        if status == CheckStatus::Failed {
-            open.push(item(OpenKind::Check, format!("{suite} ended failed")));
+    for check in checks.into_values() {
+        if check.status == CheckStatus::Failed {
+            let tree = check.worktree.trim_end_matches('/').rsplit('/').next();
+            let named = tree.filter(|t| check.foreign && !t.is_empty());
+            let line = match named {
+                Some(tree) => format!("{} in {tree} ended failed", check.suite),
+                None => format!("{} ended failed", check.suite),
+            };
+            open.push(item(OpenKind::Check, line));
         }
     }
     let changed = session
@@ -88,7 +108,7 @@ pub fn open_items(session: &Session, task: Option<TaskFacts>, store: &CardStore)
     if let Some(at) = changed
         && session.turns[at..]
             .iter()
-            .all(|turn| turn.checks.is_empty())
+            .all(|turn| turn.checks.iter().all(|c| !has_ended_run(c)))
     {
         open.push(item(
             OpenKind::Unchecked,
