@@ -53,6 +53,17 @@ Daniel picks how parallel tickets run: separate sessions he starts (one `--claim
 
 GitHub stays authoritative.
 
+## Merge procedure
+
+Run it only when Daniel explicitly asks to merge a PR (`/ship <n>`); never on your own. `<n>` is the PR, and its branch is `<branch>`. The order protects stacked PRs: retarget before anything is deleted.
+
+1. Wait for this PR's own CI: `gh pr checks <n> --watch` as a background task. A red `snap` job follows the rerun rule in `AGENTS.md`, "Checks".
+2. `gh pr merge <n> --squash`, which keeps the remote branch.
+3. For each open PR based on the branch (`gh pr list --base <branch> --json number,headRefName`): `gh pr edit <m> --base main`. Then rebase it onto `main` only if no active worktree holds its branch (`git worktree list` shows the branch beside each path); otherwise tell Daniel it needs a rebase.
+4. `cargo run --bin wayfinder-startup -- --done <n>` from the main checkout. It refuses while a PR still sits on the branch (`--help` lists the other refusals).
+5. Delete the remote branch: `git push origin --delete <branch>`.
+6. `git pull --ff-only` in the main checkout. When the app changed, tell Daniel to quit Studio and run `npm run start`.
+
 ## Pull requests as a triage surface
 
 **PRs as a request surface: no.** _(Set to `yes` if this repo treats external PRs as feature requests; `/triage` reads this flag.)_
