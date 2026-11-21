@@ -279,3 +279,17 @@ test("the opened line draws the merged row as plain text, without a hunk", () =>
   assert.equal(items.length, 1);
   assert.match(JSON.stringify(items[0]), /\+2 merged/);
 });
+
+test("a check whose last run is a worker's shows that worker, as a file row does, and a failed one keeps its call", () => {
+  const byWorker = (status, agent) => check("cargo test", status, 0, [{ ...run(status, "w-call", status === "failed" ? 101 : 0), agent }]);
+  const passed = evidenceRows({ files: null, checks: [byWorker("passed", "w1"), check("cargo clippy", "passed")] });
+  assert.deepEqual(passed.map((r) => r.agent ?? null), ["w1", null]);
+  assert.equal(passed[0].call, undefined);
+  const failed = evidenceRows({ files: null, checks: [byWorker("failed", "w1")] });
+  assert.deepEqual([failed[0].call, failed[0].agent], ["w-call", "w1"]);
+
+  const agents = (checks) => evidenceElement("s5", 2, { files: null, checks }, { only: "all" }).find("span").filter((s) => s.className === "evidence-agent");
+  assert.deepEqual(agents([byWorker("passed", "w1")]).map((s) => s.text), ["w1"]);
+  assert.deepEqual(agents([byWorker("failed", "w1")]).map((s) => s.text), ["w1"]);
+  assert.deepEqual(agents([check("cargo test", "passed")]), []);
+});

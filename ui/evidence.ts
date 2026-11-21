@@ -60,6 +60,8 @@ export function evidenceRows({ files, checks: all }: Facts): EvidenceRow[] {
       return {
         kind: "check",
         label: `${named(c)} ${c.status}${c.status === "ran" ? "" : after}`,
+        // The worker that made the last run, named as a file's agent is; a failed run's call reads its output.
+        ...(last?.agent ? { agent: last.agent } : {}),
         ...(c.status === "failed" && last ? { call: last.call, agent: last.agent } : {}),
       };
     }),
@@ -78,7 +80,7 @@ function checkRow(session: string, row: EvidenceRow): HTMLElement {
   const item = document.createElement("li");
   item.className = "evidence-check";
   if (row.call === undefined) {
-    item.append(text("span", row.label));
+    item.append(text("span", row.label), ...(row.agent ? [text("span", row.agent, "evidence-agent")] : []));
     return item;
   }
   const key = `${session} ${row.agent ?? ""} ${row.call}`;
@@ -106,7 +108,7 @@ function checkRow(session: string, row: EvidenceRow): HTMLElement {
   button.classList.add("evidence-fail");
   button.title = `Show or hide the output of ${row.label}`;
   button.setAttribute("aria-expanded", String(openOutputs.has(key)));
-  button.append(text("span", "✗", "mark"), code(row.label));
+  button.append(text("span", "✗", "mark"), code(row.label), ...(row.agent ? [text("span", row.agent, "evidence-agent")] : []));
   show();
   if (openOutputs.has(key)) fetch();
   item.append(button, pre, askAnchor(session, { kind: "check", agent: row.agent ?? null, call: row.call }, "this failed check"));
