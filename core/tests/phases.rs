@@ -261,3 +261,11 @@ fn a_command_of_the_default_list_that_the_projects_list_lacks_starts_no_phase() 
         [Phase::Orienting, Phase::Implementing]
     );
 }
+
+#[test]
+fn a_chain_that_runs_a_full_check_after_a_test_starts_the_checking_phase() {
+    assert_eq!(
+        phases_of_project(&["cargo test", "cargo test && make verify"]),
+        [Phase::Orienting, Phase::Implementing, Phase::Checking]
+    );
+}

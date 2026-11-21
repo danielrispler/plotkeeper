@@ -815,3 +815,24 @@ fn a_foreground_check_after_a_background_statement_is_counted() {
         assert_eq!(runs_of("cargo test &", exit)[0].1, CheckStatus::Ran);
     }
 }
+
+#[test]
+fn a_tool_that_is_no_command_is_no_check_whatever_its_input_says() {
+    let call = |name: &str| {
+        let call = json!({ "tool_name": name, "tool_input": { "command": "cargo test" }, "tool_use_id": "t1" });
+        let mut end = call.clone();
+        end["tool_response"] = json!({ "stdout": "ok" });
+        vec![line("PreToolUse", 1_000, call), line("PostToolUse", 1_100, end)]
+    };
+    // A later check of the turn reads the whole ledger again.
+    let later = passes(2_000, "t2", "cargo clippy", None);
+    for name in ["mcp__shell__run", "Task"] {
+        let mut lines = vec![prompt()];
+        lines.extend(call(name));
+        lines.extend(later.clone());
+        let studio = Studio::replayed(&lines);
+        let found = &studio.session(SESSION).unwrap().turns[0].checks;
+        assert_eq!(shown(found), [("cargo clippy", CheckStatus::Passed, 0)], "{name}");
+        assert_eq!(studio.typical(CWD, "cargo test"), None, "{name}");
+    }
+}

@@ -174,10 +174,14 @@ fn command_phase(command: &str, current: Phase, list: &[String]) -> Option<Phase
         Some(Phase::WaitingOnCi)
     } else if has("gh pr create") {
         Some(Phase::OpeningPr)
-    } else if let Some(suite) = crate::checks::matched(list, command) {
-        let tests = crate::checks::DEFAULT.contains(&suite)
-            && !["ci-checks", "cargo clippy"].contains(&suite);
-        if tests {
+    } else if let suites = crate::checks::suites(list, command)
+        && !suites.is_empty()
+    {
+        // Any entry besides the light ones makes the chain a full check.
+        let tests = |suite: &&str| {
+            crate::checks::DEFAULT.contains(suite) && !["ci-checks", "cargo clippy"].contains(suite)
+        };
+        if suites.iter().all(tests) {
             Some(Phase::Implementing)
         } else {
             (current >= Phase::Implementing).then_some(Phase::Checking)

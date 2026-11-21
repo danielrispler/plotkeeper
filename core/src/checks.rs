@@ -473,6 +473,14 @@ pub fn matched<'a, S: AsRef<str>>(list: &'a [S], command: &str) -> Option<&'a st
     statements(list, command).iter().find_map(|s| s.suite)
 }
 
+/// The entries of `list` that `command` runs, one for each of its statements that runs one.
+pub(crate) fn suites<'a, S: AsRef<str>>(list: &'a [S], command: &str) -> Vec<&'a str> {
+    statements(list, command)
+        .iter()
+        .filter_map(|s| s.suite)
+        .collect()
+}
+
 /// Whether a check run's exit code counts, for each way its command can end.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Counts {
