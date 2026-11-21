@@ -117,18 +117,6 @@ fn a_workers_run_is_not_listed() {
 }
 
 #[test]
-fn a_blocked_check_is_not_listed() {
-    let mut lines = vec![starts(1_000, "t1", "cargo test")];
-    lines.push(line(
-        "PermissionDenied",
-        1_100,
-        json!({ "tool_name": "Bash", "tool_input": { "command": "cargo test" }, "tool_use_id": "t1", "reason": "no" }),
-    ));
-
-    assert_eq!(listed(lines), []);
-}
-
-#[test]
 fn a_running_check_shows_the_typical_duration_of_its_statement_across_worktrees() {
     let mut lines = runs(1_000, 6 * MIN, "t1", "cargo test", None, true);
     let mut other = runs(

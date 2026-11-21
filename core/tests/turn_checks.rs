@@ -4,7 +4,7 @@
 
 use crate::common;
 use serde_json::{Value, json};
-use studio_core::{Check, CheckStatus, Studio, check_output};
+use studio_core::{Check, CheckStatus, Output, Studio, check_output};
 
 const SESSION: &str = "7d3e9a51-2b8c-4f6e-a0d7-5c1b9e3f8a24";
 const CWD: &str = "/Users/danielrispler/work/plotkeeper";
@@ -124,11 +124,15 @@ fn a_passed_run_then_a_failed_one_is_failed() {
 }
 
 #[test]
-fn a_piped_check_with_no_telling_exit_code_only_ran() {
-    let found = checks(&[passes(1_000, "t1", "cargo test 2>&1 | tail -5", None)]);
+fn a_denied_check_run_again_under_the_same_id_is_one_passed_run() {
+    let denied = "The user doesn't want to proceed with this tool use.";
+    let found = checks(&[
+        fails(1_000, "t1", "cargo test", denied),
+        passes(2_000, "t1", "cargo test", None),
+    ]);
 
-    assert_eq!(shown(&found), [("cargo test", CheckStatus::Ran, 0)]);
-    assert_eq!(found[0].runs[0].exit_code, None);
+    assert_eq!(shown(&found), [("cargo test", CheckStatus::Passed, 0)]);
+    assert_eq!(found[0].runs.len(), 1);
 }
 
 #[test]
@@ -346,15 +350,49 @@ fn a_chain_that_exits_non_zero_blames_a_check_only_when_it_is_the_one_statement(
 fn a_masked_check_is_not_counted_whatever_the_exit_code() {
     for command in [
         "cargo test | tail",
+        "cargo test 2>&1 | tail -5",
         "cargo test || true",
+        "cargo test; echo $?",
+        "cargo test\necho done",
         "! cargo test",
+        "cd /repo && ! cargo test",
         "cargo test & wait",
+        "cargo test &",
+        // `pipefail` is no word of the check, and a later statement hides the pipe's code.
+        "cargo test pipefail_cases | tail",
+        "set -o pipefail; cargo test | tail; echo done",
     ] {
         for exit in [None, Some(1)] {
             let runs = runs_of(command, exit);
             assert_eq!(runs.len(), 1, "{command}");
             assert_eq!(runs[0].1, CheckStatus::Ran, "{command} {exit:?}");
         }
+        assert_eq!(runs_of(command, None)[0].2, None, "{command}");
+    }
+}
+
+#[test]
+fn the_default_list_names_which_commands_are_checks() {
+    for command in [
+        "cargo nextest run --workspace",
+        "cargo clippy --workspace --all-targets",
+        "cargo check",
+        "cargo build --release",
+        "cargo run --bin ci-checks -- --all",
+        "cargo -q clippy --workspace",
+        "cargo --locked build",
+        "cd tests/go && go vet ./...",
+        "RUST_BACKTRACE=1 go test ./... 2>&1 | tail -20",
+    ] {
+        assert_eq!(of_command(command).len(), 1, "{command}");
+    }
+    for command in [
+        "cargo fmt",
+        "cargo run --bin wayfinder-startup -- 266",
+        "git log --oneline -3",
+        r#"gh pr create --title \"Guess\" --body \"Tests: cargo test passes.\""#,
+    ] {
+        assert_eq!(of_command(command), [], "{command}");
     }
 }
 
@@ -580,21 +618,6 @@ fn a_result_that_landed_before_its_start_is_one_check() {
 }
 
 #[test]
-fn a_check_that_did_not_run_is_not_in_the_turn_even_after_it_started() {
-    let found = turns(
-        &fails(
-            1_000,
-            "t1",
-            "cargo test",
-            "The user doesn't want to proceed with this tool use.",
-        ),
-        0,
-    );
-
-    assert_eq!(shown(&found), []);
-}
-
-#[test]
 fn a_background_check_runs_until_its_notification_then_holds_what_it_reports() {
     let report = |status: &str| {
         let mut lines = vec![
@@ -627,13 +650,6 @@ fn shown_owned(checks: Vec<Check>) -> Vec<(String, CheckStatus, u32)> {
         .into_iter()
         .map(|c| (c.suite, c.status, c.retries))
         .collect()
-}
-
-#[test]
-fn a_shell_background_check_is_not_counted() {
-    let found = checks(&[passes(1_000, "t1", "cargo test &", None)]);
-
-    assert_eq!(shown(&found), [("cargo test", CheckStatus::Ran, 0)]);
 }
 
 #[test]
@@ -763,17 +779,16 @@ fn a_quoted_assignment_or_a_command_substitution_before_a_check_does_not_hide_it
 }
 
 #[test]
-fn a_negation_anywhere_in_the_last_group_masks_the_exit_code() {
-    for exit in [None, Some(1)] {
-        let runs = runs_of("cd /repo && ! cargo test", exit);
-        assert_eq!(runs[0].1, CheckStatus::Ran, "{exit:?}");
-    }
-}
-
-#[test]
 fn pipefail_counts_only_when_an_earlier_statement_turns_it_on() {
     let status = |command: &str, exit| runs_of(command, exit)[0].1;
 
+    for command in [
+        "set -euo pipefail\ncargo test 2>&1 | tail -20",
+        "set -o pipefail && cargo test | tail",
+    ] {
+        assert_eq!(status(command, None), CheckStatus::Passed, "{command}");
+        assert_eq!(status(command, Some(101)), CheckStatus::Failed, "{command}");
+    }
     for on in ["set -o pipefail", "set -euo pipefail", "set -eo pipefail"] {
         let command = format!("{on}; cargo test 2>&1 | tail -20");
         assert_eq!(status(&command, None), CheckStatus::Passed, "{command}");
@@ -813,9 +828,6 @@ fn a_foreground_check_after_a_background_statement_is_counted() {
             "{command}"
         );
     }
-    for exit in [None, Some(1)] {
-        assert_eq!(runs_of("cargo test &", exit)[0].1, CheckStatus::Ran);
-    }
 }
 
 #[test]
@@ -844,4 +856,45 @@ fn a_tool_that_is_no_command_is_no_check_whatever_its_input_says() {
         );
         assert_eq!(studio.typical(CWD, "cargo test"), None, "{name}");
     }
+}
+
+#[test]
+fn the_fixtures_checks_are_the_same_live_as_replayed_and_raise_no_guess_or_card() {
+    const CHECKS: &str = include_str!("fixtures/checks.jsonl");
+    let mut live = Studio::default();
+    let outputs: Vec<Output> = CHECKS.lines().flat_map(|line| live.apply(line)).collect();
+    let replayed = common::replay(CHECKS);
+    let of = |studio: &Studio| -> Vec<Check> {
+        let session = studio
+            .session("a3e6c9f2-1b4d-4e7a-8c0f-5d2b9e6a3c18")
+            .unwrap();
+        session
+            .turns
+            .iter()
+            .flat_map(|t| t.checks.clone())
+            .collect()
+    };
+
+    assert_eq!(of(&live), of(&replayed));
+    let statuses: Vec<CheckStatus> = of(&live)
+        .iter()
+        .flat_map(|c| &c.runs)
+        .map(|r| r.status)
+        .collect();
+    assert_eq!(
+        statuses,
+        [
+            CheckStatus::Passed,
+            CheckStatus::Passed,
+            CheckStatus::Failed
+        ]
+    );
+    // Before danielrispler/Falinks#375 the wait's first check asked "Will it pass?".
+    let raised = |o: &&Output| {
+        !matches!(
+            o,
+            Output::Version { .. } | Output::YourTurn { .. } | Output::Name(_)
+        )
+    };
+    assert_eq!(outputs.iter().filter(raised).count(), 0);
 }

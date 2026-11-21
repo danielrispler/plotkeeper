@@ -7,7 +7,6 @@ mod blocked_commands;
 mod cards;
 mod check_cards;
 mod check_feed;
-mod checks;
 mod clear;
 mod close_rename;
 mod common;

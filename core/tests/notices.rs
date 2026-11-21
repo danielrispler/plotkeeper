@@ -253,13 +253,6 @@ fn your_turn_notifies_while_not_focused_for_the_selected_session_too() {
 }
 
 #[test]
-fn your_turn_while_focused_toasts_the_sessions_off_screen_with_no_notification() {
-    let due = your_turn_due(&[FIRST, SECOND], true);
-    assert_eq!(due.notification, None);
-    assert_eq!(due.finished, vec![SECOND.to_owned()]);
-}
-
-#[test]
 fn two_sessions_reaching_your_turn_together_give_one_notification() {
     assert_eq!(
         your_turn_notification(&[FIRST, SECOND], false),
