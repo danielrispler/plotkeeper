@@ -55,6 +55,12 @@ pub fn answered(decisions: &[Decision]) -> Vec<Answered> {
         .collect()
 }
 
+/// Whether `check` has an ended run: only an ended check says the files were checked.
+fn has_ended_run(check: &Check) -> bool {
+    check.status != CheckStatus::Running
+        || check.runs.iter().any(|r| r.status != CheckStatus::Running)
+}
+
 /// The Open slot of `session`, from facts: the questions it waits on, each check, by suite and worktree,
 /// whose last run failed, files changed with no check run since, the latest ended turn's `open` and `ask`
 /// lines, and, with `task`'s facts, unpushed work and an unmerged PR. Each drops out once settled:
@@ -102,7 +108,7 @@ pub fn open_items(session: &Session, task: Option<TaskFacts>, store: &CardStore)
     if let Some(at) = changed
         && session.turns[at..]
             .iter()
-            .all(|turn| turn.checks.is_empty())
+            .all(|turn| turn.checks.iter().all(|c| !has_ended_run(c)))
     {
         open.push(item(
             OpenKind::Unchecked,

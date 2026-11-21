@@ -3917,7 +3917,7 @@ impl Studio {
                     hunk: String::new(),
                 })
                 .collect(),
-            checks: turn.checks.clone(),
+            checks: checks::ended(&turn.checks),
             external: 0,
         }
     }

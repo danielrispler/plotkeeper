@@ -557,7 +557,9 @@ pub enum Status {
 pub struct Run {
     /// The whole command.
     pub command: String,
-    /// Its own statement: the words from the check's command on, redirections left out.
+    /// Its own statement: the words from the check's command on, redirections left out. Empty in a
+    /// summary stored before it was kept.
+    #[serde(default)]
     pub statement: String,
     pub status: Status,
     /// Its exit code, when the log says it.
@@ -712,6 +714,34 @@ pub fn of_turn(
             .count() as u32;
     }
     checks
+}
+
+/// `checks` as a summary's facts hold them: only the runs that ended, so that a check still running
+/// is left out, as is a running run of a check that has earlier ones. A check's status and retries
+/// are those of the runs that remain.
+pub(crate) fn ended(checks: &[Check]) -> Vec<Check> {
+    checks
+        .iter()
+        .filter_map(|check| {
+            let runs: Vec<Run> = check
+                .runs
+                .iter()
+                .filter(|r| r.status != Status::Running)
+                .cloned()
+                .collect();
+            let status = runs.last()?.status;
+            let retries = runs[..runs.len() - 1]
+                .iter()
+                .filter(|r| r.status == Status::Failed)
+                .count() as u32;
+            Some(Check {
+                status,
+                retries,
+                runs,
+                ..check.clone()
+            })
+        })
+        .collect()
 }
 
 /// The checks the feed lists, newest first: of the session's own agent, each check's latest run

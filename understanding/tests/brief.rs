@@ -330,3 +330,18 @@ fn a_running_check_is_not_ended_so_it_neither_closes_nor_opens_a_failed_one() {
     let texts: Vec<&str> = items.iter().map(|i| i.text.as_str()).collect();
     assert!(texts.contains(&"cargo test ended failed"));
 }
+
+#[test]
+fn a_turn_whose_only_check_is_still_running_leaves_the_files_unchecked() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store(dir.path());
+    let mut session = session();
+    session
+        .turns
+        .push(turn("s@3", false, &[("cargo test", "running")]));
+
+    assert!(kinds(&session, Some(UNSETTLED), &store).contains(&OpenKind::Unchecked));
+
+    session.turns[2] = turn("s@3", false, &[("cargo test", "passed")]);
+    assert!(!kinds(&session, Some(UNSETTLED), &store).contains(&OpenKind::Unchecked));
+}
