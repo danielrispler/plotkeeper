@@ -3,7 +3,11 @@
 
 use crate::ledger::{Ledger, Outcome, Row};
 use serde::{Deserialize, Serialize};
-use std::{collections::{BTreeMap, HashMap}, io, path::Path};
+use std::{
+    collections::{BTreeMap, HashMap},
+    io,
+    path::Path,
+};
 
 /// The checks a project without a list of its own has: the fixed list of danielrispler/Falinks#328 plus this
 /// repository's own, `npm run check` (danielrispler/plotkeeper#112).

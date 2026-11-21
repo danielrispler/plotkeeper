@@ -787,7 +787,11 @@ fn pipefail_counts_only_when_an_earlier_statement_turns_it_on() {
     for on in ["set -o pipefail", "set -euo pipefail", "set -eo pipefail"] {
         let command = format!("{on}; cargo test 2>&1 | tail -20");
         assert_eq!(status(&command, None), CheckStatus::Passed, "{command}");
-        assert_eq!(status(&command, Some(101)), CheckStatus::Failed, "{command}");
+        assert_eq!(
+            status(&command, Some(101)),
+            CheckStatus::Failed,
+            "{command}"
+        );
     }
     for command in [
         "set +o pipefail; cargo test | tail",
@@ -796,7 +800,11 @@ fn pipefail_counts_only_when_an_earlier_statement_turns_it_on() {
         "cargo test | tail",
     ] {
         for exit in [None, Some(101)] {
-            assert_eq!(status(command, exit), CheckStatus::Ran, "{command} {exit:?}");
+            assert_eq!(
+                status(command, exit),
+                CheckStatus::Ran,
+                "{command} {exit:?}"
+            );
         }
     }
 }
@@ -804,7 +812,11 @@ fn pipefail_counts_only_when_an_earlier_statement_turns_it_on() {
 #[test]
 fn a_foreground_check_after_a_background_statement_is_counted() {
     for command in ["server &\ncargo test", "server & cargo test"] {
-        assert_eq!(runs_of(command, None)[0].1, CheckStatus::Passed, "{command}");
+        assert_eq!(
+            runs_of(command, None)[0].1,
+            CheckStatus::Passed,
+            "{command}"
+        );
         assert_eq!(
             runs_of(command, Some(101))[0].1,
             CheckStatus::Failed,
@@ -822,7 +834,10 @@ fn a_tool_that_is_no_command_is_no_check_whatever_its_input_says() {
         let call = json!({ "tool_name": name, "tool_input": { "command": "cargo test" }, "tool_use_id": "t1" });
         let mut end = call.clone();
         end["tool_response"] = json!({ "stdout": "ok" });
-        vec![line("PreToolUse", 1_000, call), line("PostToolUse", 1_100, end)]
+        vec![
+            line("PreToolUse", 1_000, call),
+            line("PostToolUse", 1_100, end),
+        ]
     };
     // A later check of the turn reads the whole ledger again.
     let later = passes(2_000, "t2", "cargo clippy", None);
@@ -832,7 +847,11 @@ fn a_tool_that_is_no_command_is_no_check_whatever_its_input_says() {
         lines.extend(later.clone());
         let studio = Studio::replayed(&lines);
         let found = &studio.session(SESSION).unwrap().turns[0].checks;
-        assert_eq!(shown(found), [("cargo clippy", CheckStatus::Passed, 0)], "{name}");
+        assert_eq!(
+            shown(found),
+            [("cargo clippy", CheckStatus::Passed, 0)],
+            "{name}"
+        );
         assert_eq!(studio.typical(CWD, "cargo test"), None, "{name}");
     }
 }
