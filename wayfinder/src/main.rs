@@ -753,16 +753,40 @@ pub fn done_plan(
     })
 }
 /// Files `git worktree remove` would lose: `git status --porcelain --ignored` lines other
-/// than an ignored Cargo `target/` build directory, at the root or in a nested crate.
+/// than an ignored Cargo `target/` build directory, at the root or in a nested crate, or the
+/// ignored `dist/`, `node_modules/` and `src-tauri/gen/` that `npm ci` and the check rebuild.
 pub fn leftovers(status: &str) -> Vec<&str> {
     status
         .lines()
         .filter(|line| {
-            !line
-                .strip_prefix("!! ")
-                .is_some_and(|path| path == "target/" || path.ends_with("/target/"))
+            !line.strip_prefix("!! ").is_some_and(|path| {
+                path == "target/"
+                    || path.ends_with("/target/")
+                    || ["dist/", "node_modules/", "src-tauri/gen/"].contains(&path)
+            })
         })
         .collect()
+}
+/// Refuse while an open PR is based on `branch`: deleting the branch would close it. `open_prs`
+/// is `gh pr list --base <branch> --state open --json number`.
+pub fn stacked_refusal(branch: &str, open_prs: &Value) -> Result<()> {
+    let numbers = open_prs
+        .as_array()
+        .ok_or("expected an open PR list")?
+        .iter()
+        .filter_map(|pr| pr["number"].as_u64())
+        .collect::<Vec<_>>();
+    require(
+        numbers.is_empty(),
+        &format!(
+            "open PRs are based on {branch}; deleting it would close them. Retarget each first:\n{}",
+            numbers
+                .iter()
+                .map(|m| format!("#{m}: gh pr edit {m} --base main"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        ),
+    )
 }
 fn stdout(program: &str, args: &[&str]) -> Result<String> {
     let mut command = Command::new(program);
@@ -939,6 +963,21 @@ fn done(number: u64) -> Result<()> {
         // Resolved, so a symlinked path into the worktree is still caught.
         &env::current_dir()?.canonicalize()?,
     )?;
+    stacked_refusal(
+        &plan.branch,
+        &gh(&[
+            "pr",
+            "list",
+            "--repo",
+            REPO,
+            "--state",
+            "open",
+            "--base",
+            &plan.branch,
+            "--json",
+            "number",
+        ])?,
+    )?;
     if let Some(path) = &plan.worktree {
         let status = stdout("git", &["-C", path, "status", "--porcelain", "--ignored"])?;
         let left = leftovers(&status);
@@ -1114,7 +1153,7 @@ fn run() -> Result<()> {
     let args = env::args().skip(1).collect::<Vec<_>>();
     if args == ["--help"] {
         println!(
-            "{USAGE}\nDefault map: newest open issue labelled wayfinder:map. The map listing only reads GitHub; it prints the map title, URL and ticket rows, and --body appends the map body.\n--all lists every open issue repo-wide, by number, with its parent, assignees, open blockers and frontier, from one paginated GraphQL query. It also warns on stderr, once per pair, when two claimed or ready tickets share a file in their Touches Files line and are in different specs or in one spec with no blocking edge between them, and once per claimed or ready ticket whose Touches names a path that is not in this checkout (a path with \"new\" right before it is one the ticket creates).\n--claim <issue> refuses closed, blocked or otherwise-assigned tickets, assigns the issue to you, reuses its worktree, or checks out its local or origin branch, or creates branch issue-<n>-<slug> from origin/main, under .claude/worktrees/, and prints the path. It warns on stderr, never blocking, when another claimed or ready ticket's Touches files overlap this one's, or when its own Touches names a path that is not in its worktree.\n--done <issue> runs after merge, from outside the ticket's worktree: it removes that worktree and the ticket's one local issue-<n>-* branch, only if a merged PR ended on the branch's commit and the worktree has no uncommitted, untracked or ignored files apart from target/.\n--publish <dir> creates a spec's tickets from a folder: one Markdown body per ticket and tickets.json, {{\"parent\": <issue>, \"tickets\": [{{\"file\": \"01-x.md\", \"title\": \"...\", \"labels\": [\"studio\", \"ready-for-agent\"], \"blocked_by\": [\"<file>\", ...]}}]}}. It first checks that the parent is open, every body for ## Reading and ## Touches with Files and Session lines, every label against the repository, and every blocker for a manifest file and for cycles; any problem stops it before an issue exists. Then it creates the issues blockers first, links each as a sub-issue of the parent and adds its blocked-by edges, recording each write in <dir>/published.json, so a rerun after a failure does only what is missing. It prints one row per ticket: its file, issue number and blockers."
+            "{USAGE}\nDefault map: newest open issue labelled wayfinder:map. The map listing only reads GitHub; it prints the map title, URL and ticket rows, and --body appends the map body.\n--all lists every open issue repo-wide, by number, with its parent, assignees, open blockers and frontier, from one paginated GraphQL query. It also warns on stderr, once per pair, when two claimed or ready tickets share a file in their Touches Files line and are in different specs or in one spec with no blocking edge between them, and once per claimed or ready ticket whose Touches names a path that is not in this checkout (a path with \"new\" right before it is one the ticket creates).\n--claim <issue> refuses closed, blocked or otherwise-assigned tickets, assigns the issue to you, reuses its worktree, or checks out its local or origin branch, or creates branch issue-<n>-<slug> from origin/main, under .claude/worktrees/, and prints the path. It warns on stderr, never blocking, when another claimed or ready ticket's Touches files overlap this one's, or when its own Touches names a path that is not in its worktree.\n--done <issue> runs after merge, from outside the ticket's worktree: it removes that worktree and the ticket's one local issue-<n>-* branch, only if a merged PR ended on the branch's commit and the worktree has no uncommitted, untracked or ignored files apart from the ignored build output target/, dist/, node_modules/ and src-tauri/gen/. It also refuses, removing nothing, while an open PR has the branch as its base (deleting the branch would close it), naming each such PR and printing gh pr edit <m> --base main for it.\n--publish <dir> creates a spec's tickets from a folder: one Markdown body per ticket and tickets.json, {{\"parent\": <issue>, \"tickets\": [{{\"file\": \"01-x.md\", \"title\": \"...\", \"labels\": [\"studio\", \"ready-for-agent\"], \"blocked_by\": [\"<file>\", ...]}}]}}. It first checks that the parent is open, every body for ## Reading and ## Touches with Files and Session lines, every label against the repository, and every blocker for a manifest file and for cycles; any problem stops it before an issue exists. Then it creates the issues blockers first, links each as a sub-issue of the parent and adds its blocked-by edges, recording each write in <dir>/published.json, so a rerun after a failure does only what is missing. It prints one row per ticket: its file, issue number and blockers."
         );
         return Ok(());
     }
@@ -1599,6 +1638,34 @@ mod done_tests {
             format!("{WORKTREES}prunable gitdir file points to non-existent location\n");
         let plan = plan(&worktrees, BRANCH, &merged_at("aaa"), "/repo").unwrap();
         assert_eq!(plan.worktree, None);
+    }
+    #[test]
+    fn rebuilt_output_directories_may_be_left_behind() {
+        let ignored = "!! target/\n!! dist/\n!! node_modules/\n!! src-tauri/gen/\n";
+        assert!(leftovers(ignored).is_empty());
+        assert_eq!(
+            leftovers("?? dist/\n M dist/index.html\n?? node_modules/\n!! src-tauri/gen/x\n"),
+            [
+                "?? dist/",
+                " M dist/index.html",
+                "?? node_modules/",
+                "!! src-tauri/gen/x"
+            ]
+        );
+    }
+    #[test]
+    fn open_prs_based_on_the_branch_refuse_with_the_retarget_command() {
+        let listed = serde_json::json!([{"number": 272}, {"number": 290}]);
+        let message = stacked_refusal("issue-253-x", &listed)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            message.contains("#272") && message.contains("#290"),
+            "{message}"
+        );
+        assert!(message.contains("gh pr edit 272 --base main"), "{message}");
+        assert!(message.contains("gh pr edit 290 --base main"), "{message}");
+        assert!(stacked_refusal("issue-253-x", &serde_json::json!([])).is_ok());
     }
     #[test]
     fn only_the_build_directory_may_be_left_behind() {
