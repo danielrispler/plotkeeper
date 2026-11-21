@@ -1640,7 +1640,8 @@ impl Session {
             session_id: self.agent.id.clone(),
             id: card_id(&self.agent.id, at),
             prompt: daniels.map(|p| p.at),
-            asks: self.needs_you(),
+            // The blocks the replay saw only: a resumed terminal state is not about this turn.
+            asks: !self.blocks.is_empty(),
             ..CardRequest::default()
         };
         (!trees.is_empty()).then_some(Backfill { request, trees })

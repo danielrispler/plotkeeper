@@ -169,3 +169,59 @@ fn a_live_turn_leaves_nothing_to_backfill() {
 
     assert_eq!(studio.backfill(NOW, &[]), []);
 }
+
+/// One event of an agy session, whose terminal is `fixture-terminal`, received at `at`.
+fn agy_line(name: &str, at: u64, extra: serde_json::Value) -> String {
+    let mut event = json!({
+        "conversationId": SESSION,
+        "hookEventName": name,
+        "cwd": ROOT,
+        "studio_received_ms": at,
+        "studio_terminal_id": "fixture-terminal",
+    });
+    event
+        .as_object_mut()
+        .unwrap()
+        .extend(extra.as_object().unwrap().clone());
+    event.to_string()
+}
+
+/// A backfilled card judges "asks" from what the replay saw, not from the terminal's state, which
+/// a resumed state carries from before the app went down: a turn that ended at your turn asks
+/// nothing.
+#[test]
+fn a_backfilled_card_does_not_ask_because_the_resumed_terminal_state_was_blocked() {
+    let at = NOW - 1000;
+    let before = [
+        agy_line("SessionStart", at - 3000, json!({})),
+        agy_line(
+            "PreInvocation",
+            at - 2000,
+            json!({"invocationNum": 0, "initialNumSteps": 1, "lastUserInput": "go",
+                "studio_turn_start": {ROOT: "t1"}}),
+        ),
+    ];
+    let mut was = Studio::replayed(&before);
+    let terminal: studio_core::Terminal = serde_json::from_value(json!({
+        "id": "fixture-terminal", "argv": [], "cwd": "/tmp", "pid": 1, "exited": null,
+        "foreground": "agy", "processes": [], "state": "blocked", "app": "agy",
+        "status_ms": 1, "turn": 0,
+    }))
+    .unwrap();
+    was.terminals(&[terminal], 10);
+    let saved = was.save();
+
+    let mut studio = Studio::default();
+    studio.resume(&saved, u64::MAX);
+    let stop = agy_line(
+        "Stop",
+        at,
+        json!({"fullyIdle": true, "studio_turn_end": {ROOT: "t2"}}),
+    );
+    studio.replay(&stop);
+    studio.replay(&agy_line("PostInvocation", at + 1, json!({})));
+    let found = studio.backfill(NOW, &[]);
+
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(!found[0].request.asks);
+}
