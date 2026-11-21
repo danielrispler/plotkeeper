@@ -4,7 +4,7 @@ import type { Capabilities, Session } from "./types.js";
 type WithCapabilities = { capabilities: Capabilities };
 
 // Whether the session's agent reports `what`, so the part of the view that shows it may show.
-export const reports = (session: WithCapabilities, what: Exclude<keyof Capabilities, "agent">): boolean => session.capabilities[what];
+export const reports = (session: WithCapabilities, what: Exclude<keyof Capabilities, "agent" | "transcript_format">): boolean => session.capabilities[what];
 
 // An agent's display name, as the header's model line and the usage glance show it.
 export const agentNames: Record<string, string> = { claude: "Claude", agy: "agy", codex: "Codex" };

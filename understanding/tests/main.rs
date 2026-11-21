@@ -10,10 +10,13 @@ mod decisions;
 mod drift;
 mod fingerprint;
 mod offer;
+#[path = "../../scripts/wire/samples.rs"]
+mod samples;
 mod saved_state;
 mod self_test;
 mod store;
 mod turn_trees;
 mod turn_writing;
 mod week;
+mod wire;
 mod writer;

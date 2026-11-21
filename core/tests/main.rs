@@ -26,6 +26,8 @@ mod prompt_name;
 mod questions;
 mod replay;
 mod restart;
+#[path = "../../scripts/wire/samples.rs"]
+mod samples;
 mod saved;
 mod sessions;
 mod status_only;
@@ -40,3 +42,4 @@ mod turn_files;
 mod turns;
 mod unseen;
 mod wake_ups;
+mod wire;
