@@ -19,7 +19,7 @@ Raw evidence from finished real runs (run directories, screenshots, terminal out
 
 - **Grill, spec, ticket, then build.** By default, work moves through `$grilling`, then `$to-spec`, then `$to-tickets`, and only then to implementation, of one ticket or a whole spec. `$to-spec` and `$to-tickets` are user-invoked: they load when Daniel types them. Without them, follow `docs/agents/ticket-authoring.md`.
 - **Implement in a worktree.** Each change gets its own worktree under `.claude/worktrees/`, on a new branch from `origin/main`; the main checkout stays on `main`. Work in the main checkout only when Daniel says so.
-- **Finish with a PR.** When an implementation is done and `npm run check` passes, push its branch and open a PR against `main`, its body written with `$pr`. Daniel reviews and merges it.
+- **Finish with a PR.** When an implementation is done and `npm run check` passes, push its branch and open a PR against `main`, its body written with `$pr`. Before opening it, run the correctness pass in `docs/agents/issue-tracker.md` (Claim) if the PR changes Rust or TypeScript. Daniel reviews and merges it.
 - **Blocked commands go to Daniel.** When auto mode blocks a Bash command you need, it reaches Daniel on a studio card with Allow and Decline; wait for his click, and on Allow run that exact command once yourself, with the same quoting and folder. Hand over only a command that needs his keyboard: write it into `<scratchpad>/run-<name>.sh`, end your reply with that path, and he runs `bash <path>` in the terminal panel. Other blocks (a tool other than Bash, a permission rule) keep Claude Code's own notice.
 
 ## Implementation language
@@ -39,6 +39,10 @@ A worktree builds in its own `target/`, cargo's default: never point `CARGO_TARG
 Wait on a check through its own process: run it in the foreground with a long timeout, or start it as a background task and wait for its completion notice, so a finished worker leaves no polling loop behind. A wait that matches the check's text, such as `until ! pgrep -f "npm run check"; do sleep 5; done`, matches its own shell's command line and never ends: in spec #102's run three implementers sat an hour past their green checks that way (#141).
 
 Never edit a frozen sample in `understanding/tests/fixtures/stored/`: a failing one is fixed in the reading code, and a changed stored type adds a new sample beside the old (its `README.md`).
+
+A red `snap` job on a fixture the diff didn't touch gets one rerun of the failed job (`gh run rerun <id> --failed`), said in the PR; a second failure is real. `snap:all` has no automatic retry. A failing `snap` prints the tail of Chrome's own stderr.
+
+Rust is formatted by `cargo fmt`. TS, JS and Markdown have no formatter, so never run one (Prettier, Biome, …).
 
 ## Agent skills
 
