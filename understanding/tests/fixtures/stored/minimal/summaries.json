@@ -1,0 +1,24 @@
+[
+  {
+    "request": {
+      "session_id": "sess-1",
+      "id": "sess-1@1761743900000",
+      "prompt": "Sample prompt.",
+      "responses": ["Sample reply."],
+      "intentions": ["Sample intention."],
+      "facts": {
+        "files": [],
+        "checks": [
+          {
+            "suite": "cargo test",
+            "status": "passed",
+            "retries": 0,
+            "runs": [{ "command": "cargo test", "status": "passed", "call": "toolu_2" }]
+          }
+        ]
+      }
+    },
+    "summary": { "summary": "Sample summary." },
+    "added_at": 1761743960000
+  }
+]

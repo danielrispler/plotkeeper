@@ -1,0 +1,69 @@
+[
+  {
+    "request": {
+      "session_id": "sess-1",
+      "id": "sess-1@1761743900000",
+      "prompt": "Sample prompt.",
+      "responses": ["Sample reply."],
+      "intentions": ["Sample intention."],
+      "card": "worker-1@1761743900000",
+      "facts": {
+        "files": [
+          { "root": "/work/sample", "path": "a.rs", "from": "b.rs", "added": 1, "removed": 1, "agent": "worker-1" }
+        ],
+        "checks": [
+          {
+            "suite": "cargo test",
+            "worktree": "/work/sample",
+            "foreign": true,
+            "status": "passed",
+            "retries": 1,
+            "runs": [
+              {
+                "command": "cd /work/sample && cargo test 2>&1 | tail",
+                "statement": "cargo test",
+                "status": "failed",
+                "exit_code": 101,
+                "call": "toolu_2",
+                "agent": "worker-1",
+                "started_at": 1761743910000,
+                "ended_at": 1761743920000
+              },
+              {
+                "command": "cd /work/sample && cargo test 2>&1 | tail",
+                "statement": "cargo test",
+                "status": "passed",
+                "exit_code": 0,
+                "call": "toolu_3",
+                "agent": null,
+                "started_at": 1761743930000,
+                "ended_at": 1761743940000
+              }
+            ]
+          }
+        ],
+        "external": 0
+      },
+      "wanted": false,
+      "asks": true,
+      "no_quiz": true
+    },
+    "summary": {
+      "summary": "Sample headline.\nSample why line.",
+      "headline": "Sample headline.",
+      "lines": [{ "kind": "why", "text": "Sample why line." }],
+      "quiz": {
+        "text": "Sample question?",
+        "options": [
+          { "text": "Sample key", "why": "It is the key." },
+          { "text": "Sample other", "why": "It is not." }
+        ],
+        "key": 0
+      }
+    },
+    "added_at": 1761743960000,
+    "taps": [{ "kind": "skip", "at": 1761743970000 }],
+    "hunk": "@@ -1 +1 @@\n-old\n+new\n",
+    "arm": "body_only"
+  }
+]
