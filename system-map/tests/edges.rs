@@ -348,6 +348,39 @@ fn a_mod_line_naming_a_deleted_or_symlinked_module_file_still_pairs_and_does_not
     }
 }
 
+#[test]
+fn a_module_file_under_tests_or_bin_finds_its_submodules_in_its_own_folder() {
+    // `tests/main.rs` is a crate root; `tests/common.rs` is a module it names, so its `mod helpers;`
+    // reads `tests/common/helpers.rs`. Likewise `src/tests/foo.rs`, named by `src/tests/mod.rs`.
+    let cases = [
+        (
+            "k/tests/main.rs",
+            "k/tests/common.rs",
+            "k/tests/common/helpers.rs",
+        ),
+        (
+            "k/src/lib.rs",
+            "k/src/tests/foo.rs",
+            "k/src/tests/foo/helpers.rs",
+        ),
+    ];
+    for (root_file, module, helpers) in cases {
+        let mut files = vec![(module, "mod helpers;\n"), (helpers, "")];
+        if root_file.ends_with("lib.rs") {
+            files.push((root_file, "mod tests;\n"));
+            files.push(("k/src/tests/mod.rs", "mod foo;\n"));
+        } else {
+            files.push((root_file, "mod common;\n"));
+        }
+        let mut alpha = vec![root_file, module];
+        if root_file.ends_with("lib.rs") {
+            alpha.push("k/src/tests/mod.rs");
+        }
+        let found = rust_edges(&files, &alpha, &[helpers]);
+        assert_eq!(found, ["alpha>beta"], "{module}");
+    }
+}
+
 fn ts_edges(files: &[(&str, &str)]) -> Vec<String> {
     let map = split_map(&["typescript-imports"], &["alpha/"], &["beta/"]);
     let (_dir, root) = tree(&map, files);

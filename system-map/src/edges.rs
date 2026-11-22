@@ -375,13 +375,12 @@ fn rust_modules(root: &Path, tracked: &BTreeSet<&str>) -> Pairs {
         .filter_map(|f| Some((*f, scan_rust(&crate::read_tracked(root, f)?))))
         .collect();
     let mut pairs = Pairs::new();
-    // Every file a `mod name;` line names, to tell crate roots from module files.
-    let mut declared: HashSet<&str> = HashSet::new();
-    let resolve = |from: &str, path: &[String]| -> Option<&str> {
+    // `declared` holds every file a `mod name;` line names, to tell crate roots from module files.
+    let resolve = |declared: &HashSet<&str>, from: &str, path: &[String]| -> Option<&str> {
         // The folder that holds the files of `from`'s submodules.
         let (dir, file) = from.rsplit_once('/').unwrap_or(("", from));
         let stem = file.trim_end_matches(".rs");
-        let mut folder = if is_module_root(from) || stem == "mod" {
+        let mut folder = if is_module_root(from, declared) {
             dir.to_string()
         } else if dir.is_empty() {
             stem.to_string()
@@ -407,10 +406,26 @@ fn rust_modules(root: &Path, tracked: &BTreeSet<&str>) -> Pairs {
             .iter()
             .find_map(|c| tracked.get(c.as_str()).copied())
     };
+    // Which files are declared depends on where each declaring file looks, and that on which files
+    // are declared: start with none and repeat until the set holds still.
+    let mut declared: HashSet<&str> = HashSet::new();
+    for _ in 0..=parse.len() {
+        let mut next: HashSet<&str> = HashSet::new();
+        for (file, scanned) in &parse {
+            for (path, in_own_file) in &scanned.mods {
+                if let (true, Some(target)) = (*in_own_file, resolve(&declared, file, path)) {
+                    next.insert(target);
+                }
+            }
+        }
+        if next == declared {
+            break;
+        }
+        declared = next;
+    }
     for (file, scanned) in &parse {
         for (path, in_own_file) in &scanned.mods {
-            if let (true, Some(target)) = (*in_own_file, resolve(file, path)) {
-                declared.insert(target);
+            if let (true, Some(target)) = (*in_own_file, resolve(&declared, file, path)) {
                 pairs.push((file.to_string(), target.to_string()));
             }
         }
@@ -432,7 +447,7 @@ fn rust_modules(root: &Path, tracked: &BTreeSet<&str>) -> Pairs {
                 full.extend(path.iter().cloned());
                 if !*in_own_file {
                     found.push((full, file));
-                } else if let Some(target) = resolve(file, path) {
+                } else if let Some(target) = resolve(&declared, file, path) {
                     queue.push((target, full));
                 }
             }
@@ -453,9 +468,10 @@ fn rust_modules(root: &Path, tracked: &BTreeSet<&str>) -> Pairs {
     pairs
 }
 
-fn is_module_root(file: &str) -> bool {
+/// Whether the submodules of `file` sit in its own folder: a crate root, or a `mod.rs`.
+fn is_module_root(file: &str, declared: &HashSet<&str>) -> bool {
     let name = file.rsplit('/').next().unwrap_or(file);
-    is_crate_root(file) || name == "mod.rs"
+    (is_crate_root(file) && !declared.contains(file)) || name == "mod.rs"
 }
 
 /// A file a crate's module tree starts from.
