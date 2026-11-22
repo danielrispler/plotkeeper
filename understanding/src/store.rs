@@ -408,6 +408,9 @@ pub struct SessionCards {
     /// What each blocked command's card shows of its risk note (danielrispler/plotkeeper#298), which the shell joins
     /// to the cards when it reads them (`RiskNotes::views`); empty in a worker's own view.
     pub risk_notes: Vec<RiskView>,
+    /// The note of each Bash decision in the history, by the decision's call, for the window to compare with its time
+    /// (danielrispler/plotkeeper#299); the stored decision holds none.
+    pub decision_notes: Vec<RiskView>,
 }
 
 /// A worker's card with the turn of its session's rail it belongs to, `None` when the session has no turn for it.
@@ -622,6 +625,7 @@ impl CardStore {
             workers: Vec::new(),
             decisions,
             risk_notes: Vec::new(),
+            decision_notes: Vec::new(),
         }
     }
 

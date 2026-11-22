@@ -2077,6 +2077,42 @@ fn judging_keeps_the_note_with_the_time_without_holding_the_store_and_a_failure_
 }
 
 #[test]
+fn a_bash_decision_is_joined_to_its_note_by_command_and_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut notes = RiskNotes::open(dir.path().join("risk-notes.json")).unwrap();
+    let allowed = risk_session(&[
+        blocks(RISK_SESSION, "toolu_1", PUSH, REPO),
+        allows(RISK_SESSION, "toolu_1", PUSH),
+    ]);
+    // No note yet: no entry.
+    assert_eq!(notes.decision_views(&allowed), []);
+
+    notes
+        .keep(
+            &the_ask(),
+            judged(RiskLevel::High, "Pushes a branch."),
+            7_000,
+        )
+        .unwrap();
+    assert_eq!(
+        notes.decision_views(&allowed),
+        [arrived(
+            "toolu_1",
+            RiskLevel::High,
+            "Pushes a branch.",
+            7_000
+        )]
+    );
+
+    // The same command in another folder is another note.
+    let elsewhere = risk_session(&[
+        blocks(RISK_SESSION, "toolu_2", PUSH, "/work/other"),
+        allows(RISK_SESSION, "toolu_2", PUSH),
+    ]);
+    assert_eq!(notes.decision_views(&elsewhere), []);
+}
+
+#[test]
 fn a_corrupt_risk_notes_file_opens_empty_and_never_stops_the_start() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("risk-notes.json");

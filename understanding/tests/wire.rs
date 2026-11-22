@@ -324,6 +324,13 @@ fn the_wire_samples_of_the_understanding_layer_are_written_for_tsc() {
                 call: "toolu_3".into(),
             },
         ],
+        // The note of a Bash decision, by the decision's call.
+        decision_notes: vec![RiskView::Arrived {
+            call: "toolu_2".into(),
+            level: RiskLevel::High,
+            line: "Pushes a branch to GitHub".into(),
+            at: AT,
+        }],
     };
     let shown = json(shown);
     for card in shown["recent"].as_array().unwrap() {

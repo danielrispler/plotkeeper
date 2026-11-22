@@ -281,7 +281,9 @@ fn cards(studio: State<Core>, cards: State<Cards>, notes: State<Notes>) -> Sessi
     if let Some(session) = session {
         shown.open = open_items(session, studio.task_facts(owner), &cards);
         // Each blocked command's card is joined to its note here, so the core's type holds none.
-        shown.risk_notes = notes.lock().unwrap().views(session);
+        let notes = notes.lock().unwrap();
+        shown.risk_notes = notes.views(session);
+        shown.decision_notes = notes.decision_views(session);
     }
     shown
 }
