@@ -5,9 +5,10 @@ import fs from "node:fs";
 import { fakeDocument, tauri } from "./dom.mjs";
 
 tauri([], () => null);
-globalThis.document = fakeDocument({});
+// The document is set after the import: times.ts starts a timer when one exists at load.
 const home = await import("../../dist/home.js");
 const { initial } = await import("../../dist/settings.js");
+globalThis.document = fakeDocument({});
 
 test("the Quiz's window code is gone", () => {
   assert.equal(fs.existsSync(new URL("../quiz.ts", import.meta.url)), false);
