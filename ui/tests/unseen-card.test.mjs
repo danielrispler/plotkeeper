@@ -1,5 +1,5 @@
 // A folded turn keeps one title row for each card Daniel has not seen (danielrispler/plotkeeper#211). Run: `npm test`.
-import { test } from "node:test";
+import { afterEach, mock, test } from "node:test";
 import assert from "node:assert/strict";
 import { fakeDocument, tauri } from "./dom.mjs";
 
@@ -7,7 +7,18 @@ const calls = [];
 tauri(calls);
 // The document is set after the import: times.ts starts a timer when one exists at load.
 const { foldedTurn } = await import("../../dist/story.js");
-globalThis.document = fakeDocument({ visibilityState: "visible", body: { dataset: {} } });
+globalThis.document = fakeDocument({ visibilityState: "visible", hasFocus: () => true, body: { dataset: {}, classList: { contains: () => false } } });
+// A card is shown once seen (seen.ts): the test scrolls its card into view.
+const observers = [];
+globalThis.IntersectionObserver = class {
+  constructor(run) {
+    this.run = run;
+    observers.push(this);
+  }
+  observe() {}
+  disconnect() {}
+};
+afterEach(() => mock.timers.reset());
 
 const stored = (id, title, shown_at = null) => ({
   request: { session_id: "s", id, agent: null, changed_by: {}, check: null },
@@ -29,12 +40,16 @@ test("a folded turn's unseen card is one title row; a seen card has none, two un
   assert.equal(rows([]).length, 0);
 });
 
-test("opening a row builds the card in place and writes its shown tap", () => {
+test("opening a row builds the card in place and writes its shown tap once seen", () => {
   const [row] = rows([stored("s@6", "Opened in place")]);
   assert.ok(row, "the unseen card has a row");
   assert.equal(row.find("article").length, 0);
   row.open = true;
   row.listeners.toggle();
   assert.equal(row.find("article").length, 1);
+  mock.timers.enable({ apis: ["setTimeout"] });
+  assert.deepEqual(calls.filter(([c]) => c === "shown"), []);
+  observers.at(-1).run([{ intersectionRatio: 1, intersectionRect: { width: 100, height: 100 }, rootBounds: { width: 100, height: 100 } }]);
+  mock.timers.tick(500);
   assert.deepEqual(calls.filter(([c]) => c === "shown"), [["shown", { ids: ["s@6"] }]]);
 });
