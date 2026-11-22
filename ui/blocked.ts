@@ -32,13 +32,14 @@ export const riskLevels: Record<RiskLevel, string> = { none: "None", low: "Low",
 
 // What the note's place says for `note`, as the shell joined it to the card. A card with a button has the place from the moment it appears, so
 // the buttons never move, and reads "on its way" until the shell says more; a card with no button has it only once the shell has news of a note.
-export function riskLine(note: RiskView | undefined, hasButtons: boolean): RiskLine | null {
+// `reads`: a note may still come; an ended session's card asks for none, so with no news it has no place.
+export function riskLine(note: RiskView | undefined, hasButtons: boolean, reads = true): RiskLine | null {
   if (note?.state === "failed") return { state: "failed", level: null, line: null, text: "No risk note: the judge did not answer" };
   if (note?.state === "arrived") {
     const level = riskLevels[note.level];
     return { state: "arrived", level, line: note.line, text: `Risk: ${level} · ${note.line}` };
   }
-  return note || hasButtons ? { state: "reading", level: null, line: null, text: "Reading the command…" } : null;
+  return note || (hasButtons && reads) ? { state: "reading", level: null, line: null, text: "Reading the command…" } : null;
 }
 
 // The note's place on the card: a polite live region, so a screen reader hears the note when it fills.
@@ -138,7 +139,7 @@ export async function typeRetry(
 
 // What the card shows for `card`, asked by `agent` (the subagent's name, null for the session's own agent), or null once
 // Daniel declined it. `answerable`: its request file is still there, so Allow and Decline have something to answer, also after its hook has returned.
-// `output`: what reading its output gave, `undefined` until it is read.
+// `output`: what reading its output gave, `undefined` until it is read. `reads`: a risk note may still come for it (`riskLine`).
 export function blockedView(
   card: BlockedCommand,
   agent: string | null,
@@ -146,26 +147,28 @@ export function blockedView(
   now: number = Date.now(),
   output?: BlockedOutput | null,
   note?: RiskView,
+  reads = true,
 ): BlockedView | null {
   if (card.status === "declined") return null;
+  const buttons = buttonsOf(card.status, answerable);
   return {
     state: states[card.status],
     command: card.command,
     folder: card.cwd,
     reason: card.reason,
     agent,
-    buttons: buttonsOf(card.status, answerable),
+    buttons,
     detail: detailOf(card, now),
     tail: outputCall(card) && output !== undefined ? tailText(output) : null,
-    risk: riskLine(note, buttonsOf(card.status, answerable).length > 0),
+    risk: riskLine(note, buttons.length > 0, reads),
   };
 }
 
 // `retry` types the card's retry line into the session's terminal (`story.ts`).
-export function blockedElement(session: string, card: BlockedCommand, agent: string | null, retry: (card: BlockedCommand) => void, note?: RiskView): HTMLElement | null {
+export function blockedElement(session: string, card: BlockedCommand, agent: string | null, retry: (card: BlockedCommand) => void, note?: RiskView, reads = true): HTMLElement | null {
   const request = blockedRequestFor(card.call);
   const read = outputCall(card);
-  const view = blockedView(card, agent, request !== null, Date.now(), read ? tails.get(read.call) : undefined, note);
+  const view = blockedView(card, agent, request !== null, Date.now(), read ? tails.get(read.call) : undefined, note, reads);
   if (view === null) return null;
   const block = document.createElement("article");
   block.className = "question decision blocked-command";

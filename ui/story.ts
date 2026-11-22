@@ -791,7 +791,7 @@ function blockedElements(session: Session, cards: BlockedCommand[]): HTMLElement
   const named = (id: string | null) => (id === null ? null : (session.agents.find((a) => a.id === id)?.name ?? id.slice(0, 5)));
   const retry = (card: BlockedCommand) => typeRetryLine(session, card, named(card.agent));
   const note = (card: BlockedCommand) => studio.cards.risk_notes.find((n) => n.call === card.call);
-  return cards.flatMap((card) => blockedElement(session.resume_id || session.id, card, named(card.agent), retry, note(card)) ?? []);
+  return cards.flatMap((card) => blockedElement(session.resume_id || session.id, card, named(card.agent), retry, note(card), session.state !== "ended") ?? []);
 }
 
 // The dock of the viewed agent: its open questions and the blocked commands that show a button. Drawn again when a risk note arrives, which

@@ -267,6 +267,16 @@ test("a card's buttons and state do not depend on its note", () => {
   }
 });
 
+test("a card for which no note is coming, in an ended session, has no place unless a note arrived or failed", () => {
+  const ended = (status, note) => blockedView(card(status), null, false, 0, undefined, note, false).risk;
+  assert.equal(ended("allowed_not_run"), null);
+  assert.equal(ended("blocked_again"), null);
+  assert.equal(ended("blocked"), null);
+  assert.equal(ended("allowed_not_run", arrived("high")).level, "High");
+  assert.equal(ended("allowed_not_run", { call: "toolu_1", state: "failed" }).state, "failed");
+  assert.equal(blockedView(card("allowed_not_run"), null, false).risk.state, "reading");
+});
+
 test("a card with no button has the place only once there is news of a note, and keeps it", () => {
   assert.equal(blockedView(card("allowed"), null, true).risk, null);
   assert.equal(blockedView(card("blocked"), null, false).risk, null);
