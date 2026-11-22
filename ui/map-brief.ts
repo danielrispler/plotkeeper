@@ -10,10 +10,11 @@
 import { failure, invoke, text } from "./dom.js";
 import { currentMap, currentScrub, onDraw, registerLayer, type MapView } from "./map.js";
 import { closeDrawer, openDrawer } from "./map-drawer.js";
+import { watchSeen } from "./seen.js";
 import { scrubTo } from "./map-history.js";
 import { ratifyActions } from "./map-ratify.js";
 import { ratifyStep, statusWords } from "./ratify.js";
-import { actorSize, alsoAt, briefCamera, briefPlayer, citeDrawer, figureShapes, figureSize, orderRun, type OrderRun, pickRun, type PickRun, playlist, plateSize, type Rect, type Shape, unconfirmed } from "./map-model.js";
+import { actorSize, alsoAt, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, figureShapes, figureSize, orderRun, type OrderRun, pickRun, type PickRun, playlist, plateSize, type Rect, type Shape, unconfirmed } from "./map-model.js";
 import type { BriefCheck, BriefStep, BriefView, PrBrief, RatifyRow } from "./types.js";
 
 const player = briefPlayer({ scrubbed: () => currentScrub() !== null, backToNow: () => void scrubTo(null).catch(failure("map_at")) });
@@ -34,6 +35,31 @@ const svg = (tag: string, attrs: Record<string, string> = {}) => {
   for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
   return node;
 };
+
+// Reading a chapter to its end (#342): one gate per chapter of a brief, kept while the window runs; it tells the shell once.
+const gates = new Map<string, Gate>();
+let watching: (() => void) | null = null;
+const stopWatching = () => (watching?.(), (watching = null));
+function gateOf(): Gate | null {
+  const now = player.current();
+  if (!now || !playing) return null;
+  const key = `${now.project}|${now.pr}|${playing.brief.head}|${now.chapter}`;
+  let gate = gates.get(key);
+  if (!gate) {
+    const { project, pr, chapter } = now;
+    const head = playing.brief.head;
+    gate = chapterGate(steps(), () => void invoke("brief_chapter_done", { project, number: pr, chapter, head }).catch(failure("brief_chapter_done")));
+    gates.set(key, gate);
+  }
+  return gate;
+}
+// Watches the last step's words: once they have been seen, the chapter's reading counts.
+function watchLast(node: Element, index: number) {
+  stopWatching();
+  const gate = gateOf();
+  if (!gate || gate.done() || index !== steps().length - 1) return;
+  watching = watchSeen(node, { active: () => player.current()?.step === index && panel().classList.contains("open"), onSeen: () => gate.sawLast() });
+}
 
 const panel = () => document.getElementById("map-brief")!;
 export const briefOpen = () => player.current() !== null;
@@ -84,6 +110,7 @@ onDraw((view) => {
 });
 
 export function closeBrief() {
+  stopWatching();
   player.close();
   playing = null;
   ratifying = [];
@@ -408,6 +435,7 @@ function checkNode(view: MapView, step: BriefStep) {
 
 // Redraws the check where it is, the Check button and the map's badges with it.
 function redrawCheck(view: MapView, step: BriefStep) {
+  if (step.check && runs.get(step.check)?.run.answered()) gateOf()?.answered();
   const old = panel().querySelector(".brief-check");
   if (old) old.replaceWith(checkNode(view, step));
   paintOrder(view, step);
@@ -516,7 +544,11 @@ function show(view: MapView, same: boolean) {
   box.classList.add("open");
   const cols = box.querySelector<HTMLElement>(".brief-cols")!;
   const also = alsoAt(playing.brief.brief, now.chapter, now.step, list.length);
-  const fill = () => cols.replaceChildren(stepNode(view, step, pr, also));
+  const fill = () => {
+    const node = stepNode(view, step, pr, also);
+    cols.replaceChildren(node);
+    watchLast(node, now.step);
+  };
   clearTimeout(swap);
   if (same || reduced()) {
     fill();

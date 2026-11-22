@@ -288,6 +288,27 @@ export function alsoAt(brief: PrBrief, chapter: number, step: number, length: nu
 
 // `overview`: this chapter plays the brief's overview first. It is the first chapter opened, and keeps it until it is finished, so it plays once.
 export type Playing = { project: string; pr: number; chapter: number; step: number; overview: boolean };
+
+// A chapter is complete when its last step was seen and its check answered, right or wrong, when it holds one (#342). Leaving
+// mid-chapter completes nothing. `fire` runs once, the moment both hold.
+export type Gate = { sawLast: () => void; answered: () => void; done: () => boolean };
+export function chapterGate(list: Pick<BriefStep, "check">[], fire: () => void): Gate {
+  let last = false;
+  let answered = !list.some((step) => step.check);
+  let fired = false;
+  const look = () => {
+    if (last && answered && !fired) {
+      fired = true;
+      fire();
+    }
+  };
+  return {
+    sawLast: () => ((last = true), look()),
+    answered: () => ((answered = true), look()),
+    done: () => fired,
+  };
+}
+
 export type Player = {
   current: () => Playing | null;
   open: (project: string, pr: number, chapter: number) => void;

@@ -1238,6 +1238,7 @@ fn main() {
             refresh_landed_tasks,
             map::map_state,
             pr_briefs::pr_brief,
+            pr_briefs::brief_chapter_done,
             pr_briefs::briefs_waiting,
             ratify::pr_ratify,
             ratify::ratify_set,

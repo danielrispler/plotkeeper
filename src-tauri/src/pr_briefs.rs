@@ -26,6 +26,8 @@ pub struct BriefInfo {
     pub writing: bool,
     /// The chapters' titles, one tray row each; one title for a single story.
     pub chapters: Vec<String>,
+    /// Every chapter of the brief was read to its end (#342). Home's dot may ask this to leave a brief that is done; it does not yet.
+    pub read: bool,
     /// The PR touches no part that would fog at Daniel's tiers, so it gets no brief.
     pub quiet: bool,
 }
@@ -179,6 +181,9 @@ impl PrBriefs {
             return;
         };
         let busy = self.busy.lock().unwrap();
+        let user = crate::map::state_file()
+            .ok()
+            .map(|file| crate::map::read_user(&file, project));
         let seen = self.seen_of(project);
         let seen = seen.lock().unwrap();
         for pr in ready {
@@ -191,6 +196,7 @@ impl PrBriefs {
                         writing: false,
                         chapters: vec![],
                         quiet: true,
+                        read: false,
                     });
                 }
                 continue;
@@ -205,6 +211,9 @@ impl PrBriefs {
                     .is_some_and(|b| b.stale || b.head != pr.head),
                 writing,
                 chapters,
+                read: user
+                    .as_ref()
+                    .is_some_and(|u| crate::fog::fully_read(u, pr.number)),
                 quiet: false,
             });
         }
@@ -410,6 +419,35 @@ pub fn pr_brief(
     briefs.busy(&project, number, false);
     let _ = app.emit("map-landed", project);
     written.map(|b| Some(view(b)))
+}
+
+/// Chapter `chapter` of PR `number`'s brief was read to its end (the window saw its last step and the check was answered): the
+/// read is kept as "read at head", and the fog the PR's merged commits filed leaves every part whose chapters are all read.
+#[tauri::command(async)]
+pub fn brief_chapter_done(
+    project: String,
+    number: u64,
+    chapter: usize,
+    head: String,
+    app: AppHandle,
+) -> Result<(), String> {
+    let stored = store_of(&project)
+        .and_then(|store| store.get(number, &head))
+        .ok_or("that brief is not stored")?;
+    let lit = stored
+        .brief
+        .chapters
+        .iter()
+        .map(|c| c.parts.clone())
+        .collect();
+    let file = crate::map::state_file()?;
+    let at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let done = crate::fog::mark_read(&file, &project, number, chapter, &head, lit, at)?;
+    crate::fog::clear_pr(Path::new(&project), &file, &project, number, &done)?;
+    let _ = app.emit("map-landed", project);
+    Ok(())
 }
 
 #[cfg(test)]

@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { alsoAt, briefCamera, briefPlayer, escapeMap, figureShapes, figureSize, layerOrder, playlist, unconfirmed } from "../../dist/map-model.js";
+import { alsoAt, chapterGate, briefCamera, briefPlayer, escapeMap, figureShapes, figureSize, layerOrder, playlist, unconfirmed } from "../../dist/map-model.js";
 import { trayRows } from "../../dist/map-tray.js";
 
 const step = (k, extra = {}) => ({ k, h: k, b: "", on: [], hops: [], law: null, covered_by: null, list: [], risks: [], fig: null, check: null, cites: [], flags: [], ...extra });
@@ -224,4 +224,34 @@ test("a wrong order names the parts out of place; the right one replays the key 
   const right = orderRun(["a", "b", "c"], links);
   for (const id of ["a", "b", "c"]) right.tap(id);
   assert.deepEqual(right.grade(), { right: true, wrong: [] });
+});
+
+test("a chapter is complete when its last step was seen and its check answered, right or wrong", () => {
+  let fired = 0;
+  const gate = chapterGate([step("Where"), step("Your turn", { check: { kind: "pick" } })], () => fired++);
+  gate.sawLast();
+  assert.equal(fired, 0, "the check is not answered yet");
+  assert.equal(gate.done(), false);
+  gate.answered();
+  assert.equal(fired, 1);
+  gate.answered();
+  gate.sawLast();
+  assert.equal(fired, 1, "it tells once");
+  // Answered first, then seen: the same.
+  let again = 0;
+  const other = chapterGate([step("Your turn", { check: { kind: "order" } })], () => again++);
+  other.answered();
+  assert.equal(again, 0, "the last step was not seen");
+  other.sawLast();
+  assert.equal(again, 1);
+});
+
+test("a chapter with no check is complete once its last step is seen, and leaving earlier completes nothing", () => {
+  let fired = 0;
+  const gate = chapterGate([step("Where"), step("Now")], () => fired++);
+  assert.equal(fired, 0);
+  assert.equal(gate.done(), false);
+  gate.sawLast();
+  assert.equal(fired, 1);
+  assert.equal(gate.done(), true);
 });
