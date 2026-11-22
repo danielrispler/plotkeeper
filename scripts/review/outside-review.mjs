@@ -185,11 +185,11 @@ Look for defects that reading the diff alone would miss:
 Report only defects you can tie to a line the change adds or edits. Give each one the file's path relative to the repository, the line in the file after the change, one sentence saying what is wrong, and a concrete failure scenario: the input or state, and the wrong result. No style remarks and no praise. An empty list is a valid answer.
 `;
 
-/** How `agy` is run for the review: hidden from Studio, cut at 15 minutes, answering in SCHEMA. */
+/** How `agy` is run for the review: hidden from Studio, never recorded (`PLOTKEEPER_INTERNAL`), cut at 15 minutes, answering in SCHEMA. */
 export const agyCall = (opts, { schema, prompt, env }) => {
   const { STUDIO_TERMINAL_ID: _, ...rest } = env;
   const args = ["--model", opts.model, "--print-timeout", `${TIMEOUT_MINUTES}m`];
-  return { args: [...args, "--output-format", "json", "--json-schema", schema, "-p", prompt], env: rest };
+  return { args: [...args, "--output-format", "json", "--json-schema", schema, "-p", prompt], env: { ...rest, PLOTKEEPER_INTERNAL: "1" } };
 };
 
 // The verdict of a finished `agy` run. `reads` is how many reads the hook allowed: with none, the

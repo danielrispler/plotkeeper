@@ -989,6 +989,8 @@ impl ClaudeWriter {
             .env_remove("ANTHROPIC_API_KEY")
             .env_remove("ANTHROPIC_AUTH_TOKEN")
             .env_remove("CLAUDE_CODE_PLUGIN_DIRS")
+            // Plotkeeper's own run: its hook never records it (#323).
+            .env("PLOTKEEPER_INTERNAL", "1")
             .current_dir(&self.folder);
         (command, prompt.replace('\0', ""))
     }
