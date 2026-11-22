@@ -832,6 +832,45 @@ fn first_tree(root: &str, began: Option<u64>) -> Option<(String, serde_json::Val
     }
 }
 
+/// The agent's process for the hook that runs now (#330): `wrapper`, the pid a wrapper script passed in
+/// `STUDIO_AGENT_PID` (agy's, which runs the hook from a backgrounded subshell), else the hook's
+/// `parent`, or its parent's parent when that is a shell the agent started the hook through.
+/// `inspect` gives a process's command and parent pid. `None` when no agent can be told, as for a hook
+/// reparented to init; the session then takes the idle path.
+pub fn agent_pid(
+    wrapper: Option<&str>,
+    parent: u32,
+    inspect: impl Fn(u32) -> Option<(String, u32)>,
+) -> Option<u32> {
+    let real = |pid: u32| (pid > 1).then_some(pid);
+    if let Some(pid) = wrapper.and_then(|w| w.trim().parse().ok()).and_then(real) {
+        return Some(pid);
+    }
+    let parent = real(parent)?;
+    match inspect(parent) {
+        Some((command, up)) if is_shell(&command) => real(up),
+        _ => Some(parent),
+    }
+}
+
+fn is_shell(command: &str) -> bool {
+    let name = command.rsplit('/').next().unwrap_or(command);
+    let name = name.trim_start_matches('-');
+    matches!(name, "sh" | "bash" | "zsh" | "dash" | "fish")
+}
+
+/// The command and parent pid of process `pid`, from `ps`; `None` when it has gone or `ps` fails.
+pub fn inspect(pid: u32) -> Option<(String, u32)> {
+    let out = Command::new("ps")
+        .args(["-o", "ppid=", "-o", "comm=", "-p", &pid.to_string()])
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    let text = String::from_utf8(out.stdout).ok()?;
+    let (parent, command) = text.trim().split_once(char::is_whitespace)?;
+    Some((command.trim().to_string(), parent.parse().ok()?))
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::Path;

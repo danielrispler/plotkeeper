@@ -85,6 +85,7 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
             arg(a, "offset")?,
         )),
         "cards" => out(crate::cards(app)),
+        "writer_notice" => out(app.writer_notice.lock().unwrap().clone()),
         "shown" => done!(crate::shown(app, arg(a, "ids")?)),
         "guess" => done!(crate::guess(app, arg(a, "id")?, arg(a, "option")?)),
         "key_wrong" => done!(crate::key_wrong(app, arg(a, "id")?)),

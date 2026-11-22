@@ -404,11 +404,14 @@ window.addEventListener("keydown", () => void askOnce(), { once: true });
 listen<{ level: number; message: string }>("log://log", onLogRecord);
 element("notice-dismiss").addEventListener("click", dismissNotice);
 // No card writer can run, or one can again (danielrispler/plotkeeper#51).
-listen<string | null>("writer-notice", (notice) => {
+const showWriterNotice = (notice: string | null) => {
   const line = element("notice");
   line.textContent = withWriterNotice(line.textContent ?? "", notice);
   line.hidden = !line.textContent;
-});
+};
+listen<string | null>("writer-notice", showWriterNotice);
+// A page opened after the writer failed has missed the event (danielrispler/plotkeeper#328).
+invoke("writer_notice").then((notice) => notice && showWriterNotice(notice));
 invoke("cards").then(showCards);
 // The answer hook waits for the card only while its session shows (danielrispler/Falinks#461, decision 16).
 startWatching(() => showView(studio.selection));

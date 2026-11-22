@@ -113,19 +113,7 @@ fn run(log: &std::path::Path, held: lock::Held) -> std::io::Result<()> {
     thread::spawn(move || studio_server::prs(&prs));
     let retests = app.clone();
     thread::spawn(move || studio_server::write_due_retests(&retests));
-    let notices = app.clone();
-    thread::spawn(move || {
-        for notice in writer_notice_reader {
-            // The notice is the writer's own words; the log keeps only that one arrived or cleared.
-            log::warn!(
-                "card writer notice {}",
-                if notice.is_some() { "shown" } else { "cleared" }
-            );
-            notices
-                .events
-                .emit("writer-notice", serde_json::json!(notice));
-        }
-    });
+    studio_server::forward_writer_notices(&app, writer_notice_reader);
     let following = app.clone();
     let log = log.to_path_buf();
     thread::spawn(move || studio_server::follow(&following, &log));

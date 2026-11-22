@@ -4,8 +4,9 @@
 //! the page shows (`rail_shown`, `split_shown`) from the [`App`].
 
 use crate::{
-    App, CardsKey, ask_notes, cards, current_cards_key, refresh_landed, report, resume, save_roots,
-    save_state, selected, sessions, settle_checks, unsaved, wanted_notes, warn_log,
+    App, CardsKey, PROCESS_CHECK, append_to, ask_notes, cards, current_cards_key, pid_alive,
+    process_ends, refresh_landed, report, resume, save_roots, save_state, selected, sessions,
+    settle_checks, unsaved, wanted_notes, warn_log,
 };
 use std::{
     collections::HashMap,
@@ -247,6 +248,8 @@ pub struct Follower {
     versions: Versions,
     agy_versions: AgyVersions,
     sent: Sent,
+    /// When the sessions' agent processes were last checked (#330).
+    checked: Option<Instant>,
 }
 
 impl Follower {
@@ -273,6 +276,7 @@ impl Follower {
             versions: Versions::beside(log),
             agy_versions: AgyVersions::beside(log),
             sent: Sent::default(),
+            checked: None,
         }
     }
 
@@ -320,7 +324,7 @@ impl Follower {
                 // The turns that ended while the app was down get their cards now (danielrispler/Falinks#486).
                 let requests: Vec<CardRequest> =
                     store.cards().iter().map(|k| k.request.clone()).collect();
-                let backfill = studio.backfill(millis(), &requests);
+                let backfill = studio.backfill(millis(), &requests, crate::settings::catch_up());
                 drop((store, studio));
                 let log = log.to_path_buf();
                 thread::spawn(move || save_state(&log, &replayed));
@@ -431,6 +435,16 @@ impl Follower {
                     unsaved(store.keep_decisions(&session.agent.id, &session.decisions));
                 }
                 settle_checks(&studio, &mut store);
+            }
+        }
+        // A session whose agent is gone ends within about 30 s (#330); the lines are read on the next pass.
+        if self.live && self.checked.is_none_or(|at| at.elapsed() >= PROCESS_CHECK) {
+            self.checked = Some(Instant::now());
+            let ends = process_ends(state, pid_alive);
+            if !ends.is_empty()
+                && let Err(e) = append_to(&self.log, &ends)
+            {
+                log::warn!("end the sessions whose process is gone: {e}");
             }
         }
         // Reads the transcripts' lines and nothing else (`AGENTS.md`).

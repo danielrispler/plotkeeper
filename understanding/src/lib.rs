@@ -9,11 +9,7 @@ use std::{
     os::unix::process::CommandExt,
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::{
-        Mutex,
-        atomic::{AtomicBool, Ordering},
-        mpsc,
-    },
+    sync::{Mutex, mpsc},
     thread,
     time::{Duration, Instant},
 };
@@ -782,24 +778,27 @@ pub struct ClaudeWriter {
     availability: Availability,
 }
 
-/// Whether the writer's program starts, and who hears when that changes.
+/// The notice now shown, and who hears when it changes.
 #[derive(Default)]
 struct Availability {
-    off: AtomicBool,
+    shown: Mutex<Option<String>>,
     on_change: Option<Box<dyn Fn(Option<String>) + Send + Sync>>,
 }
 
 impl Availability {
-    /// The program did not start: tells once until a call works.
-    fn failed(&self, kind: WriterKind, error: &std::io::Error) {
-        if !self.off.swap(true, Ordering::SeqCst) {
-            self.tell(Some(kind.missing(error)));
+    /// A call failed: tells its notice, once until it changes or a call works.
+    fn failed(&self, error: &WriterError) {
+        let notice = error.notice();
+        let mut shown = self.shown.lock().unwrap();
+        if shown.as_ref() != Some(&notice) {
+            *shown = Some(notice.clone());
+            self.tell(Some(notice));
         }
     }
 
     /// A call worked: clears the notice, if one was told.
     fn worked(&self) {
-        if self.off.swap(false, Ordering::SeqCst) {
+        if self.shown.lock().unwrap().take().is_some() {
             self.tell(None);
         }
     }
@@ -1090,14 +1089,15 @@ impl ClaudeWriter {
             .process_group(0)
             .spawn()
             .map_err(|e| {
-                self.availability.failed(kind, &e);
                 let not_found = e.kind() == std::io::ErrorKind::NotFound;
                 let kind_of = if not_found {
                     FailureKind::NotInstalled
                 } else {
                     FailureKind::Other
                 };
-                WriterError::new(kind_of, kind, format!("({e})"))
+                let error = WriterError::new(kind_of, kind, format!("({e})"));
+                self.availability.failed(&error);
+                error
             })?;
         let (mut stdin, mut stdout) = (child.stdin.take(), child.stdout.take());
         // Threads, so a call that reads no input or never ends cannot hold back the timeout.
@@ -1125,15 +1125,21 @@ impl ClaudeWriter {
             // SAFETY: `kill` takes no pointers.
             unsafe { libc::kill(-(child.id() as i32), libc::SIGKILL) };
             let _ = child.wait();
-            return Err(WriterError::new(
+            let error = WriterError::new(
                 FailureKind::Timeout,
                 kind,
                 format!("(ran past {timeout:?})"),
-            ));
+            );
+            // A call kept short on purpose (the risk judge) timing out is no fault of the writer.
+            if timeout >= kind.timeout() {
+                self.availability.failed(&error);
+            }
+            return Err(error);
         };
         let reply = read_reply(kind, schema, &status, &String::from_utf8_lossy(&out));
-        if reply.is_ok() {
-            self.availability.worked();
+        match &reply {
+            Ok(_) => self.availability.worked(),
+            Err(error) => self.availability.failed(error),
         }
         reply
     }

@@ -3,21 +3,21 @@
     "SessionStart": [
       {
         "type": "command",
-        "command": "p=$(cat); (printf %s \"$p\" | \"__STUDIO_HOOK__\" >/dev/null 2>&1 &) ; exit 0",
+        "command": "p=$(cat); (printf %s \"$p\" | STUDIO_AGENT_PID=$PPID \"__STUDIO_HOOK__\" >/dev/null 2>&1 &) ; exit 0",
         "timeout": 5
       }
     ],
     "PreInvocation": [
       {
         "type": "command",
-        "command": "p=$(cat); (printf %s \"$p\" | \"__STUDIO_HOOK__\" >/dev/null 2>&1 &) ; exit 0",
+        "command": "p=$(cat); (printf %s \"$p\" | STUDIO_AGENT_PID=$PPID \"__STUDIO_HOOK__\" >/dev/null 2>&1 &) ; exit 0",
         "timeout": 5
       }
     ],
     "PostInvocation": [
       {
         "type": "command",
-        "command": "p=$(cat); (printf %s \"$p\" | \"__STUDIO_HOOK__\" >/dev/null 2>&1 &) ; exit 0",
+        "command": "p=$(cat); (printf %s \"$p\" | STUDIO_AGENT_PID=$PPID \"__STUDIO_HOOK__\" >/dev/null 2>&1 &) ; exit 0",
         "timeout": 5
       }
     ],
@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "p=$(cat); (printf %s \"$p\" | \"__STUDIO_HOOK__\" >/dev/null 2>&1 &) ; exit 0",
+            "command": "p=$(cat); (printf %s \"$p\" | STUDIO_AGENT_PID=$PPID \"__STUDIO_HOOK__\" >/dev/null 2>&1 &) ; exit 0",
             "timeout": 5
           }
         ]
@@ -39,7 +39,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "p=$(cat); (printf %s \"$p\" | \"__STUDIO_HOOK__\" >/dev/null 2>&1 &) ; exit 0",
+            "command": "p=$(cat); (printf %s \"$p\" | STUDIO_AGENT_PID=$PPID \"__STUDIO_HOOK__\" >/dev/null 2>&1 &) ; exit 0",
             "timeout": 5
           }
         ]
@@ -48,7 +48,7 @@
     "Stop": [
       {
         "type": "command",
-        "command": "p=$(cat); (printf %s \"$p\" | \"__STUDIO_HOOK__\" >/dev/null 2>&1 &) ; exit 0",
+        "command": "p=$(cat); (printf %s \"$p\" | STUDIO_AGENT_PID=$PPID \"__STUDIO_HOOK__\" >/dev/null 2>&1 &) ; exit 0",
         "timeout": 5
       }
     ]

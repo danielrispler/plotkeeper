@@ -118,6 +118,8 @@ pub struct App {
     pub ci: Arc<ci_laws::CiCache>,
     pub watching: Mutex<answer::Watching>,
     pub events: Arc<Events>,
+    /// The notice the card writer last raised and not yet cleared, for a page opened after it (danielrispler/plotkeeper#328).
+    pub writer_notice: Mutex<Option<String>>,
     /// The list changed outside the read loop since it last sent it: a PR was found, or Daniel marked a session unseen.
     pub list_changed: AtomicBool,
     /// Whether the story rail shows, as the UI last said: not in focus mode, behind a closed overlay or under the skills
@@ -183,6 +185,7 @@ impl App {
             ci: Arc::new(ci_laws::load_cache()),
             watching: Mutex::default(),
             events: Arc::default(),
+            writer_notice: Mutex::new(None),
             list_changed: AtomicBool::new(false),
             rail_shown: AtomicBool::new(true),
             split_shown: Mutex::new(None),
@@ -543,6 +546,37 @@ pub fn session_ends(studio: &Mutex<Studio>, terminal: &str) -> Vec<serde_json::V
         .collect()
 }
 
+/// How often the follower checks each session's agent process (#330).
+pub const PROCESS_CHECK: Duration = Duration::from_secs(30);
+
+/// The `SessionEnd` lines for the sessions whose agent process `alive` no longer lists (#330, spec #319,
+/// "Session ending"). A session with no pid is never listed.
+pub fn process_ends(studio: &Mutex<Studio>, alive: impl Fn(u32) -> bool) -> Vec<serde_json::Value> {
+    let gone = studio.lock().unwrap().gone(alive);
+    gone.into_iter()
+        .map(|id| {
+            serde_json::json!({
+                "session_id": id,
+                "hook_event_name": "SessionEnd",
+                "reason": "process_gone",
+                "studio_received_ms": millis(),
+            })
+        })
+        .collect()
+}
+
+/// Whether process `pid` exists: signal 0 only checks, it sends nothing.
+pub fn pid_alive(pid: u32) -> bool {
+    let Ok(pid) = i32::try_from(pid) else {
+        return false;
+    };
+    // SAFETY: signal 0 is an existence check; it delivers no signal.
+    unsafe {
+        libc::kill(pid, 0) == 0
+            || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+    }
+}
+
 /// Daniel marked session `id` unseen (danielrispler/Falinks#556), from the rail's menu.
 pub fn mark_unseen(app: &App, id: String) {
     if let Some((id, turns)) = app.core.lock().unwrap().mark_unseen(&id) {
@@ -818,6 +852,22 @@ pub fn ask_why_not(
     studio_understanding::why_not(&*app.writer, &transcript.unwrap_or_default(), &name, facts)
 }
 
+/// Sends each notice the card writer raises (or clears, as `None`) to the page as `writer-notice`, on a thread of its own that
+/// ends with the sender. The log keeps only that one arrived or cleared: the notice is the writer's own words.
+pub fn forward_writer_notices(app: &Arc<App>, notices: mpsc::Receiver<Option<String>>) {
+    let app = app.clone();
+    thread::spawn(move || {
+        for notice in notices {
+            log::warn!(
+                "card writer notice {}",
+                if notice.is_some() { "shown" } else { "cleared" }
+            );
+            *app.writer_notice.lock().unwrap() = notice.clone();
+            app.events.emit("writer-notice", serde_json::json!(notice));
+        }
+    });
+}
+
 /// Writes the retests that fell due, once an hour from a minute after the start, off the read loop; Home reads them
 /// again when one was written (danielrispler/plotkeeper#129).
 pub fn write_due_retests(app: &App) {
@@ -889,7 +939,12 @@ pub fn save_roots(log: &Path, roots: &HashMap<String, String>) {
 /// interleave with a hook's line.
 pub fn append(lines: &[serde_json::Value]) -> Result<(), String> {
     let home = std::env::home_dir().ok_or("no home directory")?;
-    let locked = studio_hook::locked(&studio_hook::event_log(&home), Duration::from_secs(60));
+    append_to(&studio_hook::event_log(&home), lines)
+}
+
+/// Appends `lines` to the event log `log`, under its lock.
+pub fn append_to(log: &Path, lines: &[serde_json::Value]) -> Result<(), String> {
+    let locked = studio_hook::locked(log, Duration::from_secs(60));
     let mut log = locked
         .map_err(|e| e.to_string())?
         .ok_or("the event log stayed locked")?;
@@ -1100,6 +1155,57 @@ mod tests {
         let mut shown = studio_understanding::SessionCards::default();
         join_notes(&studio, &notes, &mut shown);
         assert_eq!(shown.risk_notes.len(), 1);
+    }
+
+    #[test]
+    fn a_session_whose_agent_process_is_gone_gets_a_synthetic_end_and_ends() {
+        let line = |session: &str, name: &str, at: u64, pid: Option<u32>| {
+            let mut line = serde_json::json!({
+                "session_id": session, "hook_event_name": name, "cwd": "/x", "studio_received_ms": at,
+            });
+            if let Some(pid) = pid {
+                line["studio_pid"] = pid.into();
+            }
+            line.to_string()
+        };
+        let lines = [
+            line("dead", "SessionStart", 1_793_262_000_000, Some(4001)),
+            line("live", "SessionStart", 1_793_262_000_001, Some(4002)),
+            line("unwatched", "SessionStart", 1_793_262_000_002, None),
+        ];
+        let studio = std::sync::Mutex::new(studio_core::Studio::replayed(&lines));
+        let alive = |pid: u32| pid == 4002;
+        let ends = super::process_ends(&studio, alive);
+        let ended: Vec<_> = ends
+            .iter()
+            .map(|l| {
+                (
+                    l["session_id"].as_str().unwrap(),
+                    l["hook_event_name"].as_str().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(ended, [("dead", "SessionEnd")]);
+        assert!(ends[0]["studio_received_ms"].as_u64().unwrap() > 0);
+        // The lines go in the log, and the next read ends the session.
+        for end in &ends {
+            studio.lock().unwrap().replay(&end.to_string());
+        }
+        assert_eq!(
+            studio.lock().unwrap().session("dead").unwrap().state,
+            studio_core::State::Ended
+        );
+        assert!(super::process_ends(&studio, alive).is_empty());
+    }
+
+    #[test]
+    fn this_process_is_alive_and_a_vanished_pid_is_not() {
+        assert!(super::pid_alive(std::process::id()));
+        // A child that has exited and been waited for.
+        let mut child = std::process::Command::new("true").spawn().unwrap();
+        let pid = child.id();
+        child.wait().unwrap();
+        assert!(!super::pid_alive(pid));
     }
 
     #[test]
