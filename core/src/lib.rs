@@ -4464,6 +4464,11 @@ impl Studio {
         before != facts
     }
 
+    /// What the shell last found about the task folder `path`, `None` before its first lookup.
+    pub fn task_facts_at(&self, path: &str) -> Option<TaskFacts> {
+        self.tasks.get(path).copied()
+    }
+
     /// The git half of a task's facts, read again with its workspace's git state (no GitHub): a new
     /// commit or file clears the mark at once. A task never looked up has no facts to change.
     /// Returns whether the facts changed.

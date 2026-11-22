@@ -1142,7 +1142,7 @@ fn main() {
         .manage(writing)
         .manage(terminal::Daemon::default())
         .manage(map::Fetches::default())
-        .manage(ci_laws::CiCache::default())
+        .manage(ci_laws::load_cache())
         .manage(Mutex::new(answer::Watching::default()))
         .invoke_handler(tauri::generate_handler![
             sessions,
@@ -1659,9 +1659,12 @@ fn refresh_landed(app: &AppHandle, session: Option<String>) {
             let facts = Path::new(&task.path)
                 .exists()
                 .then(|| lookup_task(gh, &task));
-            let landed = facts.is_some_and(|f| f.merged);
-            let changed = studio.lock().unwrap().set_task_facts(&task.path, facts);
-            if landed {
+            let (before, changed) = {
+                let mut studio = studio.lock().unwrap();
+                let before = studio.task_facts_at(&task.path);
+                (before, studio.set_task_facts(&task.path, facts))
+            };
+            if map::became_merged(before, facts) {
                 map::merged(&app, &task.path);
             }
             if changed {

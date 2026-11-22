@@ -12,7 +12,7 @@
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
-    path::Path,
+    path::{Path, PathBuf},
     process::Command,
     sync::Mutex,
 };
@@ -227,7 +227,7 @@ fn holds(failure: &Failure, test: &LawTest) -> bool {
 }
 
 /// What a finished run says of the laws.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Status {
     /// There is no finished run to read, or `gh` could not be asked.
@@ -300,22 +300,29 @@ pub fn pick(runs: &[Run]) -> Option<(&Run, bool)> {
 }
 
 /// What the window shows of CI on the default branch.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Ci {
     pub status: Status,
     /// The finished run's page on GitHub.
+    #[serde(default)]
     pub run_url: Option<String>,
     /// The commit that run was for.
+    #[serde(default)]
     pub commit: Option<String>,
     /// A newer run is still going: this result is for an earlier commit.
+    #[serde(default)]
     pub earlier: bool,
     /// The parts that own a broken law's test: only when `status` is `broken`.
+    #[serde(default)]
     pub parts: Vec<String>,
     /// The broken laws' ids, for the drill-down's own use.
+    #[serde(default)]
     pub laws: Vec<String>,
     /// The end of the failed log.
+    #[serde(default)]
     pub tail: String,
     /// Why `status` is `unknown`.
+    #[serde(default)]
     pub note: Option<String>,
 }
 
@@ -556,14 +563,45 @@ fn gh(repo: &Path, args: &[&str]) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
-/// The last CI read of each project, kept in memory: the payload and Home's mark read it, and only a trigger replaces it.
+/// The last CI read of each project: the payload and Home's mark read it, and only a trigger replaces it. The last finished
+/// result is also kept in `file` (when there is one), so a restart does not lose Home's mark before the map is opened.
 #[derive(Default)]
 pub struct CiCache {
     last: Mutex<BTreeMap<String, Ci>>,
     running: Mutex<HashSet<String>>,
+    file: Option<PathBuf>,
+}
+
+/// Marks a read of its project as no longer running when dropped, also when the read panics.
+struct Running<'a>(&'a Mutex<HashSet<String>>, String);
+
+impl Drop for Running<'_> {
+    fn drop(&mut self) {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&self.1);
+    }
 }
 
 impl CiCache {
+    /// A cache seeded from `file`: a missing or unreadable file, or an entry that does not read, seeds nothing.
+    pub fn load(file: PathBuf) -> CiCache {
+        let stored: BTreeMap<String, serde_json::Value> = std::fs::read_to_string(&file)
+            .ok()
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or_default();
+        let last = stored
+            .into_iter()
+            .filter_map(|(project, ci)| Some((project, serde_json::from_value::<Ci>(ci).ok()?)))
+            .collect();
+        CiCache {
+            last: Mutex::new(last),
+            running: Mutex::default(),
+            file: Some(file),
+        }
+    }
+
     pub fn get(&self, project: &str) -> Option<Ci> {
         self.last.lock().unwrap().get(project).cloned()
     }
@@ -583,13 +621,41 @@ impl CiCache {
         {
             return false;
         }
-        last.insert(project.to_string(), ci.clone()) != Some(ci)
+        let changed = last.insert(project.to_string(), ci.clone()) != Some(ci);
+        if changed && let Some(file) = &self.file {
+            self.save(file, &last);
+        }
+        changed
+    }
+
+    /// Writes the finished results; a failure is logged and the memory stays the truth.
+    fn save(&self, file: &Path, last: &BTreeMap<String, Ci>) {
+        let finished: BTreeMap<&String, &Ci> = last
+            .iter()
+            .filter(|(_, ci)| ci.status != Status::Unknown)
+            .collect();
+        let write = || -> Result<(), String> {
+            let text = serde_json::to_string(&finished).map_err(|e| e.to_string())?;
+            let tmp = file.with_extension("json.tmp");
+            std::fs::write(&tmp, text).map_err(|e| e.to_string())?;
+            std::fs::rename(&tmp, file).map_err(|e| e.to_string())
+        };
+        if let Err(e) = write() {
+            log::warn!("ci: cannot keep the last result: {e}");
+        }
     }
 
     /// Whether `project` is marked: a part owns a broken law's test.
     pub fn broken(&self, project: &str) -> bool {
         self.get(project).is_some_and(|ci| !ci.parts.is_empty())
     }
+}
+
+/// The cache seeded from Studio's data folder, or an empty one when there is no home folder.
+pub fn load_cache() -> CiCache {
+    std::env::home_dir().map_or_else(CiCache::default, |home| {
+        CiCache::load(studio_hook::data_dir(&home).join("ci-last.json"))
+    })
 }
 
 /// Reads CI for `project` in the background and tells the window (`map-landed`) when the result changed. One read per project at a
@@ -601,9 +667,9 @@ pub fn refresh_later(app: &AppHandle, project: &str) {
     }
     let (app, project) = (app.clone(), project.to_string());
     std::thread::spawn(move || {
-        let ci = read(Path::new(&project));
         let cache = app.state::<CiCache>();
-        cache.running.lock().unwrap().remove(&project);
+        let _running = Running(&cache.running, project.clone());
+        let ci = read(Path::new(&project));
         if cache.put(&project, ci) {
             let _ = app.emit("map-landed", project);
         }
@@ -953,6 +1019,40 @@ mod tests {
             tail: String::new(),
             note: None,
         }
+    }
+
+    #[test]
+    fn the_last_finished_result_survives_a_restart_and_older_files_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("ci-last.json");
+        let cache = CiCache::load(file.clone());
+        assert!(cache.put("/p", ci(Status::Broken, &["shell"])));
+        assert!(cache.put("/q", ci(Status::Unknown, &[])));
+        let again = CiCache::load(file.clone());
+        assert!(again.broken("/p"));
+        assert!(!again.has("/q"), "an unknown result is not kept");
+        // An entry missing newer fields still reads; one that does not read is skipped.
+        std::fs::write(
+            &file,
+            r#"{"/a":{"status":"broken","parts":["x"]},"/b":{"nonsense":1}}"#,
+        )
+        .unwrap();
+        let older = CiCache::load(file.clone());
+        assert!(older.broken("/a") && !older.has("/b"));
+        std::fs::write(&file, "not json").unwrap();
+        assert!(!CiCache::load(file).has("/a"));
+    }
+
+    #[test]
+    fn a_panicking_read_still_frees_its_project() {
+        let cache = CiCache::default();
+        cache.running.lock().unwrap().insert("/p".into());
+        let freed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _running = Running(&cache.running, "/p".into());
+            panic!("read panicked");
+        }));
+        assert!(freed.is_err());
+        assert!(!cache.running.lock().unwrap().contains("/p"));
     }
 
     #[test]

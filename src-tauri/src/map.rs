@@ -9,7 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, HashMap},
     path::{Path, PathBuf},
     process::Command,
     sync::Mutex,
@@ -163,6 +163,21 @@ struct Slot {
     running: bool,
 }
 
+/// Marks the fetch of its repository as no longer running when dropped.
+struct Running<'a>(&'a Fetches, &'a str);
+
+impl Drop for Running<'_> {
+    fn drop(&mut self) {
+        self.0
+            .0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(self.1.to_string())
+            .or_default()
+            .running = false;
+    }
+}
+
 impl Fetches {
     /// Runs `fetch` for `repo` unless one is running or the last began within `COOLDOWN` of `now`.
     pub fn run(
@@ -183,14 +198,10 @@ impl Fetches {
             slot.running = true;
             slot.last = Some(now);
         }
-        // The lock is not held while git runs, so a second trigger meets `running`.
+        // The lock is not held while git runs, so a second trigger meets `running`; the guard clears it even if `fetch` panics.
+        let _running = Running(self, repo);
         let result = fetch();
-        self.0
-            .lock()
-            .unwrap()
-            .entry(repo.to_string())
-            .or_default()
-            .running = false;
+        drop(_running);
         match result {
             Ok(()) => Fetched::Done,
             Err(e) => Fetched::Failed(e),
@@ -425,26 +436,28 @@ pub fn map_place(
     place(Path::new(&project), &groups)
 }
 
-/// The tasks seen merged, so a transition fetches once.
-static MERGED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+/// Whether a lookup of a task is a transition to merged: the task was looked up before and was not merged. A task first seen
+/// merged (after a restart) is not a transition, so it starts no fetch.
+pub fn became_merged(
+    before: Option<studio_core::TaskFacts>,
+    after: Option<studio_core::TaskFacts>,
+) -> bool {
+    before.is_some_and(|b| !b.merged) && after.is_some_and(|a| a.merged)
+}
 
-/// `refresh_landed` found the task in `task_path` merged: on the first time, fetch its repository through the cooldown and
-/// tell the window, which draws the map again if it is open.
+/// `refresh_landed` saw the task in `task_path` become merged: fetch its repository through the cooldown and read CI, on a
+/// thread of its own so the caller's loop never waits on the network, then tell the window, which draws the map again if it
+/// is open.
 pub fn merged(app: &AppHandle, task_path: &str) {
-    if !MERGED
-        .lock()
-        .unwrap()
-        .get_or_insert_default()
-        .insert(task_path.to_string())
-    {
-        return;
-    }
     let Ok(project) = studio_workbench::main_checkout(Path::new(task_path)) else {
         return;
     };
-    fetch(&app.state::<Fetches>(), &project);
-    crate::ci_laws::refresh_later(app, &project);
-    let _ = app.emit("map-landed", project);
+    let app = app.clone();
+    std::thread::spawn(move || {
+        fetch(&app.state::<Fetches>(), &project);
+        crate::ci_laws::refresh_later(&app, &project);
+        let _ = app.emit("map-landed", project);
+    });
 }
 
 #[cfg(test)]
@@ -630,6 +643,33 @@ mod tests {
             text.contains("\"fog\"") && text.contains("\"version\""),
             "{text}"
         );
+    }
+
+    #[test]
+    fn only_a_lookup_that_turns_a_task_merged_is_a_transition() {
+        let facts = |merged| {
+            Some(studio_core::TaskFacts {
+                merged,
+                ..Default::default()
+            })
+        };
+        assert!(became_merged(facts(false), facts(true)));
+        // First seen merged (a restart), still merged, or not merged: no fetch.
+        assert!(!became_merged(None, facts(true)));
+        assert!(!became_merged(facts(true), facts(true)));
+        assert!(!became_merged(facts(false), facts(false)));
+        assert!(!became_merged(facts(false), None));
+    }
+
+    #[test]
+    fn a_panicking_fetch_does_not_leave_the_repository_locked() {
+        let fetches = Fetches::default();
+        let now = Instant::now();
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            fetches.run("/p", now, || panic!("git panicked"))
+        }));
+        assert!(panicked.is_err());
+        assert_eq!(fetches.run("/p", now + COOLDOWN, || Ok(())), Fetched::Done);
     }
 
     #[test]
