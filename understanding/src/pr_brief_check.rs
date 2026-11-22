@@ -64,7 +64,7 @@ fn items(brief: &Brief) -> Vec<(String, Item)> {
     out
 }
 
-fn flags_mut<'a>(brief: &'a mut Brief, item: Item) -> &'a mut Vec<String> {
+fn flags_mut(brief: &mut Brief, item: Item) -> &mut Vec<String> {
     match item {
         Item::Step(i) => &mut brief.steps_mut().nth(i).expect("a step").flags,
         Item::Also(i) => &mut brief.also[i].flags,
