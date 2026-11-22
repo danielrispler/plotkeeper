@@ -208,29 +208,30 @@ fn handle(context: &Context, mut request: Request) {
             })
             .any(|value| same(&value, &context.token))
     });
+    let given = query
+        .split('&')
+        .find_map(|pair| pair.strip_prefix("token="));
+    // A valid token in the link always leaves the URL, whether or not the browser already holds the cookie.
+    if *request.method() == Method::Get
+        && path == "/"
+        && given.is_some_and(|t| same(t, &context.token))
+    {
+        let response = Response::empty(302)
+            .with_header(Header::from_bytes("Location", "/").unwrap())
+            .with_header(
+                Header::from_bytes(
+                    "Set-Cookie",
+                    format!(
+                        "{COOKIE}={}; HttpOnly; SameSite=Strict; Path=/",
+                        context.token
+                    ),
+                )
+                .unwrap(),
+            );
+        let _ = request.respond(response);
+        return;
+    }
     if !has_cookie {
-        let given = query
-            .split('&')
-            .find_map(|pair| pair.strip_prefix("token="));
-        if *request.method() == Method::Get
-            && path == "/"
-            && given.is_some_and(|t| same(t, &context.token))
-        {
-            let response = Response::empty(302)
-                .with_header(Header::from_bytes("Location", "/").unwrap())
-                .with_header(
-                    Header::from_bytes(
-                        "Set-Cookie",
-                        format!(
-                            "{COOKIE}={}; HttpOnly; SameSite=Strict; Path=/",
-                            context.token
-                        ),
-                    )
-                    .unwrap(),
-                );
-            let _ = request.respond(response);
-            return;
-        }
         return refuse(request, 403, "Open plotkeeper from its own link");
     }
     match (request.method().clone(), path) {

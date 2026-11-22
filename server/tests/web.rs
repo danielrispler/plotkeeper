@@ -363,3 +363,16 @@ fn the_focus_a_closed_tab_reported_is_not_kept_while_another_tab_listens() {
 
     assert!(!f.app.events.focused());
 }
+
+#[test]
+fn the_token_in_the_url_leaves_it_even_when_the_cookie_is_already_set() {
+    let f = fixture();
+    let reply = get(&f, &format!("/?token={TOKEN}"), &[&cookie()]);
+    assert_eq!(reply.status, 302);
+    let location = reply
+        .head
+        .lines()
+        .find(|l| l.to_lowercase().starts_with("location:"))
+        .unwrap();
+    assert!(!location.contains("token"), "{location}");
+}

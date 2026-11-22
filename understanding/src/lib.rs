@@ -1426,8 +1426,8 @@ fn stop_after(kind: WriterKind, asked: Duration) -> Duration {
 #[cfg(test)]
 mod call_tests {
     use super::{CardWriter, ClaudeWriter, WriterKind, stop_after};
-    use std::time::Duration;
     use std::os::unix::fs::PermissionsExt;
+    use std::time::Duration;
 
     /// A call is read by the writer its command was built for, even when the settings switch writers in between.
     #[test]
@@ -1454,7 +1454,10 @@ mod call_tests {
     #[test]
     fn a_short_call_of_agy_is_given_its_floor_and_claudes_is_kept() {
         let fifteen = Duration::from_secs(15);
-        assert_eq!(stop_after(WriterKind::Agy, fifteen), WriterKind::Agy.floor());
+        assert_eq!(
+            stop_after(WriterKind::Agy, fifteen),
+            WriterKind::Agy.floor()
+        );
         assert_eq!(stop_after(WriterKind::Claude, fifteen), fifteen);
         let long = Duration::from_secs(180);
         assert_eq!(stop_after(WriterKind::Agy, long), long);
