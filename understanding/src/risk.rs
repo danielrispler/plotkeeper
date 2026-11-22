@@ -138,7 +138,6 @@ pub struct RiskNotes {
     kept: BTreeMap<String, BTreeMap<String, RiskNote>>,
     asked: HashSet<(String, String)>,
     failed: HashSet<(String, String)>,
-    revision: u64,
 }
 
 /// The hash of a command and its folder that keys a note, written in the file: FNV-1a, which no Rust release changes.
@@ -164,18 +163,12 @@ impl RiskNotes {
             kept,
             asked: HashSet::new(),
             failed: HashSet::new(),
-            revision: 0,
         })
     }
 
     /// The notes the app keeps beside the event log `log`, in the studio's data directory.
     pub fn open_beside(log: &Path) -> io::Result<Self> {
         Self::open(log.with_file_name("risk-notes.json"))
-    }
-
-    /// Rises on every change, so the shell sends the cards again.
-    pub fn revision(&self) -> u64 {
-        self.revision
     }
 
     fn note(&self, session: &str, hash: &str) -> Option<&RiskNote> {
@@ -200,9 +193,6 @@ impl RiskNotes {
                 });
             }
         }
-        if !asks.is_empty() {
-            self.revision += 1;
-        }
         asks
     }
 
@@ -215,7 +205,6 @@ impl RiskNotes {
         at: u64,
     ) -> io::Result<()> {
         let key = (ask.session.clone(), hash(&ask.command, &ask.cwd));
-        self.revision += 1;
         let Ok(Risk { level, line }) = outcome else {
             self.failed.insert(key);
             return Ok(());

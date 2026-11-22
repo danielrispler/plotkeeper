@@ -1947,8 +1947,6 @@ fn a_failure_is_not_kept_it_reads_failed_for_the_run_and_the_next_run_asks_again
     let session = push_blocked();
     let mut notes = RiskNotes::open(path.clone()).unwrap();
     notes.asks(&session);
-    let before = notes.revision();
-
     notes
         .keep(
             &the_ask(),
@@ -1963,7 +1961,6 @@ fn a_failure_is_not_kept_it_reads_failed_for_the_run_and_the_next_run_asks_again
             call: "toolu_1".into()
         }]
     );
-    assert!(notes.revision() > before, "the window is sent the failure");
     // Not asked for again in this run.
     assert_eq!(notes.asks(&session), []);
     // Nothing was written, so a restart has no note and asks again.

@@ -28,10 +28,10 @@ use studio_core::{
 };
 use studio_understanding::{
     AGY_FIXTURE_VERSION, AgyVersions, CardStore, CardWriter, ClaudeWriter, Core, Effects,
-    FakeWriter, Fingerprints, Offers, OpenItem, Rating, RiskNotes, RiskRequest, Row, SessionCards,
-    StoredSummary, SummarySetup, Tap, TurnWriting, Versions, diff_turn, fingerprint_changes,
-    found_files, judge, live_roots, millis, open_items, turn_hunk, worktree_root,
-    write_agent_summary, write_retests,
+    FakeWriter, Fingerprints, Offers, OpenItem, Rating, RiskNotes, RiskRequest, RiskView, Row,
+    SessionCards, StoredSummary, SummarySetup, Tap, TurnWriting, Versions, diff_turn,
+    fingerprint_changes, found_files, judge, live_roots, millis, open_items, turn_hunk,
+    worktree_root, write_agent_summary, write_retests,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
@@ -292,12 +292,14 @@ fn noted_session(studio: &Studio) -> Option<&Session> {
     studio.selected()
 }
 
+/// The risk notes the window shows for its session's cards and its decision history, which stay empty with no session.
+fn risk_views(studio: &Studio, notes: &RiskNotes) -> (Vec<RiskView>, Vec<RiskView>) {
+    noted_session(studio).map_or_default(|s| (notes.views(s), notes.decision_views(s)))
+}
+
 /// Joins the cards of the session the window shows to their risk notes, in `shown`.
 fn join_notes(studio: &Studio, notes: &RiskNotes, shown: &mut SessionCards) {
-    if let Some(session) = noted_session(studio) {
-        shown.risk_notes = notes.views(session);
-        shown.decision_notes = notes.decision_views(session);
-    }
+    (shown.risk_notes, shown.decision_notes) = risk_views(studio, notes);
 }
 
 /// Plan usage (danielrispler/plotkeeper#163; #165) of the `agents` asked for, or of every agent when `None`. The window asks for only
@@ -360,8 +362,24 @@ struct CardsKey {
     open: Vec<OpenItem>,
     /// The turn each worker card is placed in, which a wake-up can move with no store change.
     placed: Vec<(String, Option<usize>)>,
-    /// The risk notes' revision: a note arriving or failing changes no card.
-    notes: u64,
+    /// What the window shows of the risk notes: a note arriving or failing, or a card with a new call, changes no stored card.
+    notes: (Vec<RiskView>, Vec<RiskView>),
+}
+
+/// The key of the cards the window would be sent now.
+fn cards_key(studio: &Studio, cards: &CardStore, notes: &RiskNotes) -> CardsKey {
+    let viewed = studio.viewed();
+    let session = viewed.and_then(|id| studio.session(id));
+    // The Open slot moves with the core's state, not only with the store's.
+    let open = session.map(|s| open_items(s, studio.task_facts(&s.agent.id), cards));
+    CardsKey {
+        viewed: viewed.map(String::from),
+        revision: cards.revision(),
+        minute: studio.now() / 60_000,
+        open: open.unwrap_or_default(),
+        placed: session.map_or_default(|s| cards.placements(s)),
+        notes: risk_views(studio, notes),
+    }
 }
 
 /// The turns whose files the core asks for (danielrispler/plotkeeper#111): each is diffed by `git`
@@ -417,18 +435,9 @@ impl Sent {
             let studio = studio.lock().unwrap();
             let cards = app.state::<Cards>();
             let cards = cards.lock().unwrap();
-            let viewed = studio.viewed();
-            let session = viewed.and_then(|id| studio.session(id));
-            // The Open slot moves with the core's state, not only with the store's.
-            let open = session.map(|s| open_items(s, studio.task_facts(&s.agent.id), &cards));
-            CardsKey {
-                viewed: viewed.map(String::from),
-                revision: cards.revision(),
-                minute: studio.now() / 60_000,
-                open: open.unwrap_or_default(),
-                placed: session.map_or_default(|s| cards.placements(s)),
-                notes: app.state::<Notes>().lock().unwrap().revision(),
-            }
+            let notes = app.state::<Notes>();
+            let notes = notes.lock().unwrap();
+            cards_key(&studio, &cards, &notes)
         };
         if self.cards.as_ref() != Some(&key) {
             let _ = app.emit("cards", cards(app.state(), app.state(), app.state()));
@@ -1804,7 +1813,52 @@ fn uptime() -> Duration {
 
 #[cfg(test)]
 mod tests {
-    use super::{in_app, join_notes, log_line, lost_data, saved_roots, scrubbed, shows_in_window};
+    use super::{
+        cards_key, in_app, join_notes, log_line, lost_data, saved_roots, scrubbed, shows_in_window,
+    };
+
+    #[test]
+    fn a_second_card_of_a_judged_command_changes_what_the_window_is_sent() {
+        let line = |name: &str, extra: serde_json::Value| {
+            let mut line =
+                serde_json::json!({ "session_id": "s1", "hook_event_name": name, "cwd": "/repo" });
+            line.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            line.to_string()
+        };
+        let block = |call: &str, agent: &str| {
+            line(
+                "PermissionDenied",
+                serde_json::json!({ "agent_id": agent, "tool_name": "Bash", "tool_use_id": call, "prompt_id": "p-1",
+                    "tool_input": { "command": "git push" }, "reason": "[Unauthorized Access]", "permission_mode": "auto" }),
+            )
+        };
+        let mut studio = studio_core::Studio::replayed([
+            line("SessionStart", serde_json::json!({ "source": "startup" })),
+            line(
+                "UserPromptSubmit",
+                serde_json::json!({ "prompt": "Go.", "prompt_id": "p-1" }),
+            ),
+            block("toolu_1", "w1"),
+        ]);
+        studio.select("s1");
+        let dir = tempfile::tempdir().unwrap();
+        let cards = studio_understanding::CardStore::open(dir.path().join("cards.json")).unwrap();
+        let mut notes =
+            studio_understanding::RiskNotes::open(dir.path().join("risk-notes.json")).unwrap();
+        let ask = notes.asks(studio.selected().unwrap()).remove(0);
+        let judged =
+            studio_understanding::Risk::from_reply(r#"{"level": "high", "line": "Pushes."}"#);
+        notes.keep(&ask, judged, 5_000).unwrap();
+        let before = cards_key(&studio, &cards, &notes);
+
+        // Another card of the same command and folder: its note is stored, so nothing is asked and no note is kept.
+        studio.replay(&block("toolu_2", "w2"));
+        assert!(notes.asks(studio.selected().unwrap()).is_empty());
+
+        assert!(cards_key(&studio, &cards, &notes) != before);
+    }
 
     #[test]
     fn a_workers_view_joins_the_notes_and_asks_of_its_sessions_blocked_commands() {
