@@ -5,7 +5,7 @@
 // Git line with several tokens. Times are relative to the moment a fixture renders.
 
 import type { Ask } from "../../ui/answer.ts";
-import type { BlockedCommand, ListedCheck, CheckStatus, Decision, OpenItem, Quiz, Session, SessionState, StoredCard, Subagent, Turn, TurnFile, TurnSummary } from "../../ui/types.ts";
+import type { BlockedCommand, ListedCheck, CheckStatus, Decision, OpenItem, Quiz, RiskView, Session, SessionState, StoredCard, Subagent, Turn, TurnFile, TurnSummary } from "../../ui/types.ts";
 import { base, type Fixture } from "./base.ts";
 
 const MIN = 60e3;
@@ -518,6 +518,24 @@ const dockScript = `
   if (dock.hidden || labels.join() !== "Allow,Decline") log("snap:fail the dock lacks the card's buttons: " + labels);
   if (document.querySelector("#feed .blocked-command")) log("snap:fail the card is in the feed too");
   log("dock buttons: " + labels.join(" "));`;
+// #298: a docked card's risk note, on its way, arrived and failed. The place keeps two lines, so Allow and Decline sit at the same place in
+// the three: each run logs where the buttons are in the dock, and the screenshots are compared.
+const riskNote = (note: RiskView | null) => {
+  const fixture = withBlocked("your_turn", (at) => blockedCommand("blocked", at), riskScript);
+  return { ...fixture, cards: { ...fixture.cards, risk_notes: note ? [note] : [] } };
+};
+const riskScript = `
+  window.__TAURI__.__emit("blocked", [{ nonce: "n1", tool_use_id: "toolu_b1", waiting: true }]);
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  const dock = document.getElementById("dock");
+  const place = dock.querySelector(".blocked-command .risk-note");
+  if (!place || place.getAttribute("aria-live") !== "polite") return log("snap:fail the docked card has no note place");
+  const buttons = [...dock.querySelectorAll(".blocked-command .answer-buttons button")];
+  if (buttons.map((b) => b.textContent).join() !== "Allow,Decline") return log("snap:fail the buttons are " + buttons.map((b) => b.textContent));
+  const at = (e) => { const r = e.getBoundingClientRect(), d = dock.getBoundingClientRect(); return Math.round(r.left - d.left) + "," + Math.round(r.top - d.top); };
+  const tall = Math.round(place.getBoundingClientRect().height);
+  log("note: " + place.textContent);
+  log("note height " + tall + "; Allow at " + at(buttons[0]) + "; Decline at " + at(buttons[1]));`;
 // An allowed card has no button: the dock is empty and the card is neutral, with its state line, in the newest turn.
 const fedScript = `
   const card = document.querySelector("#feed .now-turn .blocked-command");
@@ -531,6 +549,9 @@ const fedScript = `
 
 export const railFixtures = {
   railBlockedDock: () => withBlocked("your_turn", (at) => blockedCommand("blocked", at), dockScript),
+  railRiskReading: () => riskNote({ call: "toolu_b1", state: "reading" }),
+  railRiskArrived: () => riskNote({ call: "toolu_b1", state: "arrived", level: "high", line: "Pushes the branch issue-56-row-controls to origin, so everyone who fetches sees it", at: Date.now() }),
+  railRiskFailed: () => riskNote({ call: "toolu_b1", state: "failed" }),
   railBlockedAllowed: () => withBlocked("your_turn", (at) => blockedCommand("allowed", at), fedScript),
   railWorkerCardRow: () => workerCardFixture(workerRowScript),
   railWorkerCard: () => workerCardFixture(workerOpenScript),
