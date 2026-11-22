@@ -69,6 +69,8 @@ pub struct Ready {
     pub number: u64,
     pub title: String,
     pub head: String,
+    /// What the PR's brief is doing (`pr_briefs.rs`); `prs.ready` leaves it empty and the Map view's payload fills it.
+    pub brief: Option<crate::pr_briefs::BriefInfo>,
 }
 
 /// The PRs found for each project's branches, and the guard of the lookups.
@@ -136,6 +138,7 @@ impl Prs {
                 number: pr.number,
                 title: pr.title.clone(),
                 head: pr.head.clone(),
+                brief: None,
             })
             .collect();
         ready.sort_by_key(|r| r.number);
@@ -189,9 +192,11 @@ pub fn ask_later(app: &AppHandle, trigger: Trigger) {
                     crate::LIST_CHANGED.store(true, std::sync::atomic::Ordering::Release);
                 }
             }
-            if prs.ready(&project) != before {
-                let _ = app.emit("map-landed", project);
+            let ready = prs.ready(&project);
+            if ready != before {
+                let _ = app.emit("map-landed", project.clone());
             }
+            crate::pr_briefs::lookup_later(&app, &project, ready);
         }
     });
 }

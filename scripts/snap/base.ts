@@ -57,6 +57,7 @@ export const base = {
   map_state: { project: "/w/plotkeeper", status: "none", source: null, reference: "origin/main", commit: null, note: null, user: { positions: {}, tiers: {} }, fog: {}, ci: null, ready: [] },
   open: noSelection,
   plugin_setup: null,
+  pr_brief: null,
   projects: ["/w/plotkeeper"],
   remove_project: [],
   remove_task: null,

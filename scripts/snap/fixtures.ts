@@ -3,7 +3,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import type { AgentUsage } from "../../ui/usage.ts";
-import type { Ci, GitState, LogEntry, MapState, Session, SessionState, Subagent } from "../../ui/types.ts";
+import type { BriefFigure, BriefStep, BriefView, Ci, GitState, LogEntry, MapState, PrBrief, Session, SessionState, Subagent } from "../../ui/types.ts";
 import { base, type ByArg, type Fixture } from "./base.ts";
 import { railFixtures } from "./rail-fixtures.ts";
 
@@ -252,11 +252,88 @@ const mapTray = (): Fixture =>
   mapOpened(`
       const rows = [...document.querySelectorAll("#map-tray .tray-row")];
       if (rows.length !== 2) return log("snap:fail expected 2 tray rows, saw " + rows.length);
+      if (rows[0].tagName !== "BUTTON" || rows[1].tagName === "BUTTON") log("snap:fail only the row with a brief opens");
       if (!document.querySelector("#map-tray .side-title")?.textContent.includes("Ready for review")) log("snap:fail the tray has no title");
-      if (!rows[0].textContent.includes("#334") || !rows[0].textContent.includes("not written yet")) log("snap:fail row text: " + rows[0].textContent);
+      if (!rows[0].textContent.includes("#334") || !rows[0].textContent.includes("brief ready")) log("snap:fail row text: " + rows[0].textContent);
+      if (!rows[1].textContent.includes("not written yet")) log("snap:fail row text: " + rows[1].textContent);
       log("tray ok");`, {
-    map_state: mapState({ fog: { shell: "thick" }, ready: [{ number: 334, title: "PR briefs: the brief written for each ready PR", head: "b".repeat(40) }, { number: 336, title: "Ready for review tray", head: "a".repeat(40) }] }),
+    map_state: mapState({ fog: { shell: "thick" }, ready: [{ number: 334, title: "PR briefs: the brief written for each ready PR", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["PR briefs on the map"] } }, { number: 336, title: "Ready for review tray", head: "a".repeat(40), brief: null }] }),
   });
+
+// The PR brief on the map (#339), played from the tray as in the prototype's treatment C: a story about the PR that fogged Shell, Understanding and
+// Window, with a light run along the links, a figure for the change inside Understanding, a quote, and what the checks left unconfirmed.
+const step = (k: string, h: string, b: string, on: string[], extra: Partial<BriefStep> = {}): BriefStep => ({
+  k, h, b, on, hops: [], law: null, covered_by: null, list: [], risks: [], fig: null, check: null, cites: [], flags: [], ...extra,
+});
+const figure = (kind: string): BriefFigure =>
+  kind === "states"
+    ? { kind, frame: "terminal t1", items: [{ label: "old · deleted", tone: null, bad: null }, { label: "now · lost", tone: "lost", bad: true }, { label: "kept · running", tone: "live", bad: null }, { label: "gone · ended", tone: null, bad: null }], before: [], after: [] }
+    : kind === "sequence"
+      ? { kind, frame: null, items: [{ label: "Turn ends", tone: null, bad: null }, { label: "Ask for PRs", tone: null, bad: null }, { label: "Write the brief", tone: "live", bad: null }, { label: "Show in tray", tone: null, bad: null }], before: [], after: [] }
+      : { kind, frame: null, items: [], before: ["asks every 5 min", "from a 5 s loop", "one PR number"], after: ["asks at a turn's end", "and on focus", "ready state, head"] };
+const brief = (steps: BriefStep[], extra: Partial<PrBrief> = {}): PrBrief => ({ title: "PR briefs on the map", overview: [], chapters: [{ behaviour: "story", parts: ["shell", "understanding", "window"], title: "PR briefs on the map", steps, flags: [] }], also: [], unseen: [], decisions: [], flags: [], ...extra });
+const storySteps = (): BriefStep[] => [
+  step("Where", "A ready PR now brings its own brief to the map", "When a pull request is ready for review, the Shell asks the Understanding part to write what changed, and the Window plays it on the map.", ["shell", "understanding", "window"], {
+    hops: [["shell-understanding", false], ["shell-window", false]], cites: [{ from: "the PR body", quote: "writes its brief when it becomes ready" }],
+  }),
+  step("Before", "The map showed fog but never said what changed", "Fog said that files had changed since you last looked. Clearing it only meant \u201cI know this\u201d, which taught nothing.", ["window"]),
+  step("Now", "A new head only marks the brief stale", "A push to a ready PR marks its brief stale. It is written again when you open it, or when the same head is seen twice in a row.", ["shell", "understanding"], {
+    hops: [["shell-understanding", false]], fig: figure("states"), cites: [{ from: "src-tauri/src/pr_briefs.rs", quote: "A new head marks it stale" }],
+  }),
+  step("Must stay true", "A part is not read until its chapter is", "Reading a chapter to its end is what clears the fog of the parts it lit.", ["window"], { law: "window-quiet" }),
+];
+const briefOf = (steps: BriefStep[], partial = false, extra: Partial<PrBrief> = {}): BriefView => ({
+  partial,
+  brief: { version: 1, pr: 334, head: "b".repeat(40), written_at: 1, stale: false, model: "opus", brief: brief(steps, extra) },
+});
+// Opens the brief from the tray, goes `next` steps on, and checks the panel and the map.
+const mapBrief = (view: BriefView, next: number, check = ""): Fixture =>
+  mapOpened(
+    `
+      // Chrome's virtual time stalls animations: the brief plays as it does under reduced motion, whose end state is the one to review.
+      const media = window.matchMedia.bind(window);
+      window.matchMedia = (query) => (query.includes("prefers-reduced-motion") ? { ...media(query), matches: true } : media(query));
+      const calm = document.createElement("style");
+      calm.textContent = "*, *::before, *::after { transition: none !important; animation: none !important; }";
+      document.head.append(calm);
+      const tray = document.querySelector('#map-tray .tray-row[data-pr="334"]');
+      if (!tray) return log("snap:fail no tray row for the brief");
+      tray.click();
+      await wait(500);
+      const panel = document.getElementById("map-brief");
+      if (panel.hidden || !panel.classList.contains("open")) return log("snap:fail the brief did not open");
+      for (let i = 0; i < ${next}; i++) { document.getElementById("brief-next").click(); await wait(500); }
+      await wait(1800);
+      if (!document.querySelector(".map-world.briefing")) log("snap:fail the map is not in the brief's light");
+      if (!document.querySelector(".plate.lit")) log("snap:fail no part is lit");
+      if (!document.querySelector(".map-world").style.transform.includes("scale")) log("snap:fail the camera did not frame the parts");
+      ${check}
+      log("brief ok");`,
+    {
+      map_state: mapState({ fog: { shell: "thick", understanding: "thin" }, ready: [{ number: 334, title: "PR briefs on the map", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["PR briefs on the map"] } }] }),
+      pr_brief: view,
+    },
+  );
+const escBrief = `
+      const before = document.querySelector(".brief-dots i.at") && [...document.querySelectorAll(".brief-dots i")].findIndex((d) => d.classList.contains("at"));
+      document.dispatchEvent(new KeyboardEvent("keydown", { code: "Escape", key: "Escape", bubbles: true }));
+      await wait(500);
+      if (!document.getElementById("map-brief").hidden) return log("snap:fail Esc did not close the brief");
+      if (document.getElementById("map").hidden) return log("snap:fail Esc left the Map view with a brief open");
+      document.querySelector('#map-tray .tray-row[data-pr="334"]').click();
+      await wait(1800);
+      const after = [...document.querySelectorAll(".brief-dots i")].findIndex((d) => d.classList.contains("at"));
+      if (after !== before) log("snap:fail the brief did not reopen at its step: " + before + " then " + after);`;
+const mapBriefStart = (): Fixture => mapBrief(briefOf(storySteps()), 0, `if (!document.querySelector("#map-brief .brief-title").textContent.includes("brings its own brief")) log("snap:fail first step");`);
+const mapBriefStory = (): Fixture => mapBrief(briefOf(storySteps(), false), 2, `${escBrief}
+      if (!document.querySelector("#map-brief .brief-cites")) log("snap:fail the step shows no citations");`);
+const mapBriefFigure = (kind: string): Fixture =>
+  mapBrief(briefOf([step("Now", "What happens inside one part", "The change is inside Understanding, so a small figure shows it.", ["understanding"], { fig: figure(kind) })]), 0, `
+      if (document.querySelectorAll("#map-brief .brief-fig .fig-chip").length < 3) log("snap:fail the figure draws no chips");`);
+const mapBriefUnconfirmed = (): Fixture =>
+  mapBrief(briefOf([step("Now", "Cards are written once per turn", "A turn is written once, whatever the order of events.", ["understanding"], { flags: ["the claim is not in the facts"] })], true), 0, `
+      if (!document.querySelector("#map-brief .brief-unconfirmed")?.textContent.includes("not confirmed from the facts")) log("snap:fail no unconfirmed mark");
+      if (!document.querySelector("#map-brief .brief-partial")?.textContent.includes("Written from part of the diff")) log("snap:fail no partial line");`);
 const homeMarked = (press: boolean): Fixture => ({
   ...(fixtures as Record<string, () => Fixture>).home(),
   map_marks: ["/w/plotkeeper"],
@@ -446,6 +523,12 @@ const mapScrubbed = (): Fixture => {
 export const fixtures = {
   ...railFixtures,
   mapTray,
+  mapBriefStart,
+  mapBriefStory,
+  mapBriefStates: () => mapBriefFigure("states"),
+  mapBriefSequence: () => mapBriefFigure("sequence"),
+  mapBriefCompare: () => mapBriefFigure("compare"),
+  mapBriefUnconfirmed,
   recordedTerminal,
   logRunning: () => logFixture("running"),
   logDone: () => logFixture("completed"),

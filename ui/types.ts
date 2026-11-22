@@ -461,7 +461,26 @@ export type MapState = {
   // The PRs ready for review (open, not a draft), as last asked (`prs.rs`); the Map view's tray lists them.
   ready: ReadyPr[];
 };
-export type ReadyPr = { number: number; title: string; head: string };
+// What a ready PR's brief is doing (`pr_briefs.rs`): a newer head was pushed (stale), being written now, and the chapters' titles, or the one story's.
+export type BriefInfo = { stale: boolean; writing: boolean; chapters: string[] };
+export type ReadyPr = { number: number; title: string; head: string; brief: BriefInfo | null };
+// A PR brief as the writer made it and `pr_brief` returns it (`understanding/src/pr_brief.rs`). A step's `flags` are what the checks found wrong with it
+// that the one rewrite did not mend: it shows "not confirmed from the facts".
+export type BriefCite = { from: string; quote: string };
+export type BriefFigure = { kind: string; frame: string | null; items: { label: string; tone: string | null; bad: boolean | null }[]; before: string[]; after: string[] };
+export type BriefCheck = { kind: string; q: string; opts: string[]; key: unknown; yes: string; no: string; flow: string | null; test: string | null };
+export type BriefStep = {
+  k: string; h: string; b: string; on: string[]; hops: [string, boolean][]; law: string | null; covered_by: string | null; list: string[];
+  risks: { part: string; trigger: string; check: string }[]; fig: BriefFigure | null; check: BriefCheck | null; cites: BriefCite[]; flags: string[];
+};
+export type BriefChapter = { behaviour: string; parts: string[]; title: string; steps: BriefStep[]; flags: string[] };
+export type PrBrief = {
+  title: string; overview: BriefStep[]; chapters: BriefChapter[]; also: { part: string; line: string; flags: string[] }[]; unseen: string[];
+  decisions: { id: string | null; text: string; flags: string[] }[]; flags: string[];
+};
+export type StoredBrief = { version: number; pr: number; head: string; written_at: number; stale: boolean; model: string; brief: PrBrief };
+// `partial`: the writer did not see the whole diff.
+export type BriefView = { brief: StoredBrief; partial: boolean };
 export type Fog = "thin" | "thick";
 // What a finished run of the default branch's CI says of the laws: `unknown` (nothing to read), `passed`, `broken` (a test that backs a
 // law failed), `not-run` (it failed, but not in a test that backs a law), `unreadable` (it failed and its log cannot be read).
@@ -538,6 +557,7 @@ export interface Commands {
   stop_dismiss: null;
   map_proof: Proof[];
   map_state: MapState;
+  pr_brief: BriefView | null;
   mark_unseen: void;
   open: Selection | null;
   open_file: void;

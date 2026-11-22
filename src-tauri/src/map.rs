@@ -223,7 +223,7 @@ impl Fetches {
     }
 }
 
-fn state_file() -> Result<PathBuf, String> {
+pub(crate) fn state_file() -> Result<PathBuf, String> {
     let home = std::env::home_dir().ok_or("no home folder")?;
     Ok(studio_hook::data_dir(&home).join(STATE_FILE))
 }
@@ -303,6 +303,7 @@ pub fn map_state(
     fetches: State<Fetches>,
     cache: State<crate::ci_laws::CiCache>,
     prs: State<crate::prs::Prs>,
+    briefs: State<crate::pr_briefs::PrBriefs>,
     app: AppHandle,
 ) -> Result<MapState, String> {
     if fetch {
@@ -326,6 +327,7 @@ pub fn map_state(
     }
     state.ci = cache.get(&project);
     state.ready = prs.ready(&project);
+    briefs.annotate(&project, &mut state.ready);
     Ok(state)
 }
 
