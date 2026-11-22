@@ -224,7 +224,7 @@ fn holds(failure: &Failure, test: &LawTest) -> bool {
 /// Whether a nextest failure `name` in `binary` is the Rust test `test` of the tagged `file`. The file's crate is its first folder
 /// (`core` is `studio-core`, `src-tauri` is `studio`). An integration test file `<crate>/tests/<module>.rs` is a module of the
 /// crate's one `it` binary (`studio-core::it`, test `<module>::<fn>`); a source file holds unit tests in the bare crate binary
-/// (`<module>::tests::<fn>`).
+/// (`<module>::tests::<fn>`), and so does a binary target's `bin/<name>` id (the studio crate's own).
 fn rust_holds(binary: &str, name: &str, file: &str, test: &str) -> bool {
     if name.rsplit("::").next() != Some(test) {
         return false;
@@ -233,6 +233,8 @@ fn rust_holds(binary: &str, name: &str, file: &str, test: &str) -> bool {
         Some((krate, test_binary)) => (krate, Some(test_binary)),
         None => (binary, None),
     };
+    // A binary target's unit tests are `<crate>::bin/<name>`: unit tests of the crate's sources, like the bare library id.
+    let test_binary = test_binary.filter(|id| !id.starts_with("bin/"));
     let Some((dir, rest)) = file.split_once('/') else {
         return false;
     };
@@ -849,6 +851,23 @@ mod tests {
             assert!(
                 broken_laws(&failures, &[tagged("l", file, test)]).is_empty(),
                 "{file} {test}"
+            );
+        }
+        // The studio crate has only `src/main.rs`, so nextest names its unit tests `studio::bin/studio`; they belong to `src/` files.
+        assert_eq!(
+            broken_laws(
+                &failures,
+                &[tagged("b", "src-tauri/src/answer.rs", "bin_unit_fails")]
+            ),
+            ["b"]
+        );
+        for (file, test) in [
+            ("src-tauri/src/other.rs", "bin_unit_fails"),
+            ("src-tauri/tests/answer.rs", "bin_unit_fails"),
+        ] {
+            assert!(
+                broken_laws(&failures, &[tagged("b", file, test)]).is_empty(),
+                "{file}"
             );
         }
         // A unit test of the crate's own source: bare crate binary, module path.
