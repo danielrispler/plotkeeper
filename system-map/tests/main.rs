@@ -2,6 +2,7 @@
 
 mod binary;
 mod edges;
+mod laws;
 mod map_file;
 mod ownership;
 mod support;

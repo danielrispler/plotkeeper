@@ -4,6 +4,7 @@
 //! links and the problems out.
 
 mod edges;
+mod laws;
 mod pattern;
 mod touched;
 
@@ -15,6 +16,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+pub use laws::{LawReport, Tag};
 use pattern::Pattern;
 pub use touched::{Touched, touched};
 
@@ -27,6 +29,8 @@ pub struct Report {
     /// The parts, in the file's order, each with the tracked files it owns.
     pub parts: Vec<PartFiles>,
     pub links: Vec<Link>,
+    /// Each law with its backing and the tags that name it.
+    pub laws: Vec<LawReport>,
     /// Dependencies between two parts that no link joins; reported, never a problem.
     pub unlinked: Vec<edges::Edge>,
     /// One line per problem; the check fails when there is any.
@@ -100,9 +104,9 @@ struct Law {
     text: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "kebab-case")]
-enum Backing {
+pub enum Backing {
     Check,
     Trust,
 }
@@ -139,6 +143,9 @@ pub fn check(root: &Path) -> Report {
     match tracked_files(root) {
         Ok(files) => {
             let (parts, problems) = ownership(&map, &files);
+            report.problems.extend(problems);
+            let (laws, problems) = laws::check(root, &map, &files);
+            report.laws = laws;
             report.problems.extend(problems);
             let names = map.extractors.as_deref().unwrap_or_default();
             let (unlinked, problems) = edges::unlinked(root, names, &parts, &map.links);
