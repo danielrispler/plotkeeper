@@ -2075,3 +2075,23 @@ fn judging_keeps_the_note_with_the_time_without_holding_the_store_and_a_failure_
         );
     }
 }
+
+#[test]
+fn a_corrupt_risk_notes_file_opens_empty_and_never_stops_the_start() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("risk-notes.json");
+    std::fs::write(&path, "{ not json").unwrap();
+    let session = push_blocked();
+
+    let mut notes = RiskNotes::open(path.clone()).unwrap();
+
+    // The notes are a cache: the card is judged again, and the file is whole after it.
+    assert_eq!(notes.asks(&session), [the_ask()]);
+    notes
+        .keep(&the_ask(), judged(RiskLevel::Low, "Pushes."), 7_000)
+        .unwrap();
+    assert_eq!(
+        RiskNotes::open(path).unwrap().views(&session),
+        [arrived("toolu_1", RiskLevel::Low, "Pushes.", 7_000)]
+    );
+}

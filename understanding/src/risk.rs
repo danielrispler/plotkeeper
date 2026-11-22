@@ -147,15 +147,11 @@ fn hash(command: &str, cwd: &str) -> String {
 }
 
 impl RiskNotes {
-    /// Reads the notes at `path`; a missing file is none. One that does not parse is an error, so it is never overwritten.
+    /// Reads the notes at `path`; a missing file is none. The notes are a cache: one that does not parse costs the
+    /// notes again and never the studio's start, and is written whole by the next note.
     pub fn open(path: PathBuf) -> io::Result<Self> {
         let kept = match fs::read(&path) {
-            Ok(bytes) => serde_json::from_slice(&bytes).map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("{}: {e}", path.display()),
-                )
-            })?,
+            Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
             Err(e) if e.kind() == io::ErrorKind::NotFound => BTreeMap::new(),
             Err(e) => return Err(e),
         };

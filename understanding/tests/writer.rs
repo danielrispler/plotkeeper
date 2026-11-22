@@ -509,6 +509,7 @@ fn every_writer_run_is_in_safe_mode() {
         ("goal", writer.goal_command(&["a prompt"])),
         ("explain more", writer.more_command(&edit(), &card)),
         ("ask", writer.ask_command("an item", &[], "why?")),
+        ("risk", writer.risk_command("rm -rf build", "/work/repo")),
         (
             "summary",
             writer.summary_command(&setup(), &turn("s", 1), &[]),
