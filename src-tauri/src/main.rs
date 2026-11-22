@@ -355,7 +355,9 @@ fn in_app(url: &tauri::Url) -> bool {
 fn main() {
     uptime();
     hover_delay();
-    let log = studio_hook::event_log(&std::env::home_dir().expect("a home directory"));
+    let home = std::env::home_dir().expect("a home directory");
+    studio_hook::move_old_data_dir(&home).expect("move the old data folder");
+    let log = studio_hook::event_log(&home);
     // The window does not exist yet, so the writer's notices wait here for the setup to forward them.
     let (writer_notices, writer_notice_reader) = mpsc::channel::<Option<String>>();
     let effects = Arc::new(ShellEffects::default());

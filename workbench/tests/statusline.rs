@@ -41,7 +41,7 @@ fn run(script: &str, stdin: &str, home: &Path) -> (String, String, Option<i32>) 
 }
 
 fn usage_dir(home: &Path) -> std::path::PathBuf {
-    home.join("Library/Application Support/dev.falinks.studio/usage")
+    home.join("Library/Application Support/plotkeeper/usage")
 }
 
 #[test]
@@ -95,9 +95,7 @@ fn a_bad_session_id_or_an_unwritable_folder_changes_nothing_either() {
     assert!(!usage_dir(home.path()).exists());
 
     // A file where the folder should be: mkdir fails, quietly.
-    let blocked = home
-        .path()
-        .join("Library/Application Support/dev.falinks.studio");
+    let blocked = home.path().join("Library/Application Support/plotkeeper");
     fs::create_dir_all(blocked.parent().unwrap()).unwrap();
     fs::write(&blocked, "").unwrap();
     assert_eq!(

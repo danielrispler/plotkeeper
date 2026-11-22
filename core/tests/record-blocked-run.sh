@@ -27,7 +27,7 @@
 set -eu
 
 studio=$(cd "$(dirname "$0")/../.." && pwd)
-data="$HOME/Library/Application Support/dev.falinks.studio"
+data="$HOME/Library/Application Support/plotkeeper"
 log="$data/events.jsonl"
 repo=$(mktemp -d)
 player=$(mktemp -d)
