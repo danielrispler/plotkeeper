@@ -11,11 +11,16 @@ globalThis.IntersectionObserver = class {
     this.run = run;
     observers.push(this);
   }
-  observe() {}
+  observe(node) {
+    this.node = node;
+  }
   disconnect() {}
 };
-const scrollTo = (observer, element, viewport) =>
+// Daniel's pointer is over the card, which a card needs to be seen (#331).
+const scrollTo = (observer, element, viewport) => {
   observer.run([{ intersectionRatio: element, intersectionRect: { width: 100, height: viewport * 100 }, rootBounds: { width: 100, height: 100 } }]);
+  observer.node.listeners.pointermove?.();
+};
 
 const calls = [];
 tauri(calls, (command) => (command === "turn_summary" ? { summary: { summary: "", headline: "Done", lines: [{ kind: "ask", text: "Pick one" }], quiz: null } } : null));
