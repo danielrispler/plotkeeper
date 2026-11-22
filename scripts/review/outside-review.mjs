@@ -5,13 +5,14 @@
 // It reviews the commits of HEAD since the merge-base with `origin/main`, or, for round 2, `--since`'s
 // commit and those after it. Its first line is the verdict: `reviewed: <n> findings`,
 // `skipped: <reason>` or `review unavailable: <reason>`. It never fails a PR: whatever stops the
-// review, it says why and exits 0. The findings go to a JSON file in `--out` (the session's
-// scratchpad; the system's temp folder without it), never into the repository.
+// review, it says why and exits 0; only a wrong option exits 2, before any review runs. The
+// findings go to a JSON file in `--out`: the session's scratchpad, or the system's temp folder
+// without it.
 //
 // The reviewer cannot write, run a command or read outside its throwaway folder: `deny-hook.mjs`
 // denies every tool but a read inside that folder (#283). So the script hands it the diff and the
 // file list as files, and checks afterwards that the reviewed tree is still clean.
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,13 +26,15 @@ const CODE = /\.(rs|ts|mjs|js)$/;
 export const SKIPPED = "skipped: no risk match";
 const TIMEOUT_MINUTES = 15;
 
+class Usage extends Error {}
+
 export const options = (argv) => {
   const opts = { force: false, model: DEFAULT_MODEL, since: null, out: tmpdir() };
   for (let i = 0; i < argv.length; i++) {
     const name = argv[i].replace(/^--/, "");
     if (argv[i] === "--force") opts.force = true;
     else if (["--model", "--since", "--out"].includes(argv[i]) && argv[i + 1]) opts[name] = argv[++i];
-    else throw new Error(`unknown or incomplete option ${argv[i]}`);
+    else throw new Usage(`unknown or incomplete option ${argv[i]}`);
   }
   return opts;
 };
@@ -60,7 +63,7 @@ const hunks = (diff) => {
       at = Number(header[2]);
       hunk = { path, changed: [], text: "" };
       if (path) out.push(hunk);
-    } else if (line.startsWith("+++ ")) path = line === "+++ /dev/null" ? null : line.slice("+++ b/".length);
+    } else if (line.startsWith("+++ ")) path = line === "+++ /dev/null" ? null : line.slice("+++ b/".length).replace(/\t$/, "");
   }
   return out;
 };
@@ -71,7 +74,8 @@ const bare = (line) => line.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)'/g, "").r
 
 // The structs and enums of a Rust file that derive Deserialize, each from its first attribute or doc
 // line to its closing line. It reads the text, not the grammar: a type that implements Deserialize
-// by hand, or gets its derive from a macro, is not seen.
+// by hand or gets its derive from a macro, a type written on its attribute's own line, and a brace
+// inside a block comment are not seen right.
 const deserialized = (source) => {
   const lines = source.split("\n");
   const types = [];
@@ -81,7 +85,7 @@ const deserialized = (source) => {
     let start = i;
     while (start > 0) {
       const above = lines[start - 1].trim();
-      if (above.startsWith("//") || above.startsWith("#[")) start--;
+      if (above === "" || above.startsWith("//") || above.startsWith("#[")) start--;
       else if (above.endsWith(")]")) {
         // The last line of an attribute that spans lines: up to the line that opens it.
         let open = start - 1;
@@ -90,17 +94,22 @@ const deserialized = (source) => {
         start = open;
       } else break;
     }
+    while (lines[start].trim() === "") start++;
     const attributes = lines.slice(start, i).filter((l) => !l.trim().startsWith("//")).join("\n");
     const derives = [...attributes.matchAll(/derive\s*\(([^)]*)\)/g)];
-    if (!derives.some((d) => /\bDeserialize\b/.test(d[1]))) continue;
+    if (!derives.some((d) => /\bDeserialize/.test(d[1]))) continue;
     let end = i;
     let depth = 0;
+    let inner = 0;
     let opened = false;
     scan: for (; end < lines.length; end++) {
       for (const c of bare(lines[end])) {
         if (c === "{") (depth++, (opened = true));
         else if (c === "}") depth--;
-        if ((opened && depth === 0) || (!opened && c === ";")) break scan;
+        else if (c === "(" || c === "[") inner++;
+        else if (c === ")" || c === "]") inner--;
+        // A unit or tuple struct ends at its `;`, one inside a field's `[u8; 4]` aside.
+        if ((opened && depth === 0) || (!opened && inner === 0 && c === ";")) break scan;
       }
     }
     types.push({ name: item[1], start: start + 1, end: end + 1 });
@@ -192,10 +201,10 @@ export const outcome = ({ status, missing, stdout, stderr, reads }) => {
   try {
     result = JSON.parse(stdout);
   } catch {}
-  const said = `${stderr}\n${result?.status === "SUCCESS" ? "" : stdout}`;
-  if (/quota|resource.exhausted|rate.limit/i.test(said)) return unavailable("the Gemini quota is used up");
   const findings = result?.structured_output?.findings;
   if (status !== 0 || result?.status !== "SUCCESS" || !Array.isArray(findings)) {
+    const said = `${stderr}\n${result?.status === "SUCCESS" ? "" : stdout}`;
+    if (/quota|resource.exhausted|rate.limit/i.test(said)) return unavailable("the Gemini quota is used up");
     const tail = said.trim().split("\n").at(-1).slice(0, 200);
     return unavailable(`agy exited with status ${status}${tail ? `: ${tail}` : ""}`);
   }
@@ -220,42 +229,82 @@ export const quota = (stdout) => {
   }
 };
 
-const main = (opts) => {
+const safe = (f, otherwise) => {
+  try {
+    return f();
+  } catch {
+    return otherwise;
+  }
+};
+
+// Runs `agy` without blocking, so a signal still reaches this script while the review runs.
+// `started` gets the child; past `limit` milliseconds it is ended, as agy's own exit code 3.
+const spawned = (args, more, limit, started) =>
+  new Promise((done) => {
+    const child = spawn("agy", args, { ...more, stdio: ["ignore", "pipe", "pipe"] });
+    started(child);
+    const out = { stdout: "", stderr: "" };
+    let late = false;
+    const timer = setTimeout(() => ((late = true), child.kill()), limit);
+    child.stdout.on("data", (data) => (out.stdout += data));
+    child.stderr.on("data", (data) => (out.stderr += data));
+    child.on("error", (error) => (clearTimeout(timer), done({ ...out, status: null, missing: error.code === "ENOENT" })));
+    child.on("close", (status) => (clearTimeout(timer), done({ ...out, status: late ? 3 : status })));
+  });
+
+const main = async (opts) => {
   const run = (command, args, more = {}) =>
     execFileSync(command, args, { encoding: "utf8", maxBuffer: 1 << 28, stdio: ["ignore", "pipe", "pipe"], ...more });
   const git = (...args) => run("git", args).trimEnd();
   const notes = [];
-  try {
-    git("fetch", "--quiet", "origin", "main");
-  } catch {
+  if (safe(() => run("git", ["fetch", "--quiet", "origin", "main"], { timeout: 30_000 }), null) === null)
     notes.push("note: `git fetch` failed; the diff is against the origin/main already here");
-  }
   const head = git("rev-parse", "HEAD");
-  const base = opts.since ? git("rev-parse", `${opts.since}^`) : git("merge-base", "HEAD", "origin/main");
-  const diff = git("diff", "--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", base, head);
+  const commit = (rev) => safe(() => git("rev-parse", "--verify", "--quiet", "--end-of-options", `${rev}^{commit}`), null);
+  let base;
+  if (opts.since) {
+    const since = commit(opts.since);
+    if (!since || safe(() => git("merge-base", "--is-ancestor", since, head), null) === null)
+      throw new Usage(`--since ${opts.since} is not a commit of this branch`);
+    base = commit(`${since}^`);
+    if (!base) throw new Usage(`--since ${opts.since} is the repository's first commit`);
+  } else base = git("merge-base", "HEAD", "origin/main");
+  const diff = git("-c", "core.quotepath=false", "diff", "--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", base, head);
   if (!diff) return console.log(`skipped: no change between ${base.slice(0, 9)} and HEAD`);
   const before = git("status", "--porcelain");
   if (before) notes.push("note: uncommitted changes are not reviewed; the review reads HEAD");
   const subIssues = () => {
     const issue = /^issue-(\d+)-/.exec(git("rev-parse", "--abbrev-ref", "HEAD"))?.[1];
     if (!issue) return 0;
-    try {
-      return Number(run("gh", ["api", `repos/{owner}/{repo}/issues/${issue}`, "--jq", ".sub_issues_summary.total"]));
-    } catch {
-      notes.push(`note: could not ask GitHub whether #${issue} is a spec`);
-      return 0;
-    }
+    const total = safe(() => run("gh", ["api", `repos/{owner}/{repo}/issues/${issue}`, "--jq", ".sub_issues_summary.total"]), null);
+    if (total === null) notes.push(`note: could not ask GitHub whether #${issue} is a spec`);
+    return Number(total ?? 0);
   };
   const decided = decide(opts, { diff, fileAt: (path) => git("show", `${head}:${path}`), subIssues });
   if (!decided.review) return console.log([decided.line, ...notes].join("\n"));
+  // Before any quota is spent: the findings must have somewhere to go.
+  if (safe(() => mkdirSync(opts.out, { recursive: true }), null) === null) throw new Usage(`--out ${opts.out} cannot be made`);
 
   const env = agyCall(opts, { env: process.env }).env;
-  const left = () => quota(spawnSync("agy", ["-p", "/usage", "--output-format", "json"], { env, encoding: "utf8" }).stdout);
+  const usage = { env, encoding: "utf8", cwd: tmpdir(), timeout: 30_000 };
+  const left = () => quota(spawnSync("agy", ["-p", "/usage", "--output-format", "json"], usage).stdout);
   const folder = realpathSync(mkdtempSync(join(tmpdir(), "outside-review-")));
   const repo = join(folder, "repo");
   const log = join(folder, "hook.log");
-  let result;
-  let quotaBefore = null;
+  let child = null;
+  const cleanup = () => {
+    safe(() => git("worktree", "remove", "--force", repo));
+    rmSync(folder, { recursive: true, force: true });
+    safe(() => git("worktree", "prune"));
+  };
+  // Killed mid-review (Ctrl-C, a stopped background task): end agy and leave no worktree behind.
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"])
+    process.once(signal, () => {
+      child?.kill();
+      cleanup();
+      process.exit(1);
+    });
+  const lines = [];
   try {
     git("worktree", "add", "--quiet", "--detach", repo, head);
     const absolute = (paths) => paths.split("\n").filter(Boolean).map((p) => join(repo, p)).join("\n") + "\n";
@@ -271,81 +320,58 @@ const main = (opts) => {
       join(folder, ".agents/hooks.json"),
       JSON.stringify({ readonly: { PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command, timeout: 10 }] }] } }),
     );
-    quotaBefore = left();
+    const quotaBefore = left();
     const call = agyCall(opts, { schema: join(folder, "review/schema.json"), prompt: brief(folder), env: process.env });
-    const ran = spawnSync("agy", call.args, {
-      cwd: folder,
-      env: call.env,
-      encoding: "utf8",
-      maxBuffer: 1 << 28,
-      timeout: (TIMEOUT_MINUTES + 2) * 60_000,
-    });
-    let decisions = [];
-    try {
-      decisions = readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line));
-    } catch {}
-    result = outcome({
-      status: ran.error?.code === "ETIMEDOUT" ? 3 : ran.status,
-      missing: ran.error?.code === "ENOENT",
-      stdout: ran.stdout ?? "",
-      stderr: ran.stderr ?? "",
-      reads: decisions.filter((d) => d.decision === "allow" && d.tool === "read_file").length,
-    });
-    result.denied = decisions.filter((d) => d.decision === "deny").map(({ tool, path, command }) => ({ tool, path, command }));
-    if (!result.findings && !result.line.includes("not installed")) {
-      // What `agy` said, kept for whoever asks why: the throwaway folder is about to go.
-      const kept = join(opts.out, `outside-review-${head.slice(0, 9)}-unavailable.json`);
-      mkdirSync(opts.out, { recursive: true });
-      writeFileSync(kept, JSON.stringify({ status: ran.status, stdout: ran.stdout, stderr: ran.stderr, decisions }, null, 2));
-      notes.push(`note: agy's output is in ${kept}`);
-    }
-    const dirty = git("-C", repo, "status", "--porcelain");
+    const ran = await spawned(call.args, { cwd: folder, env: call.env }, (TIMEOUT_MINUTES + 2) * 60_000, (c) => (child = c));
+    child = null;
+    const logged = safe(() => readFileSync(log, "utf8"), "").split("\n");
+    const decisions = logged.flatMap((line) => safe(() => [JSON.parse(line)], []));
+    const result = outcome({ ...ran, reads: decisions.filter((d) => d.decision === "allow" && d.tool === "read_file").length });
+    const dirty = safe(() => git("-C", repo, "status", "--porcelain"), "");
     if (dirty) notes.push(`warning: the review changed its throwaway tree, so the deny hook let a write through:\n${dirty}`);
+    if (safe(() => git("status", "--porcelain"), before) !== before) notes.push("warning: the reviewed checkout changed during the review");
+    const name = `outside-review-${head.slice(0, 9)}${opts.since ? "-round2" : ""}`;
+    if (result.findings) {
+      const quotaAfter = left();
+      const denied = decisions.filter((d) => d.decision === "deny").map(({ tool, path, command }) => ({ tool, path, command }));
+      const { findings, tokens, seconds } = result;
+      const report = { model: opts.model, base, head, why: decided.why, findings, tokens, seconds, denied, quotaBefore, quotaAfter, notes };
+      writeFileSync(join(opts.out, `${name}.json`), JSON.stringify(report, null, 2) + "\n");
+      const reasons = decided.why.split("; ");
+      const more = reasons.length > 2 ? `; and ${reasons.length - 2} more reasons` : "";
+      const percent = (fraction) => (typeof fraction === "number" ? `${Math.round(fraction * 100)}%` : "?");
+      const windows = Object.keys(quotaAfter ?? quotaBefore ?? {});
+      const quotas = windows.map((w) => `${w} ${percent(quotaBefore?.[w])} to ${percent(quotaAfter?.[w])}`).join(", ");
+      lines.push(`${result.line} (${opts.model}; ${reasons.slice(0, 2).join("; ")}${more})`);
+      lines.push(`findings: ${join(opts.out, `${name}.json`)}`);
+      lines.push(`cost: ${((seconds ?? 0) / 60).toFixed(1)} min, ${tokens ?? "?"} tokens; Gemini quota left: ${quotas || "unknown"}`);
+    } else {
+      lines.push(result.line);
+      if (!ran.missing) {
+        // What `agy` said, kept for whoever asks why: the throwaway folder is about to go.
+        const kept = join(opts.out, `${name}-unavailable.json`);
+        writeFileSync(kept, JSON.stringify({ ...ran, decisions }, null, 2));
+        notes.push(`note: agy's output is in ${kept}`);
+      }
+    }
   } catch (error) {
-    result = { line: `review unavailable: ${String(error.message ?? error).split("\n")[0]}`, exit: 0 };
+    lines.push(`review unavailable: ${String(error.message ?? error).split("\n")[0]}`);
   } finally {
-    try {
-      git("worktree", "remove", "--force", repo);
-    } catch {}
-    rmSync(folder, { recursive: true, force: true });
-    try {
-      git("worktree", "prune");
-    } catch {}
-  }
-  if (git("status", "--porcelain") !== before) notes.push("warning: the reviewed checkout changed during the review");
-  const quotaAfter = result.findings ? left() : null;
-  const percent = (fraction) => (typeof fraction === "number" ? `${Math.round(fraction * 100)}%` : "?");
-  const reasons = decided.why.split("; ");
-  const more = reasons.length > 2 ? `; and ${reasons.length - 2} more reasons` : "";
-  const lines = [result.findings ? `${result.line} (${opts.model}; ${reasons.slice(0, 2).join("; ")}${more})` : result.line];
-  if (result.findings) {
-    const out = join(opts.out, `outside-review-${head.slice(0, 9)}${opts.since ? "-round2" : ""}.json`);
-    const report = { model: opts.model, base, head, why: decided.why, ...result, quotaBefore, quotaAfter, notes };
-    delete report.line;
-    delete report.exit;
-    mkdirSync(opts.out, { recursive: true });
-    writeFileSync(out, JSON.stringify(report, null, 2) + "\n");
-    lines.push(`findings: ${out}`);
-    const windows = Object.keys(quotaAfter ?? quotaBefore ?? {});
-    const quotas = windows.map((w) => `${w} ${percent(quotaBefore?.[w])} to ${percent(quotaAfter?.[w])}`).join(", ");
-    lines.push(`cost: ${(result.seconds / 60).toFixed(1)} min, ${result.tokens} tokens; Gemini quota left: ${quotas || "unknown"}`);
+    cleanup();
   }
   console.log([...lines, ...notes].join("\n"));
 };
 
 // `import.meta.filename` is the real path; a path that goes through a symlink names the same file.
 if (process.argv[1] && realpathSync(process.argv[1]) === import.meta.filename) {
-  let opts;
   try {
-    opts = options(process.argv.slice(2));
+    await main(options(process.argv.slice(2)));
   } catch (error) {
-    console.error(`${error.message}\nusage: outside-review [--force] [--model <id>] [--since <sha>] [--out <folder>]`);
-    process.exit(2);
-  }
-  try {
-    main(opts);
-  } catch (error) {
-    // Whatever stops the review, the PR goes ahead with the reason.
+    if (error instanceof Usage) {
+      console.error(`${error.message}\nusage: outside-review [--force] [--model <id>] [--since <sha>] [--out <folder>]`);
+      process.exit(2);
+    }
+    // Whatever else stops the review, the PR goes ahead with the reason.
     console.log(`review unavailable: ${String(error.message ?? error).split("\n")[0]}`);
   }
 }
