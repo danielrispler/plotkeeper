@@ -225,3 +225,11 @@ test("the deny hook allows a read inside its root and the answer's hand-over, an
   assert.equal(logged.trim().split("\n").length, 8);
   assert.ok(!logged.includes("inside"));
 });
+
+test("the script runs when started through a symlinked path, and a wrong option fails with the usage", () => {
+  const link = join(mkdtempSync(join(tmpdir(), "outside-review-link-")), "review");
+  symlinkSync(join(import.meta.dirname, "../../scripts/review"), link);
+  const ran = spawnSync(process.execPath, [join(link, "outside-review.mjs"), "--modle", "x"], { encoding: "utf8" });
+  assert.equal(ran.status, 2);
+  assert.match(ran.stderr, /unknown or incomplete option --modle\nusage: outside-review/);
+});

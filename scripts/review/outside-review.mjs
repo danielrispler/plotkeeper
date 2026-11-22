@@ -333,7 +333,8 @@ const main = (opts) => {
   console.log([...lines, ...notes].join("\n"));
 };
 
-if (process.argv[1] === import.meta.filename) {
+// `import.meta.filename` is the real path; a path that goes through a symlink names the same file.
+if (process.argv[1] && realpathSync(process.argv[1]) === import.meta.filename) {
   let opts;
   try {
     opts = options(process.argv.slice(2));
