@@ -27,8 +27,8 @@ use studio_core::{
     Studio, TaskFacts, TaskQuery, compute_turn_files,
 };
 use studio_understanding::{
-    AGY_FIXTURE_VERSION, AgyVersions, Ask, CardStore, CardWriter, ClaudeWriter, Core, Effects,
-    FakeWriter, Fingerprints, Offers, OpenItem, Rating, RiskNotes, Row, SessionCards,
+    AGY_FIXTURE_VERSION, AgyVersions, CardStore, CardWriter, ClaudeWriter, Core, Effects,
+    FakeWriter, Fingerprints, Offers, OpenItem, Rating, RiskNotes, RiskRequest, Row, SessionCards,
     StoredSummary, SummarySetup, Tap, TurnWriting, Versions, diff_turn, fingerprint_changes,
     found_files, judge, live_roots, millis, open_items, turn_hunk, worktree_root,
     write_agent_summary, write_retests,
@@ -428,7 +428,7 @@ impl Sent {
 /// Starts the judge on each of `asks`, the risk notes a session wants (danielrispler/plotkeeper#298; `RiskNotes::asks`): a block that arrives
 /// live, or a card with buttons that is shown and has none, once per command per run of the app. Each call runs on a thread of its
 /// own, off the read loop and outside the turn-writing queue, as a side question does; the card shows with its buttons meanwhile.
-fn ask_notes(app: &AppHandle, asks: Vec<Ask>) {
+fn ask_notes(app: &AppHandle, asks: Vec<RiskRequest>) {
     for ask in asks {
         let notes: Notes = app.state::<Notes>().inner().clone();
         let writer: Writer = app.state::<Writer>().inner().clone();

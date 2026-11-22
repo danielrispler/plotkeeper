@@ -46,7 +46,7 @@ pub use offer::{
     changed_in, decide, is_logic, offer_stop, offer_summary, settle, turns_card,
 };
 pub use retest::{retest_quiz, write_retests};
-pub use risk::{Ask, RISK_TIMEOUT, Risk, RiskLevel, RiskNote, RiskNotes, RiskView, judge};
+pub use risk::{RISK_TIMEOUT, Risk, RiskLevel, RiskNote, RiskNotes, RiskRequest, RiskView, judge};
 pub use self_test::{ArmReport, SelfTest, self_test};
 pub use store::{
     Arm, Brief, CardStore, CheckResult, Guess, Learning, Level, PlacedCard, QuizTap, Rating,

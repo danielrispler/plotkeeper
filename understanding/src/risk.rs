@@ -125,7 +125,7 @@ pub enum RiskView {
 
 /// A blocked command that wants a note: asked for once, from the session and the command's folder.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Ask {
+pub struct RiskRequest {
     pub session: String,
     pub command: String,
     pub cwd: String,
@@ -184,7 +184,7 @@ impl RiskNotes {
 
     /// The blocked commands of `session` that want a note now: those with a button, none for an ended session, and none
     /// that was judged, or asked for in this run of the app.
-    pub fn asks(&mut self, session: &Session) -> Vec<Ask> {
+    pub fn asks(&mut self, session: &Session) -> Vec<RiskRequest> {
         if session.state == State::Ended {
             return Vec::new();
         }
@@ -193,7 +193,7 @@ impl RiskNotes {
         for card in session.blocked_commands.iter().filter(|c| c.status.waits()) {
             let key = (id.to_owned(), hash(&card.command, &card.cwd));
             if self.note(&key.0, &key.1).is_none() && self.asked.insert(key) {
-                asks.push(Ask {
+                asks.push(RiskRequest {
                     session: id.into(),
                     command: card.command.clone(),
                     cwd: card.cwd.clone(),
@@ -208,7 +208,12 @@ impl RiskNotes {
 
     /// Keeps the judge's `outcome` on `ask`, which arrived at `at`, and saves the notes. A failure is not kept: the card reads
     /// that no note came, until the app starts again.
-    pub fn keep(&mut self, ask: &Ask, outcome: Result<Risk, String>, at: u64) -> io::Result<()> {
+    pub fn keep(
+        &mut self,
+        ask: &RiskRequest,
+        outcome: Result<Risk, String>,
+        at: u64,
+    ) -> io::Result<()> {
         let key = (ask.session.clone(), hash(&ask.command, &ask.cwd));
         self.revision += 1;
         let Ok(Risk { level, line }) = outcome else {
@@ -292,7 +297,7 @@ impl RiskNotes {
 pub fn judge(
     notes: &Mutex<RiskNotes>,
     writer: &(impl CardWriter + ?Sized),
-    ask: &Ask,
+    ask: &RiskRequest,
     at: u64,
     mut log: impl FnMut(String),
 ) {

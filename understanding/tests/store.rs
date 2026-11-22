@@ -5,8 +5,8 @@ use crate::common::{Answer, Scripted};
 use std::sync::Mutex;
 use studio_core::{Base, BlockedStatus, CardRequest, Change, LiveFacts, Output, State, Studio};
 use studio_understanding::{
-    Ask, Card, CardStore, CardWriter, FakeWriter, Guess, Level, Rating, Reason, Risk, RiskLevel,
-    RiskNotes, RiskView, StoredCard, Surface, explain_more, judge, write_card,
+    Card, CardStore, CardWriter, FakeWriter, Guess, Level, Rating, Reason, Risk, RiskLevel,
+    RiskNotes, RiskRequest, RiskView, StoredCard, Surface, explain_more, judge, write_card,
 };
 
 /// The card on an edit of `path`, named `id`, from a base with `README.md` already edited.
@@ -1814,8 +1814,8 @@ fn judged(level: RiskLevel, line: &str) -> Result<Risk, String> {
     })
 }
 
-fn the_ask() -> Ask {
-    Ask {
+fn the_ask() -> RiskRequest {
+    RiskRequest {
         session: RISK_SESSION.into(),
         command: PUSH.into(),
         cwd: REPO.into(),
