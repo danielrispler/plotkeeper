@@ -42,8 +42,8 @@
   --settings: 880px; --settings-height: 620px; --switch: 32px; --switch-height: 18px; --stepper-value: 40px; --select: 140px;
 
   /* The Map view (danielrispler/plotkeeper#306, Treatment C): plates on a quiet chart. The mist is a cool grey, so it and the warm ring
-     of focus or a brief differ by temperature, not hue; thin is about two thirds of thick. Plate and actor sizes are map-model.ts's. */
-  --mist: #c4ccd6; --mist-thin: #c4ccd63d; --mist-thick: #c4ccd65c; --ring-warm: #e0c08c80;
+     of focus or a brief differ by temperature, not hue; thin is about two thirds of thick, a little denser than the prototype's mist. Plate and actor sizes are map-model.ts's. */
+  --mist: #c4ccd6; --mist-thin: #c4ccd652; --mist-thick: #c4ccd680; --ring-warm: #e0c08c80;
   --map-bg: #131416; --map-dot: #ffffff0a;
   --plate: #202226; --plate-core: #25272b; --plate-edge: #ffffff1a; --plate-black: #121315; --plate-black-edge: #ffffff0d;
   --link: #ffffff26; --law-check: var(--fg); --law-trust: var(--muted);

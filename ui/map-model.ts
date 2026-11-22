@@ -255,3 +255,13 @@ export function scrubTickets() {
     live: (ticket: number) => ticket === latest,
   };
 }
+
+// Where a map area `width` wide, scrolled to `scroll`, should scroll so plates spanning `left` to `right` (plus `gutter`) are whole in it: as
+// little as it takes; the gutter shrinks to what the area has to spare, and a span wider than the area is left where it is.
+export function scrollToShow(left: number, right: number, scroll: number, width: number, wanted: number): number {
+  const gutter = Math.min(wanted, (width - (right - left)) / 2);
+  if (gutter < 0) return scroll;
+  if (right + gutter > scroll + width) return Math.max(0, right + gutter - width);
+  if (left - gutter < scroll) return Math.max(0, left - gutter);
+  return scroll;
+}

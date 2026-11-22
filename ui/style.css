@@ -695,10 +695,13 @@ body.map-open .toasts, body.map-open .toast { visibility: visible !important; }
 .map-legend .law-mark { margin-inline: var(--sp-2); }
 /* Fog (#310): a cool-grey mist behind the plate's text, so the name stays at full strength. Thin is the plain halo; thick is the denser
    halo with a rim and a slow drift, so the two read apart at a glance without a number. "I know this" lifts it. */
-.plate.fog-thin .plate-fog, .plate.fog-thick .plate-fog { inset: calc(-1 * var(--sp-4)); border-radius: var(--sp-7); filter: blur(var(--sp-5)); }
+.plate.fog-thin .plate-fog, .plate.fog-thick .plate-fog { inset: calc(-1 * var(--sp-7)); border-radius: var(--sp-7); filter: blur(var(--sp-5)); }
 .plate.fog-thin .plate-fog { background: var(--mist-thin); }
 .plate.fog-thick .plate-fog { background: var(--mist-thick); animation: mist-drift var(--mist-drift) ease-in-out infinite alternate; }
 .plate.fog-thick { box-shadow: inset 0 0 0 var(--hair) var(--mist), var(--shadow); }
+/* The mist lies over the plate and dims what it says apart from the part's name, as in the prototype. */
+.plate.fog-thin .plate-caption { opacity: .75; }
+.plate.fog-thick .plate-caption { opacity: .55; }
 .plate-fog.lifting { animation: mist-lift var(--mist-lift) forwards; }
 @keyframes mist-drift { from { transform: translateX(calc(-1 * var(--sp-2))); } to { transform: translateX(var(--sp-2)); } }
 @keyframes mist-lift { to { opacity: 0; transform: translateY(calc(-1 * var(--sp-6))); } }

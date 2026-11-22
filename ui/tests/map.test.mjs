@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import {
-  actorSize, autoPlace, draftPrompt, dragMove, dragStart, dragThreshold, effectiveTier, escapeMap, layerOrder, mapProject, parseMap, plateSize, rimPoint, scrubTickets, sheetOf,
+  actorSize, autoPlace, draftPrompt, dragMove, dragStart, dragThreshold, effectiveTier, escapeMap, layerOrder, mapProject, parseMap, plateSize, rimPoint, scrubTickets, sheetOf, scrollToShow,
 } from "../../dist/map-model.js";
 
 const part = (id, extra = {}) => ({ id, name: id, caption: "", description: "", tier: "core", paths: [], ...extra });
@@ -171,4 +171,13 @@ test("a scrub that reads slowly is dropped after Back to now or a later click", 
   tickets.cancel();
   assert.equal(tickets.live(second), false);
   assert.equal(tickets.live(tickets.start()), true);
+});
+
+test("when the sheet narrows the map, it scrolls so the plates are not cut mid-plate, and leaves a map that cannot fit where it was", () => {
+  // Plates span 100..1300 in a 1300 wide area: scrolled right by the gutter that would be cut, never past the left edge.
+  assert.equal(scrollToShow(100, 1300, 0, 1300, 32), 32);
+  assert.equal(scrollToShow(100, 1000, 0, 1300, 32), 0, "already inside");
+  assert.equal(scrollToShow(100, 1000, 500, 1300, 32), 68, "cut at the left");
+  assert.equal(scrollToShow(83, 1350, 0, 1300, 32), 66.5, "the gutter shrinks to the room there is");
+  assert.equal(scrollToShow(0, 1350, 500, 1300, 32), 500, "wider than the area: left where it is");
 });

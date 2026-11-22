@@ -15,7 +15,7 @@ import { logStop, reviewNode, reviewOf } from "./stop-rules.js";
 import { element, failure, invoke, listen, newest, pressable, text } from "./dom.js";
 import {
   actorSize, autoPlace, brokenParts, brokenText, draftPrompt, dragMove, dragStart, effectiveTier, escapeMap, type Actor, type Drag, type Law, type Layer, type LayerName,
-  type MapDoc, mapProject, type MapLink, parseMap, type Part, type Point, plateSize, rimPoint, type Scrub, type Tier,
+  type MapDoc, mapProject, type MapLink, parseMap, type Part, type Point, plateSize, rimPoint, scrollToShow, type Scrub, type Tier,
 } from "./map-model.js";
 import { recheckSeen } from "./seen.js";
 import { knownProjects, projects } from "./projects.js";
@@ -154,6 +154,9 @@ const hideProjects = () => {
   if (menu.matches(":popover-open")) menu.hidePopover();
 };
 
+// The gutter around the plates when the map scrolls them into view: `--map-gutter` in tokens.css.
+const mapGutter = 32;
+
 // Esc in the Map view: the project menu first, then the first open layer (a scrubbed commit, a drawer, a sheet), else the view itself.
 export function mapEscape() {
   if (element("map-projects").matches(":popover-open")) return hideProjects();
@@ -163,6 +166,13 @@ export function mapEscape() {
 // The side area shows while any of its slots holds something.
 export const syncSide = (slots: MapView["slots"]) => {
   slots.side.hidden = ![slots.notPlaced, slots.sheet, slots.drawer].some((slot) => slot.childElementCount > 0);
+  // The map area ends where the side area begins; a plate it now cuts is scrolled into whole view when the plates fit.
+  // Only plates count: an actor's label is not worth a plate cut off, and a map too wide for the area keeps its plates whole first.
+  const placed = view && view.slots === slots ? Object.entries(view.positions).filter(([id]) => !view!.doc.actors.some((actor) => actor.id === id)) : [];
+  if (!placed.length || !slots.canvas?.clientWidth) return;
+  const { canvas } = slots;
+  const edges = placed.map(([id, at]) => [at.x - sizeOf(id, view!).w / 2, at.x + sizeOf(id, view!).w / 2]);
+  canvas.scrollLeft = scrollToShow(Math.min(...edges.map(([a]) => a)), Math.max(...edges.map(([, b]) => b)), canvas.scrollLeft, canvas.clientWidth, mapGutter);
 };
 
 const name = (path: string) => path.split("/").filter(Boolean).pop() ?? path;
