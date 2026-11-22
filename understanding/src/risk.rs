@@ -46,11 +46,15 @@ impl Risk {
             level: RiskLevel,
             line: String,
         }
+        // Nothing of the reply goes in the message but its head, in quotes, which the log's scrubbing cuts: a serde error
+        // may name the reply's own words.
         let read = parse_object(reply).and_then(serde_json::from_value::<Reply>);
-        let Reply { level, line } = read.map_err(|e| {
+        let Reply { level, line } = read.map_err(|_| {
             let head: String = reply.trim().chars().take(300).collect();
             let head = head.replace('\n', " ");
-            format!("the reply is no risk note ({e}): {head:?}")
+            format!(
+                "the reply is no risk note (not an object with a known level and a line): {head:?}"
+            )
         })?;
         match line.trim() {
             "" => Err("the risk note has no line".into()),
