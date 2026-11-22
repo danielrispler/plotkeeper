@@ -287,7 +287,8 @@ const briefOf = (steps: BriefStep[], partial = false, extra: Partial<PrBrief> = 
   brief: { version: 1, pr: 334, head: "b".repeat(40), written_at: 1, stale: false, model: "opus", brief: brief(steps, extra) },
 });
 // Opens the brief from the tray, goes `next` steps on, and checks the panel and the map.
-const mapBrief = (view: BriefView, next: number, check = ""): Fixture =>
+// Chrome runs a snap for about 2 s of virtual time after the page loads and what is left unrun is silent, so a `quick` brief waits the least it can.
+const mapBrief = (view: BriefView, next: number, check = "", quick = false): Fixture =>
   mapOpened(
     `
       // Chrome's virtual time stalls animations: the brief plays as it does under reduced motion, whose end state is the one to review.
@@ -299,11 +300,11 @@ const mapBrief = (view: BriefView, next: number, check = ""): Fixture =>
       const tray = document.querySelector('#map-tray .tray-row[data-pr="334"]');
       if (!tray) return log("snap:fail no tray row for the brief");
       tray.click();
-      await wait(500);
+      await wait(${quick ? 300 : 500});
       const panel = document.getElementById("map-brief");
       if (panel.hidden || !panel.classList.contains("open")) return log("snap:fail the brief did not open");
-      for (let i = 0; i < ${next}; i++) { document.getElementById("brief-next").click(); await wait(500); }
-      await wait(1800);
+      for (let i = 0; i < ${next}; i++) { document.getElementById("brief-next").click(); await wait(${quick ? 200 : 500}); }
+      await wait(${quick ? 200 : 1800});
       if (!document.querySelector(".map-world.briefing")) log("snap:fail the map is not in the brief's light");
       if (!document.querySelector(".plate.lit")) log("snap:fail no part is lit");
       if (!document.querySelector(".map-world").style.transform.includes("scale")) log("snap:fail the camera did not frame the parts");
@@ -334,6 +335,81 @@ const mapBriefUnconfirmed = (): Fixture =>
   mapBrief(briefOf([step("Now", "Cards are written once per turn", "A turn is written once, whatever the order of events.", ["understanding"], { flags: ["the claim is not in the facts"] })], true), 0, `
       if (!document.querySelector("#map-brief .brief-unconfirmed")?.textContent.includes("not confirmed from the facts")) log("snap:fail no unconfirmed mark");
       if (!document.querySelector("#map-brief .brief-partial")?.textContent.includes("Written from part of the diff")) log("snap:fail no partial line");`);
+// The prediction check (#340). A pick on a case inside one part: pick, take back, Check, then the right option and the way on.
+const pickCheck: NonNullable<BriefStep["check"]> = {
+  kind: "pick", q: "A worker's card comes from a turn that ended in Needs you. Is its Quiz stored?", opts: ["Yes: workers skip the rule", "No: the card is stored without its Quiz"], key: 1,
+  yes: "Right: worker and check cards follow the same rule as turns.", no: "Not any more: review made worker and check cards lose it too.", flow: null, test: "a_workers_card_is_stored_without_a_quiz",
+};
+const pickStep = () => step("Your turn", "A worker's card comes from a turn that asked you something", "", ["understanding"], { check: pickCheck, cites: [{ from: "the PR body", quote: "worker cards lose their Quiz" }] });
+const mapBriefPick = (option: number): Fixture =>
+  mapBrief(briefOf([pickStep()]), 0, `
+      const next = document.getElementById("brief-next");
+      const opts = [...document.querySelectorAll("#map-brief .brief-opt")];
+      if (opts.length !== 2 || !next.disabled || next.textContent !== "Check") return log("snap:fail a pick check starts with Check off");
+      opts[${option}].click();
+      if (next.disabled) log("snap:fail a pick did not turn Check on");
+      opts[${option}].click();
+      if (!next.disabled || opts[${option}].getAttribute("aria-pressed") !== "false") log("snap:fail a pick was not taken back");
+      opts[${option}].click();
+      next.click();
+      await wait(100);
+      const body = document.querySelector("#map-brief .brief-check .brief-body").textContent;
+      const done = [...document.querySelectorAll("#map-brief .brief-opt")];
+      if (!done[1].classList.contains("right")) log("snap:fail the right option is not shown");
+      if (${option} === 0 && !done[0].classList.contains("miss")) log("snap:fail the wrong pick is not marked");
+      if (done[0].classList.contains("right")) log("snap:fail the wrong option is shown as right");
+      if (body !== ${JSON.stringify(option === 1 ? pickCheck.yes : pickCheck.no)}) log("snap:fail the answer's words: " + body);
+      if (next.textContent !== "Done" || next.disabled) log("snap:fail the way on after Check: " + next.textContent);`, true);
+
+// An order check on a flow change, answered by tapping parts on the map: the writer-ticket's synthetic flow change as the UI plays it, an
+// overview of two steps that runs the flow's hops, closed by the order check, then the chapter. The key is Core, Shell, Understanding.
+const orderCheck: NonNullable<BriefStep["check"]> = {
+  kind: "order", q: "A turn just ended, and Core has noticed. Tap, in order, the three parts the work passes through before anything is stored.", opts: [], key: ["core", "shell", "understanding"],
+  yes: "Right: Core, then the Shell, then Understanding.", no: "Not quite. It goes Core, then the Shell, then Understanding. Follow the light.", flow: "turn-flow", test: null,
+};
+const flowHops: [string, boolean][] = [["shell-core", true], ["shell-understanding", false]];
+const flowSteps = (): BriefStep[] => [
+  step("Where", "A turn's end now runs through three parts", "The Core notices the end of a turn, the Shell hands it on, and Understanding stores it.", ["core", "shell", "understanding"], { hops: flowHops }),
+  step("Your turn", "A turn just ended, and Core has noticed. Tap, in order, the three parts the work passes through before anything is stored.", "", ["core", "shell", "understanding", "window"], { check: orderCheck }),
+];
+const flowBrief = (): BriefView =>
+  briefOf(storySteps().slice(0, 2), false, { overview: flowSteps(), chapters: [{ behaviour: "story", parts: ["shell", "understanding"], title: "Turn writing", steps: storySteps().slice(0, 2), flags: [] }] });
+const tap = (ids: string[]) => ids.map((id) => `document.querySelector('.plate[data-id="${id}"]').click(); await wait(50);`).join("\n      ");
+const mapBriefOrder = (ids: string[], grade: boolean, check: string): Fixture =>
+  mapBrief(flowBrief(), 1, `
+      const next = document.getElementById("brief-next");
+      if (next.textContent !== "Check" || !next.disabled) return log("snap:fail an order check starts with Check off");
+      if (document.querySelectorAll(".plate.pick").length !== 4) log("snap:fail the parts the step lights cannot be tapped: " + document.querySelectorAll(".plate.pick").length);
+      if (document.querySelectorAll("#map-brief .brief-slot").length !== 3) log("snap:fail the check has no three slots");
+      ${tap(ids)}
+      if (document.querySelector(".plate.open")) log("snap:fail a tap opened the part's sheet");
+      if (document.querySelectorAll(".plate .ord").length !== ${ids.length}) log("snap:fail the taps carry no numbers on the map");
+      if (document.querySelectorAll("#map-brief .brief-slot.full").length !== ${ids.length}) log("snap:fail the slots do not hold the taps");
+      ${grade ? `if (next.disabled) return log("snap:fail Check is off with every slot full");
+      next.click();
+      await wait(250);` : `if (!next.disabled) log("snap:fail Check is on before every slot is full");`}
+      ${check}`, true);
+const orderTakeBack = `
+      document.querySelector('.plate[data-id="shell"]').click();
+      await wait(50);
+      if (document.querySelectorAll(".plate .ord").length !== 1 || document.querySelector(".plate[data-id='core'] .ord")?.textContent !== "1") log("snap:fail a tap on a part did not take it back");
+      document.querySelector('.plate[data-id="shell"]').click();
+      await wait(50);`;
+const mapBriefOrderSlots = (): Fixture => mapBriefOrder(["core", "shell"], false, orderTakeBack);
+const mapBriefOrderWrong = (): Fixture =>
+  mapBriefOrder(["understanding", "shell", "core"], true, `
+      if (document.querySelector("#map-brief .brief-check .brief-body").textContent !== ${JSON.stringify(orderCheck.no)}) log("snap:fail the correction's words");
+      const slots = [...document.querySelectorAll("#map-brief .brief-slot span:last-child")].map((n) => n.textContent);
+      if (slots.join() !== "Core,Shell,Understanding") log("snap:fail the slots do not show the right order: " + slots);
+      if (document.querySelectorAll(".map-light .light-trail").length !== 2) log("snap:fail the right path was not replayed: " + document.querySelectorAll(".map-light .light-trail").length);
+      if (next.textContent !== "Next") log("snap:fail the way on after Check: " + next.textContent);`);
+// Right, and on through the chapter: the brief plays end to end.
+const mapBriefOrderRight = (): Fixture =>
+  mapBriefOrder(["core", "shell", "understanding"], true, `
+      if (document.querySelector("#map-brief .brief-check .brief-body").textContent !== ${JSON.stringify(orderCheck.yes)}) log("snap:fail the right answer's words");
+      next.click();
+      await wait(300);
+      if (!document.querySelector("#map-brief .brief-title").textContent.includes("A ready PR now brings")) log("snap:fail the chapter did not follow the overview");`);
 const homeMarked = (press: boolean): Fixture => ({
   ...(fixtures as Record<string, () => Fixture>).home(),
   map_marks: ["/w/plotkeeper"],
@@ -529,6 +605,11 @@ export const fixtures = {
   mapBriefSequence: () => mapBriefFigure("sequence"),
   mapBriefCompare: () => mapBriefFigure("compare"),
   mapBriefUnconfirmed,
+  mapBriefPickRight: () => mapBriefPick(1),
+  mapBriefPickWrong: () => mapBriefPick(0),
+  mapBriefOrderSlots,
+  mapBriefOrderWrong,
+  mapBriefOrderRight,
   recordedTerminal,
   logRunning: () => logFixture("running"),
   logDone: () => logFixture("completed"),

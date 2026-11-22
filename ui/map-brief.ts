@@ -3,14 +3,16 @@
 // parts the brief lights; the panel keeps its tallest step's height and crossfades between steps; a figure for a change inside one part is drawn
 // by `figureShapes` from the writer's labels; citations sit in quiet type, and the panel says when the writer saw only part of the diff and which
 // items are not confirmed from the facts. "See the code" opens the drawer (`map-drawer.ts`) above it. Opening a brief returns the map to now.
+// A step's check (#340) is answered in place: a pick in the panel, an order by tapping parts on the map into numbered slots (`pickRun`, `orderRun`);
+// Check grades it, a wrong answer shows the correction, and an order check replays the right path along the links.
 // Esc (`brief` layer) closes it and keeps its step. `map-model.ts` holds the logic: `briefPlayer`, `briefCamera`, `figureShapes`.
 
 import { failure, invoke, text } from "./dom.js";
 import { currentMap, currentScrub, onDraw, registerLayer, type MapView } from "./map.js";
 import { closeDrawer, openDrawer } from "./map-drawer.js";
 import { scrubTo } from "./map-history.js";
-import { actorSize, briefCamera, briefPlayer, citeDrawer, figureShapes, figureSize, playlist, plateSize, type Rect, type Shape, unconfirmed } from "./map-model.js";
-import type { BriefStep, BriefView } from "./types.js";
+import { actorSize, briefCamera, briefPlayer, citeDrawer, figureShapes, figureSize, orderRun, type OrderRun, pickRun, type PickRun, playlist, plateSize, type Rect, type Shape, unconfirmed } from "./map-model.js";
+import type { BriefCheck, BriefStep, BriefView } from "./types.js";
 
 const player = briefPlayer({ scrubbed: () => currentScrub() !== null, backToNow: () => void scrubTo(null).catch(failure("map_at")) });
 // The brief being played, as `pr_brief` returned it.
@@ -90,6 +92,7 @@ function unlight(view: MapView) {
   root.classList.remove("briefing");
   root.style.transform = "";
   view.slots.canvas.querySelectorAll(".lit, .arrive").forEach((node) => node.classList.remove("lit", "arrive"));
+  clearOrder(view);
   root.querySelector(".map-light")?.remove();
 }
 
@@ -146,7 +149,7 @@ function arrive(view: MapView, id: string) {
 }
 
 // The light travels the step's links at one speed, leaving each lit behind it; a part lights as the light reaches it.
-async function runLight(view: MapView, step: BriefStep) {
+async function runLight(view: MapView, hops: [string, boolean][]) {
   const mine = ++run;
   const root = world(view);
   const links = root?.querySelector(".map-links");
@@ -154,7 +157,7 @@ async function runLight(view: MapView, step: BriefStep) {
   root.querySelector(".map-light")?.remove();
   const layer = svg("svg", { class: "map-light", "aria-hidden": "true", width: links.getAttribute("width") ?? "0", height: links.getAttribute("height") ?? "0" });
   root.append(layer);
-  const legs = step.hops.flatMap((hop) => {
+  const legs = hops.flatMap((hop) => {
     const line = links.querySelector(`[data-link="${CSS.escape(hop[0])}"]`);
     const pair = ends(view, hop);
     if (!line || !pair) return [];
@@ -212,7 +215,7 @@ function light(view: MapView, step: BriefStep) {
     node.classList.remove("arrive");
     node.classList.toggle("lit", step.on.includes(node.dataset.id ?? "") && !waiting.has(node.dataset.id ?? ""));
   });
-  if (step.hops.length) void runLight(view, step);
+  if (step.hops.length) void runLight(view, step.hops);
 }
 
 // ---- the panel.
@@ -252,7 +255,7 @@ function stepNode(view: MapView, step: BriefStep, pr: number) {
   if (step.list.length) words.append(listNode(step.list));
   if (step.risks.length) words.append(listNode(step.risks.map((r) => `${part(r.part)}: ${r.trigger} To see it: ${r.check}`)));
   if (step.covered_by) words.append(text("p", `Covered by the test ${step.covered_by}.`, "brief-quiet"));
-  if (step.check) words.append(checkNode(step));
+  if (step.check) words.append(checkNode(view, step));
   if (unconfirmed(step)) {
     const mark = text("p", "not confirmed from the facts", "brief-quiet brief-unconfirmed");
     mark.title = step.flags.join("\n");
@@ -283,32 +286,154 @@ function listNode(items: string[]) {
   return list;
 }
 
-// A check on a case inside one part: pick an answer, take it back, press Check. An order check is answered on the map in a later ticket and
-// shows its question here.
-function checkNode(step: BriefStep) {
+// ---- the check: one prediction, answered in the panel (a pick) or on the map (an order).
+
+type Run = { kind: "pick"; run: PickRun } | { kind: "order"; run: OrderRun };
+// A check keeps its answer while the brief is open, so a redraw of the map or a step back shows it as it was.
+const runs = new WeakMap<BriefCheck, Run>();
+function runOf(view: MapView, check: BriefCheck): Run | null {
+  let found = runs.get(check);
+  if (!found && check.kind === "pick") found = { kind: "pick", run: pickRun(Number(check.key)) };
+  if (!found && check.kind === "order") found = { kind: "order", run: orderRun(Array.isArray(check.key) ? (check.key as string[]) : [], view.doc.links) };
+  if (found) runs.set(check, found);
+  return found ?? null;
+}
+const nameOf = (view: MapView, id: string) => view.doc.parts.find((p) => p.id === id)?.name ?? id;
+const keyOf = (check: BriefCheck) => (Array.isArray(check.key) ? (check.key as string[]) : []);
+
+// What an order check lets Daniel tap: the parts the step lights, and the ones of the key.
+const tappable = (view: MapView, step: BriefStep) => new Set([...step.on, ...keyOf(step.check!)].filter((id) => view.doc.parts.some((p) => p.id === id)));
+
+// The panel's part of a check, drawn from its run: the question (the answer's words once graded), the options or the numbered slots.
+function checkNode(view: MapView, step: BriefStep) {
   const check = step.check!;
   const box = text("div", "", "brief-check");
-  box.append(text("p", check.q, "brief-body"));
-  if (check.kind !== "pick") return box;
-  const row = text("div", "", "brief-opts");
-  const buttons = check.opts.map((opt, i) => {
-    const button = text("button", opt, "btn brief-opt");
-    button.title = "Pick this answer; press it again to take it back";
-    button.setAttribute("type", "button");
-    button.addEventListener("click", () => {
-      if (box.dataset.answered) return;
-      const was = button.getAttribute("aria-pressed") === "true";
-      buttons.forEach((b) => b.setAttribute("aria-pressed", "false"));
-      button.setAttribute("aria-pressed", String(!was));
-      box.dataset.picked = was ? "" : String(i);
-      const press = document.getElementById("brief-next");
-      if (press) (press as HTMLButtonElement).disabled = was;
+  const found = runOf(view, check);
+  if (!found) return box.appendChild(text("p", check.q, "brief-body")), box;
+  const done = found.run.answered();
+  const right = found.kind === "pick" ? found.run.picked() === Number(check.key) : keyOf(check).every((id, i) => id === found.run.picked()[i]);
+  // The question is the step's own heading when the writer put it there; then only the answer's words add to it.
+  if (done || check.q !== step.h) box.append(text("p", done ? (right ? check.yes : check.no) : check.q, "brief-body"));
+  if (found.kind === "pick") {
+    const { run } = found;
+    const row = text("div", "", "brief-opts");
+    check.opts.forEach((opt, i) => {
+      const button = text("button", opt, "btn brief-opt");
+      button.title = "Pick this answer; press it again to take it back";
+      button.setAttribute("type", "button");
+      button.setAttribute("aria-pressed", String(run.picked() === i));
+      if (done) button.classList.add(i === Number(check.key) ? "right" : "miss");
+      button.addEventListener("click", () => {
+        run.tap(i);
+        redrawCheck(view, step);
+      });
+      row.append(button);
     });
-    return button;
-  });
-  row.append(...buttons);
-  box.append(row);
+    box.append(row);
+  } else {
+    // The slots show the parts as tapped; once graded they show the key, which the map replays.
+    const shown = done ? keyOf(check) : found.run.picked();
+    const row = text("div", "", "brief-slots");
+    keyOf(check).forEach((_, i) => {
+      const slot = text("span", "", `brief-slot${shown[i] ? " full" : ""}`);
+      slot.append(text("b", String(i + 1)), text("span", shown[i] ? nameOf(view, shown[i]) : "tap a part"));
+      row.append(slot);
+    });
+    box.append(row);
+  }
   return box;
+}
+
+// Redraws the check where it is, the Check button and the map's badges with it.
+function redrawCheck(view: MapView, step: BriefStep) {
+  const old = panel().querySelector(".brief-check");
+  if (old) old.replaceWith(checkNode(view, step));
+  paintOrder(view, step);
+  syncNext(step);
+}
+
+// The map's side of an order check: the parts that can be tapped, and a number on each part tapped.
+function clearOrder(view: MapView) {
+  view.slots.canvas.querySelectorAll(".pick, .picked, .wrong").forEach((node) => node.classList.remove("pick", "picked", "wrong"));
+  view.slots.canvas.querySelectorAll(".ord").forEach((node) => node.remove());
+}
+function paintOrder(view: MapView, step: BriefStep) {
+  clearOrder(view);
+  const found = step.check?.kind === "order" ? runOf(view, step.check) : null;
+  if (!found || found.kind !== "order") return;
+  const open = tappable(view, step);
+  const answered = found.run.answered();
+  const shown = answered ? keyOf(step.check!) : found.run.picked();
+  open.forEach((id) => plateOf(view, id)?.classList.toggle("pick", !answered));
+  shown.forEach((id, i) => {
+    const plate = plateOf(view, id);
+    plate?.classList.add("picked");
+    plate?.append(text("span", String(i + 1), "ord"));
+  });
+}
+
+// A tap on a part while an order check is open picks it, instead of opening its sheet.
+function wireTaps(view: MapView) {
+  const canvas = view.slots.canvas;
+  if (canvas.dataset.briefTaps) return;
+  canvas.dataset.briefTaps = "yes";
+  canvas.addEventListener(
+    "click",
+    (event) => {
+      const now = player.current();
+      const step = now ? steps()[now.step] : undefined;
+      const current = currentMap();
+      if (!step?.check || step.check.kind !== "order" || !current) return;
+      const plate = (event.target as HTMLElement).closest<HTMLElement>(".plate");
+      if (!plate) return;
+      event.stopPropagation();
+      const found = runOf(current, step.check);
+      if (!found || found.kind !== "order" || found.run.answered() || !tappable(current, step).has(plate.dataset.id ?? "")) return;
+      found.run.tap(plate.dataset.id!);
+      redrawCheck(current, step);
+    },
+    true,
+  );
+}
+
+// Check on a check: graded, its right answer shown, and an order check's right path replayed along the links.
+function grade(view: MapView, step: BriefStep) {
+  const found = runOf(view, step.check!);
+  if (!found || !found.run.ready()) return;
+  if (found.kind === "pick") {
+    found.run.grade();
+    return redrawCheck(view, step);
+  }
+  const result = found.run.grade()!;
+  const wrong = result.wrong;
+  redrawCheck(view, step);
+  // The parts out of place nudge once; then the right path runs.
+  if (wrong.length && !reduced()) {
+    wrong.forEach((id) => plateOf(view, id)?.classList.add("wrong"));
+    setTimeout(() => replay(view, found.run), 420);
+  } else {
+    replay(view, found.run);
+  }
+}
+function replay(view: MapView, run: OrderRun) {
+  if (!player.current()) return;
+  view.slots.canvas.querySelectorAll(".wrong").forEach((node) => node.classList.remove("wrong"));
+  stopLight();
+  world(view)?.querySelector(".map-light")?.remove();
+  void runLight(view, run.replay());
+}
+
+// The Next button is Check while the step's check waits for its answer.
+function syncNext(step: BriefStep) {
+  const next = document.getElementById("brief-next") as HTMLButtonElement | null;
+  const list = steps();
+  if (!next) return;
+  const found = step.check ? runs.get(step.check) : undefined;
+  const waiting = !!step.check && (!found || !found.run.answered());
+  const last = player.current()?.step === list.length - 1;
+  next.textContent = waiting ? "Check" : last ? "Done" : "Next";
+  next.dataset.check = waiting ? step.check!.kind : "";
+  next.disabled = waiting && !(found && found.run.ready());
 }
 
 let swap = 0;
@@ -340,13 +465,11 @@ function show(view: MapView, same: boolean) {
   const code = box.querySelector<HTMLButtonElement>(".brief-code")!;
   code.hidden = step.cites.length === 0;
   (box.querySelector(".brief-back") as HTMLButtonElement).disabled = now.step === 0;
-  const next = box.querySelector<HTMLButtonElement>("#brief-next")!;
-  const last = now.step === list.length - 1;
-  next.textContent = last ? "Done" : "Next";
-  next.disabled = step.check?.kind === "pick";
-  next.dataset.check = step.check?.kind === "pick" ? "pick" : "";
-  if (step.check?.kind === "pick") next.textContent = "Check";
+  if (step.check) runOf(view, step.check);
+  syncNext(step);
+  wireTaps(view);
   light(view, step);
+  paintOrder(view, step);
   aim(view, step);
 }
 
@@ -394,22 +517,12 @@ function move(by: number) {
   show(view, false);
 }
 
-// Next on a pick check grades it first: the right answer and the other ones, then the way on.
+// Next on a check grades it first: the right answer and the other ones, then the way on.
 function advance() {
-  const box = panel();
+  const view = currentMap();
   const step = steps()[player.current()?.step ?? 0];
-  const check = box.querySelector<HTMLElement>(".brief-check");
-  if (step?.check?.kind === "pick" && check && !check.dataset.answered) {
-    const picked = Number(check.dataset.picked);
-    check.dataset.answered = "yes";
-    const key = Number(step.check.key);
-    check.querySelectorAll(".brief-opt").forEach((opt, i) => opt.classList.add(i === key ? "right" : "miss"));
-    check.querySelector(".brief-body")!.textContent = picked === key ? step.check.yes : step.check.no;
-    const next = box.querySelector<HTMLButtonElement>("#brief-next")!;
-    next.disabled = false;
-    next.textContent = player.current()!.step === steps().length - 1 ? "Done" : "Next";
-    return;
-  }
+  const found = view && step?.check ? runs.get(step.check) : undefined;
+  if (view && step?.check && found && !found.run.answered()) return grade(view, step);
   move(1);
 }
 

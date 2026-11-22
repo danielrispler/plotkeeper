@@ -107,3 +107,60 @@ test("See the code opens what the step quoted, with a jump only for a file", asy
   assert.deepEqual(drawer.blocks.map((b) => [b.label, b.code, b.jumps.length]), [["ui/map.ts", "const a = 1;", 1], ["the PR body", "Closes #5", 0]]);
   assert.deepEqual(drawer.blocks[0].jumps[0].to, { file: "ui/map.ts", line: 1 });
 });
+
+test("a pick is chosen, taken back by tapping it again, and graded only when Check is pressed", async () => {
+  const { pickRun } = await import("../../dist/map-model.js");
+  const run = pickRun(1);
+  assert.equal(run.ready(), false, "nothing picked: Check is off");
+  run.tap(0);
+  assert.equal(run.picked(), 0);
+  assert.equal(run.ready(), true);
+  run.tap(1);
+  assert.equal(run.picked(), 1, "another option replaces the pick");
+  run.tap(1);
+  assert.equal(run.picked(), null, "tapping it again takes it back");
+  assert.equal(run.ready(), false);
+  assert.equal(run.grade(), null, "no answer without a pick");
+  run.tap(0);
+  assert.deepEqual(run.grade(), { right: false, key: 1 });
+  assert.equal(run.answered(), true);
+  run.tap(1);
+  assert.equal(run.picked(), 0, "an answered check is final");
+  const right = pickRun(1);
+  right.tap(1);
+  assert.deepEqual(right.grade(), { right: true, key: 1 });
+});
+
+const links = [{ id: "a-b", from: "a", to: "b" }, { id: "c-b", from: "c", to: "b" }, { id: "a-x", from: "a", to: "x" }];
+
+test("the order slots fill by tap in order, a tap on a filled part takes it back, and Check waits for every slot", async () => {
+  const { orderRun } = await import("../../dist/map-model.js");
+  const run = orderRun(["a", "b", "c"], links);
+  run.tap("b");
+  run.tap("a");
+  assert.deepEqual(run.picked(), ["b", "a"]);
+  assert.equal(run.ready(), false);
+  run.tap("b");
+  assert.deepEqual(run.picked(), ["a"], "taking back leaves the others in their order");
+  run.tap("b");
+  run.tap("c");
+  assert.deepEqual(run.picked(), ["a", "b", "c"]);
+  assert.equal(run.ready(), true);
+  run.tap("x");
+  assert.deepEqual(run.picked(), ["a", "b", "c"], "no slot is left for a fourth");
+});
+
+test("a wrong order names the parts out of place; the right one replays the key along the links, a link backwards when it runs against the key", async () => {
+  const { orderRun } = await import("../../dist/map-model.js");
+  const wrong = orderRun(["a", "b", "c"], links);
+  assert.equal(wrong.grade(), null, "not graded before every slot is full");
+  for (const id of ["a", "c", "b"]) wrong.tap(id);
+  assert.deepEqual(wrong.grade(), { right: false, wrong: ["c", "b"] });
+  assert.equal(wrong.answered(), true);
+  wrong.tap("a");
+  assert.deepEqual(wrong.picked(), ["a", "c", "b"], "an answered check is final");
+  assert.deepEqual(wrong.replay(), [["a-b", false], ["c-b", true]]);
+  const right = orderRun(["a", "b", "c"], links);
+  for (const id of ["a", "b", "c"]) right.tap(id);
+  assert.deepEqual(right.grade(), { right: true, wrong: [] });
+});

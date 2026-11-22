@@ -818,6 +818,12 @@ button.tray-row { display: block; width: 100%; font: inherit; color: inherit; te
 .brief-opt[aria-pressed="true"] { background: var(--brief-light); color: var(--bg); }
 .brief-opt.right { background: var(--brief-light); color: var(--bg); }
 .brief-opt.miss { opacity: .45; }
+.brief-slots { display: flex; gap: var(--sp-4); margin-top: var(--sp-5); }
+.brief-slot { flex: 1; display: flex; gap: var(--sp-4); align-items: center; padding: var(--sp-4) var(--sp-5); border-radius: var(--radius-pane); color: var(--faint);
+              font-size: var(--size-read); box-shadow: inset 0 0 0 var(--hair) var(--plate-edge); transition: background var(--motion), color var(--motion); }
+.brief-slot b { width: var(--ord); height: var(--ord); border-radius: 50%; display: grid; place-items: center; font-size: var(--size-xs); font-weight: 700; box-shadow: inset 0 0 0 var(--hair) var(--plate-edge); }
+.brief-slot.full { background: var(--selected); color: var(--fg); box-shadow: none; }
+.brief-slot.full b { background: var(--brief-light); color: var(--bg); box-shadow: none; }
 .brief-foot { display: flex; align-items: center; gap: var(--sp-5); margin-top: var(--sp-5); }
 .brief-dots { display: flex; gap: var(--sp-3); flex: 1; }
 .brief-dots i { width: var(--brief-dot); height: var(--halo); border-radius: var(--sp-1); background: var(--selected); transition: background var(--motion), width var(--motion); }
@@ -830,6 +836,12 @@ button.tray-row { display: block; width: 100%; font: inherit; color: inherit; te
 .map-world.briefing .plate.lit { box-shadow: inset 0 0 0 var(--hair) var(--ring-warm), 0 0 0 var(--sp-2) color-mix(in srgb, var(--ring-warm) 35%, transparent), var(--shadow); }
 .map-world.briefing .actor.lit { color: var(--fg); }
 .plate.arrive { animation: brief-arrive var(--brief-arrive); }
+.plate.pick { cursor: pointer; }
+.plate.picked { box-shadow: inset 0 0 0 var(--mark) var(--brief-light), var(--shadow); animation: brief-arrive var(--brief-arrive); }
+.plate.wrong { animation: brief-nudge var(--brief-arrive); }
+.plate .ord { position: absolute; left: calc(-1 * var(--sp-4)); top: calc(-1 * var(--sp-4)); width: var(--ord); height: var(--ord); border-radius: 50%; background: var(--brief-light);
+              color: var(--bg); font-size: var(--size-xs); font-weight: 700; display: grid; place-items: center; }
+@keyframes brief-nudge { 0%, 100% { transform: translate(-50%, -50%); } 25% { transform: translate(calc(-50% - var(--sp-3)), -50%); } 60% { transform: translate(calc(-50% + var(--sp-3)), -50%); } }
 @keyframes brief-arrive { 0% { transform: translate(-50%, -50%) scale(.97); } 60% { transform: translate(-50%, -50%) scale(1.03); } 100% { transform: translate(-50%, -50%) scale(1); } }
 .map-light { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; }
 .light-trail { stroke: var(--brief-light); stroke-width: 2; opacity: .8; stroke-linecap: round; }
@@ -837,5 +849,5 @@ button.tray-row { display: block; width: 100%; font: inherit; color: inherit; te
 .brief-open .map-canvas { overflow: clip; }
 @media (prefers-reduced-motion: reduce) {
   .map-brief, .brief-cols, .map-world, .brief-dots i { transition: none; }
-  .plate.arrive { animation: none; }
+  .plate.arrive, .plate.picked, .plate.wrong { animation: none; }
 }

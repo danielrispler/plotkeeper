@@ -377,3 +377,68 @@ export function citeDrawer(step: Pick<BriefStep, "h" | "cites">): Drawer {
     jumps: [],
   };
 }
+
+// ---- the brief's prediction check.
+
+// A pick check: one answer chosen among the options, taken back by tapping it again, graded by the key when Check is pressed.
+export type PickRun = { picked: () => number | null; tap: (i: number) => void; ready: () => boolean; grade: () => { right: boolean; key: number } | null; answered: () => boolean };
+export function pickRun(key: number): PickRun {
+  let picked: number | null = null;
+  let done = false;
+  return {
+    picked: () => picked,
+    tap(i) {
+      if (!done) picked = picked === i ? null : i;
+    },
+    ready: () => !done && picked !== null,
+    grade() {
+      if (picked === null) return null;
+      done = true;
+      return { right: picked === key, key };
+    },
+    answered: () => done,
+  };
+}
+
+// An order check: the parts tapped in order into numbered slots, one tap more takes a part back, and Check grades them against the key
+// (the changed flow's hops, set by code). The replay is the key's path along the map's links.
+export type OrderRun = {
+  picked: () => string[];
+  tap: (id: string) => void;
+  ready: () => boolean;
+  grade: () => { right: boolean; wrong: string[] } | null;
+  answered: () => boolean;
+  replay: () => [string, boolean][];
+};
+export function orderRun(key: string[], links: { id: string; from: string; to: string }[]): OrderRun {
+  const picked: string[] = [];
+  let done = false;
+  return {
+    picked: () => [...picked],
+    tap(id) {
+      if (done) return;
+      const at = picked.indexOf(id);
+      if (at >= 0) picked.splice(at, 1);
+      else if (picked.length < key.length) picked.push(id);
+    },
+    ready: () => !done && picked.length === key.length,
+    grade() {
+      if (picked.length < key.length) return null;
+      done = true;
+      const wrong = picked.filter((id, i) => id !== key[i]);
+      return { right: wrong.length === 0, wrong };
+    },
+    answered: () => done,
+    replay() {
+      const hops: [string, boolean][] = [];
+      key.slice(1).forEach((to, i) => {
+        const from = key[i];
+        const forward = links.find((l) => l.from === from && l.to === to);
+        const back = links.find((l) => l.from === to && l.to === from);
+        if (forward) hops.push([forward.id, false]);
+        else if (back) hops.push([back.id, true]);
+      });
+      return hops;
+    },
+  };
+}

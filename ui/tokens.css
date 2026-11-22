@@ -49,6 +49,6 @@
   --link: #ffffff26; --law-check: var(--fg); --law-trust: var(--muted);
   --plate-w: 264px; --plate-h: 76px; --actor-w: 120px; --actor-h: 28px; --map-grid: 28px; --law-mark: 7px; --link-width: 1.5px;
   --map-title: 28px; --map-gutter: 32px; --map-sheet: 340px; --drawer-code: 280px;
-  --brief-width: 820px; --brief-blur: 22px; --brief-arrive: 320ms ease-out; --brief-dot: 18px; --brief-dot-at: 30px; --brief-fig-w: 292px; --brief-fig-h: 150px; --brief-light: #f0ece1; --brief-dim: .38; --brief-camera: 450ms cubic-bezier(.2,.7,.2,1);
+  --brief-width: 820px; --brief-blur: 22px; --brief-arrive: 320ms ease-out; --brief-dot: 18px; --brief-dot-at: 30px; --brief-fig-w: 292px; --brief-fig-h: 150px; --brief-light: #f0ece1; --ord: 20px; --brief-dim: .38; --brief-camera: 450ms cubic-bezier(.2,.7,.2,1);
   --strip-height: 240px; --mist-lift: 900ms ease-out; --mist-drift: 14s; --plate-move: 160ms ease-out;
 }
