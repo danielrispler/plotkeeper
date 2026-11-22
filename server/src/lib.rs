@@ -4,7 +4,7 @@
 //!
 //! The core state, the card store, the risk notes, the card writer, the turn writing and the notices are the [`App`]'s. The
 //! settings are read and written here ([`settings`]), and so are the PR lookups ([`prs`], [`refresh_landed`]) and the hourly
-//! retests ([`write_due_retests`]). What reaches the window or a page leaves through [`Events`], which the shell sets.
+//! retests ([`write_due_retests`]). What reaches the window or a page leaves through [`Events`], which holds the shell's [`Sink`]; the read loop is [`follow`].
 //! Workbench-only commands (terminals, projects, worktrees, skills, usage, restart) stay in the shell.
 
 use std::{
@@ -32,8 +32,11 @@ pub mod ci_laws;
 pub mod fog;
 pub mod history;
 pub mod map;
+mod read_loop;
 pub mod settings;
 pub mod stop_rules;
+
+pub use read_loop::{Follower, Notice, ServerEffects, follow, listed, tell, uptime};
 
 /// The card store, which the log thread adds to and the pane records guesses in.
 pub type Cards = Arc<Mutex<CardStore>>;
@@ -45,23 +48,66 @@ pub type Notes = Arc<Mutex<RiskNotes>>;
 /// The notices not shown yet, which the log thread and the card writer's threads add to.
 pub type Notices = Mutex<Notifications>;
 
-/// Where what the state announces goes: the window's events, or a page's stream. Nothing is sent until the shell sets it.
-#[derive(Default)]
-pub struct Events(OnceLock<Sink>);
+/// What the read loop and the state send out, and what they ask of the window or page they serve. The Tauri shell is one
+/// implementation (the window's events, Dock badge, macOS notifications and sounds); the web server is another.
+pub trait Sink: Send + Sync {
+    /// Sends event `name` with `payload` to the window or the page.
+    fn emit(&self, name: &str, payload: serde_json::Value);
+    /// Whether Daniel is looking at the window or page now: the "seen" and notice rules read it through the loop.
+    fn focused(&self) -> bool;
+    /// The count of sessions that need Daniel, `None` for none: the Dock badge.
+    fn badge(&self, count: Option<usize>);
+    /// Raises a notification.
+    fn notify(&self, title: &str, body: &str);
+    /// Plays a sound.
+    fn play(&self, sound: studio_core::Sound);
+    /// The log's replay at start is done, and the first list is sent.
+    fn replayed(&self);
+}
 
-/// Takes an event's name and payload.
-type Sink = Box<dyn Fn(&str, serde_json::Value) + Send + Sync>;
+/// Where what the state announces goes: a [`Sink`], which the shell sets. Nothing is sent until it is set, and an unset sink
+/// is never focused.
+#[derive(Default)]
+pub struct Events(OnceLock<Arc<dyn Sink>>);
 
 impl Events {
     /// Sets where events go; the first call wins.
-    pub fn set(&self, sink: impl Fn(&str, serde_json::Value) + Send + Sync + 'static) {
-        let _ = self.0.set(Box::new(sink));
+    pub fn set(&self, sink: Arc<dyn Sink>) {
+        let _ = self.0.set(sink);
     }
 
     /// Sends event `name` with `payload`, or drops it while nothing is set.
     pub fn emit(&self, name: &str, payload: serde_json::Value) {
         if let Some(sink) = self.0.get() {
-            sink(name, payload);
+            sink.emit(name, payload);
+        }
+    }
+
+    pub fn focused(&self) -> bool {
+        self.0.get().is_some_and(|sink| sink.focused())
+    }
+
+    pub fn badge(&self, count: Option<usize>) {
+        if let Some(sink) = self.0.get() {
+            sink.badge(count);
+        }
+    }
+
+    pub fn notify(&self, title: &str, body: &str) {
+        if let Some(sink) = self.0.get() {
+            sink.notify(title, body);
+        }
+    }
+
+    pub fn play(&self, sound: studio_core::Sound) {
+        if let Some(sink) = self.0.get() {
+            sink.play(sound);
+        }
+    }
+
+    pub fn replayed(&self) {
+        if let Some(sink) = self.0.get() {
+            sink.replayed();
         }
     }
 }
@@ -114,9 +160,6 @@ impl App {
         // The store sits beside the log, in the studio's data directory.
         let cards: Cards = Arc::new(Mutex::new(CardStore::open_beside(log)?));
         let notes: Notes = Arc::new(Mutex::new(RiskNotes::open_beside(log)?));
-        let mut studio = Studio::with_roots(studio_understanding::worktree_root);
-        studio.know_roots(saved_roots(log));
-        let core: Core = Arc::new(Mutex::new(studio));
         let writer: Writer = match std::env::var("STUDIO_CARD_WRITER").as_deref() {
             Ok("fake") => Arc::new(FakeWriter),
             _ => {
@@ -127,11 +170,25 @@ impl App {
                 }))
             }
         };
+        Self::open_with(log, cards, notes, writer, effects)
+    }
+
+    /// The state over `log` with the stores and the writer given, so a test can hold the writer.
+    pub fn open_with(
+        log: &Path,
+        cards: Cards,
+        notes: Notes,
+        writer: Writer,
+        effects: Arc<dyn Effects>,
+    ) -> io::Result<App> {
+        let mut studio = Studio::with_roots(studio_understanding::worktree_root);
+        studio.know_roots(saved_roots(log));
+        let core: Core = Arc::new(Mutex::new(studio));
         let writing = TurnWriting::new(
             core.clone(),
             cards.clone(),
             writer.clone(),
-            offers(),
+            Offers::beside(log),
             effects,
         );
         Ok(App {
@@ -156,12 +213,6 @@ impl App {
     pub fn list_changed(&self) {
         self.list_changed.store(true, Ordering::Release);
     }
-}
-
-/// The record of offers, beside the event log.
-fn offers() -> Offers {
-    let home = std::env::home_dir().unwrap_or_default();
-    Offers::beside(&studio_hook::event_log(&home))
 }
 
 // What the card writer's code reports, and how it is logged.
@@ -1180,14 +1231,28 @@ mod tests {
     fn an_event_reaches_what_the_shell_set_and_is_dropped_before() {
         let events = super::Events::default();
         events.emit("early", serde_json::json!(1));
-        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-        let sink = seen.clone();
-        events.set(move |name, payload| sink.lock().unwrap().push((name.to_string(), payload)));
+        assert!(!events.focused(), "an unset sink is never focused");
+        struct Seen(std::sync::Mutex<Vec<(String, serde_json::Value)>>);
+        impl super::Sink for Seen {
+            fn emit(&self, name: &str, payload: serde_json::Value) {
+                self.0.lock().unwrap().push((name.to_string(), payload));
+            }
+            fn focused(&self) -> bool {
+                true
+            }
+            fn badge(&self, _: Option<usize>) {}
+            fn notify(&self, _: &str, _: &str) {}
+            fn play(&self, _: studio_core::Sound) {}
+            fn replayed(&self) {}
+        }
+        let seen = std::sync::Arc::new(Seen(std::sync::Mutex::default()));
+        events.set(seen.clone());
         events.emit("retests", serde_json::Value::Null);
         assert_eq!(
-            *seen.lock().unwrap(),
+            *seen.0.lock().unwrap(),
             [("retests".to_string(), serde_json::Value::Null)]
         );
+        assert!(events.focused());
     }
 
     #[test]

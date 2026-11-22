@@ -66,7 +66,10 @@ pub fn terminal_connect(app: AppHandle, daemon: State<Daemon>) -> Result<Value, 
                     if event["ev"] == "list"
                         && let Ok(terms) = serde_json::from_value(event["terms"].clone())
                     {
-                        crate::listed(&app, terms);
+                        studio_server::listed(
+                            &app.state::<std::sync::Arc<studio_server::App>>(),
+                            terms,
+                        );
                     }
                     // A reply to `poll` stops here: the window takes the next `list` as the answer to
                     // its own request, and one asked for before it revived its terminals lacks them.

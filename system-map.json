@@ -24,7 +24,7 @@
     },
     {
       "id": "server", "name": "Server", "caption": "Holds the state, answers the commands",
-      "description": "A library with no window in it. It holds the core state, the card store, the risk notes, the card writer and the settings, and has one function for each learning-layer and session-view command: the map and the CI result it reads from the default branch for the Map view, the PR lookups, the retests, and the quiet log of what you use of it.",
+      "description": "A library with no window in it. It holds the core state, the card store, the risk notes, the card writer and the settings, runs the read loop that follows the event log and sends what changed (the list, the selection, the cards, notices, the badge) to a sink the shell sets, and has one function for each learning-layer and session-view command: the map and the CI result it reads from the default branch for the Map view, the PR lookups, the retests, and the quiet log of what you use of it.",
       "tier": "core", "paths": ["server/"]
     },
     {
