@@ -4,6 +4,7 @@
 //! links and the problems out.
 
 mod pattern;
+mod touched;
 
 use std::{
     collections::{BTreeSet, HashSet},
@@ -14,6 +15,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use pattern::Pattern;
+pub use touched::{Touched, touched};
 
 /// The map file's name, at the repository's root.
 pub const MAP_FILE: &str = "system-map.json";
