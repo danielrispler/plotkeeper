@@ -258,6 +258,15 @@ test("a project's mark keeps its one watch while a redraw keeps its node, and a 
   assert.equal(watchers[1].live, false, "a project with no mark has no watch");
 });
 
+test("the window gaining focus draws Home again, which reads the marks and the review; another view is left alone", async () => {
+  const { onWindowFocus } = await import("../../dist/home.js");
+  let draws = 0;
+  onWindowFocus(false, () => draws++);
+  assert.equal(draws, 0);
+  onWindowFocus(true, () => draws++);
+  assert.equal(draws, 1);
+});
+
 // The slot's card (#242): the options, then "Not sure" and "Not now" inside it; a pick writes the confidence tap first.
 async function slotCard(id, extra = {}, send = null) {
   const calls = [];

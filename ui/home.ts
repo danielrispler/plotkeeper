@@ -384,7 +384,12 @@ export function homeProjects(paths: string[], fogged: Set<string> = new Set()): 
 const marked = new Set<string>();
 let marksStale = true;
 export const staleMarks = () => void (marksStale = true);
-if (typeof window !== "undefined") window.addEventListener?.("focus", staleMarks);
+// The window gained focus: the marks are stale, and Home, when it is open, draws again to read them (that draw reads them).
+export function onWindowFocus(homeOpen: boolean, redraw: () => void) {
+  staleMarks();
+  if (homeOpen) redraw();
+}
+if (typeof window !== "undefined") window.addEventListener?.("focus", () => onWindowFocus(homeShown(), redrawHome));
 async function readMarks(paths: string[], redraw: () => void) {
   marksStale = false;
   const now = await invoke("map_marks", { projects: paths });
