@@ -310,11 +310,14 @@ fn scan_rust(text: &str) -> RustFile {
 fn use_tree(tokens: &[Tok], i: &mut usize, prefix: Vec<String>, out: &mut Vec<Vec<String>>) {
     let start = prefix.len();
     let mut path = prefix;
+    let mut names_self = false;
     while let Some(token) = tokens.get(*i) {
         match token {
             Tok::Ident(word) if word == "as" => *i += 2,
             Tok::Ident(word) => {
-                if word != "self" {
+                if word == "self" {
+                    names_self = true;
+                } else {
                     path.push(word.clone());
                 }
                 *i += 1;
@@ -341,7 +344,7 @@ fn use_tree(tokens: &[Tok], i: &mut usize, prefix: Vec<String>, out: &mut Vec<Ve
             _ => break,
         }
     }
-    if path.len() > start {
+    if path.len() > start || names_self {
         out.push(path);
     }
 }

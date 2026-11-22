@@ -212,6 +212,22 @@ fn a_use_crate_path_between_modules_of_two_parts_is_reported() {
 }
 
 #[test]
+fn a_use_group_naming_only_self_reaches_the_module() {
+    for text in ["use crate::a::{self};\n", "use crate::a::{self as m};\n"] {
+        let found = rust_edges(
+            &[
+                ("k/src/lib.rs", "mod a;\nmod b;\n"),
+                ("k/src/a.rs", ""),
+                ("k/src/b.rs", text),
+            ],
+            &["k/src/lib.rs", "k/src/a.rs"],
+            &["k/src/b.rs"],
+        );
+        assert_eq!(found, ["alpha>beta", "beta>alpha"], "{text}");
+    }
+}
+
+#[test]
 fn a_use_of_the_crate_root_reaches_the_root_file() {
     let mut map = split_map(&["rust-modules"], &["k/src/lib.rs"], &["k/src/b.rs"]);
     map["ignored"] = json!(["system-map.json"]);
