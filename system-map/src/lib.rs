@@ -148,7 +148,7 @@ pub fn check(root: &Path) -> Report {
             report.laws = laws;
             report.problems.extend(problems);
             let names = map.extractors.as_deref().unwrap_or_default();
-            let (unlinked, problems) = edges::unlinked(root, names, &parts, &map.links);
+            let (unlinked, problems) = edges::unlinked(root, names, &files, &parts, &map.links);
             report.unlinked = unlinked;
             report.problems.extend(problems);
             report.parts = parts;

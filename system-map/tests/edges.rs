@@ -395,6 +395,23 @@ fn a_raw_c_string_hides_a_quote_before_a_mod_line() {
     assert_eq!(found, ["alpha>beta"]);
 }
 
+#[test]
+fn a_use_between_two_parts_is_found_when_the_crate_root_is_ignored() {
+    let mut map = split_map(&["rust-modules"], &["k/src/a.rs"], &["k/src/b.rs"]);
+    map["ignored"] = json!(["system-map.json", "k/src/lib.rs"]);
+    let (_dir, root) = tree(
+        &map,
+        &[
+            ("k/src/lib.rs", "mod a;\nmod b;\n"),
+            ("k/src/a.rs", "use crate::b::B;\n"),
+            ("k/src/b.rs", "pub struct B;\n"),
+        ],
+    );
+    let report = report(&root);
+    assert_eq!(report.problems, Vec::<String>::new());
+    assert_eq!(edges(&report), ["alpha>beta"]);
+}
+
 fn ts_edges(files: &[(&str, &str)]) -> Vec<String> {
     let map = split_map(&["typescript-imports"], &["alpha/"], &["beta/"]);
     let (_dir, root) = tree(&map, files);

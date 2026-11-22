@@ -28,15 +28,15 @@ type Pairs = Vec<(String, String)>;
 pub(crate) fn unlinked(
     root: &Path,
     names: &[String],
+    files: &[String],
     parts: &[PartFiles],
     links: &[Link],
 ) -> (Vec<Edge>, Vec<String>) {
     let mut problems = Vec::new();
     let mut pairs = Pairs::new();
-    let tracked: BTreeSet<&str> = parts
-        .iter()
-        .flat_map(|part| part.files.iter().map(String::as_str))
-        .collect();
+    // Every tracked file, ignored ones too: a module tree may run through a file no part owns, and
+    // `edges_between_parts` drops the pairs that touch one.
+    let tracked: BTreeSet<&str> = files.iter().map(String::as_str).collect();
     for name in names {
         let found = match name.as_str() {
             "cargo" => cargo(root),
