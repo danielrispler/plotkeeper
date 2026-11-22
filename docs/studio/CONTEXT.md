@@ -262,6 +262,38 @@ The column on the window's left that tells the selected session's or subagent's 
 The window with the session list and the story rail folded, so the terminal takes the window. One key, rebindable in the keymap, enters it and the same key leaves it. Only two other things leave it: pressing the toast to jump to its session, and the next-needs-you key. Nothing else changes the layout, so the terminal's size never moves under Daniel's typing. While in it, a session that newly needs you shows a toast over the terminal's corner instead.
 _Avoid_: Zen mode, full screen (the macOS window state)
 
+**System map**:
+A project's own plain-language description of its system, kept in its repository as `system-map.json`: its parts, outside actors, links, ignored paths, laws and, optionally, flows. [The system map](behaviour/map.md) has the rules.
+_Avoid_: Architecture diagram, model
+
+**Part**:
+One of 6 to 15 named pieces of a system on its system map, owning a set of file paths. Its id survives a rename.
+_Avoid_: Module, component, crate (a part may hold several, or sit inside one)
+
+**Outside actor**:
+A named thing the system talks to that owns no files in its repository, such as the agents, the writer or GitHub.
+
+**Link**:
+A declared connection on the system map between two parts, or between a part and an outside actor.
+_Avoid_: Edge (a computed edge)
+
+**Computed edge**:
+A dependency between two parts that an extractor read from the code. It is a hint, never drawn; the links are what the map shows.
+
+**Flow**:
+A named path of behaviour across the system, as ordered hops along links, each with one plain sentence.
+
+**Law**:
+Something that must stay true, in one plain sentence, attached to a part, a link or a flow. It is backed by a check when a tagged test stands behind it, and on trust when none does.
+_Avoid_: Invariant, rule
+
+**Tier**:
+How much of a part Daniel wants in his head: Core, Interface-only or Black box. The system map holds each part's default; his own choice is his state, outside the repository.
+
+**Fog**:
+The mark on a part when changes landed on the default branch that Daniel has not caught up on: a cool mist, never a number. It is thin when only the part's files changed, and thick when a law on it, a link at its edge or a flow through it changed. A Black box part never fogs, and an Interface-only part fogs only thick.
+_Avoid_: Stale, unread, debt
+
 **plotkeeper**:
 The project and its repository (`danielrispler/plotkeeper`). The app it builds is named Studio.
 
