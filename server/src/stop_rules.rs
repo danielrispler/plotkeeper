@@ -186,7 +186,6 @@ fn now() -> u64 {
 }
 
 /// Logs that Daniel used something. A `session` event names no project.
-#[tauri::command(async)]
 pub fn stop_log(kind: Kind, project: Option<String>, day: String) -> Result<(), String> {
     if matches!(kind, Kind::Other | Kind::Dismissed) {
         return Err("not an event the window logs".into());
@@ -203,7 +202,6 @@ pub fn stop_log(kind: Kind, project: Option<String>, day: String) -> Result<(), 
 }
 
 /// The counts the review is decided from, for `project`.
-#[tauri::command(async)]
 pub fn stop_facts(project: String) -> Result<Facts, String> {
     let events = read(&log_file()?);
     let from = counted_from(&events, &project).unwrap_or(now());
@@ -215,7 +213,6 @@ pub fn stop_facts(project: String) -> Result<Facts, String> {
 }
 
 /// Dismisses the one-time review of each project; the log goes on.
-#[tauri::command(async)]
 pub fn stop_dismiss(projects: Vec<String>, day: String) -> Result<(), String> {
     let file = log_file()?;
     for project in projects {

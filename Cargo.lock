@@ -3443,7 +3443,6 @@ name = "studio"
 version = "0.0.0"
 dependencies = [
  "dispatch2",
- "jsonc-parser",
  "log",
  "objc2",
  "objc2-foundation",
@@ -3451,9 +3450,8 @@ dependencies = [
  "serde_json",
  "studio-core",
  "studio-hook",
- "studio-system-map",
+ "studio-server",
  "studio-terminal-daemon",
- "studio-test-support",
  "studio-understanding",
  "studio-workbench",
  "tauri",
@@ -3483,6 +3481,23 @@ dependencies = [
  "serde",
  "serde_json",
  "studio-test-support",
+]
+
+[[package]]
+name = "studio-server"
+version = "0.0.0"
+dependencies = [
+ "jsonc-parser",
+ "log",
+ "serde",
+ "serde_json",
+ "studio-core",
+ "studio-hook",
+ "studio-system-map",
+ "studio-test-support",
+ "studio-understanding",
+ "studio-workbench",
+ "tempfile",
 ]
 
 [[package]]

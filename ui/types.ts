@@ -442,7 +442,7 @@ export type Work = {
 // whose worktree holds it, `current` the main checkout's own.
 export type Branch = { name: string; remote: boolean; task: string | null; current: boolean };
 
-// The Map view's payload (`src-tauri/src/map.rs`, `MapState`): one project's map as read from `origin`'s default branch, and Daniel's own
+// The Map view's payload (`server/src/map.rs`, `MapState`): one project's map as read from `origin`'s default branch, and Daniel's own
 // positions and tiers for it. A feature of the view adds its field here and in `MapState` there.
 export type UserMap = { positions: Record<string, [number, number]>; tiers: Record<string, string> };
 export type MapState = {
