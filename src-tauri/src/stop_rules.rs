@@ -212,13 +212,17 @@ pub fn merged_numbers_since(repo: &Path, since: u64) -> Vec<u64> {
     let Some((reference, _)) = crate::map::default_ref(repo) else {
         return Vec::new();
     };
-    let after = format!("--since={since}");
-    let subjects = crate::map::git(
+    // Not `git log --since=N`: git reads a small N as a relative date ("0" is now), so the cut is made here on `%ct`.
+    let log = crate::map::git(
         repo,
-        &["log", "--first-parent", &after, "--format=%s", &reference],
+        &["log", "--first-parent", "--format=%ct %s", &reference],
     )
     .unwrap_or_default();
-    subjects.lines().filter_map(merge_number).collect()
+    log.lines()
+        .filter_map(|line| line.split_once(' '))
+        .filter(|(at, _)| at.parse::<u64>().is_ok_and(|at| at >= since))
+        .filter_map(|(_, subject)| merge_number(subject))
+        .collect()
 }
 
 /// The PR a squash (`... (#N)`) or merge (`Merge pull request #N ...`) subject lands.
@@ -448,6 +452,9 @@ mod tests {
         ] {
             git(at, &["commit", "-q", "--allow-empty", "-m", subject]);
         }
+        // A start of 0 (or any small number) is every commit; git's `--since=0` reads it as "now", so a commit older than the
+        // second `git log` runs in would not count.
+        std::thread::sleep(std::time::Duration::from_millis(1100));
         assert_eq!(merged_numbers_since(Path::new(&path), 0).len(), 2);
         // Nothing merged after a future start.
         assert_eq!(
