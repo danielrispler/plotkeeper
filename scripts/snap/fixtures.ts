@@ -515,7 +515,7 @@ const homeMarked = (press: boolean): Fixture => ({
 });
 // The stop-rule review (#314): Studio has run 20 active days and merged 25 PRs, and the Map view was opened on one of them and Home's mark
 // never led to it, so the Map view fell below its threshold, and so did the history strip and "See the proof".
-const dueFacts = { active_days: 20, merged_prs: 25, map_days: 1, mark_days: 5, map_on_mark_days: 0, scrubs: 0, proofs: 0, knows: 0, dismissed: false };
+const dueFacts = { active_days: 20, merged_prs: 25, map_days: 1, mark_days: 5, map_on_mark_days: 0, scrubs: 0, proofs: 0, knows: 0, dismissed: false, briefs_offered: 0, briefs_opened: 0, chapters_done: 0 };
 // Home's dot for a waiting PR brief (#344): no fog and no broken law, but a ready PR has a brief stored, so the shell's marks name the project.
 const homeBriefWaiting = (): Fixture => ({
   ...(fixtures as Record<string, () => Fixture>).home(),
