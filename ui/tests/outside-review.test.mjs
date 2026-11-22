@@ -317,7 +317,7 @@ if (process.env.FAKE_AGY === "sleep") {
 }
 `;
 
-const scratch = () => {
+const scratch = ({ ignored = false } = {}) => {
   const dir = mkdtempSync(join(tmpdir(), "outside-review-test-"));
   const repo = join(dir, "work");
   const env = {
@@ -336,6 +336,7 @@ const scratch = () => {
   const note = (more) => `#[derive(Deserialize)]\npub struct Note {\n    pub id: String,\n${more}}\n`;
   git("init", "--quiet", "--initial-branch=main");
   writeFileSync(join(repo, "src/store.rs"), note(""));
+  if (ignored) writeFileSync(join(repo, ".gitignore"), "/local-evidence/\n");
   git("add", "-A");
   git("commit", "--quiet", "-m", "base");
   git("clone", "--quiet", "--bare", ".", join(dir, "origin.git"));
@@ -362,6 +363,7 @@ test("a risky diff is reviewed in a throwaway worktree that is gone afterwards, 
   assert.ok(!agy.keys.includes("STUDIO_TERMINAL_ID"));
   assert.ok(agy.cwd.includes("outside-review-") && !agy.cwd.startsWith(s.repo));
   assert.deepEqual(s.left(), nothingLeft);
+  assert.ok(!existsSync(join(s.repo, "local-evidence")), "a run was recorded where git does not ignore local-evidence/");
 });
 
 test("a review cut by agy's exit code 3 is `review unavailable`, exits 0 and leaves nothing behind", () => {
@@ -416,4 +418,55 @@ test("--since must name a commit of the branch, and --out a folder that can be m
   assert.match(blocked.stderr, /--out/);
   assert.ok(!existsSync(join(s.dir, "agy-env.json")), "agy ran");
   assert.deepEqual(s.left(), nothingLeft);
+});
+
+// The record of each run (#302): one line in the main checkout's local-evidence/, where git ignores it.
+const runsOf = (repo) => readFileSync(join(repo, "local-evidence/outside-review/runs.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+
+test("a reviewed run and a skipped run each leave one line in the main checkout's record, also when run from a worktree", () => {
+  const s = scratch({ ignored: true });
+  const change = s.git("rev-parse", "change").trim();
+  s.git("checkout", "--quiet", "-b", "docs", "main");
+  writeFileSync(join(s.repo, "README.md"), "docs\n");
+  s.git("add", "-A");
+  s.git("commit", "--quiet", "-m", "docs");
+  const worktree = join(s.dir, "linked");
+  s.git("worktree", "add", "--quiet", worktree, "change");
+  const run = (cwd) => spawnSync(process.execPath, s.args(), { cwd, env: { ...s.env, FAKE_AGY: "ok" }, encoding: "utf8" });
+  assert.match(run(worktree).stdout, /^reviewed: 1 finding/);
+  assert.equal(run(s.repo).stdout.split("\n")[0], "skipped: no risk match");
+  const [reviewed, skipped] = runsOf(s.repo);
+  assert.equal(runsOf(s.repo).length, 2);
+  assert.ok(!Number.isNaN(Date.parse(reviewed.at)));
+  const { at, base, ...rest } = reviewed;
+  assert.deepEqual(rest, {
+    branch: "change",
+    head: change,
+    model: "gemini-4-neon-medium",
+    round: 1,
+    verdict: "reviewed: 1 finding",
+    why: "a type that derives Deserialize changed: Note in src/store.rs",
+    findings: 1,
+    tokens: 10,
+    seconds: 1,
+    quotaBefore: null,
+    quotaAfter: null,
+  });
+  assert.equal(base, s.git("rev-parse", "main").trim());
+  assert.equal(skipped.branch, "docs");
+  assert.equal(skipped.verdict, "skipped: no risk match");
+  assert.equal(skipped.findings, undefined);
+  const kept = JSON.parse(readFileSync(join(s.repo, `local-evidence/outside-review/outside-review-${change.slice(0, 9)}.json`), "utf8"));
+  assert.equal(kept.findings[0].summary, "no default");
+  assert.ok(!existsSync(join(worktree, "local-evidence")), "the record went to the worktree");
+  assert.equal(s.git("status", "--porcelain"), "");
+});
+
+test("a record that cannot be written changes neither the verdict nor the exit code", () => {
+  const s = scratch({ ignored: true });
+  mkdirSync(join(s.repo, "local-evidence"));
+  writeFileSync(join(s.repo, "local-evidence/outside-review"), "a file where the folder should be");
+  const ran = spawnSync(process.execPath, s.args(), { cwd: s.repo, env: { ...s.env, FAKE_AGY: "ok" }, encoding: "utf8" });
+  assert.match(ran.stdout, /^reviewed: 1 finding/);
+  assert.equal(ran.status, 0);
 });
