@@ -130,7 +130,7 @@ export function secondLine(
   // A status-only row has no step or question to show (danielrispler/Falinks#560).
   if (session.status_only) return null;
   const open = session.questions.filter((question) => question.answer === "open").at(-1);
-  // Blocked commands waiting for Daniel's choice or the agent's retry (danielrispler/plotkeeper#173).
+  // Blocked commands with a button for Daniel (danielrispler/plotkeeper#173, #297).
   const waiting = (session.blocked_commands ?? []).filter((card) => blockedWaits(card.status)).length;
   if (waiting > 0 && session.state !== "ended" && !(session.state === "needs_you" && open)) {
     return `${waiting} blocked ${waiting === 1 ? "command" : "commands"} waiting`;

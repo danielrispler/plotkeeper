@@ -1,7 +1,7 @@
 // A blocked command's card (danielrispler/plotkeeper#170, #171): its text and buttons by status. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { blockedView, outputCall } from "../../dist/blocked.js";
+import { blockedView, docksInDock, outputCall, stateInDock } from "../../dist/blocked.js";
 
 const card = (status = "blocked", agent = null) => ({
   call: "toolu_1",
@@ -32,6 +32,21 @@ test("a subagent's block names the subagent", () => {
 
 test("with no request file there is nothing to answer", () => {
   assert.deepEqual(blockedView(card(), null, false).buttons, []);
+});
+
+test("a card docks exactly when it shows a button, for each status, with and without a standing request", () => {
+  const statuses = ["blocked", "allowed", "allowed_not_run", "running", "finished", "running_in_background", "blocked_again", "declined"];
+  const docked = (answerable) => statuses.filter((status) => docksInDock(card(status), answerable));
+  assert.deepEqual(docked(true), ["blocked", "allowed_not_run", "blocked_again"]);
+  // Ask again needs no request file; Allow and Decline do.
+  assert.deepEqual(docked(false), ["allowed_not_run"]);
+  for (const status of statuses) for (const answerable of [true, false]) {
+    assert.equal(docksInDock(card(status), answerable), (blockedView(card(status), null, answerable)?.buttons.length ?? 0) > 0, `${status} ${answerable}`);
+  }
+});
+
+test("a docked card shows its state when it is Blocked again or Allowed, not run, and a plain Blocked card keeps the dock's look", () => {
+  assert.deepEqual(["blocked", "blocked_again", "allowed_not_run"].map(stateInDock), [false, true, true]);
 });
 
 test("an allowed command waits for the agent's retry with no buttons, and a declined one is closed", () => {

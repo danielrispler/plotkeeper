@@ -366,7 +366,7 @@ body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
 .state { font-size: var(--size); font-weight: 600; margin: 0 0 var(--sp-3); }
 .headline .state { margin: 0; }
 .label { margin: 0 0 var(--sp-2); color: var(--muted); font-size: var(--size-small); }
-.dock .question > .state { display: none; }
+.dock .question > .state:not(.kept) { display: none; }
 #intention-label:not([hidden]) + p { font-size: var(--size); font-weight: 400; }
 .headline-text { margin: 0 0 var(--sp-3); font-size: var(--size-large); font-weight: 500; }
 .body-lines { margin: 0 0 var(--sp-4); padding-inline-start: var(--sp-5); }

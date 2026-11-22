@@ -295,8 +295,9 @@ export type BlockedStatus =
   | "running_in_background"
   | "blocked_again"
   | "declined";
-// Whether a card in `status` waits for Daniel's choice or, once allowed, for the agent's retry.
-export const blockedWaits = (status: BlockedStatus) => ["blocked", "allowed", "allowed_not_run", "blocked_again"].includes(status);
+// Whether a card in `status` waits for Daniel: it has a button. An allowed card waits for the agent's retry, not for him
+// (the core's `BlockedStatus::waits`; danielrispler/plotkeeper#297).
+export const blockedWaits = (status: BlockedStatus) => ["blocked", "allowed_not_run", "blocked_again"].includes(status);
 export type BlockedCommand = {
   call: string;
   command: string;

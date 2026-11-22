@@ -55,6 +55,13 @@ function buttonsOf(status: BlockedStatus, answerable: boolean): BlockedButton[] 
   return (status === "blocked" || status === "blocked_again") && answerable ? ["Allow", "Decline"] : [];
 }
 
+// Whether the dock holds `card`: exactly when it shows a button, so orange means Daniel has something to click
+// (danielrispler/plotkeeper#297). Every other card sits in the feed, neutral.
+export const docksInDock = (card: BlockedCommand, answerable: boolean): boolean => buttonsOf(card.status, answerable).length > 0;
+
+// Whether a docked card shows its state line: Blocked again and Allowed, not run say what they are; a plain Blocked card keeps the dock's look.
+export const stateInDock = (status: BlockedStatus): boolean => status === "blocked_again" || status === "allowed_not_run";
+
 // The call whose output a finished card shows, and the agent that ran it, which may be the session's own for a
 // subagent's command; null before it finished, and for a background run, whose output the studio does not read.
 export function outputCall(card: BlockedCommand): { agent: string | null; call: string } | null {
@@ -125,7 +132,9 @@ export function blockedElement(session: string, card: BlockedCommand, agent: str
   const block = document.createElement("article");
   block.className = "question decision blocked-command";
   const state = text("p", view.state, "state");
-  if (card.status === "blocked" || card.status === "blocked_again") state.dataset.state = "needs_you";
+  // Orange only while the card has a button; in the dock a state line shows for the cards that name their state.
+  if (view.buttons.length > 0) state.dataset.state = "needs_you";
+  if (stateInDock(card.status)) state.classList.add("kept");
   const asked = text("p", view.agent === null ? "Auto mode blocked a command" : `Auto mode blocked a command of ${view.agent}`, "asked");
   const command = document.createElement("p");
   command.append(code(view.command));

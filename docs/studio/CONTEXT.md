@@ -184,7 +184,7 @@ A question, plan, permission or blocked command Daniel answered, with his answer
 _Avoid_: Verdict (only a plan's or a permission's allow or deny)
 
 **Blocked command**:
-A Bash command an agent session tried in auto mode that auto mode blocked, held on a card until Daniel allows or declines it. Allowed, the agent runs it itself, once; declined, the block stands. While the agent waits on his click the session needs you; once it has moved on, its row still names the blocked command until he chooses.
+A Bash command an agent session tried in auto mode that auto mode blocked, held on a card until Daniel allows or declines it. Allowed, the agent runs it itself, once; declined, the block stands. While the agent waits on his click the session needs you; once it has moved on, its row still names the blocked command while its card has a button for him (Allow and Decline, or Ask again), and no longer once he has allowed it. The card is docked, in orange, only while it has a button; otherwise it sits in the rail's feed.
 _Avoid_: Denied command (a command Daniel declined)
 
 **Identity**:

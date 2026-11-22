@@ -683,11 +683,12 @@ pub enum BlockedStatus {
 }
 
 impl BlockedStatus {
-    /// Whether a card in this status waits for Daniel's choice or, once allowed, for the agent's retry.
+    /// Whether a card in this status waits for Daniel: it has a button (Allow and Decline, or Ask again).
+    /// An allowed card waits for the agent's retry, not for him.
     pub fn waits(self) -> bool {
         matches!(
             self,
-            Self::Blocked | Self::Allowed | Self::AllowedNotRun | Self::BlockedAgain
+            Self::Blocked | Self::AllowedNotRun | Self::BlockedAgain
         )
     }
 }
@@ -1724,7 +1725,7 @@ impl Session {
         !self.blocks.is_empty() || self.terminal_blocked
     }
 
-    /// How many blocked commands wait for Daniel's choice (blocked, also again) or, once allowed, for the agent's retry.
+    /// How many blocked commands wait for Daniel: those with a button (blocked, also again, and allowed but not run).
     pub fn blocked_waiting(&self) -> usize {
         let waits = |c: &&BlockedCommand| c.status.waits();
         self.blocked_commands.iter().filter(waits).count()

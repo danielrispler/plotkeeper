@@ -5,7 +5,7 @@
 // Git line with several tokens. Times are relative to the moment a fixture renders.
 
 import type { Ask } from "../../ui/answer.ts";
-import type { ListedCheck, CheckStatus, Decision, OpenItem, Quiz, Session, SessionState, StoredCard, Subagent, Turn, TurnFile, TurnSummary } from "../../ui/types.ts";
+import type { BlockedCommand, ListedCheck, CheckStatus, Decision, OpenItem, Quiz, Session, SessionState, StoredCard, Subagent, Turn, TurnFile, TurnSummary } from "../../ui/types.ts";
 import { base, type Fixture } from "./base.ts";
 
 const MIN = 60e3;
@@ -499,7 +499,39 @@ const workerOpenScript = `
   if (!open.textContent.includes("worker w1 returned")) log("snap:fail the open turn is not the hand-back");
   open.scrollIntoView({ block: "start" });`;
 
+// #297: a blocked command's card sits in the dock only while it has a button; every other card is neutral in its turn.
+const blockedCommand = (status: BlockedCommand["status"], at: number, extra: Partial<BlockedCommand> = {}): BlockedCommand => ({
+  call: "toolu_b1", command: "git push origin issue-56-row-controls", cwd, reason: "[Unauthorized Access]", agent: null, at, status, ...extra,
+});
+const withBlocked = (state: SessionState, card: (turnStart: number) => BlockedCommand, snapScript: string) => {
+  const fixture = build(state);
+  const turn = fixture.selected.session.turns.at(-1)!;
+  fixture.selected.session.blocked_commands = [card(turn.started_at + 30e3)];
+  return { ...fixture, snapScript };
+};
+// The card has Allow and Decline: it is in the dock, once its request stands, and not in the feed.
+const dockScript = `
+  window.__TAURI__.__emit("blocked", [{ nonce: "n1", tool_use_id: "toolu_b1", waiting: true }]);
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  const dock = document.getElementById("dock");
+  const labels = [...dock.querySelectorAll(".blocked-command .answer-buttons button")].map((b) => b.textContent);
+  if (dock.hidden || labels.join() !== "Allow,Decline") log("snap:fail the dock lacks the card's buttons: " + labels);
+  if (document.querySelector("#feed .blocked-command")) log("snap:fail the card is in the feed too");
+  log("dock buttons: " + labels.join(" "));`;
+// An allowed card has no button: the dock is empty and the card is neutral, with its state line, in the newest turn.
+const fedScript = `
+  const card = document.querySelector("#feed .now-turn .blocked-command");
+  if (!card) return log("snap:fail the allowed card is not in the newest turn");
+  if (!document.getElementById("dock").hidden) log("snap:fail the dock still shows");
+  if (card.querySelector("button")) log("snap:fail the allowed card has a button");
+  const state = card.querySelector(".state");
+  if (state.textContent !== "Allowed" || state.dataset.state) log("snap:fail the state line reads '" + state.textContent + "' or is coloured");
+  card.scrollIntoView({ block: "center" });
+  log("fed card: " + state.textContent);`;
+
 export const railFixtures = {
+  railBlockedDock: () => withBlocked("your_turn", (at) => blockedCommand("blocked", at), dockScript),
+  railBlockedAllowed: () => withBlocked("your_turn", (at) => blockedCommand("allowed", at), fedScript),
   railWorkerCardRow: () => workerCardFixture(workerRowScript),
   railWorkerCard: () => workerCardFixture(workerOpenScript),
   railUnseenCard: () => ({ ...build("idle"), snapScript: unseenScript }),
