@@ -17,7 +17,7 @@ test("missing files give the defaults", () => {
   const loaded = reload(initial, { settings: null, keymap: null });
   assert.equal(loaded.settings.zoom, 1);
   assert.equal(loaded.settings.terminal.font_size, null);
-  assert.deepEqual(loaded.settings.summaries, { model: "haiku", effort: "", on_open: false });
+  assert.deepEqual(loaded.settings.summaries, { model: "haiku", effort: "", on_open: false, writer: "claude" });
   assert.equal(loaded.settings.sounds, true);
   assert.equal(loaded.settings.context_warning, 30);
   assert.deepEqual(loaded.settings.doctor, [
@@ -39,7 +39,7 @@ test("a Zed-style file, with comments and trailing commas, sets its keys and lea
   const loaded = reload(initial, { settings, keymap: null });
   assert.equal(loaded.settings.zoom, 1.5);
   assert.equal(loaded.settings.terminal.font_size, 15);
-  assert.deepEqual(loaded.settings.summaries, { model: "sonnet", effort: "", on_open: false });
+  assert.deepEqual(loaded.settings.summaries, { model: "sonnet", effort: "", on_open: false, writer: "claude" });
   assert.equal(reload(initial, { settings: `{ "sounds": false }`, keymap: null }).settings.sounds, false);
   assert.deepEqual(loaded.settings.doctor, [{ label: "Audit", command: "/audit", kind: "session" }]);
   assert.deepEqual(loaded.errors, []);
@@ -148,4 +148,13 @@ test("the check lists are commands per project folder, none by default, and anyt
   assert.deepEqual(wrong.settings.checks, { "/b": ["ok"] });
   assert.deepEqual(wrong.errors, ["settings.json: checks./a: expected an array of strings"]);
   assert.deepEqual(reload(initial, { settings: `{ "checks": [] }`, keymap: null }).errors.length, 1);
+});
+
+test("summaries.writer chooses agy, defaults to claude, and a name that is neither is reported", () => {
+  const read = (summaries) => reload(initial, { settings: `{ "summaries": ${summaries} }`, keymap: null });
+  assert.equal(read(`{ "writer": "agy" }`).settings.summaries.writer, "agy");
+  assert.equal(read(`{}`).settings.summaries.writer, "claude");
+  const bad = read(`{ "writer": "codex" }`);
+  assert.equal(bad.settings.summaries.writer, "claude");
+  assert.equal(bad.errors.length, 1);
 });

@@ -24,7 +24,8 @@ use studio_core::{Notifications, Session, State::Ended, Studio, TaskFacts, TaskQ
 use studio_understanding::{
     CardStore, ClaudeWriter, Core, Effects, FakeWriter, Offers, OpenItem, Rating, RiskNotes,
     RiskRequest, RiskView, Row, SessionCards, StoredSummary, SummarySetup, Tap, TurnWriting,
-    Writer, judge, live_roots, millis, open_items, turn_hunk, write_agent_summary, write_retests,
+    Writer, WriterKind, judge, live_roots, millis, open_items, turn_hunk, write_agent_summary,
+    write_retests,
 };
 
 pub mod answer;
@@ -83,7 +84,7 @@ pub struct App {
     pub core: Core,
     pub cards: Cards,
     pub notes: Notes,
-    /// The card writer: `claude -p`, or the fake when `STUDIO_CARD_WRITER=fake`, for checks that must not run `claude -p`.
+    /// The card writer: `claude -p` or `agy`, as `summaries.writer` says, or the fake when `STUDIO_CARD_WRITER=fake`, for checks that must not run `claude -p`.
     pub writer: Writer,
     pub writing: TurnWriting,
     pub notices: Notices,
@@ -211,12 +212,20 @@ pub fn summary_settings(
     app: &App,
     model: String,
     effort: String,
+    writer: WriterKind,
     on_open: bool,
     self_test: Option<u64>,
 ) {
     app.cards.lock().unwrap().set_self_test(self_test);
-    app.writing
-        .settings(SummarySetup { model, effort }, on_open);
+    app.writer.use_writer(writer);
+    app.writing.settings(
+        SummarySetup {
+            model,
+            effort,
+            writer,
+        },
+        on_open,
+    );
 }
 
 /// The settings' `checks` (danielrispler/plotkeeper#112): each project folder's list of commands that are checks.

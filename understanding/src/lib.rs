@@ -33,6 +33,7 @@ mod summary;
 mod turn_trees;
 mod turn_writing;
 mod week;
+mod writer;
 pub use brief::{
     Answered, DesignLine, OpenItem, OpenKind, answered, design_lines, design_sources, open_items,
     write_design,
@@ -64,6 +65,10 @@ pub use turn_trees::{
 };
 pub use turn_writing::{Core, Effects, TurnWriting, Writer};
 pub use week::{Rate, Ratings, Week, week};
+pub use writer::{
+    AGY_LOGIN_WAIT, FailureKind, Usage, WriterError, WriterKind, WriterReply, WriterRequest,
+    build_command, read_reply,
+};
 
 /// A card on a change, in the explanation language; code inside its text is in
 /// backticks. It opens with its quiz; the rest shows when Daniel taps an option.
@@ -232,6 +237,9 @@ pub trait CardWriter {
     fn goal(&self, _prompts: &[&str]) -> Result<String, String> {
         Err("this writer writes no goals".into())
     }
+
+    /// Chooses which program writes from now on, from the settings (#327). A writer with one program ignores it.
+    fn use_writer(&self, _kind: WriterKind) {}
 
     /// The writer's reply with "Design so far" of a session from `sources`, each a turn's or a card's
     /// id and a line of it, oldest first (danielrispler/plotkeeper#123), or one line for the log when it gave none.
@@ -760,8 +768,14 @@ pub struct ClaudeWriter {
     /// The `claude` program, from `find_claude`.
     program: PathBuf,
     folder: PathBuf,
-    /// How long a call may run before it fails and is stopped (danielrispler/Falinks#434, decision 30).
-    timeout: Duration,
+    /// The `agy` program and its own neutral folder, for when the settings choose it (#327).
+    agy_program: PathBuf,
+    agy_folder: PathBuf,
+    /// The program that writes now.
+    kind: Mutex<WriterKind>,
+    /// How long a call may run before it fails and is stopped (danielrispler/Falinks#434, decision 30); unset, the
+    /// program's own (`WriterKind::timeout`).
+    timeout: Option<Duration>,
     /// The same for the risk note's judge, which is not to be waited for (danielrispler/plotkeeper#298).
     risk_timeout: Duration,
     /// Told when no call can start and when one works again (danielrispler/plotkeeper#51).
@@ -777,11 +791,9 @@ struct Availability {
 
 impl Availability {
     /// The program did not start: tells once until a call works.
-    fn failed(&self, error: &std::io::Error) {
+    fn failed(&self, kind: WriterKind, error: &std::io::Error) {
         if !self.off.swap(true, Ordering::SeqCst) {
-            self.tell(Some(format!(
-                "Cards and briefs are off: `claude` did not start ({error}). Install Claude Code, or fix its path."
-            )));
+            self.tell(Some(kind.missing(error)));
         }
     }
 
@@ -804,25 +816,32 @@ impl Availability {
 /// path is kept: the shell's environment, which a profile may give the variables the writer removes,
 /// never reaches the writer.
 pub fn find_claude(shell: &Path) -> PathBuf {
+    find_program(shell, "claude")
+}
+
+/// `find_claude` for any `program`, such as `agy`.
+pub fn find_program(shell: &Path, program: &str) -> PathBuf {
     let output = Command::new(shell)
-        .args(["-lc", "command -v claude"])
+        .args(["-lc", &format!("command -v {program}")])
         .output();
     let stdout = output.ok().filter(|o| o.status.success()).map(|o| o.stdout);
     let stdout = stdout.as_deref().map(String::from_utf8_lossy);
     // A profile may print before the answer, which is the last line.
     match stdout.as_deref().and_then(|out| out.lines().last()) {
         Some(path) if path.starts_with('/') => path.into(),
-        _ => "claude".into(),
+        _ => program.into(),
     }
 }
 
 impl ClaudeWriter {
     pub fn new(program: PathBuf, folder: PathBuf) -> Self {
-        let timeout = Duration::from_secs(5 * 60);
         Self {
+            agy_program: WriterKind::Agy.program().into(),
+            agy_folder: folder.with_file_name(WriterKind::Agy.folder()),
+            kind: Mutex::new(WriterKind::Claude),
             program,
             folder,
-            timeout,
+            timeout: None,
             risk_timeout: RISK_TIMEOUT,
             availability: Availability::default(),
         }
@@ -840,16 +859,47 @@ impl ClaudeWriter {
 
     /// The writer with each call stopped after `timeout` instead of 5 minutes.
     pub fn with_timeout(self, timeout: Duration) -> Self {
-        Self { timeout, ..self }
+        Self {
+            timeout: Some(timeout),
+            ..self
+        }
+    }
+
+    /// The writer that runs `agy` as `program`, in the neutral folder `folder`.
+    pub fn with_agy(self, program: PathBuf, folder: PathBuf) -> Self {
+        Self {
+            agy_program: program,
+            agy_folder: folder,
+            ..self
+        }
+    }
+
+    /// The writer that starts as `kind`; the settings change it later with `use_writer`.
+    pub fn with_kind(self, kind: WriterKind) -> Self {
+        *self.kind.lock().unwrap() = kind;
+        self
+    }
+
+    /// The program that writes now.
+    pub fn kind(&self) -> WriterKind {
+        *self.kind.lock().unwrap()
+    }
+
+    /// How long a call may run now.
+    pub fn timeout(&self) -> Duration {
+        self.timeout.unwrap_or(self.kind().timeout())
     }
 
     /// The writer for event log `log`: its neutral folder, `card-writer` beside the log, made here,
     /// and `claude` as the login shell finds it. An error when the folder cannot be made.
     pub fn beside(log: &Path) -> std::io::Result<Self> {
-        let folder = log.with_file_name("card-writer");
+        let folder = log.with_file_name(WriterKind::Claude.folder());
+        let agy_folder = log.with_file_name(WriterKind::Agy.folder());
         std::fs::create_dir_all(&folder)?;
+        std::fs::create_dir_all(&agy_folder)?;
         let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/zsh".into());
-        Ok(Self::new(find_claude(shell.as_ref()), folder))
+        let agy = find_program(shell.as_ref(), WriterKind::Agy.program());
+        Ok(Self::new(find_claude(shell.as_ref()), folder).with_agy(agy, agy_folder))
     }
 
     /// The `claude -p` run for one change's card, read with the summaries of the prompt's `earlier`
@@ -975,47 +1025,79 @@ impl ClaudeWriter {
     /// CLAUDE.md reach it (danielrispler/Falinks#517, decision 9). The prompt goes on standard input without its NUL bytes, which
     /// `claude` could not take in an argument either (danielrispler/Falinks#434, decision 31).
     fn run(&self, prompt: &str) -> (Command, String) {
-        self.run_with(&[], prompt)
+        self.run_with(None, None, prompt)
     }
 
-    /// `run`, with `options` before `-p`.
-    pub fn run_with(&self, options: &[&str], prompt: &str) -> (Command, String) {
-        let mut command = Command::new(&self.program);
-        command
-            // `--tools` takes several values, so an option must follow it.
-            .args(["--tools", "", "--strict-mcp-config", "--safe-mode"])
-            .args(options)
-            .arg("-p")
-            .env_remove("ANTHROPIC_API_KEY")
-            .env_remove("ANTHROPIC_AUTH_TOKEN")
-            .env_remove("CLAUDE_CODE_PLUGIN_DIRS")
-            // Plotkeeper's own run: its hook never records it (#323).
-            .env("PLOTKEEPER_INTERNAL", "1")
-            .current_dir(&self.folder);
-        (command, prompt.replace('\0', ""))
+    /// `run`, with `setup`'s model and effort and the studio's own `system` prompt.
+    pub fn run_with(
+        &self,
+        setup: Option<&SummarySetup>,
+        system: Option<&str>,
+        prompt: &str,
+    ) -> (Command, String) {
+        self.build(&WriterRequest {
+            system: system.map(Into::into),
+            user: prompt.into(),
+            model: setup.map(|s| s.model.clone()),
+            effort: setup.map(|s| s.effort.clone()),
+            timeout: self.timeout(),
+            ..WriterRequest::default()
+        })
+    }
+
+    /// The command that makes `request` with the program that writes now (`build_command`).
+    pub fn build(&self, request: &WriterRequest) -> (Command, String) {
+        match self.kind() {
+            kind @ WriterKind::Claude => build_command(kind, &self.program, &self.folder, request),
+            kind @ WriterKind::Agy => {
+                build_command(kind, &self.agy_program, &self.agy_folder, request)
+            }
+        }
+    }
+
+    /// The contract's one call: `request` made and its reply read, or why not.
+    pub fn complete(&self, request: &WriterRequest) -> Result<WriterReply, WriterError> {
+        let run = self.build(request);
+        self.call(request.timeout, run, request.schema.is_some())
     }
 
     /// What a run printed, or one line for the log when the call failed: it did not start, exited
     /// with an error, printed nothing, or ran past the timeout, which stops it and every process it
     /// started, all in its own process group (danielrispler/Falinks#434, decision 30).
     fn stdout(&self, run: (Command, String)) -> Result<String, String> {
-        self.stdout_within(self.timeout, run)
+        self.stdout_within(self.timeout(), run)
     }
 
     /// `stdout`, with the call stopped after `timeout`.
-    fn stdout_within(
+    fn stdout_within(&self, timeout: Duration, run: (Command, String)) -> Result<String, String> {
+        match self.call(timeout, run, false) {
+            Ok(reply) => Ok(reply.text),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    /// A run, read into the contract: its reply, or a typed failure.
+    fn call(
         &self,
         timeout: Duration,
         (mut command, prompt): (Command, String),
-    ) -> Result<String, String> {
+        schema: bool,
+    ) -> Result<WriterReply, WriterError> {
+        let kind = self.kind();
         let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .process_group(0)
             .spawn()
             .map_err(|e| {
-                self.availability.failed(&e);
-                format!("`claude -p` did not start: {e}")
+                self.availability.failed(kind, &e);
+                let not_found = e.kind() == std::io::ErrorKind::NotFound;
+                let kind_of = if not_found {
+                    FailureKind::NotInstalled
+                } else {
+                    FailureKind::Other
+                };
+                WriterError::new(kind_of, kind, format!("({e})"))
             })?;
         let (mut stdin, mut stdout) = (child.stdin.take(), child.stdout.take());
         // Threads, so a call that reads no input or never ends cannot hold back the timeout.
@@ -1043,22 +1125,25 @@ impl ClaudeWriter {
             // SAFETY: `kill` takes no pointers.
             unsafe { libc::kill(-(child.id() as i32), libc::SIGKILL) };
             let _ = child.wait();
-            return Err(format!("`claude -p` ran past {timeout:?} and was stopped"));
+            return Err(WriterError::new(
+                FailureKind::Timeout,
+                kind,
+                format!("(ran past {timeout:?})"),
+            ));
         };
-        let out = String::from_utf8_lossy(&out);
-        let head: String = out.trim().chars().take(300).collect();
-        match (status.success(), head.is_empty()) {
-            (false, _) => Err(format!("`claude -p` failed ({status}): {head:?}")),
-            (true, true) => Err("`claude -p` printed nothing".into()),
-            (true, false) => {
-                self.availability.worked();
-                Ok(out.into())
-            }
+        let reply = read_reply(kind, schema, &status, &String::from_utf8_lossy(&out));
+        if reply.is_ok() {
+            self.availability.worked();
         }
+        reply
     }
 }
 
 impl CardWriter for ClaudeWriter {
+    fn use_writer(&self, kind: WriterKind) {
+        *self.kind.lock().unwrap() = kind;
+    }
+
     /// Runs `claude -p`, which takes seconds, so the shell calls it off its log thread.
     fn reply(&self, request: &CardRequest, earlier: &[String]) -> Result<String, String> {
         self.stdout(self.command(request, earlier))
