@@ -7,9 +7,9 @@
 //! parallel. [`TurnWriting::stepped`] has no threads, for tests that run the jobs in order themselves.
 
 use crate::{
-    CardStore, CardWriter, Changed, Decision, Offer, Offers, StoredSummary, SummarySetup,
-    backfilled, changed_in, offer_stop, offer_summary, settle, turn_of, turns_card, write_design,
-    write_goal, write_name,
+    CardStore, CardWriter, Changed, Decision, Offers, StoredSummary, SummarySetup, backfilled,
+    changed_in, offer_stop, settle, turn_of, turns_card, write_design, write_goal, write_name,
+    write_summary,
 };
 use std::{
     collections::{HashMap, VecDeque},
@@ -75,8 +75,6 @@ struct State {
     /// What the card path decided for each live turn card, by turn id, until the turn's summary takes it:
     /// one decision for a turn (danielrispler/plotkeeper#209), however late its summary runs.
     decided: Mutex<HashMap<String, Decision>>,
-    /// The turns whose decision was a lone Quiz, by turn id, until their summary puts it on record.
-    lone: Mutex<HashMap<String, Decision>>,
 }
 
 impl TurnWriting {
@@ -123,7 +121,6 @@ impl TurnWriting {
             waiting: Mutex::default(),
             changes: Mutex::default(),
             decided: Mutex::default(),
-            lone: Mutex::default(),
         };
         TurnWriting {
             state: Arc::new(state),
@@ -333,7 +330,6 @@ impl State {
                     session,
                     &turn,
                     &self.offers,
-                    turn_card,
                     stored,
                     log,
                 );
@@ -365,9 +361,8 @@ impl State {
         })
     }
 
-    /// Fills in `request`'s facts and, by the one offer function (danielrispler/plotkeeper#209), whether its summary may
-    /// keep a Quiz. Returns whether the summary is written: one asked for the sake of a lone Quiz is dropped when the
-    /// turn gets none.
+    /// Fills in `request`'s facts, by the one offer function (danielrispler/plotkeeper#209). Returns whether the summary is
+    /// written: only one that is wanted for itself.
     fn settle(&self, request: &mut SummaryRequest) -> bool {
         let change = self.changes.lock().unwrap().remove(&request.id);
         let decided = self.decided.lock().unwrap().remove(&request.id);
@@ -379,10 +374,6 @@ impl State {
             decided.as_ref(),
         );
         settled.record(&self.offers, request);
-        if settled.decision.offer == Offer::Quiz {
-            let mut lone = self.lone.lock().unwrap();
-            lone.insert(request.id.clone(), settled.decision);
-        }
         settled.write
     }
 
@@ -396,16 +387,9 @@ impl State {
             return;
         }
         let session = request.session_id.clone();
-        let lone = self.lone.lock().unwrap().remove(&request.id);
-        let written = offer_summary(
-            &self.store,
-            &*self.writer,
-            &setup,
-            request,
-            lone.as_ref(),
-            &self.offers,
-            |l| self.effects.log(l),
-        );
+        let written = write_summary(&self.store, &*self.writer, &setup, request, |l| {
+            self.effects.log(l);
+        });
         if written.is_some() {
             self.design(&session);
         }
@@ -434,20 +418,10 @@ impl State {
             return Ok((None, None));
         };
         let setup = self.setup.lock().unwrap().clone();
-        let lone = self.lone.lock().unwrap().remove(id);
-        let written = offer_summary(
-            &self.store,
-            &*self.writer,
-            &setup,
-            request.clone(),
-            lone.as_ref(),
-            &self.offers,
-            |l| self.effects.log(l),
-        );
+        let written = write_summary(&self.store, &*self.writer, &setup, request.clone(), |l| {
+            self.effects.log(l);
+        });
         if written.is_none() {
-            if let Some(lone) = lone {
-                self.lone.lock().unwrap().insert(id.to_owned(), lone);
-            }
             self.waiting.lock().unwrap().insert(id.to_owned(), request);
             return Err(format!("no summary on {id}"));
         }

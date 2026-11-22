@@ -41,7 +41,6 @@ export const base = {
   create_task: workspace,
   explain_more: null,
   failed_check_name: "",
-  learning: null,
   map_place: {},
   map_save_positions: { positions: {}, tiers: {} },
   map_set_tier: { positions: {}, tiers: {} },

@@ -4,7 +4,6 @@
 
 use crate::common::{Answer, Scripted};
 use std::{
-    cell::Cell,
     ffi::OsStr,
     fs,
     os::unix::fs::PermissionsExt,
@@ -18,8 +17,8 @@ use studio_core::{
 };
 use studio_understanding::{
     Card, CardStore, CardWriter, Choice, ClaudeWriter, FakeWriter, LineKind, Quiz, RISK_TIMEOUT,
-    Risk, RiskLevel, SummarySetup, TurnSummary, explain_more, find_claude, retest_quiz,
-    write_agent_summary, write_card, write_retests, write_summary,
+    Risk, RiskLevel, SummarySetup, TurnSummary, explain_more, find_claude, write_agent_summary,
+    write_card, write_summary,
 };
 
 const CLAUDE: &str = "/opt/homebrew/bin/claude";
@@ -841,19 +840,36 @@ fn the_summary_call_runs_in_safe_mode_with_the_settings_model_effort_and_its_own
         ]
     );
     assert!(s.contains("turn summary"), "{s}");
-    // The answer stays out of the options (danielrispler/Falinks#517, decision 14).
-    assert!(s.contains("Never mark the right option"), "{s}");
-    // The question tests understanding, and only when the turn has something to teach (danielrispler/Falinks#583).
-    for rule in ["keeps its bound or condition", r#""quiz": null"#] {
-        assert!(s.contains(rule), "{rule}: {s}");
-    }
-    // The same rules as the card's (`docs/studio/question-rules.md`).
-    for rule in RULES {
-        assert!(s.contains(rule), "{rule}: {s}");
-    }
+    assert!(s.contains("keeps its bound or condition"), "{s}");
     assert!(input.contains("Explain the parser"));
     assert!(input.contains("It keeps a bracket stack."));
     assert!(input.contains("- Rewrote the parser.\n"));
+}
+
+#[test]
+fn the_summary_asks_for_no_quiz_and_keeps_none_from_a_reply_that_has_one() {
+    let writer = ClaudeWriter::new(CLAUDE.into(), "/card-writer".into());
+    let (command, input) = writer.summary_command(&setup(), &turn("s", 1), &[]);
+    let system = command
+        .get_args()
+        .skip_while(|a| *a != "--system-prompt")
+        .nth(1)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_lowercase();
+    assert!(!system.contains("quiz"), "{system}");
+    assert!(!input.to_lowercase().contains("quiz"), "{input}");
+
+    let dir = tempfile::tempdir().unwrap();
+    let store = summaries(dir.path());
+    let mut lines = Vec::new();
+    let reply = recording(summary_reply("Rewrote the parser.", ["a", "bb", "cc"]));
+    let summary = write_summary(&store, &reply, &setup(), turn("s", 1), |l| lines.push(l)).unwrap();
+    assert_eq!(summary.quiz, None);
+    assert_eq!(summary.summary, "Rewrote the parser.");
+    assert_eq!(lines, Vec::<String>::new());
+    assert_eq!(reply.inputs().len(), 1, "no retry for a quiz");
 }
 
 #[test]
@@ -880,11 +896,13 @@ fn summaries(dir: &Path) -> Mutex<CardStore> {
     Mutex::new(CardStore::open(dir.join("cards.json")).unwrap())
 }
 
+const ELEVEN: &str = "one two three four five six seven eight nine ten eleven";
+
 /// Summary names, in words: a digit in a headline must be in the turn's material.
 const NAMES: [&str; 5] = ["zero", "one", "two", "three", "four"];
 
 #[test]
-fn the_summary_input_holds_the_sessions_last_3_summaries_and_their_questions() {
+fn the_summary_input_holds_the_sessions_last_3_summaries() {
     let dir = tempfile::tempdir().unwrap();
     let store = summaries(dir.path());
     for n in 1..=4 {
@@ -910,8 +928,8 @@ fn the_summary_input_holds_the_sessions_last_3_summaries_and_their_questions() {
             "{input}"
         );
     }
-    // The fourth Quiz within the hour was not offered (danielrispler/plotkeeper#119), so the summary of 4 has none.
-    assert_eq!(input.matches("Why a stack?").count(), 2, "{input}");
+    // No summary carries a question any more (danielrispler/plotkeeper#347).
+    assert!(!input.contains("Why a stack?"), "{input}");
     let kept = store.lock().unwrap().turn_summary("s@6").cloned();
     assert_eq!(kept.unwrap().summary.summary, "Summary six.");
     // The store keeps them across restarts.
@@ -922,27 +940,6 @@ fn the_summary_input_holds_the_sessions_last_3_summaries_and_their_questions() {
             .turn_summary("s@6")
             .is_some()
     );
-}
-
-#[test]
-fn a_summary_reply_gives_the_summary_and_the_quiz() {
-    let dir = tempfile::tempdir().unwrap();
-    let store = summaries(dir.path());
-    let writer = recording(summary_reply(
-        "Rewrote the parser.\nIt keeps a stack.",
-        [
-            "It matches nesting.",
-            "It is faster.",
-            "It uses less memory.",
-        ],
-    ));
-
-    let summary = write_summary(&store, &writer, &setup(), turn("s", 1), |_| {}).unwrap();
-
-    assert_eq!(summary.summary, "Rewrote the parser.\nIt keeps a stack.");
-    let quiz = summary.quiz.expect("a quiz");
-    assert_eq!(quiz.text, "Why a stack?");
-    assert_eq!(quiz.options[quiz.key].text, "It matches nesting.");
 }
 
 #[test]
@@ -959,75 +956,8 @@ fn a_reply_with_a_null_quiz_gives_the_summary_alone_and_logs_nothing() {
     assert_eq!(writer.inputs().len(), 1, "no retry");
 }
 
-/// A summary reply whose Quiz is `options`, each `(text, why, right)`, with key `key`.
-fn quiz_reply(options: &[(&str, &str, bool)], key: usize) -> String {
-    let options: Vec<_> = (options.iter())
-        .map(|(text, why, right)| serde_json::json!({ "text": text, "why": why, "right": right }))
-        .collect();
-    serde_json::json!({
-        "headline": "Rewrote the parser.",
-        "lines": [],
-        "quiz": { "text": "Why a stack?", "options": options, "key": key },
-    })
-    .to_string()
-}
-
-const ELEVEN: &str = "one two three four five six seven eight nine ten eleven";
-
 #[test]
-fn a_reply_that_breaks_a_quiz_rule_is_asked_once_more_and_the_second_rejection_leaves_no_quiz() {
-    for (name, options, unmarked) in broken_quizzes() {
-        let reply = unmark(quiz_reply(&options, 0), unmarked);
-        let dir = tempfile::tempdir().unwrap();
-        let store = summaries(dir.path());
-        let writer = recording(reply);
-        let mut lines = Vec::new();
-
-        let summary = write_summary(&store, &writer, &setup(), turn("s", 1), |l| lines.push(l));
-
-        let summary = summary.unwrap();
-        assert_eq!(summary.summary, "Rewrote the parser.", "{name}");
-        assert_eq!(summary.quiz, None, "{name}");
-        assert_eq!(writer.inputs().len(), 2, "{name}: asked once more");
-        assert_eq!(lines.len(), 1, "{name}: {lines:?}");
-        assert!(lines[0].contains("s@1"), "{name}: {lines:?}");
-    }
-}
-
-#[test]
-fn a_rejected_quiz_gives_one_on_the_second_reply_when_that_one_is_good() {
-    let longest = quiz_reply(
-        &[
-            ("The longest", "Why.", true),
-            ("b", "No.", false),
-            ("c", "No.", false),
-        ],
-        0,
-    );
-    let good = summary_reply("Rewrote the parser.", ["a", "bb", "cc"]);
-
-    let (summary, inputs) = written_by(turn("s", 1), &[longest, good]);
-
-    assert!(summary.quiz.is_some());
-    assert_eq!(inputs.len(), 2);
-}
-
-#[test]
-fn a_reply_that_keeps_the_quiz_rules_passes_on_the_first_call() {
-    for (name, options) in passing_quizzes() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = summaries(dir.path());
-        let writer = recording(quiz_reply(&options, 0));
-
-        let summary = write_summary(&store, &writer, &setup(), turn("s", 1), |_| {}).unwrap();
-
-        assert!(summary.quiz.is_some(), "{name}");
-        assert_eq!(writer.inputs().len(), 1, "{name}");
-    }
-}
-
-#[test]
-fn a_reply_with_no_quiz_field_gives_the_summary_alone_and_logs_why() {
+fn a_reply_with_no_quiz_field_gives_the_summary_alone_and_logs_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let store = summaries(dir.path());
     let writer = recording(r#"{"headline": "Rewrote the parser."}"#.into());
@@ -1036,7 +966,7 @@ fn a_reply_with_no_quiz_field_gives_the_summary_alone_and_logs_why() {
     let summary = write_summary(&store, &writer, &setup(), turn("s", 1), |l| lines.push(l));
 
     assert_eq!(summary.unwrap().quiz, None);
-    assert_eq!(lines.len(), 1, "only an explicit null is silent: {lines:?}");
+    assert_eq!(lines, Vec::<String>::new());
     assert_eq!(writer.inputs().len(), 1, "no retry");
 }
 
@@ -1054,34 +984,6 @@ fn a_learning_section_stored_before_the_quiz_reads_as_a_quiz() {
 
     let none: TurnSummary = serde_json::from_str(r#"{"summary": "x", "learning": null}"#).unwrap();
     assert_eq!(none.quiz, None);
-}
-
-#[test]
-fn a_reply_that_marks_the_answer_inside_the_options_has_the_mark_removed() {
-    let dir = tempfile::tempdir().unwrap();
-    let store = summaries(dir.path());
-    let writer = recording(summary_reply(
-        "Rewrote the parser.",
-        [
-            "✅ It matches nesting.",
-            "It is faster.",
-            "It uses less memory (correct)",
-        ],
-    ));
-
-    let summary = write_summary(&store, &writer, &setup(), turn("s", 1), |_| {}).unwrap();
-
-    let options = summary.quiz.unwrap().options.into_iter();
-    let mut options: Vec<String> = options.map(|o| o.text).collect();
-    options.sort();
-    assert_eq!(
-        options,
-        [
-            "It is faster.",
-            "It matches nesting.",
-            "It uses less memory"
-        ]
-    );
 }
 
 #[test]
@@ -1128,25 +1030,6 @@ fn a_turn_with_a_card_gets_its_summary_only() {
 
     assert_eq!(summary.summary, "Rewrote the parser.");
     assert_eq!(summary.quiz, None);
-    let input = writer.inputs().pop().unwrap();
-    assert!(input.contains("has a card"), "{input}");
-}
-
-#[test]
-fn a_card_the_offer_did_not_write_is_no_card_and_the_summary_carries_the_quiz() {
-    let dir = tempfile::tempdir().unwrap();
-    let store = summaries(dir.path());
-    let writer = recording(summary_reply("Rewrote the parser.", ["a", "b", "c"]));
-    let request = SummaryRequest {
-        card: Some("s@1".into()),
-        ..turn("s", 1)
-    };
-
-    let summary = write_summary(&store, &writer, &setup(), request, |_| {}).unwrap();
-
-    assert!(summary.quiz.is_some());
-    let input = writer.inputs().pop().unwrap();
-    assert!(!input.contains("has a card"), "{input}");
 }
 
 // The subagent summary, written when Daniel opens a subagent (danielrispler/Falinks#535).
@@ -1502,314 +1385,6 @@ fn a_summary_stored_before_the_headline_still_reads() {
     assert_eq!(summary.summary, "Rewrote the parser.\nIt keeps a stack.");
     assert_eq!(summary.headline, None);
     assert_eq!(summary.lines, []);
-}
-
-/// A store holding one Quiz on turn `t1` with its hunk, and when it was offered.
-fn week_old_quiz(dir: &Path) -> (CardStore, u64) {
-    let mut store = CardStore::open(dir.join("cards.json")).unwrap();
-    add_quiz(&mut store, "t1", T0);
-    (store, T0)
-}
-
-/// A fixed clock for the retests' tests.
-const T0: u64 = 1_790_000_000_000;
-const DAY: u64 = 24 * 3600 * 1000;
-
-/// Keeps a Quiz on turn `id` with its hunk, offered at `at`.
-fn add_quiz(store: &mut CardStore, id: &str, at: u64) {
-    let request = SummaryRequest {
-        id: id.into(),
-        session_id: "s1".into(),
-        facts: Facts {
-            files: vec![FactFile {
-                file: TurnFile {
-                    root: "/w".into(),
-                    path: "src/gate.rs".into(),
-                    from: None,
-                    added: Some(1),
-                    removed: Some(1),
-                    agent: None,
-                },
-                hunk: "@@ -1 +1 @@\n-open\n+frozen\n".into(),
-            }],
-            ..Facts::default()
-        },
-        ..Default::default()
-    };
-    let summary: TurnSummary = serde_json::from_value(serde_json::json!({
-        "summary": "Froze the gate.",
-        "quiz": { "text": "Why freeze the gate?", "key": 0, "options": [
-            { "text": "The pairs must not move", "why": "Scores come later, so the pairs set is fixed first." },
-            { "text": "Speed", "why": "No." }] },
-    }))
-    .unwrap();
-    store.add_summary_at(request, summary, at).unwrap();
-}
-
-#[test]
-fn the_retests_writer_input_holds_the_stored_hunk_and_the_keys_reason() {
-    let dir = tempfile::tempdir().unwrap();
-    let (store, offered) = week_old_quiz(dir.path());
-    let ask = store.due_retests(offered + 7 * 24 * 3600 * 1000).remove(0);
-    let writer = ClaudeWriter::new(CLAUDE.into(), "/card-writer".into());
-
-    let (command, prompt) = writer.retest_command(&ask);
-
-    assert!(prompt.contains("+frozen"), "{prompt}");
-    assert!(
-        prompt.contains("Scores come later, so the pairs set is fixed first."),
-        "{prompt}"
-    );
-    assert!(prompt.contains("Why freeze the gate?"), "{prompt}");
-    assert!(command.get_args().any(|a| a == "--safe-mode"));
-    // The rules of any Quiz are in the instructions.
-    assert!(prompt.contains("at most 10 words"), "{prompt}");
-}
-
-/// A retest reply on the gate, with the right option the longest or not.
-fn retest_reply(longest_right: bool) -> String {
-    let right = if longest_right {
-        "Only the two sets stay fixed"
-    } else {
-        "Pairs"
-    };
-    serde_json::json!({ "text": "What must stay true after the freeze?", "key": 0, "options": [
-        { "text": right, "why": "Yes.", "right": true },
-        { "text": "Scores", "why": "No.", "right": false },
-        { "text": "Order", "why": "No.", "right": false }] })
-    .to_string()
-}
-
-#[test]
-fn a_retest_is_written_once_a_week_after_and_its_reply_passes_the_quiz_guards() {
-    let dir = tempfile::tempdir().unwrap();
-    let (store, offered) = week_old_quiz(dir.path());
-    let store = Mutex::new(store);
-    let week = 7 * 24 * 3600 * 1000;
-    // The first reply breaks a guard (its right option is longest), the second is good: one retry.
-    let writer = retesting(vec![retest_reply(true), retest_reply(false)]);
-
-    // Six days after: none. Seven: one, written; and never again.
-    assert_eq!(
-        write_retests(&store, &writer, offered + week - 1, |l| panic!("{l}")),
-        0
-    );
-    assert_eq!(writer.calls("retest"), 0);
-    assert_eq!(
-        write_retests(&store, &writer, offered + week, |l| panic!("{l}")),
-        1
-    );
-    assert_eq!(
-        write_retests(&store, &writer, offered + 2 * week, |l| panic!("{l}")),
-        0
-    );
-
-    assert_eq!(writer.calls("retest"), 2);
-    let store = store.lock().unwrap();
-    let quiz = store.retests()[0].quiz.as_ref().unwrap();
-    assert_eq!(quiz.options[quiz.key].text, "Pairs");
-}
-
-#[test]
-fn a_retest_that_breaks_the_guards_twice_is_kept_as_none_and_not_asked_again() {
-    let dir = tempfile::tempdir().unwrap();
-    let (store, offered) = week_old_quiz(dir.path());
-    let store = Mutex::new(store);
-    let writer = retesting(vec![retest_reply(true), retest_reply(true)]);
-    let mut lines = Vec::new();
-    let now = offered + 7 * 24 * 3600 * 1000;
-
-    assert_eq!(write_retests(&store, &writer, now, |l| lines.push(l)), 0);
-    assert_eq!(write_retests(&store, &writer, now, |l| lines.push(l)), 0);
-
-    assert_eq!(writer.calls("retest"), 2);
-    assert_eq!(lines.len(), 1, "{lines:?}");
-    assert_eq!(store.lock().unwrap().retests()[0].quiz, None);
-}
-
-/// A store with a Quiz offered on each of `quizzes`, `(id, at)`, and a retest already written on each of `waiting`.
-fn retests_store(dir: &Path, quizzes: &[(&str, u64)], waiting: &[&str]) -> Mutex<CardStore> {
-    let mut store = CardStore::open(dir.join("cards.json")).unwrap();
-    for (id, at) in quizzes {
-        add_quiz(&mut store, id, *at);
-    }
-    let now = T0 + 8 * DAY;
-    for ask in store.due_retests(now) {
-        if waiting.contains(&ask.of.as_str()) {
-            let quiz = retest_quiz(&retest_reply(false)).unwrap();
-            store.add_retest(&ask, Some(quiz), now).unwrap();
-        }
-    }
-    Mutex::new(store)
-}
-
-/// The Quizzes the store holds a retest of, in the order they were written.
-fn retested(store: &Mutex<CardStore>) -> Vec<String> {
-    let store = store.lock().unwrap();
-    store.retests().iter().map(|r| r.of.clone()).collect()
-}
-
-#[test]
-fn with_three_retests_waiting_a_run_writes_none_and_calls_no_writer() {
-    let dir = tempfile::tempdir().unwrap();
-    let quizzes = [("a", T0), ("b", T0), ("c", T0), ("d", T0)];
-    let store = retests_store(dir.path(), &quizzes, &["a", "b", "c"]);
-    let writer = retesting(vec![retest_reply(false); 4]);
-
-    assert_eq!(
-        write_retests(&store, &writer, T0 + 8 * DAY, |l| panic!("{l}")),
-        0
-    );
-
-    assert_eq!(writer.calls("retest"), 0);
-    assert_eq!(retested(&store), ["a", "b", "c"]);
-}
-
-#[test]
-fn with_one_waiting_a_run_writes_two_picked_quizzes_first_and_the_latest_due_first() {
-    use studio_understanding::Tap;
-    let dir = tempfile::tempdir().unwrap();
-    let quizzes = [
-        ("waiting", T0),
-        ("a", T0),
-        ("b", T0 + DAY),
-        ("c", T0 + 5 * DAY),
-        ("d", T0 + 4 * DAY),
-        ("e", T0 + 3 * DAY),
-    ];
-    let store = retests_store(dir.path(), &quizzes, &["waiting"]);
-    for id in ["a", "b"] {
-        let mut store = store.lock().unwrap();
-        store
-            .quiz_tap(id, Tap::Pick { option: 1 }, T0 + 2 * DAY)
-            .unwrap();
-    }
-    let writer = retesting(vec![retest_reply(false); 5]);
-
-    // c, d and e came due later than a and b, but were never picked.
-    assert_eq!(
-        write_retests(&store, &writer, T0 + 13 * DAY, |l| panic!("{l}")),
-        2
-    );
-
-    assert_eq!(writer.calls("retest"), 2);
-    assert_eq!(retested(&store), ["waiting", "b", "a"]);
-}
-
-#[test]
-fn after_a_pick_on_one_of_three_waiting_the_next_run_writes_the_held_retest() {
-    use studio_understanding::Tap;
-    let dir = tempfile::tempdir().unwrap();
-    let quizzes = [("a", T0), ("b", T0), ("c", T0), ("d", T0)];
-    let store = retests_store(dir.path(), &quizzes, &["a", "b", "c"]);
-    let writer = retesting(vec![retest_reply(false)]);
-    let now = T0 + 9 * DAY;
-    assert_eq!(write_retests(&store, &writer, now, |l| panic!("{l}")), 0);
-
-    (store.lock().unwrap())
-        .quiz_tap("retest a", Tap::Pick { option: 0 }, now)
-        .unwrap();
-
-    assert_eq!(
-        write_retests(&store, &writer, now + 3600 * 1000, |l| panic!("{l}")),
-        1
-    );
-    assert_eq!(writer.calls("retest"), 1);
-    assert_eq!(retested(&store), ["a", "b", "c", "d"]);
-}
-
-#[test]
-fn a_writer_that_gives_no_reply_ends_the_run_and_its_quiz_stays_due() {
-    let dir = tempfile::tempdir().unwrap();
-    let quizzes = [("waiting", T0), ("a", T0), ("b", T0), ("c", T0), ("d", T0)];
-    let store = retests_store(dir.path(), &quizzes, &["waiting"]);
-    let writer = retesting(Vec::new());
-    let mut lines = Vec::new();
-
-    assert_eq!(
-        write_retests(&store, &writer, T0 + 9 * DAY, |l| lines.push(l)),
-        0
-    );
-
-    // One ask, tried twice; the rest are not asked until the next run.
-    assert_eq!(writer.calls("retest"), 2);
-    assert_eq!(lines.len(), 1, "{lines:?}");
-    assert_eq!(retested(&store), ["waiting"]);
-}
-
-#[test]
-fn a_retest_rejected_twice_does_not_wait_so_the_run_writes_on_until_three_wait() {
-    let dir = tempfile::tempdir().unwrap();
-    let quizzes = [("waiting", T0), ("a", T0), ("b", T0), ("c", T0)];
-    let store = retests_store(dir.path(), &quizzes, &["waiting"]);
-    let (bad, good) = (retest_reply(true), retest_reply(false));
-    let writer = retesting(vec![bad.clone(), bad, good.clone(), good]);
-    let mut lines = Vec::new();
-
-    assert_eq!(
-        write_retests(&store, &writer, T0 + 9 * DAY, |l| lines.push(l)),
-        2
-    );
-
-    assert_eq!(writer.calls("retest"), 4);
-    assert_eq!(retested(&store), ["waiting", "a", "b", "c"]);
-    assert_eq!(store.lock().unwrap().retests()[1].quiz, None);
-}
-
-/// A writer that gives each of `replies` as a retest in turn, and no reply after them.
-fn retesting(replies: Vec<String>) -> Scripted {
-    let mut slots: Vec<_> = replies.into_iter().map(|r| Some(Ok(r))).collect();
-    slots.push(Some(Err("no reply".into())));
-    Scripted {
-        retest: Answer::Sequence(slots),
-        ..Scripted::bare()
-    }
-}
-
-/// A writer that flags the Quizzes `flag` Key wrong while it writes its first retest, as Daniel might meanwhile.
-struct Flagging<'a> {
-    store: &'a Mutex<CardStore>,
-    flag: [&'a str; 2],
-    calls: Cell<usize>,
-}
-
-impl CardWriter for Flagging<'_> {
-    fn reply(&self, _: &CardRequest, _: &[String]) -> Result<String, String> {
-        Err("no cards".into())
-    }
-    fn more(&self, _: &CardRequest, _: &Card) -> Result<String, String> {
-        Err("no cards".into())
-    }
-    fn retest(&self, _: &studio_understanding::RetestAsk) -> Result<String, String> {
-        if self.calls.replace(self.calls.get() + 1) == 0 {
-            let mut store = self.store.lock().unwrap();
-            for id in self.flag {
-                store
-                    .quiz_tap(id, studio_understanding::Tap::KeyWrong, T0)
-                    .unwrap();
-            }
-        }
-        Ok(retest_reply(false))
-    }
-}
-
-#[test]
-fn a_quiz_flagged_key_wrong_while_the_writer_runs_keeps_no_retest() {
-    let dir = tempfile::tempdir().unwrap();
-    let store = retests_store(dir.path(), &[("a", T0), ("b", T0), ("c", T0)], &[]);
-    // `a` is flagged while its own retest is written, `b` while an earlier one is.
-    let writer = Flagging {
-        store: &store,
-        flag: ["a", "b"],
-        calls: Cell::new(0),
-    };
-
-    assert_eq!(
-        write_retests(&store, &writer, T0 + 9 * DAY, |l| panic!("{l}")),
-        1
-    );
-
-    assert_eq!(retested(&store), ["c"]);
 }
 
 // The risk note's judge (danielrispler/plotkeeper#296, #298): built from the command and its folder alone, its reply read

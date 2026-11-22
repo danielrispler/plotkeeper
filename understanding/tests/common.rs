@@ -4,7 +4,7 @@
 use std::sync::Mutex;
 use studio_core::{CardRequest, SummaryRequest};
 use studio_understanding::{
-    Card, CardWriter, ClaudeWriter, FakeWriter, RetestAsk, Risk, SummarySetup, TurnSummary,
+    Card, CardWriter, ClaudeWriter, FakeWriter, Risk, SummarySetup, TurnSummary,
 };
 
 pub type Reply = Result<String, String>;
@@ -71,7 +71,6 @@ pub struct Scripted {
     pub goal: Answer,
     pub design: Answer,
     pub ask: Answer,
-    pub retest: Answer,
     pub summarize: Answer,
     pub summarize_agent: Answer,
     pub name: Answer,
@@ -89,7 +88,6 @@ impl Scripted {
             goal: slot("goal"),
             design: slot("design"),
             ask: slot("ask"),
-            retest: slot("retest"),
             summarize: slot("summarize"),
             summarize_agent: slot("summarize_agent"),
             name: slot("name"),
@@ -191,12 +189,6 @@ impl CardWriter for Scripted {
         self.kept.asked.lock().unwrap().push(asking);
         let fake = || FakeWriter.ask(item, intentions, question);
         self.answer("ask", &self.ask, question, fake)
-    }
-
-    fn retest(&self, _: &RetestAsk) -> Reply {
-        self.answer("retest", &self.retest, "", || {
-            Err("this writer writes no retests".into())
-        })
     }
 
     fn summarize(

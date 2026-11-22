@@ -257,9 +257,9 @@ export type StoredCard = {
   // When the pane first drew the card's Quiz; null until it did (the store's `shown` tap).
   shown_at?: number | null;
 };
-// What Daniel did with a Quiz besides a card's pick (danielrispler/plotkeeper#120), each with its time: his pick (a lone Quiz's), "Show
-// the rest anyway", and the three chips.
-// The trial's two (#129): how sure he was before the pick, and one optional line on why after it.
+// What Daniel did with a Quiz, each with its time (danielrispler/plotkeeper#120). The window sends only "Show the rest anyway" and the
+// chips of a card's Quiz; the rest (a pick, the trial's two, "shown", "hunk", "not_now") are what the retired turn Quiz, Home and the
+// Retests wrote, which the store still reads (#347).
 export type Tap =
   | { kind: "pick"; option: number }
   | { kind: "confidence"; sure: boolean; surface?: "home" }
@@ -267,10 +267,6 @@ export type Tap =
   | { kind: "shown" | "hunk" }
   | { kind: "skip" | "understood" | "explain_more" | "key_wrong" | "not_now" };
 export type QuizTap = Tap & { at: number };
-// A fresh Quiz on the decision of an earlier one, a week after it, which Home offers (#129). `id` names it for `quiz_tap`.
-// What Home's learning slot serves (#240): a Retest, a fresh Quiz of a turn or card (#241), or "done for today"; null: nothing.
-export type Learning = ({ kind: "retest" } & Retest) | { kind: "fresh"; id: string; session_id: string; quiz: Quiz; at: number; hunk: string } | { kind: "done" };
-export type Retest = { id: string; of: string; session_id: string; added_at: number; of_at?: number | null; hunk?: string; quiz: Quiz | null; taps: QuizTap[] };
 // The selected session's brief, and its cards, split at 30 minutes by the shell's tick, each oldest
 // first.
 // An answered question, plan or permission in the session's decision history (danielrispler/Falinks#479): the call's input,
@@ -330,16 +326,15 @@ export type SummaryRequest = {
   card: string | null;
   facts: { files: TurnFile[]; checks: Check[]; external: number };
   wanted: boolean;
-  asks: boolean;
-  no_quiz: boolean;
 };
 export type TurnSummary = {
   request?: SummaryRequest;
   added_at?: number;
   hunk?: string;
+  // The Quiz of a summary stored before #347, which the window no longer shows; a new summary has none.
   summary: { summary: string; headline?: string | null; lines?: SummaryLine[]; quiz: Quiz | null };
   taps?: QuizTap[];
-  // The self-test's arm (#130): body-only shows the Body open and no Quiz; absent is quiz-first.
+  // The self-test's arm (#130), kept in the store.
   arm?: "quiz_first" | "body_only" | null;
 };
 // The Brief's slots (danielrispler/plotkeeper#122): the Goal a model wrote, each answered question with Daniel's reply, and
@@ -590,7 +585,6 @@ export interface Commands {
   reorder_projects: string[];
   repository_of: string | null;
   restart_into: void;
-  learning: Learning | null;
   revival: Revive[];
   select: Selection | null;
   select_terminal: Selection | null;

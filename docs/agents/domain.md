@@ -12,7 +12,7 @@ To measure the real event log, use `~/Library/Application Support/dev.falinks.st
 
 ## Behaviour docs
 
-What the app does is written in `docs/studio/behaviour/`, one file per area: sessions, rail, cards, quiz, brief, checks, terminal, storage, map. Read the one for your area before changing its behaviour. `docs/studio/plugin.md`, `settings.md` and `development.md` hold the setup guides and the crate and test list. The README only links them.
+What the app does is written in `docs/studio/behaviour/`, one file per area: sessions, rail, cards, brief, checks, terminal, storage, map. Read the one for your area before changing its behaviour. `docs/studio/plugin.md`, `settings.md` and `development.md` hold the setup guides and the crate and test list. The README only links them.
 
 ## Vocabulary
 

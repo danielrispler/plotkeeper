@@ -31,7 +31,7 @@ use studio_understanding::{
     FakeWriter, Fingerprints, Offers, OpenItem, Rating, RiskNotes, RiskRequest, RiskView, Row,
     SessionCards, StoredSummary, SummarySetup, Tap, TurnWriting, Versions, diff_turn,
     fingerprint_changes, found_files, judge, live_roots, millis, open_items, turn_hunk,
-    worktree_root, write_agent_summary, write_retests,
+    worktree_root, write_agent_summary,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
@@ -491,37 +491,10 @@ fn settle_checks(studio: &Studio, store: &mut CardStore) {
     }
 }
 
-/// Daniel picked, skipped or tapped a chip on the Quiz of `id`, a card's or a turn's own (danielrispler/plotkeeper#120): the turn's
-/// summary with its taps, for a turn's own Quiz.
+/// Daniel skipped or tapped a chip on card `id`'s Quiz (danielrispler/plotkeeper#120).
 #[tauri::command(async)]
-fn quiz_tap(id: String, tap: Tap, cards: State<Cards>) -> Option<StoredSummary> {
-    let mut store = cards.lock().unwrap();
-    unsaved(store.quiz_tap(&id, tap, millis()));
-    store.turn_summary(&id).cloned()
-}
-
-/// What Home's learning slot serves at `now` (danielrispler/plotkeeper#240), given the start of Daniel's local day: the card store
-/// chooses it, and reads and writes nothing.
-#[tauri::command]
-fn learning(
-    now: u64,
-    day_start: u64,
-    cards: State<Cards>,
-) -> Option<studio_understanding::Learning> {
-    cards.lock().unwrap().learning(now, day_start)
-}
-
-/// Writes the retests that fell due, once an hour from a minute after the start, off the read loop; Home reads them
-/// again when one was written (danielrispler/plotkeeper#129).
-fn write_due_retests(app: &AppHandle) {
-    thread::sleep(Duration::from_secs(60));
-    loop {
-        let (cards, writer) = (app.state::<Cards>(), app.state::<Writer>());
-        if write_retests(&cards, &**writer, millis(), report) > 0 {
-            let _ = app.emit("retests", ());
-        }
-        thread::sleep(Duration::from_secs(60 * 60));
-    }
+fn quiz_tap(id: String, tap: Tap, cards: State<Cards>) {
+    unsaved(cards.lock().unwrap().quiz_tap(&id, tap, millis()));
 }
 
 /// Daniel flagged that the key of card `id`'s quiz is wrong.
@@ -1169,7 +1142,6 @@ fn main() {
             guess,
             key_wrong,
             quiz_tap,
-            learning,
             rate,
             explain_more,
             ask,
@@ -1283,8 +1255,6 @@ fn main() {
             let _ = effects.0.set(app.clone());
             restart::watch_build(app.clone());
             settings::watch(app.clone());
-            let retest_app = app.clone();
-            thread::spawn(move || write_due_retests(&retest_app));
             let notice_app = app.clone();
             thread::spawn(move || {
                 for notice in writer_notice_reader {
@@ -2133,7 +2103,6 @@ mod tests {
         let sources = [
             include_str!("../../understanding/src/lib.rs"),
             include_str!("../../understanding/src/brief.rs"),
-            include_str!("../../understanding/src/retest.rs"),
             include_str!("../../understanding/src/summary.rs"),
             include_str!("../../understanding/src/turn_writing.rs"),
         ];
@@ -2150,7 +2119,7 @@ mod tests {
                 }
             }
         }
-        assert!(saves >= 9, "found only {saves} save lines");
+        assert!(saves >= 6, "found only {saves} save lines");
     }
 
     #[test]

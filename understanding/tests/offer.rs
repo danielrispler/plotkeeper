@@ -1,49 +1,16 @@
-//! What a turn gets for a Quiz and the cap per hour (danielrispler/plotkeeper#119), with canned writer replies.
+//! What a turn gets (danielrispler/plotkeeper#119): a card or nothing, with canned writer replies. The lone Quiz and the hourly cap
+//! are retired (danielrispler/plotkeeper#347).
 
 use crate::common::{Answer, Scripted};
 use serde_json::json;
 use std::sync::Mutex;
 use studio_core::{
-    Base, CardRequest, Check, CheckRun, CheckStatus, FactFile, Facts, SummaryRequest, TurnFile,
+    CardRequest, Check, CheckRun, CheckStatus, FactFile, Facts, SummaryRequest, TurnFile,
 };
 use studio_understanding::{
-    CardStore, CardWriter, FakeWriter, Offer, OfferKind, Offers, Place, Shape, SummarySetup, Tap,
-    TurnFacts, TurnSummary, changed_in, decide, offer_stop, offer_summary, settle, turns_card,
-    write_stop, write_summary,
+    CardStore, CardWriter, FakeWriter, Offer, OfferKind, Offers, Shape, TurnFacts, changed_in,
+    decide, offer_stop, settle, turns_card,
 };
-
-/// A writer that replies to the summary with a Headline, one more line of `kind`, and a Quiz.
-fn canned(kind: &str) -> Scripted {
-    let option =
-        |text: &str, why: &str, right: bool| json!({ "text": text, "why": why, "right": right });
-    let summary = json!({
-        "headline": "Rewrote the parser.",
-        "lines": [{ "kind": kind, "text": "A line." }],
-        "quiz": { "text": "Why a stack?", "key": 0, "options": [
-            option("A stack.", "It nests.", true),
-            option("A queue of tokens.", "It does not nest.", false),
-            option("A recursive descent only.", "It overflows.", false),
-        ]},
-    });
-    Scripted {
-        reply: Answer::Fake,
-        more: Answer::Fake,
-        summarize: Answer::ok(summary.to_string()),
-        ..Scripted::bare()
-    }
-}
-
-fn quiz() -> studio_understanding::Quiz {
-    let option = |text: &str| studio_understanding::Choice {
-        text: text.into(),
-        why: "r".into(),
-    };
-    studio_understanding::Quiz {
-        text: "Why?".into(),
-        options: vec![option("a"), option("b"), option("c")],
-        key: 0,
-    }
-}
 
 fn store() -> (tempfile::TempDir, Mutex<CardStore>) {
     let dir = tempfile::tempdir().unwrap();
@@ -60,166 +27,6 @@ fn turn(n: u64) -> SummaryRequest {
         intentions: vec!["Rewrote".into()],
         ..SummaryRequest::default()
     }
-}
-
-fn lone(
-    store: &Mutex<CardStore>,
-    n: u64,
-    at: u64,
-    asks: bool,
-    kind: &'static str,
-) -> Option<TurnSummary> {
-    let request = SummaryRequest { asks, ..turn(n) };
-    let _ = at;
-    write_summary(
-        store,
-        &canned(kind),
-        &SummarySetup::default(),
-        request,
-        |l| panic!("{l}"),
-    )
-}
-
-fn stop(store: &Mutex<CardStore>, n: u64) {
-    let request = CardRequest {
-        session_id: "s".into(),
-        id: format!("s@{n}"),
-        base: Base::default(),
-        change: Some("--- a/a.rs\n+++ b/a.rs\n@@ -1 +1 @@\n-old\n+new\n".into()),
-        ..CardRequest::default()
-    };
-    let session = studio_core::Session::default();
-    assert!(write_stop(
-        store,
-        &FakeWriter,
-        request,
-        &session,
-        || {},
-        |l| panic!("{l}")
-    ));
-}
-
-fn quiz_of_card(store: &Mutex<CardStore>, n: u64) -> bool {
-    let store = store.lock().unwrap();
-    let card = store
-        .cards()
-        .iter()
-        .find(|k| k.request.id == format!("s@{n}"))
-        .unwrap();
-    card.card.quiz.is_some()
-}
-
-#[test]
-fn a_cards_quiz_past_the_cap_replaces_the_oldest_unanswered_lone_quiz() {
-    let (_dir, store) = store();
-    for n in 1..=3 {
-        lone(&store, n, 0, false, "why");
-    }
-    // The first Quiz was answered: the oldest unanswered one is the second.
-    store
-        .lock()
-        .unwrap()
-        .quiz_tap("s@1", Tap::Pick { option: 0 }, 1)
-        .unwrap();
-    stop(&store, 10);
-    assert!(quiz_of_card(&store, 10));
-    let kept = |id: &str| {
-        store
-            .lock()
-            .unwrap()
-            .turn_summary(id)
-            .unwrap()
-            .summary
-            .quiz
-            .is_some()
-    };
-    assert!(kept("s@1") && !kept("s@2") && kept("s@3"));
-}
-
-#[test]
-fn a_cards_quiz_past_the_cap_with_every_lone_quiz_answered_is_not_offered() {
-    let (_dir, store) = store();
-    for n in 1..=3 {
-        lone(&store, n, 0, false, "why");
-        store
-            .lock()
-            .unwrap()
-            .quiz_tap(&format!("s@{n}"), Tap::Pick { option: 0 }, 1)
-            .unwrap();
-    }
-    stop(&store, 10);
-    assert!(!quiz_of_card(&store, 10));
-    assert_eq!(
-        store
-            .lock()
-            .unwrap()
-            .place_quiz(true, studio_understanding::millis()),
-        Place::Withhold
-    );
-}
-
-#[test]
-fn a_quiz_older_than_an_hour_does_not_count() {
-    let (_dir, store) = store();
-    for n in 1..=3 {
-        let at = studio_understanding::millis() - 61 * 60 * 1000;
-        let mut kept = store.lock().unwrap();
-        let summary = TurnSummary {
-            summary: String::new(),
-            headline: None,
-            lines: vec![],
-            quiz: Some(quiz()),
-        };
-        kept.add_summary_at(turn(n), summary, at).unwrap();
-    }
-    assert_eq!(
-        store
-            .lock()
-            .unwrap()
-            .place_quiz(false, studio_understanding::millis()),
-        Place::Offer
-    );
-}
-
-#[test]
-fn a_turn_the_table_gives_no_quiz_keeps_its_summary_without_one() {
-    let (_dir, store) = store();
-    let request = SummaryRequest {
-        no_quiz: true,
-        ..turn(1)
-    };
-    let summary = write_summary(
-        &store,
-        &canned("why"),
-        &SummarySetup::default(),
-        request,
-        |l| panic!("{l}"),
-    )
-    .unwrap();
-    assert_eq!(summary.quiz, None);
-    assert_eq!(summary.headline.as_deref(), Some("Rewrote the parser."));
-}
-
-#[test]
-fn a_turn_that_asks_has_no_quiz_beside_the_decision() {
-    let (_dir, store) = store();
-    assert_eq!(lone(&store, 1, 0, true, "why").unwrap().quiz, None);
-    assert_eq!(lone(&store, 2, 0, false, "ask").unwrap().quiz, None);
-    assert!(lone(&store, 3, 0, false, "open").unwrap().quiz.is_some());
-    // The card's Quiz goes with it.
-    stop(&store, 5);
-    let request = SummaryRequest {
-        card: Some("s@5".into()),
-        ..turn(5)
-    };
-    write_summary(
-        &store,
-        &canned("ask"),
-        &SummarySetup::default(),
-        request,
-        |l| panic!("{l}"),
-    );
-    assert!(!quiz_of_card(&store, 5));
 }
 
 // The table's edges, from a turn's recorded facts.
@@ -260,19 +67,16 @@ fn offer(files: &[(&str, u64)], check: Option<CheckStatus>, merge: bool) -> Offe
 
 #[test]
 fn the_table_holds_at_each_edge() {
-    assert_eq!(offer(&[("a.rs", 24)], None, false), Offer::Quiz);
+    // Below the card row a turn gets nothing: no lone Quiz at 8 or more non-trivial lines.
+    assert_eq!(offer(&[("a.rs", 24)], None, false), Offer::Nothing);
     assert_eq!(offer(&[("a.rs", 25)], None, false), Offer::Card);
-    assert_eq!(offer(&[("a.rs", 9)], None, false), Offer::Quiz);
+    assert_eq!(offer(&[("a.rs", 9)], None, false), Offer::Nothing);
     assert_eq!(offer(&[("a.rs", 9), ("b.rs", 1)], None, false), Offer::Card);
     assert_eq!(offer(&[("a.rs", 7)], None, false), Offer::Nothing);
-    assert_eq!(offer(&[("a.rs", 8)], None, false), Offer::Quiz);
+    assert_eq!(offer(&[("a.rs", 8)], None, false), Offer::Nothing);
     assert_eq!(
-        offer(&[("a.rs", 8)], Some(CheckStatus::Failed), false),
-        Offer::Nothing
-    );
-    assert_eq!(
-        offer(&[("a.rs", 8)], Some(CheckStatus::Passed), false),
-        Offer::Quiz
+        offer(&[("a.rs", 30)], Some(CheckStatus::Failed), false),
+        Offer::Card
     );
     assert_eq!(offer(&[("README.md", 40)], None, false), Offer::Nothing);
     assert_eq!(offer(&[("a.rs", 12)], None, true), Offer::Nothing);
@@ -384,7 +188,6 @@ fn stop_of(
         &session,
         turn,
         offers,
-        true,
         || {},
         |_| {},
     )
@@ -409,7 +212,7 @@ fn the_card_path_and_the_summary_path_agree_on_the_same_facts() {
     };
     let settled = settle(&mut request, &turn, &[], None);
     assert_eq!(settled.decision.offer, Offer::Card);
-    assert!(request.no_quiz && !settled.write);
+    assert!(!settled.write);
 }
 
 fn turn_request(n: u64) -> SummaryRequest {
@@ -444,8 +247,8 @@ fn an_agent_with_no_trees_is_judged_on_its_cards_diff_by_both_paths() {
         ..turn_request(3)
     };
     let settled = settle(&mut request, &none, &changed_in(&small), None);
-    assert_eq!(settled.decision.offer, Offer::Quiz);
-    assert!(settled.write && !request.no_quiz);
+    assert_eq!(settled.decision.offer, Offer::Nothing);
+    assert!(!settled.write);
 }
 
 #[test]
@@ -537,56 +340,6 @@ fn silent() -> Scripted {
 }
 
 #[test]
-fn a_lone_quiz_held_by_the_cap_says_so() {
-    let (_dir, store) = store();
-    let (_o, offers) = offers();
-    for n in 1..=3 {
-        assert!(
-            lone(&store, n, 0, false, "why").unwrap().quiz.is_some(),
-            "{n}"
-        );
-    }
-    let turn = turn_facts(&[("a.rs", 9)], None);
-    let mut request = turn_request(4);
-    let settled = settle(&mut request, &turn, &[], None);
-    assert_eq!(settled.decision.offer, Offer::Quiz);
-    let summary = offer_summary(
-        &store,
-        &canned("why"),
-        &SummarySetup::default(),
-        request,
-        Some(&settled.decision),
-        &offers,
-        |l| panic!("{l}"),
-    );
-    assert_eq!(summary.unwrap().quiz, None);
-    // The summary itself is kept.
-    assert!(store.lock().unwrap().turn_summary("s@4").is_some());
-    let lines = lines_of(&offers);
-    assert_eq!(lines.len(), 1);
-    assert_eq!(lines[0]["offer"], "quiz");
-    assert_eq!(lines[0]["outcome"], "held by the hourly cap");
-}
-
-#[test]
-fn a_lone_quiz_written_is_on_the_record() {
-    let (_dir, store) = store();
-    let (_o, offers) = offers();
-    let mut request = turn_request(1);
-    let settled = settle(&mut request, &turn_facts(&[("a.rs", 9)], None), &[], None);
-    offer_summary(
-        &store,
-        &canned("why"),
-        &SummarySetup::default(),
-        request,
-        Some(&settled.decision),
-        &offers,
-        |l| panic!("{l}"),
-    );
-    assert_eq!(lines_of(&offers)[0]["outcome"], "written");
-}
-
-#[test]
 fn a_subagents_late_change_below_the_card_row_has_a_line_of_its_own_kind() {
     let (_dir, store) = store();
     let (_o, offers) = offers();
@@ -612,7 +365,6 @@ fn a_writer_that_gave_no_reply_is_asked_again_and_the_line_stays_one_per_outcome
             &session,
             &turn,
             &offers,
-            true,
             || {},
             |_| {},
         )
@@ -629,7 +381,7 @@ fn a_writer_that_gave_no_reply_is_asked_again_and_the_line_stays_one_per_outcome
 fn the_summary_takes_the_decision_the_card_made_not_a_new_one() {
     let (_dir, store) = store();
     let (_o, offers) = offers();
-    // The card path saw a change under the lone Quiz's lines and decided nothing.
+    // The card path saw a small change and decided nothing.
     let at_card = turn_facts(&[("a.rs", 2)], None);
     let (_, decided) = {
         let session = studio_core::Session::default();
@@ -640,19 +392,17 @@ fn the_summary_takes_the_decision_the_card_made_not_a_new_one() {
             &session,
             &at_card,
             &offers,
-            true,
             || {},
             |_| {},
         )
     };
     let decided = decided.unwrap();
     assert_eq!(decided.offer, Offer::Nothing);
-    // 20 seconds later the facts differ: a fresh decision would be a lone Quiz.
-    let later = turn_facts(&[("a.rs", 9)], None);
+    // 20 seconds later the facts differ: a fresh decision would be a card.
+    let later = turn_facts(&[("a.rs", 30)], None);
     let mut request = turn_request(1);
     let settled = settle(&mut request, &later, &[], Some(&decided));
     assert_eq!(settled.decision.offer, Offer::Nothing);
-    assert!(request.no_quiz);
 }
 
 #[test]
@@ -680,7 +430,6 @@ fn a_workers_200_lines_are_offered_once_on_the_workers_card_and_not_again_on_the
             &session,
             &TurnFacts::default(),
             &offers,
-            true,
             || {},
             |_| {},
         )
@@ -767,7 +516,7 @@ fn a_turn_that_changed_nothing_is_not_offered_the_change_of_a_card_in_a_shared_c
 }
 
 #[test]
-fn a_turns_own_card_with_a_helpers_edit_is_a_turn_decision_and_keeps_its_lone_quiz() {
+fn a_turns_own_card_with_a_helpers_edit_is_a_turn_decision() {
     let (_dir, store) = store();
     let (_o, offers) = offers();
     let mut studio = studio_core::Studio::default();
@@ -786,36 +535,14 @@ fn a_turns_own_card_with_a_helpers_edit_is_a_turn_decision_and_keeps_its_lone_qu
         &session,
         &TurnFacts::default(),
         &offers,
-        true,
         || {},
         |_| {},
     );
     let decided = decided.unwrap();
     assert_eq!(
         (decided.kind, decided.offer),
-        (OfferKind::Turn, Offer::Quiz)
+        (OfferKind::Turn, Offer::Nothing)
     );
-}
-
-#[test]
-fn a_lone_quiz_dropped_for_an_ask_line_under_a_full_cap_is_not_held_by_the_cap() {
-    let (_dir, store) = store();
-    let (_o, offers) = offers();
-    for n in 1..=3 {
-        lone(&store, n, 0, false, "why");
-    }
-    let mut request = turn_request(4);
-    let settled = settle(&mut request, &turn_facts(&[("a.rs", 9)], None), &[], None);
-    offer_summary(
-        &store,
-        &canned("ask"),
-        &SummarySetup::default(),
-        request,
-        Some(&settled.decision),
-        &offers,
-        |l| panic!("{l}"),
-    );
-    assert_eq!(lines_of(&offers)[0]["outcome"], "no quiz in the reply");
 }
 
 /// A session whose turn `s@9` stopped, as the shell reads it.
@@ -842,10 +569,8 @@ fn a_decision_the_summary_path_makes_alone_is_on_the_record_once() {
         assert!(offers.settled("s", &format!("s@{n}")));
     }
     assert_eq!(lines_of(&offers).len(), 2);
-    // A lone Quiz is put on record by its summary, and the card path's decision by its card.
+    // The card path's decision is put on record by its card, so a summary that takes it adds none.
     let turn = turn_facts(&[("a.rs", 9)], None);
-    let mut request = turn_request(3);
-    settle(&mut request, &turn, &[], None).record(&offers, &request);
     let decided = decide(OfferKind::Turn, &turn, &[]);
     let mut request = turn_request(4);
     settle(&mut request, &turn, &[], Some(&decided)).record(&offers, &request);
@@ -854,32 +579,24 @@ fn a_decision_the_summary_path_makes_alone_is_on_the_record_once() {
 
 #[test]
 fn a_decision_is_on_the_record_once_across_a_restart() {
-    // Whether a summary follows the card to carry a Quiz.
-    let cases = [
-        ("a decision of nothing", 2, true),
-        ("a Quiz decision with no summary to carry it", 9, false),
-    ];
-    for (name, lines, summary_follows) in cases {
-        let (_dir, store) = store();
-        let (_o, offers) = offers();
-        let turn = turn_facts(&[("a.rs", lines)], None);
-        for _ in 0..2 {
-            offer_stop(
-                &store,
-                &FakeWriter,
-                card_request("s@1", None, ""),
-                &studio_core::Session::default(),
-                &turn,
-                &offers,
-                summary_follows,
-                || {},
-                |_| {},
-            );
-        }
-        assert_eq!(lines_of(&offers).len(), 1, "{name}");
-        assert!(offers.settled("s", "s@1"), "{name}");
-        assert!(!offers.settled("s", "s@2"), "{name}");
+    let (_dir, store) = store();
+    let (_o, offers) = offers();
+    let turn = turn_facts(&[("a.rs", 2)], None);
+    for _ in 0..2 {
+        offer_stop(
+            &store,
+            &FakeWriter,
+            card_request("s@1", None, ""),
+            &studio_core::Session::default(),
+            &turn,
+            &offers,
+            || {},
+            |_| {},
+        );
     }
+    assert_eq!(lines_of(&offers).len(), 1);
+    assert!(offers.settled("s", "s@1"));
+    assert!(!offers.settled("s", "s@2"));
 }
 
 #[test]

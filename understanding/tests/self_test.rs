@@ -1,10 +1,9 @@
 //! The self-test's report (danielrispler/plotkeeper#130): per arm, the turns, the retests answered and right, the turns whose
 //! hunk was opened, and the median time from a retest's showing to its pick, from a card store built here.
 
-use studio_understanding::{CardStore, Choice, Quiz, Tap, self_test};
+use studio_understanding::{CardStore, Tap, self_test};
 
 const START: u64 = 1_800_000_000_000;
-const WEEK: u64 = 7 * 24 * 60 * 60 * 1000;
 
 fn turn(store: &mut CardStore, id: &str, at: u64, body_only: bool) {
     let request = studio_core::SummaryRequest {
@@ -37,28 +36,18 @@ fn turn(store: &mut CardStore, id: &str, at: u64, body_only: bool) {
         .unwrap();
 }
 
-/// Retests turn `id`, shown at `shown` and, when `pick` is given, picked then.
-fn retest(store: &mut CardStore, id: &str, shown: u64, pick: Option<(usize, u64)>) {
-    let ask = store
-        .due_retests(u64::MAX)
-        .into_iter()
-        .find(|a| a.of == id)
-        .unwrap();
-    let option = |text: &str| Choice {
-        text: text.into(),
-        why: "w".into(),
-    };
-    let quiz = Quiz {
-        text: "Q".into(),
-        options: vec![option("A"), option("B")],
-        key: 0,
-    };
-    store.add_retest(&ask, Some(quiz), START + WEEK).unwrap();
-    let name = format!("retest {id}");
-    store.quiz_tap(&name, Tap::Shown, shown).unwrap();
+/// A retest of turn `id` as an earlier build stored it, shown at `shown` and, when `pick` is given, picked then. No build writes
+/// retests now (danielrispler/plotkeeper#347), so the store reads them from `retests.json`.
+fn retest(id: &str, shown: u64, pick: Option<(usize, u64)>) -> serde_json::Value {
+    let mut taps = vec![serde_json::json!({ "kind": "shown", "at": shown })];
     if let Some((option, at)) = pick {
-        store.quiz_tap(&name, Tap::Pick { option }, at).unwrap();
+        taps.push(serde_json::json!({ "kind": "pick", "option": option, "at": at }));
     }
+    serde_json::json!({
+        "id": format!("retest {id}"), "of": id, "session_id": "s1", "added_at": START,
+        "quiz": { "text": "Q", "options": [{ "text": "A", "why": "w" }, { "text": "B", "why": "w" }], "key": 0 },
+        "taps": taps,
+    })
 }
 
 #[test]
@@ -80,10 +69,15 @@ fn the_report_counts_each_arm_from_the_store() {
     store.quiz_tap("q1", Tap::Hunk, START + 10).unwrap();
     store.quiz_tap("q1", Tap::Hunk, START + 11).unwrap();
     store.quiz_tap("b2", Tap::Hunk, START + 12).unwrap();
-    retest(&mut store, "q1", 1_000, Some((0, 5_000)));
-    retest(&mut store, "q2", 1_000, Some((1, 9_000)));
-    retest(&mut store, "q3", 1_000, None);
-    retest(&mut store, "b1", 1_000, Some((0, 3_000)));
+    let retests = [
+        retest("q1", 1_000, Some((0, 5_000))),
+        retest("q2", 1_000, Some((1, 9_000))),
+        retest("q3", 1_000, None),
+        retest("b1", 1_000, Some((0, 3_000))),
+    ];
+    let text = serde_json::to_string(&retests).unwrap();
+    std::fs::write(data.path().join("retests.json"), text).unwrap();
+    let store = CardStore::open(data.path().join("cards.json")).unwrap();
 
     let report = self_test(store.summaries(), store.retests());
     let [quiz_first, body_only] = report.arms;

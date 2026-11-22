@@ -172,45 +172,6 @@ const settingsControls = (): Fixture =>
       log("headings: " + [...dialog.querySelectorAll("h2")].map((h) => h.textContent).join(" | "));
       log("scroll: " + dialog.querySelector(".settings-body").scrollHeight + " of " + dialog.querySelector(".settings-body").clientHeight);`);
 
-// Home's answered Retest of session s3, whose older turn (index 0) holds the Quiz: the turn's own (`ofCard` false), or a worker's card placed in
-// that turn. The script clicks "See the code" and checks what the rail shows. Run narrower than 1007px, so the rail is an overlay.
-const seeCode = (ofCard: boolean): Fixture => {
-  const f = fixtures.home();
-  const now = Date.now();
-  const file = { root: "/w/plotkeeper", path: "ui/settings.rs", from: null, added: 1, removed: 1, agent: null };
-  const turn = (i: number, id: string | null, ago: number, files: boolean) => ({ started_at: now - ago * 864e5 + i * 6e4, ended_at: now - ago * 864e5 + 600e3, prompt: `Turn ${i}`, id, message: `Turn ${i} done.`, checks: [], listed: [], files: files ? { files: [file], merged: 0 } : null });
-  // Newer turns enough to push the older one below the fold, so only a scroll brings it into view.
-  const turns = [turn(0, "r1", 8, true), ...Array.from({ length: 30 }, (_, i) => turn(i + 1, `t${i + 1}`, 3, false))];
-  const s3 = { ...f.sessions.find((s) => s.id === "s3")!, turns };
-  const sessions = f.sessions.map((s) => (s.id === "s3" ? s3 : s));
-  const cardId = `s3@${turns[0].started_at + 60e3}`;
-  const worker = { request: { session_id: "s3", id: cardId, agent: "w1", changed_by: {}, check: null }, card: { summary: "The worker fixed the write.", explanation: "It copies the state out.", paths: ["ui/settings.rs"], code: "", why_it_matters: "No lock across the read.", not_checked: "Nothing.", architecture: null, quiz: { text: "Why copy the state out?", key: 0, options: [{ text: "To hold no lock across the read", why: "Right." }, { text: "To save memory", why: "It copies." }] } }, guess: { option: 0, right: true, at: now }, key_wrong: false, more: null, rating: null, check_result: null, shown_at: now };
-  const hunk = ["--- ui/settings.rs", "@@ -41,3 +41,3 @@", "-    let text = self.read_file(&self.state.lock());", "+    let text = { self.state.lock().file.clone() };", ""].join("\n");
-  const learning = { ...f.learning, of: ofCard ? cardId : "r1", hunk, taps: [{ kind: "pick" as const, option: 0, at: now }] };
-  const cards = { ...base.cards, workers: ofCard ? [{ card: worker, turn: 0 }] : [] };
-  const snapScript = `
-    const wait = (ms) => new Promise((done) => setTimeout(done, ms));
-    const link = document.querySelector(".pane.home .slot-card .quiz-code-link");
-    if (!link) return log("snap:fail the reveal has no See the code link");
-    link.click();
-    await wait(300);
-    if (document.body.dataset.layout !== "overlay") log("snap:fail the window is not in the overlay layout: " + document.body.dataset.layout);
-    if (document.querySelector(".pane.home:not([hidden])")) log("snap:fail Home is still shown after See the code");
-    const lines = [...document.querySelectorAll("#feed .turn.past .turn-line")];
-    const first = lines.find((l) => l.textContent.includes("Turn 0"));
-    if (!first) return log("snap:fail the rail does not list the session's older turn: the session is not selected");
-    if (first.getAttribute("aria-expanded") !== "true") log("snap:fail the Quiz's turn is not open");
-    if (lines.some((l) => l !== first && l.getAttribute("aria-expanded") === "true")) log("snap:fail another folded turn is open");
-    const hunk = document.querySelector("#feed .evidence-hunk");
-    if (!hunk || hunk.hidden || !hunk.textContent.includes("self.state.lock().file.clone()")) log("snap:fail the turn's hunk is not open in the rail: " + hunk?.textContent);
-    if (${ofCard} && !document.querySelector("#feed details.answered-card[open] article.card")?.textContent.includes("It copies the state out.")) log("snap:fail the card of the Quiz is not open");
-    if (!document.body.classList.contains("rail-open")) log("snap:fail the overlay rail did not open");
-    const story = document.getElementById("story");
-    const turnTop = first.closest(".turn").getBoundingClientRect().top - story.getBoundingClientRect().top;
-    if (story.scrollTop <= 0 || turnTop < -2 || turnTop > story.clientHeight - 60) log("snap:fail the turn was not scrolled into view: scrollTop " + story.scrollTop + ", top " + turnTop);`;
-  return { ...f, sessions, learning, cards, select: { session: s3, agent: null }, turn_file_hunk: { text: hunk, left_out: 0, binary: false, first_line: 41 }, snapScript };
-};
-
 // The Map view (#309) on a map of plotkeeper's own shape, opened by its key. Positions are saved, as the prototype's Treatment C draws them.
 const mapFile = JSON.stringify({
   version: 1,
@@ -782,8 +743,8 @@ export const fixtures = {
     const snapScript = `[...document.querySelectorAll("summary, button")].find((el) => /^Idle/.test(el.textContent.trim()))?.click();`;
     return { ...base, sessions, selected: { session: sessions[1], agent: null }, snapScript };
   },
-  // Home, the waiting room (#238), at 1400x900: 4 running, 1 needs you, 1 unseen, the learning slot with a Retest, 2 landed and
-  // 2 projects. The script checks the Retest sits fully above the fold.
+  // Home, the waiting room (#238), at 1400x900: 4 running, 1 needs you, 1 unseen, 2 landed and 2 projects. It has no Quiz and no
+  // Retest (#347); the script checks none shows.
   home() {
     const now = Date.now();
     const running = (id: string, name: string, minutes: number, intention: string, steps: number) =>
@@ -795,7 +756,7 @@ export const fixtures = {
     const sessions = [
       running("s1", "#56 · Row controls", 14, "Make the row's controls reachable by keyboard.", 2),
       asking,
-      running("s6", "#58 · Retest card", 9, "Draw the quiz region with its options and Not now.", 0),
+      running("s6", "#58 · Sounds row", 9, "Draw the sounds row with its toggle.", 0),
       running("s7", "#59 · Agent deadline", 6, "Stop an agent that outlives its turn.", 7),
       running("s8", "#61 · Sounds setting", 2, "Add the sounds toggle to the settings page.", 1),
       session("s4", "#55 · Delete default", "your_turn", {
@@ -805,56 +766,10 @@ export const fixtures = {
       session("s3", "#54 · Subagent terminal", "idle", { cwd: "/w/plotkeeper", landed: true, identity: { issue: 54, branch: null, pr: null, worktree: "", name: "#54 · Subagent terminal" } }),
       session("s5", "#48 · Agent deadline", "ended", { cwd: "/w/plotkeeper", landed: true }),
     ];
-    const learning = { kind: "retest" as const, id: "r1", of: "r1", session_id: "s3", added_at: now - 7 * 864e5, of_at: now - 8 * 864e5, taps: [], quiz: { text: "The settings write held a lock across a read. Why was it safe?", key: 1, options: [
-      { text: "Keep the lock across the await so nobody reads half a write", why: "A lock across the await deadlocks." },
-      { text: "Release it first and re-read the state after", why: "The read can wait on the writer." },
-      { text: "Copy the state out and work on the copy", why: "It still races." },
-    ] } };
     const snapScript = `
-      const learning = document.querySelector(".pane.home .slot-card");
-      if (!learning) log("snap:fail Home has no learning card");
-      else if (!/^Retest · \\d+ days after #54/.test(learning.querySelector(".label")?.textContent ?? "")) log("snap:fail the card has no Retest label");
-      else if ([...document.querySelectorAll(".pane.home h2")].some((h) => h.textContent === "Retest")) log("snap:fail Home still has a Retest heading");
-      // The window is 900 high; the page reports less while this script runs (headless Chrome counts its frame), so the fold is fixed.
-      else if (learning.getBoundingClientRect().bottom > 900 - 6) log("snap:fail the Retest is below the fold: it ends at " + learning.getBoundingClientRect().bottom);`;
-    return { ...base, sessions, learning, projects: ["/w/plotkeeper", "/w/falinks"], selected: null, snapScript };
-  },
-  // Home's reveal (#242): the script picks the second option of the Retest; the card then shows the turn's date and Key wrong, and no Not now.
-  homeReveal(): Fixture {
-    const snapScript = `
-      const option = document.querySelectorAll(".pane.home .quiz-region .options button")[1];
-      if (!option) log("snap:fail Home's Retest has no options");
-      else {
-        option.click();
-        await new Promise((r) => setTimeout(r, 100));
-        const card = document.querySelector(".pane.home .quiz-region")?.textContent ?? "";
-        if (!/The turn of \\d+ \\w+/.test(card)) log("snap:fail the reveal shows no date of the turn");
-        if (!/Key wrong/.test(card)) log("snap:fail the reveal has no Key wrong");
-        if (/Not now|Show the rest anyway|why\\?/.test(card)) log("snap:fail the reveal shows a rail control");
-      }`;
-    return { ...fixtures.home(), snapScript };
-  },
-  // Home with a Retest answered (#243): the reveal, the link to the code, and the stored hunk in place. The script checks both show.
-  homeReveal243(): Fixture {
-    const f = fixtures.home();
-    const now = Date.now();
-    const file = { root: "/w/plotkeeper", path: "ui/settings.rs", from: null, added: 1, removed: 1, agent: null };
-    const sessions = f.sessions.map((s) =>
-      s.id === "s3" ? { ...s, turns: [{ started_at: now - 8 * 864e5, ended_at: now - 8 * 864e5 + 600e3, prompt: "Fix the settings write", id: "r1", message: null, checks: [], listed: [], files: { files: [file], merged: 0 } }] } : s,
-    );
-    // The hunk is the item's stored text, drawn with no git read (the fixture has no turn_file_hunk).
-    const hunk = ["--- ui/settings.rs", "@@ -41,3 +41,3 @@", "-    let text = self.read_file(&self.state.lock());", "+    let text = { self.state.lock().file.clone() };", "     self.write_file(merge(text, key, value));", ""].join("\n");
-    const learning = { ...f.learning, hunk, taps: [{ kind: "pick" as const, option: 0, at: now }] };
-    const snapScript = `
-      await new Promise((done) => setTimeout(done, 300));
-      const card = document.querySelector(".pane.home .slot-card");
-      if (!card?.querySelector(".quiz-code-link")) log("snap:fail the reveal has no link to the code inside the card");
-      if (!card?.querySelector(".evidence-hunk")?.textContent.includes("self.state.lock().file.clone()")) log("snap:fail the stored hunk is not drawn in place inside the card");
-      if (card?.querySelector(".evidence-caption")?.textContent !== "ui/settings.rs") log("snap:fail the hunk has no file caption");
-      for (const control of card?.querySelectorAll(".evidence-edit, .ask-about") ?? []) if (getComputedStyle(control).display !== "none") log("snap:fail the compact hunk shows " + control.className);
-      // The card sits below the fold of a full page: scroll it into view to see the reveal whole.
-      card?.scrollIntoView({ block: "start" });`;
-    return { ...f, sessions, learning, snapScript };
+      if (document.querySelector(".pane.home .slot-card, .pane.home .quiz-region")) log("snap:fail Home shows a Quiz or a Retest");
+      if ([...document.querySelectorAll(".pane.home h2")].some((h) => h.textContent === "Retest")) log("snap:fail Home still has a Retest heading");`;
+    return { ...base, sessions, projects: ["/w/plotkeeper", "/w/falinks"], selected: null, snapScript };
   },
   // Home after Clear (#244): the landed rows are hidden, the Landed part is gone, and the toast offers Undo. The script clicks Clear on the heading.
   homeClearToast(): Fixture {
@@ -871,31 +786,19 @@ export const fixtures = {
     return { ...fixtures.home(), snapScript };
   },
   // Home refreshes on a stored card or summary (#226): the summary of an Unseen row's turn resolves after the first draw and the row's Headline
-  // changes; the slot answers nothing, then a fresh Quiz, and the `cards` event (a card stored) makes Home show it.
+  // changes once the summary arrives.
   homeRefresh(): Fixture {
     const f = fixtures.home();
-    const now = Date.now();
     const sessions = f.sessions.map((s) => (s.id === "s4" ? { ...s, turns: s.turns.map((t) => ({ ...t, id: "t4" })) } : s));
-    const summary = { summary: { summary: "Delete keeps the branch.", headline: "Delete keeps the branch (summary).", lines: [], quiz: null } };
-    const fresh = { kind: "fresh", id: "f1", session_id: "s3", at: now, hunk: "", quiz: { text: "Why does delete keep the branch?", key: 0, options: [{ text: "The branch holds the work", why: "Right." }, { text: "Git forbids deleting it", why: "It does not." }] } };
+    const summary = { summary: { summary: "Delete keeps the branch.", headline: "Delete keeps the branch (summary).", lines: [] } };
     const snapScript = `
-      // The summary lands 3 s after the first draw (the script runs at 2.5 s), after the learning slot's reply: only a refresh draws its Headline.
+      // The summary lands 3 s after the first draw (the script runs at 2.5 s): only a refresh draws its Headline.
       const headline = () => document.querySelector('.pane.home [data-key="unseen s4"] .row-step')?.textContent;
       if (headline() !== "Delete now removes the worktree and keeps the branch.") log("snap:fail the row does not show the turn's message before its summary: " + headline());
       await new Promise((done) => setTimeout(done, 1000));
-      if (headline() !== "Delete keeps the branch (summary).") log("snap:fail an Unseen row's Headline did not update once its summary arrived: " + headline());
-      if (document.querySelector(".pane.home .slot-card")) log("snap:fail the slot shows an item before the store holds one");
-      const invoke = window.__TAURI__.core.invoke;
-      window.__TAURI__.core.invoke = (command, args) => (command === "learning" ? Promise.resolve(${JSON.stringify(fresh)}) : invoke(command, args));
-      window.__TAURI__.__emit("cards", await invoke("cards"));
-      await new Promise((done) => setTimeout(done, 200));
-      if (!document.querySelector(".pane.home .slot-card")?.textContent.includes("Why does delete keep the branch?")) log("snap:fail Home does not show the Quiz a stored card made");`;
-    return { ...f, sessions, learning: null, turn_summary: { __by: "id", values: { t4: { __delay: 3000, value: summary } as never } }, snapScript };
+      if (headline() !== "Delete keeps the branch (summary).") log("snap:fail an Unseen row's Headline did not update once its summary arrived: " + headline());`;
+    return { ...f, sessions, turn_summary: { __by: "id", values: { t4: { __delay: 3000, value: summary } as never } }, snapScript };
   },
-  // "See the code" (#243): from Home's reveal of a Retest whose session is listed, the link selects the session, opens the Quiz's turn (an older
-  // one) and its hunk in the rail, opens the card when the Quiz is a card's, scrolls the turn into view and, in the overlay layout, opens the rail.
-  homeSeeCode: () => seeCode(false),
-  homeSeeCodeCard: () => seeCode(true),
   // Errors in the notice line (#191): two errors and the dismiss control, beside a settings error.
   noticeErrors() {
     const snapScript = `

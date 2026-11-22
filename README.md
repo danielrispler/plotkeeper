@@ -13,10 +13,6 @@ plotkeeper builds Studio, a desktop app for macOS that sits beside your agent se
   ![A finished turn: its Headline and its evidence line](docs/studio/assets/readme/turn.png)
 
 - **Facts kept apart from the model's words.** Files, line counts and check results come from hooks and git, and code on a card is read from git, never retyped by a model. On [the rail](docs/studio/behaviour/rail.md), a claimed fix with no passed check is marked "Agent says:".
-- **One question that makes you think.** A [Quiz](docs/studio/behaviour/quiz.md) asks about the change before it tells you the answer. It is never scored, and you get at most three an hour.
-
-  ![A Quiz after a pick, with the reasons for each option](docs/studio/assets/readme/quiz.png)
-
 - **Pick up where you left off.** "Where we were" and [the Brief](docs/studio/behaviour/brief.md) sum up an idle session: the last Headline, what changed since you looked, and what is still open.
 
   ![Where we were](docs/studio/assets/readme/where-we-were.png)
@@ -48,7 +44,7 @@ Coding agents write code faster than I can read their diffs. I was losing track 
 
 ## Documentation
 
-- [Sessions](docs/studio/behaviour/sessions.md), [the story rail](docs/studio/behaviour/rail.md), [cards](docs/studio/behaviour/cards.md), [the Quiz](docs/studio/behaviour/quiz.md), [the Brief](docs/studio/behaviour/brief.md), [checks](docs/studio/behaviour/checks.md), [the terminal pane](docs/studio/behaviour/terminal.md), [storage](docs/studio/behaviour/storage.md)
+- [Sessions](docs/studio/behaviour/sessions.md), [the story rail](docs/studio/behaviour/rail.md), [cards](docs/studio/behaviour/cards.md), [the Brief](docs/studio/behaviour/brief.md), [checks](docs/studio/behaviour/checks.md), [the terminal pane](docs/studio/behaviour/terminal.md), [storage](docs/studio/behaviour/storage.md)
 - [The system map](docs/studio/behaviour/map.md)
 - [Load the plugin](docs/studio/plugin.md), [settings files](docs/studio/settings.md), [development](docs/studio/development.md)
 
