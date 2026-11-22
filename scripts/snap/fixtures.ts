@@ -263,6 +263,20 @@ const homeMarked = (press: boolean): Fixture => ({
       if (document.getElementById("map").hidden) return log("snap:fail the mark did not open the Map view");
     }`,
 });
+// The stop-rule review (#314): Studio has run 20 active days and merged 25 PRs, and the Map view was opened on one of them and Home's mark
+// never led to it, so the Map view fell below its threshold, and so did the history strip and "See the proof".
+const dueFacts = { active_days: 20, merged_prs: 25, map_days: 1, mark_days: 5, map_on_mark_days: 0, scrubs: 0, proofs: 0, knows: 0, dismissed: false };
+const homeReviewed = (): Fixture => ({
+  ...(fixtures as Record<string, () => Fixture>).home(),
+  map_marks: ["/w/plotkeeper"],
+  stop_facts: dueFacts,
+  snapScript: `
+    await new Promise((done) => setTimeout(done, 400));
+    const review = document.querySelector(".pane.home .review");
+    if (!review) return log("snap:fail Home shows no review");
+    if (!review.textContent.includes("Little used so far")) log("snap:fail the review's words: " + review.textContent);
+    log("review ok");`,
+});
 const mapOpened = (check: string, extra: Fixture = {}): Fixture => ({
   ...list(),
   ...extra,
@@ -756,6 +770,16 @@ export const fixtures = {
   mapBrokenLog: () => mapBroken("log"),
   // A part's history strip scrubbed to an older commit, with the sheet open (#313).
   mapScrubbed,
+  // The one-time review under the Map view's head, listing the modules below their thresholds (#314).
+  mapReview: () =>
+    mapOpened(`
+      const review = document.querySelector("#map-review .review");
+      if (!review || document.getElementById("map-review").hidden) return log("snap:fail the review is not shown");
+      if (!review.textContent.includes("Little used so far: the Map view, the history strip and See the proof")) log("snap:fail the review's words: " + review.textContent);
+      if (/\\d/.test(review.querySelector(".review-text").textContent)) log("snap:fail the review shows a count");
+      log("review ok");`, { map_state: mapState(), stop_facts: dueFacts }),
+  // The same review on Home, when the Map view itself fell below its threshold (#314).
+  homeReview: homeReviewed,
   // No map on the default branch: the empty state, and "Draft a map" opens New session with the drafting prompt.
   mapEmpty: () =>
     mapOpened(`
