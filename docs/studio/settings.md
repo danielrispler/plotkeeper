@@ -15,7 +15,7 @@ The page has no settings page, no project list and no terminal (danielrispler/pl
 }
 ```
 
-The writer is the program that writes cards (#327): `summaries.writer` is `"claude"` (the default, `claude -p`) or `"agy"` (the Antigravity CLI, run with JSON schema output in a neutral empty folder of its own, with a 3-minute timeout that covers a logged-out `agy`'s 60-second wait). Its `model` and `effort` are read by that program, so an `agy` model is one of `agy models`, such as `gemini-4-neon-low`. A writer that fails reports why in one log line: not logged in, quota or rate limit, timeout, not installed, an empty reply, or another failure. Both writers set `PLOTKEEPER_INTERNAL=1`, so the hook never records their runs.
+The writer is the program that writes cards (#327): `summaries.writer` is `"claude"` (the default, `claude -p`) or `"agy"` (the Antigravity CLI, run with JSON schema output in a neutral empty folder of its own, with a 3-minute timeout that covers a logged-out `agy`'s 60-second wait). Its `model` and `effort` are read by that program, so an `agy` model is one of `agy models`, such as `gemini-4-neon-low`; a `model` that is not in that list (the default `haiku`, with the writer moved to `agy`) is written with the first of the list, `gemini-4-neon-low`, and its `effort` is dropped, while `claude` takes any model id. A writer that fails reports why in one log line: not logged in, quota or rate limit, timeout, not installed, an empty reply, or another failure. Both writers set `PLOTKEEPER_INTERNAL=1`, so the hook never records their runs.
 
 An older file's `zoom`, `terminal`, `sounds`, `doctor`, `editor` and `repository` keys are ignored: the browser zooms the page, and there is no terminal, sound, Doctor or editor on it.
 

@@ -47,6 +47,16 @@ impl WriterKind {
         }
     }
 
+    /// The model a call asked for `asked`, as this writer takes it. `agy` takes only its own list, so a model it does
+    /// not know (the default `haiku` after `summaries.writer` moved to `agy`) is its first one. `claude` takes any
+    /// id, a full one included.
+    pub fn model(self, asked: &str) -> &str {
+        match self {
+            WriterKind::Agy if !self.models().contains(&asked) => self.models()[0],
+            _ => asked,
+        }
+    }
+
     /// How long a call may run before it fails and is stopped. `agy`'s covers its login wait and then some.
     pub fn timeout(self) -> Duration {
         match self {
@@ -225,9 +235,14 @@ pub fn build_command(
                 command.args(["--json-schema", schema]);
             }
             if let Some(model) = &request.model {
-                command.args(["--model", model]);
+                command.args(["--model", kind.model(model)]);
             }
-            if let Some(effort) = effort {
+            // The effort is part of an `agy` model id, so one that came with another writer's model is dropped.
+            let known = request
+                .model
+                .as_deref()
+                .is_none_or(|m| kind.models().contains(&m));
+            if let Some(effort) = effort.filter(|_| known) {
                 command.args(["--effort", effort]);
             }
             // `agy` has no system prompt flag and takes the prompt as an argument, not on standard input.
