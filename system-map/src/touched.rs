@@ -4,7 +4,7 @@ use std::{collections::BTreeSet, path::Path};
 
 use serde::Serialize;
 
-use crate::{Owners, PartFiles, Placement};
+use crate::{Map, Owners, PartFiles, Placement};
 
 /// What `touched` found.
 #[derive(Debug, Default, Serialize)]
@@ -18,8 +18,12 @@ pub struct Touched {
 /// Fails with the problems of a map file that cannot be read or fails the shape check, as `check`
 /// would report them.
 pub fn touched(root: &Path, paths: &[String]) -> Result<Touched, Vec<String>> {
-    let map = crate::load_checked(root)?;
-    let owners = Owners::new(&map);
+    Ok(touched_for_map(&crate::load_checked(root)?, paths))
+}
+
+/// Places `paths` by an already parsed `map`, with no file read and no check of the map.
+pub fn touched_for_map(map: &Map, paths: &[String]) -> Touched {
+    let owners = Owners::new(map);
     let mut found = Touched::default();
     let mut parts: Vec<Vec<String>> = vec![Vec::new(); map.parts.len()];
     for path in paths.iter().collect::<BTreeSet<_>>() {
@@ -39,5 +43,5 @@ pub fn touched(root: &Path, paths: &[String]) -> Result<Touched, Vec<String>> {
             files,
         })
         .collect();
-    Ok(found)
+    found
 }
