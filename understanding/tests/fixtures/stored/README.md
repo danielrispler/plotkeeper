@@ -13,3 +13,7 @@ rewriting the sample. For a deliberate format bump, test that the old file is mo
 When a stored type changes (a field added, renamed or made required), add a new folder here (for example
 `full-2/` and `minimal-2/`) with samples written in the new shape, add a test for it beside the existing ones in
 `stored_fixtures.rs`, and keep the old folders: every format the app ever wrote stays covered.
+
+`full-2/` and `minimal-2/` each hold one file, `risk-notes.json`, the store of the risk notes (#298), which `RiskNotes::open`
+reads on its own beside the card store: the full one with two sessions and two levels, the minimal one with one note and only
+its required fields. They also freeze the hash that keys a note (the command, a NUL and its folder, hashed with FNV-1a).

@@ -250,7 +250,7 @@ const build = (state: SessionState, { ask = null as Ask | null, answered = false
     ...common,
     sessions,
     selected: { session: s, agent: null },
-    cards: { brief: null, goal: withBrief ? goal : null, answers: withBrief ? answers : [], open: withBrief ? open : [], design: withBrief ? design.map((line) => ({ ...line, cite: stored.request.id })) : [], recent: [], older: [stored], workers: [], decisions: withBrief ? decisions : [] },
+    cards: { brief: null, goal: withBrief ? goal : null, answers: withBrief ? answers : [], open: withBrief ? open : [], design: withBrief ? design.map((line) => ({ ...line, cite: stored.request.id })) : [], recent: [], older: [stored], workers: [], decisions: withBrief ? decisions : [], risk_notes: [] },
     watch: ask,
     ask_facts: {
       sections: [
