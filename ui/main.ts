@@ -76,7 +76,7 @@ const syncHover = () => {
   }
   const mode = (dataset.layout ?? "full") as LayoutMode;
   recheckSeen();
-  tellShown(railShown(mode, classList.contains("rail-open"), classList.contains("skills-open")), mode === "overlay");
+  tellShown(railShown(mode, classList.contains("rail-open"), classList.contains("skills-open"), classList.contains("map-open")), mode === "overlay");
 };
 new MutationObserver(syncHover).observe(document.body, { attributes: true, attributeFilter: ["class", "data-layout"] });
 // A mouse button held down never opens an overlay, so a drag across the edge or a text selection leaves them be.

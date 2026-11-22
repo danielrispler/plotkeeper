@@ -81,7 +81,7 @@ export const panelHeight = (dragged: number, column: number) => Math.round(Math.
 // Whether the story rail shows the selected session (danielrispler/Falinks#556): not in focus mode, not behind a closed
 // overlay, not under the skills browser, which takes its place, and not behind the Map view, which hides it with `visibility`
 // (so the rail still intersects the viewport).
-export const railShown = (mode: LayoutMode, railOpen: boolean, skillsOpen: boolean, mapOpen = false) =>
+export const railShown = (mode: LayoutMode, railOpen: boolean, skillsOpen: boolean, mapOpen: boolean) =>
   mode !== "focus" && (mode !== "overlay" || railOpen) && !skillsOpen && !mapOpen;
 
 // Whether Home's content is seen: Home is the open pane and the Map view, which hides it with `visibility`, is not over it.

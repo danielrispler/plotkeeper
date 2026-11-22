@@ -110,12 +110,12 @@ test("the panel takes its dragged height, at most 40 % of the terminal column an
 });
 
 test("a turn is seen only while the rail shows its session: not in focus mode, a closed overlay or the skills browser (danielrispler/Falinks#556)", () => {
-  assert.equal(railShown("full", false, false), true);
-  assert.equal(railShown("strip", false, false), true);
-  assert.equal(railShown("focus", false, false), false);
-  assert.equal(railShown("overlay", false, false), false);
-  assert.equal(railShown("overlay", true, false), true);
-  assert.equal(railShown("full", true, true), false);
+  assert.equal(railShown("full", false, false, false), true);
+  assert.equal(railShown("strip", false, false, false), true);
+  assert.equal(railShown("focus", false, false, false), false);
+  assert.equal(railShown("overlay", false, false, false), false);
+  assert.equal(railShown("overlay", true, false, false), true);
+  assert.equal(railShown("full", true, true, false), false);
   // The Map view hides the rail without taking it out of the viewport, so a turn behind it is not seen.
   assert.equal(railShown("full", false, false, true), false);
   assert.equal(railShown("overlay", true, false, true), false);
