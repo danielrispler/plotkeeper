@@ -2,12 +2,13 @@
 // side area's `sheet` slot. It holds the part's plain description, its tier (changed in place), its laws and its fog, with a quiet
 // "I know this" that lifts the mist. `map-model.ts`'s `sheetOf` is what it shows; Esc closes it (the `sheet` layer).
 //
-// Where later tickets plug in: `.sheet-law-actions` on each law row is the place of "See the proof" (#312); `.sheet-extra` at the
-// foot is the place of the history strip (#313).
+// "See the proof" (`.sheet-law-actions` of a law a check backs) and the CI line with its drill-down open the drawer (`map-drawer.ts`).
+// Where a later ticket plugs in: `.sheet-extra` at the foot is the place of the history strip (#313).
 
 import { failure, invoke, pressable, text } from "./dom.js";
 import { currentMap, onDraw, onPlateClick, reloadMap, registerLayer, syncSide, type MapView } from "./map.js";
-import { effectiveTier, sheetOf, type Tier } from "./map-model.js";
+import { openDrawer } from "./map-drawer.js";
+import { ciDrawer, effectiveTier, proofDrawer, sheetCi, sheetOf, type Tier } from "./map-model.js";
 
 // The part whose sheet is open, and the project it is in; a sheet never carries over to another project's map.
 let open: { project: string; part: string } | null = null;
@@ -70,6 +71,16 @@ function drawSheet(view: MapView) {
     row.dataset.law = law.id;
     row.append(mark, text("span", law.text, "sheet-law-text"), text("span", law.label, "sheet-law-backing"), text("span", "", "sheet-law-actions"));
     row.title = `${law.label}: ${law.text}`;
+    if (law.backing === "check") {
+      const proof = text("button", "See the proof", "btn quiet");
+      proof.title = "Show the test that stands behind this law, read from the default branch";
+      proof.addEventListener("click", () => {
+        invoke("map_proof", { project: view.project, law: law.id })
+          .then((proofs) => openDrawer(proofDrawer(law.id, proofs)))
+          .catch(failure("map_proof"));
+      });
+      row.querySelector(".sheet-law-actions")!.append(proof);
+    }
     return row;
   });
   const fog = text("div", "", `sheet-fog${view.state.fog?.[part.id] ? ` ${view.state.fog[part.id]}` : ""}`);
@@ -82,6 +93,18 @@ function drawSheet(view: MapView) {
       know(view, part.id).catch(failure("map_know"));
     });
     fog.append(clear);
+  }
+  const state = sheetCi(view.state.ci, part.id, sheet.laws.some((law) => law.backing === "check"));
+  const ci = text("div", "", `sheet-ci${state?.broken ? " broken" : ""}`);
+  if (state) {
+    ci.append(text("p", state.line, "sheet-ci-line"));
+    if (state.drill && view.state.ci) {
+      const found = view.state.ci;
+      const drill = text("button", "See the CI log", "btn quiet");
+      drill.title = "Show the run's status and the end of its failed log, with a link to the run on GitHub";
+      drill.addEventListener("click", () => openDrawer(ciDrawer(found)));
+      ci.append(drill);
+    }
   }
   const card = text("div", "", "sheet");
   card.dataset.part = part.id;
@@ -96,6 +119,7 @@ function drawSheet(view: MapView) {
     ...(laws.length ? [text("ul", "", "sheet-laws")] : [text("p", "No laws on this part", "empty")]),
     text("h3", "Fog", "sheet-heading"),
     fog,
+    ...(state ? [text("h3", "CI on main", "sheet-heading"), ci] : []),
     text("div", "", "sheet-extra"),
   );
   card.querySelector(".sheet-laws")?.append(...laws);

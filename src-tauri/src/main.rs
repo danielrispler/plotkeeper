@@ -37,6 +37,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
 
 mod answer;
+mod ci_laws;
 mod fog;
 mod map;
 mod presence;
@@ -1139,6 +1140,7 @@ fn main() {
         .manage(writing)
         .manage(terminal::Daemon::default())
         .manage(map::Fetches::default())
+        .manage(ci_laws::CiCache::default())
         .manage(Mutex::new(answer::Watching::default()))
         .invoke_handler(tauri::generate_handler![
             sessions,
@@ -1224,6 +1226,7 @@ fn main() {
             map::map_set_tier,
             map::map_know,
             map::map_marks,
+            map::map_proof,
             map::map_place,
             reveal_log,
             sounds

@@ -48,6 +48,6 @@
   --plate: #202226; --plate-core: #25272b; --plate-edge: #ffffff1a; --plate-black: #121315; --plate-black-edge: #ffffff0d;
   --link: #ffffff26; --law-check: var(--fg); --law-trust: var(--muted);
   --plate-w: 264px; --plate-h: 76px; --actor-w: 120px; --actor-h: 28px; --map-grid: 28px; --law-mark: 7px; --link-width: 1.5px;
-  --map-title: 28px; --map-gutter: 32px; --map-sheet: 340px;
+  --map-title: 28px; --map-gutter: 32px; --map-sheet: 340px; --drawer-code: 280px;
   --mist-lift: 900ms ease-out; --mist-drift: 14s; --plate-move: 160ms ease-out;
 }

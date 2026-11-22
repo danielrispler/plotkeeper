@@ -13,7 +13,7 @@
 
 import { element, failure, invoke, listen, newest, pressable, text } from "./dom.js";
 import {
-  actorSize, autoPlace, draftPrompt, dragMove, dragStart, effectiveTier, escapeMap, type Actor, type Drag, type Law, type Layer, type LayerName,
+  actorSize, autoPlace, brokenParts, brokenText, draftPrompt, dragMove, dragStart, effectiveTier, escapeMap, type Actor, type Drag, type Law, type Layer, type LayerName,
   type MapDoc, mapProject, type MapLink, parseMap, type Part, type Point, plateSize, rimPoint, type Tier,
 } from "./map-model.js";
 import { knownProjects, projects } from "./projects.js";
@@ -258,6 +258,13 @@ function drawMap(body: HTMLElement, state: MapState, doc: LoadedMap) {
     plate.dataset.id = part.id;
     const [fog, marks, chips] = [text("div", "", "plate-fog"), text("div", "", "plate-marks"), text("div", "", "plate-chips")];
     marks.append(...doc.laws.filter((law) => law.on === part.id).map(lawMark));
+    // A test that backs a law failed on main: one coarse mark, never naming the law. Red, beside Needs you the only loud colour.
+    if (brokenParts(state.ci).has(part.id)) {
+      const broken = text("span", "", "law-broken");
+      broken.title = brokenText;
+      marks.append(broken);
+      plate.classList.add("broken");
+    }
     plate.append(fog, text("span", part.name, "plate-name"), text("span", part.caption, "plate-caption"), marks, chips);
     plate.title = [part.name, part.caption, part.description].filter(Boolean).join("\n\n");
     const context: PlateContext = { view: current, part, tier, plate, fog, marks, chips };
@@ -349,7 +356,8 @@ export function startMap(given: MapDeps) {
     lawMark({ id: "", on: "", backing: "trust", text: "nothing checks it" }), " law, on trust",
   );
   element("map-legend").append(
-    " ", text("span", "", "mist-swatch thin"), " fog, files changed ", text("span", "", "mist-swatch thick"), " fog, laws, links or flows changed",
+    " ", text("span", "", "law-broken"), " a test that backs a law failed on main ",
+    text("span", "", "mist-swatch thin"), " fog, files changed ", text("span", "", "mist-swatch thick"), " fog, laws, links or flows changed",
   );
   // Never on a timer: the focus and a merge, while the view is open.
   window.addEventListener("focus", () => {

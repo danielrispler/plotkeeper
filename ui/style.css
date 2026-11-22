@@ -717,6 +717,20 @@ body.map-open .toasts, body.map-open .toast { visibility: visible !important; }
 .sheet-fog { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-3); }
 .sheet-fog-line { margin: 0; font-size: var(--size-small); color: var(--muted); }
 .sheet-fog.thin .sheet-fog-line, .sheet-fog.thick .sheet-fog-line { color: var(--mist); }
+.sheet-ci { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-3); }
+.sheet-ci-line { margin: 0; font-size: var(--size-small); color: var(--muted); }
+.sheet-ci.broken .sheet-ci-line { color: var(--conflict); }
+/* A broken law (#312): a loud red dot at the plate's top right, the colour that sits beside Needs you's orange and nowhere else. */
+.law-broken { display: inline-block; flex: none; width: var(--sp-5); height: var(--sp-5); border-radius: 50%; background: var(--conflict); }
+.plate.broken, .plate.broken.open { box-shadow: inset 0 0 0 var(--hair) var(--conflict), var(--shadow); }
+.map-legend .law-broken { margin-inline: var(--sp-2); vertical-align: middle; }
+/* The drawer (#312): read-only code and text under the part sheet, with its jumps out. */
+.drawer { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-3); }
+.drawer-title { margin: 0; font-size: var(--size-read); font-weight: 600; padding-right: var(--sp-7); }
+.drawer-note, .drawer-label { margin: 0; font-size: var(--size-xs); color: var(--faint); }
+.drawer-block { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-3); align-self: stretch; }
+.drawer-code { margin: 0; align-self: stretch; max-height: var(--drawer-code); overflow: auto; padding: var(--sp-4) var(--sp-5); border-radius: var(--radius-small);
+               background: var(--raised); font: var(--size-xs)/1.5 var(--mono); white-space: pre; user-select: text; }
 .fog-mark { display: inline-block; flex: none; width: var(--sp-4); height: var(--sp-4); margin-inline-start: auto; border-radius: 50%; background: var(--mist); cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
   .plate, .btn { transition: none; }

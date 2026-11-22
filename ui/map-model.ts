@@ -1,7 +1,7 @@
 // The Map view's pure logic (spec danielrispler/plotkeeper#306, ticket #309): the map file as the window reads it, where parts
 // are placed, the drag threshold, the link's rim points and the layered Esc. `map.ts` draws and wires them.
 
-import type { Fog } from "./types.js";
+import type { Ci, Fog, Proof } from "./types.js";
 
 export type Tier = "core" | "interface" | "black-box";
 export type Point = { x: number; y: number };
@@ -161,5 +161,61 @@ export function sheetOf(part: Part, laws: Law[], tier: Tier, fog: Fog | undefine
     laws: laws.filter((law) => law.on === part.id).map((law) => ({ id: law.id, text: law.text, backing: law.backing, label: law.backing === "check" ? "Backed by a check" : "On trust" })),
     fogLine,
     canClear: fog !== undefined,
+  };
+}
+
+// Broken laws and the drawer (ticket #312). The drawer is read-only and holds any content a ticket gives it: blocks of code or text and
+// the one-click jumps out of it. `openDrawer` (map-drawer.ts) draws a `Drawer`; the history strip's commit drill-down builds one too.
+export type Jump = { label: string; title: string; to: { file: string; line: number } | { url: string } };
+export type Block = { label?: string; code: string; jumps: Jump[] };
+export type Drawer = { title: string; note?: string; blocks: Block[]; jumps: Jump[] };
+
+// What the mark and the drill-down say for a broken law: coarse, never naming the law.
+export const brokenText = "A test that backs laws here failed on main";
+
+// What CI on the default branch said, in words. A missing red mark means only "no known failure", so each outcome says which it is.
+export function ciLine(ci: Ci | null): string {
+  const earlier = ci?.earlier ? " (for an earlier commit; a newer run is going)" : "";
+  switch (ci?.status) {
+    case "passed": return `CI on main passed${earlier}`;
+    case "broken": return `${brokenText}${earlier}`;
+    case "not-run": return `CI on main failed, but the law tests did not run${earlier}`;
+    case "unreadable": return `CI on main failed and its log cannot be read${earlier}`;
+    default: return "CI on main has not been read";
+  }
+}
+
+// The parts a broken law marks: only when the run failed in a test that backs a law.
+export const brokenParts = (ci: Ci | null): Set<string> => new Set(ci?.status === "broken" ? ci.parts : []);
+
+// What the part sheet says of CI for `part`, or null when it holds no law a check backs and is not marked: its line, whether it is
+// the loud one, and whether a drill-down has anything to show.
+export function sheetCi(ci: Ci | null, part: string, backed: boolean): { line: string; broken: boolean; drill: boolean } | null {
+  const broken = brokenParts(ci).has(part);
+  if (!broken && !backed) return null;
+  return { line: ciLine(ci), broken, drill: ci !== null && ci.status !== "unknown" };
+}
+
+// "See the proof" for a law: each tagged test's code from the tag on, with a jump to the editor at the tag.
+export function proofDrawer(law: string, proofs: Proof[]): Drawer {
+  const blocks: Block[] = proofs.map((proof) => ({
+    label: `${proof.file}:${proof.line}${proof.test ? ` · ${proof.test}` : ""}`,
+    code: proof.snippet,
+    jumps: [{ label: "Open in editor", title: `Open ${proof.file} at line ${proof.line} in your editor`, to: { file: proof.file, line: proof.line } }],
+  }));
+  return {
+    title: `The proof of ${law}`,
+    blocks: blocks.length ? blocks : [{ code: "No test is tagged for this law on the default branch.", jumps: [] }],
+    jumps: [],
+  };
+}
+
+// The broken-law drill-down: the run's status, a note when a newer run is going, the failing log's tail, and a jump to the run on GitHub.
+export function ciDrawer(ci: Ci): Drawer {
+  return {
+    title: ciLine({ ...ci, earlier: false }),
+    note: ci.earlier ? "This is the last finished run, for an earlier commit; a newer run is going." : undefined,
+    blocks: ci.tail ? [{ label: "End of the failed log", code: ci.tail, jumps: [] }] : [],
+    jumps: ci.run_url ? [{ label: "Open on GitHub", title: "Open this run on GitHub", to: { url: ci.run_url } }] : [],
   };
 }

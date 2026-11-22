@@ -16,7 +16,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-pub use laws::{LawReport, LawTest, Tag, law_tests, test_name_after};
+pub use laws::{LawReport, LawTest, Tag, law_tests, tag_id, test_name_after};
 use pattern::Pattern;
 pub use touched::{Touched, touched, touched_for_map};
 

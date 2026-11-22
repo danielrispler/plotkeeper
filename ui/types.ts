@@ -456,8 +456,27 @@ export type MapState = {
   user: UserMap;
   // How strongly each part shows fog under Daniel's effective tiers; a part not listed is clear.
   fog: Record<string, Fog>;
+  // CI on the default branch as last read through `gh` (`ci_laws.rs`); null until a read has finished.
+  ci: Ci | null;
 };
 export type Fog = "thin" | "thick";
+// What a finished run of the default branch's CI says of the laws: `unknown` (nothing to read), `passed`, `broken` (a test that backs a
+// law failed), `not-run` (it failed, but not in a test that backs a law), `unreadable` (it failed and its log cannot be read).
+export type CiStatus = "unknown" | "passed" | "broken" | "not-run" | "unreadable";
+export type Ci = {
+  status: CiStatus;
+  run_url: string | null;
+  commit: string | null;
+  // A newer run is still going, so this result is for an earlier commit.
+  earlier: boolean;
+  // The parts that own a broken law's test; only with `broken`.
+  parts: string[];
+  laws: string[];
+  tail: string;
+  note: string | null;
+};
+// A tagged test shown by "See the proof": its file and tag line, and the code from the tag on, starting at line `first`.
+export type Proof = { file: string; line: number; test: string | null; first: number; snippet: string };
 
 // Every command the window invokes, with what the shell replies (`src-tauri/src/*.rs`, `#[tauri::command]`): `void` where the
 // window ignores the reply, `null` where the shell may answer none. `invoke` takes only these names, and the snap fixtures
@@ -501,6 +520,7 @@ export interface Commands {
   map_set_tier: UserMap;
   map_know: UserMap;
   map_marks: string[];
+  map_proof: Proof[];
   map_state: MapState;
   mark_unseen: void;
   open: Selection | null;

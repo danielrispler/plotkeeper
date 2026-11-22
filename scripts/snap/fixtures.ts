@@ -3,7 +3,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import type { AgentUsage } from "../../ui/usage.ts";
-import type { GitState, LogEntry, MapState, Session, SessionState, Subagent } from "../../ui/types.ts";
+import type { Ci, GitState, LogEntry, MapState, Session, SessionState, Subagent } from "../../ui/types.ts";
 import { base, type ByArg, type Fixture } from "./base.ts";
 import { railFixtures } from "./rail-fixtures.ts";
 
@@ -244,7 +244,7 @@ const at = (x: number, y: number): [number, number] => [x, y];
 const mapState = (extra: Partial<MapState> = {}): MapState => ({
   project: "/w/plotkeeper", status: "loaded", source: mapFile, reference: "origin/main", commit: "35745b1693c5d061e5aea891e98a58515942a12d", note: null,
   user: { tiers: {}, positions: { core: at(620, 190), understanding: at(980, 290), plugins: at(300, 430), hook: at(580, 430), shell: at(880, 440), window: at(1180, 560), daemon: at(760, 690), workbench: at(480, 650), agents: at(110, 430), writer: at(1400, 190), github: at(250, 650) } },
-  fog: {},
+  fog: {}, ci: null,
   ...extra,
 });
 const homeMarked = (press: boolean): Fixture => ({
@@ -274,7 +274,7 @@ const mapOpened = (check: string, extra: Fixture = {}): Fixture => ({
     ${check}`,
 });
 
-const mapBusy = (jump: boolean): Fixture => {
+const busySessions = () => {
     const touched = (...paths: string[]) => [{ started_at: Date.now() - 600e3, ended_at: null, prompt: "", id: null, message: null, checks: [], listed: [], files: { files: paths.map((path) => ({ root: "/w/plotkeeper", path, from: null, added: 3, removed: 1, agent: null })), merged: 0 } }];
     const agy = { agent: "agy", asks: false, background_tasks: false, replies: false, permission_mode: false, durations: false, transcript_version: false, context: false, turn_trees: false };
     const w = { ...subagent("w1", "Map chips"), kind: "worker" as const };
@@ -288,6 +288,10 @@ const mapBusy = (jump: boolean): Fixture => {
       session("s6", "#313 · Docs", "needs_you", { turns: touched("docs/notes.md") }),
       session("s7", "#55 · Delete default", "your_turn"),
     ];
+    return sessions;
+  };
+const mapBusy = (jump: boolean): Fixture => {
+    const sessions = busySessions();
     const f = mapOpened(`
       const chips = (id) => [...document.querySelectorAll("#map .plate[data-id=" + id + "] .agent-chip")].map((c) => c.textContent);
       await wait(400);
@@ -308,6 +312,60 @@ const mapBusy = (jump: boolean): Fixture => {
     });
     return { ...f, sessions, selected: { session: sessions[6], agent: null } };
   };
+
+// A map whose default branch's CI failed in a test that backs a law of the shell (#312): the red mark beside the Needs you chip, at the
+// size of the busy fixture; `drawer` opens the proof of a law, `log` the broken-law drill-down.
+const brokenCi: Ci = {
+  status: "broken", run_url: "https://github.com/danielrispler/plotkeeper/actions/runs/9", commit: "35745b1693c5d061e5aea891e98a58515942a12d", earlier: false,
+  parts: ["shell"], laws: ["wire-types-agree"], note: null,
+  tail: "        FAIL [   0.013s] (4/4) studio-workbench::wire wire_types_match\n  stderr ───\n\n    thread 'wire_types_match' panicked at workbench/tests/wire.rs:11:25:\n    assertion `left == right` failed: wire drifted\n      left: 1\n     right: 2\n\n────────────\n     Summary [   0.014s] 4 tests run: 3 passed, 1 failed, 0 skipped",
+};
+const mapBroken = (open: "none" | "proof" | "log"): Fixture => {
+  const sessions = busySessions();
+  const opened = {
+    none: "",
+    proof: `document.querySelector("#map .plate[data-id=shell]").click();
+      await wait(300);
+      const see = [...document.querySelectorAll("#map-sheet .sheet-law button")].find((b) => b.textContent === "See the proof");
+      if (!see) return log("snap:fail no See the proof on a check-backed law");
+      if (document.querySelectorAll("#map-sheet .sheet-law button").length !== 1) log("snap:fail See the proof is on a law no check backs");
+      see.click();
+      await wait(300);
+      const code = document.querySelector("#map-drawer .drawer-code");
+      if (!code || !code.textContent.includes("@law: wire-types-agree")) return log("snap:fail the proof drawer does not show the tag");
+      const jumps = [...document.querySelectorAll("#map-drawer .drawer-jump")].map((b) => b.textContent);
+      if (jumps.join() !== "Open in editor") log("snap:fail the proof's jumps are " + jumps);
+      document.dispatchEvent(new KeyboardEvent("keydown", { code: "Escape", key: "Escape", bubbles: true }));
+      await wait(100);
+      if (document.querySelector("#map-drawer .drawer") || !document.querySelector("#map-sheet .sheet")) log("snap:fail the first Esc did not close the drawer alone");
+      see.click();
+      await wait(300);`,
+    log: `document.querySelector("#map .plate[data-id=shell]").click();
+      await wait(300);
+      const drill = [...document.querySelectorAll("#map-sheet .sheet-ci button")].find((b) => b.textContent === "See the CI log");
+      if (!drill) return log("snap:fail no broken-law drill-down");
+      drill.click();
+      await wait(300);
+      if (!document.querySelector("#map-drawer .drawer-code")?.textContent.includes("wire_types_match")) return log("snap:fail the log tail is not shown");
+      const jumps = [...document.querySelectorAll("#map-drawer .drawer-jump")].map((b) => b.textContent);
+      if (jumps.join() !== "Open on GitHub") log("snap:fail the log's jumps are " + jumps);`,
+  }[open];
+  const f = mapOpened(`
+      await wait(400);
+      const marked = [...document.querySelectorAll("#map .plate .law-broken")].map((m) => m.closest(".plate").dataset.id);
+      if (marked.join() !== "shell") log("snap:fail the broken-law mark is on " + marked);
+      if (!document.querySelector("#map .agent-chip.needs-you")) log("snap:fail no needs-you chip beside the mark");
+      const red = getComputedStyle(document.querySelector("#map .plate .law-broken")).backgroundColor;
+      const orange = getComputedStyle(document.querySelector("#map .agent-chip.needs-you")).color;
+      if (red === orange) log("snap:fail the broken mark and Needs you are one colour");
+      ${opened}
+      log("broken " + marked.join());`, {
+    map_state: mapState({ ci: brokenCi }),
+    map_place: { s1: ["core", "window"], "s1/w1": ["shell"], s2: ["hook"], s6: [] },
+    map_proof: [{ file: "workbench/tests/wire.rs", line: 11, test: "wire_types_match", first: 11, snippet: "// @law: wire-types-agree\n#[test]\nfn wire_types_match() {\n    studio_test_support::assert_wire_types_agree();\n}" }],
+  });
+  return { ...f, sessions, selected: { session: sessions[6], agent: null } };
+};
 
 export const fixtures = {
   ...railFixtures,
@@ -639,6 +697,11 @@ export const fixtures = {
   // agy, status-only Codex, ignored-only edits); a Helper and a finished session never show.
   mapBusy: () => mapBusy(false),
   mapChipJump: () => mapBusy(true),
+  // CI on the default branch broke a law (#312): the red mark on the shell next to a Needs you chip; then with "See the proof" open, and
+  // with the broken-law drill-down open.
+  mapBroken: () => mapBroken("none"),
+  mapProof: () => mapBroken("proof"),
+  mapBrokenLog: () => mapBroken("log"),
   // No map on the default branch: the empty state, and "Draft a map" opens New session with the drafting prompt.
   mapEmpty: () =>
     mapOpened(`

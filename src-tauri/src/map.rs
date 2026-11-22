@@ -53,6 +53,8 @@ pub struct MapState {
     pub user: UserState,
     /// How strongly each part shows fog under Daniel's effective tiers (`fog.rs`); a part not listed is clear.
     pub fog: BTreeMap<String, crate::fog::Strength>,
+    /// CI on the default branch, as last read through `gh` (`ci_laws.rs`); none until a read has finished.
+    pub ci: Option<crate::ci_laws::Ci>,
 }
 
 /// Daniel's choices for one project, kept in the data folder: a saved `(x, y)` per part or actor id, and a tier per part id
@@ -116,6 +118,7 @@ pub fn read_map(repo: &Path) -> MapState {
         note: None,
         user: UserState::default(),
         fog: BTreeMap::new(),
+        ci: None,
     };
     let Some((reference, note)) = default_ref(repo) else {
         state.note = Some("this repository has no default branch to read".into());
@@ -266,15 +269,22 @@ fn fetch(fetches: &Fetches, project: &str) -> Fetched {
 }
 
 /// The Map view's payload for `project`. `fetch` asks for `origin` first: when the view opens and when the window gains
-/// focus while it is open, never on a timer; the cooldown and the in-flight lock decide whether it runs.
+/// focus while it is open, never on a timer; the cooldown and the in-flight lock decide whether it runs. The same triggers
+/// read CI on the default branch in the background (`ci_laws::refresh_later`), which tells the window when it has an answer.
 #[tauri::command(async)]
 pub fn map_state(
     project: String,
     fetch: bool,
     fetches: State<Fetches>,
+    cache: State<crate::ci_laws::CiCache>,
+    app: AppHandle,
 ) -> Result<MapState, String> {
     if fetch {
-        self::fetch(&fetches, &project);
+        let fetched = self::fetch(&fetches, &project);
+        // A fetch inside the cooldown asks nothing again, unless nothing was read yet.
+        if fetched != Fetched::Skipped || !cache.has(&project) {
+            crate::ci_laws::refresh_later(&app, &project);
+        }
     }
     let repo = Path::new(&project);
     let file = state_file()?;
@@ -287,6 +297,7 @@ pub fn map_state(
     if let Some(source) = &state.source {
         state.fog = crate::fog::effective(&state.user, source);
     }
+    state.ci = cache.get(&project);
     Ok(state)
 }
 
@@ -296,13 +307,20 @@ pub fn map_know(project: String, part: String) -> Result<UserState, String> {
     crate::fog::clear(&state_file()?, &project, &part)
 }
 
-/// The projects among `projects` that show a fogged Core part, for Home's quiet mark. Reads local refs only.
+/// The projects among `projects` that show a fogged Core part or a broken law, for Home's quiet mark. Reads local refs and the
+/// last CI read only: it asks neither `origin` nor GitHub.
 #[tauri::command(async)]
-pub fn map_marks(projects: Vec<String>) -> Result<Vec<String>, String> {
+pub fn map_marks(
+    projects: Vec<String>,
+    cache: State<crate::ci_laws::CiCache>,
+) -> Result<Vec<String>, String> {
     let file = state_file()?;
     Ok(projects
         .into_iter()
         .filter(|project| {
+            if cache.broken(project) {
+                return true;
+            }
             let repo = Path::new(project);
             let _ = crate::fog::refresh(repo, &file, project, false);
             read_map(repo)
@@ -310,6 +328,12 @@ pub fn map_marks(projects: Vec<String>) -> Result<Vec<String>, String> {
                 .is_some_and(|source| crate::fog::core_fogged(&read_user(&file, project), &source))
         })
         .collect())
+}
+
+/// "See the proof": the tests that back `law` on the default branch, with the code around their `@law:` tag.
+#[tauri::command(async)]
+pub fn map_proof(project: String, law: String) -> Vec<crate::ci_laws::Proof> {
+    crate::ci_laws::proofs(Path::new(&project), &law)
 }
 
 /// Saves the positions of parts or actors, by id; a position that is not a finite number is refused.
@@ -390,6 +414,7 @@ pub fn merged(app: &AppHandle, task_path: &str) {
         return;
     };
     fetch(&app.state::<Fetches>(), &project);
+    crate::ci_laws::refresh_later(app, &project);
     let _ = app.emit("map-landed", project);
 }
 

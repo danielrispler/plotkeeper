@@ -429,7 +429,7 @@ function projectRow({ name, path, fogged }: HomeProject): HTMLElement {
     // One quiet mark, no count; pressing it opens the project's Map view and not the new session the row starts.
     const mark = text("span", "", "fog-mark");
     mark.setAttribute("role", "button");
-    mark.title = "Something you track has changed since you last looked: open the map";
+    mark.title = "Something you track has changed, or a law is broken: open the map";
     mark.addEventListener("click", (event) => {
       event.stopPropagation();
       openMap(path);

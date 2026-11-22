@@ -78,7 +78,7 @@ pub(crate) fn check(root: &Path, map: &Map, files: &[String]) -> (Vec<LawReport>
 /// The id a line tags, when the line is a comment of its own holding only `@law: <id>`.
 /// A comment line starts, after its indentation, with a comment leader (`//`, `///`, `//!`, `#`,
 /// `--`, `/*`, `*`, `<!--`); a closing `*/` or `-->` may follow the id.
-fn tag_id(line: &str) -> Option<&str> {
+pub fn tag_id(line: &str) -> Option<&str> {
     let mut rest = line.trim();
     let leader = ["<!--", "/*", "//", "#", "--", "*"]
         .into_iter()
