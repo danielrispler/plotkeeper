@@ -248,18 +248,33 @@ pub fn refresh(repo: &Path, file: &Path, project: &str, open: bool) -> Result<()
             ));
         }
     }
-    update_user(file, project, |u| {
-        for (commit, strengths) in found {
-            for (part, strength) in strengths {
-                u.fog.parts.entry(part).or_default().push(Entry {
+    update_user(file, project, |u| apply(&mut u.fog, &done, head, found))?;
+    Ok(())
+}
+
+/// Files a finished walk from `done` to `head`, unless the stored walk has moved since (an overlapping refresh filed it first,
+/// or "I know this" cleared in between): then the result is dropped, so nothing is filed twice or brought back.
+fn apply(
+    fog: &mut FogState,
+    done: &str,
+    head: String,
+    found: Vec<(String, BTreeMap<String, Strength>)>,
+) {
+    if fog.processed.as_deref() != Some(done) {
+        return;
+    }
+    for (commit, strengths) in found {
+        for (part, strength) in strengths {
+            let entries = fog.parts.entry(part).or_default();
+            if !entries.iter().any(|e| e.commit == commit) {
+                entries.push(Entry {
                     commit: commit.clone(),
                     strength,
                 });
             }
         }
-        u.fog.processed = Some(head);
-    })?;
-    Ok(())
+    }
+    fog.processed = Some(head);
 }
 
 /// "I know this": clears every entry of `part`.
@@ -542,6 +557,24 @@ mod tests {
         assert_eq!(rig.fog(), strengths(&[("b", Strength::Thin)]));
         rig.commit(&[("a/x", "3")]);
         assert_eq!(rig.fog().len(), 2);
+    }
+
+    #[test]
+    fn an_overlapping_walk_files_nothing_twice_and_does_not_undo_a_clear() {
+        let walk = |commit: &str| vec![(commit.to_string(), strengths(&[("a", Strength::Thin)]))];
+        let mut fog = FogState {
+            processed: Some("d".into()),
+            ..FogState::default()
+        };
+        // Two walks from the same start: the first files, the second finds the walk moved and is dropped.
+        apply(&mut fog, "d", "h".into(), walk("x"));
+        apply(&mut fog, "d", "h".into(), walk("x"));
+        assert_eq!(fog.parts["a"].len(), 1);
+        // "I know this" in between is not brought back by the slower walk.
+        fog.parts.remove("a");
+        apply(&mut fog, "d", "h".into(), walk("x"));
+        assert!(fog.parts.get("a").is_none());
+        assert_eq!(fog.processed.as_deref(), Some("h"));
     }
 
     #[test]
