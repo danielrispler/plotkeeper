@@ -3,7 +3,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import type { AgentUsage } from "../../ui/usage.ts";
-import type { BriefFigure, BriefStep, BriefView, Ci, GitState, LogEntry, MapState, PrBrief, RatifyRow, Session, SessionState, Subagent } from "../../ui/types.ts";
+import type { BriefChapter, BriefFigure, BriefStep, BriefView, Ci, GitState, LogEntry, MapState, PrBrief, RatifyRow, Session, SessionState, Subagent } from "../../ui/types.ts";
 import { base, type ByArg, type Fixture } from "./base.ts";
 import { railFixtures } from "./rail-fixtures.ts";
 
@@ -441,6 +441,62 @@ const mapSheetUnratified = (): Fixture =>
       log("sheet ok");`, {
     map_state: mapState({ ratify: [{ pr: 306, kind: "law", id: "shell-notice" }] }),
   });
+// A chaptered brief (#341): the tray lists one row per chapter, each chapter opens on its own and the overview plays before the first one opened, once.
+const chapterTitles = ["Fog clears by reading", "Broken laws on the map", "The Seen gate"];
+const chapterOf = (i: number, parts: string[]): BriefChapter => ({
+  behaviour: chapterTitles[i], parts, title: chapterTitles[i], flags: [],
+  steps: [
+    step("Before", `${chapterTitles[i]}: how it was`, "Before this change the map showed the fact but said nothing of why it changed.", [parts[0]]),
+    step("Now", `${chapterTitles[i]}: what happens now`, "The Shell works it out and the Window shows it, with a light along the link.", parts, { hops: [["shell-window", false]] }),
+    step("Could break", `${chapterTitles[i]}: what could break`, "A part read on the way in would look clear before it was.", [parts[parts.length - 1]], { risks: [{ part: parts[0], trigger: "A push lands while the brief is open.", check: "Open the brief again." }] }),
+  ],
+});
+const chapteredView = (): BriefView => ({
+  partial: false,
+  brief: {
+    version: 1, pr: 334, head: "b".repeat(40), written_at: 1, stale: false, model: "opus",
+    brief: {
+      title: "The Map view: fog, broken laws and Seen", overview: [step("Where", "The Map view now says what changed and clears itself", "Three behaviours are new: fog that clears by reading, broken laws and the Seen gate.", ["shell", "window", "core"], { hops: [["shell-window", false]] })],
+      chapters: [chapterOf(0, ["shell", "window"]), chapterOf(1, ["core", "shell", "window"]), chapterOf(2, ["window", "shell"])],
+      also: [{ part: "hook", line: "A wording change in a comment.", flags: [] }], unseen: [], decisions: [], flags: [],
+    },
+  },
+});
+const chapteredState = () =>
+  mapState({ fog: { shell: "thick", window: "thin", core: "thin" }, ready: [{ number: 334, title: "The Map view", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: chapterTitles, quiet: false } }] });
+const mapChaptered = (row: number, next: number, check: string): Fixture =>
+  mapOpened(
+    `
+      const media = window.matchMedia.bind(window);
+      window.matchMedia = (query) => (query.includes("prefers-reduced-motion") ? { ...media(query), matches: true } : media(query));
+      const calm = document.createElement("style");
+      calm.textContent = "*, *::before, *::after { transition: none !important; animation: none !important; }";
+      document.head.append(calm);
+      const rows = [...document.querySelectorAll('#map-tray .tray-row[data-pr="334"]')];
+      if (rows.length !== 3) return log("snap:fail expected 3 chapter rows, saw " + rows.length);
+      if (rows.map((r) => r.querySelector(".tray-title").textContent).join("|") !== ${JSON.stringify(chapterTitles.join("|"))}) return log("snap:fail the chapter rows' titles");
+      ${row < 0 ? "" : `rows[${row}].click();
+      await wait(300);
+      if (document.getElementById("map-brief").hidden) return log("snap:fail the chapter did not open");
+      for (let i = 0; i < ${next}; i++) { document.getElementById("brief-next").click(); await wait(150); }
+      await wait(200);`}
+      ${check}
+      log("brief ok");`,
+    { map_state: chapteredState(), pr_brief: chapteredView() },
+  );
+const mapBriefChapters = (): Fixture => mapChaptered(-1, 0, `if (document.querySelector("#map-tray .tray-note").textContent.includes("1 of 3") === false) log("snap:fail the first row's note");`);
+// Chapter 2 opened first carries the overview: its dots are the overview's one step and its own three; Next once lands on its first step.
+const mapBriefChapterMid = (): Fixture =>
+  mapChaptered(1, 2, `
+      if (document.querySelectorAll("#map-brief .brief-dots i").length !== 4) log("snap:fail the first chapter opened should play the overview and its own steps");
+      if (!document.querySelector("#map-brief .brief-title").textContent.includes("Broken laws on the map: what happens now")) log("snap:fail mid-chapter step: " + document.querySelector("#map-brief .brief-title").textContent);
+      if (document.querySelector("#map-brief .brief-also")) log("snap:fail also-touched shows before the last chapter's end");
+      if (document.querySelectorAll(".plate.lit").length < 2) log("snap:fail the chapter's parts are not lit");`);
+// The last chapter's last step ends with the also-touched lines; another chapter, opened second, has no overview.
+const mapBriefChapterLast = (): Fixture =>
+  mapChaptered(2, 3, `
+      if (document.querySelectorAll("#map-brief .brief-dots i").length !== 4) log("snap:fail the last chapter opened first should carry the overview");
+      if (!document.querySelector("#map-brief .brief-also")?.textContent.includes("A wording change in a comment")) log("snap:fail no also-touched line on the last step: " + document.querySelector("#map-brief .brief-title").textContent);`);
 const homeMarked = (press: boolean): Fixture => ({
   ...(fixtures as Record<string, () => Fixture>).home(),
   map_marks: ["/w/plotkeeper"],
@@ -682,6 +738,9 @@ export const fixtures = {
   mapBriefOrderRight,
   mapBriefRatify,
   mapSheetUnratified,
+  mapBriefChapters,
+  mapBriefChapterMid,
+  mapBriefChapterLast,
   recordedTerminal,
   logRunning: () => logFixture("running"),
   logDone: () => logFixture("completed"),

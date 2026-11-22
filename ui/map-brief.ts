@@ -13,8 +13,8 @@ import { closeDrawer, openDrawer } from "./map-drawer.js";
 import { scrubTo } from "./map-history.js";
 import { ratifyActions } from "./map-ratify.js";
 import { ratifyStep, statusWords } from "./ratify.js";
-import { actorSize, briefCamera, briefPlayer, citeDrawer, figureShapes, figureSize, orderRun, type OrderRun, pickRun, type PickRun, playlist, plateSize, type Rect, type Shape, unconfirmed } from "./map-model.js";
-import type { BriefCheck, BriefStep, BriefView, RatifyRow } from "./types.js";
+import { actorSize, alsoAt, briefCamera, briefPlayer, citeDrawer, figureShapes, figureSize, orderRun, type OrderRun, pickRun, type PickRun, playlist, plateSize, type Rect, type Shape, unconfirmed } from "./map-model.js";
+import type { BriefCheck, BriefStep, BriefView, PrBrief, RatifyRow } from "./types.js";
 
 const player = briefPlayer({ scrubbed: () => currentScrub() !== null, backToNow: () => void scrubTo(null).catch(failure("map_at")) });
 // The brief being played, as `pr_brief` returned it.
@@ -99,7 +99,7 @@ export function closeBrief() {
 const steps = (): BriefStep[] => {
   const now = player.current();
   if (!playing || !now) return [];
-  const list = playlist(playing.brief.brief, now.chapter);
+  const list = playlist(playing.brief.brief, now.chapter, now.overview);
   // The ratify step ends the last chapter (the only one of a single story).
   const ratify = now.chapter >= Math.max(0, playing.brief.brief.chapters.length - 1) ? ratifyStep(ratifying.filter((row) => row.status !== "ratified"), [...new Set(list.flatMap((step) => step.on))]) : null;
   return ratify ? [...list, ratify] : list;
@@ -127,9 +127,15 @@ const ends = (view: MapView, [link, backwards]: [string, boolean]): [string, str
   return found ? (backwards ? [found.to, found.from] : [found.from, found.to]) : null;
 };
 
+// The parts the playing chapter's behaviour crosses, which its frame holds even where no step names them.
+const chapterParts = (): string[] => {
+  const now = player.current();
+  return playing && now ? (playing.brief.brief.chapters[now.chapter]?.parts ?? []) : [];
+};
+
 // What a brief frames: the parts its steps light and the ones their hops reach, with room around them.
 function frameOf(view: MapView, list: BriefStep[]): Rect | null {
-  const ids = new Set(list.flatMap((step) => [...step.on, ...step.hops.flatMap((hop) => ends(view, hop) ?? [])]));
+  const ids = new Set([...list.flatMap((step) => [...step.on, ...step.hops.flatMap((hop) => ends(view, hop) ?? [])]), ...chapterParts()]);
   const boxes = [...ids].filter((id) => centre(view, id)).map((id) => ({ at: centre(view, id), size: sizeOf(view, id) }));
   if (!boxes.length) return null;
   return {
@@ -267,9 +273,11 @@ const lawTag = (view: MapView, step: BriefStep) => {
   return law ? text("span", law.backing === "check" ? "law · backed by a check" : "law · on trust", "brief-tag") : null;
 };
 
+const partName = (view: MapView, id: string) => view.doc.parts.find((p) => p.id === id)?.name ?? view.doc.actors.find((a) => a.id === id)?.name ?? id;
+
 // One step's words and figure. The panel around them stays put.
-function stepNode(view: MapView, step: BriefStep, pr: number) {
-  const part = (id: string) => view.doc.parts.find((p) => p.id === id)?.name ?? view.doc.actors.find((a) => a.id === id)?.name ?? id;
+function stepNode(view: MapView, step: BriefStep, pr: number, also: PrBrief["also"] = []) {
+  const part = (id: string) => partName(view, id);
   const words = text("div", "", "brief-txt");
   const kick = text("div", "", "brief-kick");
   kick.append(text("span", `#${pr}`), text("span", step.k));
@@ -285,6 +293,12 @@ function stepNode(view: MapView, step: BriefStep, pr: number) {
     const mark = text("p", "not confirmed from the facts", "brief-quiet brief-unconfirmed");
     mark.title = step.flags.join("\n");
     words.append(mark);
+  }
+  if (also.length) {
+    const lines = text("div", "", "brief-also");
+    lines.append(text("p", "Also touched", "brief-quiet"));
+    for (const item of also) lines.append(text("p", `${partName(view, item.part)}: ${item.line}${item.flags.length ? " (not confirmed from the facts)" : ""}`, "brief-quiet brief-also-line"));
+    words.append(lines);
   }
   if (step.cites.length) {
     const cites = text("details", "", "brief-cites");
@@ -501,7 +515,8 @@ function show(view: MapView, same: boolean) {
   void box.offsetWidth;
   box.classList.add("open");
   const cols = box.querySelector<HTMLElement>(".brief-cols")!;
-  const fill = () => cols.replaceChildren(stepNode(view, step, pr));
+  const also = alsoAt(playing.brief.brief, now.chapter, now.step, list.length);
+  const fill = () => cols.replaceChildren(stepNode(view, step, pr, also));
   clearTimeout(swap);
   if (same || reduced()) {
     fill();
@@ -551,10 +566,11 @@ function buildPanel(view: MapView, list: BriefStep[], pr: number) {
   // One height for the whole brief: its tallest step's.
   box.hidden = false;
   let tallest = 0;
-  for (const step of list) {
-    cols.replaceChildren(stepNode(view, step, pr));
+  const now = player.current();
+  list.forEach((step, i) => {
+    cols.replaceChildren(stepNode(view, step, pr, playing && now ? alsoAt(playing.brief.brief, now.chapter, i, list.length) : []));
     tallest = Math.max(tallest, box.offsetHeight);
-  }
+  });
   box.style.minHeight = `${tallest}px`;
 }
 

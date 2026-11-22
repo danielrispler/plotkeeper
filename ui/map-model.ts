@@ -274,13 +274,20 @@ export function scrollToShow(left: number, right: number, scroll: number, width:
 
 // ---- The PR brief view (spec danielrispler/plotkeeper#334, ticket #339): what `map-brief.ts` draws, as pure logic.
 
-// The steps a brief plays from one tray row: a chapter's own, with the overview before the first chapter's. A single story has one chapter.
-export function playlist(brief: PrBrief, chapter: number): BriefStep[] {
+// The steps a brief plays from one tray row: a chapter's own, with the overview in front when this is the chapter that carries it (`Playing.overview`).
+// A single story has one chapter.
+export function playlist(brief: PrBrief, chapter: number, overview: boolean): BriefStep[] {
   const own = brief.chapters[chapter]?.steps ?? [];
-  return chapter === 0 ? [...brief.overview, ...own] : own;
+  return overview ? [...brief.overview, ...own] : own;
 }
 
-export type Playing = { project: string; pr: number; chapter: number; step: number };
+// The "also touched" lines, which show with the last step of the last chapter.
+export function alsoAt(brief: PrBrief, chapter: number, step: number, length: number): PrBrief["also"] {
+  return chapter === brief.chapters.length - 1 && step === length - 1 ? brief.also : [];
+}
+
+// `overview`: this chapter plays the brief's overview first. It is the first chapter opened, and keeps it until it is finished, so it plays once.
+export type Playing = { project: string; pr: number; chapter: number; step: number; overview: boolean };
 export type Player = {
   current: () => Playing | null;
   open: (project: string, pr: number, chapter: number) => void;
@@ -292,20 +299,30 @@ export type Player = {
 // What plays and where each brief was left. Opening one while the map shows a past commit returns the map to now first.
 export function briefPlayer(deps: { scrubbed: () => boolean; backToNow: () => void }): Player {
   const left = new Map<string, number>();
-  const key = (p: Playing) => `${p.project}|${p.pr}|${p.chapter}`;
+  // Per brief: the chapter that carries the overview (the first opened), and whether it has been played to its end.
+  const carrier = new Map<string, number>();
+  const played = new Set<string>();
+  const briefKey = (p: { project: string; pr: number }) => `${p.project}|${p.pr}`;
+  const key = (p: { project: string; pr: number; chapter: number }) => `${briefKey(p)}|${p.chapter}`;
   let now: Playing | null = null;
   return {
     current: () => now,
     open(project, pr, chapter) {
       if (deps.scrubbed()) deps.backToNow();
       const at = { project, pr, chapter, step: 0 };
-      now = { ...at, step: left.get(key(at)) ?? 0 };
+      const brief = briefKey(at);
+      if (!played.has(brief) && !carrier.has(brief)) carrier.set(brief, chapter);
+      now = { ...at, step: left.get(key(at)) ?? 0, overview: !played.has(brief) && carrier.get(brief) === chapter };
     },
     go(by, length) {
       if (!now) return "moved";
       const to = now.step + by;
       if (to >= length) {
         left.delete(key(now));
+        if (now.overview) {
+          played.add(briefKey(now));
+          carrier.delete(briefKey(now));
+        }
         now = null;
         return "done";
       }
