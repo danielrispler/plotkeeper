@@ -638,7 +638,7 @@ pub fn build_facts(source: &PrSource) -> Result<Facts, String> {
             quiet.push(p.id.clone());
         }
     }
-    fogging.sort_by(|a, b| b.1.cmp(&a.1));
+    fogging.sort_by_key(|a| std::cmp::Reverse(a.1));
     let chapters_mode = fogging.len() > 2;
     let required: Vec<String> = fogging.iter().map(|p| p.0.clone()).collect();
     let all_parts = ids(&mj, "parts");
