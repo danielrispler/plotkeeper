@@ -4,7 +4,7 @@ use std::path::Path;
 
 use serde_json::{Value, json};
 
-use crate::support::{base, has, problems, project, write};
+use crate::common::{base, has, problems, project, write};
 
 fn owned(map: &Value, files: &[&str]) -> Vec<(String, Vec<String>)> {
     let (_dir, root) = project(map, files);

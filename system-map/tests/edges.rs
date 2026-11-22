@@ -4,7 +4,7 @@ use std::{path::Path, process::Command};
 
 use serde_json::{Value, json};
 
-use crate::support::{base, has, project_text, write};
+use crate::common::{base, has, project_text, write};
 
 /// The map `base` makes, naming `extractors` and with `links` instead of its own.
 fn map(extractors: &[&str], links: Value) -> Value {

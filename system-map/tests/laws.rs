@@ -4,7 +4,7 @@ use std::path::Path;
 
 use serde_json::{Value, json};
 
-use crate::support::{FILES, base, has, problems, project, write};
+use crate::common::{FILES, base, has, problems, project, write};
 use studio_test_support::git;
 
 /// A tag line for `id`. The tag's marker is spliced in, so that no line of this file is itself a

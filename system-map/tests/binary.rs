@@ -4,7 +4,7 @@ use std::process::{Command, Output};
 
 use serde_json::Value;
 
-use crate::support::{FILES, base, project};
+use crate::common::{FILES, base, project};
 
 fn run(root: &str, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_system-map"))

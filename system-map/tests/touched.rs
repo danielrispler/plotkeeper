@@ -4,7 +4,7 @@ use std::path::Path;
 
 use serde_json::{Value, json};
 
-use crate::support::{base, project, project_text};
+use crate::common::{base, project, project_text};
 
 fn touched(map: &Value, paths: &[&str]) -> system_map::Touched {
     let (_dir, root) = project(map, &["alpha/a.rs"]);
@@ -109,7 +109,7 @@ mod binary {
 
     use serde_json::Value;
 
-    use crate::support::{base, project, project_text};
+    use crate::common::{base, project, project_text};
 
     fn run(root: &str, args: &[&str], stdin: Option<&str>) -> Output {
         let mut child = Command::new(env!("CARGO_BIN_EXE_system-map"))

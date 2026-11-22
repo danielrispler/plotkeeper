@@ -2,7 +2,7 @@
 
 use serde_json::{Value, json};
 
-use crate::support::{FILES, base, has, problems, project, project_text};
+use crate::common::{FILES, base, has, problems, project, project_text};
 
 fn failing(map: Value) -> Vec<String> {
     let (_dir, root) = project(&map, &FILES);
