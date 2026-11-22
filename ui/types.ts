@@ -454,7 +454,10 @@ export type MapState = {
   commit: string | null;
   note: string | null;
   user: UserMap;
+  // How strongly each part shows fog under Daniel's effective tiers; a part not listed is clear.
+  fog: Record<string, Fog>;
 };
+export type Fog = "thin" | "thick";
 
 // Every command the window invokes, with what the shell replies (`src-tauri/src/*.rs`, `#[tauri::command]`): `void` where the
 // window ignores the reply, `null` where the shell may answer none. `invoke` takes only these names, and the snap fixtures
@@ -495,6 +498,8 @@ export interface Commands {
   key_wrong: void;
   map_save_positions: UserMap;
   map_set_tier: UserMap;
+  map_know: UserMap;
+  map_marks: string[];
   map_state: MapState;
   mark_unseen: void;
   open: Selection | null;

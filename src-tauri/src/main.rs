@@ -37,6 +37,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
 
 mod answer;
+mod fog;
 mod map;
 mod presence;
 mod restart;
@@ -1221,6 +1222,8 @@ fn main() {
             map::map_state,
             map::map_save_positions,
             map::map_set_tier,
+            map::map_know,
+            map::map_marks,
             reveal_log,
             sounds
         ])

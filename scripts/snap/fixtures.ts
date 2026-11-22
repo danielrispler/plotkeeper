@@ -244,7 +244,24 @@ const at = (x: number, y: number): [number, number] => [x, y];
 const mapState = (extra: Partial<MapState> = {}): MapState => ({
   project: "/w/plotkeeper", status: "loaded", source: mapFile, reference: "origin/main", commit: "35745b1693c5d061e5aea891e98a58515942a12d", note: null,
   user: { tiers: {}, positions: { core: at(620, 190), understanding: at(980, 290), plugins: at(300, 430), hook: at(580, 430), shell: at(880, 440), window: at(1180, 560), daemon: at(760, 690), workbench: at(480, 650), agents: at(110, 430), writer: at(1400, 190), github: at(250, 650) } },
+  fog: {},
   ...extra,
+});
+const homeMarked = (press: boolean): Fixture => ({
+  ...(fixtures as Record<string, () => Fixture>).home(),
+  map_marks: ["/w/plotkeeper"],
+  map_state: mapState({ fog: { shell: "thick" } }),
+  snapScript: `
+    const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+    await wait(300);
+    const marks = [...document.querySelectorAll(".pane.home .fog-mark")];
+    if (marks.length !== 1) return log("snap:fail expected one fog mark, saw " + marks.length);
+    if (marks[0].textContent !== "") log("snap:fail the mark carries text, a count?");
+    if (${press}) {
+      marks[0].click();
+      await wait(400);
+      if (document.getElementById("map").hidden) return log("snap:fail the mark did not open the Map view");
+    }`,
 });
 const mapOpened = (check: string, extra: Fixture = {}): Fixture => ({
   ...list(),
@@ -556,6 +573,33 @@ export const fixtures = {
       const map = document.getElementById("map").getBoundingClientRect();
       if (map.right > list.left + 1) log("snap:fail the map overlaps the session list");
       log("plates " + plates + ", marks " + checks + "/" + trusts);`, { map_state: mapState() }),
+  // Home's quiet mark (#310): one row of two carries it, with no count.
+  homeFogMark: (): Fixture => homeMarked(false),
+  // Pressing the mark opens that project's Map view, not the new session its row starts.
+  homeFogMarkOpens: (): Fixture => homeMarked(true),
+  // The busy Map view (#310): thin and thick fog on Core and interface parts, and the part sheet of a thick one open.
+  mapBusy: () =>
+    mapOpened(`
+      const thin = document.querySelectorAll("#map .plate.fog-thin").length;
+      const thick = document.querySelectorAll("#map .plate.fog-thick").length;
+      if (thin !== 2 || thick !== 2) log("snap:fail expected 2 thin and 2 thick plates, saw " + thin + " and " + thick);
+      const name = document.querySelector("#map .plate.fog-thick .plate-name");
+      if (!name || getComputedStyle(name).opacity !== "1") log("snap:fail a fogged part's name is not at full strength");
+      document.querySelector("#map .plate[data-id=shell]").click();
+      await wait(300);
+      const sheet = document.querySelector("#map-sheet .sheet");
+      if (!sheet) return log("snap:fail the sheet did not open");
+      const pressed = [...sheet.querySelectorAll(".sheet-tiers [aria-pressed=true]")].map((b) => b.textContent);
+      if (pressed.join() !== "Core") log("snap:fail the tier pressed is " + pressed);
+      if (sheet.querySelectorAll(".sheet-law").length !== 2) log("snap:fail expected 2 laws on the sheet");
+      if (![...sheet.querySelectorAll("button")].some((b) => b.textContent === "I know this")) log("snap:fail no I know this");
+      document.dispatchEvent(new KeyboardEvent("keydown", { code: "Escape", key: "Escape", bubbles: true }));
+      await wait(100);
+      if (document.querySelector("#map-sheet .sheet")) log("snap:fail the first Esc did not close the sheet");
+      if (document.getElementById("map").hidden) log("snap:fail the first Esc left the Map view");
+      document.querySelector("#map .plate[data-id=shell]").click();
+      await wait(300);
+      log("thin " + thin + ", thick " + thick);`, { map_state: mapState({ fog: { shell: "thick", window: "thick", core: "thin", hook: "thin" } }), map_know: { positions: {}, tiers: {} } }),
   // No map on the default branch: the empty state, and "Draft a map" opens New session with the drafting prompt.
   mapEmpty: () =>
     mapOpened(`

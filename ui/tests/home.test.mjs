@@ -92,9 +92,14 @@ test("one part per kind of landed session, which are not running or needs-you", 
 test("one row per project, named by its folder, in projects.json order", () => {
   const start = view([], undefined, { projects: ["/Users/d/work/plotkeeper", "/Users/d/work/api"] })[0];
   assert.deepEqual(start.projects, [
-    { name: "plotkeeper", path: "/Users/d/work/plotkeeper" },
-    { name: "api", path: "/Users/d/work/api" },
+    { name: "plotkeeper", path: "/Users/d/work/plotkeeper", fogged: false },
+    { name: "api", path: "/Users/d/work/api", fogged: false },
   ]);
+});
+
+test("a project whose map shows a fogged Core part is marked, with no count", () => {
+  const start = homeView([], null, ["/w/a", "/w/b"], fresh(), undefined, new Set(["/w/b"]))[0];
+  assert.deepEqual(start.projects.map((p) => [p.path, p.fogged]), [["/w/a", false], ["/w/b", true]]);
 });
 
 test("Go home has a default key, which keymap.json can rebind", () => {

@@ -15,6 +15,7 @@ import { counts } from "./times.js";
 import { closePane, forgetAsked, redrawHome } from "./panes.js";
 import { hideClearToast, showClearToast } from "./toast.js";
 import { studio } from "./state.js";
+import { openMap } from "./map.js";
 import type { Learning, Session, Tap } from "./types.js";
 
 export type HomeKey = "needs_you" | "running" | "unseen" | "learning" | "landed" | "start";
@@ -40,7 +41,10 @@ export function resetHome(state: HomeState = homeState) {
 
 // Entering Home from another view starts it afresh; drawing it again while it is on screen keeps what Daniel did there.
 export function enterHome(already: boolean, state: HomeState = homeState) {
-  if (!already) resetHome(state);
+  if (!already) {
+    resetHome(state);
+    staleMarks();
+  }
 }
 
 export const MAX_RUNNING = 4;
@@ -56,7 +60,7 @@ export function learningSlot(asked: Learning | null, state: HomeState): Slot | n
   return asked ? { item: asked, next: false } : null;
 }
 
-export function homeView(sessions: Session[], asked: Learning | null, projects: string[], state: HomeState, headline: (s: Session) => string | null = () => null): HomePart[] {
+export function homeView(sessions: Session[], asked: Learning | null, projects: string[], state: HomeState, headline: (s: Session) => string | null = () => null, fogged: Set<string> = new Set()): HomePart[] {
   const allLanded = sessions.filter((s) => showsLanded(s.state, s.landed));
   const landed = allLanded.filter((s) => !state.cleared.has(s.id));
   const needsYou = sessions.filter((s) => s.state === "needs_you");
@@ -78,7 +82,7 @@ export function homeView(sessions: Session[], asked: Learning | null, projects: 
     part("unseen", "Unseen", capped("unseen", unseen, MAX_UNSEEN, (s) => ({ session: s, line: headline(s) ?? "", note: "" }))),
     part("learning", "", { rows: [], more: 0 }, { slot: learningSlot(asked, state) }),
     part("landed", "Landed", plain((s) => ({ session: s, line: "", note: "" }))(landed)),
-    part("start", "Start a session in", { rows: [], more: 0 }, { projects: homeProjects(projects) }),
+    part("start", "Start a session in", { rows: [], more: 0 }, { projects: homeProjects(projects, fogged) }),
   ];
   return parts.filter((p) => p.rows.length || p.slot || p.projects.length);
 }
@@ -348,11 +352,26 @@ export const landedClear = clearing(
   homeState.cleared,
 );
 
-export type HomeProject = { name: string; path: string };
+// `fogged`: a part of its map that Daniel tracks as Core shows fog (#310); Home marks the row quietly, with no count.
+export type HomeProject = { name: string; path: string; fogged: boolean };
 
 // The projects Home offers: one per entry of `projects.json`, in its order.
-export function homeProjects(paths: string[]): HomeProject[] {
-  return paths.map((path) => ({ name: lastSegment(path) || path, path }));
+export function homeProjects(paths: string[], fogged: Set<string> = new Set()): HomeProject[] {
+  return paths.map((path) => ({ name: lastSegment(path) || path, path, fogged: fogged.has(path) }));
+}
+
+// The projects the shell reports with a fogged Core part, read when Home is entered and when the window gains focus, never on a timer.
+const marked = new Set<string>();
+let marksStale = true;
+export const staleMarks = () => void (marksStale = true);
+if (typeof window !== "undefined") window.addEventListener?.("focus", staleMarks);
+async function readMarks(paths: string[], redraw: () => void) {
+  marksStale = false;
+  const now = await invoke("map_marks", { projects: paths });
+  if (now.length === marked.size && now.every((path) => marked.has(path))) return;
+  marked.clear();
+  now.forEach((path) => marked.add(path));
+  redraw();
 }
 
 // Whether a click on `target`, inside the session list, is on its empty space: not on a row, a group
@@ -399,13 +418,24 @@ function moreRow(key: HomeKey, count: number, redraw: () => void): HTMLElement {
   return button;
 }
 
-function projectRow({ name, path }: HomeProject): HTMLElement {
+function projectRow({ name, path, fogged }: HomeProject): HTMLElement {
   const button = pressable(document.createElement("button"), false, () => void startLast(path, "").catch(failure("start", "error")));
   button.dataset.key = `project ${path}`;
   button.classList.add("row");
   button.title = `Start a session in ${path}`;
   const line = text("span", "", "l1");
   line.append(text("span", name, "name"), text("span", "New session", "id"));
+  if (fogged) {
+    // One quiet mark, no count; pressing it opens the project's Map view and not the new session the row starts.
+    const mark = text("span", "", "fog-mark");
+    mark.setAttribute("role", "button");
+    mark.title = "Something you track has changed since you last looked: open the map";
+    mark.addEventListener("click", (event) => {
+      event.stopPropagation();
+      openMap(path);
+    });
+    line.append(mark);
+  }
   button.append(line);
   return button;
 }
@@ -424,7 +454,8 @@ export function drawHome(box: HTMLElement, sessions: Session[], projects: string
     homeState.quiet = false;
     reask();
   }
-  const parts = homeView(sessions, asked, projects, homeState, lastHeadline);
+  if (marksStale && projects.length) readMarks(projects, redraw).catch(failure("map_marks"));
+  const parts = homeView(sessions, asked, projects, homeState, lastHeadline, marked);
   const slot = parts.find((p) => p.key === "learning")?.slot ?? null;
   inSlot = slot && slot.item.kind !== "done" && homeState.held !== slot.item ? slot.item : null;
   const found = foundWorkspaces();

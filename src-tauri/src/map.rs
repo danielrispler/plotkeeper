@@ -51,6 +51,8 @@ pub struct MapState {
     pub note: Option<String>,
     /// Daniel's positions and tiers.
     pub user: UserState,
+    /// How strongly each part shows fog under Daniel's effective tiers (`fog.rs`); a part not listed is clear.
+    pub fog: BTreeMap<String, crate::fog::Strength>,
 }
 
 /// Daniel's choices for one project, kept in the data folder: a saved `(x, y)` per part or actor id, and a tier per part id
@@ -61,9 +63,12 @@ pub struct UserState {
     pub positions: BTreeMap<String, [f64; 2]>,
     #[serde(default)]
     pub tiers: BTreeMap<String, String>,
+    /// What landed on the default branch since Daniel caught up (`fog.rs`).
+    #[serde(default)]
+    pub fog: crate::fog::FogState,
 }
 
-fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
+pub(crate) fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
     let out = Command::new("git")
         .args(args)
         .current_dir(dir)
@@ -110,6 +115,7 @@ pub fn read_map(repo: &Path) -> MapState {
         commit: None,
         note: None,
         user: UserState::default(),
+        fog: BTreeMap::new(),
     };
     let Some((reference, note)) = default_ref(repo) else {
         state.note = Some("this repository has no default branch to read".into());
@@ -270,9 +276,40 @@ pub fn map_state(
     if fetch {
         self::fetch(&fetches, &project);
     }
-    let mut state = read_map(Path::new(&project));
-    state.user = read_user(&state_file()?, &project);
+    let repo = Path::new(&project);
+    let file = state_file()?;
+    // A `fetch` is an open or a focus: the first of them starts the project's fog clear. A quiet read starts nothing.
+    if let Err(why) = crate::fog::refresh(repo, &file, &project, fetch) {
+        log::warn!("map: fog of {project} failed: {why}");
+    }
+    let mut state = read_map(repo);
+    state.user = read_user(&file, &project);
+    if let Some(source) = &state.source {
+        state.fog = crate::fog::effective(&state.user, source);
+    }
     Ok(state)
+}
+
+/// "I know this": clears `part`'s fog.
+#[tauri::command(async)]
+pub fn map_know(project: String, part: String) -> Result<UserState, String> {
+    crate::fog::clear(&state_file()?, &project, &part)
+}
+
+/// The projects among `projects` that show a fogged Core part, for Home's quiet mark. Reads local refs only.
+#[tauri::command(async)]
+pub fn map_marks(projects: Vec<String>) -> Result<Vec<String>, String> {
+    let file = state_file()?;
+    Ok(projects
+        .into_iter()
+        .filter(|project| {
+            let repo = Path::new(project);
+            let _ = crate::fog::refresh(repo, &file, project, false);
+            read_map(repo)
+                .source
+                .is_some_and(|source| crate::fog::core_fogged(&read_user(&file, project), &source))
+        })
+        .collect())
 }
 
 /// Saves the positions of parts or actors, by id; a position that is not a finite number is refused.

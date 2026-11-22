@@ -689,7 +689,37 @@ body.map-open .toasts, body.map-open .toast { visibility: visible !important; }
 .map-empty .empty { max-width: var(--dialog); }
 .map-legend { display: flex; justify-content: flex-end; align-items: center; gap: var(--sp-3); padding: var(--sp-4) var(--map-gutter); font-size: var(--size-xs); color: var(--faint); }
 .map-legend .law-mark { margin-inline: var(--sp-2); }
+/* Fog (#310): a cool-grey mist behind the plate's text, so the name stays at full strength. Thin is the plain halo; thick is the denser
+   halo with a rim and a slow drift, so the two read apart at a glance without a number. "I know this" lifts it. */
+.plate.fog-thin .plate-fog, .plate.fog-thick .plate-fog { inset: calc(-1 * var(--sp-4)); border-radius: var(--sp-7); filter: blur(var(--sp-5)); }
+.plate.fog-thin .plate-fog { background: var(--mist-thin); }
+.plate.fog-thick .plate-fog { background: var(--mist-thick); animation: mist-drift var(--mist-drift) ease-in-out infinite alternate; }
+.plate.fog-thick { box-shadow: inset 0 0 0 var(--hair) var(--mist), var(--shadow); }
+.plate-fog.lifting { animation: mist-lift var(--mist-lift) forwards; }
+@keyframes mist-drift { from { transform: translateX(calc(-1 * var(--sp-2))); } to { transform: translateX(var(--sp-2)); } }
+@keyframes mist-lift { to { opacity: 0; transform: translateY(calc(-1 * var(--sp-6))); } }
+.plate.open { box-shadow: inset 0 0 0 var(--hair) var(--ring-warm), var(--shadow); }
+.mist-swatch { display: inline-block; width: var(--sp-6); height: var(--sp-4); border-radius: var(--sp-4); margin-inline: var(--sp-2); vertical-align: middle; }
+.mist-swatch.thin { background: var(--mist-thin); box-shadow: inset 0 0 0 var(--hair) var(--mist-thin); }
+.mist-swatch.thick { background: var(--mist-thick); box-shadow: inset 0 0 0 var(--hair) var(--mist); }
+/* The part sheet: in the side area, beside the map. */
+.sheet { position: relative; display: flex; flex-direction: column; gap: var(--sp-3); }
+.sheet-close { position: absolute; top: 0; right: 0; }
+.sheet-name { margin: 0; font-size: var(--size-large); font-weight: 600; padding-right: var(--sp-7); }
+.sheet-caption { margin: 0; font-size: var(--size-small); color: var(--muted); }
+.sheet-description { margin: var(--sp-3) 0 0; font-size: var(--size-read); line-height: 1.5; }
+.sheet-heading { margin: var(--sp-5) 0 0; font-size: var(--size-xs); letter-spacing: .12em; text-transform: uppercase; color: var(--faint); font-weight: 500; }
+.sheet-tiers { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+.sheet-laws { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-4); }
+.sheet-law { display: grid; grid-template-columns: auto 1fr; column-gap: var(--sp-4); align-items: baseline; font-size: var(--size-small); }
+.sheet-law-backing { grid-column: 2; font-size: var(--size-xs); color: var(--faint); }
+.sheet-law-actions { grid-column: 2; }
+.sheet-fog { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-3); }
+.sheet-fog-line { margin: 0; font-size: var(--size-small); color: var(--muted); }
+.sheet-fog.thin .sheet-fog-line, .sheet-fog.thick .sheet-fog-line { color: var(--mist); }
+.fog-mark { display: inline-block; flex: none; width: var(--sp-4); height: var(--sp-4); margin-inline-start: auto; border-radius: 50%; background: var(--mist); cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
   .plate, .btn { transition: none; }
+  .plate-fog, .plate-fog.lifting { animation: none; }
 }
 .map-empty .primary { background: var(--selected); }

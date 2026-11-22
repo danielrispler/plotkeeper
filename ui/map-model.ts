@@ -1,6 +1,8 @@
 // The Map view's pure logic (spec danielrispler/plotkeeper#306, ticket #309): the map file as the window reads it, where parts
 // are placed, the drag threshold, the link's rim points and the layered Esc. `map.ts` draws and wires them.
 
+import type { Fog } from "./types.js";
+
 export type Tier = "core" | "interface" | "black-box";
 export type Point = { x: number; y: number };
 export type Size = { w: number; h: number };
@@ -125,3 +127,39 @@ export function escapeMap(layers: Partial<Record<LayerName, Layer>>): LayerName 
 export const draftPrompt =
   "Draft system-map.json at this repository's root, in plain words: its parts, each with the files it owns, the outside actors, the links between them, " +
   "the files that belong to no part on purpose, and the laws that must stay true. Run `system-map check` and fix what it reports until it passes.";
+
+// The part sheet (ticket #310) as data: what `map-sheet.ts` draws for one part.
+export const tierLabel: Record<Tier, string> = { core: "Core", interface: "Interface-only", "black-box": "Black box" };
+export type Sheet = {
+  name: string;
+  caption: string;
+  description: string;
+  tier: Tier;
+  // The three tiers in a fixed order, the effective one pressed. Never a hint to lower one.
+  tiers: { tier: Tier; label: string; pressed: boolean }[];
+  laws: { id: string; text: string; backing: Law["backing"]; label: string }[];
+  fogLine: string;
+  // "I know this" shows only while the part shows fog.
+  canClear: boolean;
+};
+export function sheetOf(part: Part, laws: Law[], tier: Tier, fog: Fog | undefined): Sheet {
+  const fogLine = fog === "thick"
+    ? "Its laws, links or flows changed since you last looked"
+    : fog === "thin"
+      ? "Files in this part changed since you last looked"
+      : tier === "black-box"
+        ? "A black box part never fogs"
+        : tier === "interface"
+          ? "Fogs only when its laws, links or flows change"
+          : "Clear: nothing has changed since you last looked";
+  return {
+    name: part.name,
+    caption: part.caption,
+    description: part.description,
+    tier,
+    tiers: tiers.map((each) => ({ tier: each, label: tierLabel[each], pressed: each === tier })),
+    laws: laws.filter((law) => law.on === part.id).map((law) => ({ id: law.id, text: law.text, backing: law.backing, label: law.backing === "check" ? "Backed by a check" : "On trust" })),
+    fogLine,
+    canClear: fog !== undefined,
+  };
+}

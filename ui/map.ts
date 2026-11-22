@@ -85,6 +85,9 @@ export function openMap(path: string | null) {
   if (path !== null) load(path, true).catch(failure("map"));
 }
 
+// Reads the map again, for a change the view itself made (a tier, "I know this"); the payload decides whether it draws.
+export const reloadMap = () => (project === null ? Promise.resolve() : load(project, false));
+
 // Leaves the Map view; what was under it shows again. No-op when it is not showing.
 export function leaveMap() {
   if (!mapShown()) return;
@@ -249,7 +252,9 @@ function drawMap(body: HTMLElement, state: MapState, doc: LoadedMap) {
 
   for (const part of doc.parts) {
     const tier = effectiveTier(part, state.user.tiers);
-    const plate = text("div", "", `plate tier-${tier}`);
+    // Fog under Daniel's effective tier, as the shell worked it out (`fog.rs`); a part not listed is clear.
+    const mist = state.fog?.[part.id];
+    const plate = text("div", "", `plate tier-${tier}${mist ? ` fog-${mist}` : ""}`);
     plate.dataset.id = part.id;
     const [fog, marks, chips] = [text("div", "", "plate-fog"), text("div", "", "plate-marks"), text("div", "", "plate-chips")];
     marks.append(...doc.laws.filter((law) => law.on === part.id).map(lawMark));
@@ -342,6 +347,9 @@ export function startMap(given: MapDeps) {
   element("map-legend").append(
     lawMark({ id: "", on: "", backing: "check", text: "a test stands behind it" }), " law, backed by a check ",
     lawMark({ id: "", on: "", backing: "trust", text: "nothing checks it" }), " law, on trust",
+  );
+  element("map-legend").append(
+    " ", text("span", "", "mist-swatch thin"), " fog, files changed ", text("span", "", "mist-swatch thick"), " fog, laws, links or flows changed",
   );
   // Never on a timer: the focus and a merge, while the view is open.
   window.addEventListener("focus", () => {

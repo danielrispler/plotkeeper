@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import {
-  actorSize, autoPlace, draftPrompt, dragMove, dragStart, dragThreshold, effectiveTier, escapeMap, layerOrder, mapProject, parseMap, plateSize, rimPoint,
+  actorSize, autoPlace, draftPrompt, dragMove, dragStart, dragThreshold, effectiveTier, escapeMap, layerOrder, mapProject, parseMap, plateSize, rimPoint, sheetOf,
 } from "../../dist/map-model.js";
 
 const part = (id, extra = {}) => ({ id, name: id, caption: "", description: "", tier: "core", paths: [], ...extra });
@@ -131,4 +131,33 @@ test("the plate's size here is the stylesheet's, so rim points land on the drawn
 test("Draft a map's prompt names the map file and the command that checks it", () => {
   assert.match(draftPrompt, /system-map\.json/);
   assert.match(draftPrompt, /system-map check/);
+});
+
+test("a part's sheet names it, lists its laws by backing, and offers the three tiers with the effective one pressed", () => {
+  const laws = [
+    { id: "l1", on: "core", backing: "check", text: "Reads no file." },
+    { id: "l2", on: "core", backing: "trust", text: "Applies in order." },
+    { id: "l3", on: "hook", backing: "check", text: "Not this part's." },
+  ];
+  const sheet = sheetOf(part("core", { name: "Core", caption: "Events to state", description: "Plain Rust." }), laws, "interface", undefined);
+  assert.deepEqual([sheet.name, sheet.caption, sheet.description], ["Core", "Events to state", "Plain Rust."]);
+  assert.deepEqual(sheet.tiers, [
+    { tier: "core", label: "Core", pressed: false },
+    { tier: "interface", label: "Interface-only", pressed: true },
+    { tier: "black-box", label: "Black box", pressed: false },
+  ]);
+  assert.deepEqual(sheet.laws.map((l) => [l.id, l.label]), [["l1", "Backed by a check"], ["l2", "On trust"]]);
+});
+
+test("a sheet says how the part's fog stands and offers I know this only while it shows fog", () => {
+  const core = part("core");
+  const line = (tier, fog) => sheetOf(core, [], tier, fog);
+  assert.equal(line("core", undefined).canClear, false);
+  assert.match(line("core", undefined).fogLine, /^Clear/);
+  assert.equal(line("core", "thin").canClear, true);
+  assert.match(line("core", "thin").fogLine, /files/i);
+  assert.match(line("core", "thick").fogLine, /laws, links or flows/);
+  assert.notEqual(line("core", "thin").fogLine, line("core", "thick").fogLine);
+  assert.match(line("black-box", undefined).fogLine, /never/i);
+  assert.match(line("interface", undefined).fogLine, /only when/i);
 });
