@@ -682,6 +682,9 @@ impl CiCache {
             .collect();
         let write = || -> Result<(), String> {
             let text = serde_json::to_string(&finished).map_err(|e| e.to_string())?;
+            if let Some(dir) = file.parent() {
+                std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+            }
             let tmp = file.with_extension("json.tmp");
             std::fs::write(&tmp, text).map_err(|e| e.to_string())?;
             std::fs::rename(&tmp, file).map_err(|e| e.to_string())
@@ -1128,6 +1131,15 @@ mod tests {
         assert!(older.broken("/a") && !older.has("/b"));
         std::fs::write(&file, "not json").unwrap();
         assert!(!CiCache::load(file).has("/a"));
+    }
+
+    #[test]
+    fn the_last_result_is_kept_in_a_data_folder_that_does_not_exist_yet() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("fresh").join("ci-last.json");
+        let cache = CiCache::load(file.clone());
+        assert!(cache.put("/p", ci(Status::Broken, &["shell"])));
+        assert!(CiCache::load(file).broken("/p"));
     }
 
     #[test]
