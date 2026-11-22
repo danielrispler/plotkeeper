@@ -7,6 +7,7 @@ import { homeView } from "../../dist/home.js";
 import { initial } from "../../dist/settings.js";
 import { windowBinding } from "../../dist/keys.js";
 import { listSpace } from "../../dist/home.js";
+import { recheckSeen } from "../../dist/seen.js";
 
 const key = (code, k, mods = {}) => ({ key: k, code, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...mods });
 
@@ -149,18 +150,14 @@ test("an item answered here stays with its reveal, and Next shows only when anot
   assert.equal(slotOf(retest("b", quiz), null).next, false);
 });
 
-test("shown is due only with Home active, the window visible and focused, and the Retest on screen", async () => {
+test("shown is due once per item, and never for a Retest that has it", async () => {
   const { shownDue } = await import("../../dist/home.js");
   const item = retest("s1", quiz);
-  assert.equal(shownDue(item, true, true, true), true);
-  assert.equal(shownDue(item, false, true, true), false);
-  assert.equal(shownDue(item, true, false, true), false);
-  assert.equal(shownDue(item, true, true, false), false);
-  assert.equal(shownDue(null, true, true, true), false);
-  assert.equal(shownDue({ kind: "done" }, true, true, true), false);
-  // A fresh Quiz counts too, once.
-  assert.equal(shownDue({ kind: "fresh", id: "t9", session_id: "s", quiz }, true, true, true), true);
-  assert.equal(shownDue(retest("s2", quiz, [{ kind: "shown", at: 1 }]), true, true, true), false);
+  assert.equal(shownDue(item), true);
+  assert.equal(shownDue(null), false);
+  // A fresh Quiz counts too.
+  assert.equal(shownDue({ kind: "fresh", id: "t9", session_id: "s", quiz }), true);
+  assert.equal(shownDue(retest("s2", quiz, [{ kind: "shown", at: 1 }])), false);
 });
 
 test("entering Home from another view starts it afresh, and drawing it again while on it keeps a reveal and the expanded groups", async () => {
@@ -183,31 +180,56 @@ test("the newest request wins: a slower, older reply is dropped", async () => {
   assert.deepEqual([await a, await b], [undefined, "newer"]);
 });
 
-test("building the slot writes nothing; shown is written once, when its conditions hold, for a Retest and a fresh Quiz", async () => {
+test("building the slot writes nothing; shown is written once the card is seen, in a focused window with Home open", async () => {
+  const { mock } = await import("node:test");
+  const observers = [];
+  globalThis.IntersectionObserver = class {
+    constructor(run) {
+      this.run = run;
+      observers.push(this);
+    }
+    observe() {}
+    disconnect() {}
+  };
+  const scrollTo = (ratio, viewport) =>
+    observers.at(-1).run([{ intersectionRatio: ratio, intersectionRect: { width: 100, height: viewport * 100 }, rootBounds: { width: 100, height: 100 } }]);
   const calls = [];
   tauri(calls);
-  globalThis.document = fakeDocument({ visibilityState: "hidden", hasFocus: () => true }, Field);
-  const { slotNode, drawHome, markLearningShown } = await import("../../dist/home.js");
-  const quiz = { text: "q", key: 0, options: [{ text: "A", why: "a" }] };
+  globalThis.document = fakeDocument({ visibilityState: "visible", hasFocus: () => true }, Field);
+  mock.timers.enable({ apis: ["setTimeout"] });
+  const { slotNode, drawHome, watchLearningShown } = await import("../../dist/home.js");
+  let home = true;
   const items = [{ ...retest("w1", quiz) }, { kind: "fresh", id: "t5", session_id: "s", quiz }];
   for (const item of items) {
     calls.length = 0;
-    document.visibilityState = "hidden";
     slotNode({ item, next: false }, () => {}, () => {});
-    assert.deepEqual(calls, []);
     const box = new Field("div");
+    box.querySelector = () => null;
     drawHome(box, [], [], item);
-    // The window is hidden: the background mount wrote nothing.
     assert.deepEqual(calls, []);
-    markLearningShown(true);
+    const node = new Field("div");
+    watchLearningShown(node, item, () => home);
+    // Built but off screen, and then seen with Home closed or the window unfocused: nothing.
+    mock.timers.tick(5000);
     assert.deepEqual(calls, []);
-    document.visibilityState = "visible";
-    markLearningShown(false);
+    scrollTo(1, 1);
+    home = false;
+    mock.timers.tick(5000);
     assert.deepEqual(calls, []);
-    markLearningShown(true);
-    markLearningShown(true);
+    home = true;
+    document.hasFocus = () => false;
+    mock.timers.tick(5000);
+    assert.deepEqual(calls, []);
+    document.hasFocus = () => true;
+    // Back in a focused window with Home open: written once, however often Home is drawn again.
+    recheckSeen();
+    watchLearningShown(node, item, () => home);
+    mock.timers.tick(5000);
+    watchLearningShown(node, item, () => home);
+    mock.timers.tick(5000);
     assert.deepEqual(calls, [["quiz_tap", { id: item.id, tap: { kind: "shown" } }]], item.kind);
   }
+  mock.timers.reset();
 });
 
 // The slot's card (#242): the options, then "Not sure" and "Not now" inside it; a pick writes the confidence tap first.

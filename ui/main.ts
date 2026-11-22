@@ -24,7 +24,7 @@ import { startMapAgents } from "./map-agents.js";
 import { showSessions } from "./list.js";
 import { goHome, select, show, toggleHome } from "./selection.js";
 import { dragPanel, placePanel, togglePanel } from "./panel.js";
-import { dragSplit, focusPane, markHomeShown, placePanes, runDoctor, showHistory, split, startPanes, toggleSplit } from "./panes.js";
+import { dragSplit, focusPane, placePanes, runDoctor, showHistory, split, startPanes, toggleSplit } from "./panes.js";
 import { showAddProject, showBranches, showPalette, showPicker } from "./picker.js";
 import { fetchNow, foundWorkspaces, projectOfCwd, pullAll, selectedProject, showWorkspaces, sidebarOrder, watchWorkspaces } from "./workspaces.js";
 import { reload, reloadedZoom, type SettingsFiles, zoomed } from "./settings.js";
@@ -333,8 +333,6 @@ element("rail-actions").addEventListener("click", () => element("rail-actions").
 document.addEventListener("visibilitychange", recheckSeen);
 window.addEventListener("focus", recheckSeen);
 window.addEventListener("blur", recheckSeen);
-document.addEventListener("visibilitychange", markHomeShown);
-window.addEventListener("focus", markHomeShown);
 window.addEventListener("focus", () => actions["studio::RefreshLanded"]());
 
 // A login shell in the configured repository, then a pane per session terminal (danielrispler/Falinks#467).

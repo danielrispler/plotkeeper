@@ -14,7 +14,7 @@ import type * as Xterm from "@xterm/xterm";
 import { connect, list, onEvent, request, type Listed } from "./daemon.js";
 import { diffRequest, drawDiff, keepsDiff } from "./diff.js";
 import { drawHistory } from "./history.js";
-import { drawHome, enterHome, landedClear, markLearningShown } from "./home.js";
+import { drawHome, enterHome, landedClear } from "./home.js";
 import { element, failure, fullTitle, invoke, listen, newest, pressable, text } from "./dom.js";
 import { onProjects, projects } from "./projects.js";
 import { followLog, showLog, showMissing } from "./log.js";
@@ -224,9 +224,6 @@ export function refreshHome() {
   void readLearning();
   redrawHome();
 }
-
-// Writes the slot's `shown` when the window turns visible or focused with Home on screen.
-export const markHomeShown = () => markLearningShown(shown === HOME);
 
 // Draws Home again when the list changed under it.
 export function redrawHome() {

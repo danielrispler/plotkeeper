@@ -103,7 +103,7 @@ export function slotLabel(item: Learning, session: Pick<Session, "name" | "ident
 }
 
 // The slot's card: the Quiz of the item the store chose, which records its taps as a Retest's, with "Not now" until it is answered
-// and a quiet "Next" after an answer when another item is due. It writes nothing as it is built: `markLearningShown` writes `shown`.
+// and a quiet "Next" after an answer when another item is due. It writes nothing as it is built: `watchLearningShown` writes `shown` once the card is seen.
 export function slotNode(slot: Slot, redraw: () => void, reask: () => void): HTMLElement {
   const { item } = slot;
   const wrap = document.createElement("div");
@@ -206,23 +206,40 @@ function answerCode(item: Learning): HTMLElement[] {
   return out;
 }
 
-// The item the last draw put in the slot, unanswered, whose `shown` is still to be written.
-let inSlot: Learning | null = null;
+// The item the last draw put in the slot, unanswered, whose `shown` is still to be written, and the watch that waits for it to be seen.
+type Asked = Exclude<Learning, { kind: "done" }>;
+let inSlot: Asked | null = null;
 const shownWritten = new Set<string>();
+let slotWatch: { id: string; node: Element; stop: () => void } | null = null;
 
-// Whether the item's first showing is written now (#240): the item is on screen in the slot, Home is the active view and the
-// window is visible and focused. Once per item.
-export function shownDue(item: Learning | null, home: boolean, visible: boolean, focused: boolean): boolean {
-  if (!item || item.kind === "done" || !home || !visible || !focused) return false;
+// Whether the item's first showing is still to be written (#240): once per item, and never for a Retest that has it.
+export function shownDue(item: Asked | null): boolean {
+  if (!item) return false;
   return !shownWritten.has(item.id) && !(item.kind === "retest" && item.taps.some((t) => t.kind === "shown"));
 }
 
-// Writes the slot's `shown` when its conditions hold; called when Home is drawn and when the window becomes visible or focused.
-export function markLearningShown(home: boolean) {
-  if (!shownDue(inSlot, home, document.visibilityState === "visible", document.hasFocus())) return;
-  const id = (inSlot as { id: string }).id;
-  shownWritten.add(id);
-  void invoke("quiz_tap", { id, tap: { kind: "shown" } }).catch(failure("quiz_tap"));
+// Writes the slot's `shown` once its card is seen (the shared Seen, #306): in the viewport of a visible, focused window with Home
+// open (`active`), not merely built. Watches the card as it is on screen; a redraw that keeps the card keeps its watch.
+export function watchLearningShown(node: Element | null, item: Asked | null, active: () => boolean) {
+  if (slotWatch && (!node || !item || slotWatch.id !== item.id || slotWatch.node !== node)) {
+    slotWatch.stop();
+    slotWatch = null;
+  }
+  if (!node || !item || !shownDue(item) || slotWatch) return;
+  const id = item.id;
+  slotWatch = {
+    id,
+    node,
+    stop: watchSeen(node, {
+      active,
+      onSeen: () => {
+        slotWatch = null;
+        if (!shownDue(item)) return;
+        shownWritten.add(id);
+        void invoke("quiz_tap", { id, tap: { kind: "shown" } }).catch(failure("quiz_tap"));
+      },
+    }),
+  };
 }
 
 // Tells that a turn ended: a session has a turn whose end is later than what was seen of that session (for one new to the list, than the
@@ -513,5 +530,5 @@ export function drawHome(box: HTMLElement, sessions: Session[], projects: string
         }), "review")]
       : []),
   ]);
-  markLearningShown(true);
+  watchLearningShown(inSlot ? box.querySelector(`[data-key="learning ${inSlot.id}"]`) : null, inSlot, homeShown);
 }
