@@ -589,7 +589,7 @@ mod tests {
         // "I know this" in between is not brought back by the slower walk.
         fog.parts.remove("a");
         apply(&mut fog, "d", "h".into(), walk("x"));
-        assert!(fog.parts.get("a").is_none());
+        assert!(!fog.parts.contains_key("a"));
         assert_eq!(fog.processed.as_deref(), Some("h"));
     }
 
