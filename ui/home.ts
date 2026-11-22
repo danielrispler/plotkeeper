@@ -12,10 +12,12 @@ import { hunkFiles } from "./ask.js";
 import { codeTarget, followToCode } from "./selection.js";
 import { startLast } from "./picker.js";
 import { counts } from "./times.js";
-import { closePane, forgetAsked, redrawHome } from "./panes.js";
+import { closePane, forgetAsked, homeShown, redrawHome } from "./panes.js";
 import { hideClearToast, showClearToast } from "./toast.js";
 import { studio } from "./state.js";
-import { openMap } from "./map.js";
+import { mapShown, openMap } from "./map.js";
+import { watchSeen } from "./seen.js";
+import { logStop, onHome, reviewNode, reviewOf, type Module } from "./stop-rules.js";
 import type { Learning, Session, Tap } from "./types.js";
 
 export type HomeKey = "needs_you" | "running" | "unseen" | "learning" | "landed" | "start";
@@ -368,10 +370,25 @@ if (typeof window !== "undefined") window.addEventListener?.("focus", staleMarks
 async function readMarks(paths: string[], redraw: () => void) {
   marksStale = false;
   const now = await invoke("map_marks", { projects: paths });
-  if (now.length === marked.size && now.every((path) => marked.has(path))) return;
+  const review = await readReviews(paths);
+  const same = now.length === marked.size && now.every((path) => marked.has(path));
+  if (same && !review) return;
   marked.clear();
   now.forEach((path) => marked.add(path));
   redraw();
+}
+
+// The one-time review on Home (#314): only for the projects whose Map view fell below its threshold, so an unused map still reaches
+// Daniel. It lists that project's unused modules, never a count. Read with the marks, when Home is entered and on focus.
+let homeReview: { modules: Module[]; projects: string[] } | null = null;
+async function readReviews(paths: string[]): Promise<boolean> {
+  const found: Record<string, Module[] | null> = {};
+  await Promise.all(paths.map(async (path) => void (found[path] = await reviewOf(path).catch(() => null))));
+  const projects = onHome(found);
+  const next = projects.length ? { modules: found[projects[0]]!, projects } : null;
+  const changed = JSON.stringify(next) !== JSON.stringify(homeReview);
+  homeReview = next;
+  return changed;
 }
 
 // Whether a click on `target`, inside the session list, is on its empty space: not on a row, a group
@@ -418,6 +435,9 @@ function moreRow(key: HomeKey, count: number, redraw: () => void): HTMLElement {
   return button;
 }
 
+// The stop of each project mark's watch, so a redraw replaces the watch of the mark it replaced.
+const marksSeen = new Map<string, () => void>();
+
 function projectRow({ name, path, fogged }: HomeProject): HTMLElement {
   const button = pressable(document.createElement("button"), false, () => void startLast(path, "").catch(failure("start", "error")));
   button.dataset.key = `project ${path}`;
@@ -430,6 +450,9 @@ function projectRow({ name, path, fogged }: HomeProject): HTMLElement {
     const mark = text("span", "", "fog-mark");
     mark.setAttribute("role", "button");
     mark.title = "Something you track has changed, or a law is broken: open the map";
+    // The mark counts as seen when it is in view in a focused window with Home open (the shared Seen), once a day is logged.
+    marksSeen.get(path)?.();
+    marksSeen.set(path, watchSeen(mark, { active: () => homeShown() && !mapShown(), onSeen: () => logStop("mark-seen", path) }));
     mark.addEventListener("click", (event) => {
       event.stopPropagation();
       openMap(path);
@@ -483,6 +506,12 @@ export function drawHome(box: HTMLElement, sessions: Session[], projects: string
     keyed(text("h1", new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" }), "title"), "title"),
     ...(parts.some((p) => p.key === "needs_you") ? [] : [keyed(text("p", "Nothing needs you", "empty"), "none")]),
     ...parts.flatMap(drawPart),
+    ...(homeReview
+      ? [keyed(reviewNode(homeReview.modules, homeReview.projects, () => {
+          homeReview = null;
+          redraw();
+        }), "review")]
+      : []),
   ]);
   markLearningShown(true);
 }

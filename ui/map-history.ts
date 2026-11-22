@@ -6,6 +6,7 @@
 // `scrubTo` is the one place a scrub happens (on the shell side, the `map_at` command): a ticket that records that Daniel looked back
 // hooks there.
 
+import { logStop } from "./stop-rules.js";
 import { failure, invoke, text } from "./dom.js";
 import { currentMap, currentScrub, onDraw, registerLayer, setScrub, type MapView } from "./map.js";
 import { closeDrawer, openDrawer } from "./map-drawer.js";
@@ -24,6 +25,7 @@ export async function scrubTo(commit: string | null) {
   const at = await invoke("map_at", { project: view.project, commit });
   // The view may have moved on while git read.
   if (currentMap()?.project !== view.project) return;
+  logStop("scrub", view.project);
   setScrub({ commit: at.commit, short: at.short, label: at.label, source: at.source });
 }
 

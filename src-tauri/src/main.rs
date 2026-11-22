@@ -45,6 +45,7 @@ mod presence;
 mod restart;
 mod settings;
 mod skills;
+mod stop_rules;
 mod terminal;
 
 /// The card store, which the log thread adds to and the pane records guesses in.
@@ -1232,6 +1233,9 @@ fn main() {
             map::map_marks,
             map::map_proof,
             map::map_place,
+            stop_rules::stop_log,
+            stop_rules::stop_facts,
+            stop_rules::stop_dismiss,
             reveal_log,
             sounds
         ])

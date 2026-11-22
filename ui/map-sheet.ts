@@ -6,6 +6,7 @@
 // `.sheet-extra` at the foot holds the history strip (`map-history.ts`, #313). While a past commit is shown the sheet is read-only:
 // no tier change, no proof, no CI section, no fog section.
 
+import { logStop } from "./stop-rules.js";
 import { failure, invoke, pressable, text } from "./dom.js";
 import { currentMap, onDraw, onPlateClick, reloadMap, registerLayer, syncSide, type MapView } from "./map.js";
 import { openDrawer } from "./map-drawer.js";
@@ -27,6 +28,7 @@ const lifted = (node: HTMLElement) =>
 
 async function know(view: MapView, part: string) {
   await invoke("map_know", { project: view.project, part });
+  logStop("know", view.project);
   const mist = view.slots.canvas.querySelector<HTMLElement>(`.plate[data-id="${CSS.escape(part)}"] .plate-fog`);
   if (mist) {
     mist.classList.add("lifting");

@@ -529,6 +529,9 @@ export interface Commands {
   map_at: HistoricalMap;
   map_commit: CommitFiles;
   map_marks: string[];
+  stop_log: null;
+  stop_facts: StopFacts;
+  stop_dismiss: null;
   map_proof: Proof[];
   map_state: MapState;
   mark_unseen: void;
@@ -582,3 +585,17 @@ export interface Commands {
   workspaces: Workspaces;
 }
 export type Command = keyof Commands;
+
+// What the shell counted of Daniel's use (`stop_rules.rs`), for the one-time review: days, merged PRs and the uses of each module.
+export type StopKind = "session" | "map-open" | "mark-seen" | "scrub" | "proof" | "know";
+export type StopFacts = {
+  active_days: number;
+  merged_prs: number;
+  map_days: number;
+  mark_days: number;
+  map_on_mark_days: number;
+  scrubs: number;
+  proofs: number;
+  knows: number;
+  dismissed: boolean;
+};

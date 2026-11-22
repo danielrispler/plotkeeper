@@ -2,6 +2,7 @@
 // by shape (danielrispler/Falinks#572), each session's subagents nested under it. When the window is narrow it collapses to
 // a strip of glyphs and labels, which opens the full list on hover, on click or on ⌘1.
 
+import { logStop } from "./stop-rules.js";
 import { age, element, fullTitle, invoke, patch, prose, pressable, stepText, text } from "./dom.js";
 import { counts, times, type Time } from "./times.js";
 import { shortPaths } from "./paths.js";
@@ -580,6 +581,7 @@ export function drawSidebar() {
 // (danielrispler/Falinks#572).
 export function showSessions(sessions: Session[]) {
   studio.listed = sessions;
+  if (sessions.length) logStop("session");
   void refreshAgents();
   redrawHome();
   redrawHistory();

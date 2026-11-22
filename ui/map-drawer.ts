@@ -6,6 +6,7 @@
 // do, and the history strip's commit drill-down (#313) opens its files and diff the same way. A redraw of the map keeps it open; a
 // different project's map closes it.
 
+import { logStop } from "./stop-rules.js";
 import { failure, invoke, text } from "./dom.js";
 import { currentMap, onDraw, registerLayer, syncSide, type MapView } from "./map.js";
 import type { Drawer, Jump } from "./map-model.js";
@@ -18,6 +19,7 @@ export function openDrawer(drawer: Drawer) {
   const view = currentMap();
   if (!view) return;
   open = { project: view.project, drawer };
+  logStop("proof", view.project);
   drawDrawer(view);
 }
 

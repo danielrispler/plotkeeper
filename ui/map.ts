@@ -11,6 +11,7 @@
 // - `registerLayer(name, layer)`: Esc's layers, `scrubbed`, `drawer` and `sheet`, peeled in that order before the view is left.
 // - `MapState` (`types.ts`, `map.rs`) is the one payload; `currentMap()` gives the view as drawn.
 
+import { logStop, reviewNode, reviewOf } from "./stop-rules.js";
 import { element, failure, invoke, listen, newest, pressable, text } from "./dom.js";
 import {
   actorSize, autoPlace, brokenParts, brokenText, draftPrompt, dragMove, dragStart, effectiveTier, escapeMap, type Actor, type Drag, type Law, type Layer, type LayerName,
@@ -94,7 +95,22 @@ export function openMap(path: string | null) {
   document.body.classList.add("map-open");
   element("map").hidden = false;
   draw();
-  if (path !== null) load(path, true).catch(failure("map"));
+  if (path !== null) {
+    logStop("map-open", path);
+    showReview(path).catch(failure("stop_facts"));
+    load(path, true).catch(failure("map"));
+  }
+}
+
+// The quiet one-time review, under the head, when it is due for `path` and not dismissed (read when the view opens, never on a timer).
+async function showReview(path: string) {
+  const box = element("map-review");
+  box.hidden = true;
+  box.replaceChildren();
+  const modules = await reviewOf(path);
+  if (!modules?.length || path !== project || !mapShown()) return;
+  box.replaceChildren(reviewNode(modules, [path], () => (box.hidden = true)));
+  box.hidden = false;
 }
 
 // Reads the map again, for a change the view itself made (a tier, "I know this"); the payload decides whether it draws.
