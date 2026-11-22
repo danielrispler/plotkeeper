@@ -91,15 +91,14 @@ pub fn parse_failures(log: &str) -> Vec<Failure> {
                 .trim_start()
                 .strip_prefix("- ");
             if let Some(title) = title {
-                open_tap = Some(found.len());
-                push(
+                open_tap = Some(push(
                     &mut found,
                     Failure {
                         name: title.trim().to_string(),
                         binary: None,
                         file: None,
                     },
-                );
+                ));
             }
         } else if let Some(rest) = text.strip_prefix("location: ") {
             if let Some(at) = open_tap.take() {
@@ -120,14 +119,16 @@ pub fn parse_failures(log: &str) -> Vec<Failure> {
                 .find(|f| f.binary.is_none() && f.name == name)
             {
                 Some(again) => again.file = again.file.take().or(file),
-                None => push(
-                    &mut found,
-                    Failure {
-                        name: name.to_string(),
-                        binary: None,
-                        file,
-                    },
-                ),
+                None => {
+                    push(
+                        &mut found,
+                        Failure {
+                            name: name.to_string(),
+                            binary: None,
+                            file,
+                        },
+                    );
+                }
             }
         } else if let Some(failure) = nextest_failure(text) {
             push(&mut found, failure);
@@ -136,10 +137,13 @@ pub fn parse_failures(log: &str) -> Vec<Failure> {
     found
 }
 
-fn push(found: &mut Vec<Failure>, failure: Failure) {
-    if !found.contains(&failure) {
-        found.push(failure);
+/// Adds `failure` unless it is there already; the index it has in `found` either way.
+fn push(found: &mut Vec<Failure>, failure: Failure) -> usize {
+    if let Some(at) = found.iter().position(|f| *f == failure) {
+        return at;
     }
+    found.push(failure);
+    found.len() - 1
 }
 
 /// `'/a/b.mjs:5:1'` or `a/b.mjs:5:1`: the file.
@@ -777,6 +781,13 @@ mod tests {
             Some("/Users/runner/work/plotkeeper/plotkeeper/ui/tests/t.test.mjs")
         );
         assert_eq!(found[0].binary, None);
+    }
+
+    #[test]
+    fn a_tap_failure_titled_like_an_earlier_one_does_not_panic_on_its_location() {
+        let log = "not ok 1 - dup\nnot ok 2 - dup\n  location: 'ui/tests/a.test.mjs:5:1'\n";
+        let found = parse_failures(log);
+        assert_eq!(names(&found), ["dup"]);
     }
 
     #[test]
