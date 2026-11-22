@@ -61,7 +61,7 @@
     { "id": "workbench-github", "from": "workbench", "to": "github" }
   ],
   "ignored": [
-    ".claude/", ".github/", ".gitignore", "AGENTS.md", "CLAUDE.md", "Cargo.lock", "Cargo.toml", "LICENSE",
+    ".agents/", ".claude/", ".github/", ".gitignore", "AGENTS.md", "CLAUDE.md", "Cargo.lock", "Cargo.toml", "LICENSE",
     "README.md", "package-lock.json", "package.json", "real-calls.sh", "rust-toolchain.toml", "tsconfig.json",
     "system-map.json",
     "docs/", "scripts/", "terminal-spike/", "v0-spike/",
