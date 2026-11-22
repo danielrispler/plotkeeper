@@ -40,6 +40,12 @@ fn run() -> Result<ExitCode, String> {
         for problem in &report.problems {
             println!("{problem}");
         }
+        for edge in &report.unlinked {
+            println!(
+                "note: {} depends on {} and no link says so; add a link if the map is missing one",
+                edge.from, edge.to
+            );
+        }
     }
     Ok(if report.problems.is_empty() {
         ExitCode::SUCCESS
