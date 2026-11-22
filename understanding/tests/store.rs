@@ -2033,7 +2033,7 @@ fn judging_keeps_the_note_with_the_time_without_holding_the_store_and_a_failure_
         writer
     };
 
-    judge(&notes, &writer, &asks[0], 7_000, |line| panic!("{line}"));
+    judge(&notes, &writer, &asks[0], || 7_000, |line| panic!("{line}"));
 
     assert_eq!(writer.judged(), [(PUSH.to_string(), REPO.to_string())]);
     assert!(free.load(std::sync::atomic::Ordering::SeqCst));
@@ -2060,7 +2060,7 @@ fn judging_keeps_the_note_with_the_time_without_holding_the_store_and_a_failure_
         bare.risk = answer;
         let mut lines = Vec::new();
 
-        judge(&notes, &bare, &ask, 8_000, |line| lines.push(line));
+        judge(&notes, &bare, &ask, || 8_000, |line| lines.push(line));
 
         let [line] = &lines[..] else {
             panic!("one line: {lines:?}");
@@ -2074,6 +2074,37 @@ fn judging_keeps_the_note_with_the_time_without_holding_the_store_and_a_failure_
             }]
         );
     }
+}
+
+#[test]
+fn a_note_is_kept_with_the_time_the_judge_answered_not_the_time_it_started() {
+    let dir = tempfile::tempdir().unwrap();
+    let notes = Mutex::new(RiskNotes::open(dir.path().join("risk-notes.json")).unwrap());
+    let session = push_blocked();
+    let ask = notes.lock().unwrap().asks(&session).remove(0);
+    // The clock reads 1_000 when the judge starts and 5_000 when the writer returns.
+    let clock = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(1_000));
+    let mut writer = Scripted::fake();
+    writer.risk = {
+        let clock = clock.clone();
+        Answer::run(move |_| {
+            clock.store(5_000, std::sync::atomic::Ordering::SeqCst);
+            Some(Ok(r#"{"level": "high", "line": "Pushes."}"#.into()))
+        })
+    };
+
+    judge(
+        &notes,
+        &writer,
+        &ask,
+        || clock.load(std::sync::atomic::Ordering::SeqCst),
+        |line| panic!("{line}"),
+    );
+
+    assert_eq!(
+        notes.lock().unwrap().views(&session),
+        [arrived("toolu_1", RiskLevel::High, "Pushes.", 5_000)]
+    );
 }
 
 #[test]

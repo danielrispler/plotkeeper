@@ -292,16 +292,18 @@ impl RiskNotes {
     }
 }
 
-/// Asks `writer` for the note `ask` wants and keeps what it answers at `at`, with `notes` not locked while it runs, which
+/// Asks `writer` for the note `ask` wants and keeps what it answers at `now()`, read after the writer returns, so that the note's time is
+/// when it arrived and not when the judge started, with `notes` not locked while it runs, which
 /// takes seconds. A failure is one line for `log`, with nothing of the command in it.
 pub fn judge(
     notes: &Mutex<RiskNotes>,
     writer: &(impl CardWriter + ?Sized),
     ask: &RiskRequest,
-    at: u64,
+    now: impl FnOnce() -> u64,
     mut log: impl FnMut(String),
 ) {
     let outcome = writer.risk(&ask.command, &ask.cwd);
+    let at = now();
     if let Err(line) = &outcome {
         log(format!("no risk note on {}: {line}", ask.session));
     }

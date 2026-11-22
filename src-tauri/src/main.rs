@@ -444,7 +444,7 @@ fn ask_notes(app: &AppHandle, asks: Vec<RiskRequest>) {
     for ask in asks {
         let notes: Notes = app.state::<Notes>().inner().clone();
         let writer: Writer = app.state::<Writer>().inner().clone();
-        thread::spawn(move || judge(&notes, &*writer, &ask, millis(), report));
+        thread::spawn(move || judge(&notes, &*writer, &ask, millis, report));
     }
 }
 
