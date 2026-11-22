@@ -14,8 +14,8 @@ import { rendered } from "./markdown.js";
 import { encode, request } from "./daemon.js";
 import { agentState, sessionName, showsLanded } from "./list.js";
 import { closePane, openHere, refreshHome } from "./panes.js";
-import { openDecision, type Ask } from "./answer.js";
-import { blockedElement, typeRetry } from "./blocked.js";
+import { blockedRequestFor, openDecision, type Ask } from "./answer.js";
+import { blockedElement, docksInDock, typeRetry } from "./blocked.js";
 import { beginFeed, briefNodes, cardLine, cardsFor, endFeed, markShown, openCard, quizOpen, rowCards, unseenRow } from "./cards.js";
 import { type Banner, bannerElement, bannerFor, bannerLives } from "./banner.js";
 import { quizAllowed, quizAnswered, quizItem, quizRegion, seedQuiz, trialOn } from "./quiz.js";
@@ -136,7 +136,7 @@ export function showView(selected: Selection | null) {
   showIntention(storyOf(session, agent));
   showQuestions(
     reports(session, "asks") ? session.questions.filter((question) => question.agent === (agent?.id ?? null)) : [],
-    blockedCards(session, agent),
+    dockedCards(session, agent),
   );
   showCleared(agent === null ? session.cleared : []);
   // A subagent's view has no intention of its own: its written summary takes that line (danielrispler/Falinks#535).
@@ -284,7 +284,8 @@ export const storyOf = (session: Session, agent: unknown) => (agent === null && 
 
 // What the rail draws for `selected`: its latest turn, which "now" tells, and the feed. Every card is inside its turn. A status-only row
 // (danielrispler/Falinks#560) has no turns or cards to show.
-export function railOf({ session, agent }: Selection, all: StoredCard[], placed: PlacedCard[] = []) {
+// `fed`: the blocked commands the dock does not hold, which the feed places (danielrispler/plotkeeper#297).
+export function railOf({ session, agent }: Selection, all: StoredCard[], placed: PlacedCard[] = [], fed: BlockedCommand[] = []) {
   if (session.status_only) return { latest: null, blocks: [] };
   const cards = all;
   const own = agent === null;
@@ -295,6 +296,7 @@ export function railOf({ session, agent }: Selection, all: StoredCard[], placed:
     // A subagent's view: its session's subagents are not its own.
     agents: own ? session.agents : [],
     questions: session.questions.filter((question) => question.agent === agent),
+    blocked: fed,
   });
   return { latest: own ? (turns.at(-1) ?? null) : null, blocks };
 }
@@ -317,6 +319,8 @@ export type FeedTurn = {
   cards: StoredCard[];
   agents: Subagent[];
   questions: Question[];
+  // The blocked commands with no button, in the turn of their latest step (danielrispler/plotkeeper#297).
+  blocked: BlockedCommand[];
 };
 
 // The feed (danielrispler/Falinks#574): one block per turn, newest first, each holding the cards written in it (by their
@@ -324,13 +328,14 @@ export type FeedTurn = {
 // one last block, so nothing is lost.
 export function feedTurns(
   turns: Turn[],
-  { cards, placed = [], agents, questions }: Pick<FeedTurn, "cards" | "agents" | "questions"> & { placed?: PlacedCard[] },
+  { cards, placed = [], agents, questions, blocked = [] }: Pick<FeedTurn, "cards" | "agents" | "questions"> & { placed?: PlacedCard[]; blocked?: BlockedCommand[] },
 ): FeedTurn[] {
   const blocks: FeedTurn[] = [...turns.map((turn, index) => ({ index, turn })), { index: null, turn: null }].map((b) => ({
     ...b,
     cards: [],
     agents: [],
     questions: [],
+    blocked: [],
   }));
   const at = (index: number | null) => blocks[index !== null && index < turns.length ? index : turns.length];
   // Each list is oldest first; the blocks show the newest first.
@@ -343,8 +348,10 @@ export function feedTurns(
   }
   for (const agent of [...agents].sort((a, b) => b.started_at - a.started_at)) at(agent.turn).agents.push(agent);
   for (const question of [...questions].reverse()) at(question.turn).questions.push(question);
+  // A blocked command's card is in the turn running when its retry started, else when it was blocked.
+  for (const card of [...blocked].reverse()) at(turnAt(turns, card.run_at ?? card.at)).blocked.push(card);
   const rest = blocks.pop()!;
-  const empty = !rest.cards.length && !rest.agents.length && !rest.questions.length;
+  const empty = !rest.cards.length && !rest.agents.length && !rest.questions.length && !rest.blocked.length;
   return [...blocks.reverse(), ...(empty ? [] : [rest])];
 }
 
@@ -516,6 +523,7 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
   const cardTurn = index !== null && turn?.files ? { session: session.id, index, files: turn.files.files, ended: turn.ended_at !== null } : null;
   node.append(...cards.map((card) => cardLine(card, cardTurn, trial)));
   node.append(...block.questions.filter((q) => q.answer === "not_answered").map(questionElement));
+  node.append(...blockedElements(session, block.blocked));
   if (block.agents.length) {
     const list = document.createElement("ol");
     list.className = "subagents";
@@ -640,7 +648,7 @@ export function drawFeed() {
   beginFeed();
   const session = selected.session;
   const own = selected.agent === null;
-  const { latest, blocks } = railOf(selected, all, workers);
+  const { latest, blocks } = railOf(selected, all, workers, fedCards(session, selected.agent));
   const now = drawNow(session, latest);
   // The banner sits above the newest turn, and holds the Brief while it shows.
   const last = session.turns.at(-1);
@@ -770,10 +778,19 @@ function typeRetryLine(session: Session, card: BlockedCommand, agent: string | n
   }, answered).catch(failure("type retry", "error"));
 }
 
-// The session's blocked commands as cards, in block order: its own view shows them all, naming a subagent's, and a
-// subagent's view only its own (danielrispler/plotkeeper#170).
-function blockedCards(session: Session, agent: Subagent | null): HTMLElement[] {
-  const cards = (session.blocked_commands ?? []).filter((card) => agent === null || card.agent === agent.id);
+// The session's blocked commands the view shows, in block order: its own view shows them all, and a subagent's view
+// only its own (danielrispler/plotkeeper#170), less the declined, which have no card.
+const viewed = (session: Session, agent: string | null) =>
+  (session.blocked_commands ?? []).filter((card) => card.status !== "declined" && (agent === null || card.agent === agent));
+
+// The cards the dock holds: those that show a button (danielrispler/plotkeeper#297).
+const docks = (card: BlockedCommand) => docksInDock(card, blockedRequestFor(card.call) !== null);
+const dockedCards = (session: Session, agent: Subagent | null) => blockedElements(session, viewed(session, agent?.id ?? null).filter(docks));
+// The cards the feed places, neutral: those with no button.
+const fedCards = (session: Session, agent: string | null) => viewed(session, agent).filter((card) => !docks(card));
+
+// `cards` drawn, each naming the subagent that asked.
+function blockedElements(session: Session, cards: BlockedCommand[]): HTMLElement[] {
   const named = (id: string | null) => (id === null ? null : (session.agents.find((a) => a.id === id)?.name ?? id.slice(0, 5)));
   const retry = (card: BlockedCommand) => typeRetryLine(session, card, named(card.agent));
   return cards.flatMap((card) => blockedElement(session.resume_id || session.id, card, named(card.agent), retry) ?? []);

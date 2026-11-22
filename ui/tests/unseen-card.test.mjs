@@ -18,7 +18,7 @@ const stored = (id, title, shown_at = null) => ({
 });
 const turn = { id: null, prompt: "Fix it", message: "Done.", checks: [], started_at: 1, ended_at: 5, files: null };
 const rows = (cards) => {
-  const node = foldedTurn({ id: "s" }, { index: 0, turn, cards, checks: [], agents: [], questions: [] });
+  const node = foldedTurn({ id: "s" }, { index: 0, turn, cards, checks: [], agents: [], questions: [], blocked: [] });
   return node.find("details").filter((d) => d.className.includes("unseen-card"));
 };
 

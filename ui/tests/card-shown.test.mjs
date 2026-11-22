@@ -34,7 +34,7 @@ const stored = (id, title, quiz = null) => ({
 });
 const session = { id: "s", cwd: "/w", state: "idle", capabilities: { turn_trees: true, agent: "claude" }, transcript: { responses: [] }, turns: [], checks: [], agents: [], questions: [] };
 const turn = { id: null, prompt: "Fix it", message: "Done.", checks: [], started_at: 1, ended_at: 5, files: null };
-const block = (cards) => ({ index: 0, turn, cards, checks: [], agents: [], questions: [] });
+const block = (cards) => ({ index: 0, turn, cards, checks: [], agents: [], questions: [], blocked: [] });
 const shown = () => calls.filter(([c]) => c === "shown").flatMap(([, a]) => a.ids);
 beforeEach(() => {
   calls.length = 0;
