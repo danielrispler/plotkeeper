@@ -3713,7 +3713,7 @@ impl Studio {
 
     /// After the replay, the turns that ended inside `catch_up`'s window before `now` with a change between the hook's
     /// trees and no card among `cards` (danielrispler/Falinks#486), the newest `catch_up.max` of them, newest first.
-    /// Each is returned once.
+    /// Call it once, at start.
     pub fn backfill(
         &mut self,
         now: u64,
@@ -3728,6 +3728,8 @@ impl Studio {
         found.sort_by_key(|b| std::cmp::Reverse(card_time(&b.request.id)));
         // Outside the window or the cap, a turn waits for Daniel to open it ([`Studio::backfill_on_open`]).
         rest.extend(found.split_off(catch_up.max.min(found.len())));
+        // The ones asked now stay too: a card write that fails at start is asked again at the opening.
+        rest.extend(found.iter().cloned());
         self.ended = rest;
         found
     }

@@ -280,3 +280,14 @@ fn a_turn_opened_without_a_card_keeps_waiting_for_the_next_opening() {
     assert_eq!(first.map(|b| b.request.id), Some(id.clone()));
     assert_eq!(second.map(|b| b.request.id), Some(id));
 }
+
+/// A card asked at start can fail (logged out): its turn, inside the window, keeps waiting for the opening.
+#[test]
+fn a_turn_asked_at_start_is_asked_again_when_opened() {
+    let at = NOW - 1000;
+    let id = format!("{SESSION}@{at}");
+    let mut studio = Studio::replayed(&turn("p1", at, "t1", "t2"));
+    assert_eq!(studio.backfill(NOW, &[], CatchUp::default()).len(), 1);
+
+    assert_eq!(studio.backfill_on_open(&id).map(|b| b.request.id), Some(id));
+}
