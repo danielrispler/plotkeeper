@@ -432,7 +432,7 @@ const chapteredView = (): BriefView => ({
   },
 });
 const chapteredState = () =>
-  mapState({ fog: { shell: "thick", window: "thin", core: "thin" }, ready: [{ number: 334, title: "The Map view", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: chapterTitles } }] });
+  mapState({ fog: { shell: "thick", window: "thin", core: "thin" }, ready: [{ number: 334, title: "The Map view", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: chapterTitles, quiet: false } }] });
 const mapChaptered = (row: number, next: number, check: string): Fixture =>
   mapOpened(
     `
