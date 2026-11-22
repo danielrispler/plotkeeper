@@ -46,9 +46,11 @@ fn an_idle_sessions_next_event_brings_it_back() {
     assert_eq!(state(&reminded, PROBE), Some(Idle));
 
     let mut prompted = idle();
-    prompted.apply(&event(PROBE, "UserPromptSubmit", later + 1).to_string());
+    let mut prompt = event(PROBE, "UserPromptSubmit", later + 1);
+    prompt["studio_pid"] = 4001.into();
+    prompted.apply(&prompt.to_string());
     assert_eq!(state(&prompted, PROBE), Some(Running));
-    // A running session never goes idle.
+    // A running session with a process to watch never goes idle (one with none does: `ending.rs`).
     prompted.tick(later + 5 * HOUR);
     assert_eq!(state(&prompted, PROBE), Some(Running));
 }

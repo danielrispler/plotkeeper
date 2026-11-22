@@ -122,7 +122,7 @@ fn every_command_is_the_inline_wrapper_for_all_six_events() {
     for c in commands {
         assert_eq!(
             c,
-            r#"p=$(cat); (printf %s "$p" | "__STUDIO_HOOK__" >/dev/null 2>&1 &) ; exit 0"#
+            r#"p=$(cat); (printf %s "$p" | STUDIO_AGENT_PID=$PPID "__STUDIO_HOOK__" >/dev/null 2>&1 &) ; exit 0"#
         );
     }
     assert!(text.matches("\"timeout\"").count() == 6);
@@ -155,6 +155,27 @@ fn script(dir: &Path, body: &str) -> PathBuf {
     fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
     fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
     path
+}
+
+#[test]
+fn the_wrapper_passes_agys_pid_to_the_hook() {
+    // The hook runs from a backgrounded subshell, so its own parent is not agy; the wrapper's parent
+    // is, here this test (#330).
+    let tmp = tempfile::tempdir().unwrap();
+    let seen = tmp.path().join("pid");
+    let hook = script(
+        tmp.path(),
+        &format!("echo \"$STUDIO_AGENT_PID\" > {}", seen.display()),
+    );
+    wrapper(&hook, "{}");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !seen.exists() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(
+        fs::read_to_string(&seen).unwrap().trim(),
+        std::process::id().to_string()
+    );
 }
 
 #[test]

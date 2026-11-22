@@ -31,6 +31,12 @@ fn append() -> Result<(), Box<dyn Error>> {
     if let Ok(terminal) = terminal {
         event.insert("studio_terminal_id".into(), terminal.into());
     }
+    // The agent's process, so the studio ends a session whose agent is gone (#330).
+    let wrapper = env::var("STUDIO_AGENT_PID").ok();
+    let parent = std::os::unix::process::parent_id();
+    if let Some(pid) = studio_hook::agent_pid(wrapper.as_deref(), parent, studio_hook::inspect) {
+        event.insert("studio_pid".into(), pid.into());
+    }
     event.insert("studio_received_ms".into(), received_ms.into());
     let home = env::home_dir().ok_or("no home directory")?;
     // The old data folder moves before anything is created in the new one (#322).
