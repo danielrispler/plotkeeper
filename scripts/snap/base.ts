@@ -51,7 +51,7 @@ export const base = {
   map_commit: { commit: "", short: "", label: "", url: null, files: [] },
   map_marks: [],
   stop_log: null,
-  stop_facts: { active_days: 0, merged_prs: 0, map_days: 0, mark_days: 0, map_on_mark_days: 0, scrubs: 0, proofs: 0, knows: 0, dismissed: true },
+  stop_facts: { active_days: 0, merged_prs: 0, map_days: 0, mark_days: 0, map_on_mark_days: 0, scrubs: 0, proofs: 0, knows: 0, dismissed: true, briefs_offered: 0, briefs_opened: 0, chapters_done: 0 },
   stop_dismiss: null,
   map_proof: [],
   map_state: { project: "/w/plotkeeper", status: "none", source: null, reference: "origin/main", commit: null, note: null, user: { positions: {}, tiers: {} }, fog: {}, ci: null, ready: [], ratify: [] },
