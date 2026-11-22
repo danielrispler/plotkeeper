@@ -2,7 +2,7 @@
 
 The studio's projects, the main checkouts Home and Workspaces list, are an ordered list in `projects.json` beside them (#93). With no file, the first launch creates it with one entry, `repository` below, else this checkout; after that the file decides, and `repository` is the starting project only.
 
-`settings.json` and `keymap.json` sit in the studio's data folder, `~/Library/Application Support/dev.falinks.studio/`, in Zed's format: JSON with comments and trailing commas (danielrispler/Falinks#524). The app reloads them when either is saved. A file that does not parse is reported in the notice line, and the last good one stays in effect. Missing keys keep their defaults; a key of the wrong type is reported in the same line and keeps its default.
+`settings.json` and `keymap.json` sit in the studio's data folder, `~/Library/Application Support/plotkeeper/`, in Zed's format: JSON with comments and trailing commas (danielrispler/Falinks#524). The app reloads them when either is saved. A file that does not parse is reported in the notice line, and the last good one stays in effect. Missing keys keep their defaults; a key of the wrong type is reported in the same line and keeps its default.
 
 ## The settings page
 

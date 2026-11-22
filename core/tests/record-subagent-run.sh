@@ -10,7 +10,7 @@
 set -eu
 
 studio=$(cd "$(dirname "$0")/../.." && pwd)
-log="$HOME/Library/Application Support/dev.falinks.studio/events.jsonl"
+log="$HOME/Library/Application Support/plotkeeper/events.jsonl"
 session=$(uuidgen | tr '[:upper:]' '[:lower:]')
 repo=$(mktemp -d)
 trap 'rm -rf "$repo"' EXIT
