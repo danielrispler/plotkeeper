@@ -460,7 +460,12 @@ export type MapState = {
   ci: Ci | null;
   // The PRs ready for review (open, not a draft), as last asked (`prs.rs`); the Map view's tray lists them.
   ready: ReadyPr[];
+  // The map items the part sheet says are not yet ratified (`ratify.rs`).
+  ratify: PendingItem[];
 };
+// Ratifying (`ratify.rs`): an item of a PR is a map change (kind part, actor, link, law or flow) or a decision the agent declared.
+export type PendingItem = { pr: number; kind: string; id: string };
+export type RatifyRow = { pr: number; kind: string; id: string; text: string; change: string; status: "ratified" | "accepted" | "overturned" | "not-yet" };
 // What a ready PR's brief is doing (`pr_briefs.rs`): a newer head was pushed (stale), being written now, and the chapters' titles, or the one story's.
 export type BriefInfo = { stale: boolean; writing: boolean; chapters: string[]; quiet: boolean };
 export type ReadyPr = { number: number; title: string; head: string; brief: BriefInfo | null };
@@ -562,6 +567,8 @@ export interface Commands {
   map_state: MapState;
   pr_brief: BriefView | null;
   briefs_waiting: WaitingBriefs | null;
+  pr_ratify: RatifyRow[];
+  ratify_set: void;
   mark_unseen: void;
   open: Selection | null;
   open_file: void;

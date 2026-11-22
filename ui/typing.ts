@@ -40,8 +40,8 @@ export interface TypingIo {
 // Types `text` into terminal `id` as a bracketed paste, then Enter 200 ms later, once Daniel has
 // no draft there and has not pressed a key for 3 s. It never types while `blocked`, the session
 // needing him, since the text would answer its dialog, nor over a draft still there after 60 s:
-// either shows a notice instead. Returns whether it typed.
-export async function typeInto(id: string, text: string, blocked: () => boolean, io: TypingIo): Promise<boolean> {
+// either shows a notice instead. Returns whether it typed. Without `enter` it stages the text in the prompt and never presses Enter.
+export async function typeInto(id: string, text: string, blocked: () => boolean, io: TypingIo, enter = true): Promise<boolean> {
   const until = io.now() + WAIT_MS;
   for (;;) {
     if (blocked()) {
@@ -57,6 +57,7 @@ export async function typeInto(id: string, text: string, blocked: () => boolean,
     await io.sleep(POLL_MS);
   }
   await io.send(`\x1b[200~${text}\x1b[201~`);
+  if (!enter) return true;
   await io.sleep(ENTER_AFTER_MS);
   // It may have asked in the gap, and Enter would answer it.
   if (blocked()) {

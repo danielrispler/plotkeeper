@@ -3,7 +3,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import type { AgentUsage } from "../../ui/usage.ts";
-import type { BriefFigure, BriefStep, BriefView, Ci, GitState, LogEntry, MapState, PrBrief, Session, SessionState, Subagent } from "../../ui/types.ts";
+import type { BriefFigure, BriefStep, BriefView, Ci, GitState, LogEntry, MapState, PrBrief, RatifyRow, Session, SessionState, Subagent } from "../../ui/types.ts";
 import { base, type ByArg, type Fixture } from "./base.ts";
 import { railFixtures } from "./rail-fixtures.ts";
 
@@ -244,7 +244,7 @@ const at = (x: number, y: number): [number, number] => [x, y];
 const mapState = (extra: Partial<MapState> = {}): MapState => ({
   project: "/w/plotkeeper", status: "loaded", source: mapFile, reference: "origin/main", commit: "35745b1693c5d061e5aea891e98a58515942a12d", note: null,
   user: { tiers: {}, positions: { core: at(620, 190), understanding: at(980, 290), plugins: at(300, 430), hook: at(580, 430), shell: at(880, 440), window: at(1180, 560), daemon: at(760, 690), workbench: at(480, 650), agents: at(110, 430), writer: at(1400, 190), github: at(250, 650) } },
-  fog: {}, ci: null, ready: [],
+  fog: {}, ci: null, ready: [], ratify: [],
   ...extra,
 });
 // The Ready for review tray (#336) with two ready PRs, at the Map view's foot.
@@ -288,7 +288,7 @@ const briefOf = (steps: BriefStep[], partial = false, extra: Partial<PrBrief> = 
 });
 // Opens the brief from the tray, goes `next` steps on, and checks the panel and the map.
 // Chrome runs a snap for about 2 s of virtual time after the page loads and what is left unrun is silent, so a `quick` brief waits the least it can.
-const mapBrief = (view: BriefView, next: number, check = "", quick = false): Fixture =>
+const mapBrief = (view: BriefView, next: number, check = "", quick = false, pause = 500): Fixture =>
   mapOpened(
     `
       // Chrome's virtual time stalls animations: the brief plays as it does under reduced motion, whose end state is the one to review.
@@ -303,8 +303,8 @@ const mapBrief = (view: BriefView, next: number, check = "", quick = false): Fix
       await wait(${quick ? 300 : 500});
       const panel = document.getElementById("map-brief");
       if (panel.hidden || !panel.classList.contains("open")) return log("snap:fail the brief did not open");
-      for (let i = 0; i < ${next}; i++) { document.getElementById("brief-next").click(); await wait(${quick ? 200 : 500}); }
-      await wait(${quick ? 200 : 1800});
+      for (let i = 0; i < ${next}; i++) { document.getElementById("brief-next").click(); await wait(${quick ? 200 : pause}); }
+      await wait(${quick ? 200 : pause * 3});
       if (!document.querySelector(".map-world.briefing")) log("snap:fail the map is not in the brief's light");
       if (!document.querySelector(".plate.lit")) log("snap:fail no part is lit");
       if (!document.querySelector(".map-world").style.transform.includes("scale")) log("snap:fail the camera did not frame the parts");
@@ -410,6 +410,37 @@ const mapBriefOrderRight = (): Fixture =>
       next.click();
       await wait(300);
       if (!document.querySelector("#map-brief .brief-title").textContent.includes("A ready PR now brings")) log("snap:fail the chapter did not follow the overview");`);
+// The brief's ratify step (#343): a changed law and a link, and the agent's two decisions, one already accepted.
+const ratifyRows: RatifyRow[] = [
+  { pr: 334, kind: "law", id: "window-quiet", text: "Only needs-you has colour.", change: "changed", status: "not-yet" },
+  { pr: 334, kind: "link", id: "shell-understanding", text: "Shell to Understanding", change: "added", status: "not-yet" },
+  { pr: 334, kind: "decision", id: "d1", text: "A brief is stored per project, since PR numbers repeat across repositories.", change: "", status: "not-yet" },
+  { pr: 334, kind: "decision", id: "d2", text: "A merged PR's brief is read as stored, never rewritten.", change: "", status: "accepted" },
+];
+const mapBriefRatify = (): Fixture => ({
+  ...mapBrief(briefOf(storySteps()), 4, `
+      const rows = [...document.querySelectorAll("#map-brief .ratify-row")];
+      if (rows.length !== 4) return log("snap:fail expected 4 ratify rows, saw " + rows.length);
+      if (document.querySelectorAll("#map-brief .ratify-accept").length !== 3) log("snap:fail Accept belongs on the three undecided rows");
+      if (!rows[3].textContent.includes("Accepted")) log("snap:fail the decided row does not say so");
+      document.querySelector("#map-brief .ratify-row .ratify-accept").click();
+      await wait(300);
+      if (!document.querySelector("#map-brief .ratify-row").textContent.includes("Accepted")) log("snap:fail Accept did not mark the row");
+      log("ratify ok");`, false, 100),
+  pr_ratify: ratifyRows,
+});
+// The part sheet with one law not yet ratified (#343): it says so, with Accept and Overturn.
+const mapSheetUnratified = (): Fixture =>
+  mapOpened(`
+      document.querySelector("#map .plate[data-id=shell]").click();
+      await wait(300);
+      const laws = [...document.querySelectorAll("#map-sheet .sheet-law")];
+      const open = laws.filter((l) => l.textContent.includes("Not yet ratified"));
+      if (laws.length !== 2 || open.length !== 1 || !open[0].textContent.includes("Notices wait for focus.")) return log("snap:fail laws: " + laws.map((l) => l.textContent).join("|"));
+      if (!open[0].querySelector(".ratify-accept") || !open[0].querySelector(".ratify-overturn")) log("snap:fail no Accept and Overturn");
+      log("sheet ok");`, {
+    map_state: mapState({ ratify: [{ pr: 306, kind: "law", id: "shell-notice" }] }),
+  });
 const homeMarked = (press: boolean): Fixture => ({
   ...(fixtures as Record<string, () => Fixture>).home(),
   map_marks: ["/w/plotkeeper"],
@@ -649,6 +680,8 @@ export const fixtures = {
   mapBriefOrderSlots,
   mapBriefOrderWrong,
   mapBriefOrderRight,
+  mapBriefRatify,
+  mapSheetUnratified,
   recordedTerminal,
   logRunning: () => logFixture("running"),
   logDone: () => logFixture("completed"),

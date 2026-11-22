@@ -104,3 +104,14 @@ test("Option-Backspace takes a word off the draft", async () => {
   assert.equal(await typeInto("t9", "/rename x", () => false, plain.io), true);
   assert.equal(plain.sent.length, 2);
 });
+
+test("staged without Enter, the text is pasted into the prompt and Enter is never sent (ticket #343's overturn)", async () => {
+  const { io, sent } = fake();
+  const typed = await typeInto("t-stage", "I overturn the law", () => false, io, false);
+  assert.equal(typed, true);
+  assert.deepEqual(sent.map(([, data]) => data), ["\x1b[200~I overturn the law\x1b[201~"]);
+  // It still never types into a session that needs him.
+  const blocked = fake();
+  assert.equal(await typeInto("t-stage", "x", () => true, blocked.io, false), false);
+  assert.equal(blocked.sent.length, 0);
+});
