@@ -290,9 +290,16 @@ const main = () => {
       missing: ran.error?.code === "ENOENT",
       stdout: ran.stdout ?? "",
       stderr: ran.stderr ?? "",
-      reads: decisions.filter((d) => d.decision === "allow").length,
+      reads: decisions.filter((d) => d.decision === "allow" && d.tool === "read_file").length,
     });
     result.denied = decisions.filter((d) => d.decision === "deny").map(({ tool, path, command }) => ({ tool, path, command }));
+    if (!result.findings && !result.line.includes("not installed")) {
+      // What `agy` said, kept for whoever asks why: the throwaway folder is about to go.
+      const kept = join(opts.out, `outside-review-${head.slice(0, 9)}-unavailable.json`);
+      mkdirSync(opts.out, { recursive: true });
+      writeFileSync(kept, JSON.stringify({ status: ran.status, stdout: ran.stdout, stderr: ran.stderr, decisions }, null, 2));
+      notes.push(`note: agy's output is in ${kept}`);
+    }
     const dirty = git("-C", repo, "status", "--porcelain");
     if (dirty) notes.push(`warning: the review changed its throwaway tree, so the deny hook let a write through:\n${dirty}`);
   } catch (error) {

@@ -200,7 +200,7 @@ test("the Gemini quota left is read from agy's usage report", () => {
 // The deny hook, as `agy` runs it: the tool call on stdin, the decision on stdout.
 const hook = join(import.meta.dirname, "../../scripts/review/deny-hook.mjs");
 
-test("the deny hook allows a read inside its root and denies writes, commands and reads that leave the root", () => {
+test("the deny hook allows a read inside its root and the answer's hand-over, and denies writes, commands and reads that leave the root", () => {
   const root = mkdtempSync(join(tmpdir(), "deny-hook-"));
   mkdirSync(join(root, "in"));
   writeFileSync(join(root, "in/notes.txt"), "inside");
@@ -219,7 +219,9 @@ test("the deny hook allows a read inside its root and denies writes, commands an
   assert.equal(decision("write_file", { Path: join(root, "in/b.txt"), Content: "x" }), "deny");
   assert.equal(decision("run_command", { CommandLine: "cat notes.txt" }), "deny");
   assert.equal(decision("some_new_tool", {}), "deny");
+  // `agy --json-schema` hands its answer over through this tool; denied, the findings never arrive.
+  assert.equal(decision("finish", { findings: [] }), "allow");
   const logged = readFileSync(log, "utf8");
-  assert.equal(logged.trim().split("\n").length, 7);
+  assert.equal(logged.trim().split("\n").length, 8);
   assert.ok(!logged.includes("inside"));
 });

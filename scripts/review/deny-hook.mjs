@@ -1,5 +1,6 @@
 // PreToolUse hook for a read-only agy run: default deny.
-// Allows only read_file on a path whose real path is inside the root given as argv[2].
+// Allows only read_file on a path whose real path is inside the root given as argv[2], and
+// `finish`, the tool through which `agy --json-schema` hands over its answer: it touches no file.
 // Logs each decision (never file contents) to argv[3].
 import { readFileSync, appendFileSync, realpathSync } from "node:fs";
 import { resolve, sep } from "node:path";
@@ -12,7 +13,8 @@ try {
   const call = event.toolCall ?? {};
   const args = call.args ?? {};
   seen = { tool: call.name, path: args.Path, command: args.CommandLine };
-  if (call.name === "read_file" && typeof args.Path === "string") {
+  if (call.name === "finish") verdict = { decision: "allow" };
+  else if (call.name === "read_file" && typeof args.Path === "string") {
     const base = realpathSync(root);
     // realpath follows symlinks, so a link inside the root that points outside is refused.
     const target = realpathSync(resolve(event.cwd ?? base, args.Path));
