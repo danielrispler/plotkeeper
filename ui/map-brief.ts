@@ -11,6 +11,7 @@ import { failure, invoke, text } from "./dom.js";
 import { currentMap, currentScrub, onDraw, registerLayer, type MapView } from "./map.js";
 import { closeDrawer, openDrawer } from "./map-drawer.js";
 import { watchSeen } from "./seen.js";
+import { logStop } from "./stop-rules.js";
 import { scrubTo } from "./map-history.js";
 import { ratifyActions } from "./map-ratify.js";
 import { ratifyStep, statusWords } from "./ratify.js";
@@ -39,6 +40,8 @@ const svg = (tag: string, attrs: Record<string, string> = {}) => {
 // Reading a chapter to its end (#342): one gate per chapter of a brief, kept while the window runs; it tells the shell once.
 const gates = new Map<string, Gate>();
 let watching: (() => void) | null = null;
+// The "not confirmed from the facts" marks shown, watched until seen or the brief closes (#346).
+let marks: (() => void)[] = [];
 const stopWatching = () => (watching?.(), (watching = null));
 function gateOf(): Gate | null {
   const now = player.current();
@@ -48,7 +51,10 @@ function gateOf(): Gate | null {
   if (!gate) {
     const { project, pr, chapter } = now;
     const head = playing.brief.head;
-    gate = chapterGate(steps(), () => void invoke("brief_chapter_done", { project, number: pr, chapter, head }).catch(failure("brief_chapter_done")));
+    gate = chapterGate(steps(), () => {
+      logStop("chapter-done", project, pr);
+      void invoke("brief_chapter_done", { project, number: pr, chapter, head }).catch(failure("brief_chapter_done"));
+    });
     gates.set(key, gate);
   }
   return gate;
@@ -85,6 +91,7 @@ export async function openBriefOf(project: string, number: number, chapter: numb
     return;
   }
   playing = got;
+  logStop("brief-opened", project, number);
   ratifying = await invoke("pr_ratify", { project, number }).catch((e) => (failure("pr_ratify")(e), [] as RatifyRow[]));
   if (!resizing) {
     resizing = true;
@@ -111,6 +118,8 @@ onDraw((view) => {
 
 export function closeBrief() {
   stopWatching();
+  marks.forEach((stop) => stop());
+  marks = [];
   player.close();
   playing = null;
   ratifying = [];
@@ -319,6 +328,7 @@ function stepNode(view: MapView, step: BriefStep, pr: number, also: PrBrief["als
   if (unconfirmed(step)) {
     const mark = text("p", "not confirmed from the facts", "brief-quiet brief-unconfirmed");
     mark.title = step.flags.join("\n");
+    marks.push(watchSeen(mark, { active: () => mark.isConnected && panel().classList.contains("open"), onSeen: () => logStop("unconfirmed-seen", view.project, pr) }));
     words.append(mark);
   }
   if (also.length) {
@@ -486,15 +496,23 @@ function wireTaps(view: MapView) {
   );
 }
 
+// A check was graded, right or wrong.
+const answeredCheck = () => {
+  const now = player.current();
+  if (now) logStop("check-answered", now.project, now.pr);
+};
+
 // Check on a check: graded, its right answer shown, and an order check's right path replayed along the links.
 function grade(view: MapView, step: BriefStep) {
   const found = runOf(view, step.check!);
   if (!found || !found.run.ready()) return;
   if (found.kind === "pick") {
     found.run.grade();
+    answeredCheck();
     return redrawCheck(view, step);
   }
   const result = found.run.grade()!;
+  answeredCheck();
   const wrong = result.wrong;
   redrawCheck(view, step);
   // The parts out of place nudge once; then the right path runs.

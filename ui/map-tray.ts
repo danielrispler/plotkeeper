@@ -3,8 +3,10 @@
 // stored has one row, or one row per chapter of a chaptered brief; a row opens that brief on the map (`map-brief.ts`).
 
 import { text } from "./dom.js";
-import { onDraw, syncSide, type MapView } from "./map.js";
+import { mapShown, onDraw, syncSide, type MapView } from "./map.js";
 import { briefProblem, openBriefOf } from "./map-brief.js";
+import { watchSeen } from "./seen.js";
+import { logStop } from "./stop-rules.js";
 import type { ReadyPr } from "./types.js";
 
 export type TrayRow = { number: number; chapter: number | null; title: string; note: string; openable: boolean };
@@ -30,7 +32,13 @@ export const trayRows = (ready: ReadyPr[]): TrayRow[] =>
     }));
   });
 
+// The rows are built again on every draw; the watchers of the old ones stop with them. An offered brief is told once per PR
+// (`logStop`), whichever of its rows is seen first.
+let watching: (() => void)[] = [];
+
 function paint(view: MapView) {
+  watching.forEach((stop) => stop());
+  watching = [];
   const rows = view.scrub ? [] : trayRows(view.state.ready ?? []);
   view.slots.tray.replaceChildren(
     ...(rows.length
@@ -46,6 +54,7 @@ function paint(view: MapView) {
               item.setAttribute("type", "button");
               item.title = "Play this brief on the map";
               item.addEventListener("click", () => openBriefOf(view.project, row.number, row.chapter ?? 0));
+              watching.push(watchSeen(item, { active: mapShown, onSeen: () => logStop("brief-offered", view.project, row.number) }));
             }
             return item;
           }),

@@ -5,6 +5,7 @@
 import { failure, invoke, text } from "./dom.js";
 import { overturnIn } from "./map.js";
 import { overturnPrompt } from "./ratify.js";
+import { logStop } from "./stop-rules.js";
 import type { RatifyRow } from "./types.js";
 
 export type Ratifiable = Pick<RatifyRow, "pr" | "kind" | "id" | "text" | "change">;
@@ -16,6 +17,7 @@ export function ratifyActions(project: string, item: Ratifiable, done: (state: "
     box.querySelectorAll("button").forEach((button) => ((button as HTMLButtonElement).disabled = true));
     invoke("ratify_set", { project, pr: item.pr, kind: item.kind, id: item.id, state, text: item.text })
       .then(() => {
+        logStop("ratify", project, item.pr);
         if (state === "overturned") overturnIn(project, item.pr, overturnPrompt(item));
         done(state);
       })
