@@ -292,6 +292,33 @@ fn unresolvable_rust_paths_are_skipped_without_a_problem() {
     assert_eq!(found, Vec::<String>::new());
 }
 
+#[test]
+fn a_mod_line_naming_a_deleted_or_symlinked_module_file_still_pairs_and_does_not_panic() {
+    for symlink in [false, true] {
+        let map = split_map(
+            &["rust-modules"],
+            &["k/src/lib.rs"],
+            &["k/src/a.rs", "k/src/target.rs"],
+        );
+        let (dir, root) = tree(
+            &map,
+            &[
+                ("k/src/lib.rs", "mod a;\n"),
+                ("k/src/a.rs", "mod inner;\n"),
+                ("k/src/target.rs", ""),
+            ],
+        );
+        let a = dir.path().join("k/src/a.rs");
+        std::fs::remove_file(&a).unwrap();
+        if symlink {
+            std::os::unix::fs::symlink("target.rs", &a).unwrap();
+            studio_test_support::git(dir.path(), &["add", "-A"]);
+        }
+        let report = report(&root);
+        assert_eq!(edges(&report), ["alpha>beta"], "symlink {symlink}");
+    }
+}
+
 fn ts_edges(files: &[(&str, &str)]) -> Vec<String> {
     let map = split_map(&["typescript-imports"], &["alpha/"], &["beta/"]);
     let (_dir, root) = tree(&map, files);

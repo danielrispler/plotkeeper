@@ -409,7 +409,7 @@ fn rust_modules(root: &Path, tracked: &BTreeSet<&str>) -> Pairs {
                 continue;
             }
             found.push((prefix.clone(), file));
-            for (path, in_own_file) in &parse[file].mods {
+            for (path, in_own_file) in parse.get(file).map_or(&[][..], |f| &f.mods[..]) {
                 let mut full = prefix.clone();
                 full.extend(path.iter().cloned());
                 if !*in_own_file {
@@ -420,7 +420,7 @@ fn rust_modules(root: &Path, tracked: &BTreeSet<&str>) -> Pairs {
             }
         }
         for (_, file) in &found {
-            for path in &parse[file].uses {
+            for path in parse.get(file).map_or(&[][..], |f| &f.uses[..]) {
                 // The longest prefix of the path that names a module.
                 let target = (0..=path.len())
                     .rev()
