@@ -1075,6 +1075,15 @@ impl ClaudeWriter {
         }
     }
 
+    /// The writer whose program `command` runs.
+    fn built_for(&self, command: &Command) -> WriterKind {
+        if command.get_program() == self.agy_program.as_os_str() {
+            WriterKind::Agy
+        } else {
+            WriterKind::Claude
+        }
+    }
+
     /// A run, read into the contract: its reply, or a typed failure.
     fn call(
         &self,
@@ -1082,7 +1091,9 @@ impl ClaudeWriter {
         (mut command, prompt): (Command, String),
         schema: bool,
     ) -> Result<WriterReply, WriterError> {
-        let kind = self.kind();
+        // The writer the command was built for, not the one set now: the settings may switch between the two.
+        let kind = self.built_for(&command);
+        let timeout = stop_after(kind, timeout);
         let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -1403,5 +1414,52 @@ mod reply_tests {
             |second, _| second,
         );
         assert_eq!(second_stands, Err("b".into()));
+    }
+}
+
+/// How long a call of `kind` asked to stop after `asked` runs: never less than the writer's floor, so a logged-out
+/// `agy` reports its login failure instead of being killed as a timeout.
+fn stop_after(kind: WriterKind, asked: Duration) -> Duration {
+    asked.max(kind.floor())
+}
+
+#[cfg(test)]
+mod call_tests {
+    use super::{CardWriter, ClaudeWriter, WriterKind, stop_after};
+    use std::os::unix::fs::PermissionsExt;
+    use std::time::Duration;
+
+    /// A call is read by the writer its command was built for, even when the settings switch writers in between.
+    #[test]
+    fn a_call_is_read_by_the_writer_it_was_built_for() {
+        let dir = tempfile::tempdir().unwrap();
+        let agy = dir.path().join("agy");
+        std::fs::write(
+            &agy,
+            "#!/bin/sh\necho '{\"status\":\"SUCCESS\",\"response\":\"plain words\"}'\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&agy, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let writer = ClaudeWriter::new(dir.path().join("claude"), dir.path().into())
+            .with_agy(agy, dir.path().into())
+            .with_kind(WriterKind::Agy);
+
+        let run = writer.goal_command(&["a prompt"]);
+        writer.use_writer(WriterKind::Claude);
+
+        assert_eq!(writer.stdout(run), Ok("plain words".into()));
+    }
+
+    /// The risk judge's 15 seconds are too short for a logged-out `agy`, which waits a minute before it says so.
+    #[test]
+    fn a_short_call_of_agy_is_given_its_floor_and_claudes_is_kept() {
+        let fifteen = Duration::from_secs(15);
+        assert_eq!(
+            stop_after(WriterKind::Agy, fifteen),
+            WriterKind::Agy.floor()
+        );
+        assert_eq!(stop_after(WriterKind::Claude, fifteen), fifteen);
+        let long = Duration::from_secs(180);
+        assert_eq!(stop_after(WriterKind::Agy, long), long);
     }
 }

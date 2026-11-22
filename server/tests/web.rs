@@ -1,6 +1,7 @@
 //! The page's transport (danielrispler/plotkeeper#325, spec #319 "Security and lifecycle"): the token and its cookie, the Host
 //! check, a command's answer against the function behind it, an event reaching a subscriber, and one plotkeeper per data folder.
 
+mod isolated_home;
 use std::{
     io::{BufRead, BufReader, Read, Write},
     net::TcpStream,
@@ -35,6 +36,7 @@ struct Fixture {
 }
 
 fn fixture() -> Fixture {
+    isolated_home::set();
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("events.jsonl");
     std::fs::write(&log, LOG).unwrap();
@@ -252,7 +254,10 @@ fn no_workbench_command_is_served() {
 #[test]
 fn a_failed_command_answers_500_with_its_reason() {
     let f = fixture();
-    let reply = post(&f, "rename", r#"{"id":"../x","name":"n"}"#);
+    // A folder that is no repository: the command fails reading it and writes nothing, in the real home or elsewhere.
+    let project = f._dir.path().join("none");
+    let body = serde_json::json!({"project": project, "commit": "abc"}).to_string();
+    let reply = post(&f, "map_at", &body);
     assert_eq!(reply.status, 500);
     assert!(
         serde_json::from_str::<String>(&reply.body).is_ok(),
@@ -362,4 +367,31 @@ fn the_focus_a_closed_tab_reported_is_not_kept_while_another_tab_listens() {
     }
 
     assert!(!f.app.events.focused());
+}
+
+#[test]
+fn the_token_in_the_url_leaves_it_even_when_the_cookie_is_already_set() {
+    let f = fixture();
+    let reply = get(&f, &format!("/?token={TOKEN}"), &[&cookie()]);
+    assert_eq!(reply.status, 302);
+    let location = reply
+        .head
+        .lines()
+        .find(|l| l.to_lowercase().starts_with("location:"))
+        .unwrap();
+    assert!(!location.contains("token"), "{location}");
+}
+
+#[test]
+fn the_tests_run_in_an_empty_home_not_daniels() {
+    let _f = fixture();
+    let home = std::env::home_dir().unwrap();
+    assert!(
+        std::fs::read_dir(&home).unwrap().next().is_none(),
+        "{home:?}"
+    );
+    assert!(
+        !home.join("Library/Application Support/plotkeeper").exists(),
+        "{home:?}"
+    );
 }
