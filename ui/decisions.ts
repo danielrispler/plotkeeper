@@ -38,12 +38,13 @@ export function kindText(decision: Decision): string {
 
 export const sourceText = (decision: Decision) => (decision.source === "card" ? "on the card" : "in the terminal");
 
-// What the history says of a blocked command's risk note beside its answer, or `null` for a decision that is no blocked command's. The note
-// shows only when it arrived strictly before the answer; with the same millisecond, or no time, Daniel is not claimed to have seen it.
+// What the history says of a blocked command's risk note beside its answer, or `null` for a decision with no entry: the shell sends one for
+// each blocked command's decision, so an ordinary Bash permission has none. The note shows only when it arrived strictly before the answer;
+// with the same millisecond, or no time, Daniel is not claimed to have seen it.
 export function riskText(decision: Decision, notes: RiskView[]): string | null {
-  if (decision.tool !== "Bash") return null;
   const note = notes.find((n) => n.call === decision.call);
-  if (note?.state !== "arrived") return "no risk note";
+  if (!note) return null;
+  if (note.state !== "arrived") return "no risk note";
   if (note.at === undefined || note.at >= decision.at) return "answered before the risk note arrived";
   return `Risk: ${riskLevels[note.level]} · ${note.line}`;
 }

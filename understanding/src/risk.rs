@@ -254,8 +254,9 @@ impl RiskNotes {
     }
 
     /// The notes of the decisions in `session`'s history, for the window to compare with each answer's time.
-    /// A Bash decision is joined by its command and the folder of its card (the card with its call, or else one of the
-    /// same command and agent); a decision of another tool, or one whose command has no note, has none.
+    /// A blocked command's decision is joined by its command and the folder of its card (the card with its call, or else
+    /// one of the same command and agent), and has an entry with its note or, with none, `Failed`; a decision that is no
+    /// blocked command's, such as another tool's or an ordinary Bash permission, has no entry.
     pub fn decision_views(&self, session: &Session) -> Vec<RiskView> {
         let id = session.agent.id.as_str();
         let decisions = session.decisions.iter().filter(|d| d.tool == "Bash");
@@ -271,12 +272,15 @@ impl RiskNotes {
                             .into_iter()
                             .find(|c| c.command == command && c.agent == decision.agent)
                     })?;
-                let note = self.note(id, &hash(command, &card.cwd))?;
-                Some(RiskView::Arrived {
-                    call: decision.call.clone(),
-                    level: note.level,
-                    line: note.line.clone(),
-                    at: note.at,
+                let call = decision.call.clone();
+                Some(match self.note(id, &hash(command, &card.cwd)) {
+                    Some(note) => RiskView::Arrived {
+                        call,
+                        level: note.level,
+                        line: note.line.clone(),
+                        at: note.at,
+                    },
+                    None => RiskView::Failed { call },
                 })
             })
             .collect()

@@ -2084,8 +2084,13 @@ fn a_bash_decision_is_joined_to_its_note_by_command_and_folder() {
         blocks(RISK_SESSION, "toolu_1", PUSH, REPO),
         allows(RISK_SESSION, "toolu_1", PUSH),
     ]);
-    // No note yet: no entry.
-    assert_eq!(notes.decision_views(&allowed), []);
+    // No note yet: an entry that says so.
+    assert_eq!(
+        notes.decision_views(&allowed),
+        [RiskView::Failed {
+            call: "toolu_1".into()
+        }]
+    );
 
     notes
         .keep(
@@ -2109,7 +2114,49 @@ fn a_bash_decision_is_joined_to_its_note_by_command_and_folder() {
         blocks(RISK_SESSION, "toolu_2", PUSH, "/work/other"),
         allows(RISK_SESSION, "toolu_2", PUSH),
     ]);
-    assert_eq!(notes.decision_views(&elsewhere), []);
+    assert_eq!(
+        notes.decision_views(&elsewhere),
+        [RiskView::Failed {
+            call: "toolu_2".into()
+        }]
+    );
+}
+
+#[test]
+fn a_blocked_commands_decision_has_an_entry_with_or_without_a_note_and_an_ordinary_bash_permission_has_none()
+ {
+    let dir = tempfile::tempdir().unwrap();
+    let mut notes = RiskNotes::open(dir.path().join("risk-notes.json")).unwrap();
+    let ask = |name: &str, at: u64| {
+        let extra = serde_json::json!({ "tool_name": "Bash", "tool_use_id": "toolu_7",
+            "tool_input": { "command": "ls" } });
+        risk_line(RISK_SESSION, name, at, extra)
+    };
+    let session = risk_session(&[
+        blocks(RISK_SESSION, "toolu_1", PUSH, REPO),
+        allows(RISK_SESSION, "toolu_1", PUSH),
+        ask("PreToolUse", 5_000),
+        ask("PermissionRequest", 5_001),
+        ask("PostToolUse", 5_002),
+    ]);
+    let calls: Vec<_> = session.decisions.iter().map(|d| d.call.as_str()).collect();
+    assert_eq!(calls, ["toolu_1", "toolu_7"]);
+
+    // No note yet: the blocked command's decision has an entry that says so, the ordinary permission has none.
+    assert_eq!(
+        notes.decision_views(&session),
+        [RiskView::Failed {
+            call: "toolu_1".into()
+        }]
+    );
+
+    notes
+        .keep(&the_ask(), judged(RiskLevel::High, "Pushes."), 3_500)
+        .unwrap();
+    assert_eq!(
+        notes.decision_views(&session),
+        [arrived("toolu_1", RiskLevel::High, "Pushes.", 3_500)]
+    );
 }
 
 #[test]
