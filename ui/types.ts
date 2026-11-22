@@ -332,7 +332,7 @@ export type TurnSummary = {
   added_at?: number;
   hunk?: string;
   // The Quiz of a summary stored before #347, which the window no longer shows; a new summary has none.
-  summary: { summary: string; headline?: string | null; lines?: SummaryLine[]; quiz: Quiz | null };
+  summary: { summary: string; headline?: string | null; lines?: SummaryLine[]; quiz?: Quiz | null };
   taps?: QuizTap[];
   // The self-test's arm (#130), kept in the store.
   arm?: "quiz_first" | "body_only" | null;
