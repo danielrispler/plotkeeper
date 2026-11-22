@@ -92,6 +92,19 @@ fn a_dev_dependency_is_not_reported() {
 }
 
 #[test]
+fn a_registry_dependency_sharing_a_workspace_crate_name_is_not_reported() {
+    let (dir, root) = workspace(&map(&["cargo"], json!([])), &[], &[]);
+    write(
+        dir.path(),
+        "alpha/Cargo.toml",
+        &manifest("alpha", "beta = \"0.4\"\n", ""),
+    );
+    studio_test_support::git(dir.path(), &["add", "-A"]);
+    studio_test_support::git(dir.path(), &["commit", "-q", "-m", "Registry beta"]);
+    assert_eq!(edges(&report(&root)), Vec::<String>::new());
+}
+
+#[test]
 fn a_dependency_inside_one_part_is_not_reported() {
     let mut map = map(&["cargo"], json!([]));
     map["parts"][0]["paths"] = json!(["alpha/", "beta/"]);

@@ -118,10 +118,21 @@ fn cargo(root: &Path) -> Result<Pairs, String> {
         let path = path.strip_prefix(&root).ok()?;
         Some(path.to_str()?.replace('\\', "/"))
     };
-    let manifests: HashMap<&str, String> = packages
+    // A dependency on a workspace crate carries that crate's folder as its `path`; one on the
+    // registry's crate of the same name does not.
+    let manifests: HashMap<String, String> = packages
         .iter()
-        .filter_map(|p| Some((p["name"].as_str()?, manifest(p)?)))
+        .filter_map(|p| {
+            let manifest = manifest(p)?;
+            let dir = manifest.strip_suffix("Cargo.toml")?.trim_end_matches('/');
+            Some((dir.to_string(), manifest))
+        })
         .collect();
+    let relative = |path: &str| -> Option<String> {
+        let path = Path::new(path);
+        let path = path.strip_prefix(&root).ok()?;
+        Some(path.to_str()?.replace('\\', "/"))
+    };
     let mut pairs = Pairs::new();
     for package in packages {
         let Some(from) = manifest(package) else {
@@ -131,7 +142,11 @@ fn cargo(root: &Path) -> Result<Pairs, String> {
             if dep["kind"].as_str() == Some("dev") {
                 continue;
             }
-            if let Some(to) = dep["name"].as_str().and_then(|n| manifests.get(n)) {
+            if let Some(to) = dep["path"]
+                .as_str()
+                .and_then(relative)
+                .and_then(|dir| manifests.get(&dir))
+            {
                 pairs.push((from.clone(), to.clone()));
             }
         }
