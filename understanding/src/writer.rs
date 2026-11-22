@@ -70,18 +70,6 @@ impl WriterKind {
             WriterKind::Agy => "card-writer-agy",
         }
     }
-
-    /// The one line the app shows when the program does not start.
-    pub(crate) fn missing(self, error: &std::io::Error) -> String {
-        match self {
-            WriterKind::Claude => format!(
-                "Cards and briefs are off: `claude` did not start ({error}). Install Claude Code, or fix its path."
-            ),
-            WriterKind::Agy => format!(
-                "Cards and briefs are off: `agy` did not start ({error}). Install the Antigravity CLI, or fix its path."
-            ),
-        }
-    }
 }
 
 /// One call of the contract.
@@ -140,6 +128,39 @@ impl WriterError {
             program: program.program(),
             detail: detail.into(),
         }
+    }
+}
+
+impl WriterError {
+    /// The line the page shows: why no card is written, and what to do about it.
+    pub fn notice(&self) -> String {
+        let program = self.program;
+        let todo = match (self.kind, program) {
+            (FailureKind::NotLoggedIn, "agy") => {
+                "Log in to `agy` in a terminal, then it writes again."
+            }
+            (FailureKind::NotLoggedIn, _) => "Run `claude` in a terminal and log in with /login.",
+            (FailureKind::Quota, _) => {
+                "Wait for the limit to reset, or choose another model or writer in settings.json."
+            }
+            (FailureKind::Timeout, _) => "Check the connection; it tries again at the next turn.",
+            (FailureKind::NotInstalled, "agy") => "Install the Antigravity CLI, or fix its path.",
+            (FailureKind::NotInstalled, _) => "Install Claude Code, or fix its path.",
+            (FailureKind::Empty, _) => {
+                "Run it by hand to see why; it tries again at the next turn."
+            }
+            (FailureKind::Other, _) => {
+                "Run it by hand to see why; it tries again at the next turn."
+            }
+        };
+        // What the program printed stays out of the page: it may quote the work.
+        let mut head = self.clone();
+        head.detail = if head.detail.starts_with('(') && self.kind == FailureKind::NotInstalled {
+            head.detail
+        } else {
+            String::new()
+        };
+        format!("Cards and briefs are off: {head}. {todo}")
     }
 }
 

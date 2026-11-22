@@ -201,6 +201,25 @@ fn summary_writer_in(text: &str) -> studio_understanding::WriterKind {
         .unwrap_or_default()
 }
 
+/// The catch-up at start from `settings.json`: `catchUp.hours` (default 2) and `catchUp.max` (default 10), each default where
+/// the file leaves it out or gives something else than a number (danielrispler/plotkeeper#328).
+pub fn catch_up() -> studio_core::CatchUp {
+    let text = paths().and_then(|[settings, _]| fs::read_to_string(settings).ok());
+    catch_up_in(&text.unwrap_or_default())
+}
+
+fn catch_up_in(text: &str) -> studio_core::CatchUp {
+    let json: serde_json::Value = serde_json::from_str(&plain_json(text)).unwrap_or_default();
+    let mut catch_up = studio_core::CatchUp::default();
+    if let Some(hours) = json["catchUp"]["hours"].as_f64().filter(|h| *h >= 0.0) {
+        catch_up.window_ms = (hours * 3_600_000.0) as u64;
+    }
+    if let Some(max) = json["catchUp"]["max"].as_u64() {
+        catch_up.max = max as usize;
+    }
+    catch_up
+}
+
 /// Zed's format as plain JSON: comments and trailing commas outside strings dropped, as
 /// `ui/settings.ts`'s `parseJsonc` does.
 fn plain_json(text: &str) -> String {
@@ -244,7 +263,7 @@ fn plain_json(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{edit_text, plain_json, repository_in, summary_writer_in, write_in};
+    use super::{catch_up_in, edit_text, plain_json, repository_in, summary_writer_in, write_in};
     use serde_json::json;
     use studio_understanding::WriterKind;
 
@@ -254,6 +273,20 @@ mod tests {
 
     fn parsed(text: &str) -> serde_json::Value {
         serde_json::from_str(&plain_json(text)).unwrap()
+    }
+
+    #[test]
+    fn the_catch_up_is_two_hours_and_ten_unless_the_settings_say_otherwise() {
+        let default = studio_core::CatchUp::default();
+        assert_eq!((default.window_ms, default.max), (7_200_000, 10));
+        assert_eq!(catch_up_in(""), default);
+        assert_eq!(
+            catch_up_in("{ \"catchUp\": { \"hours\": \"x\" } }"),
+            default
+        );
+        let set = catch_up_in("{ // wider\n \"catchUp\": { \"hours\": 6, \"max\": 3, }, }");
+        assert_eq!((set.window_ms, set.max), (21_600_000, 3));
+        assert_eq!(catch_up_in("{ \"catchUp\": { \"max\": 0 } }").max, 0);
     }
 
     #[test]

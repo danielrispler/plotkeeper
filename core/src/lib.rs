@@ -2122,6 +2122,23 @@ pub fn wants_summary(reply: &str, asks: bool) -> bool {
         || last.is_some_and(|l| l.ends_with('?'))
 }
 
+/// How far back a start writes cards for turns that ended while plotkeeper was stopped, and how many: older turns get theirs
+/// when opened. Settings `catchUp.hours` and `catchUp.max`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CatchUp {
+    pub window_ms: u64,
+    pub max: usize,
+}
+
+impl Default for CatchUp {
+    fn default() -> Self {
+        CatchUp {
+            window_ms: 2 * 60 * 60 * 1000,
+            max: 10,
+        }
+    }
+}
+
 /// A turn that ended with no card, as the replay saw it (danielrispler/Falinks#486): its card request with no change,
 /// and its worktrees' trees, whose diffs the shell joins into the change.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -3694,15 +3711,24 @@ impl Studio {
         self.take(line, BTreeMap::new(), true);
     }
 
-    /// After the replay, the turns that ended in the 24 hours before `now` with a change between
-    /// the hook's trees and no card among `cards` (danielrispler/Falinks#486). Each is returned once.
-    pub fn backfill(&mut self, now: u64, cards: &[CardRequest]) -> Vec<Backfill> {
-        let since = now.saturating_sub(24 * 60 * 60 * 1000);
+    /// After the replay, the turns that ended inside `catch_up`'s window before `now` with a change between the hook's
+    /// trees and no card among `cards` (danielrispler/Falinks#486), the newest `catch_up.max` of them, newest first.
+    /// Each is returned once.
+    pub fn backfill(
+        &mut self,
+        now: u64,
+        cards: &[CardRequest],
+        catch_up: CatchUp,
+    ) -> Vec<Backfill> {
+        let since = now.saturating_sub(catch_up.window_ms);
         let ended = std::mem::take(&mut self.ended).into_iter();
         let ended = ended.filter(|b| card_time(&b.request.id) >= since);
-        ended
+        let mut found: Vec<Backfill> = ended
             .filter(|b| cards.iter().all(|c| c.id != b.request.id))
-            .collect()
+            .collect();
+        found.sort_by_key(|b| std::cmp::Reverse(card_time(&b.request.id)));
+        found.truncate(catch_up.max);
+        found
     }
 
     /// The trees the hook recorded of worktree `root` for turn `turn` of `session`: its start, and its end once the

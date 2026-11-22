@@ -584,6 +584,7 @@ export interface Commands {
   // The new `settings.json` text, as `settings.rs` wrote it; an error is why the write was refused.
   write_setting: string;
   workspace_git_state: GitState;
+  writer_notice: string | null;
   workspaces: Workspaces;
 }
 export type Command = keyof Commands;

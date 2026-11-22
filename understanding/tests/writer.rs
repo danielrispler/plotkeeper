@@ -1277,13 +1277,44 @@ fn a_writer_that_cannot_start_gives_one_notice_until_a_call_works() {
 }
 
 #[test]
-fn a_writer_that_starts_and_fails_raises_no_notice() {
+fn a_writer_that_starts_and_fails_tells_why_and_what_to_do_once_until_a_call_works() {
     let dir = tempfile::tempdir().unwrap();
-    let claude = shell(dir.path(), "claude", "exit 3");
+    let claude = shell(
+        dir.path(),
+        "claude",
+        "echo 'Not logged in. Please run /login'; exit 1",
+    );
     let (writer, heard) = watched(&claude, dir.path());
 
-    assert!(writer.reply(&edit(), &[]).is_err());
-    assert!(heard.lock().unwrap().is_empty());
+    for _ in 0..3 {
+        assert!(writer.reply(&edit(), &[]).is_err());
+    }
+    {
+        let heard = heard.lock().unwrap();
+        assert_eq!(heard.len(), 1, "{heard:?}");
+        let text = heard[0].as_deref().unwrap();
+        assert!(text.starts_with("Cards and briefs are off: "), "{text}");
+        assert!(text.contains("not logged in"), "{text}");
+        assert!(text.contains("claude"), "{text}");
+    }
+
+    shell(dir.path(), "claude", "echo ok");
+    assert!(writer.reply(&edit(), &[]).is_ok());
+    assert_eq!(heard.lock().unwrap().last(), Some(&None));
+}
+
+#[test]
+fn each_failure_kind_has_its_own_notice() {
+    let dir = tempfile::tempdir().unwrap();
+    let heard_after = |body: &str| {
+        let claude = shell(dir.path(), "claude", body);
+        let (writer, heard) = watched(&claude, dir.path());
+        assert!(writer.reply(&edit(), &[]).is_err());
+        let heard = heard.lock().unwrap();
+        heard.first().cloned().flatten().unwrap_or_default()
+    };
+    assert!(heard_after("echo 'rate limit reached'; exit 1").contains("quota"));
+    assert!(heard_after("exit 0").contains("printed nothing"));
 }
 
 // The grounded turn writer (danielrispler/plotkeeper#115).

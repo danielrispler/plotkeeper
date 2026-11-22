@@ -142,6 +142,8 @@ pub struct App {
     pub ci: Arc<ci_laws::CiCache>,
     pub watching: Mutex<answer::Watching>,
     pub events: Arc<Events>,
+    /// The notice the card writer last raised and not yet cleared, for a page opened after it (danielrispler/plotkeeper#328).
+    pub writer_notice: Mutex<Option<String>>,
     /// The list changed outside the read loop since it last sent it: a PR was found, or Daniel marked a session unseen.
     pub list_changed: AtomicBool,
     /// Whether the story rail shows, as the UI last said: not in focus mode, behind a closed overlay or under the skills
@@ -207,6 +209,7 @@ impl App {
             ci: Arc::new(ci_laws::load_cache()),
             watching: Mutex::default(),
             events: Arc::default(),
+            writer_notice: Mutex::new(None),
             list_changed: AtomicBool::new(false),
             rail_shown: AtomicBool::new(true),
             split_shown: Mutex::new(None),
@@ -871,6 +874,22 @@ pub fn ask_why_not(
     };
     let facts = facts.ok_or("this turn is not known")?;
     studio_understanding::why_not(&*app.writer, &transcript.unwrap_or_default(), &name, facts)
+}
+
+/// Sends each notice the card writer raises (or clears, as `None`) to the page as `writer-notice`, on a thread of its own that
+/// ends with the sender. The log keeps only that one arrived or cleared: the notice is the writer's own words.
+pub fn forward_writer_notices(app: &Arc<App>, notices: mpsc::Receiver<Option<String>>) {
+    let app = app.clone();
+    thread::spawn(move || {
+        for notice in notices {
+            log::warn!(
+                "card writer notice {}",
+                if notice.is_some() { "shown" } else { "cleared" }
+            );
+            *app.writer_notice.lock().unwrap() = notice.clone();
+            app.events.emit("writer-notice", serde_json::json!(notice));
+        }
+    });
 }
 
 /// Writes the retests that fell due, once an hour from a minute after the start, off the read loop; Home reads them
