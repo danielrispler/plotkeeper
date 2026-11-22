@@ -411,7 +411,7 @@ mod tests {
         assert_eq!(fake.1.borrow()[0], "opus");
         // Another lookup of the same head writes nothing.
         assert_eq!(lookup(&store, &mut seen, &fake, "aaa"), Did::Kept);
-        assert_eq!(fake.0.get(), 1);
+        assert_eq!(store.records().len(), 1);
     }
 
     #[test]
@@ -425,11 +425,11 @@ mod tests {
         assert!(store.get(7, "bbb").is_none(), "not rewritten at once");
         // A burst of pushes: the head moved again, so the count starts over.
         assert_eq!(lookup(&store, &mut seen, &fake, "ccc"), Did::Staled);
-        assert_eq!(fake.0.get(), 1);
+        assert_eq!(store.records().len(), 1);
         // The same head at two lookups in a row: rewritten.
         assert_eq!(lookup(&store, &mut seen, &fake, "ccc"), Did::Wrote);
         assert!(store.get(7, "ccc").is_some());
-        assert_eq!(fake.0.get(), 2);
+        assert_eq!(store.records().len(), 2);
     }
 
     #[test]
@@ -445,10 +445,10 @@ mod tests {
         };
         let open = |head: &str| on_open(&with, 7, head, || Ok(source(head)), |_| {});
         assert_eq!(open("aaa").unwrap().head, "aaa");
-        assert_eq!(fake.0.get(), 1, "a fresh brief is not rewritten");
+        assert_eq!(store.records().len(), 1, "a fresh brief is not rewritten");
         lookup(&store, &mut seen, &fake, "bbb");
         assert_eq!(open("bbb").unwrap().head, "bbb");
-        assert_eq!(fake.0.get(), 2);
+        assert_eq!(store.records().len(), 2);
         assert!(store.get(7, "bbb").is_some());
     }
 
