@@ -8,7 +8,7 @@ import { refreshHome } from "./panes.js";
 import { studio } from "./state.js";
 import { showDecisions } from "./decisions.js";
 import { fileRow } from "./evidence.js";
-import { drawFeed, forgetMissingSummaries, openCitation } from "./story.js";
+import { drawFeed, fillDockNotes, forgetMissingSummaries, openCitation } from "./story.js";
 import { confidenceRow, pickedHere, trialStage, whyInput, whyWaiting } from "./quiz.js";
 import type { CardRequest, CheckResult, Guess, Level, Quiz, Rating, Reason, SessionCards, StoredCard, Tap, TurnFile } from "./types.js";
 import { HOVERS } from "./hovers.js";
@@ -360,9 +360,11 @@ export function cardNode(stored: StoredCard, turn: CardTurn | null = null, trial
 }
 
 export function showCards(cards: SessionCards) {
+  // A risk note that arrived fills its card's place in the dock where it stands, which only a session's own events redraw otherwise.
+  const notes = JSON.stringify(cards.risk_notes) !== JSON.stringify(studio.cards.risk_notes);
   studio.cards = cards;
   showBrief(cards);
-  showDecisions(cards.decisions);
+  showDecisions(cards.decisions, cards.decision_notes);
   // A card drawn in a visible window is tapped before a switch of session drops it.
   markShown();
   const ids = new Set([...cards.recent, ...cards.older, ...cards.workers.map(({ card }) => card)].map(({ request }) => request.id));
@@ -374,6 +376,7 @@ export function showCards(cards: SessionCards) {
   // The store changed: a summary missing before may be in it now.
   forgetMissingSummaries();
   drawFeed();
+  if (notes) fillDockNotes();
   // A card stored while Home is shown may be its next Quiz.
   refreshHome();
   markShown();

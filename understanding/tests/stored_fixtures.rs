@@ -11,7 +11,7 @@ use std::path::Path;
 use studio_core::CheckStatus as Status;
 use studio_core::Source;
 use studio_understanding::{CardStore, Level, Reason};
-use studio_understanding::{CheckResult, Surface, Tap};
+use studio_understanding::{CheckResult, RiskLevel, RiskNotes, RiskView, Surface, Tap};
 
 const FILES: [&str; 7] = [
     "cards-v2.json",
@@ -161,4 +161,87 @@ fn the_minimal_samples_of_every_stored_file_load_with_their_values() {
     };
     assert_eq!(retest.of, "sess-1@1761743900000");
     assert!(retest.quiz.is_none());
+}
+
+/// The risk notes (#298) of the frozen sample folder `sample`, read for session `sess-1` with a card for each of `commands`,
+/// which also freezes the hash that keys a note: the command, a NUL and its folder `/work/repo`, hashed with FNV-1a.
+fn risk_views(sample: &str, commands: &[&str]) -> Vec<RiskView> {
+    let from = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/stored")
+        .join(sample)
+        .join("risk-notes.json");
+    let data = tempfile::tempdir().unwrap();
+    fs::copy(&from, data.path().join("risk-notes.json"))
+        .unwrap_or_else(|e| panic!("sample `{sample}/risk-notes.json`: {e}"));
+    let notes = RiskNotes::open(data.path().join("risk-notes.json"))
+        .unwrap_or_else(|e| panic!("the `{sample}` risk notes do not load: {e}"));
+    let line = |name: &str, at: u64, extra: serde_json::Value| {
+        let mut line = serde_json::json!({
+            "session_id": "sess-1", "hook_event_name": name, "cwd": "/work/repo", "studio_received_ms": at,
+        });
+        line.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        line.to_string()
+    };
+    let mut lines = vec![
+        line(
+            "SessionStart",
+            1_000,
+            serde_json::json!({ "source": "startup" }),
+        ),
+        line(
+            "UserPromptSubmit",
+            2_000,
+            serde_json::json!({ "prompt": "Go.", "prompt_id": "p-1" }),
+        ),
+    ];
+    for (n, command) in commands.iter().enumerate() {
+        lines.push(line(
+            "PermissionDenied",
+            3_000 + n as u64,
+            serde_json::json!({ "tool_name": "Bash", "tool_use_id": format!("toolu_{n}"), "prompt_id": "p-1",
+                "tool_input": { "command": command }, "reason": "[Unauthorized Access]", "permission_mode": "auto" }),
+        ));
+    }
+    let studio = studio_core::Studio::replayed(&lines);
+    notes.views(studio.session("sess-1").unwrap())
+}
+
+#[test]
+fn the_full_sample_of_the_risk_notes_loads_with_its_values() {
+    let views = risk_views("full-2", &["git push origin feature-x", "rm -rf build"]);
+
+    assert_eq!(
+        views,
+        [
+            RiskView::Arrived {
+                call: "toolu_0".into(),
+                level: RiskLevel::Medium,
+                line: "Pushes the branch issue-298 to origin.".into(),
+                at: 1_761_743_950_000
+            },
+            RiskView::Arrived {
+                call: "toolu_1".into(),
+                level: RiskLevel::VeryHigh,
+                line: "Deletes the build folder and everything in it.".into(),
+                at: 1_761_743_960_000
+            },
+        ]
+    );
+}
+
+#[test]
+fn the_minimal_sample_of_the_risk_notes_loads_with_its_values() {
+    let views = risk_views("minimal-2", &["git push origin feature-x"]);
+
+    assert_eq!(
+        views,
+        [RiskView::Arrived {
+            call: "toolu_0".into(),
+            level: RiskLevel::None,
+            line: "Only reads.".into(),
+            at: 1
+        }]
+    );
 }

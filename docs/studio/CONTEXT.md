@@ -184,8 +184,12 @@ A question, plan, permission or blocked command Daniel answered, with his answer
 _Avoid_: Verdict (only a plan's or a permission's allow or deny)
 
 **Blocked command**:
-A Bash command an agent session tried in auto mode that auto mode blocked, held on a card until Daniel allows or declines it. Allowed, the agent runs it itself, once; declined, the block stands. While the agent waits on his click the session needs you; once it has moved on, its row still names the blocked command until he chooses.
+A Bash command an agent session tried in auto mode that auto mode blocked, held on a card until Daniel allows or declines it. Allowed, the agent runs it itself, once; declined, the block stands. While the agent waits on his click the session needs you; once it has moved on, its row still names the blocked command while its card has a button for him (Allow and Decline, or Ask again), and no longer once he has allowed it. The card is docked, in orange, only while it has a button; otherwise it sits in the rail's feed.
 _Avoid_: Denied command (a command Daniel declined)
+
+**Risk note**:
+The card writer's one line on what a blocked command would do if allowed, led by its risk level (None, Low, Medium, High, Very high or Not sure); written from the command and its folder alone, never the agent's words; advice, the choice stays Daniel's. The classifier's label keeps its wording, "the rule that blocked it".
+_Avoid_: Verdict, rating (a risk note judges nothing: it describes)
 
 **Identity**:
 The name an agent session gets from its work: its issue, its PR and its worktree, such as "danielrispler/Falinks#480 · PR danielrispler/Falinks#490 · agent-a1b2". A name Daniel gives it replaces it.
