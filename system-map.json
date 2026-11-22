@@ -24,7 +24,7 @@
     },
     {
       "id": "understanding", "name": "Understanding", "caption": "Writes what you read, and keeps it",
-      "description": "Decides what a change is worth telling you, asks the writer for it, and stores it: cards, turn summaries, briefs, the offers record and the risk notes of blocked commands.",
+      "description": "Decides what a change is worth telling you, asks the writer for it, and stores it: cards, turn summaries, briefs, PR briefs (the facts, the writer's reply and the code checks on it), the offers record and the risk notes of blocked commands.",
       "tier": "core", "paths": ["understanding/"]
     },
     {

@@ -3522,6 +3522,7 @@ dependencies = [
  "similar",
  "studio-core",
  "studio-hook",
+ "studio-system-map",
  "studio-test-support",
  "tempfile",
 ]

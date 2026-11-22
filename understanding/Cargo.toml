@@ -14,6 +14,8 @@ similar = "3"
 studio-core = { path = "../core" }
 # The weekly command finds the card store beside the event log.
 studio-hook = { path = "../hook" }
+# The brief's facts place a PR's files by the map.
+studio-system-map = { path = "../system-map" }
 
 [dev-dependencies]
 studio-test-support = { path = "../test-support" }

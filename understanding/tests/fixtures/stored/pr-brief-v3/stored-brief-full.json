@@ -1,0 +1,111 @@
+{
+ "version": 1,
+ "pr": 317,
+ "head": "feedbeef",
+ "written_at": 1795000000000,
+ "stale": true,
+ "model": "opus",
+ "shape": {
+  "chapters": true,
+  "required": [
+   "shell",
+   "window",
+   "core"
+  ],
+  "also": [],
+  "overview": false,
+  "flows_changed": []
+ },
+ "brief": {
+  "title": "Sample",
+  "overview": [],
+  "chapters": [
+   {
+    "behaviour": "fog",
+    "parts": [
+     "shell"
+    ],
+    "title": "Fog",
+    "flags": [],
+    "steps": [
+     {
+      "k": "Must stay true",
+      "h": "A heading",
+      "b": "A body",
+      "on": [
+       "shell"
+      ],
+      "hops": [
+       [
+        "shell-window",
+        false
+       ]
+      ],
+      "law": "a-law",
+      "covered_by": "a_test",
+      "list": [],
+      "risks": [
+       {
+        "part": "shell",
+        "trigger": "t",
+        "check": "c"
+       }
+      ],
+      "fig": {
+       "kind": "compare",
+       "before": [
+        "x"
+       ],
+       "after": [
+        "y"
+       ]
+      },
+      "check": {
+       "kind": "pick",
+       "q": "q",
+       "opts": [
+        "a",
+        "b"
+       ],
+       "key": 1,
+       "yes": "y",
+       "no": "n",
+       "test": "a_test"
+      },
+      "cites": [
+       {
+        "from": "PR",
+        "quote": "a quote"
+       }
+      ],
+      "flags": [
+       "not confirmed"
+      ]
+     }
+    ]
+   }
+  ],
+  "also": [
+   {
+    "part": "core",
+    "line": "a line",
+    "flags": []
+   }
+  ],
+  "unseen": [
+   "a gap"
+  ],
+  "decisions": [
+   {
+    "id": "d1",
+    "text": "A decision",
+    "flags": []
+   }
+  ],
+  "flags": [],
+  "a_field_a_newer_build_wrote": {
+   "x": 1
+  }
+ },
+ "another_new_field": true
+}

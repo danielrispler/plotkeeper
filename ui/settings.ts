@@ -24,6 +24,8 @@ export interface Settings {
   // The summary writer's model and effort ("" for the model's default), and whether opening a turn
   // writes its summary.
   summaries: { model: string; effort: string; on_open: boolean };
+  // The model that writes a PR's brief and checks it (#337).
+  pr_briefs: { model: string };
   // The needs-you and your-turn sounds (danielrispler/Falinks#556).
   sounds: boolean;
   // The context share, a whole percent, past which a session raises its context warning; 0: never.
@@ -76,6 +78,8 @@ const defaultSettings: Settings = {
   terminal: { font_size: null },
   // Haiku at its default effort (danielrispler/Falinks#517, decision 14).
   summaries: { model: "haiku", effort: "", on_open: false },
+  // Quality first: Opus, for the writer and the claim check (#334).
+  pr_briefs: { model: "opus" },
   sounds: true,
   context_warning: 30,
   doctor: [
@@ -159,6 +163,7 @@ function readSettings(json: unknown, report: Report): Settings {
   };
   const terminal = isObject(json.terminal) ? json.terminal : {};
   const summaries = isObject(json.summaries) ? json.summaries : {};
+  const prBriefs = isObject(json.pr_briefs) ? json.pr_briefs : {};
   const d = defaultSettings;
   // null when unset or of the wrong type: the stylesheet's size.
   const fontSize = pick("terminal.font_size", terminal.font_size ?? undefined, NaN);
@@ -170,6 +175,7 @@ function readSettings(json: unknown, report: Report): Settings {
       effort: pick("summaries.effort", summaries.effort, d.summaries.effort),
       on_open: pick("summaries.on_open", summaries.on_open, d.summaries.on_open),
     },
+    pr_briefs: { model: pick("pr_briefs.model", prBriefs.model, d.pr_briefs.model) },
     sounds: pick("sounds", json.sounds, d.sounds),
     context_warning: Math.min(100, Math.max(0, Math.round(pick("context_warning", json.context_warning, d.context_warning)))),
     doctor: Array.isArray(json.doctor)
