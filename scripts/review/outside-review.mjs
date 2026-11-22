@@ -220,8 +220,7 @@ export const quota = (stdout) => {
   }
 };
 
-const main = () => {
-  const opts = options(process.argv.slice(2));
+const main = (opts) => {
   const run = (command, args, more = {}) =>
     execFileSync(command, args, { encoding: "utf8", maxBuffer: 1 << 28, stdio: ["ignore", "pipe", "pipe"], ...more });
   const git = (...args) => run("git", args).trimEnd();
@@ -233,7 +232,7 @@ const main = () => {
   }
   const head = git("rev-parse", "HEAD");
   const base = opts.since ? git("rev-parse", `${opts.since}^`) : git("merge-base", "HEAD", "origin/main");
-  const diff = git("diff", "--no-color", "--no-ext-diff", base, head);
+  const diff = git("diff", "--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", base, head);
   if (!diff) return console.log(`skipped: no change between ${base.slice(0, 9)} and HEAD`);
   const before = git("status", "--porcelain");
   if (before) notes.push("note: uncommitted changes are not reviewed; the review reads HEAD");
@@ -316,7 +315,9 @@ const main = () => {
   if (git("status", "--porcelain") !== before) notes.push("warning: the reviewed checkout changed during the review");
   const quotaAfter = result.findings ? left() : null;
   const percent = (fraction) => (typeof fraction === "number" ? `${Math.round(fraction * 100)}%` : "?");
-  const lines = [result.findings ? `${result.line} (${opts.model}; ${decided.why})` : result.line];
+  const reasons = decided.why.split("; ");
+  const more = reasons.length > 2 ? `; and ${reasons.length - 2} more reasons` : "";
+  const lines = [result.findings ? `${result.line} (${opts.model}; ${reasons.slice(0, 2).join("; ")}${more})` : result.line];
   if (result.findings) {
     const out = join(opts.out, `outside-review-${head.slice(0, 9)}${opts.since ? "-round2" : ""}.json`);
     const report = { model: opts.model, base, head, why: decided.why, ...result, quotaBefore, quotaAfter, notes };
@@ -333,8 +334,15 @@ const main = () => {
 };
 
 if (process.argv[1] === import.meta.filename) {
+  let opts;
   try {
-    main();
+    opts = options(process.argv.slice(2));
+  } catch (error) {
+    console.error(`${error.message}\nusage: outside-review [--force] [--model <id>] [--since <sha>] [--out <folder>]`);
+    process.exit(2);
+  }
+  try {
+    main(opts);
   } catch (error) {
     // Whatever stops the review, the PR goes ahead with the reason.
     console.log(`review unavailable: ${String(error.message ?? error).split("\n")[0]}`);
