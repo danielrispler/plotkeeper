@@ -12,7 +12,10 @@ import { placeBar, watchBar } from "./bar.js";
 import { showCards } from "./cards.js";
 import { recheckSeen } from "./seen.js";
 import { diffRequest, newestDiff } from "./diff.js";
-import { element, failure, invoke, listen, logUncaught } from "./dom.js";
+import { element, failure, invoke, listen, logLine, logUncaught } from "./dom.js";
+import { encode, request } from "./daemon.js";
+import { overturnRoute } from "./ratify.js";
+import { typeInto } from "./typing.js";
 import { type Actions, doctorEntries, newestUnseen, nextNeedsYou, paletteEntries, run, stepLine, stepSession, titled, windowBinding } from "./keys.js";
 import { hover, realClock, shownGate } from "./hover.js";
 import { arrange, defaultWidths, type LayoutMode, railShown, resized, type Widths } from "./layout.js";
@@ -33,7 +36,8 @@ import { knownProjects } from "./projects.js";
 import { studio } from "./state.js";
 import { closeSettingsPage, settingsPageOpen, showSettingsPage, startSettingsPage } from "./settings-page.js";
 import { showSkills } from "./skills.js";
-import { showBarName, showView } from "./story.js";
+import { drawFeed, showBarName, showView } from "./story.js";
+import { startRailBriefs } from "./rail-brief.js";
 import { jumpToNeedsYou, showToast } from "./toast.js";
 import { finishedNote, showNote, warnContext, watchNotes } from "./notes.js";
 import type { Selection, Session, SessionCards } from "./types.js";
@@ -344,7 +348,24 @@ startPanes().catch((e) => {
 dragSplit();
 dragPanel();
 // A drafting prompt fills the quick start of New session in the project (`map.ts`, "Draft a map").
-startMap({ draft: (project, prompt) => void showPicker("session", project, prompt), selectedProject, refocus: focusPane });
+startRailBriefs(drawFeed);
+startMap({
+  draft: (project, prompt) => void showPicker("session", project, prompt),
+  // An overturn stages its prompt in the PR's live session without Enter, else New session starts with it (`ratify.ts`).
+  overturn: (project, pr, prompt) => {
+    const route = overturnRoute(studio.listed, pr);
+    if (route.kind === "new") return void showPicker("session", project, prompt);
+    const blocked = () => studio.listed.find((s) => s.id === route.id)?.state === "needs_you";
+    typeInto(route.terminal, prompt, blocked, {
+      now: Date.now,
+      sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
+      send: (data) => request({ op: "input", id: route.terminal, data: encode(new TextEncoder().encode(data)) }),
+      notice: (line) => logLine("error", line),
+    }, false).catch(failure("stage overturn", "error"));
+  },
+  selectedProject,
+  refocus: focusPane,
+});
 startMapAgents({ sessions: () => studio.listed, projectOf: projectOfCwd, select: (id, agent) => void select(id, agent) });
 element("new-session").addEventListener("click", () => void showPicker());
 element("add-project").addEventListener("click", () => void showAddProject());

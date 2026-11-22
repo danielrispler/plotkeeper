@@ -20,6 +20,7 @@ import { briefNodes, cardLine, cardsFor, openCard, quizOpen, rowCards, unseenRow
 import { type Banner, bannerElement, bannerFor, bannerLives } from "./banner.js";
 import { quizAllowed, quizAnswered, quizItem, quizRegion, seedQuiz, trialOn } from "./quiz.js";
 import { evidenceElement, hasEvidence } from "./evidence.js";
+import { railBriefRow } from "./rail-brief.js";
 import { showCleared } from "./decisions.js";
 import { decisionElement, questionElement } from "./questions.js";
 import { removeWorktreeByDefault, shortPaths, worktreeOf } from "./paths.js";
@@ -489,6 +490,11 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
   if (turn && index !== null && hasEvidence(turn, session.capabilities)) {
     const line = evidenceElement(session.id, index, turn, { only: session.state === "running" && now ? "failed" : "all" });
     if (line) node.append(line);
+  }
+  // A PR brief waiting for this session's PR: one quiet row in the newest turn, which opens it on the Map view.
+  if (now && index !== null) {
+    const row = railBriefRow(session, drawFeed);
+    if (row) node.append(row);
   }
   // `open` and `ask` lines always show; `why` and `reported` wait for the Quiz to be answered or skipped (#120), and show at once
   // when the turn has none. Its Quiz is never beside a decision: a turn with an `ask` line, or in Needs you, has none open.

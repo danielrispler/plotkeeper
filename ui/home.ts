@@ -373,6 +373,8 @@ export const landedClear = clearing(
 );
 
 // `fogged`: a part of its map that Daniel tracks as Core shows fog (#310); Home marks the row quietly, with no count.
+// What the project's quiet dot says on hover: it lights for fog on a Core part, a broken law or a PR brief waiting (#344).
+export const markTitle = "Something you track has changed, a law is broken or a PR brief is waiting: open the map";
 export type HomeProject = { name: string; path: string; fogged: boolean };
 
 // The projects Home offers: one per entry of `projects.json`, in its order.
@@ -492,7 +494,7 @@ function projectRow({ name, path, fogged }: HomeProject): HTMLElement {
     // One quiet mark, no count; pressing it opens the project's Map view and not the new session the row starts.
     const mark = text("span", "", "fog-mark");
     mark.setAttribute("role", "button");
-    mark.title = "Something you track has changed, or a law is broken: open the map";
+    mark.title = markTitle;
     mark.addEventListener("click", (event) => {
       event.stopPropagation();
       openMap(path);
