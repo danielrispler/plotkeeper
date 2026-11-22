@@ -7,15 +7,16 @@
 // `skipped: <reason>` or `review unavailable: <reason>`. It never fails a PR: whatever stops the
 // review, it says why and exits 0; only a wrong option exits 2, before any review runs. The
 // findings go to a JSON file in `--out`: the session's scratchpad, or the system's temp folder
-// without it.
+// without it. Every run, whatever its verdict, also leaves one line in the main checkout's
+// `local-evidence/outside-review/runs.jsonl`, where git ignores that folder (#302).
 //
 // The reviewer cannot write, run a command or read outside its throwaway folder: `deny-hook.mjs`
 // denies every tool but a read inside that folder (#283). So the script hands it the diff and the
 // file list as files, and checks afterwards that the reviewed tree is still clean.
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 export const DEFAULT_MODEL = "gemini-4-neon-medium";
 /** The turn-writing job queue: each session's jobs, and what runs behind one that panics. */
@@ -269,8 +270,25 @@ const main = async (opts) => {
     base = commit(`${since}^`);
     if (!base) throw new Usage(`--since ${opts.since} is the repository's first commit`);
   } else base = git("merge-base", "HEAD", "origin/main");
+  const about = { branch: git("rev-parse", "--abbrev-ref", "HEAD"), head, base, model: opts.model, round: opts.since ? 2 : 1 };
+  // One line per run in the main checkout's local-evidence/, and a reviewed run's findings beside
+  // it. Only where git ignores that folder, so no other repository gets an untracked file; a record
+  // that cannot be written changes nothing else.
+  const record = (entry, findings) =>
+    safe(() => {
+      const main = dirname(git("rev-parse", "--path-format=absolute", "--git-common-dir"));
+      git("-C", main, "check-ignore", "--quiet", "local-evidence/outside-review/runs.jsonl");
+      const folder = join(main, "local-evidence/outside-review");
+      mkdirSync(folder, { recursive: true });
+      appendFileSync(join(folder, "runs.jsonl"), JSON.stringify({ at: new Date().toISOString(), ...about, ...entry }) + "\n");
+      if (findings) writeFileSync(join(folder, findings.name), findings.text);
+    });
+  const skip = (line) => {
+    record({ verdict: line });
+    console.log([line, ...notes].join("\n"));
+  };
   const diff = git("-c", "core.quotepath=false", "diff", "--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", base, head);
-  if (!diff) return console.log(`skipped: no change between ${base.slice(0, 9)} and HEAD`);
+  if (!diff) return skip(`skipped: no change between ${base.slice(0, 9)} and HEAD`);
   const before = git("status", "--porcelain");
   if (before) notes.push("note: uncommitted changes are not reviewed; the review reads HEAD");
   const subIssues = () => {
@@ -281,7 +299,7 @@ const main = async (opts) => {
     return Number(total ?? 0);
   };
   const decided = decide(opts, { diff, fileAt: (path) => git("show", `${head}:${path}`), subIssues });
-  if (!decided.review) return console.log([decided.line, ...notes].join("\n"));
+  if (!decided.review) return skip(decided.line);
   // Before any quota is spent: the findings must have somewhere to go.
   if (safe(() => mkdirSync(opts.out, { recursive: true }), null) === null) throw new Usage(`--out ${opts.out} cannot be made`);
 
@@ -306,6 +324,9 @@ const main = async (opts) => {
       process.exit(1);
     });
   const lines = [];
+  let verdict = null;
+  let cost = {};
+  let kept = null;
   try {
     git("worktree", "add", "--quiet", "--detach", repo, head);
     const absolute = (paths) => paths.split("\n").filter(Boolean).map((p) => join(repo, p)).join("\n") + "\n";
@@ -332,12 +353,15 @@ const main = async (opts) => {
     if (dirty) notes.push(`warning: the review changed its throwaway tree, so the deny hook let a write through:\n${dirty}`);
     if (safe(() => git("status", "--porcelain"), before) !== before) notes.push("warning: the reviewed checkout changed during the review");
     const name = `outside-review-${head.slice(0, 9)}${opts.since ? "-round2" : ""}`;
+    verdict = result.line;
     if (result.findings) {
       const quotaAfter = left();
       const denied = decisions.filter((d) => d.decision === "deny").map(({ tool, path, command }) => ({ tool, path, command }));
       const { findings, tokens, seconds } = result;
       const report = { model: opts.model, base, head, why: decided.why, findings, tokens, seconds, denied, quotaBefore, quotaAfter, notes };
-      writeFileSync(join(opts.out, `${name}.json`), JSON.stringify(report, null, 2) + "\n");
+      kept = { name: `${name}.json`, text: JSON.stringify(report, null, 2) + "\n" };
+      cost = { findings: findings.length, tokens, seconds, quotaBefore, quotaAfter };
+      writeFileSync(join(opts.out, kept.name), kept.text);
       const reasons = decided.why.split("; ");
       const more = reasons.length > 2 ? `; and ${reasons.length - 2} more reasons` : "";
       const percent = (fraction) => (typeof fraction === "number" ? `${Math.round(fraction * 100)}%` : "?");
@@ -356,10 +380,12 @@ const main = async (opts) => {
       }
     }
   } catch (error) {
-    lines.push(`review unavailable: ${String(error.message ?? error).split("\n")[0]}`);
+    verdict = `review unavailable: ${String(error.message ?? error).split("\n")[0]}`;
+    lines.push(verdict);
   } finally {
     cleanup();
   }
+  record({ verdict, why: decided.why, ...cost }, kept);
   console.log([...lines, ...notes].join("\n"));
 };
 
