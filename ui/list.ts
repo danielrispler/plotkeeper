@@ -8,9 +8,7 @@ import { counts, times, type Time } from "./times.js";
 import { shortPaths } from "./paths.js";
 import { historyLink } from "./history.js";
 import { logo, logoKey, noContextNote } from "./logos.js";
-import { knownProjects, onProjects, projects, projectsError, setProjects } from "./projects.js";
-import { addProject, refuse, showPicker } from "./picker.js";
-import { projectGroups, foundWorkspaces, tokenOf, workspaceSection, type ProjectGroup } from "./workspaces.js";
+import { projectGroups, type ProjectGroup } from "./projects.js";
 import { redrawHistory, redrawHome, showHistory } from "./panes.js";
 import { isSelected, select } from "./selection.js";
 import { studio } from "./state.js";
@@ -422,43 +420,12 @@ export function strip(sessions: Session[]): HTMLElement[] {
 // The sessions the list shows: all but the ended ones, which are in History (#94).
 export const sidebarSessions = <T extends Pick<Session, "state">>(sessions: T[]): T[] => sessions.filter((session) => session.state !== "ended");
 
-// The main checkout of the repository a folder outside every project is in (#98), asked once each: only then its group
-// may offer Add as project. Unknown until the answer comes, when the sidebar is drawn again.
-const repositories = new Map<string, string | null>();
-function repositoryOf(folder: string): string | null {
-  const known = repositories.get(folder);
-  if (known === undefined) {
-    repositories.set(folder, null);
-    invoke("repository_of", { folder }).then((main) => {
-      if (main) {
-        repositories.set(folder, main);
-        drawSidebar();
-      }
-    }, () => {});
-  }
-  return known ?? null;
-}
-
-// A project header's one action (#98): Remove on a project, Add as project on a folder outside every project whose
-// repository (`main`, its main checkout, when known) isn't a project already. `key` names the action and its path, so
-// the sidebar's patch replaces the button when the action changes instead of keeping the old listener.
-export type HeadAction = { kind: "remove" | "add"; path: string; key: string };
-export function headAction(group: { key: string; project: boolean }, main: string | null, projects: string[]): HeadAction | null {
-  if (group.project) return { kind: "remove", path: group.key, key: `remove ${group.key}` };
-  if (main && !projects.includes(main)) return { kind: "add", path: group.key, key: `add ${group.key}` };
-  return null;
-}
-
-// A project's header (#97): its name and, even while folded, its most urgent state: needs you over running. The
-// header carries the project's own actions (#98): Remove, and Add as project on a folder outside every project; a
-// project's header is dragged to reorder the projects. A project's header also holds a "+", shown on hover or focus,
-// that opens New session on that project, as in Zed, T3 Code, Superset and cmux (docs/studio/research/new-session-project.md).
+// A project's header (#97): its name and, even while folded, its most urgent state: needs you over running.
 export function projectHead(group: ProjectGroup<Session>): HTMLElement {
   const head = document.createElement("div");
   head.className = "project-head";
   head.dataset.key = `head ${group.key}`;
   head.dataset.project = group.key;
-  head.draggable = group.project;
   const toggle = pressable(text("button", "", "project-toggle"), false, () => {
     if (!shut.delete(group.key)) shut.add(group.key);
     drawSidebar();
@@ -469,65 +436,13 @@ export function projectHead(group: ProjectGroup<Session>): HTMLElement {
   toggle.append(text("span", group.name, "name"));
   if (group.rollup) toggle.append(glyph(group.rollup));
   head.append(toggle);
-  if (group.project) {
-    const plus = pressable(text("button", "+", "project-new"), false, () => void showPicker("session", group.key));
-    plus.removeAttribute("aria-pressed");
-    plus.dataset.key = `new ${group.key}`;
-    plus.title = `New session in ${group.name}`;
-    plus.setAttribute("aria-label", plus.title);
-    head.append(plus);
-  }
-  const action = headAction(group, group.project ? null : repositoryOf(group.key), knownProjects());
-  if (action) {
-    const remove = action.kind === "remove";
-    const button = pressable(text("button", remove ? "×" : "Add as project", "project-action"), false, () => {
-      if (remove) invoke("remove_project", { project: action.path }).then(setProjects, refuse);
-      else void addProject(action.path);
-    });
-    button.removeAttribute("aria-pressed");
-    button.dataset.key = action.key;
-    button.title = remove ? "Remove project: its worktrees and branches stay" : `Add ${action.path} as a project`;
-    head.append(button);
-  }
   return head;
 }
 
-// Dragging a project's header onto another moves it before that one, or after it from the lower half of the target;
-// the order is written to `projects.json` and kept.
-function dragProjects(groups: HTMLElement) {
-  let dragged: string | null = null;
-  const target = (event: DragEvent) => (event.target as HTMLElement).closest<HTMLElement>(".project-head[draggable=true]");
-  groups.addEventListener("dragstart", (event) => {
-    const head = target(event);
-    dragged = head?.dataset.project ?? null;
-    if (head && event.dataTransfer) event.dataTransfer.effectAllowed = "move";
-  });
-  groups.addEventListener("dragover", (event) => {
-    if (dragged && target(event)) event.preventDefault();
-  });
-  groups.addEventListener("drop", (event) => {
-    const head = target(event);
-    const over = head?.dataset.project;
-    if (!head || !over || !dragged || over === dragged) return;
-    event.preventDefault();
-    const box = head.getBoundingClientRect();
-    const after = event.clientY > box.top + box.height / 2;
-    const rest = knownProjects().filter((path) => path !== dragged);
-    const at = rest.indexOf(over);
-    if (at < 0) return;
-    rest.splice(at + (after ? 1 : 0), 0, dragged);
-    dragged = null;
-    invoke("reorder_projects", { order: rest }).then(setProjects, refuse);
-  });
-  groups.addEventListener("dragend", () => (dragged = null));
-}
-onProjects(() => drawSidebar());
-
-// A project's group: its header, then, unless folded, its live sessions by state and its workspace rows. A group for a
-// folder outside every project is dimmed and has no workspaces.
+// A project's group: its header, then, unless folded, its live sessions by state.
 function projectNode(group: ProjectGroup<Session>): HTMLElement {
   const node = document.createElement("section");
-  node.className = group.project ? "project" : "project outside";
+  node.className = "project";
   node.dataset.key = group.key;
   node.append(projectHead(group));
   if (!projectOpen(group.key)) return node;
@@ -535,7 +450,7 @@ function projectNode(group: ProjectGroup<Session>): HTMLElement {
   body.className = "project-body";
   body.dataset.key = "body";
   for (const { state, sessions } of group.states) {
-    const rows = sessions.flatMap((session) => tree(session, group.project ? tokenOf(group.key, session.cwd) : null));
+    const rows = sessions.flatMap((session) => tree(session, null));
     if (!collapsed.includes(state)) {
       const states = document.createElement("div");
       states.dataset.key = state;
@@ -551,32 +466,14 @@ function projectNode(group: ProjectGroup<Session>): HTMLElement {
     folded.append(fullTitle(text("summary", `${stateLabels[state]} · ${sessions.length}`), `Show or hide the ${stateLabels[state].toLowerCase()} sessions`), ...rows);
     body.append(folded);
   }
-  if (group.project) {
-    const workspaces = document.createElement("div");
-    workspaces.className = "project-workspaces";
-    workspaces.dataset.key = "workspaces";
-    workspaces.append(...workspaceSection(group.key, studio.listed.filter((session) => session.state !== "ended")));
-    body.append(workspaces);
-  }
   node.append(body);
   return node;
 }
 
-// The project groups (#97): one per project, in order, then one dimmed group for each folder outside every project.
+// The project groups (#97): one per repository, in the order its sessions are listed.
 // Patched, not rebuilt, so focus and text selection survive the update (danielrispler/Falinks#570).
-let listening = false;
 export function drawSidebar() {
-  if (!listening) dragProjects(element("groups"));
-  listening = true;
-  const paths = knownProjects();
-  const error = projectsError();
-  const failure: HTMLElement[] = [];
-  if (error) {
-    const message = text("pre", `The projects could not be read: ${error}`, "picker-error");
-    message.dataset.key = "projects-error";
-    failure.push(message);
-  }
-  patch(element("groups"), [...projectGroups(paths, foundWorkspaces(), sidebarSessions(studio.listed)).map(projectNode), ...failure]);
+  patch(element("groups"), projectGroups(sidebarSessions(studio.listed)).map(projectNode));
 }
 
 // The sessions are grouped by project, then by state: needs you, running, your turn, idle; the idle ones
@@ -590,8 +487,6 @@ export function showSessions(sessions: Session[]) {
   redrawHistory();
   const live = sidebarSessions(sessions);
   drawSidebar();
-  // The projects are read once; until then the groups draw with none.
-  if (!knownProjects().length) void projects().then(drawSidebar, () => {});
   patch(element("history-link"), historyLink(sessions, showHistory));
   patch(element("strip"), strip(live));
   element("no-sessions").hidden = sessions.length > 0;

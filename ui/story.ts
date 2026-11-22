@@ -11,24 +11,20 @@ import { age, code, element, failure, fullTitle, invoke, logLine, pressable, pro
 import { select } from "./selection.js";
 import { askAnchor } from "./ask.js";
 import { rendered } from "./markdown.js";
-import { encode, request } from "./daemon.js";
 import { agentState, sessionName, showsLanded } from "./list.js";
-import { closePane, openHere, refreshHome } from "./panes.js";
+import { refreshHome } from "./panes.js";
 import { blockedRequestFor, openDecision, type Ask } from "./answer.js";
-import { blockedElement, docksInDock, fillCardRisk, riskLine, typeRetry } from "./blocked.js";
+import { blockedElement, docksInDock, fillCardRisk, retryLine, riskLine } from "./blocked.js";
 import { briefNodes, cardLine, cardsFor, openCard, quizOpen, rowCards, unseenRow } from "./cards.js";
 import { type Banner, bannerElement, bannerFor, bannerLives } from "./banner.js";
 import { quizAllowed, quizAnswered, quizItem, quizRegion, seedQuiz, trialOn } from "./quiz.js";
 import { evidenceElement, hasEvidence } from "./evidence.js";
 import { showCleared } from "./decisions.js";
 import { decisionElement, questionElement } from "./questions.js";
-import { removeWorktreeByDefault, shortPaths, worktreeOf } from "./paths.js";
+import { shortPaths } from "./paths.js";
 import { checkTime, counts, estimateText, times } from "./times.js";
 import { studio } from "./state.js";
 import { titled } from "./keys.js";
-import { typeInto } from "./typing.js";
-import { repositoryOfWorktree } from "./workspaces.js";
-import { terminalInUse } from "./home.js";
 import {
   askKind,
   stateLabels,
@@ -103,9 +99,6 @@ export function showView(selected: Selection | null) {
     element("headline").title = [...times(session, stepSpan).map(([, draw]) => draw(now)), runsAt].filter(Boolean).join(" · ");
   };
   element("view").toggleAttribute("data-agent", agent !== null);
-  // "Open" resumes an ended session in a new terminal, in its folder, where Claude Code keeps it.
-  element("reopen").hidden = agent !== null || session.state !== "ended";
-  element("reopen").onclick = () => openHere(session).catch(failure("reopen", "error"));
   // Another agent's row (danielrispler/Falinks#560) has no name of its own to keep, nor turns to mark, and comes back
   // with its status if dropped.
   const own = agent === null && !session.status_only;
@@ -113,9 +106,6 @@ export function showView(selected: Selection | null) {
   element("rename").onclick = () => askName(session);
   element("mark-unseen").hidden = !own || session.state !== "your_turn" || session.unseen === true;
   element("mark-unseen").onclick = () => void invoke("mark_unseen", { id: session.id }).catch(failure("mark_unseen", "error"));
-  // Only a terminal the studio runs can be closed from here.
-  element("close").hidden = agent !== null || session.terminal === null;
-  element("close").onclick = () => askClose(session);
   element("delete").hidden = !own;
   element("delete").onclick = () => askDelete(session).catch(report);
   element("tool").textContent = session.shell
@@ -476,12 +466,12 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
   const summary = turn?.id ? summaryOf(turn.id) : null;
   const bodyLine = (line: BodyLine) =>
     // A `reported` line is the agent's claim, which no recorded fact shows.
-    rendered("li", line.kind === "reported" ? `Agent says: ${line.text}` : line.text, line.kind, session.cwd);
+    rendered("li", line.kind === "reported" ? `Agent says: ${line.text}` : line.text, line.kind);
   // An earlier turn's Body is derived as the folded line's Headline is, which that line already shows.
   const lines = (now ?? (turn ? headlineOf(summary, turn.message) : null))?.body ?? [];
   if (now) {
     if (now.headline) {
-      node.append(rendered("p", now.headline, "headline-text", session.cwd));
+      node.append(rendered("p", now.headline, "headline-text"));
       if (index !== null) node.append(askAnchor(session.id, { kind: "headline", turn: index }, "this turn's Headline"));
     }
   }
@@ -544,7 +534,7 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
   const responses = latest ? session.transcript.responses : [];
   if (turn && (latest ? responses.length : turn.id)) {
     const body = document.createElement("div");
-    const fill = (texts: string[]) => body.replaceChildren(...texts.map((t) => rendered("div", t, "response", session.cwd)));
+    const fill = (texts: string[]) => body.replaceChildren(...texts.map((t) => rendered("div", t, "response")));
     const fetched = replies.get(key);
     if (latest) fill(responses);
     else if (fetched !== undefined) fill([fetched]);
@@ -654,38 +644,15 @@ export function drawFeed() {
   element("brief-fold").hidden = lives || briefNodes(cards).length === 0;
   element("feed").replaceChildren(...blocks.map((block, i) => turnElement(session, block, own && i === 0 && block.index !== null ? now : null)));
 }
-// Rename (danielrispler/Falinks#469): the row's name, kept in the event log, and `/rename` typed into the session while
-// its claude runs, so Claude Code shows the same name. An empty name gives the row its folder's again.
-// The command waits for Daniel's draft and never answers a session that needs him (danielrispler/Falinks#544).
+// Rename (danielrispler/Falinks#469): the row's name, kept in the event log. An empty name gives the row its folder's again.
 function askName(session: Session) {
   const dialog = element("rename-dialog") as HTMLDialogElement;
   const field = element("rename-field") as HTMLInputElement;
   field.value = session.name ?? "";
   dialog.onclose = async () => {
     if (dialog.returnValue !== "rename") return;
-    const name = field.value.trim();
-    await invoke("rename", { id: session.id, name }).catch(failure("rename", "error"));
-    if (!name || session.terminal === null || session.state === "ended") return;
-    const terminal = session.terminal;
-    const blocked = () => studio.listed.find((s) => s.id === session.id)?.state === "needs_you";
-    await typeInto(terminal, `/rename ${name}`, blocked, {
-      now: Date.now,
-      sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
-      send: (data) => request({ op: "input", id: terminal, data: encode(new TextEncoder().encode(data)) }),
-      notice: (text) => logLine("error", text),
-    }).catch(failure("type /rename", "error"));
+    await invoke("rename", { id: session.id, name: field.value.trim() }).catch(failure("rename", "error"));
   };
-  dialog.returnValue = "";
-  dialog.showModal();
-}
-
-// Close (danielrispler/Falinks#469): ends the session's terminal, asking first while it works or has background tasks.
-function askClose(session: Session) {
-  const close = () => closePane(session.terminal!).catch(failure("close pane", "error"));
-  if (!session.asks_before_closing) return close();
-  const dialog = element("close-dialog") as HTMLDialogElement;
-  element("close-name").textContent = sessionName(session);
-  dialog.onclose = () => dialog.returnValue === "close" && close();
   dialog.returnValue = "";
   dialog.showModal();
 }
@@ -704,71 +671,18 @@ function choice(dialog: HTMLDialogElement): Promise<string> {
   });
 }
 
-// Delete: ends the session's terminal unless another live session runs in it, removes its worktree
-// when ticked, asking first when that would lose work, and its branch when the main checkout holds
-// it, then drops its row. A branch git keeps is reported, and the row goes anyway.
+// Delete: asks, then drops the row; the cards are kept.
 export async function askDelete(session: Session) {
   const dialog = element("delete-dialog") as HTMLDialogElement;
-  const found = worktreeOf(session.cwd);
-  const repository = found === null ? null : await repositoryOfWorktree(found);
-  const worktree = repository === null ? null : found;
-  const ticked = element("delete-worktree") as HTMLInputElement;
-  ticked.checked = removeWorktreeByDefault(session, studio.listed);
   element("delete-name").textContent = sessionName(session);
-  element("delete-working").hidden = !(session.terminal !== null && session.asks_before_closing);
-  element("delete-worktree-option").hidden = worktree === null;
-  element("delete-worktree-path").textContent = worktree ?? "";
-  const others = studio.listed.filter((s) => s.id !== session.id && s.state !== "ended" && worktreeOf(s.cwd) === worktree);
-  element("delete-shared").hidden = worktree === null || others.length === 0;
   if ((await choice(dialog)) !== "delete") return;
-  if (session.terminal !== null && !terminalInUse(session.terminal, studio.listed, (id) => id === session.id)) await closePane(session.terminal);
-  if (worktree !== null && ticked.checked) await removeWorktree(worktree, repository!);
   await invoke("delete_session", { id: session.id });
 }
 
-// The branch is git's, read before the worktree goes: a session with no turn yet has none in its
-// transcript.
-export async function removeWorktree(worktree: string, project: string) {
-  const { tasks } = await invoke("workspaces", { project });
-  const branch = tasks.find((task) => task.path === worktree)?.branch ?? null;
-  const losses = await invoke("remove_task", { project, path: worktree, confirmed: false });
-  if (losses) {
-    const list = (title: string, lines: string[]) => {
-      if (!lines.length) return [];
-      const items = document.createElement("ul");
-      items.append(...lines.map((line) => text("li", line, "mono")));
-      return [text("p", title), items];
-    };
-    element("delete-losses-list").replaceChildren(
-      ...list("Uncommitted changes", losses.uncommitted),
-      ...list("Commits not on origin (they stay on the branch)", losses.unpushed),
-    );
-    if ((await choice(element("delete-losses") as HTMLDialogElement)) !== "remove") return;
-    await invoke("remove_task", { project, path: worktree, confirmed: true });
-  }
-  if (branch === null) return;
-  await invoke("delete_merged_branch", { project, branch }).catch((e) => report(`Branch ${branch} kept: ${e}`));
-}
-
-
-// Types a blocked command's retry line into the session's terminal (danielrispler/plotkeeper#175), as `/rename` is typed.
-function typeRetryLine(session: Session, card: BlockedCommand, agent: string | null) {
-  const notice = (text: string) => logLine("error", text);
-  const terminal = session.terminal;
-  if (terminal === null || session.state === "ended") return notice("Not typed: the session has no terminal running. Ask it to run the approved command yourself.");
-  const listed = () => studio.listed.find((s) => s.id === session.id);
-  const blocked = () => listed()?.state === "needs_you";
-  // A late Allow's answer reaches the session in the read loop's next pass, which ends its block's needs-you.
-  const answered = () => {
-    const status = listed()?.blocked_commands?.find((c) => c.call === card.call)?.status;
-    return status !== "blocked" && status !== "blocked_again";
-  };
-  typeRetry(card, agent, terminal, blocked, {
-    now: Date.now,
-    sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
-    send: (data) => request({ op: "input", id: terminal, data: encode(new TextEncoder().encode(data)) }),
-    notice,
-  }, answered).catch(failure("type retry", "error"));
+// A late Allow reaches no terminal from the page: it shows the line to tell the session, so the agent retries the command.
+function retryNotice(session: Session, card: BlockedCommand, agent: string | null) {
+  if (session.state === "ended") return report("The session has ended: start it again and ask it to run the approved command.");
+  report(`Allowed. Tell the session: ${retryLine(card, agent)}`);
 }
 
 // The session's blocked commands the view shows, in block order: its own view shows them all, and a subagent's view
@@ -785,7 +699,7 @@ const fedCards = (session: Session, agent: string | null) => viewed(session, age
 // `cards` drawn, each naming the subagent that asked.
 function blockedElements(session: Session, cards: BlockedCommand[]): HTMLElement[] {
   const named = (id: string | null) => (id === null ? null : (session.agents.find((a) => a.id === id)?.name ?? id.slice(0, 5)));
-  const retry = (card: BlockedCommand) => typeRetryLine(session, card, named(card.agent));
+  const retry = (card: BlockedCommand) => retryNotice(session, card, named(card.agent));
   const note = (card: BlockedCommand) => studio.cards.risk_notes.find((n) => n.call === card.call);
   return cards.flatMap((card) => blockedElement(session.resume_id || session.id, card, named(card.agent), retry, note(card), session.state !== "ended") ?? []);
 }

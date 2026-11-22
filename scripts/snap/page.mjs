@@ -20,16 +20,7 @@ export const stubSource = (fixture) => `(() => {
     }
     close() {}
   };
-  // The daemon's terminals are the fixture's terminals key (none by default). A list request is answered with them, which the
-  // terminals' revival waits for, and an attach with the terminal's recorded screen, as the daemon replays it at start.
-  const terminals = fixture.terminals ?? [];
-  const emit = (payload) => setTimeout(() => fire("terminal", payload));
   const invoke = async (command, args) => {
-    if (command === "terminal_send" && args?.msg?.op === "list") emit({ ev: "list", terms: terminals.map(({ replay, ...listed }) => listed) });
-    if (command === "terminal_send" && args?.msg?.op === "attach") {
-      const found = terminals.find((t) => t.id === args.msg.id);
-      if (found) emit({ ev: "replay", id: found.id, ...found.replay, exited: found.exited });
-    }
     const reply = fixture[command];
     // A reply that depends on one argument: { __by: "id", values: { <id>: reply } }.
     const found = reply?.__by ? (reply.values[args?.[reply.__by]] ?? null) : reply;

@@ -1,5 +1,5 @@
 // `npm run snap:readme`: draws the README's four pictures into docs/studio/assets/readme/, dark, from fixtures, with headless
-// Chrome: hero.png (the whole window, its terminal replayed from the recording of `recordedTerminal`) and three crops of the rail
+// Chrome: hero.png (the whole page, on the `home` fixture) and three crops of the rail
 // (turn.png, quiz.png, where-we-were.png). A crop's fixture script logs the box to keep; a fixture whose target is missing logs
 // `snap:fail`, which stops this run. Run `npm run build` first. Cropping uses macOS `sips`.
 import { spawnSync } from "node:child_process";
@@ -11,7 +11,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const folder = resolve(here, "../../docs/studio/assets/readme");
 const scale = 2;
 const pictures = [
-  { out: "hero.png", fixture: "recordedTerminal", size: "1400x800", scale: 1, crop: false },
+  { out: "hero.png", fixture: "home", size: "1400x800", scale: 1, crop: false },
   { out: "turn.png", fixture: "readmeTurn", size: "1400x1000", scale, crop: true },
   { out: "quiz.png", fixture: "readmeQuiz", size: "1400x1000", scale, crop: true },
   { out: "where-we-were.png", fixture: "readmeWhere", size: "1400x1000", scale, crop: true },

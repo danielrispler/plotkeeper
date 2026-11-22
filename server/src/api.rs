@@ -3,7 +3,7 @@
 //! crate, as the Tauri shell's handlers did (danielrispler/plotkeeper#325). A command the page no longer has, such as a terminal's,
 //! is not here and answers as unknown.
 
-use crate::{App, Cleared, answer as server_answer, stop_rules};
+use crate::{App, answer as server_answer, stop_rules};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Map, Value};
 use std::sync::Arc;
@@ -75,7 +75,6 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
     match name {
         "sessions" => out(crate::sessions(app)),
         "select" => out(crate::select(app, arg(a, "id")?)),
-        "select_terminal" => out(crate::select_terminal(app, arg(a, "terminal")?)),
         "open" => out(crate::open(app, arg(a, "agent_id")?)),
         "selected" => out(crate::selected(app)),
         "subagent_log" => out(crate::subagent_log(
@@ -114,12 +113,8 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
         )),
         "rename" => res(crate::rename(arg(a, "id")?, arg(a, "name")?)),
         "delete_session" => res(crate::delete_session(arg(a, "id")?)),
-        "clearing" => done!(crate::clearing(app, arg::<Vec<Cleared>>(a, "sessions")?)),
-        "closed" => res(crate::closed(app, arg(a, "terminal")?)),
         "rail_shown" => done!(crate::rail_shown(app, arg(a, "shown")?)),
-        "split_shown" => done!(crate::split_shown(app, arg(a, "terminal")?)),
         "mark_unseen" => done!(crate::mark_unseen(app, arg(a, "id")?)),
-        "sounds" => done!(crate::sounds(app, arg(a, "on")?)),
         "summary_settings" => done!(crate::summary_settings(
             app,
             arg(a, "model")?,
@@ -198,11 +193,6 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
             arg(a, "decision")?,
         )),
         "settings_files" => out(crate::settings::settings_files()),
-        "write_setting" => res(crate::settings::write_setting(
-            arg(a, "expected")?,
-            arg(a, "path")?,
-            arg(a, "value")?,
-        )),
         "refresh_landed_tasks" => done!(crate::refresh_landed_tasks(arc)),
         "page_focus" => {
             page.focus(arg(a, "focused")?);

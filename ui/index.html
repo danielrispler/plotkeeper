@@ -2,50 +2,28 @@
 <html lang="en" dir="ltr">
 <head>
   <meta charset="utf-8">
-  <title>Studio</title>
-  <link rel="stylesheet" href="vendor/xterm.css">
+  <title>Plotkeeper</title>
   <link rel="stylesheet" href="tokens.css">
   <link rel="stylesheet" href="style.css">
-  <script src="vendor/xterm.js"></script>
-  <script src="vendor/addon-fit.js"></script>
-  <script src="vendor/addon-unicode11.js"></script>
-  <script src="vendor/addon-webgl.js"></script>
-  <script src="vendor/addon-search.js"></script>
-  <script src="vendor/addon-web-links.js"></script>
   <script src="vendor/marked.umd.js"></script>
   <script type="module" src="main.js"></script>
 </head>
 <body data-layout="full">
-  <!-- The grid runs right to left: the list on the right, the terminal in the centre, the rail on the left. -->
+  <!-- The grid runs right to left: the list on the right, Home, History or a diff in the centre, the rail on the left. -->
   <div class="app">
-    <header class="top" data-tauri-drag-region="deep">
-      <!-- The top bar (danielrispler/plotkeeper#127): each item shows whole or is in the "⋯" menu, in the order bar.ts keeps. The
-           session's header is first, after the traffic lights; a click toggles the rail. Its state is the one the rail's header shows. -->
+    <header class="top">
+      <!-- The top bar (danielrispler/plotkeeper#127): the session's header first; a click toggles the rail. Its state is the one the rail's header shows. -->
       <button id="session-header" class="btn quiet session-header" type="button" aria-label="Session story" hidden><span id="bar-dot" class="dot"></span><span id="bar-state" class="state"></span><span id="bar-name" class="name"></span></button>
       <!-- How many sessions need Daniel (danielrispler/Falinks#572), anywhere, shown whenever any do; it selects the first. -->
       <button id="needs-you" class="btn small chip" type="button" hidden></button>
       <!-- How many sessions finished a turn Daniel has not seen, not in colour; it selects the newest. -->
       <button id="unseen" class="btn small chip unseen" type="button" hidden></button>
-      <!-- The Git line (#29): the selected session's workspace and its git tokens, or the main checkout's; stays in focus mode. -->
-      <span id="git-line" class="git-line" hidden></span>
-      <span class="sp"></span>
-      <!-- Plan usage (danielrispler/plotkeeper#163): the tightest window; a click opens the popover of each agent's tile. -->
-      <button id="usage" class="btn small usage" type="button" popovertarget="usage-popover">Usage</button>
-      <!-- A new build to restart into (danielrispler/Falinks#470); sessions live in the daemon, so they stay. -->
-      <button id="new-build" class="btn small" type="button" title="Restart Studio into the new build. Sessions keep running." hidden>Restart to update</button>
-      <button id="new-session" class="btn small" type="button" title="New session" aria-label="New session">+</button>
-      <button id="bar-more" class="btn small" type="button" popovertarget="bar-menu" aria-label="More" title="Show the top bar's items that do not fit" hidden>⋯</button>
-      <!-- The gear (#159, #194) runs Open settings, as ⌘, does; its title names the key the keymap binds. It is the bar's last item and never folds into "⋯". -->
-      <button id="settings-gear" class="btn small quiet gear" type="button" aria-label="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="7"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg></button>
-      <div id="bar-menu" class="menu bar-menu" popover></div>
     </header>
-    <div id="usage-popover" class="menu usage-popover" popover></div>
 
     <nav class="list" aria-label="Sessions">
       <div class="full">
         <p id="no-sessions" class="empty">No session yet.</p>
         <div id="groups"></div>
-        <button id="add-project" class="btn small add-project" type="button">Add project…</button>
         <!-- "History · N" (#94): the ended sessions, which are not in the list. -->
         <div class="list-foot">
           <div id="history-link"></div>
@@ -54,26 +32,18 @@
       <div id="strip" class="strip"></div>
     </nav>
 
-    <!-- The picker (danielrispler/Falinks#467): where a new session starts. Creating and removing tasks is danielrispler/Falinks#468. -->
-    <div id="picker" class="picker" role="dialog" aria-label="New session" hidden></div>
+    <!-- The palette (danielrispler/Falinks#575): every action, filtered by what Daniel types. -->
+    <div id="palette" class="picker" role="dialog" aria-label="Palette" hidden></div>
 
-    <!-- The terminal panes (danielrispler/Falinks#466, danielrispler/Falinks#467) draw into #terminal-body. -->
-    <section id="terminal" class="term" aria-label="Terminal">
-      <div id="terminal-head" class="term-h"><span id="terminal-title">terminal</span></div>
-      <!-- The daemon upgrade's offer and the plugin fix (danielrispler/Falinks#470, #21). -->
-      <div id="restart" class="restart" role="status" hidden></div>
-      <!-- A split (danielrispler/Falinks#529) shows two panes, the divider between them. -->
-      <div id="terminal-body" class="term-body"><div id="split-divider" class="split-divider" hidden></div></div>
-      <!-- The terminal panel (danielrispler/Falinks#542): a shell in the shown session's folder, a band under the panes. -->
-      <div id="panel" class="term-body panel" hidden><div id="panel-divider" class="split-divider stacked" role="separator" aria-orientation="horizontal" aria-label="Resize the terminal panel"></div></div>
-      <!-- The needs-you toast (danielrispler/Falinks#573) over the terminal's top-right corner, and under it the note toast, for a
+    <!-- The centre column (danielrispler/Falinks#467): Home, History, a diff or a subagent's log; `panes.ts` draws it. -->
+    <section id="centre" class="term" aria-label="Centre">
+      <div id="column" class="term-body"></div>
+      <!-- The needs-you toast (danielrispler/Falinks#573) over the centre column's top-right corner, and under it the note toast, for a
            turn that ended off screen or a context warning; never focused. -->
       <div class="toasts">
         <div id="toast" class="toast" role="status" hidden></div>
         <div id="note-toast" class="toast note" role="status" hidden></div>
       </div>
-      <!-- A program that failed at start (danielrispler/Falinks#558): over the terminal's bottom-right corner, never focused. -->
-      <div id="start-toast" class="toast start" role="status" hidden></div>
       <div id="clear-toast" class="toast start clear" role="status" hidden></div>
     </section>
 
@@ -92,13 +62,10 @@
         </div>
         <button id="rail-more" class="btn small" type="button" popovertarget="rail-actions" aria-label="More actions" title="Rename, mark unseen, close or delete this session" hidden>⋯</button>
         <div id="rail-actions" class="menu" popover>
-          <!-- An ended session opens again with `claude --resume` (danielrispler/Falinks#467). -->
-          <button id="reopen" class="btn small" type="button" title="Resume this ended session in a terminal" hidden>Open</button>
           <!-- Rename and close (danielrispler/Falinks#469). -->
           <button id="rename" class="btn small" type="button" title="Give this session a name of your own" hidden>Rename</button>
           <!-- Unseen (danielrispler/Falinks#556): the row's mark comes back until Daniel selects it again. -->
           <button id="mark-unseen" class="btn small" type="button" title="Mark this session unseen, to come back to it" hidden>Mark unseen</button>
-          <button id="close" class="btn small" type="button" title="End this session's terminal; the session stays in History" hidden>Close</button>
           <button id="open-all" class="btn small" type="button" title="Unfold every turn and section in the story">Open all</button>
           <button id="close-all" class="btn small" type="button" title="Fold every turn and section in the story">Close all</button>
           <button id="delete" class="btn small" type="button" title="Remove this session from the list; its cards are kept" hidden>Delete</button>
@@ -131,8 +98,6 @@
           <details id="decisions" class="decisions" hidden><summary id="decisions-title" title="Show or hide the decisions made in this session"></summary><ol id="decisions-list"></ol></details>
         </section>
       </div>
-      <!-- The skills browser (danielrispler/Falinks#528), in the rail's place while open; Esc returns. -->
-      <section id="skills" class="story skills" aria-label="Skills"></section>
     </aside>
 
     <!-- The Map view (danielrispler/plotkeeper#306): over the rail's and the terminal's columns, which it hides; the list and the top bar
@@ -168,48 +133,12 @@
       <div class="ask-buttons"><button class="btn" value="rename" title="Save this name (↩)">Rename</button><button class="btn" value="cancel" title="Keep the old name (Esc)">Cancel</button></div>
     </form>
   </dialog>
-  <dialog id="close-dialog" class="ask">
-    <form method="dialog">
-      <p><strong id="close-name"></strong> is still working: it is in a turn or has background tasks.</p>
-      <p>Closing ends its terminal and every process in it.</p>
-      <div class="ask-buttons"><button class="btn" value="close" title="End its terminal and every process in it">Close</button><button class="btn" value="cancel" autofocus title="Leave it running (Esc)">Cancel</button></div>
-    </form>
-  </dialog>
-  <!-- Delete: the row leaves the list; its worktree and merged branch only when ticked. -->
+  <!-- Delete: the row leaves the list; its cards are kept. -->
   <dialog id="delete-dialog" class="ask">
     <form method="dialog">
       <p>Delete <strong id="delete-name"></strong> from the list? Its cards are kept.</p>
-      <p id="delete-working" hidden>It is still working: deleting ends its terminal and every process in it.</p>
-      <label id="delete-worktree-option"><input id="delete-worktree" type="checkbox"> Also remove its worktree
-        <code id="delete-worktree-path"></code> and, if merged, its branch</label>
-      <p id="delete-shared" hidden>Another session still works in this worktree.</p>
-      <div class="ask-buttons"><button class="btn" value="delete" title="Remove it from the list, and its worktree when ticked">Delete</button><button class="btn" value="cancel" autofocus title="Keep it (Esc)">Cancel</button></div>
+      <div class="ask-buttons"><button class="btn" value="delete" title="Remove it from the list">Delete</button><button class="btn" value="cancel" autofocus title="Keep it (Esc)">Cancel</button></div>
     </form>
-  </dialog>
-  <dialog id="delete-losses" class="ask">
-    <form method="dialog">
-      <p>The worktree has work that is not on origin:</p>
-      <div id="delete-losses-list"></div>
-      <div class="ask-buttons"><button class="btn" value="remove" title="Remove the worktree and lose the work listed above">Remove anyway</button><button class="btn" value="keep" autofocus title="Delete the session but keep its worktree and work (Esc)">Keep the worktree</button></div>
-    </form>
-  </dialog>
-  <!-- The daemon upgrade's question (danielrispler/Falinks#470, danielrispler/Falinks#322 resolution point 4). -->
-  <dialog id="upgrade" class="upgrade" aria-labelledby="upgrade-title">
-    <form method="dialog">
-      <h1 id="upgrade-title">Restart your terminals on the new version?</h1>
-      <p>Studio was updated, but your terminals still run on the old version. A restart ends each terminal and brings it back:</p>
-      <ul id="upgrade-terms"></ul>
-      <p class="actions"><button class="btn" value="no" title="Keep the terminals on the old version for now (Esc)">Not now</button> <button class="btn primary" value="yes" title="End each terminal listed and bring it back on the new version">Restart terminals</button></p>
-    </form>
-  </dialog>
-  <!-- The settings page (#193, #195): a dialog over the window; Esc, the X and a click outside close it. `settings-page.ts` draws it. -->
-  <dialog id="settings-dialog" class="settings" aria-labelledby="settings-title">
-    <div class="settings-head">
-      <h1 id="settings-title">Settings</h1>
-      <button id="settings-close" class="btn quiet" type="button" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
-    </div>
-    <div id="settings-status" class="settings-status"></div>
-    <div id="settings-body" class="settings-body"></div>
   </dialog>
   <span id="probe" aria-hidden="true">MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM</span>
 </body>

@@ -34,7 +34,7 @@
     },
     {
       "id": "window", "name": "Window", "caption": "Everything you see and press",
-      "description": "The list, the rail, Home, the Map view and the terminal panes. It shows state and sends your actions to the shell.",
+      "description": "The page: the list, the rail, Home, History and the Map view. It shows state and sends your actions to the server; it has no terminals, projects, branches, skills, usage or settings page.",
       "tier": "core", "paths": ["ui/"]
     },
     {
@@ -97,8 +97,6 @@
       "text": "Replaying the log never rewrites, replaces or deletes a stored card, summary or answer." },
     { "id": "writer-has-no-tools", "on": "understanding", "backing": "check",
       "text": "A change is untrusted text: the writer has no tools." },
-    { "id": "delete-keeps-live-terminal", "on": "window", "backing": "check",
-      "text": "Delete never ends a terminal another live session uses." },
     { "id": "colour-only-for-needs-you", "on": "window", "backing": "trust",
       "text": "Colour is only for what needs you." },
     { "id": "terminals-outlive-app", "on": "terminal-daemon", "backing": "trust",

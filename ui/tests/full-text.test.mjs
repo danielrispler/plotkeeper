@@ -5,10 +5,9 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { El, fakeDocument } from "./dom.mjs";
 import { row, projectHead } from "../../dist/list.js";
-import { showPalette, workspaceRow as pickerRow, branchRow } from "../../dist/picker.js";
-import { showStartToast, showToast } from "../../dist/toast.js";
+import { showPalette } from "../../dist/palette.js";
+import { showToast } from "../../dist/toast.js";
 import { checkElement, foldedTurn, showBarName } from "../../dist/story.js";
-import { workspaceRow } from "../../dist/workspaces.js";
 import { studio } from "../../dist/state.js";
 
 // The stand-in page: elements by id, as the shell's index.html has them.
@@ -85,15 +84,6 @@ test("a named session's name needs no title of its own: the row's holds it", () 
   noEmptyTitle(button);
 });
 
-test("a Workspaces row's name and facts hold their full text in a title", () => {
-  const workspace = { path: "/r/.claude/worktrees/issue-1", branch: "issue-1" };
-  const facts = "↑2 ↓1  ●3  2 sessions";
-  const node = workspaceRow("/r", { workspace, name: "issue-1-a-long-task-name", facts, actions: ["New session here"], landed: false });
-  holds(node, "name", "issue-1-a-long-task-name");
-  holds(node, "facts", facts);
-  noEmptyTitle(node);
-});
-
 test("the session header holds the full name", () => {
   showBarName(long);
   const header = document.getElementById("session-header");
@@ -121,10 +111,6 @@ test("a toast's name and line hold their full text, and a start toast's message"
   holds(toast, "name", long);
   holds(toast, "line", "A long question the toast cuts?");
   noEmptyTitle(toast);
-  showStartToast("A long start failure message the toast cuts", () => {});
-  const start = document.getElementById("start-toast");
-  holds(start, "name", "A long start failure message the toast cuts");
-  noEmptyTitle(start);
 });
 
 test("a check's command holds its full text in a title", () => {
@@ -135,17 +121,13 @@ test("a check's command holds its full text in a title", () => {
   assert.ok(titled(code).some((title) => title.includes(command)));
 });
 
-test("the picker's, palette's and branch picker's rows hold their full text in a title", () => {
-  const picker = document.getElementById("picker");
-  const path = "/Users/someone/work/a-long-project-name/.claude/worktrees/issue-1-a-long-task-name";
-  const worktree = pickerRow("issue-1-a-long-task-name", { path, branch: "issue-1" }, () => Promise.resolve());
-  holds(worktree, "name", "issue-1-a-long-task-name");
-  holds(worktree, "l2", path);
-  noEmptyTitle(worktree);
+test("the palette's rows hold their full text in a title", () => {
+  const palette = document.getElementById("palette");
+  palette.hidden = true; // as in the page
   const make = document.createElement;
   document.createElement = (tag) => Object.assign(make(tag), tag === "input" ? { value: "", focus() {} } : {});
   showPalette([{ title: "Switch to a session with a very long action name", keys: ["⌘K"], note: "A note the row cuts to fit", binding: {} }], () => {});
-  const rows = every(picker).filter((n) => n.tag === "button");
+  const rows = every(palette).filter((n) => n.tag === "button");
   assert.ok(rows.length > 0, "the palette draws its rows");
   for (const drawn of rows) {
     holds(drawn, "name", "Switch to a session with a very long action name");
@@ -153,13 +135,10 @@ test("the picker's, palette's and branch picker's rows hold their full text in a
     noEmptyTitle(drawn);
   }
   document.createElement = make;
-  const branch = branchRow("a-long-branch-name-the-row-cuts", "in task X", false, () => {});
-  holds(branch, "name", "a-long-branch-name-the-row-cuts");
-  noEmptyTitle(branch);
 });
 
-test("the outside-project group's toggle has a title, also for the home folder", () => {
-  const group = (key, name) => ({ key, name, project: true, rollup: null, states: [], workspaces: null });
+test("a project group's toggle has a title, also for the home folder", () => {
+  const group = (key, name) => ({ key, name, rollup: null, states: [] });
   const head = projectHead(group("/Users/someone/elsewhere/a-repository", "a-repository"));
   holds(head, "project-toggle", "/Users/someone/elsewhere/a-repository");
   noEmptyTitle(projectHead(group("", "~")));
@@ -168,10 +147,9 @@ test("the outside-project group's toggle has a title, also for the home folder",
 
 // Every CSS rule that cuts text, by selector, with where its full text is: a new one fails this test until it is covered.
 const covered = {
-  ".term": "the terminal pane, not a text",
-  ".term-h": "panes.ts: the program's title is the title of #terminal-title",
-  ".term-body": "the terminal's grid, not a text",
-  ".top": "a container: each item shows whole or sits in the ⋯ menu (bar.ts)",
+  ".term": "the centre column, not a text",
+  ".term-body": "the centre column's grid, not a text",
+  ".top": "a container: its items are the session header and two chips",
   ".strip .btn": "list.ts: the button's title holds the name and state",
   ".row .l1": "a container: its name, token and glyph carry the titles",
   ".row .l2": "a container: its step carries the title",
@@ -179,8 +157,6 @@ const covered = {
   ".row .row-step": "list.ts: the step's title",
   ".row .token": "list.ts: the token's title",
   ".project-toggle .name": "list.ts: the toggle's title is the project's path",
-  ".picker .project-pill .name": "picker.ts: the pill's title is the project's path",
-  ".project-workspaces .row .facts": "workspaces.ts: the facts' title",
   ".session-header .name": "story.ts: the header's title holds the full name",
   ".toast .name": "toast.ts: the name's title",
   ".toast .line": "toast.ts: the line's title",
@@ -192,7 +168,6 @@ const covered = {
   ".unseen-card > summary": "cards.ts: the summary's title",
   ".subagent-log .log-title": "log.ts: the title's title",
   ".subagent-log .log-call summary": "log.ts: the summary's title",
-  ".usage-tile .group-name": "usage.ts: the group name's title",
   ".plate-name": "map.ts: the plate's title holds the name, caption and description",
   ".plate-caption": "map.ts: the plate's title holds the name, caption and description",
   ".agent-chip": "map-agents.ts: a chip's title holds its full label",
