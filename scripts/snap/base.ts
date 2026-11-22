@@ -58,6 +58,7 @@ export const base = {
   open: noSelection,
   plugin_setup: null,
   pr_brief: null,
+  briefs_waiting: null,
   projects: ["/w/plotkeeper"],
   remove_project: [],
   remove_task: null,

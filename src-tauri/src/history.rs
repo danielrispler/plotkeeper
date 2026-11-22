@@ -17,6 +17,13 @@ pub struct Entry {
     pub short: String,
     pub label: String,
     pub fogged: bool,
+    /// The PR whose stored brief this commit offers (`map_history` fills it).
+    pub brief: Option<u64>,
+}
+
+/// The PR number a strip label names: `12` for `#12 Title`, none for any other label.
+pub fn pr_of_label(label: &str) -> Option<u64> {
+    label.strip_prefix('#')?.split(' ').next()?.parse().ok()
 }
 
 /// The map as of a commit: its text as the window parses it.
@@ -169,6 +176,7 @@ pub fn part_history(repo: &Path, part: &str, fogged: &HashSet<String>) -> Vec<En
             short: commit.chars().take(7).collect(),
             label: label(subject),
             fogged: fogged.contains(commit),
+            brief: None,
         })
         .collect()
 }
@@ -279,6 +287,15 @@ mod tests {
         fn labels(&self, part: &str) -> Vec<String> {
             self.history(part).into_iter().map(|e| e.label).collect()
         }
+    }
+
+    #[test]
+    fn a_strip_label_names_its_pr_only_when_it_is_a_squash_merge_label() {
+        assert_eq!(pr_of_label("#310 Studio: fog engine"), Some(310));
+        assert_eq!(pr_of_label("#7"), Some(7));
+        assert_eq!(pr_of_label("Revert (#9) of a thing"), None);
+        assert_eq!(pr_of_label("#x thing"), None);
+        assert_eq!(pr_of_label("Add a thing"), None);
     }
 
     #[test]

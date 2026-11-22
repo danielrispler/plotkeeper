@@ -62,6 +62,20 @@ export async function openBriefOf(project: string, number: number, chapter: numb
   show(view, false);
 }
 
+// Opens PR `number`'s brief once the Map view has drawn `project` (the rail's row opens the view and the brief together).
+let pending: { project: string; number: number } | null = null;
+export function openBriefWhenDrawn(project: string, number: number) {
+  const view = currentMap();
+  if (view?.project === project) return void openBriefOf(project, number, 0);
+  pending = { project, number };
+}
+onDraw((view) => {
+  if (!pending || pending.project !== view.project) return;
+  const { project, number } = pending;
+  pending = null;
+  void openBriefOf(project, number, 0);
+});
+
 export function closeBrief() {
   player.close();
   playing = null;

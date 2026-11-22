@@ -11,7 +11,8 @@ import { failure, invoke, text } from "./dom.js";
 import { currentMap, currentScrub, onDraw, onUnread, registerLayer, setScrub, type MapView } from "./map.js";
 import { closeDrawer, openDrawer } from "./map-drawer.js";
 import { hideAgents } from "./map-agents.js";
-import { type Scrub, commitDrawer, scrubBanner, scrubTickets, stripOf } from "./map-model.js";
+import { openBriefOf } from "./map-brief.js";
+import { type Scrub, briefOffer, commitDrawer, scrubBanner, scrubTickets, stripOf } from "./map-model.js";
 import type { HistoryEntry } from "./types.js";
 
 const tickets = scrubTickets();
@@ -54,7 +55,18 @@ function rows(view: MapView, list: HTMLElement, entries: HistoryEntry[]) {
           .then((found) => openDrawer(commitDrawer(found)))
           .catch(failure("map_commit"));
       });
-      item.append(text("span", "", "hist-dot"), scrub, text("span", row.short, "hist-sha"), files);
+      item.append(text("span", "", "hist-dot"), scrub, text("span", row.short, "hist-sha"));
+      // A commit whose PR has a stored brief offers it; opening it returns the map to now and plays it.
+      const actions = text("span", "", "hist-actions");
+      const offer = briefOffer(row);
+      if (offer) {
+        const brief = text("button", offer.label, "btn quiet hist-brief");
+        brief.title = offer.title;
+        brief.addEventListener("click", () => void openBriefOf(view.project, offer.number, 0));
+        actions.append(brief);
+      }
+      actions.append(files);
+      item.append(actions);
       return item;
     }),
   );

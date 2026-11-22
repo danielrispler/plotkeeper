@@ -14,6 +14,7 @@ export const trayRows = (ready: ReadyPr[]): TrayRow[] =>
   ready.flatMap((pr): TrayRow[] => {
     const title = pr.title || `PR #${pr.number}`;
     const brief = pr.brief;
+    if (brief?.quiet) return [{ number: pr.number, chapter: null, title, note: `#${pr.number} · no brief: nothing you track changed`, openable: false }];
     if (!brief || brief.chapters.length === 0) {
       const note = brief?.writing ? "writing the brief…" : "the brief is not written yet";
       return [{ number: pr.number, chapter: null, title, note: `#${pr.number} · ${note}`, openable: false }];
