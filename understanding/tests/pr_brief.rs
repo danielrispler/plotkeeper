@@ -738,6 +738,22 @@ impl BriefWriter for Canned {
     }
 }
 
+fn none_unsupported() -> String {
+    json!({ "items": [] }).to_string()
+}
+
+fn no_rewrites() -> String {
+    json!({ "items": [] }).to_string()
+}
+
+fn unsupported(id: &str, phrase: &str, why: &str) -> serde_json::Value {
+    json!({ "id": id, "supported": false, "phrase": phrase, "why": why })
+}
+
+fn checker(items: Vec<serde_json::Value>) -> String {
+    json!({ "items": items }).to_string()
+}
+
 // Sync is not needed: the entry takes any writer.
 #[test]
 fn the_entry_writes_checks_stores_and_records_one_brief() {
@@ -746,7 +762,12 @@ fn the_entry_writes_checks_stores_and_records_one_brief() {
     let mut b = single_story();
     b["decisions"] = json!(["Alpha chose order over speed.", { "text": "Gamma was left alone." }]);
     b["chapters"][0]["steps"][0]["b"] = json!("This ensures order.");
-    let writer = Canned::new(vec![Ok(b.to_string())]);
+    // The claim check finds nothing; the retry leaves the flagged step as it is.
+    let writer = Canned::new(vec![
+        Ok(b.to_string()),
+        Ok(none_unsupported()),
+        Ok(no_rewrites()),
+    ]);
     let mut log = Vec::new();
     let stored = write_pr_brief(&writer, "opus", &source(&["alpha/a.rs"]), &store, |l| {
         log.push(l)
@@ -808,7 +829,7 @@ fn a_rewrite_keeps_the_ids_of_the_decisions_it_repeats_and_a_stale_brief_is_mark
     let mut b = single_story();
     b["decisions"] = json!([{ "text": "Alpha chose order over speed." }]);
     let first = write_pr_brief(
-        &Canned::new(vec![Ok(b.to_string())]),
+        &Canned::new(vec![Ok(b.to_string()), Ok(none_unsupported())]),
         "opus",
         &source(&["alpha/a.rs"]),
         &store,
@@ -827,7 +848,7 @@ fn a_rewrite_keeps_the_ids_of_the_decisions_it_repeats_and_a_stale_brief_is_mark
         { "text": "A new decision." },
         { "text": "Alpha chose order over speed." }
     ]);
-    let writer = Canned::new(vec![Ok(b.to_string())]);
+    let writer = Canned::new(vec![Ok(b.to_string()), Ok(none_unsupported())]);
     let second = write_pr_brief(&writer, "sonnet", &again, &store, drop).unwrap();
     assert!(
         writer.prompts.borrow()[0]
@@ -960,4 +981,352 @@ fn gather_reads_the_map_the_diff_and_the_tagged_tests_from_git() {
     let facts = build_facts(&s).unwrap();
     assert_eq!(facts.shape.required, ["alpha"]);
     assert!(section(&facts, "MAP DIFF IN THIS PR").contains("Alpha two"));
+}
+
+// ---- the claim check and the one retry (#338) ----
+
+const NOT_CONFIRMED: &str = "not confirmed from the facts";
+
+fn run_entry(
+    replies: Vec<Result<String, String>>,
+    brief: &serde_json::Value,
+    src: &PrSource,
+) -> (Canned, StoredBrief, BriefRecord, Vec<String>) {
+    let data = tempfile::tempdir().unwrap();
+    let store = BriefStore::open(data.path()).unwrap();
+    let mut all = vec![Ok(brief.to_string())];
+    all.extend(replies);
+    let writer = Canned::new(all);
+    let mut log = Vec::new();
+    let stored = write_pr_brief(&writer, "opus", src, &store, |l| log.push(l)).unwrap();
+    assert_eq!(store.get(7, "abc123"), Some(stored.clone()));
+    let records = store.records();
+    assert_eq!(records.len(), 1, "one line per brief");
+    (writer, stored, records[0].clone(), log)
+}
+
+fn steps_json(b: &Brief) -> Vec<String> {
+    b.steps()
+        .map(|s| serde_json::to_string(s).unwrap())
+        .collect()
+}
+
+#[test]
+fn a_flagged_step_is_rewritten_unflagged_steps_are_kept_and_a_step_still_flagged_is_unconfirmed() {
+    let mut b = single_story();
+    b["chapters"][0]["steps"][1]["b"] = json!("This ensures order.");
+    let first: Brief = serde_json::from_value(b.clone()).unwrap();
+    let mut fixed = step("Before", &["alpha"]);
+    fixed["b"] = json!("Alpha now keeps what it was given in order.");
+    // The retry also sends a rewrite of a step nobody flagged: it is ignored.
+    let mut sneaky = step("Where", &["alpha"]);
+    sneaky["b"] = json!("Changed without being asked.");
+    let (writer, stored, record, log) = run_entry(
+        vec![
+            Ok(checker(vec![
+                unsupported(
+                    "step 3",
+                    "Alpha now keeps order",
+                    "the PR never says it is kept",
+                ),
+                json!({ "id": "step 1", "supported": true }),
+            ])),
+            Ok(json!({ "items": [
+                { "id": "step 2", "step": fixed },
+                { "id": "step 1", "step": sneaky }
+            ]})
+            .to_string()),
+        ],
+        &b,
+        &source(&["alpha/a.rs"]),
+    );
+    assert!(log.is_empty(), "{log:?}");
+    let steps = steps_json(&stored.brief);
+    let before = steps_json(&first);
+    assert_eq!(steps[0], before[0], "an unflagged step is byte-identical");
+    assert!(
+        steps[1].contains("keeps what it was given")
+            && stored.brief.steps().nth(1).unwrap().flags.is_empty()
+    );
+    // The third step was flagged by the claim check and the retry gave nothing for it.
+    let third = stored.brief.steps().nth(2).unwrap();
+    assert_eq!(
+        steps_json(&Brief {
+            chapters: vec![Chapter {
+                steps: vec![Step {
+                    flags: vec![],
+                    ..third.clone()
+                }],
+                ..Chapter::default()
+            }],
+            ..Brief::default()
+        })[0],
+        before[2]
+    );
+    assert!(
+        third.flags.iter().any(|f| f == NOT_CONFIRMED),
+        "{:?}",
+        third.flags
+    );
+    assert!(
+        third
+            .flags
+            .iter()
+            .any(|f| f.contains("the PR never says it is kept")),
+        "{:?}",
+        third.flags
+    );
+    // The retry request carries both kinds of flag and the claim check saw the facts.
+    let prompts = writer.prompts.borrow();
+    assert_eq!(prompts.len(), 3);
+    assert!(prompts[1].1.contains("=== SHAPE (decided by code) ==="));
+    assert!(prompts[2].1.contains("banned word"));
+    assert!(prompts[2].1.contains("the PR never says it is kept"));
+    assert!(
+        prompts.iter().all(|(m, _)| m == "opus"),
+        "the PR briefs model, all three calls"
+    );
+    // The record: before and after, the unconfirmed count and the cost of each call.
+    assert!(
+        record
+            .flags
+            .iter()
+            .any(|f| f.contains("banned word \"ensures\""))
+    );
+    assert_eq!(record.claim_flags_before.len(), 1);
+    assert!(record.claim_flags_before[0].contains("step 3"));
+    assert_eq!(record.claim_flags_after, record.claim_flags_before);
+    assert_eq!(record.unconfirmed, 1);
+    assert_eq!(
+        record
+            .calls
+            .iter()
+            .map(|c| (c.role.as_str(), c.cost_usd))
+            .collect::<Vec<_>>(),
+        [("writer", 0.25), ("claim check", 0.25), ("retry", 0.25)]
+    );
+    assert!(record.flags_after.iter().any(|f| f.contains(NOT_CONFIRMED)));
+}
+
+#[test]
+fn a_claim_the_retry_rewrites_leaves_no_claim_flag_after() {
+    let b = single_story();
+    let mut fixed = step("Now", &["alpha"]);
+    fixed["b"] = json!("The PR body says Alpha now keeps order.");
+    let (_, stored, record, _) = run_entry(
+        vec![
+            Ok(checker(vec![unsupported(
+                "step 3",
+                "Alpha now keeps order",
+                "no source",
+            )])),
+            Ok(json!({ "items": [{ "id": "step 3", "step": fixed }] }).to_string()),
+        ],
+        &b,
+        &source(&["alpha/a.rs"]),
+    );
+    assert_eq!(stored.brief.flagged(), 0, "{:?}", stored.brief.all_flags());
+    assert_eq!(record.claim_flags_before.len(), 1);
+    assert!(record.claim_flags_after.is_empty());
+    assert_eq!(record.unconfirmed, 0);
+}
+
+#[test]
+fn the_check_block_and_the_risks_are_part_of_what_the_claim_check_reads_and_what_it_flags() {
+    let src = flow_source();
+    let mut b = good_brief();
+    b["overview"][0]["k"] = json!("Your turn");
+    b["overview"][0]["check"] = json!({ "kind": "order", "q": "Which part answers first?", "key": ["gamma", "beta", "alpha"], "yes": "Yes, Gamma answers", "no": "No, Alpha answers", "flow": "the-flow", "opts": ["Alpha first", "Gamma first"] });
+    b["chapters"][0]["steps"][2]["risks"] =
+        json!([{ "part": "beta", "trigger": "Beta gets an empty list", "check": "Send one" }]);
+    let (writer, stored, record, _) = run_entry(
+        vec![
+            Ok(checker(vec![
+                unsupported(
+                    "step 1",
+                    "Yes, Gamma answers",
+                    "the facts do not say Gamma answers",
+                ),
+                unsupported(
+                    "step 4",
+                    "Beta gets an empty list",
+                    "no such case in the facts",
+                ),
+            ])),
+            Ok(no_rewrites()),
+        ],
+        &b,
+        &src,
+    );
+    let check_prompt = &writer.prompts.borrow()[1].1;
+    for text in [
+        "Which part answers first?",
+        "Alpha first",
+        "Yes, Gamma answers",
+        "No, Alpha answers",
+        "Beta gets an empty list",
+        "Send one",
+    ] {
+        assert!(
+            check_prompt.contains(text),
+            "the claim check does not read {text:?}"
+        );
+    }
+    let flagged: Vec<usize> = stored
+        .brief
+        .steps()
+        .enumerate()
+        .filter(|(_, s)| s.flags.iter().any(|f| f.contains("claim check")))
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(flagged, [0, 3]);
+    assert_eq!(record.claim_flags_before.len(), 2);
+}
+
+#[test]
+fn a_decision_and_an_also_line_can_be_flagged_and_rewritten() {
+    let mut b = single_story();
+    b["decisions"] = json!([{ "text": "Alpha chose order over speed." }]);
+    b["also"] = json!([{ "part": "beta", "line": "Beta changed a little." }]);
+    let src = source(&["alpha/a.rs", "beta/b.rs"]);
+    let (_, stored, record, _) = run_entry(
+        vec![
+            Ok(checker(vec![
+                unsupported(
+                    "decision 1",
+                    "chose order over speed",
+                    "the PR names no such choice",
+                ),
+                unsupported("also 1", "changed a little", "nothing shows it"),
+            ])),
+            Ok(json!({ "items": [
+                { "id": "decision 1", "text": "Alpha chose to keep order." },
+                { "id": "also 1", "line": "Beta passes its list on." }
+            ]})
+            .to_string()),
+        ],
+        &b,
+        &src,
+    );
+    assert_eq!(stored.brief.decisions[0].text, "Alpha chose to keep order.");
+    assert_eq!(
+        stored.brief.decisions[0].id.as_deref(),
+        Some("d1"),
+        "the id stays"
+    );
+    assert_eq!(stored.brief.also[0].line, "Beta passes its list on.");
+    // (The whole brief keeps the flag of the part no chapter lights: not an item a retry rewrites.)
+    assert!(stored.brief.also[0].flags.is_empty() && stored.brief.decisions[0].flags.is_empty());
+    assert!(stored.brief.steps().all(|s| s.flags.is_empty()));
+    assert_eq!(record.claim_flags_before.len(), 2);
+}
+
+#[test]
+fn a_malformed_checker_reply_leaves_the_brief_unmarked_and_is_recorded() {
+    for reply in [
+        Ok("I could not decide.".to_string()),
+        Ok("{\"items\": 3}".into()),
+        Ok("{\"items\": [{\"id\": \"step 1\"}]}".into()),
+        Err("`claude -p` failed".to_string()),
+    ] {
+        let b = single_story();
+        let (writer, stored, record, log) =
+            run_entry(vec![reply.clone()], &b, &source(&["alpha/a.rs"]));
+        assert_eq!(stored.brief.flagged(), 0, "{reply:?}");
+        assert!(record.claim_flags_before.is_empty() && record.claim_flags_after.is_empty());
+        assert!(record.claim_error.is_some(), "{reply:?}");
+        assert!(log.iter().any(|l| l.contains("claim check")), "{log:?}");
+        assert_eq!(
+            writer.prompts.borrow().len(),
+            2,
+            "no retry with nothing flagged"
+        );
+        assert_eq!(record.unconfirmed, 0);
+    }
+}
+
+#[test]
+fn a_brief_with_nothing_flagged_makes_no_retry_call() {
+    let (writer, stored, record, _) = run_entry(
+        vec![Ok(none_unsupported())],
+        &single_story(),
+        &source(&["alpha/a.rs"]),
+    );
+    assert_eq!(writer.prompts.borrow().len(), 2);
+    assert_eq!(stored.brief.flagged(), 0);
+    assert_eq!(
+        record
+            .calls
+            .iter()
+            .map(|c| c.role.as_str())
+            .collect::<Vec<_>>(),
+        ["writer", "claim check"]
+    );
+    assert!(record.retry_error.is_none() && record.claim_error.is_none());
+}
+
+#[test]
+fn a_failed_or_unreadable_retry_keeps_the_brief_with_its_flagged_items_unconfirmed() {
+    for retry in [
+        Err("`claude -p` failed".to_string()),
+        Ok("no json".to_string()),
+    ] {
+        let mut b = single_story();
+        b["chapters"][0]["steps"][1]["b"] = json!("This ensures order.");
+        let (_, stored, record, log) = run_entry(
+            vec![Ok(none_unsupported()), retry],
+            &b,
+            &source(&["alpha/a.rs"]),
+        );
+        let second = stored.brief.steps().nth(1).unwrap();
+        assert!(second.flags.iter().any(|f| f == NOT_CONFIRMED));
+        assert_eq!(record.unconfirmed, 1);
+        assert!(record.retry_error.is_some());
+        assert!(log.iter().any(|l| l.contains("retry")), "{log:?}");
+    }
+}
+
+#[test]
+fn a_your_turn_step_whose_order_check_was_dropped_is_retried_and_may_get_a_right_check() {
+    let src = flow_source();
+    let wrong = |k: &str| {
+        let mut b = good_brief();
+        b["overview"][0]["k"] = json!(k);
+        b["overview"][0]["check"] = json!({ "kind": "order", "q": "Which way?", "key": ["gamma", "beta"], "yes": "y", "no": "n", "flow": "the-flow" });
+        b
+    };
+    let b = wrong("Your turn");
+    // Fixed: the retry gives the step a check whose parts are the flow's.
+    let mut fixed = step("Your turn", &["alpha", "beta"]);
+    fixed["check"] = json!({ "kind": "order", "q": "Which way?", "key": ["beta", "alpha", "gamma"], "yes": "y", "no": "n", "flow": "the-flow" });
+    let (writer, stored, record, _) = run_entry(
+        vec![
+            Ok(none_unsupported()),
+            Ok(json!({ "items": [{ "id": "step 1", "step": fixed }] }).to_string()),
+        ],
+        &b,
+        &src,
+    );
+    assert!(
+        record
+            .flags
+            .iter()
+            .any(|f| f.contains("order check dropped"))
+    );
+    assert!(writer.prompts.borrow()[2].1.contains("order check dropped"));
+    assert_eq!(stored.brief.flagged(), 0, "{:?}", stored.brief.all_flags());
+    assert_eq!(
+        stored.brief.overview[0].check.as_ref().unwrap().key,
+        json!(["alpha", "beta", "gamma"])
+    );
+    // Still wrong: the step stays "Your turn" with no check, flagged, and carries the mark.
+    let (_, stored, record, _) =
+        run_entry(vec![Ok(none_unsupported()), Ok(no_rewrites())], &b, &src);
+    let s = &stored.brief.overview[0];
+    assert!(
+        s.check.is_none() && s.flags.iter().any(|f| f == NOT_CONFIRMED),
+        "{:?}",
+        s.flags
+    );
+    assert_eq!(record.unconfirmed, 1);
 }
