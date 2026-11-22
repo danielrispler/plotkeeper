@@ -1,6 +1,8 @@
 // Broken laws and the inline proof drawer's pure logic (spec danielrispler/plotkeeper#306, ticket #312), run on the `tsc` output.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { showBanner } from "../../dist/map-history.js";
+import { Field, fakeDocument } from "./dom.mjs";
 import { brokenParts, brokenText, ciDrawer, ciLine, commitDrawer, proofDrawer, scrubBanner, sheetCi, stripOf } from "../../dist/map-model.js";
 
 const ci = (status, extra = {}) => ({ status, run_url: "https://github.com/o/r/actions/runs/9", commit: "abc1234def", earlier: false, parts: [], laws: [], tail: "", note: null, ...extra });
@@ -93,4 +95,15 @@ test("a commit's drill-down lists its files with their diffs and opens the commi
   const local = commitDrawer({ ...found, url: null, files: [] });
   assert.deepEqual(local.jumps, []);
   assert.match(local.blocks[0].code, /No files/);
+});
+
+test("the banner offers the way back to now while a commit is scrubbed, also when its map is empty, and is empty with none", () => {
+  globalThis.document = fakeDocument({ visibilityState: "visible", hasFocus: () => true }, Field);
+  const banner = new Field("div");
+  showBanner(banner, { commit: "abcdef0123", short: "abcdef0", label: "#4 Thing", source: "" });
+  assert.match(banner.textContent, /Viewing abcdef0.*Back to now/);
+  assert.equal(banner.getAttribute("title"), "#4 Thing");
+  showBanner(banner, null);
+  assert.equal(banner.textContent, "");
+  assert.equal(banner.getAttribute("title"), null);
 });

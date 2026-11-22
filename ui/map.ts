@@ -41,6 +41,9 @@ const layers: Partial<Record<LayerName, Layer>> = {};
 export const onPlate = (hook: (context: PlateContext) => void) => void plateHooks.push(hook);
 export const onPlateClick = (hook: (context: PlateContext) => void) => void clickHooks.push(hook);
 export const onDraw = (hook: (view: MapView) => void) => void drawHooks.push(hook);
+// Runs when a draw has no map to show (none yet, or a past commit's cannot be read), with the banner and the scrub still set.
+const unreadHooks: ((banner: HTMLElement, scrub: Scrub | null) => void)[] = [];
+export const onUnread = (hook: (banner: HTMLElement, scrub: Scrub | null) => void) => void unreadHooks.push(hook);
 export const registerLayer = (name: LayerName, layer: Layer) => void (layers[name] = layer);
 
 // What `startMap` is given by `main.ts`, which owns what the Map view may not import.
@@ -379,6 +382,8 @@ function draw() {
   // No map is drawn, so nothing of the last one may stay: its banner, sheet and drawer would belong to another project.
   [slots.notPlaced, slots.sheet, slots.drawer, slots.banner].forEach((slot) => slot.replaceChildren());
   syncSide(slots as MapView["slots"]);
+  // A scrubbed commit whose map cannot be read still shows the way back to now.
+  unreadHooks.forEach((hook) => hook(slots.banner, scrub));
 }
 
 // Wires the view: the project menu, the window's focus and a merge the shell saw.

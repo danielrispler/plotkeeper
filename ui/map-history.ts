@@ -8,10 +8,10 @@
 
 import { logStop } from "./stop-rules.js";
 import { failure, invoke, text } from "./dom.js";
-import { currentMap, currentScrub, onDraw, registerLayer, setScrub, type MapView } from "./map.js";
+import { currentMap, currentScrub, onDraw, onUnread, registerLayer, setScrub, type MapView } from "./map.js";
 import { closeDrawer, openDrawer } from "./map-drawer.js";
 import { hideAgents } from "./map-agents.js";
-import { commitDrawer, scrubBanner, scrubTickets, stripOf } from "./map-model.js";
+import { type Scrub, commitDrawer, scrubBanner, scrubTickets, stripOf } from "./map-model.js";
 import type { HistoryEntry } from "./types.js";
 
 const tickets = scrubTickets();
@@ -77,23 +77,28 @@ export function drawStrip(view: MapView, part: string, slot: HTMLElement) {
     .catch(failure("map_history"));
 }
 
+// The banner: "Viewing <commit> · Back to now" while `scrub` is set, empty with none. A commit whose map cannot be read keeps it too.
+export function showBanner(banner: HTMLElement, scrub: Scrub | null) {
+  if (!scrub) {
+    banner.removeAttribute("title");
+    return banner.replaceChildren();
+  }
+  const words = scrubBanner(scrub);
+  const back = text("button", words.back, "btn quiet banner-back");
+  back.title = "Show the map as it is now";
+  back.addEventListener("click", () => scrubTo(null).catch(failure("map_at")));
+  banner.title = scrub.label;
+  banner.replaceChildren(text("span", words.text, "banner-text"), " · ", back);
+}
+
 // The banner while a past commit shows, the live agents hidden for as long.
 let hidden = false;
 onDraw((view) => {
   // Every draw makes new plates, so what is hidden is hidden again; going back to now shows them once.
   if (view.scrub !== null || hidden) hideAgents(view.scrub !== null);
   hidden = view.scrub !== null;
-  const banner = view.slots.banner;
-  if (!view.scrub) {
-    banner.removeAttribute("title");
-    return banner.replaceChildren();
-  }
-  const words = scrubBanner(view.scrub);
-  const back = text("button", words.back, "btn quiet banner-back");
-  back.title = "Show the map as it is now";
-  back.addEventListener("click", () => scrubTo(null).catch(failure("map_at")));
-  banner.title = view.scrub.label;
-  banner.replaceChildren(text("span", words.text, "banner-text"), " · ", back);
+  showBanner(view.slots.banner, view.scrub);
 });
+onUnread((banner, scrub) => showBanner(banner, scrub));
 
 registerLayer("scrubbed", { open: () => currentScrub() !== null && currentMap() !== null, close: () => void scrubTo(null) });
