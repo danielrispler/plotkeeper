@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import {
-  actorSize, autoPlace, draftPrompt, dragMove, dragStart, dragThreshold, effectiveTier, escapeMap, layerOrder, mapProject, parseMap, plateSize, rimPoint, sheetOf,
+  actorSize, autoPlace, draftPrompt, dragMove, dragStart, dragThreshold, effectiveTier, escapeMap, layerOrder, mapProject, parseMap, plateSize, rimPoint, scrubTickets, sheetOf,
 } from "../../dist/map-model.js";
 
 const part = (id, extra = {}) => ({ id, name: id, caption: "", description: "", tier: "core", paths: [], ...extra });
@@ -160,4 +160,15 @@ test("a sheet says how the part's fog stands and offers I know this only while i
   assert.notEqual(line("core", "thin").fogLine, line("core", "thick").fogLine);
   assert.match(line("black-box", undefined).fogLine, /never/i);
   assert.match(line("interface", undefined).fogLine, /only when/i);
+});
+
+test("a scrub that reads slowly is dropped after Back to now or a later click", () => {
+  const tickets = scrubTickets();
+  const first = tickets.start();
+  const second = tickets.start();
+  assert.equal(tickets.live(first), false);
+  assert.equal(tickets.live(second), true);
+  tickets.cancel();
+  assert.equal(tickets.live(second), false);
+  assert.equal(tickets.live(tickets.start()), true);
 });

@@ -244,3 +244,14 @@ export function commitDrawer(found: CommitFiles): Drawer {
     jumps: found.url ? [{ label: "Open on GitHub", title: "Open this commit on GitHub", to: { url: found.url } }] : [],
   };
 }
+
+// Tells which of a series of scrubs is the newest. `start` takes a ticket; `cancel` (Back to now) makes every ticket out stale; a
+// scrub that reads slowly lands only while its ticket is still `live`, so it never overrides what Daniel did after it.
+export function scrubTickets() {
+  let latest = 0;
+  return {
+    start: () => ++latest,
+    cancel: () => void ++latest,
+    live: (ticket: number) => ticket === latest,
+  };
+}

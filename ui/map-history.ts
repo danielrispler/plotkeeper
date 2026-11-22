@@ -11,20 +11,24 @@ import { failure, invoke, text } from "./dom.js";
 import { currentMap, currentScrub, onDraw, registerLayer, setScrub, type MapView } from "./map.js";
 import { closeDrawer, openDrawer } from "./map-drawer.js";
 import { hideAgents } from "./map-agents.js";
-import { commitDrawer, scrubBanner, stripOf } from "./map-model.js";
+import { commitDrawer, scrubBanner, scrubTickets, stripOf } from "./map-model.js";
 import type { HistoryEntry } from "./types.js";
+
+const tickets = scrubTickets();
 
 // Shows the map as of `commit` read-only, or now again with null.
 export async function scrubTo(commit: string | null) {
   const view = currentMap();
   if (!view) return;
   if (commit === null) {
+    tickets.cancel();
     closeDrawer();
     return setScrub(null);
   }
+  const ticket = tickets.start();
   const at = await invoke("map_at", { project: view.project, commit });
-  // The view may have moved on while git read.
-  if (currentMap()?.project !== view.project) return;
+  // The view may have moved on while git read, or Daniel went back to now or clicked another commit.
+  if (!tickets.live(ticket) || currentMap()?.project !== view.project) return;
   logStop("scrub", view.project);
   setScrub({ commit: at.commit, short: at.short, label: at.label, source: at.source });
 }
