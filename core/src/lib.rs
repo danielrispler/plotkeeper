@@ -630,7 +630,7 @@ pub struct BlockedCommand {
     pub reason: String,
     /// The subagent that asked, `None` for the session's own agent.
     pub agent: Option<String>,
-    /// When it was blocked, in Unix milliseconds.
+    /// When it was blocked, in Unix milliseconds: its latest block, which a block again renews.
     pub at: u64,
     pub status: BlockedStatus,
     /// The retry's `tool_use_id` once it runs, which `check_output` reads the tail by, and when it started.
@@ -3119,6 +3119,8 @@ impl Studio {
                             card.status = BlockedStatus::BlockedAgain;
                             card.call = id.clone();
                             card.reason = reason.clone();
+                            // A new block: the feed places the card in the turn running now.
+                            card.at = at;
                             card.run = None;
                             card.run_at = None;
                         }

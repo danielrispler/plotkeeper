@@ -441,6 +441,33 @@ fn a_new_block_of_an_allowed_not_run_command_blocks_the_card_again() {
     );
 }
 
+// The feed places a card in the turn of its latest step (danielrispler/plotkeeper#296): the turn its retry started in, else the
+// turn running at its block. A block again is a new block, so the card is blocked at its time, not at the first block's.
+#[test]
+fn a_card_blocked_again_is_blocked_at_the_time_of_the_new_block() {
+    let lines = then(
+        allowed(),
+        vec![
+            stop(6_000, None),
+            line(
+                "UserPromptSubmit",
+                7_000,
+                json!({ "prompt": "Ask again.", "prompt_id": "p-3" }),
+            ),
+            denied(8_000, "toolu_3", COMMAND, None),
+        ],
+    );
+    let card = &session(&lines).blocked_commands[0];
+    assert_eq!(card.status, BlockedStatus::BlockedAgain);
+    assert_eq!((card.at, card.run_at), (8_000, None));
+
+    // Allowed again, the card stays in the turn of that block, which has no retry yet.
+    let lines = then(lines, vec![answer(9_000, "toolu_3", COMMAND, "allow")]);
+    let card = &session(&lines).blocked_commands[0];
+    assert_eq!(card.status, BlockedStatus::Allowed);
+    assert_eq!((card.at, card.run_at), (8_000, None));
+}
+
 #[test]
 fn an_ended_session_does_not_want_you_for_its_waiting_cards() {
     let end = line("SessionEnd", 8_000, json!({ "reason": "other" }));
