@@ -122,6 +122,12 @@ fn began(events: &[Event], project: &str) -> Option<u64> {
         .min()
 }
 
+/// Where merged PRs are counted from for `project`: its own first event, else the Studio-wide start of tracking (the log's first
+/// event); `None` for an empty log.
+fn counted_from(events: &[Event], project: &str) -> Option<u64> {
+    began(events, project).or_else(|| events.iter().map(|e| e.at).min())
+}
+
 /// The counts for `project`; `merged_prs` is read from git by the caller.
 pub fn facts(events: &[Event], project: &str, merged_prs: u32) -> Facts {
     let count = |kind| {
@@ -200,11 +206,11 @@ pub fn stop_log(kind: Kind, project: Option<String>, day: String) -> Result<(), 
 #[tauri::command(async)]
 pub fn stop_facts(project: String) -> Result<Facts, String> {
     let events = read(&log_file()?);
-    let began = began(&events, &project).unwrap_or(now());
+    let from = counted_from(&events, &project).unwrap_or(now());
     Ok(facts(
         &events,
         &project,
-        merged_since(Path::new(&project), began),
+        merged_since(Path::new(&project), from),
     ))
 }
 
@@ -260,6 +266,18 @@ mod tests {
         assert_eq!(began(&events, "/b"), Some(20));
         assert_eq!(began(&events, "/a"), Some(10));
         assert_eq!(began(&events, "/c"), None);
+    }
+
+    #[test]
+    fn a_project_with_no_events_of_its_own_counts_from_the_logs_first_event() {
+        let at = |at, project| Event {
+            at,
+            ..event("2026-11-01", Kind::Session, project)
+        };
+        let events = [at(30, None), at(5, None), at(10, Some("/a"))];
+        assert_eq!(counted_from(&events, "/c"), Some(5));
+        assert_eq!(counted_from(&events, "/a"), Some(10));
+        assert_eq!(counted_from(&[], "/a"), None);
     }
 
     #[test]
