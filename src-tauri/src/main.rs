@@ -3,9 +3,8 @@
 //! window lists every session (danielrispler/Falinks#369, decision 18) and shows the one Daniel selected: its cards, with
 //! their quizzes, his guesses, his ratings and the longer explanations he asked for, which the card
 //! store keeps on disk, and its check lines. A session that newly needs Daniel or reaches your turn,
-//! a new card and a failed worker raise a macOS notification while the window is not focused; while
-//! it is, a turn that ends off screen goes to the window's toast. The Dock badge counts the sessions
-//! that need him (danielrispler/Falinks#369, decision 22; danielrispler/Falinks#517, decision 6).
+//! a new card and a failed worker are sent to the page as a `notification` event while the window is not focused; while
+//! it is, a turn that ends off screen goes to the window's toast. There is no Dock badge or sound (danielrispler/plotkeeper#331).
 //!
 //! The state and the logic behind the learning-layer and session-view commands are `studio_server`'s
 //! (danielrispler/plotkeeper#321): `commands` forwards to it, and what stays here is what needs the window.
@@ -15,10 +14,9 @@ use std::{
     sync::{Arc, mpsc},
     thread,
 };
-use studio_core::{Sound, State::Ended};
+use studio_core::State::Ended;
 use studio_server::{App, Cleared, clear_commit, resolve_clearing, scrubbed, session_ends};
 use tauri::{AppHandle, Emitter, Manager};
-use tauri_plugin_notification::NotificationExt;
 
 mod commands;
 mod presence;
@@ -412,7 +410,7 @@ fn main() {
         });
 }
 
-/// The window is the read loop's sink: events are emitted to it, and focus, the Dock badge, notifications and sounds are its.
+/// The window is the read loop's sink: events are emitted to it, and focus is its.
 struct TauriSink(AppHandle);
 
 impl studio_server::Sink for TauriSink {
@@ -425,44 +423,9 @@ impl studio_server::Sink for TauriSink {
         window.and_then(|w| w.is_focused().ok()) == Some(true)
     }
 
-    fn badge(&self, count: Option<usize>) {
-        if let Some(window) = self.0.get_webview_window("main") {
-            let _ = window.set_badge_count(count.map(|n| n as i64));
-        }
-    }
-
-    fn notify(&self, title: &str, body: &str) {
-        let _ = self
-            .0
-            .notification()
-            .builder()
-            .title(title)
-            .body(body)
-            .show();
-    }
-
-    fn play(&self, sound: Sound) {
-        play(sound);
-    }
-
     fn replayed(&self) {
         restart::REPLAYED.store(true, std::sync::atomic::Ordering::Release);
     }
-}
-
-/// Plays a macOS system sound, so the studio bundles none (danielrispler/Falinks#556).
-fn play(sound: Sound) {
-    let name = match sound {
-        Sound::NeedsYou => "Glass",
-        Sound::YourTurn => "Tink",
-    };
-    let file = format!("/System/Library/Sounds/{name}.aiff");
-    // Waited on its own thread, so no finished `afplay` is left a zombie.
-    thread::spawn(move || {
-        if let Err(e) = Command::new("afplay").arg(file).status() {
-            log::warn!("play the {name} sound: {e}");
-        }
-    });
 }
 
 // A hover's text shows after half a second, not macOS's 1.5 s (#220). WKWebView's `title` tooltips are AppKit's, which read

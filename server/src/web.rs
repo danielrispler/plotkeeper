@@ -58,8 +58,8 @@ impl Page for Bus {
     }
 }
 
-/// The state's sink for the page: events go to the stream; the page is focused when it says so and a tab listens. Notices,
-/// sounds and the badge are the page's own (danielrispler/plotkeeper#331), so they are not sent from here.
+/// The state's sink for the page: events go to the stream; the page is focused when it says so and a tab listens. A due
+/// notice goes as a `notification` event; the title count is the page's own, and there are no sounds or badge (danielrispler/plotkeeper#331).
 struct WebSink(Arc<Bus>);
 
 impl Sink for WebSink {
@@ -70,9 +70,6 @@ impl Sink for WebSink {
     fn focused(&self) -> bool {
         self.0.focused.load(Ordering::Acquire) && !self.0.subscribers.lock().unwrap().is_empty()
     }
-    fn badge(&self, _: Option<usize>) {}
-    fn notify(&self, _: &str, _: &str) {}
-    fn play(&self, _: studio_core::Sound) {}
     fn replayed(&self) {}
 }
 

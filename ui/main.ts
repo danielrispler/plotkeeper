@@ -35,6 +35,7 @@ import { closeSettingsPage, settingsPageOpen, showSettingsPage, startSettingsPag
 import { showSkills } from "./skills.js";
 import { showBarName, showView } from "./story.js";
 import { jumpToNeedsYou, showToast } from "./toast.js";
+import { askOnce, notifyIfAway, type Alert } from "./alerts.js";
 import { finishedNote, showNote, warnContext, watchNotes } from "./notes.js";
 import type { Selection, Session, SessionCards } from "./types.js";
 import { readUsage, timedAgents } from "./usage.js";
@@ -395,6 +396,10 @@ invoke("selected").then(show);
 listen<SessionCards>("cards", (cards) => (studio.pending ? (studio.missed = true) : showCards(cards)));
 // Claude Code's version changed: re-record the subagent fixture.
 listen<string>("notice", showNotice);
+// A notice the server found due while no tab was focused (#331): the browser notification. The permission is asked once, on the first press.
+listen<Alert>("notification", notifyIfAway);
+window.addEventListener("pointerdown", () => void askOnce(), { once: true });
+window.addEventListener("keydown", () => void askOnce(), { once: true });
 // The app's errors, from the log plugin's `Webview` target (#191).
 listen<{ level: number; message: string }>("log://log", onLogRecord);
 element("notice-dismiss").addEventListener("click", dismissNotice);

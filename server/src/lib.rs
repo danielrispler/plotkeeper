@@ -53,18 +53,12 @@ pub type Notes = Arc<Mutex<RiskNotes>>;
 pub type Notices = Mutex<Notifications>;
 
 /// What the read loop and the state send out, and what they ask of the window or page they serve. The Tauri shell is one
-/// implementation (the window's events, Dock badge, macOS notifications and sounds); the web server is another.
+/// implementation (the window's events and focus); the web server is another.
 pub trait Sink: Send + Sync {
     /// Sends event `name` with `payload` to the window or the page.
     fn emit(&self, name: &str, payload: serde_json::Value);
     /// Whether Daniel is looking at the window or page now: the "seen" and notice rules read it through the loop.
     fn focused(&self) -> bool;
-    /// The count of sessions that need Daniel, `None` for none: the Dock badge.
-    fn badge(&self, count: Option<usize>);
-    /// Raises a notification.
-    fn notify(&self, title: &str, body: &str);
-    /// Plays a sound.
-    fn play(&self, sound: studio_core::Sound);
     /// The log's replay at start is done, and the first list is sent.
     fn replayed(&self);
 }
@@ -89,24 +83,6 @@ impl Events {
 
     pub fn focused(&self) -> bool {
         self.0.get().is_some_and(|sink| sink.focused())
-    }
-
-    pub fn badge(&self, count: Option<usize>) {
-        if let Some(sink) = self.0.get() {
-            sink.badge(count);
-        }
-    }
-
-    pub fn notify(&self, title: &str, body: &str) {
-        if let Some(sink) = self.0.get() {
-            sink.notify(title, body);
-        }
-    }
-
-    pub fn play(&self, sound: studio_core::Sound) {
-        if let Some(sink) = self.0.get() {
-            sink.play(sound);
-        }
     }
 
     pub fn replayed(&self) {
@@ -1252,9 +1228,6 @@ mod tests {
             fn focused(&self) -> bool {
                 true
             }
-            fn badge(&self, _: Option<usize>) {}
-            fn notify(&self, _: &str, _: &str) {}
-            fn play(&self, _: studio_core::Sound) {}
             fn replayed(&self) {}
         }
         let seen = std::sync::Arc::new(Seen(std::sync::Mutex::default()));
