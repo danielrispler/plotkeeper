@@ -794,6 +794,7 @@ fn setup() -> SummarySetup {
     SummarySetup {
         model: "claude-haiku-4-5".into(),
         effort: "medium".into(),
+        ..SummarySetup::default()
     }
 }
 
