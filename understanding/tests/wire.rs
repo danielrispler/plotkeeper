@@ -245,6 +245,7 @@ fn learning() -> [Learning; 4] {
     ]
 }
 
+// @law: wire-types-agree
 #[test]
 fn the_wire_samples_of_the_understanding_layer_are_written_for_tsc() {
     let data = tempfile::tempdir().unwrap();

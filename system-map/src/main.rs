@@ -1,0 +1,120 @@
+//! `system-map check [--json] [--root <dir>]` checks the repository's system map;
+//! `system-map touched [--json] [--root <dir>] [path...]` names the parts some paths touch.
+
+use std::{
+    path::{Path, PathBuf},
+    process::{Command, ExitCode},
+};
+
+fn main() -> ExitCode {
+    match run() {
+        Ok(code) => code,
+        Err(message) => {
+            eprintln!("system-map: {message}");
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn run() -> Result<ExitCode, String> {
+    let mut args = std::env::args().skip(1);
+    let command = args.next();
+    if !matches!(command.as_deref(), Some("check" | "touched")) {
+        return Err(
+            "usage: system-map check [--json] [--root <dir>] | system-map touched [--json] [--root <dir>] [path...]"
+                .into(),
+        );
+    }
+    let touched = command.as_deref() == Some("touched");
+    let mut json = false;
+    let mut root = None;
+    let mut paths = Vec::new();
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--json" => json = true,
+            "--root" => root = Some(PathBuf::from(args.next().ok_or("--root needs a folder")?)),
+            other if touched && !other.starts_with("--") => paths.push(other.to_string()),
+            other => return Err(format!("unknown argument {other:?}")),
+        }
+    }
+    let root = match root {
+        Some(root) => root,
+        None => git_top_level()?,
+    };
+    if touched {
+        return run_touched(&root, paths, json);
+    }
+    let report = system_map::check(&root);
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?
+        );
+    } else {
+        for problem in &report.problems {
+            println!("{problem}");
+        }
+        for edge in &report.unlinked {
+            println!(
+                "note: {} depends on {} and no link says so; add a link if the map is missing one",
+                edge.from, edge.to
+            );
+        }
+    }
+    Ok(if report.problems.is_empty() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    })
+}
+
+/// `touched`: paths from the arguments, or one per line on standard input when there are none.
+fn run_touched(root: &Path, mut paths: Vec<String>, json: bool) -> Result<ExitCode, String> {
+    if paths.is_empty() {
+        for line in std::io::stdin().lines() {
+            let line = line.map_err(|e| format!("cannot read standard input: {e}"))?;
+            if !line.is_empty() {
+                paths.push(line);
+            }
+        }
+    }
+    let found = match system_map::touched(root, &paths) {
+        Ok(found) => found,
+        Err(problems) => {
+            for problem in problems {
+                eprintln!("{problem}");
+            }
+            return Ok(ExitCode::from(2));
+        }
+    };
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&found).map_err(|e| e.to_string())?
+        );
+    } else {
+        for part in &found.parts {
+            println!("part {}: {}", part.id, part.files.join(", "));
+        }
+        if !found.ignored.is_empty() {
+            println!("ignored: {}", found.ignored.join(", "));
+        }
+        if !found.unowned.is_empty() {
+            println!("unowned: {}", found.unowned.join(", "));
+        }
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn git_top_level() -> Result<PathBuf, String> {
+    let output = Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .map_err(|e| format!("cannot run git: {e}"))?;
+    if !output.status.success() {
+        return Err("not inside a git repository; pass --root <dir>".into());
+    }
+    Ok(PathBuf::from(
+        String::from_utf8_lossy(&output.stdout).trim_end(),
+    ))
+}

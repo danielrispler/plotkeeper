@@ -39,6 +39,7 @@ fn open(sample: &str) -> (tempfile::TempDir, CardStore) {
     (data, store)
 }
 
+// @law: old-stored-files-load
 #[test]
 fn the_full_samples_of_every_stored_file_load_with_their_values() {
     let (_data, store) = open("full");
@@ -110,6 +111,7 @@ fn the_full_samples_of_every_stored_file_load_with_their_values() {
     assert_eq!(retest.taps.len(), 1);
 }
 
+// @law: old-stored-files-load
 #[test]
 fn the_minimal_samples_of_every_stored_file_load_with_their_values() {
     let (_data, store) = open("minimal");
