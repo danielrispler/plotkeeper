@@ -3,7 +3,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import type { AgentUsage } from "../../ui/usage.ts";
-import type { BriefFigure, BriefStep, BriefView, Ci, GitState, LogEntry, MapState, PrBrief, Session, SessionState, Subagent } from "../../ui/types.ts";
+import type { BriefFigure, BriefStep, BriefView, Ci, GitState, LogEntry, MapState, PrBrief, RatifyRow, Session, SessionState, Subagent } from "../../ui/types.ts";
 import { base, type ByArg, type Fixture } from "./base.ts";
 import { railFixtures } from "./rail-fixtures.ts";
 
@@ -244,7 +244,7 @@ const at = (x: number, y: number): [number, number] => [x, y];
 const mapState = (extra: Partial<MapState> = {}): MapState => ({
   project: "/w/plotkeeper", status: "loaded", source: mapFile, reference: "origin/main", commit: "35745b1693c5d061e5aea891e98a58515942a12d", note: null,
   user: { tiers: {}, positions: { core: at(620, 190), understanding: at(980, 290), plugins: at(300, 430), hook: at(580, 430), shell: at(880, 440), window: at(1180, 560), daemon: at(760, 690), workbench: at(480, 650), agents: at(110, 430), writer: at(1400, 190), github: at(250, 650) } },
-  fog: {}, ci: null, ready: [],
+  fog: {}, ci: null, ready: [], ratify: [],
   ...extra,
 });
 // The Ready for review tray (#336) with two ready PRs, at the Map view's foot.
@@ -287,7 +287,7 @@ const briefOf = (steps: BriefStep[], partial = false, extra: Partial<PrBrief> = 
   brief: { version: 1, pr: 334, head: "b".repeat(40), written_at: 1, stale: false, model: "opus", brief: brief(steps, extra) },
 });
 // Opens the brief from the tray, goes `next` steps on, and checks the panel and the map.
-const mapBrief = (view: BriefView, next: number, check = ""): Fixture =>
+const mapBrief = (view: BriefView, next: number, check = "", pause = 500): Fixture =>
   mapOpened(
     `
       // Chrome's virtual time stalls animations: the brief plays as it does under reduced motion, whose end state is the one to review.
@@ -302,8 +302,8 @@ const mapBrief = (view: BriefView, next: number, check = ""): Fixture =>
       await wait(500);
       const panel = document.getElementById("map-brief");
       if (panel.hidden || !panel.classList.contains("open")) return log("snap:fail the brief did not open");
-      for (let i = 0; i < ${next}; i++) { document.getElementById("brief-next").click(); await wait(500); }
-      await wait(1800);
+      for (let i = 0; i < ${next}; i++) { document.getElementById("brief-next").click(); await wait(${pause}); }
+      await wait(${pause * 3});
       if (!document.querySelector(".map-world.briefing")) log("snap:fail the map is not in the brief's light");
       if (!document.querySelector(".plate.lit")) log("snap:fail no part is lit");
       if (!document.querySelector(".map-world").style.transform.includes("scale")) log("snap:fail the camera did not frame the parts");
@@ -334,6 +334,37 @@ const mapBriefUnconfirmed = (): Fixture =>
   mapBrief(briefOf([step("Now", "Cards are written once per turn", "A turn is written once, whatever the order of events.", ["understanding"], { flags: ["the claim is not in the facts"] })], true), 0, `
       if (!document.querySelector("#map-brief .brief-unconfirmed")?.textContent.includes("not confirmed from the facts")) log("snap:fail no unconfirmed mark");
       if (!document.querySelector("#map-brief .brief-partial")?.textContent.includes("Written from part of the diff")) log("snap:fail no partial line");`);
+// The brief's ratify step (#343): a changed law and a link, and the agent's two decisions, one already accepted.
+const ratifyRows: RatifyRow[] = [
+  { pr: 334, kind: "law", id: "window-quiet", text: "Only needs-you has colour.", change: "changed", status: "not-yet" },
+  { pr: 334, kind: "link", id: "shell-understanding", text: "Shell to Understanding", change: "added", status: "not-yet" },
+  { pr: 334, kind: "decision", id: "d1", text: "A brief is stored per project, since PR numbers repeat across repositories.", change: "", status: "not-yet" },
+  { pr: 334, kind: "decision", id: "d2", text: "A merged PR's brief is read as stored, never rewritten.", change: "", status: "accepted" },
+];
+const mapBriefRatify = (): Fixture => ({
+  ...mapBrief(briefOf(storySteps()), 4, `
+      const rows = [...document.querySelectorAll("#map-brief .ratify-row")];
+      if (rows.length !== 4) return log("snap:fail expected 4 ratify rows, saw " + rows.length);
+      if (document.querySelectorAll("#map-brief .ratify-accept").length !== 3) log("snap:fail Accept belongs on the three undecided rows");
+      if (!rows[3].textContent.includes("Accepted")) log("snap:fail the decided row does not say so");
+      document.querySelector("#map-brief .ratify-row .ratify-accept").click();
+      await wait(300);
+      if (!document.querySelector("#map-brief .ratify-row").textContent.includes("Accepted")) log("snap:fail Accept did not mark the row");
+      log("ratify ok");`, 100),
+  pr_ratify: ratifyRows,
+});
+// The part sheet with one law not yet ratified (#343): it says so, with Accept and Overturn.
+const mapSheetUnratified = (): Fixture =>
+  mapOpened(`
+      document.querySelector("#map .plate[data-id=shell]").click();
+      await wait(300);
+      const laws = [...document.querySelectorAll("#map-sheet .sheet-law")];
+      const open = laws.filter((l) => l.textContent.includes("Not yet ratified"));
+      if (laws.length !== 2 || open.length !== 1 || !open[0].textContent.includes("Notices wait for focus.")) return log("snap:fail laws: " + laws.map((l) => l.textContent).join("|"));
+      if (!open[0].querySelector(".ratify-accept") || !open[0].querySelector(".ratify-overturn")) log("snap:fail no Accept and Overturn");
+      log("sheet ok");`, {
+    map_state: mapState({ ratify: [{ pr: 306, kind: "law", id: "shell-notice" }] }),
+  });
 const homeMarked = (press: boolean): Fixture => ({
   ...(fixtures as Record<string, () => Fixture>).home(),
   map_marks: ["/w/plotkeeper"],
@@ -529,6 +560,8 @@ export const fixtures = {
   mapBriefSequence: () => mapBriefFigure("sequence"),
   mapBriefCompare: () => mapBriefFigure("compare"),
   mapBriefUnconfirmed,
+  mapBriefRatify,
+  mapSheetUnratified,
   recordedTerminal,
   logRunning: () => logFixture("running"),
   logDone: () => logFixture("completed"),

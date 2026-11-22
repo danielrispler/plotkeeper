@@ -219,7 +219,7 @@ pub fn chapter_titles(brief: &studio_understanding::pr_brief::Brief) -> Vec<Stri
 }
 
 /// A project's briefs live in a folder of their own, since PR numbers repeat across repositories.
-fn store_of(project: &str) -> Option<BriefStore> {
+pub(crate) fn store_of(project: &str) -> Option<BriefStore> {
     let home = std::env::home_dir()?;
     let name: String = project
         .chars()

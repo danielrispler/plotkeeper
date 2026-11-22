@@ -57,6 +57,9 @@ pub struct MapState {
     pub ci: Option<crate::ci_laws::Ci>,
     /// The PRs ready for review (open, not a draft), as last asked (`prs.rs`); the "Ready for review" tray lists them.
     pub ready: Vec<crate::prs::Ready>,
+    /// The items the part sheet says are not yet ratified (`ratify.rs`): the map changes that landed after the first run without a
+    /// record, and the ones marked so by hand.
+    pub ratify: Vec<crate::ratify::Pending>,
 }
 
 /// Daniel's choices for one project, kept in the data folder: a saved `(x, y)` per part or actor id, and a tier per part id
@@ -122,6 +125,7 @@ pub fn read_map(repo: &Path) -> MapState {
         fog: BTreeMap::new(),
         ci: None,
         ready: Vec::new(),
+        ratify: Vec::new(),
     };
     let Some((reference, note)) = default_ref(repo) else {
         state.note = Some("this repository has no default branch to read".into());
@@ -328,6 +332,10 @@ pub fn map_state(
     state.ci = cache.get(&project);
     state.ready = prs.ready(&project);
     briefs.annotate(&project, &mut state.ready);
+    state.ratify = crate::ratify::file()
+        .and_then(|file| crate::ratify::start(&file, &project, crate::ratify::now()))
+        .map(|mine| crate::ratify::pending(repo, &mine))
+        .unwrap_or_default();
     Ok(state)
 }
 

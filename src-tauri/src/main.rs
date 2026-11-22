@@ -44,6 +44,7 @@ mod map;
 mod pr_briefs;
 mod presence;
 mod prs;
+mod ratify;
 mod restart;
 mod settings;
 mod skills;
@@ -1237,6 +1238,8 @@ fn main() {
             refresh_landed_tasks,
             map::map_state,
             pr_briefs::pr_brief,
+            ratify::pr_ratify,
+            ratify::ratify_set,
             map::map_save_positions,
             map::map_set_tier,
             map::map_know,

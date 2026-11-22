@@ -50,12 +50,15 @@ export const registerLayer = (name: LayerName, layer: Layer) => void (layers[nam
 export type MapDeps = {
   // Opens New session in `project` with `prompt` in its quick start.
   draft: (project: string, prompt: string) => void;
+  // Overturns an item of PR `pr`: types `prompt` into the PR's live session's input without Enter, else opens New session in `project` with it.
+  overturn: (project: string, pr: number, prompt: string) => void;
   // The project of the selected session, null with none.
   selectedProject: () => string | null;
   // Gives the keyboard back to the terminal pane the view covered.
   refocus: () => void;
 };
 let deps: MapDeps;
+export const overturnIn = (project: string, pr: number, prompt: string) => deps.overturn(project, pr, prompt);
 let project: string | null = null;
 let loaded: MapState | null = null;
 let view: MapView | null = null;

@@ -19,7 +19,7 @@
     },
     {
       "id": "shell", "name": "Shell", "caption": "Reads the log, feeds the core, acts",
-      "description": "The app's Rust side. It reads the event log, feeds the core, and carries out what follows: notices, sounds, GitHub, the terminals, the map and the CI result it reads from the default branch for the Map view, and the quiet log of what you use of it.",
+      "description": "The app's Rust side. It reads the event log, feeds the core, and carries out what follows: notices, sounds, GitHub, the terminals, the map and the CI result it reads from the default branch for the Map view, the quiet log of what you use of it, and which map changes and agent decisions of a PR you accepted or overturned.",
       "tier": "core", "paths": ["src-tauri/"]
     },
     {

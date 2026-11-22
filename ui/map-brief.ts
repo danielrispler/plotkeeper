@@ -9,12 +9,16 @@ import { failure, invoke, text } from "./dom.js";
 import { currentMap, currentScrub, onDraw, registerLayer, type MapView } from "./map.js";
 import { closeDrawer, openDrawer } from "./map-drawer.js";
 import { scrubTo } from "./map-history.js";
+import { ratifyActions } from "./map-ratify.js";
+import { ratifyStep, statusWords } from "./ratify.js";
 import { actorSize, briefCamera, briefPlayer, citeDrawer, figureShapes, figureSize, playlist, plateSize, type Rect, type Shape, unconfirmed } from "./map-model.js";
-import type { BriefStep, BriefView } from "./types.js";
+import type { BriefStep, BriefView, RatifyRow } from "./types.js";
 
 const player = briefPlayer({ scrubbed: () => currentScrub() !== null, backToNow: () => void scrubTo(null).catch(failure("map_at")) });
 // The brief being played, as `pr_brief` returned it.
 let playing: BriefView | null = null;
+// What the brief offers for accept or overturn (`ratify.rs`), read when it opens; a decision updates its row at once.
+let ratifying: RatifyRow[] = [];
 // What stopped a row from opening, shown in its place until the next try.
 const problems = new Map<number, string>();
 export const briefProblem = (pr: number) => problems.get(pr) ?? null;
@@ -53,6 +57,7 @@ export async function openBriefOf(project: string, number: number, chapter: numb
     return;
   }
   playing = got;
+  ratifying = await invoke("pr_ratify", { project, number }).catch((e) => (failure("pr_ratify")(e), [] as RatifyRow[]));
   if (!resizing) {
     resizing = true;
     addEventListener("resize", onResize);
@@ -65,6 +70,7 @@ export async function openBriefOf(project: string, number: number, chapter: numb
 export function closeBrief() {
   player.close();
   playing = null;
+  ratifying = [];
   stopLight();
   const view = currentMap();
   panel().hidden = true;
@@ -76,7 +82,11 @@ export function closeBrief() {
 
 const steps = (): BriefStep[] => {
   const now = player.current();
-  return playing && now ? playlist(playing.brief.brief, now.chapter) : [];
+  if (!playing || !now) return [];
+  const list = playlist(playing.brief.brief, now.chapter);
+  // The ratify step ends the last chapter (the only one of a single story).
+  const ratify = now.chapter >= Math.max(0, playing.brief.brief.chapters.length - 1) ? ratifyStep(ratifying.filter((row) => row.status !== "ratified"), [...new Set(list.flatMap((step) => step.on))]) : null;
+  return ratify ? [...list, ratify] : list;
 };
 
 // ---- the map: lit parts, the camera and the light.
@@ -253,6 +263,7 @@ function stepNode(view: MapView, step: BriefStep, pr: number) {
   if (step.risks.length) words.append(listNode(step.risks.map((r) => `${part(r.part)}: ${r.trigger} To see it: ${r.check}`)));
   if (step.covered_by) words.append(text("p", `Covered by the test ${step.covered_by}.`, "brief-quiet"));
   if (step.check) words.append(checkNode(step));
+  if (step.k === "Ratify") words.append(ratifyNode(view, ratifying));
   if (unconfirmed(step)) {
     const mark = text("p", "not confirmed from the facts", "brief-quiet brief-unconfirmed");
     mark.title = step.flags.join("\n");
@@ -275,6 +286,29 @@ function stepNode(view: MapView, step: BriefStep, pr: number) {
     cols.append(figure);
   }
   return cols;
+}
+
+// The items to ratify, each with where it stands; a not yet ratified one has Accept and Overturn.
+function ratifyNode(view: MapView, rows: RatifyRow[]) {
+  const list = text("ul", "", "brief-ratify");
+  for (const row of rows.filter((each) => each.status !== "ratified")) {
+    const item = text("li", "", "ratify-row");
+    item.dataset.kind = row.kind;
+    item.dataset.id = row.id;
+    const kind = row.kind === "decision" ? "Decided" : `${row.change ? `${row.change[0].toUpperCase()}${row.change.slice(1)} ` : ""}${row.kind}`;
+    item.append(text("span", kind, "ratify-kind"), text("span", row.text || row.id, "ratify-text"));
+    if (row.status === "not-yet") {
+      item.append(ratifyActions(view.project, row, (state) => {
+        row.status = state;
+        const now = currentMap();
+        if (now) show(now, true);
+      }));
+    } else {
+      item.append(text("span", statusWords[row.status], "ratify-mark done"));
+    }
+    list.append(item);
+  }
+  return list;
 }
 
 function listNode(items: string[]) {
