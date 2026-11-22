@@ -31,8 +31,8 @@ beforeEach(() => {
 });
 
 test("the title carries the unseen count, and none when there is none", () => {
-  assert.equal(titleFor(0), "Studio");
-  assert.equal(titleFor(3), "(3) Studio");
+  assert.equal(titleFor(0), "plotkeeper");
+  assert.equal(titleFor(3), "(3) plotkeeper");
 });
 
 test("a notification fires when the tab is hidden or unfocused, and not when it is visible and focused", () => {

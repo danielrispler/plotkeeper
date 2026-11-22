@@ -30,4 +30,4 @@ Seen and notices are the page's (danielrispler/plotkeeper#331); the Dock badge, 
 
 - A card counts as seen only when its tab is visible (Page Visibility) and focused (`document.hasFocus()`), the card has been in view for half a second, and Daniel interacted with it (his pointer moved over it, he pressed on it, scrolled over it or focused it). A browser on a second screen shows cards but never marks them seen while he works in his IDE.
 - When a notice is due and no tab is visible and focused, the server sends a `notification` event and the page raises a browser notification (one tag, so tabs do not stack them). A focused tab shows the notice in the page instead. The page asks for the notification permission once, at Daniel's first press.
-- The tab's title carries the number of unseen sessions, as the bar's unseen chip counts them: `(3) Studio`, plain `Studio` with none.
+- The tab's title carries the number of unseen sessions, as the bar's unseen chip counts them: `(3) plotkeeper`, plain `plotkeeper` with none.
