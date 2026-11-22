@@ -5,7 +5,7 @@
 const looking = () => document.visibilityState === "visible" && document.hasFocus();
 
 // The title carries the number of unseen sessions, as the bar's unseen chip counts them.
-export const titleFor = (unseen: number, base = "Studio"): string => (unseen > 0 ? `(${unseen}) ${base}` : base);
+export const titleFor = (unseen: number, base = "plotkeeper"): string => (unseen > 0 ? `(${unseen}) ${base}` : base);
 
 export function showTitle(unseen: number) {
   document.title = titleFor(unseen);

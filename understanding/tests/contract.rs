@@ -75,12 +75,39 @@ fn the_claude_command_has_no_tools_a_schema_and_the_internal_mark() {
 }
 
 #[test]
+fn agy_writes_with_its_own_model_when_the_setting_names_another_writers() {
+    let asked = WriterRequest {
+        model: Some("haiku".into()),
+        ..request()
+    };
+    let (command, _) = build_command(
+        WriterKind::Agy,
+        Path::new("/bin/agy"),
+        Path::new("/w/card-writer-agy"),
+        &asked,
+    );
+    let args = args(&command);
+    let at = args.iter().position(|a| *a == "--model").unwrap();
+    assert_eq!(args[at + 1], "gemini-4-neon-low");
+    assert!(!args.contains(&"--effort"));
+    // A model it knows is kept, and so is a `claude` model of any id.
+    assert_eq!(
+        WriterKind::Agy.model("gemini-4-neon-high"),
+        "gemini-4-neon-high"
+    );
+    assert_eq!(WriterKind::Claude.model("claude-x-9"), "claude-x-9");
+}
+
+#[test]
 fn the_agy_command_takes_the_schema_runs_in_its_own_folder_and_is_marked_internal() {
     let (command, stdin) = build_command(
         WriterKind::Agy,
         Path::new("/bin/agy"),
         Path::new("/w/card-writer-agy"),
-        &request(),
+        &WriterRequest {
+            model: Some("gemini-4-neon-medium".into()),
+            ..request()
+        },
     );
     assert_eq!(command.get_program(), "/bin/agy");
     assert_eq!(
@@ -91,7 +118,7 @@ fn the_agy_command_takes_the_schema_runs_in_its_own_folder_and_is_marked_interna
             "--json-schema",
             r#"{"type":"object"}"#,
             "--model",
-            "m1",
+            "gemini-4-neon-medium",
             "--effort",
             "low",
             "--print-timeout",

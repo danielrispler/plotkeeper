@@ -298,14 +298,16 @@ fn events(context: &Context, request: Request) {
         let frame = match receiver.recv_timeout(KEEPALIVE) {
             Ok(frame) => frame,
             Err(mpsc::RecvTimeoutError::Timeout) => ": keepalive\n\n".to_string(),
-            Err(mpsc::RecvTimeoutError::Disconnected) => return,
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
         };
         if out
             .write_all(frame.as_bytes())
             .and_then(|_| out.flush())
             .is_err()
         {
-            return;
+            break;
         }
     }
+    // The closed tab may have been the one that said it is focused; the tabs left say so again when their focus changes.
+    context.bus.focused.store(false, Ordering::Release);
 }

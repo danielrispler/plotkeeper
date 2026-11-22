@@ -326,3 +326,40 @@ fn a_second_plotkeeper_for_the_same_folder_finds_the_first() {
         "a stopped one frees the folder"
     );
 }
+
+/// Opens the event stream and reads up to its first comment.
+fn open_stream(port: u16) -> TcpStream {
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    write!(
+        stream,
+        "GET /events HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{}\r\n\r\n",
+        cookie()
+    )
+    .unwrap();
+    let mut lines = BufReader::new(stream.try_clone().unwrap()).lines();
+    while !lines.next().unwrap().unwrap().starts_with(':') {}
+    stream
+}
+
+#[test]
+fn the_focus_a_closed_tab_reported_is_not_kept_while_another_tab_listens() {
+    let f = fixture();
+    let port = f.web.port();
+    let (closing, _other) = (open_stream(port), open_stream(port));
+    assert_eq!(post(&f, "page_focus", r#"{"focused":true}"#).status, 200);
+    assert!(f.app.events.focused());
+
+    drop(closing);
+    // The server finds the closed tab when it writes to it.
+    let mut waited = 0;
+    while f.app.events.focused() && waited < 100 {
+        f.app.events.emit("ping", serde_json::json!({}));
+        std::thread::sleep(Duration::from_millis(50));
+        waited += 1;
+    }
+
+    assert!(!f.app.events.focused());
+}

@@ -265,3 +265,18 @@ fn only_the_newest_turns_up_to_the_cap_get_a_card_at_start_newest_first() {
     };
     assert_eq!(Studio::replayed(&lines).backfill(NOW, &[], two).len(), 2);
 }
+
+/// A card written on open can fail (logged out, quota): the turn keeps waiting, so opening it again asks again.
+#[test]
+fn a_turn_opened_without_a_card_keeps_waiting_for_the_next_opening() {
+    let at = NOW - 3 * HOUR;
+    let id = format!("{SESSION}@{at}");
+    let mut studio = Studio::replayed(turn("p1", at, "t1", "t2"));
+    assert_eq!(studio.backfill(NOW, &[], CatchUp::default()), []);
+
+    let first = studio.backfill_on_open(&id);
+    let second = studio.backfill_on_open(&id);
+
+    assert_eq!(first.map(|b| b.request.id), Some(id.clone()));
+    assert_eq!(second.map(|b| b.request.id), Some(id));
+}

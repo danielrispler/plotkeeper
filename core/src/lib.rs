@@ -3732,10 +3732,11 @@ impl Studio {
         found
     }
 
-    /// The card request of turn `id`, which ended while the app was down and got no card at start, once: Daniel opened it.
-    pub fn backfill_on_open(&mut self, id: &str) -> Option<Backfill> {
-        let at = self.ended.iter().position(|b| b.request.id == id)?;
-        Some(self.ended.remove(at))
+    /// The card request of turn `id`, which ended while the app was down and got no card at start: Daniel opened it.
+    /// The turn keeps waiting, so a card write that fails (logged out, quota) is asked again at the next opening;
+    /// the caller asks only while the turn has no card.
+    pub fn backfill_on_open(&self, id: &str) -> Option<Backfill> {
+        self.ended.iter().find(|b| b.request.id == id).cloned()
     }
 
     /// The trees the hook recorded of worktree `root` for turn `turn` of `session`: its start, and its end once the
