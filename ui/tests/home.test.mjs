@@ -522,3 +522,30 @@ test("the card's label names the Retest's age and the session of its first Quiz;
 test("the learning part has no heading of its own, as the card carries its label", () => {
   assert.equal(view([], undefined, { learning: retest("a", quiz) }).find((p) => p.key === "learning").title, "");
 });
+
+test("a mark that was seen is watched again by the next redraw, so a later day is logged while Studio stays open", async () => {
+  const observers = [];
+  globalThis.IntersectionObserver = class {
+    constructor(run) {
+      this.run = run;
+      observers.push(this);
+    }
+    observe() {}
+    disconnect() {}
+  };
+  globalThis.document = fakeDocument({ visibilityState: "visible", hasFocus: () => true }, Field);
+  globalThis.window = { ...globalThis.window, innerWidth: 100, innerHeight: 100 };
+  const { watchMark } = await import("../../dist/home.js");
+  const { showHome, homeShown } = await import("../../dist/panes.js");
+  tauri([]);
+  // `show` records Home as the view shown before it draws; the rest of drawing Home is not what this test reads.
+  await Promise.resolve(showHome()).catch(() => {});
+  assert.equal(homeShown(), true);
+  const node = new Field("span");
+  watchMark("/w/seen", node);
+  observers[0].run([{ intersectionRatio: 1, intersectionRect: { width: 1, height: 1 }, rootBounds: { width: 100, height: 100 } }]);
+  await new Promise((done) => setTimeout(done, 650));
+  watchMark("/w/seen", node);
+  assert.equal(observers.length, 2, "the redraw that keeps the node watches it again once it fired");
+  watchMark("/w/seen", null);
+});

@@ -469,7 +469,16 @@ export function watchMark(path: string, node: Element | null) {
   had?.stop();
   marksSeen.delete(path);
   if (!node) return;
-  marksSeen.set(path, { node, stop: watchSeen(node, { active: () => homeSeen(homeShown(), mapShown()), onSeen: () => logStop("mark-seen", path) }) });
+  // Once seen, the entry goes: the next redraw watches the same node again, and `logStop` sends one event a day per project, so a mark
+  // still in view on a later day is logged while Studio stays open.
+  const stop = watchSeen(node, {
+    active: () => homeSeen(homeShown(), mapShown()),
+    onSeen: () => {
+      if (marksSeen.get(path)?.stop === stop) marksSeen.delete(path);
+      logStop("mark-seen", path);
+    },
+  });
+  marksSeen.set(path, { node, stop });
 }
 
 function projectRow({ name, path, fogged }: HomeProject): HTMLElement {
