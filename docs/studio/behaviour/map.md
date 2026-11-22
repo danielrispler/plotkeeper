@@ -44,11 +44,11 @@ An extractor reads which tracked file depends on which; the checker turns each p
 - `rust-modules`: inside a crate, `mod` declarations and `use crate::` paths resolved to the files they name.
 - `typescript-imports`: relative import specifiers resolved to tracked files. A specifier that resolves to no tracked file is skipped; a dynamic import or a path alias is not seen.
 
-The checker runs only `git` and, when the map names `cargo`, `cargo`; it reads no file outside the repository and needs no network.
+The checker runs only `git` and, when the map names `cargo`, `cargo`; it reads no file outside the repository, so it never reads through a tracked symlink (the link still counts as a tracked file for ownership), and needs no network.
 
 ## Which parts a change touches
 
-`system-map touched [--json] [--root <dir>] [path...]` names the parts that own the paths, with the ignored paths and the unowned ones listed apart. It takes paths as arguments or one per line on standard input, so `git diff --name-only | system-map touched` works. It matches by pattern alone, so a deleted or moved path is still placed.
+`system-map touched [--json] [--root <dir>] [path...]` names the parts that own the paths, with the ignored paths and the unowned ones listed apart. It takes paths as arguments or one per line on standard input, so `git diff --name-only | system-map touched` works. It matches by pattern alone, so a deleted or moved path is still placed. A map that fails the shape check gets no answer: it fails with every problem `check` would report, one per line on standard error, and exit status 2.
 
 ## plotkeeper's map
 
