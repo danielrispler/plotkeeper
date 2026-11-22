@@ -98,7 +98,7 @@ fn paths_no_pattern_matches_are_listed_apart() {
 fn a_map_that_fails_its_shape_check_gives_its_problem_not_an_answer() {
     let (_dir, root) = project_text("{ \"version\": 1 }", &["a"]);
     let error = system_map::touched(Path::new(&root), &["a".to_string()]).unwrap_err();
-    assert!(error.contains("system-map.json"), "{error}");
+    assert!(error[0].contains("system-map.json"), "{error:?}");
 }
 
 mod binary {
@@ -157,4 +157,44 @@ mod binary {
                 .contains("system-map.json")
         );
     }
+}
+
+#[test]
+fn a_map_that_fails_the_shape_check_makes_touched_fail_with_every_problem() {
+    let mut map = base();
+    map["parts"][1]["id"] = json!("alpha");
+    map["actors"][0]["id"] = json!("Bad Id");
+    map["links"][0]["to"] = json!("nowhere");
+    map["laws"][0]["on"] = json!("nothing");
+    let (_dir, root) = project(&map, &["alpha/a.rs"]);
+    let problems = system_map::touched(Path::new(&root), &["alpha/a.rs".to_string()])
+        .expect_err("a map with problems must not answer");
+    let check = system_map::check(Path::new(&root)).problems;
+    for needle in ["Bad Id", "more than once", "nowhere", "nothing"] {
+        assert!(
+            problems.iter().any(|p| p.contains(needle)),
+            "{needle}: {problems:?}"
+        );
+    }
+    assert!(problems.len() >= 4 && problems.iter().all(|p| check.contains(p)));
+}
+
+#[test]
+fn a_hop_on_a_missing_link_makes_touched_fail() {
+    let mut map = base();
+    map["flows"] =
+        json!([{ "id": "go", "name": "Go", "hops": [{ "link": "ghost", "text": "t" }] }]);
+    let (_dir, root) = project(&map, &["alpha/a.rs"]);
+    let problems = system_map::touched(Path::new(&root), &["alpha/a.rs".to_string()])
+        .expect_err("a hop on a missing link must not answer");
+    assert!(problems.iter().any(|p| p.contains("ghost")), "{problems:?}");
+}
+
+#[test]
+fn many_double_stars_against_a_path_that_does_not_match_finish_at_once() {
+    let mut map = base();
+    map["parts"][0]["paths"] = json!(["a/**/**/**/**/**/**/**/**/**/**/**/**/c"]);
+    let path = format!("a/{}d", "x/".repeat(34));
+    let got = touched(&map, &[&path]);
+    assert_eq!(got.unowned, vec![path]);
 }

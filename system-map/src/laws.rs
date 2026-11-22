@@ -26,8 +26,8 @@ pub struct Tag {
 pub(crate) fn check(root: &Path, map: &Map, files: &[String]) -> (Vec<LawReport>, Vec<String>) {
     let mut found: BTreeMap<String, Vec<Tag>> = BTreeMap::new();
     for file in files {
-        // A file that cannot be read as text (binary, deleted from disk) carries no tag.
-        let Ok(text) = std::fs::read_to_string(root.join(file)) else {
+        // A symlink or a file gone from disk carries no tag; other bytes read lossily.
+        let Some(text) = crate::read_tracked(root, file) else {
             continue;
         };
         for (index, line) in text.lines().enumerate() {

@@ -78,7 +78,15 @@ fn run_touched(root: &Path, mut paths: Vec<String>, json: bool) -> Result<ExitCo
             }
         }
     }
-    let found = system_map::touched(root, &paths)?;
+    let found = match system_map::touched(root, &paths) {
+        Ok(found) => found,
+        Err(problems) => {
+            for problem in problems {
+                eprintln!("{problem}");
+            }
+            return Ok(ExitCode::from(2));
+        }
+    };
     if json {
         println!(
             "{}",

@@ -354,7 +354,7 @@ fn rust_modules(root: &Path, tracked: &BTreeSet<&str>) -> Pairs {
     let parse: HashMap<&str, RustFile> = tracked
         .iter()
         .filter(|f| f.ends_with(".rs"))
-        .filter_map(|f| Some((*f, scan_rust(&std::fs::read_to_string(root.join(f)).ok()?))))
+        .filter_map(|f| Some((*f, scan_rust(&crate::read_tracked(root, f)?))))
         .collect();
     let mut pairs = Pairs::new();
     // Every file a `mod name;` line names, to tell crate roots from module files.
@@ -530,10 +530,7 @@ fn typescript_imports(root: &Path, tracked: &BTreeSet<&str>) -> Pairs {
         let script = file
             .rsplit_once('.')
             .is_some_and(|(_, ext)| SCRIPTS.contains(&ext));
-        let Some(text) = script
-            .then(|| std::fs::read_to_string(root.join(file)).ok())
-            .flatten()
-        else {
+        let Some(text) = script.then(|| crate::read_tracked(root, file)).flatten() else {
             continue;
         };
         for spec in import_specifiers(&text) {

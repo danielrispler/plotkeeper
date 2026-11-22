@@ -37,17 +37,36 @@ impl Pattern {
     }
 }
 
+/// Whether `pattern` matches all of `path`. Each (pattern index, path index) is worked out once,
+/// so a run of `**` costs no more than its length times the path's.
 fn segments_match(pattern: &[String], path: &[&str]) -> bool {
-    match pattern.split_first() {
-        None => path.is_empty(),
-        Some((first, rest)) if first == "**" => {
-            (0..=path.len()).any(|skip| segments_match(rest, &path[skip..]))
-        }
-        Some((first, rest)) => match path.split_first() {
-            Some((name, tail)) => segment_matches(first, name) && segments_match(rest, tail),
-            None => false,
-        },
+    let mut memo = vec![vec![None; path.len() + 1]; pattern.len() + 1];
+    walk(pattern, path, 0, 0, &mut memo)
+}
+
+fn walk(
+    pattern: &[String],
+    path: &[&str],
+    p: usize,
+    at: usize,
+    memo: &mut Vec<Vec<Option<bool>>>,
+) -> bool {
+    if let Some(known) = memo[p][at] {
+        return known;
     }
+    let found = match pattern.get(p) {
+        None => at == path.len(),
+        Some(first) if first == "**" => {
+            (at..=path.len()).any(|skip| walk(pattern, path, p + 1, skip, memo))
+        }
+        Some(first) => {
+            at < path.len()
+                && segment_matches(first, path[at])
+                && walk(pattern, path, p + 1, at + 1, memo)
+        }
+    };
+    memo[p][at] = Some(found);
+    found
 }
 
 /// `*` matches any run of characters within one segment.

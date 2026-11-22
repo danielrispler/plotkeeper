@@ -158,6 +158,17 @@ pub fn check(root: &Path) -> Report {
     report
 }
 
+/// The map, when it has the shape and no problem of ids or references; else every problem.
+fn load_checked(root: &Path) -> Result<Map, Vec<String>> {
+    let map = load(root).map_err(|problem| vec![problem])?;
+    let problems = check_ids_and_references(&map);
+    if problems.is_empty() {
+        Ok(map)
+    } else {
+        Err(problems)
+    }
+}
+
 fn load(root: &Path) -> Result<Map, String> {
     let path = root.join(MAP_FILE);
     let text = std::fs::read_to_string(&path).map_err(|error| match error.kind() {
@@ -278,15 +289,62 @@ fn tracked_files(root: &Path) -> Result<Vec<String>, String> {
     Ok(files.into_iter().collect())
 }
 
+/// The patterns that place a path: the ignored ones and each part's.
+pub(crate) struct Owners {
+    ignored: Vec<Pattern>,
+    parts: Vec<Vec<Pattern>>,
+}
+
+/// Where a path stands in the map.
+pub(crate) enum Placement {
+    Ignored,
+    Part(usize),
+    Unowned,
+}
+
+impl Owners {
+    pub(crate) fn new(map: &Map) -> Owners {
+        Owners {
+            ignored: map.ignored.iter().map(|p| Pattern::new(p)).collect(),
+            parts: map
+                .parts
+                .iter()
+                .map(|part| part.paths.iter().map(|p| Pattern::new(p)).collect())
+                .collect(),
+        }
+    }
+
+    /// The ownership rule, held here for `check` and `touched` alike: a match in `ignored` wins,
+    /// then the last part with a matching pattern.
+    pub(crate) fn place(&self, path: &str) -> Placement {
+        if self.ignored.iter().any(|p| p.matches(path)) {
+            return Placement::Ignored;
+        }
+        match self
+            .parts
+            .iter()
+            .rposition(|patterns| patterns.iter().any(|p| p.matches(path)))
+        {
+            Some(index) => Placement::Part(index),
+            None => Placement::Unowned,
+        }
+    }
+}
+
+/// The text of a tracked file, or none for one the scans do not read: a symlink (its target may lie
+/// outside the repository), a file that is gone or a folder. Bytes that are not UTF-8 read lossily.
+pub(crate) fn read_tracked(root: &Path, file: &str) -> Option<String> {
+    let path = root.join(file);
+    if !std::fs::symlink_metadata(&path).ok()?.is_file() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&std::fs::read(path).ok()?).into_owned())
+}
+
 /// Which part owns each file, and the problems of files nobody owns and patterns that match none.
 fn ownership(map: &Map, files: &[String]) -> (Vec<PartFiles>, Vec<String>) {
     let mut problems = Vec::new();
-    let ignored: Vec<Pattern> = map.ignored.iter().map(|p| Pattern::new(p)).collect();
-    let part_patterns: Vec<Vec<Pattern>> = map
-        .parts
-        .iter()
-        .map(|part| part.paths.iter().map(|p| Pattern::new(p)).collect())
-        .collect();
+    let owners = Owners::new(map);
     let mut parts: Vec<PartFiles> = map
         .parts
         .iter()
@@ -296,15 +354,10 @@ fn ownership(map: &Map, files: &[String]) -> (Vec<PartFiles>, Vec<String>) {
         })
         .collect();
     for file in files {
-        if ignored.iter().any(|p| p.matches(file)) {
-            continue;
-        }
-        let owner = part_patterns
-            .iter()
-            .rposition(|patterns| patterns.iter().any(|p| p.matches(file)));
-        match owner {
-            Some(index) => parts[index].files.push(file.clone()),
-            None => problems.push(format!(
+        match owners.place(file) {
+            Placement::Ignored => {}
+            Placement::Part(index) => parts[index].files.push(file.clone()),
+            Placement::Unowned => problems.push(format!(
                 "{file}: tracked, but no part owns it and no ignored pattern matches it; add it to a part's paths or to ignored"
             )),
         }
@@ -317,10 +370,15 @@ fn ownership(map: &Map, files: &[String]) -> (Vec<PartFiles>, Vec<String>) {
             )
         })
     };
-    for (part, patterns) in map.parts.iter().zip(&part_patterns) {
+    for (part, patterns) in map.parts.iter().zip(&owners.parts) {
         let kind = format!("part {:?}", part.id);
         problems.extend(patterns.iter().filter_map(|p| unmatched(&kind, p)));
     }
-    problems.extend(ignored.iter().filter_map(|p| unmatched("ignored", p)));
+    problems.extend(
+        owners
+            .ignored
+            .iter()
+            .filter_map(|p| unmatched("ignored", p)),
+    );
     (parts, problems)
 }

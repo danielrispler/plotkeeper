@@ -127,3 +127,36 @@ fn comment_leaders_of_other_languages_and_indentation_are_accepted() {
         assert!(has(&problems(&root), &[&file, "stay-true"]), "{line}");
     }
 }
+
+#[test]
+fn a_tag_behind_a_tracked_symlink_to_a_file_outside_the_repository_is_not_read() {
+    let (_dir, root) = project(&with_backing("trust"), &FILES);
+    let outside = tempfile::tempdir().unwrap();
+    write(outside.path(), "secret.rs", &tag("stay-true"));
+    std::os::unix::fs::symlink(
+        outside.path().join("secret.rs"),
+        Path::new(&root).join("alpha/link.rs"),
+    )
+    .unwrap();
+    git(Path::new(&root), &["add", "-A"]);
+    git(Path::new(&root), &["commit", "-q", "-m", "Link"]);
+    let report = system_map::check(Path::new(&root));
+    assert_eq!(report.problems, Vec::<String>::new());
+    assert!(report.laws[0].tags.is_empty());
+    let alpha = report.parts.iter().find(|p| p.id == "alpha").unwrap();
+    assert!(alpha.files.contains(&"alpha/link.rs".to_string()));
+}
+
+#[test]
+fn a_tag_in_a_file_that_is_not_valid_utf8_is_still_found() {
+    let (_dir, root) = project(&with_backing("check"), &FILES);
+    let mut bytes = b"\xff\xfe junk\n".to_vec();
+    bytes.extend(tag("stay-true").as_bytes());
+    std::fs::write(Path::new(&root).join("alpha/a.rs"), bytes).unwrap();
+    git(Path::new(&root), &["add", "-A"]);
+    git(Path::new(&root), &["commit", "-q", "-m", "Bytes"]);
+    let report = system_map::check(Path::new(&root));
+    assert_eq!(report.problems, Vec::<String>::new());
+    assert_eq!(report.laws[0].tags.len(), 1);
+    assert_eq!(report.laws[0].tags[0].line, 2);
+}

@@ -4,7 +4,7 @@ use std::{collections::BTreeSet, path::Path};
 
 use serde::Serialize;
 
-use crate::{PartFiles, pattern::Pattern};
+use crate::{Owners, PartFiles, Placement};
 
 /// What `touched` found.
 #[derive(Debug, Default, Serialize)]
@@ -15,28 +15,18 @@ pub struct Touched {
 }
 
 /// Places `paths` by the map in `root`, by pattern alone: a path need not exist or be tracked.
-/// Fails with the map file's problem when it cannot be read or has the wrong shape.
-pub fn touched(root: &Path, paths: &[String]) -> Result<Touched, String> {
-    let map = crate::load(root)?;
-    let ignored: Vec<Pattern> = map.ignored.iter().map(|p| Pattern::new(p)).collect();
-    let part_patterns: Vec<Vec<Pattern>> = map
-        .parts
-        .iter()
-        .map(|part| part.paths.iter().map(|p| Pattern::new(p)).collect())
-        .collect();
+/// Fails with the problems of a map file that cannot be read or fails the shape check, as `check`
+/// would report them.
+pub fn touched(root: &Path, paths: &[String]) -> Result<Touched, Vec<String>> {
+    let map = crate::load_checked(root)?;
+    let owners = Owners::new(&map);
     let mut found = Touched::default();
     let mut parts: Vec<Vec<String>> = vec![Vec::new(); map.parts.len()];
     for path in paths.iter().collect::<BTreeSet<_>>() {
-        if ignored.iter().any(|p| p.matches(path)) {
-            found.ignored.push(path.clone());
-            continue;
-        }
-        match part_patterns
-            .iter()
-            .rposition(|patterns| patterns.iter().any(|p| p.matches(path)))
-        {
-            Some(index) => parts[index].push(path.clone()),
-            None => found.unowned.push(path.clone()),
+        match owners.place(path) {
+            Placement::Ignored => found.ignored.push(path.clone()),
+            Placement::Part(index) => parts[index].push(path.clone()),
+            Placement::Unowned => found.unowned.push(path.clone()),
         }
     }
     found.parts = map
