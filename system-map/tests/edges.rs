@@ -166,11 +166,195 @@ fn an_unknown_extractor_name_fails_and_is_named() {
     assert!(has(&problems, &["gradle", "extractor"]), "{problems:?}");
 }
 
+/// A repository holding `map` and the tracked `files` with their text.
+fn tree(map: &Value, files: &[(&str, &str)]) -> (tempfile::TempDir, String) {
+    let (dir, root) = project_text(&map.to_string(), &[]);
+    for (file, text) in files {
+        write(dir.path(), file, text);
+    }
+    let git = |args: &[&str]| studio_test_support::git(dir.path(), args);
+    git(&["add", "-A"]);
+    git(&["commit", "-q", "-m", "Tree"]);
+    (dir, root)
+}
+
+/// The map naming `extractors`, with `alpha` owning `alpha_paths` and `beta` owning `beta_paths`.
+fn split_map(extractors: &[&str], alpha_paths: &[&str], beta_paths: &[&str]) -> Value {
+    let mut map = map(extractors, json!([]));
+    map["parts"][0]["paths"] = json!(alpha_paths);
+    map["parts"][1]["paths"] = json!(beta_paths);
+    map["ignored"] = json!(["system-map.json"]);
+    map
+}
+
+fn rust_edges(files: &[(&str, &str)], alpha: &[&str], beta: &[&str]) -> Vec<String> {
+    let (_dir, root) = tree(&split_map(&["rust-modules"], alpha, beta), files);
+    let report = report(&root);
+    assert_eq!(report.problems, Vec::<String>::new());
+    edges(&report)
+}
+
 #[test]
-fn the_extractors_not_built_yet_do_not_fail_a_valid_map() {
-    let names = ["rust-modules", "typescript-imports"];
-    let (_dir, root) = workspace(&map(&names, json!([])), &[], &[]);
-    assert_eq!(report(&root).problems, Vec::<String>::new());
+fn a_use_crate_path_between_modules_of_two_parts_is_reported() {
+    // Only the `use` lines make the edge from beta to alpha; the `mod` lines make the other.
+    for text in ["use crate::a::A;\n", "use crate::{b::B, a::{self, A}};\n"] {
+        let found = rust_edges(
+            &[
+                ("k/src/lib.rs", "mod a;\nmod b;\n"),
+                ("k/src/a.rs", "pub struct A;\n"),
+                ("k/src/b.rs", text),
+            ],
+            &["k/src/lib.rs", "k/src/a.rs"],
+            &["k/src/b.rs"],
+        );
+        assert_eq!(found, ["alpha>beta", "beta>alpha"], "{text}");
+    }
+}
+
+#[test]
+fn a_use_of_the_crate_root_reaches_the_root_file() {
+    let mut map = split_map(&["rust-modules"], &["k/src/lib.rs"], &["k/src/b.rs"]);
+    map["ignored"] = json!(["system-map.json"]);
+    let (_dir, root) = tree(
+        &map,
+        &[
+            ("k/src/lib.rs", "mod b;\npub struct Studio;\n"),
+            ("k/src/b.rs", "use crate::Studio;\n"),
+        ],
+    );
+    let report = report(&root);
+    assert_eq!(edges(&report), ["alpha>beta", "beta>alpha"]);
+}
+
+#[test]
+fn a_mod_declaration_resolves_to_name_rs_and_to_name_mod_rs() {
+    let found = rust_edges(
+        &[
+            ("k/src/lib.rs", "mod flat;\nmod nested;\n"),
+            ("k/src/flat.rs", ""),
+            ("k/src/nested/mod.rs", "mod deep;\n"),
+            ("k/src/nested/deep.rs", ""),
+        ],
+        &["k/src/lib.rs"],
+        &["k/src/flat.rs", "k/src/nested/"],
+    );
+    assert_eq!(found, ["alpha>beta"]);
+    let found = rust_edges(
+        &[
+            ("k/src/lib.rs", "mod nested;\n"),
+            ("k/src/nested/mod.rs", ""),
+        ],
+        &["k/src/lib.rs"],
+        &["k/src/nested/mod.rs"],
+    );
+    assert_eq!(found, ["alpha>beta"]);
+    let found = rust_edges(
+        &[("k/src/lib.rs", "mod flat;\n"), ("k/src/flat.rs", "")],
+        &["k/src/lib.rs"],
+        &["k/src/flat.rs"],
+    );
+    assert_eq!(found, ["alpha>beta"]);
+}
+
+#[test]
+fn a_nested_module_file_is_found_beside_its_parent_and_a_use_group_is_read() {
+    let found = rust_edges(
+        &[
+            ("k/src/lib.rs", "mod a;\nmod c;\n"),
+            (
+                "k/src/a.rs",
+                "mod inner;\nuse crate::{c::{self, X}, a::inner::Y};\n",
+            ),
+            ("k/src/a/inner.rs", ""),
+            ("k/src/c.rs", ""),
+        ],
+        &["k/src/lib.rs", "k/src/a.rs", "k/src/a/inner.rs"],
+        &["k/src/c.rs"],
+    );
+    assert_eq!(found, ["alpha>beta"]);
+}
+
+#[test]
+fn unresolvable_rust_paths_are_skipped_without_a_problem() {
+    let found = rust_edges(
+        &[
+            ("k/src/lib.rs", "mod missing;\nmod a;\n// mod b;\n"),
+            (
+                "k/src/a.rs",
+                "use std::fmt;\nuse serde::Serialize;\nuse crate::nowhere::Thing;\nuse super::x;\n\
+                 let s = \"use crate::b::X;\";\n",
+            ),
+            ("k/src/b.rs", ""),
+        ],
+        &["k/src/lib.rs", "k/src/a.rs"],
+        &["k/src/b.rs"],
+    );
+    assert_eq!(found, Vec::<String>::new());
+}
+
+fn ts_edges(files: &[(&str, &str)]) -> Vec<String> {
+    let map = split_map(&["typescript-imports"], &["alpha/"], &["beta/"]);
+    let (_dir, root) = tree(&map, files);
+    let report = report(&root);
+    assert_eq!(report.problems, Vec::<String>::new());
+    edges(&report)
+}
+
+#[test]
+fn a_relative_import_of_another_part_is_reported_and_js_resolves_to_ts() {
+    for spec in ["../beta/b.ts", "../beta/b.js", "../beta/b", "../beta"] {
+        let (from, to) = if spec == "../beta" {
+            ("alpha/a.ts", "beta/index.ts")
+        } else {
+            ("alpha/a.ts", "beta/b.ts")
+        };
+        let text = format!("import {{ x }} from \"{spec}\";\n");
+        let found = ts_edges(&[(from, &text), (to, "export const x = 1;\n")]);
+        assert_eq!(found, ["alpha>beta"], "{spec}");
+    }
+}
+
+#[test]
+fn other_import_forms_are_read() {
+    for text in [
+        "import '../beta/b.ts';",
+        "export * from '../beta/b.ts';",
+        "const m = await import('../beta/b.ts');",
+        "import {\n  x,\n} from '../beta/b.ts';",
+    ] {
+        let found = ts_edges(&[("alpha/a.ts", text), ("beta/b.ts", "")]);
+        assert_eq!(found, ["alpha>beta"], "{text}");
+    }
+}
+
+#[test]
+fn an_untracked_target_and_a_package_import_are_skipped_without_a_problem() {
+    let found = ts_edges(&[
+        (
+            "alpha/a.ts",
+            "import { h } from '../../dist/home.js';\nimport x from 'react';\n\
+             import y from '@scope/pkg';\nimport z from '../beta/gone.ts';\n\
+             import w from '../../../outside.ts';\n",
+        ),
+        ("beta/b.ts", ""),
+    ]);
+    assert_eq!(found, Vec::<String>::new());
+}
+
+#[test]
+fn the_new_extractors_do_not_run_when_the_map_does_not_name_them() {
+    let mut map = split_map(&[], &["k/src/lib.rs", "alpha/"], &["k/src/b.rs", "beta/"]);
+    map.as_object_mut().unwrap().remove("extractors");
+    let (_dir, root) = tree(
+        &map,
+        &[
+            ("k/src/lib.rs", "mod b;\n"),
+            ("k/src/b.rs", ""),
+            ("alpha/a.ts", "import '../beta/b.ts';"),
+            ("beta/b.ts", ""),
+        ],
+    );
+    assert_eq!(edges(&report(&root)), Vec::<String>::new());
 }
 
 fn run_check(root: &str, args: &[&str]) -> std::process::Output {
