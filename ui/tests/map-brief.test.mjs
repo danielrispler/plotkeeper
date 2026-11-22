@@ -1,7 +1,9 @@
 // The PR brief view's pure logic (spec danielrispler/plotkeeper#334, ticket #339), run on the `tsc` output.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { briefCamera, briefPlayer, escapeMap, figureShapes, figureSize, layerOrder, playlist, unconfirmed } from "../../dist/map-model.js";
+import { readFileSync } from "node:fs";
+import { alsoAt, briefCamera, briefPlayer, escapeMap, figureShapes, figureSize, layerOrder, playlist, unconfirmed } from "../../dist/map-model.js";
+import { trayRows } from "../../dist/map-tray.js";
 
 const step = (k, extra = {}) => ({ k, h: k, b: "", on: [], hops: [], law: null, covered_by: null, list: [], risks: [], fig: null, check: null, cites: [], flags: [], ...extra });
 const chapter = (title, ...kinds) => ({ behaviour: title, parts: [], title, steps: kinds.map((k) => step(k)), flags: [] });
@@ -9,10 +11,69 @@ const brief = (extra) => ({ title: "T", overview: [], chapters: [], also: [], un
 
 test("a single story plays its steps; a chaptered brief plays one chapter, the overview before the first", () => {
   const single = brief({ chapters: [chapter("Order", "Where", "Before", "Now")] });
-  assert.deepEqual(playlist(single, 0).map((s) => s.k), ["Where", "Before", "Now"]);
+  assert.deepEqual(playlist(single, 0, false).map((s) => s.k), ["Where", "Before", "Now"]);
   const chaptered = brief({ overview: [step("Where")], chapters: [chapter("Fog", "Before", "Now"), chapter("Laws", "Now", "Could break")] });
-  assert.deepEqual(playlist(chaptered, 0).map((s) => s.k), ["Where", "Before", "Now"]);
-  assert.deepEqual(playlist(chaptered, 1).map((s) => s.k), ["Now", "Could break"]);
+  assert.deepEqual(playlist(chaptered, 0, true).map((s) => s.k), ["Where", "Before", "Now"]);
+  assert.deepEqual(playlist(chaptered, 1, false).map((s) => s.k), ["Now", "Could break"]);
+  assert.deepEqual(playlist(chaptered, 0, false).map((s) => s.k), ["Before", "Now"], "an overview already played is not played again");
+});
+
+test("the overview plays before the first chapter opened, whichever it is, and once per brief", () => {
+  const player = briefPlayer({ scrubbed: () => false, backToNow: () => {} });
+  player.open("/p", 7, 1);
+  assert.equal(player.current().overview, true, "the first chapter opened carries it");
+  player.close();
+  player.open("/p", 7, 0);
+  assert.equal(player.current().overview, false, "another chapter does not");
+  assert.equal(player.current().step, 0);
+  player.close();
+  player.open("/p", 7, 1);
+  assert.equal(player.current().overview, true, "leaving mid-chapter keeps the overview in front of it");
+  assert.equal(player.go(1, 5), "moved");
+  assert.equal(player.go(1, 5), "moved");
+  assert.equal(player.go(1, 5), "moved");
+  assert.equal(player.go(1, 5), "moved");
+  assert.equal(player.go(1, 5), "done");
+  player.open("/p", 7, 1);
+  assert.equal(player.current().overview, false, "finishing it used the overview up");
+  player.open("/p", 8, 0);
+  assert.equal(player.current().overview, true, "another brief has its own");
+});
+
+test("each chapter resumes at the step it was left on", () => {
+  const player = briefPlayer({ scrubbed: () => false, backToNow: () => {} });
+  player.open("/p", 7, 0);
+  player.go(1, 4);
+  player.close();
+  player.open("/p", 7, 2);
+  player.go(1, 4);
+  player.go(1, 4);
+  player.close();
+  player.open("/p", 7, 0);
+  assert.equal(player.current().step, 1);
+  player.close();
+  player.open("/p", 7, 2);
+  assert.equal(player.current().step, 2);
+});
+
+test("the also-touched lines show on the last step of the last chapter only", () => {
+  const also = [{ part: "hook", line: "A wording change.", flags: [] }];
+  const b = brief({ also, chapters: [chapter("Fog", "Before", "Now"), chapter("Laws", "Now", "Could break")] });
+  assert.deepEqual(alsoAt(b, 1, 1, 2), also);
+  assert.deepEqual(alsoAt(b, 1, 0, 2), []);
+  assert.deepEqual(alsoAt(b, 0, 1, 2), []);
+  assert.deepEqual(alsoAt(brief({ chapters: [chapter("Fog", "Now")] }), 0, 0, 1), []);
+});
+
+test("the stored v3 brief of #317 plays as three chapters of four steps, in order, with the overview none", () => {
+  const raw = JSON.parse(readFileSync("understanding/tests/fixtures/stored/pr-brief-v3/317-reply.json", "utf8")).result;
+  const writer = JSON.parse(raw.replace(/^\s*```json\s*/, "").replace(/\s*```\s*$/, ""));
+  const full = brief({ ...writer, chapters: writer.chapters.map((c) => ({ ...c, flags: [], steps: c.steps.map((s) => step(s.k, s)) })) });
+  assert.deepEqual(full.chapters.map((c) => c.behaviour), ["Fog", "Broken laws", "Seen gate"]);
+  assert.deepEqual([0, 1, 2].map((i) => playlist(full, i, i === 0).length), [4, 4, 4]);
+  const rows = trayRows([{ number: 317, title: "The Map view", head: "a", brief: { stale: false, writing: false, chapters: full.chapters.map((c) => c.title) } }]);
+  assert.equal(rows.length, 3);
+  assert.deepEqual(rows.map((r) => r.chapter), [0, 1, 2]);
 });
 
 test("a brief reopens at the step left, and finishing it starts it over", () => {
