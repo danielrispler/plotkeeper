@@ -462,6 +462,7 @@ const RULES: [&str; 6] = [
     "exactly one option is right",
 ];
 
+// @law: writer-has-no-tools
 #[test]
 fn the_real_writer_runs_claude_on_the_subscription_in_its_neutral_folder() {
     let folder = Path::new("/h/Library/Application Support/dev.falinks.studio/card-writer");

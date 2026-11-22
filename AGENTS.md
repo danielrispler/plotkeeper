@@ -44,6 +44,10 @@ A red `snap` job on a fixture the diff didn't touch gets one rerun of the failed
 
 Rust is formatted by `cargo fmt`. TS, JS and Markdown have no formatter, so never run one (Prettier, Biome, …).
 
+## The system map
+
+A change that adds, moves or removes files, changes what a part does or how parts connect, or changes a law, changes `system-map.json` in the same PR. `npm run check` runs `system-map check` and fails on what it can see; `docs/studio/behaviour/map.md` says how to edit the map and tag a test with `@law: <id>`.
+
 ## Agent skills
 
 ### Learning

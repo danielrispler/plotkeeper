@@ -48,7 +48,7 @@ Coding agents write code faster than I can read their diffs. I was losing track 
 
 ## Documentation
 
-- [Sessions](docs/studio/behaviour/sessions.md), [the story rail](docs/studio/behaviour/rail.md), [cards](docs/studio/behaviour/cards.md), [the Quiz](docs/studio/behaviour/quiz.md), [the Brief](docs/studio/behaviour/brief.md), [checks](docs/studio/behaviour/checks.md), [the terminal pane](docs/studio/behaviour/terminal.md), [storage](docs/studio/behaviour/storage.md)
+- [Sessions](docs/studio/behaviour/sessions.md), [the story rail](docs/studio/behaviour/rail.md), [cards](docs/studio/behaviour/cards.md), [the Quiz](docs/studio/behaviour/quiz.md), [the Brief](docs/studio/behaviour/brief.md), [checks](docs/studio/behaviour/checks.md), [the terminal pane](docs/studio/behaviour/terminal.md), [storage](docs/studio/behaviour/storage.md), [the system map](docs/studio/behaviour/map.md)
 - [Load the plugin](docs/studio/plugin.md), [settings files](docs/studio/settings.md), [development](docs/studio/development.md)
 
 ## Licence

@@ -33,6 +33,7 @@ fn agy() -> Studio {
     Studio::replayed(run.lines())
 }
 
+// @law: wire-types-agree
 #[test]
 fn the_wire_samples_of_the_core_are_written_for_tsc() {
     let mut studios: Vec<Studio> = logs()
