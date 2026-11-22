@@ -1233,6 +1233,7 @@ fn main() {
             map::map_marks,
             map::map_proof,
             map::map_place,
+            ci_laws::failed_check_name,
             stop_rules::stop_log,
             stop_rules::stop_facts,
             stop_rules::stop_dismiss,

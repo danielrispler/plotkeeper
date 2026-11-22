@@ -25,6 +25,13 @@ test("the top level: files and each check's final result, singular and plural", 
   );
 });
 
+test("a failed check is named in words once they are known, and by its suite until then", () => {
+  const checks = [check("cargo test", "failed"), check("npm run check", "passed")];
+  const words = (c) => (c.suite === "cargo test" ? "Core tests failed: a wire drifts (+1 more)" : undefined);
+  assert.equal(evidenceLine({ files: null, checks }, words), "1 check passed · ✗ Core tests failed: a wire drifts (+1 more)");
+  assert.equal(evidenceLine({ files: null, checks }), "1 check passed · ✗ cargo test failed");
+});
+
 test("a failure is named only for a check whose last run failed; a retried pass is a pass; a check that ran is counted apart", () => {
   const failed = evidenceLine({ files: files([file("a", 1, 0)]), checks: [check("cargo test", "failed", 0), check("npm run check", "passed")] });
   assert.equal(failed, "1 file · 1 check passed · ✗ cargo test failed");
@@ -137,6 +144,8 @@ test("a file row opens its hunk in place, opens the editor at the first changed 
   };
   const make = () => evidenceElement("s2", 7, turn, { only: "all" });
   const rail = new El("ul");
+  // The failed check's words are read as the line is drawn (#345); this test follows the hunk's calls.
+  const reads = () => calls.splice(0).filter(([command]) => command !== "check_output" && command !== "failed_check_name").forEach((c) => calls.push(c));
   const line = make();
   rail.append(new El("p"), line);
   line.find("button")[0].listeners.click();
@@ -149,6 +158,7 @@ test("a file row opens its hunk in place, opens the editor at the first changed 
 
   row.find("button")[0].listeners.click();
   await new Promise((resolve) => setTimeout(resolve));
+  reads();
   // Opening a hunk is told to the self-test (#130), then the hunk is read.
   assert.deepEqual(calls[0], ["hunk_opened", { session: "s2", turn: 7 }]);
   assert.deepEqual(calls[1], ["turn_file_hunk", { session: "s2", turn: 7, root: "/r", path: "a.rs", from: null }]);
