@@ -1,12 +1,12 @@
 //! The PR brief trial, on the product's own path: for each merged PR named, `fetch_meta` and `gather` fill a
 //! `PrSource`, and `write_pr_brief` builds the facts, calls the real sandboxed writer (`ClaudeWriter`: no tools,
-//! the neutral folder), checks the reply and stores the brief, so judging a brief by hand judges what Studio
+//! the neutral folder), checks the reply (code checks, the claim check, the one retry) and stores the brief, so judging a brief by hand judges what Studio
 //! writes. Run it outside auto mode (`claude -p` nested), from the repository's root:
 //!
 //! `cargo run -q -p studio-understanding --example brief_trial -- --out <dir> [--model opus] 274 276 317`
 //!
 //! Under `--out <dir>`, per PR: `<n>-facts.txt`, `<n>-budget.md`, `<n>-brief.json` (the stored brief, flags on
-//! its items) and `<n>-checks.md`; the store and its records are under `<dir>/pr-briefs/`. With `BRIEF_DRY` set
+//! its items) and `<n>-checks.md`, `<n>-claims.md` and `<n>-record.json` (the claim check's flags and the record line); the store and its records are under `<dir>/pr-briefs/`. With `BRIEF_DRY` set
 //! it writes the facts and budget only and makes no call. Calls `gh` and `git`; reads no credential file.
 
 use std::path::{Path, PathBuf};
@@ -107,13 +107,43 @@ fn main() {
                 )
                 .unwrap();
                 let records = store.records();
-                let call = &records.last().unwrap().calls[0];
+                let record = records.last().unwrap();
+                std::fs::write(
+                    out.join(format!("{number}-record.json")),
+                    serde_json::to_string_pretty(record).unwrap(),
+                )
+                .unwrap();
+                std::fs::write(
+                    out.join(format!("{number}-claims.md")),
+                    format!(
+                        "# #{number} claim check\n\nBefore the retry:\n{}\nAfter the retry:\n{}\nError: {:?}; retry error: {:?}\n",
+                        record.claim_flags_before.iter().map(|f| format!("- {f}\n")).collect::<String>(),
+                        record.claim_flags_after.iter().map(|f| format!("- {f}\n")).collect::<String>(),
+                        record.claim_error,
+                        record.retry_error
+                    ),
+                )
+                .unwrap();
                 println!(
-                    "- steps {}; flagged items {}; {} s; ${:.3}",
+                    "- steps {}; flagged items {}; unconfirmed {}",
                     stored.brief.steps().count(),
                     stored.brief.flagged(),
-                    call.seconds,
-                    call.cost_usd
+                    record.unconfirmed
+                );
+                for call in &record.calls {
+                    println!(
+                        "- {}: {} s; ${:.3}; {} in, {} out",
+                        call.role,
+                        call.seconds,
+                        call.cost_usd,
+                        call.input_tokens,
+                        call.output_tokens
+                    );
+                }
+                println!(
+                    "- claim check: {} flags before the retry, {} after",
+                    record.claim_flags_before.len(),
+                    record.claim_flags_after.len()
                 );
                 println!(
                     "- code checks: {}",

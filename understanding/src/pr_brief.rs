@@ -6,8 +6,8 @@
 //! - `fetch_meta` (`gh`) and `gather` (`git`) fill a `PrSource`, plain data, so a test builds one by hand;
 //! - `build_facts` turns a source into `Facts`: the text the writer reads, the shape, the budget record and the
 //!   `CheckContext` the checks need;
-//! - `parse_reply` and `check_brief` read and check a reply (the claim check and the one retry of #338 start
-//!   from the flags `check_brief` leaves on the items);
+//! - `parse_reply` and `check_brief` read and check a reply; `pr_brief_check` (#338) then runs the claim check
+//!   and the one retry from the flags `check_brief` leaves on the items;
 //! - `BriefStore` keeps briefs and the records in the data folder;
 //! - `write_pr_brief` does all of it with a `BriefWriter`, which `ClaudeWriter` is and a test fakes.
 
@@ -305,7 +305,7 @@ impl Brief {
             .chain(self.chapters.iter().flat_map(|c| &c.steps))
     }
 
-    fn steps_mut(&mut self) -> impl Iterator<Item = &mut Step> {
+    pub(crate) fn steps_mut(&mut self) -> impl Iterator<Item = &mut Step> {
         self.overview
             .iter_mut()
             .chain(self.chapters.iter_mut().flat_map(|c| &mut c.steps))
@@ -994,7 +994,7 @@ pub fn build_facts(source: &PrSource) -> Result<Facts, String> {
 // ---------------------------------------------------------------------------------------------------------------
 // The prompt.
 
-const INSTRUCTIONS: &str = r#"You write a PR brief: a short, stepped, plain-language explanation of what one pull request changed in a system, for the system's owner. He directs AI agents that write the code; he does not read code. The brief exists to keep his mental model accurate: what each part does now, how behaviour flows between parts, what must stay true, what could break. It is not a changelog and not a file tour. The brief plays on a map of the system: each step lights parts and may send a light along links.
+pub(crate) const INSTRUCTIONS: &str = r#"You write a PR brief: a short, stepped, plain-language explanation of what one pull request changed in a system, for the system's owner. He directs AI agents that write the code; he does not read code. The brief exists to keep his mental model accurate: what each part does now, how behaviour flows between parts, what must stay true, what could break. It is not a changelog and not a file tour. The brief plays on a map of the system: each step lights parts and may send a light along links.
 
 You get FACTS below. The code has already decided the brief's SHAPE (single story or chapters, and which parts must be covered); follow it exactly.
 
@@ -1513,8 +1513,24 @@ pub struct BriefRecord {
     /// The code checks' flags.
     #[serde(default)]
     pub flags: Vec<String>,
+    /// Items still flagged after the retry, each carrying "not confirmed from the facts".
     #[serde(default)]
     pub unconfirmed: usize,
+    /// The claim check's flags, before the retry.
+    #[serde(default)]
+    pub claim_flags_before: Vec<String>,
+    /// The claim check's flags that still stand after the retry (those of items the retry did not rewrite).
+    #[serde(default)]
+    pub claim_flags_after: Vec<String>,
+    /// The flags the stored brief carries in the end.
+    #[serde(default)]
+    pub flags_after: Vec<String>,
+    /// Why the claim check or the retry gave nothing (a failed call or a reply that does not read).
+    #[serde(default)]
+    pub claim_error: Option<String>,
+    #[serde(default)]
+    pub retry_error: Option<String>,
+    /// The writer's call, the claim check's and the retry's, in that order, each when it was made.
     #[serde(default)]
     pub calls: Vec<CallUsage>,
 }
@@ -1603,8 +1619,8 @@ impl BriefStore {
 // The entry.
 
 /// Writes the brief of `source`'s PR at its head: builds the facts, asks the writer once, parses and checks the
-/// reply, stores the brief and appends its record. `log` hears one line per problem that does not stop the
-/// write. The claim check and the retry (#338) take the stored brief's flags from here.
+/// reply, runs the claim check and the one retry (`pr_brief_check`), stores the brief and appends its one
+/// record line. `log` hears one line per problem that does not stop the write.
 pub fn write_pr_brief(
     writer: &(impl BriefWriter + ?Sized),
     model: &str,
@@ -1617,6 +1633,28 @@ pub fn write_pr_brief(
     let mut brief = parse_reply(&reply.text)?;
     assign_decision_ids(&mut brief, &source.earlier_decisions);
     check_brief(&mut brief, &facts.context);
+    let code_flags = brief.all_flags();
+    let mut record = BriefRecord {
+        pr: source.meta.number,
+        head: source.meta.head.clone(),
+        at: millis(),
+        shape: facts.shape.label(),
+        budget: facts.budget.clone(),
+        flags: code_flags,
+        ..BriefRecord::default()
+    };
+    let mut usage = reply.usage;
+    usage.role = "writer".into();
+    record.calls.push(usage);
+    crate::pr_brief_check::claim_check_and_retry(
+        writer,
+        model,
+        &facts,
+        &facts.context,
+        &mut brief,
+        &mut record,
+        &mut log,
+    );
     let stored = StoredBrief {
         version: STORED_VERSION,
         pr: source.meta.number,
@@ -1630,18 +1668,16 @@ pub fn write_pr_brief(
     store
         .put(&stored)
         .map_err(|e| format!("keep the brief of #{}: {e}", stored.pr))?;
-    let mut usage = reply.usage;
-    usage.role = "writer".into();
-    let record = BriefRecord {
-        pr: stored.pr,
-        head: stored.head.clone(),
-        at: stored.written_at,
-        shape: facts.shape.label(),
-        budget: facts.budget,
-        flags: stored.brief.all_flags(),
-        unconfirmed: stored.brief.steps().filter(|s| !s.flags.is_empty()).count(),
-        calls: vec![usage],
-    };
+    record.at = stored.written_at;
+    record.flags_after = stored.brief.all_flags();
+    record.unconfirmed = stored
+        .brief
+        .steps()
+        .map(|s| &s.flags)
+        .chain(stored.brief.also.iter().map(|a| &a.flags))
+        .chain(stored.brief.decisions.iter().map(|d| &d.flags))
+        .filter(|f| f.iter().any(|f| f == crate::pr_brief_check::UNCONFIRMED))
+        .count();
     if let Err(e) = store.record(&record) {
         log(format!("record the brief of #{}: {e}", stored.pr));
     }

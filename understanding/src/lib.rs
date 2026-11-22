@@ -26,6 +26,7 @@ mod fingerprint;
 mod grounding;
 mod offer;
 pub mod pr_brief;
+pub mod pr_brief_check;
 mod retest;
 mod risk;
 mod self_test;
