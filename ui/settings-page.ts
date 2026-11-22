@@ -67,6 +67,18 @@ const SECTIONS: { heading: string; rows: Spec[] }[] = [
     ],
   },
   {
+    heading: "PR briefs",
+    rows: [
+      {
+        kind: "select",
+        path: ["pr_briefs", "model"],
+        options: [["haiku", "Haiku"], ["sonnet", "Sonnet"], ["opus", "Opus"], ["fable", "Fable"]],
+        title: "PR briefs model",
+        description: "The model that writes a PR's brief and checks its claims.",
+      },
+    ],
+  },
+  {
     heading: "Files",
     rows: [
       { kind: "open", file: "settings", title: "Open settings.json", description: "Every setting, including those this page does not show." },

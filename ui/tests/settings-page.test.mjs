@@ -16,9 +16,9 @@ const row = (page, title) => rows(page).find((r) => r.title === title);
 // The rows that set a key: every row but the two that open a file.
 const settingRows = (page) => rows(page).filter((r) => r.control !== "open");
 
-test("the page has its four headings, with their rows", () => {
+test("the page has its five headings, with their rows", () => {
   const page = settingsPage(initial);
-  assert.deepEqual(page.sections.map((s) => s.heading), ["Appearance", "Alerts", "Summaries", "Files"]);
+  assert.deepEqual(page.sections.map((s) => s.heading), ["Appearance", "Alerts", "Summaries", "PR briefs", "Files"]);
   assert.deepEqual(rows(page).map((r) => r.title), [
     "Default zoom",
     "Terminal font size",
@@ -27,6 +27,7 @@ test("the page has its four headings, with their rows", () => {
     "Model",
     "Effort",
     "Write a summary when a turn is opened",
+    "PR briefs model",
     "Open settings.json",
     "Open keymap.json",
   ]);
@@ -177,6 +178,19 @@ test("the effort dropdown shows an empty effort as Default, then low to max", ()
   const high = row(settingsPage(load(`{ "summaries": { "effort": "high" } }`)), "Effort");
   assert.equal(high.options.find((o) => o.value === high.value).label, "high");
   assert.equal(high.changed, true);
+});
+
+test("the PR briefs model is a dropdown of the same four models, Opus by default, written under pr_briefs", () => {
+  const model = row(settingsPage(initial), "PR briefs model");
+  assert.equal(model.control, "select");
+  assert.deepEqual(model.options.map((o) => o.value), ["haiku", "sonnet", "opus", "fable"]);
+  assert.deepEqual([model.value, model.changed, model.path], ["opus", false, ["pr_briefs", "model"]]);
+  const other = row(settingsPage(load(`{ "pr_briefs": { "model": "sonnet" } }`)), "PR briefs model");
+  assert.deepEqual([other.value, other.changed], ["sonnet", true]);
+  assert.equal(newValue(other, "select", "opus"), null, "Opus is the default, so the key is removed");
+  assert.equal(newValue(model, "select", "haiku"), "haiku");
+  // The summary writer's model is its own setting.
+  assert.equal(row(settingsPage(load(`{ "pr_briefs": { "model": "sonnet" } }`)), "Model").value, "haiku");
 });
 
 test("Write a summary when a turn is opened is a toggle, off by default", () => {

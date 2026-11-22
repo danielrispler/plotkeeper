@@ -18,6 +18,7 @@ test("missing files give the defaults", () => {
   assert.equal(loaded.settings.zoom, 1);
   assert.equal(loaded.settings.terminal.font_size, null);
   assert.deepEqual(loaded.settings.summaries, { model: "haiku", effort: "", on_open: false });
+  assert.deepEqual(loaded.settings.pr_briefs, { model: "opus" });
   assert.equal(loaded.settings.sounds, true);
   assert.equal(loaded.settings.context_warning, 30);
   assert.deepEqual(loaded.settings.doctor, [

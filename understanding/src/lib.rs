@@ -25,6 +25,7 @@ mod drift;
 mod fingerprint;
 mod grounding;
 mod offer;
+pub mod pr_brief;
 mod retest;
 mod risk;
 mod self_test;

@@ -10,6 +10,7 @@ mod decisions;
 mod drift;
 mod fingerprint;
 mod offer;
+mod pr_brief;
 #[path = "../../scripts/wire/samples.rs"]
 mod samples;
 mod saved_state;

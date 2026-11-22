@@ -550,7 +550,7 @@ pub fn is_logic(path: &str) -> bool {
 }
 
 /// Whether `path` is a test file.
-fn is_test(path: &str) -> bool {
+pub(crate) fn is_test(path: &str) -> bool {
     let name = path.rsplit('/').next().unwrap_or(path);
     path.split('/')
         .any(|p| matches!(p, "tests" | "test" | "__tests__"))
