@@ -162,12 +162,13 @@ pub fn merged_since(repo: &Path, since: u64) -> u32 {
     let Some((reference, _)) = crate::map::default_ref(repo) else {
         return 0;
     };
+    // git reads `--since=0` as about now, not the epoch, so 0 asks for no limit at all.
     let after = format!("--since={since}");
-    let subjects = crate::map::git(
-        repo,
-        &["log", "--first-parent", &after, "--format=%s", &reference],
-    )
-    .unwrap_or_default();
+    let mut args = vec!["log", "--first-parent", "--format=%s", &reference];
+    if since > 0 {
+        args.push(&after);
+    }
+    let subjects = crate::map::git(repo, &args).unwrap_or_default();
     subjects.lines().filter(|s| is_merge(s)).count() as u32
 }
 
@@ -369,6 +370,8 @@ mod tests {
         ] {
             git(at, &["commit", "-q", "--allow-empty", "-m", subject]);
         }
+        // `--since=0` reads as about now in git, not the epoch: a second later the commits drop out.
+        std::thread::sleep(std::time::Duration::from_millis(1100));
         assert_eq!(merged_since(Path::new(&path), 0), 2);
         // Nothing merged after a future start.
         assert_eq!(merged_since(Path::new(&path), now() + 3600), 0);
