@@ -311,3 +311,42 @@ test("the place keeps two lines and cuts a longer note at two, with no colour", 
   assert.match(rule, /min-height:\s*calc\(2 \* /);
   assert.doesNotMatch(rule, /color|background/);
 });
+
+// A docked card drawn before its note was known gets its place when the note is (an ended session's card, drawn while the previous
+// session's notes were held), and a place that stands is filled where it stands.
+import { El } from "./dom.mjs";
+import { fillCardRisk } from "../../dist/blocked.js";
+
+class Card extends El {
+  querySelector(selector) {
+    const cls = selector.slice(1);
+    return this.childNodes.find((c) => c.className.split(" ").includes(cls)) ?? null;
+  }
+}
+const cardWithReason = () => {
+  const block = new Card("article");
+  const reason = new El("p");
+  reason.className = "description reason";
+  const after = new El("p");
+  after.className = "answer-buttons";
+  block.append(reason, after);
+  return { block, reason, after };
+};
+
+test("a docked card with no place gets one after the rule when its note is known, and a place that stands keeps its node", () => {
+  globalThis.document = fakeDocument();
+  const { block, reason, after } = cardWithReason();
+  block.after = undefined;
+  reason.after = (item) => block.childNodes.splice(block.childNodes.indexOf(reason) + 1, 0, item);
+  const risk = blockedView(card("allowed_not_run"), null, false, 0, undefined, arrived("high"), false).risk;
+  fillCardRisk(block, risk);
+  const place = block.querySelector(".risk-note");
+  assert.deepEqual(block.childNodes, [reason, place, after]);
+  assert.equal(place.getAttribute("aria-live"), "polite");
+  assert.equal(place.text, "Risk: High · Deletes the remote branch feature-x on GitHub");
+
+  fillCardRisk(block, { state: "failed", level: null, line: null, text: "No risk note: the judge did not answer" });
+  assert.equal(block.querySelector(".risk-note"), place);
+  assert.equal(block.childNodes.length, 3);
+  assert.equal(place.text, "No risk note: the judge did not answer");
+});

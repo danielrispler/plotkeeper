@@ -55,6 +55,13 @@ export function fillRisk(place: HTMLElement, risk: RiskLine) {
   place.replaceChildren("Risk: ", level, ` · ${risk.line}`);
 }
 
+// Shows `risk` on the docked card `block`: in the place that stands, or, for a card drawn before its note was known, in a new place after the rule.
+export function fillCardRisk(block: HTMLElement, risk: RiskLine) {
+  const place = block.querySelector<HTMLElement>(".risk-note");
+  if (place) fillRisk(place, risk);
+  else block.querySelector(".reason")?.after(riskElement(risk));
+}
+
 // The note's place on the card: a polite live region, so a screen reader hears the note when it fills.
 export function riskElement(risk: RiskLine): HTMLElement {
   const place = document.createElement("p");
@@ -186,7 +193,7 @@ export function blockedElement(session: string, card: BlockedCommand, agent: str
   const asked = text("p", view.agent === null ? "Auto mode blocked a command" : `Auto mode blocked a command of ${view.agent}`, "asked");
   const command = document.createElement("p");
   command.append(code(view.command));
-  block.append(state, asked, command, text("p", `In ${view.folder}`, "description"), text("p", view.reason, "description"));
+  block.append(state, asked, command, text("p", `In ${view.folder}`, "description"), text("p", view.reason, "description reason"));
   // Beside the rule, before anything that changes: the place keeps its two lines, so the buttons never move when the note arrives.
   if (view.risk !== null) block.append(riskElement(view.risk));
   // A Running card's time counts up each second, as a running check's does, until the card leaves the page.

@@ -15,7 +15,7 @@ import { encode, request } from "./daemon.js";
 import { agentState, sessionName, showsLanded } from "./list.js";
 import { closePane, openHere, refreshHome } from "./panes.js";
 import { blockedRequestFor, openDecision, type Ask } from "./answer.js";
-import { blockedElement, docksInDock, fillRisk, riskLine, typeRetry } from "./blocked.js";
+import { blockedElement, docksInDock, fillCardRisk, riskLine, typeRetry } from "./blocked.js";
 import { beginFeed, briefNodes, cardLine, cardsFor, endFeed, markShown, openCard, quizOpen, rowCards, unseenRow } from "./cards.js";
 import { type Banner, bannerElement, bannerFor, bannerLives } from "./banner.js";
 import { quizAllowed, quizAnswered, quizItem, quizRegion, seedQuiz, trialOn } from "./quiz.js";
@@ -803,8 +803,9 @@ function drawDock({ session, agent: id }: Selection) {
   );
 }
 
-// Fills the note place of each docked blocked command in place, from the cards the window holds: a note arriving changes no card's buttons, so the
-// dock is not rebuilt, which would make the live region a new node and drop the focus on Allow (danielrispler/plotkeeper#298).
+// Shows the note of each docked blocked command, from the cards the window holds: in the place that stands, where it stands, since a note
+// arriving changes no card's buttons and rebuilding the dock would make the live region a new node and drop the focus on Allow
+// (danielrispler/plotkeeper#298); and in a new place for a card drawn before its note was known, as when a selection draws before its cards.
 export function fillDockNotes() {
   const session = studio.selection?.session;
   if (!session) return;
@@ -812,9 +813,8 @@ export function fillDockNotes() {
     const call = node.dataset.call;
     const card = (session.blocked_commands ?? []).find((c) => c.call === call);
     const note = studio.cards.risk_notes.find((n) => n.call === call);
-    const place = node.querySelector<HTMLElement>(".risk-note");
-    const risk = card && place ? riskLine(note, docks(card), session.state !== "ended") : null;
-    if (place && risk) fillRisk(place, risk);
+    const risk = card ? riskLine(note, docks(card), session.state !== "ended") : null;
+    if (risk) fillCardRisk(node, risk);
   }
 }
 
