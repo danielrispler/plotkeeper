@@ -15,7 +15,7 @@ import { connect, list, onEvent, request, type Listed } from "./daemon.js";
 import { diffRequest, drawDiff, keepsDiff } from "./diff.js";
 import { drawHistory } from "./history.js";
 import { drawHome, enterHome, landedClear } from "./home.js";
-import { element, failure, fullTitle, invoke, listen, newest, pressable, text } from "./dom.js";
+import { element, failure, fullTitle, invoke, pressable, text } from "./dom.js";
 import { onProjects, projects } from "./projects.js";
 import { followLog, showLog, showMissing } from "./log.js";
 import { leaveMap } from "./map.js";
@@ -28,14 +28,13 @@ import { studio } from "./state.js";
 import { sessionName } from "./list.js";
 import { FAILED_OSC, openPane, startNotice } from "./terminal.js";
 import { showStartToast } from "./toast.js";
-import type { Learning, Session } from "./types.js";
+import type { Session } from "./types.js";
 import { HOVERS } from "./hovers.js";
 
 type Pane = { box: HTMLElement; term: Xterm.Terminal | null; title: string };
 const panes = new Map<string, Pane>();
 let repo = "";
 let projectPaths: string[] = [];
-let asked: Learning | null = null;
 let shown = "";
 let ready: Promise<void> | null = null;
 let revived: Promise<void> = Promise.resolve();
@@ -57,21 +56,6 @@ const readHomeProjects = () =>
     failure("projects"),
   );
 
-// Asks the card store for the learning item (#240), with the clock and the start of Daniel's local day, and draws Home with it; a
-// failed read leaves the item as it was. Asked when Home is drawn, when a turn ends and after each tap.
-// Only the newest read lands: an older reply, which may predate a tap, is dropped.
-const latestLearning = newest();
-export const readLearning = () => {
-  const now = Date.now();
-  const day = new Date(now);
-  day.setHours(0, 0, 0, 0);
-  return latestLearning(invoke("learning", { now, dayStart: day.getTime() })).then((found) => {
-    if (found === undefined) return;
-    asked = found;
-    redrawHome();
-  }, failure("learning"));
-};
-
 // Connects, shows Home, then brings back every terminal;
 // again each time the daemon is lost.
 export function startPanes(): Promise<void> {
@@ -87,7 +71,6 @@ export function startPanes(): Promise<void> {
     showHome();
     void readHomeProjects();
   });
-  listen<null>("retests", () => void readLearning());
   onProjects(() => void readHomeProjects());
   window.addEventListener("start-failed", (e) => failedAtStart((e as CustomEvent).detail));
   onEvent((event) => {
@@ -203,32 +186,25 @@ const HOME = "home";
 export function showHome() {
   const entering = shown !== HOME;
   show(HOME, () => null);
-  // Home's expanded groups, "Not now" and the answered item last until it is left; what the store chose before is not shown
-  // again until it answers, since it may be an item set aside.
+  // Home's expanded groups last until it is left.
   enterHome(!entering);
-  if (entering) asked = null;
-  drawHome(box(HOME), studio.listed, projectPaths, asked, redrawHome, () => void readLearning());
-  void readLearning();
+  drawHome(box(HOME), studio.listed, projectPaths, redrawHome);
   element("terminal-head").hidden = true;
 }
-
-// Forgets the item the store last chose, until it answers again.
-export const forgetAsked = () => void (asked = null);
 
 // Whether Home is the view shown.
 export const homeShown = () => shown === HOME;
 
-// A card or summary was stored, or a turn ended: what the store chooses for the slot, and the Headlines of the rows, may have changed.
+// A card or summary was stored, or a turn ended: the Headlines of the rows may have changed.
 export function refreshHome() {
   if (shown !== HOME) return;
-  void readLearning();
   redrawHome();
 }
 
 // Draws Home again when the list changed under it.
 export function redrawHome() {
   landedClear.sync();
-  if (shown === HOME) drawHome(box(HOME), studio.listed, projectPaths, asked, redrawHome, () => void readLearning());
+  if (shown === HOME) drawHome(box(HOME), studio.listed, projectPaths, redrawHome);
 }
 
 // History (`history.ts`), a view like Home in the terminal column: the ended sessions, searchable. Clicking a row selects

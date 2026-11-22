@@ -1,8 +1,7 @@
-//! What a turn gets for a Quiz (danielrispler/plotkeeper#119): a card with its Quiz, a lone Quiz, or
-//! nothing, by the size of its change; the rules are in `docs/studio/question-rules.md`.
+//! What a turn gets (danielrispler/plotkeeper#119): a card, or nothing, by the size of its change. The lone Quiz row of the
+//! table is retired (danielrispler/plotkeeper#347).
 
-use crate::summary::write_held;
-use crate::{CardStore, CardWriter, SummarySetup, TurnSummary, write_stop};
+use crate::{CardStore, CardWriter, write_stop};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::io::Write;
@@ -14,15 +13,12 @@ use studio_core::{CardRequest, CheckStatus, Facts, Session, SummaryRequest};
 const CARD_LINES: u64 = 25;
 /// Logic files from which a turn gets a card.
 const CARD_FILES: usize = 2;
-/// Non-trivial lines from which a turn gets a lone Quiz.
-const QUIZ_LINES: u64 = 8;
 
 /// What a turn gets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Offer {
     Card,
-    Quiz,
     Nothing,
 }
 
@@ -102,12 +98,7 @@ impl Shape {
         if lines >= CARD_LINES || files >= CARD_FILES {
             return Offer::Card;
         }
-        let non_trivial: u64 = self.logic().map(|f| f.non_trivial).sum();
-        let test_run = files > 0 && self.logic().all(|f| is_test(&f.path));
-        match non_trivial >= QUIZ_LINES && !self.failed && !self.merge && !test_run {
-            true => Offer::Quiz,
-            false => Offer::Nothing,
-        }
+        Offer::Nothing
     }
 }
 
@@ -157,7 +148,7 @@ pub struct Decision {
 /// The one function that decides an offer, by the table (danielrispler/plotkeeper#119) read from `turn`'s
 /// files, or from `change`, the files of the card's own diff, where `turn` has no trees: an agent that
 /// reports none, and a worker's card. A worker's card, and a subagent's late change, must pass
-/// the table's first row, and get no lone Quiz, since neither has a summary.
+/// the table's first row.
 pub fn decide(kind: OfferKind, turn: &TurnFacts, change: &[Changed]) -> Decision {
     let shape = Shape::read(
         &turn.facts,
@@ -184,14 +175,10 @@ pub fn decide(kind: OfferKind, turn: &TurnFacts, change: &[Changed]) -> Decision
             offer = Offer::Nothing;
             Some("below the card row")
         }
-        Offer::Quiz => None,
         Offer::Nothing => Some(match () {
             _ if shape.files.is_empty() => "no change",
             _ if logic.is_empty() => "no logic file",
-            _ if non_trivial < QUIZ_LINES => "under 8 non-trivial lines",
-            _ if inputs.failed => "a check ended failed",
-            _ if inputs.merge => "a merge turn",
-            _ => "a test run",
+            _ => "below the card row",
         }),
     };
     Decision {
@@ -212,12 +199,8 @@ pub fn changed_in(diff: &str) -> Vec<Changed> {
 pub enum Outcome {
     #[serde(rename = "written")]
     Written,
-    #[serde(rename = "held by the hourly cap")]
-    HeldByCap,
     #[serde(rename = "no reply from the writer")]
     NoReply,
-    #[serde(rename = "no quiz in the reply")]
-    NoQuiz,
 }
 
 /// One line of the record.
@@ -294,7 +277,7 @@ impl Offers {
 
 /// What settling a turn's summary found.
 pub struct Settled {
-    /// Whether the summary is written: it is wanted for itself, or for a lone Quiz.
+    /// Whether the summary is written: it is wanted for itself.
     pub write: bool,
     pub decision: Decision,
     /// The decision was made here, not by the turn's card.
@@ -302,18 +285,16 @@ pub struct Settled {
 }
 
 impl Settled {
-    /// Puts on record a decision made here that no card or summary will: any but a lone Quiz, whose
-    /// summary puts its line, and one the turn's card made, which put its own.
+    /// Puts on record a decision made here that no card will: one the turn's card made put its own.
     pub fn record(&self, offers: &Offers, request: &SummaryRequest) {
-        if self.fresh && self.decision.offer != Offer::Quiz {
+        if self.fresh {
             offers.record(&request.session_id, &request.id, &self.decision, None);
         }
     }
 }
 
-/// Fills in `request`'s facts from `turn` and whether its summary may keep a Quiz, from the same
-/// decision the turn's card got: a lone Quiz only when the table gives that, and the card's own
-/// `change` is read only where `turn` has no files. A `decided` decision, the one the card path made
+/// Fills in `request`'s facts from `turn`, and decides whether its summary is written, from the same
+/// decision the turn's card got: the card's own `change` is read only where `turn` has no files. A `decided` decision, the one the card path made
 /// for this turn, is taken as it is: the summary never decides again on facts that moved since.
 pub fn settle(
     request: &mut SummaryRequest,
@@ -326,18 +307,15 @@ pub fn settle(
         Some(decided) => decided.clone(),
         None => decide(OfferKind::Turn, turn, change),
     };
-    let lone = decision.offer == Offer::Quiz;
-    request.no_quiz = !lone;
     Settled {
-        write: request.wanted || lone,
+        write: request.wanted,
         decision,
         fresh: decided.is_none(),
     }
 }
 
 /// Writes the stop card of `request` when the table gives it one, and puts the decision on record. A
-/// check's card is not judged. A lone Quiz's line is put by the turn's summary, which `carried` says
-/// will come. See `write_stop` for the rest.
+/// check's card is not judged. See `write_stop` for the rest.
 #[allow(clippy::too_many_arguments)]
 pub fn offer_stop(
     store: &Mutex<CardStore>,
@@ -346,7 +324,6 @@ pub fn offer_stop(
     session: &Session,
     turn: &TurnFacts,
     offers: &Offers,
-    carried: bool,
     stored: impl FnOnce(),
     mut log: impl FnMut(String),
 ) -> (bool, Option<Decision>) {
@@ -376,19 +353,6 @@ pub fn offer_stop(
             offers.record(&session_id, &id, &decision, Some(outcome));
             (written, Some(decision))
         }
-        // Its summary carries the lone Quiz, and puts the line there; with none to come, it is put now.
-        Offer::Quiz => {
-            log(format!("no card on {id}: its change gets a lone Quiz"));
-            if !carried {
-                let reason = Some("no summary to carry it");
-                let recorded = Decision {
-                    reason,
-                    ..decision.clone()
-                };
-                offers.record(&session_id, &id, &recorded, None);
-            }
-            (false, Some(decision))
-        }
         Offer::Nothing => {
             let why = decision.reason.unwrap_or_default();
             log(format!("no card on {id}: {why}"));
@@ -396,31 +360,6 @@ pub fn offer_stop(
             (false, Some(decision))
         }
     }
-}
-
-/// Writes the summary of `request`, and, when `lone` is the decision that gave the turn a lone Quiz,
-/// puts it on record with its outcome.
-pub fn offer_summary(
-    store: &Mutex<CardStore>,
-    writer: &(impl CardWriter + ?Sized),
-    setup: &SummarySetup,
-    request: SummaryRequest,
-    lone: Option<&Decision>,
-    offers: &Offers,
-    log: impl FnMut(String),
-) -> Option<TurnSummary> {
-    let (session, id) = (request.session_id.clone(), request.id.clone());
-    let written = write_held(store, writer, setup, request, log);
-    if let Some(decision) = lone {
-        let outcome = match &written {
-            None => Outcome::NoReply,
-            Some((s, _)) if s.quiz.is_some() => Outcome::Written,
-            Some((_, true)) => Outcome::HeldByCap,
-            Some(_) => Outcome::NoQuiz,
-        };
-        offers.record(&session, &id, decision, Some(outcome));
-    }
-    written.map(|(summary, _)| summary)
 }
 
 /// Whether `request` is the card of one of `session`'s turns: its session's own, with the id of the
@@ -585,20 +524,20 @@ mod tests {
     #[test]
     fn a_card_at_25_lines_or_two_logic_files() {
         let one = |lines| shape(vec![file("a.rs", lines, lines)]).offer();
-        assert_eq!(one(24), Offer::Quiz);
+        assert_eq!(one(24), Offer::Nothing);
         assert_eq!(one(25), Offer::Card);
         let two = shape(vec![file("a.rs", 3, 3), file("b.rs", 3, 3)]).offer();
         assert_eq!(two, Offer::Card);
         // A doc beside a logic file is one logic file.
         let doc = shape(vec![file("a.rs", 9, 9), file("docs/x.md", 90, 90)]).offer();
-        assert_eq!(doc, Offer::Quiz);
+        assert_eq!(doc, Offer::Nothing);
     }
 
     #[test]
     fn a_lone_quiz_at_8_non_trivial_lines() {
         let one = |n| shape(vec![file("a.rs", 12, n)]).offer();
         assert_eq!(one(7), Offer::Nothing);
-        assert_eq!(one(8), Offer::Quiz);
+        assert_eq!(one(8), Offer::Nothing);
     }
 
     #[test]
@@ -617,7 +556,7 @@ mod tests {
         for s in [failed, merge, tests, spec] {
             assert_eq!(s.offer(), Offer::Nothing);
         }
-        assert_eq!(base.offer(), Offer::Quiz);
+        assert_eq!(base.offer(), Offer::Nothing);
     }
 
     #[test]

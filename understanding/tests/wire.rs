@@ -1,5 +1,5 @@
 //! The wire's agreement check (#246) for the understanding layer's types: the session list's rows, a session's cards
-//! with its brief, a turn's summary and Home's learning slot, written into `scripts/wire/understanding.ts`
+//! with its brief, a turn's summary, written into `scripts/wire/understanding.ts`
 //! (`scripts/wire/samples.rs`). The store's values are built whole, every optional field filled once and left empty
 //! once, so the samples hold every shape; still, an optional field no sample fills is not checked.
 
@@ -7,10 +7,9 @@ use crate::samples::{Sample, json, write};
 use std::collections::{BTreeMap, BTreeSet};
 use studio_core::{Base, CardRequest, FactFile, Facts, Studio, SummaryRequest, TurnFile};
 use studio_understanding::{
-    Answered, Arm, Card, CardStore, CheckResult, Choice, CodeRange, DesignLine, Guess, Learning,
-    Level, Line, LineKind, OpenItem, OpenKind, PlacedCard, Quiz, QuizTap, Rating, Reason, Retest,
-    RiskLevel, RiskView, Row, SessionCards, StoredCard, StoredSummary, Surface, Tap, TurnSummary,
-    hunk_view,
+    Answered, Arm, Card, CardStore, CheckResult, Choice, CodeRange, DesignLine, Guess, Level, Line,
+    LineKind, OpenItem, OpenKind, PlacedCard, Quiz, QuizTap, Rating, Reason, RiskLevel, RiskView,
+    Row, SessionCards, StoredCard, StoredSummary, Surface, Tap, TurnSummary, hunk_view,
 };
 
 const SESSION: &str = "5b9e3d71-0c2a-4f8e-b6d4-8a1c3e5f7092";
@@ -169,8 +168,6 @@ fn summaries(checks: &Studio) -> [StoredSummary; 2] {
             external: 0,
         },
         wanted: true,
-        asks: true,
-        no_quiz: true,
     };
     let kinds = [
         LineKind::Why,
@@ -210,39 +207,6 @@ fn summaries(checks: &Studio) -> [StoredSummary; 2] {
         arm: None,
     };
     [full, old]
-}
-
-/// Each of Home's learning items: a Retest filled in for serving and one as stored, a fresh Quiz, and done.
-fn learning() -> [Learning; 4] {
-    let retest = Retest {
-        id: format!("retest {SESSION}@{AT}"),
-        of: format!("{SESSION}@{AT}"),
-        session_id: SESSION.into(),
-        added_at: AT,
-        of_at: Some(AT),
-        hunk: "--- src/lib.rs".into(),
-        quiz: Some(quiz()),
-        taps: taps(),
-    };
-    let stored = Retest {
-        of_at: None,
-        hunk: String::new(),
-        quiz: None,
-        taps: Vec::new(),
-        ..retest.clone()
-    };
-    [
-        Learning::Retest(retest),
-        Learning::Retest(stored),
-        Learning::Fresh {
-            id: format!("{SESSION}@{AT}"),
-            session_id: SESSION.into(),
-            quiz: quiz(),
-            at: AT,
-            hunk: "--- src/lib.rs".into(),
-        },
-        Learning::Done,
-    ]
 }
 
 // @law: wire-types-agree
@@ -358,11 +322,6 @@ fn the_wire_samples_of_the_understanding_layer_are_written_for_tsc() {
         )),
     ));
 
-    // Home's learning slot.
-    for item in learning() {
-        samples.push(("Learning", json(item)));
-    }
-
     let types = [
         "Session",
         "SessionCards",
@@ -370,7 +329,6 @@ fn the_wire_samples_of_the_understanding_layer_are_written_for_tsc() {
         "OpenItem",
         "TurnSummary",
         "Hunk",
-        "Learning",
     ];
     write(
         env!("CARGO_MANIFEST_DIR"),

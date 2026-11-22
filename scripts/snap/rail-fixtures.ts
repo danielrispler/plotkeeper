@@ -1,19 +1,17 @@
 // Fixtures for the story rail (from the design session for #8, danielrispler/plotkeeper#102): one selected session,
 // "#56 · Row controls", in four states (running, at your turn, needing you, idle), with realistic content: 5 turns, summaries as the writer's prompt shapes them (at most 4
-// short lines, the first says what the turn did), a card with its quiz, turn Quizzes,
+// short lines, the first says what the turn did), a card with its quiz,
 // subagents, checks, a permission mode, a model, an estimate, a brief and decision history, and a
 // Git line with several tokens. Times are relative to the moment a fixture renders.
 
 import type { Ask } from "../../ui/answer.ts";
-import type { BlockedCommand, ListedCheck, CheckStatus, Decision, OpenItem, Quiz, RiskView, Session, SessionState, StoredCard, Subagent, Turn, TurnFile, TurnSummary } from "../../ui/types.ts";
+import type { BlockedCommand, ListedCheck, CheckStatus, Decision, OpenItem, RiskView, Session, SessionState, StoredCard, Subagent, Turn, TurnFile, TurnSummary } from "../../ui/types.ts";
 import { base, type Fixture } from "./base.ts";
 
 const MIN = 60e3;
 
 const capabilities = { agent: "claude", asks: true, background_tasks: true, replies: true, permission_mode: true, durations: true, transcript_version: true, context: true, turn_trees: true };
 const cwd = "/Users/danielrispler/work/plotkeeper/.claude/worktrees/issue-56-row-controls";
-
-const quiz = (text: string, options: Quiz["options"], key: number): Quiz => ({ text, options, key });
 
 // What each turn's summary says; its first line is the turn's Headline (the turn-end intention is the final response's first line).
 const summaries: Record<string, TurnSummary["summary"]> = {
@@ -23,37 +21,18 @@ const summaries: Record<string, TurnSummary["summary"]> = {
       "The row's padding now comes from the fold and delete columns (`--control`), so the test reads the token instead of a hard-coded 12px.\n" +
       "Clippy's `needless_borrow` was unrelated to the UI and is fixed with a one-line change.\n" +
       "`npm run check` passes; nobody looked at the rows in a real window.",
-    quiz: quiz(
-      "Why does the delete button stay in the row's layout while it is hidden?",
-      [
-        { text: "Its box is kept, so no column shifts", why: "Right: `visibility: hidden` hides the paint but keeps the space." },
-        { text: "The browser reserves space for any hover rule", why: "No rule makes a browser reserve space for a hover rule." },
-        { text: "The row's padding is rounded up to the control size", why: "Padding is a fixed token here, not rounded." },
-      ],
-      0,
-    ),
   },
   t3: {
     summary:
       "Made the delete button show on hover and on the selected row, and kept its column empty otherwise.\n" +
       "Keyboard users get it through `:focus-within`, so Tab reaches it.\n" +
       "Not checked: the strip, where rows have no delete.",
-    quiz: null,
   },
   t1: {
     summary:
       "Added a fold toggle to each session row and moved the delete button into its own column.\n" +
       "The toggle sits at the row's start and is drawn only when subagents show under the row.\n" +
       "Both are siblings of the row button, since a button cannot hold a button.",
-    quiz: quiz(
-      "Why are the toggle and the delete siblings of the row button, not its children?",
-      [
-        { text: "A button may not hold interactive content", why: "Right: the HTML content model forbids it, and the press would bubble." },
-        { text: "Children of a button cannot take a hover state", why: "They can; hover does not depend on the parent being a button." },
-        { text: "Siblings let the grid share the glyph's column", why: "The columns come from padding, not the grid." },
-      ],
-      0,
-    ),
   },
 };
 
@@ -423,24 +402,7 @@ const askScript = (selectors: string[]) => `
   log("rail scrollTop " + at + " -> " + story.scrollTop);
   if (story.scrollTop !== at) log("snap:fail the rail's scrollTop moved from " + at + " to " + story.scrollTop);`;
 
-// #120: scrolls the rail, answers the turn's Quiz (a pick, or "Show the rest anyway"), and fails when the rail's scrollTop moved
-// or the reasons and the held Body lines did not show.
-const quizScript = (answer: "pick" | "skip") => `
-  const story = document.getElementById("story");
-  story.scrollTop = Math.min(80, story.scrollHeight - story.clientHeight);
-  const at = story.scrollTop;
-  const wait = () => new Promise((resolve) => setTimeout(resolve, 200));
-  const region = document.querySelector(".now-turn .quiz-region");
-  if (!region) return log("snap:fail the newest turn has no open Quiz");
-  if (region.querySelector(".options li p")) log("snap:fail the reasons show before an answer");
-  ${answer === "pick" ? `region.querySelector(".options .btn").click();` : `region.querySelector(".quiz-skip").click();`}
-  await wait();
-  if (!region.querySelector(".options li p")) log("snap:fail the reasons did not show");
-  if (!region.querySelector(".quiz-chips")) log("snap:fail the chips did not show");
-  log("rail scrollTop " + at + " -> " + story.scrollTop);
-  if (story.scrollTop !== at) log("snap:fail the rail's scrollTop moved from " + at + " to " + story.scrollTop);`;
-
-// `npm run snap:readme` (scripts/snap/readme.mjs): the README's three rail crops. Each script scrolls the rail to its top, finds
+// `npm run snap:readme` (scripts/snap/readme.mjs): the README's rail crops. Each script scrolls the rail to its top, finds
 // its target (a missing one is a `snap:fail`) and logs `snap:crop x y width height`, the box in page pixels that the crop keeps.
 const cropScript = (setup: string, from: string, to: string) => `
   const story = document.getElementById("story");
@@ -458,14 +420,6 @@ const cropScript = (setup: string, from: string, to: string) => `
   log("snap:crop " + [rail.left, start - 8, story.clientWidth, end - start + 16].map(Math.round).join(" "));`;
 
 const readmeTurn = () => ({ ...build("your_turn"), snapScript: cropScript("", ".now-turn", ".now-turn .evidence-toggle") });
-const readmeQuiz = () => ({
-  ...build("your_turn"),
-  snapScript: cropScript(`
-    const pick = document.querySelector(".now-turn .quiz-region .options .btn");
-    if (pick) pick.click();
-    await wait();
-    if (!document.querySelector(".now-turn .quiz-region .options li p")) return log("snap:fail the pick did not show the reasons");`, ".now-turn .quiz-region", ".now-turn .quiz-region"),
-});
 const readmeWhere = () => ({ ...build("idle", { answered: true, withBrief: true }), snapScript: cropScript("", "#banner", "#banner") });
 
 // #211: a folded turn's unseen card shows one title row; a click opens the card in place and writes its `shown` tap.
@@ -596,11 +550,8 @@ export const railFixtures = {
   railUnseenCard: () => ({ ...build("idle"), snapScript: unseenScript }),
   railUnseenCardOpen: () => ({ ...build("idle"), snapScript: unseenOpenScript }),
   readmeTurn,
-  readmeQuiz,
   readmeWhere,
   railQuiz: () => build("your_turn"),
-  railQuizPick: () => ({ ...build("your_turn"), snapScript: quizScript("pick") }),
-  railQuizSkip: () => ({ ...build("your_turn"), snapScript: quizScript("skip") }),
   railDiff: () => ({ ...build("your_turn"), snapScript: diffScript }),
   railAsk: () => ({ ...build("your_turn"), snapScript: askScript([".evidence-file", ".evidence-check"]) }),
   railAskCheck: () => ({ ...build("your_turn"), snapScript: askScript([".evidence-check"]) }),

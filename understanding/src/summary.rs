@@ -1,9 +1,9 @@
-//! The turn summary and its Quiz (danielrispler/Falinks#526; danielrispler/Falinks#517, decisions 12 to 15): one writer call
-//! when a long turn ends, on a small model with the studio's own system prompt, read with the
-//! session's last 3 summaries.
+//! The turn summary, a Headline and a Body (danielrispler/Falinks#526; danielrispler/Falinks#517, decisions 12 to 15): one
+//! writer call when a long turn ends, on a small model with the studio's own system prompt, read with the session's last 3
+//! summaries. It writes no Quiz since danielrispler/plotkeeper#347.
 
 use crate::grounding::{HEADLINE_WORDS, agent_says, facts_text, grounded, material, words};
-use crate::{CardStore, CardWriter, ClaudeWriter, MAX_CHANGE, Place, Quiz, millis, quiz_rules};
+use crate::{CardStore, CardWriter, ClaudeWriter, MAX_CHANGE, Quiz};
 use serde::{Deserialize, Serialize};
 use std::{process::Command, sync::Mutex};
 
@@ -34,7 +34,7 @@ pub struct Line {
 /// The most Body lines a turn has.
 const LINES: usize = 3;
 
-/// A turn's summary and, unless the turn has a card, its Quiz.
+/// A turn's summary: its Headline and Body.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TurnSummary {
     /// The Headline and the Body lines' texts, one per line. Summaries stored before the Headline
@@ -47,9 +47,8 @@ pub struct TurnSummary {
     /// The Body lines, at most 3, typed.
     #[serde(default)]
     pub lines: Vec<Line>,
-    /// `None` on a turn with a card, whose Quiz is the card's, on a turn with nothing to teach
-    /// (danielrispler/Falinks#583), or when the writer's was rejected twice. A learning section stored before
-    /// danielrispler/plotkeeper#118 reads as its question (`stored_quiz`).
+    /// The Quiz a summary stored before danielrispler/plotkeeper#347 holds; the writer no longer writes one, so a new summary has
+    /// `None`. A learning section stored before danielrispler/plotkeeper#118 reads as its question (`stored_quiz`).
     #[serde(default, alias = "learning", deserialize_with = "stored_quiz")]
     pub quiz: Option<Quiz>,
 }
@@ -89,40 +88,17 @@ impl Default for SummarySetup {
 /// How many of the session's latest summaries the writer reads (danielrispler/Falinks#517, decision 15).
 const EARLIER: usize = 3;
 
-/// Why a summary's Quiz or Headline is unusable.
-enum Unusable {
-    /// Its Quiz breaks a rule (`Quiz::from_value`); a reply with one is asked for once more.
-    Quiz(String),
-    /// Its Headline held a number or id the turn's material lacks, or ran over its words; the
-    /// reply is asked for once more.
-    Headline(String),
-    Other(String),
-}
-
-impl std::fmt::Display for Unusable {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            Unusable::Quiz(why) | Unusable::Headline(why) | Unusable::Other(why) => {
-                f.write_str(why)
-            }
-        }
-    }
-}
-
 impl TurnSummary {
     /// The summary in a writer's reply, which must hold one JSON object with a headline. Its Body
     /// lines of an unknown kind, or with a number or id that `material` lacks, are dropped. A
     /// Headline with such a number is stripped, and one over `HEADLINE_WORDS` stands, each with why
     /// so the reply is asked for once more; a claim of a fix, a pass or a verification gets "Agent
-    /// says:" unless a check backs it. On a turn with a `card`, any Quiz is dropped; a `null` one
-    /// means the turn has nothing to teach, and a missing one is unusable. A Quiz that breaks a
-    /// rule is dropped too, with why, and the reply is asked for once more.
+    /// says:" unless a check backs it. A Quiz in the reply is ignored.
     fn from_reply(
         reply: &str,
         request: &SummaryRequest,
         material: &str,
-    ) -> Result<(TurnSummary, Option<Unusable>), String> {
-        let card = request.card.is_some();
+    ) -> Result<(TurnSummary, Option<String>), String> {
         let head: String = reply.chars().take(300).collect();
         let value: serde_json::Value = crate::parse_object(reply)
             .map_err(|e| format!("the summary reply does not parse ({e}): {head:?}"))?;
@@ -147,27 +123,15 @@ impl TurnSummary {
             .collect();
         let mut headline_problem = None;
         let headline = if !grounded(headline, material) {
-            headline_problem = Some(Unusable::Headline(format!(
+            headline_problem = Some(format!(
                 "its headline holds a number or id the turn lacks: {headline:?}"
-            )));
+            ));
             String::new()
         } else {
             if words(headline) > HEADLINE_WORDS {
-                headline_problem = Some(Unusable::Headline(format!(
-                    "its headline has {} words",
-                    words(headline)
-                )));
+                headline_problem = Some(format!("its headline has {} words", words(headline)));
             }
             agent_says(headline, &request.facts)
-        };
-        let quiz =
-            match card || request.no_quiz || value.get("quiz") == Some(&serde_json::Value::Null) {
-                true => Ok(None),
-                false => quiz(&value["quiz"]).map(Some),
-            };
-        let (quiz, problem) = match quiz {
-            Ok(quiz) => (quiz, headline_problem),
-            Err(problem) => (None, headline_problem.or(Some(problem))),
         };
         let texts = lines.iter().map(|l| l.text.as_str());
         let summary = std::iter::once(headline.as_str())
@@ -179,55 +143,24 @@ impl TurnSummary {
             summary,
             headline: Some(headline),
             lines,
-            quiz,
+            quiz: None,
         };
-        Ok((summary, problem))
+        Ok((summary, headline_problem))
     }
-}
-
-/// The Quiz in `value`, or why it is unusable.
-fn quiz(value: &serde_json::Value) -> Result<Quiz, Unusable> {
-    if value.is_null() {
-        return Err(Unusable::Other("the reply holds no quiz".into()));
-    }
-    Quiz::from_value(value.clone()).map_err(Unusable::Quiz)
 }
 
 /// The summary of `request`'s turn from `writer`, read with the session's last 3 summaries in
-/// `store`, which keeps it. The writer is asked once more when its reply gives none, gives a
-/// Headline with an invented number or over 16 words, or gives a Quiz that breaks a rule
-/// (`Quiz::from_value`); the second reply stands, with no Quiz when it breaks a rule again, or the
-/// first when the second gives no summary. Each problem
-/// is one line for `log`. The store is not locked while the writer runs.
+/// `store`, which keeps it. The writer is asked once more when its reply gives none, or gives a
+/// Headline with an invented number or over 16 words; the second reply stands, or the first when
+/// the second gives no summary. Each problem is one line for `log`. The store is not locked while
+/// the writer runs.
 pub fn write_summary(
     store: &Mutex<CardStore>,
     writer: &(impl CardWriter + ?Sized),
     setup: &SummarySetup,
     request: SummaryRequest,
-    log: impl FnMut(String),
-) -> Option<TurnSummary> {
-    write_held(store, writer, setup, request, log).map(|(summary, _)| summary)
-}
-
-/// As `write_summary`, and whether the hourly cap took its Quiz.
-pub(crate) fn write_held(
-    store: &Mutex<CardStore>,
-    writer: &(impl CardWriter + ?Sized),
-    setup: &SummarySetup,
-    mut request: SummaryRequest,
     mut log: impl FnMut(String),
-) -> Option<(TurnSummary, bool)> {
-    // A card the offer did not write is no card: the turn's summary may carry its Quiz instead.
-    if let Some(card) = &request.card
-        && !store
-            .lock()
-            .unwrap()
-            .cards()
-            .iter()
-            .any(|k| k.request.id == *card)
-    {
-        request.card = None;
-    }
+) -> Option<TurnSummary> {
     let earlier = store
         .lock()
         .unwrap()
@@ -242,54 +175,26 @@ pub(crate) fn write_held(
         )
     };
     let first = summary();
-    let retry = |first: &Result<_, _>| match first {
+    let retry = |first: &Result<(TurnSummary, Option<String>), String>| match first {
         Err(_) => true,
-        Ok((_, problem)) => matches!(problem, Some(Unusable::Quiz(_) | Unusable::Headline(_))),
+        Ok((_, problem)) => problem.is_some(),
     };
     match crate::once_more(first, retry, summary, |second, first| second.or(first)) {
-        Ok((mut summary, problem)) => {
+        Ok((summary, problem)) => {
             if let Some(problem) = problem {
-                log(format!("no quiz on {}: {problem}", request.id));
+                log(format!("headline of {}: {problem}", request.id));
             }
             let id = request.id.clone();
             let mut store = store.lock().unwrap();
-            let held = quiz_cap(&mut store, &request, &mut summary, &mut log);
             if let Err(e) = store.add_summary(request, summary.clone()) {
                 log(format!("save the summaries of {id}: {e}"));
             }
-            Some((summary, held))
+            Some(summary)
         }
         Err(line) => {
             log(format!("no summary on {}: {line}", request.id));
             None
         }
-    }
-}
-
-/// Holds the Quiz of `summary` and of its turn's card to the rules for when a Quiz shows
-/// (danielrispler/plotkeeper#119): none beside a decision, a turn that asks Daniel something or ended in Needs
-/// you, and at most 3 in an hour, which a lone Quiz past the cap does not get. Returns whether the
-/// cap took the Quiz.
-fn quiz_cap(
-    store: &mut CardStore,
-    request: &SummaryRequest,
-    summary: &mut TurnSummary,
-    mut log: impl FnMut(String),
-) -> bool {
-    let asks = request.asks || summary.lines.iter().any(|l| l.kind == LineKind::Ask);
-    if asks {
-        summary.quiz = None;
-        if let Some(card) = &request.card
-            && let Err(e) = store.drop_card_quiz(card)
-        {
-            log(format!("save the card store: {e}"));
-        }
-        false
-    } else if summary.quiz.is_some() && store.place_quiz(false, millis()) != Place::Offer {
-        summary.quiz = None;
-        true
-    } else {
-        false
     }
 }
 
@@ -315,21 +220,8 @@ impl ClaudeWriter {
             [] => "none\n".into(),
             earlier => earlier
                 .iter()
-                .map(|s| {
-                    let question = s.quiz.as_ref().map_or("none", |q| q.text.as_str());
-                    format!(
-                        "<summary>\n{}\nIts question: {question}\n</summary>\n",
-                        s.summary
-                    )
-                })
+                .map(|s| format!("<summary>\n{}\n</summary>\n", s.summary))
                 .collect(),
-        };
-        let card = match request.card {
-            Some(_) => {
-                "This turn has a card, which asks its quiz: write the headline and lines only."
-            }
-            None if request.no_quiz => "This turn gets no quiz: write the headline and lines only.",
-            None => "Write the headline, the lines and the quiz.",
         };
         self.run_with(
             &options(setup, SUMMARY),
@@ -338,8 +230,8 @@ impl ClaudeWriter {
                  The agent's responses in the turn, oldest first:\n{responses}\n\
                  The turn's intentions, oldest first:\n{intentions}\n\
                  What the hooks and git recorded of the turn:\n{facts}\n\
-                 The session's latest turn summaries and their questions, oldest first:\n\
-                 {earlier}\n{card}",
+                 The session's latest turn summaries, oldest first:\n\
+                 {earlier}",
                 request.prompt,
                 facts = facts_text(&request.facts)
             ),
@@ -441,9 +333,9 @@ Reply with one JSON object and nothing else:
 /// The summary writer's system prompt (danielrispler/Falinks#517, decision 14; danielrispler/plotkeeper#115), which replaces
 /// Claude Code's own.
 const SUMMARY: &str = concat!(
-    r#"You write the turn summary of one turn of a coding agent's session, for the developer who runs it and wants to check what happened instead of reading its raw output: a headline and up to three lines. Under them sits, when the turn has something to teach, a quiz: one multiple-choice question that he answers when he chooses.
+    r#"You write the turn summary of one turn of a coding agent's session, for the developer who runs it and wants to check what happened instead of reading its raw output: a headline and up to three lines.
 
-Answer from the input: his prompt, the agent's responses in the turn, its intentions, what the hooks and git recorded of the turn (its files with their line counts, its checks and its hunks), and the session's latest turn summaries with their questions. Connect to those earlier turns where it helps, and never ask the same question twice. Use only this input: do not use tools or read files.
+Answer from the input: his prompt, the agent's responses in the turn, its intentions, what the hooks and git recorded of the turn (its files with their line counts, its checks and its hunks), and the session's latest turn summaries. Connect to those earlier turns where it helps. Use only this input: do not use tools or read files.
 
 The studio shows the recorded files and checks itself, next to your headline. Do not restate them: no file lists, no line counts, no check results. Write what they cannot say. Never write a number, an issue or PR id or a commit SHA that the input does not hold; say "one" or "a few" in words instead. Say "fixed", "passes" or "verified" only when a check in the recorded facts ended passed; otherwise attribute the claim to the agent.
 
@@ -452,22 +344,11 @@ The studio shows the recorded files and checks itself, next to your headline. Do
     r#"
 
 Reply with one JSON object and nothing else:
-{"headline": string, "lines": [{"kind": "why" | "reported" | "open" | "ask", "text": string}], "quiz": {"text": string, "options": [{"text": string, "why": string, "right": boolean}], "key": number}}
+{"headline": string, "lines": [{"kind": "why" | "reported" | "open" | "ask", "text": string}]}
 - headline: at most 16 words, one sentence that states an outcome, or what the turn waits on. Never narrate ("Looked at", "Started by"). When the turn ends by asking the developer something, the headline is that ask.
 - lines: at most 3, each at most 20 words, each typed. why: the reason for a choice the turn made. reported: something the agent claims that the recorded facts do not show. open: what was left undone or was not checked, such as "Nobody looked at the rows in a real window." ask: a question or decision the agent puts to the developer. Leave out a line that says nothing more than the headline.
-- quiz.text: the quiz's question, under the rules below.
-- quiz.options: 3 or 4 options, each {"text", "why", "right"}. why: one line on why that option is right or wrong, never naming an option by its letter or place. right: true for the one right option, false for the others.
-- quiz.key: the place of the right option, counting from 0.
 
 A number taken from the input keeps its bound or condition, such as "upper bound", "on fixtures" or "median", wherever it appears.
-
-"#,
-    quiz_rules!("your headline"),
-    r#"
-
-When the turn holds nothing worth a quiz, such as orchestration, status, merges or bookkeeping, reply with {"headline": string, "lines": [...], "quiz": null}. The headline is still written: a question made up for such a turn wastes the developer's time.
-
-When the input says the turn has a card, reply with {"headline": string, "lines": [...]} only.
 "#
 );
 

@@ -2043,7 +2043,7 @@ pub struct SummaryRequest {
     pub responses: Vec<String>,
     /// The turn's intentions, one per response.
     pub intentions: Vec<String>,
-    /// The card its `Stop` requested, whose Quiz the turn has instead of its own.
+    /// The card its `Stop` requested.
     #[serde(default)]
     pub card: Option<String>,
     /// What the hooks and git recorded of the turn (danielrispler/plotkeeper#115); empty until the
@@ -2051,17 +2051,9 @@ pub struct SummaryRequest {
     #[serde(default)]
     pub facts: Facts,
     /// Whether the turn's reply is long or asks Daniel something (`wants_summary`), so that its
-    /// summary is wanted for itself; a summary of a turn that only changed code is there for a lone
-    /// Quiz (danielrispler/plotkeeper#119), and is dropped when the turn gets none.
+    /// summary is wanted for itself; a summary of a turn that only changed code is not written.
     #[serde(default = "wanted")]
     pub wanted: bool,
-    /// Whether the turn ended in Needs you, which keeps a Quiz from showing beside the decision.
-    #[serde(default)]
-    pub asks: bool,
-    /// Whether the offer table gives the turn no lone Quiz (danielrispler/plotkeeper#119): its
-    /// summary is written without one. Set by the shell, which reads the table.
-    #[serde(default)]
-    pub no_quiz: bool,
 }
 
 fn wanted() -> bool {
@@ -3292,7 +3284,7 @@ impl Studio {
                         _ => None,
                     };
                     outputs.extend(output);
-                    // A turn that changed code gets its summary for a lone Quiz (danielrispler/plotkeeper#119).
+                    // A turn that changed code has its summary requested, which is written only when it is wanted.
                     if !replay && (wanted || card.is_some()) {
                         // shortcut: the transcript may lag the `Stop` by one poll, so the final reply
                         // is taken from the `Stop`; read the transcript first if earlier texts go missing.
@@ -3313,8 +3305,6 @@ impl Studio {
                             card: card.clone(),
                             facts: Facts::default(),
                             wanted,
-                            asks: session.needs_you(),
-                            no_quiz: false,
                         }));
                     }
                     if let Some(prompt) = session.name_after.take()
@@ -3843,7 +3833,7 @@ impl Studio {
     }
 
     /// Whether the turn named `id` ran a merge, by `git merge` or `gh pr merge`, which the offer of a
-    /// Quiz leaves out (danielrispler/plotkeeper#119).
+    /// card's offer leaves out (danielrispler/plotkeeper#119).
     pub fn turn_merged(&self, id: &str) -> bool {
         let found = self.sessions.values().find_map(|s| {
             let at = s.turns.iter().position(|t| t.id.as_deref() == Some(id))?;

@@ -27,7 +27,6 @@ mod grounding;
 mod offer;
 pub mod pr_brief;
 pub mod pr_brief_check;
-mod retest;
 mod risk;
 mod self_test;
 mod store;
@@ -45,17 +44,13 @@ pub use fingerprint::{Fingerprints, backfilled, fingerprint_changes, live_roots,
 use grounding::words;
 pub use offer::{
     Changed, Decision, Inputs, Offer, OfferKind, Offers, Outcome, Settled, Shape, TurnFacts,
-    changed_in, decide, is_logic, offer_stop, offer_summary, settle, turns_card,
+    changed_in, decide, is_logic, offer_stop, settle, turns_card,
 };
-pub use retest::{retest_quiz, write_retests};
 pub use risk::{RISK_TIMEOUT, Risk, RiskLevel, RiskNote, RiskNotes, RiskRequest, RiskView, judge};
 pub use self_test::{ArmReport, SelfTest, self_test};
 pub use store::{
-    Arm, Brief, CardStore, CheckResult, Guess, Learning, Level, PlacedCard, QuizTap, Rating,
-    Reason, Retest, RetestAsk, Row, SessionCards, StoredCard, StoredSummary, Surface, Tap, millis,
-};
-pub use store::{
-    Place, QUIZZES_PER_HOUR, RETEST_AFTER_MS, RETEST_REACH_MS, RETESTS_PER_DAY, RETESTS_WAITING,
+    Arm, Brief, CardStore, CheckResult, Guess, Level, PlacedCard, QuizTap, Rating, Reason, Retest,
+    Row, SessionCards, StoredCard, StoredSummary, Surface, Tap, millis,
 };
 pub use summary::{
     Line, LineKind, SummarySetup, TurnSummary, write_agent_summary, write_name, write_summary,
@@ -249,12 +244,6 @@ pub trait CardWriter {
         Err("this writer answers no questions".into())
     }
 
-    /// The writer's reply with a fresh Quiz on the decision of `ask`'s first Quiz (danielrispler/plotkeeper#129), or one line
-    /// for the log when it gave none. A writer that writes no retests says so.
-    fn retest(&self, _ask: &RetestAsk) -> Result<String, String> {
-        Err("this writer writes no retests".into())
-    }
-
     /// The writer's reply with the summary of `request`'s turn, read with `earlier`, the session's
     /// latest summaries, oldest first, at `setup`'s model and effort (danielrispler/Falinks#526), or one line when it
     /// gave none. A writer that writes no summaries says so.
@@ -332,44 +321,21 @@ pub fn write_stop(
     let Some(mut card) = write_card(writer, &request, &earlier, &mut log) else {
         return false;
     };
-    // The cap check and the store are one step: another session's card cannot slip between them.
-    {
-        let mut store = store.lock().unwrap();
-        place_card_quiz(&mut store, &request, &mut card, &mut log);
-        if let Err(e) = store.add(request.clone(), card, millis()) {
-            log(format!("save the card store: {e}"));
-        }
+    drop_quiz_beside_decision(&request, &mut card);
+    if let Err(e) = store.lock().unwrap().add(request.clone(), card, millis()) {
+        log(format!("save the card store: {e}"));
     }
     stored();
     write_goal(store, writer, &request, session, log);
     true
 }
 
-/// Holds `card`'s Quiz to the rules for when a Quiz shows (danielrispler/plotkeeper#119, #257): none beside a
-/// decision, which `request` says by how its turn ended and never by the session's state now; then at most
-/// 3 an hour: past it, a session's card shows without its Quiz, and takes the place of the oldest unanswered lone
-/// Quiz of the hour when there is one. A worker's card and a check's are no turn's: they count for no cap, but keep none beside a decision.
-fn place_card_quiz(
-    store: &mut CardStore,
-    request: &CardRequest,
-    card: &mut Card,
-    mut log: impl FnMut(String),
-) {
+/// Keeps `card`'s Quiz off a turn that asks Daniel something (danielrispler/plotkeeper#119, #257): none beside a decision, which
+/// `request` says by how its turn ended and never by the session's state now. The hourly cap is retired
+/// (danielrispler/plotkeeper#347).
+fn drop_quiz_beside_decision(request: &CardRequest, card: &mut Card) {
     if request.asks {
         card.quiz = None;
-        return;
-    }
-    if card.quiz.is_none() || request.agent.is_some() || request.check.is_some() {
-        return;
-    }
-    match store.place_quiz(true, millis()) {
-        Place::Offer => {}
-        Place::Withhold => card.quiz = None,
-        Place::Replace(turn) => {
-            if let Err(e) = store.drop_summary_quiz(&turn) {
-                log(format!("save the summaries: {e}"));
-            }
-        }
     }
 }
 
@@ -1080,10 +1046,6 @@ impl CardWriter for ClaudeWriter {
         self.stdout(self.ask_command(item, intentions, question))
     }
 
-    fn retest(&self, ask: &RetestAsk) -> Result<String, String> {
-        self.stdout(self.retest_command(ask))
-    }
-
     fn summarize(
         &self,
         setup: &SummarySetup,
@@ -1136,8 +1098,7 @@ macro_rules! explanation_language {
 }
 pub(crate) use explanation_language;
 
-/// The Quiz's rules (danielrispler/plotkeeper#118), one paragraph in both writers' instructions; `docs/studio/question-rules.md`
-/// holds them too. `headline` names what the writer's own headline is called in that prompt.
+/// The Quiz's rules (danielrispler/plotkeeper#118), one paragraph in the card writer's instructions. `headline` names what the writer's own headline is called in that prompt.
 macro_rules! quiz_rules {
     ($headline:literal) => {
         concat!(
@@ -1155,7 +1116,6 @@ macro_rules! quiz_rules {
         )
     };
 }
-pub(crate) use quiz_rules;
 
 /// The card writer's instructions. Its input is the change, the summaries of the prompt's earlier
 /// cards and the brief, not the payloads (v0 note, proposal 8).

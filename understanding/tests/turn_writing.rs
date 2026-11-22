@@ -313,8 +313,7 @@ fn a_turns_card_then_its_summary_with_the_summary_taking_the_cards_decision_and_
     let ids = day.card_ids();
     assert_eq!(ids.len(), 1);
     let summary = day.summary(&ids[0]).expect("the turn's summary");
-    // The card's decision was a card, so the summary gets no lone Quiz.
-    assert!(summary.request.no_quiz);
+    // A summary carries no Quiz (danielrispler/plotkeeper#347).
     assert_eq!(summary.summary.quiz, None);
     let lines = day.offers();
     assert_eq!(lines.len(), 1, "{lines:?}");
@@ -330,9 +329,7 @@ fn quizzes(day: &Day) -> usize {
     let store = day.store.lock().unwrap();
     let cards = store.cards().iter().filter(|k| k.card.quiz.is_some());
     cards.count()
-        + store
-            .summaries()
-            .iter()
+        + (store.summaries().iter())
             .filter(|k| k.summary.quiz.is_some())
             .count()
 }
@@ -344,22 +341,14 @@ fn ended_asking(outputs: Vec<Output>) -> Vec<Output> {
             asks: true,
             ..request
         }),
-        Output::Summary(request) => Output::Summary(SummaryRequest {
-            asks: true,
-            ..request
-        }),
         other => other,
     };
     outputs.into_iter().map(asking).collect()
 }
 
 #[test]
-fn a_card_of_a_turn_that_ended_in_needs_you_is_stored_without_a_quiz_and_displaces_no_lone_quiz() {
+fn a_card_of_a_turn_that_ended_in_needs_you_is_stored_without_a_quiz() {
     let mut day = Day::new();
-    for (i, file) in ["x1.rs", "x2.rs", "x3.rs"].iter().enumerate() {
-        day.turn(&format!("Lone {i}"), &[(file, 10)], "Done.");
-    }
-    assert_eq!(quizzes(&day), 3);
 
     let outputs = day.turn_asking("Add two files", &[("a.rs", 3), ("b.rs", 3)], "Done.");
     let id = card_id(&outputs);
@@ -369,76 +358,7 @@ fn a_card_of_a_turn_that_ended_in_needs_you_is_stored_without_a_quiz_and_displac
     let card = store.cards().iter().find(|k| k.request.id == id).unwrap();
     assert_eq!(card.card.quiz, None);
     drop(store);
-    assert_eq!(
-        quizzes(&day),
-        3,
-        "the count is unchanged and none displaced"
-    );
-}
-
-#[test]
-fn two_sessions_whose_cards_arrive_at_the_caps_edge_offer_one_more_quiz_not_two() {
-    let mut day = Day::new();
-    // Two card Quizzes, which a later card does not displace.
-    for (i, files) in [["a.rs", "b.rs"], ["c.rs", "d.rs"]].iter().enumerate() {
-        let files = files.map(|f| (f, 3));
-        day.turn(&format!("Card {i}"), &files, "Done.");
-    }
-    assert_eq!(quizzes(&day), 2);
-    // Two more sessions, each with a card-sized change and a turn of its own.
-    let mut requests = Vec::new();
-    for session in ["s2", "s3"] {
-        for name in ["UserPromptSubmit", "Stop"] {
-            day.at += 1;
-            let line = json!({"session_id": session, "hook_event_name": name, "cwd": day.repo,
-                "studio_received_ms": day.at, "prompt": "Go", "prompt_id": "p1",
-                "last_assistant_message": "Done."});
-            day.core.lock().unwrap().apply(&line.to_string());
-        }
-        requests.push(CardRequest {
-            session_id: session.into(),
-            id: format!("{session}@{}", day.at),
-            change: Some(diff(&["a.rs", "b.rs"])),
-            ..CardRequest::default()
-        });
-    }
-    let threaded = TurnWriting::new(
-        day.core.clone(),
-        day.store.clone(),
-        Arc::new(Recorded {
-            events: day.events.clone(),
-            failing: Arc::default(),
-            summaries: Arc::default(),
-            why: Arc::default(),
-        }),
-        Offers::beside(&day.data.join("events.jsonl")),
-        day.recorder.clone(),
-    );
-    // Each session's queue has its own thread, so the two cards are written at the same time.
-    for request in requests {
-        threaded.card(request, true);
-    }
-    for _ in 0..500 {
-        if day.card_ids().len() == 4 {
-            break;
-        }
-        thread::sleep(Duration::from_millis(10));
-    }
-    assert_eq!(day.card_ids().len(), 4);
-    assert_eq!(quizzes(&day), 3, "no fourth Quiz is offered in the hour");
-    let store = day.store.lock().unwrap();
-    let kept = |session: &str| {
-        let cards = store
-            .cards()
-            .iter()
-            .filter(|k| k.request.session_id == session);
-        cards.filter(|k| k.card.quiz.is_some()).count()
-    };
-    assert_eq!(
-        kept("s2") + kept("s3"),
-        1,
-        "exactly one of the two cards keeps its Quiz"
-    );
+    assert_eq!(quizzes(&day), 0);
 }
 
 #[test]
@@ -461,53 +381,19 @@ fn a_card_of_a_turn_that_ended_at_your_turn_keeps_its_quiz_though_its_session_ne
 }
 
 #[test]
-fn a_summary_of_a_turn_that_ended_in_needs_you_loses_its_quiz_and_its_cards() {
-    let mut day = Day::new();
-    let outputs = day.turn_asking("Add two files", &[("a.rs", 3), ("b.rs", 3)], &long_reply());
-    let id = card_id(&outputs);
-    day.pass(ended_asking(outputs));
-
-    assert_eq!(day.summary(&id).expect("its summary").summary.quiz, None);
-    assert_eq!(quizzes(&day), 0);
-}
-
-#[test]
-fn a_summary_takes_its_cards_decision_though_the_turns_facts_moved_after_the_card() {
-    let mut day = Day::new();
-    let outputs = day.turn_asking("Add one file", &[("a.rs", 10)], "Done.");
-    let id = card_id(&outputs);
-    let (cards, summaries): (Vec<_>, Vec<_>) = outputs
-        .into_iter()
-        .partition(|o| matches!(o, Output::Card(_)));
-    // The card's decision is a lone Quiz, which its summary carries.
-    day.pass(cards);
-    // The turn then reads as a merge turn, which the table alone gives no Quiz.
-    day.event(
-        "PostToolUse",
-        json!({"tool_name": "Bash", "tool_input": {"command": "git merge main"}, "tool_use_id": "t9"}),
-    );
-    day.pass(summaries);
-
-    let summary = day.summary(&id).expect("the lone Quiz's summary");
-    assert!(summary.summary.quiz.is_some());
-}
-
-#[test]
-fn a_small_change_gets_no_card_and_a_lone_quiz_on_its_summary_with_one_line_on_record() {
+fn a_small_change_gets_no_card_and_no_summary_with_one_line_on_record() {
     let mut day = Day::new();
     let outputs = day.turn_asking("Add one file", &[("a.rs", 10)], "Done.");
     let id = card_id(&outputs);
     day.pass(outputs);
 
     assert_eq!(day.card_ids(), Vec::<String>::new());
-    let summary = day.summary(&id).expect("the lone Quiz's summary");
-    assert!(summary.summary.quiz.is_some());
+    // No lone Quiz row any more (danielrispler/plotkeeper#347): a summary nobody wanted is not written.
+    assert_eq!(day.summary(&id), None);
     let lines = day.offers();
     assert_eq!(lines.len(), 1, "{lines:?}");
-    assert_eq!(
-        (lines[0]["offer"].as_str(), lines[0]["outcome"].as_str()),
-        (Some("quiz"), Some("written"))
-    );
+    assert_eq!(lines[0]["offer"].as_str(), Some("nothing"));
+    assert_eq!(lines[0]["reason"].as_str(), Some("below the card row"));
 }
 
 #[test]
@@ -551,7 +437,7 @@ fn jobs_run_in_the_order_they_were_asked_for_on_the_session_queue() {
 /// Summaries are written on open, and the turn of a small change waits.
 fn on_open(day: &mut Day) -> String {
     day.writing.settings(SummarySetup::default(), true);
-    let outputs = day.turn_asking("Add one file", &[("a.rs", 10)], "Done.");
+    let outputs = day.turn_asking("Add one file", &[("a.rs", 10)], &long_reply());
     let id = card_id(&outputs);
     day.pass(outputs);
     id
@@ -652,16 +538,11 @@ fn a_failed_write_on_open_parks_the_turn_again_and_the_next_opening_writes_it() 
 
     day.failing.store(false, Ordering::SeqCst);
     let written = day.writing.opened(&id).unwrap();
-    assert!(written.is_some_and(|s| s.summary.quiz.is_some()));
+    assert!(written.is_some());
     // The failed write was tried twice (the writers retry once), then the one that worked.
     assert_eq!(day.summaries.load(Ordering::SeqCst), 3);
-    // A silent writer is no final decision: its line stays, and the write that worked adds the last.
-    let lines = day.offers();
-    let outcomes: Vec<_> = lines
-        .iter()
-        .map(|l| l["outcome"].as_str().unwrap())
-        .collect();
-    assert_eq!(outcomes, ["no reply from the writer", "written"]);
+    // The card path's decision is the turn's one line, however often its summary was tried.
+    assert_eq!(day.offers().len(), 1);
 }
 
 #[test]
@@ -975,7 +856,7 @@ fn the_threaded_module_writes_a_card_on_its_sessions_queue_and_its_queue_ends() 
 #[test]
 fn a_turn_opened_in_an_ended_session_gets_its_summary_and_design_and_its_queue_ends() {
     let mut day = Day::new();
-    let outputs = day.turn_asking("Add one file", &[("a.rs", 10)], "Done.");
+    let outputs = day.turn_asking("Add one file", &[("a.rs", 10)], &long_reply());
     let threaded = TurnWriting::new(
         day.core.clone(),
         day.store.clone(),

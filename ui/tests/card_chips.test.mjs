@@ -48,7 +48,6 @@ test("a card's Quiz is hidden where a Quiz may not show beside a decision", () =
 });
 
 const quizOf = { text: "Why a stack?", key: 0, options: [{ text: "It nests.", why: "Right." }, { text: "It is fast.", why: "No." }] };
-const press = (key, value = "") => ({ key, target: { value }, preventDefault() {} });
 const buttons = (node, pattern) => node.find("button").find((b) => pattern.test(b.text));
 
 test("a card answered in this view stays open on the redraw after its pick", () => {
@@ -74,21 +73,14 @@ test("a card's file chip opens on its own, not with the evidence row of the same
   assert.equal(row.find("pre")[0].hasAttribute("hidden"), true);
 });
 
-test("during the trial a card's Quiz asks the confidence tap, then the why line, and the reveal waits for it", () => {
+test("a card's Quiz asks no confidence tap and no why line, as the trial is retired", () => {
   const open = stored({ quiz: quizOf }, "s1@20");
-  const first = cardLine(open, null, true);
-  assert.ok(buttons(first, /^Sure/) && buttons(first, /^Not sure/));
-  buttons(first, /It nests/).listeners.click();
-  const picked = { ...open, guess: { option: 0, right: true } };
-  const waiting = cardLine(picked, null, true);
-  const [input] = waiting.find("input");
-  assert.equal(input.placeholder, "In a few words, why?");
-  assert.doesNotMatch(waiting.text, /Why it matters/);
-  input.listeners.keydown(press("Enter", "it nests"));
-  assert.deepEqual(calls.at(-1), ["quiz_tap", { id: "s1@20", tap: { kind: "why", text: "it nests" } }]);
-  assert.match(cardLine(picked, null, true).text, /Why it matters/);
-  // Without the trial, none of it shows.
-  assert.equal(cardLine(stored({ quiz: quizOf }, "s1@21"), null, false).find("input").length, 0);
+  const first = cardLine(open);
+  assert.equal(buttons(first, /^Sure/), undefined);
+  assert.equal(buttons(first, /^Not sure/), undefined);
+  const picked = cardLine({ ...open, guess: { option: 0, right: true } });
+  assert.equal(picked.find("input").length, 0);
+  assert.match(picked.text, /Why it matters/);
 });
 
 test("a card's file chip and the evidence row of the same file each keep their own Ask box", () => {

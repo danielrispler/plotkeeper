@@ -1,45 +1,34 @@
 // Home (spec #53, #226): the waiting room, the view in the terminal column while no session is selected. `homeView` is a pure
-// function of the sessions, the learning item the card store chose, the projects and the window's Home state: an ordered list of parts, each absent when
+// function of the sessions, the projects and the window's Home state: an ordered list of parts, each absent when
 // empty. Needs you is the only colour. `drawHome` draws it, patched by key so focus survives updates.
 
 import { age, failure, fullTitle, invoke, patch, pressable, text } from "./dom.js";
-import { quizAnswered, quizItem, quizRegion, seedQuiz } from "./quiz.js";
 import { childrenOf, deleting, glyph, item, row, secondLine, selecting, sessionName, showsLanded, status } from "./list.js";
 import { logo, logoKey } from "./logos.js";
 import { foundWorkspaces, lastSegment, sessionProjectName } from "./workspaces.js";
 import { lastHeadline } from "./story.js";
-import { hunkFiles } from "./ask.js";
-import { codeTarget, followToCode } from "./selection.js";
 import { startLast } from "./picker.js";
 import { counts } from "./times.js";
-import { closePane, forgetAsked, homeShown, redrawHome } from "./panes.js";
+import { closePane, homeShown, redrawHome } from "./panes.js";
 import { hideClearToast, showClearToast } from "./toast.js";
 import { studio } from "./state.js";
 import { mapShown, openMap } from "./map.js";
 import { watchSeen } from "./seen.js";
 import { homeSeen } from "./layout.js";
 import { logStop, onHome, reviewNode, reviewOf, type Module } from "./stop-rules.js";
-import type { Learning, Session, Tap } from "./types.js";
+import type { Session } from "./types.js";
 
-export type HomeKey = "needs_you" | "running" | "unseen" | "learning" | "landed" | "start";
+export type HomeKey = "needs_you" | "running" | "unseen" | "landed" | "start";
 // A session's row on Home: its second line, and a muted note beside it (the intention's age).
 export type HomeRow = { session: Session; line: string; note: string };
 // One part of the page: `rows` are its sessions, `more` the sessions hidden behind its "+N" row.
-export type HomePart = { key: HomeKey; title: string; colour: boolean; rows: HomeRow[]; more: number; slot: Slot | null; projects: HomeProject[] };
-// The learning slot (#240): the item it serves, and whether a quiet "Next" follows an answer, because another item is due.
-export type Slot = { item: Learning; next: boolean };
-// The window's Home state: the groups Daniel expanded, kept until Home is left; `quiet`, set by "Not now", which hides the slot
-// until Home is entered again or a turn ends; and `held`, the item he answered in this window, which stays with its reveal
-// until "Next" or until Home is left.
+export type HomePart = { key: HomeKey; title: string; colour: boolean; rows: HomeRow[]; more: number; projects: HomeProject[] };
+// The window's Home state: the groups Daniel expanded, kept until Home is left.
 // `cleared` is the rows Clear hides, the one set `landedClear` keeps; leaving Home does not reset it.
-export type HomeState = { expanded: Set<string>; cleared: Set<string>; quiet: boolean; held: Learning | null };
-export const homeState: HomeState = { expanded: new Set(), cleared: new Set(), quiet: false, held: null };
+export type HomeState = { expanded: Set<string>; cleared: Set<string> };
+export const homeState: HomeState = { expanded: new Set(), cleared: new Set() };
 export function resetHome(state: HomeState = homeState) {
   state.expanded.clear();
-  state.quiet = false;
-  state.held = null;
-  // What was marked on screen belongs to the visit, so the sets do not grow for the whole session.
-  shownWritten.clear();
 }
 
 // Entering Home from another view starts it afresh; drawing it again while it is on screen keeps what Daniel did there.
@@ -55,15 +44,7 @@ export const MAX_UNSEEN = 3;
 const endOf = (s: Session) => s.turns.at(-1)?.ended_at ?? s.last_event_at ?? 0;
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
 
-// What the slot shows: nothing while quiet; an item answered here, with "Next" when `asked`, the store's choice after that answer, is
-// another item; else what the store chose.
-export function learningSlot(asked: Learning | null, state: HomeState): Slot | null {
-  if (state.quiet) return null;
-  if (state.held) return { item: state.held, next: asked !== null && asked.kind !== "done" && asked.id !== (state.held as { id: string }).id };
-  return asked ? { item: asked, next: false } : null;
-}
-
-export function homeView(sessions: Session[], asked: Learning | null, projects: string[], state: HomeState, headline: (s: Session) => string | null = () => null, fogged: Set<string> = new Set()): HomePart[] {
+export function homeView(sessions: Session[], projects: string[], state: HomeState, headline: (s: Session) => string | null = () => null, fogged: Set<string> = new Set()): HomePart[] {
   const allLanded = sessions.filter((s) => showsLanded(s.state, s.landed));
   const landed = allLanded.filter((s) => !state.cleared.has(s.id));
   const needsYou = sessions.filter((s) => s.state === "needs_you");
@@ -75,7 +56,7 @@ export function homeView(sessions: Session[], asked: Learning | null, projects: 
     return { rows: shown.map(rowOf), more: all.length - shown.length };
   };
   const plain = (rowOf: (s: Session) => HomeRow) => (all: Session[]) => ({ rows: all.map(rowOf), more: 0 });
-  const part = (key: HomeKey, title: string, rows: { rows: HomeRow[]; more: number }, extra: Partial<HomePart> = {}): HomePart => ({ key, title, colour: key === "needs_you", slot: null, projects: [], ...rows, ...extra });
+  const part = (key: HomeKey, title: string, rows: { rows: HomeRow[]; more: number }, extra: Partial<HomePart> = {}): HomePart => ({ key, title, colour: key === "needs_you", projects: [], ...rows, ...extra });
   const parts: HomePart[] = [
     part("needs_you", "Needs you", plain((s) => ({ session: s, line: secondLine(s) ?? "", note: "" }))(needsYou)),
     part("running", "Running", capped("running", running, MAX_RUNNING, (s) => {
@@ -83,186 +64,11 @@ export function homeView(sessions: Session[], asked: Learning | null, projects: 
       return { session: s, line: s.transcript?.intention ?? s.line ?? "", note: steps === 0 ? "" : `${plural(steps, "step")} ago` };
     })),
     part("unseen", "Unseen", capped("unseen", unseen, MAX_UNSEEN, (s) => ({ session: s, line: headline(s) ?? "", note: "" }))),
-    part("learning", "", { rows: [], more: 0 }, { slot: learningSlot(asked, state) }),
     part("landed", "Landed", plain((s) => ({ session: s, line: "", note: "" }))(landed)),
     part("start", "Start a session in", { rows: [], more: 0 }, { projects: homeProjects(projects, fogged) }),
   ];
-  return parts.filter((p) => p.rows.length || p.slot || p.projects.length);
+  return parts.filter((p) => p.rows.length || p.projects.length);
 }
-
-// The taps Home sent, in a chain: each waits for the one before it to be stored.
-let sent: Promise<unknown> = Promise.resolve();
-
-// The small label at the top of the slot's card: a Retest's age and the session of its first Quiz, a fresh Quiz's session, none for "Done for today".
-export function slotLabel(item: Learning, session: Pick<Session, "name" | "identity" | "folder_name"> | undefined, now = Date.now()): string {
-  if (item.kind === "done") return "";
-  const ref = session ? (session.identity.issue === null ? sessionName(session) : `#${session.identity.issue}`) : null;
-  if (item.kind === "fresh") return ref ? `Quiz · ${ref}` : "Quiz";
-  if (!item.of_at) return "Retest";
-  const days = Math.floor((now - item.of_at) / 864e5);
-  return `Retest · ${plural(days, "day")} ${ref ? `after ${ref}` : "ago"}`;
-}
-
-// The slot's card: the Quiz of the item the store chose, which records its taps as a Retest's, with "Not now" until it is answered
-// and a quiet "Next" after an answer when another item is due. It writes nothing as it is built: `watchLearningShown` writes `shown` once the card is seen.
-export function slotNode(slot: Slot, redraw: () => void, reask: () => void): HTMLElement {
-  const { item } = slot;
-  const wrap = document.createElement("div");
-  wrap.className = "slot-card";
-  if (item.kind === "done") {
-    wrap.className = "";
-    wrap.append(text("p", "Done for today", "empty"));
-    return wrap;
-  }
-  const quiz = item.quiz;
-  if (!quiz) return wrap;
-  seedQuiz(item.id, item.kind === "retest" ? item.taps : []);
-  const tap = (tap: Tap) => {
-    if (tap.kind === "pick" || tap.kind === "skip") homeState.held = item;
-    // One after another, so the confidence tap is stored before its pick.
-    sent = sent
-      .then(() => invoke("quiz_tap", { id: item.id, tap }))
-      .then(reask)
-      .catch(failure("quiz_tap"));
-    if (homeState.held) redraw();
-  };
-  const button = (label: string, title: string, run: () => void) => {
-    const one = pressable(document.createElement("button"), false, run);
-    one.classList.add("quiz-skip");
-    one.title = title;
-    one.textContent = label;
-    return one;
-  };
-  const when = item.kind === "retest" ? item.of_at : item.kind === "fresh" ? item.at : null;
-  const date = when ? new Date(when).toLocaleDateString("en-GB", { day: "numeric", month: "long" }) : null;
-  const region = quizRegion(item.id, quiz, [], {
-    record: tap,
-    explain: () => invoke("ask", { session: item.session_id, item: quizItem(quiz), question: "I did not get this yet. Explain more." }),
-    line: () => document.createElement("li"),
-    // "Not now" sits in the card, beside "Not sure", until it is answered.
-    home: {
-      date,
-      actions: (answered) =>
-        answered
-          ? []
-          : [button("Not now", "Set this aside until tomorrow", () => {
-              homeState.quiet = true;
-              tap({ kind: "not_now" });
-              redraw();
-            })],
-    },
-  });
-  const session = studio.listed.find((s) => s.id === item.session_id);
-  wrap.append(text("p", slotLabel(item, session), "label"), region);
-  // After an answer: the link to the code and the hunk (#243), then a quiet "Next" when another item is due.
-  if (quizAnswered(item.id)) wrap.append(...answerCode(item));
-  // An item that arrives answered without being held here (a stored skip, say) would leave no way on: "Next" sets it aside.
-  const stuck = quizAnswered(item.id) && homeState.held !== item;
-  if (stuck && !slot.next) {
-    const actions = text("p", "", "slot-actions");
-    actions.append(button("Next", "Set this aside until tomorrow", () => {
-      homeState.quiet = true;
-      tap({ kind: "not_now" });
-      redraw();
-    }));
-    wrap.append(actions);
-  }
-  if (slot.next) {
-    const actions = text("p", "", "slot-actions");
-    actions.append(button("Next", "The next question", () => {
-      homeState.held = null;
-      redraw();
-    }));
-    wrap.append(actions);
-  }
-  wrap.dataset.key = `learning ${item.id}`;
-  return wrap;
-}
-
-// Under an answer's reveal (#243): the link to the code the Quiz was about, and the Quiz's stored hunk in place, compact: each file as a
-// faint caption and its code lines. The hunk is the item's own text, so no git read and no `hunk_opened`: a hunk counts as opened only
-// on Daniel's own action. A Retest names the turn of its first Quiz. No link when the session or its turn is gone; no hunk without text.
-function answerCode(item: Learning): HTMLElement[] {
-  if (item.kind === "done") return [];
-  const quizId = item.kind === "retest" ? item.of : item.id;
-  const stored = item.hunk ?? "";
-  const session = studio.listed.find((s) => s.id === item.session_id);
-  const out: HTMLElement[] = [];
-  if (session && codeTarget(session.turns, quizId, stored)) {
-    const link = pressable(text("button", "See the code", "quiz-code-link"), false, () => void followToCode(session.id, quizId, stored));
-    link.title = "Open the turn, and its change, in the session";
-    out.push(link);
-  }
-  const files = hunkFiles(stored);
-  if (files.length) {
-    const hunk = document.createElement("ul");
-    hunk.className = "evidence-rows";
-    for (const file of files) {
-      const li = document.createElement("li");
-      li.append(text("p", file.path, "evidence-caption"), text("pre", file.lines, "evidence-hunk"));
-      hunk.append(li);
-    }
-    out.push(hunk);
-  }
-  return out;
-}
-
-// The item the last draw put in the slot, unanswered, whose `shown` is still to be written, and the watch that waits for it to be seen.
-type Asked = Exclude<Learning, { kind: "done" }>;
-let inSlot: Asked | null = null;
-const shownWritten = new Set<string>();
-let slotWatch: { id: string; node: Element; stop: () => void } | null = null;
-
-// Whether the item's first showing is still to be written (#240): once per item, and never for a Retest that has it.
-export function shownDue(item: Asked | null): boolean {
-  if (!item) return false;
-  return !shownWritten.has(item.id) && !(item.kind === "retest" && item.taps.some((t) => t.kind === "shown"));
-}
-
-// Writes the slot's `shown` once its card is seen (the shared Seen, #306): in the viewport of a visible, focused window with Home
-// open (`active`), not merely built. Watches the card as it is on screen; a redraw that keeps the card keeps its watch.
-export function watchLearningShown(node: Element | null, item: Asked | null, active: () => boolean) {
-  if (slotWatch && (!node || !item || slotWatch.id !== item.id || slotWatch.node !== node)) {
-    slotWatch.stop();
-    slotWatch = null;
-  }
-  if (!node || !item || !shownDue(item) || slotWatch) return;
-  const id = item.id;
-  slotWatch = {
-    id,
-    node,
-    stop: watchSeen(node, {
-      active,
-      onSeen: () => {
-        slotWatch = null;
-        if (!shownDue(item)) return;
-        shownWritten.add(id);
-        void invoke("quiz_tap", { id, tap: { kind: "shown" } }).catch(failure("quiz_tap"));
-      },
-    }),
-  };
-}
-
-// Tells that a turn ended: a session has a turn whose end is later than what was seen of that session (for one new to the list, than the
-// latest end seen anywhere). Any turn counts, not only the last, so a queued prompt that starts the next turn at once hides no end, and
-// a session starting a new turn never moves anything back. The first call only learns.
-export function endTracker() {
-  let latest: number | null = null;
-  const seen = new Map<string, number>();
-  return (sessions: Pick<Session, "id" | "turns">[]): boolean => {
-    let ended = false;
-    let top = latest ?? 0;
-    for (const s of sessions) {
-      const end = Math.max(0, ...s.turns.map((t) => t.ended_at ?? 0));
-      if (latest !== null && end > (seen.get(s.id) ?? latest)) ended = true;
-      seen.set(s.id, Math.max(end, seen.get(s.id) ?? 0));
-      top = Math.max(top, end);
-    }
-    latest = top;
-    return ended;
-  };
-}
-export const turnEnded = endTracker();
 
 // Clear landed (#244): Clear hides every landed row and offers Undo for CLEAR_WINDOW_MS. When the window closes each hidden session
 // that is still landed goes through today's Delete (`commit`); Undo commits nothing. `changed` hears the sessions still pending.
@@ -506,23 +312,10 @@ function projectRow({ name, path, fogged }: HomeProject): HTMLElement {
 }
 
 // Draws Home into `box`, patched, so focus survives the list's updates; `redraw` draws it again after an expansion.
-export function drawHome(box: HTMLElement, sessions: Session[], projects: string[], asked: Learning | null = null, redraw: () => void = () => {}, reask: () => void = () => {}) {
+export function drawHome(box: HTMLElement, sessions: Session[], projects: string[], redraw: () => void = () => {}) {
   box.classList.add("home");
-  // A turn's end brings the slot back after "Not now", and asks the store again.
-  if (turnEnded(sessions)) {
-    // What was asked while the slot was quiet may be the item set aside or one Daniel never saw: it is not drawn or marked shown before
-    // the store answers again.
-    if (homeState.quiet) {
-      forgetAsked();
-      asked = null;
-    }
-    homeState.quiet = false;
-    reask();
-  }
   if (marksStale && projects.length) readMarks(projects, redraw).catch(failure("map_marks"));
-  const parts = homeView(sessions, asked, projects, homeState, lastHeadline, marked);
-  const slot = parts.find((p) => p.key === "learning")?.slot ?? null;
-  inSlot = slot && slot.item.kind !== "done" && homeState.held !== slot.item ? slot.item : null;
+  const parts = homeView(sessions, projects, homeState, lastHeadline, marked);
   const found = foundWorkspaces();
   const keyed = (node: HTMLElement, key: string) => {
     node.dataset.key = key;
@@ -541,7 +334,6 @@ export function drawHome(box: HTMLElement, sessions: Session[], projects: string
     ...(part.title ? [heading(part.title, `h ${part.key}`)] : []),
     ...part.rows.map((r) => (part.key === "landed" ? sessionRow(r.session, true) : waitingRow(r, part.key, sessionProjectName(projects, found, r.session)))),
     ...(part.more ? [moreRow(part.key, part.more, redraw)] : []),
-    ...(part.slot ? [slotNode(part.slot, redraw, reask)] : []),
     ...part.projects.map(projectRow),
   ];
   patch(box, [
@@ -558,5 +350,4 @@ export function drawHome(box: HTMLElement, sessions: Session[], projects: string
   // The marks that patch left in the DOM, not the ones just built and discarded.
   const rows = new Map([...box.children].map((child) => [(child as HTMLElement).dataset.key, child]));
   for (const path of new Set([...marksSeen.keys(), ...marked])) watchMark(path, rows.get(`project ${path}`)?.querySelector(".fog-mark") ?? null);
-  watchLearningShown(inSlot ? box.querySelector(`[data-key="learning ${inSlot.id}"]`) : null, inSlot, () => homeSeen(homeShown(), mapShown()));
 }

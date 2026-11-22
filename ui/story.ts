@@ -1,7 +1,7 @@
 // The story rail, on the window's left (danielrispler/Falinks#574). One header line: the verdict and the phase, with the
 // times and the model on hover, and a "⋯" menu. Then "now": the open question, docked, or else the
 // newest card; the current intention, boxed; the latest turn's summary. Below, a feed of turns,
-// newest first, each with its prompt, summary, Quiz, cards, questions, subagents,
+// newest first, each with its prompt, summary, cards, questions, subagents,
 // checks and folded response. "Ask" sits on a file, a failed check, a subagent line and the Headline. A subagent's view shows its own line,
 // questions, brief and cards in one block.
 
@@ -16,9 +16,8 @@ import { agentState, sessionName, showsLanded } from "./list.js";
 import { closePane, openHere, refreshHome } from "./panes.js";
 import { blockedRequestFor, openDecision, type Ask } from "./answer.js";
 import { blockedElement, docksInDock, fillCardRisk, riskLine, typeRetry } from "./blocked.js";
-import { briefNodes, cardLine, cardsFor, openCard, quizOpen, rowCards, unseenRow } from "./cards.js";
+import { briefNodes, cardLine, cardsFor, openCard, quizAllowed, quizOpen, rowCards, unseenRow } from "./cards.js";
 import { type Banner, bannerElement, bannerFor, bannerLives } from "./banner.js";
-import { quizAllowed, quizAnswered, quizItem, quizRegion, seedQuiz, trialOn } from "./quiz.js";
 import { evidenceElement, hasEvidence } from "./evidence.js";
 import { railBriefRow } from "./rail-brief.js";
 import { showCleared } from "./decisions.js";
@@ -42,7 +41,6 @@ import {
   type Session,
   type PlacedCard,
   type StoredCard,
-  type Tap,
   type Subagent,
   type Turn,
   type SummaryLine,
@@ -384,7 +382,6 @@ const askSummary = oneAtATime((id) =>
   invoke("turn_summary", { id })
     .then((summary) => {
       summaries.set(id, summary);
-      if (summary) seedQuiz(id, summary.taps);
     })
     .catch((e) => {
       failedTurns.add(id);
@@ -393,7 +390,7 @@ const askSummary = oneAtATime((id) =>
     .finally(() => {
       asking.delete(id);
       drawFeed();
-      // Home's Unseen rows show this Headline, and the card store may now hold a fresh Quiz.
+      // Home's Unseen rows show this Headline.
       refreshHome();
     }),
 );
@@ -422,9 +419,6 @@ export function forgetMissingSummaries() {
 // replies, fetched at their first opening.
 const opened = new Set<string>();
 const replies = new Map<string, string>();
-
-// Opens turn `index` of `session` in the rail, as a click on its line does (#243); the newest turn is always open.
-export const openTurn = (session: string, index: number) => void opened.add(`${session} ${index} turn`);
 
 // A folded block keyed `key`, open while Daniel keeps it open; `onOpen` runs at each opening. `hover` says what it holds.
 function folded(key: string, title: string, hover: string, body: HTMLElement[], onOpen?: () => void): HTMLElement {
@@ -496,16 +490,12 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
     const row = railBriefRow(session, drawFeed);
     if (row) node.append(row);
   }
-  // `open` and `ask` lines always show; `why` and `reported` wait for the Quiz to be answered or skipped (#120), and show at once
-  // when the turn has none. Its Quiz is never beside a decision: a turn with an `ask` line, or in Needs you, has none open.
-  // A body-only turn of the self-test (#130) shows its Body open and no Quiz.
+  // The Body shows whole. A card's Quiz is never beside a decision: a turn with an `ask` line, or in Needs you, has none open;
+  // `open` and `ask` lines always show, and `why` and `reported` wait while a card's Quiz is open.
   const allowed = quizAllowed(lines, now !== null && session.state === "needs_you");
-  const quiz = summary?.summary.quiz && summary.arm !== "body_only" && turn?.id && allowed ? summary.summary.quiz : null;
   const cards = cardsFor(block.cards, allowed);
-  // The trial of the confidence tap and the "why?" line (#129) runs on the Quizzes of "now".
-  const trial = now !== null && trialOn(studio.files.settings.quiz_trial, Date.now());
-  const held = cards.some(quizOpen) || quiz !== null;
-  const [always, rest] = [lines.filter((l) => l.kind === "open" || l.kind === "ask"), lines.filter((l) => l.kind !== "open" && l.kind !== "ask")];
+  const held = cards.some(quizOpen);
+  const always = lines.filter((l) => l.kind === "open" || l.kind === "ask");
   const shown = held ? always : lines;
   if (shown.length) {
     const list = document.createElement("ul");
@@ -513,18 +503,8 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
     list.append(...shown.map(bodyLine));
     node.append(list);
   }
-  if (quiz && turn?.id) {
-    const id = turn.id;
-    const deps = {
-      record: (tap: Tap) => void invoke("quiz_tap", { id, tap }).catch(failure("quiz_tap")),
-      explain: () => invoke("ask", { session: session.id, item: quizItem(quiz), question: "I did not get this yet. Explain more." }),
-      line: bodyLine,
-      trial,
-    };
-    node.append(quizRegion(id, quiz, rest, deps));
-  }
   const cardTurn = index !== null && turn?.files ? { session: session.id, index, files: turn.files.files, ended: turn.ended_at !== null } : null;
-  node.append(...cards.map((card) => cardLine(card, cardTurn, trial)));
+  node.append(...cards.map((card) => cardLine(card, cardTurn)));
   node.append(...block.questions.filter((q) => q.answer === "not_answered").map(questionElement));
   node.append(...blockedElements(session, block.blocked));
   if (block.agents.length) {
@@ -583,7 +563,7 @@ export function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
     const open = opened.has(key);
     const allowed = quizAllowed(headlineOf(summary, turn.message).body, false);
     const cards = cardsFor(block.cards, allowed);
-    const line = foldedLine(turn, headline, allowed && (block.cards.some(quizOpen) || (summary?.summary.quiz != null && summary.arm !== "body_only" && !quizAnswered(turn.id!))));
+    const line = foldedLine(turn, headline, allowed && block.cards.some(quizOpen));
     const button = pressable(document.createElement("button"), open, () => {
       if (opened.has(key)) opened.delete(key);
       else opened.add(key);

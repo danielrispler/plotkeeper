@@ -1,8 +1,7 @@
 //! The table of danielrispler/plotkeeper#119 run over the stored turns, with no model call: replays the real
 //! event log, and for each turn whose two trees `git` can still read, takes its facts and counts what
-//! it would get, a card, a lone Quiz or nothing, beside today's count (every turn whose trees differ
-//! gets a card). It then plays the cap on Quizzes in turn order. It reads the log and git trees, writes
-//! no ref, and prints counts only. Run it with
+//! it would get, a card or nothing, beside today's count (every turn whose trees differ
+//! gets a card). It reads the log and git trees, writes no ref, and prints counts only. Run it with
 //! `cargo run --release -p studio-understanding --example offer_dry_run`.
 
 use std::io::{BufRead, BufReader};
@@ -29,9 +28,8 @@ fn main() {
     ids.sort();
     let (mut turns, mut readable) = (ids.len(), 0);
     let mut with_diff = 0;
-    let mut counts = [0usize; 3];
-    let mut plan: Vec<(u64, Offer)> = Vec::new();
-    for (ended, id) in &ids {
+    let mut counts = [0usize; 2];
+    for id in ids.iter().map(|(_, id)| id) {
         let Some(mut ask) = studio.summary_ask(id) else {
             continue;
         };
@@ -52,26 +50,6 @@ fn main() {
         };
         let offer = decide(OfferKind::Turn, &turn, &[]).offer;
         counts[offer as usize] += 1;
-        plan.push((*ended, offer));
-    }
-    // The cap: a card's Quiz first, a lone Quiz while fewer than 3 were offered in the last hour.
-    let hour = 60 * 60 * 1000;
-    let mut offered: Vec<u64> = Vec::new();
-    let (mut cards_kept, mut lone_kept) = (0, 0);
-    for (at, offer) in &plan {
-        offered.retain(|t| *t + hour > *at);
-        match offer {
-            Offer::Card if offered.len() < 3 => {
-                offered.push(*at);
-                cards_kept += 1;
-            }
-            Offer::Card => {}
-            Offer::Quiz if offered.len() < 3 => {
-                offered.push(*at);
-                lone_kept += 1;
-            }
-            _ => {}
-        }
     }
     println!("turns with an id and an end: {turns}");
     turns = readable;
@@ -79,10 +57,8 @@ fn main() {
     println!("turns whose trees differ: {with_diff}");
     println!("today: {with_diff} cards (every turn whose trees differ)");
     println!(
-        "the table: {} cards, {} lone Quizzes, {} nothing",
+        "the table: {} cards, {} nothing",
         counts[Offer::Card as usize],
-        counts[Offer::Quiz as usize],
         counts[Offer::Nothing as usize]
     );
-    println!("after the cap: {cards_kept} card Quizzes, {lone_kept} lone Quizzes offered");
 }

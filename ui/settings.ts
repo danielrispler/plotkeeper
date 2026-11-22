@@ -39,9 +39,6 @@ export interface Settings {
   // The commands that are checks, per project folder (danielrispler/plotkeeper#112): each a command such as
   // "make verify", matched when a session's command runs it. A project not here uses the studio's list.
   checks: Record<string, string[]>;
-  // The day, as "YYYY-MM-DD", the two-week trial of the confidence tap and the "why?" line on a Quiz of "now" starts
-  // (danielrispler/plotkeeper#129). null: no trial.
-  quiz_trial: string | null;
   // The day, as "YYYY-MM-DD", the 21-day self-test of quiz-first against body-only turns starts (#130). null: no test.
   quiz_self_test: string | null;
 }
@@ -89,7 +86,6 @@ const defaultSettings: Settings = {
   editor: null,
   repository: null,
   checks: {},
-  quiz_trial: null,
   quiz_self_test: null,
 };
 
@@ -189,7 +185,6 @@ function readSettings(json: unknown, report: Report): Settings {
     editor: readEditor(json.editor, report),
     repository: pick("repository", json.repository ?? undefined, "") || null,
     checks: readChecks(json.checks, report),
-    quiz_trial: pick("quiz_trial", json.quiz_trial ?? undefined, "") || null,
     quiz_self_test: pick("quiz_self_test", json.quiz_self_test ?? undefined, "") || null,
   };
 }
