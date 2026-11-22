@@ -8,6 +8,7 @@ use studio_workbench::{
     AgentUsage, Branch, GitState, LimitGroup, Losses, UsageWindow, Workspace, Workspaces,
 };
 
+// @law: wire-types-agree
 #[test]
 fn the_wire_samples_of_the_workbench_are_written_for_tsc() {
     let task = |branch: Option<&str>| Workspace {

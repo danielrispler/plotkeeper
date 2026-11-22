@@ -525,6 +525,7 @@ fn the_list_and_the_new_card_notice_go_out_once_the_card_is_stored_and_before_th
     );
 }
 
+// @law: session-pieces-in-order
 #[test]
 fn jobs_run_in_the_order_they_were_asked_for_on_the_session_queue() {
     let mut day = Day::new();

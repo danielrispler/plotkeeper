@@ -419,6 +419,7 @@ test("a second Clear inside the window restarts it and keeps the first rows hidd
 });
 
 // One rule for Clear and Delete (#270): an ended session keeps its terminal, which a later session may now run in.
+// @law: delete-keeps-live-terminal
 test("a terminal is in use while a session not leaving, and not ended, runs in it", async () => {
   const { terminalInUse } = await import("../../dist/home.js");
   const old = live("old", "ended", { terminal: "t1" });
