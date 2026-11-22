@@ -18,13 +18,14 @@ const tickets = scrubTickets();
 
 // Shows the map as of `commit` read-only, or now again with null.
 export async function scrubTo(commit: string | null) {
-  const view = currentMap();
-  if (!view) return;
   if (commit === null) {
+    // Back to now works whenever a scrub is set, also when its commit's map cannot be read and no view is drawn.
     tickets.cancel();
     closeDrawer();
     return setScrub(null);
   }
+  const view = currentMap();
+  if (!view) return;
   const ticket = tickets.start();
   const at = await invoke("map_at", { project: view.project, commit });
   // The view may have moved on while git read, or Daniel went back to now or clicked another commit.
@@ -101,4 +102,4 @@ onDraw((view) => {
 });
 onUnread((banner, scrub) => showBanner(banner, scrub));
 
-registerLayer("scrubbed", { open: () => currentScrub() !== null && currentMap() !== null, close: () => void scrubTo(null) });
+registerLayer("scrubbed", { open: () => currentScrub() !== null, close: () => void scrubTo(null) });
