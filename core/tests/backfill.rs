@@ -4,12 +4,12 @@
 
 use crate::common;
 use serde_json::json;
-use studio_core::{Backfill, CardRequest, Studio, Trees};
+use studio_core::{Backfill, CardRequest, CatchUp, Studio, Trees};
 
 const SESSION: &str = "4c2e8a1f-7b3d-4e9a-a6c5-0f1d2b3e4a57";
 const ROOT: &str = "/w/repo";
 const OTHER: &str = "/w/other";
-const DAY: u64 = 24 * 60 * 60 * 1000;
+const HOUR: u64 = 60 * 60 * 1000;
 /// When the app starts after the log.
 const NOW: u64 = 1_800_000_000_000;
 
@@ -48,7 +48,7 @@ fn turn(prompt: &str, at: u64, start: &str, end: &str) -> Vec<String> {
 /// The backfill after replaying `lines`, with `cards` in the store.
 fn backfill(lines: &[String], cards: &[CardRequest]) -> Vec<Backfill> {
     let mut studio = Studio::replayed(lines);
-    studio.backfill(NOW, cards)
+    studio.backfill(NOW, cards, CatchUp::default())
 }
 
 #[test]
@@ -94,8 +94,11 @@ fn a_turn_with_a_live_card_gets_none() {
 }
 
 #[test]
-fn a_turn_older_than_24_hours_gets_none() {
-    assert_eq!(backfill(&turn("p1", NOW - DAY - 1, "t1", "t2"), &[]), []);
+fn a_turn_older_than_the_default_window_gets_none() {
+    assert_eq!(
+        backfill(&turn("p1", NOW - 2 * HOUR - 1, "t1", "t2"), &[]),
+        []
+    );
 }
 
 #[test]
@@ -159,7 +162,7 @@ fn a_live_turn_leaves_nothing_to_backfill() {
         studio.apply(&line);
     }
 
-    assert_eq!(studio.backfill(NOW, &[]), []);
+    assert_eq!(studio.backfill(NOW, &[], CatchUp::default()), []);
 }
 
 /// One event of an agy session, whose terminal is `fixture-terminal`, received at `at`.
@@ -212,8 +215,53 @@ fn a_backfilled_card_does_not_ask_because_the_resumed_terminal_state_was_blocked
     );
     studio.replay(&stop);
     studio.replay(&agy_line("PostInvocation", at + 1, json!({})));
-    let found = studio.backfill(NOW, &[]);
+    let found = studio.backfill(NOW, &[], CatchUp::default());
 
     assert_eq!(found.len(), 1, "{found:?}");
     assert!(!found[0].request.asks);
+}
+
+fn ids(found: &[Backfill]) -> Vec<String> {
+    found.iter().map(|b| b.request.id.clone()).collect()
+}
+
+#[test]
+fn a_turn_older_than_the_window_gets_no_card_at_start_and_a_wider_window_takes_it() {
+    let at = NOW - 3 * HOUR;
+    let lines = turn("p1", at, "t1", "t2");
+
+    assert_eq!(backfill(&lines, &[]), []);
+    let wide = CatchUp {
+        window_ms: 4 * HOUR,
+        max: 10,
+    };
+    let found = Studio::replayed(&lines).backfill(NOW, &[], wide);
+    assert_eq!(ids(&found), [format!("{SESSION}@{at}")]);
+}
+
+#[test]
+fn only_the_newest_turns_up_to_the_cap_get_a_card_at_start_newest_first() {
+    let lines: Vec<String> = (1..=12u64)
+        .flat_map(|n| {
+            turn(
+                &format!("p{n}"),
+                NOW - 10_000 + n * 100,
+                "t1",
+                &format!("e{n}"),
+            )
+        })
+        .collect();
+
+    let found = backfill(&lines, &[]);
+
+    let expected: Vec<String> = (3..=12u64)
+        .rev()
+        .map(|n| format!("{SESSION}@{}", NOW - 10_000 + n * 100))
+        .collect();
+    assert_eq!(ids(&found), expected);
+    let two = CatchUp {
+        window_ms: 2 * HOUR,
+        max: 2,
+    };
+    assert_eq!(Studio::replayed(&lines).backfill(NOW, &[], two).len(), 2);
 }

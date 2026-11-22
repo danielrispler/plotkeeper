@@ -327,7 +327,7 @@ impl Follower {
                 // The turns that ended while the app was down get their cards now (danielrispler/Falinks#486).
                 let requests: Vec<CardRequest> =
                     store.cards().iter().map(|k| k.request.clone()).collect();
-                let backfill = studio.backfill(millis(), &requests);
+                let backfill = studio.backfill(millis(), &requests, crate::settings::catch_up());
                 drop((store, studio));
                 let log = log.to_path_buf();
                 thread::spawn(move || save_state(&log, &replayed));
