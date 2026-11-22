@@ -3,7 +3,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import type { AgentUsage } from "../../ui/usage.ts";
-import type { GitState, LogEntry, Session, SessionState, Subagent } from "../../ui/types.ts";
+import type { GitState, LogEntry, MapState, Session, SessionState, Subagent } from "../../ui/types.ts";
 import { base, type ByArg, type Fixture } from "./base.ts";
 import { railFixtures } from "./rail-fixtures.ts";
 
@@ -210,6 +210,52 @@ const seeCode = (ofCard: boolean): Fixture => {
     if (story.scrollTop <= 0 || turnTop < -2 || turnTop > story.clientHeight - 60) log("snap:fail the turn was not scrolled into view: scrollTop " + story.scrollTop + ", top " + turnTop);`;
   return { ...f, sessions, learning, cards, select: { session: s3, agent: null }, turn_file_hunk: { text: hunk, left_out: 0, binary: false, first_line: 41 }, snapScript };
 };
+
+// The Map view (#309) on a map of plotkeeper's own shape, opened by its key. Positions are saved, as the prototype's Treatment C draws them.
+const mapFile = JSON.stringify({
+  version: 1,
+  parts: [
+    { id: "plugins", name: "Agent plugins", caption: "Which hooks each agent runs", description: "", tier: "interface", paths: ["plugin/"] },
+    { id: "hook", name: "Hook", caption: "Records every agent event", description: "", tier: "core", paths: ["hook/"] },
+    { id: "core", name: "Core", caption: "Turns events into session state", description: "", tier: "core", paths: ["core/"] },
+    { id: "shell", name: "Shell", caption: "Reads the log, feeds the core, acts", description: "", tier: "core", paths: ["src-tauri/"] },
+    { id: "understanding", name: "Understanding", caption: "Writes what you read, and keeps it", description: "", tier: "core", paths: ["understanding/"] },
+    { id: "window", name: "Window", caption: "Everything you see and press", description: "", tier: "core", paths: ["ui/"] },
+    { id: "daemon", name: "Terminal daemon", caption: "Owns the terminals", description: "", tier: "core", paths: ["terminal-daemon/"] },
+    { id: "workbench", name: "Workbench", caption: "Git and worktrees", description: "", tier: "black-box", paths: ["workbench/"] },
+  ],
+  actors: [{ id: "agents", name: "Agents" }, { id: "writer", name: "Writer" }, { id: "github", name: "GitHub" }],
+  links: [
+    { id: "agents-plugins", from: "agents", to: "plugins" }, { id: "plugins-hook", from: "plugins", to: "hook" }, { id: "hook-shell", from: "hook", to: "shell" },
+    { id: "shell-core", from: "shell", to: "core" }, { id: "shell-understanding", from: "shell", to: "understanding" }, { id: "understanding-writer", from: "understanding", to: "writer" },
+    { id: "shell-window", from: "shell", to: "window" }, { id: "shell-daemon", from: "shell", to: "daemon" }, { id: "shell-workbench", from: "shell", to: "workbench" }, { id: "workbench-github", from: "workbench", to: "github" },
+  ],
+  ignored: [],
+  laws: [
+    { id: "core-pure", on: "core", backing: "check", text: "The core reads no file." }, { id: "core-order", on: "core", backing: "trust", text: "Events apply in order." },
+    { id: "shell-log", on: "shell", backing: "check", text: "The log is only appended." }, { id: "shell-notice", on: "shell", backing: "trust", text: "Notices wait for focus." },
+    { id: "hook-held", on: "hook", backing: "trust", text: "A held question blocks the agent." },
+    { id: "understanding-kept", on: "understanding", backing: "check", text: "Cards are kept." }, { id: "understanding-once", on: "understanding", backing: "check", text: "A turn is written once." }, { id: "understanding-asked", on: "understanding", backing: "trust", text: "The writer is asked at most once." },
+    { id: "window-quiet", on: "window", backing: "check", text: "Only needs-you has colour." }, { id: "window-key", on: "window", backing: "trust", text: "Every key is rebindable." },
+    { id: "daemon-live", on: "daemon", backing: "check", text: "A terminal outlives the window." },
+  ],
+});
+const at = (x: number, y: number): [number, number] => [x, y];
+const mapState = (extra: Partial<MapState> = {}): MapState => ({
+  project: "/w/plotkeeper", status: "loaded", source: mapFile, reference: "origin/main", commit: "35745b1693c5d061e5aea891e98a58515942a12d", note: null,
+  user: { tiers: {}, positions: { core: at(620, 190), understanding: at(980, 290), plugins: at(300, 430), hook: at(580, 430), shell: at(880, 440), window: at(1180, 560), daemon: at(760, 690), workbench: at(480, 650), agents: at(110, 430), writer: at(1400, 190), github: at(250, 650) } },
+  ...extra,
+});
+const mapOpened = (check: string, extra: Fixture = {}): Fixture => ({
+  ...list(),
+  ...extra,
+  snapScript: `
+    const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+    document.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyM", key: "m", metaKey: true, shiftKey: true, bubbles: true }));
+    await wait(400);
+    if (document.getElementById("map").hidden) return log("snap:fail the map key did not open the Map view");
+    ${check}`,
+});
 
 export const fixtures = {
   ...railFixtures,
@@ -495,6 +541,32 @@ export const fixtures = {
       log("note: " + note.textContent + " · chip: " + unseen.textContent + " · past: " + past.join());`;
     return { ...base, sessions, selected: { session: sessions[1], agent: null }, snapScript };
   },
+  // The calm Map view: plates, law marks of both kinds, a black box part, actors, and the session list live beside it.
+  mapCalm: () =>
+    mapOpened(`
+      const plates = document.querySelectorAll("#map .plate").length;
+      const checks = document.querySelectorAll("#map .plate .law-mark.check").length;
+      const trusts = document.querySelectorAll("#map .plate .law-mark.trust").length;
+      if (plates !== 8) log("snap:fail expected 8 plates, saw " + plates);
+      if (checks !== 6 || trusts !== 5) log("snap:fail law marks: " + checks + " check, " + trusts + " trust");
+      if (document.querySelectorAll("#map .link").length !== 10) log("snap:fail expected 10 links");
+      if (document.querySelectorAll("#map .actor").length !== 3) log("snap:fail expected 3 actors");
+      if (document.querySelector("#map .plate[data-id=workbench]").className.indexOf("tier-black-box") < 0) log("snap:fail workbench is not a black box plate");
+      const list = document.querySelector(".list").getBoundingClientRect();
+      const map = document.getElementById("map").getBoundingClientRect();
+      if (map.right > list.left + 1) log("snap:fail the map overlaps the session list");
+      log("plates " + plates + ", marks " + checks + "/" + trusts);`, { map_state: mapState() }),
+  // No map on the default branch: the empty state, and "Draft a map" opens New session with the drafting prompt.
+  mapEmpty: () =>
+    mapOpened(`
+      const button = [...document.querySelectorAll("#map .map-empty .btn")].find((b) => b.textContent === "Draft a map");
+      if (!button) return log("snap:fail no Draft a map button");
+      button.click();
+      await wait(500);
+      const field = document.querySelector("#picker input");
+      if (document.getElementById("picker").hidden || !field) return log("snap:fail New session did not open");
+      if (!field.value.includes("system-map.json") || !field.value.includes("system-map check")) log("snap:fail the quick start lacks the drafting prompt: " + field.value);
+      log("drafting prompt: " + field.value.slice(0, 40));`, { map_state: mapState({ status: "none", source: null }) }),
   branchOnce,
   pullEnabled: pullMain({}, false),
   pullDisabled: pullMain({ changed: 2, would_overwrite: true }, true),

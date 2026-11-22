@@ -645,3 +645,51 @@ body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
 .pane.home .slot-card .evidence-edit, .pane.home .slot-card .ask-about { display: none; }
 .pane.home .slot-card .evidence-hunk { background: var(--bg); font: var(--size-xs)/1.5 var(--mono); padding: var(--sp-3) var(--sp-5); }
 .pane.home .slot-card .evidence-caption { margin: var(--sp-3) 0 0; font-size: var(--size-xs); color: var(--faint); }
+
+/* The Map view (danielrispler/plotkeeper#306, ticket #309): over the rail's and the terminal's columns, which it hides; the list and the top
+   bar stay live. Treatment C: plates on a quiet chart. The sizes are tokens, and map-model.ts holds the plate's and the actor's. */
+.map-view { grid-column: 2 / 4; grid-row: 2; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; background: var(--map-bg); position: relative; z-index: 2; }
+body.map-open .term, body.map-open .rail, body.map-open .spine { visibility: hidden !important; }
+/* A toast is not hidden: a session that needs Daniel is never out of sight. */
+body.map-open .toasts, body.map-open .toast { visibility: visible !important; }
+.map-head { display: flex; align-items: baseline; gap: var(--sp-5); padding: var(--sp-6) var(--map-gutter) var(--sp-4); }
+.map-project { font-size: var(--map-title); font-weight: 600; line-height: 1.2; padding: 0 var(--sp-4); margin-inline-start: calc(-1 * var(--sp-4)); }
+.map-ref { font-size: var(--size-small); color: var(--faint); }
+.map-banner:not(:empty) { margin-inline-start: auto; font-size: var(--size-small); color: var(--muted); }
+.map-projects[popover] { top: calc(var(--bar) + var(--map-title) + var(--sp-7)); left: var(--map-gutter); right: auto; width: var(--menu); }
+.map-stage { display: grid; grid-template-columns: minmax(0, 1fr) auto; min-height: 0; }
+.map-body { position: relative; min-width: 0; min-height: 0; }
+.map-side { width: var(--map-sheet); overflow-y: auto; padding: var(--sp-4) var(--map-gutter) var(--sp-5) var(--sp-5); }
+.map-canvas { position: absolute; inset: 0; overflow: auto; }
+.map-world { position: relative; background-image: radial-gradient(var(--map-dot) var(--hair), transparent var(--hair)); background-size: var(--map-grid) var(--map-grid); }
+.map-links { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
+.map-links .link { stroke: var(--link); stroke-width: var(--link-width); }
+.link-mark.check { fill: var(--law-check); }
+.link-mark.trust { fill: var(--map-bg); stroke: var(--law-trust); stroke-width: var(--hair); }
+.plate { position: absolute; transform: translate(-50%, -50%); width: var(--plate-w); height: var(--plate-h); padding: var(--sp-5);
+         display: flex; flex-direction: column; gap: var(--sp-1); border-radius: var(--radius-pane); background: var(--plate); touch-action: none; user-select: none;
+         box-shadow: inset 0 0 0 var(--hair) var(--plate-edge), var(--shadow); cursor: grab; transition: box-shadow var(--plate-move); }
+.plate.dragging, .actor.dragging { cursor: grabbing; transition: none; }
+.plate.tier-core { background: var(--plate-core); }
+.plate.tier-black-box { background: var(--plate-black); box-shadow: inset 0 0 0 var(--hair) var(--plate-black-edge); color: var(--muted); }
+.plate-name { font-size: var(--size-read); font-weight: 600; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plate-caption { font-size: var(--size-small); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plate.tier-black-box .plate-caption { color: var(--faint); }
+/* The plate's slots: the mist behind it, the law marks at its top right, and the agents' chips along its foot. */
+.plate-fog { position: absolute; inset: calc(-1 * var(--sp-7)); z-index: -1; pointer-events: none; }
+.plate-marks { position: absolute; top: var(--sp-4); right: var(--sp-5); display: flex; gap: var(--sp-3); align-items: center; }
+.plate-chips { position: absolute; left: var(--sp-4); right: var(--sp-4); bottom: calc(-1 * var(--sp-4)); display: flex; gap: var(--sp-2); }
+.law-mark { display: inline-block; flex: none; width: var(--law-mark); height: var(--law-mark); transform: rotate(45deg); }
+.law-mark.check { background: var(--law-check); }
+.law-mark.trust { box-shadow: inset 0 0 0 var(--hair) var(--law-trust); }
+.actor { position: absolute; transform: translate(-50%, -50%); width: var(--actor-w); height: var(--actor-h); display: grid; place-items: center;
+         font-size: var(--size-xs); letter-spacing: .12em; text-transform: uppercase; color: var(--faint); cursor: grab; touch-action: none; user-select: none; }
+.map-empty { position: absolute; inset: 0; display: grid; align-content: center; justify-items: center; gap: var(--sp-4); text-align: center; }
+.map-empty-title { margin: 0; font-size: var(--size-large); font-weight: 600; }
+.map-empty .empty { max-width: var(--dialog); }
+.map-legend { display: flex; justify-content: flex-end; align-items: center; gap: var(--sp-3); padding: var(--sp-4) var(--map-gutter); font-size: var(--size-xs); color: var(--faint); }
+.map-legend .law-mark { margin-inline: var(--sp-2); }
+@media (prefers-reduced-motion: reduce) {
+  .plate, .btn { transition: none; }
+}
+.map-empty .primary { background: var(--selected); }

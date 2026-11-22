@@ -17,12 +17,13 @@ import { type Actions, doctorEntries, newestUnseen, nextNeedsYou, paletteEntries
 import { hover, realClock, shownGate } from "./hover.js";
 import { arrange, defaultWidths, type LayoutMode, railShown, resized, type Widths } from "./layout.js";
 import { listSpace } from "./home.js";
+import { leaveMap, mapEscape, mapShown, startMap, toggleMap } from "./map.js";
 import { showSessions } from "./list.js";
 import { goHome, select, show, toggleHome } from "./selection.js";
 import { dragPanel, placePanel, togglePanel } from "./panel.js";
 import { dragSplit, focusPane, markHomeShown, placePanes, runDoctor, showHistory, split, startPanes, toggleSplit } from "./panes.js";
 import { showAddProject, showBranches, showPalette, showPicker } from "./picker.js";
-import { fetchNow, foundWorkspaces, pullAll, showWorkspaces, sidebarOrder, watchWorkspaces } from "./workspaces.js";
+import { fetchNow, foundWorkspaces, pullAll, selectedProject, showWorkspaces, sidebarOrder, watchWorkspaces } from "./workspaces.js";
 import { reload, reloadedZoom, type SettingsFiles, zoomed } from "./settings.js";
 import { knownProjects } from "./projects.js";
 import { studio } from "./state.js";
@@ -182,6 +183,9 @@ const actions: Actions = {
   "studio::Dismiss": () => {
     // The settings page, a dialog over the window, closes first and leaves the rest as it was.
     if (settingsPageOpen()) return closeSettingsPage();
+    // In the Map view, Esc peels its layers (`map.ts`) and leaves it last; an overlay or the picker open over it closes first.
+    const overlaid = ["list-open", "list-peek", "rail-open", "skills-open"].some((name) => document.body.classList.contains(name)) || !element("picker").hidden;
+    if (mapShown() && !overlaid) return mapEscape();
     document.body.classList.remove("list-open", "list-peek", "rail-open", "skills-open");
     element("picker").hidden = true;
   },
@@ -219,6 +223,8 @@ const actions: Actions = {
   // Home, in the terminal column: selects no session.
   "studio::JumpToUnseen": () => void go(newestUnseen(inSidebar())),
   "studio::GoHome": () => void toggleHome(),
+  // The Map view (danielrispler/plotkeeper#306), over the rail and the terminal; the same key leaves it.
+  "studio::ShowMap": () => void toggleMap(),
   // History (#94), in the terminal column: the ended sessions, searchable.
   "studio::ShowHistory": () => showHistory(),
   // Fetches the repository now (#33); the workspaces' states follow.
@@ -234,6 +240,7 @@ const actions: Actions = {
   "studio::OpenSettingsFile": () => void invoke("open_settings", { editor: studio.files.settings.editor }).catch(failure("open_settings", "error")),
   // The skills browser (danielrispler/Falinks#528), in the rail's place; it leaves focus mode, which hides the rail.
   "studio::Skills": () => {
+    leaveMap();
     if (studio.focus) actions["studio::ToggleFocus"]();
     void showSkills();
   },
@@ -334,6 +341,8 @@ startPanes().catch((e) => {
 });
 dragSplit();
 dragPanel();
+// A drafting prompt fills the quick start of New session in the project (`map.ts`, "Draft a map").
+startMap({ draft: (project, prompt) => void showPicker("session", project, prompt), selectedProject, refocus: focusPane });
 element("new-session").addEventListener("click", () => void showPicker());
 element("add-project").addEventListener("click", () => void showAddProject());
 element("settings-gear").addEventListener("click", () => void run(actions, "studio::OpenSettings"));

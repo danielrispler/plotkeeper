@@ -117,6 +117,8 @@ const defaultKeymap: Keymap = {
     "cmd-n": "studio::NewSession",
     "cmd-t": "studio::NewTerminal",
     "shift-cmd-h": "studio::GoHome",
+    // The Map view (danielrispler/plotkeeper#306): the selected session's project, else the first with a map; again, leaves it.
+    "shift-cmd-m": "studio::ShowMap",
     "cmd-,": "studio::OpenSettings",
     // Modifiers in `MODIFIERS` order, as a keystroke reads.
     "shift-cmd-p": "studio::Palette",

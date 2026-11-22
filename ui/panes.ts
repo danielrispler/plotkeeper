@@ -18,6 +18,7 @@ import { drawHome, enterHome, landedClear, markLearningShown } from "./home.js";
 import { element, failure, fullTitle, invoke, listen, newest, pressable, text } from "./dom.js";
 import { onProjects, projects } from "./projects.js";
 import { followLog, showLog, showMissing } from "./log.js";
+import { leaveMap } from "./map.js";
 import { type Box, paneBoxes } from "./layout.js";
 import { isPanel, panelTerm, showPanel, showPanelShell } from "./panel.js";
 import { offerAgyPluginFix, offerBuilds, offerPluginFix, upgrade } from "./restart.js";
@@ -237,6 +238,7 @@ export function redrawHome() {
 // the session, which takes the column.
 const HISTORY = "history";
 export function showHistory() {
+  leaveMap();
   show(HISTORY, () => null);
   drawHistory(box(HISTORY), studio.listed);
   element("terminal-head").hidden = true;
@@ -343,6 +345,7 @@ export const doctorArgv = (command: string) => [
 
 async function startTerminal(id: string, cwd: string, argv: string[]) {
   starting = id;
+  leaveMap(); // the new terminal shows in the column the Map view covers
   element("terminal-head").hidden = false;
   studio.pending = null; // an earlier press's late reply must not take the pane from this session
   show(id, () => openPane(box(id), id, cwd, argv));

@@ -56,10 +56,12 @@ export function newTask(
   prompt: boolean,
   report: (error: unknown) => void = failed,
   start: Start = startLast,
+  initial = "",
 ): HTMLElement {
   const form = document.createElement("form");
   form.className = "new-task";
   const field = document.createElement("input");
+  field.value = initial;
   field.placeholder = placeholder;
   field.setAttribute("aria-label", placeholder);
   field.spellcheck = false;
@@ -92,8 +94,8 @@ export function newTask(
 // selected by the time Daniel submits.
 export const quickTask = (project: string, main: Workspace, request: string, create: typeof invoke = invoke): Promise<Workspace> =>
   request ? create("create_named_task", { project, request }) : Promise.resolve(main);
-const quickStart = (project: string, main: Workspace, start: Start) =>
-  newTask("Issue #, spec path or prompt; empty for main", "Start", "Start the session: in a new task for an issue, spec or prompt, else in the main checkout (↩)", (request) => quickTask(project, main, request), true, failed, start);
+const quickStart = (project: string, main: Workspace, start: Start, initial = "") =>
+  newTask("Issue #, spec path or prompt; empty for main", "Start", "Start the session: in a new task for an issue, spec or prompt, else in the main checkout (↩)", (request) => quickTask(project, main, request), true, failed, start, initial);
 
 // The Auto mode choice (danielrispler/Falinks#541): off each time the picker opens; the session starts in Claude Code's
 // auto mode when on. Bypass mode is never offered.
@@ -201,7 +203,7 @@ async function showProjects(current: string, kind: Kind) {
   (picker.querySelector("input") ?? rows.querySelector<HTMLElement>("[aria-pressed=true]"))?.focus();
 }
 
-function picked(project: string, workspaces: Workspaces, agents: string[], kind: Kind): HTMLElement[] {
+function picked(project: string, workspaces: Workspaces, agents: string[], kind: Kind, prompt = ""): HTMLElement[] {
   const { hidden } = workspaces;
   const count = hidden ? [text("p", `${hidden} agent worktree${hidden === 1 ? "" : "s"} hidden`, "hidden-count")] : [];
   const [choice, auto] = autoChoice();
@@ -216,7 +218,7 @@ function picked(project: string, workspaces: Workspaces, agents: string[], kind:
     projectPill(project, kind),
     agentButtons,
     text("h1", "In its own task"),
-    quickStart(project, workspaces.main, start),
+    quickStart(project, workspaces.main, start, prompt),
     choice,
     text("h1", "Start in"),
     main,
@@ -292,21 +294,22 @@ export function showPalette(entries: Entry[], run: (binding: Binding) => void) {
 // Opens the picker, on the last agent for New session or on a plain terminal for New terminal, or
 // closes it when open. It opens on `from`, a project header's "+", else on `pickerProject`'s choice; from a header it
 // never closes, so a second header's "+" shows its own project.
-export async function showPicker(kind: Kind = "session", from?: string) {
+// `prompt` fills the quick start's field, as the Map view's "Draft a map" does.
+export async function showPicker(kind: Kind = "session", from?: string, prompt = "") {
   const label = kind === "terminal" ? "New terminal" : "New session";
   if (from === undefined) {
     if (closed(label)) return;
   } else element("picker").ariaLabel = label;
-  await drawPicker(kind, from ?? pickerProject(selectedProject(), lastProject(), await projects().catch(() => [])));
+  await drawPicker(kind, from ?? pickerProject(selectedProject(), lastProject(), await projects().catch(() => [])), prompt);
 }
 
 // The picker on `project`.
-async function drawPicker(kind: Kind, project: string) {
+async function drawPicker(kind: Kind, project: string, prompt = "") {
   const picker = element("picker");
   // It opens once its rows are read, so no placeholder flashes first in another box (danielrispler/Falinks#570).
   try {
     const [workspaces, agents] = await Promise.all([invoke("workspaces", { project }), offeredAgents()]);
-    picker.replaceChildren(...picked(project, workspaces, agents, kind));
+    picker.replaceChildren(...picked(project, workspaces, agents, kind, prompt));
   } catch (e) {
     failure("workspaces", "error")(e);
     // The pill stays, so a project that cannot be read is left for another.

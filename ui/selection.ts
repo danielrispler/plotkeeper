@@ -7,6 +7,7 @@ import { hunkFiles } from "./ask.js";
 import { openCard, showCards } from "./cards.js";
 import { element, failure, invoke } from "./dom.js";
 import { openHunk } from "./evidence.js";
+import { leaveMap } from "./map.js";
 import { showSessions } from "./list.js";
 import { homeShown, showSession } from "./panes.js";
 import { showWorkspaces } from "./workspaces.js";
@@ -32,6 +33,7 @@ export function isSelected(session: string, agent?: string | null): boolean {
 // returns. Opening a subagent's line also fades a failed helper. A later press wins over this one's
 // reply.
 export async function select(id: string, agent: string | null = null) {
+  leaveMap(); // a session pressed anywhere leaves the Map view over the rail and the terminal
   const pressed = { id, agent };
   studio.pending = pressed;
   showSessions(studio.listed);
@@ -118,6 +120,7 @@ export async function toggleHome() {
 
 // Selects no session, which shows Home: the core clears the selection and what is viewed.
 export async function goHome() {
+  leaveMap();
   studio.pending = null;
   try {
     const selected = await invoke("select", { id: null });

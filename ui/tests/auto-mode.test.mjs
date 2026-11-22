@@ -45,5 +45,5 @@ test("the picker's Auto mode choice is off by default and reaches the start comm
   // Both ways to start from the picker start the chosen agent with the choice.
   assert.match(picker, /startAgent\(agent\(\), cwd, prompt, auto\(\)\)/);
   assert.match(picker, /workspaceRow\(name, workspace, start\)/);
-  assert.match(picker, /quickStart\(project, workspaces\.main, start\)/);
+  assert.match(picker, /quickStart\(project, workspaces\.main, start, prompt\)/);
 });

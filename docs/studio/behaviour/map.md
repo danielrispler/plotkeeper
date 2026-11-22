@@ -53,3 +53,13 @@ The checker runs only `git` and, when the map names `cargo`, `cargo`; it reads n
 ## plotkeeper's map
 
 Eight parts: the agent plugins, the hook, the core, the shell (`src-tauri/`), understanding, the window (`ui/`), the terminal daemon and workbench; three actors: the agents, the writer and GitHub; one flow, Turn writing. `ignored` holds what is not the running system: the docs, the spikes, `scripts/`, the tooling crates (`wayfinder/`, `test-support/`, `system-map/`) and the repository's own configuration at the root. A change that adds, moves or removes files, changes what a part does or how parts connect, or changes a law changes the map in the same PR (`AGENTS.md`).
+
+## The Map view
+
+The window's Map view (`ui/map.ts`, `src-tauri/src/map.rs`) draws a project's map on a quiet chart: parts as plates (name, caption, a mark per law: filled when a check backs it, hollow when it rests on trust), actors as labels, links from rim to rim. It takes the story rail's and the terminal's columns and leaves the session list and the top bar live; `studio::ShowMap` (shift-cmd-m by default) opens it on the selected session's project, else the first project with a map, and the same key leaves it.
+
+- **Source.** The shell reads `system-map.json` with `git show` from `origin`'s default branch as last fetched, never the working tree. With `origin/HEAD` unset it reads the local `main` or `master` and says so quietly. It fetches `origin` when the view opens and when the window gains focus while it is open, and when a task is first seen merged; never on a timer. A repository is fetched at most once a minute, and never twice at once.
+- **Daniel's own state** (`map-state.json` in the data folder, never the repository): a saved `(x, y)` per part or actor id and a tier per part id, which beats the map's.
+- **Placement.** A part with no saved position is placed once, near the parts it links to (else the parts of its `zone`), clear of every plate, then saved; a placed part never moves on its own. A plate drags past 6 px of pointer movement, so a click never nudges it, and its place is saved when it is let go.
+- **Esc** peels the layers, in order: a scrubbed commit, a drawer, a part's sheet, then the view.
+- **No map.** A project without the file shows a calm empty state, and "Draft a map" opens New session in that project with a drafting prompt in its quick start.

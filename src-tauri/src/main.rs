@@ -37,6 +37,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
 
 mod answer;
+mod map;
 mod presence;
 mod restart;
 mod settings;
@@ -1136,6 +1137,7 @@ fn main() {
         .manage(writer.clone())
         .manage(writing)
         .manage(terminal::Daemon::default())
+        .manage(map::Fetches::default())
         .manage(Mutex::new(answer::Watching::default()))
         .invoke_handler(tauri::generate_handler![
             sessions,
@@ -1216,6 +1218,9 @@ fn main() {
             mark_unseen,
             rail_shown,
             refresh_landed_tasks,
+            map::map_state,
+            map::map_save_positions,
+            map::map_set_tier,
             reveal_log,
             sounds
         ])
@@ -1639,7 +1644,11 @@ fn refresh_landed(app: &AppHandle, session: Option<String>) {
             let facts = Path::new(&task.path)
                 .exists()
                 .then(|| lookup_task(gh, &task));
+            let landed = facts.is_some_and(|f| f.merged);
             let changed = studio.lock().unwrap().set_task_facts(&task.path, facts);
+            if landed {
+                map::merged(&app, &task.path);
+            }
             if changed {
                 LIST_CHANGED.store(true, Ordering::Release);
             }

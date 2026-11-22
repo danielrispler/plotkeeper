@@ -442,6 +442,20 @@ export type Work = {
 // whose worktree holds it, `current` the main checkout's own.
 export type Branch = { name: string; remote: boolean; task: string | null; current: boolean };
 
+// The Map view's payload (`src-tauri/src/map.rs`, `MapState`): one project's map as read from `origin`'s default branch, and Daniel's own
+// positions and tiers for it. A feature of the view adds its field here and in `MapState` there.
+export type UserMap = { positions: Record<string, [number, number]>; tiers: Record<string, string> };
+export type MapState = {
+  project: string;
+  status: "loaded" | "none" | "unreadable";
+  // The text of `system-map.json` when it loaded.
+  source: string | null;
+  reference: string | null;
+  commit: string | null;
+  note: string | null;
+  user: UserMap;
+};
+
 // Every command the window invokes, with what the shell replies (`src-tauri/src/*.rs`, `#[tauri::command]`): `void` where the
 // window ignores the reply, `null` where the shell may answer none. `invoke` takes only these names, and the snap fixtures
 // (`scripts/snap/`) are typed against it, and `scripts/snap/base.ts` answers every command that is not `void`, so a fixture
@@ -479,6 +493,9 @@ export interface Commands {
   guess: void;
   hunk_opened: void;
   key_wrong: void;
+  map_save_positions: UserMap;
+  map_set_tier: UserMap;
+  map_state: MapState;
   mark_unseen: void;
   open: Selection | null;
   open_file: void;

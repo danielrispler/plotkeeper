@@ -134,6 +134,26 @@
       <!-- The skills browser (danielrispler/Falinks#528), in the rail's place while open; Esc returns. -->
       <section id="skills" class="story skills" aria-label="Skills"></section>
     </aside>
+
+    <!-- The Map view (danielrispler/plotkeeper#306): over the rail's and the terminal's columns, which it hides; the list and the top bar
+         stay live. `map.ts` draws it. The side area is for the sheet, the drawer and the not-placed list of later tickets. -->
+    <section id="map" class="map-view" aria-label="Map" hidden>
+      <header class="map-head">
+        <button id="map-project" class="btn quiet map-project" type="button" popovertarget="map-projects" aria-label="Project" title="Show another project's map"></button>
+        <div id="map-projects" class="menu map-projects" popover></div>
+        <span id="map-ref" class="map-ref"></span>
+        <div id="map-banner" class="map-banner"></div>
+      </header>
+      <div class="map-stage">
+        <div id="map-body" class="map-body"></div>
+        <aside id="map-side" class="map-side" aria-label="Beside the map" hidden>
+          <section id="map-not-placed"></section>
+          <section id="map-sheet"></section>
+          <section id="map-drawer"></section>
+        </aside>
+      </div>
+      <footer id="map-legend" class="map-legend"></footer>
+    </section>
   </div>
   <!-- The dividers: drag to resize the list and the rail. -->
   <div id="list-divider" class="divider" role="separator" aria-orientation="vertical" aria-label="Resize the session list"></div>
