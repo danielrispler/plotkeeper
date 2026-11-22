@@ -42,6 +42,7 @@ mod fog;
 mod history;
 mod map;
 mod presence;
+mod prs;
 mod restart;
 mod settings;
 mod skills;
@@ -1142,6 +1143,7 @@ fn main() {
         .manage(writing)
         .manage(terminal::Daemon::default())
         .manage(map::Fetches::default())
+        .manage(prs::Prs::default())
         .manage(ci_laws::load_cache())
         .manage(Mutex::new(answer::Watching::default()))
         .invoke_handler(tauri::generate_handler![
@@ -1265,8 +1267,6 @@ fn main() {
             let _ = effects.0.set(app.clone());
             restart::watch_build(app.clone());
             settings::watch(app.clone());
-            let prs_app = app.clone();
-            thread::spawn(move || prs(&prs_app));
             let retest_app = app.clone();
             thread::spawn(move || write_due_retests(&retest_app));
             let notice_app = app.clone();
@@ -1389,6 +1389,7 @@ fn follow(app: &AppHandle, log: &Path) {
                     }
                     Output::YourTurn { session_id } => {
                         refresh_landed(app, Some(session_id.clone()));
+                        prs::ask_later(app, prs::Trigger::TurnEnd);
                         tell(app, Notice::YourTurn, &session_id, None);
                     }
                     Output::CommandBlocked { session_id, agent } => {
@@ -1678,37 +1679,8 @@ fn refresh_landed(app: &AppHandle, session: Option<String>) {
 /// The window gained focus, or Daniel chose the palette's refresh: ask about every task again.
 #[tauri::command]
 fn refresh_landed_tasks(app: AppHandle) {
+    prs::ask_later(&app, prs::Trigger::Focus);
     refresh_landed(&app, None);
-}
-
-/// Finds the PR of each session's branch with `gh pr view` (danielrispler/Falinks#461, decision 19), on its own thread so
-/// the read loop never waits on the network, and asks again after 5 minutes. `gh` runs as Daniel
-/// with its own login; no credential file is read.
-fn prs(app: &AppHandle) {
-    let gh = studio_workbench::gh_path();
-    let mut asked = HashMap::<String, Instant>::new();
-    loop {
-        let branches = app.state::<Core>().lock().unwrap().branches();
-        for (cwd, branch) in branches {
-            if asked
-                .get(&branch)
-                .is_some_and(|at| at.elapsed() < Duration::from_secs(300))
-            {
-                continue;
-            }
-            asked.insert(branch.clone(), Instant::now());
-            let output = Command::new(gh)
-                .args(["pr", "view", &branch, "--json", "number", "--jq", ".number"])
-                .current_dir(&cwd)
-                .output();
-            let output = output.ok().filter(|o| o.status.success());
-            let pr = output.and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse().ok());
-            if app.state::<Core>().lock().unwrap().set_pr(&branch, pr) {
-                LIST_CHANGED.store(true, Ordering::Release);
-            }
-        }
-        thread::sleep(Duration::from_secs(5));
-    }
 }
 
 /// The shell's part of Turn writing: what only it can do. It holds the app once the window's setup has it.

@@ -664,6 +664,13 @@ body.map-open .toasts, body.map-open .toast { visibility: visible !important; }
 .map-stage { display: grid; grid-template-columns: minmax(0, 1fr) auto; min-height: 0; }
 .map-body { position: relative; min-width: 0; min-height: 0; }
 .map-side { width: var(--map-sheet); overflow-y: auto; padding: var(--sp-4) var(--map-gutter) var(--sp-5) var(--sp-5); }
+/* Ready for review (#336): the way into a PR brief, in the side area under Not placed. */
+#map-tray:not(:empty) { display: flex; flex-direction: column; gap: var(--sp-2); margin-top: var(--sp-5); }
+#map-tray .side-title { margin: 0; font-size: var(--size-xs); font-weight: 400; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); }
+.tray-row { padding: var(--sp-3); border-radius: var(--radius); }
+.tray-row:hover { background: var(--hover); }
+.tray-title { display: block; font-weight: 500; }
+.tray-note { display: block; font-size: var(--size-xs); color: var(--faint); }
 .map-canvas { position: absolute; inset: 0; overflow: auto; }
 .map-world { position: relative; background-image: radial-gradient(var(--map-dot) var(--hair), transparent var(--hair)); background-size: var(--map-grid) var(--map-grid); }
 .map-links { position: absolute; inset: 0; pointer-events: none; overflow: visible; }

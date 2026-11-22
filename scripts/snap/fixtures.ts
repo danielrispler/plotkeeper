@@ -244,9 +244,19 @@ const at = (x: number, y: number): [number, number] => [x, y];
 const mapState = (extra: Partial<MapState> = {}): MapState => ({
   project: "/w/plotkeeper", status: "loaded", source: mapFile, reference: "origin/main", commit: "35745b1693c5d061e5aea891e98a58515942a12d", note: null,
   user: { tiers: {}, positions: { core: at(620, 190), understanding: at(980, 290), plugins: at(300, 430), hook: at(580, 430), shell: at(880, 440), window: at(1180, 560), daemon: at(760, 690), workbench: at(480, 650), agents: at(110, 430), writer: at(1400, 190), github: at(250, 650) } },
-  fog: {}, ci: null,
+  fog: {}, ci: null, ready: [],
   ...extra,
 });
+// The Ready for review tray (#336) with two ready PRs, at the Map view's foot.
+const mapTray = (): Fixture =>
+  mapOpened(`
+      const rows = [...document.querySelectorAll("#map-tray .tray-row")];
+      if (rows.length !== 2) return log("snap:fail expected 2 tray rows, saw " + rows.length);
+      if (!document.querySelector("#map-tray .side-title")?.textContent.includes("Ready for review")) log("snap:fail the tray has no title");
+      if (!rows[0].textContent.includes("#334") || !rows[0].textContent.includes("not written yet")) log("snap:fail row text: " + rows[0].textContent);
+      log("tray ok");`, {
+    map_state: mapState({ fog: { shell: "thick" }, ready: [{ number: 334, title: "PR briefs: the brief written for each ready PR", head: "b".repeat(40) }, { number: 336, title: "Ready for review tray", head: "a".repeat(40) }] }),
+  });
 const homeMarked = (press: boolean): Fixture => ({
   ...(fixtures as Record<string, () => Fixture>).home(),
   map_marks: ["/w/plotkeeper"],
@@ -435,6 +445,7 @@ const mapScrubbed = (): Fixture => {
 
 export const fixtures = {
   ...railFixtures,
+  mapTray,
   recordedTerminal,
   logRunning: () => logFixture("running"),
   logDone: () => logFixture("completed"),

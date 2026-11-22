@@ -55,6 +55,8 @@ pub struct MapState {
     pub fog: BTreeMap<String, crate::fog::Strength>,
     /// CI on the default branch, as last read through `gh` (`ci_laws.rs`); none until a read has finished.
     pub ci: Option<crate::ci_laws::Ci>,
+    /// The PRs ready for review (open, not a draft), as last asked (`prs.rs`); the "Ready for review" tray lists them.
+    pub ready: Vec<crate::prs::Ready>,
 }
 
 /// Daniel's choices for one project, kept in the data folder: a saved `(x, y)` per part or actor id, and a tier per part id
@@ -119,6 +121,7 @@ pub fn read_map(repo: &Path) -> MapState {
         user: UserState::default(),
         fog: BTreeMap::new(),
         ci: None,
+        ready: Vec::new(),
     };
     let Some((reference, note)) = default_ref(repo) else {
         state.note = Some("this repository has no default branch to read".into());
@@ -186,12 +189,23 @@ impl Fetches {
         now: Instant,
         fetch: impl FnOnce() -> Result<(), String>,
     ) -> Fetched {
+        self.run_after(repo, now, COOLDOWN, fetch)
+    }
+
+    /// As `run`, with its own `cooldown`: zero asks at once unless one is running.
+    pub fn run_after(
+        &self,
+        repo: &str,
+        now: Instant,
+        cooldown: Duration,
+        fetch: impl FnOnce() -> Result<(), String>,
+    ) -> Fetched {
         {
             let mut slots = self.0.lock().unwrap();
             let slot = slots.entry(repo.to_string()).or_default();
             let cooling = slot
                 .last
-                .is_some_and(|at| now.saturating_duration_since(at) < COOLDOWN);
+                .is_some_and(|at| now.saturating_duration_since(at) < cooldown);
             if slot.running || cooling {
                 return Fetched::Skipped;
             }
@@ -288,9 +302,11 @@ pub fn map_state(
     fetch: bool,
     fetches: State<Fetches>,
     cache: State<crate::ci_laws::CiCache>,
+    prs: State<crate::prs::Prs>,
     app: AppHandle,
 ) -> Result<MapState, String> {
     if fetch {
+        crate::prs::ask_later(&app, crate::prs::Trigger::MapOpen);
         let fetched = self::fetch(&fetches, &project);
         // A fetch inside the cooldown asks nothing again, unless nothing was read yet.
         if fetched != Fetched::Skipped || !cache.has(&project) {
@@ -309,6 +325,7 @@ pub fn map_state(
         state.fog = crate::fog::effective(&state.user, source);
     }
     state.ci = cache.get(&project);
+    state.ready = prs.ready(&project);
     Ok(state)
 }
 
