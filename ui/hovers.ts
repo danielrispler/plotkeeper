@@ -6,9 +6,4 @@ export const HOVERS = {
   addProject: "Add a repository as a project",
   failedOutput: "Show the failed terminal's output",
   goToSession: "Go to this session",
-  pickAnswer: "Pick this answer",
-  answered: "Already answered: the reasons show under the options",
-  understood: "Note that the explanation made sense to you",
-  keyWrong: "Flag the quiz's right answer as wrong",
-  explainMore: "Ask the writer for a longer explanation",
 } as const;

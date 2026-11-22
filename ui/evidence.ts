@@ -175,7 +175,6 @@ export function fileRow(session: string, index: number, row: EvidenceRow, scope 
   const fetch = () => {
     if (kept()) return;
     pre.textContent = "Reading the hunk…";
-    invoke("hunk_opened", { session, turn: index }).catch(failure("hunk_opened"));
     invoke("turn_file_hunk", { session, turn: index, root: file.root, path: file.path, from: file.from })
       .then((h) => {
         hunks.set(key, { hunk: h, ended, added: file.added, removed: file.removed });

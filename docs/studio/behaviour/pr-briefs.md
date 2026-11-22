@@ -33,6 +33,16 @@ Code checks (`check_brief`) flag each item they concern, and the brief as a whol
 
 The **claim check** (`pr_brief_check.rs`) is a second sandboxed call that reads the same facts and the written brief and says, per item (steps with their check and risks, the also lines, the decisions), whether the facts support it. The code flags and the claim flags go into **one retry** that rewrites only the flagged items; flags of a chapter or of the brief as a whole are left as the code set them. An item still flagged after the retry carries "not confirmed from the facts". A failed claim call or retry leaves the code-checked brief stored and says why in the record.
 
+## The writer's limits
+
+Every writer call of the studio, the PR brief's, the claim check's, the turn summary's, the Goal's, Ask's and the risk note's judge, runs `claude -p` on your subscription, with `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` removed from its environment, in `card-writer/` beside the event log. What it reads is untrusted text, so it runs with no tools (`--tools ""`) and no MCP servers (`--strict-mcp-config`), in safe mode, whatever your settings allow, and without `CLAUDE_CODE_PLUGIN_DIRS`, so its own sessions send no hook events. A change it is given is cut at 64 KiB, with a line that says how many bytes were cut; a brief's facts keep to their own budget (see [The writer and its facts](#the-writer-and-its-facts)). It writes in English, with code in backticks. A reply that does not parse is asked for once more; when the second fails too, there is nothing stored and one line in the Studio log ([storage](storage.md)).
+
+An app opened from Finder or `open` does not get your shell's `PATH`, so at start the app asks your login shell where `claude` is: `$SHELL -lc 'command -v claude'`, with `/bin/zsh` when `SHELL` is unset. Only the path comes back; the writer keeps the app's own environment. A login shell that is not interactive reads `~/.zprofile` but not `~/.zshrc`, so the line that puts `claude` on your `PATH` must be in the first. With no answer, the app runs `claude` from its own `PATH`.
+
+To run the app with a fake writer instead of `claude -p`:
+
+    open --env STUDIO_CARD_WRITER=fake target/release/bundle/macos/Studio.app
+
 ## The record
 
 Each brief written appends one line to `pr-brief-records.jsonl`, beside the briefs: the PR and head, the shape, the budget and what was cut, the code checks' flags, the claim check's flags before the retry and the ones that still stand after, the flags the stored brief carries, the count left unconfirmed, any claim or retry error, and each call's tokens and cost. It is for tuning prompts, caps and models from real data; nothing shows it. A brief is stored per PR and head under the data folder's `pr-briefs-by-project/<project>/pr-briefs/`, and a reader ignores fields it does not know.

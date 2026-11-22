@@ -6,7 +6,7 @@ use std::{fs, path::Path, process::Command, sync::Mutex};
 use studio_core::{Numstat, RootDiff, Studio, compute_turn_files};
 use studio_test_support::git;
 use studio_understanding::{
-    MAX_TURN_FILES, diff_turn, found_files, hunk, numstat, turn_diffs, turn_hunk, turn_of,
+    MAX_TURN_FILES, diff_turn, found_files, hunk, numstat, turn_diffs, turn_facts, turn_hunk,
 };
 
 const SESSION: &str = "5b1c7e30-9d2a-4f8b-8c63-1e0a7d4b9f52";
@@ -733,12 +733,12 @@ fn a_turns_files_are_matched_with_the_core_unlocked_and_stored_after() {
 }
 
 #[test]
-fn a_turn_is_read_for_its_offer_without_locking_the_core_while_it_is_held() {
+fn a_turn_is_read_for_its_facts_without_locking_the_core_while_it_is_held() {
     let state = std::sync::Arc::new(Mutex::new(Studio::default()));
     let (done, read) = std::sync::mpsc::channel();
     let core = state.clone();
     std::thread::spawn(move || {
-        turn_of(&core, "no-such-turn", &mut drop);
+        turn_facts(&core, "no-such-turn", &mut drop);
         let _ = done.send(());
     });
     // A lock taken while the thread's own earlier one is still held never returns.

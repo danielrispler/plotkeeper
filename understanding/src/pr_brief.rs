@@ -11,7 +11,11 @@
 //! - `BriefStore` keeps briefs and the records in the data folder;
 //! - `write_pr_brief` does all of it with a `BriefWriter`, which `ClaudeWriter` is and a test fakes.
 
-use crate::{ClaudeWriter, is_logic, millis, offer::is_test};
+use crate::{
+    ClaudeWriter,
+    logic_file::{is_logic, is_test},
+    millis,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;

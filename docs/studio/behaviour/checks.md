@@ -33,7 +33,7 @@ A check outside the session's own worktree names its worktree, in the Evidence l
 A turn's checks, its workers' included, come from the step ledger, in the order each first ran. A check's status is its last run's:
 
 - **Passed** or **failed** when the exit code tells.
-- **Ran** when something in the command can mask the exit code (see [The card store](storage.md#the-card-store)); a card calls it not counted.
+- **Ran** when something in the command can mask the exit code (see [The card store](storage.md#the-card-store)); an exit code that does not say whether it passed leaves its run with no verdict.
 - **Running** while the run has started and has no result. A running check is neither passed nor failed: it is in none of the counts, it is not on the Evidence line, and it closes nothing in the Brief's Open slot.
 
 A run that failed before the last one is a retry. A failed check keeps its exit code and the last 40 lines of its output, read from the event log when its row is opened; the runs of one command share them. A command that was denied, interrupted or blocked is no run.
@@ -59,10 +59,8 @@ A check an agent sends to the background is running until its notification lands
 
 The core gives the rail's feed the checks to list, newest first, and the rail draws them with no rule of its own. Under a turn, for each check of the session's own agent, its latest run is listed while it is running or failed: a check that passed, or failed and then passed, is not listed. A worker's runs are not in the feed; they are in the Evidence line with who ran them, and they count in the banner and the Brief. A line shows "Running" or "Failed", the run's own statement and how long it took; while it runs, the time so far against the typical duration, such as "1m of usually 2m".
 
-## Typical durations and the Check card
+## Typical durations
 
 A command's typical duration is the lower median of how long its earlier runs took, kept under the keys of its check statements joined in order (one statement's key for a command with one check). A worktree is not part of the key, so a new worktree starts with the time of the others. Only the session's own agent's runs count: a foreground run that did not fail, and a background run once its notification says completed.
 
-A check of the session's own agent whose typical duration is over 2 minutes gets a card at its start, one for the command, on the change since the last card, when there is one; a subagent's checks get no card. Its quiz asks whether the check will pass, and the command's result settles your guess: until it ends, the card says only that the check runs; once it ends, it says whether it passed and whether you were right, and shows the writer's reasons for a pass and a fail. A tap after the result counts for nothing.
-
-When the exit code does not say whether the command's checks passed, the guess is not counted and no option is named the right one. That is so when any check of the command is Ran, such as in a chain that exits non-zero. A command with a failed check settles failed. That card has no "the key is wrong".
+The rail shows the typical duration beside a running check. A long check no longer gets a card at its start, and no guess is asked or settled: check cards are retired (danielrispler/plotkeeper#348).

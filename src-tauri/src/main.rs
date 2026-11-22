@@ -1,9 +1,9 @@
 //! The studio app's shell (danielrispler/Falinks#328, module 9). At start it replays the whole event log through the
-//! core, then feeds it each new line live and hands the core's card requests to the card writer. The
-//! window lists every session (danielrispler/Falinks#369, decision 18) and shows the one Daniel selected: its cards, with
-//! their quizzes, his guesses, his ratings and the longer explanations he asked for, which the card
-//! store keeps on disk, and its check lines. A session that newly needs Daniel or reaches your turn,
-//! a new card and a failed worker raise a macOS notification while the window is not focused; while
+//! core, then feeds it each new line live and hands the core's requests to the writer. The
+//! window lists every session (danielrispler/Falinks#369, decision 18) and shows the one Daniel selected: its brief and
+//! turns, which the card store keeps on disk (cards are retired, danielrispler/plotkeeper#348), and its check lines.
+//! A session that newly needs Daniel or reaches your turn
+//! and a failed worker raise a macOS notification while the window is not focused; while
 //! it is, a turn that ends off screen goes to the window's toast. The Dock badge counts the sessions
 //! that need him (danielrispler/Falinks#369, decision 22; danielrispler/Falinks#517, decision 6).
 
@@ -22,16 +22,16 @@ use std::{
     time::{Duration, Instant},
 };
 use studio_core::{
-    CardRequest, Notifications, Output, Session, Sound,
+    Notifications, Output, Session, Sound,
     State::{Ended, NeedsYou},
     Studio, TaskFacts, TaskQuery, compute_turn_files,
 };
 use studio_understanding::{
     AGY_FIXTURE_VERSION, AgyVersions, CardStore, CardWriter, ClaudeWriter, Core, Effects,
-    FakeWriter, Fingerprints, Offers, OpenItem, Rating, RiskNotes, RiskRequest, RiskView, Row,
-    SessionCards, StoredSummary, SummarySetup, Tap, TurnWriting, Versions, diff_turn,
-    fingerprint_changes, found_files, judge, live_roots, millis, open_items, turn_hunk,
-    worktree_root, write_agent_summary,
+    FakeWriter, Fingerprints, OpenItem, RiskNotes, RiskRequest, RiskView, Row, SessionCards,
+    StoredSummary, SummarySetup, TurnWriting, Versions, diff_turn, fingerprint_changes,
+    found_files, judge, live_roots, millis, open_items, turn_hunk, worktree_root,
+    write_agent_summary,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
@@ -51,7 +51,7 @@ mod skills;
 mod stop_rules;
 mod terminal;
 
-/// The card store, which the log thread adds to and the pane records guesses in.
+/// The card store, which holds the briefs, the summaries and the decisions, and the cards written before cards were retired.
 type Cards = Arc<Mutex<CardStore>>;
 
 /// The risk notes of blocked commands (danielrispler/plotkeeper#298), in a store of their own beside the card store: the log thread asks for
@@ -64,15 +64,7 @@ type Notices = Mutex<Notifications>;
 /// The settings' `summaries` (danielrispler/Falinks#517, decision 17): the writer's model and effort, and whether a
 /// summary is written when Daniel opens its turn instead of at the turn's end.
 #[tauri::command]
-fn summary_settings(
-    model: String,
-    effort: String,
-    on_open: bool,
-    self_test: Option<u64>,
-    writing: State<TurnWriting>,
-    cards: State<Cards>,
-) {
-    cards.lock().unwrap().set_self_test(self_test);
+fn summary_settings(model: String, effort: String, on_open: bool, writing: State<TurnWriting>) {
     writing.settings(SummarySetup { model, effort }, on_open);
 }
 
@@ -137,15 +129,6 @@ fn turn_file_hunk(
         from.as_deref(),
         all.unwrap_or(false),
     )
-}
-
-/// Daniel opened a hunk of turn `turn` (danielrispler/plotkeeper#130): the self-test counts the turns where he did.
-#[tauri::command(async)]
-fn hunk_opened(session: String, turn: usize, studio: State<Core>, cards: State<Cards>) {
-    let id = (studio.lock().unwrap().session(&session)).and_then(|s| s.turns.get(turn)?.id.clone());
-    if let Some(id) = id {
-        unsaved(cards.lock().unwrap().quiz_tap(&id, Tap::Hunk, millis()));
-    }
 }
 
 /// Daniel opened turn `id` (danielrispler/Falinks#526): its summary, written now when it waits for him, which takes
@@ -270,8 +253,7 @@ fn selection(studio: &Studio) -> serde_json::Value {
     serde_json::to_value(studio.selection()).expect("selection serializes")
 }
 
-/// The brief and cards of the selected session, or of the worker of it Daniel opened, split at the
-/// latest tick, without each card's diff and base, which the pane never reads.
+/// The brief, decision history and risk notes of the selected session, or of the worker of it Daniel opened.
 #[tauri::command]
 fn cards(studio: State<Core>, cards: State<Cards>, notes: State<Notes>) -> SessionCards {
     let studio = studio.lock().unwrap();
@@ -279,12 +261,8 @@ fn cards(studio: State<Core>, cards: State<Cards>, notes: State<Notes>) -> Sessi
         return SessionCards::default();
     };
     let cards = cards.lock().unwrap();
-    // A session's rail also holds its workers' cards, each with its turn; a worker's view is its own cards.
     let session = studio.session(owner);
-    let mut shown = match session {
-        Some(session) => cards.rail_cards(session, studio.now()),
-        None => cards.session_cards(owner, studio.now()),
-    };
+    let mut shown = cards.session_cards(owner);
     // The Open slot is the session's: a worker's view has none.
     if let Some(session) = session {
         shown.open = open_items(session, studio.task_facts(owner), &cards);
@@ -361,16 +339,13 @@ struct Sent {
     cards: Option<CardsKey>,
 }
 
-/// What the cards were built for; the minute moves a card past 30 minutes, up to one minute late.
+/// What the session's brief was built for.
 #[derive(PartialEq)]
 struct CardsKey {
     viewed: Option<String>,
     revision: u64,
-    minute: u64,
     open: Vec<OpenItem>,
-    /// The turn each worker card is placed in, which a wake-up can move with no store change.
-    placed: Vec<(String, Option<usize>)>,
-    /// What the window shows of the risk notes: a note arriving or failing, or a card with a new call, changes no stored card.
+    /// What the window shows of the risk notes: a note arriving or failing, or a card with a new call, changes nothing stored.
     notes: (Vec<RiskView>, Vec<RiskView>),
 }
 
@@ -383,9 +358,7 @@ fn cards_key(studio: &Studio, cards: &CardStore, notes: &RiskNotes) -> CardsKey 
     CardsKey {
         viewed: viewed.map(String::from),
         revision: cards.revision(),
-        minute: studio.now() / 60_000,
         open: open.unwrap_or_default(),
-        placed: session.map_or_default(|s| cards.placements(s)),
         notes: risk_views(studio, notes),
     }
 }
@@ -428,7 +401,7 @@ impl Sent {
         }
     }
 
-    /// Sends the cards when the viewed owner, the store's revision or the minute changed.
+    /// Sends the cards when the viewed owner or the store's revision changed.
     fn cards(&mut self, app: &AppHandle) {
         // A card with buttons that is shown and has no note asks for one, before the key reads the notes' revision.
         let asks = {
@@ -463,57 +436,6 @@ fn ask_notes(app: &AppHandle, asks: Vec<RiskRequest>) {
         let writer: Writer = app.state::<Writer>().inner().clone();
         thread::spawn(move || judge(&notes, &*writer, &ask, millis, report));
     }
-}
-
-// The four store commands run off the main thread, since saving the store fsyncs.
-
-/// The pane drew the quizzes of cards `ids` in a visible window.
-#[tauri::command(async)]
-fn shown(ids: Vec<String>, cards: State<Cards>) {
-    unsaved(cards.lock().unwrap().show(&ids, millis()));
-}
-
-/// Daniel tapped option `option` of card `id`'s quiz, which on a check's card counts only before
-/// the check's result.
-#[tauri::command(async)]
-fn guess(id: String, option: usize, studio: State<Core>, cards: State<Cards>) {
-    let studio = studio.lock().unwrap();
-    let mut store = cards.lock().unwrap();
-    settle_checks(&studio, &mut store);
-    unsaved(store.guess(&id, option, millis()));
-}
-
-/// Settles the guesses on the cards of the checks that ended (danielrispler/Falinks#461, decision 15). Takes the core's
-/// lock before the store's, as the read loop does.
-fn settle_checks(studio: &Studio, store: &mut CardStore) {
-    for session in studio.sessions() {
-        unsaved(store.settle_checks(session));
-    }
-}
-
-/// Daniel skipped or tapped a chip on card `id`'s Quiz (danielrispler/plotkeeper#120).
-#[tauri::command(async)]
-fn quiz_tap(id: String, tap: Tap, cards: State<Cards>) {
-    unsaved(cards.lock().unwrap().quiz_tap(&id, tap, millis()));
-}
-
-/// Daniel flagged that the key of card `id`'s quiz is wrong.
-#[tauri::command(async)]
-fn key_wrong(id: String, cards: State<Cards>) {
-    unsaved(cards.lock().unwrap().key_wrong(&id));
-}
-
-/// Daniel rated card `id`'s explanation.
-#[tauri::command(async)]
-fn rate(id: String, rating: Rating, cards: State<Cards>) {
-    unsaved(cards.lock().unwrap().rate(&id, rating));
-}
-
-/// Daniel asked card `id` to explain more: the kept text, or the writer's, which takes seconds, so the
-/// command runs off the main thread. `None` when the writer gave none.
-#[tauri::command(async)]
-fn explain_more(id: String, cards: State<Cards>, writer: State<Writer>) -> Option<String> {
-    studio_understanding::explain_more(&cards, &**writer, &id, report)
 }
 
 /// Daniel's side `question` on `item`, a response, card or intention of session `session` (danielrispler/Falinks#461,
@@ -1092,13 +1014,7 @@ fn main() {
             }),
         });
     let effects = Arc::new(ShellEffects::default());
-    let writing = TurnWriting::new(
-        core.clone(),
-        store.clone(),
-        writer.clone(),
-        offers(),
-        effects.clone(),
-    );
+    let writing = TurnWriting::new(core.clone(), store.clone(), writer.clone(), effects.clone());
     keep_panics_in_the_log();
     tauri::Builder::default()
         .plugin(studio_log())
@@ -1138,12 +1054,6 @@ fn main() {
             selected,
             subagent_log,
             cards,
-            shown,
-            guess,
-            key_wrong,
-            quiz_tap,
-            rate,
-            explain_more,
             ask,
             rename,
             delete_session,
@@ -1194,7 +1104,6 @@ fn main() {
             settings::open_keymap,
             settings::write_setting,
             summary_settings,
-            hunk_opened,
             check_lists,
             check_output,
             turn_file_hunk,
@@ -1343,15 +1252,11 @@ fn follow(app: &AppHandle, log: &Path) {
             // goes first, so Daniel sees it while `git` runs.
             if !live {
                 let mut studio = state.lock().unwrap();
-                // What the replay made, before the card store's facts and the backfill change it.
+                // What the replay made, before the card store's facts change it.
                 let replayed = studio.save();
                 let store = app.state::<Cards>();
                 let store = store.lock().unwrap();
                 store.restore(&mut studio);
-                // The turns that ended while the app was down get their cards now (danielrispler/Falinks#486).
-                let requests: Vec<CardRequest> =
-                    store.cards().iter().map(|k| k.request.clone()).collect();
-                let backfill = studio.backfill(millis(), &requests);
                 drop((store, studio));
                 let log = log.to_path_buf();
                 thread::spawn(move || save_state(&log, &replayed));
@@ -1362,12 +1267,10 @@ fn follow(app: &AppHandle, log: &Path) {
                 restart::REPLAYED.store(true, std::sync::atomic::Ordering::Release);
                 let waiting = state.lock().unwrap().waiting_folders();
                 fingerprint_changes(waiting, &mut fingerprints);
-                writing.backfill(backfill);
             }
             for output in outputs {
                 match output {
-                    Output::Card(request) => writing.card(request, true),
-                    Output::Brief(request) => writing.brief(request),
+                    Output::Card(request) | Output::Brief(request) => writing.brief(request),
                     Output::Summary(request) => writing.summary(request),
                     Output::Name(request) => writing.name(request),
                     Output::NeedsYou { session_id, agent } => {
@@ -1460,7 +1363,6 @@ fn follow(app: &AppHandle, log: &Path) {
                 for session in studio.sessions() {
                     unsaved(store.keep_decisions(&session.agent.id, &session.decisions));
                 }
-                settle_checks(&studio, &mut store);
             }
         }
         // Reads the transcripts' lines and nothing else (`AGENTS.md`).
@@ -1680,18 +1582,6 @@ impl Effects for ShellEffects {
         }
     }
 
-    fn new_card(&self, session_id: &str, agent: Option<&str>) {
-        if let Some(app) = self.0.get() {
-            tell(app, Notice::Titled("New card"), session_id, agent);
-        }
-    }
-
-    fn settle_checks(&self) {
-        let Some(app) = self.0.get() else { return };
-        let (studio, store) = (app.state::<Core>(), app.state::<Cards>());
-        settle_checks(&studio.lock().unwrap(), &mut store.lock().unwrap());
-    }
-
     fn name(&self, session_id: &str, name: &str) {
         let line = serde_json::json!({
             "session_id": session_id,
@@ -1712,12 +1602,6 @@ impl Effects for ShellEffects {
 /// The warning for an oversized turn, which the understanding layer hands its callers, goes to the Studio log.
 fn warn_log(warning: String) {
     log::warn!("{warning}");
-}
-
-/// The record of offers, beside the event log.
-fn offers() -> Offers {
-    let home = std::env::home_dir().unwrap_or_default();
-    Offers::beside(&studio_hook::event_log(&home))
 }
 
 /// Adds a notice on session `session_id`'s line, naming its subagent `agent`, if any; the read loop
@@ -2119,7 +2003,7 @@ mod tests {
                 }
             }
         }
-        assert!(saves >= 6, "found only {saves} save lines");
+        assert!(saves >= 4, "found only {saves} save lines");
     }
 
     #[test]

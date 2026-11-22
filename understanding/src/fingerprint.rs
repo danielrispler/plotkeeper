@@ -15,7 +15,7 @@ use std::{
     process::Command,
     time::SystemTime,
 };
-use studio_core::{Backfill, Base, CardRequest, Change, Fingerprint, Purpose};
+use studio_core::{Base, Change, Fingerprint, Purpose};
 
 /// A worktree's `HEAD`, and the files `git status` listed, by path from the worktree's root, with
 /// their content: `None` for a file that is gone.
@@ -348,20 +348,6 @@ fn change(root: &Path, previous: &Record, record: &Record) -> Option<Change> {
     };
     let head = record.head.clone();
     (!diff.is_empty()).then_some(Change { base, diff, head })
-}
-
-/// The card request of a turn the app was down for (danielrispler/Falinks#486), with the diffs between its worktrees'
-/// trees joined as its change; `None` when nothing differs.
-pub fn backfilled(backfill: Backfill) -> Option<CardRequest> {
-    let trees = backfill.trees.iter();
-    let diff: String = trees
-        .map(|t| between(Path::new(&t.root), Some(&t.start), &t.end))
-        .collect();
-    let request = CardRequest {
-        change: Some(diff),
-        ..backfill.request
-    };
-    (!request.diff().is_empty()).then_some(request)
 }
 
 /// The paths that differ between commits, or trees, `from` and `to`; every path of `to` when `from` is `None`.

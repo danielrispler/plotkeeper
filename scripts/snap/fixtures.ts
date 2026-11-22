@@ -613,7 +613,7 @@ past.links = past.links.filter((link: { from: string; to: string }) => link.from
 const strip = (n: number, label: string, fogged: boolean, brief: number | null = null) => ({ commit: `${n}`.repeat(40), short: `${n}`.repeat(7), label, fogged, brief });
 // The rail's quiet row "PR brief ready" in the newest turn of the session whose PR a brief waits for (#344); pressing it opens that brief on the map.
 const railBriefReady = (press: boolean): Fixture => ({
-  ...(railFixtures as Record<string, () => Fixture>).railQuiz(),
+  ...(railFixtures as Record<string, () => Fixture>).railPlain(),
   briefs_waiting: { project: "/w/plotkeeper", numbers: [61] },
   map_state: mapState({ fog: { shell: "thick" }, ready: [{ number: 61, title: "Row controls", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["PR briefs on the map"], quiet: false } }] }),
   pr_brief: briefOf(storySteps()),

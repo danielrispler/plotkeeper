@@ -3,16 +3,14 @@
 # short scripted Claude Code session in a temporary repository, with this checkout's plugin, spawns
 # one background subagent that is not isolated. From the session's folder the subagent makes a
 # worktree with `git worktree add`, writes a 42-line file in it through Bash and commits, as the
-# workers of #186's diagnosis do. The script then reads the session's events in the event log and the
-# offers record, and prints pass or fail for each of its two checks with the line that decided it:
+# workers of #186's diagnosis do. The script then reads the session's events in the event log and prints
+# pass or fail for its one check with the line that decided it:
 #
 #   - events: the subagent's events carry the worktree in `studio_touched_roots`, some event carries
-#     a start tree and a later one an end tree for it, and the diff of those trees holds the edit;
-#   - offers: `offers.jsonl` gained a line for that worker with a card offered.
+#     a start tree and a later one an end tree for it, and the diff of those trees holds the edit.
 #
-# Studio must be open on the build under test: the app, not the hook, writes the offers record, so
-# with Studio closed or on a build from before #202 the offers check fails. The session lands in the
-# event log like any other, so it adds one throwaway session to your list in Studio. Nothing is copied
+# The offers check of #202 is gone with the offers record (#348). The session lands in the event
+# log like any other, so it adds one throwaway session to your list in Studio. Nothing is copied
 # into the repository: a recorded run cannot be a fixture here, since `scrub` replaces every command's
 # text. It runs a nested `claude` on your subscription, so run it yourself, outside auto mode, from
 # any folder, and keep its output as the run's evidence:
@@ -108,10 +106,10 @@ PROMPT
 
 echo "Session $session with Claude Code $(claude --version)"
 cd "$studio"
-python3 - "$data/events.jsonl" "$data/offers.jsonl" "$session" "$repo" "$worktree" <<'PY'
+python3 - "$data/events.jsonl" "$session" "$repo" "$worktree" <<'PY'
 import json, subprocess, sys, time
 
-log, offers, session, repo, worktree = sys.argv[1:]
+log, session, repo, worktree = sys.argv[1:]
 WAIT = 300
 # The hooks are async and may wait on the log's lock or on git, so the last events land late.
 EVENTS_WAIT = 30
@@ -187,42 +185,6 @@ for line in said:
     print(line)
 
 
-def offers_check(agent):
-    """Why the check failed, or None."""
-    def lines():
-        try:
-            text = open(offers).read()
-        except OSError:
-            return []
-        found = []
-        for line in text.splitlines():
-            try:
-                record = json.loads(line)
-            except ValueError:
-                continue
-            record_id = str(record.get("id", ""))
-            if (record.get("session") == session and record.get("kind") == "worker"
-                    and (agent is None or record_id.startswith(agent + "@"))):
-                found.append((line, record))
-        return found
-
-    print(f"offers: waiting up to {WAIT} s for the worker's line in {offers}")
-    deadline = time.time() + WAIT
-    while True:
-        found = lines()
-        card = next((line for line, r in found if r.get("offer") == "card"), None)
-        if card:
-            print(f"offers: the worker's card: {card}")
-            return None
-        if time.time() > deadline:
-            if found:
-                return f"the worker's lines offer no card: {' | '.join(line for line, _ in found)}"
-            return "no line for the worker; is Studio open on a build with #202?"
-        time.sleep(5)
-
-
-offers_failed = offers_check(agent)
-for name, failed in (("events", events_failed), ("offers", offers_failed)):
-    print(f"{name}: {'FAIL: ' + failed if failed else 'pass'}")
-sys.exit(1 if events_failed or offers_failed else 0)
+print(f"events: {'FAIL: ' + events_failed if events_failed else 'pass'}")
+sys.exit(1 if events_failed else 0)
 PY

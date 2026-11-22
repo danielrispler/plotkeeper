@@ -301,8 +301,7 @@ function applySettings(files: SettingsFiles) {
   else document.documentElement.style.setProperty("--term-size", `${size}px`);
   layout();
   const { model, effort, on_open: onOpen } = settings.summaries;
-  const selfTest = Date.parse(settings.quiz_self_test ?? "");
-  invoke("summary_settings", { model, effort, onOpen, selfTest: Number.isNaN(selfTest) ? null : selfTest }).catch(failure("summary_settings"));
+  invoke("summary_settings", { model, effort, onOpen }).catch(failure("summary_settings"));
   invoke("check_lists", { lists: settings.checks }).catch(failure("check_lists"));
   window.dispatchEvent(new Event("settings"));
 }

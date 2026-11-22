@@ -229,7 +229,7 @@ fn design_store(dir: &std::path::Path) -> Mutex<CardStore> {
 }
 
 fn design_of(store: &Mutex<CardStore>) -> Vec<(String, String)> {
-    let design = store.lock().unwrap().session_cards("sess", 0).design;
+    let design = store.lock().unwrap().session_cards("sess").design;
     design.into_iter().map(|l| (l.text, l.cite)).collect()
 }
 
@@ -304,7 +304,7 @@ fn design_is_written_again_only_when_its_sources_changed_and_not_without_any() {
         store
             .lock()
             .unwrap()
-            .session_cards("other", 0)
+            .session_cards("other")
             .design
             .is_empty()
     );

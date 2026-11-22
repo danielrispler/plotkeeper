@@ -67,8 +67,6 @@ pub struct Studio {
     /// Where the next log line starts in the event log, in bytes: every line given to `replay`,
     /// `apply` or `apply_with_changes` moves it, as the shell reads the log from its start.
     log_end: u64,
-    /// The turns the replay saw end with both trees, for `backfill`.
-    ended: Vec<Backfill>,
     /// How long each command of checks ran when it did not fail (danielrispler/Falinks#461, decision 13).
     durations: checks::Durations,
     /// The row of each session that continues another after a `/clear`, by its own id (danielrispler/Falinks#461,
@@ -222,10 +220,6 @@ pub struct Session {
     /// Its latest `Stop` listed background tasks.
     #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     background: bool,
-    /// The cards that long checks requested at their start, whose guess their result settles
-    /// (danielrispler/Falinks#461, decision 15), oldest first.
-    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
-    pub check_cards: Vec<CheckCard>,
     /// The tool calls whose `PreToolUse` landed and whose `PostToolUse` has not.
     #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     running: Vec<Call>,
@@ -475,20 +469,6 @@ struct Since {
 
 /// 20 minutes, a starting guess (danielrispler/Falinks#369, decision 11 and Further Notes).
 const FALLBACK_MS: u64 = 20 * 60 * 1000;
-
-/// A check a `PreToolUse` starts (`Studio::check_start`): its whole command, and its typical duration
-/// (`Studio::typical`).
-struct CheckStart {
-    command: String,
-    typical: Option<u64>,
-}
-
-impl CheckStart {
-    /// It usually takes over 2 minutes, so it gets a card at its start (danielrispler/Falinks#461, decision 15).
-    fn long(&self) -> bool {
-        checks::is_long(self.typical)
-    }
-}
 
 /// A prompt of a session (danielrispler/Falinks#369, decision 7), received at `at`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1366,16 +1346,6 @@ impl Session {
         self.turns[turn].checks = found;
     }
 
-    /// Settles what the check cards wait on: the checks of their calls that ended.
-    fn settle_cards(&mut self, list: &[String]) {
-        for card in self.check_cards.iter_mut().filter(|c| !c.ended) {
-            let row = self.ledger.row(None, &card.call);
-            if let Some(passed) = row.and_then(|row| checks::settled(row, list)) {
-                (card.ended, card.passed) = (true, passed);
-            }
-        }
-    }
-
     /// Whether subagent `id` gets cards of its own: a worker in a worktree of its own.
     fn has_cards(&self, id: &str) -> bool {
         self.subagent(id)
@@ -1443,7 +1413,6 @@ impl Session {
             changed_by: since.by,
             workers: since.cards,
             check: None,
-            ends: BTreeMap::new(),
             asks: self.needs_you(),
         }
     }
@@ -1514,64 +1483,6 @@ impl Session {
     fn ledger_turn(&self, agent: &Option<String>) -> Option<usize> {
         let spawned = agent.as_deref().and_then(|a| self.subagent(a)?.turn);
         spawned.or_else(|| self.current_turn())
-    }
-
-    /// The turn of this session's rail that worker card `request` belongs to (danielrispler/plotkeeper#212): while the
-    /// worker runs, the turn that spawned it or, after a resume, the turn that resumed it; once it ended, the turn
-    /// opened by the wake-up that reports the card's latest end, or the spawning turn until that wake-up arrives.
-    pub fn worker_card_turn(&self, request: &CardRequest) -> Option<usize> {
-        let worker = self.subagent(request.agent.as_deref()?)?;
-        let at = card_time(&request.id);
-        let mut ends: Vec<u64> = worker
-            .ends
-            .iter()
-            .chain(worker.ended_at.iter())
-            .copied()
-            .collect();
-        ends.sort_unstable();
-        ends.dedup();
-        let ends: Vec<u64> = ends.into_iter().filter(|end| *end <= at).collect();
-        let resumed = worker
-            .resumes
-            .iter()
-            .filter(|(r, _)| *r <= at)
-            .max_by_key(|(r, _)| *r);
-        let Some(&end) = ends.last() else {
-            return worker.turn;
-        };
-        if let Some((resumed_at, turn)) = resumed
-            && *resumed_at > end
-        {
-            return turn.or(worker.turn);
-        }
-        // Each end takes the first wake-up that names the worker after the end before it and the wake-up that one took:
-        // a wake-up may land a little before its end is recorded, as the async `SubagentStop` is.
-        let wake_ups: Vec<&Prompt> = (self.prompts.iter())
-            .filter(|p| {
-                matches!(p.sender, Sender::WakeUp(_))
-                    && matches!(
-                        claude::names(&p.text, &worker.agent.id),
-                        claude::Names::WakeUp
-                    )
-            })
-            .collect();
-        let mut taken = 0;
-        let mut found = None;
-        for after in std::iter::once(0)
-            .chain(ends.iter().copied())
-            .take(ends.len())
-        {
-            found = wake_ups
-                .iter()
-                .enumerate()
-                .skip(taken)
-                .find(|(_, p)| p.at >= after)
-                .map(|(i, p)| (i, p.turn));
-            if let Some((i, _)) = found {
-                taken = i + 1;
-            }
-        }
-        found.and_then(|(_, turn)| turn).or(worker.turn)
     }
 
     /// The index of its latest turn, which a check, subagent or question that starts now is in.
@@ -1683,29 +1594,6 @@ impl Session {
             _ => u64::MAX,
         };
         (since, until)
-    }
-
-    /// The backfill of its turn ended at `at` with the hook's trees `ends`: `None` when no worktree
-    /// has a start tree and another end tree.
-    fn backfill(&self, ends: &BTreeMap<String, String>, at: u64) -> Option<Backfill> {
-        let trees: Vec<Trees> = ends
-            .iter()
-            .filter_map(|(root, end)| {
-                let start = self.trees.get(root).filter(|start| *start != end)?;
-                let (root, start, end) = (root.clone(), start.clone(), end.clone());
-                Some(Trees { root, start, end })
-            })
-            .collect();
-        let daniels = self.prompts.iter().rfind(|p| p.sender.is_daniels());
-        let request = CardRequest {
-            session_id: self.agent.id.clone(),
-            id: card_id(&self.agent.id, at),
-            prompt: daniels.map(|p| p.at),
-            // The blocks the replay saw only: a resumed terminal state is not about this turn.
-            asks: !self.blocks.is_empty(),
-            ..CardRequest::default()
-        };
-        (!trees.is_empty()).then_some(Backfill { request, trees })
     }
 
     /// Ends its turn's span and its step's at `at`, when they run.
@@ -2021,10 +1909,6 @@ pub struct CardRequest {
     /// `None` for any other card.
     #[serde(default)]
     pub check: Option<String>,
-    /// The end tree of each worktree the card's turn touched, by root, which the shell fills in before the
-    /// writer runs: where the card's code is pulled from (danielrispler/plotkeeper#121).
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub ends: BTreeMap<String, String>,
     /// Whether the turn ended in Needs you, as the core recorded at its end: a Quiz is never beside a decision
     /// (danielrispler/plotkeeper#257). A request stored before this reads as "did not".
     #[serde(default)]
@@ -2110,14 +1994,6 @@ pub fn wants_summary(reply: &str, asks: bool) -> bool {
         || last.is_some_and(|l| l.ends_with('?'))
 }
 
-/// A turn that ended with no card, as the replay saw it (danielrispler/Falinks#486): its card request with no change,
-/// and its worktrees' trees, whose diffs the shell joins into the change.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Backfill {
-    pub request: CardRequest,
-    pub trees: Vec<Trees>,
-}
-
 /// The git trees the hook recorded for worktree `root` at a turn's start and end, which differ.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Trees {
@@ -2148,19 +2024,6 @@ pub struct Fingerprint {
     /// When the turn or worker `key` names began, in Unix milliseconds: a worktree made after that is the
     /// agent's own creation, one made before it is not (danielrispler/plotkeeper#204). `None` when it does not say.
     pub began: Option<u64>,
-}
-
-/// The card a long check's start requested (danielrispler/Falinks#461, decision 15), and how the check ended.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct CheckCard {
-    /// The card's id (`CardRequest::id`).
-    pub card: String,
-    /// The check's call: its row in the ledger.
-    call: String,
-    /// Whether the check ended, so that its result settles the guess.
-    pub ended: bool,
-    /// Whether it passed, when its exit code says (the check model's rule); `None` otherwise.
-    pub passed: Option<bool>,
 }
 
 /// The worktree a card's change starts from (danielrispler/Falinks#369, decision 10): the session's previous card, or its
@@ -2354,8 +2217,7 @@ impl Studio {
         });
         event.map_or_else(Vec::new, |mut event| {
             event.session_id = self.row(&event);
-            let long_check = self.check_start(&event).is_some_and(|start| start.long());
-            self.looks(&event, long_check)
+            self.looks(&event)
         })
     }
 
@@ -2396,8 +2258,8 @@ impl Studio {
 
     /// The fingerprints before `event`: its own (`look`), and the end of each worker with cards that
     /// it ends, by any signal (danielrispler/Falinks#434, decision 19).
-    fn looks(&self, event: &Event, long_check: bool) -> Vec<Fingerprint> {
-        let mut looks = self.look(event, long_check);
+    fn looks(&self, event: &Event) -> Vec<Fingerprint> {
+        let mut looks = self.look(event);
         let Some(session) = self.sessions.get(&event.session_id) else {
             return looks;
         };
@@ -2448,7 +2310,7 @@ impl Studio {
     /// worker's after each Bash step, for a commit; and a worker's end. On a step 20 minutes after
     /// the last card of the worktree it is in, that worktree's, for the fallback card; a session's
     /// only in a turn. A helper's look after its Bash step comes beside such a fallback's.
-    fn look(&self, event: &Event, long_check: bool) -> Vec<Fingerprint> {
+    fn look(&self, event: &Event) -> Vec<Fingerprint> {
         let step = event.tool_ends();
         let due = |since: &Since| step && event.studio_received_ms >= since.at + FALLBACK_MS;
         let session = self.sessions.get(&event.session_id);
@@ -2486,11 +2348,9 @@ impl Studio {
             }
             let purpose = match ends {
                 true => Some(Purpose::TurnEnd),
-                // A long check's start cards the change so far, as a fallback would (danielrispler/Falinks#461,
-                // decision 15).
-                false => {
-                    (session.is_some_and(session_due) || long_check).then_some(Purpose::Fallback)
-                }
+                false => session
+                    .is_some_and(session_due)
+                    .then_some(Purpose::Fallback),
             };
             let mut looks: Vec<Fingerprint> = purpose
                 .into_iter()
@@ -2724,12 +2584,7 @@ impl Studio {
             }
             return Vec::new();
         }
-        let start = self.check_start(&event);
-        let long_check = start.as_ref().filter(|start| start.long());
-        let looks = self.looks(&event, long_check.is_some());
-        let long_check = long_check.map(|start| start.command.clone());
-        // The card a long check's start requests, which its line keeps.
-        let mut check_card = None;
+        let looks = self.looks(&event);
         let touches = self.touches(&event);
         let command = event.tool().and_then(|t| t.command.as_deref());
         let called = if event.tool().is_some() {
@@ -2881,10 +2736,6 @@ impl Studio {
             if event.capabilities.turn_trees {
                 session.keep_end_trees(&event.studio_turn_end);
             }
-            if replay {
-                self.ended
-                    .extend(session.backfill(&event.studio_turn_end, at));
-            }
         }
         if starts {
             session.turn.clone_from(&event.prompt_id);
@@ -2964,12 +2815,7 @@ impl Studio {
                 }
             }
             if !worker || session.has_cards(&look.key) {
-                let mut request = session.card(&look.key, Some(found), at);
-                // At a long check's start, the session's own look is the check's card.
-                if !worker && long_check.is_some() {
-                    request.check.clone_from(&long_check);
-                    check_card.get_or_insert_with(|| request.id.clone());
-                }
+                let request = session.card(&look.key, Some(found), at);
                 if worker {
                     session.agent.since.cards.push(request.id.clone());
                 }
@@ -3073,7 +2919,6 @@ impl Studio {
                 Happened::CommandBlocked { tool, id, reason } => {
                     let command = tool.command.clone().unwrap_or_default();
                     // The blocked call never ran, so it is no run of a check.
-                    session.check_cards.retain(|c| c.call != *id);
                     session.ledger.block(event.agent_id.as_deref(), id);
                     let turn = session.ledger.row(event.agent_id.as_deref(), id);
                     let turn = turn
@@ -3226,7 +3071,6 @@ impl Studio {
                             if let Some(turn) = row.turn.filter(|t| *t < session.turns.len()) {
                                 session.recheck(turn, list, &self.roots, &self.durations);
                             }
-                            session.settle_cards(list);
                         }
                     }
                     session.work.prompt(prompt, at);
@@ -3258,10 +3102,6 @@ impl Studio {
                     let output = session.end_turn(changes.remove(&session.agent.id), at);
                     if in_turn && event.capabilities.turn_trees {
                         session.keep_end_trees(&event.studio_turn_end);
-                    }
-                    if replay && in_turn {
-                        self.ended
-                            .extend(session.backfill(&event.studio_turn_end, at));
                     }
                     if !session.versioned
                         && event.capabilities.transcript_version
@@ -3372,15 +3212,6 @@ impl Studio {
                         session
                             .work
                             .call(tool, at, self.check_lists.of(&session.cwd));
-                        // The card a long check's start requested is settled by its result.
-                        if let Some(card) = check_card.take() {
-                            session.check_cards.push(CheckCard {
-                                card,
-                                call: event.call_id().into(),
-                                ended: false,
-                                passed: None,
-                            });
-                        }
                     }
                     let call = Call {
                         id: id.clone(),
@@ -3572,7 +3403,6 @@ impl Studio {
                         self.durations
                             .record(list, command, ended.saturating_sub(began));
                     }
-                    session.settle_cards(list);
                 }
                 _ => {}
             }
@@ -3670,21 +3500,10 @@ impl Studio {
     }
 
     /// Takes one event log line replayed at app start. It updates state exactly like `apply` and
-    /// requests nothing, so turns that ended while the app was down get no cards and no notices
-    /// here; `backfill` then asks for their cards.
+    /// requests nothing, so turns that ended while the app was down get no summaries and no notices
+    /// here.
     pub fn replay(&mut self, line: &str) {
         self.take(line, BTreeMap::new(), true);
-    }
-
-    /// After the replay, the turns that ended in the 24 hours before `now` with a change between
-    /// the hook's trees and no card among `cards` (danielrispler/Falinks#486). Each is returned once.
-    pub fn backfill(&mut self, now: u64, cards: &[CardRequest]) -> Vec<Backfill> {
-        let since = now.saturating_sub(24 * 60 * 60 * 1000);
-        let ended = std::mem::take(&mut self.ended).into_iter();
-        let ended = ended.filter(|b| card_time(&b.request.id) >= since);
-        ended
-            .filter(|b| cards.iter().all(|c| c.id != b.request.id))
-            .collect()
     }
 
     /// The trees the hook recorded of worktree `root` for turn `turn` of `session`: its start, and its end once the
@@ -3699,17 +3518,6 @@ impl Studio {
         let (start, end) = session.turns.get(turn)?.trees.get(root)?.clone();
         let open = session.open_roots().contains(&(turn, root.into()));
         Some((start, end.filter(|_| !open)))
-    }
-
-    /// The end tree of each worktree of the turn that `request`'s card belongs to, by root: the latest turn started
-    /// by the card's time, and only the worktrees it has ended in (danielrispler/plotkeeper#121).
-    pub fn card_ends(&self, request: &CardRequest) -> BTreeMap<String, String> {
-        let at = card_time(&request.id);
-        let turns = self.session(&request.session_id).map(|s| s.turns.iter());
-        let turn = turns.and_then(|mut turns| turns.rfind(|t| t.started_at <= at));
-        let trees = turn.into_iter().flat_map(|t| t.trees.iter());
-        let ends = trees.filter_map(|(root, (_, end))| Some((root.clone(), end.clone()?)));
-        ends.collect()
     }
 
     /// The turns whose files the shell should diff now, newest first, at most `limit`
@@ -4546,22 +4354,6 @@ impl Studio {
     /// of a session working in `cwd`.
     pub fn typical(&self, cwd: &str, command: &str) -> Option<u64> {
         self.durations.typical(self.check_lists.of(cwd), command)
-    }
-
-    /// The check `event` starts: a new Bash call of its session's own agent that runs a check. A
-    /// subagent's checks are not recorded, so they get no line and no card.
-    fn check_start(&self, event: &Event) -> Option<CheckStart> {
-        let tool = event.tool()?;
-        let command = tool.command.as_deref()?;
-        let session = self.sessions.get(&event.session_id);
-        let known = session.is_some_and(|s| s.ledger.row(None, event.call_id()).is_some());
-        let start = event.tool_starts() && event.agent_id.is_none();
-        let list = self.check_lists.of(session.map_or("", |s| &s.cwd));
-        let is_check = matched(list, command).is_some();
-        (start && tool.kind == ToolKind::Command && is_check && !known).then(|| CheckStart {
-            command: command.into(),
-            typical: self.typical(session.map_or("", |s| &s.cwd), command),
-        })
     }
 
     /// Session `id`'s row: its own, or the row it continues after a `/clear`.

@@ -23,7 +23,6 @@ test("summaries on open are written one at a time, in the order asked, newest fi
 
 const html = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
 const rail = html.slice(html.indexOf('<aside class="rail"'), html.indexOf("</aside>"));
-const card = (at) => ({ request: { id: `s@${at}` } });
 const turn = (started_at, prompt) => ({ started_at, ended_at: null, prompt, id: null, message: null });
 
 test("the rail is the dock, the intention and the feed; the newest card is inside its turn", () => {
@@ -33,7 +32,7 @@ test("the rail is the dock, the intention and the feed; the newest card is insid
   assert.ok(!rail.includes('id="now-card"'));
 });
 
-test("a card belongs to the turn it was written in, by its id's time", () => {
+test("an event id's time places it in a turn, as a design line's citation of an older card does", () => {
   const turns = [turn(10, "a"), turn(20, "b")];
   assert.equal(cardTime("477b6b89-5461@1793715833094"), 1793715833094);
   assert.equal(turnAt(turns, 5), null);
@@ -41,24 +40,22 @@ test("a card belongs to the turn it was written in, by its id's time", () => {
   assert.equal(turnAt(turns, 25), 1);
 });
 
-test("turns render newest first, each with its cards, subagents and questions", () => {
+test("turns render newest first, each with its subagents and questions", () => {
   const turns = [turn(10, "Fix the parser"), turn(20, "worker w1 returned"), turn(30, "Open the PR")];
   const agents = [{ id: "w1", started_at: 11, turn: 0 }];
   const questions = [{ tool_use_id: "q1", answer: "not_answered", turn: 1 }];
-  const feed = feedTurns(turns, { cards: [card(15), card(35)], agents, questions });
+  const feed = feedTurns(turns, { agents, questions });
   assert.deepEqual(feed.map((b) => b.turn.prompt), ["Open the PR", "worker w1 returned", "Fix the parser"]);
-  assert.deepEqual(feed[0].cards.map((c) => c.request.id), ["s@35"]);
   assert.deepEqual(feed[1].questions.map((q) => q.tool_use_id), ["q1"]);
   assert.deepEqual(feed[2].agents.map((a) => a.id), ["w1"]);
-  assert.deepEqual(feed[2].cards.map((c) => c.request.id), ["s@15"]);
 });
 
-test("what started in no turn, such as a subagent's cards, goes in one last block", () => {
-  const feed = feedTurns([], { cards: [card(1), card(2)], agents: [], questions: [] });
+test("what started in no turn, such as a subagent's question, goes in one last block", () => {
+  const feed = feedTurns([], { agents: [], questions: [{ tool_use_id: "q1", answer: "not_answered", turn: null }] });
   assert.equal(feed.length, 1);
   assert.equal(feed[0].turn, null);
-  assert.deepEqual(feed[0].cards.map((c) => c.request.id), ["s@2", "s@1"]);
-  assert.deepEqual(feedTurns([], { cards: [], agents: [], questions: [] }), []);
+  assert.deepEqual(feed[0].questions.map((q) => q.tool_use_id), ["q1"]);
+  assert.deepEqual(feedTurns([], { agents: [], questions: [] }), []);
 });
 
 const summary = { summary: { summary: "Fixed the lint.\nThe test reads the token.\nNot checked: the strip.", quiz: null } };
@@ -114,16 +111,15 @@ test("the block a session needs Daniel for is named by its kind", () => {
   assert.equal(blockKind([], { tool_name: "Bash" }), "permission");
 });
 
-test("a folded turn's line holds the prompt and Headline, a dot for an open Quiz, a mark for a failed check", () => {
+test("a folded turn's line holds the prompt and Headline, and a mark for a failed check", () => {
   const run = (status) => ({ suite: "check", status, retries: 0, runs: [] });
-  const line = (checks, open, headline = "Fixed the parser") =>
-    foldedLine({ prompt: "  Fix the parser\nand the lexer", checks }, headline, open);
-  assert.deepEqual(line([], true), { prompt: "Fix the parser", headline: "Fixed the parser", unanswered: true, failed: false });
-  assert.deepEqual(line([run("failed")], false), { prompt: "Fix the parser", headline: "Fixed the parser", unanswered: false, failed: true });
+  const line = (checks, headline = "Fixed the parser") => foldedLine({ prompt: "  Fix the parser\nand the lexer", checks }, headline);
+  assert.deepEqual(line([]), { prompt: "Fix the parser", headline: "Fixed the parser", failed: false });
+  assert.deepEqual(line([run("failed")]), { prompt: "Fix the parser", headline: "Fixed the parser", failed: true });
   // A failure the agent fixed ends as passed, with its retry: no mark.
-  assert.equal(line([{ ...run("passed"), retries: 1 }], false).failed, false);
-  assert.deepEqual(line([run("ran")], false, null), { prompt: "Fix the parser", headline: null, unanswered: false, failed: false });
-  assert.equal(foldedLine({ prompt: "", checks: [] }, null, false).prompt, "No prompt");
+  assert.equal(line([{ ...run("passed"), retries: 1 }]).failed, false);
+  assert.deepEqual(line([run("ran")], null), { prompt: "Fix the parser", headline: null, failed: false });
+  assert.equal(foldedLine({ prompt: "", checks: [] }, null).prompt, "No prompt");
 });
 
 // A blocked command's card with no button is in the turn of its latest step: its retry's start, else its block.
@@ -133,22 +129,22 @@ const placedCalls = (feed) => feed.map((b) => [b.index, b.blocked.map((c) => c.c
 test("a blocked card is in the turn it was blocked in, also once its retry ran in that turn", () => {
   const turns = [turn(10, "a"), turn(20, "b")];
   const cards = [blocked("c1", 12), blocked("c2", 25, { status: "finished", run_at: 27 })];
-  const feed = feedTurns(turns, { cards: [], agents: [], questions: [], blocked: cards });
+  const feed = feedTurns(turns, { agents: [], questions: [], blocked: cards });
   assert.deepEqual(placedCalls(feed), [[1, ["c2"]], [0, ["c1"]]]);
 });
 
 test("a late Allow whose retry starts in a later turn puts the card in the later turn", () => {
   const turns = [turn(10, "a"), turn(20, "b")];
   const card = blocked("c1", 12, { status: "running", run_at: 22 });
-  const feed = feedTurns(turns, { cards: [], agents: [], questions: [], blocked: [card] });
+  const feed = feedTurns(turns, { agents: [], questions: [], blocked: [card] });
   assert.deepEqual(placedCalls(feed), [[1, ["c1"]], [0, []]]);
 });
 
 test("a blocked card with no turn goes in the last block, as a subagent's view shows its cards", () => {
-  const feed = feedTurns([], { cards: [], agents: [], questions: [], blocked: [blocked("c1", 5), blocked("c2", 6)] });
+  const feed = feedTurns([], { agents: [], questions: [], blocked: [blocked("c1", 5), blocked("c2", 6)] });
   assert.equal(feed.length, 1);
   assert.equal(feed[0].turn, null);
   assert.deepEqual(feed[0].blocked.map((c) => c.call), ["c2", "c1"]);
-  const early = feedTurns([turn(10, "a")], { cards: [], agents: [], questions: [], blocked: [blocked("c3", 5)] });
+  const early = feedTurns([turn(10, "a")], { agents: [], questions: [], blocked: [blocked("c3", 5)] });
   assert.deepEqual(placedCalls(early), [[0, []], [null, ["c3"]]]);
 });

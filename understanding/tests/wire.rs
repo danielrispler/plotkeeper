@@ -1,15 +1,13 @@
-//! The wire's agreement check (#246) for the understanding layer's types: the session list's rows, a session's cards
-//! with its brief, a turn's summary, written into `scripts/wire/understanding.ts`
+//! The wire's agreement check (#246) for the understanding layer's types: the session list's rows, a session's brief and decisions, a turn's summary, written into `scripts/wire/understanding.ts`
 //! (`scripts/wire/samples.rs`). The store's values are built whole, every optional field filled once and left empty
 //! once, so the samples hold every shape; still, an optional field no sample fills is not checked.
 
 use crate::samples::{Sample, json, write};
-use std::collections::{BTreeMap, BTreeSet};
-use studio_core::{Base, CardRequest, FactFile, Facts, Studio, SummaryRequest, TurnFile};
+use studio_core::{FactFile, Facts, Studio, SummaryRequest, TurnFile};
 use studio_understanding::{
-    Answered, Arm, Card, CardStore, CheckResult, Choice, CodeRange, DesignLine, Guess, Level, Line,
-    LineKind, OpenItem, OpenKind, PlacedCard, Quiz, QuizTap, Rating, Reason, RiskLevel, RiskView,
-    Row, SessionCards, StoredCard, StoredSummary, Surface, Tap, TurnSummary, hunk_view,
+    Answered, Arm, CardStore, Choice, DesignLine, Line, LineKind, OpenItem, OpenKind, Quiz,
+    QuizTap, RiskLevel, RiskView, Row, SessionCards, StoredSummary, Surface, Tap, TurnSummary,
+    hunk_view,
 };
 
 const SESSION: &str = "5b9e3d71-0c2a-4f8e-b6d4-8a1c3e5f7092";
@@ -53,87 +51,6 @@ fn taps() -> Vec<QuizTap> {
     taps.into_iter()
         .map(|tap| QuizTap { tap, at: AT })
         .collect()
-}
-
-/// A card with every field filled, and one with every optional field empty.
-fn cards() -> [StoredCard; 2] {
-    let request = CardRequest {
-        session_id: SESSION.into(),
-        id: "toolu_01A".into(),
-        base: Base {
-            head: Some("5f0c1e2d9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d".into()),
-            files: vec!["README.md".into()],
-        },
-        change: Some("--- a/src/lib.rs\n+++ b/src/lib.rs\n".into()),
-        prompt: Some(AT),
-        agent: Some("a1b2c3".into()),
-        changed_by: BTreeMap::from([("d4e5f6".into(), BTreeSet::from(["src/lib.rs".into()]))]),
-        workers: vec!["a1b2c3".into()],
-        check: Some("cargo test".into()),
-        ends: BTreeMap::from([("/repo".into(), "4b825dc".into())]),
-        asks: true,
-    };
-    let card = Card {
-        explanation: "It reads the log once.".into(),
-        summary: "Reads the log once".into(),
-        paths: vec!["src/lib.rs".into()],
-        code: "fn read() {}".into(),
-        ranges: vec![CodeRange {
-            path: "src/lib.rs".into(),
-            from: 1,
-            to: 3,
-        }],
-        why_it_matters: "A second read doubles the rows.".into(),
-        not_checked: "A log over 1 GB.".into(),
-        architecture: Some("The core owns the log.".into()),
-        quiz: Some(quiz()),
-    };
-    let full = StoredCard {
-        request: request.clone(),
-        card: card.clone(),
-        added_at: Some(AT),
-        shown_at: Some(AT),
-        guess: Some(Guess {
-            option: 1,
-            right: Some(true),
-            at: AT,
-        }),
-        key_wrong: true,
-        more: Some("More on it.".into()),
-        rating: Some(Rating {
-            level: Level::Fair,
-            reasons: vec![
-                Reason::Unclear,
-                Reason::Wrong,
-                Reason::TooShallow,
-                Reason::TooEasy,
-            ],
-        }),
-        check_result: Some(CheckResult::NotCounted),
-        taps: taps(),
-    };
-    let bare = StoredCard {
-        request: CardRequest {
-            session_id: SESSION.into(),
-            id: "toolu_01B".into(),
-            ..CardRequest::default()
-        },
-        card: Card {
-            ranges: Vec::new(),
-            architecture: None,
-            quiz: None,
-            ..card
-        },
-        added_at: None,
-        shown_at: None,
-        guess: None,
-        key_wrong: false,
-        more: None,
-        rating: None,
-        check_result: None,
-        taps: Vec::new(),
-    };
-    [full, bare]
 }
 
 /// A turn's summary with its request, facts and Quiz, and one stored before the Headline and lines.
@@ -230,8 +147,7 @@ fn the_wire_samples_of_the_understanding_layer_are_written_for_tsc() {
 
     // A session's cards: the store's own, and one with every slot filled.
     let session = studio.sessions()[0];
-    samples.push(("SessionCards", json(store.rail_cards(session, AT))));
-    let [full, bare] = cards();
+    samples.push(("SessionCards", json(store.session_cards(&session.agent.id))));
     let kinds = [
         OpenKind::Question,
         OpenKind::Check,
@@ -261,18 +177,6 @@ fn the_wire_samples_of_the_understanding_layer_are_written_for_tsc() {
             text: "One read per start".into(),
             cite: "toolu_01A".into(),
         }],
-        recent: vec![full.clone(), bare.clone()],
-        older: vec![bare.clone()],
-        workers: vec![
-            PlacedCard {
-                card: full,
-                turn: Some(0),
-            },
-            PlacedCard {
-                card: bare,
-                turn: None,
-            },
-        ],
         decisions,
         // A card's note on its way, one that arrived and one that is not coming.
         risk_notes: vec![
@@ -298,9 +202,6 @@ fn the_wire_samples_of_the_understanding_layer_are_written_for_tsc() {
         }],
     };
     let shown = json(shown);
-    for card in shown["recent"].as_array().unwrap() {
-        samples.push(("StoredCard", card.clone()));
-    }
     for item in &open {
         samples.push(("OpenItem", json(item)));
     }
@@ -322,14 +223,7 @@ fn the_wire_samples_of_the_understanding_layer_are_written_for_tsc() {
         )),
     ));
 
-    let types = [
-        "Session",
-        "SessionCards",
-        "StoredCard",
-        "OpenItem",
-        "TurnSummary",
-        "Hunk",
-    ];
+    let types = ["Session", "SessionCards", "OpenItem", "TurnSummary", "Hunk"];
     write(
         env!("CARGO_MANIFEST_DIR"),
         "understanding",

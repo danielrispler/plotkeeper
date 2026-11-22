@@ -203,63 +203,10 @@ export type Session = {
 };
 // What happened in a session since Daniel looked (danielrispler/plotkeeper#124).
 export type Since = { turns: number; files: number; passed: number; failed: number; ran: number };
-// The shell sends a card's request without its diff and base, which the pane never reads. `prompt` is when the
-// prompt it is on arrived; `agent` is the worker whose card it is; `changed_by` holds the files other subagents edited
-// in its worktree, by subagent; `workers` the workers whose changes it covers. `check` is the command of the check whose
-// start requested the card (danielrispler/Falinks#476).
-export type CardRequest = {
-  session_id: string;
-  id: string;
-  prompt?: number | null;
-  agent: string | null;
-  changed_by: Record<string, string[]>;
-  workers?: string[];
-  check: string | null;
-};
-// A check's result, which settles the guess on its card; null while the check runs.
-export type CheckResult = "passed" | "failed" | "not_counted";
-// A card's multiple-choice question; `key` is the right option, counting from 0.
+// A multiple-choice question as the store kept it on a summary written before #347; `key` is the right option, counting from 0.
 export type Quiz = { text: string; options: { text: string; why: string }[]; key: number };
-// `architecture` is null when the change is not structural.
-export type Card = {
-  summary: string;
-  explanation: string;
-  paths: string[];
-  code: string;
-  // The line ranges `code` was pulled from; absent when the writer named none.
-  ranges?: { path: string; from: number; to: number }[];
-  why_it_matters: string;
-  not_checked: string;
-  architecture: string | null;
-  quiz: Quiz | null;
-};
-// Daniel's tap on a quiz, graded by the writer's key; on a check's card by its result, so `right`
-// is null until the result settles it, and stays null when the result does not say (danielrispler/Falinks#476).
-export type Guess = { option: number; right: boolean | null; at: number };
-// Daniel's rating of a card's explanation. His fifth reason, "the key is wrong", is `key_wrong`, the
-// one record the quiz's flag also sets.
-export type Level = "good" | "fair" | "poor";
-export type Reason = "unclear" | "wrong" | "too_shallow" | "too_easy";
-export type Rating = { level: Level; reasons: Reason[] };
-// The store also records when the quiz showed; the pane never shows it, nor any rate. `more` is the
-// longer explanation from "explain more".
-export type StoredCard = {
-  request: CardRequest;
-  card: Card;
-  // When it reached the store; null in a store from before the time was kept.
-  added_at?: number | null;
-  guess: Guess | null;
-  key_wrong: boolean;
-  more: string | null;
-  rating: Rating | null;
-  check_result: CheckResult | null;
-  taps?: QuizTap[];
-  // When the pane first drew the card's Quiz; null until it did (the store's `shown` tap).
-  shown_at?: number | null;
-};
-// What Daniel did with a Quiz, each with its time (danielrispler/plotkeeper#120). The window sends only "Show the rest anyway" and the
-// chips of a card's Quiz; the rest (a pick, the trial's two, "shown", "hunk", "not_now") are what the retired turn Quiz, Home and the
-// Retests wrote, which the store still reads (#347).
+// What Daniel did with a Quiz, each with its time (danielrispler/plotkeeper#120): what the retired turn Quiz, cards, Home and the
+// Retests wrote, which the store still reads (#347, #348). The window sends none.
 export type Tap =
   | { kind: "pick"; option: number }
   | { kind: "confidence"; sure: boolean; surface?: "home" }
@@ -267,8 +214,6 @@ export type Tap =
   | { kind: "shown" | "hunk" }
   | { kind: "skip" | "understood" | "explain_more" | "key_wrong" | "not_now" };
 export type QuizTap = Tap & { at: number };
-// The selected session's brief, and its cards, split at 30 minutes by the shell's tick, each oldest
-// first.
 // An answered question, plan or permission in the session's decision history (danielrispler/Falinks#479): the call's input,
 // Daniel's answers by question text or "allow"/"deny", when, and where he answered.
 export type Decision = {
@@ -310,8 +255,8 @@ export type BlockedCommand = {
   exit_code?: number | null;
   task?: string | null;
 };
-// A turn's summary (danielrispler/Falinks#526) and, unless the turn has a card, its Quiz, as the store keeps it; a
-// learning section stored before danielrispler/plotkeeper#118 reads as its question.
+// A turn's summary (danielrispler/Falinks#526), as the store keeps it; a Quiz stored before #347 and a learning section stored
+// before danielrispler/plotkeeper#118 read as the old Quiz.
 // `headline` and `lines` are the turn writer's Headline and typed Body lines (danielrispler/plotkeeper#115); a summary stored
 // before them has neither, and its `summary` text reads as a Headline and `reported` lines.
 export type SummaryLine = { kind: "why" | "reported" | "open" | "ask"; text: string };
@@ -345,16 +290,13 @@ export type OpenItem = {
 };
 // A line of "Design so far" (danielrispler/plotkeeper#123): a decision with its reason, and the id of the turn or card it came from.
 export type DesignLine = { text: string; cite: string };
+// The selected session's brief, decision history and the risk notes of its blocked commands.
 export type SessionCards = {
   brief: string | null;
   goal: string | null;
   answers: { question: string; reply: string }[];
   open: OpenItem[];
   design: DesignLine[];
-  recent: StoredCard[];
-  older: StoredCard[];
-  // A session's workers' cards, each with the turn of its rail it belongs to (danielrispler/plotkeeper#212).
-  workers: PlacedCard[];
   decisions: Decision[];
   // What each blocked command's card shows of its risk note, by the card's call id (danielrispler/plotkeeper#298).
   risk_notes: RiskView[];
@@ -368,7 +310,6 @@ export type RiskView =
   | { call: string; state: "reading" }
   | { call: string; state: "failed" }
   | { call: string; state: "arrived"; level: RiskLevel; line: string; at?: number };
-export type PlacedCard = { card: StoredCard; turn: number | null };
 // What a call asks Daniel, by its tool, as the answer hook's `Kind`: a question, a plan, or any other
 // tool's permission.
 export type AskKind = "question" | "plan" | "permission";
@@ -539,14 +480,10 @@ export interface Commands {
   create_task: Workspace;
   delete_merged_branch: void;
   delete_session: void;
-  explain_more: string | null;
   failed_check_name: string;
   fetch_repository: void;
   fix_agy_plugin_setup: void;
   fix_plugin_setup: void;
-  guess: void;
-  hunk_opened: void;
-  key_wrong: void;
   map_place: Record<string, string[]>;
   map_save_positions: UserMap;
   map_set_tier: UserMap;
@@ -574,9 +511,7 @@ export interface Commands {
   plugin_setup: string | null;
   projects: string[];
   pull_main: void;
-  quiz_tap: void;
   rail_shown: void;
-  rate: void;
   refresh_landed_tasks: void;
   reveal_log: void;
   remove_project: string[];
@@ -593,7 +528,6 @@ export interface Commands {
   sessions: Session[];
   set_zoom: void;
   settings_files: SettingsFiles;
-  shown: void;
   skills: Skill[];
   sounds: void;
   subagent_log: SubagentLog | null;
