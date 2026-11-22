@@ -541,7 +541,7 @@ body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
 .decisions ol { list-style: none; margin: var(--sp-3) 0 0; padding: 0; }
 .decisions li { border-left: var(--mark) solid var(--line); padding: var(--sp-1) 0 var(--sp-3) var(--sp-4); margin: 0 0 var(--sp-3); }
 .decisions li p { margin: var(--sp-1) 0 0; overflow-wrap: anywhere; }
-.decisions .kind, .decisions .when, .decisions .options { color: var(--muted); font-size: var(--size-small); }
+.decisions .kind, .decisions .when, .decisions .options, .decisions .risk { color: var(--muted); font-size: var(--size-small); }
 .decisions .asked, .decisions .answer { font-size: var(--size-read); }
 .decisions .answer { font-weight: 600; }
 .decisions .cleared { border-left-style: dashed; }

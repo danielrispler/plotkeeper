@@ -363,9 +363,11 @@ export type SessionCards = {
   decisions: Decision[];
   // What each blocked command's card shows of its risk note, by the card's call id (danielrispler/plotkeeper#298).
   risk_notes: RiskView[];
+  // The note of each Bash decision in the history, by the decision's call; the window compares its `at` with the answer's (danielrispler/plotkeeper#299).
+  decision_notes: RiskView[];
 };
 // A blocked command's risk note as the shell joins it to its card: on its way, not coming (a timeout, an unreadable reply or
-// no card writer), or arrived. The shell also sends when it arrived, which the window never reads.
+// no card writer), or arrived. The shell also sends when it arrived, which only the decision history reads.
 export type RiskLevel = "none" | "low" | "medium" | "high" | "very_high" | "not_sure";
 export type RiskView =
   | { call: string; state: "reading" }

@@ -364,7 +364,7 @@ export function showCards(cards: SessionCards) {
   const notes = JSON.stringify(cards.risk_notes) !== JSON.stringify(studio.cards.risk_notes);
   studio.cards = cards;
   showBrief(cards);
-  showDecisions(cards.decisions);
+  showDecisions(cards.decisions, cards.decision_notes);
   // A card drawn in a visible window is tapped before a switch of session drops it.
   markShown();
   const ids = new Set([...cards.recent, ...cards.older, ...cards.workers.map(({ card }) => card)].map(({ request }) => request.id));

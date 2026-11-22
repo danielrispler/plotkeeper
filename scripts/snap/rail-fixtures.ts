@@ -250,7 +250,7 @@ const build = (state: SessionState, { ask = null as Ask | null, answered = false
     ...common,
     sessions,
     selected: { session: s, agent: null },
-    cards: { brief: null, goal: withBrief ? goal : null, answers: withBrief ? answers : [], open: withBrief ? open : [], design: withBrief ? design.map((line) => ({ ...line, cite: stored.request.id })) : [], recent: [], older: [stored], workers: [], decisions: withBrief ? decisions : [], risk_notes: [] },
+    cards: { brief: null, goal: withBrief ? goal : null, answers: withBrief ? answers : [], open: withBrief ? open : [], design: withBrief ? design.map((line) => ({ ...line, cite: stored.request.id })) : [], recent: [], older: [stored], workers: [], decisions: withBrief ? decisions : [], risk_notes: [], decision_notes: [] },
     watch: ask,
     ask_facts: {
       sections: [
@@ -522,7 +522,7 @@ const dockScript = `
 // the three: each run logs where the buttons are in the dock, and the screenshots are compared.
 const riskNote = (note: RiskView | null) => {
   const fixture = withBlocked("your_turn", (at) => blockedCommand("blocked", at), riskScript);
-  return { ...fixture, cards: { ...fixture.cards, risk_notes: note ? [note] : [] } };
+  return { ...fixture, cards: { ...fixture.cards, risk_notes: note ? [note] : [], decision_notes: [] } };
 };
 const riskScript = `
   window.__TAURI__.__emit("blocked", [{ nonce: "n1", tool_use_id: "toolu_b1", waiting: true }]);

@@ -3,13 +3,16 @@
 // with the cards, from the store; the markers come with the selection.
 
 import { code, element, fullTitle, prose, text } from "./dom.js";
-import { askKind, type Decision } from "./types.js";
+import { riskLevels } from "./blocked.js";
+import { askKind, type Decision, type RiskView } from "./types.js";
 
 let decisions: Decision[] = [];
 let cleared: number[] = [];
+let notes: RiskView[] = [];
 
-export function showDecisions(list: Decision[]) {
+export function showDecisions(list: Decision[], noted: RiskView[]) {
   decisions = list;
+  notes = noted;
   draw();
 }
 
@@ -34,6 +37,16 @@ export function kindText(decision: Decision): string {
 }
 
 export const sourceText = (decision: Decision) => (decision.source === "card" ? "on the card" : "in the terminal");
+
+// What the history says of a blocked command's risk note beside its answer, or `null` for a decision that is no blocked command's. The note
+// shows only when it arrived strictly before the answer; with the same millisecond, or no time, Daniel is not claimed to have seen it.
+export function riskText(decision: Decision, notes: RiskView[]): string | null {
+  if (decision.tool !== "Bash") return null;
+  const note = notes.find((n) => n.call === decision.call);
+  if (note?.state !== "arrived") return "no risk note";
+  if (note.at === undefined || note.at >= decision.at) return "answered before the risk note arrived";
+  return `Risk: ${riskLevels[note.level]} · ${note.line}`;
+}
 
 const when = (at: number) =>
   new Date(at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -84,5 +97,7 @@ function entry(decision: Decision): HTMLElement {
     item.append(shown);
   }
   item.append(text("p", `Answer: ${answerText(decision)}`, "answer"));
+  const risk = riskText(decision, notes);
+  if (risk !== null) item.append(text("p", risk, "risk"));
   return item;
 }
