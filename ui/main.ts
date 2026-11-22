@@ -9,7 +9,8 @@ import { withWriterNotice } from "./writer-notice.js";
 import { startWatching } from "./answer.js";
 import { openAsk } from "./ask.js";
 import { placeBar, watchBar } from "./bar.js";
-import { markShown, showCards } from "./cards.js";
+import { showCards } from "./cards.js";
+import { recheckSeen } from "./seen.js";
 import { diffRequest, newestDiff } from "./diff.js";
 import { element, failure, invoke, listen, logUncaught } from "./dom.js";
 import { type Actions, doctorEntries, newestUnseen, nextNeedsYou, paletteEntries, run, stepLine, stepSession, titled, windowBinding } from "./keys.js";
@@ -70,6 +71,7 @@ const syncHover = () => {
     if (classList.contains(name) !== machine.open) classList.contains(name) ? machine.toggle() : machine.dismiss();
   }
   const mode = (dataset.layout ?? "full") as LayoutMode;
+  recheckSeen();
   tellShown(railShown(mode, classList.contains("rail-open"), classList.contains("skills-open")), mode === "overlay");
 };
 new MutationObserver(syncHover).observe(document.body, { attributes: true, attributeFilter: ["class", "data-layout"] });
@@ -318,7 +320,9 @@ element("close-all").addEventListener("click", () => blocks().forEach((block) =>
 // The rail's "⋯" menu (danielrispler/Falinks#574) closes once an action in it is chosen.
 element("rail-actions").addEventListener("click", () => element("rail-actions").hidePopover());
 
-document.addEventListener("visibilitychange", markShown);
+document.addEventListener("visibilitychange", recheckSeen);
+window.addEventListener("focus", recheckSeen);
+window.addEventListener("blur", recheckSeen);
 document.addEventListener("visibilitychange", markHomeShown);
 window.addEventListener("focus", markHomeShown);
 window.addEventListener("focus", () => actions["studio::RefreshLanded"]());
