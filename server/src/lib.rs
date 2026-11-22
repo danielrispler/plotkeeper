@@ -335,6 +335,20 @@ pub fn hunk_opened(app: &App, session: String, turn: usize) {
 /// seconds. `None` when the turn has none. A failed write keeps the turn waiting and is an error, so the window asks again
 /// only at the next opening.
 pub fn turn_summary(app: &App, id: String) -> Result<Option<StoredSummary>, String> {
+    // A turn that ended while the app was down, outside the catch-up window, gets its card now.
+    let found = app.core.lock().unwrap().backfill_on_open(&id);
+    if let Some(found) = found {
+        let has_card = app
+            .cards
+            .lock()
+            .unwrap()
+            .cards()
+            .iter()
+            .any(|k| k.request.id == id);
+        if !has_card {
+            app.writing.backfill(vec![found]);
+        }
+    }
     app.writing.opened(&id)
 }
 

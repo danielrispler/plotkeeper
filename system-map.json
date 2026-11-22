@@ -93,6 +93,8 @@
       "text": "A session's pieces are written one at a time, in order." },
     { "id": "old-stored-files-load", "on": "understanding", "backing": "check",
       "text": "A stored file of an older format still loads." },
+    { "id": "replay-never-rewrites", "on": "understanding", "backing": "check",
+      "text": "Replaying the log never rewrites, replaces or deletes a stored card, summary or answer." },
     { "id": "writer-has-no-tools", "on": "understanding", "backing": "check",
       "text": "A change is untrusted text: the writer has no tools." },
     { "id": "delete-keeps-live-terminal", "on": "window", "backing": "check",
