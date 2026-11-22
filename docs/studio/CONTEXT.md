@@ -263,12 +263,28 @@ The window with the session list and the story rail folded, so the terminal take
 _Avoid_: Zen mode, full screen (the macOS window state)
 
 **Map view**:
-The project-scoped view of a project's system map, taking the story rail and terminal column together while keeping the session list and top bar live. Opened from the palette, its key, or the quiet mark on Home's project row; Esc is layered (returns from scrubbed history to live first, then closes an open part sheet, then leaves the map view).
+The project-scoped view of a project's system map, taking the story rail and terminal column together while keeping the session list and top bar live. Opened from the palette, its key, or the quiet mark on Home's project row; Esc is layered, in the order it ships: an open drawer, then a scrubbed commit (back to now), then a part's sheet, then leaving the view. Its **Ready for review** tray lists the PRs of the project that are open and not drafts.
 _Avoid_: Architecture view, graph view
 
 **PR brief**:
-The entered, stepped plain-language explanation of one pull request on the system map, with an understanding check when the change alters a flow or adds a tagged test. Distinct from **Brief** (the session-resume brief in the story rail).
+The stepped plain-language explanation of one pull request on the system map, written when the PR becomes **Ready for review** and kept waiting. A PR that would fog at most two parts is told as a single story; a bigger one in two to four **chapters**. It ends with at most one prediction (the check) when the change alters a flow or adds a tagged test. Distinct from **Brief** (the session-resume brief in the story rail).
 _Avoid_: Brief (alone — that is the session-resume brief), lesson
+
+**Chapter**:
+One behaviour of a chaptered **PR brief**, the kind Daniel would name ("Fog", "Broken laws"), told in three or four steps. It lights every part its behaviour crosses; finishing it clears their fog.
+_Avoid_: Section, step (a step is one line of a chapter)
+
+**Ready for review**:
+A pull request that is open and not a draft. The shell learns it from `gh pr view` at a turn's end, and at window focus and the Map view's opening within one per-repository cooldown; never on a timer. The Map view's "Ready for review" tray lists these PRs.
+_Avoid_: Open PR (a draft is open too), review requested
+
+**Ratify**:
+To accept or overturn a change the agent made to the system map or a law, or a decision it declared, offered in the **PR brief**. A map change nobody has decided on is **not yet ratified**; it is in effect all the same, since ratifying never blocks.
+_Avoid_: Approve (that is the PR review), sign off
+
+**Claim check**:
+The second sandboxed call that checks each claim of a **PR brief** against the same facts the writer had. An item still flagged after one rewrite carries the mark **not confirmed from the facts**.
+_Avoid_: Fact check, verification
 
 **Seen**:
 In the viewport (intersecting visibly, not merely built in the DOM), in a visible and focused window, with the view that holds it open. Used for cards, Home items, and stop-rule counts.
