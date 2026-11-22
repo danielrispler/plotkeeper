@@ -222,6 +222,8 @@ fn an_unknown_state_leaves_the_row_as_it_was() {
 #[test]
 fn a_claude_sessions_state_is_unchanged_by_its_7501_reports() {
     let mut studio = replay(TWO);
+    // Its hook events carry no pid, so a tick this far on idles a session in a turn (#330).
+    studio.tick(T0);
     let before = state(&studio, IN_STUDIO).unwrap();
     let rows = studio.sessions().len();
     let other = if before == State::NeedsYou {

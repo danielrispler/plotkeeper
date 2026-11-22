@@ -29,6 +29,7 @@ import { reload, type SettingsFiles } from "./settings.js";
 import { studio } from "./state.js";
 import { showBarName, showView } from "./story.js";
 import { jumpToNeedsYou, showToast } from "./toast.js";
+import { askOnce, notifyIfAway, type Alert } from "./alerts.js";
 import { finishedNote, showNote, warnContext, watchNotes } from "./notes.js";
 import type { Selection, Session, SessionCards } from "./types.js";
 import { HOVERS } from "./hovers.js";
@@ -308,15 +309,22 @@ invoke("selected").then(show);
 listen<SessionCards>("cards", (cards) => (studio.pending ? (studio.missed = true) : showCards(cards)));
 // Claude Code's version changed: re-record the subagent fixture.
 listen<string>("notice", showNotice);
-// The server's errors, as a `log://log` record (`notice.ts`); #328 decides what sends them.
+// A notice the server found due while no tab was focused (#331): the browser notification. The permission is asked once, on the first press.
+listen<Alert>("notification", notifyIfAway);
+window.addEventListener("pointerdown", () => void askOnce(), { once: true });
+window.addEventListener("keydown", () => void askOnce(), { once: true });
+// The server's errors, as a `log://log` record (`notice.ts`).
 listen<{ level: number; message: string }>("log://log", onLogRecord);
 element("notice-dismiss").addEventListener("click", dismissNotice);
 // No card writer can run, or one can again (danielrispler/plotkeeper#51).
-listen<string | null>("writer-notice", (notice) => {
+const showWriterNotice = (notice: string | null) => {
   const line = element("notice");
   line.textContent = withWriterNotice(line.textContent ?? "", notice);
   line.hidden = !line.textContent;
-});
+};
+listen<string | null>("writer-notice", showWriterNotice);
+// A page opened after the writer failed has missed the event (danielrispler/plotkeeper#328).
+invoke("writer_notice").then((notice) => notice && showWriterNotice(notice));
 invoke("cards").then(showCards);
 // The answer hook waits for the card only while its session shows (danielrispler/Falinks#461, decision 16).
 startWatching(() => showView(studio.selection));

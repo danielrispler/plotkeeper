@@ -50,4 +50,5 @@ export const base = {
   turn_reply: null,
   turn_summary: null,
   watch: null,
+  writer_notice: null,
 } satisfies { [C in ReadCommand]: Commands[C] };

@@ -1,11 +1,12 @@
 //! The read loop (danielrispler/plotkeeper#324, spec #319 "The server"): it reads the event log from its start, then from where
 //! it stopped, and sends what changed to the [`Sink`](crate::Sink) the shell set: the session list, the selection, the cards, the
-//! notices and the badge. It holds no window: whether Daniel is looking comes from the sink's `focused`, and what he last said
+//! notices (a `notification` event). It holds no window: whether Daniel is looking comes from the sink's `focused`, and what he last said
 //! the page shows (`rail_shown`, `split_shown`) from the [`App`].
 
 use crate::{
-    App, CardsKey, ask_notes, cards, current_cards_key, refresh_landed, report, resume, save_roots,
-    save_state, selected, sessions, settle_checks, unsaved, wanted_notes, warn_log,
+    App, CardsKey, PROCESS_CHECK, append_to, ask_notes, cards, current_cards_key, pid_alive,
+    process_ends, refresh_landed, report, resume, save_roots, save_state, selected, sessions,
+    settle_checks, unsaved, wanted_notes, warn_log,
 };
 use std::{
     collections::HashMap,
@@ -32,20 +33,13 @@ use studio_understanding::{
 struct Sent {
     list: Option<serde_json::Value>,
     selected: Option<serde_json::Value>,
-    badge: Option<usize>,
     cards: Option<CardsKey>,
 }
 
 impl Sent {
-    /// Sends the session list, the badge and the selection, each only if it changed.
+    /// Sends the session list and the selection, each only if it changed.
     fn list(&mut self, app: &App) {
         let list = sessions(app);
-        let needing = list.iter().filter(|r| r.session.wants_you()).count();
-        // macOS shows `Some(0)` as a "0" badge.
-        if self.badge != Some(needing) {
-            app.events.badge((needing > 0).then_some(needing));
-            self.badge = Some(needing);
-        }
         let list = serde_json::to_value(list).expect("sessions serialize");
         if self.list.as_ref() != Some(&list) {
             app.events.emit("sessions", list.clone());
@@ -254,6 +248,8 @@ pub struct Follower {
     versions: Versions,
     agy_versions: AgyVersions,
     sent: Sent,
+    /// When the sessions' agent processes were last checked (#330).
+    checked: Option<Instant>,
 }
 
 impl Follower {
@@ -280,6 +276,7 @@ impl Follower {
             versions: Versions::beside(log),
             agy_versions: AgyVersions::beside(log),
             sent: Sent::default(),
+            checked: None,
         }
     }
 
@@ -327,7 +324,7 @@ impl Follower {
                 // The turns that ended while the app was down get their cards now (danielrispler/Falinks#486).
                 let requests: Vec<CardRequest> =
                     store.cards().iter().map(|k| k.request.clone()).collect();
-                let backfill = studio.backfill(millis(), &requests);
+                let backfill = studio.backfill(millis(), &requests, crate::settings::catch_up());
                 drop((store, studio));
                 let log = log.to_path_buf();
                 thread::spawn(move || save_state(&log, &replayed));
@@ -440,6 +437,16 @@ impl Follower {
                 settle_checks(&studio, &mut store);
             }
         }
+        // A session whose agent is gone ends within about 30 s (#330); the lines are read on the next pass.
+        if self.live && self.checked.is_none_or(|at| at.elapsed() >= PROCESS_CHECK) {
+            self.checked = Some(Instant::now());
+            let ends = process_ends(state, pid_alive);
+            if !ends.is_empty()
+                && let Err(e) = append_to(&self.log, &ends)
+            {
+                log::warn!("end the sessions whose process is gone: {e}");
+            }
+        }
         // Reads the transcripts' lines and nothing else (`AGENTS.md`).
         let transcripts_changed = state.lock().unwrap().follow_transcripts(report);
         // Each live session's context, from its status line snapshot (danielrispler/Falinks#517, decision 1; danielrispler/Falinks#519); the
@@ -511,10 +518,11 @@ impl Follower {
                 on_screen
             });
         if let Some((title, body)) = due.notification {
-            app.events.notify(&title, &body);
-        }
-        if let Some(sound) = due.sound {
-            app.events.play(sound);
+            // The page shows it as a browser notification, when no tab of it is visible and focused (#331).
+            app.events.emit(
+                "notification",
+                serde_json::json!({ "title": title, "body": body }),
+            );
         }
         if !due.finished.is_empty() {
             app.events

@@ -14,6 +14,10 @@ test("each state has its glyph and a word for its title and accessible name", ()
   // An unseen turn keeps its mark once the session goes idle (danielrispler/Falinks#556).
   assert.deepEqual(status("idle", true), ["filled", "Idle, not seen"]);
   assert.deepEqual(status("ended"), ["ring", "Ended"]);
+  // Idle with no process to watch is a guess, so it says so (#330); only idle does.
+  assert.deepEqual(status("idle", false, false, true), ["ring", "Idle?"]);
+  assert.deepEqual(status("idle", true, false, true), ["filled", "Idle?, not seen"]);
+  assert.deepEqual(status("running", false, false, true), ["spinner", "Running"]);
   // A subagent's own status, such as "completed", is its word.
   assert.deepEqual(status("completed"), ["ring", "completed"]);
 });

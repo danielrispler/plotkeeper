@@ -16,6 +16,7 @@ import { titled } from "./keys.js";
 import { blockedWaits, stateLabels, type BlockedCommand, type Context, type Session, type SessionState, type Subagent } from "./types.js";
 import { askDelete, report } from "./story.js";
 import { refreshAgents } from "./map-agents.js";
+import { showTitle } from "./alerts.js";
 
 // The state groups folded in a project, idle only, and the idle groups Daniel opened, by project and state,
 // which stay open when the list is drawn again.
@@ -100,8 +101,9 @@ export type Glyph = "pill" | "spinner" | "dot" | "filled" | "ring" | "check";
 // A landed task's session at your turn, idle or ended shows a check mark and these words instead (#53, Landed).
 export const landedWord = "Landed — safe to delete";
 export const showsLanded = (state: string, landed: boolean) => landed && ["your_turn", "idle", "ended"].includes(state);
-export function status(state: string, unseen = false, landed = false): [Glyph, string] {
-  const label = stateLabels[state as SessionState] ?? state;
+// `unwatched`: no process of the session's agent is known, so its "Idle" is a guess (#330).
+export function status(state: string, unseen = false, landed = false, unwatched = false): [Glyph, string] {
+  const label = (stateLabels[state as SessionState] ?? state) + (state === "idle" && unwatched ? "?" : "");
   if (showsLanded(state, landed)) return ["check", landedWord];
   if (state === "needs_you") return ["pill", label];
   if (state === "running") return ["spinner", label];
@@ -112,8 +114,8 @@ export function status(state: string, unseen = false, landed = false): [Glyph, s
 }
 
 // A status's glyph, named by its word, so the shape is never alone. The pill shows its word.
-export function glyph(state: string, unseen = false, landed = false): HTMLElement {
-  const [shape, word] = status(state, unseen, landed);
+export function glyph(state: string, unseen = false, landed = false, unwatched = false): HTMLElement {
+  const [shape, word] = status(state, unseen, landed, unwatched);
   const node = text("span", shape === "pill" ? word : "", "glyph");
   node.dataset.glyph = shape;
   node.setAttribute("role", "img");
@@ -210,11 +212,11 @@ function done(all: Children, children: Subagent[] = []): HTMLElement[] {
 
 // A row's lines: its name and status glyph, then, if any, what it is doing, muted. Its title pairs
 // the name with the status's word.
-function rowLines(button: HTMLElement, state: string, name: HTMLElement[], below: HTMLElement[] | null, unseen = false, landed = false) {
+function rowLines(button: HTMLElement, state: string, name: HTMLElement[], below: HTMLElement[] | null, unseen = false, landed = false, unwatched = false) {
   const first = text("span", "", "l1");
-  first.append(...name, glyph(state, unseen, landed));
+  first.append(...name, glyph(state, unseen, landed, unwatched));
   button.append(first);
-  button.title = `${name[0].textContent} · ${status(state, unseen, landed)[1]}`;
+  button.title = `${name[0].textContent} · ${status(state, unseen, landed, unwatched)[1]}`;
   button.classList.toggle("unseen", unseen);
   if (below) {
     const second = text("span", "", "l2");
@@ -250,6 +252,7 @@ export function row(session: Session, children: Children, token: string | null =
       : [...done(children, children.get("session")), rowLine(line), ...(turn ? [Object.assign(counts(clock, turn[1]), { title: turn[0] })] : [])],
     session.unseen,
     session.landed,
+    !session.pid,
   );
   // The agent's logo leads the row, apart from its state glyph (#158).
   first.prepend(logo(logoKey(session), noContextNote(session) || undefined));
@@ -494,5 +497,6 @@ export function showSessions(sessions: Session[]) {
   const unseen = element("unseen");
   unseen.textContent = unseenText(live);
   unseen.hidden = unseen.textContent === "";
+  showTitle(live.filter((session) => session.unseen).length);
   unseen.title = titled(studio.files.keymap, "Go to the newest unseen session", "studio::JumpToUnseen");
 }

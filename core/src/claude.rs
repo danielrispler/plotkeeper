@@ -101,6 +101,8 @@ struct Raw {
     duration_ms: Option<u64>,
     /// The terminal the session runs in, which the hook records from `STUDIO_TERMINAL_ID`.
     studio_terminal_id: Option<String>,
+    /// The agent's process, from the hook (#330).
+    studio_pid: Option<u32>,
     /// The trees the hook recorded at a turn's first touch of each worktree, by root (danielrispler/Falinks#486).
     #[serde(default)]
     studio_turn_start: BTreeMap<String, String>,
@@ -305,6 +307,7 @@ fn adapt(raw: Raw) -> Event {
         prompt_id: raw.prompt_id,
         studio_received_ms: raw.studio_received_ms,
         studio_terminal_id: raw.studio_terminal_id,
+        studio_pid: raw.studio_pid,
         studio_turn_start: raw.studio_turn_start,
         studio_turn_end: raw.studio_turn_end,
         studio_touched_roots: raw.studio_touched_roots,

@@ -15,7 +15,9 @@ globalThis.IntersectionObserver = class {
     this.run = run;
     observers.push(this);
   }
-  observe() {}
+  observe(node) {
+    this.node = node;
+  }
   disconnect() {}
 };
 afterEach(() => mock.timers.reset());
@@ -50,6 +52,8 @@ test("opening a row builds the card in place and writes its shown tap once seen"
   mock.timers.enable({ apis: ["setTimeout"] });
   assert.deepEqual(calls.filter(([c]) => c === "shown"), []);
   observers.at(-1).run([{ intersectionRatio: 1, intersectionRect: { width: 100, height: 100 }, rootBounds: { width: 100, height: 100 } }]);
+  // Daniel's pointer is over the card, which a card needs to be seen (#331).
+  observers.at(-1).node.listeners.pointermove?.();
   mock.timers.tick(500);
   assert.deepEqual(calls.filter(([c]) => c === "shown"), [["shown", { ids: ["s@6"] }]]);
 });

@@ -190,6 +190,8 @@ export type Session = {
   line?: string;
   // Its turn finished and Daniel has not looked at it since; danielrispler/Falinks#556 sets it (danielrispler/Falinks#572 draws it).
   unseen?: boolean;
+  // Its agent's process, when its hook could tell; without one an idle session shows "Idle?" (#330).
+  pid?: number | null;
   // How many of its turns Daniel has seen (danielrispler/plotkeeper#124).
   seen: number;
   // How many it had seen when Daniel selected it, which "Since you looked" counts from.
@@ -520,7 +522,7 @@ export interface Commands {
   turn_reply: string | null;
   turn_summary: TurnSummary | null;
   watch: Ask | null;
-  // The new `settings.json` text, as `settings.rs` wrote it; an error is why the write was refused.
+  writer_notice: string | null;
 }
 export type Command = keyof Commands;
 
