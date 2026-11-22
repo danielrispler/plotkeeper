@@ -566,7 +566,10 @@ export interface Commands {
   map_proof: Proof[];
   map_state: MapState;
   pr_brief: BriefView | null;
-export type BriefInfo = { stale: boolean; writing: boolean; chapters: string[]; quiet: boolean; read?: boolean };
+  brief_chapter_done: void;
+  briefs_waiting: WaitingBriefs | null;
+  pr_ratify: RatifyRow[];
+  ratify_set: void;
   mark_unseen: void;
   open: Selection | null;
   open_file: void;
