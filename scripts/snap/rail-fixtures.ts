@@ -511,7 +511,7 @@ const withBlocked = (state: SessionState, card: (turnStart: number) => BlockedCo
 };
 // The card has Allow and Decline: it is in the dock, once its request stands, and not in the feed.
 const dockScript = `
-  window.__TAURI__.__emit("blocked", [{ nonce: "n1", tool_use_id: "toolu_b1", waiting: true }]);
+  window.__snapEmit("blocked", [{ nonce: "n1", tool_use_id: "toolu_b1", waiting: true }]);
   await new Promise((resolve) => setTimeout(resolve, 200));
   const dock = document.getElementById("dock");
   const labels = [...dock.querySelectorAll(".blocked-command .answer-buttons button")].map((b) => b.textContent);
@@ -525,7 +525,7 @@ const riskNote = (note: RiskView | null) => {
   return { ...fixture, cards: { ...fixture.cards, risk_notes: note ? [note] : [], decision_notes: [] } };
 };
 const riskScript = `
-  window.__TAURI__.__emit("blocked", [{ nonce: "n1", tool_use_id: "toolu_b1", waiting: true }]);
+  window.__snapEmit("blocked", [{ nonce: "n1", tool_use_id: "toolu_b1", waiting: true }]);
   await new Promise((resolve) => setTimeout(resolve, 200));
   const dock = document.getElementById("dock");
   const place = dock.querySelector(".blocked-command .risk-note");
@@ -543,7 +543,7 @@ const riskFilled = () => {
   const note = { call: "toolu_b1", state: "arrived", level: "high", line: "Pushes the branch issue-56-row-controls to origin", at: Date.now() };
   const next = { ...fixture.cards, risk_notes: [note] };
   const snapScript = `
-    window.__TAURI__.__emit("blocked", [{ nonce: "n1", tool_use_id: "toolu_b1", waiting: true }]);
+    window.__snapEmit("blocked", [{ nonce: "n1", tool_use_id: "toolu_b1", waiting: true }]);
     await new Promise((resolve) => setTimeout(resolve, 200));
     const dock = document.getElementById("dock");
     const card = dock.querySelector(".blocked-command");
@@ -552,7 +552,7 @@ const riskFilled = () => {
     const before = place.textContent;
     if (before !== "Reading the command…") return log("snap:fail the place reads '" + before + "' before the note");
     buttons[0].focus();
-    window.__TAURI__.__emit("cards", ${JSON.stringify(next)});
+    window.__snapEmit("cards", ${JSON.stringify(next)});
     await new Promise((resolve) => setTimeout(resolve, 200));
     const same = dock.querySelector(".blocked-command") === card && card.querySelector(".risk-note") === place;
     const kept = [...card.querySelectorAll(".answer-buttons button")].every((b, i) => b === buttons[i]);

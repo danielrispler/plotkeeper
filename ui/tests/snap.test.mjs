@@ -7,11 +7,19 @@ import { chromeFailure, consoleLines, failed, headSource, snapPage, stubSource }
 import { fixtures } from "../../scripts/snap/fixtures.ts";
 import { railStates } from "../../scripts/snap/rail-fixtures.ts";
 
-const invokeIn = (source, command) => {
+// The stub answers what the page's transport asks: `fetch` of `/api/<command>`, read as the transport reads it.
+const stubbed = (source, extra = {}) => {
   const window = {};
-  vm.runInNewContext(source, { window, Date });
-  return window.__TAURI__.core.invoke(command);
+  vm.runInNewContext(source, { window, Date, ...extra });
+  const invoke = async (command, args) => {
+    const reply = await window.fetch(`/api/${command}`, { method: "POST", body: JSON.stringify(args ?? {}) });
+    const body = await reply.json();
+    if (!reply.ok) throw body;
+    return body;
+  };
+  return { window, invoke };
 };
+const invokeIn = (source, command) => stubbed(source).invoke(command);
 
 test("the stub answers a command from the fixture, and an unknown one with null", async () => {
   const source = stubSource({ sessions: [{ id: "s1" }] });
@@ -22,8 +30,8 @@ test("the stub answers a command from the fixture, and an unknown one with null"
 test("the stub is injected before the app's module script, and the fixture is not written into dist's own file", () => {
   const index = '<head><script src="vendor/marked.umd.js"></script><script type="module" src="main.js"></script></head>';
   const page = snapPage(index, { sessions: [] });
-  assert.ok(page.indexOf("__TAURI__") < page.indexOf('src="main.js"'));
-  assert.ok(index.indexOf("__TAURI__") === -1);
+  assert.ok(page.indexOf("__snapEmit") < page.indexOf('src="main.js"'));
+  assert.ok(index.indexOf("__snapEmit") === -1);
 });
 
 test("the list fixture has a nested, a selected and a landed row", async () => {
@@ -87,10 +95,9 @@ test("railIdle: an idle session with five turns and an answered card", () => {
 });
 
 test("an argument-keyed reply answers by that argument", async () => {
-  const window = {};
-  vm.runInNewContext(stubSource({ turn_summary: { __by: "id", values: { t1: { summary: "x" } } } }), { window, Date });
-  assert.equal(JSON.stringify(await window.__TAURI__.core.invoke("turn_summary", { id: "t1" })), '{"summary":"x"}');
-  assert.equal(await window.__TAURI__.core.invoke("turn_summary", { id: "zz" }), null);
+  const { invoke } = stubbed(stubSource({ turn_summary: { __by: "id", values: { t1: { summary: "x" } } } }));
+  assert.equal(JSON.stringify(await invoke("turn_summary", { id: "t1" })), '{"summary":"x"}');
+  assert.equal(await invoke("turn_summary", { id: "zz" }), null);
 });
 
 // Runs a page's head script in a stand-in page: `load` fires, then the timers run.
@@ -169,7 +176,8 @@ test("the hover check runs after a script that returns early or throws", async (
 test("snapPage puts a fixture's script in the page, after the stub and before the app", () => {
   const index = '<head><script type="module" src="main.js"></script></head>';
   const page = snapPage(index, { snapScript: "log(1)" });
-  assert.ok(page.indexOf("__TAURI__") < page.indexOf("log(1)") && page.indexOf("log(1)") < page.indexOf('src="main.js"'));
+  // The fixture, with its script, is also data inside the stub, so the script that runs is the last one.
+  assert.ok(page.indexOf("window.__snapEmit =") < page.lastIndexOf("log(1)") && page.lastIndexOf("log(1)") < page.indexOf('src="main.js"'));
 });
 
 test("a log line starting snap:fail fails the run; other lines do not", () => {
@@ -199,11 +207,10 @@ const terminalFixture = { terminals: [{ id: "t1", argv: ["claude"], cwd: "/w", e
 
 // Runs the stub in a stand-in page; the `terminal` events it emits are collected as the UI's listener would see them.
 const terminalEvents = async (fixture, requests) => {
-  const window = {};
-  vm.runInNewContext(stubSource(fixture), { window, Date, setTimeout });
+  const { window, invoke } = stubbed(stubSource(fixture), { setTimeout });
   const events = [];
-  await window.__TAURI__.event.listen("terminal", (event) => events.push(event.payload));
-  for (const msg of requests) await window.__TAURI__.core.invoke("terminal_send", { msg });
+  new window.EventSource("/events").addEventListener("terminal", (event) => events.push(JSON.parse(event.data)));
+  for (const msg of requests) await invoke("terminal_send", { msg });
   await new Promise((done) => setTimeout(done));
   return JSON.parse(JSON.stringify(events));
 };

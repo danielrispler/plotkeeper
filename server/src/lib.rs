@@ -28,13 +28,16 @@ use studio_understanding::{
 };
 
 pub mod answer;
+pub mod api;
 pub mod ci_laws;
 pub mod fog;
 pub mod history;
+pub mod lock;
 pub mod map;
 mod read_loop;
 pub mod settings;
 pub mod stop_rules;
+pub mod web;
 
 pub use read_loop::{Follower, Notice, ServerEffects, follow, listed, tell, uptime};
 

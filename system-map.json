@@ -24,7 +24,7 @@
     },
     {
       "id": "server", "name": "Server", "caption": "Holds the state, answers the commands",
-      "description": "A library with no window in it. It holds the core state, the card store, the risk notes, the card writer and the settings, runs the read loop that follows the event log and sends what changed (the list, the selection, the cards, notices, the badge) to a sink the shell sets, and has one function for each learning-layer and session-view command: the map and the CI result it reads from the default branch for the Map view, the PR lookups, the retests, and the quiet log of what you use of it.",
+      "description": "A library, and the `plotkeeper` program that serves it, with no window in it. It holds the core state, the card store, the risk notes, the card writer and the settings, runs the read loop that follows the event log and sends what changed (the list, the selection, the cards, notices, the badge) to a sink the shell or the web server sets, serves the learning layer as a local page on 127.0.0.1 (the built page, one POST route for each command and one server-sent event stream, behind a random token, a cookie and a Host check, one server per data folder), and has one function for each learning-layer and session-view command: the map and the CI result it reads from the default branch for the Map view, the PR lookups, the retests, and the quiet log of what you use of it.",
       "tier": "core", "paths": ["server/"]
     },
     {
@@ -66,6 +66,7 @@
     { "id": "shell-understanding", "from": "shell", "to": "understanding" },
     { "id": "understanding-writer", "from": "understanding", "to": "writer" },
     { "id": "shell-window", "from": "shell", "to": "window" },
+    { "id": "server-window", "from": "server", "to": "window" },
     { "id": "shell-terminal-daemon", "from": "shell", "to": "terminal-daemon" },
     { "id": "shell-workbench", "from": "shell", "to": "workbench" },
     { "id": "workbench-github", "from": "workbench", "to": "github" }
