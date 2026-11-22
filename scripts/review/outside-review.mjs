@@ -294,7 +294,8 @@ const main = async (opts) => {
   let child = null;
   const cleanup = () => {
     safe(() => git("worktree", "remove", "--force", repo));
-    rmSync(folder, { recursive: true, force: true });
+    // An agy that is still ending may write its hook's log meanwhile: try again, and prune either way.
+    safe(() => rmSync(folder, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
     safe(() => git("worktree", "prune"));
   };
   // Killed mid-review (Ctrl-C, a stopped background task): end agy and leave no worktree behind.

@@ -295,7 +295,7 @@ test("the script runs when started through a symlinked path, and a wrong option 
 const script = join(import.meta.dirname, "../../scripts/review/outside-review.mjs");
 const fakeAgy = `#!/usr/bin/env node
 const { execSync } = require("node:child_process");
-const { readFileSync, writeFileSync } = require("node:fs");
+const { readFileSync, renameSync, writeFileSync } = require("node:fs");
 const { join } = require("node:path");
 if (process.argv.includes("/usage")) process.exit(0);
 const dir = process.env.FAKE_AGY_DIR;
@@ -306,7 +306,9 @@ const call = (name, args) => execSync(command, { input: JSON.stringify({ cwd: pr
 call("read_file", { Path: join(process.cwd(), "review/diff.patch") });
 if (process.env.FAKE_AGY === "exit3") process.exit(3);
 if (process.env.FAKE_AGY === "sleep") {
-  writeFileSync(join(dir, "agy.pid"), String(process.pid));
+  // Renamed into place, so the test never reads a half-written file.
+  writeFileSync(join(dir, "agy.pid.new"), String(process.pid));
+  renameSync(join(dir, "agy.pid.new"), join(dir, "agy.pid"));
   setTimeout(() => {}, 60000);
 } else {
   const finding = { file: "src/store.rs", line: 7, summary: "no default", failure_scenario: "an old file" };
@@ -377,6 +379,8 @@ test("a review that is killed ends its agy and removes its worktree", async () =
   const pidFile = join(s.dir, "agy.pid");
   for (let i = 0; i < 200 && !existsSync(pidFile); i++) await new Promise((done) => setTimeout(done, 50));
   const agy = Number(readFileSync(pidFile, "utf8"));
+  // Never 0: `process.kill(0, …)` would signal this test's own process group.
+  assert.ok(agy > 0, "the stand-in agy wrote no pid");
   child.kill("SIGTERM");
   await closed;
   assert.deepEqual(s.left(), nothingLeft);
