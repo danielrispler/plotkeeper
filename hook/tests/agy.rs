@@ -25,12 +25,21 @@ fn agy() -> serde_json::Value {
 fn an_agy_event_outside_a_studio_terminal_is_logged_without_one() {
     let (written, log) = run(None, agy(), "unset");
     assert!(written);
-    assert!(log.contains("c-1") && !log.contains("studio_terminal_id"), "{log}");
+    assert!(
+        log.contains("c-1") && !log.contains("studio_terminal_id"),
+        "{log}"
+    );
 }
 
 #[test]
 fn an_event_from_a_plotkeeper_run_writes_nothing() {
-    for (name, payload) in [("agy", agy()), ("claude", serde_json::json!({ "session_id": "s-1", "hook_event_name": "Stop", "cwd": "/" }))] {
+    for (name, payload) in [
+        ("agy", agy()),
+        (
+            "claude",
+            serde_json::json!({ "session_id": "s-1", "hook_event_name": "Stop", "cwd": "/" }),
+        ),
+    ] {
         let home = scratch(&format!("internal-{name}"));
         let mut cmd = hook(&home);
         cmd.env("PLOTKEEPER_INTERNAL", "1").stdout(Stdio::piped());
