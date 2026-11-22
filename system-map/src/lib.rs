@@ -3,6 +3,7 @@
 //! `check` is the entry point: a repository's root in, the parts with the files each owns, the
 //! links and the problems out.
 
+mod laws;
 mod pattern;
 
 use std::{
@@ -13,6 +14,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+pub use laws::{LawReport, Tag};
 use pattern::Pattern;
 
 /// The map file's name, at the repository's root.
@@ -24,6 +26,8 @@ pub struct Report {
     /// The parts, in the file's order, each with the tracked files it owns.
     pub parts: Vec<PartFiles>,
     pub links: Vec<Link>,
+    /// Each law with its backing and the tags that name it.
+    pub laws: Vec<LawReport>,
     /// One line per problem; the check fails when there is any.
     pub problems: Vec<String>,
 }
@@ -95,9 +99,9 @@ struct Law {
     text: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "kebab-case")]
-enum Backing {
+pub enum Backing {
     Check,
     Trust,
 }
@@ -135,6 +139,9 @@ pub fn check(root: &Path) -> Report {
         Ok(files) => {
             let (parts, problems) = ownership(&map, &files);
             report.parts = parts;
+            report.problems.extend(problems);
+            let (laws, problems) = laws::check(root, &map, &files);
+            report.laws = laws;
             report.problems.extend(problems);
         }
         Err(problem) => report.problems.push(problem),
