@@ -3,8 +3,10 @@
 //! `check` is the entry point: a repository's root in, the parts with the files each owns, the
 //! links and the problems out.
 
+mod edges;
 mod laws;
 mod pattern;
+mod touched;
 
 use std::{
     collections::{BTreeSet, HashSet},
@@ -16,6 +18,7 @@ use serde::{Deserialize, Serialize};
 
 pub use laws::{LawReport, Tag};
 use pattern::Pattern;
+pub use touched::{Touched, touched};
 
 /// The map file's name, at the repository's root.
 pub const MAP_FILE: &str = "system-map.json";
@@ -28,6 +31,8 @@ pub struct Report {
     pub links: Vec<Link>,
     /// Each law with its backing and the tags that name it.
     pub laws: Vec<LawReport>,
+    /// Dependencies between two parts that no link joins; reported, never a problem.
+    pub unlinked: Vec<edges::Edge>,
     /// One line per problem; the check fails when there is any.
     pub problems: Vec<String>,
 }
@@ -138,11 +143,15 @@ pub fn check(root: &Path) -> Report {
     match tracked_files(root) {
         Ok(files) => {
             let (parts, problems) = ownership(&map, &files);
-            report.parts = parts;
             report.problems.extend(problems);
             let (laws, problems) = laws::check(root, &map, &files);
             report.laws = laws;
             report.problems.extend(problems);
+            let names = map.extractors.as_deref().unwrap_or_default();
+            let (unlinked, problems) = edges::unlinked(root, names, &parts, &map.links);
+            report.unlinked = unlinked;
+            report.problems.extend(problems);
+            report.parts = parts;
         }
         Err(problem) => report.problems.push(problem),
     }
