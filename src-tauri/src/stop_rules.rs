@@ -81,11 +81,16 @@ pub fn append(file: &Path, event: &Event) -> Result<(), String> {
     if let Some(dir) = file.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
+    // A torn last line (a crash mid-write) must not swallow this event: start a new line.
+    let torn = std::fs::read(file).is_ok_and(|bytes| bytes.last().is_some_and(|b| *b != b'\n'));
     let mut out = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(file)
         .map_err(|e| e.to_string())?;
+    if torn {
+        writeln!(out).map_err(|e| e.to_string())?;
+    }
     writeln!(out, "{line}").map_err(|e| e.to_string())
 }
 
@@ -106,6 +111,15 @@ fn days<'a>(events: &'a [Event], project: &str, kind: Kind) -> BTreeSet<&'a str>
         .filter(|e| e.kind == kind && e.project.as_deref() == Some(project))
         .map(|e| e.day.as_str())
         .collect()
+}
+
+/// When `project`'s first event was logged: merged PRs count from then, not from the first event of any project.
+fn began(events: &[Event], project: &str) -> Option<u64> {
+    events
+        .iter()
+        .filter(|e| e.project.as_deref() == Some(project))
+        .map(|e| e.at)
+        .min()
 }
 
 /// The counts for `project`; `merged_prs` is read from git by the caller.
@@ -186,7 +200,7 @@ pub fn stop_log(kind: Kind, project: Option<String>, day: String) -> Result<(), 
 #[tauri::command(async)]
 pub fn stop_facts(project: String) -> Result<Facts, String> {
     let events = read(&log_file()?);
-    let began = events.iter().map(|e| e.at).min().unwrap_or(now());
+    let began = began(&events, &project).unwrap_or(now());
     Ok(facts(
         &events,
         &project,
@@ -224,6 +238,28 @@ mod tests {
             kind,
             project: project.map(String::from),
         }
+    }
+
+    #[test]
+    fn an_append_after_a_torn_line_starts_a_new_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(LOG_FILE);
+        std::fs::write(&file, "{\"at\":1,\"day\":\"2026-1").unwrap();
+        let next = event("2026-11-02", Kind::Know, Some("/p"));
+        append(&file, &next).unwrap();
+        assert_eq!(read(&file), [next]);
+    }
+
+    #[test]
+    fn merged_prs_count_from_the_projects_own_first_event() {
+        let at = |at, project| Event {
+            at,
+            ..event("2026-11-01", Kind::MapOpen, project)
+        };
+        let events = [at(5, None), at(10, Some("/a")), at(20, Some("/b"))];
+        assert_eq!(began(&events, "/b"), Some(20));
+        assert_eq!(began(&events, "/a"), Some(10));
+        assert_eq!(began(&events, "/c"), None);
     }
 
     #[test]
