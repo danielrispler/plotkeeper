@@ -198,3 +198,18 @@ fn many_double_stars_against_a_path_that_does_not_match_finish_at_once() {
     let got = touched(&map, &[&path]);
     assert_eq!(got.unowned, vec![path]);
 }
+
+#[test]
+fn a_version_other_than_one_makes_touched_fail_and_names_it() {
+    let mut map = base();
+    map["version"] = json!(2);
+    let (_dir, root) = project(&map, &["alpha/a.rs"]);
+    let problems = system_map::touched(Path::new(&root), &["alpha/a.rs".to_string()])
+        .expect_err("a map of another version must not answer");
+    assert!(
+        problems
+            .iter()
+            .any(|p| p.contains("version") && p.contains('2') && p.contains("version 1")),
+        "{problems:?}"
+    );
+}

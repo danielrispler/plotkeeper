@@ -199,6 +199,12 @@ fn is_id(id: &str) -> bool {
 
 fn check_ids_and_references(map: &Map) -> Vec<String> {
     let mut problems = Vec::new();
+    if map.version != 1 {
+        problems.push(format!(
+            "{MAP_FILE}: version {} is not one this checker reads; it reads version 1, so set \"version\" to 1",
+            map.version
+        ));
+    }
     let flows = map.flows.as_deref().unwrap_or_default();
     let ids = map
         .parts
