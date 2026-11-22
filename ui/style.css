@@ -693,3 +693,11 @@ body.map-open .toasts, body.map-open .toast { visibility: visible !important; }
   .plate, .btn { transition: none; }
 }
 .map-empty .primary { background: var(--selected); }
+
+/* Live agents on the Map view (#311): a chip per agent along a plate's foot, and a quiet list of those no part holds. A chip that needs
+   Daniel is the one coloured thing, in the needs-you pill's colours. */
+.agent-chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; padding: 0 var(--sp-4); font-size: var(--size-xs);
+              line-height: 1.6; border-radius: var(--radius); color: var(--fg); background: var(--raised); box-shadow: inset 0 0 0 var(--hair) var(--plate-edge); }
+.agent-chip.needs-you { font-weight: 600; color: var(--needs-you); background: var(--needs-you-bg); box-shadow: none; }
+#map-not-placed:not(:empty) { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-3); }
+#map-not-placed .side-title { margin: 0; font-size: var(--size-xs); font-weight: 400; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); }

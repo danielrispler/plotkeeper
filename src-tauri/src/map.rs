@@ -308,6 +308,33 @@ pub fn map_set_tier(
     })
 }
 
+/// The parts each group of paths touches, by the map on `repo`'s default branch: group key to part ids, in the map's order.
+/// A group whose paths are all ignored or owned by no part maps to no part; with no readable map every group does.
+pub fn place(repo: &Path, groups: &BTreeMap<String, Vec<String>>) -> BTreeMap<String, Vec<String>> {
+    let map = read_map(repo)
+        .source
+        .and_then(|text| system_map::parse_lenient(&text).ok());
+    groups
+        .iter()
+        .map(|(key, paths)| {
+            let parts = map.as_ref().map_or_else(Vec::new, |map| {
+                let found = system_map::touched_for_map(map, paths);
+                found.parts.into_iter().map(|part| part.id).collect()
+            });
+            (key.clone(), parts)
+        })
+        .collect()
+}
+
+/// Which parts each live agent's current turn touched (ticket #311): the window sends its changed paths by agent key.
+#[tauri::command(async)]
+pub fn map_place(
+    project: String,
+    groups: BTreeMap<String, Vec<String>>,
+) -> BTreeMap<String, Vec<String>> {
+    place(Path::new(&project), &groups)
+}
+
 /// The tasks seen merged, so a transition fetches once.
 static MERGED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 
@@ -359,6 +386,31 @@ mod tests {
             state.commit,
             Some(git(&o.main, &["rev-parse", "origin/trunk"]))
         );
+    }
+
+    #[test]
+    fn a_group_of_paths_is_placed_on_every_part_it_touches() {
+        let o = origin();
+        let map = r#"{"version":1,"parts":[
+            {"id":"core","name":"Core","caption":"","description":"","tier":"core","paths":["core/"]},
+            {"id":"window","name":"Window","caption":"","description":"","tier":"core","paths":["ui/"]}],
+            "actors":[],"links":[],"ignored":["docs/"],"laws":[]}"#;
+        commit_file(&o.seed, MAP_FILE, map);
+        git(&o.seed, &["push", "-q", "origin", "HEAD"]);
+        git(&o.main, &["fetch", "-q", "origin"]);
+        let paths = |list: &[&str]| list.iter().map(|p| p.to_string()).collect::<Vec<_>>();
+        let groups = BTreeMap::from([
+            ("both".to_string(), paths(&["ui/a.ts", "core/b.rs"])),
+            ("docs".to_string(), paths(&["docs/x.md"])),
+            ("none".to_string(), paths(&[])),
+        ]);
+        let placed = place(&o.main, &groups);
+        assert_eq!(placed["both"], ["core", "window"]);
+        assert!(placed["docs"].is_empty());
+        assert!(placed["none"].is_empty());
+        // With no map on the branch, nothing is placed.
+        let bare = origin();
+        assert!(place(&bare.main, &groups)["both"].is_empty());
     }
 
     #[test]

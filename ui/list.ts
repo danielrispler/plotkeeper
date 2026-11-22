@@ -16,6 +16,7 @@ import { studio } from "./state.js";
 import { titled } from "./keys.js";
 import { blockedWaits, stateLabels, type BlockedCommand, type Context, type Session, type SessionState, type Subagent } from "./types.js";
 import { askDelete, report } from "./story.js";
+import { refreshAgents } from "./map-agents.js";
 
 // The state groups folded in a project, idle only, and the idle groups Daniel opened, by project and state,
 // which stay open when the list is drawn again.
@@ -579,6 +580,7 @@ export function drawSidebar() {
 // (danielrispler/Falinks#572).
 export function showSessions(sessions: Session[]) {
   studio.listed = sessions;
+  void refreshAgents();
   redrawHome();
   redrawHistory();
   const live = sidebarSessions(sessions);

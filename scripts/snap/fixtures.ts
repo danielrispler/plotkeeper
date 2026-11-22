@@ -257,6 +257,41 @@ const mapOpened = (check: string, extra: Fixture = {}): Fixture => ({
     ${check}`,
 });
 
+const mapBusy = (jump: boolean): Fixture => {
+    const touched = (...paths: string[]) => [{ started_at: Date.now() - 600e3, ended_at: null, prompt: "", id: null, message: null, checks: [], listed: [], files: { files: paths.map((path) => ({ root: "/w/plotkeeper", path, from: null, added: 3, removed: 1, agent: null })), merged: 0 } }];
+    const agy = { agent: "agy", asks: false, background_tasks: false, replies: false, permission_mode: false, durations: false, transcript_version: false, context: false, turn_trees: false };
+    const w = { ...subagent("w1", "Map chips"), kind: "worker" as const };
+    const h = { ...subagent("h1", "Read the log"), kind: "helper" as const };
+    const sessions = [
+      session("s1", "#311 · Live agents", "running", { turns: touched("core/lib.rs", "ui/map.ts"), agents: [w, h] }),
+      session("s2", "Ship PR 286", "needs_you", { turns: touched("hook/src/main.rs") }),
+      session("s3", "#312 · CI marks", "running"),
+      session("s4", "agy · Name from the prompt", "running", { capabilities: agy }),
+      session("s5", "codex · plotkeeper", "running", { status_only: true, turns: [] }),
+      session("s6", "#313 · Docs", "needs_you", { turns: touched("docs/notes.md") }),
+      session("s7", "#55 · Delete default", "your_turn"),
+    ];
+    const f = mapOpened(`
+      const chips = (id) => [...document.querySelectorAll("#map .plate[data-id=" + id + "] .agent-chip")].map((c) => c.textContent);
+      await wait(400);
+      if (chips("core").join() !== "#311 · Live agents") log("snap:fail core chips: " + chips("core").join());
+      if (chips("window").join() !== "#311 · Live agents") log("snap:fail window chips: " + chips("window").join());
+      if (chips("hook").join() !== "Ship PR 286 needs you") log("snap:fail hook chips: " + chips("hook").join());
+      if (chips("shell").join() !== "Map chips") log("snap:fail shell chips: " + chips("shell").join());
+      if (!document.querySelector("#map .plate[data-id=hook] .agent-chip.needs-you")) log("snap:fail the needs-you chip is not loud");
+      const rest = [...document.querySelectorAll("#map-not-placed .agent-chip")].map((c) => c.textContent);
+      if (rest.join("|") !== "#312 · CI marks|agy · Name from the prompt|codex · plotkeeper|#313 · Docs needs you") log("snap:fail not placed: " + rest.join("|"));
+      if (document.querySelector("#map .agent-chip[title*=Helper], #map .agent-chip[title*='Read the log']")) log("snap:fail a Helper is on the map");
+      log("chips ok, not placed " + rest.length);
+      ${jump ? `document.querySelector("#map .plate[data-id=hook] .agent-chip").click();
+      await wait(400);
+      if (!document.getElementById("map").hidden) log("snap:fail a chip did not leave the Map view");` : ""}`, {
+      map_state: mapState(),
+      map_place: { s1: ["core", "window"], "s1/w1": ["shell"], s2: ["hook"], s6: [] },
+    });
+    return { ...f, sessions, selected: { session: sessions[6], agent: null } };
+  };
+
 export const fixtures = {
   ...railFixtures,
   recordedTerminal,
@@ -556,6 +591,10 @@ export const fixtures = {
       const map = document.getElementById("map").getBoundingClientRect();
       if (map.right > list.left + 1) log("snap:fail the map overlaps the session list");
       log("plates " + plates + ", marks " + checks + "/" + trusts);`, { map_state: mapState() }),
+  // The Map view busy (#311): a session on two parts, a Needs you one, a Worker with its own chip, and the not placed list (no files yet,
+  // agy, status-only Codex, ignored-only edits); a Helper and a finished session never show.
+  mapBusy: () => mapBusy(false),
+  mapChipJump: () => mapBusy(true),
   // No map on the default branch: the empty state, and "Draft a map" opens New session with the drafting prompt.
   mapEmpty: () =>
     mapOpened(`

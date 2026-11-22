@@ -1,0 +1,81 @@
+// Live agents on the Map view's parts and its "not placed" list (spec danielrispler/plotkeeper#306, ticket #311), run on the `tsc` output.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { arrange, liveAgents } from "../../dist/map-agents.js";
+
+const file = (path, agent = null) => ({ root: "/w/p", path, from: null, added: 1, removed: 0, agent });
+const turn = (files) => ({ started_at: 1, ended_at: null, prompt: "", id: null, message: null, checks: [], listed: [], files: files === null ? null : { files, merged: 0 } });
+const worker = (id, extra = {}) => ({ id, parent: "session", kind: "worker", name: `worker ${id}`, status: "running", ...extra });
+const session = (id, state, extra = {}) => ({
+  id, state, name: `session ${id}`, cwd: "/w/p", shell: false, status_only: false, asker: null, agents: [], turns: [turn([])], last_step: null,
+  capabilities: { turn_trees: true }, identity: { name: `identity ${id}` }, ...extra,
+});
+const here = () => true;
+const keys = (live) => live.map((l) => l.key);
+
+test("a running session is on every part its turn touched, a Needs you one loudly", () => {
+  const sessions = [
+    session("a", "running", { turns: [turn([file("core/x.rs"), file("ui/y.ts")])] }),
+    session("b", "needs_you", { turns: [turn([file("core/z.rs")])] }),
+  ];
+  const live = liveAgents(sessions, here);
+  assert.deepEqual(live.map((l) => [l.key, l.needsYou, l.label]), [["a", false, "session a"], ["b", true, "session b"]]);
+  const placed = { a: ["core", "window"], b: ["core"] };
+  const { byPart, notPlaced } = arrange(live, placed);
+  assert.deepEqual(byPart.core.map((l) => l.key), ["a", "b"]);
+  assert.deepEqual(byPart.window.map((l) => l.key), ["a"]);
+  assert.deepEqual(notPlaced, []);
+});
+
+test("only Running and Needs you sessions are live; finished ones, shells and other projects' sessions leave the map", () => {
+  const files = [file("core/x.rs")];
+  const sessions = ["your_turn", "idle", "ended"].map((state) => session(state, state, { turns: [turn(files)] }));
+  sessions.push(session("shell", "running", { shell: true }), session("away", "running", { cwd: "/elsewhere" }), session("on", "running"));
+  assert.deepEqual(keys(liveAgents(sessions, (cwd) => cwd === "/w/p")), ["on"]);
+});
+
+test("a Worker has its own chip on the parts of its files; a Helper and a finished Worker have none", () => {
+  const w = worker("w1");
+  const sessions = [session("a", "running", {
+    agents: [w, { ...worker("h1"), kind: "helper" }, worker("w2", { status: "completed" })],
+    turns: [turn([file("core/own.rs"), file("ui/w.ts", "w1"), file("hook/gone.rs", "w2"), file("hook/h.rs", "h1")])],
+  })];
+  const live = liveAgents(sessions, here);
+  assert.deepEqual(keys(live), ["a", "a/w1"]);
+  assert.deepEqual(live[0].paths, ["core/own.rs", "hook/gone.rs", "hook/h.rs"]);
+  assert.deepEqual(live[1].paths, ["ui/w.ts"]);
+  assert.equal(live[1].label, "worker w1");
+  assert.equal(live[1].agent, "w1");
+});
+
+test("a Worker the session waits on is the one that needs you", () => {
+  const sessions = [session("a", "needs_you", { agents: [worker("w1")], asker: { agent: "w1", since: 1 } })];
+  assert.deepEqual(liveAgents(sessions, here).map((l) => [l.key, l.needsYou]), [["a", false], ["a/w1", true]]);
+});
+
+test("an in-flight Edit or Write counts before the turn's files are diffed", () => {
+  const edit = (tool, detail) => session("a", "running", { turns: [turn(null)], last_step: { tool, detail } });
+  assert.deepEqual(liveAgents([edit("Edit", "/w/p/core/a.rs")], here)[0].paths, ["core/a.rs"]);
+  assert.deepEqual(liveAgents([edit("Write", "ui/b.ts")], here)[0].paths, ["ui/b.ts"]);
+  assert.deepEqual(liveAgents([edit("Bash", "ls")], here)[0].paths, []);
+});
+
+test("a session with no changed files, no turn trees, no turns or only ignored edits is in the not placed list", () => {
+  const sessions = [
+    session("none", "running"),
+    session("agy", "running", { capabilities: { turn_trees: false }, turns: [turn(null)] }),
+    session("codex", "running", { status_only: true, turns: [] }),
+    session("ignored", "needs_you", { turns: [turn([file("docs/a.md")])] }),
+    session("placed", "running", { turns: [turn([file("core/a.rs")])] }),
+  ];
+  const live = liveAgents(sessions, here);
+  const { byPart, notPlaced } = arrange(live, { ignored: [], placed: ["core"] });
+  assert.deepEqual(keys(notPlaced), ["none", "agy", "codex", "ignored"]);
+  assert.deepEqual(byPart.core.map((l) => l.key), ["placed"]);
+});
+
+test("a path moved to another part moves the chip with it", () => {
+  const live = liveAgents([session("a", "running", { turns: [turn([file("a")])] })], here);
+  assert.deepEqual(Object.keys(arrange(live, { a: ["one"] }).byPart), ["one"]);
+  assert.deepEqual(Object.keys(arrange(live, { a: ["two"] }).byPart), ["two"]);
+});

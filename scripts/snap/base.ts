@@ -41,6 +41,7 @@ export const base = {
   create_task: workspace,
   explain_more: null,
   learning: null,
+  map_place: {},
   map_save_positions: { positions: {}, tiers: {} },
   map_set_tier: { positions: {}, tiers: {} },
   map_state: { project: "/w/plotkeeper", status: "none", source: null, reference: "origin/main", commit: null, note: null, user: { positions: {}, tiers: {} } },
