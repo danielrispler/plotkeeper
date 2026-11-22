@@ -14,10 +14,9 @@ use std::{
     collections::{BTreeMap, HashMap, HashSet},
     path::{Path, PathBuf},
     process::Command,
-    sync::Mutex,
+    sync::{Arc, Mutex},
 };
 use system_map::LawTest;
-use tauri::{AppHandle, Emitter, Manager};
 
 /// The CI workflow whose run holds the law tests: the Studio's `npm run check` job.
 pub const WORKFLOW: &str = "studio.yml";
@@ -711,18 +710,16 @@ pub fn load_cache() -> CiCache {
 
 /// Reads CI for `project` in the background and tells the window (`map-landed`) when the result changed. One read per project at a
 /// time; a trigger that finds one running adds nothing.
-pub fn refresh_later(app: &AppHandle, project: &str) {
-    let cache = app.state::<CiCache>();
+pub fn refresh_later(cache: &Arc<CiCache>, events: &Arc<crate::Events>, project: &str) {
     if !cache.running.lock().unwrap().insert(project.to_string()) {
         return;
     }
-    let (app, project) = (app.clone(), project.to_string());
+    let (cache, events, project) = (cache.clone(), events.clone(), project.to_string());
     std::thread::spawn(move || {
-        let cache = app.state::<CiCache>();
         let _running = Running(&cache.running, project.clone());
         let ci = read(Path::new(&project));
         if cache.put(&project, ci) {
-            let _ = app.emit("map-landed", project);
+            events.emit("map-landed", project.into());
         }
     });
 }

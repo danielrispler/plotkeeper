@@ -1,6 +1,6 @@
 // The Map view (spec danielrispler/plotkeeper#306, ticket #309): a project's system map as plates on a quiet chart (Treatment C),
 // over the story rail and the terminal column, with the session list and the top bar left live. The shell reads the map from
-// `origin`'s default branch and keeps Daniel's positions (`src-tauri/src/map.rs`); `map-model.ts` holds the pure logic.
+// `origin`'s default branch and keeps Daniel's positions (`server/src/map.rs`); `map-model.ts` holds the pure logic.
 //
 // Where the next tickets plug in, so they add to this file rather than reshape it:
 // - `onPlate(fn)`: runs for each plate each time it is drawn, with the plate's slots: `fog` behind the name, `marks` at its top

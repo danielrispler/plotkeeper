@@ -1,5 +1,5 @@
 // Always-on stop-rule tracking (spec danielrispler/plotkeeper#306, ticket #314): the window tells the shell what Daniel uses, the shell
-// keeps the log in the data folder (`src-tauri/src/stop_rules.rs`) and counts it, and this file decides, with no number ever shown, whether
+// keeps the log in the data folder (`server/src/stop_rules.rs`) and counts it, and this file decides, with no number ever shown, whether
 // the one-time review is due and which modules fell below their threshold. Nothing here runs on a timer: the events are the ones that
 // already happen (a session list, the Map view opening, Home's mark seen, a scrub, a drawer, "I know this") and the evaluation runs when the
 // Map view opens and when Home is entered.

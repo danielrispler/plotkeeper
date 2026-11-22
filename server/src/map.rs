@@ -12,10 +12,9 @@ use std::{
     collections::{BTreeMap, HashMap},
     path::{Path, PathBuf},
     process::Command,
-    sync::Mutex,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
-use tauri::{AppHandle, Emitter, Manager, State};
 
 /// The map file's name at the repository's root.
 const MAP_FILE: &str = system_map::MAP_FILE;
@@ -282,19 +281,18 @@ fn fetch(fetches: &Fetches, project: &str) -> Fetched {
 /// The Map view's payload for `project`. `fetch` asks for `origin` first: when the view opens and when the window gains
 /// focus while it is open, never on a timer; the cooldown and the in-flight lock decide whether it runs. The same triggers
 /// read CI on the default branch in the background (`ci_laws::refresh_later`), which tells the window when it has an answer.
-#[tauri::command(async)]
 pub fn map_state(
     project: String,
     fetch: bool,
-    fetches: State<Fetches>,
-    cache: State<crate::ci_laws::CiCache>,
-    app: AppHandle,
+    fetches: &Fetches,
+    cache: &Arc<crate::ci_laws::CiCache>,
+    events: &Arc<crate::Events>,
 ) -> Result<MapState, String> {
     if fetch {
-        let fetched = self::fetch(&fetches, &project);
+        let fetched = self::fetch(fetches, &project);
         // A fetch inside the cooldown asks nothing again, unless nothing was read yet.
         if fetched != Fetched::Skipped || !cache.has(&project) {
-            crate::ci_laws::refresh_later(&app, &project);
+            crate::ci_laws::refresh_later(cache, events, &project);
         }
     }
     let repo = Path::new(&project);
@@ -313,14 +311,12 @@ pub fn map_state(
 }
 
 /// "I know this": clears `part`'s fog.
-#[tauri::command(async)]
 pub fn map_know(project: String, part: String) -> Result<UserState, String> {
     crate::fog::clear(&state_file()?, &project, &part)
 }
 
 /// A part's history strip: its first-parent commits on the default branch from the map's birth, oldest to newest, the ones Daniel
 /// has not caught up on marked.
-#[tauri::command(async)]
 pub fn map_history(project: String, part: String) -> Result<Vec<crate::history::Entry>, String> {
     let fogged = read_user(&state_file()?, &project)
         .fog
@@ -336,23 +332,20 @@ pub fn map_history(project: String, part: String) -> Result<Vec<crate::history::
 }
 
 /// The map as of `commit`: what one scrub of the history strip asks the shell for. A later ticket that records scrubs hooks here.
-#[tauri::command(async)]
 pub fn map_at(project: String, commit: String) -> Result<crate::history::At, String> {
     crate::history::at(Path::new(&project), &commit)
 }
 
 /// The files and diffs of `commit`, for the drawer.
-#[tauri::command(async)]
 pub fn map_commit(project: String, commit: String) -> Result<crate::history::Commit, String> {
     crate::history::commit_files(Path::new(&project), &commit)
 }
 
 /// The projects among `projects` that show a fogged Core part or a broken law, for Home's quiet mark. Reads local refs and the
 /// last CI read only: it asks neither `origin` nor GitHub.
-#[tauri::command(async)]
 pub fn map_marks(
     projects: Vec<String>,
-    cache: State<crate::ci_laws::CiCache>,
+    cache: &crate::ci_laws::CiCache,
 ) -> Result<Vec<String>, String> {
     let file = state_file()?;
     Ok(projects
@@ -371,13 +364,11 @@ pub fn map_marks(
 }
 
 /// "See the proof": the tests that back `law` on the default branch, with the code around their `@law:` tag.
-#[tauri::command(async)]
 pub fn map_proof(project: String, law: String) -> Vec<crate::ci_laws::Proof> {
     crate::ci_laws::proofs(Path::new(&project), &law)
 }
 
 /// Saves the positions of parts or actors, by id; a position that is not a finite number is refused.
-#[tauri::command(async)]
 pub fn map_save_positions(
     project: String,
     positions: BTreeMap<String, [f64; 2]>,
@@ -391,7 +382,6 @@ pub fn map_save_positions(
 }
 
 /// Sets part `part`'s tier, `null` clearing Daniel's choice so the map's own tier applies again.
-#[tauri::command(async)]
 pub fn map_set_tier(
     project: String,
     part: String,
@@ -428,7 +418,6 @@ pub fn place(repo: &Path, groups: &BTreeMap<String, Vec<String>>) -> BTreeMap<St
 }
 
 /// Which parts each live agent's current turn touched (ticket #311): the window sends its changed paths by agent key.
-#[tauri::command(async)]
 pub fn map_place(
     project: String,
     groups: BTreeMap<String, Vec<String>>,
@@ -448,15 +437,20 @@ pub fn became_merged(
 /// `refresh_landed` saw the task in `task_path` become merged: fetch its repository through the cooldown and read CI, on a
 /// thread of its own so the caller's loop never waits on the network, then tell the window, which draws the map again if it
 /// is open.
-pub fn merged(app: &AppHandle, task_path: &str) {
+pub fn merged(
+    fetches: &Arc<Fetches>,
+    cache: &Arc<crate::ci_laws::CiCache>,
+    events: &Arc<crate::Events>,
+    task_path: &str,
+) {
     let Ok(project) = studio_workbench::main_checkout(Path::new(task_path)) else {
         return;
     };
-    let app = app.clone();
+    let (fetches, cache, events) = (fetches.clone(), cache.clone(), events.clone());
     std::thread::spawn(move || {
-        fetch(&app.state::<Fetches>(), &project);
-        crate::ci_laws::refresh_later(&app, &project);
-        let _ = app.emit("map-landed", project);
+        fetch(&fetches, &project);
+        crate::ci_laws::refresh_later(&cache, &events, &project);
+        events.emit("map-landed", project.into());
     });
 }
 

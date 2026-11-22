@@ -14,7 +14,6 @@ use std::{
     sync::Mutex,
 };
 use studio_hook::answer;
-use tauri::State;
 
 pub fn data() -> Result<PathBuf, String> {
     Ok(studio_hook::data_dir(
@@ -162,7 +161,6 @@ pub fn answer_blocked(
 }
 
 /// Daniel chose Allow or Decline on a blocked command's card.
-#[tauri::command]
 pub fn answer_blocked_command(
     session: String,
     nonce: String,
@@ -173,7 +171,6 @@ pub fn answer_blocked_command(
 
 /// "Ask again" on an Allowed, not run card: a fresh pass for its exact command and folder, the only one, since the
 /// 30-minute pass may have expired or been spent. The window then types the retry line.
-#[tauri::command]
 pub fn ask_again(session: String, command: String, cwd: String) -> Result<(), String> {
     if !answer::is_file_safe(&session) {
         return Err("not a session id".into());
@@ -184,24 +181,18 @@ pub fn ask_again(session: String, command: String, cwd: String) -> Result<(), St
 
 /// The window shows `session`'s view, or none (`None`, also while the window is hidden). Returns the
 /// session's open request, if any.
-#[tauri::command]
-pub fn watch(
-    session: Option<String>,
-    watching: State<Mutex<Watching>>,
-) -> Result<Option<Value>, String> {
+pub fn watch(session: Option<String>, watching: &Mutex<Watching>) -> Result<Option<Value>, String> {
     Ok(watching.lock().unwrap().watch(&data()?, session))
 }
 
 /// The window is alive: it calls this every second while it is visible.
-#[tauri::command]
-pub fn alive(watching: State<Mutex<Watching>>) {
+pub fn alive(watching: &Mutex<Watching>) {
     watching.lock().unwrap().alive(answer::now_ms());
 }
 
 /// Daniel answered `session`'s request `nonce` from its card: for a question, `answers` maps each
 /// question to a label, or a multi-select's to its labels; for a plan or a permission, `decision` is
 /// `allow` or `deny` (danielrispler/Falinks#478). Neither answers in the terminal.
-#[tauri::command]
 pub fn answer(
     session: String,
     nonce: String,

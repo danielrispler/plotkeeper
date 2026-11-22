@@ -19,8 +19,13 @@
     },
     {
       "id": "shell", "name": "Shell", "caption": "Reads the log, feeds the core, acts",
-      "description": "The app's Rust side. It reads the event log, feeds the core, and carries out what follows: notices, sounds, GitHub, the terminals, the map and the CI result it reads from the default branch for the Map view, and the quiet log of what you use of it.",
+      "description": "The app's Rust side. It reads the event log, feeds the core, and carries out what needs the window: notices, sounds, the Dock badge, the terminals, and each command handler, which only forwards to the server.",
       "tier": "core", "paths": ["src-tauri/"]
+    },
+    {
+      "id": "server", "name": "Server", "caption": "Holds the state, answers the commands",
+      "description": "A library with no window in it. It holds the core state, the card store, the risk notes, the card writer and the settings, and has one function for each learning-layer and session-view command: the map and the CI result it reads from the default branch for the Map view, the PR lookups, the retests, and the quiet log of what you use of it.",
+      "tier": "core", "paths": ["server/"]
     },
     {
       "id": "understanding", "name": "Understanding", "caption": "Writes what you read, and keeps it",
@@ -53,6 +58,11 @@
     { "id": "plugins-hook", "from": "plugins", "to": "hook" },
     { "id": "hook-shell", "from": "hook", "to": "shell" },
     { "id": "core-shell", "from": "core", "to": "shell" },
+    { "id": "shell-server", "from": "shell", "to": "server" },
+    { "id": "hook-server", "from": "hook", "to": "server" },
+    { "id": "core-server", "from": "core", "to": "server" },
+    { "id": "server-understanding", "from": "server", "to": "understanding" },
+    { "id": "server-workbench", "from": "server", "to": "workbench" },
     { "id": "shell-understanding", "from": "shell", "to": "understanding" },
     { "id": "understanding-writer", "from": "understanding", "to": "writer" },
     { "id": "shell-window", "from": "shell", "to": "window" },
