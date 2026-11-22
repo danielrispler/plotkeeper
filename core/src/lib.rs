@@ -176,6 +176,10 @@ pub struct Session {
     /// The studio terminal it runs in, its `STUDIO_TERMINAL_ID` from its latest event, `None` when
     /// it runs outside the studio (danielrispler/Falinks#461, decision 8).
     pub terminal: Option<String>,
+    /// Its agent's process, `studio_pid` of its latest event that has one; `None` when its hook
+    /// could not tell, and then it never ends by a dead process (#330).
+    #[serde(default)]
+    pub pid: Option<u32>,
     /// Daniel's name for it, from the studio's latest rename line in the log (danielrispler/Falinks#469); `None` for its
     /// folder's.
     pub name: Option<String>,
@@ -2778,6 +2782,10 @@ impl Studio {
         if moves {
             session.terminal.clone_from(&event.studio_terminal_id);
         }
+        // A subagent's event is the same process as its session's.
+        if event.studio_pid.is_some() {
+            session.pid = event.studio_pid;
+        }
         if let Some(mode) = event.permission_mode() {
             session.permission_mode = Some(mode.into());
             if session.started_mode.is_none() {
@@ -4035,7 +4043,11 @@ impl Studio {
         self.now = now;
         let mut changed = false;
         for session in self.sessions.values_mut() {
-            if session.state == State::YourTurn
+            // With no process to watch, a session in a turn or waiting on Daniel goes idle too: it
+            // never ends by a guess, and its next event revives it (#330).
+            let unwatched =
+                session.pid.is_none() && matches!(session.state, State::Running | State::NeedsYou);
+            if (session.state == State::YourTurn || unwatched)
                 && now.saturating_sub(session.agent.last_event_at) >= IDLE_AFTER_MS
             {
                 session.state = State::Idle;
@@ -4044,6 +4056,17 @@ impl Studio {
             }
         }
         changed
+    }
+
+    /// The resume ids of the sessions whose leader pid `alive` no longer lists (#330).
+    pub fn gone(&self, alive: impl Fn(u32) -> bool) -> Vec<String> {
+        let gone: Vec<&Session> = (self.sessions.values())
+            .filter(|s| !s.ended && !s.deleted && !s.status_only)
+            .filter(|s| s.pid.is_some_and(|pid| !alive(pid)))
+            .collect();
+        let mut ids: Vec<String> = gone.into_iter().map(|s| s.resume_id.clone()).collect();
+        ids.sort();
+        ids
     }
 
     /// The keys of the sessions that have not ended and of their subagents: the shell drops the

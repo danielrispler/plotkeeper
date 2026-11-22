@@ -23,6 +23,9 @@ pub(crate) struct Event {
     pub studio_received_ms: u64,
     /// The terminal the session runs in, which the hook records from `STUDIO_TERMINAL_ID`.
     pub studio_terminal_id: Option<String>,
+    /// The agent's process, which the hook records as `studio_pid`: its parent, or the pid the
+    /// agy wrapper passes. `None` when it could not tell (#330).
+    pub studio_pid: Option<u32>,
     /// The trees the hook recorded at a turn's first touch of each worktree, by root.
     pub studio_turn_start: BTreeMap<String, String>,
     /// The trees the hook recorded at the end of the turn this event ends, by root.
