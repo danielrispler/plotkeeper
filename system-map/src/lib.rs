@@ -16,9 +16,9 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-pub use laws::{LawReport, Tag};
+pub use laws::{LawReport, LawTest, Tag, law_tests, tag_id, test_name_after};
 use pattern::Pattern;
-pub use touched::{Touched, touched};
+pub use touched::{Touched, touched, touched_for_map};
 
 /// The map file's name, at the repository's root.
 pub const MAP_FILE: &str = "system-map.json";
@@ -51,10 +51,11 @@ pub struct Link {
     pub to: String,
 }
 
-#[derive(Deserialize)]
+/// A parsed `system-map.json`. Its fields are private: build one with `parse` or `parse_lenient`.
+#[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[allow(dead_code)] // Fields the map must hold; later checks and screens read them.
-struct Map {
+pub struct Map {
     version: u32,
     extractors: Option<Vec<String>>,
     parts: Vec<Part>,
@@ -65,7 +66,7 @@ struct Map {
     flows: Option<Vec<Flow>>,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[allow(dead_code)]
 struct Part {
@@ -78,7 +79,7 @@ struct Part {
     zone: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 enum Tier {
     Core,
@@ -86,7 +87,7 @@ enum Tier {
     BlackBox,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[allow(dead_code)]
 struct Actor {
@@ -94,7 +95,7 @@ struct Actor {
     name: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[allow(dead_code)]
 struct Law {
@@ -111,7 +112,7 @@ pub enum Backing {
     Trust,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[allow(dead_code)]
 struct Flow {
@@ -120,7 +121,7 @@ struct Flow {
     hops: Vec<Hop>,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[allow(dead_code)]
 struct Hop {
@@ -177,7 +178,12 @@ fn load(root: &Path) -> Result<Map, String> {
         }
         _ => format!("{MAP_FILE}: cannot read it ({error})"),
     })?;
-    serde_json::from_str(&text).map_err(|error| {
+    parse(&text)
+}
+
+/// Parses map text strictly, as `check` does: an unknown field is an error.
+pub fn parse(text: &str) -> Result<Map, String> {
+    serde_json::from_str(text).map_err(|error| {
         let kind = if error.is_syntax() || error.is_eof() {
             "is not valid JSON"
         } else {
@@ -185,6 +191,68 @@ fn load(root: &Path) -> Result<Map, String> {
         };
         format!("{MAP_FILE}: {kind}: {error}; fix the file")
     })
+}
+
+/// The fields each kind of object in the map holds, for `parse_lenient` to tell the unknown ones.
+const MAP_FIELDS: &[&str] = &[
+    "version",
+    "extractors",
+    "parts",
+    "actors",
+    "links",
+    "ignored",
+    "laws",
+    "flows",
+];
+const PART_FIELDS: &[&str] = &[
+    "id",
+    "name",
+    "caption",
+    "description",
+    "tier",
+    "paths",
+    "zone",
+];
+const ACTOR_FIELDS: &[&str] = &["id", "name"];
+const LINK_FIELDS: &[&str] = &["id", "from", "to"];
+const LAW_FIELDS: &[&str] = &["id", "on", "backing", "text"];
+const FLOW_FIELDS: &[&str] = &["id", "name", "hops"];
+const HOP_FIELDS: &[&str] = &["link", "text"];
+
+/// Parses the text of a historical `system-map.json` read from git: fields this reader does not
+/// know are ignored, so a later schema addition never breaks a walk through old commits. Fails
+/// only when the text is not JSON or lacks a field the map must hold.
+pub fn parse_lenient(text: &str) -> Result<Map, String> {
+    let mut value: serde_json::Value = serde_json::from_str(text)
+        .map_err(|error| format!("{MAP_FILE}: is not valid JSON: {error}"))?;
+    prune(&mut value, MAP_FIELDS);
+    for (key, fields, nested) in [
+        ("parts", PART_FIELDS, None),
+        ("actors", ACTOR_FIELDS, None),
+        ("links", LINK_FIELDS, None),
+        ("laws", LAW_FIELDS, None),
+        ("flows", FLOW_FIELDS, Some(("hops", HOP_FIELDS))),
+    ] {
+        let Some(items) = value.get_mut(key).and_then(|v| v.as_array_mut()) else {
+            continue;
+        };
+        for item in items {
+            prune(item, fields);
+            if let Some((inner, inner_fields)) = nested
+                && let Some(inner) = item.get_mut(inner).and_then(|v| v.as_array_mut())
+            {
+                inner.iter_mut().for_each(|hop| prune(hop, inner_fields));
+            }
+        }
+    }
+    parse(&value.to_string())
+}
+
+/// Drops the keys of an object that are not in `known`; anything else is left as it is.
+fn prune(value: &mut serde_json::Value, known: &[&str]) {
+    if let Some(object) = value.as_object_mut() {
+        object.retain(|key, _| known.contains(&key.as_str()));
+    }
 }
 
 fn is_id(id: &str) -> bool {

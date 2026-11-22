@@ -54,7 +54,7 @@ test("Home's project rows appear once a retried projects read succeeds, with no 
   assert.equal(seen.length, 0);
   fail = false;
   assert.deepEqual(await mod.projects(), ["/a"]);
-  assert.deepEqual(seen, [{ rows: [{ name: "a", path: "/a" }], error: null }]);
+  assert.deepEqual(seen, [{ rows: [{ name: "a", path: "/a", fogged: false }], error: null }]);
   await mod.projects();
   assert.equal(seen.length, 1);
 });

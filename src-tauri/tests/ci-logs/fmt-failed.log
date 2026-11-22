@@ -1,0 +1,21 @@
+macos	Run npm run check	2026-11-22T09:12:01.1234567Z Diff in /Users/runner/work/plotkeeper/plotkeeper/src/lib.rs:1:
+macos	Run npm run check	2026-11-22T09:12:02.1234567Z -pub fn  one( )->u32{1}
+macos	Run npm run check	2026-11-22T09:12:03.1234567Z +pub fn one() -> u32 {
+macos	Run npm run check	2026-11-22T09:12:04.1234567Z +    1
+macos	Run npm run check	2026-11-22T09:12:05.1234567Z +}
+macos	Run npm run check	2026-11-22T09:12:06.1234567Z  
+macos	Run npm run check	2026-11-22T09:12:07.1234567Z Diff in /Users/runner/work/plotkeeper/plotkeeper/tests/wire.rs:1:
+macos	Run npm run check	2026-11-22T09:12:08.1234567Z  // @law: wire-types-agree
+macos	Run npm run check	2026-11-22T09:12:09.1234567Z  #[test]
+macos	Run npm run check	2026-11-22T09:12:10.1234567Z -fn wire_types_match() { assert_eq!(studio_nx::one(), 2, "wire drifted"); }
+macos	Run npm run check	2026-11-22T09:12:11.1234567Z +fn wire_types_match() {
+macos	Run npm run check	2026-11-22T09:12:12.1234567Z +    assert_eq!(studio_nx::one(), 2, "wire drifted");
+macos	Run npm run check	2026-11-22T09:12:13.1234567Z +}
+macos	Run npm run check	2026-11-22T09:12:14.1234567Z  #[test]
+macos	Run npm run check	2026-11-22T09:12:15.1234567Z -fn unrelated_in_same_file() { panic!("boom"); }
+macos	Run npm run check	2026-11-22T09:12:16.1234567Z +fn unrelated_in_same_file() {
+macos	Run npm run check	2026-11-22T09:12:17.1234567Z +    panic!("boom");
+macos	Run npm run check	2026-11-22T09:12:18.1234567Z +}
+macos	Run npm run check	2026-11-22T09:12:19.1234567Z  #[test]
+macos	Run npm run check	2026-11-22T09:12:20.1234567Z  fn passes() {}
+macos	Run npm run check	2026-11-22T09:12:21.1234567Z  

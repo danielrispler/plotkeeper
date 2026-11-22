@@ -104,3 +104,41 @@ fn a_version_other_than_one_fails_and_names_it() {
     map["version"] = json!(2);
     assert!(has(&failing(map), &["version", "2", "version 1"]));
 }
+
+mod lenient {
+    use serde_json::json;
+    use system_map::{parse, parse_lenient, touched_for_map};
+
+    use crate::common::base;
+
+    fn with_extras() -> serde_json::Value {
+        let mut map = base();
+        map["future"] = json!(true);
+        map["parts"][0]["colour"] = json!("red");
+        map["actors"][0]["icon"] = json!("x");
+        map["links"][0]["weight"] = json!(2);
+        map["laws"][0]["severity"] = json!("high");
+        map["flows"] = json!([{ "id": "go", "name": "Go", "extra": 1,
+            "hops": [{ "link": "alpha-beta", "text": "t", "extra": 1 }] }]);
+        map
+    }
+
+    #[test]
+    fn unknown_fields_are_ignored_by_the_lenient_parser_and_refused_by_the_strict() {
+        let text = with_extras().to_string();
+        assert!(parse(&text).is_err());
+        let map = parse_lenient(&text).expect("lenient parse");
+        let got = touched_for_map(&map, &["alpha/a.rs".to_string()]);
+        assert_eq!(got.parts[0].id, "alpha");
+    }
+
+    #[test]
+    fn the_lenient_parser_fails_clearly_on_bad_json_and_on_a_missing_core_field() {
+        let error = parse_lenient("{ nope").unwrap_err();
+        assert!(error.contains("not valid JSON"), "{error}");
+        let mut map = base();
+        map.as_object_mut().unwrap().remove("parts");
+        let error = parse_lenient(&map.to_string()).unwrap_err();
+        assert!(error.contains("parts"), "{error}");
+    }
+}

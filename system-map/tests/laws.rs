@@ -160,3 +160,126 @@ fn a_tag_in_a_file_that_is_not_valid_utf8_is_still_found() {
     assert_eq!(report.laws[0].tags.len(), 1);
     assert_eq!(report.laws[0].tags[0].line, 2);
 }
+
+mod resolver {
+    use system_map::{LawTest, Tag, law_tests, test_name_after};
+
+    use super::tag;
+    use crate::common::{base, project, write};
+
+    fn after(source: &str) -> Option<String> {
+        test_name_after(source, 1)
+    }
+
+    #[test]
+    fn a_rust_test_after_its_attribute_gives_the_fn_name() {
+        let source = format!("{}#[test]\nfn it_holds() {{}}\n", tag("x"));
+        assert_eq!(after(&source), Some("it_holds".into()));
+    }
+
+    #[test]
+    fn blank_lines_comments_and_attributes_are_skipped() {
+        let source = format!(
+            "{}\n// a note\n/// a doc\n#[test]\n#[ignore = \"slow\"]\n\nasync fn later() {{}}\n",
+            tag("x")
+        );
+        assert_eq!(after(&source), Some("later".into()));
+        let multi = format!(
+            "{}#[cfg_attr(\n    all(),\n    test\n)]\npub(crate) fn wide() {{}}\n",
+            tag("x")
+        );
+        assert_eq!(after(&multi), Some("wide".into()));
+    }
+
+    #[test]
+    fn several_tags_above_one_test_all_resolve_to_it() {
+        let source = format!("{}{}#[test]\nfn both() {{}}\n", tag("a"), tag("b"));
+        assert_eq!(test_name_after(&source, 1), Some("both".into()));
+        assert_eq!(test_name_after(&source, 2), Some("both".into()));
+    }
+
+    #[test]
+    fn a_node_test_call_gives_its_title_in_either_quote() {
+        assert_eq!(
+            after(&format!(
+                "{}test(\"a title, with commas\", async () => {{}});\n",
+                tag("x")
+            )),
+            Some("a title, with commas".into())
+        );
+        assert_eq!(
+            after(&format!("{}test('single', () => {{}});\n", tag("x"))),
+            Some("single".into())
+        );
+    }
+
+    #[test]
+    fn a_tag_with_no_test_after_it_resolves_to_nothing() {
+        assert_eq!(after(&tag("x")), None);
+        assert_eq!(after(&format!("{}const x = 1;\n", tag("x"))), None);
+        assert_eq!(
+            after(&format!("{}struct A;\nfn not_next() {{}}\n", tag("x"))),
+            None
+        );
+    }
+
+    #[test]
+    fn only_the_test_right_after_the_tag_is_named() {
+        let source = format!(
+            "fn before() {{}}\n{}#[test]\nfn mine() {{}}\nfn after() {{}}\n",
+            tag("x")
+        );
+        assert_eq!(test_name_after(&source, 2), Some("mine".into()));
+    }
+
+    #[test]
+    fn plotkeepers_real_tag_patterns_resolve() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let laws = system_map::check(&root).laws;
+        let tests = law_tests(&root, &laws);
+        let name = |law: &str| {
+            tests
+                .iter()
+                .find(|t| t.law == law)
+                .and_then(|t| t.test.clone())
+        };
+        assert_eq!(
+            name("writer-has-no-tools").as_deref(),
+            Some("the_real_writer_runs_claude_on_the_subscription_in_its_neutral_folder")
+        );
+        assert_eq!(
+            name("session-pieces-in-order").as_deref(),
+            Some("jobs_run_in_the_order_they_were_asked_for_on_the_session_queue")
+        );
+        assert_eq!(
+            name("delete-keeps-live-terminal").as_deref(),
+            Some("a terminal is in use while a session not leaving, and not ended, runs in it")
+        );
+    }
+
+    #[test]
+    fn law_tests_reads_each_tag_of_a_repository() {
+        let mut map = base();
+        map["laws"][0]["backing"] = "check".into();
+        let (dir, root) = project(&map, &[]);
+        write(
+            dir.path(),
+            "alpha/a.rs",
+            &format!("{}#[test]\nfn holds() {{}}\n", tag("stay-true")),
+        );
+        studio_test_support::git(dir.path(), &["add", "-A"]);
+        let root = std::path::Path::new(&root);
+        let report = system_map::check(root);
+        assert_eq!(
+            law_tests(root, &report.laws),
+            vec![LawTest {
+                law: "stay-true".into(),
+                tag: Tag {
+                    file: "alpha/a.rs".into(),
+                    line: 1
+                },
+                test: Some("holds".into()),
+            }]
+        );
+    }
+}

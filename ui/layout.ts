@@ -79,9 +79,13 @@ export function paneBoxes(width: number, height: number, cell: number, split: Sp
 export const panelHeight = (dragged: number, column: number) => Math.round(Math.min(Math.max(dragged, 80), 0.4 * column));
 
 // Whether the story rail shows the selected session (danielrispler/Falinks#556): not in focus mode, not behind a closed
-// overlay, and not under the skills browser, which takes its place.
-export const railShown = (mode: LayoutMode, railOpen: boolean, skillsOpen: boolean) =>
-  mode !== "focus" && (mode !== "overlay" || railOpen) && !skillsOpen;
+// overlay, not under the skills browser, which takes its place, and not behind the Map view, which hides it with `visibility`
+// (so the rail still intersects the viewport).
+export const railShown = (mode: LayoutMode, railOpen: boolean, skillsOpen: boolean, mapOpen: boolean) =>
+  mode !== "focus" && (mode !== "overlay" || railOpen) && !skillsOpen && !mapOpen;
+
+// Whether Home's content is seen: Home is the open pane and the Map view, which hides it with `visibility`, is not over it.
+export const homeSeen = (homeOpen: boolean, mapOpen: boolean) => homeOpen && !mapOpen;
 
 // The top bar's items, in the order they survive a narrowing window (#127): the session's header and the needs-you and unseen
 // chips never leave, and nor does the settings gear (#194), the bar's last item; the git line, "+" (new session) and the "⋯"

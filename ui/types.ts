@@ -442,6 +442,48 @@ export type Work = {
 // whose worktree holds it, `current` the main checkout's own.
 export type Branch = { name: string; remote: boolean; task: string | null; current: boolean };
 
+// The Map view's payload (`src-tauri/src/map.rs`, `MapState`): one project's map as read from `origin`'s default branch, and Daniel's own
+// positions and tiers for it. A feature of the view adds its field here and in `MapState` there.
+export type UserMap = { positions: Record<string, [number, number]>; tiers: Record<string, string> };
+export type MapState = {
+  project: string;
+  status: "loaded" | "none" | "unreadable";
+  // The text of `system-map.json` when it loaded.
+  source: string | null;
+  reference: string | null;
+  commit: string | null;
+  note: string | null;
+  user: UserMap;
+  // How strongly each part shows fog under Daniel's effective tiers; a part not listed is clear.
+  fog: Record<string, Fog>;
+  // CI on the default branch as last read through `gh` (`ci_laws.rs`); null until a read has finished.
+  ci: Ci | null;
+};
+export type Fog = "thin" | "thick";
+// What a finished run of the default branch's CI says of the laws: `unknown` (nothing to read), `passed`, `broken` (a test that backs a
+// law failed), `not-run` (it failed, but not in a test that backs a law), `unreadable` (it failed and its log cannot be read).
+export type CiStatus = "unknown" | "passed" | "broken" | "not-run" | "unreadable";
+export type Ci = {
+  status: CiStatus;
+  run_url: string | null;
+  commit: string | null;
+  // A newer run is still going, so this result is for an earlier commit.
+  earlier: boolean;
+  // The parts that own a broken law's test; only with `broken`.
+  parts: string[];
+  laws: string[];
+  tail: string;
+  note: string | null;
+};
+// A tagged test shown by "See the proof": its file and tag line, and the code from the tag on, starting at line `first`.
+export type Proof = { file: string; line: number; test: string | null; first: number; snippet: string };
+
+// One commit of a part's history strip, oldest first; `fogged` is a commit Daniel has not caught up on.
+export type HistoryEntry = { commit: string; short: string; label: string; fogged: boolean };
+// The map as of a commit (a scrub), and a commit's files with their diffs (the drill-down).
+export type HistoricalMap = { commit: string; short: string; label: string; source: string };
+export type CommitFiles = { commit: string; short: string; label: string; url: string | null; files: { path: string; diff: string }[] };
+
 // Every command the window invokes, with what the shell replies (`src-tauri/src/*.rs`, `#[tauri::command]`): `void` where the
 // window ignores the reply, `null` where the shell may answer none. `invoke` takes only these names, and the snap fixtures
 // (`scripts/snap/`) are typed against it, and `scripts/snap/base.ts` answers every command that is not `void`, so a fixture
@@ -479,6 +521,19 @@ export interface Commands {
   guess: void;
   hunk_opened: void;
   key_wrong: void;
+  map_place: Record<string, string[]>;
+  map_save_positions: UserMap;
+  map_set_tier: UserMap;
+  map_know: UserMap;
+  map_history: HistoryEntry[];
+  map_at: HistoricalMap;
+  map_commit: CommitFiles;
+  map_marks: string[];
+  stop_log: null;
+  stop_facts: StopFacts;
+  stop_dismiss: null;
+  map_proof: Proof[];
+  map_state: MapState;
   mark_unseen: void;
   open: Selection | null;
   open_file: void;
@@ -530,3 +585,17 @@ export interface Commands {
   workspaces: Workspaces;
 }
 export type Command = keyof Commands;
+
+// What the shell counted of Daniel's use (`stop_rules.rs`), for the one-time review: days, merged PRs and the uses of each module.
+export type StopKind = "session" | "map-open" | "mark-seen" | "scrub" | "proof" | "know";
+export type StopFacts = {
+  active_days: number;
+  merged_prs: number;
+  map_days: number;
+  mark_days: number;
+  map_on_mark_days: number;
+  scrubs: number;
+  proofs: number;
+  knows: number;
+  dismissed: boolean;
+};

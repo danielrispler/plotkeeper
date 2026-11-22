@@ -14,10 +14,11 @@ import type * as Xterm from "@xterm/xterm";
 import { connect, list, onEvent, request, type Listed } from "./daemon.js";
 import { diffRequest, drawDiff, keepsDiff } from "./diff.js";
 import { drawHistory } from "./history.js";
-import { drawHome, enterHome, landedClear, markLearningShown } from "./home.js";
+import { drawHome, enterHome, landedClear } from "./home.js";
 import { element, failure, fullTitle, invoke, listen, newest, pressable, text } from "./dom.js";
 import { onProjects, projects } from "./projects.js";
 import { followLog, showLog, showMissing } from "./log.js";
+import { leaveMap } from "./map.js";
 import { type Box, paneBoxes } from "./layout.js";
 import { isPanel, panelTerm, showPanel, showPanelShell } from "./panel.js";
 import { offerAgyPluginFix, offerBuilds, offerPluginFix, upgrade } from "./restart.js";
@@ -224,9 +225,6 @@ export function refreshHome() {
   redrawHome();
 }
 
-// Writes the slot's `shown` when the window turns visible or focused with Home on screen.
-export const markHomeShown = () => markLearningShown(shown === HOME);
-
 // Draws Home again when the list changed under it.
 export function redrawHome() {
   landedClear.sync();
@@ -237,6 +235,7 @@ export function redrawHome() {
 // the session, which takes the column.
 const HISTORY = "history";
 export function showHistory() {
+  leaveMap();
   show(HISTORY, () => null);
   drawHistory(box(HISTORY), studio.listed);
   element("terminal-head").hidden = true;
@@ -343,6 +342,7 @@ export const doctorArgv = (command: string) => [
 
 async function startTerminal(id: string, cwd: string, argv: string[]) {
   starting = id;
+  leaveMap(); // the new terminal shows in the column the Map view covers
   element("terminal-head").hidden = false;
   studio.pending = null; // an earlier press's late reply must not take the pane from this session
   show(id, () => openPane(box(id), id, cwd, argv));

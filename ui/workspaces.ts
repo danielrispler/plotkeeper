@@ -356,6 +356,8 @@ function selectedOwner() {
   const cwd = studio.selection?.session.cwd;
   return cwd ? ownerOf([...read.keys()], read, cwd) : null;
 }
+// The project whose workspace holds `cwd`, null outside every project.
+export const projectOfCwd = (cwd: string): string | null => ownerOf([...read.keys()], read, cwd)?.project ?? null;
 export const selectedProject = (): string | null => selectedOwner()?.project ?? null;
 
 // The repository a worktree belongs to: its own main checkout, project or not, never another project; null when

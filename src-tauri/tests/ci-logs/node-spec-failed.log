@@ -1,0 +1,59 @@
+macos	Run npm run check	2026-11-22T09:12:01.1234567Z ✔ passes fine (0.263667ms)
+macos	Run npm run check	2026-11-22T09:12:02.1234567Z ✖ a delete keeps the live terminal (0.266ms)
+macos	Run npm run check	2026-11-22T09:12:03.1234567Z ✖ an unrelated one fails (0.388792ms)
+macos	Run npm run check	2026-11-22T09:12:04.1234567Z ℹ tests 3
+macos	Run npm run check	2026-11-22T09:12:05.1234567Z ℹ suites 0
+macos	Run npm run check	2026-11-22T09:12:06.1234567Z ℹ pass 1
+macos	Run npm run check	2026-11-22T09:12:07.1234567Z ℹ fail 2
+macos	Run npm run check	2026-11-22T09:12:08.1234567Z ℹ cancelled 0
+macos	Run npm run check	2026-11-22T09:12:09.1234567Z ℹ skipped 0
+macos	Run npm run check	2026-11-22T09:12:10.1234567Z ℹ todo 0
+macos	Run npm run check	2026-11-22T09:12:11.1234567Z ℹ duration_ms 30.049542
+macos	Run npm run check	2026-11-22T09:12:12.1234567Z 
+macos	Run npm run check	2026-11-22T09:12:13.1234567Z ✖ failing tests:
+macos	Run npm run check	2026-11-22T09:12:14.1234567Z 
+macos	Run npm run check	2026-11-22T09:12:15.1234567Z test at ui/tests/t.test.mjs:5:1
+macos	Run npm run check	2026-11-22T09:12:16.1234567Z ✖ a delete keeps the live terminal (0.266ms)
+macos	Run npm run check	2026-11-22T09:12:17.1234567Z   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+macos	Run npm run check	2026-11-22T09:12:18.1234567Z   
+macos	Run npm run check	2026-11-22T09:12:19.1234567Z   1 !== 2
+macos	Run npm run check	2026-11-22T09:12:20.1234567Z   
+macos	Run npm run check	2026-11-22T09:12:21.1234567Z       at TestContext.<anonymous> (file://ui/tests/t.test.mjs:5:55)
+macos	Run npm run check	2026-11-22T09:12:22.1234567Z       at Test.runInAsyncScope (node:async_hooks:214:14)
+macos	Run npm run check	2026-11-22T09:12:23.1234567Z       at Test.run (node:internal/test_runner/test:1047:25)
+macos	Run npm run check	2026-11-22T09:12:24.1234567Z       at Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+macos	Run npm run check	2026-11-22T09:12:25.1234567Z       at Test.postRun (node:internal/test_runner/test:1173:19)
+macos	Run npm run check	2026-11-22T09:12:26.1234567Z       at Test.run (node:internal/test_runner/test:1101:12)
+macos	Run npm run check	2026-11-22T09:12:27.1234567Z       at async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3) {
+macos	Run npm run check	2026-11-22T09:12:28.1234567Z     generatedMessage: true,
+macos	Run npm run check	2026-11-22T09:12:29.1234567Z     code: 'ERR_ASSERTION',
+macos	Run npm run check	2026-11-22T09:12:30.1234567Z     actual: 1,
+macos	Run npm run check	2026-11-22T09:12:31.1234567Z     expected: 2,
+macos	Run npm run check	2026-11-22T09:12:32.1234567Z     operator: 'strictEqual',
+macos	Run npm run check	2026-11-22T09:12:33.1234567Z     diff: 'simple'
+macos	Run npm run check	2026-11-22T09:12:34.1234567Z   }
+macos	Run npm run check	2026-11-22T09:12:35.1234567Z 
+macos	Run npm run check	2026-11-22T09:12:36.1234567Z test at ui/tests/t.test.mjs:6:1
+macos	Run npm run check	2026-11-22T09:12:37.1234567Z ✖ an unrelated one fails (0.388792ms)
+macos	Run npm run check	2026-11-22T09:12:38.1234567Z   AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+macos	Run npm run check	2026-11-22T09:12:39.1234567Z   + actual - expected
+macos	Run npm run check	2026-11-22T09:12:40.1234567Z   
+macos	Run npm run check	2026-11-22T09:12:41.1234567Z     [
+macos	Run npm run check	2026-11-22T09:12:42.1234567Z   +   1
+macos	Run npm run check	2026-11-22T09:12:43.1234567Z   -   2
+macos	Run npm run check	2026-11-22T09:12:44.1234567Z     ]
+macos	Run npm run check	2026-11-22T09:12:45.1234567Z   
+macos	Run npm run check	2026-11-22T09:12:46.1234567Z       at TestContext.<anonymous> (file://ui/tests/t.test.mjs:6:45)
+macos	Run npm run check	2026-11-22T09:12:47.1234567Z       at Test.runInAsyncScope (node:async_hooks:214:14)
+macos	Run npm run check	2026-11-22T09:12:48.1234567Z       at Test.run (node:internal/test_runner/test:1047:25)
+macos	Run npm run check	2026-11-22T09:12:49.1234567Z       at Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+macos	Run npm run check	2026-11-22T09:12:50.1234567Z       at Test.postRun (node:internal/test_runner/test:1173:19)
+macos	Run npm run check	2026-11-22T09:12:51.1234567Z       at Test.run (node:internal/test_runner/test:1101:12)
+macos	Run npm run check	2026-11-22T09:12:52.1234567Z       at async Test.processPendingSubtests (node:internal/test_runner/test:744:7) {
+macos	Run npm run check	2026-11-22T09:12:53.1234567Z     generatedMessage: true,
+macos	Run npm run check	2026-11-22T09:12:54.1234567Z     code: 'ERR_ASSERTION',
+macos	Run npm run check	2026-11-22T09:12:55.1234567Z     actual: [ 1 ],
+macos	Run npm run check	2026-11-22T09:12:56.1234567Z     expected: [ 2 ],
+macos	Run npm run check	2026-11-22T09:12:57.1234567Z     operator: 'deepStrictEqual',
+macos	Run npm run check	2026-11-22T09:12:58.1234567Z     diff: 'simple'
+macos	Run npm run check	2026-11-22T09:12:59.1234567Z   }

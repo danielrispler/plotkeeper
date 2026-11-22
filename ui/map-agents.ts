@@ -1,0 +1,121 @@
+// Live agents on the Map view (spec danielrispler/plotkeeper#306, ticket #311): a chip on every part a running or needs-you session's
+// or Worker's current turn touched, and a quiet "not placed" list beside the map for the ones no part holds. The pure rules come first;
+// the drawing below them reads the sessions the window already has, and `map_place` (the shell, `studio-system-map`) says which parts a
+// list of paths touches.
+
+import { element, failure, invoke, newest, pressable, text } from "./dom.js";
+import { currentMap, onDraw, syncSide } from "./map.js";
+import type { Session } from "./types.js";
+
+// One agent on the map: a session's own, or a Worker's. `key` is the session's id, and `session/worker` for a Worker.
+export type Live = { key: string; session: string; agent: string | null; label: string; needsYou: boolean; paths: string[] };
+
+const editing = ["Edit", "Write", "MultiEdit", "NotebookEdit"];
+
+// The file an Edit or Write in flight works on, from the session's folder: null for any other step.
+const inFlight = (step: Session["last_step"], cwd: string): string | null => {
+  const path = step && editing.includes(step.tool) ? step.detail : null;
+  if (!path) return null;
+  return path.startsWith(`${cwd}/`) ? path.slice(cwd.length + 1) : path;
+};
+
+// The agents on the map: sessions in `Running` or `Needs you` of a project (`inProject` says whether a folder is one's), and their
+// running Workers. A Helper, a finished Worker, a plain shell and a session in any other state are never on it. A session's own
+// paths are its current turn's changed files that no running Worker's call or worktree names, with an Edit or Write in flight; a
+// Worker's are the ones its own name or id is on.
+export function liveAgents(sessions: Session[], inProject: (cwd: string) => boolean): Live[] {
+  const live: Live[] = [];
+  for (const session of sessions) {
+    if ((session.state !== "running" && session.state !== "needs_you") || session.shell || !inProject(session.cwd)) continue;
+    const workers = session.agents.filter((agent) => agent.kind === "worker" && agent.status === "running");
+    const named = (name: string | null) => workers.find((worker) => worker.id === name || worker.name === name);
+    const files = session.capabilities.turn_trees ? (session.turns.at(-1)?.files?.files ?? []) : [];
+    const flight = inFlight(session.last_step, session.cwd);
+    const own = files.filter((file) => !named(file.agent)).map((file) => file.path);
+    const askedByWorker = session.asker?.agent != null && named(session.asker.agent) !== undefined;
+    live.push({
+      key: session.id,
+      session: session.id,
+      agent: null,
+      label: session.name ?? session.identity.name,
+      needsYou: session.state === "needs_you" && !askedByWorker,
+      paths: [...new Set([...own, ...(flight ? [flight] : [])])],
+    });
+    for (const worker of workers) {
+      const paths = files.filter((file) => file.agent === worker.id || file.agent === worker.name).map((file) => file.path);
+      live.push({ key: `${session.id}/${worker.id}`, session: session.id, agent: worker.id, label: worker.name, needsYou: session.asker?.agent === worker.id, paths });
+    }
+  }
+  return live;
+}
+
+// Where each agent goes: on every part `placed` (its key to part ids) gives it, else in the not placed list.
+export function arrange(live: Live[], placed: Record<string, string[]>): { byPart: Record<string, Live[]>; notPlaced: Live[] } {
+  const byPart: Record<string, Live[]> = {};
+  const notPlaced: Live[] = [];
+  for (const agent of live) {
+    const parts = placed[agent.key] ?? [];
+    if (!parts.length) notPlaced.push(agent);
+    for (const part of parts) (byPart[part] ??= []).push(agent);
+  }
+  return { byPart, notPlaced };
+}
+
+// What the drawing needs of the window, given by `main.ts`: the sessions, a folder's project, and the jump to a session.
+export type AgentDeps = { sessions: () => Session[]; projectOf: (cwd: string) => string | null; select: (session: string, agent: string | null) => void };
+let deps: AgentDeps;
+let hidden = false;
+// The last answer of `map_place` for the paths asked, so a refresh that changes none asks nothing.
+let asked = "";
+let placed: Record<string, string[]> = {};
+const latest = newest();
+
+// Hides every chip and the not placed list, or shows them again: for a view of a past commit, where nothing is live.
+export function hideAgents(hide: boolean) {
+  hidden = hide;
+  paint();
+}
+
+const chip = (agent: Live, select: AgentDeps["select"]) => {
+  const button = pressable(text("button", agent.needsYou ? `${agent.label} needs you` : agent.label, `agent-chip${agent.needsYou ? " needs-you" : ""}`), false, () => select(agent.session, agent.agent));
+  button.removeAttribute("aria-pressed");
+  button.title = `${agent.label}${agent.needsYou ? " needs you" : ""}\nGo to this ${agent.agent === null ? "session" : "worker"}`;
+  return button;
+};
+
+// Puts the chips on the plates and the not placed list in its slot, from what the last refresh found.
+function paint() {
+  const view = currentMap();
+  if (!view) return;
+  const live = hidden ? [] : liveAgents(deps.sessions(), (cwd) => deps.projectOf(cwd) === view.project);
+  const { byPart, notPlaced } = arrange(live, placed);
+  for (const plate of view.slots.canvas.querySelectorAll<HTMLElement>(".plate[data-id]")) {
+    plate.querySelector(".plate-chips")?.replaceChildren(...(byPart[plate.dataset.id!] ?? []).map((agent) => chip(agent, deps.select)));
+  }
+  const slot = view.slots.notPlaced;
+  slot.replaceChildren(...(notPlaced.length ? [text("h3", "Not placed", "side-title"), ...notPlaced.map((agent) => chip(agent, deps.select))] : []));
+  syncSide(view.slots);
+}
+
+// Reads which parts the live agents' paths touch (when they changed) and draws them. Called when the sessions change and when the map draws.
+export const refreshAgents = () => read().catch(failure("map_place"));
+async function read() {
+  const view = currentMap();
+  if (!view) return;
+  const live = hidden ? [] : liveAgents(deps.sessions(), (cwd) => deps.projectOf(cwd) === view.project);
+  const groups = Object.fromEntries(live.filter((agent) => agent.paths.length).map((agent) => [agent.key, agent.paths]));
+  const key = JSON.stringify([view.project, view.state.commit, groups]);
+  if (key !== asked) {
+    const found = await latest(invoke("map_place", { project: view.project, groups }));
+    if (!found || currentMap() !== view) return;
+    asked = key;
+    placed = found;
+  }
+  paint();
+}
+
+// Wires the drawing: a map that draws gets its chips, and `list.ts` calls `refreshAgents` as the sessions change.
+export function startMapAgents(given: AgentDeps) {
+  deps = given;
+  onDraw(() => void refreshAgents());
+}

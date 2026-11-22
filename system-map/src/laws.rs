@@ -78,7 +78,7 @@ pub(crate) fn check(root: &Path, map: &Map, files: &[String]) -> (Vec<LawReport>
 /// The id a line tags, when the line is a comment of its own holding only `@law: <id>`.
 /// A comment line starts, after its indentation, with a comment leader (`//`, `///`, `//!`, `#`,
 /// `--`, `/*`, `*`, `<!--`); a closing `*/` or `-->` may follow the id.
-fn tag_id(line: &str) -> Option<&str> {
+pub fn tag_id(line: &str) -> Option<&str> {
     let mut rest = line.trim();
     let leader = ["<!--", "/*", "//", "#", "--", "*"]
         .into_iter()
@@ -91,4 +91,81 @@ fn tag_id(line: &str) -> Option<&str> {
         .unwrap_or(rest)
         .trim();
     (!rest.is_empty() && !rest.contains(char::is_whitespace)).then_some(rest)
+}
+
+/// A tag with the test it sits above.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LawTest {
+    pub law: String,
+    pub tag: Tag,
+    /// The test's name; none when no test follows the tag.
+    pub test: Option<String>,
+}
+
+/// The test each tag of `laws` sits above, read from the files in `root`. A file that cannot be
+/// read leaves its tags without a test.
+pub fn law_tests(root: &Path, laws: &[LawReport]) -> Vec<LawTest> {
+    let mut texts: BTreeMap<&str, Option<String>> = BTreeMap::new();
+    let mut found = Vec::new();
+    for law in laws {
+        for tag in &law.tags {
+            let text = texts
+                .entry(&tag.file)
+                .or_insert_with(|| crate::read_tracked(root, &tag.file));
+            found.push(LawTest {
+                law: law.id.clone(),
+                tag: tag.clone(),
+                test: text.as_deref().and_then(|t| test_name_after(t, tag.line)),
+            });
+        }
+    }
+    found
+}
+
+/// The name of the test that starts after the 1-based `line` of `text`: a Rust `fn` or a Node
+/// `test("...")`, reached over blank lines, comments (other tags among them) and attributes.
+pub fn test_name_after(text: &str, line: usize) -> Option<String> {
+    let mut lines = text.lines().skip(line);
+    let mut depth = 0i32; // Open brackets of an attribute that runs over several lines.
+    for raw in lines.by_ref() {
+        let trimmed = raw.trim();
+        if depth > 0 || trimmed.starts_with("#[") || trimmed.starts_with("#![") {
+            depth += trimmed.matches('[').count() as i32 - trimmed.matches(']').count() as i32;
+            continue;
+        }
+        if trimmed.is_empty() || trimmed.starts_with("//") {
+            continue;
+        }
+        return rust_fn_name(trimmed).or_else(|| node_test_title(trimmed));
+    }
+    None
+}
+
+fn rust_fn_name(line: &str) -> Option<String> {
+    let mut rest = line;
+    loop {
+        let word = rest.split_whitespace().next()?;
+        if let Some(after) = rest.strip_prefix("fn ") {
+            let name: String = after
+                .trim_start()
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            return (!name.is_empty()).then_some(name);
+        }
+        let qualifier = word.starts_with("pub") || ["async", "unsafe", "const"].contains(&word);
+        if !qualifier {
+            return None;
+        }
+        // `pub(crate)` is one word; `pub (crate)` is not used.
+        rest = rest[rest.find(word)? + word.len()..].trim_start();
+    }
+}
+
+fn node_test_title(line: &str) -> Option<String> {
+    let rest = line.strip_prefix("test(")?.trim_start();
+    let quote = rest.chars().next().filter(|c| *c == '"' || *c == '\'')?;
+    let body = &rest[1..];
+    let end = body.find(quote)?;
+    Some(body[..end].to_string())
 }

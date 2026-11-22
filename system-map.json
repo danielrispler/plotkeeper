@@ -19,7 +19,7 @@
     },
     {
       "id": "shell", "name": "Shell", "caption": "Reads the log, feeds the core, acts",
-      "description": "The app's Rust side. It reads the event log, feeds the core, and carries out what follows: notices, sounds, GitHub, the terminals.",
+      "description": "The app's Rust side. It reads the event log, feeds the core, and carries out what follows: notices, sounds, GitHub, the terminals, the map and the CI result it reads from the default branch for the Map view, and the quiet log of what you use of it.",
       "tier": "core", "paths": ["src-tauri/"]
     },
     {
@@ -29,7 +29,7 @@
     },
     {
       "id": "window", "name": "Window", "caption": "Everything you see and press",
-      "description": "The list, the rail, Home and the terminal panes. It shows state and sends your actions to the shell.",
+      "description": "The list, the rail, Home, the Map view and the terminal panes. It shows state and sends your actions to the shell.",
       "tier": "core", "paths": ["ui/"]
     },
     {

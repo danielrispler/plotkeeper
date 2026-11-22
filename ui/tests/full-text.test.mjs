@@ -193,6 +193,9 @@ const covered = {
   ".subagent-log .log-title": "log.ts: the title's title",
   ".subagent-log .log-call summary": "log.ts: the summary's title",
   ".usage-tile .group-name": "usage.ts: the group name's title",
+  ".plate-name": "map.ts: the plate's title holds the name, caption and description",
+  ".plate-caption": "map.ts: the plate's title holds the name, caption and description",
+  ".agent-chip": "map-agents.ts: a chip's title holds its full label",
   ".risk-note": "blocked.ts: the note's title holds all of it",
   code: "a check's command has its own title (story.ts); any other code span wraps or sits in a text that wraps",
 };

@@ -40,4 +40,14 @@
   --popover: 380px; --dialog: 560px; --find: 220px; --outcome: 52px; --toast: 360px; --menu: 180px; --session-header: 280px; --layer: 320px; --spine: 14px;
   /* The settings page (#195): herdr's 880 by 620, and a switch's track. */
   --settings: 880px; --settings-height: 620px; --switch: 32px; --switch-height: 18px; --stepper-value: 40px; --select: 140px;
+
+  /* The Map view (danielrispler/plotkeeper#306, Treatment C): plates on a quiet chart. The mist is a cool grey, so it and the warm ring
+     of focus or a brief differ by temperature, not hue; thin is about two thirds of thick, a little denser than the prototype's mist. Plate and actor sizes are map-model.ts's. */
+  --mist: #c4ccd6; --mist-thin: #c4ccd652; --mist-thick: #c4ccd680; --ring-warm: #e0c08c80;
+  --map-bg: #131416; --map-dot: #ffffff0a;
+  --plate: #202226; --plate-core: #25272b; --plate-edge: #ffffff1a; --plate-black: #121315; --plate-black-edge: #ffffff0d;
+  --link: #ffffff26; --law-check: var(--fg); --law-trust: var(--muted);
+  --plate-w: 264px; --plate-h: 76px; --actor-w: 120px; --actor-h: 28px; --map-grid: 28px; --law-mark: 7px; --link-width: 1.5px;
+  --map-title: 28px; --map-gutter: 32px; --map-sheet: 340px; --drawer-code: 280px;
+  --strip-height: 240px; --mist-lift: 900ms ease-out; --mist-drift: 14s; --plate-move: 160ms ease-out;
 }

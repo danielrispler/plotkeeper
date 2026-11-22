@@ -9,19 +9,24 @@ import { withWriterNotice } from "./writer-notice.js";
 import { startWatching } from "./answer.js";
 import { openAsk } from "./ask.js";
 import { placeBar, watchBar } from "./bar.js";
-import { markShown, showCards } from "./cards.js";
+import { showCards } from "./cards.js";
+import { recheckSeen } from "./seen.js";
 import { diffRequest, newestDiff } from "./diff.js";
 import { element, failure, invoke, listen, logUncaught } from "./dom.js";
 import { type Actions, doctorEntries, newestUnseen, nextNeedsYou, paletteEntries, run, stepLine, stepSession, titled, windowBinding } from "./keys.js";
 import { hover, realClock, shownGate } from "./hover.js";
 import { arrange, defaultWidths, type LayoutMode, railShown, resized, type Widths } from "./layout.js";
 import { listSpace } from "./home.js";
+import { leaveMap, mapEscape, mapShown, startMap, toggleMap } from "./map.js";
+import "./map-history.js";
+import "./map-sheet.js";
+import { startMapAgents } from "./map-agents.js";
 import { showSessions } from "./list.js";
 import { goHome, select, show, toggleHome } from "./selection.js";
 import { dragPanel, placePanel, togglePanel } from "./panel.js";
-import { dragSplit, focusPane, markHomeShown, placePanes, runDoctor, showHistory, split, startPanes, toggleSplit } from "./panes.js";
+import { dragSplit, focusPane, placePanes, runDoctor, showHistory, split, startPanes, toggleSplit } from "./panes.js";
 import { showAddProject, showBranches, showPalette, showPicker } from "./picker.js";
-import { fetchNow, foundWorkspaces, pullAll, showWorkspaces, sidebarOrder, watchWorkspaces } from "./workspaces.js";
+import { fetchNow, foundWorkspaces, projectOfCwd, pullAll, selectedProject, showWorkspaces, sidebarOrder, watchWorkspaces } from "./workspaces.js";
 import { reload, reloadedZoom, type SettingsFiles, zoomed } from "./settings.js";
 import { knownProjects } from "./projects.js";
 import { studio } from "./state.js";
@@ -70,7 +75,8 @@ const syncHover = () => {
     if (classList.contains(name) !== machine.open) classList.contains(name) ? machine.toggle() : machine.dismiss();
   }
   const mode = (dataset.layout ?? "full") as LayoutMode;
-  tellShown(railShown(mode, classList.contains("rail-open"), classList.contains("skills-open")), mode === "overlay");
+  recheckSeen();
+  tellShown(railShown(mode, classList.contains("rail-open"), classList.contains("skills-open"), classList.contains("map-open")), mode === "overlay");
 };
 new MutationObserver(syncHover).observe(document.body, { attributes: true, attributeFilter: ["class", "data-layout"] });
 // A mouse button held down never opens an overlay, so a drag across the edge or a text selection leaves them be.
@@ -180,6 +186,9 @@ const actions: Actions = {
   "studio::Dismiss": () => {
     // The settings page, a dialog over the window, closes first and leaves the rest as it was.
     if (settingsPageOpen()) return closeSettingsPage();
+    // In the Map view, Esc peels its layers (`map.ts`) and leaves it last; an overlay or the picker open over it closes first.
+    const overlaid = ["list-open", "list-peek", "rail-open", "skills-open"].some((name) => document.body.classList.contains(name)) || !element("picker").hidden;
+    if (mapShown() && !overlaid) return mapEscape();
     document.body.classList.remove("list-open", "list-peek", "rail-open", "skills-open");
     element("picker").hidden = true;
   },
@@ -217,6 +226,8 @@ const actions: Actions = {
   // Home, in the terminal column: selects no session.
   "studio::JumpToUnseen": () => void go(newestUnseen(inSidebar())),
   "studio::GoHome": () => void toggleHome(),
+  // The Map view (danielrispler/plotkeeper#306), over the rail and the terminal; the same key leaves it.
+  "studio::ShowMap": () => void toggleMap(),
   // History (#94), in the terminal column: the ended sessions, searchable.
   "studio::ShowHistory": () => showHistory(),
   // Fetches the repository now (#33); the workspaces' states follow.
@@ -232,6 +243,7 @@ const actions: Actions = {
   "studio::OpenSettingsFile": () => void invoke("open_settings", { editor: studio.files.settings.editor }).catch(failure("open_settings", "error")),
   // The skills browser (danielrispler/Falinks#528), in the rail's place; it leaves focus mode, which hides the rail.
   "studio::Skills": () => {
+    leaveMap();
     if (studio.focus) actions["studio::ToggleFocus"]();
     void showSkills();
   },
@@ -318,9 +330,9 @@ element("close-all").addEventListener("click", () => blocks().forEach((block) =>
 // The rail's "⋯" menu (danielrispler/Falinks#574) closes once an action in it is chosen.
 element("rail-actions").addEventListener("click", () => element("rail-actions").hidePopover());
 
-document.addEventListener("visibilitychange", markShown);
-document.addEventListener("visibilitychange", markHomeShown);
-window.addEventListener("focus", markHomeShown);
+document.addEventListener("visibilitychange", recheckSeen);
+window.addEventListener("focus", recheckSeen);
+window.addEventListener("blur", recheckSeen);
 window.addEventListener("focus", () => actions["studio::RefreshLanded"]());
 
 // A login shell in the configured repository, then a pane per session terminal (danielrispler/Falinks#467).
@@ -330,6 +342,9 @@ startPanes().catch((e) => {
 });
 dragSplit();
 dragPanel();
+// A drafting prompt fills the quick start of New session in the project (`map.ts`, "Draft a map").
+startMap({ draft: (project, prompt) => void showPicker("session", project, prompt), selectedProject, refocus: focusPane });
+startMapAgents({ sessions: () => studio.listed, projectOf: projectOfCwd, select: (id, agent) => void select(id, agent) });
 element("new-session").addEventListener("click", () => void showPicker());
 element("add-project").addEventListener("click", () => void showAddProject());
 element("settings-gear").addEventListener("click", () => void run(actions, "studio::OpenSettings"));

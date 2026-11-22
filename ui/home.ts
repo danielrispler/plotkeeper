@@ -12,9 +12,13 @@ import { hunkFiles } from "./ask.js";
 import { codeTarget, followToCode } from "./selection.js";
 import { startLast } from "./picker.js";
 import { counts } from "./times.js";
-import { closePane, forgetAsked, redrawHome } from "./panes.js";
+import { closePane, forgetAsked, homeShown, redrawHome } from "./panes.js";
 import { hideClearToast, showClearToast } from "./toast.js";
 import { studio } from "./state.js";
+import { mapShown, openMap } from "./map.js";
+import { watchSeen } from "./seen.js";
+import { homeSeen } from "./layout.js";
+import { logStop, onHome, reviewNode, reviewOf, type Module } from "./stop-rules.js";
 import type { Learning, Session, Tap } from "./types.js";
 
 export type HomeKey = "needs_you" | "running" | "unseen" | "learning" | "landed" | "start";
@@ -40,7 +44,10 @@ export function resetHome(state: HomeState = homeState) {
 
 // Entering Home from another view starts it afresh; drawing it again while it is on screen keeps what Daniel did there.
 export function enterHome(already: boolean, state: HomeState = homeState) {
-  if (!already) resetHome(state);
+  if (!already) {
+    resetHome(state);
+    staleMarks();
+  }
 }
 
 export const MAX_RUNNING = 4;
@@ -56,7 +63,7 @@ export function learningSlot(asked: Learning | null, state: HomeState): Slot | n
   return asked ? { item: asked, next: false } : null;
 }
 
-export function homeView(sessions: Session[], asked: Learning | null, projects: string[], state: HomeState, headline: (s: Session) => string | null = () => null): HomePart[] {
+export function homeView(sessions: Session[], asked: Learning | null, projects: string[], state: HomeState, headline: (s: Session) => string | null = () => null, fogged: Set<string> = new Set()): HomePart[] {
   const allLanded = sessions.filter((s) => showsLanded(s.state, s.landed));
   const landed = allLanded.filter((s) => !state.cleared.has(s.id));
   const needsYou = sessions.filter((s) => s.state === "needs_you");
@@ -78,7 +85,7 @@ export function homeView(sessions: Session[], asked: Learning | null, projects: 
     part("unseen", "Unseen", capped("unseen", unseen, MAX_UNSEEN, (s) => ({ session: s, line: headline(s) ?? "", note: "" }))),
     part("learning", "", { rows: [], more: 0 }, { slot: learningSlot(asked, state) }),
     part("landed", "Landed", plain((s) => ({ session: s, line: "", note: "" }))(landed)),
-    part("start", "Start a session in", { rows: [], more: 0 }, { projects: homeProjects(projects) }),
+    part("start", "Start a session in", { rows: [], more: 0 }, { projects: homeProjects(projects, fogged) }),
   ];
   return parts.filter((p) => p.rows.length || p.slot || p.projects.length);
 }
@@ -97,7 +104,7 @@ export function slotLabel(item: Learning, session: Pick<Session, "name" | "ident
 }
 
 // The slot's card: the Quiz of the item the store chose, which records its taps as a Retest's, with "Not now" until it is answered
-// and a quiet "Next" after an answer when another item is due. It writes nothing as it is built: `markLearningShown` writes `shown`.
+// and a quiet "Next" after an answer when another item is due. It writes nothing as it is built: `watchLearningShown` writes `shown` once the card is seen.
 export function slotNode(slot: Slot, redraw: () => void, reask: () => void): HTMLElement {
   const { item } = slot;
   const wrap = document.createElement("div");
@@ -200,23 +207,40 @@ function answerCode(item: Learning): HTMLElement[] {
   return out;
 }
 
-// The item the last draw put in the slot, unanswered, whose `shown` is still to be written.
-let inSlot: Learning | null = null;
+// The item the last draw put in the slot, unanswered, whose `shown` is still to be written, and the watch that waits for it to be seen.
+type Asked = Exclude<Learning, { kind: "done" }>;
+let inSlot: Asked | null = null;
 const shownWritten = new Set<string>();
+let slotWatch: { id: string; node: Element; stop: () => void } | null = null;
 
-// Whether the item's first showing is written now (#240): the item is on screen in the slot, Home is the active view and the
-// window is visible and focused. Once per item.
-export function shownDue(item: Learning | null, home: boolean, visible: boolean, focused: boolean): boolean {
-  if (!item || item.kind === "done" || !home || !visible || !focused) return false;
+// Whether the item's first showing is still to be written (#240): once per item, and never for a Retest that has it.
+export function shownDue(item: Asked | null): boolean {
+  if (!item) return false;
   return !shownWritten.has(item.id) && !(item.kind === "retest" && item.taps.some((t) => t.kind === "shown"));
 }
 
-// Writes the slot's `shown` when its conditions hold; called when Home is drawn and when the window becomes visible or focused.
-export function markLearningShown(home: boolean) {
-  if (!shownDue(inSlot, home, document.visibilityState === "visible", document.hasFocus())) return;
-  const id = (inSlot as { id: string }).id;
-  shownWritten.add(id);
-  void invoke("quiz_tap", { id, tap: { kind: "shown" } }).catch(failure("quiz_tap"));
+// Writes the slot's `shown` once its card is seen (the shared Seen, #306): in the viewport of a visible, focused window with Home
+// open (`active`), not merely built. Watches the card as it is on screen; a redraw that keeps the card keeps its watch.
+export function watchLearningShown(node: Element | null, item: Asked | null, active: () => boolean) {
+  if (slotWatch && (!node || !item || slotWatch.id !== item.id || slotWatch.node !== node)) {
+    slotWatch.stop();
+    slotWatch = null;
+  }
+  if (!node || !item || !shownDue(item) || slotWatch) return;
+  const id = item.id;
+  slotWatch = {
+    id,
+    node,
+    stop: watchSeen(node, {
+      active,
+      onSeen: () => {
+        slotWatch = null;
+        if (!shownDue(item)) return;
+        shownWritten.add(id);
+        void invoke("quiz_tap", { id, tap: { kind: "shown" } }).catch(failure("quiz_tap"));
+      },
+    }),
+  };
 }
 
 // Tells that a turn ended: a session has a turn whose end is later than what was seen of that session (for one new to the list, than the
@@ -348,11 +372,46 @@ export const landedClear = clearing(
   homeState.cleared,
 );
 
-export type HomeProject = { name: string; path: string };
+// `fogged`: a part of its map that Daniel tracks as Core shows fog (#310); Home marks the row quietly, with no count.
+export type HomeProject = { name: string; path: string; fogged: boolean };
 
 // The projects Home offers: one per entry of `projects.json`, in its order.
-export function homeProjects(paths: string[]): HomeProject[] {
-  return paths.map((path) => ({ name: lastSegment(path) || path, path }));
+export function homeProjects(paths: string[], fogged: Set<string> = new Set()): HomeProject[] {
+  return paths.map((path) => ({ name: lastSegment(path) || path, path, fogged: fogged.has(path) }));
+}
+
+// The projects the shell reports with a fogged Core part, read when Home is entered and when the window gains focus, never on a timer.
+const marked = new Set<string>();
+let marksStale = true;
+export const staleMarks = () => void (marksStale = true);
+// The window gained focus: the marks are stale, and Home, when it is open, draws again to read them (that draw reads them).
+export function onWindowFocus(homeOpen: boolean, redraw: () => void) {
+  staleMarks();
+  if (homeOpen) redraw();
+}
+if (typeof window !== "undefined") window.addEventListener?.("focus", () => onWindowFocus(homeShown(), redrawHome));
+async function readMarks(paths: string[], redraw: () => void) {
+  marksStale = false;
+  const now = await invoke("map_marks", { projects: paths });
+  const review = await readReviews(paths);
+  const same = now.length === marked.size && now.every((path) => marked.has(path));
+  if (same && !review) return;
+  marked.clear();
+  now.forEach((path) => marked.add(path));
+  redraw();
+}
+
+// The one-time review on Home (#314): only for the projects whose Map view fell below its threshold, so an unused map still reaches
+// Daniel. It lists that project's unused modules, never a count. Read with the marks, when Home is entered and on focus.
+let homeReview: { modules: Module[]; projects: string[] } | null = null;
+async function readReviews(paths: string[]): Promise<boolean> {
+  const found: Record<string, Module[] | null> = {};
+  await Promise.all(paths.map(async (path) => void (found[path] = await reviewOf(path).catch(() => null))));
+  const projects = onHome(found);
+  const next = projects.length ? { modules: found[projects[0]]!, projects } : null;
+  const changed = JSON.stringify(next) !== JSON.stringify(homeReview);
+  homeReview = next;
+  return changed;
 }
 
 // Whether a click on `target`, inside the session list, is on its empty space: not on a row, a group
@@ -399,13 +458,47 @@ function moreRow(key: HomeKey, count: number, redraw: () => void): HTMLElement {
   return button;
 }
 
-function projectRow({ name, path }: HomeProject): HTMLElement {
+// Each project mark's watch, and the node it watches: a redraw that keeps the node keeps its watch, one that drops it stops it.
+const marksSeen = new Map<string, { node: Element; stop: () => void }>();
+
+// Watches `node`, the mark of `path` as it is in the DOM now (null: the project has no mark); the mark counts as seen when it is in view
+// in a focused window with Home open (the shared Seen), and a day is logged once.
+export function watchMark(path: string, node: Element | null) {
+  const had = marksSeen.get(path);
+  if (had && had.node === node) return;
+  had?.stop();
+  marksSeen.delete(path);
+  if (!node) return;
+  // Once seen, the entry goes: the next redraw watches the same node again, and `logStop` sends one event a day per project, so a mark
+  // still in view on a later day is logged while Studio stays open.
+  const stop = watchSeen(node, {
+    active: () => homeSeen(homeShown(), mapShown()),
+    onSeen: () => {
+      if (marksSeen.get(path)?.stop === stop) marksSeen.delete(path);
+      logStop("mark-seen", path);
+    },
+  });
+  marksSeen.set(path, { node, stop });
+}
+
+function projectRow({ name, path, fogged }: HomeProject): HTMLElement {
   const button = pressable(document.createElement("button"), false, () => void startLast(path, "").catch(failure("start", "error")));
   button.dataset.key = `project ${path}`;
   button.classList.add("row");
   button.title = `Start a session in ${path}`;
   const line = text("span", "", "l1");
   line.append(text("span", name, "name"), text("span", "New session", "id"));
+  if (fogged) {
+    // One quiet mark, no count; pressing it opens the project's Map view and not the new session the row starts.
+    const mark = text("span", "", "fog-mark");
+    mark.setAttribute("role", "button");
+    mark.title = "Something you track has changed, or a law is broken: open the map";
+    mark.addEventListener("click", (event) => {
+      event.stopPropagation();
+      openMap(path);
+    });
+    line.append(mark);
+  }
   button.append(line);
   return button;
 }
@@ -424,7 +517,8 @@ export function drawHome(box: HTMLElement, sessions: Session[], projects: string
     homeState.quiet = false;
     reask();
   }
-  const parts = homeView(sessions, asked, projects, homeState, lastHeadline);
+  if (marksStale && projects.length) readMarks(projects, redraw).catch(failure("map_marks"));
+  const parts = homeView(sessions, asked, projects, homeState, lastHeadline, marked);
   const slot = parts.find((p) => p.key === "learning")?.slot ?? null;
   inSlot = slot && slot.item.kind !== "done" && homeState.held !== slot.item ? slot.item : null;
   const found = foundWorkspaces();
@@ -452,6 +546,15 @@ export function drawHome(box: HTMLElement, sessions: Session[], projects: string
     keyed(text("h1", new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" }), "title"), "title"),
     ...(parts.some((p) => p.key === "needs_you") ? [] : [keyed(text("p", "Nothing needs you", "empty"), "none")]),
     ...parts.flatMap(drawPart),
+    ...(homeReview
+      ? [keyed(reviewNode(homeReview.modules, homeReview.projects, () => {
+          homeReview = null;
+          redraw();
+        }), "review")]
+      : []),
   ]);
-  markLearningShown(true);
+  // The marks that patch left in the DOM, not the ones just built and discarded.
+  const rows = new Map([...box.children].map((child) => [(child as HTMLElement).dataset.key, child]));
+  for (const path of new Set([...marksSeen.keys(), ...marked])) watchMark(path, rows.get(`project ${path}`)?.querySelector(".fog-mark") ?? null);
+  watchLearningShown(inSlot ? box.querySelector(`[data-key="learning ${inSlot.id}"]`) : null, inSlot, () => homeSeen(homeShown(), mapShown()));
 }

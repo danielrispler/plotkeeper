@@ -213,3 +213,18 @@ fn a_version_other_than_one_makes_touched_fail_and_names_it() {
         "{problems:?}"
     );
 }
+
+#[test]
+fn touched_for_map_places_paths_without_reading_the_working_tree() {
+    let map = system_map::parse(&base().to_string()).unwrap();
+    let paths = ["beta/b.rs", "docs/d.md", "stray.txt", "beta/b.rs"].map(String::from);
+    let got = system_map::touched_for_map(&map, &paths);
+    assert_eq!(parts(&got), vec![("beta", vec!["beta/b.rs"])]);
+    assert_eq!(got.ignored, vec!["docs/d.md"]);
+    assert_eq!(got.unowned, vec!["stray.txt"]);
+    let (_dir, root) = project(&base(), &["alpha/a.rs"]);
+    let by_root = system_map::touched(Path::new(&root), &paths).unwrap();
+    assert_eq!(parts(&by_root), parts(&got));
+    assert_eq!(by_root.ignored, got.ignored);
+    assert_eq!(by_root.unowned, got.unowned);
+}

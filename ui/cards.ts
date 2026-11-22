@@ -12,6 +12,8 @@ import { drawFeed, fillDockNotes, forgetMissingSummaries, openCitation } from ".
 import { confidenceRow, pickedHere, trialStage, whyInput, whyWaiting } from "./quiz.js";
 import type { CardRequest, CheckResult, Guess, Level, Quiz, Rating, Reason, SessionCards, StoredCard, Tap, TurnFile } from "./types.js";
 import { HOVERS } from "./hovers.js";
+import { type LayoutMode, railShown } from "./layout.js";
+import { watchSeen } from "./seen.js";
 
 // The turn a card is drawn in: its file chips open the file's hunk between the turn's trees, as its evidence line's rows do.
 export type CardTurn = { session: string; index: number; files: TurnFile[]; ended: boolean };
@@ -274,29 +276,31 @@ function ratingElement(id: string, rating: Rating | null, keyWrong: boolean | nu
   return node;
 }
 
-// Unguessed cards whose quiz the pane drew while the window was hidden. A quiz counts as shown when
-// it is drawn in a visible window, or when the window next becomes visible; the store keeps the first
-// time, which the weekly rates measure guesses from.
-const unshown = new Set<string>();
+// A card counts as shown when it is seen (`seen.ts`): in the viewport of a visible, focused window with the rail open, not when it
+// is built. The store keeps the first time, which the weekly rates measure guesses from. Cards already told, so one is told once.
+const told = new Set<string>();
+const watching = new Map<string, () => void>();
 
-// The ids of the cards built since the feed last began to draw: only those are on screen.
-const built = new Set<string>();
+const rail = () => {
+  const { classList, dataset } = document.body;
+  return railShown((dataset.layout ?? "full") as LayoutMode, classList.contains("rail-open"), classList.contains("skills-open"), classList.contains("map-open"));
+};
 
-// The feed starts to draw: every card it builds from here on is on screen.
-export const beginFeed = () => built.clear();
-
-// The feed finished drawing: a card that waited while the window was hidden and was folded away since is not shown, so it is
-// never tapped (a wake-up may fold the newest turn while the window is hidden).
-export function endFeed() {
-  for (const id of unshown) if (!built.has(id)) unshown.delete(id);
+function watchCard(id: string, node: HTMLElement) {
+  watching.get(id)?.();
+  if (told.has(id)) return;
+  watching.set(
+    id,
+    watchSeen(node, {
+      active: rail,
+      onSeen: () => {
+        watching.delete(id);
+        told.add(id);
+        void invoke("shown", { ids: [id] });
+      },
+    }),
+  );
 }
-
-export function markShown() {
-  if (document.visibilityState !== "visible") return;
-  if (unshown.size) invoke("shown", { ids: [...unshown] });
-  unshown.clear();
-}
-
 
 // Cards already drawn, keyed by their id, with the record each was drawn from. A card is drawn again
 // only when its record changed, such as after a tap, and is moved whole to the older group.
@@ -350,11 +354,11 @@ function showBrief(cards: SessionCards) {
 // Card `stored`'s node, drawn again only when its record changed.
 export function cardNode(stored: StoredCard, turn: CardTurn | null = null, trial = false): HTMLElement {
   const id = stored.request.id;
-  built.add(id);
   const record = JSON.stringify([stored, turn, trial ? trialStage(id) : null]);
   if (drawn.get(id)?.record !== record) {
-    if (!drawn.has(id) && stored.guess === null) unshown.add(id);
-    drawn.set(id, { record, node: cardElement(stored, turn, trial) });
+    const node = cardElement(stored, turn, trial);
+    if (stored.guess === null) watchCard(id, node);
+    drawn.set(id, { record, node });
   }
   return drawn.get(id)!.node;
 }
@@ -365,13 +369,12 @@ export function showCards(cards: SessionCards) {
   studio.cards = cards;
   showBrief(cards);
   showDecisions(cards.decisions, cards.decision_notes);
-  // A card drawn in a visible window is tapped before a switch of session drops it.
-  markShown();
   const ids = new Set([...cards.recent, ...cards.older, ...cards.workers.map(({ card }) => card)].map(({ request }) => request.id));
   for (const id of drawn.keys()) {
     if (ids.has(id)) continue;
     drawn.delete(id);
-    unshown.delete(id);
+    watching.get(id)?.();
+    watching.delete(id);
   }
   // The store changed: a summary missing before may be in it now.
   forgetMissingSummaries();
@@ -379,7 +382,6 @@ export function showCards(cards: SessionCards) {
   if (notes) fillDockNotes();
   // A card stored while Home is shown may be its next Quiz.
   refreshHome();
-  markShown();
 }
 
 // Whether the card's quiz waits for Daniel's answer.
@@ -429,7 +431,6 @@ export function unseenRow(stored: StoredCard, turn: CardTurn | null = null): HTM
     if (built) return;
     built = true;
     node.append(cardNode(stored, turn));
-    markShown();
   };
   if (node.open) show();
   node.addEventListener("toggle", () => {

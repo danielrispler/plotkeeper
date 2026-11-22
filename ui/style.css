@@ -645,3 +645,122 @@ body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
 .pane.home .slot-card .evidence-edit, .pane.home .slot-card .ask-about { display: none; }
 .pane.home .slot-card .evidence-hunk { background: var(--bg); font: var(--size-xs)/1.5 var(--mono); padding: var(--sp-3) var(--sp-5); }
 .pane.home .slot-card .evidence-caption { margin: var(--sp-3) 0 0; font-size: var(--size-xs); color: var(--faint); }
+
+/* The Map view (danielrispler/plotkeeper#306, ticket #309): over the rail's and the terminal's columns, which it hides; the list and the top
+   bar stay live. Treatment C: plates on a quiet chart. The sizes are tokens, and map-model.ts holds the plate's and the actor's. */
+.map-view { grid-column: 2 / 4; grid-row: 2; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; background: var(--map-bg); position: relative; z-index: 2; }
+body.map-open .term, body.map-open .rail, body.map-open .spine { visibility: hidden !important; }
+/* A toast is not hidden: a session that needs Daniel is never out of sight. */
+body.map-open .toasts, body.map-open .toast { visibility: visible !important; }
+.map-head { display: flex; align-items: baseline; gap: var(--sp-5); padding: var(--sp-6) var(--map-gutter) var(--sp-4); }
+.map-project { font-size: var(--map-title); font-weight: 600; line-height: 1.2; padding: 0 var(--sp-4); margin-inline-start: calc(-1 * var(--sp-4)); }
+.map-ref { font-size: var(--size-small); color: var(--faint); }
+/* The one-time review (#314): a quiet line, in the muted colour, with one small button; never a colour of its own. */
+.review { display: flex; align-items: baseline; gap: var(--sp-4); font-size: var(--size-small); color: var(--muted); }
+.review[hidden], .map-review[hidden] { display: none; }
+.map-review:not([hidden]) { margin-inline-start: var(--sp-5); }
+.map-banner:not(:empty) { margin-inline-start: auto; font-size: var(--size-small); color: var(--muted); }
+.map-projects[popover] { top: calc(var(--bar) + var(--map-title) + var(--sp-7)); left: var(--map-gutter); right: auto; width: var(--menu); }
+.map-stage { display: grid; grid-template-columns: minmax(0, 1fr) auto; min-height: 0; }
+.map-body { position: relative; min-width: 0; min-height: 0; }
+.map-side { width: var(--map-sheet); overflow-y: auto; padding: var(--sp-4) var(--map-gutter) var(--sp-5) var(--sp-5); }
+.map-canvas { position: absolute; inset: 0; overflow: auto; }
+.map-world { position: relative; background-image: radial-gradient(var(--map-dot) var(--hair), transparent var(--hair)); background-size: var(--map-grid) var(--map-grid); }
+.map-links { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
+.map-links .link { stroke: var(--link); stroke-width: var(--link-width); }
+.link-mark.check { fill: var(--law-check); }
+.link-mark.trust { fill: var(--map-bg); stroke: var(--law-trust); stroke-width: var(--hair); }
+.plate { position: absolute; transform: translate(-50%, -50%); width: var(--plate-w); height: var(--plate-h); padding: var(--sp-5);
+         display: flex; flex-direction: column; gap: var(--sp-1); border-radius: var(--radius-pane); background: var(--plate); touch-action: none; user-select: none;
+         box-shadow: inset 0 0 0 var(--hair) var(--plate-edge), var(--shadow); cursor: grab; transition: box-shadow var(--plate-move); }
+.plate.dragging, .actor.dragging { cursor: grabbing; transition: none; }
+.plate.tier-core { background: var(--plate-core); }
+.plate.tier-black-box { background: var(--plate-black); box-shadow: inset 0 0 0 var(--hair) var(--plate-black-edge); color: var(--muted); }
+.plate-name { font-size: var(--size-read); font-weight: 600; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plate-caption { font-size: var(--size-small); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plate.tier-black-box .plate-caption { color: var(--faint); }
+/* The plate's slots: the mist behind it, the law marks at its top right, and the agents' chips along its foot. */
+.plate-fog { position: absolute; inset: calc(-1 * var(--sp-7)); z-index: -1; pointer-events: none; }
+.plate-marks { position: absolute; top: var(--sp-4); right: var(--sp-5); display: flex; gap: var(--sp-3); align-items: center; }
+.plate-chips { position: absolute; left: var(--sp-4); right: var(--sp-4); bottom: calc(-1 * var(--sp-4)); display: flex; gap: var(--sp-2); }
+.law-mark { display: inline-block; flex: none; width: var(--law-mark); height: var(--law-mark); transform: rotate(45deg); }
+.law-mark.check { background: var(--law-check); }
+.law-mark.trust { box-shadow: inset 0 0 0 var(--hair) var(--law-trust); }
+.actor { position: absolute; transform: translate(-50%, -50%); width: var(--actor-w); height: var(--actor-h); display: grid; place-items: center;
+         font-size: var(--size-xs); letter-spacing: .12em; text-transform: uppercase; color: var(--faint); cursor: grab; touch-action: none; user-select: none; }
+.map-empty { position: absolute; inset: 0; display: grid; align-content: center; justify-items: center; gap: var(--sp-4); text-align: center; }
+.map-empty-title { margin: 0; font-size: var(--size-large); font-weight: 600; }
+.map-empty .empty { max-width: var(--dialog); }
+.map-legend { display: flex; justify-content: flex-end; align-items: center; gap: var(--sp-3); padding: var(--sp-4) var(--map-gutter); font-size: var(--size-xs); color: var(--faint); }
+.map-legend .law-mark { margin-inline: var(--sp-2); }
+/* Fog (#310): a cool-grey mist behind the plate's text, so the name stays at full strength. Thin is the plain halo; thick is the denser
+   halo with a rim and a slow drift, so the two read apart at a glance without a number. "I know this" lifts it. */
+.plate.fog-thin .plate-fog, .plate.fog-thick .plate-fog { inset: calc(-1 * var(--sp-7)); border-radius: var(--sp-7); filter: blur(var(--sp-5)); }
+.plate.fog-thin .plate-fog { background: var(--mist-thin); }
+.plate.fog-thick .plate-fog { background: var(--mist-thick); animation: mist-drift var(--mist-drift) ease-in-out infinite alternate; }
+.plate.fog-thick { box-shadow: inset 0 0 0 var(--hair) var(--mist), var(--shadow); }
+/* The mist lies over the plate and dims what it says apart from the part's name, as in the prototype. */
+.plate.fog-thin .plate-caption { opacity: .75; }
+.plate.fog-thick .plate-caption { opacity: .55; }
+.plate-fog.lifting { animation: mist-lift var(--mist-lift) forwards; }
+@keyframes mist-drift { from { transform: translateX(calc(-1 * var(--sp-2))); } to { transform: translateX(var(--sp-2)); } }
+@keyframes mist-lift { to { opacity: 0; transform: translateY(calc(-1 * var(--sp-6))); } }
+.plate.open { box-shadow: inset 0 0 0 var(--hair) var(--ring-warm), var(--shadow); }
+.mist-swatch { display: inline-block; width: var(--sp-6); height: var(--sp-4); border-radius: var(--sp-4); margin-inline: var(--sp-2); vertical-align: middle; }
+.mist-swatch.thin { background: var(--mist-thin); box-shadow: inset 0 0 0 var(--hair) var(--mist-thin); }
+.mist-swatch.thick { background: var(--mist-thick); box-shadow: inset 0 0 0 var(--hair) var(--mist); }
+/* The part sheet: in the side area, beside the map. */
+.sheet { position: relative; display: flex; flex-direction: column; gap: var(--sp-3); }
+.sheet-close { position: absolute; top: 0; right: 0; }
+.sheet-name { margin: 0; font-size: var(--size-large); font-weight: 600; padding-right: var(--sp-7); }
+.sheet-caption { margin: 0; font-size: var(--size-small); color: var(--muted); }
+.sheet-description { margin: var(--sp-3) 0 0; font-size: var(--size-read); line-height: 1.5; }
+.sheet-heading { margin: var(--sp-5) 0 0; font-size: var(--size-xs); letter-spacing: .12em; text-transform: uppercase; color: var(--faint); font-weight: 500; }
+.sheet-tiers { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+.sheet-laws { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-4); }
+.sheet-law { display: grid; grid-template-columns: auto 1fr; column-gap: var(--sp-4); align-items: baseline; font-size: var(--size-small); }
+.sheet-law-backing { grid-column: 2; font-size: var(--size-xs); color: var(--faint); }
+.sheet-law-actions { grid-column: 2; }
+.sheet-fog { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-3); }
+.sheet-fog-line { margin: 0; font-size: var(--size-small); color: var(--muted); }
+.sheet-fog.thin .sheet-fog-line, .sheet-fog.thick .sheet-fog-line { color: var(--mist); }
+.sheet-ci { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-3); }
+.sheet-ci-line { margin: 0; font-size: var(--size-small); color: var(--muted); }
+.sheet-ci.broken .sheet-ci-line { color: var(--conflict); }
+/* The history strip (#313): a commit per row, oldest first. A commit Daniel has not caught up on has a filled mist dot; an older one a
+   hollow dot. The one being viewed is raised. The strip scrolls; its labels wrap, so none is cut. */
+.hist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); max-height: var(--strip-height); overflow-y: auto; }
+.hist-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: var(--sp-4); align-items: baseline; padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-small); font-size: var(--size-small); }
+.hist-row.current { background: var(--raised); }
+.hist-dot { width: var(--sp-4); height: var(--sp-4); border-radius: 50%; box-shadow: inset 0 0 0 var(--hair) var(--faint); align-self: center; }
+.hist-row.fogged .hist-dot { background: var(--mist); box-shadow: none; }
+.hist-commit { text-align: start; padding: 0; color: var(--fg); overflow-wrap: anywhere; }
+.hist-row.fogged .hist-commit { color: var(--mist); }
+.hist-sha { grid-column: 3; font: var(--size-xs) var(--mono); color: var(--faint); }
+.hist-files { grid-column: 2 / 4; justify-self: start; }
+.banner-text { color: var(--fg); }
+/* A broken law (#312): a loud red dot at the plate's top right, the colour that sits beside Needs you's orange and nowhere else. */
+.law-broken { display: inline-block; flex: none; width: var(--sp-5); height: var(--sp-5); border-radius: 50%; background: var(--conflict); }
+.plate.broken, .plate.broken.open { box-shadow: inset 0 0 0 var(--hair) var(--conflict), var(--shadow); }
+.map-legend .law-broken { margin-inline: var(--sp-2); vertical-align: middle; }
+/* The drawer (#312): read-only code and text under the part sheet, with its jumps out. */
+.drawer { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-3); }
+.drawer-title { margin: 0; font-size: var(--size-read); font-weight: 600; padding-right: var(--sp-7); }
+.drawer-note, .drawer-label { margin: 0; font-size: var(--size-xs); color: var(--faint); }
+.drawer-block { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-3); align-self: stretch; }
+.drawer-code { margin: 0; align-self: stretch; max-height: var(--drawer-code); overflow: auto; padding: var(--sp-4) var(--sp-5); border-radius: var(--radius-small);
+               background: var(--raised); font: var(--size-xs)/1.5 var(--mono); white-space: pre; user-select: text; }
+.fog-mark { display: inline-block; flex: none; width: var(--sp-4); height: var(--sp-4); margin-inline-start: auto; border-radius: 50%; background: var(--mist); cursor: pointer; }
+@media (prefers-reduced-motion: reduce) {
+  .plate, .btn { transition: none; }
+  .plate-fog, .plate-fog.lifting { animation: none; }
+}
+.map-empty .primary { background: var(--selected); }
+
+/* Live agents on the Map view (#311): a chip per agent along a plate's foot, and a quiet list of those no part holds. A chip that needs
+   Daniel is the one coloured thing, in the needs-you pill's colours. */
+.agent-chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; padding: 0 var(--sp-4); font-size: var(--size-xs);
+              line-height: 1.6; border-radius: var(--radius); color: var(--fg); background: var(--raised); box-shadow: inset 0 0 0 var(--hair) var(--plate-edge); }
+.agent-chip.needs-you { font-weight: 600; color: var(--needs-you); background: var(--needs-you-bg); box-shadow: none; }
+#map-not-placed:not(:empty) { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-3); }
+#map-not-placed .side-title { margin: 0; font-size: var(--size-xs); font-weight: 400; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); }

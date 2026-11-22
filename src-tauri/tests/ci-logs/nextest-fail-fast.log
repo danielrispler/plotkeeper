@@ -1,0 +1,73 @@
+macos	Run npm run check	2026-11-22T09:12:01.1234567Z     Finished `test` profile [unoptimized + debuginfo] target(s) in 0.00s
+macos	Run npm run check	2026-11-22T09:12:02.1234567Z ────────────
+macos	Run npm run check	2026-11-22T09:12:03.1234567Z  Nextest run ID ab46fd0d-dfdb-4065-9add-ed4b81e8b436 with nextest profile: default
+macos	Run npm run check	2026-11-22T09:12:04.1234567Z     Starting 4 tests across 2 binaries
+macos	Run npm run check	2026-11-22T09:12:05.1234567Z         PASS [   0.005s] (1/4) studio-nx::wire passes
+macos	Run npm run check	2026-11-22T09:12:06.1234567Z         FAIL [   0.005s] (2/4) studio-nx::wire wire_types_match
+macos	Run npm run check	2026-11-22T09:12:07.1234567Z   stdout ───
+macos	Run npm run check	2026-11-22T09:12:08.1234567Z 
+macos	Run npm run check	2026-11-22T09:12:09.1234567Z     running 1 test
+macos	Run npm run check	2026-11-22T09:12:10.1234567Z     test wire_types_match ... FAILED
+macos	Run npm run check	2026-11-22T09:12:11.1234567Z 
+macos	Run npm run check	2026-11-22T09:12:12.1234567Z     failures:
+macos	Run npm run check	2026-11-22T09:12:13.1234567Z 
+macos	Run npm run check	2026-11-22T09:12:14.1234567Z     failures:
+macos	Run npm run check	2026-11-22T09:12:15.1234567Z         wire_types_match
+macos	Run npm run check	2026-11-22T09:12:16.1234567Z 
+macos	Run npm run check	2026-11-22T09:12:17.1234567Z     test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+macos	Run npm run check	2026-11-22T09:12:18.1234567Z 
+macos	Run npm run check	2026-11-22T09:12:19.1234567Z   stderr ───
+macos	Run npm run check	2026-11-22T09:12:20.1234567Z 
+macos	Run npm run check	2026-11-22T09:12:21.1234567Z     thread 'wire_types_match' (28484948) panicked at tests/wire.rs:3:25:
+macos	Run npm run check	2026-11-22T09:12:22.1234567Z     assertion `left == right` failed: wire drifted
+macos	Run npm run check	2026-11-22T09:12:23.1234567Z       left: 1
+macos	Run npm run check	2026-11-22T09:12:24.1234567Z      right: 2
+macos	Run npm run check	2026-11-22T09:12:25.1234567Z     note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+macos	Run npm run check	2026-11-22T09:12:26.1234567Z 
+macos	Run npm run check	2026-11-22T09:12:27.1234567Z   Cancelling due to test failure: 2 tests still running
+macos	Run npm run check	2026-11-22T09:12:28.1234567Z         FAIL [   0.005s] (3/4) studio-nx::wire unrelated_in_same_file
+macos	Run npm run check	2026-11-22T09:12:29.1234567Z   stdout ───
+macos	Run npm run check	2026-11-22T09:12:30.1234567Z 
+macos	Run npm run check	2026-11-22T09:12:31.1234567Z     running 1 test
+macos	Run npm run check	2026-11-22T09:12:32.1234567Z     test unrelated_in_same_file ... FAILED
+macos	Run npm run check	2026-11-22T09:12:33.1234567Z 
+macos	Run npm run check	2026-11-22T09:12:34.1234567Z     failures:
+macos	Run npm run check	2026-11-22T09:12:35.1234567Z 
+macos	Run npm run check	2026-11-22T09:12:36.1234567Z     failures:
+macos	Run npm run check	2026-11-22T09:12:37.1234567Z         unrelated_in_same_file
+macos	Run npm run check	2026-11-22T09:12:38.1234567Z 
+macos	Run npm run check	2026-11-22T09:12:39.1234567Z     test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+macos	Run npm run check	2026-11-22T09:12:40.1234567Z 
+macos	Run npm run check	2026-11-22T09:12:41.1234567Z   stderr ───
+macos	Run npm run check	2026-11-22T09:12:42.1234567Z 
+macos	Run npm run check	2026-11-22T09:12:43.1234567Z     thread 'unrelated_in_same_file' (28484947) panicked at tests/wire.rs:5:31:
+macos	Run npm run check	2026-11-22T09:12:44.1234567Z     boom
+macos	Run npm run check	2026-11-22T09:12:45.1234567Z     note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+macos	Run npm run check	2026-11-22T09:12:46.1234567Z 
+macos	Run npm run check	2026-11-22T09:12:47.1234567Z         FAIL [   0.005s] (4/4) studio-nx tests::unit_fails
+macos	Run npm run check	2026-11-22T09:12:48.1234567Z   stdout ───
+macos	Run npm run check	2026-11-22T09:12:49.1234567Z 
+macos	Run npm run check	2026-11-22T09:12:50.1234567Z     running 1 test
+macos	Run npm run check	2026-11-22T09:12:51.1234567Z     test tests::unit_fails ... FAILED
+macos	Run npm run check	2026-11-22T09:12:52.1234567Z 
+macos	Run npm run check	2026-11-22T09:12:53.1234567Z     failures:
+macos	Run npm run check	2026-11-22T09:12:54.1234567Z 
+macos	Run npm run check	2026-11-22T09:12:55.1234567Z     failures:
+macos	Run npm run check	2026-11-22T09:12:56.1234567Z         tests::unit_fails
+macos	Run npm run check	2026-11-22T09:12:57.1234567Z 
+macos	Run npm run check	2026-11-22T09:12:58.1234567Z     test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+macos	Run npm run check	2026-11-22T09:12:59.1234567Z 
+macos	Run npm run check	2026-11-22T09:12:00.1234567Z   stderr ───
+macos	Run npm run check	2026-11-22T09:12:01.1234567Z 
+macos	Run npm run check	2026-11-22T09:12:02.1234567Z     thread 'tests::unit_fails' (28484949) panicked at src/lib.rs:5:23:
+macos	Run npm run check	2026-11-22T09:12:03.1234567Z     assertion `left == right` failed
+macos	Run npm run check	2026-11-22T09:12:04.1234567Z       left: 1
+macos	Run npm run check	2026-11-22T09:12:05.1234567Z      right: 2
+macos	Run npm run check	2026-11-22T09:12:06.1234567Z     note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+macos	Run npm run check	2026-11-22T09:12:07.1234567Z 
+macos	Run npm run check	2026-11-22T09:12:08.1234567Z ────────────
+macos	Run npm run check	2026-11-22T09:12:09.1234567Z      Summary [   0.006s] 4 tests run: 1 passed, 3 failed, 0 skipped
+macos	Run npm run check	2026-11-22T09:12:10.1234567Z         FAIL [   0.005s] (2/4) studio-nx::wire wire_types_match
+macos	Run npm run check	2026-11-22T09:12:11.1234567Z         FAIL [   0.005s] (3/4) studio-nx::wire unrelated_in_same_file
+macos	Run npm run check	2026-11-22T09:12:12.1234567Z         FAIL [   0.005s] (4/4) studio-nx tests::unit_fails
+macos	Run npm run check	2026-11-22T09:12:13.1234567Z error: test run failed

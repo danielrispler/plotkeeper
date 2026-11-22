@@ -37,10 +37,15 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
 
 mod answer;
+mod ci_laws;
+mod fog;
+mod history;
+mod map;
 mod presence;
 mod restart;
 mod settings;
 mod skills;
+mod stop_rules;
 mod terminal;
 
 /// The card store, which the log thread adds to and the pane records guesses in.
@@ -1136,6 +1141,8 @@ fn main() {
         .manage(writer.clone())
         .manage(writing)
         .manage(terminal::Daemon::default())
+        .manage(map::Fetches::default())
+        .manage(ci_laws::load_cache())
         .manage(Mutex::new(answer::Watching::default()))
         .invoke_handler(tauri::generate_handler![
             sessions,
@@ -1216,6 +1223,19 @@ fn main() {
             mark_unseen,
             rail_shown,
             refresh_landed_tasks,
+            map::map_state,
+            map::map_save_positions,
+            map::map_set_tier,
+            map::map_know,
+            map::map_history,
+            map::map_at,
+            map::map_commit,
+            map::map_marks,
+            map::map_proof,
+            map::map_place,
+            stop_rules::stop_log,
+            stop_rules::stop_facts,
+            stop_rules::stop_dismiss,
             reveal_log,
             sounds
         ])
@@ -1639,7 +1659,14 @@ fn refresh_landed(app: &AppHandle, session: Option<String>) {
             let facts = Path::new(&task.path)
                 .exists()
                 .then(|| lookup_task(gh, &task));
-            let changed = studio.lock().unwrap().set_task_facts(&task.path, facts);
+            let (before, changed) = {
+                let mut studio = studio.lock().unwrap();
+                let before = studio.task_facts_at(&task.path);
+                (before, studio.set_task_facts(&task.path, facts))
+            };
+            if map::became_merged(before, facts) {
+                map::merged(&app, &task.path);
+            }
             if changed {
                 LIST_CHANGED.store(true, Ordering::Release);
             }
