@@ -6,13 +6,12 @@ import { age, failure, fullTitle, invoke, patch, pressable, text } from "./dom.j
 import { quizAnswered, quizItem, quizRegion, seedQuiz } from "./quiz.js";
 import { childrenOf, deleting, glyph, item, row, secondLine, selecting, sessionName, showsLanded, status } from "./list.js";
 import { logo, logoKey } from "./logos.js";
-import { foundWorkspaces, lastSegment, sessionProjectName } from "./workspaces.js";
+import { lastSegment, sessionProjectName } from "./projects.js";
 import { lastHeadline } from "./story.js";
 import { hunkFiles } from "./ask.js";
 import { codeTarget, followToCode } from "./selection.js";
-import { startLast } from "./picker.js";
 import { counts } from "./times.js";
-import { closePane, forgetAsked, homeShown, redrawHome } from "./panes.js";
+import { forgetAsked, homeShown, redrawHome } from "./panes.js";
 import { hideClearToast, showClearToast } from "./toast.js";
 import { studio } from "./state.js";
 import { mapShown, openMap } from "./map.js";
@@ -21,7 +20,7 @@ import { homeSeen } from "./layout.js";
 import { logStop, onHome, reviewNode, reviewOf, type Module } from "./stop-rules.js";
 import type { Learning, Session, Tap } from "./types.js";
 
-export type HomeKey = "needs_you" | "running" | "unseen" | "learning" | "landed" | "start";
+export type HomeKey = "needs_you" | "running" | "unseen" | "learning" | "landed" | "projects";
 // A session's row on Home: its second line, and a muted note beside it (the intention's age).
 export type HomeRow = { session: Session; line: string; note: string };
 // One part of the page: `rows` are its sessions, `more` the sessions hidden behind its "+N" row.
@@ -85,7 +84,7 @@ export function homeView(sessions: Session[], asked: Learning | null, projects: 
     part("unseen", "Unseen", capped("unseen", unseen, MAX_UNSEEN, (s) => ({ session: s, line: headline(s) ?? "", note: "" }))),
     part("learning", "", { rows: [], more: 0 }, { slot: learningSlot(asked, state) }),
     part("landed", "Landed", plain((s) => ({ session: s, line: "", note: "" }))(landed)),
-    part("start", "Start a session in", { rows: [], more: 0 }, { projects: homeProjects(projects, fogged) }),
+    part("projects", "Projects", { rows: [], more: 0 }, { projects: homeProjects(projects, fogged) }),
   ];
   return parts.filter((p) => p.rows.length || p.slot || p.projects.length);
 }
@@ -339,31 +338,19 @@ export function clearing(
   };
 }
 
-// The window's one Clear: its hidden rows are `homeState.cleared`, the toast offers Undo, and the shell is told which sessions a quit
-// would commit (`clearing`). A commit is today's Delete: the terminal ended, the row dropped, the cards kept.
+// The page's one Clear: its hidden rows are `homeState.cleared`, and the toast offers Undo. A commit is today's Delete: the row
+// dropped, the cards kept.
 const stillLanded = (id: string) => studio.listed.find((s) => s.id === id && showsLanded(s.state, s.landed));
-// Clear's and Delete's one rule (#244, #270): a terminal is in use while a session that is not leaving the list, and not ended, runs in
-// it. An ended session keeps the terminal a later one may now use.
-export const terminalInUse = (terminal: string, listed: Session[], leaving: (id: string) => boolean) =>
-  listed.some((s) => s.terminal === terminal && s.state !== "ended" && !leaving(s.id));
-// A terminal is ended once, and never while a session that is not being cleared still runs in it.
-const closed = new Set<string>();
-const terminalFree = (terminal: string) =>
-  !closed.has(terminal) && !terminalInUse(terminal, studio.listed, (id) => landedClear.hidden.has(id)) && (closed.add(terminal), true);
 export const landedClear = clearing(
   { set: (run, ms) => setTimeout(run, ms), clear: (id) => clearTimeout(id as number) },
   {
     landed: stillLanded,
     commit: (session) =>
-      (async () => {
-        if (session.terminal !== null && terminalFree(session.terminal)) await closePane(session.terminal);
-        await invoke("delete_session", { id: session.id });
-      })().catch((e) => {
+      invoke("delete_session", { id: session.id }).catch((e) => {
         failure("delete_session", "error")(e);
         throw e;
       }),
     changed: (pending, writing) => {
-      void invoke("clearing", { sessions: [...pending, ...writing].map((s) => ({ id: s.id, terminal: s.terminal })) }).catch(failure("clearing"));
       if (pending.length) showClearToast(pending.length, () => landedClear.undo());
       else hideClearToast();
       redrawHome();
@@ -375,7 +362,7 @@ export const landedClear = clearing(
 // `fogged`: a part of its map that Daniel tracks as Core shows fog (#310); Home marks the row quietly, with no count.
 export type HomeProject = { name: string; path: string; fogged: boolean };
 
-// The projects Home offers: one per entry of `projects.json`, in its order.
+// The projects Home offers: one per repository a session ran in; a row opens the project's map.
 export function homeProjects(paths: string[], fogged: Set<string> = new Set()): HomeProject[] {
   return paths.map((path) => ({ name: lastSegment(path) || path, path, fogged: fogged.has(path) }));
 }
@@ -415,9 +402,9 @@ async function readReviews(paths: string[]): Promise<boolean> {
 }
 
 // Whether a click on `target`, inside the session list, is on its empty space: not on a row, a group
-// or project heading, a workspace or any button.
+// or project heading or any button.
 export function listSpace(target: { closest(selector: string): unknown }): boolean {
-  return ![".item", "summary", ".project-head", ".project-workspaces", "button"].some((selector) => target.closest(selector));
+  return ![".item", "summary", ".project-head", "button"].some((selector) => target.closest(selector));
 }
 
 // A session's row, the list's, with its Delete beside it on a landed one.
@@ -482,14 +469,14 @@ export function watchMark(path: string, node: Element | null) {
 }
 
 function projectRow({ name, path, fogged }: HomeProject): HTMLElement {
-  const button = pressable(document.createElement("button"), false, () => void startLast(path, "").catch(failure("start", "error")));
+  const button = pressable(document.createElement("button"), false, () => openMap(path));
   button.dataset.key = `project ${path}`;
   button.classList.add("row");
-  button.title = `Start a session in ${path}`;
+  button.title = `Open the map of ${path}`;
   const line = text("span", "", "l1");
-  line.append(text("span", name, "name"), text("span", "New session", "id"));
+  line.append(text("span", name, "name"), text("span", "Map", "id"));
   if (fogged) {
-    // One quiet mark, no count; pressing it opens the project's Map view and not the new session the row starts.
+    // One quiet mark, no count.
     const mark = text("span", "", "fog-mark");
     mark.setAttribute("role", "button");
     mark.title = "Something you track has changed, or a law is broken: open the map";
@@ -521,7 +508,6 @@ export function drawHome(box: HTMLElement, sessions: Session[], projects: string
   const parts = homeView(sessions, asked, projects, homeState, lastHeadline, marked);
   const slot = parts.find((p) => p.key === "learning")?.slot ?? null;
   inSlot = slot && slot.item.kind !== "done" && homeState.held !== slot.item ? slot.item : null;
-  const found = foundWorkspaces();
   const keyed = (node: HTMLElement, key: string) => {
     node.dataset.key = key;
     return node;
@@ -537,7 +523,7 @@ export function drawHome(box: HTMLElement, sessions: Session[], projects: string
   };
   const drawPart = (part: HomePart): HTMLElement[] => [
     ...(part.title ? [heading(part.title, `h ${part.key}`)] : []),
-    ...part.rows.map((r) => (part.key === "landed" ? sessionRow(r.session, true) : waitingRow(r, part.key, sessionProjectName(projects, found, r.session)))),
+    ...part.rows.map((r) => (part.key === "landed" ? sessionRow(r.session, true) : waitingRow(r, part.key, sessionProjectName(r.session)))),
     ...(part.more ? [moreRow(part.key, part.more, redraw)] : []),
     ...(part.slot ? [slotNode(part.slot, redraw, reask)] : []),
     ...part.projects.map(projectRow),

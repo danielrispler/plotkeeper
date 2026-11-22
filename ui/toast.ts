@@ -60,32 +60,6 @@ export function showToast() {
   }
 }
 
-// The start-failure toast (danielrispler/Falinks#558, herdr's pattern): `message` names the session, else the program, and
-// the code; "Show output" runs `open`, which shows the failed pane. Like the needs-you toast it never
-// takes focus or space, and it stays until Daniel acts on it or dismisses it. Each failure is its own
-// row, stacked under the earlier ones, so a second never hides the first.
-export function showStartToast(message: string, open: () => void) {
-  const toast = element("start-toast");
-  const row: HTMLElement[] = [];
-  const button = (label: string, hover: string, kind: string, click: () => void) => {
-    const node = text("button", label, `btn ${kind}`);
-    node.title = hover;
-    node.tabIndex = -1;
-    node.addEventListener("pointerdown", (event) => event.preventDefault());
-    node.addEventListener("click", () => {
-      for (const node of row) node.remove();
-      toast.hidden = toast.childElementCount === 0;
-      click();
-    });
-    return node;
-  };
-  const close = button("×", "Hide this toast", "quiet small", () => {});
-  close.setAttribute("aria-label", "Dismiss");
-  row.push(fullTitle(text("strong", message, "name"), message), button("Show output", HOVERS.failedOutput, "small", open), close);
-  toast.append(...row);
-  toast.hidden = false;
-}
-
 // Jumps to the toast's session and leaves focus mode; the next-needs-you key does the same. False:
 // no toast shows.
 export function jumpToNeedsYou(): boolean {

@@ -251,10 +251,6 @@ mod resolver {
             name("session-pieces-in-order").as_deref(),
             Some("jobs_run_in_the_order_they_were_asked_for_on_the_session_queue")
         );
-        assert_eq!(
-            name("delete-keeps-live-terminal").as_deref(),
-            Some("a terminal is in use while a session not leaving, and not ended, runs in it")
-        );
     }
 
     #[test]

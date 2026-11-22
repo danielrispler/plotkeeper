@@ -18,7 +18,7 @@ import {
   type MapDoc, mapProject, type MapLink, parseMap, type Part, type Point, plateSize, rimPoint, scrollToShow, type Scrub, type Tier,
 } from "./map-model.js";
 import { recheckSeen } from "./seen.js";
-import { knownProjects, projects } from "./projects.js";
+import { knownProjects } from "./projects.js";
 import type { MapState } from "./types.js";
 
 export type LoadedMap = Extract<MapDoc, { ok: true }>;
@@ -48,12 +48,8 @@ export const registerLayer = (name: LayerName, layer: Layer) => void (layers[nam
 
 // What `startMap` is given by `main.ts`, which owns what the Map view may not import.
 export type MapDeps = {
-  // Opens New session in `project` with `prompt` in its quick start.
-  draft: (project: string, prompt: string) => void;
   // The project of the selected session, null with none.
   selectedProject: () => string | null;
-  // Gives the keyboard back to the terminal pane the view covered.
-  refocus: () => void;
 };
 let deps: MapDeps;
 let project: string | null = null;
@@ -128,13 +124,12 @@ export function leaveMap() {
   element("map").hidden = true;
   recheckSeen();
   hideProjects();
-  deps?.refocus();
 }
 
 // The map key: opens the Map view on the selected session's project, else the first project with a map; again, leaves it.
 export async function toggleMap() {
   if (mapShown()) return leaveMap();
-  const paths = await projects().catch(() => knownProjects());
+  const paths = knownProjects();
   const selected = deps.selectedProject();
   const withMap = new Set<string>();
   if (selected === null) {
@@ -224,10 +219,8 @@ function drawEmpty(body: HTMLElement, state: MapState | null) {
       text("p", "No map yet", "map-empty-title"),
       text("p", `${name(state.project)} has no system-map.json on ${where}.`, "empty"),
     );
-    const draft = pressable(text("button", "Draft a map", "btn primary"), false, () => deps.draft(state.project, draftPrompt));
-    draft.removeAttribute("aria-pressed");
-    draft.title = "Start a session in this project that drafts system-map.json and checks it with system-map check";
-    box.append(draft);
+    // The page starts no session: the prompt is shown to give to one in the project.
+    box.append(text("p", "To draft one, give this to a session in the project:", "empty"), text("pre", draftPrompt, "map-draft"));
   }
   body.replaceChildren(box);
 }

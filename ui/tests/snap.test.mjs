@@ -41,13 +41,12 @@ test("the list fixture has a nested, a selected and a landed row", async () => {
   assert.equal(f.selected.session.id, f.sessions[0].id);
 });
 
-test("the home fixture has every section: needs you, unseen, landed, and a project", () => {
+test("the home fixture has every section: needs you, unseen, landed", () => {
   const f = fixtures.home();
   assert.equal(f.selected, null);
   assert.ok(f.sessions.some((s) => s.state === "needs_you"));
   assert.ok(f.sessions.some((s) => s.unseen && s.state !== "needs_you" && !s.landed));
   assert.ok(f.sessions.some((s) => s.landed && s.state !== "running"));
-  assert.ok(f.terminal_connect.repo);
 });
 
 // The rail's fixtures (#109): each holds what its state needs.
@@ -200,55 +199,6 @@ test("consoleLines reads the page's console lines out of Chrome's stderr", () =>
     '[1116/101010.000:INFO:CONSOLE:6] "snap:fail it said \\"no\\"", source: http://127.0.0.1:1/index.html (6)',
   ].join("\n");
   assert.deepEqual(consoleLines(stderr), ["rail scrollTop 120", 'snap:fail it said "no"']);
-});
-
-// The recorded terminal (#150): a fixture gives a session a terminal, and the stub replays recorded output when the UI attaches.
-const terminalFixture = { terminals: [{ id: "t1", argv: ["claude"], cwd: "/w", exited: null, replay: { data: "aGk=", cols: 100, rows: 30 } }] };
-
-// Runs the stub in a stand-in page; the `terminal` events it emits are collected as the UI's listener would see them.
-const terminalEvents = async (fixture, requests) => {
-  const { window, invoke } = stubbed(stubSource(fixture), { setTimeout });
-  const events = [];
-  new window.EventSource("/events").addEventListener("terminal", (event) => events.push(JSON.parse(event.data)));
-  for (const msg of requests) await invoke("terminal_send", { msg });
-  await new Promise((done) => setTimeout(done));
-  return JSON.parse(JSON.stringify(events));
-};
-
-test("the stub lists the fixture's terminals, and none when the fixture has none", async () => {
-  const [listed] = await terminalEvents(terminalFixture, [{ op: "list" }]);
-  assert.deepEqual(listed.terms.map((t) => [t.id, t.argv, t.exited]), [["t1", ["claude"], null]]);
-  assert.deepEqual((await terminalEvents({}, [{ op: "list" }]))[0].terms, []);
-});
-
-test("the stub replays a terminal's recorded output when the UI attaches, as the daemon does at start", async () => {
-  const events = await terminalEvents(terminalFixture, [{ op: "attach", id: "t1" }, { op: "attach", id: "nope" }]);
-  assert.deepEqual(events, [{ ev: "replay", id: "t1", data: "aGk=", cols: 100, rows: 30, exited: null }]);
-});
-
-test("recordedTerminal: a session at your turn, linked to a terminal that replays the recording", () => {
-  const f = fixtures.recordedTerminal();
-  const s = f.selected.session;
-  assert.equal(s.state, "your_turn");
-  assert.ok(s.turns.length > 0 && f.turn_summary.values.t4.summary);
-  const [term] = f.terminals ?? [];
-  assert.ok(term, "the fixture has a terminal");
-  assert.equal(s.terminal, term.id);
-  assert.ok(term.replay.cols > 0 && term.replay.rows > 0);
-  assert.ok(term.replay.data.length > 0, "terminal-recording.txt is missing or empty");
-});
-
-// What the page's terminal shows: its drawn rows, as the stand-in document answers `querySelectorAll`.
-const runTerminalScript = async (rows) => {
-  const logged = [];
-  const document = { querySelectorAll: () => rows.map((textContent) => ({ textContent })) };
-  await vm.runInNewContext(`(async (log, document) => {${fixtures.recordedTerminal().snapScript}})`)((line) => logged.push(line), document);
-  return logged;
-};
-
-test("recordedTerminal's script fails the run when the terminal shows no rows, and not when it shows some", async () => {
-  assert.ok(failed(await runTerminalScript(["", "  "])));
-  assert.ok(!failed(await runTerminalScript(["", "Welcome to Claude Code"])));
 });
 
 test("a non-zero Chrome status reports the status and the last lines of its stderr; a zero status reports nothing", () => {

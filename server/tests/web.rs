@@ -229,6 +229,27 @@ fn a_command_answers_as_the_function_behind_it_does() {
 }
 
 #[test]
+fn no_workbench_command_is_served() {
+    let f = fixture();
+    // The terminals, the project list and the settings page left the page (#326): each answers as an unknown command.
+    for command in [
+        "select_terminal",
+        "closed",
+        "split_shown",
+        "sounds",
+        "clearing",
+        "write_setting",
+        "terminal_send",
+        "projects",
+        "branches",
+        "skills",
+        "usage",
+    ] {
+        assert_eq!(post(&f, command, "{}").status, 404, "{command}");
+    }
+}
+
+#[test]
 fn a_failed_command_answers_500_with_its_reason() {
     let f = fixture();
     let reply = post(&f, "rename", r#"{"id":"../x","name":"n"}"#);

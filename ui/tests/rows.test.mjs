@@ -91,20 +91,3 @@ test("a landed task's session at your turn, idle or ended shows a check mark and
   assert.deepEqual(status("idle", false, false), ["ring", "Idle"]);
   assert.ok(!showsLanded("idle", false));
 });
-
-test("a project header's action is keyed by its action, so Add and Remove never share a node", async () => {
-  const { headAction } = await import("../../dist/list.js");
-  const remove = headAction({ key: "/a", project: true }, null, ["/a"]);
-  const add = headAction({ key: "/a", project: false }, "/a", []);
-  assert.equal(remove.kind, "remove");
-  assert.equal(add.kind, "add");
-  assert.notEqual(remove.key, add.key);
-});
-
-test("Add as project is not offered when the folder's main checkout is already a project", async () => {
-  const { headAction } = await import("../../dist/list.js");
-  const outside = { key: "/a/.claude/worktrees/x", project: false };
-  assert.equal(headAction(outside, "/a", ["/a"]), null);
-  assert.equal(headAction(outside, null, ["/a"]), null);
-  assert.equal(headAction(outside, "/b", ["/a"]).kind, "add");
-});
