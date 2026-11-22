@@ -374,7 +374,7 @@ function draw() {
   drawEmpty(body, unreadable);
   const slots = { side: element("map-side"), notPlaced: element("map-not-placed"), sheet: element("map-sheet"), drawer: element("map-drawer"), banner: element("map-banner") };
   // No map is drawn, so nothing of the last one may stay: its banner, sheet and drawer would belong to another project.
-  Object.values(slots).forEach((slot) => slot.replaceChildren());
+  [slots.notPlaced, slots.sheet, slots.drawer, slots.banner].forEach((slot) => slot.replaceChildren());
   syncSide(slots as MapView["slots"]);
 }
 
