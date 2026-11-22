@@ -83,8 +83,9 @@ pub fn core_fogged(user: &UserState, source: &str) -> bool {
             .tiers
             .get(id)
             .map(String::as_str)
-            .or(part["tier"].as_str());
-        shown.contains_key(id) && tier == Some("core")
+            .or(part["tier"].as_str())
+            .unwrap_or("core");
+        shown.contains_key(id) && tier == "core"
     })
 }
 
@@ -557,6 +558,21 @@ mod tests {
         assert_eq!(rig.fog(), strengths(&[("b", Strength::Thin)]));
         rig.commit(&[("a/x", "3")]);
         assert_eq!(rig.fog().len(), 2);
+    }
+
+    #[test]
+    fn a_part_with_no_tier_is_core_for_home_as_it_is_for_the_map() {
+        let source = r#"{"parts":[{"id":"a","name":"A","paths":[]}]}"#;
+        let mut user = UserState::default();
+        user.fog.parts.insert(
+            "a".into(),
+            vec![Entry {
+                commit: "x".into(),
+                strength: Strength::Thin,
+            }],
+        );
+        assert!(effective(&user, source).contains_key("a"));
+        assert!(core_fogged(&user, source));
     }
 
     #[test]
