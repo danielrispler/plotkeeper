@@ -84,6 +84,9 @@ export const panelHeight = (dragged: number, column: number) => Math.round(Math.
 export const railShown = (mode: LayoutMode, railOpen: boolean, skillsOpen: boolean, mapOpen = false) =>
   mode !== "focus" && (mode !== "overlay" || railOpen) && !skillsOpen && !mapOpen;
 
+// Whether Home's content is seen: Home is the open pane and the Map view, which hides it with `visibility`, is not over it.
+export const homeSeen = (homeOpen: boolean, mapOpen: boolean) => homeOpen && !mapOpen;
+
 // The top bar's items, in the order they survive a narrowing window (#127): the session's header and the needs-you and unseen
 // chips never leave, and nor does the settings gear (#194), the bar's last item; the git line, "+" (new session) and the "⋯"
 // menu come after. The menu takes, first to last, the usage, the new-build button, then "+" and the git line. An item shows

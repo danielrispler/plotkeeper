@@ -1,7 +1,7 @@
 // The UI's pure functions, run on the `tsc` output (danielrispler/Falinks#465). Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { arrange, arrangeBar, defaultWidths, paneBoxes, panelHeight, railShown, resized } from "../../dist/layout.js";
+import { homeSeen, arrange, arrangeBar, defaultWidths, paneBoxes, panelHeight, railShown, resized } from "../../dist/layout.js";
 
 // The cell of 12.5px SF Mono in WebKit, as danielrispler/Falinks#577 measured it, and the terminal's padding, which holds no column.
 const cell = 7.73;
@@ -119,6 +119,12 @@ test("a turn is seen only while the rail shows its session: not in focus mode, a
   // The Map view hides the rail without taking it out of the viewport, so a turn behind it is not seen.
   assert.equal(railShown("full", false, false, true), false);
   assert.equal(railShown("overlay", true, false, true), false);
+});
+
+test("Home's marks and learning card are seen only while Home is open and the Map view is not over it", () => {
+  assert.equal(homeSeen(true, false), true);
+  assert.equal(homeSeen(false, false), false);
+  assert.equal(homeSeen(true, true), false);
 });
 
 // The top bar (#127). Widths as the bar measures them at its font: header, chip, git line, "+", usage, new build, gear.

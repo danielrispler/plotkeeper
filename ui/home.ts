@@ -17,6 +17,7 @@ import { hideClearToast, showClearToast } from "./toast.js";
 import { studio } from "./state.js";
 import { mapShown, openMap } from "./map.js";
 import { watchSeen } from "./seen.js";
+import { homeSeen } from "./layout.js";
 import { logStop, onHome, reviewNode, reviewOf, type Module } from "./stop-rules.js";
 import type { Learning, Session, Tap } from "./types.js";
 
@@ -469,7 +470,7 @@ function projectRow({ name, path, fogged }: HomeProject): HTMLElement {
     mark.title = "Something you track has changed, or a law is broken: open the map";
     // The mark counts as seen when it is in view in a focused window with Home open (the shared Seen), once a day is logged.
     marksSeen.get(path)?.();
-    marksSeen.set(path, watchSeen(mark, { active: () => homeShown() && !mapShown(), onSeen: () => logStop("mark-seen", path) }));
+    marksSeen.set(path, watchSeen(mark, { active: () => homeSeen(homeShown(), mapShown()), onSeen: () => logStop("mark-seen", path) }));
     mark.addEventListener("click", (event) => {
       event.stopPropagation();
       openMap(path);
@@ -530,5 +531,5 @@ export function drawHome(box: HTMLElement, sessions: Session[], projects: string
         }), "review")]
       : []),
   ]);
-  watchLearningShown(inSlot ? box.querySelector(`[data-key="learning ${inSlot.id}"]`) : null, inSlot, homeShown);
+  watchLearningShown(inSlot ? box.querySelector(`[data-key="learning ${inSlot.id}"]`) : null, inSlot, () => homeSeen(homeShown(), mapShown()));
 }
