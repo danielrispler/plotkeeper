@@ -4,6 +4,7 @@
 // decides what the window shows; this file wires the shell's events to the regions and lays the
 // columns out by the width rule in `layout.ts`.
 
+import "./transport.js";
 import { dismissNotice, onLogRecord, setSettingsErrors, showNotice } from "./notice.js";
 import { withWriterNotice } from "./writer-notice.js";
 import { startWatching } from "./answer.js";

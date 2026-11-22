@@ -581,7 +581,7 @@ export const fixtures = {
       if (document.querySelector(".pane.home .slot-card")) log("snap:fail the slot shows an item before the store holds one");
       const invoke = window.__TAURI__.core.invoke;
       window.__TAURI__.core.invoke = (command, args) => (command === "learning" ? Promise.resolve(${JSON.stringify(fresh)}) : invoke(command, args));
-      window.__TAURI__.__emit("cards", await invoke("cards"));
+      window.__snapEmit("cards", await invoke("cards"));
       await new Promise((done) => setTimeout(done, 200));
       if (!document.querySelector(".pane.home .slot-card")?.textContent.includes("Why does delete keep the branch?")) log("snap:fail Home does not show the Quiz a stored card made");`;
     return { ...f, sessions, learning: null, turn_summary: { __by: "id", values: { t4: { __delay: 3000, value: summary } as never } }, snapScript };
@@ -706,7 +706,7 @@ export const fixtures = {
       session("s4", "#55 · Delete default", "your_turn", { unseen: true }),
     ];
     const snapScript = `
-      window.__TAURI__.__emit("finished", ["s3", "s4"]);
+      window.__snapEmit("finished", ["s3", "s4"]);
       await new Promise((done) => setTimeout(done, 50));
       const note = document.getElementById("note-toast");
       if (note.hidden || !note.textContent.includes("2 finished")) log("snap:fail the note toast should say 2 finished");
