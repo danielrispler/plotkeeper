@@ -6,7 +6,7 @@
 
 JSON, one object. A field the checker does not know fails the check.
 
-- `version`: `1`.
+- `version`: `1`. Any other value fails the check, and `touched` too, with a problem that names the value and says this checker reads version 1.
 - `extractors`: optional, the names of the extractors to run (below). A map that names none gets no computed edges.
 - `parts`: each has `id`, `name`, `caption` (a few words), `description` (plain language), `tier` (`core`, `interface` or `black-box`: the part's default; Daniel's own choice is outside the repository), `paths` (the ownership patterns) and an optional `zone`.
 - `actors`: each has `id` and `name`. An outside actor owns no files.
@@ -42,7 +42,7 @@ An extractor reads which tracked file depends on which; the checker turns each p
 
 - `cargo`: the workspace's crates and the workspace crates each depends on, from `cargo metadata --no-deps --offline`. Dev-dependencies are left out.
 - `rust-modules`: inside a crate, `mod` declarations and `use crate::` paths resolved to the files they name.
-- `typescript-imports`: relative import specifiers resolved to tracked files. A specifier that resolves to no tracked file is skipped; a dynamic import or a path alias is not seen.
+- `typescript-imports`: relative import specifiers resolved to tracked files. A specifier that resolves to no tracked file is skipped; a literal `import('./x')` is read, but a computed specifier or a path alias is not seen.
 
 The checker runs only `git` and, when the map names `cargo`, `cargo`; it reads no file outside the repository, so it never reads through a tracked symlink (the link still counts as a tracked file for ownership), and needs no network.
 
