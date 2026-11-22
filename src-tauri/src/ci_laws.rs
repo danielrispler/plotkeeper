@@ -204,25 +204,67 @@ pub fn broken_laws(failures: &[Failure], tests: &[LawTest]) -> Vec<String> {
 fn holds(failure: &Failure, test: &LawTest) -> bool {
     let Some(name) = &test.test else { return false };
     let file = &test.tag.file;
-    let rust = file.ends_with(".rs");
     match &failure.binary {
-        Some(binary) => {
-            // `crate::integration_test` names the test file (or its folder); a bare crate name holds the unit tests.
-            let in_binary = binary.split_once("::").is_none_or(|(_, test_binary)| {
-                file.trim_end_matches(".rs")
-                    .split('/')
-                    .any(|part| part == test_binary)
-            });
-            rust && failure.name.rsplit("::").next() == Some(name) && in_binary
-        }
+        Some(binary) => file.ends_with(".rs") && rust_holds(binary, &failure.name, file, name),
         None => {
-            !rust
+            !file.ends_with(".rs")
                 && failure.name == *name
                 && failure
                     .file
                     .as_ref()
                     .is_none_or(|seen| seen == file || seen.ends_with(&format!("/{file}")))
         }
+    }
+}
+
+/// Whether a nextest failure `name` in `binary` is the Rust test `test` of the tagged `file`. The file's crate is its first folder
+/// (`core` is `studio-core`, `src-tauri` is `studio`). An integration test file `<crate>/tests/<module>.rs` is a module of the
+/// crate's one `it` binary (`studio-core::it`, test `<module>::<fn>`); a source file holds unit tests in the bare crate binary
+/// (`<module>::tests::<fn>`).
+fn rust_holds(binary: &str, name: &str, file: &str, test: &str) -> bool {
+    if name.rsplit("::").next() != Some(test) {
+        return false;
+    }
+    let (krate, test_binary) = match binary.split_once("::") {
+        Some((krate, test_binary)) => (krate, Some(test_binary)),
+        None => (binary, None),
+    };
+    let Some((dir, rest)) = file.split_once('/') else {
+        return false;
+    };
+    let dir_crate = if dir == "src-tauri" {
+        "studio".to_string()
+    } else {
+        format!("studio-{dir}")
+    };
+    if krate != dir && krate != dir_crate {
+        return false;
+    }
+    let module = |path: &str| -> Vec<String> {
+        let path = path.trim_end_matches(".rs");
+        let mut parts: Vec<&str> = path.split('/').collect();
+        if matches!(parts.last(), Some(&"mod" | &"lib" | &"main")) {
+            parts.pop();
+        }
+        parts.into_iter().map(str::to_string).collect()
+    };
+    let path_in_name: Vec<&str> = name.split("::").collect();
+    let path_in_name = &path_in_name[..path_in_name.len() - 1];
+    match (rest.strip_prefix("tests/"), test_binary) {
+        // `tests/<module path>.rs` of the `it` binary.
+        (Some(tests_path), Some("it")) => module(tests_path) == path_in_name,
+        // A binary named for its own test file, or for a folder of it.
+        (Some(tests_path), Some(test_binary)) => tests_path
+            .trim_end_matches(".rs")
+            .split('/')
+            .any(|part| part == test_binary),
+        (Some(_), None) => false,
+        (None, None) => {
+            let module = module(rest.strip_prefix("src/").unwrap_or(rest));
+            // `src/a/b.rs` holds `a::b::tests::<fn>`; the crate root holds `tests::<fn>`.
+            path_in_name.starts_with(&module.iter().map(String::as_str).collect::<Vec<_>>())
+        }
+        (None, Some(_)) => false,
     }
 }
 
@@ -685,6 +727,7 @@ mod tests {
     const NEXTEST_FAIL_FAST: &str = include_str!("../tests/ci-logs/nextest-fail-fast.log");
     const NODE_TAP: &str = include_str!("../tests/ci-logs/node-tap-failed.log");
     const NODE_SPEC: &str = include_str!("../tests/ci-logs/node-spec-failed.log");
+    const NEXTEST_REAL: &str = include_str!("../tests/ci-logs/nextest-real-binaries.log");
     const FMT: &str = include_str!("../tests/ci-logs/fmt-failed.log");
 
     fn tagged(law: &str, file: &str, test: &str) -> LawTest {
@@ -766,6 +809,39 @@ mod tests {
             broken_laws(&parse_failures(NEXTEST_FAIL_FAST), &tests),
             ["wire-types-agree"]
         );
+    }
+
+    #[test]
+    fn a_failure_in_this_workspaces_it_binary_breaks_the_law_tagged_in_its_test_file() {
+        let failures = parse_failures(NEXTEST_REAL);
+        let tests = [tagged(
+            "wire-types-agree",
+            "core/tests/wire.rs",
+            "the_wire_samples_of_the_core_are_written_for_tsc",
+        )];
+        assert_eq!(broken_laws(&failures, &tests), ["wire-types-agree"]);
+        // The same function in another test file, another crate, or a passing one breaks nothing.
+        for (file, test) in [
+            (
+                "core/tests/other.rs",
+                "the_wire_samples_of_the_core_are_written_for_tsc",
+            ),
+            (
+                "understanding/tests/wire.rs",
+                "the_wire_samples_of_the_core_are_written_for_tsc",
+            ),
+            ("core/tests/wire.rs", "passes"),
+        ] {
+            assert!(
+                broken_laws(&failures, &[tagged("l", file, test)]).is_empty(),
+                "{file} {test}"
+            );
+        }
+        // A unit test of the crate's own source: bare crate binary, module path.
+        let unit = [tagged("u", "core/src/ids.rs", "unit_fails")];
+        assert_eq!(broken_laws(&failures, &unit), ["u"]);
+        let other = [tagged("u", "core/src/other.rs", "unit_fails")];
+        assert!(broken_laws(&failures, &other).is_empty());
     }
 
     #[test]
