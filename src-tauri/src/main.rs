@@ -1237,6 +1237,7 @@ fn main() {
             refresh_landed_tasks,
             map::map_state,
             pr_briefs::pr_brief,
+            pr_briefs::brief_chapter_done,
             map::map_save_positions,
             map::map_set_tier,
             map::map_know,

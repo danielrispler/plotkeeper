@@ -274,6 +274,26 @@ export function playlist(brief: PrBrief, chapter: number): BriefStep[] {
   return chapter === 0 ? [...brief.overview, ...own] : own;
 }
 
+// A chapter is complete when its last step was seen and its check answered, right or wrong, when it holds one (#342). Leaving
+// mid-chapter completes nothing. `fire` runs once, the moment both hold.
+export type Gate = { sawLast: () => void; answered: () => void; done: () => boolean };
+export function chapterGate(list: Pick<BriefStep, "check">[], fire: () => void): Gate {
+  let last = false;
+  let answered = !list.some((step) => step.check);
+  let fired = false;
+  const look = () => {
+    if (last && answered && !fired) {
+      fired = true;
+      fire();
+    }
+  };
+  return {
+    sawLast: () => ((last = true), look()),
+    answered: () => ((answered = true), look()),
+    done: () => fired,
+  };
+}
+
 export type Playing = { project: string; pr: number; chapter: number; step: number };
 export type Player = {
   current: () => Playing | null;
