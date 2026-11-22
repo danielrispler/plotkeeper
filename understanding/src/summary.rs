@@ -74,6 +74,9 @@ fn stored_quiz<'de, D: serde::Deserializer<'de>>(from: D) -> Result<Option<Quiz>
 pub struct SummarySetup {
     pub model: String,
     pub effort: String,
+    /// The program that writes, `summaries.writer` in the settings: `claude` unless the file says `agy`.
+    #[serde(default)]
+    pub writer: crate::WriterKind,
 }
 
 impl Default for SummarySetup {
@@ -82,6 +85,7 @@ impl Default for SummarySetup {
         Self {
             model: "haiku".into(),
             effort: String::new(),
+            writer: crate::WriterKind::Claude,
         }
     }
 }
@@ -332,7 +336,8 @@ impl ClaudeWriter {
             None => "Write the headline, the lines and the quiz.",
         };
         self.run_with(
-            &options(setup, SUMMARY),
+            Some(setup),
+            Some(SUMMARY),
             &format!(
                 "The developer's prompt:\n<prompt>\n{}\n</prompt>\n\n\
                  The agent's responses in the turn, oldest first:\n{responses}\n\
@@ -345,17 +350,6 @@ impl ClaudeWriter {
             ),
         )
     }
-}
-
-/// The options of a summary run: `setup`'s model and effort, and `system`, the studio's own system
-/// prompt.
-fn options<'a>(setup: &'a SummarySetup, system: &'a str) -> Vec<&'a str> {
-    let mut options = vec!["--model", &setup.model];
-    if !setup.effort.is_empty() {
-        options.extend(["--effort", &setup.effort]);
-    }
-    options.extend(["--system-prompt", system]);
-    options
 }
 
 /// The summary of subagent `id`'s purpose and result (danielrispler/Falinks#535): the one `store` keeps, or else one
@@ -411,7 +405,8 @@ impl ClaudeWriter {
     ) -> (Command, String) {
         let cut = |text: &str| text[..text.floor_char_boundary(MAX_CHANGE)].to_string();
         self.run_with(
-            &options(setup, AGENT_SUMMARY),
+            Some(setup),
+            Some(AGENT_SUMMARY),
             &format!(
                 "The prompt it was spawned with:\n<prompt>\n{}\n</prompt>\n\n\
                  Its last message:\n<message>\n{}\n</message>",
@@ -518,7 +513,8 @@ impl ClaudeWriter {
             )
         });
         self.run_with(
-            &options(setup, NAME),
+            Some(setup),
+            Some(NAME),
             &format!(
                 "The developer's first prompt:\n<prompt>\n{}\n</prompt>{response}",
                 cut(prompt)

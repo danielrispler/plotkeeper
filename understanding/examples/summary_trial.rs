@@ -299,7 +299,8 @@ fn answers(writer: &Costed, headline: &str, quiz: &studio_understanding::Quiz) -
         .map(|o| format!("- {}\n", o.text))
         .collect();
     let (mut command, input) = writer.writer.run_with(
-        &["--model", "haiku", "--system-prompt", "You judge a quiz. Say whether a developer who has read only the headline could pick the right option of the question, without knowing the code. Reply with one word: yes or no."],
+        Some(&studio_understanding::SummarySetup { model: "haiku".into(), ..Default::default() }),
+        Some("You judge a quiz. Say whether a developer who has read only the headline could pick the right option of the question, without knowing the code. Reply with one word: yes or no."),
         &format!("Headline: {headline}\n\nQuestion: {}\nOptions:\n{options}\nThe right option: {}", quiz.text, quiz.options[quiz.key].text),
     );
     command.args(["--output-format", "json"]);

@@ -21,9 +21,9 @@ export interface Settings {
   zoom: number;
   // null: the stylesheet's `--size-mono`.
   terminal: { font_size: number | null };
-  // The summary writer's model and effort ("" for the model's default), and whether opening a turn
-  // writes its summary.
-  summaries: { model: string; effort: string; on_open: boolean };
+  // The summary writer's model and effort ("" for the model's default), whether opening a turn
+  // writes its summary, and the program that writes cards: Claude Code or the Antigravity CLI (#327).
+  summaries: { model: string; effort: string; on_open: boolean; writer: "claude" | "agy" };
   // The needs-you and your-turn sounds (danielrispler/Falinks#556).
   sounds: boolean;
   // The context share, a whole percent, past which a session raises its context warning; 0: never.
@@ -71,11 +71,18 @@ export const FONT_MAX = 40;
 // `current`, which ⌘+, ⌘− and ⌘0 may have moved; those keys never write the file.
 export const reloadedZoom = (current: number, previous: Settings, next: Settings) => (next.zoom !== previous.zoom ? next.zoom : current);
 
+// The writer the file names, or undefined, reporting a name that is neither.
+function writerKind(value: unknown, report: (line: string) => void): "claude" | "agy" | undefined {
+  if (value === undefined || value === "claude" || value === "agy") return value;
+  report('summaries.writer: expected "claude" or "agy"');
+  return undefined;
+}
+
 const defaultSettings: Settings = {
   zoom: 1,
   terminal: { font_size: null },
   // Haiku at its default effort (danielrispler/Falinks#517, decision 14).
-  summaries: { model: "haiku", effort: "", on_open: false },
+  summaries: { model: "haiku", effort: "", on_open: false, writer: "claude" },
   sounds: true,
   context_warning: 30,
   doctor: [
@@ -169,6 +176,7 @@ function readSettings(json: unknown, report: Report): Settings {
       model: pick("summaries.model", summaries.model, d.summaries.model),
       effort: pick("summaries.effort", summaries.effort, d.summaries.effort),
       on_open: pick("summaries.on_open", summaries.on_open, d.summaries.on_open),
+      writer: writerKind(summaries.writer, report) ?? d.summaries.writer,
     },
     sounds: pick("sounds", json.sounds, d.sounds),
     context_warning: Math.min(100, Math.max(0, Math.round(pick("context_warning", json.context_warning, d.context_warning)))),

@@ -11,6 +11,7 @@ Cmd+, (`studio::OpenSettings`) and the gear at the top bar's far right open the 
 - **Appearance:** Default zoom (a stepper, 0.5 to 2 in steps of 0.1, editing `zoom`; the window's zoom changes at once, while ⌘+, ⌘− and ⌘0 stay temporary and never write the file) and Terminal font size (a stepper, 8 to 40; unset, it shows the stylesheet's size).
 - **Alerts:** Sounds (a toggle) and Warn at context share (a stepper, 0 to 100 in steps of 5, editing `context_warning`; it shows "Off" at 0).
 - **Summaries:** Model (a dropdown of Haiku, Sonnet, Opus and Fable; a model from the file that is not listed shows as its own entry and is never overwritten by opening the page), Effort (a dropdown of Default, which passes no `--effort`, then low, medium, high, xhigh and max) and Write a summary when a turn is opened (a toggle).
+  The writer itself, the program that writes cards, is a key only (no row, no Test step; #327): `summaries.writer` is `"claude"` (the default, `claude -p`) or `"agy"` (the Antigravity CLI, run with JSON schema output in a neutral empty folder of its own, with a 3-minute timeout that covers a logged-out `agy`'s 60-second wait). Its `model` and `effort` are read by that program, so an `agy` model is one of `agy models`, such as `gemini-4-neon-low`. A writer that fails reports why in one log line: not logged in, quota or rate limit, timeout, not installed, an empty reply, or another failure. Both writers set `PLOTKEEPER_INTERNAL=1`, so the hook never records their runs.
 - **Files:** Open settings.json, Open keymap.json.
 
 The rest (`doctor`, `checks`, `editor`, `repository`, `quiz_trial`, `quiz_self_test`) stay in the file.
@@ -30,7 +31,7 @@ Each `doctor` entry is a palette action, "Doctor: <label>", marked with its kind
 {
   "zoom": 1,                     // 0.5 to 2
   "terminal": { "font_size": 15 }, // 8 to 40; default: the stylesheet's 12.5
-  "summaries": { "model": "haiku", "effort": "low", "on_open": false },
+  "summaries": { "model": "haiku", "effort": "low", "on_open": false, "writer": "claude" }, // writer: "claude" or "agy"
   "sounds": true,                // false: no needs-you or your-turn sound
   "context_warning": 30,         // the context share, 0 to 100, past which a session warns once; 0: never
   "repository": "/path/to/plotkeeper", // the starting project only, and where the shell starts; default: this checkout

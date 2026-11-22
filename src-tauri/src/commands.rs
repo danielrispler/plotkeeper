@@ -8,7 +8,7 @@ use std::{
     sync::Arc,
 };
 use studio_server::{self as server, App, Cleared, answer as server_answer, stop_rules};
-use studio_understanding::{Rating, Row, SessionCards, StoredSummary, Tap};
+use studio_understanding::{Rating, Row, SessionCards, StoredSummary, Tap, WriterKind};
 use tauri::State;
 
 type Shared<'a> = State<'a, Arc<App>>;
@@ -17,11 +17,12 @@ type Shared<'a> = State<'a, Arc<App>>;
 pub fn summary_settings(
     model: String,
     effort: String,
+    writer: WriterKind,
     on_open: bool,
     self_test: Option<u64>,
     app: Shared,
 ) {
-    server::summary_settings(&app, model, effort, on_open, self_test);
+    server::summary_settings(&app, model, effort, writer, on_open, self_test);
 }
 
 #[tauri::command]

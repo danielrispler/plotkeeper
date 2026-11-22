@@ -6,6 +6,7 @@ mod brief;
 mod card_code;
 mod check_cards;
 mod common;
+mod contract;
 mod decisions;
 mod drift;
 mod fingerprint;
