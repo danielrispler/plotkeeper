@@ -1,6 +1,6 @@
 //! The read loop (danielrispler/plotkeeper#324, spec #319 "The server"): it reads the event log from its start, then from where
 //! it stopped, and sends what changed to the [`Sink`](crate::Sink) the shell set: the session list, the selection, the cards, the
-//! notices and the badge. It holds no window: whether Daniel is looking comes from the sink's `focused`, and what he last said
+//! notices (a `notification` event). It holds no window: whether Daniel is looking comes from the sink's `focused`, and what he last said
 //! the page shows (`rail_shown`, `split_shown`) from the [`App`].
 
 use crate::{
@@ -33,20 +33,13 @@ use studio_understanding::{
 struct Sent {
     list: Option<serde_json::Value>,
     selected: Option<serde_json::Value>,
-    badge: Option<usize>,
     cards: Option<CardsKey>,
 }
 
 impl Sent {
-    /// Sends the session list, the badge and the selection, each only if it changed.
+    /// Sends the session list and the selection, each only if it changed.
     fn list(&mut self, app: &App) {
         let list = sessions(app);
-        let needing = list.iter().filter(|r| r.session.wants_you()).count();
-        // macOS shows `Some(0)` as a "0" badge.
-        if self.badge != Some(needing) {
-            app.events.badge((needing > 0).then_some(needing));
-            self.badge = Some(needing);
-        }
         let list = serde_json::to_value(list).expect("sessions serialize");
         if self.list.as_ref() != Some(&list) {
             app.events.emit("sessions", list.clone());
@@ -525,10 +518,11 @@ impl Follower {
                 on_screen
             });
         if let Some((title, body)) = due.notification {
-            app.events.notify(&title, &body);
-        }
-        if let Some(sound) = due.sound {
-            app.events.play(sound);
+            // The page shows it as a browser notification, when no tab of it is visible and focused (#331).
+            app.events.emit(
+                "notification",
+                serde_json::json!({ "title": title, "body": body }),
+            );
         }
         if !due.finished.is_empty() {
             app.events

@@ -9,8 +9,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
 };
-use studio_core::Sound;
-use studio_server::{App, Follower, Sink};
+use studio_server::{App, Follower, Notice, Sink, tell};
 use studio_understanding::{CardStore, Effects, FakeWriter, RiskNotes};
 
 const LOG: &str = include_str!("../../core/tests/fixtures/two-sessions.jsonl");
@@ -20,7 +19,6 @@ const FIRST: &str = "c41d8e27-6a3f-4b90-8e15-2f7a9b0c3d64";
 #[derive(Default)]
 struct FakeSink {
     events: Mutex<Vec<(String, serde_json::Value)>>,
-    badges: Mutex<Vec<Option<usize>>>,
     focused: AtomicBool,
     replayed: AtomicBool,
 }
@@ -32,11 +30,6 @@ impl Sink for FakeSink {
     fn focused(&self) -> bool {
         self.focused.load(Ordering::Acquire)
     }
-    fn badge(&self, count: Option<usize>) {
-        self.badges.lock().unwrap().push(count);
-    }
-    fn notify(&self, _: &str, _: &str) {}
-    fn play(&self, _: Sound) {}
     fn replayed(&self) {
         self.replayed.store(true, Ordering::Release);
     }
@@ -95,7 +88,6 @@ fn the_replay_sends_the_list_once_and_a_live_line_sends_it_again() {
     assert_eq!(lists.len(), 2);
     assert_eq!(ids(&lists[0]), [OTHER, FIRST]);
     assert!(sink.replayed.load(Ordering::Acquire));
-    assert_eq!(*sink.badges.lock().unwrap(), [None]);
 
     follower.pass();
     assert!(
@@ -149,5 +141,32 @@ fn a_finished_turn_is_seen_only_while_the_sink_is_focused() {
     assert!(
         !unseen(&sink),
         "the sink says it is focused: the turn is seen"
+    );
+}
+
+#[test]
+fn a_due_notice_goes_to_the_page_as_an_event_only_while_it_is_unfocused() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("events.jsonl");
+    std::fs::write(&log, LOG).unwrap();
+    let (app, sink) = app(&log);
+    let mut follower = Follower::start(&app, &log);
+    follower.pass();
+    sink.take("notification");
+    tell(&app, Notice::Titled("A card is ready"), FIRST, None);
+    // Notices wait 3 seconds to be combined.
+    std::thread::sleep(std::time::Duration::from_millis(3200));
+    follower.pass();
+    let sent = sink.take("notification");
+    assert_eq!(sent.len(), 1, "no tab is focused: the page is told");
+    assert_eq!(sent[0]["title"], "A card is ready");
+
+    sink.focused.store(true, Ordering::Release);
+    tell(&app, Notice::Titled("Another"), FIRST, None);
+    std::thread::sleep(std::time::Duration::from_millis(3200));
+    follower.pass();
+    assert!(
+        sink.take("notification").is_empty(),
+        "a focused tab looks at the page itself"
     );
 }

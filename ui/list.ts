@@ -18,6 +18,7 @@ import { titled } from "./keys.js";
 import { blockedWaits, stateLabels, type BlockedCommand, type Context, type Session, type SessionState, type Subagent } from "./types.js";
 import { askDelete, report } from "./story.js";
 import { refreshAgents } from "./map-agents.js";
+import { showTitle } from "./alerts.js";
 
 // The state groups folded in a project, idle only, and the idle groups Daniel opened, by project and state,
 // which stay open when the list is drawn again.
@@ -601,5 +602,6 @@ export function showSessions(sessions: Session[]) {
   const unseen = element("unseen");
   unseen.textContent = unseenText(live);
   unseen.hidden = unseen.textContent === "";
+  showTitle(live.filter((session) => session.unseen).length);
   unseen.title = titled(studio.files.keymap, "Go to the newest unseen session", "studio::JumpToUnseen");
 }

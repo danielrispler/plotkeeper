@@ -32,9 +32,6 @@ impl Sink for Heard {
     fn focused(&self) -> bool {
         false
     }
-    fn badge(&self, _: Option<usize>) {}
-    fn notify(&self, _: &str, _: &str) {}
-    fn play(&self, _: studio_core::Sound) {}
     fn replayed(&self) {}
 }
 

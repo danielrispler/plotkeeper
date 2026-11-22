@@ -23,3 +23,11 @@ The first start holds a lock on `plotkeeper.lock` in the data folder and writes 
 At start it applies the card writer `settings.json` names (`summaries.writer`, `claude` by default), so cards are written with it before any page opens. A start writes cards for the turns that ended in the catch-up window (`catchUp.hours`, 2 by default, and `catchUp.max`, 10) and the writer's failures reach the page as `writer-notice`; see [cards](cards.md).
 
 `PLOTKEEPER_NO_BROWSER=1` leaves the browser closed; the address is printed either way (`plotkeeper: <url>`).
+
+## Seen and notices
+
+Seen and notices are the page's (danielrispler/plotkeeper#331); the Dock badge, the macOS notifications and the sounds are gone.
+
+- A card counts as seen only when its tab is visible (Page Visibility) and focused (`document.hasFocus()`), the card has been in view for half a second, and Daniel interacted with it (his pointer moved over it, he pressed on it, scrolled over it or focused it). A browser on a second screen shows cards but never marks them seen while he works in his IDE.
+- When a notice is due and no tab is visible and focused, the server sends a `notification` event and the page raises a browser notification (one tag, so tabs do not stack them). A focused tab shows the notice in the page instead. The page asks for the notification permission once, at Daniel's first press.
+- The tab's title carries the number of unseen sessions, as the bar's unseen chip counts them: `(3) Studio`, plain `Studio` with none.
