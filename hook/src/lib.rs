@@ -47,8 +47,30 @@ pub fn move_old_data_dir(home: &Path) -> std::io::Result<bool> {
     if fs::rename(&old, &new).is_err() {
         return Ok(false);
     }
-    std::os::unix::fs::symlink(DATA_FOLDER, &old)?;
+    leave_link(&old)?;
     Ok(true)
+}
+
+/// The symbolic link at `old`, which now names the new folder. Something that took the old path after the rename
+/// (a hook still built with the old path makes its folder) leaves it, and is no failure: the data moved.
+fn leave_link(old: &Path) -> std::io::Result<()> {
+    match std::os::unix::fs::symlink(DATA_FOLDER, old) {
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        other => other,
+    }
+}
+
+#[cfg(test)]
+mod link_tests {
+    #[test]
+    fn a_path_taken_after_the_rename_is_no_failure_of_the_move() {
+        let home = std::env::temp_dir().join(format!("plotkeeper-link-{}", std::process::id()));
+        let old = home.join("old");
+        std::fs::create_dir_all(&old).unwrap();
+        let left = super::leave_link(&old);
+        std::fs::remove_dir_all(&home).unwrap();
+        assert!(left.is_ok(), "{left:?}");
+    }
 }
 
 /// The log in the studio's data directory. The hook writes it; the app reads it.
