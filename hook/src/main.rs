@@ -33,7 +33,10 @@ fn append() -> Result<(), Box<dyn Error>> {
         event.insert("studio_terminal_id".into(), terminal.into());
     }
     event.insert("studio_received_ms".into(), received_ms.into());
-    let path = studio_hook::event_log(&env::home_dir().ok_or("no home directory")?);
+    let home = env::home_dir().ok_or("no home directory")?;
+    // The old data folder moves before anything is created in the new one (#322).
+    studio_hook::move_old_data_dir(&home)?;
+    let path = studio_hook::event_log(&home);
     let data = path.parent().ok_or("no data directory")?;
     fs::create_dir_all(data)?;
     // The line goes in the log even when the trees cannot be recorded.

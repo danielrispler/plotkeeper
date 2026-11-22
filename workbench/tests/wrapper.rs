@@ -49,7 +49,7 @@ fn run(home: &Path) -> (String, String, Option<i32>) {
 }
 
 fn snapshot(home: &Path) -> PathBuf {
-    home.join("Library/Application Support/dev.falinks.studio/usage")
+    home.join("Library/Application Support/plotkeeper/usage")
         .join(format!("{ID}.json"))
 }
 

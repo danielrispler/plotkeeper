@@ -7,7 +7,7 @@ use std::{
 };
 use studio_workbench::{fixed_profile, link_checkout, loads_plugin};
 
-const LINK: &str = "$HOME/Library/Application Support/dev.falinks.studio/checkout/plugin";
+const LINK: &str = "$HOME/Library/Application Support/plotkeeper/checkout/plugin";
 
 /// A checkout in `dir` with the studio plugin's manifest.
 fn checkout(dir: &Path) -> PathBuf {

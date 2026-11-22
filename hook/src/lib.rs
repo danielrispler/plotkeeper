@@ -18,10 +18,37 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// The studio's data directory, which is Tauri's app data directory for the identifier in
-/// `src-tauri/tauri.conf.json`.
+/// The data folder, `~/Library/Application Support/plotkeeper/`: the one place that names it.
 pub fn data_dir(home: &Path) -> PathBuf {
-    home.join("Library/Application Support/dev.falinks.studio")
+    home.join("Library/Application Support").join(DATA_FOLDER)
+}
+
+const DATA_FOLDER: &str = "plotkeeper";
+
+/// The folder the data lived in before it was named for plotkeeper (#322).
+const OLD_DATA_FOLDER: &str = "dev.falinks.studio";
+
+/// The one move (#322): when the old data folder exists as a real folder and the new one does not,
+/// renames it to the new name and leaves a symbolic link at the old path, so the plugin path in
+/// `~/.zshrc` (through the folder's `checkout` link) and a hook still built with the old path keep
+/// working. Never moves over an existing new folder. Returns whether it moved.
+pub fn move_old_data_dir(home: &Path) -> std::io::Result<bool> {
+    let (new, old) = (
+        data_dir(home),
+        home.join("Library/Application Support")
+            .join(OLD_DATA_FOLDER),
+    );
+    let is_dir = |p: &Path| fs::symlink_metadata(p).is_ok_and(|m| m.is_dir());
+    if !is_dir(&old) || fs::symlink_metadata(&new).is_ok() {
+        return Ok(false);
+    }
+    // A second process that moved first leaves a link at `old` and a folder at `new`; losing the
+    // race is not an error.
+    if fs::rename(&old, &new).is_err() {
+        return Ok(false);
+    }
+    std::os::unix::fs::symlink(DATA_FOLDER, &old)?;
+    Ok(true)
 }
 
 /// The log in the studio's data directory. The hook writes it; the app reads it.
@@ -865,15 +892,6 @@ mod tests {
         assert_eq!(turn.take(INTERRUPTED, Some("p1"), true), (vec![], false));
         assert!(!turn.ended);
         assert_eq!(turn.roots, ["/w/a"]);
-    }
-
-    #[test]
-    fn the_log_lives_in_the_data_directory_of_the_apps_identifier() {
-        let conf: serde_json::Value =
-            serde_json::from_str(include_str!("../../src-tauri/tauri.conf.json")).unwrap();
-        let identifier = conf["identifier"].as_str().unwrap();
-        let data = Path::new("/h/Library/Application Support").join(identifier);
-        assert_eq!(super::event_log(Path::new("/h")), data.join("events.jsonl"));
     }
 
     #[test]

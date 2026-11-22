@@ -2,12 +2,14 @@
 
 ## The event log
 
-`~/Library/Application Support/dev.falinks.studio/events.jsonl`, one hook payload per line, with two added fields:
+`~/Library/Application Support/plotkeeper/events.jsonl`, one hook payload per line, with two added fields:
 
 - `studio_terminal_id`: the session's `STUDIO_TERMINAL_ID`, when set;
 - `studio_received_ms`: when the hook received the event, in Unix milliseconds.
 
 The app appends lines of its own, named `Studio…`, such as `StudioInterrupted`, which ends a turn Daniel interrupted, by its `prompt_id`, with that turn's end trees.
+
+The data folder was `~/Library/Application Support/dev.falinks.studio/` before plotkeeper. At the first start of the hook or the app, if that folder exists and `plotkeeper/` does not, it is renamed to `plotkeeper/` and a symbolic link to it is left at the old path, so the plugin path in `~/.zshrc` (through the folder's `checkout` link) and a hook built with the old path keep working. The move never goes over an existing `plotkeeper/`.
 
 The hooks are async, so Claude Code never waits for them, and they append whether the app runs or not. Two events that fire within a few milliseconds can land in either order.
 

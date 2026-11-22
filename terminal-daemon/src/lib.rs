@@ -122,7 +122,7 @@ fn hang_up(pids: impl Fn() -> Vec<i32>) {
 /// The one socket the studio's daemon listens on.
 pub fn default_socket() -> PathBuf {
     PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
-        .join("Library/Application Support/dev.falinks.studio/terminal-daemon.sock")
+        .join("Library/Application Support/plotkeeper/terminal-daemon.sock")
 }
 
 pub fn encode(bytes: &[u8]) -> String {
