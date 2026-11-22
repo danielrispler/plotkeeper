@@ -481,6 +481,7 @@ fn the_real_writer_runs_claude_on_the_subscription_in_its_neutral_folder() {
             (OsStr::new("ANTHROPIC_API_KEY"), None),
             (OsStr::new("ANTHROPIC_AUTH_TOKEN"), None),
             (OsStr::new("CLAUDE_CODE_PLUGIN_DIRS"), None),
+            (OsStr::new("PLOTKEEPER_INTERNAL"), Some(OsStr::new("1"))),
         ]
     );
     let args: Vec<_> = command
