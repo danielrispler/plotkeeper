@@ -341,17 +341,23 @@ pub fn map_know(project: String, part: String) -> Result<UserState, String> {
 /// has not caught up on marked.
 #[tauri::command(async)]
 pub fn map_history(project: String, part: String) -> Result<Vec<crate::history::Entry>, String> {
+    let briefs = crate::pr_briefs::store_of(&project);
     let fogged = read_user(&state_file()?, &project)
         .fog
         .parts
         .get(&part)
         .map(|entries| entries.iter().map(|e| e.commit.clone()).collect())
         .unwrap_or_default();
-    Ok(crate::history::part_history(
-        Path::new(&project),
-        &part,
-        &fogged,
-    ))
+    let mut entries = crate::history::part_history(Path::new(&project), &part, &fogged);
+    // A commit whose PR has a stored brief offers it.
+    for entry in &mut entries {
+        entry.brief = crate::history::pr_of_label(&entry.label).filter(|n| {
+            briefs
+                .as_ref()
+                .is_some_and(|store| store.latest(*n).is_some())
+        });
+    }
+    Ok(entries)
 }
 
 /// The map as of `commit`: what one scrub of the history strip asks the shell for. A later ticket that records scrubs hooks here.
@@ -366,18 +372,20 @@ pub fn map_commit(project: String, commit: String) -> Result<crate::history::Com
     crate::history::commit_files(Path::new(&project), &commit)
 }
 
-/// The projects among `projects` that show a fogged Core part or a broken law, for Home's quiet mark. Reads local refs and the
+/// The projects among `projects` that show a fogged Core part, a broken law or a waiting PR brief, for Home's quiet mark. Reads local refs and the
 /// last CI read only: it asks neither `origin` nor GitHub.
 #[tauri::command(async)]
 pub fn map_marks(
     projects: Vec<String>,
     cache: State<crate::ci_laws::CiCache>,
+    prs: State<crate::prs::Prs>,
 ) -> Result<Vec<String>, String> {
     let file = state_file()?;
     Ok(projects
         .into_iter()
         .filter(|project| {
-            if cache.broken(project) {
+            if cache.broken(project) || crate::pr_briefs::any_waiting(project, &prs.ready(project))
+            {
                 return true;
             }
             let repo = Path::new(project);

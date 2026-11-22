@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Field, fakeDocument, tauri } from "./dom.mjs";
-import { homeView } from "../../dist/home.js";
+import { homeView, markTitle } from "../../dist/home.js";
 import { initial } from "../../dist/settings.js";
 import { windowBinding } from "../../dist/keys.js";
 import { listSpace } from "../../dist/home.js";
@@ -548,4 +548,11 @@ test("a mark that was seen is watched again by the next redraw, so a later day i
   watchMark("/w/seen", node);
   assert.equal(observers.length, 2, "the redraw that keeps the node watches it again once it fired");
   watchMark("/w/seen", null);
+});
+
+test("a project's dot also lights for a waiting PR brief, and says so on hover", () => {
+  // The shell's `map_marks` names the project (a ready PR with a stored brief); Home marks it as it marks fog, with no count.
+  const start = homeView([], null, ["/w/a", "/w/b"], fresh(), undefined, new Set(["/w/a"]))[0];
+  assert.deepEqual(start.projects.map((p) => [p.path, p.fogged]), [["/w/a", true], ["/w/b", false]]);
+  assert.match(markTitle, /PR brief is waiting/);
 });

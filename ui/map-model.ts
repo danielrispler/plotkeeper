@@ -224,6 +224,12 @@ export function ciDrawer(ci: Ci): Drawer {
 export type Scrub = Pick<HistoricalMap, "commit" | "short" | "label"> & { source: string };
 export type StripRow = HistoryEntry & { current: boolean; title: string };
 
+// What a commit of the history strip offers of its PR's stored brief: a quiet "Brief" button, none when the PR has none.
+export const briefOffer = (row: Pick<HistoryEntry, "brief" | "short">): { number: number; label: string; title: string } | null => {
+  if (row.brief === null) return null;
+  return { number: row.brief, label: "Brief", title: `Play the brief of #${row.brief}, which this commit merged` };
+};
+
 export const stripOf = (entries: HistoryEntry[], viewing: string | null): StripRow[] =>
   entries.map((entry) => ({
     ...entry,
