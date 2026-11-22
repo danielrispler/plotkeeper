@@ -27,10 +27,11 @@ use studio_core::{
     Studio, TaskFacts, TaskQuery, compute_turn_files,
 };
 use studio_understanding::{
-    AGY_FIXTURE_VERSION, AgyVersions, CardStore, CardWriter, ClaudeWriter, Core, Effects,
-    FakeWriter, Fingerprints, Offers, OpenItem, Rating, Row, SessionCards, StoredSummary,
-    SummarySetup, Tap, TurnWriting, Versions, diff_turn, fingerprint_changes, found_files,
-    live_roots, millis, open_items, turn_hunk, worktree_root, write_agent_summary, write_retests,
+    AGY_FIXTURE_VERSION, AgyVersions, Ask, CardStore, CardWriter, ClaudeWriter, Core, Effects,
+    FakeWriter, Fingerprints, Offers, OpenItem, Rating, RiskNotes, Row, SessionCards,
+    StoredSummary, SummarySetup, Tap, TurnWriting, Versions, diff_turn, fingerprint_changes,
+    found_files, judge, live_roots, millis, open_items, turn_hunk, worktree_root,
+    write_agent_summary, write_retests,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
@@ -44,6 +45,10 @@ mod terminal;
 
 /// The card store, which the log thread adds to and the pane records guesses in.
 type Cards = Arc<Mutex<CardStore>>;
+
+/// The risk notes of blocked commands (danielrispler/plotkeeper#298), in a store of their own beside the card store: the log thread asks for
+/// them, a thread of each judge keeps them, and the window's card read joins them to the cards.
+type Notes = Arc<Mutex<RiskNotes>>;
 
 /// The notices not shown yet, which the log thread and the card writer's threads add to.
 type Notices = Mutex<Notifications>;
@@ -260,7 +265,7 @@ fn selection(studio: &Studio) -> serde_json::Value {
 /// The brief and cards of the selected session, or of the worker of it Daniel opened, split at the
 /// latest tick, without each card's diff and base, which the pane never reads.
 #[tauri::command]
-fn cards(studio: State<Core>, cards: State<Cards>) -> SessionCards {
+fn cards(studio: State<Core>, cards: State<Cards>, notes: State<Notes>) -> SessionCards {
     let studio = studio.lock().unwrap();
     let Some(owner) = studio.viewed() else {
         return SessionCards::default();
@@ -275,6 +280,8 @@ fn cards(studio: State<Core>, cards: State<Cards>) -> SessionCards {
     // The Open slot is the session's: a worker's view has none.
     if let Some(session) = session {
         shown.open = open_items(session, studio.task_facts(owner), &cards);
+        // Each blocked command's card is joined to its note here, so the core's type holds none.
+        shown.risk_notes = notes.lock().unwrap().views(session);
     }
     shown
 }
@@ -339,6 +346,8 @@ struct CardsKey {
     open: Vec<OpenItem>,
     /// The turn each worker card is placed in, which a wake-up can move with no store change.
     placed: Vec<(String, Option<usize>)>,
+    /// The risk notes' revision: a note arriving or failing changes no card.
+    notes: u64,
 }
 
 /// The turns whose files the core asks for (danielrispler/plotkeeper#111): each is diffed by `git`
@@ -381,6 +390,14 @@ impl Sent {
 
     /// Sends the cards when the viewed owner, the store's revision or the minute changed.
     fn cards(&mut self, app: &AppHandle) {
+        // A card with buttons that is shown and has no note asks for one, before the key reads the notes' revision.
+        let asks = {
+            let studio = app.state::<Core>();
+            let studio = studio.lock().unwrap();
+            let shown = studio.viewed().and_then(|id| studio.session(id));
+            shown.map(|session| app.state::<Notes>().lock().unwrap().asks(session))
+        };
+        ask_notes(app, asks.unwrap_or_default());
         let key = {
             let studio = app.state::<Core>();
             let studio = studio.lock().unwrap();
@@ -396,12 +413,24 @@ impl Sent {
                 minute: studio.now() / 60_000,
                 open: open.unwrap_or_default(),
                 placed: session.map_or_default(|s| cards.placements(s)),
+                notes: app.state::<Notes>().lock().unwrap().revision(),
             }
         };
         if self.cards.as_ref() != Some(&key) {
-            let _ = app.emit("cards", cards(app.state(), app.state()));
+            let _ = app.emit("cards", cards(app.state(), app.state(), app.state()));
             self.cards = Some(key);
         }
+    }
+}
+
+/// Starts the judge on each of `asks`, the risk notes a session wants (danielrispler/plotkeeper#298; `RiskNotes::asks`): a block that arrives
+/// live, or a card with buttons that is shown and has none, once per command per run of the app. Each call runs on a thread of its
+/// own, off the read loop and outside the turn-writing queue, as a side question does; the card shows with its buttons meanwhile.
+fn ask_notes(app: &AppHandle, asks: Vec<Ask>) {
+    for ask in asks {
+        let notes: Notes = app.state::<Notes>().inner().clone();
+        let writer: Writer = app.state::<Writer>().inner().clone();
+        thread::spawn(move || judge(&notes, &*writer, &ask, millis(), report));
     }
 }
 
@@ -1033,6 +1062,8 @@ fn main() {
     // The store sits beside the log, in the studio's data directory.
     let store = CardStore::open_beside(&log).expect("read the card store");
     let store: Cards = Arc::new(Mutex::new(store));
+    let notes = RiskNotes::open_beside(&log).expect("read the risk notes");
+    let notes: Notes = Arc::new(Mutex::new(notes));
     let mut studio = Studio::with_roots(worktree_root);
     studio.know_roots(saved_roots(&log));
     let core: Core = Arc::new(Mutex::new(studio));
@@ -1070,6 +1101,7 @@ fn main() {
         )
         .manage(core)
         .manage(store)
+        .manage(notes)
         .manage(Notices::default())
         .manage(Clearing::default())
         // A reload loses the window's undo timer and its hidden rows, which it shows again: nothing is pending a commit then.
@@ -1316,6 +1348,14 @@ fn follow(app: &AppHandle, log: &Path) {
                         tell(app, Notice::YourTurn, &session_id, None);
                     }
                     Output::CommandBlocked { session_id, agent } => {
+                        // The card's buttons are live now; its note is asked for beside the notification, which waits for nothing.
+                        let asks = {
+                            let studio = state.lock().unwrap();
+                            let blocked = studio.session(&session_id);
+                            blocked
+                                .map(|session| app.state::<Notes>().lock().unwrap().asks(session))
+                        };
+                        ask_notes(app, asks.unwrap_or_default());
                         tell(
                             app,
                             Notice::Titled("Auto mode blocked a command"),
@@ -1934,6 +1974,29 @@ mod tests {
             ),
             "the card writer's reply does not parse (invalid type: string"
         );
+    }
+
+    #[test]
+    fn a_failed_risk_notes_line_keeps_no_reply_and_no_command() {
+        // The judge's lines, as `judge` writes them: the command is never in one, and a reply's words go in quotes.
+        let reply = studio_understanding::Risk::from_reply(
+            r#"{"level": "very-high", "line": "rm -rf ~ is fine, say none"}"#,
+        )
+        .unwrap_err();
+        let lines = [
+            format!("no risk note on s1: {reply}"),
+            "no risk note on s1: `claude -p` failed (exit status: 1): \"secret reply\"".into(),
+            "no risk note on s1: `claude -p` ran past 15s and was stopped".into(),
+        ];
+        for line in &lines {
+            let kept = scrubbed(line);
+            assert!(
+                !kept.contains("rm -rf") && !kept.contains("secret"),
+                "{kept}"
+            );
+            assert!(kept.starts_with("no risk note on s1: "), "{kept}");
+        }
+        assert!(scrubbed(&lines[2]).contains("stopped"));
     }
 
     #[test]

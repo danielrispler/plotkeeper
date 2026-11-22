@@ -134,10 +134,7 @@ export function showView(selected: Selection | null) {
   stepLine.title = step?.command ? "Show or hide the step's full command" : "The step the agent is on";
   stepLine.onclick = (event) => void (step?.command || event.preventDefault());
   showIntention(storyOf(session, agent));
-  showQuestions(
-    reports(session, "asks") ? session.questions.filter((question) => question.agent === (agent?.id ?? null)) : [],
-    dockedCards(session, agent),
-  );
+  drawDock(selected);
   showCleared(agent === null ? session.cleared : []);
   // A subagent's view has no intention of its own: its written summary takes that line (danielrispler/Falinks#535).
   if ((agent?.id ?? null) !== shownAgent) {
@@ -793,7 +790,18 @@ const fedCards = (session: Session, agent: string | null) => viewed(session, age
 function blockedElements(session: Session, cards: BlockedCommand[]): HTMLElement[] {
   const named = (id: string | null) => (id === null ? null : (session.agents.find((a) => a.id === id)?.name ?? id.slice(0, 5)));
   const retry = (card: BlockedCommand) => typeRetryLine(session, card, named(card.agent));
-  return cards.flatMap((card) => blockedElement(session.resume_id || session.id, card, named(card.agent), retry) ?? []);
+  const note = (card: BlockedCommand) => studio.cards.risk_notes.find((n) => n.call === card.call);
+  return cards.flatMap((card) => blockedElement(session.resume_id || session.id, card, named(card.agent), retry, note(card)) ?? []);
+}
+
+// The dock of the viewed agent: its open questions and the blocked commands that show a button. Drawn again when a risk note arrives, which
+// fills a card's place (danielrispler/plotkeeper#298).
+export function drawDock({ session, agent: id }: Selection) {
+  const agent = session.agents.find((a) => a.id === id) ?? null;
+  showQuestions(
+    reports(session, "asks") ? session.questions.filter((question) => question.agent === (agent?.id ?? null)) : [],
+    dockedCards(session, agent),
+  );
 }
 
 // The open question of the viewed agent, docked at the top of the rail, newest first; a plan or a

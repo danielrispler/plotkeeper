@@ -6,7 +6,7 @@ import { blockedRequestFor, sendBlockedAnswer } from "./answer.js";
 import { code, failure, invoke, text } from "./dom.js";
 import { counts, duration } from "./times.js";
 import { typeInto, type TypingIo } from "./typing.js";
-import { blockedWaits, type BlockedCommand, type BlockedStatus } from "./types.js";
+import { blockedWaits, type BlockedCommand, type BlockedStatus, type RiskLevel, type RiskView } from "./types.js";
 
 export type BlockedView = {
   state: string;
@@ -19,7 +19,43 @@ export type BlockedView = {
   // a background run has none.
   detail: string | null;
   tail: string | null;
+  // The risk note's place (danielrispler/plotkeeper#298): null when the card has neither a button nor a note.
+  risk: RiskLine | null;
 };
+
+// What the note's place says: `text` is all of it in plain text, which is also its hover; `level` and `line` are its two parts once a note
+// arrived, `null` while it is on its way or when none is coming.
+export type RiskLine = { state: RiskView["state"]; level: string | null; line: string | null; text: string };
+
+// The levels as the card says them.
+export const riskLevels: Record<RiskLevel, string> = { none: "None", low: "Low", medium: "Medium", high: "High", very_high: "Very high", not_sure: "Not sure" };
+
+// What the note's place says for `note`, as the shell joined it to the card. A card with a button has the place from the moment it appears, so
+// the buttons never move, and reads "on its way" until the shell says more; a card with no button has it only once the shell has news of a note.
+export function riskLine(note: RiskView | undefined, hasButtons: boolean): RiskLine | null {
+  if (note?.state === "failed") return { state: "failed", level: null, line: null, text: "No risk note: the judge did not answer" };
+  if (note?.state === "arrived") {
+    const level = riskLevels[note.level];
+    return { state: "arrived", level, line: note.line, text: `Risk: ${level} · ${note.line}` };
+  }
+  return note || hasButtons ? { state: "reading", level: null, line: null, text: "Reading the command…" } : null;
+}
+
+// The note's place on the card: a polite live region, so a screen reader hears the note when it fills.
+export function riskElement(risk: RiskLine): HTMLElement {
+  const place = document.createElement("p");
+  place.className = "risk-note";
+  place.setAttribute("aria-live", "polite");
+  place.title = risk.text;
+  if (risk.level === null) {
+    place.textContent = risk.text;
+    return place;
+  }
+  const level = document.createElement("strong");
+  level.textContent = risk.level;
+  place.append("Risk: ", level, ` · ${risk.line}`);
+  return place;
+}
 
 export type BlockedOutput = { exit_code: number | null; tail: string };
 
@@ -109,6 +145,7 @@ export function blockedView(
   answerable: boolean,
   now: number = Date.now(),
   output?: BlockedOutput | null,
+  note?: RiskView,
 ): BlockedView | null {
   if (card.status === "declined") return null;
   return {
@@ -120,14 +157,15 @@ export function blockedView(
     buttons: buttonsOf(card.status, answerable),
     detail: detailOf(card, now),
     tail: outputCall(card) && output !== undefined ? tailText(output) : null,
+    risk: riskLine(note, buttonsOf(card.status, answerable).length > 0),
   };
 }
 
 // `retry` types the card's retry line into the session's terminal (`story.ts`).
-export function blockedElement(session: string, card: BlockedCommand, agent: string | null, retry: (card: BlockedCommand) => void): HTMLElement | null {
+export function blockedElement(session: string, card: BlockedCommand, agent: string | null, retry: (card: BlockedCommand) => void, note?: RiskView): HTMLElement | null {
   const request = blockedRequestFor(card.call);
   const read = outputCall(card);
-  const view = blockedView(card, agent, request !== null, Date.now(), read ? tails.get(read.call) : undefined);
+  const view = blockedView(card, agent, request !== null, Date.now(), read ? tails.get(read.call) : undefined, note);
   if (view === null) return null;
   const block = document.createElement("article");
   block.className = "question decision blocked-command";
@@ -139,6 +177,8 @@ export function blockedElement(session: string, card: BlockedCommand, agent: str
   const command = document.createElement("p");
   command.append(code(view.command));
   block.append(state, asked, command, text("p", `In ${view.folder}`, "description"), text("p", view.reason, "description"));
+  // Beside the rule, before anything that changes: the place keeps its two lines, so the buttons never move when the note arrives.
+  if (view.risk !== null) block.append(riskElement(view.risk));
   // A Running card's time counts up each second, as a running check's does, until the card leaves the page.
   if (card.status === "running") block.append(counts(text("p", "", "description"), (at) => detailOf(card, at) ?? ""));
   else if (view.detail !== null) block.append(text("p", view.detail, "description"));

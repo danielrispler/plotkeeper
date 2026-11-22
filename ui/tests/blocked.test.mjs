@@ -23,6 +23,7 @@ test("a blocked command shows in full with its folder and rule, and Allow and De
     buttons: ["Allow", "Decline"],
     detail: null,
     tail: null,
+    risk: { state: "reading", level: null, line: null, text: "Reading the command…" },
   });
 });
 
@@ -225,4 +226,78 @@ test("a failed answer puts the request back so the card keeps its buttons", asyn
   console.warn = origWarn;
   assert.equal(took, null);
   assert.deepEqual(blockedRequestFor("toolu_n1"), original);
+});
+
+// The risk note (danielrispler/plotkeeper#298).
+import { riskLevels } from "../../dist/blocked.js";
+
+const arrived = (level, line = "Deletes the remote branch feature-x on GitHub") => ({ call: "toolu_1", state: "arrived", level, line, at: 5 });
+
+test("a card with buttons has the note's place from the start, which reads that the note is on its way, with no note sent yet", () => {
+  const view = blockedView(card(), null, true);
+  assert.deepEqual(view.risk, { state: "reading", level: null, line: null, text: "Reading the command…" });
+  assert.deepEqual(blockedView(card(), null, true, 0, undefined, { call: "toolu_1", state: "reading" }).risk, view.risk);
+});
+
+test("a note shows at each of the six levels as 'Risk: Level · line', in plain text", () => {
+  const levels = { none: "None", low: "Low", medium: "Medium", high: "High", very_high: "Very high", not_sure: "Not sure" };
+  assert.deepEqual(riskLevels, levels);
+  for (const [level, label] of Object.entries(levels)) {
+    const risk = blockedView(card(), null, true, 0, undefined, arrived(level)).risk;
+    assert.deepEqual(risk, { state: "arrived", level: label, line: "Deletes the remote branch feature-x on GitHub", text: `Risk: ${label} · Deletes the remote branch feature-x on GitHub` }, level);
+  }
+});
+
+test("a failed note reads that no risk note came, which is not a level", () => {
+  const risk = blockedView(card(), null, true, 0, undefined, { call: "toolu_1", state: "failed" }).risk;
+  assert.deepEqual(risk, { state: "failed", level: null, line: null, text: "No risk note: the judge did not answer" });
+});
+
+test("a card's buttons and state do not depend on its note", () => {
+  const notes = [undefined, { call: "toolu_1", state: "reading" }, { call: "toolu_1", state: "failed" }, ...Object.keys(riskLevels).map((level) => arrived(level))];
+  for (const status of ["blocked", "allowed", "allowed_not_run", "running", "finished", "blocked_again"]) {
+    for (const answerable of [true, false]) {
+      const bare = blockedView(card(status), null, answerable);
+      for (const note of notes) {
+        const view = blockedView(card(status), null, answerable, 0, undefined, note);
+        assert.deepEqual({ ...view, risk: null }, { ...bare, risk: null }, `${status} ${answerable} ${note?.state}`);
+        assert.equal(docksInDock(card(status), answerable), view.buttons.length > 0);
+      }
+    }
+  }
+});
+
+test("a card with no button has the place only once there is news of a note, and keeps it", () => {
+  assert.equal(blockedView(card("allowed"), null, true).risk, null);
+  assert.equal(blockedView(card("blocked"), null, false).risk, null);
+  assert.equal(blockedView(card("allowed"), null, true, 0, undefined, arrived("high")).risk.level, "High");
+  assert.equal(blockedView(card("finished"), null, false, 0, null, { call: "toolu_1", state: "failed" }).risk.state, "failed");
+});
+
+import { fakeDocument } from "./dom.mjs";
+import { riskElement } from "../../dist/blocked.js";
+
+test("the note's place is a polite live region whose full text is its hover, so a cut note is still readable", () => {
+  globalThis.document = fakeDocument();
+  const long = Array.from({ length: 16 }, (_, i) => `word${i}`).join(" ");
+  const risk = blockedView(card(), null, true, 0, undefined, arrived("very_high", long)).risk;
+  const place = riskElement(risk);
+  assert.equal(place.className, "risk-note");
+  assert.equal(place.getAttribute("aria-live"), "polite");
+  assert.equal(place.title, `Risk: Very high · ${long}`);
+  assert.equal(place.text, `Risk: Very high · ${long}`);
+  assert.deepEqual(place.find("strong").map((s) => s.text), ["Very high"]);
+  // Waiting and failed read as plain text, with no level in bold.
+  const waiting = riskElement(blockedView(card(), null, true).risk);
+  assert.equal(waiting.text, "Reading the command…");
+  assert.deepEqual(waiting.find("strong"), []);
+});
+
+test("the place keeps two lines and cuts a longer note at two, with no colour", async () => {
+  const fs = await import("node:fs");
+  const css = fs.readFileSync(new URL("../../ui/style.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const rule = css.match(/\.risk-note\s*\{([^}]*)\}/)?.[1] ?? "";
+  assert.match(rule, /-webkit-line-clamp:\s*2/);
+  assert.match(rule, /min-height:\s*calc\(2 \* /);
+  assert.doesNotMatch(rule, /color|background/);
 });

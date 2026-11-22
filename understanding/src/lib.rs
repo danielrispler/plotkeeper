@@ -26,6 +26,7 @@ mod fingerprint;
 mod grounding;
 mod offer;
 mod retest;
+mod risk;
 mod self_test;
 mod store;
 mod summary;
@@ -45,6 +46,7 @@ pub use offer::{
     changed_in, decide, is_logic, offer_stop, offer_summary, settle, turns_card,
 };
 pub use retest::{retest_quiz, write_retests};
+pub use risk::{Ask, RISK_TIMEOUT, Risk, RiskLevel, RiskNote, RiskNotes, RiskView, judge};
 pub use self_test::{ArmReport, SelfTest, self_test};
 pub use store::{
     Arm, Brief, CardStore, CheckResult, Guess, Learning, Level, PlacedCard, QuizTap, Rating,
@@ -273,6 +275,13 @@ pub trait CardWriter {
         _message: &str,
     ) -> Result<String, String> {
         Err("this writer writes no summaries".into())
+    }
+
+    /// The writer's risk note on a blocked `command` that was asked to run in `folder`
+    /// (danielrispler/plotkeeper#298), or one line for the log when it gave none. A writer that
+    /// writes no risk notes says so.
+    fn risk(&self, _command: &str, _folder: &str) -> Result<Risk, String> {
+        Err("this writer writes no risk notes".into())
     }
 
     /// The writer's reply with a session's name, from Daniel's first `prompt` and, when it was a
@@ -735,6 +744,14 @@ impl CardWriter for FakeWriter {
     fn name(&self, _: &SummarySetup, _: &str, _: Option<&str>) -> Result<String, String> {
         Ok(serde_json::json!({ "name": "Sample session name" }).to_string())
     }
+
+    fn risk(&self, _: &str, _: &str) -> Result<Risk, String> {
+        Ok(Risk {
+            level: RiskLevel::NotSure,
+            line: "A sample risk note from the fake writer, which does not read the command."
+                .into(),
+        })
+    }
 }
 
 /// Writes the card with `claude -p` on Daniel's subscription, in a neutral folder that holds none of
@@ -745,6 +762,8 @@ pub struct ClaudeWriter {
     folder: PathBuf,
     /// How long a call may run before it fails and is stopped (danielrispler/Falinks#434, decision 30).
     timeout: Duration,
+    /// The same for the risk note's judge, which is not to be waited for (danielrispler/plotkeeper#298).
+    risk_timeout: Duration,
     /// Told when no call can start and when one works again (danielrispler/plotkeeper#51).
     availability: Availability,
 }
@@ -804,6 +823,7 @@ impl ClaudeWriter {
             program,
             folder,
             timeout,
+            risk_timeout: RISK_TIMEOUT,
             availability: Availability::default(),
         }
     }
@@ -976,7 +996,16 @@ impl ClaudeWriter {
     /// What a run printed, or one line for the log when the call failed: it did not start, exited
     /// with an error, printed nothing, or ran past the timeout, which stops it and every process it
     /// started, all in its own process group (danielrispler/Falinks#434, decision 30).
-    fn stdout(&self, (mut command, prompt): (Command, String)) -> Result<String, String> {
+    fn stdout(&self, run: (Command, String)) -> Result<String, String> {
+        self.stdout_within(self.timeout, run)
+    }
+
+    /// `stdout`, with the call stopped after `timeout`.
+    fn stdout_within(
+        &self,
+        timeout: Duration,
+        (mut command, prompt): (Command, String),
+    ) -> Result<String, String> {
         let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -995,8 +1024,8 @@ impl ClaudeWriter {
             let _ = stdout.as_mut().map(|o| o.read_to_end(&mut out));
             let _ = sender.send(out);
         });
-        let deadline = Instant::now() + self.timeout;
-        let out = read.recv_timeout(self.timeout).ok();
+        let deadline = Instant::now() + timeout;
+        let out = read.recv_timeout(timeout).ok();
         let status = loop {
             match child.try_wait() {
                 Ok(None) if out.is_some() && Instant::now() < deadline => {
@@ -1012,10 +1041,7 @@ impl ClaudeWriter {
             // SAFETY: `kill` takes no pointers.
             unsafe { libc::kill(-(child.id() as i32), libc::SIGKILL) };
             let _ = child.wait();
-            return Err(format!(
-                "`claude -p` ran past {:?} and was stopped",
-                self.timeout
-            ));
+            return Err(format!("`claude -p` ran past {timeout:?} and was stopped"));
         };
         let out = String::from_utf8_lossy(&out);
         let head: String = out.trim().chars().take(300).collect();
@@ -1081,6 +1107,10 @@ impl CardWriter for ClaudeWriter {
         response: Option<&str>,
     ) -> Result<String, String> {
         self.stdout(self.name_command(setup, prompt, response))
+    }
+
+    fn risk(&self, command: &str, folder: &str) -> Result<Risk, String> {
+        ClaudeWriter::risk(self, command, folder)
     }
 }
 

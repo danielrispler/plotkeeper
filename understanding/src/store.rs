@@ -2,6 +2,7 @@
 //! session's brief, on disk in the studio's data directory, so a restart neither loses nor re-asks
 //! them.
 
+use crate::risk::RiskView;
 use crate::{Answered, Card, DesignLine, OpenItem, Quiz, TurnSummary, answered};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -404,6 +405,9 @@ pub struct SessionCards {
     pub workers: Vec<PlacedCard>,
     /// Its decision history, oldest first (danielrispler/Falinks#461, decision 17).
     pub decisions: Vec<Decision>,
+    /// What each blocked command's card shows of its risk note (danielrispler/plotkeeper#298), which the shell joins
+    /// to the cards when it reads them (`RiskNotes::views`); empty in a worker's own view.
+    pub risk_notes: Vec<RiskView>,
 }
 
 /// A worker's card with the turn of its session's rail it belongs to, `None` when the session has no turn for it.
@@ -617,6 +621,7 @@ impl CardStore {
             older,
             workers: Vec::new(),
             decisions,
+            risk_notes: Vec::new(),
         }
     }
 
