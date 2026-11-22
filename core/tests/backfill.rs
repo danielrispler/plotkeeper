@@ -271,7 +271,7 @@ fn only_the_newest_turns_up_to_the_cap_get_a_card_at_start_newest_first() {
 fn a_turn_opened_without_a_card_keeps_waiting_for_the_next_opening() {
     let at = NOW - 3 * HOUR;
     let id = format!("{SESSION}@{at}");
-    let mut studio = Studio::replayed(&turn("p1", at, "t1", "t2"));
+    let mut studio = Studio::replayed(turn("p1", at, "t1", "t2"));
     assert_eq!(studio.backfill(NOW, &[], CatchUp::default()), []);
 
     let first = studio.backfill_on_open(&id);
