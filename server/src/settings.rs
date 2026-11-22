@@ -187,6 +187,20 @@ fn repository_in(text: &str) -> Option<String> {
     (!repo.is_empty()).then(|| repo.to_string())
 }
 
+/// The card writer `settings.json` names, `summaries.writer`: `claude` unless the file says `agy`, or is missing or broken
+/// (danielrispler/plotkeeper#325: the web server applies it at start, as the page's first save did in the app).
+pub fn summary_writer() -> studio_understanding::WriterKind {
+    let text = paths().and_then(|[settings, _]| fs::read_to_string(settings).ok());
+    summary_writer_in(&text.unwrap_or_default())
+}
+
+fn summary_writer_in(text: &str) -> studio_understanding::WriterKind {
+    serde_json::from_str::<serde_json::Value>(&plain_json(text))
+        .ok()
+        .and_then(|json| serde_json::from_value(json["summaries"]["writer"].clone()).ok())
+        .unwrap_or_default()
+}
+
 /// Zed's format as plain JSON: comments and trailing commas outside strings dropped, as
 /// `ui/settings.ts`'s `parseJsonc` does.
 fn plain_json(text: &str) -> String {
@@ -230,8 +244,9 @@ fn plain_json(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{edit_text, plain_json, repository_in, write_in};
+    use super::{edit_text, plain_json, repository_in, summary_writer_in, write_in};
     use serde_json::json;
+    use studio_understanding::WriterKind;
 
     fn path(keys: &[&str]) -> Vec<String> {
         keys.iter().map(|k| k.to_string()).collect()
@@ -239,6 +254,22 @@ mod tests {
 
     fn parsed(text: &str) -> serde_json::Value {
         serde_json::from_str(&plain_json(text)).unwrap()
+    }
+
+    #[test]
+    fn the_summary_writer_is_claude_unless_the_settings_say_agy() {
+        let agy = "{ // cards on my subscription\n \"summaries\": { \"writer\": \"agy\", }, }";
+        assert_eq!(summary_writer_in(agy), WriterKind::Agy);
+        assert_eq!(
+            summary_writer_in(r#"{ "summaries": { "model": "haiku" } }"#),
+            WriterKind::Claude
+        );
+        assert_eq!(
+            summary_writer_in(r#"{ "summaries": { "writer": "nope" } }"#),
+            WriterKind::Claude
+        );
+        assert_eq!(summary_writer_in("not json"), WriterKind::Claude);
+        assert_eq!(summary_writer_in(""), WriterKind::Claude);
     }
 
     #[test]

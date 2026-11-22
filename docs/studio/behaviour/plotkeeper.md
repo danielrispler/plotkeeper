@@ -20,4 +20,6 @@
 
 The first start holds a lock on `plotkeeper.lock` in the data folder and writes its port and token to `plotkeeper.running.json` there (mode 0600). A second start finds the lock held, opens the browser on the first one's address and exits. Ctrl+C (or SIGTERM) stops the server, removes that file and frees the lock; the stores write by temp file and rename, so a stop never leaves one half written.
 
+At start it applies the card writer `settings.json` names (`summaries.writer`, `claude` by default), so cards are written with it before any page opens.
+
 `PLOTKEEPER_NO_BROWSER=1` leaves the browser closed; the address is printed either way (`plotkeeper: <url>`).

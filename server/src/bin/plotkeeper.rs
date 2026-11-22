@@ -96,6 +96,9 @@ fn run(log: &std::path::Path, held: lock::Held) -> std::io::Result<()> {
     let effects = Arc::new(ServerEffects::default());
     let app = Arc::new(App::open(log, effects.clone(), writer_notices)?);
     effects.attach(&app);
+    // The writer settings.json names takes effect at start, with no page open to save it.
+    app.writer
+        .use_writer(studio_server::settings::summary_writer());
     let token = web::new_token();
     let page = Web::start(
         app.clone(),

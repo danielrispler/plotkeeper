@@ -123,6 +123,7 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
             app,
             arg(a, "model")?,
             arg(a, "effort")?,
+            arg(a, "writer")?,
             arg(a, "on_open")?,
             arg(a, "self_test")?,
         )),
