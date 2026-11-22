@@ -1,7 +1,7 @@
 // Broken laws and the inline proof drawer's pure logic (spec danielrispler/plotkeeper#306, ticket #312), run on the `tsc` output.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { brokenParts, brokenText, ciDrawer, ciLine, proofDrawer, sheetCi } from "../../dist/map-model.js";
+import { brokenParts, brokenText, ciDrawer, ciLine, commitDrawer, proofDrawer, scrubBanner, sheetCi, stripOf } from "../../dist/map-model.js";
 
 const ci = (status, extra = {}) => ({ status, run_url: "https://github.com/o/r/actions/runs/9", commit: "abc1234def", earlier: false, parts: [], laws: [], tail: "", note: null, ...extra });
 const broken = ci("broken", { parts: ["shell"], laws: ["wire-types-agree"], tail: "FAIL wire_types_match\nSummary 1 failed" });
@@ -66,4 +66,31 @@ test("the broken-law drill-down shows the log's tail and opens the run on GitHub
   assert.equal(quiet.blocks.length, 0);
   assert.match(quiet.title, /passed/);
   assert.equal(ciDrawer(ci("unreadable", { run_url: null })).jumps.length, 0);
+});
+
+const entry = (commit, extra = {}) => ({ commit, short: commit.slice(0, 7), label: `change ${commit}`, fogged: false, ...extra });
+
+test("the strip marks the commit being viewed and the ones Daniel has not caught up on, oldest first", () => {
+  const rows = stripOf([entry("aaaaaaaa"), entry("bbbbbbbb", { fogged: true }), entry("cccccccc", { fogged: true })], "bbbbbbbb");
+  assert.deepEqual(rows.map((row) => [row.commit, row.current, row.fogged]), [["aaaaaaaa", false, false], ["bbbbbbbb", true, true], ["cccccccc", false, true]]);
+  assert.ok(stripOf([entry("aaaaaaaa")], null).every((row) => !row.current));
+  // Fogged and caught-up rows tell themselves apart in words too, not only by colour.
+  assert.notEqual(rows[0].title, rows[2].title);
+});
+
+test("the banner names the commit and offers the way back", () => {
+  assert.deepEqual(scrubBanner({ commit: "abcdef0123", short: "abcdef0", label: "#4 Thing" }), { text: "Viewing abcdef0", back: "Back to now" });
+});
+
+test("a commit's drill-down lists its files with their diffs and opens the commit on GitHub", () => {
+  const found = { commit: "abc1234def", short: "abc1234", label: "#7 Edit a", url: "https://github.com/o/r/commit/abc1234def", files: [{ path: "a/x", diff: "-one\n+two" }, { path: "b/y", diff: "+n" }] };
+  const drawer = commitDrawer(found);
+  assert.equal(drawer.title, "#7 Edit a");
+  assert.match(drawer.note ?? "", /abc1234/);
+  assert.match(drawer.note ?? "", /2 files/);
+  assert.deepEqual(drawer.blocks.map((block) => [block.label, block.code]), [["a/x", "-one\n+two"], ["b/y", "+n"]]);
+  assert.deepEqual(drawer.jumps.map((jump) => [jump.label, jump.to]), [["Open on GitHub", { url: found.url }]]);
+  const local = commitDrawer({ ...found, url: null, files: [] });
+  assert.deepEqual(local.jumps, []);
+  assert.match(local.blocks[0].code, /No files/);
 });

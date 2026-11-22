@@ -307,6 +307,35 @@ pub fn map_know(project: String, part: String) -> Result<UserState, String> {
     crate::fog::clear(&state_file()?, &project, &part)
 }
 
+/// A part's history strip: its first-parent commits on the default branch from the map's birth, oldest to newest, the ones Daniel
+/// has not caught up on marked.
+#[tauri::command(async)]
+pub fn map_history(project: String, part: String) -> Result<Vec<crate::history::Entry>, String> {
+    let fogged = read_user(&state_file()?, &project)
+        .fog
+        .parts
+        .get(&part)
+        .map(|entries| entries.iter().map(|e| e.commit.clone()).collect())
+        .unwrap_or_default();
+    Ok(crate::history::part_history(
+        Path::new(&project),
+        &part,
+        &fogged,
+    ))
+}
+
+/// The map as of `commit`: what one scrub of the history strip asks the shell for. A later ticket that records scrubs hooks here.
+#[tauri::command(async)]
+pub fn map_at(project: String, commit: String) -> Result<crate::history::At, String> {
+    crate::history::at(Path::new(&project), &commit)
+}
+
+/// The files and diffs of `commit`, for the drawer.
+#[tauri::command(async)]
+pub fn map_commit(project: String, commit: String) -> Result<crate::history::Commit, String> {
+    crate::history::commit_files(Path::new(&project), &commit)
+}
+
 /// The projects among `projects` that show a fogged Core part or a broken law, for Home's quiet mark. Reads local refs and the
 /// last CI read only: it asks neither `origin` nor GitHub.
 #[tauri::command(async)]

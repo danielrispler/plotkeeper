@@ -14,7 +14,7 @@
 import { element, failure, invoke, listen, newest, pressable, text } from "./dom.js";
 import {
   actorSize, autoPlace, brokenParts, brokenText, draftPrompt, dragMove, dragStart, effectiveTier, escapeMap, type Actor, type Drag, type Law, type Layer, type LayerName,
-  type MapDoc, mapProject, type MapLink, parseMap, type Part, type Point, plateSize, rimPoint, type Tier,
+  type MapDoc, mapProject, type MapLink, parseMap, type Part, type Point, plateSize, rimPoint, type Scrub, type Tier,
 } from "./map-model.js";
 import { knownProjects, projects } from "./projects.js";
 import type { MapState } from "./types.js";
@@ -26,6 +26,8 @@ export type MapView = {
   state: MapState;
   doc: LoadedMap;
   positions: Record<string, Point>;
+  // The past commit this view shows read-only (no fog, no live agents, no CI), null when it shows now (ticket #313).
+  scrub: Scrub | null;
   slots: { canvas: HTMLElement; side: HTMLElement; notPlaced: HTMLElement; sheet: HTMLElement; drawer: HTMLElement; banner: HTMLElement };
 };
 export type PlateContext = { view: MapView; part: Part; tier: Tier; plate: HTMLElement; fog: HTMLElement; marks: HTMLElement; chips: HTMLElement };
@@ -53,9 +55,18 @@ let project: string | null = null;
 let loaded: MapState | null = null;
 let view: MapView | null = null;
 let drawn = "";
+// The past commit shown instead of the default branch's map, in `project`; `openMap` of another project drops it.
+let scrub: Scrub | null = null;
 
 export const mapShown = () => document.body?.classList.contains("map-open") === true;
 export const currentMap = (): MapView | null => view;
+export const currentScrub = (): Scrub | null => scrub;
+
+// Shows the map as of `to` read-only, or now again with null (the one setter of a scrub: `scrubTo` in `map-history.ts` calls it).
+export function setScrub(to: Scrub | null) {
+  scrub = to;
+  draw();
+}
 
 const latest = newest();
 
@@ -73,6 +84,7 @@ async function load(path: string, fetch: boolean) {
 
 // Opens the Map view on `path`.
 export function openMap(path: string | null) {
+  if (path !== project) scrub = null;
   project = path;
   loaded = null;
   view = null;
@@ -221,11 +233,12 @@ const place = (node: HTMLElement, at: Point) => {
 };
 
 // Draws the parts as plates, the actors as labels and the links between them, placing what has no saved position once.
-function drawMap(body: HTMLElement, state: MapState, doc: LoadedMap) {
+function drawMap(body: HTMLElement, state: MapState, doc: LoadedMap, past: Scrub | null) {
   const saved = Object.fromEntries(Object.entries(state.user.positions).map(([id, [x, y]]) => [id, { x, y }]));
   const items = [...doc.parts, ...doc.actors];
   const added = autoPlace(items, doc.links, saved);
-  if (Object.keys(added).length) {
+  // A past commit's map is read-only: what it places is not saved, and its parts get no fog or broken-law mark.
+  if (Object.keys(added).length && !past) {
     // Saved the first time they are placed, so they never move again on their own.
     const stored = Object.fromEntries(Object.entries(added).map(([id, at]) => [id, [at.x, at.y] as [number, number]]));
     state.user.positions = { ...state.user.positions, ...stored };
@@ -238,7 +251,7 @@ function drawMap(body: HTMLElement, state: MapState, doc: LoadedMap) {
   const links = svg("svg", { class: "map-links", "aria-hidden": "true" });
   world.append(links);
   const slots = { canvas, side: element("map-side"), notPlaced: element("map-not-placed"), sheet: element("map-sheet"), drawer: element("map-drawer"), banner: element("map-banner") };
-  const current: MapView = { project: state.project, state, doc, positions, slots };
+  const current: MapView = { project: state.project, state, doc, positions, scrub: past, slots };
 
   const fit = () => {
     const reach = Object.entries(positions).map(([id, at]) => ({ x: at.x + sizeOf(id, current).w / 2, y: at.y + sizeOf(id, current).h / 2 }));
@@ -253,13 +266,13 @@ function drawMap(body: HTMLElement, state: MapState, doc: LoadedMap) {
   for (const part of doc.parts) {
     const tier = effectiveTier(part, state.user.tiers);
     // Fog under Daniel's effective tier, as the shell worked it out (`fog.rs`); a part not listed is clear.
-    const mist = state.fog?.[part.id];
+    const mist = past ? undefined : state.fog?.[part.id];
     const plate = text("div", "", `plate tier-${tier}${mist ? ` fog-${mist}` : ""}`);
     plate.dataset.id = part.id;
     const [fog, marks, chips] = [text("div", "", "plate-fog"), text("div", "", "plate-marks"), text("div", "", "plate-chips")];
     marks.append(...doc.laws.filter((law) => law.on === part.id).map(lawMark));
     // A test that backs a law failed on main: one coarse mark, never naming the law. Red, beside Needs you the only loud colour.
-    if (brokenParts(state.ci).has(part.id)) {
+    if (!past && brokenParts(state.ci).has(part.id)) {
       const broken = text("span", "", "law-broken");
       broken.title = brokenText;
       marks.append(broken);
@@ -320,6 +333,7 @@ function grab(node: HTMLElement, id: string, current: MapView, links: Element, f
     node.classList.remove("dragging");
     if (!done?.moved) return;
     swallow = true;
+    if (current.scrub) return;
     const at = current.positions[id];
     current.state.user.positions = { ...current.state.user.positions, [id]: [at.x, at.y] };
     invoke("map_save_positions", { project: current.project, positions: { [id]: [at.x, at.y] } }).catch(failure("map_save_positions"));
@@ -336,8 +350,9 @@ function draw() {
   drawHead(loaded);
   element("map-legend").hidden = loaded?.status !== "loaded";
   const body = element("map-body");
-  const doc = loaded?.status === "loaded" && loaded.source !== null ? parseMap(loaded.source) : null;
-  if (loaded && doc?.ok) return drawMap(body, loaded, doc);
+  const past = loaded?.status === "loaded" ? scrub : null;
+  const doc = loaded?.status === "loaded" && loaded.source !== null ? parseMap(past?.source ?? loaded.source) : null;
+  if (loaded && doc?.ok) return drawMap(body, loaded, doc, past);
   view = null;
   const unreadable = doc && !doc.ok ? { ...loaded!, status: "unreadable" as const, note: doc.why } : loaded;
   drawEmpty(body, unreadable);

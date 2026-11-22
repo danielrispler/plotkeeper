@@ -478,6 +478,12 @@ export type Ci = {
 // A tagged test shown by "See the proof": its file and tag line, and the code from the tag on, starting at line `first`.
 export type Proof = { file: string; line: number; test: string | null; first: number; snippet: string };
 
+// One commit of a part's history strip, oldest first; `fogged` is a commit Daniel has not caught up on.
+export type HistoryEntry = { commit: string; short: string; label: string; fogged: boolean };
+// The map as of a commit (a scrub), and a commit's files with their diffs (the drill-down).
+export type HistoricalMap = { commit: string; short: string; label: string; source: string };
+export type CommitFiles = { commit: string; short: string; label: string; url: string | null; files: { path: string; diff: string }[] };
+
 // Every command the window invokes, with what the shell replies (`src-tauri/src/*.rs`, `#[tauri::command]`): `void` where the
 // window ignores the reply, `null` where the shell may answer none. `invoke` takes only these names, and the snap fixtures
 // (`scripts/snap/`) are typed against it, and `scripts/snap/base.ts` answers every command that is not `void`, so a fixture
@@ -519,6 +525,9 @@ export interface Commands {
   map_save_positions: UserMap;
   map_set_tier: UserMap;
   map_know: UserMap;
+  map_history: HistoryEntry[];
+  map_at: HistoricalMap;
+  map_commit: CommitFiles;
   map_marks: string[];
   map_proof: Proof[];
   map_state: MapState;

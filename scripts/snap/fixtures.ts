@@ -367,6 +367,58 @@ const mapBroken = (open: "none" | "proof" | "log"): Fixture => {
   return { ...f, sessions, selected: { session: sessions[6], agent: null } };
 };
 
+// A part's history strip and a past commit (#313): the shell's sheet open on a part with four commits, the newest two not caught up on;
+// scrubbing to an older one shows that commit's map (without the workbench) read-only, with no fog, broken-law mark or live agent and a
+// banner; "Files" opens the commit's diff in the drawer; Esc then peels the drawer, the past commit, the sheet and the view, in that order.
+const past = JSON.parse(mapFile);
+past.parts = past.parts.filter((part: { id: string }) => part.id !== "workbench");
+past.links = past.links.filter((link: { from: string; to: string }) => link.from !== "workbench" && link.to !== "workbench");
+const strip = (n: number, label: string, fogged: boolean) => ({ commit: `${n}`.repeat(40), short: `${n}`.repeat(7), label, fogged });
+const mapScrubbed = (): Fixture => {
+  const esc = `document.dispatchEvent(new KeyboardEvent("keydown", { code: "Escape", key: "Escape", bubbles: true }));
+      await wait(100);`;
+  const f = mapOpened(`
+      await wait(200);
+      if (!document.querySelector("#map .plate .law-broken") || !document.querySelector("#map .agent-chip")) return log("snap:fail the live map lacks its mark or chips");
+      document.querySelector("#map .plate[data-id=shell]").click();
+      await wait(200);
+      const rows = [...document.querySelectorAll("#map-sheet .hist-row")];
+      if (rows.length !== 4) return log("snap:fail expected 4 strip rows, saw " + rows.length);
+      if (rows.filter((r) => r.classList.contains("fogged")).length !== 2 || !rows[3].classList.contains("fogged") || rows[0].classList.contains("fogged")) log("snap:fail fogged rows");
+      rows[1].querySelector(".hist-commit").click();
+      await wait(200);
+      const banner = document.getElementById("map-banner");
+      if (!banner.textContent.includes("Viewing 2222222") || !banner.textContent.includes("Back to now")) return log("snap:fail banner: " + banner.textContent);
+      if (document.querySelector("#map .agent-chip, #map-not-placed .agent-chip")) log("snap:fail a live agent shows in the past");
+      if (document.querySelector("#map .plate .law-broken")) log("snap:fail a broken-law mark shows in the past");
+      if (document.querySelector("#map .plate.fog-thin, #map .plate.fog-thick")) log("snap:fail fog shows in the past");
+      if (document.querySelector("#map .plate[data-id=workbench]")) log("snap:fail the workbench was not yet there");
+      if (!document.querySelector("#map-sheet .sheet")) log("snap:fail the sheet closed on a scrub");
+      if (!document.querySelector("#map-sheet .hist-row.current")) log("snap:fail no current row");
+      rows[1].querySelector(".hist-files").click();
+      await wait(150);
+      if (!document.querySelector("#map-drawer .drawer-code")?.textContent.includes("+two")) return log("snap:fail the diff is not in the drawer");
+      if ([...document.querySelectorAll("#map-drawer .drawer-jump")].map((b) => b.textContent).join() !== "Open on GitHub") log("snap:fail the commit's jump");
+      ${esc}
+      if (document.querySelector("#map-drawer .drawer") || !banner.textContent.includes("Viewing")) return log("snap:fail the first Esc did not close the drawer alone");
+      document.querySelectorAll("#map-sheet .hist-row")[1].querySelector(".hist-files").click();
+      await wait(150);
+      ${esc}
+      ${esc}
+      if (banner.textContent !== "" || !document.querySelector("#map .plate .law-broken") || !document.querySelector("#map-sheet .sheet")) return log("snap:fail the second Esc did not return to now alone: " + banner.textContent);
+      document.querySelectorAll("#map-sheet .hist-row")[1].querySelector(".hist-commit").click();
+      await wait(200);
+      if (!document.getElementById("map-banner").textContent.includes("Viewing")) return log("snap:fail could not scrub again");
+      log("scrubbed ok");`, {
+    map_state: mapState({ ci: brokenCi, fog: { shell: "thick", core: "thin" } }),
+    map_place: { s1: ["core", "window"], "s1/w1": ["shell"], s2: ["hook"], s6: [] },
+    map_history: [strip(1, "#101 Map first drawn", false), strip(2, "#150 Plates and links", false), strip(3, "#210 Fog engine", true), strip(4, "#306 Live agents on the map", true)],
+    map_at: { commit: "2".repeat(40), short: "2222222", label: "#150 Plates and links", source: JSON.stringify(past) },
+    map_commit: { commit: "2".repeat(40), short: "2222222", label: "#150 Plates and links", url: "https://github.com/danielrispler/plotkeeper/commit/" + "2".repeat(40), files: [{ path: "src-tauri/src/map.rs", diff: "@@ -1,2 +1,2 @@\n-one\n+two" }, { path: "ui/map.ts", diff: "@@ -1 +1,2 @@\n+three" }] },
+  });
+  return { ...f, sessions: busySessions(), selected: { session: busySessions()[6], agent: null } };
+};
+
 export const fixtures = {
   ...railFixtures,
   recordedTerminal,
@@ -702,6 +754,8 @@ export const fixtures = {
   mapBroken: () => mapBroken("none"),
   mapProof: () => mapBroken("proof"),
   mapBrokenLog: () => mapBroken("log"),
+  // A part's history strip scrubbed to an older commit, with the sheet open (#313).
+  mapScrubbed,
   // No map on the default branch: the empty state, and "Draft a map" opens New session with the drafting prompt.
   mapEmpty: () =>
     mapOpened(`

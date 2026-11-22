@@ -720,6 +720,18 @@ body.map-open .toasts, body.map-open .toast { visibility: visible !important; }
 .sheet-ci { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-3); }
 .sheet-ci-line { margin: 0; font-size: var(--size-small); color: var(--muted); }
 .sheet-ci.broken .sheet-ci-line { color: var(--conflict); }
+/* The history strip (#313): a commit per row, oldest first. A commit Daniel has not caught up on has a filled mist dot; an older one a
+   hollow dot. The one being viewed is raised. The strip scrolls; its labels wrap, so none is cut. */
+.hist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); max-height: var(--strip-height); overflow-y: auto; }
+.hist-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: var(--sp-4); align-items: baseline; padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-small); font-size: var(--size-small); }
+.hist-row.current { background: var(--raised); }
+.hist-dot { width: var(--sp-4); height: var(--sp-4); border-radius: 50%; box-shadow: inset 0 0 0 var(--hair) var(--faint); align-self: center; }
+.hist-row.fogged .hist-dot { background: var(--mist); box-shadow: none; }
+.hist-commit { text-align: start; padding: 0; color: var(--fg); overflow-wrap: anywhere; }
+.hist-row.fogged .hist-commit { color: var(--mist); }
+.hist-sha { grid-column: 3; font: var(--size-xs) var(--mono); color: var(--faint); }
+.hist-files { grid-column: 2 / 4; justify-self: start; }
+.banner-text { color: var(--fg); }
 /* A broken law (#312): a loud red dot at the plate's top right, the colour that sits beside Needs you's orange and nowhere else. */
 .law-broken { display: inline-block; flex: none; width: var(--sp-5); height: var(--sp-5); border-radius: 50%; background: var(--conflict); }
 .plate.broken, .plate.broken.open { box-shadow: inset 0 0 0 var(--hair) var(--conflict), var(--shadow); }

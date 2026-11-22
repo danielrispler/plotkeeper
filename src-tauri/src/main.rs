@@ -39,6 +39,7 @@ use tauri_plugin_notification::NotificationExt;
 mod answer;
 mod ci_laws;
 mod fog;
+mod history;
 mod map;
 mod presence;
 mod restart;
@@ -1225,6 +1226,9 @@ fn main() {
             map::map_save_positions,
             map::map_set_tier,
             map::map_know,
+            map::map_history,
+            map::map_at,
+            map::map_commit,
             map::map_marks,
             map::map_proof,
             map::map_place,

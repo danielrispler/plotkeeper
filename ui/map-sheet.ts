@@ -3,15 +3,19 @@
 // "I know this" that lifts the mist. `map-model.ts`'s `sheetOf` is what it shows; Esc closes it (the `sheet` layer).
 //
 // "See the proof" (`.sheet-law-actions` of a law a check backs) and the CI line with its drill-down open the drawer (`map-drawer.ts`).
-// Where a later ticket plugs in: `.sheet-extra` at the foot is the place of the history strip (#313).
+// `.sheet-extra` at the foot holds the history strip (`map-history.ts`, #313). While a past commit is shown the sheet is read-only:
+// no tier change, no proof, no CI section, no fog section.
 
 import { failure, invoke, pressable, text } from "./dom.js";
 import { currentMap, onDraw, onPlateClick, reloadMap, registerLayer, syncSide, type MapView } from "./map.js";
 import { openDrawer } from "./map-drawer.js";
-import { ciDrawer, effectiveTier, proofDrawer, sheetCi, sheetOf, type Tier } from "./map-model.js";
+import { drawStrip } from "./map-history.js";
+import { ciDrawer, effectiveTier, type Part, proofDrawer, sheetCi, sheetOf, type Tier } from "./map-model.js";
 
 // The part whose sheet is open, and the project it is in; a sheet never carries over to another project's map.
 let open: { project: string; part: string } | null = null;
+// The part as the live map last had it, so the sheet of a part a past commit no longer has still draws.
+let remembered: Part | null = null;
 
 // How long the lifting mist plays before the map is drawn without it: the stylesheet's `--mist-lift`, none under reduced motion.
 const lifted = (node: HTMLElement) =>
@@ -46,7 +50,9 @@ function close() {
 function drawSheet(view: MapView) {
   const slot = view.slots.sheet;
   view.slots.canvas.querySelectorAll(".plate.open").forEach((plate) => plate.classList.remove("open"));
-  const part = open && open.project === view.project ? view.doc.parts.find((each) => each.id === open!.part) : undefined;
+  const there = open && open.project === view.project ? view.doc.parts.find((each) => each.id === open!.part) : undefined;
+  if (there && !view.scrub) remembered = there;
+  const part = there ?? (view.scrub && open?.project === view.project && remembered?.id === open.part ? remembered : undefined);
   if (!part) {
     open = null;
     slot.replaceChildren();
@@ -54,7 +60,7 @@ function drawSheet(view: MapView) {
   }
   view.slots.canvas.querySelector(`.plate[data-id="${CSS.escape(part.id)}"]`)?.classList.add("open");
   const tier = effectiveTier(part, view.state.user.tiers);
-  const sheet = sheetOf(part, view.doc.laws, tier, view.state.fog?.[part.id]);
+  const sheet = sheetOf(part, view.doc.laws, tier, view.scrub ? undefined : view.state.fog?.[part.id]);
 
   const closer = text("button", "×", "btn quiet sheet-close");
   closer.title = "Close the sheet";
@@ -63,6 +69,7 @@ function drawSheet(view: MapView) {
   for (const each of sheet.tiers) {
     const button = pressable(text("button", each.label, "btn"), each.pressed, () => setTier(view, part.id, each.tier).catch(failure("map_set_tier")));
     button.title = `Track ${part.name} as ${each.label}`;
+    if (view.scrub) (button as HTMLButtonElement).disabled = true;
     tiers.append(button);
   }
   const laws = sheet.laws.map((law) => {
@@ -71,7 +78,7 @@ function drawSheet(view: MapView) {
     row.dataset.law = law.id;
     row.append(mark, text("span", law.text, "sheet-law-text"), text("span", law.label, "sheet-law-backing"), text("span", "", "sheet-law-actions"));
     row.title = `${law.label}: ${law.text}`;
-    if (law.backing === "check") {
+    if (law.backing === "check" && !view.scrub) {
       const proof = text("button", "See the proof", "btn quiet");
       proof.title = "Show the test that stands behind this law, read from the default branch";
       proof.addEventListener("click", () => {
@@ -83,7 +90,7 @@ function drawSheet(view: MapView) {
     }
     return row;
   });
-  const fog = text("div", "", `sheet-fog${view.state.fog?.[part.id] ? ` ${view.state.fog[part.id]}` : ""}`);
+  const fog = text("div", "", `sheet-fog${!view.scrub && view.state.fog?.[part.id] ? ` ${view.state.fog[part.id]}` : ""}`);
   fog.append(text("p", sheet.fogLine, "sheet-fog-line"));
   if (sheet.canClear) {
     const clear = text("button", "I know this", "btn quiet sheet-know") as HTMLButtonElement;
@@ -94,7 +101,7 @@ function drawSheet(view: MapView) {
     });
     fog.append(clear);
   }
-  const state = sheetCi(view.state.ci, part.id, sheet.laws.some((law) => law.backing === "check"));
+  const state = view.scrub ? null : sheetCi(view.state.ci, part.id, sheet.laws.some((law) => law.backing === "check"));
   const ci = text("div", "", `sheet-ci${state?.broken ? " broken" : ""}`);
   if (state) {
     ci.append(text("p", state.line, "sheet-ci-line"));
@@ -117,13 +124,15 @@ function drawSheet(view: MapView) {
     tiers,
     text("h3", "Laws", "sheet-heading"),
     ...(laws.length ? [text("ul", "", "sheet-laws")] : [text("p", "No laws on this part", "empty")]),
-    text("h3", "Fog", "sheet-heading"),
-    fog,
+    // Fog and CI are of now: a past commit shows neither.
+    ...(view.scrub ? [] : [text("h3", "Fog", "sheet-heading"), fog]),
     ...(state ? [text("h3", "CI on main", "sheet-heading"), ci] : []),
-    text("div", "", "sheet-extra"),
   );
+  const extra = text("div", "", "sheet-extra");
+  card.append(extra);
   card.querySelector(".sheet-laws")?.append(...laws);
   slot.replaceChildren(card);
+  drawStrip(view, part.id, extra);
   syncSide(view.slots);
 }
 

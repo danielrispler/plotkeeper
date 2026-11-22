@@ -1,7 +1,7 @@
 // The Map view's pure logic (spec danielrispler/plotkeeper#306, ticket #309): the map file as the window reads it, where parts
 // are placed, the drag threshold, the link's rim points and the layered Esc. `map.ts` draws and wires them.
 
-import type { Ci, Fog, Proof } from "./types.js";
+import type { Ci, CommitFiles, Fog, HistoricalMap, HistoryEntry, Proof } from "./types.js";
 
 export type Tier = "core" | "interface" | "black-box";
 export type Point = { x: number; y: number };
@@ -17,9 +17,9 @@ export const plateSize: Size = { w: 264, h: 76 };
 export const actorSize: Size = { w: 120, h: 28 };
 // How far the pointer moves before a press on a plate becomes a drag, so a click never nudges it.
 export const dragThreshold = 6;
-// The layers Esc peels, first to last (user story 5): a scrubbed past commit, a drawer, a part's sheet. The tickets that add
+// The layers Esc peels, first to last (user story 5): a drawer, a scrubbed past commit (back to now), a part's sheet. The tickets that add
 // them register a `Layer` under its name in `map.ts`; the Map view itself is left only when none is open.
-export const layerOrder = ["scrubbed", "drawer", "sheet"] as const;
+export const layerOrder = ["drawer", "scrubbed", "sheet"] as const;
 export type LayerName = (typeof layerOrder)[number];
 export type Layer = { open: () => boolean; close: () => void };
 
@@ -217,5 +217,30 @@ export function ciDrawer(ci: Ci): Drawer {
     note: ci.earlier ? "This is the last finished run, for an earlier commit; a newer run is going." : undefined,
     blocks: ci.tail ? [{ label: "End of the failed log", code: ci.tail, jumps: [] }] : [],
     jumps: ci.run_url ? [{ label: "Open on GitHub", title: "Open this run on GitHub", to: { url: ci.run_url } }] : [],
+  };
+}
+
+// The history strip and time travel (ticket #313). A scrub is a past commit's map shown read-only.
+export type Scrub = Pick<HistoricalMap, "commit" | "short" | "label"> & { source: string };
+export type StripRow = HistoryEntry & { current: boolean; title: string };
+
+export const stripOf = (entries: HistoryEntry[], viewing: string | null): StripRow[] =>
+  entries.map((entry) => ({
+    ...entry,
+    current: entry.commit === viewing,
+    title: `${entry.short}${entry.fogged ? " · you have not caught up on this" : ""}\nShow the map as of this commit`,
+  }));
+
+// The quiet banner while a past commit is shown: what it says and the word of the way back.
+export const scrubBanner = (scrub: Pick<Scrub, "short">): { text: string; back: string } => ({ text: `Viewing ${scrub.short}`, back: "Back to now" });
+
+// A commit's drill-down: each file it changed with its diff, and the commit on GitHub when the project is there.
+export function commitDrawer(found: CommitFiles): Drawer {
+  const count = `${found.files.length} ${found.files.length === 1 ? "file" : "files"}`;
+  return {
+    title: found.label,
+    note: `${found.short} · ${count}`,
+    blocks: found.files.length ? found.files.map((file) => ({ label: file.path, code: file.diff, jumps: [] })) : [{ code: "No files changed.", jumps: [] }],
+    jumps: found.url ? [{ label: "Open on GitHub", title: "Open this commit on GitHub", to: { url: found.url } }] : [],
   };
 }
