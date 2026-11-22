@@ -515,6 +515,7 @@ export interface Commands {
   delete_merged_branch: void;
   delete_session: void;
   explain_more: string | null;
+  failed_check_name: string;
   fetch_repository: void;
   fix_agy_plugin_setup: void;
   fix_plugin_setup: void;

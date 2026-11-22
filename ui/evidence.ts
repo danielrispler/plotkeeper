@@ -30,7 +30,9 @@ const ended = (c: Check) => c.status !== "running";
 
 // The top level: "3 files · +2 merged · 2 checks passed". A check's status is its last run's, so only one that ended failed is named;
 // one that only "ran" is counted apart.
-export function evidenceLine({ files, checks: all }: Facts): string {
+// `words` gives a failed check's name in plain words once it is known (`failed_check_name`); until then, and for a check it does
+// not know, the check is named by its suite.
+export function evidenceLine({ files, checks: all }: Facts, words: (check: Check) => string | undefined = () => undefined): string {
   const checks = all.filter(ended);
   const count = (status: Check["status"]) => checks.filter((c) => c.status === status).length;
   const [passed, ran] = [count("passed"), count("ran")];
@@ -39,7 +41,7 @@ export function evidenceLine({ files, checks: all }: Facts): string {
     ...(files?.merged ? [mergedLabel(files.merged)] : []),
     ...(passed ? [`${plural(passed, "check")} passed`] : []),
     ...(ran ? [`${plural(ran, "check")} ran`] : []),
-    ...checks.filter((c) => c.status === "failed").map((c) => `✗ ${named(c)} failed`),
+    ...checks.filter((c) => c.status === "failed").map((c) => `✗ ${words(c) ?? `${named(c)} failed`}`),
   ].join(" · ");
 }
 
@@ -71,6 +73,14 @@ export function evidenceRows({ files, checks: all }: Facts): EvidenceRow[] {
 const openLines = new Set<string>();
 const openOutputs = new Set<string>();
 const outputs = new Map<string, string>();
+
+// A failed check's plain words by its last run (session, agent, call), kept once read: the failing tests and their part, or the
+// step that failed (danielrispler/plotkeeper#345).
+const failedWords = new Map<string, string>();
+const wordsKey = (session: string, c: Check) => {
+  const last = c.runs.at(-1);
+  return last ? `${session} ${last.agent ?? ""} ${last.call}` : null;
+};
 
 export type CheckOutput = { exit_code: number | null; tail: string };
 const outputText = (output: CheckOutput) => `${output.exit_code === null ? "No exit code" : `exit code ${output.exit_code}`}\n${output.tail}`;
@@ -211,7 +221,11 @@ function fullDiffRow(session: string, index: number): HTMLElement {
 // Null when there is nothing to show.
 export function evidenceElement(session: string, index: number, turn: Facts & Ended, { only }: { only: "all" | "failed" }): HTMLElement | null {
   const facts: Facts = only === "failed" ? { files: null, checks: turn.checks.filter((c) => c.status === "failed") } : turn;
-  const line = evidenceLine(facts);
+  const words = (c: Check) => {
+    const key = wordsKey(session, c);
+    return key ? failedWords.get(key) : undefined;
+  };
+  const line = evidenceLine(facts, words);
   if (!line) return null;
   const key = `${session} ${index} evidence`;
   const node = document.createElement("div");
@@ -234,7 +248,22 @@ export function evidenceElement(session: string, index: number, turn: Facts & En
   button.classList.add("evidence-toggle");
   button.title = "Show or hide this turn's files and checks";
   button.setAttribute("aria-expanded", String(openLines.has(key)));
-  button.append(text("span", line));
+  const label = text("span", line);
+  button.append(label);
+  // A failed check's words come from its output: read it once, then say the line again.
+  for (const c of facts.checks.filter((c) => c.status === "failed")) {
+    const key = wordsKey(session, c);
+    const last = c.runs.at(-1);
+    if (!key || !last || failedWords.has(key)) continue;
+    invoke("check_output", { session, agent: last.agent, call: last.call })
+      .then((output) => (output ? invoke("failed_check_name", { tail: output.tail, suite: c.suite, worktree: c.worktree }) : null))
+      .then((named) => {
+        if (!named) return;
+        failedWords.set(key, named);
+        label.textContent = evidenceLine(facts, words);
+      })
+      .catch(failure("failed_check_name"));
+  }
   show();
   node.append(button, list);
   return node;

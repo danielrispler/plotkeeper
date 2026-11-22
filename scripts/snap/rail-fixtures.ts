@@ -321,6 +321,17 @@ const openTurnScript = `
   log("folded turns " + lines.length + ", open " + lines.filter((l) => l.getAttribute("aria-expanded") === "true").length);
   if (lines.length !== 4 || lines[1].getAttribute("aria-expanded") !== "true") log("snap:fail one turn should be open of four folded");`;
 
+// #345: the evidence line names the failed check by what broke, and keeps the command behind the drill-down.
+const namedFailureScript = `
+  const wait = () => new Promise((resolve) => setTimeout(resolve, 300));
+  await wait();
+  const toggle = document.querySelector(".evidence-toggle");
+  if (!toggle) log("snap:fail there is no evidence line");
+  if (!/✗ Window tests failed: delete keeps a live terminal \\(\\+1 more\\)/.test(toggle.textContent)) log("snap:fail the failed check is not named by its test: " + toggle.textContent);
+  toggle.click();
+  await wait();
+  if (!document.querySelector(".evidence-check .evidence-fail code")) log("snap:fail the command is not behind the drill-down");`;
+
 // #113: scrolls the rail, opens the evidence line, then a failed check's output, and fails when the rail's scrollTop moved.
 const evidenceScript = `
   const story = document.getElementById("story");
@@ -599,6 +610,7 @@ export const railFixtures = {
     fixture.selected.session.turns[4].files!.merged = 2;
     return { ...fixture, snapScript: mergedScript };
   },
+  railNamedFailure: () => ({ ...build("your_turn"), failed_check_name: "Window tests failed: delete keeps a live terminal (+1 more)", snapScript: namedFailureScript }),
   railEvidence: () => ({ ...build("your_turn"), snapScript: evidenceScript }),
   ...railStates,
   railBanner: () => ({ ...build("idle", { answered: true, withBrief: true }), snapScript: bannerScript }),
