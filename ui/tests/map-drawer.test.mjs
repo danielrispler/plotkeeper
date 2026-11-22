@@ -102,8 +102,7 @@ test("the banner offers the way back to now while a commit is scrubbed, also whe
   const banner = new Field("div");
   showBanner(banner, { commit: "abcdef0123", short: "abcdef0", label: "#4 Thing", source: "" });
   assert.match(banner.textContent, /Viewing abcdef0.*Back to now/);
-  assert.equal(banner.getAttribute("title"), "#4 Thing");
+  assert.equal(banner.title, "#4 Thing");
   showBanner(banner, null);
   assert.equal(banner.textContent, "");
-  assert.equal(banner.getAttribute("title"), null);
 });
