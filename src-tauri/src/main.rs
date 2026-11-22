@@ -41,6 +41,7 @@ mod ci_laws;
 mod fog;
 mod history;
 mod map;
+mod pr_briefs;
 mod presence;
 mod prs;
 mod restart;
@@ -1108,6 +1109,14 @@ fn main() {
             }))
         }
     };
+    // The PR briefs' writer: the real one, never the fake of the checks.
+    let brief_writer =
+        pr_briefs::PrBriefs::new(match std::env::var("STUDIO_CARD_WRITER").as_deref() {
+            Ok("fake") => None,
+            _ => ClaudeWriter::beside(&log).ok().map(|w| {
+                Arc::new(w) as Arc<dyn studio_understanding::pr_brief::BriefWriter + Send + Sync>
+            }),
+        });
     let effects = Arc::new(ShellEffects::default());
     let writing = TurnWriting::new(
         core.clone(),
@@ -1144,6 +1153,7 @@ fn main() {
         .manage(terminal::Daemon::default())
         .manage(map::Fetches::default())
         .manage(prs::Prs::default())
+        .manage(brief_writer)
         .manage(ci_laws::load_cache())
         .manage(Mutex::new(answer::Watching::default()))
         .invoke_handler(tauri::generate_handler![
@@ -1226,6 +1236,7 @@ fn main() {
             rail_shown,
             refresh_landed_tasks,
             map::map_state,
+            pr_briefs::pr_brief,
             map::map_save_positions,
             map::map_set_tier,
             map::map_know,
