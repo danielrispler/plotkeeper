@@ -453,8 +453,19 @@ function moreRow(key: HomeKey, count: number, redraw: () => void): HTMLElement {
   return button;
 }
 
-// The stop of each project mark's watch, so a redraw replaces the watch of the mark it replaced.
-const marksSeen = new Map<string, () => void>();
+// Each project mark's watch, and the node it watches: a redraw that keeps the node keeps its watch, one that drops it stops it.
+const marksSeen = new Map<string, { node: Element; stop: () => void }>();
+
+// Watches `node`, the mark of `path` as it is in the DOM now (null: the project has no mark); the mark counts as seen when it is in view
+// in a focused window with Home open (the shared Seen), and a day is logged once.
+export function watchMark(path: string, node: Element | null) {
+  const had = marksSeen.get(path);
+  if (had && had.node === node) return;
+  had?.stop();
+  marksSeen.delete(path);
+  if (!node) return;
+  marksSeen.set(path, { node, stop: watchSeen(node, { active: () => homeSeen(homeShown(), mapShown()), onSeen: () => logStop("mark-seen", path) }) });
+}
 
 function projectRow({ name, path, fogged }: HomeProject): HTMLElement {
   const button = pressable(document.createElement("button"), false, () => void startLast(path, "").catch(failure("start", "error")));
@@ -468,9 +479,6 @@ function projectRow({ name, path, fogged }: HomeProject): HTMLElement {
     const mark = text("span", "", "fog-mark");
     mark.setAttribute("role", "button");
     mark.title = "Something you track has changed, or a law is broken: open the map";
-    // The mark counts as seen when it is in view in a focused window with Home open (the shared Seen), once a day is logged.
-    marksSeen.get(path)?.();
-    marksSeen.set(path, watchSeen(mark, { active: () => homeSeen(homeShown(), mapShown()), onSeen: () => logStop("mark-seen", path) }));
     mark.addEventListener("click", (event) => {
       event.stopPropagation();
       openMap(path);
@@ -531,5 +539,8 @@ export function drawHome(box: HTMLElement, sessions: Session[], projects: string
         }), "review")]
       : []),
   ]);
+  // The marks that patch left in the DOM, not the ones just built and discarded.
+  const rows = new Map([...box.children].map((child) => [(child as HTMLElement).dataset.key, child]));
+  for (const path of new Set([...marksSeen.keys(), ...marked])) watchMark(path, rows.get(`project ${path}`)?.querySelector(".fog-mark") ?? null);
   watchLearningShown(inSlot ? box.querySelector(`[data-key="learning ${inSlot.id}"]`) : null, inSlot, () => homeSeen(homeShown(), mapShown()));
 }

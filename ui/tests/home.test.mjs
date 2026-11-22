@@ -232,6 +232,32 @@ test("building the slot writes nothing; shown is written once the card is seen, 
   mock.timers.reset();
 });
 
+test("a project's mark keeps its one watch while a redraw keeps its node, and a new node takes the watch over", async () => {
+  const watchers = [];
+  globalThis.IntersectionObserver = class {
+    constructor() {
+      this.live = true;
+      watchers.push(this);
+    }
+    observe() {}
+    disconnect() {
+      this.live = false;
+    }
+  };
+  globalThis.document = fakeDocument({ visibilityState: "visible", hasFocus: () => true }, Field);
+  tauri([]);
+  const { watchMark } = await import("../../dist/home.js");
+  const [a, b] = [new Field("span"), new Field("span")];
+  watchMark("/w/p", a);
+  watchMark("/w/p", a);
+  assert.equal(watchers.length, 1, "the same node keeps its watch");
+  watchMark("/w/p", b);
+  assert.equal(watchers.length, 2);
+  assert.deepEqual(watchers.map((w) => w.live), [false, true], "the node that left the DOM is no longer watched");
+  watchMark("/w/p", null);
+  assert.equal(watchers[1].live, false, "a project with no mark has no watch");
+});
+
 // The slot's card (#242): the options, then "Not sure" and "Not now" inside it; a pick writes the confidence tap first.
 async function slotCard(id, extra = {}, send = null) {
   const calls = [];
