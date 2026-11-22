@@ -58,7 +58,6 @@ function fileFold(session: string, index: number, file: TurnFile): HTMLElement {
   });
   const edit = fullTitle(pressable(text("button", "Open in editor", "evidence-edit"), false, () => openAt({ path: file.path, line: first, column: 1 }, file.root)), HOVERS.editAtFirstChange);
   let first = 1;
-  invoke("hunk_opened", { session, turn: index }).catch(failure("hunk_opened"));
   const body = text("div", "Reading the hunk…", "diff-body");
   fold.append(fullTitle(text("summary", `${file.from ? `${file.from} → ` : ""}${file.path}${counts(file)}`), `Show or hide this file's change: ${file.path}`), edit, body);
   invoke("turn_file_hunk", { session, turn: index, root: file.root, path: file.path, from: file.from, all: true })

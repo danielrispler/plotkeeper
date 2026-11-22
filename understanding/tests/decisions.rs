@@ -27,8 +27,8 @@ fn the_history_survives_a_restart_and_keeping_it_again_adds_nothing() {
     assert_eq!(store.revision(), revision);
 
     let reopened = CardStore::open(path).unwrap();
-    assert_eq!(reopened.session_cards(PROBE, 0).decisions, decisions);
-    assert!(reopened.session_cards("another", 0).decisions.is_empty());
+    assert_eq!(reopened.session_cards(PROBE).decisions, decisions);
+    assert!(reopened.session_cards("another").decisions.is_empty());
 }
 
 #[test]

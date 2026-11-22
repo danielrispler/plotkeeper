@@ -1,11 +1,11 @@
 // Fixtures for the story rail (from the design session for #8, danielrispler/plotkeeper#102): one selected session,
 // "#56 · Row controls", in four states (running, at your turn, needing you, idle), with realistic content: 5 turns, summaries as the writer's prompt shapes them (at most 4
-// short lines, the first says what the turn did), a card with its quiz,
+// short lines, the first says what the turn did),
 // subagents, checks, a permission mode, a model, an estimate, a brief and decision history, and a
 // Git line with several tokens. Times are relative to the moment a fixture renders.
 
 import type { Ask } from "../../ui/answer.ts";
-import type { BlockedCommand, ListedCheck, CheckStatus, Decision, OpenItem, RiskView, Session, SessionState, StoredCard, Subagent, Turn, TurnFile, TurnSummary } from "../../ui/types.ts";
+import type { BlockedCommand, ListedCheck, CheckStatus, Decision, OpenItem, RiskView, Session, SessionState, Subagent, Turn, TurnFile, TurnSummary } from "../../ui/types.ts";
 import { base, type Fixture } from "./base.ts";
 
 const MIN = 60e3;
@@ -43,35 +43,6 @@ const prompts = [
   "The delete should show only on hover, and stay on the selected row",
   "Run npm run check and fix what fails",
 ];
-
-const card = (id: string, answered: boolean): StoredCard => ({
-  request: { session_id: "s1", id, agent: null, changed_by: {}, check: null },
-  card: {
-    summary: "Delete shows on hover, focus and the selected row.",
-    explanation:
-      "The delete button of a session row is now hidden with `visibility`, so its column stays in the layout. It shows when the item is hovered, when focus is inside it, and while its row is the selected one. Rows that cannot be deleted draw no button, but keep the column, so every name starts at the same x.",
-    paths: ["ui/style.css", "ui/list.ts", "ui/tests/rows.test.mjs"],
-    code: "-.item .delete { display: none; }\n+.item .delete { visibility: hidden; }\n+.item:hover .delete,\n+.item:focus-within .delete,\n+.item:has(> .row[aria-pressed=\"true\"]) .delete { visibility: visible; }",
-    why_it_matters: "A row that changes width on hover makes the list jitter under the pointer. Keeping the column makes the list steady.",
-    not_checked: "The strip, which draws no delete, and a screen reader's reading order of the sibling controls.",
-    architecture: null,
-    quiz: {
-      text: "What does a keyboard user get when they Tab onto a session row?",
-      options: [
-        { text: "The delete button shows, because `:focus-within` matches the row's item", why: "Right: focus inside the item matches the rule." },
-        { text: "Nothing changes until the pointer hovers the row", why: "Hover is not needed once focus is inside." },
-        { text: "The row is selected, which shows the delete", why: "Tab focuses; it does not select." },
-      ],
-      key: 0,
-    },
-  },
-  guess: answered ? { option: 0, right: true, at: Date.now() - 20 * MIN } : null,
-  shown_at: answered ? Date.now() - 105 * MIN : null,
-  key_wrong: false,
-  more: null,
-  rating: null,
-  check_result: null,
-});
 
 const listed = (statement: string, status: CheckStatus, startedAgo: number, tookMs: number, typical_ms: number | null = null): ListedCheck => ({
   statement, status, started_at: Date.now() - startedAgo, ended_at: status === "running" ? null : Date.now() - startedAgo + tookMs, typical_ms,
@@ -217,19 +188,18 @@ const decisions: Decision[] = [
 
 const questionAsk: Ask = { nonce: "n1", hook_event_name: "PreToolUse", tool_name: "AskUserQuestion", tool_use_id: "toolu_q1", agent_id: null, tool_input: {} };
 
-// The fixture for a state: its session, the list around it and the cards it has.
-const build = (state: SessionState, { ask = null as Ask | null, answered = false, withBrief = false } = {}) => {
+// The fixture for a state: its session, the list around it and its brief.
+const build = (state: SessionState, { ask = null as Ask | null, withBrief = false } = {}) => {
   const running = state === "running";
   const s = session(state, { running, question: ask === questionAsk });
   const sessions = [s, ...others()].sort((a, b) => ["needs_you", "running", "your_turn", "idle", "ended"].indexOf(a.state) - ["needs_you", "running", "your_turn", "idle", "ended"].indexOf(b.state));
-  const stored = card(`s1@${Date.now() - 110 * MIN}`, answered);
   const turnSummaries = { ...summaries };
   if (running) delete turnSummaries.t4;
   return {
     ...common,
     sessions,
     selected: { session: s, agent: null },
-    cards: { brief: null, goal: withBrief ? goal : null, answers: withBrief ? answers : [], open: withBrief ? open : [], design: withBrief ? design.map((line) => ({ ...line, cite: stored.request.id })) : [], recent: [], older: [stored], workers: [], decisions: withBrief ? decisions : [], risk_notes: [], decision_notes: [] },
+    cards: { brief: null, goal: withBrief ? goal : null, answers: withBrief ? answers : [], open: withBrief ? open : [], design: withBrief ? design.map((line) => ({ ...line, cite: "t1" })) : [], decisions: withBrief ? decisions : [], risk_notes: [], decision_notes: [] },
     watch: ask,
     ask_facts: {
       sections: [
@@ -270,7 +240,7 @@ export const railStates = {
   railRunning: () => build("running"),
   railYourTurn: () => ({ ...build("your_turn"), snapScript: barScript }),
   railNeeds: () => ({ ...build("needs_you", { ask: questionAsk }), snapScript: barScript }),
-  railIdle: () => build("idle", { answered: true, withBrief: true }),
+  railIdle: () => build("idle", { withBrief: true }),
 };
 
 // #124: the banner opens an idle session, right above the newest turn, with the Brief inside it and not below the feed.
@@ -420,49 +390,7 @@ const cropScript = (setup: string, from: string, to: string) => `
   log("snap:crop " + [rail.left, start - 8, story.clientWidth, end - start + 16].map(Math.round).join(" "));`;
 
 const readmeTurn = () => ({ ...build("your_turn"), snapScript: cropScript("", ".now-turn", ".now-turn .evidence-toggle") });
-const readmeWhere = () => ({ ...build("idle", { answered: true, withBrief: true }), snapScript: cropScript("", "#banner", "#banner") });
-
-// #211: a folded turn's unseen card shows one title row; a click opens the card in place and writes its `shown` tap.
-const unseenScript = `
-  const rows = [...document.querySelectorAll(".turn.past .unseen-card")];
-  if (rows.length !== 1) return log("snap:fail one unseen card should have one row, found " + rows.length);
-  if (!rows[0].querySelector("summary").textContent) log("snap:fail the row has no title");
-  if (document.querySelector(".now-turn .unseen-card")) log("snap:fail the newest turn shows a row");
-  rows[0].scrollIntoView({ block: "center" });
-  log("unseen rows " + rows.length + ": " + rows[0].querySelector("summary").textContent);`;
-const unseenOpenScript = `
-  const row = document.querySelector(".turn.past .unseen-card");
-  if (!row) return log("snap:fail there is no row");
-  row.open = true;
-  await new Promise((resolve) => setTimeout(resolve, 200));
-  if (!row.querySelector(".card")) log("snap:fail the card did not open in place");
-  if (document.querySelector(".turn.past .turn-line[aria-expanded=true]")) log("snap:fail the turn unfolded");
-  row.scrollIntoView({ block: "start" });`;
-
-// #212: a worker's card sits in the turn its wake-up opened ("worker w1 returned", the third turn): folded it shows a title row, opened
-// the card is in that turn's block, and no other turn holds it.
-const workerCard = (): StoredCard => {
-  const stored = card(`w1@${Date.now() - 100 * MIN}`, false);
-  return { ...stored, request: { ...stored.request, agent: "w1" }, card: { ...stored.card, summary: "The worker made the fold toggle a sibling of the glyph." } };
-};
-const workerCardFixture = (snapScript: string) => {
-  const fixture = build("idle");
-  return { ...fixture, cards: { ...fixture.cards, older: [], workers: [{ card: workerCard(), turn: 2 }] }, snapScript };
-};
-const workerRowScript = `
-  const lines = [...document.querySelectorAll(".turn.past")];
-  const rows = lines.map((t) => t.querySelectorAll(".unseen-card").length);
-  if (JSON.stringify(rows) !== "[0,1,0,0]") return log("snap:fail the worker's row should be under the hand-back turn only: " + rows);
-  lines[1].scrollIntoView({ block: "center" });
-  log("hand-back turn row: " + lines[1].querySelector(".unseen-card summary").textContent);`;
-const workerOpenScript = `
-  const lines = [...document.querySelectorAll(".turn.past")];
-  lines[1].querySelector(".turn-line").click();
-  const open = [...document.querySelectorAll(".turn.past")][1];
-  if (!open.querySelector("article.card")) return log("snap:fail the worker's card is not in the hand-back turn's block");
-  if (document.querySelectorAll("article.card").length !== 1) log("snap:fail the card shows more than once");
-  if (!open.textContent.includes("worker w1 returned")) log("snap:fail the open turn is not the hand-back");
-  open.scrollIntoView({ block: "start" });`;
+const readmeWhere = () => ({ ...build("idle", { withBrief: true }), snapScript: cropScript("", "#banner", "#banner") });
 
 // #297: a blocked command's card sits in the dock only while it has a button; every other card is neutral in its turn.
 const blockedCommand = (status: BlockedCommand["status"], at: number, extra: Partial<BlockedCommand> = {}): BlockedCommand => ({
@@ -545,13 +473,9 @@ export const railFixtures = {
   railRiskFilled: riskFilled,
   railRiskFailed: () => riskNote({ call: "toolu_b1", state: "failed" }),
   railBlockedAllowed: () => withBlocked("your_turn", (at) => blockedCommand("allowed", at), fedScript),
-  railWorkerCardRow: () => workerCardFixture(workerRowScript),
-  railWorkerCard: () => workerCardFixture(workerOpenScript),
-  railUnseenCard: () => ({ ...build("idle"), snapScript: unseenScript }),
-  railUnseenCardOpen: () => ({ ...build("idle"), snapScript: unseenOpenScript }),
   readmeTurn,
   readmeWhere,
-  railQuiz: () => build("your_turn"),
+  railPlain: () => build("your_turn"),
   railDiff: () => ({ ...build("your_turn"), snapScript: diffScript }),
   railAsk: () => ({ ...build("your_turn"), snapScript: askScript([".evidence-file", ".evidence-check"]) }),
   railAskCheck: () => ({ ...build("your_turn"), snapScript: askScript([".evidence-check"]) }),
@@ -564,8 +488,8 @@ export const railFixtures = {
   railNamedFailure: () => ({ ...build("your_turn"), failed_check_name: "Window tests failed: delete keeps a live terminal (+1 more)", snapScript: namedFailureScript }),
   railEvidence: () => ({ ...build("your_turn"), snapScript: evidenceScript }),
   ...railStates,
-  railBanner: () => ({ ...build("idle", { answered: true, withBrief: true }), snapScript: bannerScript }),
-  railIdleScroll: () => ({ ...build("idle", { answered: true, withBrief: true }), snapScript: scrollScript }),
-  railIdleOpened: () => ({ ...build("idle", { answered: true, withBrief: true }), snapScript: openTurnScript }),
-  railIdleFail: () => ({ ...build("idle", { answered: true, withBrief: true }), snapScript: failScript }),
+  railBanner: () => ({ ...build("idle", { withBrief: true }), snapScript: bannerScript }),
+  railIdleScroll: () => ({ ...build("idle", { withBrief: true }), snapScript: scrollScript }),
+  railIdleOpened: () => ({ ...build("idle", { withBrief: true }), snapScript: openTurnScript }),
+  railIdleFail: () => ({ ...build("idle", { withBrief: true }), snapScript: failScript }),
 } satisfies Record<string, () => Fixture>;

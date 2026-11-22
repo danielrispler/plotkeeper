@@ -1,6 +1,5 @@
-//! The card writer (danielrispler/Falinks#328 and danielrispler/Falinks#369, Testing Decisions): the real `claude -p` command is checked
-//! without running it, the cards, their quizzes and the updated brief come from its reply, and a
-//! fake that fails is retried.
+//! The writer (danielrispler/Falinks#328 and danielrispler/Falinks#369, Testing Decisions): the real `claude -p` command is checked
+//! without running it, and the summaries, goals and notes come from its reply. Cards are retired (danielrispler/plotkeeper#348).
 
 use crate::common::{Answer, Scripted};
 use std::{
@@ -12,462 +11,20 @@ use std::{
     sync::Mutex,
     time::Duration,
 };
-use studio_core::{
-    Base, CardRequest, Check, CheckRun, CheckStatus, FactFile, Facts, SummaryRequest, TurnFile,
-};
+use studio_core::{Check, CheckRun, CheckStatus, FactFile, Facts, SummaryRequest, TurnFile};
 use studio_understanding::{
-    Card, CardStore, CardWriter, Choice, ClaudeWriter, FakeWriter, LineKind, Quiz, RISK_TIMEOUT,
-    Risk, RiskLevel, SummarySetup, TurnSummary, explain_more, find_claude, write_agent_summary,
-    write_card, write_summary,
+    CardStore, CardWriter, ClaudeWriter, LineKind, RISK_TIMEOUT, Risk, RiskLevel, SummarySetup,
+    TurnSummary, find_claude, write_agent_summary, write_summary,
 };
 
 const CLAUDE: &str = "/opt/homebrew/bin/claude";
-
-fn edit() -> CardRequest {
-    CardRequest {
-        session_id: "2c7a9f14-6e3b-4d58-a1c9-0f8e2b7d4a63".into(),
-        id: "2c7a9f14-6e3b-4d58-a1c9-0f8e2b7d4a63@1793263024310".into(),
-        base: Base::default(),
-        change: Some(
-            concat!(
-                "--- a/apps/studio/ui/style.css\n",
-                "+++ b/apps/studio/ui/style.css\n",
-                "@@ -9,1 +9,1 @@\n",
-                "-.unchecked { font-size:12px; }\n",
-                "+.unchecked { font-size:15px; }\n",
-            )
-            .into(),
-        ),
-        prompt: None,
-        ..CardRequest::default()
-    }
-}
-
-/// The card `writer` writes on `edit()`, with no earlier card, and the lines it
-/// logs.
-fn written(writer: &impl CardWriter) -> (Option<Card>, Vec<String>) {
-    let mut lines = Vec::new();
-    let card = write_card(writer, &edit(), &[], |line| lines.push(line));
-    (card.map(sorted), lines)
-}
-
-#[test]
-fn a_writer_that_fails_is_asked_once_more_and_a_second_failure_gives_no_card_and_one_log_line() {
-    let no_card = || Ok("Shall I read the file?".to_string());
-    // `None` is `FakeWriter`'s card.
-    let cases = [
-        (
-            "fails once",
-            Answer::Sequence(vec![Some(no_card()), None]),
-            true,
-        ),
-        ("fails twice", Answer::Fixed(no_card()), false),
-    ];
-    for (name, reply, gives_card) in cases {
-        let writer = Scripted {
-            reply,
-            ..Scripted::fake()
-        };
-
-        let (card, lines) = written(&writer);
-
-        assert_eq!(card.is_some(), gives_card, "{name}");
-        assert_eq!(writer.calls("reply"), 2, "{name}");
-        if gives_card {
-            assert_eq!(lines, [] as [String; 0], "{name}");
-            continue;
-        }
-        let [line] = &lines[..] else {
-            panic!("{name}: one log line: {lines:?}");
-        };
-        assert_eq!(line.lines().count(), 1, "{name}: {line}");
-        assert!(line.contains(&edit().id), "{name}: {line}");
-    }
-}
-
-/// A writer whose card is always `reply`.
-fn replying(reply: &str) -> Scripted {
-    Scripted {
-        reply: Answer::ok(reply),
-        ..Scripted::bare()
-    }
-}
-
-/// A good reply on `edit()`, in a code fence: the explanation, a quiz on its design, no
-/// architecture section.
-const GOOD: &str = concat!(
-    "```json\n",
-    r#"{"summary": "הגופן של שורת „לא נבדק” גדל ל־`15px`.", "#,
-    r#""explanation": "הסוכן הגדיל את `font-size` של `.unchecked` כדי שאפשר יהיה לקרוא את שורת „לא נבדק” בלי מאמץ.", "#,
-    r#""paths": ["apps/studio/ui/style.css"], "#,
-    r#""ranges": [], "#,
-    r#""why_it_matters": "טקסט משני ב־`12px` היה קטן מדי לקריאה בזמן המתנה.", "#,
-    r#""not_checked": "לא נבדק אם הכרטיס עדיין נכנס בחלונית צרה.", "#,
-    r#""architecture": "structural: none", "#,
-    r#""quiz": {"text": "למה השינוי נוגע רק ב־`.unchecked`?", "options": ["#,
-    r#"{"text": "כי רק השורה הזו הייתה קטנה מדי לקריאה.", "why": "נכון: שאר הכרטיס כבר היה ב־`15px`.", "right": true}, "#,
-    r#"{"text": "כי `.unchecked` קובע את גודל הגופן של כל הכרטיס.", "why": "לא: הכלל חל רק על השורה עצמה.", "right": false}, "#,
-    r#"{"text": "כי גודל הגופן של הכרטיס בא מהגדרות המערכת.", "why": "לא: הגודל קבוע ב־`style.css`.", "right": false}"#,
-    r#"], "key": 0}}"#,
-    "\n```\n",
-);
-
-/// `card` with its quiz's options in the order of their text, the key moved with them, so cards
-/// compare whatever order the shuffle gave.
-fn sorted(mut card: Card) -> Card {
-    if let Some(quiz) = &mut card.quiz {
-        let right = quiz.options[quiz.key].clone();
-        quiz.options.sort_by(|a, b| a.text.cmp(&b.text));
-        quiz.key = quiz.options.iter().position(|o| *o == right).unwrap();
-    }
-    card
-}
-
-/// The card in `GOOD`, its options sorted.
-fn good_card() -> Card {
-    let choice = |text: &str, why: &str| Choice {
-        text: text.into(),
-        why: why.into(),
-    };
-    let card = Card {
-        summary: "הגופן של שורת „לא נבדק” גדל ל־`15px`.".into(),
-        explanation:
-            "הסוכן הגדיל את `font-size` של `.unchecked` כדי שאפשר יהיה לקרוא את שורת „לא נבדק” בלי מאמץ."
-                .into(),
-        paths: vec!["apps/studio/ui/style.css".into()],
-        code: String::new(),
-        ranges: Vec::new(),
-        why_it_matters: "טקסט משני ב־`12px` היה קטן מדי לקריאה בזמן המתנה.".into(),
-        not_checked: "לא נבדק אם הכרטיס עדיין נכנס בחלונית צרה.".into(),
-        architecture: None,
-        quiz: Some(Quiz {
-            text: "למה השינוי נוגע רק ב־`.unchecked`?".into(),
-            options: vec![
-                choice(
-                    "כי רק השורה הזו הייתה קטנה מדי לקריאה.",
-                    "נכון: שאר הכרטיס כבר היה ב־`15px`.",
-                ),
-                choice(
-                    "כי `.unchecked` קובע את גודל הגופן של כל הכרטיס.",
-                    "לא: הכלל חל רק על השורה עצמה.",
-                ),
-                choice(
-                    "כי גודל הגופן של הכרטיס בא מהגדרות המערכת.",
-                    "לא: הגודל קבוע ב־`style.css`.",
-                ),
-            ],
-            key: 0,
-        }),
-    };
-    sorted(card)
-}
-
-#[test]
-fn the_app_shuffles_the_quizs_options_and_the_key_and_reasons_move_with_them() {
-    let right = "כי רק השורה הזו הייתה קטנה מדי לקריאה.";
-    let mut keys = std::collections::BTreeSet::new();
-    for _ in 0..60 {
-        let (card, _) = Card::from_reply(GOOD).unwrap();
-        let quiz = card.quiz.clone().unwrap();
-
-        assert_eq!(quiz.options[quiz.key].text, right);
-        assert_eq!(sorted(card), good_card());
-        keys.insert(quiz.key);
-    }
-    assert_eq!(keys.len(), 3, "{keys:?}");
-}
-
-#[test]
-fn the_writer_places_no_option_and_never_names_options_by_letter() {
-    let folder = Path::new("/h/Library/Application Support/dev.falinks.studio/card-writer");
-    let (_, prompt) = ClaudeWriter::new(CLAUDE.into(), folder.into()).command(&edit(), &[]);
-
-    assert!(!prompt.contains("random place"), "{prompt}");
-    assert!(
-        prompt.contains("never refer to an option by its letter"),
-        "{prompt}"
-    );
-}
-
-#[test]
-fn a_reply_with_an_architecture_section_gives_the_card_that_section() {
-    let section = "הקוד עבר מ־`lib.rs` למודול חדש, `brief.rs`, ש־`lib.rs` קורא לו.";
-    let reply = GOOD.replace("structural: none", section);
-
-    let (card, lines) = written(&replying(&reply));
-
-    let structural = Card {
-        architecture: Some(section.into()),
-        ..good_card()
-    };
-    assert_eq!((card, lines), (Some(structural), vec![]));
-}
-
-#[test]
-fn the_card_call_returns_the_card_and_asks_for_no_brief() {
-    let card = write_card(&replying(GOOD), &edit(), &[], |l| panic!("{l}"));
-    assert_eq!(card.map(sorted), Some(good_card()));
-
-    let (_, prompt) = ClaudeWriter::new(CLAUDE.into(), "/f".into()).command(&edit(), &[]);
-    assert!(!prompt.contains("brief"), "{prompt}");
-}
-
-#[test]
-fn a_quiz_with_no_key_or_one_that_does_not_parse_logs_one_line_and_the_card_has_no_quiz() {
-    let broken = [
-        GOOD.replace(r#", "key": 0"#, ""),
-        // Options with no reasons.
-        GOOD.replace(r#", "why": ""#, r#", "note": ""#),
-        // A key past the last option.
-        GOOD.replace(r#""key": 0"#, r#""key": 3"#),
-        GOOD.replace(r#""key": 0"#, r#""key": "א""#),
-        // No quiz at all.
-        GOOD.replace(r#""quiz": {"#, r#""other": {"#),
-    ];
-
-    for reply in broken {
-        let (card, lines) = written(&replying(&reply));
-
-        let no_quiz = Card {
-            quiz: None,
-            ..good_card()
-        };
-        assert_eq!(card, Some(no_quiz), "{reply}");
-        let [line] = &lines[..] else {
-            panic!("one log line on {reply}: {lines:?}");
-        };
-        assert_eq!(line.lines().count(), 1, "{line}");
-        assert!(line.contains(&edit().id), "{line}");
-    }
-}
-
-/// `GOOD` with its three options' texts, reasons and marks replaced by `options`, the key its first.
-fn good_with(options: [(&str, &str, bool); 3]) -> String {
-    let quiz: Vec<_> = (options.iter())
-        .map(|(text, why, right)| serde_json::json!({ "text": text, "why": why, "right": right }))
-        .collect();
-    let start = GOOD.find(r#""options": ["#).unwrap();
-    let end = GOOD.find(r#"], "key": 0}"#).unwrap();
-    let options = serde_json::to_string(&quiz).unwrap();
-    format!(
-        "{}\"options\": {options}{}",
-        &GOOD[..start],
-        &GOOD[end + 1..]
-    )
-}
-
-/// A Quiz's three options, each `(text, why, right)`, the key the first.
-type Options = [(&'static str, &'static str, bool); 3];
-
-const TEN: &str = "one two three four five six seven eight nine ten";
-/// The Quizzes the rules reject, named for the rule each breaks, and whether the reply leaves out
-/// the marks of the wrong options. The card's reply and the summary's are tested on the same ones.
-fn broken_quizzes() -> [(&'static str, Options, bool); 8] {
-    [
-        (
-            "an option of 11 words",
-            [
-                ("a", "Why.", true),
-                (ELEVEN, "No.", false),
-                ("c", "No.", false),
-            ],
-            false,
-        ),
-        (
-            "the key is the longest option",
-            [
-                ("The longest", "Why.", true),
-                ("b", "No.", false),
-                ("c", "No.", false),
-            ],
-            false,
-        ),
-        (
-            "the key is not the option marked right",
-            [
-                ("a", "Why.", false),
-                ("bbb", "No.", true),
-                ("cc", "No.", false),
-            ],
-            false,
-        ),
-        (
-            "two options marked right",
-            [
-                ("a", "Why.", true),
-                ("bbb", "Yes.", true),
-                ("cc", "No.", false),
-            ],
-            false,
-        ),
-        (
-            "no option marked right",
-            [
-                ("a", "Why.", false),
-                ("bbb", "No.", false),
-                ("cc", "No.", false),
-            ],
-            false,
-        ),
-        (
-            "a missing reason",
-            [
-                ("a", "Why.", true),
-                ("bbb", "", false),
-                ("cc", "No.", false),
-            ],
-            false,
-        ),
-        (
-            "a blank reason",
-            [
-                ("a", "Why.", true),
-                ("bbb", " ", false),
-                ("cc", "No.", false),
-            ],
-            false,
-        ),
-        (
-            "a missing mark",
-            [
-                ("a", "Why.", true),
-                ("bbb", "No.", false),
-                ("cc", "No.", false),
-            ],
-            true,
-        ),
-    ]
-}
-
-/// The Quizzes the rules let pass: an option of 10 words, and a key that is not the longest.
-fn passing_quizzes() -> [(&'static str, Options); 3] {
-    [
-        (
-            "an option of 10 words",
-            [
-                ("a", "Why.", true),
-                (TEN, "No.", false),
-                ("c", "No.", false),
-            ],
-        ),
-        (
-            "a key shorter than an option",
-            [
-                ("O(n)", "Why.", true),
-                ("O(n log n)", "No.", false),
-                ("O(1)", "No.", false),
-            ],
-        ),
-        (
-            "equal lengths, the key not longer than the others",
-            [
-                ("aa", "Why.", true),
-                ("bb", "No.", false),
-                ("cc", "No.", false),
-            ],
-        ),
-    ]
-}
-
-/// `reply` with the marks of its wrong options left out, when `unmarked`.
-fn unmark(reply: String, unmarked: bool) -> String {
-    match unmarked {
-        true => reply.replace(r#""right":false,"#, ""),
-        false => reply,
-    }
-}
-
-#[test]
-fn a_card_quiz_that_breaks_a_rule_is_rejected_and_the_card_keeps_no_quiz() {
-    for (name, options, unmarked) in broken_quizzes() {
-        let reply = unmark(good_with(options), unmarked);
-        let (card, problem) = Card::from_reply(&reply).unwrap();
-        assert_eq!(card.quiz, None, "{name}: {reply}");
-        assert!(problem.is_some(), "{name}: {reply}");
-    }
-}
-
-#[test]
-fn a_card_quiz_that_keeps_the_rules_stands() {
-    for (name, options) in passing_quizzes() {
-        let (card, problem) = Card::from_reply(&good_with(options)).unwrap();
-        assert!(card.quiz.is_some(), "{name}");
-        assert_eq!(problem, None, "{name}");
-    }
-}
-
-#[test]
-fn a_rejected_quiz_is_asked_for_once_more_and_the_second_rejection_leaves_the_card_with_none() {
-    let longest = good_with([
-        ("a long right option", "Why.", true),
-        ("b", "No.", false),
-        ("c", "No.", false),
-    ]);
-
-    // The second reply is good: its quiz stands.
-    let writer = Scripted {
-        reply: Answer::replies([longest.clone(), GOOD.into()]),
-        ..Scripted::bare()
-    };
-    let card = write_card(&writer, &edit(), &[], |l| panic!("{l}")).unwrap();
-    assert_eq!(sorted(card), good_card());
-    assert_eq!(writer.calls("reply"), 2);
-
-    // Both are rejected: the card is kept with no quiz, after two calls and no more.
-    let writer = replying(&longest);
-    let mut lines = Vec::new();
-    let card = write_card(&writer, &edit(), &[], |l| lines.push(l)).unwrap();
-    assert_eq!(card.quiz, None);
-    assert_eq!(writer.calls("reply"), 2);
-    assert_eq!(lines.len(), 1, "{lines:?}");
-    assert!(lines[0].contains("longest"), "{lines:?}");
-}
-
-#[test]
-fn the_card_prompt_carries_the_quiz_rules() {
-    let folder = Path::new("/card-writer");
-    let (_, prompt) = ClaudeWriter::new(CLAUDE.into(), folder.into()).command(&edit(), &[]);
-    for rule in RULES {
-        assert!(prompt.contains(rule), "{rule}: {prompt}");
-    }
-}
-
-#[test]
-fn the_card_prompts_name_ranges_and_never_ask_for_copied_code() {
-    let writer = ClaudeWriter::new(CLAUDE.into(), "/card-writer".into());
-    let (_, card) = writer.command(&edit(), &[]);
-    assert!(
-        card.contains("\"ranges\"") && !card.contains("copied from it"),
-        "{card}"
-    );
-    let check = CardRequest {
-        check: Some("cargo test".into()),
-        ..edit()
-    };
-    let (_, check) = writer.command(&check, &[]);
-    assert!(
-        !check.contains("copied from it") && !check.contains("\"code\""),
-        "{check}"
-    );
-}
-
-/// What both writers' prompts say of the Quiz (`docs/studio/question-rules.md`).
-const RULES: [&str; 6] = [
-    "why this design over the alternative",
-    "cannot be answered from",
-    "the alternative that was considered, the previous behaviour, or a common wrong model",
-    "at most 10 words",
-    "the right option is never the longest",
-    "exactly one option is right",
-];
 
 // @law: writer-has-no-tools
 #[test]
 fn the_real_writer_runs_claude_on_the_subscription_in_its_neutral_folder() {
     let folder = Path::new("/h/Library/Application Support/dev.falinks.studio/card-writer");
-    let earlier = ["`Card` קיבל שדה `summary`.".to_string()];
     let (command, prompt) =
-        ClaudeWriter::new(CLAUDE.into(), folder.into()).command(&edit(), &earlier);
+        ClaudeWriter::new(CLAUDE.into(), folder.into()).goal_command(&["Add a field"]);
 
     assert_eq!(command.get_program(), CLAUDE);
     // Both keys would take precedence over the subscription login, and without the plugin the
@@ -492,22 +49,20 @@ fn the_real_writer_runs_claude_on_the_subscription_in_its_neutral_folder() {
         args,
         ["--tools", "", "--strict-mcp-config", "--safe-mode", "-p"]
     );
-    assert!(prompt.contains("multiple-choice question on the change's logic or design"));
-    // The architecture section reads the prompt's earlier cards.
-    assert!(prompt.contains(&format!("earlier cards, oldest first:\n- {}\n", earlier[0])));
-    assert!(prompt.ends_with(&format!("\nChange:\n{}", edit().diff())));
+    assert!(prompt.contains("Goal of a coding agent's session"));
+    assert!(prompt.ends_with("<prompt>\nAdd a field\n</prompt>\n"));
     assert_eq!(command.get_current_dir(), Some(folder));
 }
 
 #[test]
 fn every_writer_run_is_in_safe_mode() {
     let writer = ClaudeWriter::new(CLAUDE.into(), "/card-writer".into());
-    let reply = FakeWriter.reply(&edit(), &[]).unwrap();
-    let (card, _) = Card::from_reply(&reply).unwrap();
     let runs = [
-        ("card", writer.command(&edit(), &[])),
         ("goal", writer.goal_command(&["a prompt"])),
-        ("explain more", writer.more_command(&edit(), &card)),
+        (
+            "design",
+            writer.design_command(&[("t1".into(), "A reason.".into())]),
+        ),
         ("ask", writer.ask_command("an item", &[], "why?")),
         ("risk", writer.risk_command("rm -rf build", "/work/repo")),
         (
@@ -571,8 +126,6 @@ fn a_goal_whose_newest_prompt_alone_is_over_the_budget_keeps_its_start() {
 fn every_prompt_asks_for_english_and_none_for_hebrew() {
     let writer = ClaudeWriter::new(CLAUDE.into(), "/f".into());
     let prompts = [
-        writer.command(&edit(), &[]).1,
-        writer.more_command(&edit(), &good_card()).1,
         writer.goal_command(&["Add a"]).1,
         writer.ask_command("item", &[], "Why?").1,
     ];
@@ -583,42 +136,6 @@ fn every_prompt_asks_for_english_and_none_for_hebrew() {
         );
         assert!(!prompt.contains("Hebrew"), "{prompt}");
     }
-}
-
-#[test]
-fn explain_more_runs_the_same_writer_on_the_cards_explanation_and_its_change() {
-    let folder = Path::new("/h/Library/Application Support/dev.falinks.studio/card-writer");
-    let writer = ClaudeWriter::new(CLAUDE.into(), folder.into());
-    let card = good_card();
-
-    let (more, prompt) = writer.more_command(&edit(), &card);
-
-    let (card_run, _) = writer.command(&edit(), &[]);
-    assert_eq!(more.get_program(), card_run.get_program());
-    assert!(more.get_envs().eq(card_run.get_envs()));
-    assert!(more.get_args().eq(card_run.get_args()));
-    assert_eq!(more.get_current_dir(), Some(folder));
-    assert!(prompt.contains("in more depth than the card"), "{prompt}");
-    assert!(
-        prompt.contains("do not invent code you were not shown"),
-        "{prompt}"
-    );
-    assert!(prompt.contains(&card.explanation), "{prompt}");
-    assert!(prompt.ends_with(&format!("\nChange:\n{}", edit().diff())));
-}
-
-#[test]
-fn a_huge_change_is_cut_so_the_prompt_stays_small() {
-    let folder = Path::new("/h/Library/Application Support/dev.falinks.studio/card-writer");
-    // A new file of 100 000 two-byte letters, as added lines.
-    let request = CardRequest {
-        change: Some(format!("+{}\n", "א".repeat(100_000))),
-        ..edit()
-    };
-    let (_, prompt) = ClaudeWriter::new(CLAUDE.into(), folder.into()).command(&request, &[]);
-
-    assert!(prompt.len() < 70 << 10, "{}", prompt.len());
-    assert!(prompt.ends_with(" more bytes cut]"));
 }
 
 /// A stand-in login shell named `name`, which runs `script` and never `claude`.
@@ -648,36 +165,12 @@ fn the_login_shell_finds_claude_and_without_its_answer_the_path_does() {
     );
 }
 
-#[test]
-fn a_reply_that_does_not_parse_gives_no_card_and_one_log_line() {
-    let replies = [
-        "",
-        "I can't write a card without the file.\nShall I read it?",
-        // No explanation.
-        r#"{"quiz": {"text": "למה?"}, "why_it_matters": "כי."}"#,
-        // A `}` before the first `{`.
-        "Sorry :} I need {more context",
-    ];
-
-    for reply in replies {
-        let line = Card::from_reply(reply).expect_err(reply);
-        assert_eq!(line.lines().count(), 1, "{line}");
-    }
-}
-
 /// The writer on a stub `claude` in `dir` that runs `script`. Its timeout is long: a stub that has
 /// to start and finish is not racing a clock, however loaded the machine is; a test of the timeout
 /// itself sets a short one.
 fn stub(dir: &Path, script: &str) -> ClaudeWriter {
     let claude = shell(dir, "claude", script);
     ClaudeWriter::new(claude, dir.into()).with_timeout(Duration::from_secs(30))
-}
-
-/// A store in `dir` that holds `good_card()` on `edit()`.
-fn stored(dir: &Path) -> Mutex<CardStore> {
-    let mut store = CardStore::open(dir.join("cards.json")).unwrap();
-    store.add(edit(), good_card(), 1).unwrap();
-    Mutex::new(store)
 }
 
 /// Whether process `pid` still runs, given a moment to go once it was stopped.
@@ -696,8 +189,7 @@ fn running(pid: &str) -> bool {
 }
 
 #[test]
-fn a_claude_that_fails_prints_nothing_or_hangs_gives_nothing_keeps_nothing_and_leaves_nothing_running()
- {
+fn a_claude_that_fails_prints_nothing_or_hangs_gives_nothing_and_leaves_nothing_running() {
     // Stubs that start `sh` and reply keep a second; only the hang is cut short.
     let scripts = [
         ("echo 'Not logged in'; exit 1", Duration::from_secs(1)),
@@ -710,17 +202,10 @@ fn a_claude_that_fails_prints_nothing_or_hangs_gives_nothing_keeps_nothing_and_l
     ];
     for (script, timeout) in scripts {
         let dir = tempfile::tempdir().unwrap();
-        let store = stored(dir.path());
-        let mut lines = Vec::new();
 
         let writer = stub(dir.path(), script).with_timeout(timeout);
-        let more = explain_more(&store, &writer, &edit().id, |l| lines.push(l));
+        let line = writer.goal(&["a prompt"]).expect_err(script);
 
-        assert_eq!(more, None, "{script}");
-        assert_eq!(store.lock().unwrap().cards()[0].more, None, "{script}");
-        let [line] = &lines[..] else {
-            panic!("one log line on {script}: {lines:?}");
-        };
         assert_eq!(line.lines().count(), 1, "{line}");
         if let Ok(child) = fs::read_to_string(dir.path().join("child")) {
             assert!(!running(child.trim()), "{script}");
@@ -729,41 +214,14 @@ fn a_claude_that_fails_prints_nothing_or_hangs_gives_nothing_keeps_nothing_and_l
 }
 
 #[test]
-fn explain_more_after_a_failed_call_asks_the_writer_again() {
+fn a_prompt_holding_nul_bytes_reaches_the_writer_on_standard_input_without_them() {
     let dir = tempfile::tempdir().unwrap();
-    let store = stored(dir.path());
-    // Fails on its first call, then explains.
-    let writer = stub(
-        dir.path(),
-        "cat > /dev/null; [ -e called ] || { touch called; exit 1; }; echo 'הסבר ארוך'",
-    );
-    let log = |_| {};
+    let writer = stub(dir.path(), r#"cat > input; echo '{"goal": "x"}'"#);
 
-    assert_eq!(explain_more(&store, &writer, &edit().id, log), None);
-    assert_eq!(
-        explain_more(&store, &writer, &edit().id, log).as_deref(),
-        Some("הסבר ארוך")
-    );
-}
+    writer.goal(&["a\0b"]).unwrap();
 
-#[test]
-fn a_change_holding_nul_bytes_reaches_the_writer_on_standard_input_and_gets_a_card() {
-    let dir = tempfile::tempdir().unwrap();
-    fs::write(dir.path().join("reply"), GOOD).unwrap();
-    let writer = stub(dir.path(), "cat > input; cat reply");
-    let request = CardRequest {
-        change: Some("+++ b/data.bin\n+a\0b\n".into()),
-        ..edit()
-    };
-
-    let card = write_card(&writer, &request, &[], |l| panic!("{l}"));
-
-    assert!(card.is_some());
     let input = fs::read_to_string(dir.path().join("input")).unwrap();
-    assert!(
-        input.ends_with("\nChange:\n+++ b/data.bin\n+ab\n"),
-        "{input}"
-    );
+    assert!(input.ends_with("<prompt>\nab\n</prompt>\n"), "{input}");
 }
 
 // The turn summary (danielrispler/Falinks#526; danielrispler/Falinks#517, decisions 13 to 15).
@@ -896,8 +354,6 @@ fn summaries(dir: &Path) -> Mutex<CardStore> {
     Mutex::new(CardStore::open(dir.join("cards.json")).unwrap())
 }
 
-const ELEVEN: &str = "one two three four five six seven eight nine ten eleven";
-
 /// Summary names, in words: a digit in a headline must be in the turn's material.
 const NAMES: [&str; 5] = ["zero", "one", "two", "three", "four"];
 
@@ -1000,36 +456,6 @@ fn a_malformed_summary_reply_gives_none_and_one_log_line() {
     assert_eq!(lines.len(), 1, "{lines:?}");
     assert!(lines[0].contains("s@1"), "{lines:?}");
     assert_eq!(store.lock().unwrap().turn_summary("s@1"), None);
-}
-
-#[test]
-fn a_turn_with_a_card_gets_its_summary_only() {
-    let dir = tempfile::tempdir().unwrap();
-    let store = summaries(dir.path());
-    let writer = recording(summary_reply("Rewrote the parser.", ["a", "b", "c"]));
-    let on = edit();
-    let card = write_card(&FakeWriter, &on, &[], |_| {}).unwrap();
-    store
-        .lock()
-        .unwrap()
-        .add(
-            CardRequest {
-                id: "s@1".into(),
-                ..on
-            },
-            card,
-            1,
-        )
-        .unwrap();
-    let request = SummaryRequest {
-        card: Some("s@1".into()),
-        ..turn("s", 1)
-    };
-
-    let summary = write_summary(&store, &writer, &setup(), request, |_| {}).unwrap();
-
-    assert_eq!(summary.summary, "Rewrote the parser.");
-    assert_eq!(summary.quiz, None);
 }
 
 // The subagent summary, written when Daniel opens a subagent (danielrispler/Falinks#535).
@@ -1142,17 +568,17 @@ fn a_writer_that_cannot_start_gives_one_notice_until_a_call_works() {
     let (writer, heard) = watched(&program, dir.path());
 
     for _ in 0..3 {
-        assert!(writer.reply(&edit(), &[]).is_err());
+        assert!(writer.goal(&["a prompt"]).is_err());
     }
     {
         let heard = heard.lock().unwrap();
         assert_eq!(heard.len(), 1, "{heard:?}");
         let text = heard[0].as_deref().unwrap();
-        assert!(text.contains("Cards and briefs are off"), "{text}");
+        assert!(text.contains("Summaries and briefs are off"), "{text}");
     }
 
     shell(dir.path(), "claude", "echo ok");
-    assert_eq!(writer.reply(&edit(), &[]).unwrap().trim(), "ok");
+    assert_eq!(writer.goal(&["a prompt"]).unwrap().trim(), "ok");
     assert_eq!(heard.lock().unwrap().last(), Some(&None));
     assert_eq!(heard.lock().unwrap().len(), 2);
 }
@@ -1163,7 +589,7 @@ fn a_writer_that_starts_and_fails_raises_no_notice() {
     let claude = shell(dir.path(), "claude", "exit 3");
     let (writer, heard) = watched(&claude, dir.path());
 
-    assert!(writer.reply(&edit(), &[]).is_err());
+    assert!(writer.goal(&["a prompt"]).is_err());
     assert!(heard.lock().unwrap().is_empty());
 }
 

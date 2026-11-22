@@ -75,7 +75,7 @@ fn the_full_samples_of_every_stored_file_load_with_their_values() {
     assert!(store.facts().opened.contains("line-1"));
     assert_eq!(store.facts().seen["sess-1"], 3);
 
-    let decisions = store.session_cards("sess-1", 1_761_744_000_000).decisions;
+    let decisions = store.session_cards("sess-1").decisions;
     assert_eq!(decisions.len(), 1);
     assert_eq!(decisions[0].call, "toolu_1");
     assert_eq!(decisions[0].source, Source::Card);
@@ -137,7 +137,7 @@ fn the_minimal_samples_of_every_stored_file_load_with_their_values() {
     assert_eq!(store.brief("sess-1").unwrap().goal, None);
     assert!(store.facts().promoted.is_empty());
 
-    let decisions = store.session_cards("sess-1", 1_761_744_000_000).decisions;
+    let decisions = store.session_cards("sess-1").decisions;
     assert_eq!(decisions[0].call, "toolu_1");
 
     let [summary] = store.summaries() else {

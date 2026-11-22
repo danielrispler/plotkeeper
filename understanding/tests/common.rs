@@ -2,10 +2,8 @@
 //! set by the test, and which keeps what it was asked.
 
 use std::sync::Mutex;
-use studio_core::{CardRequest, SummaryRequest};
-use studio_understanding::{
-    Card, CardWriter, ClaudeWriter, FakeWriter, Risk, SummarySetup, TurnSummary,
-};
+use studio_core::SummaryRequest;
+use studio_understanding::{CardWriter, ClaudeWriter, FakeWriter, Risk, SummarySetup, TurnSummary};
 
 pub type Reply = Result<String, String>;
 
@@ -56,7 +54,6 @@ pub type Asking = (String, Vec<String>, String);
 pub struct Kept {
     /// The name of each method called, in order.
     calls: Mutex<Vec<&'static str>>,
-    requests: Mutex<Vec<CardRequest>>,
     asked: Mutex<Vec<Asking>>,
     /// The command and folder of each risk note asked for.
     judged: Mutex<Vec<(String, String)>>,
@@ -66,8 +63,6 @@ pub struct Kept {
 /// A writer that answers each method as its slot says. `fake()` has `FakeWriter`'s answer in every
 /// slot, `bare()` the answer of a writer that writes nothing; a test sets the slots it cares about.
 pub struct Scripted {
-    pub reply: Answer,
-    pub more: Answer,
     pub goal: Answer,
     pub design: Answer,
     pub ask: Answer,
@@ -76,15 +71,13 @@ pub struct Scripted {
     pub name: Answer,
     /// The judge's raw replies, read as the real writer reads them; the subject is the command.
     pub risk: Answer,
-    /// What it keeps of its calls, for `calls`, `requests`, `asked` and `inputs`.
+    /// What it keeps of its calls, for `calls`, `asked` and `inputs`.
     pub kept: Kept,
 }
 
 impl Scripted {
     fn with(slot: impl Fn(&str) -> Answer) -> Self {
         Scripted {
-            reply: slot("reply"),
-            more: slot("more"),
             goal: slot("goal"),
             design: slot("design"),
             ask: slot("ask"),
@@ -113,11 +106,6 @@ impl Scripted {
             .iter()
             .filter(|m| **m == method)
             .count()
-    }
-
-    /// The requests the writer was asked to write a card on.
-    pub fn requests(&self) -> Vec<CardRequest> {
-        self.kept.requests.lock().unwrap().clone()
     }
 
     /// The side questions it was asked.
@@ -166,16 +154,6 @@ fn claude() -> ClaudeWriter {
 }
 
 impl CardWriter for Scripted {
-    fn reply(&self, request: &CardRequest, earlier: &[String]) -> Reply {
-        self.kept.requests.lock().unwrap().push(request.clone());
-        let fake = || FakeWriter.reply(request, earlier);
-        self.answer("reply", &self.reply, &request.id, fake)
-    }
-
-    fn more(&self, request: &CardRequest, card: &Card) -> Reply {
-        self.answer("more", &self.more, "", || FakeWriter.more(request, card))
-    }
-
     fn goal(&self, prompts: &[&str]) -> Reply {
         self.answer("goal", &self.goal, "", || FakeWriter.goal(prompts))
     }

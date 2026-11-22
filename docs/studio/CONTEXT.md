@@ -9,13 +9,13 @@ The app this effort builds: the place Daniel does all agent work. It has three l
 _Avoid_: Dashboard (one view, not the thing itself)
 
 **Understanding layer**:
-The part of the control room that keeps Daniel's understanding in step with the agents' work: guesses, cards and debrief. It works without the workbench, for any agent session.
+The part of the control room that keeps Daniel's understanding in step with the agents' work: the turn summaries, the session Brief and the PR briefs. It works without the workbench, for any agent session.
 
 **Wait**:
 The time Daniel waits on an agent: from his prompt until the agent ends its turn, or until his next prompt if he interrupts it. Answering a permission, a question or a plan inside it does not start a new wait.
 
 **Card**:
-An explanation, in the explanation language, of what a prompt changed, or what a worker changed, since the previous card. It opens with a quiz, and offers "explain more" and a rating.
+Retired as a turn's or a worker's explanation (danielrispler/plotkeeper#348): a **PR brief** is the explanation now. The cards stored before stay readable and none is shown. A blocked command's card is another thing, see **Blocked command**.
 _Avoid_: Summary (read after the work, with no question first)
 
 **Turn**:
@@ -35,7 +35,7 @@ _Avoid_: Intention (the agent's own words while it works)
 
 **Turn summary**:
 A Headline and up to three typed Body lines, written by one cheap writer call when the turn ends, or when Daniel opens the turn if summaries are set to write on open. A turn gets one when its final response is about 150 words or more, or when it ends asking Daniel something; other turns show their response as it is. The writer is given the turn's recorded facts (its files with their line counts, hunks up to a cap, each check's command, result and retries) and told not to restate them. A Body line is `why`, `reported`, `open` or `ask`, at most 20 words; `open` and `ask` always show, and a `reported` line reads "Agent says". A line with a number or id the turn's material lacks is dropped; numbers in the turn's diff, line counts or check results, number words and digits in a known path always pass. A summary stored before the Headline is read with its first line as the Headline and the rest as `reported` lines; the writer is not run again on it.
-_Avoid_: Card (on a change, with its quiz first), brief (the whole session's, kept for resuming)
+_Avoid_: Card (retired), brief (the whole session's, kept for resuming)
 
 **Transcript**:
 Claude Code's own record of an agent session, which the control room reads for the intention, the turn's responses, the branch and the context share. When it cannot be read, the session's view falls back to its steps only.
@@ -52,37 +52,18 @@ _Avoid_: ETA (implies a promise)
 What an agent session's work is, named by its first prompt's slash command, else by its first skill, such as `implement` or `wayfinder`. An estimate compares a session only with sessions of the same kind.
 
 **Base**:
-The state of a worktree that the next card's change is measured from: its commit and its files when the previous card was written, or when the prompt or worker began. A move of the commit that is not the agent's own work moves the base instead of adding to the change.
+The state of a worktree that the next change is measured from: its commit and its files when the previous change was taken, or when the prompt or worker began. A move of the commit that is not the agent's own work moves the base instead of adding to the change.
 _Avoid_: Snapshot, checkpoint (the engine's term)
 
 **Quiz**:
-The multiple-choice question a card carries, with the writer's key, which grades Daniel's guess. A turn's own Quiz, the Retest a week after it, Home's learning slot and the hourly cap are retired (danielrispler/plotkeeper#347): the turn summary is a Headline and a Body, and the stored Quizzes, Retests and learning sections stay readable. On a check card the quiz asks whether the check will pass, and the check's result is the key. The cards go the same way in danielrispler/plotkeeper#348.
+The multiple-choice question a card or a turn summary carried, with the writer's key. All of it is retired: a turn's own Quiz, the Retest a week after it, Home's learning slot and the hourly cap in danielrispler/plotkeeper#347, and the cards, their Quizzes, the check cards and the self-test in danielrispler/plotkeeper#348. The turn summary is a Headline and a Body, and the stored Quizzes, Retests and learning sections stay readable.
 _Avoid_: Question (an agent's question to Daniel), Learning section (retired), Retest (retired)
 
-**Offer**:
-What one decision gives a change: a card, or nothing, by the table in [`cards.md`](behaviour/cards.md). A turn, a worker's card and a **late change** each get one, decided once with the same facts for the card and for the summary. Each is recorded once in `offers.jsonl` ([`storage.md`](behaviour/storage.md)).
-
-**Late change**:
-What a subagent changed in its session's own worktree after the turn ended, which the session's card then covers. It is judged below the card row: it gets a card only when it passes the table's first row, .
-
 **Turn writing**:
-What the understanding layer writes when a turn ends, a long check starts or a worker returns: the card its **offer** gives, the turn summary, the session's name, and the Brief's Goal and Design so far. A session's pieces are written one at a time, in the order they were asked for, so a turn's summary follows its card.
-_Avoid_: Card writing (one part of it)
+What the understanding layer writes when a turn ends or a worker returns: the turn summary, the session's name, and the Brief's Goal and Design so far, and no card. A session's pieces are written one at a time, in the order they were asked for.
 
 **Check**:
 A command of a project's check list, as run in one worktree. Its runs in a turn are one check, and its last run's result is the check's. The same command in two worktrees is two checks. [Checks](behaviour/checks.md) has the rules.
-
-**Check card**:
-The card a check of the session's own agent gets at its start when it usually runs over 2 minutes, on the change since the last card, so Daniel can guess while he waits whether the check will pass.
-
-**Guess**:
-Daniel's answer to a card's quiz. The card writer's key grades it, and the card shows right or wrong, with the reasons, as soon as he answers. On a check card the check's result settles it instead, and the card shows right or wrong, with the reasons, once the check ends. It is never shown as a raw score.
-
-**Settle**:
-To grade the guess on a check card by the check's result, once the check ends. A tap after the result is no guess.
-
-**Not counted**:
-A check card's guess whose check ended with an exit code that does not say whether it passed, such as `cargo test 2>&1 | tail`. No option is named the right one, and the weekly rates leave it out.
 
 **Step ledger**:
 The index of an agent session's tool calls, workers' included, kept as one row per call: its tool, file, command or pattern, turn, subagent, duration and result or exit code, and where in the event log its start and result lines are. It holds no output; a call's details are read from the log by those offsets.
@@ -91,7 +72,7 @@ The index of an agent session's tool calls, workers' included, kept as one row p
 The line under a turn's Headline that states what the hooks and git recorded for the turn: the files it changed and each ended check's last result, such as `3 files · 2 checks passed`, with "+N merged" when a merge brought files in. It opens in place to each file with its line counts, the merged files, and each check with its status, naming its worktree when it is not the session's own; a failed check opens its exit code and the tail of its output. It has no model in it, and an agent that reports no trees has none.
 
 **Brief**:
-What Daniel reads to resume an agent session he lost track of, folded under its feed (inside **Where we were** while that shows): slots, not prose. **Goal** is one or two lines a model writes from Daniel's prompts, again when a new prompt of his came; it is the only part a model writes. **Decisions** lists each question the agent asked with Daniel's reply, in order. **Open** is computed from facts, never written: the pending question, each check whose last run failed (its worktree named when it is not the session's own), files changed with no check run since, the latest turn's `open` and `ask` lines, and unpushed work or an unmerged PR; each drops out once it is settled. **Design so far** is at most five one-line design decisions with their reasons, which a model writes from the turns' `why` lines and the cards' summaries only; each cites the turn or card it came from, a click on the citation opens it in the rail, and code drops a line that cites nothing or something not in the session. A session with no `why` line and no card has none. A brief stored before the slots, as prose, shows as it is until the session's next Goal.
+What Daniel reads to resume an agent session he lost track of, folded under its feed (inside **Where we were** while that shows): slots, not prose. **Goal** is one or two lines a model writes from Daniel's prompts, again when a new prompt of his came; it is the only part a model writes. **Decisions** lists each question the agent asked with Daniel's reply, in order. **Open** is computed from facts, never written: the pending question, each check whose last run failed (its worktree named when it is not the session's own), files changed with no check run since, the latest turn's `open` and `ask` lines, and unpushed work or an unmerged PR; each drops out once it is settled. **Design so far** is at most five one-line design decisions with their reasons, which a model writes from the turns' `why` lines and the summaries of the cards stored before they were retired; each cites the turn or card it came from, a click on the citation opens it in the rail, and code drops a line that cites nothing or something not in the session. A session with no `why` line and no card has none. A brief stored before the slots, as prose, shows as it is until the session's next Goal.
 
 **Where we were**:
 The banner the rail opens on when Daniel returns to a session, above the newest turn, which shows in full under it. It shows for an idle or ended session, and for one with unseen turns whose last turn ended 15 minutes ago or more. Three lines, all from facts: the last Headline with its age; what happened since he looked (the turns after the last one he saw, their files and check results, such as `2 turns · 4 files · checks passed`); and what is open, from the Brief's Open slot. The Brief folds inside it. It is decided when the session is selected and stays while he reads it, until he selects another session or sends a prompt.

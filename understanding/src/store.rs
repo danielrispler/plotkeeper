@@ -6,7 +6,7 @@ use crate::risk::RiskView;
 use crate::{Answered, Card, DesignLine, OpenItem, Quiz, TurnSummary, answered};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeMap,
     fs::{self, File},
     io::{self, Write},
     path::{Path, PathBuf},
@@ -81,26 +81,13 @@ pub struct StoredSummary {
     pub arm: Option<Arm>,
 }
 
-/// How long the self-test assigns arms: 21 days from its start (danielrispler/plotkeeper#130).
-pub const SELF_TEST_MS: u64 = 21 * 24 * 60 * 60 * 1000;
-
-/// A turn's arm in the self-test (danielrispler/plotkeeper#130): quiz-first shows the Quiz open and the Body after a pick;
-/// body-only shows the Body open and no Quiz, though the Quiz is kept for the retest.
+/// A turn's arm in the self-test (danielrispler/plotkeeper#130), retired in danielrispler/plotkeeper#348: the store only reads
+/// the ones it holds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Arm {
     QuizFirst,
     BodyOnly,
-}
-
-/// A random bit, from the random keys std gives each hasher.
-fn coin() -> bool {
-    use std::hash::{BuildHasher, Hasher};
-    std::collections::hash_map::RandomState::new()
-        .build_hasher()
-        .finish()
-        & 1
-        == 1
 }
 
 /// Where a confidence tap was made (danielrispler/plotkeeper#242): Home's learning slot, or the rail, which a tap stored before
@@ -158,30 +145,6 @@ pub struct QuizTap {
     #[serde(flatten)]
     pub tap: Tap,
     pub at: u64,
-}
-
-impl QuizTap {
-    /// Whether it answers the Quiz, as a pick or a skip do.
-    fn answers(&self) -> bool {
-        matches!(self.tap, Tap::Pick { .. } | Tap::Skip)
-    }
-}
-
-/// Keeps `tap` at `at` in `taps`: the first answer counts, and each chip once. Whether it was kept.
-fn keep_tap(taps: &mut Vec<QuizTap>, tap: Tap, at: u64) -> bool {
-    let new = QuizTap { tap, at };
-    let taken = !matches!(new.tap, Tap::NotNow)
-        && taps.iter().any(|kept| {
-            if new.answers() {
-                kept.answers()
-            } else {
-                std::mem::discriminant(&kept.tap) == std::mem::discriminant(&new.tap)
-            }
-        });
-    if !taken {
-        taps.push(new);
-    }
-    !taken
 }
 
 /// A fresh Quiz on the decision of an earlier one, which Home offered a week after it (danielrispler/plotkeeper#129). Retests
@@ -267,8 +230,7 @@ pub struct Brief {
     pub updates: u32,
 }
 
-/// One session's brief and its cards in the session view's two groups (danielrispler/Falinks#369, decision 18), each
-/// oldest first.
+/// One session's brief, its decision history and its blocked commands' risk notes, which the session view shows.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct SessionCards {
     /// A brief stored as prose, which shows while there is no Goal.
@@ -280,15 +242,6 @@ pub struct SessionCards {
     pub open: Vec<OpenItem>,
     /// "Design so far": at most five decisions, each citing its turn or card.
     pub design: Vec<DesignLine>,
-    /// The cards added in the last 30 minutes.
-    #[serde(serialize_with = "without_diffs")]
-    pub recent: Vec<StoredCard>,
-    /// The cards added before, or before the store kept the time.
-    #[serde(serialize_with = "without_diffs")]
-    pub older: Vec<StoredCard>,
-    /// A session's workers' cards, each with the turn of the session's rail it belongs to
-    /// (danielrispler/plotkeeper#212); empty in a worker's own view.
-    pub workers: Vec<PlacedCard>,
     /// Its decision history, oldest first (danielrispler/Falinks#461, decision 17).
     pub decisions: Vec<Decision>,
     /// What each blocked command's card shows of its risk note (danielrispler/plotkeeper#298), which the shell joins
@@ -298,82 +251,6 @@ pub struct SessionCards {
     /// (danielrispler/plotkeeper#299); the stored decision holds none.
     pub decision_notes: Vec<RiskView>,
 }
-
-/// A worker's card with the turn of its session's rail it belongs to, `None` when the session has no turn for it.
-#[derive(Clone, Debug, PartialEq)]
-pub struct PlacedCard {
-    pub card: StoredCard,
-    pub turn: Option<usize>,
-}
-
-impl Serialize for PlacedCard {
-    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeStruct;
-        let mut placed = s.serialize_struct("PlacedCard", 2)?;
-        placed.serialize_field("card", &ShownCard::of(&self.card))?;
-        placed.serialize_field("turn", &self.turn)?;
-        placed.end()
-    }
-}
-
-/// A stored card as the pane reads it: its request without the diff and base, which the pane never
-/// reads.
-#[derive(Serialize)]
-struct ShownCard<'a> {
-    request: ShownRequest<'a>,
-    card: &'a Card,
-    added_at: Option<u64>,
-    shown_at: Option<u64>,
-    guess: &'a Option<Guess>,
-    key_wrong: bool,
-    more: &'a Option<String>,
-    rating: &'a Option<Rating>,
-    check_result: Option<CheckResult>,
-    taps: &'a [QuizTap],
-}
-
-#[derive(Serialize)]
-struct ShownRequest<'a> {
-    session_id: &'a str,
-    id: &'a str,
-    prompt: Option<u64>,
-    agent: &'a Option<String>,
-    changed_by: &'a BTreeMap<String, BTreeSet<String>>,
-    workers: &'a [String],
-    check: &'a Option<String>,
-}
-
-impl<'a> ShownCard<'a> {
-    fn of(kept: &'a StoredCard) -> Self {
-        ShownCard {
-            request: ShownRequest {
-                session_id: &kept.request.session_id,
-                id: &kept.request.id,
-                prompt: kept.request.prompt,
-                agent: &kept.request.agent,
-                changed_by: &kept.request.changed_by,
-                workers: &kept.request.workers,
-                check: &kept.request.check,
-            },
-            card: &kept.card,
-            added_at: kept.added_at,
-            shown_at: kept.shown_at,
-            guess: &kept.guess,
-            key_wrong: kept.key_wrong,
-            more: &kept.more,
-            rating: &kept.rating,
-            check_result: kept.check_result,
-            taps: &kept.taps,
-        }
-    }
-}
-
-fn without_diffs<S: serde::Serializer>(cards: &[StoredCard], s: S) -> Result<S::Ok, S::Error> {
-    s.collect_seq(cards.iter().map(ShownCard::of))
-}
-
-/// The last 30 minutes (danielrispler/Falinks#369, decision 18).
-const RECENT_MS: u64 = 30 * 60 * 1000;
 
 /// Now, in Unix milliseconds, as the store's records keep time.
 pub fn millis() -> u64 {
@@ -400,8 +277,6 @@ pub struct CardStore {
     agent_summaries: BTreeMap<String, String>,
     /// The retests, in `retests.json` beside the cards (danielrispler/plotkeeper#129).
     retests: Vec<Retest>,
-    /// When the self-test started, in Unix milliseconds, from the settings; kept in memory.
-    self_test: Option<u64>,
     /// Rises on every change, briefs included, so the shell sends the cards only when it moves.
     revision: u64,
 }
@@ -436,7 +311,6 @@ impl CardStore {
         Ok(CardStore {
             path,
             retests,
-            self_test: None,
             cards,
             briefs,
             facts,
@@ -477,17 +351,9 @@ impl CardStore {
         &self.cards
     }
 
-    /// The cards and brief of `owner`, a session's id, or a worker's for its own (danielrispler/Falinks#369, decision 11),
-    /// split 30 minutes before `now`, the shell's tick.
-    pub fn session_cards(&self, owner: &str, now: u64) -> SessionCards {
-        let cards = self
-            .cards
-            .iter()
-            .filter(|kept| kept.request.owner() == owner);
-        let (recent, older) = cards.cloned().partition(|kept| {
-            kept.added_at
-                .is_some_and(|at| now.saturating_sub(at) < RECENT_MS)
-        });
+    /// The brief, decisions and risk-note slots of `owner`, a session's id, or a worker's for its own
+    /// (danielrispler/Falinks#369, decision 11).
+    pub fn session_cards(&self, owner: &str) -> SessionCards {
         let brief = self.brief(owner);
         let goal = brief.and_then(|brief| brief.goal.clone());
         let design = brief.map(|brief| brief.design.clone()).unwrap_or_default();
@@ -506,47 +372,10 @@ impl CardStore {
             answers: answered(&decisions),
             open: Vec::new(),
             design,
-            recent,
-            older,
-            workers: Vec::new(),
             decisions,
             risk_notes: Vec::new(),
             decision_notes: Vec::new(),
         }
-    }
-
-    /// `session`'s cards and brief, and its workers' cards each with its turn: what its rail shows.
-    pub fn rail_cards(&self, session: &Session, now: u64) -> SessionCards {
-        let mut shown = self.session_cards(&session.agent.id, now);
-        shown.workers = self
-            .worker_cards(session)
-            .map(|kept| PlacedCard {
-                turn: session.worker_card_turn(&kept.request),
-                card: kept.clone(),
-            })
-            .collect();
-        shown
-    }
-
-    /// The cards of `session`'s workers.
-    fn worker_cards<'a>(&'a self, session: &'a Session) -> impl Iterator<Item = &'a StoredCard> {
-        let own = move |kept: &&StoredCard| kept.request.session_id == session.agent.id;
-        let known = move |kept: &&StoredCard| session.subagent(kept.request.owner()).is_some();
-        let workers = self
-            .cards
-            .iter()
-            .filter(|kept| kept.request.agent.is_some());
-        workers.filter(own).filter(known)
-    }
-
-    /// The turn each of `session`'s worker cards is placed in, by card id: the rail redraws when one
-    /// moves, as a wake-up that arrives after the card was stored moves it.
-    pub fn placements(&self, session: &Session) -> Vec<(String, Option<usize>)> {
-        let placed = self.worker_cards(session).map(|kept| {
-            let turn = session.worker_card_turn(&kept.request);
-            (kept.request.id.clone(), turn)
-        });
-        placed.collect()
     }
 
     /// What `session`'s row says at `now`, in Unix milliseconds (danielrispler/Falinks#410, decision 27): while it needs
@@ -629,177 +458,9 @@ impl CardStore {
         write(&self.path.with_file_name("briefs.json"), &self.briefs)
     }
 
-    /// Adds a new card at `at`, in Unix milliseconds, which shows its quiz first, and saves the store.
-    pub fn add(&mut self, request: CardRequest, card: Card, at: u64) -> io::Result<()> {
-        self.cards.push(StoredCard {
-            request,
-            card,
-            added_at: Some(at),
-            shown_at: None,
-            guess: None,
-            key_wrong: false,
-            more: None,
-            rating: None,
-            check_result: None,
-            taps: Vec::new(),
-        });
-        self.save()
-    }
-
-    /// Marks the quizzes of cards `ids` shown at `at`, in Unix milliseconds, and saves the store
-    /// once if any changed. A card keeps its first time, and one guessed before gets none, so a
-    /// guess never comes before its quiz.
-    pub fn show(&mut self, ids: &[impl AsRef<str>], at: u64) -> io::Result<()> {
-        let mut changed = false;
-        for id in ids {
-            if let Some(kept) = self.card_mut(id.as_ref())
-                && kept.shown_at.is_none()
-                && kept.guess.is_none()
-            {
-                kept.shown_at = Some(at);
-                changed = true;
-            }
-        }
-        if changed { self.save() } else { Ok(()) }
-    }
-
-    /// Records Daniel's tap on option `option` of card `id`'s quiz at `at`, in Unix milliseconds,
-    /// graded by its key, and saves the store. The first tap counts; a card with no quiz, or no such
-    /// option, records none. On a check's card only a tap before the check's result counts, which
-    /// the result grades (`settle`).
-    pub fn guess(&mut self, id: &str, option: usize, at: u64) -> io::Result<()> {
-        if let Some(kept) = self.card_mut(id)
-            && kept.guess.is_none()
-            && kept.check_result.is_none()
-            && let Some(quiz) = &kept.card.quiz
-            && option < quiz.options.len()
-        {
-            let right = kept.request.check.is_none().then_some(option == quiz.key);
-            kept.guess = Some(Guess { option, right, at });
-            return self.save();
-        }
-        Ok(())
-    }
-
-    /// Settles the guess on card `id`, a check's, with the check's result (danielrispler/Falinks#461, decision 15):
-    /// `passed`, or `None` when its exit code does not say. Its quiz's key becomes the option the
-    /// result names, "It passes" or "It fails", and saves the store. A card no check requested, or
-    /// one settled before, is left as it is.
-    pub fn settle(&mut self, id: &str, passed: Option<bool>) -> io::Result<()> {
-        let Some(kept) = self.card_mut(id) else {
-            return Ok(());
-        };
-        if kept.request.check.is_none() || kept.check_result.is_some() {
-            return Ok(());
-        }
-        kept.check_result = Some(match passed {
-            Some(true) => CheckResult::Passed,
-            Some(false) => CheckResult::Failed,
-            // shortcut: an exit code that does not say leaves the guess not counted, where danielrispler/Falinks#343 let
-            // the writer's `passed` settle it: the core skips a check's output (danielrispler/Falinks#410), and the
-            // check's card took the change, so often no later card comes to read it. Ask the writer
-            // on the output at the check's end if `cargo test 2>&1 | tail` checks leave many unscored.
-            None => CheckResult::NotCounted,
-        });
-        if let Some(passed) = passed
-            && let Some(quiz) = &mut kept.card.quiz
-        {
-            quiz.key = usize::from(!passed);
-            if let Some(guess) = &mut kept.guess {
-                guess.right = Some(guess.option == quiz.key);
-            }
-        }
-        self.save()
-    }
-
-    /// Settles the cards of `session`'s checks that ended (`settle`). The shell calls it after each
-    /// log read, once a card is stored and before a tap, so a tap after the result never counts.
-    pub fn settle_checks(&mut self, session: &Session) -> io::Result<()> {
-        for check in session.check_cards.iter().filter(|c| c.ended) {
-            self.settle(&check.card, check.passed)?;
-        }
-        Ok(())
-    }
-
-    /// Records Daniel's `tap` at `at` on the Quiz of `id`, a card's or a stored turn summary's (danielrispler/plotkeeper#120), and
-    /// saves it. No window sends a tap on a turn's own Quiz now (danielrispler/plotkeeper#347); the self-test's hunk tap still
-    /// lands on a summary that has one. A Retest takes none. A card's pick is its guess, and its key flag the same one record; the first answer counts, so a
-    /// pick after a skip, a skip after a pick and a tap on a check's card record nothing.
-    pub fn quiz_tap(&mut self, id: &str, tap: Tap, at: u64) -> io::Result<()> {
-        if let Some(kept) = self.card_mut(id) {
-            let answered = kept.guess.is_some() || kept.taps.iter().any(QuizTap::answers);
-            if kept.card.quiz.is_none() || kept.request.check.is_some() {
-                return Ok(());
-            }
-            return match tap {
-                Tap::Pick { option } if !answered => self.guess(id, option, at),
-                Tap::Pick { .. } => Ok(()),
-                Tap::Skip if answered => Ok(()),
-                _ => {
-                    let key_wrong = matches!(tap, Tap::KeyWrong);
-                    if keep_tap(&mut kept.taps, tap, at) {
-                        if key_wrong {
-                            kept.key_wrong = true;
-                        }
-                        return self.save();
-                    }
-                    Ok(())
-                }
-            };
-        }
-        let Some(kept) = self.summaries.iter_mut().find(|kept| kept.request.id == id) else {
-            return Ok(());
-        };
-        let options = kept
-            .summary
-            .quiz
-            .as_ref()
-            .map_or(0, |quiz| quiz.options.len());
-        if options == 0 || matches!(tap, Tap::Pick { option } if option >= options) {
-            return Ok(());
-        }
-        if keep_tap(&mut kept.taps, tap, at) {
-            self.revision += 1;
-            return write(&self.path.with_file_name("summaries.json"), &self.summaries);
-        }
-        Ok(())
-    }
-
     /// The retests the store holds, oldest first: none is written now (danielrispler/plotkeeper#347).
     pub fn retests(&self) -> &[Retest] {
         &self.retests
-    }
-
-    /// Records Daniel's flag that the key of card `id`'s quiz is wrong, and saves the store.
-    pub fn key_wrong(&mut self, id: &str) -> io::Result<()> {
-        if let Some(kept) = self.card_mut(id)
-            && !kept.key_wrong
-        {
-            kept.key_wrong = true;
-            return self.save();
-        }
-        Ok(())
-    }
-
-    /// Records Daniel's rating of card `id`, which replaces the one before, and saves the store.
-    pub fn rate(&mut self, id: &str, rating: Rating) -> io::Result<()> {
-        if let Some(kept) = self.card_mut(id) {
-            kept.rating = Some(rating);
-            return self.save();
-        }
-        Ok(())
-    }
-
-    /// Keeps `more`, the writer's longer explanation of card `id`, unless it has one, and saves the
-    /// store.
-    pub(crate) fn more(&mut self, id: &str, more: String) -> io::Result<()> {
-        if let Some(kept) = self.card_mut(id)
-            && kept.more.is_none()
-        {
-            kept.more = Some(more);
-            return self.save();
-        }
-        Ok(())
     }
 
     /// Keeps the decisions of session `session` (`Session::decisions`) not kept yet, by their call,
@@ -831,27 +492,6 @@ impl CardStore {
         summary: TurnSummary,
         at: u64,
     ) -> io::Result<()> {
-        self.add_summary_with(request, summary, at, coin())
-    }
-
-    /// Starts the self-test at `start`, in Unix milliseconds, or ends it with `None` (danielrispler/plotkeeper#130).
-    pub fn set_self_test(&mut self, start: Option<u64>) {
-        self.self_test = start;
-    }
-
-    /// `add_summary_at` with the self-test's coin given: heads is body-only. A turn with a Quiz written in the test's 21
-    /// days gets an arm; any other turn none, so outside the window no turn is body-only.
-    pub fn add_summary_with(
-        &mut self,
-        request: SummaryRequest,
-        summary: TurnSummary,
-        at: u64,
-        heads: bool,
-    ) -> io::Result<()> {
-        let arm = (self.self_test)
-            .filter(|start| (*start..*start + SELF_TEST_MS).contains(&at))
-            .filter(|_| summary.quiz.is_some())
-            .map(|_| if heads { Arm::BodyOnly } else { Arm::QuizFirst });
         let hunk = (request.facts.files.iter())
             .map(|f| format!("--- {}\n{}", f.file.path, f.hunk))
             .collect();
@@ -861,7 +501,7 @@ impl CardStore {
             added_at: at,
             taps: Vec::new(),
             hunk,
-            arm,
+            arm: None,
         });
         self.revision += 1;
         write(&self.path.with_file_name("summaries.json"), &self.summaries)
@@ -942,17 +582,6 @@ impl CardStore {
 
     fn save_facts(&self) -> io::Result<()> {
         write(&self.path.with_file_name("live-facts.json"), &self.facts)
-    }
-
-    /// Card `id`, to record on.
-    fn card_mut(&mut self, id: &str) -> Option<&mut StoredCard> {
-        self.cards.iter_mut().find(|kept| kept.request.id == id)
-    }
-
-    /// Saves the cards after a change, which raises the revision.
-    fn save(&mut self) -> io::Result<()> {
-        self.revision += 1;
-        write(&self.path, &self.cards)
     }
 }
 

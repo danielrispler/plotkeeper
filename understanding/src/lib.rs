@@ -4,7 +4,6 @@
 //! (danielrispler/Falinks#369, decisions 7, 9 and 23).
 use serde::{Deserialize, Serialize};
 use std::{
-    hash::{BuildHasher, Hasher, RandomState},
     io::{Read, Write},
     os::unix::process::CommandExt,
     path::{Path, PathBuf},
@@ -20,50 +19,48 @@ use std::{
 use studio_core::{CardRequest, Session, SummaryRequest, Transcript};
 
 mod brief;
-mod card_code;
 mod drift;
 mod fingerprint;
 mod grounding;
-mod offer;
+mod logic_file;
 pub mod pr_brief;
 pub mod pr_brief_check;
 mod risk;
-mod self_test;
 mod store;
 mod summary;
 mod turn_trees;
 mod turn_writing;
-mod week;
 pub use brief::{
     Answered, DesignLine, OpenItem, OpenKind, answered, design_lines, design_sources, open_items,
     write_design,
 };
-pub use card_code::{CodeRange, pull_code};
 pub use drift::{AGY_FIXTURE_VERSION, AgyVersions, Drift, Versions, drift, dropped_events};
-pub use fingerprint::{Fingerprints, backfilled, fingerprint_changes, live_roots, worktree_root};
-use grounding::words;
-pub use offer::{
-    Changed, Decision, Inputs, Offer, OfferKind, Offers, Outcome, Settled, Shape, TurnFacts,
-    changed_in, decide, is_logic, offer_stop, settle, turns_card,
-};
+pub use fingerprint::{Fingerprints, fingerprint_changes, live_roots, worktree_root};
 pub use risk::{RISK_TIMEOUT, Risk, RiskLevel, RiskNote, RiskNotes, RiskRequest, RiskView, judge};
-pub use self_test::{ArmReport, SelfTest, self_test};
 pub use store::{
-    Arm, Brief, CardStore, CheckResult, Guess, Level, PlacedCard, QuizTap, Rating, Reason, Retest,
-    Row, SessionCards, StoredCard, StoredSummary, Surface, Tap, millis,
+    Arm, Brief, CardStore, CheckResult, Guess, Level, QuizTap, Rating, Reason, Retest, Row,
+    SessionCards, StoredCard, StoredSummary, Surface, Tap, millis,
 };
 pub use summary::{
     Line, LineKind, SummarySetup, TurnSummary, write_agent_summary, write_name, write_summary,
 };
 pub use turn_trees::{
     Hunk, MAX_TURN_FILES, add_hunks, anchor, diff_turn, found_files, hunk, hunk_view, numstat,
-    turn_diffs, turn_facts, turn_hunk, turn_of,
+    turn_diffs, turn_facts, turn_hunk,
 };
 pub use turn_writing::{Core, Effects, TurnWriting, Writer};
-pub use week::{Rate, Ratings, Week, week};
 
-/// A card on a change, in the explanation language; code inside its text is in
-/// backticks. It opens with its quiz; the rest shows when Daniel taps an option.
+/// Lines `from` to `to`, counted from 1 and both included, of a file in a card's end tree, as a card stored before
+/// danielrispler/plotkeeper#348 names them.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CodeRange {
+    pub path: String,
+    pub from: usize,
+    pub to: usize,
+}
+
+/// A card on a change, as the store keeps the ones written before cards were retired (danielrispler/plotkeeper#348): the
+/// frozen samples load it, and none is written now.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Card {
     /// What the change does and why. Cards stored before danielrispler/Falinks#375 call it `answer`.
@@ -97,8 +94,8 @@ pub struct Card {
     pub quiz: Option<Quiz>,
 }
 
-/// A card's multiple-choice question on the change's logic or design (danielrispler/Falinks#369, decision 13), named
-/// apart from an agent's question (`AskUserQuestion`). The writer's key grades Daniel's tap.
+/// A multiple-choice question as the store kept it, on a card or a turn's summary written before the Quiz was retired
+/// (danielrispler/plotkeeper#347). Named apart from an agent's question (`AskUserQuestion`).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Quiz {
     pub text: String,
@@ -114,115 +111,8 @@ pub struct Choice {
     pub why: String,
 }
 
-/// Marks a writer may put on the right option, which would give the answer away (danielrispler/Falinks#517, decision
-/// 14).
-const MARKS: [&str; 7] = ["✅", "✔️", "✔", "✓", "☑️", "(correct)", "(Correct)"];
-
-/// The most words an option has (danielrispler/plotkeeper#118).
-pub const OPTION_WORDS: usize = 10;
-
-impl Quiz {
-    /// The quiz in `value`, its options' marks removed and shuffled with the key and reasons moving
-    /// with them, as the writer places the right one unevenly (danielrispler/Falinks#434, decision 36); or why it is
-    /// rejected (danielrispler/plotkeeper#118, `docs/studio/question-rules.md`): it does not parse, its key names none
-    /// of two or more options, an option has no reason or no `right` mark, the key is not the one
-    /// option marked right, an option has over `OPTION_WORDS` words, or the right option is the
-    /// longest.
-    pub(crate) fn from_value(value: serde_json::Value) -> Result<Quiz, String> {
-        let marked: Vec<Option<bool>> = (value["options"].as_array().into_iter().flatten())
-            .map(|option| option["right"].as_bool())
-            .collect();
-        let mut quiz: Quiz = serde_json::from_value(value).map_err(|e| e.to_string())?;
-        let options = quiz.options.len();
-        if options < 2 || quiz.key >= options {
-            return Err(format!("key {} of {options} options", quiz.key));
-        }
-        if quiz.options.iter().any(|o| o.why.trim().is_empty()) {
-            return Err("an option has no reason".into());
-        }
-        if marked.contains(&None) {
-            return Err("an option is not marked right or wrong".into());
-        }
-        let right: Vec<usize> = (marked.iter().enumerate())
-            .filter(|(_, m)| **m == Some(true))
-            .map(|(i, _)| i)
-            .collect();
-        if right != [quiz.key] {
-            return Err(format!(
-                "its key {} is not the one option marked right ({right:?})",
-                quiz.key
-            ));
-        }
-        for option in &mut quiz.options {
-            let text = MARKS
-                .iter()
-                .fold(option.text.clone(), |t, m| t.replace(m, ""));
-            option.text = text.trim().into();
-        }
-        if let Some(long) = quiz.options.iter().find(|o| words(&o.text) > OPTION_WORDS) {
-            return Err(format!(
-                "an option has {} words: {:?}",
-                words(&long.text),
-                long.text
-            ));
-        }
-        let length = |o: &Choice| o.text.chars().count();
-        let wrong = (quiz.options.iter().enumerate())
-            .filter(|(i, _)| *i != quiz.key)
-            .map(|(_, o)| length(o))
-            .max();
-        if wrong.is_some_and(|wrong| length(&quiz.options[quiz.key]) > wrong) {
-            return Err("its right option is the longest".into());
-        }
-        let right = quiz.options[quiz.key].clone();
-        // Fisher-Yates, on the random keys std gives each hasher.
-        for last in (1..options).rev() {
-            let random = RandomState::new().build_hasher().finish();
-            quiz.options
-                .swap(last, (random % (last as u64 + 1)) as usize);
-        }
-        quiz.key = quiz.options.iter().position(|o| *o == right).unwrap();
-        Ok(quiz)
-    }
-}
-
-impl Card {
-    /// The card in a writer's reply, which must hold one JSON object, perhaps in a code fence. When
-    /// it does not parse, the error is one line for the log. A card whose quiz is missing or
-    /// unusable keeps its explanation, with one line on why it has no quiz.
-    pub fn from_reply(reply: &str) -> Result<(Card, Option<String>), String> {
-        let fail = |error: serde_json::Error| {
-            let head: String = reply.chars().take(300).collect();
-            format!("the card writer's reply does not parse ({error}): {head:?}")
-        };
-        let mut value = parse_object(reply).map_err(fail)?;
-        let quiz = value.get_mut("quiz").map(serde_json::Value::take);
-        let mut card: Card = serde_json::from_value(value).map_err(fail)?;
-        // The writer names ranges, never code: a copy it made anyway is dropped.
-        card.code.clear();
-        let structural = |section: &String| !["", NOT_STRUCTURAL].contains(&section.trim());
-        card.architecture = card.architecture.filter(structural);
-        match Quiz::from_value(quiz.unwrap_or_default()) {
-            Ok(quiz) => {
-                card.quiz = Some(quiz);
-                Ok((card, None))
-            }
-            Err(error) => Ok((card, Some(format!("its quiz is unusable ({error})")))),
-        }
-    }
-}
-
-/// Writes the card on a session's change since its last card.
+/// The writers of the turn: its Goal, Design so far, summaries and names, and Daniel's side questions.
 pub trait CardWriter {
-    /// The writer's reply on `request`'s change, or one line for the log when it gave none. It reads
-    /// the change with `earlier`, the summaries of the earlier cards of the prompt the change belongs
-    /// to, oldest first (danielrispler/Falinks#369, decision 12).
-    fn reply(&self, request: &CardRequest, earlier: &[String]) -> Result<String, String>;
-
-    /// The writer's longer explanation of `card` on `request`'s change, for "explain more" (danielrispler/Falinks#369,
-    /// decision 15), or one line for the log when it gave none.
-    fn more(&self, request: &CardRequest, card: &Card) -> Result<String, String>;
-
     /// The writer's reply with the Goal of a session, or of a worker, from `prompts`, Daniel's or its
     /// spawn's, oldest first (danielrispler/plotkeeper#122), or one line for the log when it gave none.
     /// A writer that writes no goals says so.
@@ -285,57 +175,6 @@ pub trait CardWriter {
         _response: Option<&str>,
     ) -> Result<String, String> {
         Err("this writer writes no summaries".into())
-    }
-}
-
-/// The card on a session's or a worker's change, from `session`'s state, and its Goal (danielrispler/Falinks#369,
-/// decisions 11 and 12; danielrispler/plotkeeper#122). `writer` writes the card on `request` with the
-/// summaries of the earlier cards of its prompt, and it goes in `store`. A request with no change
-/// writes no card. The Goal is written after `stored` runs on the card stored, so the shell sends the
-/// list and the "New card" notice first (danielrispler/Falinks#434, decision 32). The store is not locked while
-/// the writer runs, which takes seconds. Each problem is one line for `log`. Returns whether a card
-/// was added.
-pub fn write_stop(
-    store: &Mutex<CardStore>,
-    writer: &(impl CardWriter + ?Sized),
-    request: CardRequest,
-    session: &Session,
-    stored: impl FnOnce(),
-    mut log: impl FnMut(String),
-) -> bool {
-    let owner = request.owner().to_owned();
-    let earlier = {
-        let store = store.lock().unwrap();
-        let cards = store
-            .cards()
-            .iter()
-            .filter(|kept| kept.request.owner() == owner);
-        let same_prompt =
-            cards.filter(|kept| request.prompt.is_some() && kept.request.prompt == request.prompt);
-        same_prompt.filter_map(summary).collect::<Vec<String>>()
-    };
-    // A session that changed nothing itself gets no card, whatever its workers wrote.
-    if request.change.is_none() {
-        return false;
-    }
-    let Some(mut card) = write_card(writer, &request, &earlier, &mut log) else {
-        return false;
-    };
-    drop_quiz_beside_decision(&request, &mut card);
-    if let Err(e) = store.lock().unwrap().add(request.clone(), card, millis()) {
-        log(format!("save the card store: {e}"));
-    }
-    stored();
-    write_goal(store, writer, &request, session, log);
-    true
-}
-
-/// Keeps `card`'s Quiz off a turn that asks Daniel something (danielrispler/plotkeeper#119, #257): none beside a decision, which
-/// `request` says by how its turn ended and never by the session's state now. The hourly cap is retired
-/// (danielrispler/plotkeeper#347).
-fn drop_quiz_beside_decision(request: &CardRequest, card: &mut Card) {
-    if request.asks {
-        card.quiz = None;
     }
 }
 
@@ -475,11 +314,6 @@ pub(crate) fn once_more<T, E>(
 /// Why a reply gave no goal, for the log.
 const HOLDS_NONE: &str = "the reply holds none";
 
-/// A stored card's summary, when it has one.
-fn summary(kept: &StoredCard) -> Option<String> {
-    Some(kept.card.summary.clone()).filter(|s| !s.is_empty())
-}
-
 /// The Goal in a writer's reply, when it holds one that is not empty, or else why not, for the log.
 fn goal_in(reply: &str) -> Result<String, String> {
     let value = parse_object(reply).unwrap_or_default();
@@ -489,160 +323,11 @@ fn goal_in(reply: &str) -> Result<String, String> {
     }
 }
 
-/// The longer explanation of card `id` in `store`: the one kept, or else one more call to `writer`,
-/// whose text is kept with the card (danielrispler/Falinks#369, decision 15). The store is not locked while the writer
-/// runs, which takes seconds. A writer that gives no text logs one line to `log`, and nothing is kept.
-pub fn explain_more(
-    store: &Mutex<CardStore>,
-    writer: &(impl CardWriter + ?Sized),
-    id: &str,
-    mut log: impl FnMut(String),
-) -> Option<String> {
-    // The lock ends with the statement.
-    let kept = store
-        .lock()
-        .unwrap()
-        .cards()
-        .iter()
-        .find(|kept| kept.request.id == id)
-        .cloned()?;
-    if kept.more.is_some() {
-        return kept.more;
-    }
-    let more = writer
-        .more(&kept.request, &kept.card)
-        .and_then(|text| match text.trim() {
-            "" => Err("the writer's reply is empty".to_owned()),
-            text => Ok(text.to_owned()),
-        });
-    match more {
-        Ok(more) => {
-            if let Err(e) = store.lock().unwrap().more(id, more.clone()) {
-                log(format!("save the card store: {e}"));
-            }
-            Some(more)
-        }
-        Err(line) => {
-            log(format!("no longer explanation on {id}: {line}"));
-            None
-        }
-    }
-}
-
-/// The card on `request` from `writer`'s reply, which is asked once more when it gives no card
-/// (danielrispler/Falinks#369, decision 12). The writer reads `earlier`, the summaries of the
-/// earlier cards of the prompt `request` belongs to. Each problem is one line for `log`: no card
-/// after the retry, or a card with no quiz, which is kept without asking again.
-pub fn write_card(
-    writer: &(impl CardWriter + ?Sized),
-    request: &CardRequest,
-    earlier: &[String],
-    mut log: impl FnMut(String),
-) -> Option<Card> {
-    let card = || {
-        let reply = writer.reply(request, earlier)?;
-        let (mut card, mut problem) = Card::from_reply(&reply)?;
-        // A check's card asks whether the check passes, which its result settles (danielrispler/Falinks#461, decision
-        // 15), so its quiz is the app's, with the writer's reasons.
-        if let Some(check) = &request.check {
-            card.quiz = Some(check_quiz(check, &reply));
-            problem = None;
-        }
-        Ok::<_, String>((card, problem))
-    };
-    // A reply with no card, or whose quiz breaks a rule (danielrispler/plotkeeper#118), is asked for once more; the
-    // second stands, with no quiz when it breaks one again, or the first when the second gives no card.
-    let first = card();
-    match once_more(
-        first,
-        |first| !matches!(first, Ok((_, None))),
-        card,
-        |second, first| second.or(first),
-    ) {
-        Ok((card, problem)) => {
-            if let Some(problem) = problem {
-                log(format!("no quiz on {}: {problem}", request.id));
-            }
-            Some(Card {
-                code: pull_code(&card.ranges, &request.ends),
-                ..card
-            })
-        }
-        Err(line) => {
-            log(format!("no card on {}: {line}", request.id));
-            None
-        }
-    }
-}
-
-/// The quiz on a check's card: whether `check` passes, with the writer's `if_it_passes` and
-/// `if_it_fails` as the reasons, in that order. Its key is "It passes" until the result settles it
-/// (`CardStore::settle`).
-fn check_quiz(check: &str, reply: &str) -> Quiz {
-    let value = parse_object(reply).unwrap_or_default();
-    let why = |field: &str| value[field].as_str().unwrap_or_default().to_owned();
-    let first = check.lines().next().unwrap_or_default();
-    Quiz {
-        text: format!("Will `{first}` pass?"),
-        options: vec![
-            Choice {
-                text: "It passes.".into(),
-                why: why("if_it_passes"),
-            },
-            Choice {
-                text: "It fails.".into(),
-                why: why("if_it_fails"),
-            },
-        ],
-        key: 0,
-    }
-}
-
 /// Writes a fixed card that shows the change, and a fixed goal, so the app can run without
 /// `claude -p`.
 pub struct FakeWriter;
 
 impl CardWriter for FakeWriter {
-    fn reply(&self, request: &CardRequest, _: &[String]) -> Result<String, String> {
-        let paths: Vec<&str> = request
-            .diff()
-            .lines()
-            .filter_map(|line| line.strip_prefix("+++ b/"))
-            .collect();
-        let named = format!("`{}`", paths.join("`, `"));
-        // A change to several files gets a section, so the app shows one.
-        let architecture = match paths.len() {
-            0 | 1 => NOT_STRUCTURAL.into(),
-            _ => format!("Sample architecture section: the change touches {named}."),
-        };
-        let option = |text: &str, why: &str, right: bool| serde_json::json!({ "text": text, "why": why, "right": right });
-        let card = serde_json::json!({
-            "summary": format!("Sample change to {named}"),
-            "explanation": "A sample card from the fake writer, which does not read the code. The change itself is below.",
-            "paths": paths,
-            "ranges": paths.iter().map(|path| serde_json::json!({"path": path, "from": 1, "to": 1})).collect::<Vec<_>>(),
-            "architecture": architecture,
-            "why_it_matters": "Why the change matters goes here, with code inside the text such as `if a <= b {`.",
-            "not_checked": "Not checked: nothing, this is a sample card.",
-            "if_it_passes": "It passes when the change is right: a sample reason from the fake writer.",
-            "if_it_fails": "It fails when the change breaks a test: a sample reason from the fake writer.",
-            "quiz": {
-                "text": format!("What did the agent change in `{}`?", paths.join("`, `")),
-                "options": [
-                    option("What the code below shows.", "Right: the code below is the change itself.", true),
-                    option("Only the docs, without touching the code.", "No: the fake writer does not know what changed.", false),
-                    option("Nothing, it only ran tests.", "No: a card is written only on a change.", false),
-                ],
-                "key": 0,
-            },
-        });
-        Ok(card.to_string())
-    }
-
-    fn more(&self, _: &CardRequest, _: &Card) -> Result<String, String> {
-        Ok("A longer sample explanation from the fake writer, which does not read the code. How the changed code works goes here, step by step, and why it was done this way, with code such as `if a <= b {`.".into())
-    }
-
     fn goal(&self, prompts: &[&str]) -> Result<String, String> {
         let goal = format!(
             "A sample goal from the fake writer, which read {} prompts.",
@@ -748,7 +433,7 @@ impl Availability {
     fn failed(&self, error: &std::io::Error) {
         if !self.off.swap(true, Ordering::SeqCst) {
             self.tell(Some(format!(
-                "Cards and briefs are off: `claude` did not start ({error}). Install Claude Code, or fix its path."
+                "Summaries and briefs are off: `claude` did not start ({error}). Install Claude Code, or fix its path."
             )));
         }
     }
@@ -820,24 +505,6 @@ impl ClaudeWriter {
         Ok(Self::new(find_claude(shell.as_ref()), folder))
     }
 
-    /// The `claude -p` run for one change's card, read with the summaries of the prompt's `earlier`
-    /// cards, with the prompt it reads on standard input, as are all the runs below.
-    pub fn command(&self, request: &CardRequest, earlier: &[String]) -> (Command, String) {
-        let earlier: String = match earlier {
-            [] => "none\n".into(),
-            summaries => summaries.iter().map(|s| format!("- {s}\n")).collect(),
-        };
-        // A check's card is on what the check verifies against the change (danielrispler/Falinks#461, decision 15).
-        let instructions = match &request.check {
-            Some(check) => format!("{CHECK}\nThe check's command:\n{check}\n"),
-            None => PROMPT.into(),
-        };
-        let head = format!(
-            "{instructions}\nThe summaries of this prompt's earlier cards, oldest first:\n{earlier}\n"
-        );
-        self.claude(&head, request.diff())
-    }
-
     /// The `claude -p` run that writes a session's Goal from Daniel's `prompts`. Past `MAX_CHANGE`,
     /// the oldest prompts are cut first, and the newest is shortened rather than cut.
     pub fn goal_command(&self, prompts: &[&str]) -> (Command, String) {
@@ -900,12 +567,6 @@ impl ClaudeWriter {
         ))
     }
 
-    /// The `claude -p` run for "explain more" on `card`, which the writer reads with its change.
-    pub fn more_command(&self, request: &CardRequest, card: &Card) -> (Command, String) {
-        let head = format!("{MORE}\nThe card's explanation:\n{}\n", card.explanation);
-        self.claude(&head, request.diff())
-    }
-
     /// The `claude -p` run for Daniel's side `question` on `item`, read with its turn's `intentions`.
     /// The item is cut at `MAX_CHANGE`, as a response may be long.
     pub fn ask_command(
@@ -923,16 +584,6 @@ impl ClaudeWriter {
             "{ASK}\nThe intentions of the turn, oldest first:\n{intentions}\n\
              <item>\n{item}\n</item>\n\nThe developer's question:\n{question}"
         ))
-    }
-
-    /// The `claude -p` run on `head`, then `change`, cut at `MAX_CHANGE`.
-    fn claude(&self, head: &str, change: &str) -> (Command, String) {
-        let kept = &change[..change.floor_char_boundary(MAX_CHANGE)];
-        let cut = match change.len() - kept.len() {
-            0 => String::new(),
-            bytes => format!("\n[{bytes} more bytes cut]"),
-        };
-        self.run(&format!("{head}\nChange:\n{kept}{cut}"))
     }
 
     /// The `claude -p` run on `prompt`. Without the two variables and without `--bare`, `claude`
@@ -1025,15 +676,6 @@ impl ClaudeWriter {
 }
 
 impl CardWriter for ClaudeWriter {
-    /// Runs `claude -p`, which takes seconds, so the shell calls it off its log thread.
-    fn reply(&self, request: &CardRequest, earlier: &[String]) -> Result<String, String> {
-        self.stdout(self.command(request, earlier))
-    }
-
-    fn more(&self, request: &CardRequest, card: &Card) -> Result<String, String> {
-        self.stdout(self.more_command(request, card))
-    }
-
     fn goal(&self, prompts: &[&str]) -> Result<String, String> {
         self.stdout(self.goal_command(prompts))
     }
@@ -1078,9 +720,6 @@ impl CardWriter for ClaudeWriter {
     }
 }
 
-/// The writer's architecture section on a change that is not structural.
-const NOT_STRUCTURAL: &str = "structural: none";
-
 /// The most of a change the writer gets, and of a brief rewrite's input: 64 KiB. The lines that
 /// matter fit, and a huge new file or log costs no more.
 const MAX_CHANGE: usize = 64 << 10;
@@ -1097,78 +736,6 @@ macro_rules! explanation_language {
     };
 }
 pub(crate) use explanation_language;
-
-/// The Quiz's rules (danielrispler/plotkeeper#118), one paragraph in the card writer's instructions. `headline` names what the writer's own headline is called in that prompt.
-macro_rules! quiz_rules {
-    ($headline:literal) => {
-        concat!(
-            "The quiz asks why this design over the alternative, what must stay true, or what happens in a concrete \
-             case in this codebase. It never asks what the agent did, a name or syntax, or bookkeeping. Its stem \
-             cannot be answered from ",
-            $headline,
-            " or from the evidence line (the recorded files, their line counts and the checks), which the developer \
-             sees beside it: if they answer it, ask something else or leave the quiz out. Each wrong option comes from \
-             the alternative that was considered, the previous behaviour, or a common wrong model of the code. Each \
-             option has at most 10 words, and the right option is never the longest. Every option carries its reason \
-             (`why`) and whether it is right (`right`): exactly one option is right, and the key is its place. Never \
-             mark the right option in its text, with a sign, an emoji or a word: the options are shown in another \
-             order."
-        )
-    };
-}
-
-/// The card writer's instructions. Its input is the change, the summaries of the prompt's earlier
-/// cards and the brief, not the payloads (v0 note, proposal 8).
-const PROMPT: &str = concat!(
-    r#"You write one card that teaches a developer about the change a coding agent made to his code while he waited on it, since the previous card. The card opens with a multiple-choice question on the change's logic or design. He taps an option, and the card shows at once whether he was right, why each option is right or wrong, and the explanation.
-
-Answer from the input below: the summaries of the earlier cards on the same prompt of his, and the diff. Use only this input: do not use tools or read files.
-
-"#,
-    explanation_language!(),
-    r#"
-
-Reply with one JSON object and nothing else:
-{"summary": string, "explanation": string, "paths": [string], "ranges": [{"path": string, "from": number, "to": number}], "why_it_matters": string, "not_checked": string, "architecture": string, "quiz": {"text": string, "options": [{"text": string, "why": string, "right": boolean}], "key": number}}
-- summary: what the change did, in one short line.
-- explanation: what the change does and why, in at most three sentences.
-- paths: the files the change touched.
-- ranges: the lines of the change that matter most, as at most 3 of {"path", "from", "to"}: a file of the change and the first and last line, counted from 1, in the file as the change leaves it (the diff's + side), at most 12 lines each. Name the lines, never write them: the studio reads them from git. A range of lines the file does not have is dropped.
-- why_it_matters: what the change does for the code, in one or two sentences.
-- not_checked: one thing the diff does not show.
-- architecture: when the change is structural, a short section on how it changes the code's structure, before and after, and why: modules, types, interfaces or files added, removed, moved or split, or a change in which parts call or depend on which. Read it with the earlier cards' summaries, so that a structural change spread over several cards counts. Otherwise exactly "structural: none".
-- quiz.text: the quiz's question, under the rules below. Never ask whether a command, test or check will pass.
-- quiz.options: 3 or 4 options, each {"text", "why", "right"}. why: one line on why that option is right or wrong; the options are shown in another order, so never refer to an option by its letter or place. right: true for the one right option, false for the others.
-- quiz.key: the place of the right option in quiz.options, counting from 0.
-
-"#,
-    quiz_rules!("your `summary`"),
-    r#""#
-);
-
-/// The card writer's instructions for a check's card (danielrispler/Falinks#461, decision 15), written while the check
-/// runs: on what the check verifies against the change so far. The app asks whether it passes.
-const CHECK: &str = concat!(
-    r#"A coding agent just started a check, a command that tests or verifies its code, which usually runs for minutes. You write one card that teaches the developer who waits on it what this check verifies against the change the agent made since the previous card, so he can guess whether it will pass. The card asks him "Will it pass?"; once the check ends, it shows whether he was right and your two reasons.
-
-Answer from the input below: the check's command, the summaries of the earlier cards on the same prompt of his, and the diff. Use only this input: do not use tools or read files. You do not know the check's result.
-
-"#,
-    explanation_language!(),
-    r#"
-
-Reply with one JSON object and nothing else:
-{"summary": string, "explanation": string, "paths": [string], "why_it_matters": string, "not_checked": string, "architecture": string, "if_it_passes": string, "if_it_fails": string}
-- summary: what the change did, in one short line.
-- explanation: what the check runs and what of the change it verifies, in at most three sentences.
-- paths: the files the change touched.
-- why_it_matters: what the check's result tells about the change, in one or two sentences.
-- not_checked: one thing in the change the check does not verify.
-- architecture: when the change is structural, a short section on how it changes the code's structure, before and after, and why. Otherwise exactly "structural: none".
-- if_it_passes: one line on what a pass would show about the change.
-- if_it_fails: one line on the likeliest reason in the change it could fail.
-"#
-);
 
 /// The writer's instructions for a session's Goal (danielrispler/plotkeeper#122): from Daniel's prompts
 /// only, so it names what he wants done and not what the agent did.
@@ -1197,21 +764,6 @@ Answer from the input below: each line is `[id] text`. Use only this input: do n
     r#"
 
 Reply with one JSON object and nothing else: {"design": [{"text": string, "cite": string}]}, where cite is an id exactly as in the input, without the brackets.
-"#
-);
-
-/// The writer's instructions for "explain more" (danielrispler/Falinks#369, decision 15): one more call on the card's
-/// change, which also reads the card's explanation, so it goes deeper instead of repeating it.
-const MORE: &str = concat!(
-    r#"A developer read a card that explains a change a coding agent made to his code, and asked for more. Explain the change in more depth than the card: how the changed code works, step by step, and why it was done this way and not another. Do not repeat the card.
-
-Answer from the change below. Use only this input: do not use tools or read files. When the change below is not a diff, explain only what it says: do not invent code you were not shown.
-
-"#,
-    explanation_language!(),
-    r#"
-
-Reply with the explanation only, in at most three short paragraphs: no JSON and no heading.
 "#
 );
 

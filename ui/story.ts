@@ -1,9 +1,9 @@
 // The story rail, on the window's left (danielrispler/Falinks#574). One header line: the verdict and the phase, with the
 // times and the model on hover, and a "⋯" menu. Then "now": the open question, docked, or else the
-// newest card; the current intention, boxed; the latest turn's summary. Below, a feed of turns,
-// newest first, each with its prompt, summary, cards, questions, subagents,
+// newest summary; the current intention, boxed; the latest turn's summary. Below, a feed of turns,
+// newest first, each with its prompt, summary, questions, subagents,
 // checks and folded response. "Ask" sits on a file, a failed check, a subagent line and the Headline. A subagent's view shows its own line,
-// questions, brief and cards in one block.
+// questions and brief in one block.
 
 import { modelLine, reports } from "./capabilities.js";
 import { logo, logoKey, noContextNote } from "./logos.js";
@@ -16,7 +16,7 @@ import { agentState, sessionName, showsLanded } from "./list.js";
 import { closePane, openHere, refreshHome } from "./panes.js";
 import { blockedRequestFor, openDecision, type Ask } from "./answer.js";
 import { blockedElement, docksInDock, fillCardRisk, riskLine, typeRetry } from "./blocked.js";
-import { briefNodes, cardLine, cardsFor, openCard, quizAllowed, quizOpen, rowCards, unseenRow } from "./cards.js";
+import { briefNodes } from "./cards.js";
 import { type Banner, bannerElement, bannerFor, bannerLives } from "./banner.js";
 import { evidenceElement, hasEvidence } from "./evidence.js";
 import { railBriefRow } from "./rail-brief.js";
@@ -39,8 +39,6 @@ import {
   type Selection,
   type SessionState,
   type Session,
-  type PlacedCard,
-  type StoredCard,
   type Subagent,
   type Turn,
   type SummaryLine,
@@ -120,7 +118,7 @@ export function showView(selected: Selection | null) {
   element("tool").textContent = session.shell
     ? "A plain terminal"
     : session.status_only
-    ? "Status only: another agent, with no steps, intention, cards or brief"
+    ? "Status only: another agent, with no steps, intention or brief"
     : (step?.tool ?? (agent === null ? session.returned : null) ?? "No step yet");
   const [detail, fullDetail] = shortPaths(step?.detail ?? "");
   element("detail").textContent = detail;
@@ -238,12 +236,11 @@ export function headlineOf(summary: TurnSummary | null, message: string | null):
 }
 
 // A folded turn's line (danielrispler/plotkeeper#117): Daniel's prompt (its first line, which the style cuts to fit) and the
-// Headline, with two marks: a Quiz he has not answered, and a check that ended failed. A check's status is its last run's,
-// so a failure the agent fixed leaves no mark.
-export type FoldedLine = { prompt: string; headline: string | null; unanswered: boolean; failed: boolean };
-export function foldedLine(turn: Pick<Turn, "prompt" | "checks">, headline: string | null, unanswered: boolean): FoldedLine {
+// Headline, with one mark: a check that ended failed. A check's status is its last run's, so a failure the agent fixed leaves no mark.
+export type FoldedLine = { prompt: string; headline: string | null; failed: boolean };
+export function foldedLine(turn: Pick<Turn, "prompt" | "checks">, headline: string | null): FoldedLine {
   const prompt = turn.prompt.split("\n").map((line) => line.trim()).find(Boolean) ?? "No prompt";
-  return { prompt, headline, unanswered, failed: turn.checks.some((check) => check.status === "failed") };
+  return { prompt, headline, failed: turn.checks.some((check) => check.status === "failed") };
 }
 
 // What "now" holds in each state: one thing per state. While running, what Daniel asked and the intention, boxed.
@@ -278,17 +275,14 @@ function showIntention(story: Session["transcript"] | null) {
 // another agent's status-only row (danielrispler/Falinks#560).
 export const storyOf = (session: Session, agent: unknown) => (agent === null && !session.status_only ? session.transcript : null);
 
-// What the rail draws for `selected`: its latest turn, which "now" tells, and the feed. Every card is inside its turn. A status-only row
-// (danielrispler/Falinks#560) has no turns or cards to show.
+// What the rail draws for `selected`: its latest turn, which "now" tells, and the feed. A status-only row
+// (danielrispler/Falinks#560) has no turns to show.
 // `fed`: the blocked commands the dock does not hold, which the feed places (danielrispler/plotkeeper#297).
-export function railOf({ session, agent }: Selection, all: StoredCard[], placed: PlacedCard[] = [], fed: BlockedCommand[] = []) {
+export function railOf({ session, agent }: Selection, fed: BlockedCommand[] = []) {
   if (session.status_only) return { latest: null, blocks: [] };
-  const cards = all;
   const own = agent === null;
   const turns = own ? session.turns : [];
   const blocks = feedTurns(turns, {
-    cards,
-    placed: own ? placed : [],
     // A subagent's view: its session's subagents are not its own.
     agents: own ? session.agents : [],
     questions: session.questions.filter((question) => question.agent === agent),
@@ -297,7 +291,8 @@ export function railOf({ session, agent }: Selection, all: StoredCard[], placed:
   return { latest: own ? (turns.at(-1) ?? null) : null, blocks };
 }
 
-// When the event card `id` was written at: the part after its `@`, in Unix ms (the core's `card_time`).
+// When the event `id` was written at: the part after its `@`, in Unix ms (the core's `card_time`). A design line's citation may name a
+// card stored before cards were retired.
 export const cardTime = (id: string) => Number(id.slice(id.lastIndexOf("@") + 1)) || 0;
 
 // The index of the turn that runs at `at`: the latest that started at or before it, else null.
@@ -312,42 +307,32 @@ export function turnAt(turns: Pick<Turn, "started_at">[], at: number): number | 
 export type FeedTurn = {
   index: number | null;
   turn: Turn | null;
-  cards: StoredCard[];
   agents: Subagent[];
   questions: Question[];
   // The blocked commands with no button, in the turn of their latest step (danielrispler/plotkeeper#297).
   blocked: BlockedCommand[];
 };
 
-// The feed (danielrispler/Falinks#574): one block per turn, newest first, each holding the cards written in it (by their
-// id's time), and the subagents and questions the core put in it. What has no turn goes in
-// one last block, so nothing is lost.
+// The feed (danielrispler/Falinks#574): one block per turn, newest first, each holding the subagents and questions the core put in it.
+// What has no turn goes in one last block, so nothing is lost.
 export function feedTurns(
   turns: Turn[],
-  { cards, placed = [], agents, questions, blocked = [] }: Pick<FeedTurn, "cards" | "agents" | "questions"> & { placed?: PlacedCard[]; blocked?: BlockedCommand[] },
+  { agents, questions, blocked = [] }: Pick<FeedTurn, "agents" | "questions"> & { blocked?: BlockedCommand[] },
 ): FeedTurn[] {
   const blocks: FeedTurn[] = [...turns.map((turn, index) => ({ index, turn })), { index: null, turn: null }].map((b) => ({
     ...b,
-    cards: [],
     agents: [],
     questions: [],
     blocked: [],
   }));
   const at = (index: number | null) => blocks[index !== null && index < turns.length ? index : turns.length];
   // Each list is oldest first; the blocks show the newest first.
-  for (const card of [...cards].reverse()) at(turnAt(turns, cardTime(card.request.id))).cards.push(card);
-  // A worker's card is in the turn the core placed it in (danielrispler/plotkeeper#212), else where its time falls.
-  for (const { card, turn } of placed) {
-    const block = at(turn ?? turnAt(turns, cardTime(card.request.id)));
-    block.cards.push(card);
-    block.cards.sort((a, b) => cardTime(b.request.id) - cardTime(a.request.id));
-  }
   for (const agent of [...agents].sort((a, b) => b.started_at - a.started_at)) at(agent.turn).agents.push(agent);
   for (const question of [...questions].reverse()) at(question.turn).questions.push(question);
   // A blocked command's card is in the turn running when its retry started, else when it was blocked.
   for (const card of [...blocked].reverse()) at(turnAt(turns, card.run_at ?? card.at)).blocked.push(card);
   const rest = blocks.pop()!;
-  const empty = !rest.cards.length && !rest.agents.length && !rest.questions.length && !rest.blocked.length;
+  const empty = !rest.agents.length && !rest.questions.length && !rest.blocked.length;
   return [...blocks.reverse(), ...(empty ? [] : [rest])];
 }
 
@@ -490,21 +475,13 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
     const row = railBriefRow(session, drawFeed);
     if (row) node.append(row);
   }
-  // The Body shows whole. A card's Quiz is never beside a decision: a turn with an `ask` line, or in Needs you, has none open;
-  // `open` and `ask` lines always show, and `why` and `reported` wait while a card's Quiz is open.
-  const allowed = quizAllowed(lines, now !== null && session.state === "needs_you");
-  const cards = cardsFor(block.cards, allowed);
-  const held = cards.some(quizOpen);
-  const always = lines.filter((l) => l.kind === "open" || l.kind === "ask");
-  const shown = held ? always : lines;
-  if (shown.length) {
+  // The Body shows whole.
+  if (lines.length) {
     const list = document.createElement("ul");
     list.className = "body-lines";
-    list.append(...shown.map(bodyLine));
+    list.append(...lines.map(bodyLine));
     node.append(list);
   }
-  const cardTurn = index !== null && turn?.files ? { session: session.id, index, files: turn.files.files, ended: turn.ended_at !== null } : null;
-  node.append(...cards.map((card) => cardLine(card, cardTurn)));
   node.append(...block.questions.filter((q) => q.answer === "not_answered").map(questionElement));
   node.append(...blockedElements(session, block.blocked));
   if (block.agents.length) {
@@ -561,9 +538,7 @@ export function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
     const summary = turn.id ? summaryOf(turn.id) : null;
     const { headline } = headlineOf(summary, turn.message);
     const open = opened.has(key);
-    const allowed = quizAllowed(headlineOf(summary, turn.message).body, false);
-    const cards = cardsFor(block.cards, allowed);
-    const line = foldedLine(turn, headline, allowed && block.cards.some(quizOpen));
+    const line = foldedLine(turn, headline);
     const button = pressable(document.createElement("button"), open, () => {
       if (opened.has(key)) opened.delete(key);
       else opened.add(key);
@@ -574,25 +549,19 @@ export function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
     button.title = open ? "Fold this turn" : "Unfold this turn";
     button.setAttribute("aria-expanded", String(open));
     button.append(
-      ...(line.unanswered ? [text("span", "●", "mark quiz-open")] : []),
       fullTitle(text("span", line.prompt, "prompt"), turn.prompt.trim() || line.prompt),
       fullTitle(text("span", line.headline ?? "", "headline-text"), line.headline),
       ...(line.failed ? [text("span", "✕", "mark check-failed")] : []),
     );
-    if (line.unanswered) button.querySelector(".quiz-open")!.setAttribute("title", "A quiz is open");
     if (line.failed) button.querySelector(".check-failed")!.setAttribute("title", "A check ended failed");
-    // An unseen card of a folded turn keeps a title row (danielrispler/plotkeeper#211); the open turn shows its cards itself.
-    const turnIndex = block.index!;
-    const cardTurn = turn.files ? { session: session.id, index: turnIndex, files: turn.files.files, ended: turn.ended_at !== null } : null;
-    const rows = open ? [] : rowCards(cards).map((stored) => unseenRow(stored, cardTurn));
-    node.replaceChildren(button, ...rows, ...(open ? [...turnContent(session, block, null).children] : []));
+    node.replaceChildren(button, ...(open ? [...turnContent(session, block, null).children] : []));
   };
   draw();
   return node;
 }
 
 // The index of the turn a design line's citation `id` names (danielrispler/plotkeeper#123): the turn with that id, or else
-// the turn a card of that id was written in, null when neither is in `turns`.
+// the turn a card of that id was written in (an older line may cite one), null when neither is in `turns`.
 export function citedTurn(turns: Pick<Turn, "id" | "started_at">[], id: string): number | null {
   const own = turns.findIndex((turn) => turn.id === id);
   return own >= 0 ? own : turnAt(turns, cardTime(id));
@@ -606,7 +575,6 @@ export function openCitation(id: string) {
   const index = citedTurn(session.turns, id);
   if (index === null) return;
   opened.add(`${session.id} ${index} turn`);
-  openCard(id);
   drawFeed();
   const node = element("feed").children[session.turns.length - 1 - index];
   (node as HTMLElement | undefined)?.scrollIntoView?.({ block: "start" });
@@ -615,11 +583,9 @@ export function openCitation(id: string) {
 const turnElement = (session: Session, block: FeedTurn, now: Now | null) =>
   now || block.index === null ? turnContent(session, block, now) : foldedTurn(session, block);
 
-// Draws "now" and the feed from the selection and the cards the shell last sent.
+// Draws "now" and the feed from the selection and the brief the shell last sent.
 export function drawFeed() {
   const selected = studio.selection;
-  const { recent, older, workers } = studio.cards;
-  const all = [...older, ...recent];
   if (selected === null) {
     drawNow(null, null);
     element("banner-slot").replaceChildren();
@@ -628,7 +594,7 @@ export function drawFeed() {
   }
   const session = selected.session;
   const own = selected.agent === null;
-  const { latest, blocks } = railOf(selected, all, workers, fedCards(session, selected.agent));
+  const { latest, blocks } = railOf(selected, fedCards(session, selected.agent));
   const now = drawNow(session, latest);
   // The banner sits above the newest turn, and holds the Brief while it shows.
   const last = session.turns.at(-1);

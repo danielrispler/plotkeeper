@@ -159,9 +159,8 @@ test("a file row opens its hunk in place, opens the editor at the first changed 
   row.find("button")[0].listeners.click();
   await new Promise((resolve) => setTimeout(resolve));
   reads();
-  // Opening a hunk is told to the self-test (#130), then the hunk is read.
-  assert.deepEqual(calls[0], ["hunk_opened", { session: "s2", turn: 7 }]);
-  assert.deepEqual(calls[1], ["turn_file_hunk", { session: "s2", turn: 7, root: "/r", path: "a.rs", from: null }]);
+  // The hunk is read, and no self-test is told of it (#348).
+  assert.deepEqual(calls[0], ["turn_file_hunk", { session: "s2", turn: 7, root: "/r", path: "a.rs", from: null }]);
   assert.match(row.find("pre")[0].text, /\+b/);
   assert.doesNotMatch(row.find("pre")[0].text, /more lines/);
   // "12 more lines" opens the turn's whole diff (#131).

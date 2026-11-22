@@ -77,7 +77,6 @@ impl fmt::Debug for Studio {
             roots: _,
             check_lists: _,
             log_end,
-            ended,
             durations,
             rows,
             summaries_on_open: _,
@@ -94,7 +93,6 @@ impl fmt::Debug for Studio {
             .field("awaiting", awaiting)
             .field("held", held)
             .field("log_end", log_end)
-            .field("ended", ended)
             .field("durations", &durations.sorted())
             .field("rows", &rows.iter().collect::<BTreeMap<_, _>>())
             .field("mismatched", &mismatched.iter().collect::<BTreeMap<_, _>>())

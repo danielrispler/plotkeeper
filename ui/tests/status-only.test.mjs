@@ -34,13 +34,11 @@ test("a status-only row shows its name and \"status only\", and no step, intenti
   assert.equal(secondLine(claude), "No step yet");
 });
 
-test("the rail shows a status-only row no intention or card", () => {
+test("the rail shows a status-only row no intention or turn", () => {
   const row = { ...codex("your_turn"), transcript: { context: null, intention: "Left over" } };
-  const cards = [{ request: { id: "t-7@1" } }];
   assert.equal(storyOf(row, null), null);
-  assert.deepEqual(railOf({ session: row, agent: null }, cards), { latest: null, blocks: [] });
-  // A Claude session's rail keeps its intention and its cards.
+  assert.deepEqual(railOf({ session: row, agent: null }), { latest: null, blocks: [] });
+  // A Claude session's rail keeps its intention.
   const claude = { ...row, status_only: false };
   assert.equal(storyOf(claude, null).intention, "Left over");
-  assert.equal(railOf({ session: claude, agent: null }, cards).blocks[0].cards[0], cards[0]);
 });

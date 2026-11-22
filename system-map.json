@@ -24,7 +24,7 @@
     },
     {
       "id": "understanding", "name": "Understanding", "caption": "Writes what you read, and keeps it",
-      "description": "Decides what a change is worth telling you, asks the writer for it, and stores it: cards, turn summaries, briefs, PR briefs (the facts, the writer's reply and the code checks on it), the offers record and the risk notes of blocked commands.",
+      "description": "Decides what a change is worth telling you, asks the writer for it, and stores it: turn summaries, session briefs, PR briefs (the facts, the writer's reply and the code checks on it) and the risk notes of blocked commands. Cards, as a turn's or a worker's explanation, are retired; the cards stored before stay readable.",
       "tier": "core", "paths": ["understanding/"]
     },
     {
@@ -94,12 +94,12 @@
   "flows": [
     { "id": "turn-writing", "name": "Turn writing",
       "hops": [
-        { "link": "core-shell", "text": "Core sees the turn end and the shell asks for a card." },
+        { "link": "core-shell", "text": "Core sees the turn end and the shell asks for its summary." },
         { "link": "shell-understanding", "text": "The shell passes the request on; understanding queues it for the session." },
-        { "link": "understanding-writer", "text": "Understanding asks the writer for the card." },
-        { "link": "understanding-writer", "text": "The writer's card comes back and understanding stores it." },
-        { "link": "shell-understanding", "text": "Understanding tells the shell the card is stored." },
-        { "link": "shell-window", "text": "The shell updates the list and sends the notice." }
+        { "link": "understanding-writer", "text": "Understanding asks the writer for the summary, and for the session's Goal and Design so far." },
+        { "link": "understanding-writer", "text": "The writer's reply comes back and understanding stores it." },
+        { "link": "shell-understanding", "text": "Understanding tells the shell the brief changed." },
+        { "link": "shell-window", "text": "The shell updates the list." }
       ] }
   ]
 }
