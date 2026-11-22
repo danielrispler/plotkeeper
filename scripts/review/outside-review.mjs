@@ -1,0 +1,335 @@
+// The outside review (#279, #284): Gemini, through `agy`, reads a risky diff before its PR is opened.
+//
+//   node scripts/review/outside-review.mjs [--force] [--model <id>] [--since <sha>] [--out <folder>]
+//
+// It reviews the commits of HEAD since the merge-base with `origin/main`, or, for round 2, `--since`'s
+// commit and those after it. Its first line is the verdict: `reviewed: <n> findings`,
+// `skipped: <reason>` or `review unavailable: <reason>`. It never fails a PR: whatever stops the
+// review, it says why and exits 0. The findings go to a JSON file in `--out` (the session's
+// scratchpad; the system's temp folder without it), never into the repository.
+//
+// The reviewer cannot write, run a command or read outside its throwaway folder: `deny-hook.mjs`
+// denies every tool but a read inside that folder (#283). So the script hands it the diff and the
+// file list as files, and checks afterwards that the reviewed tree is still clean.
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+export const DEFAULT_MODEL = "gemini-4-neon-medium";
+/** The turn-writing job queue: each session's jobs, and what runs behind one that panics. */
+export const JOB_QUEUE = "understanding/src/turn_writing.rs";
+/** The files `CardStore::open` reads at start; one that fails to parse stops Studio's start. */
+const STORED = /\b(cards-v2|briefs|live-facts|decisions|agent-summaries|summaries|retests)\.json\b/;
+const CODE = /\.(rs|ts|mjs|js)$/;
+export const SKIPPED = "skipped: no risk match";
+const TIMEOUT_MINUTES = 15;
+
+export const options = (argv) => {
+  const opts = { force: false, model: DEFAULT_MODEL, since: null, out: tmpdir() };
+  for (let i = 0; i < argv.length; i++) {
+    const name = argv[i].replace(/^--/, "");
+    if (argv[i] === "--force") opts.force = true;
+    else if (["--model", "--since", "--out"].includes(argv[i]) && argv[i + 1]) opts[name] = argv[++i];
+    else throw new Error(`unknown or incomplete option ${argv[i]}`);
+  }
+  return opts;
+};
+
+// Each hunk of a unified diff: its file after the change, the lines of that file it adds or removes
+// at, and its text, context included. A deleted file has no lines after the change.
+const hunks = (diff) => {
+  const out = [];
+  let path = null;
+  let hunk = null;
+  let old = 0;
+  let neu = 0;
+  let at = 0;
+  for (const line of diff.split("\n")) {
+    if (old > 0 || neu > 0) {
+      hunk.text += line + "\n";
+      if (line.startsWith("+")) (hunk.changed.push(at), at++, neu--);
+      else if (line.startsWith("-")) (hunk.changed.push(at), old--);
+      else if (!line.startsWith("\\")) (at++, old--, neu--);
+      continue;
+    }
+    const header = /^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
+    if (header) {
+      old = Number(header[1] ?? 1);
+      neu = Number(header[3] ?? 1);
+      at = Number(header[2]);
+      hunk = { path, changed: [], text: "" };
+      if (path) out.push(hunk);
+    } else if (line.startsWith("+++ ")) path = line === "+++ /dev/null" ? null : line.slice("+++ b/".length);
+  }
+  return out;
+};
+
+// A line of Rust with its strings, character literals and line comments blanked, so a brace inside
+// one opens and closes nothing.
+const bare = (line) => line.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)'/g, "").replace(/\/\/.*$/, "");
+
+// The structs and enums of a Rust file that derive Deserialize, each from its first attribute or doc
+// line to its closing line. It reads the text, not the grammar: a type that implements Deserialize
+// by hand, or gets its derive from a macro, is not seen.
+const deserialized = (source) => {
+  const lines = source.split("\n");
+  const types = [];
+  for (let i = 0; i < lines.length; i++) {
+    const item = /^\s*(?:pub(?:\([^)]*\))?\s+)?(?:struct|enum)\s+(\w+)/.exec(bare(lines[i]));
+    if (!item) continue;
+    let start = i;
+    while (start > 0) {
+      const above = lines[start - 1].trim();
+      if (above.startsWith("//") || above.startsWith("#[")) start--;
+      else if (above.endsWith(")]")) {
+        // The last line of an attribute that spans lines: up to the line that opens it.
+        let open = start - 1;
+        while (open >= 0 && !lines[open].trim().startsWith("#[")) open--;
+        if (open < 0) break;
+        start = open;
+      } else break;
+    }
+    const attributes = lines.slice(start, i).filter((l) => !l.trim().startsWith("//")).join("\n");
+    const derives = [...attributes.matchAll(/derive\s*\(([^)]*)\)/g)];
+    if (!derives.some((d) => /\bDeserialize\b/.test(d[1]))) continue;
+    let end = i;
+    let depth = 0;
+    let opened = false;
+    scan: for (; end < lines.length; end++) {
+      for (const c of bare(lines[end])) {
+        if (c === "{") (depth++, (opened = true));
+        else if (c === "}") depth--;
+        if ((opened && depth === 0) || (!opened && c === ";")) break scan;
+      }
+    }
+    types.push({ name: item[1], start: start + 1, end: end + 1 });
+  }
+  return types;
+};
+
+// Why this diff gets a review, or that it gets none. `facts.fileAt(path)` is a file after the
+// change; `facts.subIssues()` is how many sub-issues the branch's issue has, asked last.
+export const decide = (opts, facts) => {
+  if (opts.force) return { review: true, why: "--force" };
+  if (opts.since) return { review: true, why: `round 2: the commits since ${opts.since}` };
+  const why = new Set();
+  const types = new Map();
+  for (const hunk of hunks(facts.diff)) {
+    if (!CODE.test(hunk.path)) continue;
+    // A type in a test file is a test's own helper: no stored file or wire holds it.
+    if (hunk.path.endsWith(".rs") && !/(^|\/)tests\//.test(hunk.path)) {
+      if (!types.has(hunk.path)) types.set(hunk.path, deserialized(facts.fileAt(hunk.path)));
+      for (const type of types.get(hunk.path))
+        if (hunk.changed.some((line) => type.start <= line && line <= type.end))
+          why.add(`a type that derives Deserialize changed: ${type.name} in ${hunk.path}`);
+    }
+    const stored = STORED.exec(hunk.text);
+    if (stored) why.add(`code naming ${stored[0]} changed: ${hunk.path}`);
+    if (hunk.path === JOB_QUEUE) why.add(`the turn-writing job queue changed: ${JOB_QUEUE}`);
+  }
+  if (why.size === 0 && facts.subIssues() > 0) why.add("its issue is a spec");
+  return why.size ? { review: true, why: [...why].join("; ") } : { review: false, line: SKIPPED };
+};
+
+/** The findings' shape, enforced by `agy --json-schema`. */
+const SCHEMA = {
+  type: "object",
+  properties: {
+    findings: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          file: { type: "string" },
+          line: { type: "integer" },
+          summary: { type: "string" },
+          failure_scenario: { type: "string" },
+        },
+        required: ["file", "line", "summary", "failure_scenario"],
+      },
+    },
+  },
+  required: ["findings"],
+};
+
+// What the reviewer is asked. It names files by absolute path, the only form its read tool takes,
+// and holds no at-sign: a file mentioned that way may be read with no tool call, past the hook.
+export const brief = (folder) => `You are reviewing a code change for defects, before its pull request is opened.
+
+You can change nothing. Your only working tool is read_file, and it takes absolute paths only. Do not try to write a file or run a command: those calls are denied, and so is a read outside ${folder}.
+
+- The change, as a unified diff: ${folder}/review/diff.patch
+- The changed files, one absolute path a line: ${folder}/review/changed.txt
+- Every file of the repository, one absolute path a line: ${folder}/review/tree.txt
+- The repository as it is after the change: ${folder}/repo
+
+Read the whole diff first. Then read the changed files, and the code that calls them or that they call, until you can say how the change behaves.
+
+Look for defects that reading the diff alone would miss:
+- Stored data, both ways. Does the new code still read every file the previous code wrote? A field added to a type that derives Deserialize with no serde default, or a renamed field or variant, fails on an existing file. Can the previous code read what the new code writes? A new variant or status value fails there.
+- Queued work. When a job crashes, panics or is skipped, what happens to the jobs queued behind it?
+- State, ordering and concurrency across components: a lock held across a call that takes it again, events that arrive in another order, a value read before it is written.
+- A test that cannot fail, or that asserts less than its name says.
+
+Report only defects you can tie to a line the change adds or edits. Give each one the file's path relative to the repository, the line in the file after the change, one sentence saying what is wrong, and a concrete failure scenario: the input or state, and the wrong result. No style remarks and no praise. An empty list is a valid answer.
+`;
+
+/** How `agy` is run for the review: hidden from Studio, cut at 15 minutes, answering in SCHEMA. */
+export const agyCall = (opts, { schema, prompt, env }) => {
+  const { STUDIO_TERMINAL_ID: _, ...rest } = env;
+  const args = ["--model", opts.model, "--print-timeout", `${TIMEOUT_MINUTES}m`];
+  return { args: [...args, "--output-format", "json", "--json-schema", schema, "-p", prompt], env: rest };
+};
+
+// The verdict of a finished `agy` run. `reads` is how many reads the hook allowed: with none, the
+// reviewer saw no file (a broken hook denies every tool), so its empty answer is no review.
+export const outcome = ({ status, missing, stdout, stderr, reads }) => {
+  const unavailable = (reason) => ({ line: `review unavailable: ${reason}`, exit: 0 });
+  if (missing) return unavailable("agy is not installed");
+  if (status === 3) return unavailable(`the review was cut at ${TIMEOUT_MINUTES} minutes`);
+  let result = null;
+  try {
+    result = JSON.parse(stdout);
+  } catch {}
+  const said = `${stderr}\n${result?.status === "SUCCESS" ? "" : stdout}`;
+  if (/quota|resource.exhausted|rate.limit/i.test(said)) return unavailable("the Gemini quota is used up");
+  const findings = result?.structured_output?.findings;
+  if (status !== 0 || result?.status !== "SUCCESS" || !Array.isArray(findings)) {
+    const tail = said.trim().split("\n").at(-1).slice(0, 200);
+    return unavailable(`agy exited with status ${status}${tail ? `: ${tail}` : ""}`);
+  }
+  if (!reads) return unavailable("the reviewer could read no file; see the hook's log");
+  return {
+    line: `reviewed: ${findings.length} finding${findings.length === 1 ? "" : "s"}`,
+    exit: 0,
+    findings,
+    tokens: result.usage?.total_tokens ?? null,
+    seconds: result.duration_seconds ?? null,
+  };
+};
+
+/** The Gemini quota left, by window, as fractions, from `agy -p /usage --output-format json`. */
+export const quota = (stdout) => {
+  try {
+    const groups = JSON.parse(stdout).command.data.groups;
+    const gemini = groups.find((g) => g.name === "Gemini Models");
+    return Object.fromEntries(gemini.buckets.map((b) => [b.window, b.remaining_fraction]));
+  } catch {
+    return null;
+  }
+};
+
+const main = () => {
+  const opts = options(process.argv.slice(2));
+  const run = (command, args, more = {}) =>
+    execFileSync(command, args, { encoding: "utf8", maxBuffer: 1 << 28, stdio: ["ignore", "pipe", "pipe"], ...more });
+  const git = (...args) => run("git", args).trimEnd();
+  const notes = [];
+  try {
+    git("fetch", "--quiet", "origin", "main");
+  } catch {
+    notes.push("note: `git fetch` failed; the diff is against the origin/main already here");
+  }
+  const head = git("rev-parse", "HEAD");
+  const base = opts.since ? git("rev-parse", `${opts.since}^`) : git("merge-base", "HEAD", "origin/main");
+  const diff = git("diff", "--no-color", "--no-ext-diff", base, head);
+  if (!diff) return console.log(`skipped: no change between ${base.slice(0, 9)} and HEAD`);
+  const before = git("status", "--porcelain");
+  if (before) notes.push("note: uncommitted changes are not reviewed; the review reads HEAD");
+  const subIssues = () => {
+    const issue = /^issue-(\d+)-/.exec(git("rev-parse", "--abbrev-ref", "HEAD"))?.[1];
+    if (!issue) return 0;
+    try {
+      return Number(run("gh", ["api", `repos/{owner}/{repo}/issues/${issue}`, "--jq", ".sub_issues_summary.total"]));
+    } catch {
+      notes.push(`note: could not ask GitHub whether #${issue} is a spec`);
+      return 0;
+    }
+  };
+  const decided = decide(opts, { diff, fileAt: (path) => git("show", `${head}:${path}`), subIssues });
+  if (!decided.review) return console.log([decided.line, ...notes].join("\n"));
+
+  const env = agyCall(opts, { env: process.env }).env;
+  const left = () => quota(spawnSync("agy", ["-p", "/usage", "--output-format", "json"], { env, encoding: "utf8" }).stdout);
+  const folder = realpathSync(mkdtempSync(join(tmpdir(), "outside-review-")));
+  const repo = join(folder, "repo");
+  const log = join(folder, "hook.log");
+  let result;
+  let quotaBefore = null;
+  try {
+    git("worktree", "add", "--quiet", "--detach", repo, head);
+    const absolute = (paths) => paths.split("\n").filter(Boolean).map((p) => join(repo, p)).join("\n") + "\n";
+    mkdirSync(join(folder, "review"));
+    writeFileSync(join(folder, "review/diff.patch"), diff + "\n");
+    writeFileSync(join(folder, "review/changed.txt"), absolute(git("diff", "--name-only", "--diff-filter=d", base, head)));
+    writeFileSync(join(folder, "review/tree.txt"), absolute(git("ls-tree", "-r", "--name-only", head)));
+    writeFileSync(join(folder, "review/schema.json"), JSON.stringify(SCHEMA));
+    const hook = join(import.meta.dirname, "deny-hook.mjs");
+    const command = [process.execPath, hook, folder, log].map((part) => `'${part}'`).join(" ");
+    mkdirSync(join(folder, ".agents"));
+    writeFileSync(
+      join(folder, ".agents/hooks.json"),
+      JSON.stringify({ readonly: { PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command, timeout: 10 }] }] } }),
+    );
+    quotaBefore = left();
+    const call = agyCall(opts, { schema: join(folder, "review/schema.json"), prompt: brief(folder), env: process.env });
+    const ran = spawnSync("agy", call.args, {
+      cwd: folder,
+      env: call.env,
+      encoding: "utf8",
+      maxBuffer: 1 << 28,
+      timeout: (TIMEOUT_MINUTES + 2) * 60_000,
+    });
+    let decisions = [];
+    try {
+      decisions = readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    } catch {}
+    result = outcome({
+      status: ran.error?.code === "ETIMEDOUT" ? 3 : ran.status,
+      missing: ran.error?.code === "ENOENT",
+      stdout: ran.stdout ?? "",
+      stderr: ran.stderr ?? "",
+      reads: decisions.filter((d) => d.decision === "allow").length,
+    });
+    result.denied = decisions.filter((d) => d.decision === "deny").map(({ tool, path, command }) => ({ tool, path, command }));
+    const dirty = git("-C", repo, "status", "--porcelain");
+    if (dirty) notes.push(`warning: the review changed its throwaway tree, so the deny hook let a write through:\n${dirty}`);
+  } catch (error) {
+    result = { line: `review unavailable: ${String(error.message ?? error).split("\n")[0]}`, exit: 0 };
+  } finally {
+    try {
+      git("worktree", "remove", "--force", repo);
+    } catch {}
+    rmSync(folder, { recursive: true, force: true });
+    try {
+      git("worktree", "prune");
+    } catch {}
+  }
+  if (git("status", "--porcelain") !== before) notes.push("warning: the reviewed checkout changed during the review");
+  const quotaAfter = result.findings ? left() : null;
+  const percent = (fraction) => (typeof fraction === "number" ? `${Math.round(fraction * 100)}%` : "?");
+  const lines = [result.findings ? `${result.line} (${opts.model}; ${decided.why})` : result.line];
+  if (result.findings) {
+    const out = join(opts.out, `outside-review-${head.slice(0, 9)}${opts.since ? "-round2" : ""}.json`);
+    const report = { model: opts.model, base, head, why: decided.why, ...result, quotaBefore, quotaAfter, notes };
+    delete report.line;
+    delete report.exit;
+    mkdirSync(opts.out, { recursive: true });
+    writeFileSync(out, JSON.stringify(report, null, 2) + "\n");
+    lines.push(`findings: ${out}`);
+    const windows = Object.keys(quotaAfter ?? quotaBefore ?? {});
+    const quotas = windows.map((w) => `${w} ${percent(quotaBefore?.[w])} to ${percent(quotaAfter?.[w])}`).join(", ");
+    lines.push(`cost: ${(result.seconds / 60).toFixed(1)} min, ${result.tokens} tokens; Gemini quota left: ${quotas || "unknown"}`);
+  }
+  console.log([...lines, ...notes].join("\n"));
+};
+
+if (process.argv[1] === import.meta.filename) {
+  try {
+    main();
+  } catch (error) {
+    // Whatever stops the review, the PR goes ahead with the reason.
+    console.log(`review unavailable: ${String(error.message ?? error).split("\n")[0]}`);
+  }
+}
