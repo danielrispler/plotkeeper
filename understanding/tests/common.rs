@@ -4,7 +4,7 @@
 use std::sync::Mutex;
 use studio_core::{CardRequest, SummaryRequest};
 use studio_understanding::{
-    Card, CardWriter, ClaudeWriter, FakeWriter, RetestAsk, SummarySetup, TurnSummary,
+    Card, CardWriter, ClaudeWriter, FakeWriter, RetestAsk, Risk, SummarySetup, TurnSummary,
 };
 
 pub type Reply = Result<String, String>;
@@ -58,6 +58,8 @@ pub struct Kept {
     calls: Mutex<Vec<&'static str>>,
     requests: Mutex<Vec<CardRequest>>,
     asked: Mutex<Vec<Asking>>,
+    /// The command and folder of each risk note asked for.
+    judged: Mutex<Vec<(String, String)>>,
     inputs: Mutex<Vec<String>>,
 }
 
@@ -73,6 +75,8 @@ pub struct Scripted {
     pub summarize: Answer,
     pub summarize_agent: Answer,
     pub name: Answer,
+    /// The judge's raw replies, read as the real writer reads them; the subject is the command.
+    pub risk: Answer,
     /// What it keeps of its calls, for `calls`, `requests`, `asked` and `inputs`.
     pub kept: Kept,
 }
@@ -89,6 +93,7 @@ impl Scripted {
             summarize: slot("summarize"),
             summarize_agent: slot("summarize_agent"),
             name: slot("name"),
+            risk: slot("risk"),
             kept: Kept::default(),
         }
     }
@@ -120,6 +125,11 @@ impl Scripted {
     /// The side questions it was asked.
     pub fn asked(&self) -> Vec<Asking> {
         self.kept.asked.lock().unwrap().clone()
+    }
+
+    /// The command and folder of each risk note it was asked for.
+    pub fn judged(&self) -> Vec<(String, String)> {
+        self.kept.judged.lock().unwrap().clone()
     }
 
     /// What the real `claude -p` would have been given for each summary it wrote, as text.
@@ -211,5 +221,19 @@ impl CardWriter for Scripted {
     fn name(&self, setup: &SummarySetup, prompt: &str, response: Option<&str>) -> Reply {
         let fake = || FakeWriter.name(setup, prompt, response);
         self.answer("name", &self.name, prompt, fake)
+    }
+
+    fn risk(&self, command: &str, folder: &str) -> Result<Risk, String> {
+        self.kept
+            .judged
+            .lock()
+            .unwrap()
+            .push((command.into(), folder.into()));
+        let fake = || {
+            let risk = FakeWriter.risk(command, folder)?;
+            Ok(serde_json::json!({ "level": risk.level, "line": risk.line }).to_string())
+        };
+        let reply = self.answer("risk", &self.risk, command, fake)?;
+        Risk::from_reply(&reply)
     }
 }

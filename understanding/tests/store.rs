@@ -3,10 +3,10 @@
 
 use crate::common::{Answer, Scripted};
 use std::sync::Mutex;
-use studio_core::{Base, CardRequest, Change, LiveFacts, Output, Studio};
+use studio_core::{Base, BlockedStatus, CardRequest, Change, LiveFacts, Output, State, Studio};
 use studio_understanding::{
-    Card, CardStore, CardWriter, FakeWriter, Guess, Level, Rating, Reason, StoredCard, Surface,
-    explain_more, write_card,
+    Ask, Card, CardStore, CardWriter, FakeWriter, Guess, Level, Rating, Reason, Risk, RiskLevel,
+    RiskNotes, RiskView, StoredCard, Surface, explain_more, judge, write_card,
 };
 
 /// The card on an edit of `path`, named `id`, from a base with `README.md` already edited.
@@ -1746,4 +1746,332 @@ fn a_summary_stored_before_the_checks_grew_fields_still_opens() {
     let kept = &reopened.summaries()[0].request.facts.checks[0];
     assert_eq!(kept.runs[0].statement, "");
     assert_eq!(kept.worktree, "");
+}
+
+// The risk notes (danielrispler/plotkeeper#298): a store of their own, keyed by the session and a hash of the command and its folder.
+
+const RISK_SESSION: &str = "5c1e7a42-0b9d-4f36-8a15-3d2e9c6b7f08";
+const PUSH: &str = "git push origin feature-x";
+const REPO: &str = "/work/repo";
+
+/// A hook line of the risk session.
+fn risk_line(session: &str, name: &str, at: u64, extra: serde_json::Value) -> String {
+    let mut line = serde_json::json!({
+        "session_id": session, "hook_event_name": name, "cwd": REPO, "studio_received_ms": at,
+    });
+    line.as_object_mut()
+        .unwrap()
+        .extend(extra.as_object().unwrap().clone());
+    line.to_string()
+}
+
+/// The lines in which auto mode blocks `command` in `cwd` as call `id`.
+fn blocks(session: &str, id: &str, command: &str, cwd: &str) -> String {
+    let extra = serde_json::json!({ "tool_name": "Bash", "tool_use_id": id, "prompt_id": "p-1",
+        "tool_input": { "command": command }, "reason": "[Unauthorized Access]", "permission_mode": "auto" });
+    let line = risk_line(session, "PermissionDenied", 3_000, extra);
+    let mut line: serde_json::Value = serde_json::from_str(&line).unwrap();
+    line["cwd"] = cwd.into();
+    line.to_string()
+}
+
+/// Daniel's Allow of call `id` from the card.
+fn allows(session: &str, id: &str, command: &str) -> String {
+    let extra = serde_json::json!({ "studio_asked_by": "PermissionDenied", "tool_name": "Bash", "tool_use_id": id,
+        "tool_input": { "command": command }, "studio_answer": { "decision": "allow" } });
+    risk_line(session, "StudioAnswer", 4_000, extra)
+}
+
+/// The session `lines` make, after its start and a prompt.
+fn risk_session(lines: &[String]) -> studio_core::Session {
+    let mut all = vec![
+        risk_line(
+            RISK_SESSION,
+            "SessionStart",
+            1_000,
+            serde_json::json!({ "source": "startup" }),
+        ),
+        risk_line(
+            RISK_SESSION,
+            "UserPromptSubmit",
+            2_000,
+            serde_json::json!({ "prompt": "Go.", "prompt_id": "p-1" }),
+        ),
+    ];
+    all.extend(lines.iter().cloned());
+    let studio = Studio::replayed(&all);
+    studio.session(RISK_SESSION).unwrap().clone()
+}
+
+fn push_blocked() -> studio_core::Session {
+    risk_session(&[blocks(RISK_SESSION, "toolu_1", PUSH, REPO)])
+}
+
+fn judged(level: RiskLevel, line: &str) -> Result<Risk, String> {
+    Ok(Risk {
+        level,
+        line: line.into(),
+    })
+}
+
+fn the_ask() -> Ask {
+    Ask {
+        session: RISK_SESSION.into(),
+        command: PUSH.into(),
+        cwd: REPO.into(),
+    }
+}
+
+fn arrived(call: &str, level: RiskLevel, line: &str, at: u64) -> RiskView {
+    RiskView::Arrived {
+        call: call.into(),
+        level,
+        line: line.into(),
+        at,
+    }
+}
+
+#[test]
+fn a_note_is_kept_across_a_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("risk-notes.json");
+    let session = push_blocked();
+    let mut notes = RiskNotes::open(path.clone()).unwrap();
+    assert_eq!(notes.asks(&session), [the_ask()]);
+    notes
+        .keep(
+            &the_ask(),
+            judged(RiskLevel::Medium, "Pushes a branch."),
+            7_000,
+        )
+        .unwrap();
+
+    let mut reopened = RiskNotes::open(path).unwrap();
+
+    assert_eq!(
+        reopened.views(&session),
+        [arrived(
+            "toolu_1",
+            RiskLevel::Medium,
+            "Pushes a branch.",
+            7_000
+        )]
+    );
+    // Judged before: not asked for again after the restart.
+    assert_eq!(reopened.asks(&session), []);
+}
+
+#[test]
+fn a_card_whose_call_id_changed_still_has_its_note() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut notes = RiskNotes::open(dir.path().join("risk-notes.json")).unwrap();
+    notes
+        .keep(&the_ask(), judged(RiskLevel::High, "Pushes."), 7_000)
+        .unwrap();
+    // Allowed, then blocked again: the card's call id is the second block's.
+    let again = risk_session(&[
+        blocks(RISK_SESSION, "toolu_1", PUSH, REPO),
+        allows(RISK_SESSION, "toolu_1", PUSH),
+        blocks(RISK_SESSION, "toolu_2", PUSH, REPO),
+    ]);
+    let [card] = &again.blocked_commands[..] else {
+        panic!("one card: {:?}", again.blocked_commands);
+    };
+    assert_eq!(card.call, "toolu_2");
+
+    assert_eq!(
+        notes.views(&again),
+        [arrived("toolu_2", RiskLevel::High, "Pushes.", 7_000)]
+    );
+    assert_eq!(notes.asks(&again), []);
+}
+
+#[test]
+fn two_cards_of_one_command_and_folder_in_a_session_share_one_note_and_one_ask() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut notes = RiskNotes::open(dir.path().join("risk-notes.json")).unwrap();
+    let session = risk_session(&[
+        blocks(RISK_SESSION, "toolu_1", PUSH, REPO),
+        blocks(RISK_SESSION, "toolu_2", PUSH, REPO),
+        blocks(RISK_SESSION, "toolu_3", PUSH, "/work/other"),
+    ]);
+    assert_eq!(session.blocked_commands.len(), 3);
+
+    let asks = notes.asks(&session);
+    assert_eq!(
+        asks.iter().map(|a| a.cwd.as_str()).collect::<Vec<_>>(),
+        [REPO, "/work/other"]
+    );
+    notes
+        .keep(&asks[0], judged(RiskLevel::Low, "Pushes."), 7_000)
+        .unwrap();
+
+    assert_eq!(
+        notes.views(&session),
+        [
+            arrived("toolu_1", RiskLevel::Low, "Pushes.", 7_000),
+            arrived("toolu_2", RiskLevel::Low, "Pushes.", 7_000),
+            RiskView::Reading {
+                call: "toolu_3".into()
+            },
+        ]
+    );
+    // Another session's card of the same command and folder has no note of this one's.
+    let other = "9e0b5f13-d72a-4c6e-b8f4-61a3c2d9e807";
+    let elsewhere = {
+        let lines = [
+            risk_line(
+                other,
+                "SessionStart",
+                1_000,
+                serde_json::json!({ "source": "startup" }),
+            ),
+            risk_line(
+                other,
+                "UserPromptSubmit",
+                2_000,
+                serde_json::json!({ "prompt": "Go.", "prompt_id": "p-1" }),
+            ),
+            blocks(other, "toolu_9", PUSH, REPO),
+        ];
+        Studio::replayed(&lines).session(other).unwrap().clone()
+    };
+    assert_eq!(notes.views(&elsewhere), []);
+    assert_eq!(notes.asks(&elsewhere).len(), 1);
+}
+
+#[test]
+fn a_failure_is_not_kept_it_reads_failed_for_the_run_and_the_next_run_asks_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("risk-notes.json");
+    let session = push_blocked();
+    let mut notes = RiskNotes::open(path.clone()).unwrap();
+    notes.asks(&session);
+    let before = notes.revision();
+
+    notes
+        .keep(
+            &the_ask(),
+            Err("`claude -p` ran past 15s and was stopped".into()),
+            7_000,
+        )
+        .unwrap();
+
+    assert_eq!(
+        notes.views(&session),
+        [RiskView::Failed {
+            call: "toolu_1".into()
+        }]
+    );
+    assert!(notes.revision() > before, "the window is sent the failure");
+    // Not asked for again in this run.
+    assert_eq!(notes.asks(&session), []);
+    // Nothing was written, so a restart has no note and asks again.
+    let mut reopened = RiskNotes::open(path).unwrap();
+    assert_eq!(reopened.views(&session), []);
+    assert_eq!(reopened.asks(&session), [the_ask()]);
+}
+
+#[test]
+fn a_note_is_asked_for_once_per_run_only_for_a_card_with_buttons_and_never_for_an_ended_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut notes = RiskNotes::open(dir.path().join("risk-notes.json")).unwrap();
+    let session = push_blocked();
+
+    assert_eq!(notes.asks(&session), [the_ask()]);
+    assert_eq!(notes.asks(&session), [], "once per command per run");
+    // The card shows before the ask is answered.
+    assert_eq!(
+        notes.views(&session),
+        [RiskView::Reading {
+            call: "toolu_1".into()
+        }]
+    );
+
+    // An Allowed card has no button, and a declined one is closed.
+    let mut notes = RiskNotes::open(dir.path().join("other.json")).unwrap();
+    let allowed = risk_session(&[
+        blocks(RISK_SESSION, "toolu_1", PUSH, REPO),
+        allows(RISK_SESSION, "toolu_1", PUSH),
+    ]);
+    assert_eq!(allowed.blocked_commands[0].status, BlockedStatus::Allowed);
+    assert_eq!(notes.asks(&allowed), []);
+    assert_eq!(notes.views(&allowed), []);
+
+    // A session that ended asks for none.
+    let ended = risk_session(&[
+        blocks(RISK_SESSION, "toolu_1", PUSH, REPO),
+        risk_line(RISK_SESSION, "SessionEnd", 5_000, serde_json::json!({})),
+    ]);
+    assert_eq!(ended.state, State::Ended);
+    assert_eq!(notes.asks(&ended), []);
+}
+
+#[test]
+fn judging_keeps_the_note_with_the_time_without_holding_the_store_and_a_failure_logs_one_line_without_the_command()
+ {
+    let dir = tempfile::tempdir().unwrap();
+    let notes = std::sync::Arc::new(Mutex::new(
+        RiskNotes::open(dir.path().join("risk-notes.json")).unwrap(),
+    ));
+    let session = push_blocked();
+    let asks = notes.lock().unwrap().asks(&session);
+    let free = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let writer = {
+        let (notes, free) = (notes.clone(), free.clone());
+        let mut writer = Scripted::fake();
+        writer.risk = Answer::run(move |_| {
+            // The store answers other calls while the judge runs.
+            free.store(
+                notes.try_lock().is_ok(),
+                std::sync::atomic::Ordering::SeqCst,
+            );
+            Some(Ok(
+                r#"{"level": "medium", "line": "Pushes a branch."}"#.into()
+            ))
+        });
+        writer
+    };
+
+    judge(&notes, &writer, &asks[0], 7_000, |line| panic!("{line}"));
+
+    assert_eq!(writer.judged(), [(PUSH.to_string(), REPO.to_string())]);
+    assert!(free.load(std::sync::atomic::Ordering::SeqCst));
+    assert_eq!(
+        notes.lock().unwrap().views(&session),
+        [arrived(
+            "toolu_1",
+            RiskLevel::Medium,
+            "Pushes a branch.",
+            7_000
+        )]
+    );
+
+    // A writer that answers nothing readable, and one that writes no risk notes, each log one line.
+    let mut bare = Scripted::bare();
+    let unreadable = [
+        Answer::ok("Shall I read the file?"),
+        Answer::err("`claude -p` failed"),
+    ];
+    for (n, answer) in unreadable.into_iter().enumerate() {
+        let other = format!("{PUSH} {n}");
+        let session = risk_session(&[blocks(RISK_SESSION, "toolu_9", &other, REPO)]);
+        let ask = notes.lock().unwrap().asks(&session).remove(0);
+        bare.risk = answer;
+        let mut lines = Vec::new();
+
+        judge(&notes, &bare, &ask, 8_000, |line| lines.push(line));
+
+        let [line] = &lines[..] else {
+            panic!("one line: {lines:?}");
+        };
+        assert_eq!(line.lines().count(), 1, "{line}");
+        assert!(!line.contains(&other), "{line}");
+        assert_eq!(
+            notes.lock().unwrap().views(&session),
+            [RiskView::Failed {
+                call: "toolu_9".into()
+            }]
+        );
+    }
 }
