@@ -207,8 +207,8 @@ fn rust_tokens(text: &str) -> Vec<Tok> {
                 i += 1;
             }
             let word: String = chars[start..i].iter().collect();
-            let raw_string =
-                matches!(word.as_str(), "r" | "br") && matches!(chars.get(i), Some('"' | '#'));
+            let raw_string = matches!(word.as_str(), "r" | "br" | "cr")
+                && matches!(chars.get(i), Some('"' | '#'));
             if raw_string {
                 let mut hashes = 0;
                 while chars.get(i) == Some(&'#') {

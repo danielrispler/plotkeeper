@@ -381,6 +381,20 @@ fn a_module_file_under_tests_or_bin_finds_its_submodules_in_its_own_folder() {
     }
 }
 
+#[test]
+fn a_raw_c_string_hides_a_quote_before_a_mod_line() {
+    // Read as an ordinary string, `cr#"a " b"#` ends at its inner quote and swallows `mod b;`.
+    let found = rust_edges(
+        &[
+            ("k/src/lib.rs", "const S: &CStr = cr#\"a \" b\"#;\nmod b;\n"),
+            ("k/src/b.rs", ""),
+        ],
+        &["k/src/lib.rs"],
+        &["k/src/b.rs"],
+    );
+    assert_eq!(found, ["alpha>beta"]);
+}
+
 fn ts_edges(files: &[(&str, &str)]) -> Vec<String> {
     let map = split_map(&["typescript-imports"], &["alpha/"], &["beta/"]);
     let (_dir, root) = tree(&map, files);
