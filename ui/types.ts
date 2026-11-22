@@ -458,7 +458,10 @@ export type MapState = {
   fog: Record<string, Fog>;
   // CI on the default branch as last read through `gh` (`ci_laws.rs`); null until a read has finished.
   ci: Ci | null;
+  // The PRs ready for review (open, not a draft), as last asked (`prs.rs`); the Map view's tray lists them.
+  ready: ReadyPr[];
 };
+export type ReadyPr = { number: number; title: string; head: string };
 export type Fog = "thin" | "thick";
 // What a finished run of the default branch's CI says of the laws: `unknown` (nothing to read), `passed`, `broken` (a test that backs a
 // law failed), `not-run` (it failed, but not in a test that backs a law), `unreadable` (it failed and its log cannot be read).

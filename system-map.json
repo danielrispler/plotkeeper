@@ -87,7 +87,7 @@
     { "id": "delete-keeps-live-terminal", "on": "window", "backing": "check",
       "text": "Delete never ends a terminal another live session uses." },
     { "id": "colour-only-for-needs-you", "on": "window", "backing": "trust",
-      "text": "Colour is only for what needs you." },
+      "text": "Loud colour is only for what needs you and for a broken law." },
     { "id": "terminals-outlive-app", "on": "terminal-daemon", "backing": "trust",
       "text": "Terminals outlive the app." }
   ],
