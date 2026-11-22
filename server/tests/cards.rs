@@ -136,6 +136,69 @@ fn a_turn_older_than_the_window_gets_no_card_at_start() {
 }
 
 #[test]
+fn a_turn_older_than_the_window_gets_its_card_when_daniel_opens_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let ended = now() - 3 * 60 * 60 * 1000;
+    let log = log_with_turn(dir.path(), ended);
+    let (app, _) = app_with(&log, Arc::new(FakeWriter));
+    Follower::start(&app, &log).pass();
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(card_ids(&app), Vec::<String>::new());
+
+    let id = format!("s1@{ended}");
+    studio_server::turn_summary(&app, id.clone()).unwrap();
+    studio_server::turn_summary(&app, id.clone()).unwrap();
+
+    assert_eq!(wait_for_cards(&app), [id]);
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(
+        card_ids(&app).len(),
+        1,
+        "opening again writes no second card"
+    );
+}
+
+// @law: replay-never-rewrites
+#[test]
+fn replaying_a_log_twice_over_a_store_changes_no_card_summary_or_answer() {
+    let dir = tempfile::tempdir().unwrap();
+    let ended = now() - 60_000;
+    let log = log_with_turn(dir.path(), ended);
+    let id = format!("s1@{ended}");
+    // The first start writes the turn's card; Daniel answers its quiz, and its turn has a summary.
+    let (app, _) = app_with(&log, Arc::new(FakeWriter));
+    Follower::start(&app, &log).pass();
+    assert_eq!(wait_for_cards(&app), std::slice::from_ref(&id));
+    {
+        let mut store = app.cards.lock().unwrap();
+        store.guess(&id, 0, ended + 5).unwrap();
+        let request = studio_core::SummaryRequest {
+            session_id: "s1".into(),
+            id: id.clone(),
+            ..Default::default()
+        };
+        let summary = serde_json::from_value(json!({"summary": "Added two files"})).unwrap();
+        store.add_summary_at(request, summary, ended + 10).unwrap();
+    }
+    drop(app);
+    let files =
+        || ["cards-v2.json", "summaries.json"].map(|name| fs::read(dir.path().join(name)).unwrap());
+    let before = files();
+    assert!(String::from_utf8_lossy(&before[0]).contains("\"guess\""));
+    assert!(String::from_utf8_lossy(&before[1]).contains("Added two files"));
+
+    for _ in 0..2 {
+        let (app, _) = app_with(&log, Arc::new(FakeWriter));
+        Follower::start(&app, &log).pass();
+        std::thread::sleep(Duration::from_secs(1));
+        assert_eq!(card_ids(&app), std::slice::from_ref(&id));
+        drop(app);
+    }
+
+    assert_eq!(files(), before);
+}
+
+#[test]
 fn a_writer_that_is_not_logged_in_shows_what_to_do_on_the_page_and_clears_when_it_works() {
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("events.jsonl");

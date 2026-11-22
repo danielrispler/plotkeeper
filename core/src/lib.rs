@@ -3721,14 +3721,21 @@ impl Studio {
         catch_up: CatchUp,
     ) -> Vec<Backfill> {
         let since = now.saturating_sub(catch_up.window_ms);
-        let ended = std::mem::take(&mut self.ended).into_iter();
-        let ended = ended.filter(|b| card_time(&b.request.id) >= since);
-        let mut found: Vec<Backfill> = ended
+        let (mut found, mut rest): (Vec<Backfill>, Vec<Backfill>) = std::mem::take(&mut self.ended)
+            .into_iter()
             .filter(|b| cards.iter().all(|c| c.id != b.request.id))
-            .collect();
+            .partition(|b| card_time(&b.request.id) >= since);
         found.sort_by_key(|b| std::cmp::Reverse(card_time(&b.request.id)));
-        found.truncate(catch_up.max);
+        // Outside the window or the cap, a turn waits for Daniel to open it ([`Studio::backfill_on_open`]).
+        rest.extend(found.split_off(catch_up.max.min(found.len())));
+        self.ended = rest;
         found
+    }
+
+    /// The card request of turn `id`, which ended while the app was down and got no card at start, once: Daniel opened it.
+    pub fn backfill_on_open(&mut self, id: &str) -> Option<Backfill> {
+        let at = self.ended.iter().position(|b| b.request.id == id)?;
+        Some(self.ended.remove(at))
     }
 
     /// The trees the hook recorded of worktree `root` for turn `turn` of `session`: its start, and its end once the
