@@ -1,6 +1,6 @@
 # Settings files
 
-`settings.json` and `keymap.json` sit in plotkeeper's data folder, `~/Library/Application Support/plotkeeper/`, in Zed's format: JSON with comments and trailing commas (danielrispler/Falinks#524). plotkeeper reloads them when either is saved. A file that does not parse is reported in the notice line, and the last good one stays in effect. Missing keys keep their defaults; a key of the wrong type is reported in the same line and keeps its default.
+`settings.json` and `keymap.json` sit in plotkeeper's data folder, `~/Library/Application Support/plotkeeper/`, in Zed's format: JSON with comments and trailing commas (danielrispler/Falinks#524). The desktop app reloads them when either is saved; `plotkeeper` reads them at start, so restart it after editing one. A file that does not parse is reported in the notice line, and the last good one stays in effect. Missing keys keep their defaults; a key of the wrong type is reported in the same line and keeps its default.
 
 The page has no settings page, no project list and no terminal (danielrispler/plotkeeper#326): you edit the files in your editor. The keys it reads:
 

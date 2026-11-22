@@ -324,7 +324,10 @@ const showWriterNotice = (notice: string | null) => {
 };
 listen<string | null>("writer-notice", showWriterNotice);
 // A page opened after the writer failed has missed the event (danielrispler/plotkeeper#328).
-invoke("writer_notice").then((notice) => notice && showWriterNotice(notice));
+// The desktop shell has no such command, so a rejection is no error there.
+invoke("writer_notice")
+  .then((notice) => notice && showWriterNotice(notice))
+  .catch(() => {});
 invoke("cards").then(showCards);
 // The answer hook waits for the card only while its session shows (danielrispler/Falinks#461, decision 16).
 startWatching(() => showView(studio.selection));
