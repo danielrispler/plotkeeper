@@ -1,6 +1,7 @@
 //! A recorded log through the server with a fake writer (danielrispler/plotkeeper#328): a turn that ended while plotkeeper was
 //! stopped gets its card inside the catch-up window and none outside it, and a writer failure reaches the page with what to do.
 
+mod isolated_home;
 use serde_json::json;
 use std::{
     fs,
@@ -43,6 +44,7 @@ fn now() -> u64 {
 }
 
 fn app_with(log: &Path, writer: studio_understanding::Writer) -> (Arc<App>, Arc<Heard>) {
+    isolated_home::set();
     let cards = Arc::new(Mutex::new(CardStore::open_beside(log).unwrap()));
     let notes = Arc::new(Mutex::new(RiskNotes::open_beside(log).unwrap()));
     let app = App::open_with(log, cards, notes, writer, Arc::new(NoEffects)).unwrap();

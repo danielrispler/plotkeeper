@@ -1,6 +1,7 @@
 //! The read loop over a recorded log into a fake sink (danielrispler/plotkeeper#324): what it sends, when it sends it again,
 //! and where its focus input comes from.
 
+mod isolated_home;
 use std::{
     io::Write,
     path::Path,
@@ -58,6 +59,7 @@ impl Effects for NoEffects {
 }
 
 fn app(log: &Path) -> (Arc<App>, Arc<FakeSink>) {
+    isolated_home::set();
     let cards = Arc::new(Mutex::new(CardStore::open_beside(log).unwrap()));
     let notes = Arc::new(Mutex::new(RiskNotes::open_beside(log).unwrap()));
     let app = App::open_with(log, cards, notes, Arc::new(FakeWriter), Arc::new(NoEffects)).unwrap();
