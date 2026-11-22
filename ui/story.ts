@@ -15,7 +15,7 @@ import { encode, request } from "./daemon.js";
 import { agentState, sessionName, showsLanded } from "./list.js";
 import { closePane, openHere, refreshHome } from "./panes.js";
 import { blockedRequestFor, openDecision, type Ask } from "./answer.js";
-import { blockedElement, docksInDock, typeRetry } from "./blocked.js";
+import { blockedElement, docksInDock, fillRisk, riskLine, typeRetry } from "./blocked.js";
 import { beginFeed, briefNodes, cardLine, cardsFor, endFeed, markShown, openCard, quizOpen, rowCards, unseenRow } from "./cards.js";
 import { type Banner, bannerElement, bannerFor, bannerLives } from "./banner.js";
 import { quizAllowed, quizAnswered, quizItem, quizRegion, seedQuiz, trialOn } from "./quiz.js";
@@ -794,14 +794,28 @@ function blockedElements(session: Session, cards: BlockedCommand[]): HTMLElement
   return cards.flatMap((card) => blockedElement(session.resume_id || session.id, card, named(card.agent), retry, note(card), session.state !== "ended") ?? []);
 }
 
-// The dock of the viewed agent: its open questions and the blocked commands that show a button. Drawn again when a risk note arrives, which
-// fills a card's place (danielrispler/plotkeeper#298).
-export function drawDock({ session, agent: id }: Selection) {
+// The dock of the viewed agent: its open questions and the blocked commands that show a button.
+function drawDock({ session, agent: id }: Selection) {
   const agent = session.agents.find((a) => a.id === id) ?? null;
   showQuestions(
     reports(session, "asks") ? session.questions.filter((question) => question.agent === (agent?.id ?? null)) : [],
     dockedCards(session, agent),
   );
+}
+
+// Fills the note place of each docked blocked command in place, from the cards the window holds: a note arriving changes no card's buttons, so the
+// dock is not rebuilt, which would make the live region a new node and drop the focus on Allow (danielrispler/plotkeeper#298).
+export function fillDockNotes() {
+  const session = studio.selection?.session;
+  if (!session) return;
+  for (const node of element("dock").querySelectorAll<HTMLElement>(".blocked-command[data-call]")) {
+    const call = node.dataset.call;
+    const card = (session.blocked_commands ?? []).find((c) => c.call === call);
+    const note = studio.cards.risk_notes.find((n) => n.call === call);
+    const place = node.querySelector<HTMLElement>(".risk-note");
+    const risk = card && place ? riskLine(note, docks(card), session.state !== "ended") : null;
+    if (place && risk) fillRisk(place, risk);
+  }
 }
 
 // The open question of the viewed agent, docked at the top of the rail, newest first; a plan or a

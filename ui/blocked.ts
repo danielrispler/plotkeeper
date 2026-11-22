@@ -42,19 +42,25 @@ export function riskLine(note: RiskView | undefined, hasButtons: boolean, reads 
   return note || (hasButtons && reads) ? { state: "reading", level: null, line: null, text: "Reading the command…" } : null;
 }
 
+// Fills the note's place `place` with `risk`, in place: a place that already stands keeps its node, so the live region changes its text
+// and a screen reader hears it, and the card's buttons keep their focus.
+export function fillRisk(place: HTMLElement, risk: RiskLine) {
+  place.title = risk.text;
+  if (risk.level === null) {
+    place.replaceChildren(risk.text);
+    return;
+  }
+  const level = document.createElement("strong");
+  level.textContent = risk.level;
+  place.replaceChildren("Risk: ", level, ` · ${risk.line}`);
+}
+
 // The note's place on the card: a polite live region, so a screen reader hears the note when it fills.
 export function riskElement(risk: RiskLine): HTMLElement {
   const place = document.createElement("p");
   place.className = "risk-note";
   place.setAttribute("aria-live", "polite");
-  place.title = risk.text;
-  if (risk.level === null) {
-    place.textContent = risk.text;
-    return place;
-  }
-  const level = document.createElement("strong");
-  level.textContent = risk.level;
-  place.append("Risk: ", level, ` · ${risk.line}`);
+  fillRisk(place, risk);
   return place;
 }
 
@@ -172,6 +178,7 @@ export function blockedElement(session: string, card: BlockedCommand, agent: str
   if (view === null) return null;
   const block = document.createElement("article");
   block.className = "question decision blocked-command";
+  block.dataset.call = card.call;
   const state = text("p", view.state, "state");
   // Orange only while the card has a button; in the dock a state line shows for the cards that name their state.
   if (view.buttons.length > 0) state.dataset.state = "needs_you";

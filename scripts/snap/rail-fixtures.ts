@@ -536,6 +536,32 @@ const riskScript = `
   const tall = Math.round(place.getBoundingClientRect().height);
   log("note: " + place.textContent);
   log("note height " + tall + "; Allow at " + at(buttons[0]) + "; Decline at " + at(buttons[1]));`;
+// A note that arrives while the card is docked fills its place where it stands: the place and the buttons stay the same nodes, so a screen
+// reader hears the live region fill and keyboard focus stays on Allow. The script holds the nodes, sends the cards with a note, and compares.
+const riskFilled = () => {
+  const fixture = riskNote({ call: "toolu_b1", state: "reading" });
+  const note = { call: "toolu_b1", state: "arrived", level: "high", line: "Pushes the branch issue-56-row-controls to origin", at: Date.now() };
+  const next = { ...fixture.cards, risk_notes: [note] };
+  const snapScript = `
+    window.__TAURI__.__emit("blocked", [{ nonce: "n1", tool_use_id: "toolu_b1", waiting: true }]);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const dock = document.getElementById("dock");
+    const card = dock.querySelector(".blocked-command");
+    const place = card.querySelector(".risk-note");
+    const buttons = [...card.querySelectorAll(".answer-buttons button")];
+    const before = place.textContent;
+    if (before !== "Reading the command…") return log("snap:fail the place reads '" + before + "' before the note");
+    buttons[0].focus();
+    window.__TAURI__.__emit("cards", ${JSON.stringify(next)});
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const same = dock.querySelector(".blocked-command") === card && card.querySelector(".risk-note") === place;
+    const kept = [...card.querySelectorAll(".answer-buttons button")].every((b, i) => b === buttons[i]);
+    if (!same || !kept) return log("snap:fail the dock's card, its place or a button is a new node");
+    if (place.textContent === before || !place.textContent.startsWith("Risk: High")) return log("snap:fail the place did not fill: " + place.textContent);
+    if (document.activeElement !== buttons[0]) return log("snap:fail focus left Allow");
+    log("filled in place: " + place.textContent);`;
+  return { ...fixture, snapScript };
+};
 // An allowed card has no button: the dock is empty and the card is neutral, with its state line, in the newest turn.
 const fedScript = `
   const card = document.querySelector("#feed .now-turn .blocked-command");
@@ -551,6 +577,7 @@ export const railFixtures = {
   railBlockedDock: () => withBlocked("your_turn", (at) => blockedCommand("blocked", at), dockScript),
   railRiskReading: () => riskNote({ call: "toolu_b1", state: "reading" }),
   railRiskArrived: () => riskNote({ call: "toolu_b1", state: "arrived", level: "high", line: "Pushes the branch issue-56-row-controls to origin, so everyone who fetches sees it", at: Date.now() }),
+  railRiskFilled: riskFilled,
   railRiskFailed: () => riskNote({ call: "toolu_b1", state: "failed" }),
   railBlockedAllowed: () => withBlocked("your_turn", (at) => blockedCommand("allowed", at), fedScript),
   railWorkerCardRow: () => workerCardFixture(workerRowScript),
