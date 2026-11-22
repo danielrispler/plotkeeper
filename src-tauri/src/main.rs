@@ -1224,6 +1224,7 @@ fn main() {
             map::map_set_tier,
             map::map_know,
             map::map_marks,
+            map::map_place,
             reveal_log,
             sounds
         ])

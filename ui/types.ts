@@ -496,6 +496,7 @@ export interface Commands {
   guess: void;
   hunk_opened: void;
   key_wrong: void;
+  map_place: Record<string, string[]>;
   map_save_positions: UserMap;
   map_set_tier: UserMap;
   map_know: UserMap;
