@@ -17,6 +17,7 @@ import {
   actorSize, autoPlace, brokenParts, brokenText, draftPrompt, dragMove, dragStart, effectiveTier, escapeMap, type Actor, type Drag, type Law, type Layer, type LayerName,
   type MapDoc, mapProject, type MapLink, parseMap, type Part, type Point, plateSize, rimPoint, type Scrub, type Tier,
 } from "./map-model.js";
+import { recheckSeen } from "./seen.js";
 import { knownProjects, projects } from "./projects.js";
 import type { MapState } from "./types.js";
 
@@ -94,6 +95,7 @@ export function openMap(path: string | null) {
   (document.activeElement as HTMLElement | null)?.blur?.();
   document.body.classList.add("map-open");
   element("map").hidden = false;
+  recheckSeen();
   draw();
   if (path !== null) {
     logStop("map-open", path);
@@ -121,6 +123,7 @@ export function leaveMap() {
   if (!mapShown()) return;
   document.body.classList.remove("map-open");
   element("map").hidden = true;
+  recheckSeen();
   hideProjects();
   deps?.refocus();
 }

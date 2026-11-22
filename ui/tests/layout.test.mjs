@@ -116,6 +116,9 @@ test("a turn is seen only while the rail shows its session: not in focus mode, a
   assert.equal(railShown("overlay", false, false), false);
   assert.equal(railShown("overlay", true, false), true);
   assert.equal(railShown("full", true, true), false);
+  // The Map view hides the rail without taking it out of the viewport, so a turn behind it is not seen.
+  assert.equal(railShown("full", false, false, true), false);
+  assert.equal(railShown("overlay", true, false, true), false);
 });
 
 // The top bar (#127). Widths as the bar measures them at its font: header, chip, git line, "+", usage, new build, gear.

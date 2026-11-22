@@ -283,7 +283,7 @@ const watching = new Map<string, () => void>();
 
 const rail = () => {
   const { classList, dataset } = document.body;
-  return railShown((dataset.layout ?? "full") as LayoutMode, classList.contains("rail-open"), classList.contains("skills-open"));
+  return railShown((dataset.layout ?? "full") as LayoutMode, classList.contains("rail-open"), classList.contains("skills-open"), classList.contains("map-open"));
 };
 
 function watchCard(id: string, node: HTMLElement) {
