@@ -257,7 +257,7 @@ const mapTray = (): Fixture =>
       if (!rows[0].textContent.includes("#334") || !rows[0].textContent.includes("brief ready")) log("snap:fail row text: " + rows[0].textContent);
       if (!rows[1].textContent.includes("not written yet")) log("snap:fail row text: " + rows[1].textContent);
       log("tray ok");`, {
-    map_state: mapState({ fog: { shell: "thick" }, ready: [{ number: 334, title: "PR briefs: the brief written for each ready PR", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["PR briefs on the map"] } }, { number: 336, title: "Ready for review tray", head: "a".repeat(40), brief: null }] }),
+    map_state: mapState({ fog: { shell: "thick" }, ready: [{ number: 334, title: "PR briefs: the brief written for each ready PR", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["PR briefs on the map"], quiet: false } }, { number: 336, title: "Ready for review tray", head: "a".repeat(40), brief: null }] }),
   });
 
 // The PR brief on the map (#339), played from the tray as in the prototype's treatment C: a story about the PR that fogged Shell, Understanding and
@@ -311,7 +311,7 @@ const mapBrief = (view: BriefView, next: number, check = "", quick = false): Fix
       ${check}
       log("brief ok");`,
     {
-      map_state: mapState({ fog: { shell: "thick", understanding: "thin" }, ready: [{ number: 334, title: "PR briefs on the map", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["PR briefs on the map"] } }] }),
+      map_state: mapState({ fog: { shell: "thick", understanding: "thin" }, ready: [{ number: 334, title: "PR briefs on the map", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["PR briefs on the map"], quiet: false } }] }),
       pr_brief: view,
     },
   );
@@ -429,6 +429,18 @@ const homeMarked = (press: boolean): Fixture => ({
 // The stop-rule review (#314): Studio has run 20 active days and merged 25 PRs, and the Map view was opened on one of them and Home's mark
 // never led to it, so the Map view fell below its threshold, and so did the history strip and "See the proof".
 const dueFacts = { active_days: 20, merged_prs: 25, map_days: 1, mark_days: 5, map_on_mark_days: 0, scrubs: 0, proofs: 0, knows: 0, dismissed: false };
+// Home's dot for a waiting PR brief (#344): no fog and no broken law, but a ready PR has a brief stored, so the shell's marks name the project.
+const homeBriefWaiting = (): Fixture => ({
+  ...(fixtures as Record<string, () => Fixture>).home(),
+  map_marks: ["/w/plotkeeper"],
+  map_state: mapState({ ready: [{ number: 334, title: "PR briefs on the map", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["PR briefs on the map"], quiet: false } }] }),
+  snapScript: `
+    await new Promise((done) => setTimeout(done, 300));
+    const marks = [...document.querySelectorAll(".pane.home .fog-mark")];
+    if (marks.length !== 1) return log("snap:fail expected one mark for the waiting brief, saw " + marks.length);
+    if (marks[0].textContent !== "" || !marks[0].title.includes("PR brief")) log("snap:fail the mark has a count or does not name the brief");
+    log("home brief dot ok");`,
+});
 const homeReviewed = (): Fixture => ({
   ...(fixtures as Record<string, () => Fixture>).home(),
   map_marks: ["/w/plotkeeper"],
@@ -550,7 +562,29 @@ const mapBroken = (open: "none" | "proof" | "log"): Fixture => {
 const past = JSON.parse(mapFile);
 past.parts = past.parts.filter((part: { id: string }) => part.id !== "workbench");
 past.links = past.links.filter((link: { from: string; to: string }) => link.from !== "workbench" && link.to !== "workbench");
-const strip = (n: number, label: string, fogged: boolean) => ({ commit: `${n}`.repeat(40), short: `${n}`.repeat(7), label, fogged });
+const strip = (n: number, label: string, fogged: boolean, brief: number | null = null) => ({ commit: `${n}`.repeat(40), short: `${n}`.repeat(7), label, fogged, brief });
+// The rail's quiet row "PR brief ready" in the newest turn of the session whose PR a brief waits for (#344); pressing it opens that brief on the map.
+const railBriefReady = (press: boolean): Fixture => ({
+  ...(railFixtures as Record<string, () => Fixture>).railQuiz(),
+  briefs_waiting: { project: "/w/plotkeeper", numbers: [61] },
+  map_state: mapState({ fog: { shell: "thick" }, ready: [{ number: 61, title: "Row controls", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["PR briefs on the map"], quiet: false } }] }),
+  pr_brief: briefOf(storySteps()),
+  snapScript: `
+    const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+    await wait(300);
+    const rows = [...document.querySelectorAll(".now-turn .brief-ready")];
+    if (rows.length !== 1) return log("snap:fail expected one PR brief row in the newest turn, saw " + rows.length);
+    if (rows[0].textContent !== "PR brief ready") log("snap:fail the row says: " + rows[0].textContent);
+    if (document.querySelector(".turn.past .brief-ready")) log("snap:fail an earlier turn holds the row");
+    document.getElementById("story").scrollTop = 0;
+    if (${press}) {
+      rows[0].click();
+      await wait(900);
+      if (document.getElementById("map").hidden) return log("snap:fail the row did not open the Map view");
+      if (!document.getElementById("map-brief").classList.contains("open")) return log("snap:fail the brief did not open");
+    }
+    log("rail brief row ok");`,
+});
 const mapScrubbed = (): Fixture => {
   const esc = `document.dispatchEvent(new KeyboardEvent("keydown", { code: "Escape", key: "Escape", bubbles: true }));
       await wait(100);`;
@@ -562,6 +596,8 @@ const mapScrubbed = (): Fixture => {
       const rows = [...document.querySelectorAll("#map-sheet .hist-row")];
       if (rows.length !== 4) return log("snap:fail expected 4 strip rows, saw " + rows.length);
       if (rows.filter((r) => r.classList.contains("fogged")).length !== 2 || !rows[3].classList.contains("fogged") || rows[0].classList.contains("fogged")) log("snap:fail fogged rows");
+      const offers = [...document.querySelectorAll("#map-sheet .hist-brief")];
+      if (offers.length !== 1 || offers[0].closest(".hist-row") !== rows[3] || offers[0].textContent !== "Brief") return log("snap:fail only #306's row offers its brief, saw " + offers.length);
       rows[1].querySelector(".hist-commit").click();
       await wait(200);
       const banner = document.getElementById("map-banner");
@@ -589,7 +625,7 @@ const mapScrubbed = (): Fixture => {
       log("scrubbed ok");`, {
     map_state: mapState({ ci: brokenCi, fog: { shell: "thick", core: "thin" } }),
     map_place: { s1: ["core", "window"], "s1/w1": ["shell"], s2: ["hook"], s6: [] },
-    map_history: [strip(1, "#101 Map first drawn", false), strip(2, "#150 Plates and links", false), strip(3, "#210 Fog engine", true), strip(4, "#306 Live agents on the map", true)],
+    map_history: [strip(1, "#101 Map first drawn", false), strip(2, "#150 Plates and links", false), strip(3, "#210 Fog engine", true), strip(4, "#306 Live agents on the map", true, 306)],
     map_at: { commit: "2".repeat(40), short: "2222222", label: "#150 Plates and links", source: JSON.stringify(past) },
     map_commit: { commit: "2".repeat(40), short: "2222222", label: "#150 Plates and links", url: "https://github.com/danielrispler/plotkeeper/commit/" + "2".repeat(40), files: [{ path: "src-tauri/src/map.rs", diff: "@@ -1,2 +1,2 @@\n-one\n+two" }, { path: "ui/map.ts", diff: "@@ -1 +1,2 @@\n+three" }] },
   });
@@ -599,6 +635,9 @@ const mapScrubbed = (): Fixture => {
 export const fixtures = {
   ...railFixtures,
   mapTray,
+  railBriefRow: () => railBriefReady(false),
+  railBriefOpened: () => railBriefReady(true),
+  homeBriefWaiting,
   mapBriefStart,
   mapBriefStory,
   mapBriefStates: () => mapBriefFigure("states"),

@@ -36,3 +36,10 @@ test("a chaptered brief has one row per chapter, in order", () => {
 test("with nothing ready there is no row", () => {
   assert.deepEqual(trayRows([]), []);
 });
+
+test("a ready PR that fogs nothing at the tiers says so and cannot be opened", () => {
+  const row = trayRows([pr(7, "Docs", { stale: false, writing: false, chapters: [], quiet: true })])[0];
+  assert.equal(row.openable, false);
+  assert.match(row.note, /no brief/);
+  assert.doesNotMatch(row.note, /not written yet/);
+});

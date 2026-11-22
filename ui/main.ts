@@ -33,7 +33,8 @@ import { knownProjects } from "./projects.js";
 import { studio } from "./state.js";
 import { closeSettingsPage, settingsPageOpen, showSettingsPage, startSettingsPage } from "./settings-page.js";
 import { showSkills } from "./skills.js";
-import { showBarName, showView } from "./story.js";
+import { drawFeed, showBarName, showView } from "./story.js";
+import { startRailBriefs } from "./rail-brief.js";
 import { jumpToNeedsYou, showToast } from "./toast.js";
 import { finishedNote, showNote, warnContext, watchNotes } from "./notes.js";
 import type { Selection, Session, SessionCards } from "./types.js";
@@ -344,6 +345,7 @@ startPanes().catch((e) => {
 dragSplit();
 dragPanel();
 // A drafting prompt fills the quick start of New session in the project (`map.ts`, "Draft a map").
+startRailBriefs(drawFeed);
 startMap({ draft: (project, prompt) => void showPicker("session", project, prompt), selectedProject, refocus: focusPane });
 startMapAgents({ sessions: () => studio.listed, projectOf: projectOfCwd, select: (id, agent) => void select(id, agent) });
 element("new-session").addEventListener("click", () => void showPicker());
