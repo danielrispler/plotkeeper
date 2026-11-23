@@ -802,3 +802,73 @@ fn uninstall_runs_every_step_and_a_rerun_retries_only_the_failed_one() {
     assert_eq!(machine.calls("claude").len(), claude_calls, "{text}");
     assert_eq!(files(&machine.home), before);
 }
+
+#[test]
+fn no_line_of_zshrc_but_the_removed_ones_is_kept_in_the_data_folder() {
+    const TOKEN: &str = "export OPENAI_API_KEY=sk-planted-token-0123456789";
+    let machine = Machine::new(true, true);
+    legacy(&machine, FALINKS_LINE);
+    let zshrc = machine.home.join(".zshrc");
+    let text = fs::read_to_string(&zshrc).unwrap();
+    fs::write(&zshrc, format!("{TOKEN}\n{text}")).unwrap();
+    let before = files(&machine.home);
+    machine.run("install");
+    for (path, bytes) in files(&machine.data()) {
+        let text = String::from_utf8_lossy(&bytes);
+        for line in [TOKEN, "alias g=git", "export EDITOR=vim"] {
+            assert!(!text.contains(line), "{path} holds `{line}`:\n{text}");
+        }
+    }
+    machine.run("uninstall");
+    assert_eq!(files(&machine.home), before);
+}
+
+/// A record written before install kept only the removed lines held the whole old `~/.zshrc` in `backups/zshrc` and
+/// the text install wrote in `state.json`'s `zshrc`.
+#[test]
+fn uninstall_from_a_record_with_a_whole_zshrc_backup_puts_it_back_and_deletes_the_backup() {
+    let machine = Machine::new(false, false);
+    let old = "alias g=git\nexport CLAUDE_CODE_PLUGIN_DIRS=\"/x/plotkeeper/checkout/plugin\"\n";
+    let cleaned = "alias g=git\n";
+    machine.write(".zshrc", cleaned);
+    let record = machine.data().join("install");
+    machine.write(
+        "Library/Application Support/plotkeeper/install/state.json",
+        &serde_json::json!({
+            "claude": false, "agy": false, "zshrc": cleaned, "agy_backups": [], "codex": null, "cursor": null
+        })
+        .to_string(),
+    );
+    machine.write(
+        "Library/Application Support/plotkeeper/install/backups/zshrc",
+        old,
+    );
+    machine.run("uninstall");
+    assert_eq!(
+        fs::read_to_string(machine.home.join(".zshrc")).unwrap(),
+        old
+    );
+    assert!(!record.join("backups/zshrc").exists());
+}
+
+/// Codex waits for a hook unless it runs in the background (its hook docs, https://learn.chatgpt.com/docs/hooks, read
+/// 2026-11-23): the hook never makes the agent wait (the trusted law `hook-never-makes-agent-wait`).
+#[test]
+fn every_codex_recording_hook_runs_in_the_background() {
+    let machine = Machine::new(false, false).with_codex();
+    machine.run("install");
+    let text = fs::read_to_string(machine.home.join(".codex/hooks.json")).unwrap();
+    let file: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let handlers: Vec<_> = file["hooks"]
+        .as_object()
+        .unwrap()
+        .values()
+        .flat_map(|groups| groups.as_array().unwrap())
+        .flat_map(|group| group["hooks"].as_array().unwrap())
+        .filter(|h| h["command"].as_str().unwrap().contains("plotkeeper-hook"))
+        .collect();
+    assert_eq!(handlers.len(), 8, "{text}");
+    for handler in handlers {
+        assert_eq!(handler["async"], true, "{handler}");
+    }
+}

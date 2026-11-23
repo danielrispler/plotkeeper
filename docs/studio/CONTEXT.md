@@ -215,11 +215,11 @@ The state of an agent session left at your turn with no events for 2 hours or mo
 The state of an agent session from its own end event until it starts again under its id. The control room never guesses that a session is gone.
 
 **Agent session**:
-One worker runtime session running one agent on a task, such as a Claude Code session in a terminal. The unit the control room watches. Claude Code and agy sessions are followed fully, from their hooks and transcripts, each as far as its **agent adapter**'s **capabilities** reach; a session of another agent has its status only.
+One worker runtime session running one agent on a task, such as a Claude Code session in a terminal. The unit the control room watches. Claude Code and agy sessions are followed fully, from their hooks and transcripts; Codex, Qwen Code, Cursor and Copilot sessions from their hooks only (sessions, turns, prompts and calls; no transcript is read and no turn trees are recorded); each as far as its **agent adapter**'s **capabilities** reach. A session of another agent has its status only.
 _Avoid_: Run (alone)
 
 **Agent adapter**:
-The part of the core that turns one agent's hook lines and transcript into the studio's events. Claude Code and agy each have one.
+The part of the core that turns one agent's hook lines and transcript into the studio's events. Claude Code, agy, Codex, Qwen Code, Copilot and Cursor each have one.
 
 **Capability**:
 What an agent adapter can report, such as a question that waits on Daniel, a permission mode, a subagent's last message or how full the session's context is. It decides what its sessions' views show: a part of the view hides when the adapter cannot report it, never by the agent's name.
@@ -327,7 +327,7 @@ A place the control room learns about agent sessions from, such as a worker runt
 A repository added to the control room.
 
 **Settings**:
-Daniel's choices for the studio, kept in `settings.json` in its data folder, in Zed's format: zoom, the terminal's font size, the summary writer's model and effort, the catch-up window and the PR brief writer's model (`prBriefs.model`). The page has no settings page: Daniel edits the files in his editor. "Settings files" means `settings.json` and `keymap.json` together: the studio reloads either when saved, and a file that does not parse is reported while its last good version stays in effect.
+Daniel's choices for the studio, kept in `settings.json` in its data folder, in Zed's format: zoom, the terminal's font size, the summary writer with its model and effort (`summaries`), the OpenAI-compatible API's base URL (`summaries.base_url`), the catch-up window and the PR brief writer's model (`prBriefs.model`). The page sets only the writer's: its writer section (`ui/writers.ts`, under Writer in the top bar) saves the writer, model and effort once its Test passes, and the base URL; it also takes the Anthropic and OpenAI-compatible API keys, which are kept in the macOS Keychain, never in `settings.json`. Daniel edits the rest in the files, in his editor. "Settings files" means `settings.json` and `keymap.json` together: the studio reloads either when saved, and a file that does not parse is reported while its last good version stays in effect.
 _Avoid_: Preferences, config
 
 **Sounds**:

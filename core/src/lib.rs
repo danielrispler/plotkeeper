@@ -53,17 +53,15 @@ pub use work::{Estimate, MIN_HISTORY, Phase, PhaseStart, Work, range};
 /// harness is one arm here, beside its `Capabilities` constant and its parser.
 enum Named {
     Agy,
-    /// The line's time, for its drift when Codex's parser cannot read it.
-    Codex(u64),
-    /// The line's time, for its drift when Cursor's parser cannot read it (#362).
-    Cursor(u64),
-    /// The line's time, for its drift when Qwen Code's parser cannot read it.
-    Qwen(u64),
-    /// The line's time, for its drift when Copilot's parser cannot read it (#361).
-    Copilot(u64),
+    /// An agent read by a parser of its own, Codex's, Cursor's (#362), Qwen Code's or Copilot's (#361), and the line's
+    /// time, for its drift when that parser cannot read it.
+    Parsed(Parse, u64),
     /// The line's time, for its drift.
     Other(u64),
 }
+
+/// An adapter's reading of one log line into its event.
+type Parse = fn(&str) -> Result<Event, serde_json::Error>;
 
 impl Named {
     fn of(line: &str) -> Named {
@@ -77,10 +75,10 @@ impl Named {
         match stamp.studio_agent.as_deref() {
             None => Named::Agy,
             Some(agent) if agent == AGY_CAPABILITIES.agent => Named::Agy,
-            Some(codex::CODEX) => Named::Codex(stamp.studio_received_ms),
-            Some(cursor::CURSOR) => Named::Cursor(stamp.studio_received_ms),
-            Some(qwen::QWEN) => Named::Qwen(stamp.studio_received_ms),
-            Some(copilot::COPILOT) => Named::Copilot(stamp.studio_received_ms),
+            Some(codex::CODEX) => Named::Parsed(codex::parse, stamp.studio_received_ms),
+            Some(cursor::CURSOR) => Named::Parsed(cursor::parse, stamp.studio_received_ms),
+            Some(qwen::QWEN) => Named::Parsed(qwen::parse, stamp.studio_received_ms),
+            Some(copilot::COPILOT) => Named::Parsed(copilot::parse, stamp.studio_received_ms),
             Some(_) => Named::Other(stamp.studio_received_ms),
         }
     }
@@ -2584,28 +2582,7 @@ impl Studio {
             Ok(event) => vec![event],
             Err(_) => match Named::of(line) {
                 Named::Agy => self.agy.events(line).unwrap_or_default(),
-                Named::Codex(at) => match codex::parse(line) {
-                    Ok(event) => vec![event],
-                    Err(_) => {
-                        self.agy.drift(at, AgyDriftKind::Agent);
-                        Vec::new()
-                    }
-                },
-                Named::Cursor(at) => match cursor::parse(line) {
-                    Ok(event) => vec![event],
-                    Err(_) => {
-                        self.agy.drift(at, AgyDriftKind::Agent);
-                        Vec::new()
-                    }
-                },
-                Named::Copilot(at) => match copilot::parse(line) {
-                    Ok(event) => vec![event],
-                    Err(_) => {
-                        self.agy.drift(at, AgyDriftKind::Agent);
-                        Vec::new()
-                    }
-                },
-                Named::Qwen(at) => match qwen::parse(line) {
+                Named::Parsed(parse, at) => match parse(line) {
                     Ok(event) => vec![event],
                     Err(_) => {
                         self.agy.drift(at, AgyDriftKind::Agent);
@@ -2626,10 +2603,7 @@ impl Studio {
             Ok(event) => Some(event),
             Err(_) => match Named::of(line) {
                 Named::Agy => self.agy.peek(line),
-                Named::Codex(_) => codex::parse(line).ok(),
-                Named::Cursor(_) => cursor::parse(line).ok(),
-                Named::Qwen(_) => qwen::parse(line).ok(),
-                Named::Copilot(_) => copilot::parse(line).ok(),
+                Named::Parsed(parse, _) => parse(line).ok(),
                 Named::Other(_) => None,
             },
         }

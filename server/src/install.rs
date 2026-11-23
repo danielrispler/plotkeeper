@@ -5,7 +5,8 @@
 //! one: Claude Code with `claude plugin`, agy with `agy plugin`, Copilot with `copilot plugin` (#361). Codex has none for its hooks, so install adds its
 //! entries to `~/.codex/hooks.json` itself (#359). It also removes the archived app's setup, so no event is recorded twice:
 //! the `CLAUDE_CODE_PLUGIN_DIRS` entries in `~/.zshrc` that name a data folder's `checkout/plugin`, and agy's plugin
-//! `studio`. What it changes it backs up first, and `uninstall` puts it back.
+//! `studio`. What it changes it backs up first (of `~/.zshrc`, only the lines it removes), and `uninstall` puts it
+//! back.
 //!
 //! plotkeeper never opens Claude Code's settings files (AGENTS.md, Hard rules; spec #320, "Install obeys the
 //! credentials rule"): `claude plugin` writes them. `~/.codex/hooks.json` holds no credentials: Codex's hook docs
@@ -64,8 +65,13 @@ struct State {
     claude_plugin_gone: bool,
     /// plotkeeper's agy plugin was installed with `agy plugin`.
     agy: bool,
-    /// `~/.zshrc` was rewritten to this text; its old bytes are in `backups/zshrc`.
+    /// A record from before #376's review: `~/.zshrc` was rewritten to this text, and its old bytes are in
+    /// `backups/zshrc`. Install no longer writes it; uninstall still undoes it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     zshrc: Option<String>,
+    /// The lines install took out of `~/.zshrc`, and where.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    zshrc_edits: Option<ZshrcRecord>,
     /// agy plugins whose folders were backed up under `backups/agy/<name>` before install replaced or removed them.
     agy_backups: Vec<String>,
     /// What install did to `~/.codex/hooks.json`.
@@ -143,12 +149,33 @@ fn old_plugin_dir(entry: &str) -> bool {
         || entry.ends_with("/dev.falinks.studio/checkout/plugin")
 }
 
-/// `profile` without the old plugin entries of its `export CLAUDE_CODE_PLUGIN_DIRS=` lines: a line left with no entry
-/// goes, one with others keeps them, and the archived app's comment above a changed line goes too.
+/// Lines install took out of `~/.zshrc` at one place: what they were and what it wrote instead. Only these are kept,
+/// never the rest of the file, which may export a token.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct ZshrcEdit {
+    /// The index, among the lines of the file install wrote, of the first line after the removed ones.
+    at: usize,
+    /// The removed lines, each with its line ending.
+    removed: Vec<String>,
+    /// The line install wrote in their place, with the entries that were not plotkeeper's, if any were left.
+    kept: Option<String>,
+}
+
+/// What install did to `~/.zshrc`: the line count of the text it wrote, and its edits in order.
+#[derive(Serialize, Deserialize)]
+struct ZshrcRecord {
+    lines: usize,
+    edits: Vec<ZshrcEdit>,
+}
+
+/// `profile` without the old plugin entries of its `export CLAUDE_CODE_PLUGIN_DIRS=` lines, and the edits that undo
+/// it: a line left with no entry goes, one with others keeps them, and the archived app's comment above a changed
+/// line goes too.
 // shortcut: reads `export NAME=value` lines only, quoted or bare, as the archived app wrote them.
-pub fn without_old_plugin_dirs(profile: &str) -> String {
+fn without_old_plugin_dirs(profile: &str) -> (String, Vec<ZshrcEdit>) {
     const EXPORT: &str = "export CLAUDE_CODE_PLUGIN_DIRS=";
     let mut lines: Vec<String> = Vec::new();
+    let mut edits = Vec::new();
     for piece in profile.split_inclusive('\n') {
         let line = piece.trim_end_matches('\n');
         let ending = &piece[line.len()..];
@@ -162,21 +189,58 @@ pub fn without_old_plugin_dirs(profile: &str) -> String {
             lines.push(piece.to_owned());
             continue;
         }
-        if lines.last().is_some_and(|l| {
-            l.trim_start().starts_with('#')
-                && l.trim_end().ends_with("for every claude session (#21).")
-        }) {
-            lines.pop();
+        let mut removed = Vec::new();
+        // The comment is the previous source line only when no edit already holds it.
+        let after_edit = edits
+            .last()
+            .is_some_and(|e: &ZshrcEdit| e.at + usize::from(e.kept.is_some()) == lines.len());
+        if !after_edit
+            && lines.last().is_some_and(|l| {
+                l.trim_start().starts_with('#')
+                    && l.trim_end().ends_with("for every claude session (#21).")
+            })
+        {
+            removed.extend(lines.pop());
         }
+        removed.push(piece.to_owned());
         let kept: Vec<_> = value
             .split(':')
             .filter(|d| !d.is_empty() && !old_plugin_dir(d))
             .collect();
-        if !kept.is_empty() {
-            lines.push(format!("{indent}{EXPORT}\"{}\"{ending}", kept.join(":")));
+        let kept =
+            (!kept.is_empty()).then(|| format!("{indent}{EXPORT}\"{}\"{ending}", kept.join(":")));
+        edits.push(ZshrcEdit {
+            at: lines.len(),
+            removed,
+            kept: kept.clone(),
+        });
+        lines.extend(kept);
+    }
+    (lines.concat(), edits)
+}
+
+/// `now`, the text install wrote to `~/.zshrc`, with `record`'s removed lines put back, or `None` when the lines it
+/// wrote are no longer where it wrote them.
+fn with_removed_lines(now: &str, record: &ZshrcRecord) -> Option<String> {
+    let lines: Vec<&str> = now.split_inclusive('\n').collect();
+    if lines.len() != record.lines {
+        return None;
+    }
+    let mut out = String::new();
+    let mut next = 0;
+    for edit in &record.edits {
+        out.push_str(&lines.get(next..edit.at)?.concat());
+        out.push_str(&edit.removed.concat());
+        next = edit.at;
+        if let Some(kept) = &edit.kept {
+            if lines.get(next) != Some(&kept.as_str()) {
+                return None;
+            }
+            next += 1;
         }
     }
-    lines.concat()
+    out.push_str(&lines.get(next..)?.concat());
+    Some(out)
 }
 
 /// `template`, a hook file, with the path of `bin` in place of its placeholder. The path sits in a JSON string, inside
@@ -254,25 +318,24 @@ pub fn install(
     let mut state = load(home)?.unwrap_or_default();
     let backups = record_dir(home).join("backups");
 
-    // The archived app's line in `~/.zshrc`, once: a second install keeps the first backup.
+    // The archived app's line in `~/.zshrc`, once: a second install keeps the first record. Only the removed lines
+    // are recorded, never a copy of the file, which may export a token.
     let zshrc = home.join(".zshrc");
     if state.zshrc.is_none()
+        && state.zshrc_edits.is_none()
         && let Ok(text) = fs::read_to_string(&zshrc)
     {
-        let cleaned = without_old_plugin_dirs(&text);
-        if cleaned != text {
-            fs::create_dir_all(&backups).map_err(|e| e.to_string())?;
-            fs::write(backups.join("zshrc"), &text)
-                .map_err(|e| format!("could not back up ~/.zshrc: {e}"))?;
-            state.zshrc = Some(cleaned.clone());
+        let (cleaned, edits) = without_old_plugin_dirs(&text);
+        if !edits.is_empty() {
+            state.zshrc_edits = Some(ZshrcRecord {
+                lines: cleaned.split_inclusive('\n').count(),
+                edits,
+            });
             save(home, &state)?;
             fs::write(&zshrc, cleaned).map_err(|e| format!("could not write ~/.zshrc: {e}"))?;
             say(
                 out,
-                format!(
-                    "~/.zshrc: removed the old plugin path from CLAUDE_CODE_PLUGIN_DIRS (backup in {})",
-                    backups.display()
-                ),
+                "~/.zshrc: removed the old plugin path from CLAUDE_CODE_PLUGIN_DIRS (the removed lines are kept for uninstall)",
             );
         }
     }
@@ -822,7 +885,10 @@ pub fn uninstall(home: &Path, path: Option<&OsStr>, out: &mut dyn Write) -> Resu
                 .and_then(|old| {
                     fs::write(&zshrc, old).map_err(|e| format!("could not write ~/.zshrc: {e}"))
                 });
-            match put_back {
+            match put_back.and_then(|()| {
+                fs::remove_file(backups.join("zshrc"))
+                    .map_err(|e| format!("could not delete the backup of ~/.zshrc: {e}"))
+            }) {
                 Ok(()) => {
                     say(out, "~/.zshrc: put back as it was");
                     state.zshrc = None;
@@ -841,6 +907,37 @@ pub fn uninstall(home: &Path, path: Option<&OsStr>, out: &mut dyn Write) -> Resu
         }
     }
 
+    if let Some(record) = &state.zshrc_edits {
+        let zshrc = home.join(".zshrc");
+        let put_back = fs::read_to_string(&zshrc)
+            .ok()
+            .and_then(|now| with_removed_lines(&now, record));
+        match put_back {
+            Some(text) => match fs::write(&zshrc, text) {
+                Ok(()) => {
+                    say(out, "~/.zshrc: put back as it was");
+                    state.zshrc_edits = None;
+                }
+                Err(e) => fail(out, format!("could not write ~/.zshrc: {e}")),
+            },
+            None => {
+                // Not a failure: only these lines are left to give back, so the record stays for them.
+                let lines: String = record
+                    .edits
+                    .iter()
+                    .flat_map(|e| e.removed.iter().map(String::as_str))
+                    .collect();
+                say(
+                    out,
+                    format!(
+                        "~/.zshrc changed since install, so it is left as it is; the lines install removed were:\n{}",
+                        lines.trim_end()
+                    ),
+                );
+            }
+        }
+    }
+
     if failed > 0 {
         // The hooks of a harness not undone still run the binaries, and a rerun needs the backups.
         save(home, &state)?;
@@ -849,7 +946,7 @@ pub fn uninstall(home: &Path, path: Option<&OsStr>, out: &mut dyn Write) -> Resu
         ));
     }
     let mut gone = vec![bin, plugins_dir(home)];
-    if state.zshrc.is_some() {
+    if state.zshrc.is_some() || state.zshrc_edits.is_some() {
         save(home, &state)?;
     } else {
         gone.push(record_dir(home));

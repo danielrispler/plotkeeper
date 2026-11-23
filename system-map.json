@@ -34,7 +34,7 @@
     },
     {
       "id": "workbench", "name": "Workbench", "caption": "Worktrees, PRs and plan usage",
-      "description": "Git worktrees, tasks, PR lookups and plan usage. A black box: it never fogs and never asks for your time.",
+      "description": "Git worktrees, tasks, PR lookups and plan usage, and agy's plugin: the shipped `plugin-agy/`, embedded, rendered with the hook's path and installed with `agy plugin`. A black box: it never fogs and never asks for your time.",
       "tier": "black-box", "paths": ["workbench/"]
     }
   ],
@@ -53,7 +53,10 @@
     { "id": "server-workbench", "from": "server", "to": "workbench" },
     { "id": "understanding-writer", "from": "understanding", "to": "writer" },
     { "id": "server-window", "from": "server", "to": "window" },
-    { "id": "workbench-github", "from": "workbench", "to": "github" }
+    { "id": "workbench-github", "from": "workbench", "to": "github" },
+    { "id": "workbench-plugins", "from": "workbench", "to": "plugins" },
+    { "id": "server-agents", "from": "server", "to": "agents" },
+    { "id": "workbench-agents", "from": "workbench", "to": "agents" }
   ],
   "ignored": [
     ".agents/", ".claude/", ".github/", ".gitignore", "AGENTS.md", "CLAUDE.md", "Cargo.lock", "Cargo.toml", "LICENSE",

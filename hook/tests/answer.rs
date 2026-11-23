@@ -842,3 +842,25 @@ fn a_claimed_pass_whose_retry_is_blocked_again_allows_nothing_later() {
     assert_eq!(run(retried("PermissionRequest", COMMAND, CWD, SESSION)), "");
     let _ = fs::remove_dir_all(&home);
 }
+
+/// Another harness that runs Claude Code's plugin hooks can send its own payload to the Claude entry's answer hook
+/// (spec #320, "One event, one record, the right agent"): one with Cursor's marker raises no card there and is let
+/// through at once, so that harness asks as it does without plotkeeper.
+#[test]
+fn a_payload_with_another_harness_marker_raises_no_card_on_the_claude_entry() {
+    let home = scratch("foreign");
+    watch(&home, SESSION, std::process::id(), 0);
+    let mut payload = asked();
+    payload["cursor_version"] = json!("2.1.4");
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_plotkeeper-answer"));
+    cmd.args(["--agent", "claude"])
+        .env("HOME", &home)
+        .env("PLOTKEEPER_ANSWER_TIMEOUT_MS", WAIT_MS.to_string())
+        .stdout(Stdio::piped());
+    let since = Instant::now();
+    let (out, took) = finish(feed(cmd, &payload), since);
+    assert_eq!(out, "");
+    assert!(took < PROMPTLY, "it waited {took:?} for a card");
+    assert!(!answer::ask_file(&data(&home), SESSION).exists());
+    let _ = fs::remove_dir_all(&home);
+}

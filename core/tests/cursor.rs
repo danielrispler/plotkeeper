@@ -135,10 +135,18 @@ fn an_ide_session_with_no_pid_goes_idle_and_is_never_ended_by_the_process_check(
 }
 
 #[test]
-fn a_cursor_session_ended_by_the_process_check_stays_cursor() {
-    // The CLI session up to its second turn's first call, then the server's end for its gone process.
-    let mut lines: Vec<String> = fixture()[..11].iter().map(|l| l.to_string()).collect();
-    lines.push(
+fn a_cursor_session_ended_by_the_process_check_or_interrupted_stays_cursor() {
+    // The CLI session up to its second turn's first call, then the server's lines for an interrupt and for its
+    // gone process.
+    let lines: Vec<String> = fixture()[..11].iter().map(|l| l.to_string()).collect();
+    let synthetic = [
+        serde_json::json!({
+            "session_id": FIRST,
+            "hook_event_name": "StudioInterrupted",
+            "prompt_id": "gen_2",
+            "studio_received_ms": 1_794_800_011_000u64,
+        })
+        .to_string(),
         serde_json::json!({
             "session_id": FIRST,
             "hook_event_name": "SessionEnd",
@@ -146,9 +154,18 @@ fn a_cursor_session_ended_by_the_process_check_stays_cursor() {
             "studio_received_ms": 1_794_800_012_000u64,
         })
         .to_string(),
-    );
-    let studio = Studio::replayed(&lines);
-    let session = studio.session(FIRST).unwrap();
-    assert_eq!(session.state, State::Ended);
-    assert_eq!(session.capabilities, CURSOR_CAPABILITIES);
+    ];
+
+    let mut live = Studio::replayed(&lines);
+    for line in &synthetic {
+        live.apply(line);
+    }
+    let mut all = lines.clone();
+    all.extend(synthetic);
+    let restarted = Studio::replayed(&all);
+    for studio in [&live, &restarted] {
+        let session = studio.session(FIRST).unwrap();
+        assert_eq!(session.state, State::Ended);
+        assert_eq!(session.capabilities, CURSOR_CAPABILITIES);
+    }
 }

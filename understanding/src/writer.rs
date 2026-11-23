@@ -407,17 +407,13 @@ pub fn build_command(
                 command.args(["--effort", effort]);
             }
             // `agy` has no system prompt flag and takes the prompt as an argument, not on standard input.
-            let prompt = match &request.system {
-                Some(system) => format!("{system}\n\n{}", request.user),
-                None => request.user.clone(),
-            };
             let minutes = request.timeout.as_secs().div_ceil(60).max(1);
             command
                 // No flag turns `agy`'s tools off, and `--mode plan` writes a plan instead of the reply: its lockout is
                 // the sandboxed terminal, with no slash commands or skills, in the empty folder.
                 .args(["--sandbox", "--disable-slash-commands"])
                 .args(["--print-timeout", &format!("{minutes}m"), "-p"])
-                .arg(prompt.replace('\0', ""));
+                .arg(lead(request));
             String::new()
         }
         WriterKind::Codex => {
@@ -445,10 +441,7 @@ pub fn build_command(
             }
             // `-`: the prompt on standard input. Codex has no system prompt flag, so the system prompt leads it.
             command.arg("-");
-            match &request.system {
-                Some(system) => format!("{system}\n\n{}", request.user),
-                None => request.user.clone(),
-            }
+            lead(request)
         }
         WriterKind::Copilot => {
             // An empty allow-list turns Copilot's tools off (its docs; that an empty one leaves none is not verified),
@@ -484,8 +477,8 @@ pub fn build_command(
     (command, stdin.replace('\0', ""))
 }
 
-/// The prompt as one argument, for a writer with no system prompt flag that takes no standard input: the system prompt
-/// leads it, and NUL bytes, which no argument can hold, are dropped.
+/// The prompt as one text, for a writer with no system prompt flag: the system prompt leads it, and NUL bytes, which no
+/// argument can hold, are dropped.
 fn lead(request: &WriterRequest) -> String {
     match &request.system {
         Some(system) => format!("{system}\n\n{}", request.user),
@@ -646,19 +639,8 @@ fn read_codex(schema: bool, status: &ExitStatus, stdout: &str) -> Result<WriterR
             format!("({status}): {head:?}"),
         );
     }
-    let Some(text) = text.filter(|t| !t.trim().is_empty()) else {
-        return fail(FailureKind::Empty, String::new());
-    };
-    Ok(WriterReply {
-        json: schema.then(|| crate::parse_object(&text).ok()).flatten(),
-        usage: usage.and_then(|usage| {
-            usage["input_tokens"].as_u64().map(|input_tokens| Usage {
-                input_tokens,
-                output_tokens: usage["output_tokens"].as_u64().unwrap_or_default(),
-            })
-        }),
-        text,
-    })
+    let usage = usage.as_ref().and_then(usage_of);
+    finish(kind, schema, text.unwrap_or_default(), None, usage)
 }
 
 /// `read_reply` for `copilot -p --output-format=json`: JSON lines whose records its docs do not describe, so this reading
@@ -698,14 +680,7 @@ fn read_copilot(
         true => stdout,
         false => last("assistant.message", "content").unwrap_or_default(),
     };
-    if text.trim().is_empty() {
-        return fail(FailureKind::Empty, String::new());
-    }
-    Ok(WriterReply {
-        json: schema.then(|| crate::parse_object(text).ok()).flatten(),
-        usage: None,
-        text: text.into(),
-    })
+    finish(kind, schema, text.into(), None, None)
 }
 
 /// The usage a reply's `usage` object gives, when it does: the same field names on both paths.
