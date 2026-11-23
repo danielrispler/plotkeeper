@@ -80,7 +80,8 @@ export async function openBriefOf(project: string, number: number, chapter: numb
     panel().dataset.waiting = String(number);
     got = await invoke("pr_brief", { project, number });
   } catch (e) {
-    problems.set(number, String(e));
+    // A superseded open's failure is not this PR's problem: only a wanted answer may set it.
+    if (wanted()) problems.set(number, String(e));
     got = null;
   }
   // A later open, or a close, since: this one's answer is not wanted, and the panel's waiting mark is that one's.
