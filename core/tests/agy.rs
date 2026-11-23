@@ -448,3 +448,86 @@ fn a_command_of_an_agy_session_that_runs_a_list_entry_is_a_check() {
     let found: Vec<&str> = checks.iter().map(|c| c.suite.as_str()).collect();
     assert_eq!(found, ["cargo test"]);
 }
+
+/// A line the server writes itself into the event log for session `id`, shaped as Claude Code's
+/// lines are: the process check's `SessionEnd` (#330) or an interrupted turn's line (#352).
+fn server_line(id: &str, name: &str, at: u64, fields: Value) -> String {
+    let mut line = json!({ "session_id": id, "hook_event_name": name, "studio_received_ms": at });
+    line.as_object_mut()
+        .unwrap()
+        .extend(fields.as_object().unwrap().clone());
+    line.to_string()
+}
+
+fn ended_by_process_check(id: &str, at: u64) -> String {
+    server_line(id, "SessionEnd", at, json!({ "reason": "process_gone" }))
+}
+
+fn interrupted(id: &str, at: u64) -> String {
+    server_line(id, "StudioInterrupted", at, json!({ "prompt_id": "p-1" }))
+}
+
+/// The session keeps agy's capabilities, so its transcript, read once selected (an ended session's
+/// is read only then), is still read as agy's.
+fn assert_still_agy(studio: &mut Studio) {
+    let session = studio.session(PARENT).unwrap();
+    assert_eq!(session.capabilities, studio_core::AGY_CAPABILITIES);
+    studio.select(PARENT);
+    studio.follow_transcripts(|_| {});
+    let session = studio.session(PARENT).unwrap();
+    assert!(
+        session.transcript.unavailable.is_none(),
+        "{:?}",
+        session.transcript.unavailable
+    );
+    assert!(session.transcript.intention.is_some());
+}
+
+#[test]
+fn an_agy_session_ended_by_the_process_check_stays_agy_live_and_after_a_restart() {
+    let mut lines = fixture();
+    let end = ended_by_process_check(PARENT, 1_794_738_300_000);
+
+    let mut studio = Studio::replayed(&lines);
+    studio.apply(&end);
+    assert_eq!(studio.session(PARENT).unwrap().state, State::Ended);
+    assert_still_agy(&mut studio);
+
+    lines.push(end);
+    let mut restarted = Studio::replayed(&lines);
+    assert_eq!(restarted.session(PARENT).unwrap().state, State::Ended);
+    assert_still_agy(&mut restarted);
+}
+
+#[test]
+fn an_interrupted_agy_turn_stays_agy_live_and_after_a_restart() {
+    let mut lines = fixture();
+    let line = interrupted(PARENT, 1_794_738_300_000);
+
+    let mut studio = Studio::replayed(&lines);
+    studio.apply(&line);
+    assert_still_agy(&mut studio);
+
+    lines.push(line);
+    let mut restarted = Studio::replayed(&lines);
+    assert_still_agy(&mut restarted);
+}
+
+#[test]
+fn a_claude_session_ended_or_interrupted_by_the_server_stays_claude() {
+    let claude = |name: &str, at: u64, extra: Value| common::event("c1", name, "/repo", at, extra);
+    let lines = [
+        claude("SessionStart", 1, json!({ "source": "startup" })),
+        claude(
+            "UserPromptSubmit",
+            2,
+            json!({ "prompt": "go", "prompt_id": "p-1" }),
+        ),
+        interrupted("c1", 3),
+        ended_by_process_check("c1", 4),
+    ];
+    let studio = Studio::replayed(lines.iter().map(String::as_str));
+    let session = studio.session("c1").unwrap();
+    assert_eq!(session.state, State::Ended);
+    assert_eq!(session.capabilities, studio_core::CLAUDE_CAPABILITIES);
+}

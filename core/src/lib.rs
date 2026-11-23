@@ -2550,6 +2550,13 @@ impl Studio {
     ) -> Vec<Output> {
         let own_id = event.session_id.clone();
         event.session_id = self.row(&event);
+        // A line the server wrote is Claude-shaped whatever the session's agent, so it reads as the
+        // session's own agent's (#352).
+        if event.written_by_studio()
+            && let Some(session) = self.sessions.get(&event.session_id)
+        {
+            event.capabilities = session.capabilities;
+        }
         let continues = event.session_id != own_id && !self.rows.contains_key(&own_id);
         if event.session_id != own_id {
             self.rows.insert(own_id.clone(), event.session_id.clone());

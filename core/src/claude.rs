@@ -173,6 +173,9 @@ fn adapt(raw: Raw) -> Event {
             if raw.reason == "clear" {
                 happened.push(Happened::EndedByClear);
             }
+            if matches!(raw.reason.as_str(), "process_gone" | "studio_close") {
+                happened.push(Happened::WrittenByStudio);
+            }
         }
         "UserPromptSubmit" => {
             happened.push(Happened::TurnStart {
@@ -284,6 +287,9 @@ fn adapt(raw: Raw) -> Event {
             answer: raw.studio_answer.clone(),
         }),
         _ => {}
+    }
+    if matches!(raw.hook_event_name.as_str(), INTERRUPTED | STUDIO_ANSWER) {
+        happened.push(Happened::WrittenByStudio);
     }
     if let Some(task) = raw.tool_response.background_task_id.clone() {
         happened.push(Happened::BackgroundTask(task));
