@@ -437,6 +437,11 @@ pub struct ClaudeWriter {
     /// The same for `codex` (#364).
     codex_program: PathBuf,
     codex_folder: PathBuf,
+    /// And for `copilot` and Cursor's `agent` (#365).
+    copilot_program: PathBuf,
+    copilot_folder: PathBuf,
+    cursor_program: PathBuf,
+    cursor_folder: PathBuf,
     /// The program that writes now.
     kind: Mutex<WriterKind>,
     /// How long a call may run before it fails and is stopped (danielrispler/Falinks#434, decision 30); unset, the
@@ -519,6 +524,10 @@ impl ClaudeWriter {
             agy_folder: folder.with_file_name(WriterKind::Agy.folder()),
             codex_program: WriterKind::Codex.program().into(),
             codex_folder: folder.with_file_name(WriterKind::Codex.folder()),
+            copilot_program: WriterKind::Copilot.program().into(),
+            copilot_folder: folder.with_file_name(WriterKind::Copilot.folder()),
+            cursor_program: WriterKind::Cursor.program().into(),
+            cursor_folder: folder.with_file_name(WriterKind::Cursor.folder()),
             kind: Mutex::new(WriterKind::Claude),
             program,
             folder,
@@ -565,6 +574,24 @@ impl ClaudeWriter {
         }
     }
 
+    /// The writer that runs `copilot` as `program`, in the neutral folder `folder`.
+    pub fn with_copilot(self, program: PathBuf, folder: PathBuf) -> Self {
+        Self {
+            copilot_program: program,
+            copilot_folder: folder,
+            ..self
+        }
+    }
+
+    /// The writer that runs Cursor's `agent` as `program`, in the neutral folder `folder`.
+    pub fn with_cursor(self, program: PathBuf, folder: PathBuf) -> Self {
+        Self {
+            cursor_program: program,
+            cursor_folder: folder,
+            ..self
+        }
+    }
+
     /// The writer that starts as `kind`; the settings change it later with `use_writer`.
     pub fn with_kind(self, kind: WriterKind) -> Self {
         *self.kind.lock().unwrap() = kind;
@@ -593,15 +620,23 @@ impl ClaudeWriter {
         let folder = log.with_file_name(WriterKind::Claude.folder());
         let agy_folder = log.with_file_name(WriterKind::Agy.folder());
         let codex_folder = log.with_file_name(WriterKind::Codex.folder());
+        let copilot_folder = log.with_file_name(WriterKind::Copilot.folder());
+        let cursor_folder = log.with_file_name(WriterKind::Cursor.folder());
         std::fs::create_dir_all(&folder)?;
         std::fs::create_dir_all(&agy_folder)?;
         std::fs::create_dir_all(&codex_folder)?;
+        std::fs::create_dir_all(&copilot_folder)?;
+        std::fs::create_dir_all(&cursor_folder)?;
         let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/zsh".into());
         let agy = find_program(shell.as_ref(), WriterKind::Agy.program());
         let codex = find_program(shell.as_ref(), WriterKind::Codex.program());
+        let copilot = find_program(shell.as_ref(), WriterKind::Copilot.program());
+        let cursor = find_program(shell.as_ref(), WriterKind::Cursor.program());
         Ok(Self::new(find_claude(shell.as_ref()), folder)
             .with_agy(agy, agy_folder)
-            .with_codex(codex, codex_folder))
+            .with_codex(codex, codex_folder)
+            .with_copilot(copilot, copilot_folder)
+            .with_cursor(cursor, cursor_folder))
     }
 
     /// The `claude -p` run that writes a session's Goal from Daniel's `prompts`. Past `MAX_CHANGE`,
@@ -715,14 +750,19 @@ impl ClaudeWriter {
 
     /// The command that makes `request` with the program that writes now (`build_command`).
     pub fn build(&self, request: &WriterRequest) -> (Command, String) {
-        match self.kind() {
-            kind @ WriterKind::Claude => build_command(kind, &self.program, &self.folder, request),
-            kind @ WriterKind::Agy => {
-                build_command(kind, &self.agy_program, &self.agy_folder, request)
-            }
-            kind @ WriterKind::Codex => {
-                build_command(kind, &self.codex_program, &self.codex_folder, request)
-            }
+        let kind = self.kind();
+        let (program, folder) = self.program_of(kind);
+        build_command(kind, program, folder, request)
+    }
+
+    /// Writer `kind`'s program and its neutral folder.
+    fn program_of(&self, kind: WriterKind) -> (&PathBuf, &PathBuf) {
+        match kind {
+            WriterKind::Claude => (&self.program, &self.folder),
+            WriterKind::Agy => (&self.agy_program, &self.agy_folder),
+            WriterKind::Codex => (&self.codex_program, &self.codex_folder),
+            WriterKind::Copilot => (&self.copilot_program, &self.copilot_folder),
+            WriterKind::Cursor => (&self.cursor_program, &self.cursor_folder),
         }
     }
 
@@ -770,13 +810,11 @@ impl ClaudeWriter {
 
     /// The writer whose program `command` runs.
     fn built_for(&self, command: &Command) -> WriterKind {
-        if command.get_program() == self.agy_program.as_os_str() {
-            WriterKind::Agy
-        } else if command.get_program() == self.codex_program.as_os_str() {
-            WriterKind::Codex
-        } else {
-            WriterKind::Claude
-        }
+        WriterKind::ALL
+            .into_iter()
+            .filter(|&kind| kind != WriterKind::Claude)
+            .find(|&kind| command.get_program() == self.program_of(kind).0.as_os_str())
+            .unwrap_or(WriterKind::Claude)
     }
 
     /// Nothing, or why no call runs: summaries are off until a writer passes Test. Being off is no failure notice.
@@ -818,9 +856,26 @@ impl ClaudeWriter {
             }
         };
         let timeout = stop_after(kind, timeout);
-        let mut child = command
+        // A writer that says why it failed on standard error only has it read with its output, through one pipe.
+        let merged = match kind.fails_on_stderr() {
+            true => match std::io::pipe().and_then(|(read, write)| {
+                command.stdout(write.try_clone()?).stderr(write);
+                Ok(read)
+            }) {
+                Ok(read) => Some(read),
+                Err(e) => {
+                    let error = WriterError::new(FailureKind::Other, kind, format!("({e})"));
+                    tell_failed(&error);
+                    return Err(error);
+                }
+            },
+            false => {
+                command.stdout(Stdio::piped());
+                None
+            }
+        };
+        let child = command
             .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
             .process_group(0)
             .spawn()
             .map_err(|e| {
@@ -834,7 +889,17 @@ impl ClaudeWriter {
                 tell_failed(&error);
                 error
             })?;
-        let (mut stdin, mut stdout) = (child.stdin.take(), child.stdout.take());
+        // The command holds the pipe's write ends until it is dropped, and the output would never end while it does.
+        drop(command);
+        let mut child = child;
+        let mut stdin = child.stdin.take();
+        let mut stdout: Option<Box<dyn Read + Send>> = match merged {
+            Some(read) => Some(Box::new(read)),
+            None => child
+                .stdout
+                .take()
+                .map(|o| Box::new(o) as Box<dyn Read + Send>),
+        };
         // Threads, so a call that reads no input or never ends cannot hold back the timeout.
         thread::spawn(move || stdin.as_mut().map(|i| i.write_all(prompt.as_bytes())));
         let (sender, read) = mpsc::channel();
@@ -898,11 +963,7 @@ impl CardWriter for ClaudeWriter {
             timeout: self.timeout.unwrap_or(kind.timeout()),
             ..WriterRequest::default()
         };
-        let (program, folder) = match kind {
-            WriterKind::Claude => (&self.program, &self.folder),
-            WriterKind::Agy => (&self.agy_program, &self.agy_folder),
-            WriterKind::Codex => (&self.codex_program, &self.codex_folder),
-        };
+        let (program, folder) = self.program_of(kind);
         let run = build_command(kind, program, folder, &request);
         self.call_as(kind, request.timeout, run, false, false)
             .map(|_| ())

@@ -80,7 +80,7 @@
     { "id": "replay-never-rewrites", "on": "understanding", "backing": "check",
       "text": "Replaying the log never rewrites, replaces or deletes a stored card, summary or answer." },
     { "id": "writer-has-no-tools", "on": "understanding", "backing": "check",
-      "text": "A change is untrusted text: the writer has no tools where it can turn them off (Claude), else it runs read-only (Codex's read-only sandbox) or as locked as its flags allow (agy's sandboxed terminal, with no slash commands or skills), always in an empty folder." },
+      "text": "A change is untrusted text: the writer has no tools where it can turn them off (Claude; Copilot's empty tool allow-list, from its docs), else it runs read-only (Codex's read-only sandbox, Cursor's ask mode) or as locked as its flags allow (agy's sandboxed terminal, with no slash commands or skills), always in an empty folder." },
     { "id": "colour-only-for-needs-you", "on": "window", "backing": "trust",
       "text": "Loud colour is only for what needs you and for a broken law." }
   ],

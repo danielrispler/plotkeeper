@@ -15,7 +15,7 @@ export type Choice = { writer: WriterKind; model: string; effort: string };
 export const choiceOptions = (list: Writers): { kind: WriterKind; label: string; disabled: boolean }[] =>
   list.writers.map((w) => ({ kind: w.kind, label: w.found ? w.name : `${w.name} (not found)`, disabled: !w.found }));
 
-// A model as writer `kind` takes it: one agy or Codex does not list is its first, as the server reads it
+// A model as writer `kind` takes it: one any writer but Claude does not list is its first, as the server reads it
 // (`WriterKind::model`); Claude takes any id.
 function modelOf(list: Writers, kind: WriterKind, model: string): string {
   const models = list.writers.find((w) => w.kind === kind)?.models ?? [];

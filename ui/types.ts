@@ -447,7 +447,7 @@ export type CommitFiles = { commit: string; short: string; label: string; url: s
 // The writer section (spec #320): the writers the login shell's `command -v` finds (`understanding/src/writer.rs`), whether
 // summaries are on (off until a writer passes Test for a user who arrived with none) and whether PR briefs can be written,
 // which needs `claude`; and a Test's outcome, with `settings.json`'s new text when the pass saved the choice.
-export type WriterKind = "claude" | "agy" | "codex";
+export type WriterKind = "claude" | "agy" | "codex" | "copilot" | "cursor";
 export type FoundWriter = { kind: WriterKind; name: string; found: boolean; models: string[]; efforts: string[] };
 export type Writers = { writers: FoundWriter[]; summaries_on: boolean; briefs: boolean };
 export type WriterOutcome = "passed" | "not_logged_in" | "quota" | "timeout" | "not_installed" | "empty" | "other";
