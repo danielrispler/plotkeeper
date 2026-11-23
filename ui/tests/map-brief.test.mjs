@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { alsoAt, chapterGate, briefCamera, briefPlayer, escapeMap, figureShapes, figureSize, layerOrder, playlist, unconfirmed } from "../../dist/map-model.js";
+import { alsoAt, chapterGate, storySteps, briefCamera, briefPlayer, escapeMap, figureShapes, figureSize, layerOrder, playlist, unconfirmed } from "../../dist/map-model.js";
 import { trayRows } from "../../dist/map-tray.js";
 
 const step = (k, extra = {}) => ({ k, h: k, b: "", on: [], hops: [], law: null, covered_by: null, list: [], risks: [], fig: null, check: null, cites: [], flags: [], ...extra });
@@ -254,4 +254,19 @@ test("a chapter with no check is complete once its last step is seen, and leavin
   gate.sawLast();
   assert.equal(fired, 1);
   assert.equal(gate.done(), true);
+});
+
+test("the Ratify step that ends the last chapter is no part of the story: the gate and the also-touched lines key on the step before it", () => {
+  const also = [{ part: "hook", line: "A wording change.", flags: [] }];
+  const b = brief({ also, chapters: [chapter("Fog", "Before", "Now")] });
+  const played = [...playlist(b, 0, false), step("Ratify")];
+  const story = storySteps(played);
+  assert.deepEqual(story.map((s) => s.k), ["Before", "Now"]);
+  assert.deepEqual(alsoAt(b, 0, 1, story.length), also, "the last story step carries them");
+  assert.deepEqual(alsoAt(b, 0, 2, story.length), [], "the Ratify step does not");
+  // Reading the last story step completes the chapter; the Ratify step is never needed.
+  let fired = 0;
+  const gate = chapterGate(story, () => fired++);
+  gate.sawLast();
+  assert.equal(fired, 1);
 });

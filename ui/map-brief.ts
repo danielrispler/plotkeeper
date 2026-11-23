@@ -15,7 +15,7 @@ import { logStop } from "./stop-rules.js";
 import { scrubTo } from "./map-history.js";
 import { ratifyActions } from "./map-ratify.js";
 import { ratifyStep, statusWords } from "./ratify.js";
-import { actorSize, alsoAt, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, figureShapes, figureSize, orderRun, type OrderRun, pickRun, type PickRun, playlist, plateSize, type Rect, type Shape, unconfirmed } from "./map-model.js";
+import { actorSize, alsoAt, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, figureShapes, figureSize, orderRun, type OrderRun, pickRun, type PickRun, playlist, plateSize, storySteps, type Rect, type Shape, unconfirmed } from "./map-model.js";
 import type { BriefCheck, BriefStep, BriefView, PrBrief, RatifyRow } from "./types.js";
 
 const player = briefPlayer({ scrubbed: () => currentScrub() !== null, backToNow: () => void scrubTo(null).catch(failure("map_at")) });
@@ -51,7 +51,7 @@ function gateOf(): Gate | null {
   if (!gate) {
     const { project, pr, chapter } = now;
     const head = playing.brief.head;
-    gate = chapterGate(steps(), () => {
+    gate = chapterGate(storySteps(steps()), () => {
       logStop("chapter-done", project, pr);
       void invoke("brief_chapter_done", { project, number: pr, chapter, head }).catch(failure("brief_chapter_done"));
     });
@@ -63,7 +63,7 @@ function gateOf(): Gate | null {
 function watchLast(node: Element, index: number) {
   stopWatching();
   const gate = gateOf();
-  if (!gate || gate.done() || index !== steps().length - 1) return;
+  if (!gate || gate.done() || index !== storySteps(steps()).length - 1) return;
   watching = watchSeen(node, { active: () => player.current()?.step === index && panel().classList.contains("open"), onSeen: () => gate.sawLast() });
 }
 
@@ -561,7 +561,7 @@ function show(view: MapView, same: boolean) {
   void box.offsetWidth;
   box.classList.add("open");
   const cols = box.querySelector<HTMLElement>(".brief-cols")!;
-  const also = alsoAt(playing.brief.brief, now.chapter, now.step, list.length);
+  const also = alsoAt(playing.brief.brief, now.chapter, now.step, storySteps(list).length);
   const fill = () => {
     const node = stepNode(view, step, pr, also);
     cols.replaceChildren(node);
@@ -618,7 +618,7 @@ function buildPanel(view: MapView, list: BriefStep[], pr: number) {
   let tallest = 0;
   const now = player.current();
   list.forEach((step, i) => {
-    cols.replaceChildren(stepNode(view, step, pr, playing && now ? alsoAt(playing.brief.brief, now.chapter, i, list.length) : []));
+    cols.replaceChildren(stepNode(view, step, pr, playing && now ? alsoAt(playing.brief.brief, now.chapter, i, storySteps(list).length) : []));
     tallest = Math.max(tallest, box.offsetHeight);
   });
   box.style.minHeight = `${tallest}px`;

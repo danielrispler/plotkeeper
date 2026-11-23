@@ -281,6 +281,12 @@ export function playlist(brief: PrBrief, chapter: number, overview: boolean): Br
   return overview ? [...brief.overview, ...own] : own;
 }
 
+// What the brief says, without the Ratify step that ends its last chapter: reading to the end, the check and the "also touched" lines
+// all key on the story, since ratifying never blocks anything (#343).
+export function storySteps<T extends { k: string }>(list: T[]): T[] {
+  return list.filter((step) => step.k !== "Ratify");
+}
+
 // The "also touched" lines, which show with the last step of the last chapter.
 export function alsoAt(brief: PrBrief, chapter: number, step: number, length: number): PrBrief["also"] {
   return chapter === brief.chapters.length - 1 && step === length - 1 ? brief.also : [];
