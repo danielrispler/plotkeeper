@@ -2,15 +2,15 @@
 
 A **PR brief** is the story of one ready PR, written once by a sandboxed writer from facts code assembles, held to checks, and played on the Map view so Daniel understands what the PR changes before he merges it (spec danielrispler/plotkeeper#334). This is the one doc for it; [the system map](map.md) covers the view it plays on, the fog it clears and the part sheet. Vocabulary (PR brief, chapter, Ready for review, ratify, claim check) is in [`CONTEXT.md`](../CONTEXT.md).
 
-Code: `src-tauri/src/prs.rs`, `src-tauri/src/pr_briefs.rs`, `src-tauri/src/ratify.rs`, `src-tauri/src/fog.rs`, `src-tauri/src/stop_rules.rs`; `understanding/src/pr_brief.rs`, `understanding/src/pr_brief_check.rs`; `ui/map-tray.ts`, `ui/map-brief.ts`, `ui/map-model.ts`, `ui/map-ratify.ts`, `ui/ratify.ts`, `ui/stop-rules.ts`.
+Code: `server/src/prs.rs`, `server/src/pr_briefs.rs`, `server/src/ratify.rs`, `server/src/fog.rs`, `server/src/stop_rules.rs`; `understanding/src/pr_brief.rs`, `understanding/src/pr_brief_check.rs`; `ui/map-tray.ts`, `ui/map-brief.ts`, `ui/map-model.ts`, `ui/map-ratify.ts`, `ui/ratify.ts`, `ui/stop-rules.ts`.
 
 ## Ready detection
 
-The shell asks `gh pr view <branch> --json number,title,isDraft,state,headRefOid,body,closingIssuesReferences` for each listed session's branch on Landed's triggers, never on a timer: at once when a turn ends, and when the window gains focus or the Map view opens, through one cooldown of a minute per repository with an in-flight guard (`prs.rs`). A PR is **ready** when it is open and not a draft. Its head is kept in memory and replaced by a later lookup. Any PR number found still names its session ("PR #N").
+The server asks `gh pr view <branch> --json number,title,isDraft,state,headRefOid,body,closingIssuesReferences` for each listed session's branch on Landed's triggers, never on a timer: at once when a turn ends, and when the page gains focus or the Map view opens, through one cooldown of a minute per repository with an in-flight guard (`prs.rs`). A PR is **ready** when it is open and not a draft. Its head is kept in memory and replaced by a later lookup. Any PR number found still names its session ("PR #N").
 
 A lookup of a ready PR (`pr_briefs.rs`):
 
-- With no stored brief at that head, the brief is written at once.
+- With no stored brief at that head, the brief is written at once, unless it was ready when `plotkeeper` started: then it is written at start only when its head moved within `catchUp.hours` (2 by default) and it is among the 3 newest such heads; any other is written when Daniel opens it (a PR that becomes ready while `plotkeeper` runs is written at once, as before). The 3 is a constant in the code, not a setting.
 - A new head marks the stored brief stale. It is rewritten when Daniel opens it, or when two lookups in a row see the same new head.
 - A PR whose touched parts would not fog at Daniel's effective tiers gets no brief (see Shape): nothing is written, it is not gathered again at the same head, and its tray row says "no brief: nothing you track changed".
 
@@ -18,7 +18,7 @@ Home's quiet dot, the rail's row and the history strip's "Brief" link all read t
 
 ## The writer and its facts
 
-`write_pr_brief` is the one call into the writer (`understanding/src/pr_brief.rs`). The model is the "PR briefs" setting ([settings](../settings.md)), Opus by default, and serves the writer, the claim check and the retry alike. The writer is sandboxed with no tools: everything it reads is in the facts, which `build_facts` assembles from `gh` (`fetch_meta`) and `git` (`gather`):
+`write_pr_brief` is the one call into the writer (`understanding/src/pr_brief.rs`). The model is `prBriefs.model` in `settings.json` ([settings](../settings.md)), Opus by default, read on each write, and serves the writer, the claim check and the retry alike. Briefs are always written with `claude -p`, whatever `summaries.writer` says. The writer is sandboxed with no tools: everything it reads is in the facts, which `build_facts` assembles from `gh` (`fetch_meta`) and `git` (`gather`):
 
 - The PR's title and body, the spec or ticket it closes (trimmed to the sections the writer needs), its checks' conclusions.
 - The map at the PR's head (or as of its birth for an older PR), the map's diff, and the parts the diff touches with their tier (Daniel's tier overrides the map's), laws, the tagged tests that back each law and whether this PR changed one, and the flows through them.
@@ -35,21 +35,21 @@ The **claim check** (`pr_brief_check.rs`) is a second sandboxed call that reads 
 
 ## The writer's limits
 
-Every writer call of the studio, the PR brief's, the claim check's, the turn summary's, the Goal's, Ask's and the risk note's judge, runs `claude -p` on your subscription, with `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` removed from its environment, in `card-writer/` beside the event log. What it reads is untrusted text, so it runs with no tools (`--tools ""`) and no MCP servers (`--strict-mcp-config`), in safe mode, whatever your settings allow, and without `CLAUDE_CODE_PLUGIN_DIRS`, so its own sessions send no hook events. A change it is given is cut at 64 KiB, with a line that says how many bytes were cut; a brief's facts keep to their own budget (see [The writer and its facts](#the-writer-and-its-facts)). It writes in English, with code in backticks. A reply that does not parse is asked for once more; when the second fails too, there is nothing stored and one line in the Studio log ([storage](storage.md)).
+Every writer call of the studio, the PR brief's, the claim check's, the turn summary's, the Goal's, Ask's and the risk note's judge, runs `claude -p` on your subscription, with `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` removed from its environment, in `card-writer/` beside the event log (`claude` only for briefs, whatever `summaries.writer` says). What it reads is untrusted text, so it runs with no tools (`--tools ""`) and no MCP servers (`--strict-mcp-config`), in safe mode, whatever your settings allow, and without `CLAUDE_CODE_PLUGIN_DIRS`, so its own sessions send no hook events. A change it is given is cut at 64 KiB, with a line that says how many bytes were cut; a brief's facts keep to their own budget (see [The writer and its facts](#the-writer-and-its-facts)). It writes in English, with code in backticks. A reply that does not parse is asked for once more; when the second fails too, there is nothing stored and one line in the Studio log ([storage](storage.md)).
 
-An app opened from Finder or `open` does not get your shell's `PATH`, so at start the app asks your login shell where `claude` is: `$SHELL -lc 'command -v claude'`, with `/bin/zsh` when `SHELL` is unset. Only the path comes back; the writer keeps the app's own environment. A login shell that is not interactive reads `~/.zprofile` but not `~/.zshrc`, so the line that puts `claude` on your `PATH` must be in the first. With no answer, the app runs `claude` from its own `PATH`.
+`plotkeeper` started from a launcher may not get your shell's `PATH`, so at start it asks your login shell where `claude` is: `$SHELL -lc 'command -v claude'`, with `/bin/zsh` when `SHELL` is unset. Only the path comes back; the writer keeps the process's own environment. A login shell that is not interactive reads `~/.zprofile` but not `~/.zshrc`, so the line that puts `claude` on your `PATH` must be in the first. With no answer, it runs `claude` from its own `PATH`.
 
-To run the app with a fake writer instead of `claude -p`:
+To run `plotkeeper` with a fake writer instead of `claude -p` (it then writes no PR brief):
 
-    open --env STUDIO_CARD_WRITER=fake target/release/bundle/macos/Studio.app
+    STUDIO_CARD_WRITER=fake plotkeeper
 
 ## The record
 
-Each brief written appends one line to `pr-brief-records.jsonl`, beside the briefs: the PR and head, the shape, the budget and what was cut, the code checks' flags, the claim check's flags before the retry and the ones that still stand after, the flags the stored brief carries, the count left unconfirmed, any claim or retry error, and each call's tokens and cost. It is for tuning prompts, caps and models from real data; nothing shows it. A brief is stored per PR and head under the data folder's `pr-briefs-by-project/<project>/pr-briefs/`, and a reader ignores fields it does not know.
+Each brief written appends one line to `pr-brief-records.jsonl`, beside the briefs: the PR and head, the shape, the budget and what was cut, the code checks' flags, the claim check's flags before the retry and the ones that still stand after, the flags the stored brief carries, the count left unconfirmed, any claim or retry error, and each call's tokens, cost and wall time (`duration_ms`: the writer, the claim check and the retry each). It is for tuning prompts, caps and models from real data; nothing shows it. A brief is stored per PR and head under the data folder's `pr-briefs-by-project/<project>/pr-briefs/`, and a reader ignores fields it does not know.
 
 ## The tray and the view
 
-The tray at the map's foot lists the project's ready PRs (`ui/map-tray.ts`): a PR whose brief is stored is one row, or one row per chapter, that opens it; one without says its brief is being written or not written yet; a quiet one says "no brief". Opening a row (`openBriefOf`) reads the brief (the shell rewrites a stale one first), returns a scrubbed map to now, and plays it from the step it was left at; closing it with Esc keeps the step and finishing it starts it over (`map-brief.ts`, `map-model.ts`).
+The tray at the map's foot lists the project's ready PRs (`ui/map-tray.ts`): a PR whose brief is stored is one row, or one row per chapter, that opens it; one being written says "writing the brief…" and waits; one without a brief opens, and opening it writes it (the panel says "Writing the brief…" if that takes a moment, and the map stays usable); a quiet one says "no brief". The page raises no browser notification and no tab-title count for briefs. Opening a row (`openBriefOf`) reads the brief (the server rewrites a stale one first), returns a scrubbed map to now, and plays it from the step it was left at; closing it with Esc keeps the step and finishing it starts it over (`map-brief.ts`, `map-model.ts`).
 
 Playing: the light runs a step's links at one speed and each part lights as it arrives, the camera frames the parts the brief lights, the panel keeps its tallest step's height and crossfades, citations sit in quiet type ("What this rests on"), and "See the code" opens the PR's changed files with their diffs (`pr_diff`) in the drawer above the brief. Under reduced motion a whole step lights at once. A step with a flagged item shows "not confirmed from the facts"; "Also touched" lines show on the last step of the last chapter. Esc peels the drawer, then the brief, then a scrubbed commit, then the part sheet, then the view.
 
@@ -63,17 +63,17 @@ A step's check is one prediction. A **pick** is answered in the panel: pick an o
 
 ## Fog clearing
 
-A chapter is **done** when its last step's words were seen (`watchSeen`) and its check was answered, right or wrong, when it holds one (`chapterGate`). The window tells the shell once (`brief_chapter_done`), which keeps "read at head X" per chapter in `map-state.json` and clears the PR's fog (`fog.rs`) from every part whose chapters are all done, lifting the mist. A part no chapter lights keeps its fog; leaving mid-chapter clears nothing. A PR read before it merges files fog at merge only for what was pushed after the read, limited to the paths the squash commit changed. "I know this" on a part's sheet still clears a whole part. Details of the fog are in [the map doc](map.md).
+A chapter is **done** when its last step's words were seen (`watchSeen`) and its check was answered, right or wrong, when it holds one (`chapterGate`). The page tells the server once (`brief_chapter_done`), only for a chapter finished while the page is visible and focused (`watchSeen` already asks for both), which keeps "read at head X" per chapter in `map-state.json` and clears the PR's fog (`fog.rs`) from every part whose chapters are all done, lifting the mist. A part no chapter lights keeps its fog; leaving mid-chapter clears nothing. A PR read before it merges files fog at merge only for what was pushed after the read, limited to the paths the squash commit changed. "I know this" on a part's sheet still clears a whole part. Details of the fog are in [the map doc](map.md).
 
 ## Ratifying
 
-The brief ends with a **Ratify** step listing what Daniel has not yet looked at (nothing is added when all is ratified): each map or law change the PR made (read by code from the map's diff, keyed by PR, kind and map id) and each decision the agent declared (keyed by PR and decision id). Each has **Accept** and **Overturn**. Ratifying never blocks anything; the merged map is in effect at once and the record (`ratify.json` in the data folder, per project) only says Daniel looked. Overturn records the decision, then opens New session in the project with a prompt quoting the item, or types the prompt, without Enter, into the PR's session when it is live. The part sheet marks the same two buttons on a law row or a link at the part that landed after the project's first run with no record. The full rules, including the `since` date and `pending` records, are in [the map doc](map.md).
+The brief ends with a **Ratify** step listing what Daniel has not yet looked at (nothing is added when all is ratified): each map or law change the PR made (read by code from the map's diff, keyed by PR, kind and map id) and each decision the agent declared (keyed by PR and decision id). Each has **Accept** and **Overturn**. Ratifying never blocks anything; the merged map is in effect at once and the record (`ratify.json` in the data folder, per project) only says Daniel looked. Overturn records the decision, then copies a self-contained prompt to the clipboard with `navigator.clipboard.writeText()` (the PR number, its branch while the PR is open, the item's id and its wording) and says "Prompt copied, paste it into your agent"; if the clipboard refuses, the prompt shows in a small box with a Copy button. Nothing is typed into a session. The part sheet marks the same two buttons on a law row or a link at the part that landed after the project's first run with no record. The full rules, including the `since` date and `pending` records, are in [the map doc](map.md).
 
 ## Stop rules
 
 The brief's use is counted quietly in `stop-rules.jsonl`, with no setting and nothing shown, beside the map's own events ([map doc, Stop rules](map.md)). Each brief event names its project and PR:
 
-- `brief-offered`: the PR's tray row was seen (`watchSeen`), once per PR; the shell keeps the offer to one line however often the tray is drawn or Studio restarts. A row with no brief to open offers nothing.
+- `brief-offered`: the PR's tray row was seen (`watchSeen`), once per PR; the server keeps the offer to one line however often the tray is drawn or Studio restarts. A row with no brief to open offers nothing.
 - `brief-opened`: a tray row (or the rail's or history strip's link) opened the brief.
 - `chapter-done`: a chapter was read to its end, as above.
 - `check-answered`: a check was graded.

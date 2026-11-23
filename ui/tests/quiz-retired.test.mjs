@@ -20,7 +20,7 @@ test("Home has no learning slot, no Retest and no 'shown' watch", () => {
   }
   const state = { expanded: new Set(), cleared: new Set() };
   const sessions = [{ id: "u", state: "your_turn", unseen: true, landed: false, turns: [], questions: [], transcript: {} }];
-  assert.deepEqual(home.homeView(sessions, ["/w/a"], state).map((p) => p.key), ["unseen", "start"]);
+  assert.deepEqual(home.homeView(sessions, ["/w/a"], state).map((p) => p.key), ["unseen", "projects"]);
   assert.equal("quiet" in home.homeState || "held" in home.homeState, false);
 });
 

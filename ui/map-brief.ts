@@ -13,7 +13,7 @@ import { closeDrawer, openDrawer } from "./map-drawer.js";
 import { watchSeen } from "./seen.js";
 import { logStop } from "./stop-rules.js";
 import { scrubTo } from "./map-history.js";
-import { ratifyActions } from "./map-ratify.js";
+import { overturnNote, ratifyActions } from "./map-ratify.js";
 import { ratifyStep, statusWords } from "./ratify.js";
 import { actorSize, alsoAt, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, commitDrawer, figureShapes, figureSize, latestRequest, orderRun, type OrderRun, pickRun, type PickRun, playlist, plateSize, storySteps, type Rect, type Shape, unconfirmed } from "./map-model.js";
 import type { BriefCheck, BriefStep, BriefView, PrBrief, RatifyRow } from "./types.js";
@@ -76,6 +76,8 @@ export async function openBriefOf(project: string, number: number, chapter: numb
   problems.delete(number);
   const wanted = latest.begin();
   let got: BriefView | null;
+  // A brief that takes a moment to write shows "Writing the brief…" in the panel and on the PR's tray row; the map stays usable meanwhile.
+  const slow = window.setTimeout(() => wanted() && showWriting(number), WRITING_AFTER_MS);
   try {
     panel().dataset.waiting = String(number);
     got = await invoke("pr_brief", { project, number });
@@ -84,9 +86,11 @@ export async function openBriefOf(project: string, number: number, chapter: numb
     if (wanted()) problems.set(number, String(e));
     got = null;
   }
+  clearTimeout(slow);
   // A later open, or a close, since: this one's answer is not wanted, and the panel's waiting mark is that one's.
   if (!wanted()) return;
   delete panel().dataset.waiting;
+  if (!briefOpen()) hideWriting();
   const view = currentMap();
   if (!got || !view || view.project !== project) {
     if (!got && !problems.has(number)) problems.set(number, "the brief is not written yet");
@@ -111,6 +115,26 @@ export async function openBriefOf(project: string, number: number, chapter: numb
   show(view, false);
 }
 
+// The panel says so while a brief is written for an open: after this long, so a stored brief never flashes it.
+const WRITING_AFTER_MS = 300;
+function showWriting(number: number) {
+  if (briefOpen()) return;
+  const box = panel();
+  box.replaceChildren(text("p", "Writing the brief…", "brief-writing"));
+  box.classList.add("open");
+  box.hidden = false;
+  const note = document.querySelector(`#map-tray .tray-row[data-pr="${number}"] .tray-note`);
+  if (note) note.textContent = `#${number} · writing the brief…`;
+}
+function hideWriting() {
+  const box = panel();
+  if (box.querySelector(".brief-writing")) {
+    box.replaceChildren();
+    box.classList.remove("open");
+    box.hidden = true;
+  }
+}
+
 // Opens PR `number`'s brief once the Map view has drawn `project` (the rail's row opens the view and the brief together).
 let pending: { project: string; number: number } | null = null;
 export function openBriefWhenDrawn(project: string, number: number) {
@@ -128,6 +152,7 @@ onDraw((view) => {
 export function closeBrief() {
   latest.cancel();
   delete panel().dataset.waiting;
+  hideWriting();
   stopWatching();
   marks.forEach((stop) => stop());
   marks = [];
@@ -387,6 +412,8 @@ function ratifyNode(view: MapView, rows: RatifyRow[]) {
     }
     list.append(item);
   }
+  const note = overturnNote();
+  if (note) list.append(note);
   return list;
 }
 

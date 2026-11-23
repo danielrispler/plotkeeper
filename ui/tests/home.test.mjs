@@ -25,7 +25,7 @@ test("Home's parts come in order, each absent when empty", () => {
     undefined,
     { projects: ["/w/plotkeeper"] },
   );
-  assert.deepEqual(keys(all), ["needs_you", "running", "unseen", "landed", "start"]);
+  assert.deepEqual(keys(all), ["needs_you", "running", "unseen", "landed", "projects"]);
   assert.deepEqual(keys(view([live("r", "running")])), ["running"]);
   assert.deepEqual(keys(view([live("d", "your_turn", { unseen: true })])), ["unseen"]);
 });
@@ -112,7 +112,6 @@ test("a click on the list's empty space goes home; a click on a row, a heading o
   assert.equal(listSpace(target()), true);
   assert.equal(listSpace(target(".item")), false);
   assert.equal(listSpace(target("summary")), false);
-  assert.equal(listSpace(target(".project-workspaces")), false);
   assert.equal(listSpace(target("button")), false);
 });
 
@@ -279,19 +278,6 @@ test("a second Clear inside the window restarts it and keeps the first rows hidd
   assert.deepEqual(deleted, []);
   time.tick(1);
   assert.deepEqual(deleted, ["a", "b"]);
-});
-
-// One rule for Clear and Delete (#270): an ended session keeps its terminal, which a later session may now run in.
-// @law: delete-keeps-live-terminal
-test("a terminal is in use while a session not leaving, and not ended, runs in it", async () => {
-  const { terminalInUse } = await import("../../dist/home.js");
-  const old = live("old", "ended", { terminal: "t1" });
-  const now = live("now", "running", { terminal: "t1" });
-  const leaving = (ids) => (id) => ids.includes(id);
-  assert.equal(terminalInUse("t1", [old, now], leaving(["old"])), true);
-  assert.equal(terminalInUse("t1", [old, now], leaving(["old", "now"])), false);
-  assert.equal(terminalInUse("t1", [old, live("gone", "ended", { terminal: "t1" })], leaving(["old"])), false);
-  assert.equal(terminalInUse("t1", [old, live("other", "running", { terminal: "t2" })], leaving(["old"])), false);
 });
 
 test("Home hides the cleared rows, and shows the Landed part again after Undo", () => {

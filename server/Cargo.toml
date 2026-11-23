@@ -1,0 +1,29 @@
+[package]
+name = "studio-server"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# The app's state and the functions behind its learning-layer and session-view commands, with no Tauri in it
+# (danielrispler/plotkeeper#321, spec #319 "The server").
+[dependencies]
+studio-core = { path = "../core" }
+studio-hook = { path = "../hook" }
+studio-understanding = { path = "../understanding" }
+studio-workbench = { path = "../workbench" }
+studio-system-map = { path = "../system-map" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+jsonc-parser = { version = "0.34", features = ["cst"] }
+log = "0.4"
+libc = "0.2"
+tempfile = "3"
+tiny_http = "0.12"
+ctrlc = { version = "3", features = ["termination"] }
+
+[dev-dependencies]
+studio-test-support = { path = "../test-support" }
+
+[[bin]]
+name = "plotkeeper"
+path = "src/bin/plotkeeper.rs"

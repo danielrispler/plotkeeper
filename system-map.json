@@ -19,8 +19,13 @@
     },
     {
       "id": "shell", "name": "Shell", "caption": "Reads the log, feeds the core, acts",
-      "description": "The app's Rust side. It reads the event log, feeds the core, and carries out what follows: notices, sounds, GitHub, the terminals, the map and the CI result it reads from the default branch for the Map view, the quiet log of what you use of it, and which map changes and agent decisions of a PR you accepted or overturned.",
+      "description": "The app's Rust side. It reads the event log, feeds the core, and carries out what needs the window: notices, sounds, the Dock badge, the terminals, and each command handler, which only forwards to the server.",
       "tier": "core", "paths": ["src-tauri/"]
+    },
+    {
+      "id": "server", "name": "Server", "caption": "Holds the state, answers the commands",
+      "description": "A library, and the `plotkeeper` program that serves it, with no window in it. It holds the core state, the card store (which keeps the session briefs, the turn summaries and the cards written before cards were retired), the risk notes, the writer and the settings, tells the page why when the writer fails, runs the read loop that follows the event log and sends what changed (the list, the selection, the brief, notices) to a sink the web server sets, serves the learning layer as a local page on 127.0.0.1 (the built page, one POST route for each command and one server-sent event stream, behind a random token, a cookie and a Host check, one server per data folder), and has one function for each learning-layer and session-view command: the PR lookups on a turn's end, the page's focus and the Map view's opening (never on a timer), the PR briefs written for ready PRs and kept per head, the map, the fog a PR's reading clears, the CI result it reads from the default branch, which map changes and agent decisions of a PR you accepted or overturned, and the quiet log of what you use of it.",
+      "tier": "core", "paths": ["server/"]
     },
     {
       "id": "understanding", "name": "Understanding", "caption": "Writes what you read, and keeps it",
@@ -29,7 +34,7 @@
     },
     {
       "id": "window", "name": "Window", "caption": "Everything you see and press",
-      "description": "The list, the rail, Home, the Map view and the terminal panes. It shows state and sends your actions to the shell.",
+      "description": "The page: the list, the rail, Home, History and the Map view. It shows state and sends your actions to the server; it has no terminals, projects, branches, skills, usage or settings page.",
       "tier": "core", "paths": ["ui/"]
     },
     {
@@ -53,9 +58,15 @@
     { "id": "plugins-hook", "from": "plugins", "to": "hook" },
     { "id": "hook-shell", "from": "hook", "to": "shell" },
     { "id": "core-shell", "from": "core", "to": "shell" },
+    { "id": "shell-server", "from": "shell", "to": "server" },
+    { "id": "hook-server", "from": "hook", "to": "server" },
+    { "id": "core-server", "from": "core", "to": "server" },
+    { "id": "server-understanding", "from": "server", "to": "understanding" },
+    { "id": "server-workbench", "from": "server", "to": "workbench" },
     { "id": "shell-understanding", "from": "shell", "to": "understanding" },
     { "id": "understanding-writer", "from": "understanding", "to": "writer" },
     { "id": "shell-window", "from": "shell", "to": "window" },
+    { "id": "server-window", "from": "server", "to": "window" },
     { "id": "shell-terminal-daemon", "from": "shell", "to": "terminal-daemon" },
     { "id": "shell-workbench", "from": "shell", "to": "workbench" },
     { "id": "workbench-github", "from": "workbench", "to": "github" }
@@ -82,10 +93,10 @@
       "text": "A session's pieces are written one at a time, in order." },
     { "id": "old-stored-files-load", "on": "understanding", "backing": "check",
       "text": "A stored file of an older format still loads." },
+    { "id": "replay-never-rewrites", "on": "understanding", "backing": "check",
+      "text": "Replaying the log never rewrites, replaces or deletes a stored card, summary or answer." },
     { "id": "writer-has-no-tools", "on": "understanding", "backing": "check",
       "text": "A change is untrusted text: the writer has no tools." },
-    { "id": "delete-keeps-live-terminal", "on": "window", "backing": "check",
-      "text": "Delete never ends a terminal another live session uses." },
     { "id": "colour-only-for-needs-you", "on": "window", "backing": "trust",
       "text": "Loud colour is only for what needs you and for a broken law." },
     { "id": "terminals-outlive-app", "on": "terminal-daemon", "backing": "trust",

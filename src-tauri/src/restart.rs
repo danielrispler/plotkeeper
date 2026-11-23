@@ -1,6 +1,7 @@
 //! Restarts (danielrispler/Falinks#470): one app instance at a time, a "restart into the new build" step, and the core's
 //! answer on the daemon's terminals, idle and how each comes back (`Studio::revival`).
 
+use std::sync::Arc;
 use std::{
     path::{Path, PathBuf},
     process::Command,
@@ -12,7 +13,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 use studio_core::{Revive, Terminal};
-use studio_understanding::Core;
+use studio_server::App;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 /// Set once the read loop has replayed the event log, so the core knows every session's terminal.
@@ -21,11 +22,11 @@ pub static REPLAYED: AtomicBool = AtomicBool::new(false);
 /// How each terminal of the daemon's `list`, or of a dead daemon's record, comes back, and what runs
 /// in it now; after the event log's replay.
 #[tauri::command(async)]
-pub fn revival(terms: Vec<Terminal>, studio: State<Core>) -> Vec<Revive> {
+pub fn revival(terms: Vec<Terminal>, app: State<Arc<App>>) -> Vec<Revive> {
     while !REPLAYED.load(Ordering::Acquire) {
         thread::sleep(Duration::from_millis(50));
     }
-    studio.lock().unwrap().revival(&terms)
+    app.core.lock().unwrap().revival(&terms)
 }
 
 /// A second instance hands over and exits; this one comes forward and, when the second was another

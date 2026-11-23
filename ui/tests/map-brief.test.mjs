@@ -161,12 +161,11 @@ test("a step with a flag left after the rewrite is unconfirmed", () => {
   assert.equal(unconfirmed(step("Now")), false);
 });
 
-test("See the code opens what the step quoted, with a jump only for a file", async () => {
+test("See the code opens what the step quoted, with its source and no jump, as the page has no editor", async () => {
   const { citeDrawer } = await import("../../dist/map-model.js");
   const drawer = citeDrawer(step("Now", { h: "Delete keeps a live terminal", cites: [{ from: "ui/map.ts", quote: "const a = 1;" }, { from: "the PR body", quote: "Closes #5" }] }));
   assert.equal(drawer.title, "Delete keeps a live terminal");
-  assert.deepEqual(drawer.blocks.map((b) => [b.label, b.code, b.jumps.length]), [["ui/map.ts", "const a = 1;", 1], ["the PR body", "Closes #5", 0]]);
-  assert.deepEqual(drawer.blocks[0].jumps[0].to, { file: "ui/map.ts", line: 1 });
+  assert.deepEqual(drawer.blocks.map((b) => [b.label, b.code, b.jumps.length]), [["ui/map.ts", "const a = 1;", 0], ["the PR body", "Closes #5", 0]]);
 });
 
 test("a pick is chosen, taken back by tapping it again, and graded only when Check is pressed", async () => {

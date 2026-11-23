@@ -105,8 +105,7 @@ test("a command blocked again offers Allow and Decline once more", () => {
   assert.deepEqual(blockedView(card("blocked_again"), null, false).buttons, []);
 });
 
-import { noteKeys } from "../../dist/typing.js";
-import { retryLine, typeRetry } from "../../dist/blocked.js";
+import { retryLine } from "../../dist/blocked.js";
 
 test("a command allowed but not run says so and offers Ask again, and nothing else", () => {
   const view = blockedView(card("allowed_not_run"), null, false);
@@ -126,62 +125,6 @@ test("a subagent's block tells the session to cd into its folder in its own call
     retryLine(card("blocked", "a-7aaaa"), "Reviewer"),
     'Daniel approved the command subagent `Reviewer` was blocked on. Run `cd /work/repo` as its own Bash call, then run exactly: `claude -p "summarise" > /tmp/out.txt`. Or pass it to the subagent if it still runs.',
   );
-});
-
-// A fake clock and terminal, as in typing.test.mjs.
-function fake(keys = []) {
-  let now = 0;
-  const sent = [];
-  const notices = [];
-  const pending = [...keys];
-  const io = {
-    now: () => now,
-    sleep: async (ms) => {
-      now += ms;
-      while (pending.length && pending[0][0] <= now) {
-        const [at, id, data] = pending.shift();
-        noteKeys(id, data, at);
-      }
-    },
-    send: async (data) => sent.push([now, data]),
-    notice: (text) => notices.push(text),
-  };
-  return { io, sent, notices };
-}
-
-test("the retry line goes in as a bracketed paste and Enter follows it", async () => {
-  const { io, sent } = fake();
-  const typed = await typeRetry(card(), null, "t-retry", () => false, io);
-  assert.equal(typed, true);
-  assert.equal(sent[0][1], `\x1b[200~${retryLine(card(), null)}\x1b[201~`);
-  assert.equal(sent[1][1], "\r");
-  assert.ok(sent[1][0] > sent[0][0]);
-});
-
-test("the retry line waits for Daniel's draft and is never typed into a session that needs him", async () => {
-  noteKeys("t-draft", "half a thought", 0);
-  const drafted = fake();
-  assert.equal(await typeRetry(card(), null, "t-draft", () => false, drafted.io), false);
-  assert.deepEqual(drafted.sent, []);
-  assert.match(drafted.notices[0], /draft/);
-
-  const needing = fake();
-  assert.equal(await typeRetry(card(), null, "t-needs", () => true, needing.io), false);
-  assert.deepEqual(needing.sent, []);
-  assert.equal(needing.notices.length, 1);
-});
-
-test("a late Allow's retry line waits for the answer to reach the session, whose needs-you it ends, then types", async () => {
-  const late = fake();
-  let answered = false;
-  const sleep = late.io.sleep;
-  late.io.sleep = async (ms) => {
-    await sleep(ms);
-    if (late.io.now() >= 300) answered = true;
-  };
-  const typed = await typeRetry(card(), null, "t-late", () => !answered, late.io, () => answered);
-  assert.equal(typed, true);
-  assert.equal(late.notices.length, 0);
 });
 
 import { blockedRequestFor, sendBlockedAnswer, startWatching } from "../../dist/answer.js";

@@ -46,7 +46,7 @@ test("the pane lists the agent's files with counts, each hunk read whole, and no
   assert.deepEqual(summaries, ["a.rs +1 −0", "img.png"]);
   assert.match(place.text, /\+b/);
   assert.match(place.text, /Binary file/);
-  place.find("button").find((b) => b.text === "Terminal").listeners.click();
+  place.find("button").find((b) => b.text === "Back").listeners.click();
   assert.equal(back, 1);
 });
 

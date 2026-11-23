@@ -29,7 +29,7 @@ npm start
 - [x] **danielrispler/Falinks#555:** the data folder is `drwx------` and the socket `srw-------`:
 
   ```sh
-  ls -la ~/Library/Application\ Support/dev.falinks.studio/
+  ls -la ~/Library/Application\ Support/plotkeeper/
   ```
 
 - [x] **danielrispler/Falinks#466:** the bundle places and signs `Contents/MacOS/studio-terminal-daemon`:
@@ -75,7 +75,7 @@ Check the results when it ends:
   The arguments show `--settings` with `workbench/statusline.sh`. The session's usage file updates after a turn:
 
   ```sh
-  ls -l ~/Library/Application\ Support/dev.falinks.studio/usage/
+  ls -l ~/Library/Application\ Support/plotkeeper/usage/
   ```
 
   The status line looks the same as before, padding included. If `--settings` does not win, stop and report on danielrispler/Falinks#521: that reopens its decision 5.
@@ -195,10 +195,10 @@ With a real `claude` session in the pane (danielrispler/Falinks#466, danielrispl
 - [ ] **danielrispler/Falinks#556 and the 6c fix:** focused, another session that newly needs you plays one sound (Glass) as its toast shows, in any layout, and never twice. The session you are viewing plays none, and a your-turn plays none.
 - [ ] **danielrispler/Falinks#556:** in the background, needs you plays Glass and your turn plays Tink, each only with its notification. The sounds feel right, not alarming.
 - [ ] **danielrispler/Falinks#522:** a real "your turn" notification while you are in another app. Take a screenshot for danielrispler/Falinks#522.
-- [ ] **danielrispler/Falinks#522:** with Remote Control on (`remoteControlAtStartup`), in a session the studio started: no phone push while the studio is focused, and a push while it is in the background. `~/Library/Application Support/dev.falinks.studio/present` exists only while the window is focused:
+- [ ] **danielrispler/Falinks#522:** with Remote Control on (`remoteControlAtStartup`), in a session the studio started: no phone push while the studio is focused, and a push while it is in the background. `~/Library/Application Support/plotkeeper/present` exists only while the window is focused:
 
   ```sh
-  ls ~/Library/Application\ Support/dev.falinks.studio/present
+  ls ~/Library/Application\ Support/plotkeeper/present
   ```
 
 - [ ] **danielrispler/Falinks#522:** a turn driven from the phone still sends hook events: its row and card update in the studio.
@@ -326,7 +326,7 @@ Save everything in a new folder: `local-evidence/<date>-ui-ux-recheck/` (for exa
 - [ ] **danielrispler/Falinks#555:** with Claude working in a studio pane, the daemon reports its state:
 
   ```sh
-  (echo '{"op":"list"}'; sleep 1) | nc -U ~/Library/Application\ Support/dev.falinks.studio/terminal-daemon.sock
+  (echo '{"op":"list"}'; sleep 1) | nc -U ~/Library/Application\ Support/plotkeeper/terminal-daemon.sock
   ```
 
   That terminal shows `"state":"working"` and `"app"` set, and `turn` goes up after the turn ends.

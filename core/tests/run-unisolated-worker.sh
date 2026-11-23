@@ -21,7 +21,7 @@
 set -eu
 
 studio=$(cd "$(dirname "$0")/../.." && pwd)
-data="$HOME/Library/Application Support/dev.falinks.studio"
+data="$HOME/Library/Application Support/plotkeeper"
 session=$(uuidgen | tr '[:upper:]' '[:lower:]')
 # The real path, as `git worktree list` gives it: `mktemp` answers under the `/var` link.
 repo=$(cd "$(mktemp -d)" && pwd -P)

@@ -1,7 +1,7 @@
 // Ratifying (spec danielrispler/plotkeeper#334, ticket #343), the pure part: what the part sheet and the brief's ratify step say of an item,
-// and where an overturn goes. `map-sheet.ts` and `map-brief.ts` draw it, the shell (`src-tauri/src/ratify.rs`) keeps the records.
+// and what an overturn copies. `map-sheet.ts` and `map-brief.ts` draw it, the server (`server/src/ratify.rs`) keeps the records.
 
-import type { BriefStep, PendingItem, RatifyRow, Session } from "./types.js";
+import type { BriefStep, PendingItem, RatifyRow } from "./types.js";
 
 // The state of an item as the brief says it: nothing to ratify when it landed before the first run.
 export const statusWords: Record<RatifyRow["status"], string> = {
@@ -24,16 +24,34 @@ export function sheetPending(pending: PendingItem[], part: string, links: { id: 
 
 const kindWords: Record<string, string> = { part: "part", actor: "outside actor", link: "link", law: "law", flow: "flow", decision: "decision" };
 
-// The prompt an overturn hands to the agent: it quotes the item.
-export function overturnPrompt(row: Pick<RatifyRow, "pr" | "kind" | "id" | "text" | "change">): string {
-  const what = row.kind === "decision" ? `the decision “${row.text}”` : `the ${kindWords[row.kind] ?? row.kind} ${row.id}${row.change ? ` (${row.change})` : ""}: “${row.text}”`;
-  return `I overturn ${what} from PR #${row.pr}. Undo it and tell me what you changed.`;
+// The prompt an overturn puts on the clipboard: it stands alone for any agent, naming the PR, its branch while it is open, the item's
+// id and its wording.
+export function overturnPrompt(row: Pick<RatifyRow, "pr" | "kind" | "id" | "text" | "change">, branch: string | null): string {
+  const where = branch ? `PR #${row.pr} (branch ${branch})` : `PR #${row.pr}`;
+  const what =
+    row.kind === "decision"
+      ? `the decision ${row.id}: “${row.text}”`
+      : `the ${kindWords[row.kind] ?? row.kind} ${row.id}${row.change ? ` (${row.change})` : ""}: “${row.text}”`;
+  return `In ${where}, I overturn ${what} Undo it and tell me what you changed.`;
 }
 
-// Where an overturn goes: the PR's own session while it is live and has a terminal, else New session in the project.
-export function overturnRoute(sessions: Pick<Session, "id" | "state" | "terminal" | "identity">[], pr: number): { kind: "live"; id: string; terminal: string } | { kind: "new" } {
-  const live = sessions.find((s) => s.identity.pr === pr && s.state !== "ended" && s.terminal !== null);
-  return live ? { kind: "live", id: live.id, terminal: live.terminal! } : { kind: "new" };
+// Puts `prompt` on the clipboard through `writeText` (`navigator.clipboard.writeText`): "copied", or "manual" when there is no clipboard or
+// the write fails.
+export async function copyOverturn(prompt: string, writeText: ((text: string) => Promise<void> | void) | undefined): Promise<"copied" | "manual"> {
+  if (!writeText) return "manual";
+  try {
+    await writeText(prompt);
+    return "copied";
+  } catch {
+    return "manual";
+  }
+}
+
+// What the overturn shows once the copy was tried: the line, and for a failed copy the prompt to copy by hand.
+export function overturnReport(outcome: "copied" | "manual", prompt: string): { line: string; manual: string | null } {
+  return outcome === "copied"
+    ? { line: "Prompt copied, paste it into your agent", manual: null }
+    : { line: "Copy this prompt and paste it into your agent", manual: prompt };
 }
 
 // The brief's last step when there is anything to ratify: it holds the items, drawn by `map-brief.ts`.

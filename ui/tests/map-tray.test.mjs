@@ -5,10 +5,10 @@ import { trayRows } from "../../dist/map-tray.js";
 
 const pr = (number, title, brief = null) => ({ number, title, head: "aaa", brief });
 
-test("a ready PR with no brief yet is a row that cannot be opened and says so", () => {
+test("a ready PR whose brief is not written is a row that opens, and opening it writes the brief", () => {
   const rows = trayRows([pr(7, "Fog on the map"), pr(9, "")]);
-  assert.deepEqual(rows.map((r) => [r.number, r.title, r.openable]), [[7, "Fog on the map", false], [9, "PR #9", false]]);
-  assert.match(rows[0].note, /#7 .*not written yet/);
+  assert.deepEqual(rows.map((r) => [r.number, r.title, r.openable, r.chapter]), [[7, "Fog on the map", true, 0], [9, "PR #9", true, 0]]);
+  assert.match(rows[0].note, /#7 .*written when you open it/);
 });
 
 test("a brief being written says so, and a stored one opens", () => {

@@ -245,15 +245,11 @@ mod resolver {
         };
         assert_eq!(
             name("writer-has-no-tools").as_deref(),
-            Some("the_real_writer_runs_claude_on_the_subscription_in_its_neutral_folder")
+            Some("the_claude_command_has_no_tools_a_schema_and_the_internal_mark")
         );
         assert_eq!(
             name("session-pieces-in-order").as_deref(),
             Some("jobs_run_in_the_order_they_were_asked_for_on_the_session_queue")
-        );
-        assert_eq!(
-            name("delete-keeps-live-terminal").as_deref(),
-            Some("a terminal is in use while a session not leaving, and not ended, runs in it")
         );
     }
 

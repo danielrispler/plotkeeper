@@ -66,7 +66,10 @@ pub fn terminal_connect(app: AppHandle, daemon: State<Daemon>) -> Result<Value, 
                     if event["ev"] == "list"
                         && let Ok(terms) = serde_json::from_value(event["terms"].clone())
                     {
-                        crate::listed(&app, terms);
+                        studio_server::listed(
+                            &app.state::<std::sync::Arc<studio_server::App>>(),
+                            terms,
+                        );
                     }
                     // A reply to `poll` stops here: the window takes the next `list` as the answer to
                     // its own request, and one asked for before it revived its terminals lacks them.
@@ -161,7 +164,7 @@ fn projects_file() -> Result<PathBuf, String> {
 
 /// The first project of a studio with no `projects.json` yet: every command on the projects gives it.
 fn seed() -> Option<String> {
-    crate::settings::repository().or_else(|| checkout().map(|c| c.display().to_string()))
+    studio_server::settings::repository().or_else(|| checkout().map(|c| c.display().to_string()))
 }
 
 /// The main checkout of the repository holding `folder`, `None` when it is not in one (#98).
@@ -215,14 +218,14 @@ pub fn workspaces(project: String) -> Result<studio_workbench::Workspaces, Strin
 pub fn workspace_git_state(
     project: String,
     path: String,
-    studio: State<Mutex<studio_core::Studio>>,
+    app: State<std::sync::Arc<studio_server::App>>,
 ) -> Result<studio_workbench::GitState, String> {
     let state = studio_workbench::git_state(Path::new(&project), &path)?;
     // The same read tells **Landed** whether the task's files are still safe; local git only, never GitHub.
     let safe = studio_workbench::losses(Path::new(&path))
         .is_ok_and(|l| l.uncommitted.is_empty() && l.unpushed.is_empty());
-    if studio.lock().unwrap().set_task_safe(&path, safe) {
-        crate::LIST_CHANGED.store(true, std::sync::atomic::Ordering::Release);
+    if app.core.lock().unwrap().set_task_safe(&path, safe) {
+        app.list_changed();
     }
     Ok(state)
 }
@@ -673,7 +676,7 @@ fn start(log: &Path) -> io::Result<()> {
 /// Where the shell starts: `settings.json`'s `repository` (danielrispler/Falinks#605), else the studio's own
 /// checkout (danielrispler/Falinks#461, decision 3), else the home folder.
 pub(crate) fn repo() -> String {
-    crate::settings::repository()
+    studio_server::settings::repository()
         .map(PathBuf::from)
         .or_else(checkout)
         .or_else(std::env::home_dir)

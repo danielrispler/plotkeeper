@@ -2,12 +2,14 @@
 
 ## The event log
 
-`~/Library/Application Support/dev.falinks.studio/events.jsonl`, one hook payload per line, with two added fields:
+`~/Library/Application Support/plotkeeper/events.jsonl`, one hook payload per line, with two added fields:
 
 - `studio_terminal_id`: the session's `STUDIO_TERMINAL_ID`, when set;
 - `studio_received_ms`: when the hook received the event, in Unix milliseconds.
 
 The app appends lines of its own, named `Studio…`, such as `StudioInterrupted`, which ends a turn Daniel interrupted, by its `prompt_id`, with that turn's end trees.
+
+The data folder was `~/Library/Application Support/dev.falinks.studio/` before plotkeeper. At the first start of the hook or the app, if that folder exists and `plotkeeper/` does not, it is renamed to `plotkeeper/` and a symbolic link to it is left at the old path, so the plugin path in `~/.zshrc` (through the folder's `checkout` link) and a hook built with the old path keep working. The move never goes over an existing `plotkeeper/`.
 
 The hooks are async, so Claude Code never waits for them, and they append whether the app runs or not. Two events that fire within a few milliseconds can land in either order.
 
@@ -21,7 +23,7 @@ The app also keeps `roots.json` beside the log: the git worktree root of each fo
 
 Claude Code gives the plan's 5-hour and weekly usage, and the context window's size, only to the status line command, on its stdin. Sessions the studio starts run `claude --settings` with `workbench/statusline.sh` as their status line, so you edit nothing. On every refresh it saves that stdin as `usage/<session_id>.json` beside the event log, by temp file and rename, readable only by you (mode 0600, in a folder of mode 0700), with the line in `workbench/statusline-usage.sh`.
 
-Then it reads `statusLine.command` from `~/.claude/settings.json`, runs it on the same stdin, and passes its output and exit status through; with none set, it prints nothing. The top bar's usage button shows the tightest window across the agents, as that agent's logo and "5h 62%" or "wk 80%", or "Usage" when none has data; a click opens a popover with a tile for each agent: its windows with the share used and the time to reset, and when and from where they were read, or the reason it has none. Claude's snapshot is read on load, on focus and every 10 seconds; the other agents' usage is read only when the popover opens. Sessions started outside the studio save no snapshot. Snapshots are never deleted; remove the folder at any time.
+Then it reads `statusLine.command` from `~/.claude/settings.json`, runs it on the same stdin, and passes its output and exit status through; with none set, it prints nothing. The page has no usage button or popover (danielrispler/plotkeeper#326): the snapshot is still saved, and the Tauri app's top bar read it. Sessions started outside the studio save no snapshot. Snapshots are never deleted; remove the folder at any time.
 
 ## The card store
 

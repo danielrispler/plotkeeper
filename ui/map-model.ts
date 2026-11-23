@@ -166,7 +166,7 @@ export function sheetOf(part: Part, laws: Law[], tier: Tier, fog: Fog | undefine
 
 // Broken laws and the drawer (ticket #312). The drawer is read-only and holds any content a ticket gives it: blocks of code or text and
 // the one-click jumps out of it. `openDrawer` (map-drawer.ts) draws a `Drawer`; the history strip's commit drill-down builds one too.
-export type Jump = { label: string; title: string; to: { file: string; line: number } | { url: string } };
+export type Jump = { label: string; title: string; to: { url: string } };
 export type Block = { label?: string; code: string; jumps: Jump[] };
 export type Drawer = { title: string; note?: string; blocks: Block[]; jumps: Jump[] };
 
@@ -196,12 +196,12 @@ export function sheetCi(ci: Ci | null, part: string, backed: boolean): { line: s
   return { line: ciLine(ci), broken, drill: ci !== null && ci.status !== "unknown" };
 }
 
-// "See the proof" for a law: each tagged test's code from the tag on, with a jump to the editor at the tag.
+// "See the proof" for a law: each tagged test's code from the tag on. The page has no editor to jump to.
 export function proofDrawer(law: string, proofs: Proof[]): Drawer {
   const blocks: Block[] = proofs.map((proof) => ({
     label: `${proof.file}:${proof.line}${proof.test ? ` · ${proof.test}` : ""}`,
     code: proof.snippet,
-    jumps: [{ label: "Open in editor", title: `Open ${proof.file} at line ${proof.line} in your editor`, to: { file: proof.file, line: proof.line } }],
+    jumps: [],
   }));
   return {
     title: `The proof of ${law}`,
@@ -428,16 +428,15 @@ export function figureShapes(fig: BriefFigure): Shape[] {
 // An item the checks left flagged shows "not confirmed from the facts".
 export const unconfirmed = (step: Pick<BriefStep, "flags">): boolean => step.flags.length > 0;
 
-// What "See the code" opens in the drawer for a step: what the writer quoted, each with its source and, for a file, a jump to it.
+// What "See the code" opens in the drawer for a step: what the writer quoted, each with its source. The page has no editor to jump to.
 export function citeDrawer(step: Pick<BriefStep, "h" | "cites">): Drawer {
-  const isFile = (from: string) => /^[\w.@-]+(\/[\w.@-]+)+$/.test(from);
   return {
     title: step.h,
     note: step.cites.length ? "What this step rests on, as quoted from the facts." : "This step quotes nothing.",
     blocks: step.cites.map((cite) => ({
       label: cite.from,
       code: cite.quote,
-      jumps: isFile(cite.from) ? [{ label: "Open the file", title: `Open ${cite.from} in your editor`, to: { file: cite.from, line: 1 } }] : [],
+      jumps: [],
     })),
     jumps: [],
   };

@@ -40,14 +40,14 @@ test("the sheet shows CI only on a part with a check-backed law or a broken law,
   assert.equal(sheetCi(ci("unknown"), "shell", true)?.drill, false);
 });
 
-test("See the proof shows each tagged test's code with a jump to the editor at its tag", () => {
+test("See the proof shows each tagged test's code from its tag, with no jump out", () => {
   const proofs = [{ file: "tests/wire.rs", line: 3, test: "wire_types_match", first: 3, snippet: "// @law: wire-types-agree\n#[test]\nfn wire_types_match() {}" }];
   const drawer = proofDrawer("wire-types-agree", proofs);
   assert.match(drawer.title, /wire-types-agree/);
   assert.equal(drawer.blocks.length, 1);
   assert.equal(drawer.blocks[0].code, proofs[0].snippet);
   assert.match(drawer.blocks[0].label ?? "", /tests\/wire\.rs:3/);
-  assert.deepEqual(drawer.blocks[0].jumps.map((jump) => [jump.label, jump.to]), [["Open in editor", { file: "tests/wire.rs", line: 3 }]]);
+  assert.deepEqual(drawer.blocks[0].jumps, []);
   assert.deepEqual(drawer.jumps, []);
 });
 

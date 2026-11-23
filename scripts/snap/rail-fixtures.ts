@@ -157,15 +157,6 @@ const others = () => {
 
 const common = {
   ...base,
-  projects: ["/Users/danielrispler/work/plotkeeper"],
-  workspaces: {
-    main: { path: "/Users/danielrispler/work/plotkeeper", branch: "main" },
-    tasks: [{ path: cwd, branch: "issue-56-row-controls" }],
-    hidden: 0,
-  },
-  workspace_git_state: { branch: "issue-56-row-controls", upstream: [2, 1], changed: 5, main_behind: 7, on_default: false, would_conflict: true, operation: null },
-  terminal_connect: { repo: "/Users/danielrispler/work/plotkeeper", outdated: false },
-  usage: [{ agent: "claude", groups: [{ name: "", windows: [{ label: "5h", used_percentage: 42, resets_at: Date.now() / 1000 + 3600 }, { label: "week", used_percentage: 18, resets_at: Date.now() / 1000 + 86400 }] }], read_at: Date.now() / 1000 - 240, source: "last Claude session", reason: null }],
 } satisfies Fixture;
 
 const goal = "Give each session row a fold toggle and a delete, drawn only where a row can use them.";
@@ -228,11 +219,6 @@ const barScript = `
     if (item.scrollWidth > item.clientWidth + 1 && item.id !== "session-header") log("snap:fail #" + item.id + " is clipped at " + innerWidth);
   }
   if (document.getElementById("session-header").hidden) log("snap:fail the session header is missing");
-  // The settings gear (#194): the bar's last item, at its right end, in the bar and never in the "⋯" menu.
-  const gear = document.getElementById("settings-gear");
-  const shown = [...top.children].filter((i) => !i.hidden && i.id && !i.classList.contains("menu"));
-  if (gear.parentElement !== top || shown.at(-1) !== gear) log("snap:fail the settings gear is not the bar's last item at " + innerWidth);
-  if (room - gear.getBoundingClientRect().right > 20) log("snap:fail the settings gear is not at the bar's right end at " + innerWidth);
   log("bar at " + innerWidth + ": " + [...top.children].filter((i) => !i.hidden && i.id).map((i) => i.id).join(" "));`;
 
 // One fixture per state of the rail. `railStates` is what `npm run snap:rail` renders.
@@ -404,7 +390,7 @@ const withBlocked = (state: SessionState, card: (turnStart: number) => BlockedCo
 };
 // The card has Allow and Decline: it is in the dock, once its request stands, and not in the feed.
 const dockScript = `
-  window.__TAURI__.__emit("blocked", [{ nonce: "n1", tool_use_id: "toolu_b1", waiting: true }]);
+  window.__snapEmit("blocked", [{ nonce: "n1", tool_use_id: "toolu_b1", waiting: true }]);
   await new Promise((resolve) => setTimeout(resolve, 200));
   const dock = document.getElementById("dock");
   const labels = [...dock.querySelectorAll(".blocked-command .answer-buttons button")].map((b) => b.textContent);
@@ -418,7 +404,7 @@ const riskNote = (note: RiskView | null) => {
   return { ...fixture, cards: { ...fixture.cards, risk_notes: note ? [note] : [], decision_notes: [] } };
 };
 const riskScript = `
-  window.__TAURI__.__emit("blocked", [{ nonce: "n1", tool_use_id: "toolu_b1", waiting: true }]);
+  window.__snapEmit("blocked", [{ nonce: "n1", tool_use_id: "toolu_b1", waiting: true }]);
   await new Promise((resolve) => setTimeout(resolve, 200));
   const dock = document.getElementById("dock");
   const place = dock.querySelector(".blocked-command .risk-note");
@@ -436,7 +422,7 @@ const riskFilled = () => {
   const note = { call: "toolu_b1", state: "arrived", level: "high", line: "Pushes the branch issue-56-row-controls to origin", at: Date.now() };
   const next = { ...fixture.cards, risk_notes: [note] };
   const snapScript = `
-    window.__TAURI__.__emit("blocked", [{ nonce: "n1", tool_use_id: "toolu_b1", waiting: true }]);
+    window.__snapEmit("blocked", [{ nonce: "n1", tool_use_id: "toolu_b1", waiting: true }]);
     await new Promise((resolve) => setTimeout(resolve, 200));
     const dock = document.getElementById("dock");
     const card = dock.querySelector(".blocked-command");
@@ -445,7 +431,7 @@ const riskFilled = () => {
     const before = place.textContent;
     if (before !== "Reading the command…") return log("snap:fail the place reads '" + before + "' before the note");
     buttons[0].focus();
-    window.__TAURI__.__emit("cards", ${JSON.stringify(next)});
+    window.__snapEmit("cards", ${JSON.stringify(next)});
     await new Promise((resolve) => setTimeout(resolve, 200));
     const same = dock.querySelector(".blocked-command") === card && card.querySelector(".risk-note") === place;
     const kept = [...card.querySelectorAll(".answer-buttons button")].every((b, i) => b === buttons[i]);

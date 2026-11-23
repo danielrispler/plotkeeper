@@ -4,7 +4,6 @@
 // other command, and adding one to the map without a reply here fails `tsc` too.
 
 import type { Command, Commands, Selection } from "../../ui/types.ts";
-import type { Listed } from "../../ui/daemon.ts";
 
 // A reply that depends on one argument: { __by: "id", values: { <id>: reply } }.
 export type ByArg<T> = { __by: string; values: Record<string, T> };
@@ -12,33 +11,20 @@ export type ByArg<T> = { __by: string; values: Record<string, T> };
 // The commands whose reply the window reads.
 type ReadCommand = { [C in Command]: Commands[C] extends void ? never : C }[Command];
 
-// A daemon terminal and the screen it replays when the window attaches.
-export type Terminal = Listed & { replay: { data: string; cols: number; rows: number } };
+// Beside the replies, the harness's own keys: errors for the log and a script that runs once the UI has drawn (page.mjs).
+export type Fixture = { [C in Command]?: Commands[C] | ByArg<Commands[C]> } & { appErrors?: string[]; snapScript?: string; snapDone?: string };
 
-// Beside the replies, the harness's own keys: the daemon's terminals and a script that runs once the UI has drawn (page.mjs).
-export type Fixture = { [C in Command]?: Commands[C] | ByArg<Commands[C]> } & { terminals?: Terminal[]; appErrors?: string[]; snapScript?: string; snapDone?: string };
-
-const workspace = { path: "/w/plotkeeper", branch: "main" };
 const noSelection: Selection | null = null;
 
 export const base = {
-  add_project: [],
-  agent_argv: ["claude"],
   agent_summary: null,
-  agents: ["claude"],
-  agy_plugin_setup: null,
   answer_blocked_command: "hook",
   ask: "",
   ask_anchor: "",
   ask_facts: null,
   ask_why_not: { facts: { sections: [] }, reasons: null },
-  branches: [],
   cards: { brief: null, goal: null, answers: [], open: [], design: [], decisions: [], risk_notes: [], decision_notes: [] },
   check_output: null,
-  choose_folder: null,
-  claude_argv: ["claude"],
-  create_named_task: workspace,
-  create_task: workspace,
   failed_check_name: "",
   map_place: {},
   map_save_positions: { positions: {}, tiers: {} },
@@ -54,33 +40,18 @@ export const base = {
   map_proof: [],
   map_state: { project: "/w/plotkeeper", status: "none", source: null, reference: "origin/main", commit: null, note: null, user: { positions: {}, tiers: {} }, fog: {}, ci: null, ready: [], ratify: [] },
   open: noSelection,
-  plugin_setup: null,
   pr_brief: null,
   pr_diff: { commit: "", short: "", label: "", url: null, files: [] },
   briefs_waiting: null,
   pr_ratify: [],
-  projects: ["/w/plotkeeper"],
-  remove_project: [],
-  remove_task: null,
-  reorder_projects: [],
-  repository_of: null,
-  revival: [],
   select: noSelection,
-  select_terminal: noSelection,
   selected: noSelection,
   sessions: [],
   settings_files: { settings: null, keymap: null },
-  skills: [],
   subagent_log: null,
-  suggest_projects: [],
-  terminal_connect: { repo: "/w/plotkeeper", outdated: false },
-  terminal_lost: [],
   turn_file_hunk: null,
   turn_reply: null,
   turn_summary: null,
-  usage: [],
   watch: null,
-  workspace_git_state: { branch: "main", upstream: [0, 0], changed: 0, main_behind: 0, on_default: true, would_conflict: false, operation: null },
-  workspaces: { main: workspace, tasks: [], hidden: 0 },
-  write_setting: "",
+  writer_notice: null,
 } satisfies { [C in ReadCommand]: Commands[C] };

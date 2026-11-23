@@ -9,6 +9,7 @@ mod clear;
 mod close_rename;
 mod common;
 mod decisions;
+mod ending;
 mod feed;
 mod fork;
 mod idle;

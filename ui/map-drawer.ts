@@ -7,10 +7,9 @@
 // different project's map closes it.
 
 import { logStop } from "./stop-rules.js";
-import { failure, invoke, text } from "./dom.js";
+import { text } from "./dom.js";
 import { currentMap, onDraw, registerLayer, syncSide, type MapView } from "./map.js";
 import type { Drawer, Jump } from "./map-model.js";
-import { openAt } from "./paths.js";
 
 let open: { project: string; drawer: Drawer } | null = null;
 
@@ -31,16 +30,13 @@ export function closeDrawer() {
 
 export const drawerOpen = () => open !== null && currentMap()?.project === open.project;
 
-// A jump out of the drawer: a file opens in Daniel's editor from the project's folder, a link in the browser.
-function jumpTo(project: string, jump: Jump) {
-  if ("file" in jump.to) openAt({ path: jump.to.file, line: jump.to.line, column: 1 }, project);
-  else invoke("open_link", { target: jump.to.url }).catch(failure("open_link", "error"));
-}
+// A jump out of the drawer: a link, opened in a new tab.
+const jumpTo = (jump: Jump) => window.open(jump.to.url, "_blank", "noopener");
 
-function jumpButton(project: string, jump: Jump) {
+function jumpButton(jump: Jump) {
   const button = text("button", jump.label, "btn quiet drawer-jump");
   button.title = jump.title;
-  button.addEventListener("click", () => jumpTo(project, jump));
+  button.addEventListener("click", () => jumpTo(jump));
   return button;
 }
 
@@ -62,10 +58,10 @@ function drawDrawer(view: MapView) {
     const part = text("div", "", "drawer-block");
     if (block.label) part.append(text("p", block.label, "drawer-label"));
     part.append(text("pre", block.code, "drawer-code"));
-    if (block.jumps.length) part.append(...block.jumps.map((jump) => jumpButton(view.project, jump)));
+    if (block.jumps.length) part.append(...block.jumps.map(jumpButton));
     card.append(part);
   }
-  if (drawer.jumps.length) card.append(...drawer.jumps.map((jump) => jumpButton(view.project, jump)));
+  if (drawer.jumps.length) card.append(...drawer.jumps.map(jumpButton));
   slot.replaceChildren(card);
   syncSide(view.slots);
 }

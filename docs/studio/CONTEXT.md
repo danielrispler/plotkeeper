@@ -130,7 +130,11 @@ _Avoid_: Sync (see **Upstream**)
 
 **Terminal daemon**:
 The background process that owns the workbench's terminals, so they outlive the app. The app connects to it over a socket.
-_Avoid_: Server, multiplexer
+_Avoid_: Server (the program that serves the page, below), multiplexer
+
+**Server**:
+The `server/` library and its `plotkeeper` program, which has no window: it holds the core state, the card store and the writer, follows the event log, writes the summaries and the PR briefs, and serves the learning layer as a page on 127.0.0.1 (one per data folder, behind a token) that Daniel opens in a browser tab. The app's shell is another host of the same library. It does not own terminals, which stay with the **Terminal daemon**.
+_Avoid_: Backend, daemon (the terminal daemon is another process)
 
 **Pane**:
 The window's view of one terminal of the terminal daemon. Up to two panes show at a time, when the terminal column is split; the others keep running hidden.
@@ -260,7 +264,7 @@ A pull request that is open and not a draft. The shell learns it from `gh pr vie
 _Avoid_: Open PR (a draft is open too), review requested
 
 **Ratify**:
-To accept or overturn a change the agent made to the system map or a law, or a decision it declared, offered in the **PR brief**. A map change nobody has decided on is **not yet ratified**; it is in effect all the same, since ratifying never blocks.
+To accept or overturn a change the agent made to the system map or a law, or a decision it declared, offered in the **PR brief**. A map change nobody has decided on is **not yet ratified**; it is in effect all the same, since ratifying never blocks. Overturning copies a prompt that quotes the item to the clipboard, for Daniel to paste into his agent.
 _Avoid_: Approve (that is the PR review), sign off
 
 **Claim check**:
@@ -311,7 +315,7 @@ The mark on a part when changes landed on `origin`'s default branch that Daniel 
 _Avoid_: Stale, unread, debt
 
 **plotkeeper**:
-The project and its repository (`danielrispler/plotkeeper`). The app it builds is named Studio.
+The project and its repository (`danielrispler/plotkeeper`). The app it builds is named Studio; the program that serves its page without the app is `plotkeeper` (see **Server**).
 
 **Falinks run**:
 Several agent sessions coordinated by the Falinks engine on one repository.

@@ -7,7 +7,6 @@
 import { code, failure, fullTitle, invoke, pressable, text } from "./dom.js";
 import { askAnchor, type Hunk, hunkText } from "./ask.js";
 import { diffRequest } from "./diff.js";
-import { openAt } from "./paths.js";
 import type { Capabilities, Check, Turn, TurnFile } from "./types.js";
 import { HOVERS } from "./hovers.js";
 
@@ -152,13 +151,6 @@ export function fileRow(session: string, index: number, row: EvidenceRow, scope 
     return entry && (entry.ended || (!ended && same)) ? entry : undefined;
   };
   const pre = text("pre", kept() ? hunkText(kept()!.hunk, false) : "", "evidence-hunk");
-  const edit = pressable(document.createElement("button"), false, () => {
-    const first = kept()?.hunk?.first_line ?? 1;
-    openAt({ path: file.path, line: first, column: 1 }, file.root);
-  });
-  edit.classList.add("evidence-edit");
-  edit.textContent = "Open in editor";
-  edit.title = HOVERS.editAtFirstChange;
   const left = (h: Hunk | null) => {
     more.textContent = `${h?.left_out ?? 0} more lines`;
     if (openHunks.has(openKey) && h?.left_out) more.removeAttribute("hidden");
@@ -169,7 +161,7 @@ export function fileRow(session: string, index: number, row: EvidenceRow, scope 
   more.title = HOVERS.wholeDiff;
   const show = () => {
     const open = openHunks.has(openKey);
-    for (const node of [pre, edit]) open ? node.removeAttribute("hidden") : node.setAttribute("hidden", "");
+    for (const node of [pre]) open ? node.removeAttribute("hidden") : node.setAttribute("hidden", "");
     left(kept()?.hunk ?? null);
   };
   const fetch = () => {
@@ -200,7 +192,7 @@ export function fileRow(session: string, index: number, row: EvidenceRow, scope 
   button.append(text("span", row.label), ...(row.agent ? [text("span", row.agent, "evidence-agent")] : []));
   show();
   if (openHunks.has(openKey)) fetch();
-  item.append(button, edit, pre, more, askAnchor(session, { kind: "file", turn: index, root: file.root, path: file.path, from: file.from }, `the file ${file.path}`, scope));
+  item.append(button, pre, more, askAnchor(session, { kind: "file", turn: index, root: file.root, path: file.path, from: file.from }, `the file ${file.path}`, scope));
   return item;
 }
 

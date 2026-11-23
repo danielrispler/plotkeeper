@@ -62,32 +62,13 @@ body[data-layout="focus"] #rail-divider { display: none; }
 .top { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--sp-5); padding: 0 var(--sp-5) 0 var(--lights);
        white-space: nowrap; overflow: hidden; }
 /* The Git line: the workspace's name, then its tokens (#29). */
-.git-line { display: flex; gap: var(--sp-4); align-items: baseline; font-size: var(--size-small); color: var(--muted); }
-.git-line .git-workspace { color: inherit; font-weight: 600; }
-.git-line .git-bad { color: var(--conflict); }
-.git-line .git-branch { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
-.git-line .git-branch:hover { text-decoration: underline; }
-.project-workspaces .row .facts { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; font-size: var(--size-small); color: var(--muted); }
-.usage { display: inline-flex; align-items: center; gap: var(--sp-3); color: var(--muted); }
 /* The usage popover (danielrispler/plotkeeper#163): one tile per agent, under the bar at its right. */
-.usage-popover[popover] { top: var(--bar); right: var(--sp-5); left: auto; width: var(--popover); max-width: calc(100vw - 2 * var(--sp-5)); gap: var(--sp-5); }
-.usage-tile { display: flex; flex-direction: column; gap: var(--sp-3); }
-.usage-tile .tile-head { display: flex; align-items: center; gap: var(--sp-3); font-weight: 600; }
-.usage-tile .usage-window { display: grid; grid-template-columns: 3em 1fr 3em auto; align-items: center; gap: var(--sp-3); font-size: var(--size-small); }
-.usage-tile .window-name, .usage-tile .window-resets, .usage-tile .tile-foot { color: var(--muted); }
-.usage-tile .bar { height: var(--sp-3); border-radius: var(--radius-small); background: var(--line); }
-.usage-tile .bar-fill { height: 100%; border-radius: var(--radius-small); background: var(--muted); }
-.usage-tile .group-name { margin: 0; font-size: var(--size-small); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.usage-tile .tile-reason, .usage-tile .tile-foot { margin: 0; font-size: var(--size-small); }
 /* The top bar's items show whole or sit in the "⋯" menu, so none shrinks (danielrispler/plotkeeper#127, bar.ts). The spacer takes the rest. */
 .top > :not(.sp):not(.menu) { flex: none; }
 .top .sp { flex: 1; }
 .top .menu[popover] { top: var(--bar); right: var(--sp-5); left: auto; width: max-content; max-width: calc(100vw - 2 * var(--sp-5)); }
-.top .menu .git-line { flex-wrap: wrap; padding: var(--sp-2) var(--sp-4); }
 .top .menu .chip { text-align: start; }
 /* The settings gear (#194): icon only, the bar's last item. */
-.top .gear { color: var(--muted); display: inline-grid; place-items: center; width: calc(var(--icon) * 2); height: calc(var(--icon) * 2); padding: 0; }
-.top .gear svg { width: var(--icon); height: var(--icon); }
 /* The session's header: its state dot, state and name; the name is the one part that gives way, past a fixed length. */
 .session-header { display: flex; align-items: center; gap: var(--sp-3); font: inherit; font-size: var(--size-small); color: var(--fg); background: none;
                   border: 0; border-radius: var(--radius); padding: var(--sp-1) var(--sp-4); max-width: var(--session-header); cursor: pointer; }
@@ -157,12 +138,8 @@ h1 { margin: 0 0 var(--sp-4); }
 .project-toggle .glyph { margin-inline-start: auto; }
 .project-head[draggable="true"] { cursor: grab; }
 /* A project's "+" (Zed's, T3 Code's): hidden until its header is hovered or holds the focus. */
-.project-new { flex: none; padding: var(--sp-1) var(--sp-3); font-size: var(--size-small); color: var(--muted); opacity: 0; }
-.project-head:is(:hover, :focus-within) .project-new { opacity: 1; }
-.project-action { flex: none; padding: var(--sp-1) var(--sp-3); font-size: var(--size-xs); color: var(--muted); }
 .add-project { margin: var(--sp-4) var(--sp-2); }
 .project.outside { opacity: 0.6; }
-.project-workspaces { margin-top: var(--sp-3); }
 .row .token { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 /* A list row with its fold toggle in a column before the name and its delete after the glyph, shown
    on hover or focus. Every row keeps both columns, so names and glyphs stay aligned. */
@@ -199,59 +176,6 @@ h1 { margin: 0 0 var(--sp-4); }
         margin: 0 var(--sp-4) var(--sp-4); border-radius: var(--radius-pane); box-shadow: inset 0 0 0 var(--hair) var(--edge);
         overflow: hidden; }
 .term > .term-body { grid-row: 3; }
-.restart { display: flex; gap: var(--sp-4); align-items: center; padding: var(--sp-2) var(--sp-3); font-size: var(--size-small);
-           color: var(--fg); background: var(--raised); }
-.restart[hidden] { display: none; }
-/* A program that failed at start (danielrispler/Falinks#558): its last lines, between the notice and "Show output". */
-.elsewhere .last-lines { font: var(--size-small)/var(--term-line) var(--mono); color: var(--fg); white-space: pre-wrap; margin: var(--sp-3) 0 var(--sp-4); }
-.restart .btn, .elsewhere .btn { flex: none; font-size: var(--size-small); padding: var(--sp-1) var(--sp-4); background: var(--selected); }
-.upgrade { background: var(--surface); color: var(--fg); border: 0; border-radius: var(--radius); box-shadow: var(--shadow);
-           max-width: var(--dialog); padding: var(--sp-6); }
-.upgrade::backdrop { background: var(--backdrop); }
-.upgrade h1 { font-size: var(--size-read); font-weight: 600; color: var(--fg); margin: 0 0 var(--sp-4); }
-.upgrade ul { margin: 0 0 var(--sp-5); padding-inline-start: var(--sp-6); }
-.upgrade .actions { display: flex; justify-content: flex-end; gap: var(--sp-4); margin: 0; }
-.upgrade .primary { background: var(--selected); }
-/* The settings page (#195): herdr's rows, a title with a muted description and the control at the end. */
-.settings { width: min(var(--settings), calc(100vw - 2 * var(--sp-7))); height: min(var(--settings-height), calc(100vh - 2 * var(--sp-7))); max-width: none; max-height: none;
-            padding: 0; border: 0; border-radius: var(--radius-pane); background: var(--surface); color: var(--fg); box-shadow: var(--shadow); }
-.settings[open] { display: flex; flex-direction: column; }
-.settings::backdrop { background: var(--backdrop); }
-.settings-head { display: flex; align-items: center; justify-content: space-between; padding: var(--sp-4) var(--sp-5) var(--sp-4) var(--sp-6); border-bottom: var(--hair) solid var(--line); }
-.settings-head h1 { margin: 0; font-size: var(--size-large); font-weight: 600; }
-.settings-head .btn { display: inline-grid; place-items: center; width: calc(var(--icon) * 2); height: calc(var(--icon) * 2); padding: 0; color: var(--muted); }
-.settings-head svg { width: var(--icon); height: var(--icon); }
-.settings-body { flex: 1; min-height: 0; overflow-y: auto; padding: var(--sp-4) var(--sp-6) var(--sp-7); }
-.settings-body h2 { margin: var(--sp-6) 0 var(--sp-2); font-size: var(--size-small); font-weight: 600; color: var(--muted); }
-/* An error line is neutral, as #notice is: colour is for "needs you". */
-.settings-status:empty { display: none; }
-.settings-status { padding: 0 var(--sp-6); }
-.settings-status .broken, .settings-status .refused { margin: var(--sp-4) 0 0; padding: var(--sp-4) var(--sp-5); border-radius: var(--radius); font-size: var(--size-small);
-                                                      background: var(--raised); color: var(--muted); border: var(--hair) solid var(--line); }
-.settings-status .broken { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-5); }
-.settings-status .broken .btn { flex: none; background: var(--selected); color: var(--fg); }
-.setting { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-6); padding: var(--sp-5) 0; border-bottom: var(--hair) solid var(--line); }
-.setting-text { min-width: 0; }
-.setting-title { display: flex; align-items: center; gap: var(--sp-3); font-size: var(--size); }
-.setting-description { margin-top: var(--sp-1); font-size: var(--size-small); color: var(--muted); }
-.setting .reset { display: inline-grid; place-items: center; width: var(--control); height: var(--control); padding: 0; color: var(--muted); }
-.setting .reset svg { width: var(--icon); height: var(--icon); }
-.setting .btn.open { flex: none; background: var(--raised); }
-/* A stepper, a value between two buttons, and a dropdown, both in the control's place at the row's end. */
-.stepper { display: flex; flex: none; align-items: center; gap: var(--sp-2); }
-.stepper .btn { display: inline-grid; place-items: center; width: calc(var(--icon) * 2); height: calc(var(--icon) * 2); padding: 0; background: var(--raised); }
-.stepper-value { min-width: var(--stepper-value); text-align: center; font-variant-numeric: tabular-nums; }
-.setting select { flex: none; font: inherit; font-size: var(--size-small); color: inherit; background: var(--raised); border: var(--hair) solid var(--line); border-radius: var(--radius);
-                  padding: var(--sp-2) var(--sp-4); min-width: var(--select); }
-.setting select:disabled { opacity: .45; }
-/* A switch: a track and a thumb, on in the foreground colour. */
-.btn.switch { position: relative; flex: none; width: var(--switch); height: var(--switch-height); padding: 0; border-radius: var(--switch-height); background: var(--raised); box-shadow: inset 0 0 0 var(--hair) var(--line); }
-.btn.switch::after { content: ""; position: absolute; top: var(--sp-1); inset-inline-start: var(--sp-1); width: calc(var(--switch-height) - 2 * var(--sp-1)); height: calc(var(--switch-height) - 2 * var(--sp-1));
-                     border-radius: 50%; background: var(--muted); transition: transform var(--motion), background-color var(--motion); }
-.btn.switch[aria-checked="true"] { background: var(--selected); }
-.btn.switch[aria-checked="true"]::after { transform: translateX(calc(var(--switch) - var(--switch-height))); background: var(--fg); }
-.term-h { height: var(--term-head); display: flex; gap: var(--sp-5); align-items: center; padding: 0 var(--sp-5); font-size: var(--size-xs); color: var(--faint);
-          white-space: nowrap; overflow: hidden; }
 .term-body { min-height: 0; min-width: 0; overflow: hidden; padding: var(--sp-3); position: relative; }
 /* The panes lie on top of each other, the hidden ones invisible but still laid out, so each stays
    fitted to the body and a switch shows it as it is, with no resize and redraw after (danielrispler/Falinks#570). A new
@@ -282,14 +206,7 @@ h1 { margin: 0 0 var(--sp-4); }
 .pane[hidden] { display: block; }
 .pane[hidden], .pane.fitting { visibility: hidden; }
 /* A split's divider (danielrispler/Falinks#529), in the gap between its two panes. */
-.split-divider { position: absolute; z-index: 4; width: calc(2 * var(--sp-3)); cursor: col-resize; touch-action: none; border-radius: var(--radius-small); }
-.split-divider.stacked { width: auto; height: calc(2 * var(--sp-3)); cursor: row-resize; }
-.split-divider:hover, .split-divider.dragging { background: var(--edge); }
 /* The terminal panel (danielrispler/Falinks#542): a band under the panes, its height set by `panel.ts`; its divider on its top edge. */
-.term > .panel { grid-row: 4; box-shadow: inset 0 var(--hair) 0 var(--edge); }
-.panel[hidden] { display: none; }
-.panel > .split-divider { inset: 0 0 auto; height: var(--sp-3); }
-.term-find { position: absolute; top: var(--sp-3); right: var(--sp-5); z-index: 10; width: var(--find); font: inherit; }
 /* The needs-you toast (danielrispler/Falinks#573): over the terminal's top-right corner, taking none of its space. */
 .term { position: relative; }
 .toasts { position: absolute; top: var(--sp-5); right: var(--sp-5); z-index: 11; max-width: var(--toast); display: flex;
@@ -307,7 +224,6 @@ h1 { margin: 0 0 var(--sp-4); }
 .toast.start { top: auto; bottom: var(--sp-5); background: var(--raised); cursor: default;
                box-shadow: inset 0 0 0 var(--hair) var(--edge), var(--shadow); }
 .toast.clear { right: auto; left: var(--sp-5); grid-template-columns: minmax(0, 1fr) auto; }
-.toast.start .name { color: var(--fg); }
 /* The note toast: a turn that ended off screen or a context warning; not in colour. */
 .toast.note { background: var(--raised); box-shadow: inset 0 0 0 var(--hair) var(--edge), var(--shadow); }
 .toast.note .name { color: var(--fg); }
@@ -354,9 +270,6 @@ body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
 #notice { flex: 1; min-width: 0; margin: 0; color: var(--muted); white-space: pre-line; overflow-wrap: anywhere; }
 .notice-row .btn { flex: none; }
 /* The skills browser (danielrispler/Falinks#528) takes the whole rail while open. */
-#skills, .skills-open .rail > :not(#skills) { display: none; }
-.skills-open #skills { display: block; grid-row: 1 / -1; }
-.skills h1:not(:first-child) { margin-top: var(--sp-5); }
 .skill > summary { display: flex; flex-direction: column; padding: var(--sp-2) 0; cursor: pointer; }
 .skill > summary .l2 { font-size: var(--size-small); color: var(--muted); }
 .skill > .btn { margin: var(--sp-2) 0; }
@@ -474,20 +387,8 @@ body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
 .picker { position: fixed; top: calc(var(--bar) + var(--sp-2)); right: var(--sp-5); z-index: 8; width: var(--popover); max-height: 70vh;
           overflow-y: auto; background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); padding: var(--sp-3); }
 .picker .row .l2 { font-family: var(--mono); font-size: var(--size-xs); }
-.picker .project-pill { margin: var(--sp-1) var(--sp-2) var(--sp-2); max-width: calc(100% - 2 * var(--sp-2)); }
-.picker .project-pill .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.picker .agent-choice { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin: var(--sp-2) var(--sp-2) var(--sp-3); }
-.picker .auto-mode { display: block; font-size: var(--size-small); margin: var(--sp-2) var(--sp-4) var(--sp-3); }
-.picker .row:disabled { opacity: 0.5; cursor: default; }
-.picker .hidden-count { color: var(--faint); font-size: var(--size-small); margin: var(--sp-1) var(--sp-4) var(--sp-3); }
 :is(.picker, .project-workspaces) .new-task { display: flex; gap: var(--sp-3); margin: var(--sp-4) var(--sp-2) var(--sp-1); padding-top: var(--sp-4); }
-:is(.picker, .project-workspaces) .new-task input { flex: 1; min-width: 0; font: var(--size-small) var(--mono); color: inherit; background: var(--bg);
-                                        border: var(--hair) solid var(--edge); border-radius: var(--radius); padding: var(--sp-1) var(--sp-3); }
-:is(.picker, .project-workspaces) .new-task .btn { margin: 0; }
-.picker .new-task:first-of-type { margin-top: var(--sp-1); padding-top: 0; }
-:is(.picker, .project-workspaces) .picker-error { white-space: pre-wrap; font: var(--size-small) var(--mono); color: var(--needs-you); margin: var(--sp-3) var(--sp-2); }
 /* Workspaces (danielrispler/Falinks#576): a clicked workspace's actions, under its row. */
-.project-workspaces .workspace-actions { display: flex; gap: var(--sp-3); padding: var(--sp-1) var(--sp-4) var(--sp-3); }
 /* The questions of rename and close (danielrispler/Falinks#469). */
 .ask { background: var(--surface); color: var(--fg); border: 0; border-radius: var(--radius); box-shadow: var(--shadow);
        padding: var(--sp-5); width: var(--popover); }
@@ -587,11 +488,6 @@ body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
 .ask-why-not > p { font-size: var(--size-small); }
 .ask-why-not summary { margin-top: var(--sp-3); font-size: var(--size-small); color: var(--muted); cursor: pointer; }
 .ask-why-not .markdown { margin: var(--sp-3) 0 0; }
-/* Pull ↓N (#164), at the end of the main checkout's line. Disabled, it still takes hover so its title says why. */
-.project-workspaces .workspace-line { display: flex; align-items: center; gap: var(--sp-2); padding-inline-end: var(--sp-3); }
-.project-workspaces .workspace-line .row { flex: 1; min-width: 0; width: auto; }
-.project-workspaces .workspace .pull { flex: none; color: var(--fg); }
-.project-workspaces .workspace .pull:disabled { color: var(--muted); }
 
 /* The Map view (danielrispler/plotkeeper#306, ticket #309): over the rail's and the terminal's columns, which it hides; the list and the top
    bar stay live. Treatment C: plates on a quiet chart. The sizes are tokens, and map-model.ts holds the plate's and the actor's. */
@@ -751,6 +647,11 @@ button.tray-row { display: block; width: 100%; font: inherit; color: inherit; te
 .brief-tag { background: var(--selected); color: var(--muted); border-radius: var(--sp-5); padding: 0 var(--sp-4); letter-spacing: .02em; text-transform: none; }
 .brief-title { margin: var(--sp-3) 0; font-size: var(--size-title); line-height: 1.22; font-weight: 650; letter-spacing: -.018em; text-wrap: balance; }
 .brief-body { margin: 0; color: var(--muted); font-size: var(--size-read); line-height: 1.55; max-width: 56ch; text-wrap: pretty; }
+.brief-writing { margin: 0; padding: var(--sp-5) var(--sp-6); color: var(--muted); font-size: var(--size); }
+.ratify-note { margin-top: var(--sp-4); font-size: var(--size-small); color: var(--muted); }
+.ratify-note p { margin: 0; }
+.ratify-prompt { display: block; width: 100%; box-sizing: border-box; margin-top: var(--sp-3); font: var(--size-xs)/1.5 var(--mono); }
+.ratify-copy { margin-top: var(--sp-3); }
 .brief-pts { margin: var(--sp-4) 0 0; padding: 0; list-style: none; max-width: 60ch; }
 .brief-pts li { position: relative; padding: var(--sp-2) 0 var(--sp-2) var(--sp-6); color: var(--muted); font-size: var(--size); line-height: 1.45; }
 .brief-pts li::before { content: ""; position: absolute; left: 0; top: .85em; width: var(--law-mark); height: var(--link-width); background: var(--faint); }

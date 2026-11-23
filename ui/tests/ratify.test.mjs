@@ -1,9 +1,8 @@
 // Ratifying's pure part (ticket #343), run on the `tsc` output.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { openRows, overturnPrompt, overturnRoute, ratifyStep, sheetPending, statusWords } from "../../dist/ratify.js";
+import { copyOverturn, openRows, overturnPrompt, overturnReport, ratifyStep, sheetPending, statusWords } from "../../dist/ratify.js";
 
-const session = (id, pr, state = "working", terminal = `t-${id}`) => ({ id, state, terminal, identity: { pr } });
 const row = (kind, id, status = "not-yet", extra = {}) => ({ pr: 7, kind, id, text: `${id} text`, change: "", status, ...extra });
 
 test("the sheet marks a law and a link at the part that are not yet ratified, with the PR that changed them", () => {
@@ -15,18 +14,30 @@ test("the sheet marks a law and a link at the part that are not yet ratified, wi
   assert.equal(sheetPending([], "a", links).laws.size, 0);
 });
 
-test("an overturn goes to the PR's live session with a terminal, else to New session", () => {
-  const sessions = [session("s1", 3), session("s2", 7, "ended"), session("s3", 7, "working", null), session("s4", 7, "needs_you", "t-4")];
-  assert.deepEqual(overturnRoute(sessions, 7), { kind: "live", id: "s4", terminal: "t-4" });
-  assert.deepEqual(overturnRoute(sessions, 8), { kind: "new" });
-  assert.deepEqual(overturnRoute([session("s2", 7, "ended")], 7), { kind: "new" }, "an ended session is not live");
+test("the overturn prompt stands alone: the PR, its branch while it is open, the item's id and its wording", () => {
+  const law = row("law", "l1", "not-yet", { text: "The hook never waits.", change: "changed" });
+  const open = overturnPrompt(law, "fog-on-the-map");
+  assert.match(open, /PR #7/);
+  assert.match(open, /branch fog-on-the-map/);
+  assert.match(open, /law l1 \(changed\): “The hook never waits\.”/);
+  assert.match(open, /Undo it/);
+  const merged = overturnPrompt(law, null);
+  assert.match(merged, /PR #7/);
+  assert.doesNotMatch(merged, /branch/, "a PR that is not open has no branch to name");
+  const decision = overturnPrompt(row("decision", "d1", "not-yet", { text: "Briefs are kept per project." }), null);
+  assert.match(decision, /decision d1: “Briefs are kept per project\.”/);
+  assert.match(decision, /PR #7/);
 });
 
-test("the overturn prompt quotes the item and its PR", () => {
-  const law = overturnPrompt(row("law", "l1", "not-yet", { text: "The hook never waits.", change: "changed" }));
-  assert.match(law, /law l1 \(changed\): “The hook never waits\.”/);
-  assert.match(law, /PR #7/);
-  assert.match(overturnPrompt(row("decision", "d1", "not-yet", { text: "Briefs are kept per project." })), /decision “Briefs are kept per project\.” from PR #7/);
+test("copying the prompt says so, and a clipboard that fails or is missing leaves the prompt to copy by hand", async () => {
+  const written = [];
+  assert.equal(await copyOverturn("the prompt", async (text) => void written.push(text)), "copied");
+  assert.deepEqual(written, ["the prompt"]);
+  assert.equal(await copyOverturn("the prompt", async () => Promise.reject(new Error("denied"))), "manual");
+  assert.equal(await copyOverturn("the prompt", () => { throw new Error("blocked"); }), "manual");
+  assert.equal(await copyOverturn("the prompt", undefined), "manual");
+  assert.deepEqual(overturnReport("copied", "the prompt"), { line: "Prompt copied, paste it into your agent", manual: null });
+  assert.deepEqual(overturnReport("manual", "the prompt"), { line: "Copy this prompt and paste it into your agent", manual: "the prompt" });
 });
 
 test("the ratify step exists only when there is something to ratify, and rows say where they stand", () => {

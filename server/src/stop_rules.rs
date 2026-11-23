@@ -1,0 +1,538 @@
+//! Always-on stop-rule tracking (spec danielrispler/plotkeeper#306, ticket #314): the window tells the shell what Daniel uses, and the
+//! shell appends one line per event to `stop-rules.jsonl` in the data folder (no setting, nothing shown). The window decides whether the
+//! one-time review is due (`ui/stop-rules.ts`) from the counts `facts` gives it.
+//!
+//! A day is a local calendar day the window names (`2026-11-03`); the shell has no clock zone of its own. An active day is one with a
+//! `session` or a `map-open` event. Merged PRs are counted on the default branch's first-parent commits since the first event was
+//! logged, so the count starts when tracking does.
+
+use serde::{Deserialize, Serialize};
+use std::{
+    collections::BTreeSet,
+    io::Write,
+    path::{Path, PathBuf},
+    sync::Mutex,
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+/// The log's file, in the data folder.
+const LOG_FILE: &str = "stop-rules.jsonl";
+
+/// What happened. A kind this build does not know reads as `Other` and counts for nothing, so an older build tolerates a newer log.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Kind {
+    /// The session list had a session on the day.
+    Session,
+    /// The Map view opened.
+    MapOpen,
+    /// Home's quiet mark on a project's row was seen.
+    MarkSeen,
+    /// A part's history strip was scrubbed to a commit.
+    Scrub,
+    /// "See the proof", a CI log or a commit's files opened in the drawer.
+    Proof,
+    /// "I know this" cleared a part's fog; tracked apart, with no threshold in project 2.
+    Know,
+    /// The one-time review was dismissed for the project.
+    Dismissed,
+    /// A PR's brief had a row in the tray and the row was seen (once per PR).
+    BriefOffered,
+    /// A tray row opened the PR's brief on the map.
+    BriefOpened,
+    /// A chapter of a brief was read to its end.
+    ChapterDone,
+    /// A brief's check was answered, right or wrong.
+    CheckAnswered,
+    /// Accept or Overturn was pressed on an item to ratify.
+    Ratify,
+    /// A step's "not confirmed from the facts" mark was seen.
+    UnconfirmedSeen,
+    #[serde(other)]
+    Other,
+}
+
+/// One line of the log.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Event {
+    /// Unix seconds.
+    pub at: u64,
+    /// The local calendar day, `2026-11-03`.
+    pub day: String,
+    pub kind: Kind,
+    #[serde(default)]
+    pub project: Option<String>,
+    /// The PR a brief event is about.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pr: Option<u64>,
+}
+
+/// What the window needs of one project to decide on the review. Counts only; the window shows none of them.
+#[derive(Debug, Default, Clone, PartialEq, Serialize)]
+pub struct Facts {
+    pub active_days: u32,
+    pub merged_prs: u32,
+    pub map_days: u32,
+    pub mark_days: u32,
+    pub map_on_mark_days: u32,
+    pub scrubs: u32,
+    pub proofs: u32,
+    pub knows: u32,
+    pub dismissed: bool,
+    /// Merged PRs of the project whose brief was offered, and how many of those had it opened.
+    pub briefs_offered: u32,
+    pub briefs_opened: u32,
+    /// Chapters read to their end, to set against `knows`.
+    pub chapters_done: u32,
+}
+
+/// Serialises appends, so two events never share a line.
+static WRITING: Mutex<()> = Mutex::new(());
+
+fn log_file() -> Result<PathBuf, String> {
+    let home = std::env::home_dir().ok_or("no home folder")?;
+    Ok(studio_hook::data_dir(&home).join(LOG_FILE))
+}
+
+/// Appends `event` to `file`, creating it and its folder.
+pub fn append(file: &Path, event: &Event) -> Result<(), String> {
+    let line = serde_json::to_string(event).map_err(|e| e.to_string())?;
+    let _writing = WRITING.lock().unwrap();
+    if let Some(dir) = file.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    // A torn last line (a crash mid-write) must not swallow this event: start a new line.
+    let torn = std::fs::read(file).is_ok_and(|bytes| bytes.last().is_some_and(|b| *b != b'\n'));
+    let mut out = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(file)
+        .map_err(|e| e.to_string())?;
+    if torn {
+        writeln!(out).map_err(|e| e.to_string())?;
+    }
+    writeln!(out, "{line}").map_err(|e| e.to_string())
+}
+
+/// Every event of `file`, oldest first. A missing file is no events; a line that does not read (torn, or from a format this build
+/// does not know) is skipped and the rest are kept.
+pub fn read(file: &Path) -> Vec<Event> {
+    std::fs::read_to_string(file)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .collect()
+}
+
+/// The days of `project`'s events of `kind`.
+fn days<'a>(events: &'a [Event], project: &str, kind: Kind) -> BTreeSet<&'a str> {
+    events
+        .iter()
+        .filter(|e| e.kind == kind && e.project.as_deref() == Some(project))
+        .map(|e| e.day.as_str())
+        .collect()
+}
+
+/// When `project`'s first event was logged: merged PRs count from then, not from the first event of any project.
+fn began(events: &[Event], project: &str) -> Option<u64> {
+    events
+        .iter()
+        .filter(|e| e.project.as_deref() == Some(project))
+        .map(|e| e.at)
+        .min()
+}
+
+/// Where merged PRs are counted from for `project`: its own first event, else the Studio-wide start of tracking (the log's first
+/// event); `None` for an empty log.
+fn counted_from(events: &[Event], project: &str) -> Option<u64> {
+    began(events, project).or_else(|| events.iter().map(|e| e.at).min())
+}
+
+/// The counts for `project`; `merged_prs` is read from git by the caller.
+pub fn facts(events: &[Event], project: &str, merged_prs: u32) -> Facts {
+    let count = |kind| {
+        events
+            .iter()
+            .filter(|e| e.kind == kind && e.project.as_deref() == Some(project))
+            .count() as u32
+    };
+    let opened = days(events, project, Kind::MapOpen);
+    let marked = days(events, project, Kind::MarkSeen);
+    Facts {
+        active_days: events
+            .iter()
+            .filter(|e| matches!(e.kind, Kind::Session | Kind::MapOpen))
+            .map(|e| e.day.as_str())
+            .collect::<BTreeSet<_>>()
+            .len() as u32,
+        merged_prs,
+        map_days: opened.len() as u32,
+        mark_days: marked.len() as u32,
+        map_on_mark_days: opened.intersection(&marked).count() as u32,
+        scrubs: count(Kind::Scrub),
+        proofs: count(Kind::Proof),
+        knows: count(Kind::Know),
+        dismissed: count(Kind::Dismissed) > 0,
+        briefs_offered: 0,
+        briefs_opened: 0,
+        chapters_done: count(Kind::ChapterDone),
+    }
+}
+
+/// Of the merged PRs `merged` (numbers), how many had a brief offered for `project`, and how many of those had it opened.
+pub fn brief_use(events: &[Event], project: &str, merged: &BTreeSet<u64>) -> (u32, u32) {
+    let of = |kind| -> BTreeSet<u64> {
+        events
+            .iter()
+            .filter(|e| e.kind == kind && e.project.as_deref() == Some(project))
+            .filter_map(|e| e.pr)
+            .filter(|pr| merged.contains(pr))
+            .collect()
+    };
+    let offered = of(Kind::BriefOffered);
+    let opened = of(Kind::BriefOpened);
+    (
+        offered.len() as u32,
+        offered.intersection(&opened).count() as u32,
+    )
+}
+
+/// Appends `event` unless the log already holds one of its kind for the same project and PR: a PR's brief is offered once.
+pub fn append_once(file: &Path, event: &Event) -> Result<bool, String> {
+    let same = |e: &Event| e.kind == event.kind && e.project == event.project && e.pr == event.pr;
+    if read(file).iter().any(same) {
+        return Ok(false);
+    }
+    append(file, event).map(|()| true)
+}
+
+/// The PRs merged on `repo`'s default branch at or after `since` (unix seconds), newest first: its first-parent commits whose
+/// subject ends `(#N)` (a squash) or starts `Merge pull request #N`.
+pub fn merged_numbers_since(repo: &Path, since: u64) -> Vec<u64> {
+    let Some((reference, _)) = crate::map::default_ref(repo) else {
+        return Vec::new();
+    };
+    // Not `git log --since=N`: git reads a small N as a relative date ("0" is now), so the cut is made here on `%ct`.
+    let log = crate::map::git(
+        repo,
+        &["log", "--first-parent", "--format=%ct %s", &reference],
+    )
+    .unwrap_or_default();
+    log.lines()
+        .filter_map(|line| line.split_once(' '))
+        .filter(|(at, _)| at.parse::<u64>().is_ok_and(|at| at >= since))
+        .filter_map(|(_, subject)| merge_number(subject))
+        .collect()
+}
+
+/// The PR a squash (`... (#N)`) or merge (`Merge pull request #N ...`) subject lands.
+fn merge_number(subject: &str) -> Option<u64> {
+    let digits = |n: &str| {
+        (!n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+            .then(|| n.parse().ok())
+            .flatten()
+    };
+    let squash = subject
+        .strip_suffix(')')
+        .and_then(|rest| rest.rsplit_once("(#"))
+        .and_then(|(_, n)| digits(n));
+    squash.or_else(|| {
+        let rest = subject.strip_prefix("Merge pull request #")?;
+        digits(rest.split(' ').next().unwrap_or(""))
+    })
+}
+
+fn now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
+/// Logs that Daniel used something. A `session` event names no project.
+pub fn stop_log(
+    kind: Kind,
+    project: Option<String>,
+    day: String,
+    pr: Option<u64>,
+) -> Result<(), String> {
+    if matches!(kind, Kind::Other | Kind::Dismissed) {
+        return Err("not an event the window logs".into());
+    }
+    let event = Event {
+        at: now(),
+        day,
+        kind,
+        project,
+        pr,
+    };
+    let file = log_file()?;
+    if kind == Kind::BriefOffered {
+        return append_once(&file, &event).map(drop);
+    }
+    append(&file, &event)
+}
+
+/// The counts the review is decided from, for `project`.
+pub fn stop_facts(project: String) -> Result<Facts, String> {
+    let events = read(&log_file()?);
+    let from = counted_from(&events, &project).unwrap_or(now());
+    let merged = merged_numbers_since(Path::new(&project), from);
+    let mut found = facts(&events, &project, merged.len() as u32);
+    (found.briefs_offered, found.briefs_opened) =
+        brief_use(&events, &project, &merged.into_iter().collect());
+    Ok(found)
+}
+
+/// Dismisses the one-time review of each project; the log goes on.
+pub fn stop_dismiss(projects: Vec<String>, day: String) -> Result<(), String> {
+    let file = log_file()?;
+    for project in projects {
+        append(
+            &file,
+            &Event {
+                at: now(),
+                day: day.clone(),
+                kind: Kind::Dismissed,
+                project: Some(project),
+                pr: None,
+            },
+        )?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use studio_test_support::{git, repo};
+
+    fn event(day: &str, kind: Kind, project: Option<&str>) -> Event {
+        Event {
+            at: 1,
+            day: day.into(),
+            kind,
+            project: project.map(String::from),
+            pr: None,
+        }
+    }
+
+    fn brief(day: &str, kind: Kind, pr: u64) -> Event {
+        Event {
+            pr: Some(pr),
+            ..event(day, kind, Some("/p"))
+        }
+    }
+
+    #[test]
+    fn an_append_after_a_torn_line_starts_a_new_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(LOG_FILE);
+        std::fs::write(&file, "{\"at\":1,\"day\":\"2026-1").unwrap();
+        let next = event("2026-11-02", Kind::Know, Some("/p"));
+        append(&file, &next).unwrap();
+        assert_eq!(read(&file), [next]);
+    }
+
+    #[test]
+    fn merged_prs_count_from_the_projects_own_first_event() {
+        let at = |at, project| Event {
+            at,
+            ..event("2026-11-01", Kind::MapOpen, project)
+        };
+        let events = [at(5, None), at(10, Some("/a")), at(20, Some("/b"))];
+        assert_eq!(began(&events, "/b"), Some(20));
+        assert_eq!(began(&events, "/a"), Some(10));
+        assert_eq!(began(&events, "/c"), None);
+    }
+
+    #[test]
+    fn a_project_with_no_events_of_its_own_counts_from_the_logs_first_event() {
+        let at = |at, project| Event {
+            at,
+            ..event("2026-11-01", Kind::Session, project)
+        };
+        let events = [at(30, None), at(5, None), at(10, Some("/a"))];
+        assert_eq!(counted_from(&events, "/c"), Some(5));
+        assert_eq!(counted_from(&events, "/a"), Some(10));
+        assert_eq!(counted_from(&[], "/a"), None);
+    }
+
+    #[test]
+    fn events_round_trip_through_the_file_in_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("data").join(LOG_FILE);
+        let all = [
+            event("2026-11-01", Kind::Session, None),
+            event("2026-11-01", Kind::MapOpen, Some("/p")),
+            event("2026-11-02", Kind::Know, Some("/p")),
+        ];
+        for e in &all {
+            append(&file, e).unwrap();
+        }
+        assert_eq!(read(&file), all);
+    }
+
+    #[test]
+    fn a_missing_older_or_newer_log_is_tolerated() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(LOG_FILE);
+        assert!(read(&file).is_empty());
+        // An event with no project, a kind and a field of a later build, a torn line and a blank one.
+        std::fs::write(
+            &file,
+            concat!(
+                "{\"at\":1,\"day\":\"2026-11-01\",\"kind\":\"session\"}\n",
+                "{\"at\":2,\"day\":\"2026-11-01\",\"kind\":\"pr-brief\",\"project\":\"/p\",\"extra\":1}\n",
+                "{\"at\":3,\"day\":\"2026-11-01\",\"kind\":\"scrub\",\"project\":\"/p\",\"later\":true}\n",
+                "{\"at\":4,\"day\":\"2026-1",
+                "\n\n",
+            ),
+        )
+        .unwrap();
+        let events = read(&file);
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[1].kind, Kind::Other);
+        let found = facts(&events, "/p", 0);
+        assert_eq!((found.active_days, found.scrubs, found.map_days), (1, 1, 0));
+        // A later append goes on after a torn last line without losing the lines before it.
+        append(&file, &event("2026-11-02", Kind::Proof, Some("/p"))).unwrap();
+        assert!(read(&file).iter().any(|e| e.kind == Kind::Proof));
+    }
+
+    #[test]
+    fn days_are_counted_by_what_makes_a_day_active_and_per_project() {
+        let events = [
+            event("2026-11-01", Kind::Session, None),
+            event("2026-11-01", Kind::Session, None),
+            event("2026-11-02", Kind::MapOpen, Some("/p")),
+            event("2026-11-02", Kind::MapOpen, Some("/p")),
+            event("2026-11-03", Kind::MapOpen, Some("/other")),
+            // Seen and used, but neither a session nor a map open: no active day of its own.
+            event("2026-11-04", Kind::MarkSeen, Some("/p")),
+            event("2026-11-02", Kind::MarkSeen, Some("/p")),
+            event("2026-11-05", Kind::Scrub, Some("/p")),
+        ];
+        let found = facts(&events, "/p", 7);
+        assert_eq!(found.active_days, 3);
+        assert_eq!(found.merged_prs, 7);
+        assert_eq!(found.map_days, 1);
+        assert_eq!(found.mark_days, 2);
+        assert_eq!(found.map_on_mark_days, 1);
+        assert_eq!(found.scrubs, 1);
+        assert_eq!(facts(&events, "/other", 0).scrubs, 0);
+    }
+
+    #[test]
+    fn uses_are_counted_and_a_dismissal_is_per_project() {
+        let events = [
+            event("2026-11-01", Kind::Proof, Some("/p")),
+            event("2026-11-01", Kind::Proof, Some("/p")),
+            event("2026-11-01", Kind::Know, Some("/p")),
+            event("2026-11-01", Kind::Dismissed, Some("/p")),
+        ];
+        let found = facts(&events, "/p", 0);
+        assert_eq!((found.proofs, found.knows), (2, 1));
+        assert!(found.dismissed);
+        assert!(!facts(&events, "/q", 0).dismissed);
+    }
+
+    #[test]
+    fn a_merged_pr_is_a_squash_or_a_merge_commit_on_the_first_parent_line() {
+        let (dir, path) = repo();
+        let at = dir.path();
+        for subject in [
+            "Studio: a thing (#12)",
+            "Merge pull request #13 from a/b",
+            "A plain commit",
+            "Mentions (#14) mid-line",
+            "Ends in a word (#x)",
+        ] {
+            git(at, &["commit", "-q", "--allow-empty", "-m", subject]);
+        }
+        // A start of 0 (or any small number) is every commit; git's `--since=0` reads it as "now", so a commit older than the
+        // second `git log` runs in would not count.
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        assert_eq!(merged_numbers_since(Path::new(&path), 0).len(), 2);
+        // Nothing merged after a future start.
+        assert_eq!(
+            merged_numbers_since(Path::new(&path), now() + 3600).len(),
+            0
+        );
+    }
+
+    #[test]
+    fn a_start_is_inclusive_of_the_commits_own_second() {
+        let (dir, path) = repo();
+        let stamp = "1700000000 +0000";
+        let status = std::process::Command::new("git")
+            .args([
+                "-c",
+                "user.name=S",
+                "-c",
+                "user.email=s@e.com",
+                "commit",
+                "-q",
+            ])
+            .args(["--allow-empty", "-m", "Studio: a thing (#5)"])
+            .env("GIT_COMMITTER_DATE", stamp)
+            .env("GIT_AUTHOR_DATE", stamp)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .current_dir(dir.path())
+            .status()
+            .unwrap();
+        assert!(status.success());
+        assert_eq!(merged_numbers_since(Path::new(&path), 1_700_000_000), [5]);
+        assert!(merged_numbers_since(Path::new(&path), 1_700_000_001).is_empty());
+    }
+
+    #[test]
+    fn a_brief_is_offered_once_per_pr_however_often_its_row_is_seen() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(LOG_FILE);
+        assert!(append_once(&file, &brief("2026-11-01", Kind::BriefOffered, 7)).unwrap());
+        assert!(!append_once(&file, &brief("2026-11-02", Kind::BriefOffered, 7)).unwrap());
+        assert!(append_once(&file, &brief("2026-11-02", Kind::BriefOffered, 8)).unwrap());
+        assert_eq!(read(&file).len(), 2);
+    }
+
+    #[test]
+    fn brief_use_counts_offered_and_opened_among_merged_prs_only() {
+        let events = [
+            brief("2026-11-01", Kind::BriefOffered, 1),
+            brief("2026-11-01", Kind::BriefOffered, 2),
+            brief("2026-11-01", Kind::BriefOffered, 3),
+            brief("2026-11-01", Kind::BriefOffered, 99),
+            brief("2026-11-01", Kind::BriefOpened, 2),
+            brief("2026-11-02", Kind::BriefOpened, 2),
+            brief("2026-11-02", Kind::BriefOpened, 99),
+            // Opened with no offer logged (the log began after the offer): not counted as having had a brief.
+            brief("2026-11-02", Kind::BriefOpened, 4),
+        ];
+        let merged: BTreeSet<u64> = [1, 2, 3, 4].into();
+        assert_eq!(brief_use(&events, "/p", &merged), (3, 1));
+        assert_eq!(brief_use(&events, "/other", &merged), (0, 0));
+    }
+
+    #[test]
+    fn chapters_done_are_counted_per_project_beside_knows() {
+        let events = [
+            brief("2026-11-01", Kind::ChapterDone, 1),
+            brief("2026-11-01", Kind::ChapterDone, 1),
+            event("2026-11-01", Kind::Know, Some("/p")),
+            Event {
+                project: Some("/q".into()),
+                ..brief("2026-11-01", Kind::ChapterDone, 1)
+            },
+        ];
+        let found = facts(&events, "/p", 0);
+        assert_eq!((found.chapters_done, found.knows), (2, 1));
+    }
+
+    #[test]
+    fn a_merge_subject_names_its_pr() {
+        assert_eq!(merge_number("Studio: a thing (#12)"), Some(12));
+        assert_eq!(merge_number("Merge pull request #13 from a/b"), Some(13));
+        assert_eq!(merge_number("A plain commit"), None);
+        assert_eq!(merge_number("Ends in a word (#x)"), None);
+    }
+}

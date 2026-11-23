@@ -14,6 +14,10 @@ test("each state has its glyph and a word for its title and accessible name", ()
   // An unseen turn keeps its mark once the session goes idle (danielrispler/Falinks#556).
   assert.deepEqual(status("idle", true), ["filled", "Idle, not seen"]);
   assert.deepEqual(status("ended"), ["ring", "Ended"]);
+  // Idle with no process to watch is a guess, so it says so (#330); only idle does.
+  assert.deepEqual(status("idle", false, false, true), ["ring", "Idle?"]);
+  assert.deepEqual(status("idle", true, false, true), ["filled", "Idle?, not seen"]);
+  assert.deepEqual(status("running", false, false, true), ["spinner", "Running"]);
   // A subagent's own status, such as "completed", is its word.
   assert.deepEqual(status("completed"), ["ring", "completed"]);
 });
@@ -90,21 +94,4 @@ test("a landed task's session at your turn, idle or ended shows a check mark and
   assert.deepEqual(status("needs_you", false, true), ["pill", "Needs you"]);
   assert.deepEqual(status("idle", false, false), ["ring", "Idle"]);
   assert.ok(!showsLanded("idle", false));
-});
-
-test("a project header's action is keyed by its action, so Add and Remove never share a node", async () => {
-  const { headAction } = await import("../../dist/list.js");
-  const remove = headAction({ key: "/a", project: true }, null, ["/a"]);
-  const add = headAction({ key: "/a", project: false }, "/a", []);
-  assert.equal(remove.kind, "remove");
-  assert.equal(add.kind, "add");
-  assert.notEqual(remove.key, add.key);
-});
-
-test("Add as project is not offered when the folder's main checkout is already a project", async () => {
-  const { headAction } = await import("../../dist/list.js");
-  const outside = { key: "/a/.claude/worktrees/x", project: false };
-  assert.equal(headAction(outside, "/a", ["/a"]), null);
-  assert.equal(headAction(outside, null, ["/a"]), null);
-  assert.equal(headAction(outside, "/b", ["/a"]).kind, "add");
 });

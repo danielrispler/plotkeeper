@@ -1,30 +1,12 @@
 // Settings and keymap (danielrispler/Falinks#524), run on the `tsc` output. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { initial, reload, zoomed } from "../../dist/settings.js";
-
-test("zoom steps by a tenth and stays between half and double", () => {
-  assert.equal(zoomed(1, 1), 1.1);
-  assert.equal(zoomed(1, -1), 0.9);
-  assert.equal(zoomed(2, 1), 2);
-  assert.equal(zoomed(0.5, -1), 0.5);
-  assert.equal(zoomed(1.7, 0), 1);
-  assert.equal(reload(initial, { settings: `{ "zoom": 9 }`, keymap: null }).settings.zoom, 2);
-  assert.equal(reload(initial, { settings: `{ "zoom": 0.1 }`, keymap: null }).settings.zoom, 0.5);
-});
+import { initial, reload } from "../../dist/settings.js";
 
 test("missing files give the defaults", () => {
   const loaded = reload(initial, { settings: null, keymap: null });
-  assert.equal(loaded.settings.zoom, 1);
-  assert.equal(loaded.settings.terminal.font_size, null);
-  assert.deepEqual(loaded.settings.summaries, { model: "haiku", effort: "", on_open: false });
-  assert.deepEqual(loaded.settings.pr_briefs, { model: "opus" });
-  assert.equal(loaded.settings.sounds, true);
+  assert.deepEqual(loaded.settings.summaries, { model: "haiku", effort: "", on_open: false, writer: "claude" });
   assert.equal(loaded.settings.context_warning, 30);
-  assert.deepEqual(loaded.settings.doctor, [
-    { label: "Check the installation", command: "claude doctor", kind: "shell" },
-    { label: "Full checkup", command: "/doctor", kind: "session" },
-  ]);
   assert.equal(loaded.keymap.Workspace["cmd-1"], "studio::ToggleList");
   assert.deepEqual(loaded.errors, []);
 });
@@ -32,17 +14,12 @@ test("missing files give the defaults", () => {
 test("a Zed-style file, with comments and trailing commas, sets its keys and leaves the rest default", () => {
   const settings = `// Studio settings
   {
-    "zoom": 1.5, /* bigger */
-    "terminal": { "font_size": 15, },
-    "summaries": { "model": "sonnet" },
-    "doctor": [{ "label": "Audit", "command": "/audit", "kind": "session" }],
+    "context_warning": 50, /* later */
+    "summaries": { "model": "sonnet", },
   }`;
   const loaded = reload(initial, { settings, keymap: null });
-  assert.equal(loaded.settings.zoom, 1.5);
-  assert.equal(loaded.settings.terminal.font_size, 15);
-  assert.deepEqual(loaded.settings.summaries, { model: "sonnet", effort: "", on_open: false });
-  assert.equal(reload(initial, { settings: `{ "sounds": false }`, keymap: null }).settings.sounds, false);
-  assert.deepEqual(loaded.settings.doctor, [{ label: "Audit", command: "/audit", kind: "session" }]);
+  assert.equal(loaded.settings.context_warning, 50);
+  assert.deepEqual(loaded.settings.summaries, { model: "sonnet", effort: "", on_open: false, writer: "claude" });
   assert.deepEqual(loaded.errors, []);
 });
 
@@ -64,31 +41,19 @@ test("a string holding // or /* is not read as a comment", () => {
 });
 
 test("a key of the wrong type keeps its default", () => {
-  const settings = `{ "zoom": "big", "terminal": { "font_size": "large" }, "doctor": [{ "label": "x", "kind": "shell" }] }`;
+  const settings = `{ "context_warning": "high", "summaries": { "model": 3 } }`;
   const loaded = reload(initial, { settings, keymap: null });
-  assert.equal(loaded.settings.zoom, 1);
-  assert.equal(loaded.settings.terminal.font_size, null);
-  assert.equal(loaded.settings.doctor.length, 0);
-  assert.deepEqual(loaded.errors, [
-    "settings.json: terminal.font_size: expected a number",
-    "settings.json: zoom: expected a number",
-    "settings.json: doctor[0]: expected a label, a command and a kind of shell or session",
-  ]);
+  assert.equal(loaded.settings.context_warning, 30);
+  assert.equal(loaded.settings.summaries.model, "haiku");
+  assert.deepEqual(loaded.errors, ["settings.json: summaries.model: expected a string", "settings.json: context_warning: expected a number"]);
   // The other keys still apply.
-  assert.equal(reload(initial, { settings: `{ "zoom": 1.5, "summaries": { "on_open": "yes" } }`, keymap: null }).settings.zoom, 1.5);
-});
-
-test("the terminal's font size stays between 8 and 40", () => {
-  const size = (n) => reload(initial, { settings: `{ "terminal": { "font_size": ${n} } }`, keymap: null }).settings.terminal.font_size;
-  assert.equal(size(2), 8);
-  assert.equal(size(100), 40);
-  assert.equal(size(15), 15);
+  assert.equal(reload(initial, { settings: `{ "context_warning": 40, "summaries": { "on_open": "yes" } }`, keymap: null }).settings.context_warning, 40);
 });
 
 test("a broken file keeps the last good settings and reports the error", () => {
-  const good = reload(initial, { settings: `{ "zoom": 1.5 }`, keymap: `[{ "bindings": { "cmd-l": "studio::ToggleList" } }]` });
-  const broken = reload(good, { settings: `{ "zoom": 2, `, keymap: `[{ "bindings": ` });
-  assert.equal(broken.settings.zoom, 1.5);
+  const good = reload(initial, { settings: `{ "context_warning": 50 }`, keymap: `[{ "bindings": { "cmd-l": "studio::ToggleList" } }]` });
+  const broken = reload(good, { settings: `{ "context_warning": 60, `, keymap: `[{ "bindings": ` });
+  assert.equal(broken.settings.context_warning, 50);
   assert.equal(broken.keymap.Workspace["cmd-l"], "studio::ToggleList");
   assert.equal(broken.errors.length, 2);
   assert.match(broken.errors[0], /^settings\.json: /);
@@ -120,25 +85,7 @@ test("a key that is not a keystroke is reported and the rest of the keymap stays
 test("a file of the wrong shape is reported", () => {
   const loaded = reload(initial, { settings: `[]`, keymap: `{}` });
   assert.equal(loaded.errors.length, 2);
-  assert.equal(loaded.settings.zoom, 1);
-});
-
-test("the editor is an argv template, none by default, and anything else is reported", () => {
-  assert.equal(reload(initial, { settings: null, keymap: null }).settings.editor, null);
-  const code = `{ "editor": ["code", "-g", "{path}:{line}:{column}"] }`;
-  assert.deepEqual(reload(initial, { settings: code, keymap: null }).settings.editor, ["code", "-g", "{path}:{line}:{column}"]);
-  const shell = reload(initial, { settings: `{ "editor": "code -g {path}" }`, keymap: null });
-  assert.equal(shell.settings.editor, null);
-  assert.deepEqual(shell.errors, ['settings.json: editor: expected an array of strings, such as ["code", "-g", "{path}:{line}:{column}"]']);
-});
-
-test("the repository is a path, the studio's checkout by default, and anything else is reported (danielrispler/Falinks#605)", () => {
-  assert.equal(reload(initial, { settings: null, keymap: null }).settings.repository, null);
-  const set = reload(initial, { settings: `{ "repository": "/Users/d/work/Falinks" }`, keymap: null });
-  assert.equal(set.settings.repository, "/Users/d/work/Falinks");
-  const wrong = reload(initial, { settings: `{ "repository": 3 }`, keymap: null });
-  assert.equal(wrong.settings.repository, null);
-  assert.deepEqual(wrong.errors, ["settings.json: repository: expected a string"]);
+  assert.equal(loaded.settings.context_warning, 30);
 });
 
 test("the check lists are commands per project folder, none by default, and anything else is reported (danielrispler/plotkeeper#112)", () => {
@@ -149,4 +96,13 @@ test("the check lists are commands per project folder, none by default, and anyt
   assert.deepEqual(wrong.settings.checks, { "/b": ["ok"] });
   assert.deepEqual(wrong.errors, ["settings.json: checks./a: expected an array of strings"]);
   assert.deepEqual(reload(initial, { settings: `{ "checks": [] }`, keymap: null }).errors.length, 1);
+});
+
+test("summaries.writer chooses agy, defaults to claude, and a name that is neither is reported", () => {
+  const read = (summaries) => reload(initial, { settings: `{ "summaries": ${summaries} }`, keymap: null });
+  assert.equal(read(`{ "writer": "agy" }`).settings.summaries.writer, "agy");
+  assert.equal(read(`{}`).settings.summaries.writer, "claude");
+  const bad = read(`{ "writer": "codex" }`);
+  assert.equal(bad.settings.summaries.writer, "claude");
+  assert.equal(bad.errors.length, 1);
 });

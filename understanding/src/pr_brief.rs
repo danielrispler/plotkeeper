@@ -21,7 +21,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::Instant;
 
 /// The facts' budget: the writer is sandboxed with no tools, so everything it reads is here.
 pub const BUDGET: usize = 64 << 10;
@@ -1120,13 +1119,14 @@ pub struct CallUsage {
     pub output_tokens: u64,
     #[serde(default)]
     pub cost_usd: f64,
+    /// The call's wall time, from asking the writer to its reply (danielrispler/plotkeeper#334, port decision Q5).
     #[serde(default)]
-    pub seconds: u64,
+    pub duration_ms: u64,
 }
 
 /// A writer's reply: the text, and what the call cost when it says.
 #[derive(Clone, Debug, Default)]
-pub struct WriterReply {
+pub struct BriefReply {
     pub text: String,
     pub usage: CallUsage,
 }
@@ -1134,20 +1134,32 @@ pub struct WriterReply {
 /// What writes a brief: `ClaudeWriter` in the app, a canned reply in a test.
 pub trait BriefWriter {
     /// The reply to `prompt` at `model`, or one line for the log when the call failed.
-    fn write(&self, model: &str, prompt: &str) -> Result<WriterReply, String>;
+    fn write(&self, model: &str, prompt: &str) -> Result<BriefReply, String>;
+}
+
+/// `writer`'s reply to `prompt` at `model`, with the call's wall time (`duration_ms`) set on its usage.
+pub fn timed_write(
+    writer: &(impl BriefWriter + ?Sized),
+    model: &str,
+    prompt: &str,
+) -> Result<BriefReply, String> {
+    let started = std::time::Instant::now();
+    let mut reply = writer.write(model, prompt)?;
+    reply.usage.duration_ms = started.elapsed().as_millis() as u64;
+    Ok(reply)
 }
 
 /// Reads `claude -p --output-format json`'s output: the `result` text and the usage. A reply that is not that
 /// envelope is taken as the text itself.
-pub fn read_envelope(output: &str) -> Result<WriterReply, String> {
+pub fn read_envelope(output: &str) -> Result<BriefReply, String> {
     let Ok(v) = serde_json::from_str::<serde_json::Value>(output) else {
-        return Ok(WriterReply {
+        return Ok(BriefReply {
             text: output.to_string(),
             usage: CallUsage::default(),
         });
     };
     let Some(result) = v.get("result").and_then(|r| r.as_str()) else {
-        return Ok(WriterReply {
+        return Ok(BriefReply {
             text: output.to_string(),
             usage: CallUsage::default(),
         });
@@ -1171,22 +1183,18 @@ pub fn read_envelope(output: &str) -> Result<WriterReply, String> {
             + v["usage"]["cache_read_input_tokens"].as_u64().unwrap_or(0),
         output_tokens: v["usage"]["output_tokens"].as_u64().unwrap_or(0),
         cost_usd: v["total_cost_usd"].as_f64().unwrap_or(0.0),
-        seconds: 0,
+        duration_ms: 0,
     };
-    Ok(WriterReply {
+    Ok(BriefReply {
         text: result.to_string(),
         usage,
     })
 }
 
 impl BriefWriter for ClaudeWriter {
-    fn write(&self, model: &str, prompt: &str) -> Result<WriterReply, String> {
-        let started = Instant::now();
-        let run = self.run_with(&["--output-format", "json", "--model", model], prompt);
-        let out = self.stdout(run)?;
-        let mut reply = read_envelope(&out)?;
-        reply.usage.seconds = started.elapsed().as_secs();
-        Ok(reply)
+    fn write(&self, model: &str, prompt: &str) -> Result<BriefReply, String> {
+        let out = self.brief_stdout(model, prompt)?;
+        read_envelope(&out)
     }
 }
 
@@ -1705,7 +1713,7 @@ pub fn write_pr_brief(
     mut log: impl FnMut(String),
 ) -> Result<StoredBrief, String> {
     let facts = build_facts(source)?;
-    let reply = writer.write(model, &prompt(&facts))?;
+    let reply = timed_write(writer, model, &prompt(&facts))?;
     let mut brief = parse_reply(&reply.text)?;
     assign_decision_ids(&mut brief, &source.earlier_decisions);
     check_brief(&mut brief, &facts.context);

@@ -4,12 +4,8 @@
 
 import type { Ask } from "./answer.js";
 import type { Facts, Hunk } from "./ask.js";
-import type { Config, Listed } from "./daemon.js";
 import type { CheckOutput } from "./evidence.js";
-import type { Revive } from "./restart.js";
 import type { SettingsFiles } from "./settings.js";
-import type { Skill } from "./skills.js";
-import type { AgentUsage } from "./usage.js";
 
 // `detail` is a command's description, else what the step works on; `command` a command's full text.
 export type Step = { tool: string; detail: string | null; command?: string | null };
@@ -194,6 +190,8 @@ export type Session = {
   line?: string;
   // Its turn finished and Daniel has not looked at it since; danielrispler/Falinks#556 sets it (danielrispler/Falinks#572 draws it).
   unseen?: boolean;
+  // Its agent's process, when its hook could tell; without one an idle session shows "Idle?" (#330).
+  pid?: number | null;
   // How many of its turns Daniel has seen (danielrispler/plotkeeper#124).
   seen: number;
   // How many it had seen when Daniel selected it, which "Since you looked" counts from.
@@ -335,16 +333,6 @@ export type LogCall = { kind: "call"; id: string; tool: string; detail: string |
 // view then shows its own line.
 export type Selection = { session: Session; agent: string | null };
 
-// Where a session can start (danielrispler/Falinks#467): the main checkout and the tasks under `.claude/worktrees/`, with
-// the count of `agent-*` worktrees hidden. `branch` is null at a detached HEAD.
-export type Workspace = { path: string; branch: string | null };
-export type Workspaces = { main: Workspace; tasks: Workspace[]; hidden: number };
-// A workspace's git state (#26): its branch, null at a detached HEAD; commits ahead of and behind its upstream, null with
-// none; changed files; commits behind origin's default branch, null when level with it or it is unknown; whether the
-// branch is the default branch; whether a rebase onto it would conflict; and the operation in progress, null with none.
-export type GitState = { branch: string | null; upstream: [number, number] | null; changed: number; main_behind: number | null; on_default: boolean; would_conflict: boolean; would_overwrite?: boolean; operation: string | null };
-export type Losses = { uncommitted: string[]; unpushed: string[] };
-
 export const stateLabels: Record<SessionState, string> = {
   needs_you: "Needs you",
   running: "Running",
@@ -374,11 +362,7 @@ export type Work = {
   estimate: { range: [number, number] | null; depends_on_you: boolean };
 };
 
-// A branch the main checkout can switch to (#95): `remote` when only `origin` has it, `task` the folder of the task
-// whose worktree holds it, `current` the main checkout's own.
-export type Branch = { name: string; remote: boolean; task: string | null; current: boolean };
-
-// The Map view's payload (`src-tauri/src/map.rs`, `MapState`): one project's map as read from `origin`'s default branch, and Daniel's own
+// The Map view's payload (`server/src/map.rs`, `MapState`): one project's map as read from `origin`'s default branch, and Daniel's own
 // positions and tiers for it. A feature of the view adds its field here and in `MapState` there.
 export type UserMap = { positions: Record<string, [number, number]>; tiers: Record<string, string> };
 export type MapState = {
@@ -404,7 +388,7 @@ export type PendingItem = { pr: number; kind: string; id: string };
 export type RatifyRow = { pr: number; kind: string; id: string; text: string; change: string; status: "ratified" | "accepted" | "overturned" | "not-yet" };
 // What a ready PR's brief is doing (`pr_briefs.rs`): a newer head was pushed (stale), being written now, and the chapters' titles, or the one story's.
 export type BriefInfo = { stale: boolean; writing: boolean; chapters: string[]; quiet: boolean; read?: boolean };
-export type ReadyPr = { number: number; title: string; head: string; brief: BriefInfo | null };
+export type ReadyPr = { number: number; title: string; head: string; branch?: string; brief: BriefInfo | null };
 // A PR brief as the writer made it and `pr_brief` returns it (`understanding/src/pr_brief.rs`). A step's `flags` are what the checks found wrong with it
 // that the one rewrite did not mend: it shows "not confirmed from the facts".
 export type BriefCite = { from: string; quote: string };
@@ -455,11 +439,7 @@ export type CommitFiles = { commit: string; short: string; label: string; url: s
 // (`scripts/snap/`) are typed against it, and `scripts/snap/base.ts` answers every command that is not `void`, so a fixture
 // that lacks a command or a field fails `tsc` (#144).
 export interface Commands {
-  add_project: string[];
-  agent_argv: string[];
   agent_summary: string | null;
-  agents: string[];
-  agy_plugin_setup: string | null;
   alive: void;
   answer: void;
   answer_blocked_command: "hook" | "late";
@@ -468,22 +448,11 @@ export interface Commands {
   ask_anchor: string;
   ask_facts: Facts | null;
   ask_why_not: { facts: Facts; reasons: string | null };
-  branches: Branch[];
   cards: SessionCards;
   check_lists: void;
   check_output: CheckOutput | null;
-  choose_folder: string | null;
-  claude_argv: string[];
-  clearing: void;
-  closed: void;
-  create_named_task: Workspace;
-  create_task: Workspace;
-  delete_merged_branch: void;
   delete_session: void;
   failed_check_name: string;
-  fetch_repository: void;
-  fix_agy_plugin_setup: void;
-  fix_plugin_setup: void;
   map_place: Record<string, string[]>;
   map_save_positions: UserMap;
   map_set_tier: UserMap;
@@ -499,56 +468,26 @@ export interface Commands {
   map_state: MapState;
   pr_brief: BriefView | null;
   pr_diff: CommitFiles;
-  pr_brief_settings: void;
   brief_chapter_done: void;
   briefs_waiting: WaitingBriefs | null;
   pr_ratify: RatifyRow[];
   ratify_set: void;
   mark_unseen: void;
   open: Selection | null;
-  open_file: void;
-  open_link: void;
-  open_keymap: void;
-  open_settings: void;
-  plugin_setup: string | null;
-  projects: string[];
-  pull_main: void;
   rail_shown: void;
   refresh_landed_tasks: void;
-  reveal_log: void;
-  remove_project: string[];
-  remove_task: Losses | null;
   rename: void;
-  reorder_projects: string[];
-  repository_of: string | null;
-  restart_into: void;
-  revival: Revive[];
   select: Selection | null;
-  select_terminal: Selection | null;
-  split_shown: void;
   selected: Selection | null;
   sessions: Session[];
-  set_zoom: void;
   settings_files: SettingsFiles;
-  skills: Skill[];
-  sounds: void;
   subagent_log: SubagentLog | null;
-  suggest_projects: string[];
   summary_settings: void;
-  switch_branch: void;
-  terminal_connect: Config;
-  terminal_lost: Listed[];
-  terminal_send: void;
-  terminal_upgrade: void;
   turn_file_hunk: Hunk | null;
   turn_reply: string | null;
   turn_summary: TurnSummary | null;
-  usage: AgentUsage[];
   watch: Ask | null;
-  // The new `settings.json` text, as `settings.rs` wrote it; an error is why the write was refused.
-  write_setting: string;
-  workspace_git_state: GitState;
-  workspaces: Workspaces;
+  writer_notice: string | null;
 }
 export type Command = keyof Commands;
 

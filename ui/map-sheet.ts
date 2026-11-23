@@ -11,7 +11,7 @@ import { failure, invoke, pressable, text } from "./dom.js";
 import { currentMap, onDraw, onPlateClick, reloadMap, registerLayer, syncSide, type MapView } from "./map.js";
 import { openDrawer } from "./map-drawer.js";
 import { drawStrip } from "./map-history.js";
-import { ratifyActions } from "./map-ratify.js";
+import { overturnNote, ratifyActions } from "./map-ratify.js";
 import { sheetPending, statusWords } from "./ratify.js";
 import { ciDrawer, effectiveTier, type Part, proofDrawer, sheetCi, sheetOf, type Tier } from "./map-model.js";
 
@@ -153,6 +153,8 @@ function drawSheet(view: MapView) {
   card.append(extra);
   card.querySelector(".sheet-laws")?.append(...laws);
   card.querySelector(".sheet-links")?.append(...links);
+  const overturned = overturnNote();
+  if (overturned) card.append(overturned);
   slot.replaceChildren(card);
   drawStrip(view, part.id, extra);
   syncSide(view.slots);

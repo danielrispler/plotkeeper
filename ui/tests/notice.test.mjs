@@ -80,10 +80,10 @@ test("clearing the settings errors hides a line that holds nothing else", () => 
 
 test("dismissing removes the errors and keeps the version and writer notices beside them", () => {
   showNotice("Claude Code 3 changed.");
-  line.textContent += "\nCards and briefs are off: no writer";
+  line.textContent += "\nSummaries and briefs are off: no writer";
   onLogRecord({ level: ERROR, message: "cards did not save" });
   dismissNotice();
-  assert.deepEqual(lines(), ["Claude Code 3 changed.", "Cards and briefs are off: no writer"]);
+  assert.deepEqual(lines(), ["Claude Code 3 changed.", "Summaries and briefs are off: no writer"]);
   assert.equal(line.hidden, false);
 });
 

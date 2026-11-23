@@ -161,6 +161,9 @@ impl Adapter {
             parent.map(|_| id.clone()),
             at,
         );
+        event.studio_pid = raw["studio_pid"]
+            .as_u64()
+            .and_then(|p| u32::try_from(p).ok());
         event.studio_turn_start = strings(&raw["studio_turn_start"]);
         event.studio_turn_end = strings(&raw["studio_turn_end"]);
         if own && let Some(model) = raw["modelName"].as_str().filter(|m| !m.is_empty()) {
@@ -484,6 +487,7 @@ fn frame(conversation: &Conversation, session: String, agent_id: Option<String>,
         prompt_id: None,
         studio_received_ms: at,
         studio_terminal_id: conversation.terminal.clone(),
+        studio_pid: None,
         studio_turn_start: BTreeMap::new(),
         studio_turn_end: BTreeMap::new(),
         studio_touched_roots: None,

@@ -1,18 +1,7 @@
 // A subagent's log shows in the pane (danielrispler/plotkeeper#54). Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { paneView } from "../../dist/panes.js";
 import { callTitle, logNote, logRows, stateLabel } from "../../dist/log.js";
-
-const session = { terminal: "claude-a", state: "working" };
-
-test("a selected subagent's pane is its log, the session's row keeps its terminal", () => {
-  assert.deepEqual(paneView(session, true, "agent-1"), { log: "agent-1" });
-  assert.deepEqual(paneView(session, false, "agent-1"), { log: "agent-1" });
-  assert.deepEqual(paneView(session, true, null), { terminal: "claude-a" });
-  assert.deepEqual(paneView(session, true), { terminal: "claude-a" });
-  assert.equal(paneView(null, false, "agent-1"), "home");
-});
 
 const call = (id, tool = "Read", detail = null) => ({ kind: "call", id, tool, detail });
 const result = (id, text = "ok", failed = false, cut = false) => ({ kind: "result", id, text, failed, cut });

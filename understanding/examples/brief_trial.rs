@@ -132,9 +132,9 @@ fn main() {
                 );
                 for call in &record.calls {
                     println!(
-                        "- {}: {} s; ${:.3}; {} in, {} out",
+                        "- {}: {:.1} s; ${:.3}; {} in, {} out",
                         call.role,
-                        call.seconds,
+                        call.duration_ms as f64 / 1000.0,
                         call.cost_usd,
                         call.input_tokens,
                         call.output_tokens

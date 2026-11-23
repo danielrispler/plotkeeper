@@ -115,7 +115,7 @@ function askBox(session: string, anchor: Anchor, what: string): HTMLDetailsEleme
       const answer = await invoke("ask_anchor", { session, anchor, what, question });
       const cwd = studio.listed.find((s) => s.id === session)?.cwd ?? null;
       // The recorded facts are above; the answer is the model's reading of them.
-      reply.replaceChildren(text("p", "Interpretation", "label"), rendered("div", answer, "", cwd));
+      reply.replaceChildren(text("p", "Interpretation", "label"), rendered("div", answer, ""));
     } catch (e) {
       const retry = button("Retry", "Ask the same question again");
       retry.addEventListener("click", ask);
@@ -157,7 +157,7 @@ export function whyNotElement(name: string, result: { facts: Facts; reasons: str
   }
   if (result.reasons) {
     const reasons = document.createElement("details");
-    reasons.append(fullTitle(text("summary", "possible reasons (not recorded)"), "Show or hide the writer's guesses, which nothing recorded"), rendered("div", result.reasons, "", cwd));
+    reasons.append(fullTitle(text("summary", "possible reasons (not recorded)"), "Show or hide the writer's guesses, which nothing recorded"), rendered("div", result.reasons, ""));
     node.append(reasons);
   }
   return node;

@@ -709,6 +709,8 @@ fn the_same_replies_as_the_bare_object_or_inside_prose_parse_too() {
 struct Canned {
     replies: RefCell<Vec<Result<String, String>>>,
     prompts: RefCell<Vec<(String, String)>>,
+    /// How long each call takes, in milliseconds.
+    delay: u64,
 }
 
 impl Canned {
@@ -716,16 +718,22 @@ impl Canned {
         Self {
             replies: RefCell::new(replies),
             prompts: RefCell::new(vec![]),
+            delay: 0,
         }
+    }
+
+    fn slow(self, delay: u64) -> Self {
+        Self { delay, ..self }
     }
 }
 
 impl BriefWriter for Canned {
-    fn write(&self, model: &str, prompt: &str) -> Result<WriterReply, String> {
+    fn write(&self, model: &str, prompt: &str) -> Result<BriefReply, String> {
         self.prompts
             .borrow_mut()
             .push((model.into(), prompt.into()));
-        self.replies.borrow_mut().remove(0).map(|text| WriterReply {
+        std::thread::sleep(std::time::Duration::from_millis(self.delay));
+        self.replies.borrow_mut().remove(0).map(|text| BriefReply {
             text,
             usage: CallUsage {
                 model: model.into(),
@@ -819,6 +827,34 @@ fn the_entry_writes_checks_stores_and_records_one_brief() {
             r.calls[0].cost_usd
         ),
         ("writer", 100, 0.25)
+    );
+}
+
+#[test]
+fn the_record_logs_the_wall_time_of_the_writer_the_claim_check_and_the_retry() {
+    let data = tempfile::tempdir().unwrap();
+    let store = BriefStore::open(data.path()).unwrap();
+    let mut b = single_story();
+    b["chapters"][0]["steps"][0]["b"] = json!("This ensures order.");
+    // The claim check flags the step, so a retry follows: three calls.
+    let flagged = unsupported("c0s0", "ensures order", "the facts say no such thing");
+    let writer = Canned::new(vec![
+        Ok(b.to_string()),
+        Ok(checker(vec![flagged])),
+        Ok(no_rewrites()),
+    ])
+    .slow(30);
+    write_pr_brief(&writer, "opus", &source(&["alpha/a.rs"]), &store, |_| {}).unwrap();
+
+    let record = &store.records()[0];
+    let timed: Vec<(&str, bool)> = record
+        .calls
+        .iter()
+        .map(|c| (c.role.as_str(), c.duration_ms >= 30))
+        .collect();
+    assert_eq!(
+        timed,
+        [("writer", true), ("claim check", true), ("retry", true)]
     );
 }
 

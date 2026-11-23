@@ -1,5 +1,5 @@
 // The Map view's "Ready for review" tray (spec danielrispler/plotkeeper#334, tickets #336 and #339): the PRs of the project that are open and
-// not drafts, which the shell finds on a turn's end, the window's focus and the view's opening (`src-tauri/src/prs.rs`). A PR whose brief is
+// not drafts, which the server finds on a turn's end, the page's focus and the view's opening (`server/src/prs.rs`). A PR whose brief is
 // stored has one row, or one row per chapter of a chaptered brief; a row opens that brief on the map (`map-brief.ts`).
 
 import { text } from "./dom.js";
@@ -18,8 +18,9 @@ export const trayRows = (ready: ReadyPr[]): TrayRow[] =>
     const brief = pr.brief;
     if (brief?.quiet) return [{ number: pr.number, chapter: null, title, note: `#${pr.number} · no brief: nothing you track changed`, openable: false }];
     if (!brief || brief.chapters.length === 0) {
-      const note = brief?.writing ? "writing the brief…" : "the brief is not written yet";
-      return [{ number: pr.number, chapter: null, title, note: `#${pr.number} · ${note}`, openable: false }];
+      // Being written: the row says so and waits. Otherwise opening the row writes the brief (the start writes only a few, newest first).
+      if (brief?.writing) return [{ number: pr.number, chapter: null, title, note: `#${pr.number} · writing the brief…`, openable: false }];
+      return [{ number: pr.number, chapter: 0, title, note: `#${pr.number} · the brief is written when you open it`, openable: true }];
     }
     const state = brief.writing ? "writing it again…" : brief.stale ? "a newer push; rewritten when opened" : "brief ready";
     if (brief.chapters.length === 1) return [{ number: pr.number, chapter: 0, title: brief.chapters[0] || title, note: `#${pr.number} · ${state}`, openable: true }];

@@ -7,11 +7,19 @@ import { chromeFailure, consoleLines, failed, headSource, snapPage, stubSource }
 import { fixtures } from "../../scripts/snap/fixtures.ts";
 import { railStates } from "../../scripts/snap/rail-fixtures.ts";
 
-const invokeIn = (source, command) => {
+// The stub answers what the page's transport asks: `fetch` of `/api/<command>`, read as the transport reads it.
+const stubbed = (source, extra = {}) => {
   const window = {};
-  vm.runInNewContext(source, { window, Date });
-  return window.__TAURI__.core.invoke(command);
+  vm.runInNewContext(source, { window, Date, ...extra });
+  const invoke = async (command, args) => {
+    const reply = await window.fetch(`/api/${command}`, { method: "POST", body: JSON.stringify(args ?? {}) });
+    const body = await reply.json();
+    if (!reply.ok) throw body;
+    return body;
+  };
+  return { window, invoke };
 };
+const invokeIn = (source, command) => stubbed(source).invoke(command);
 
 test("the stub answers a command from the fixture, and an unknown one with null", async () => {
   const source = stubSource({ sessions: [{ id: "s1" }] });
@@ -22,8 +30,8 @@ test("the stub answers a command from the fixture, and an unknown one with null"
 test("the stub is injected before the app's module script, and the fixture is not written into dist's own file", () => {
   const index = '<head><script src="vendor/marked.umd.js"></script><script type="module" src="main.js"></script></head>';
   const page = snapPage(index, { sessions: [] });
-  assert.ok(page.indexOf("__TAURI__") < page.indexOf('src="main.js"'));
-  assert.ok(index.indexOf("__TAURI__") === -1);
+  assert.ok(page.indexOf("__snapEmit") < page.indexOf('src="main.js"'));
+  assert.ok(index.indexOf("__snapEmit") === -1);
 });
 
 test("the list fixture has a nested, a selected and a landed row", async () => {
@@ -33,13 +41,12 @@ test("the list fixture has a nested, a selected and a landed row", async () => {
   assert.equal(f.selected.session.id, f.sessions[0].id);
 });
 
-test("the home fixture has every section: needs you, unseen, landed, and a project", () => {
+test("the home fixture has every section: needs you, unseen, landed", () => {
   const f = fixtures.home();
   assert.equal(f.selected, null);
   assert.ok(f.sessions.some((s) => s.state === "needs_you"));
   assert.ok(f.sessions.some((s) => s.unseen && s.state !== "needs_you" && !s.landed));
   assert.ok(f.sessions.some((s) => s.landed && s.state !== "running"));
-  assert.ok(f.terminal_connect.repo);
 });
 
 // The rail's fixtures (#109): each holds what its state needs.
@@ -85,10 +92,9 @@ test("railIdle: an idle session with five turns and its brief", () => {
 });
 
 test("an argument-keyed reply answers by that argument", async () => {
-  const window = {};
-  vm.runInNewContext(stubSource({ turn_summary: { __by: "id", values: { t1: { summary: "x" } } } }), { window, Date });
-  assert.equal(JSON.stringify(await window.__TAURI__.core.invoke("turn_summary", { id: "t1" })), '{"summary":"x"}');
-  assert.equal(await window.__TAURI__.core.invoke("turn_summary", { id: "zz" }), null);
+  const { invoke } = stubbed(stubSource({ turn_summary: { __by: "id", values: { t1: { summary: "x" } } } }));
+  assert.equal(JSON.stringify(await invoke("turn_summary", { id: "t1" })), '{"summary":"x"}');
+  assert.equal(await invoke("turn_summary", { id: "zz" }), null);
 });
 
 // Runs a page's head script in a stand-in page: `load` fires, then the timers run.
@@ -167,7 +173,8 @@ test("the hover check runs after a script that returns early or throws", async (
 test("snapPage puts a fixture's script in the page, after the stub and before the app", () => {
   const index = '<head><script type="module" src="main.js"></script></head>';
   const page = snapPage(index, { snapScript: "log(1)" });
-  assert.ok(page.indexOf("__TAURI__") < page.indexOf("log(1)") && page.indexOf("log(1)") < page.indexOf('src="main.js"'));
+  // The fixture, with its script, is also data inside the stub, so the script that runs is the last one.
+  assert.ok(page.indexOf("window.__snapEmit =") < page.lastIndexOf("log(1)") && page.lastIndexOf("log(1)") < page.indexOf('src="main.js"'));
 });
 
 test("a log line starting snap:fail fails the run; other lines do not", () => {
@@ -190,56 +197,6 @@ test("consoleLines reads the page's console lines out of Chrome's stderr", () =>
     '[1116/101010.000:INFO:CONSOLE:6] "snap:fail it said \\"no\\"", source: http://127.0.0.1:1/index.html (6)',
   ].join("\n");
   assert.deepEqual(consoleLines(stderr), ["rail scrollTop 120", 'snap:fail it said "no"']);
-});
-
-// The recorded terminal (#150): a fixture gives a session a terminal, and the stub replays recorded output when the UI attaches.
-const terminalFixture = { terminals: [{ id: "t1", argv: ["claude"], cwd: "/w", exited: null, replay: { data: "aGk=", cols: 100, rows: 30 } }] };
-
-// Runs the stub in a stand-in page; the `terminal` events it emits are collected as the UI's listener would see them.
-const terminalEvents = async (fixture, requests) => {
-  const window = {};
-  vm.runInNewContext(stubSource(fixture), { window, Date, setTimeout });
-  const events = [];
-  await window.__TAURI__.event.listen("terminal", (event) => events.push(event.payload));
-  for (const msg of requests) await window.__TAURI__.core.invoke("terminal_send", { msg });
-  await new Promise((done) => setTimeout(done));
-  return JSON.parse(JSON.stringify(events));
-};
-
-test("the stub lists the fixture's terminals, and none when the fixture has none", async () => {
-  const [listed] = await terminalEvents(terminalFixture, [{ op: "list" }]);
-  assert.deepEqual(listed.terms.map((t) => [t.id, t.argv, t.exited]), [["t1", ["claude"], null]]);
-  assert.deepEqual((await terminalEvents({}, [{ op: "list" }]))[0].terms, []);
-});
-
-test("the stub replays a terminal's recorded output when the UI attaches, as the daemon does at start", async () => {
-  const events = await terminalEvents(terminalFixture, [{ op: "attach", id: "t1" }, { op: "attach", id: "nope" }]);
-  assert.deepEqual(events, [{ ev: "replay", id: "t1", data: "aGk=", cols: 100, rows: 30, exited: null }]);
-});
-
-test("recordedTerminal: a session at your turn, linked to a terminal that replays the recording", () => {
-  const f = fixtures.recordedTerminal();
-  const s = f.selected.session;
-  assert.equal(s.state, "your_turn");
-  assert.ok(s.turns.length > 0 && f.turn_summary.values.t4.summary);
-  const [term] = f.terminals ?? [];
-  assert.ok(term, "the fixture has a terminal");
-  assert.equal(s.terminal, term.id);
-  assert.ok(term.replay.cols > 0 && term.replay.rows > 0);
-  assert.ok(term.replay.data.length > 0, "terminal-recording.txt is missing or empty");
-});
-
-// What the page's terminal shows: its drawn rows, as the stand-in document answers `querySelectorAll`.
-const runTerminalScript = async (rows) => {
-  const logged = [];
-  const document = { querySelectorAll: () => rows.map((textContent) => ({ textContent })) };
-  await vm.runInNewContext(`(async (log, document) => {${fixtures.recordedTerminal().snapScript}})`)((line) => logged.push(line), document);
-  return logged;
-};
-
-test("recordedTerminal's script fails the run when the terminal shows no rows, and not when it shows some", async () => {
-  assert.ok(failed(await runTerminalScript(["", "  "])));
-  assert.ok(!failed(await runTerminalScript(["", "Welcome to Claude Code"])));
 });
 
 test("a non-zero Chrome status reports the status and the last lines of its stderr; a zero status reports nothing", () => {

@@ -9,7 +9,7 @@
 
 use crate::pr_brief::{
     Also, Brief, BriefRecord, BriefWriter, CallUsage, CheckContext, Decision, Facts, Step,
-    check_brief, prompt, put_plan_first,
+    check_brief, prompt, put_plan_first, timed_write,
 };
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -282,7 +282,7 @@ pub fn claim_check_and_retry(
     log: &mut impl FnMut(String),
 ) {
     let mut claims = Vec::new();
-    match writer.write(model, &claim_prompt(facts, brief)) {
+    match timed_write(writer, model, &claim_prompt(facts, brief)) {
         Err(e) => record.claim_error = Some(e),
         Ok(reply) => {
             record.calls.push(with_role(reply.usage, "claim check"));
@@ -303,7 +303,7 @@ pub fn claim_check_and_retry(
         return;
     };
     let mut rewritten = BTreeSet::new();
-    match writer.write(model, &request) {
+    match timed_write(writer, model, &request) {
         Err(e) => record.retry_error = Some(e),
         Ok(reply) => {
             record.calls.push(with_role(reply.usage, "retry"));

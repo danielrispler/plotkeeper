@@ -1,9 +1,12 @@
 # The studio's own workspace, kept apart from the engine's (danielrispler/Falinks#328, "Where the code lives").
 [workspace]
-members = ["core", "wayfinder", "hook", "understanding", "terminal-daemon", "workbench", "system-map", "src-tauri", "test-support"]
+members = ["core", "wayfinder", "hook", "understanding", "terminal-daemon", "workbench", "system-map", "server", "test-support"]
+# The Tauri shell is out of the workspace: retiring the cards, the hourly retests and the 5-second PR lookup (danielrispler/plotkeeper#334) removed what
+# its commands forward to, and it is archived with the herdr trial (#332). Its files stay as `main` has them.
+exclude = ["src-tauri"]
 # The shell embeds the built frontend (`dist/`) at compile time, so plain `cargo test` leaves it out;
 # `npm run tauri build` builds it.
-default-members = ["core", "wayfinder", "hook", "understanding", "terminal-daemon", "workbench", "system-map"]
+default-members = ["core", "wayfinder", "hook", "understanding", "terminal-daemon", "workbench", "system-map", "server"]
 resolver = "3"
 
 # Lighter debug info links faster; line tables keep file and line in backtraces.
