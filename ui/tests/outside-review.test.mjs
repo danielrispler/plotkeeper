@@ -159,9 +159,9 @@ test("a docs-only diff is skipped: no risk match, even when it names a stored fi
   assert.deepEqual(decide(quiet, facts(docs)), { review: false, line: SKIPPED });
 });
 
-test("--force reviews any diff, and --since reviews the fix commits of round 2", () => {
+test("--force reviews any diff, and --since is no option: the review has one round", () => {
   assert.equal(decide(options(["--force"]), facts(docs)).review, true);
-  assert.equal(decide(options(["--since", "abc123"]), facts(docs)).review, true);
+  assert.throws(() => options(["--since", "abc123"]), /unknown or incomplete option --since/);
 });
 
 test("a spec's branch gets a review: its issue has sub-issues", () => {
@@ -400,19 +400,8 @@ test("a review that is killed ends its agy and removes its worktree", async () =
   assert.equal(alive, false, "the stand-in agy outlived the review");
 });
 
-test("--since must name a commit of the branch, and --out a folder that can be made: both fail before agy runs", () => {
+test("--out must be a folder that can be made: it fails before agy runs", () => {
   const s = scratch();
-  const run = (more) => spawnSync(process.execPath, s.args(more), { cwd: s.repo, env: { ...s.env, FAKE_AGY: "ok" }, encoding: "utf8" });
-  s.git("checkout", "--quiet", "-b", "elsewhere", "main");
-  writeFileSync(join(s.repo, "other.txt"), "x");
-  s.git("add", "-A");
-  s.git("commit", "--quiet", "-m", "elsewhere");
-  const stray = s.git("rev-parse", "HEAD").trim();
-  s.git("checkout", "--quiet", "change");
-  for (const [name, ran] of Object.entries({ stray: run(["--since", stray]), unknown: run(["--since", "nope"]) })) {
-    assert.equal(ran.status, 2, name);
-    assert.match(ran.stderr, /--since .* is not a commit of this branch/, name);
-  }
   writeFileSync(join(s.dir, "file"), "");
   const blocked = spawnSync(process.execPath, [script, "--out", join(s.dir, "file/out")], { cwd: s.repo, env: { ...s.env, FAKE_AGY: "ok" }, encoding: "utf8" });
   assert.equal(blocked.status, 2);

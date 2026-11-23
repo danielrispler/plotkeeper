@@ -1,9 +1,9 @@
 // The outside review (#279, #284): Gemini, through `agy`, reads a risky diff before its PR is opened.
 //
-//   node scripts/review/outside-review.mjs [--force] [--model <id>] [--since <sha>] [--out <folder>]
+//   node scripts/review/outside-review.mjs [--force] [--model <id>] [--out <folder>]
 //
-// It reviews the commits of HEAD since the merge-base with `origin/main`, or, for round 2, `--since`'s
-// commit and those after it. Its first line is the verdict: `reviewed: <n> findings`,
+// It reviews the commits of HEAD since the merge-base with `origin/main`, once: there is no second
+// round. Its first line is the verdict: `reviewed: <n> findings`,
 // `skipped: <reason>` or `review unavailable: <reason>`. It never fails a PR: whatever stops the
 // review, it says why and exits 0; only a wrong option exits 2, before any review runs. The
 // findings go to a JSON file in `--out`: the session's scratchpad, or the system's temp folder
@@ -30,11 +30,11 @@ const TIMEOUT_MINUTES = 15;
 class Usage extends Error {}
 
 export const options = (argv) => {
-  const opts = { force: false, model: DEFAULT_MODEL, since: null, out: tmpdir() };
+  const opts = { force: false, model: DEFAULT_MODEL, out: tmpdir() };
   for (let i = 0; i < argv.length; i++) {
     const name = argv[i].replace(/^--/, "");
     if (argv[i] === "--force") opts.force = true;
-    else if (["--model", "--since", "--out"].includes(argv[i]) && argv[i + 1]) opts[name] = argv[++i];
+    else if (["--model", "--out"].includes(argv[i]) && argv[i + 1]) opts[name] = argv[++i];
     else throw new Usage(`unknown or incomplete option ${argv[i]}`);
   }
   return opts;
@@ -122,7 +122,6 @@ const deserialized = (source) => {
 // change; `facts.subIssues()` is how many sub-issues the branch's issue has, asked last.
 export const decide = (opts, facts) => {
   if (opts.force) return { review: true, why: "--force" };
-  if (opts.since) return { review: true, why: `round 2: the commits since ${opts.since}` };
   const why = new Set();
   const types = new Map();
   for (const hunk of hunks(facts.diff)) {
@@ -261,16 +260,8 @@ const main = async (opts) => {
   if (safe(() => run("git", ["fetch", "--quiet", "origin", "main"], { timeout: 30_000 }), null) === null)
     notes.push("note: `git fetch` failed; the diff is against the origin/main already here");
   const head = git("rev-parse", "HEAD");
-  const commit = (rev) => safe(() => git("rev-parse", "--verify", "--quiet", "--end-of-options", `${rev}^{commit}`), null);
-  let base;
-  if (opts.since) {
-    const since = commit(opts.since);
-    if (!since || safe(() => git("merge-base", "--is-ancestor", since, head), null) === null)
-      throw new Usage(`--since ${opts.since} is not a commit of this branch`);
-    base = commit(`${since}^`);
-    if (!base) throw new Usage(`--since ${opts.since} is the repository's first commit`);
-  } else base = git("merge-base", "HEAD", "origin/main");
-  const about = { branch: git("rev-parse", "--abbrev-ref", "HEAD"), head, base, model: opts.model, round: opts.since ? 2 : 1 };
+  const base = git("merge-base", "HEAD", "origin/main");
+  const about = { branch: git("rev-parse", "--abbrev-ref", "HEAD"), head, base, model: opts.model, round: 1 };
   // One line per run in the main checkout's local-evidence/, and a reviewed run's findings beside
   // it. Only where git ignores that folder, so no other repository gets an untracked file; a record
   // that cannot be written changes nothing else.
@@ -352,7 +343,7 @@ const main = async (opts) => {
     const dirty = safe(() => git("-C", repo, "status", "--porcelain"), "");
     if (dirty) notes.push(`warning: the review changed its throwaway tree, so the deny hook let a write through:\n${dirty}`);
     if (safe(() => git("status", "--porcelain"), before) !== before) notes.push("warning: the reviewed checkout changed during the review");
-    const name = `outside-review-${head.slice(0, 9)}${opts.since ? "-round2" : ""}`;
+    const name = `outside-review-${head.slice(0, 9)}`;
     verdict = result.line;
     if (result.findings) {
       const quotaAfter = left();
@@ -395,7 +386,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === import.meta.filename) {
     await main(options(process.argv.slice(2)));
   } catch (error) {
     if (error instanceof Usage) {
-      console.error(`${error.message}\nusage: outside-review [--force] [--model <id>] [--since <sha>] [--out <folder>]`);
+      console.error(`${error.message}\nusage: outside-review [--force] [--model <id>] [--out <folder>]`);
       process.exit(2);
     }
     // Whatever else stops the review, the PR goes ahead with the reason.
