@@ -22,7 +22,15 @@ const turn = { id: null, prompt: "Fix it", message: "Done.", checks: [], started
 
 test("no card shows in the rail, whatever the block holds, a folded turn or an open one", () => {
   const block = { index: 0, turn, cards: [stored("s@2")], checks: [], agents: [], questions: [], blocked: [] };
-  for (const node of [story.foldedTurn({ id: "s" }, block), story.foldedTurn({ id: "s" }, block)]) {
+  const session = { id: "s", cwd: "/p", state: "idle", capabilities: { turn_trees: false }, turns: [turn, turn, turn] };
+  const folded = story.foldedTurn(session, block);
+  const unfolded = story.foldedTurn(session, { ...block, index: 1 });
+  // The line's click opens the turn's block under it.
+  const line = unfolded.children[0];
+  const closed = unfolded.children.length;
+  line.listeners.click();
+  assert.ok(unfolded.children.length > closed, "the turn is open");
+  for (const node of [folded, unfolded]) {
     assert.equal(node.find("article").length, 0);
     assert.equal(node.find("details").filter((d) => d.className.includes("unseen-card") || d.className.includes("answered-card")).length, 0);
   }
