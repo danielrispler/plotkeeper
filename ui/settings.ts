@@ -66,6 +66,8 @@ const defaultKeymap: Keymap = {
     "shift-cmd-h": "studio::GoHome",
     // The Map view (danielrispler/plotkeeper#306): the selected session's project, else the first with a map; again, leaves it.
     "shift-cmd-m": "studio::ShowMap",
+    // The map's camera (#383): the whole map in view.
+    "cmd-0": "studio::FitMap",
     // Modifiers in `MODIFIERS` order, as a keystroke reads.
     "shift-cmd-p": "studio::Palette",
   },

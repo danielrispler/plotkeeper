@@ -168,6 +168,7 @@ const covered = {
   ".unseen-card > summary": "cards.ts: the summary's title",
   ".subagent-log .log-title": "log.ts: the title's title",
   ".subagent-log .log-call summary": "log.ts: the summary's title",
+  ".map-canvas": "map.ts: the map area is a camera, not a text; it pans and zooms to what it cuts",
   ".plate-name": "map.ts: the plate's title holds the name, caption and description",
   ".plate-caption": "map.ts: the plate's title holds the name, caption and description",
   ".agent-chip": "map-agents.ts: a chip's title holds its full label",

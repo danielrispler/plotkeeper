@@ -16,7 +16,7 @@ import { type Actions, newestUnseen, nextNeedsYou, paletteEntries, run, stepLine
 import { hover, realClock, shownGate } from "./hover.js";
 import { arrange, defaultWidths, type LayoutMode, railShown, resized, type Widths } from "./layout.js";
 import { listSpace } from "./home.js";
-import { mapEscape, mapShown, projectsChanged, startMap, toggleMap } from "./map.js";
+import { fitMap, mapEscape, mapShown, projectsChanged, startMap, toggleMap } from "./map.js";
 import "./map-history.js";
 import "./map-sheet.js";
 import "./map-tray.js";
@@ -199,6 +199,8 @@ const actions: Actions = {
   "studio::GoHome": () => void toggleHome(),
   // The Map view (danielrispler/plotkeeper#306), over the rail and the centre column; the same key leaves it.
   "studio::ShowMap": () => void toggleMap(),
+  // The whole map in view (#383), while the Map view shows.
+  "studio::FitMap": () => fitMap(),
   // History (#94), in the centre column: the ended sessions, searchable.
   "studio::ShowHistory": () => showHistory(),
   // Asks GitHub again which tasks have landed (#53); it is otherwise asked at a turn's end and at the page's focus.

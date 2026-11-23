@@ -186,6 +186,10 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
             arg(a, "project")?,
             arg(a, "positions")?,
         )),
+        "map_save_view" => res(crate::map::map_save_view(
+            arg(a, "project")?,
+            arg(a, "view")?,
+        )),
         "map_set_tier" => res(crate::map::map_set_tier(
             arg(a, "project")?,
             arg(a, "part")?,

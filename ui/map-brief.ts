@@ -8,7 +8,7 @@
 // Esc (`brief` layer) closes it and keeps its step. `map-model.ts` holds the logic: `briefPlayer`, `briefCamera`, `figureShapes`.
 
 import { failure, invoke, text } from "./dom.js";
-import { currentMap, currentScrub, onDraw, registerLayer, type MapView } from "./map.js";
+import { currentMap, currentScrub, giveCameraBack, lendCamera, onDraw, registerLayer, type MapView } from "./map.js";
 import { closeDrawer, openDrawer } from "./map-drawer.js";
 import { watchSeen } from "./seen.js";
 import { logStop } from "./stop-rules.js";
@@ -213,7 +213,7 @@ function unlight(view: MapView) {
   const root = world(view);
   if (!root) return;
   root.classList.remove("briefing");
-  root.style.transform = "";
+  giveCameraBack();
   view.slots.canvas.querySelectorAll(".lit, .arrive").forEach((node) => node.classList.remove("lit", "arrive"));
   clearOrder(view);
   root.querySelector(".map-light")?.remove();
@@ -249,7 +249,6 @@ function aim(view: MapView, step: BriefStep) {
   const root = world(view);
   if (!root) return;
   const canvas = view.slots.canvas;
-  canvas.scrollLeft = canvas.scrollTop = 0;
   const area = { w: canvas.clientWidth, h: canvas.clientHeight };
   const room = { top: 26, bottom: panel().offsetHeight + 40 };
   const all = frameOf(view, steps());
@@ -260,9 +259,7 @@ function aim(view: MapView, step: BriefStep) {
     box = frameOf(view, [step]) ?? box;
     camera = box && briefCamera(box, area, room, 1.35);
   }
-  if (!camera) return;
-  root.style.transformOrigin = "0 0";
-  root.style.transform = `translate(${camera.x}px, ${camera.y}px) scale(${camera.scale})`;
+  if (camera) lendCamera(camera);
 }
 
 let run = 0;

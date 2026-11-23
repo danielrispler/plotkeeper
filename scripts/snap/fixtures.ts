@@ -872,6 +872,53 @@ export const fixtures = {
       const map = document.getElementById("map").getBoundingClientRect();
       if (map.right > list.left + 1) log("snap:fail the map overlaps the session list");
       log("plates " + plates + ", marks " + checks + "/" + trusts);`, { map_state: mapState() }),
+  // The map's camera (#383): an empty point of the map is the map itself (no layer over it), a drag there pans, a plain wheel does nothing,
+  // ⌘+wheel and a pinch zoom up to 200 %, and ⌘0 fits the whole map; no part's place changes. Shown fitted.
+  mapCamera: () =>
+    mapOpened(`
+      const canvas = document.querySelector("#map .map-canvas");
+      const world = () => document.querySelector("#map .map-world");
+      const camera = () => {
+        const m = /translate\\((-?[\\d.e+-]+)px, (-?[\\d.e+-]+)px\\) scale\\(([\\d.e+-]+)\\)/.exec(world().style.transform);
+        return m ? { x: +m[1], y: +m[2], scale: +m[3] } : null;
+      };
+      const places = () => [...document.querySelectorAll("#map .plate, #map .actor")].map((n) => n.dataset.id + n.style.left + n.style.top).join();
+      const before = places();
+      const box = canvas.getBoundingClientRect();
+      const [px, py] = [box.left + 300, box.top + 60];
+      const hit = document.elementFromPoint(px, py);
+      if (!hit || !(hit === canvas || hit === world())) return log("snap:fail the element under an empty point of the map is not the map: " + (hit ? hit.tagName + "." + hit.className : "none"));
+      if (getComputedStyle(hit).cursor !== "grab") log("snap:fail the empty map's cursor is " + getComputedStyle(hit).cursor);
+      const start = camera();
+      if (!start) return log("snap:fail the world has no camera: " + world().style.transform);
+      const pointer = (type, x) => new PointerEvent(type, { bubbles: true, clientX: x, clientY: py, pointerId: 1, button: 0, buttons: 1, isPrimary: true });
+      hit.dispatchEvent(pointer("pointerdown", px));
+      canvas.dispatchEvent(pointer("pointermove", px + 120));
+      canvas.dispatchEvent(pointer("pointerup", px + 120));
+      const panned = camera();
+      if (Math.round(panned.x - start.x) !== 120 || panned.y !== start.y || panned.scale !== start.scale) log("snap:fail a drag of the empty map did not pan by 120: " + JSON.stringify([start, panned]));
+      const wheel = (extra) => new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: -100, clientX: px, clientY: py, ...extra });
+      const scrolled = document.scrollingElement.scrollTop;
+      const plain = wheel({ deltaY: 100 });
+      canvas.dispatchEvent(plain);
+      if (JSON.stringify(camera()) !== JSON.stringify(panned)) log("snap:fail a plain wheel moved the view: " + JSON.stringify(camera()));
+      if (!plain.defaultPrevented || document.scrollingElement.scrollTop !== scrolled) log("snap:fail a plain wheel was not swallowed");
+      canvas.dispatchEvent(wheel({ ctrlKey: true }));
+      if (!(camera().scale > panned.scale)) log("snap:fail a pinch did not zoom in");
+      for (let i = 0; i < 40; i++) canvas.dispatchEvent(wheel({ deltaY: -300, metaKey: true }));
+      if (camera().scale !== 2) log("snap:fail zoom is not held at 200 %: " + camera().scale);
+      for (let i = 0; i < 40; i++) canvas.dispatchEvent(wheel({ deltaY: 300, metaKey: true }));
+      if (camera().scale !== 0.4) log("snap:fail zoom is not held at 40 %: " + camera().scale);
+      document.dispatchEvent(new KeyboardEvent("keydown", { code: "Digit0", key: "0", metaKey: true, bubbles: true }));
+      const fitted = camera();
+      if (fitted.scale === 0.4) log("snap:fail ⌘0 did not fit the map");
+      // Headless Chrome's virtual time does not run the fit's glide: skip to where it ends.
+      world().classList.remove("glide");
+      await wait(100);
+      const shown = [...document.querySelectorAll("#map .plate, #map .actor")].map((n) => n.getBoundingClientRect());
+      if (shown.some((r) => r.left < box.left || r.right > box.right || r.top < box.top || r.bottom > box.bottom)) log("snap:fail ⌘0 left a part outside the map");
+      if (places() !== before) log("snap:fail a part's saved position changed");
+      log("camera ok: fitted at " + Math.round(fitted.scale * 100) + "% over " + shown.length + " items");`, { map_state: mapState() }),
   // Home's quiet mark (#310): one row of two carries it, with no count.
   homeFogMark: (): Fixture => homeMarked(false),
   // Pressing the mark opens that project's Map view, not the new session its row starts.
