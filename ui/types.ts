@@ -363,8 +363,16 @@ export type Work = {
 };
 
 // The Map view's payload (`server/src/map.rs`, `MapState`): one project's map as read from `origin`'s default branch, and Daniel's own
-// positions and tiers for it. A feature of the view adds its field here and in `MapState` there.
-export type UserMap = { positions: Record<string, [number, number]>; tiers: Record<string, string> };
+// positions and tiers for it. A feature of the view adds its field here and in `MapState` there; `server/tests/wire.rs` holds
+// the two to agree (#333).
+// `fog`: what landed since Daniel caught up and what he has read of each PR's brief (`fog.rs`); the window does not read it.
+export type FogState = {
+  first: string | null;
+  processed: string | null;
+  parts: Record<string, { commit: string; strength: Fog }[]>;
+  reads: Record<string, { lit: string[][]; chapters: Record<string, { head: string; at: number }> }>;
+};
+export type UserMap = { positions: Record<string, [number, number]>; tiers: Record<string, string>; fog?: FogState };
 export type MapState = {
   project: string;
   status: "loaded" | "none" | "unreadable";
