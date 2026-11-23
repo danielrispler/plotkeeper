@@ -18,9 +18,13 @@ A subagent's wait, failure or card shows on its session's line and names the sub
 
 A session with blocked commands waiting shows "N blocked commands waiting" ("1 blocked command waiting") as its row's second line in any state but ended, counting the cards that have a button (Blocked, Blocked again, Allowed, not run), until each is chosen (or declined). An Allowed card, Running, Finished or Running in background does not count. An open question still takes the line. A Bash command auto mode blocks while the app runs raises the notification "Auto mode blocked a command", naming the session and the subagent, under the same rules as the others: not while the window is focused, and combined with notices within 3 seconds. It replaces the "needs you" notice that block would raise. A block replayed at launch raises none.
 
+### Projects
+
+plotkeeper keeps its own list of projects, `projects.json` in the data folder (`server/src/projects.rs`, #381). A repository joins it the first time a session is seen in it, as its main checkout (a task's worktree joins its main checkout's project, the rule the list groups by). It stays after its sessions end or are deleted, and leaves only through Remove project, in a project header's "⋯" menu; a removed project comes back only when a session is active in it after the removal. The list's groups are read from it: every saved project has a header even with no live session, as its header only, after the projects with sessions, in the order they joined. A saved project whose folder was moved or deleted is gone: its header's name is struck through, and in the Map view it shows "This folder is gone", its path and Remove project where its map would be, never an error, and nothing reads its map.
+
 ## Home
 
-With no session selected the centre column shows Home, the waiting room, as a page of parts in a fixed order under a quiet title (the date). A part with nothing in it is absent: Needs you, Running, Unseen, Landed, and the repositories sessions ran in, one row each, which opens that repository's map.
+With no session selected the centre column shows Home, the waiting room, as a page of parts in a fixed order under a quiet title (the date). A part with nothing in it is absent: Needs you, Running, Unseen, Landed, and the saved projects (see [Projects](#projects)), one row each, which opens that repository's map.
 
 Needs you lists each session that needs Daniel as a card on the raised surface, with its "Needs you" pill and its question's first line. It is the only colour on the page; with no session needing him Home says "Nothing needs you".
 

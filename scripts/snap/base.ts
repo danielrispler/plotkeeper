@@ -44,6 +44,8 @@ export const base = {
   pr_diff: { commit: "", short: "", label: "", url: null, files: [] },
   briefs_waiting: null,
   pr_ratify: [],
+  projects: [],
+  remove_project: [],
   select: noSelection,
   selected: noSelection,
   sessions: [],

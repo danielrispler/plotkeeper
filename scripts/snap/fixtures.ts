@@ -58,6 +58,34 @@ const list = () => {
   return { ...base, sessions, selected: { session: sessions[0], agent: null } } satisfies Fixture;
 };
 
+// The saved project list (#381): plotkeeper with its sessions, falinks with none (its header only, after it) and pokedex, whose
+// folder is gone.
+const savedProjects = [{ path: "/w/falinks", gone: false }, { path: "/w/plotkeeper", gone: false }, { path: "/w/pokedex", gone: true }];
+const withSaved = (snapScript: string, extra: Fixture = {}): Fixture => ({
+  ...list(),
+  projects: savedProjects,
+  remove_project: savedProjects.filter((project) => !project.gone),
+  ...extra,
+  snapScript: `
+    const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+    await wait(200);
+    const heads = () => [...document.querySelectorAll("#groups .project-head")];
+    const named = (name) => heads().find((head) => head.querySelector(".name").textContent === name);
+    ${snapScript}`,
+});
+const openGone = `
+    document.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyM", key: "m", metaKey: true, shiftKey: true, bubbles: true }));
+    await wait(400);
+    document.getElementById("map-project").click();
+    await wait(100);
+    [...document.querySelectorAll("#map-projects button")].find((b) => b.textContent === "pokedex")?.click();
+    await wait(300);
+    const gone = document.querySelector("#map .map-empty.map-gone");
+    if (!gone) return log("snap:fail the gone project shows no gone state: " + document.getElementById("map-body").textContent);
+    if (!gone.textContent.includes("This folder is gone") || !gone.textContent.includes("/w/pokedex")) log("snap:fail the gone state lacks its words or its path: " + gone.textContent);
+    const remove = [...gone.querySelectorAll("button")].find((b) => b.textContent === "Remove project");
+    if (!remove) return log("snap:fail the gone state has no Remove project");`;
+
 // The Map view (#309) on a map of plotkeeper's own shape, opened by its key. Positions are saved, as the prototype's Treatment C draws them.
 const mapFile = JSON.stringify({
   version: 1,
@@ -739,7 +767,7 @@ export const fixtures = {
     const snapScript = `
       if (document.querySelector(".pane.home .slot-card, .pane.home .quiz-region")) log("snap:fail Home shows a Quiz or a Retest");
       if ([...document.querySelectorAll(".pane.home h2")].some((h) => h.textContent === "Retest")) log("snap:fail Home still has a Retest heading");`;
-    return { ...base, sessions, projects: ["/w/plotkeeper", "/w/falinks"], selected: null, snapScript };
+    return { ...base, sessions, projects: [{ path: "/w/plotkeeper", gone: false }, { path: "/w/falinks", gone: false }], selected: null, snapScript };
   },
   // Home after Clear (#244): the landed rows are hidden, the Landed part is gone, and the toast offers Undo. The script clicks Clear on the heading.
   homeClearToast(): Fixture {
@@ -806,6 +834,29 @@ export const fixtures = {
       log("note: " + note.textContent + " · chip: " + unseen.textContent + " · past: " + past.join());`;
     return { ...base, sessions, selected: { session: sessions[1], agent: null }, snapScript };
   },
+  // The saved project list (#381): a project with no sessions keeps its header, after the one with sessions; a gone one is
+  // struck through; a header's "⋯" offers Remove project.
+  projectsSaved: () =>
+    withSaved(`
+      const order = heads().map((head) => head.querySelector(".name").textContent).join();
+      if (order !== "plotkeeper,falinks,pokedex") log("snap:fail the headers' order: " + order);
+      if (named("falinks")?.closest(".project").querySelector(".row")) log("snap:fail a project with no sessions shows rows");
+      if (!named("pokedex")?.classList.contains("gone")) log("snap:fail the gone project's header is not marked gone");
+      named("pokedex").querySelector(".project-more").click();
+      await wait(100);
+      const menu = document.getElementById("project-actions");
+      if (!menu.matches(":popover-open") || menu.textContent.trim() !== "Remove project") log("snap:fail the header's menu does not offer Remove project");
+      log("headers " + order);`),
+  // A saved project whose folder is gone, in the map's place: its words, its path and Remove project, never an error (#381).
+  mapProjectGone: () => withSaved(openGone + `
+    log("gone: " + gone.textContent);`),
+  // Remove project on the gone state: its header leaves the list and the map gives way to another project.
+  mapProjectRemoved: () => withSaved(openGone + `
+    remove.click();
+    await wait(300);
+    if (named("pokedex")) log("snap:fail the removed project keeps its header");
+    if (document.querySelector("#map .map-gone")) log("snap:fail the map still shows the removed project");
+    log("removed; headers " + heads().map((head) => head.querySelector(".name").textContent).join());`),
   // The calm Map view: plates, law marks of both kinds, a black box part, actors, and the session list live beside it.
   mapCalm: () =>
     mapOpened(`

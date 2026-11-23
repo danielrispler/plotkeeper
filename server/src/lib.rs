@@ -35,6 +35,7 @@ pub mod history;
 pub mod lock;
 pub mod map;
 pub mod pr_briefs;
+pub mod projects;
 pub mod prs;
 pub mod ratify;
 mod read_loop;
@@ -121,6 +122,8 @@ pub struct App {
     /// The PRs found for each project's branches (`prs.rs`) and the PR briefs written for the ready ones (`pr_briefs.rs`).
     pub prs: prs::Prs,
     pub briefs: pr_briefs::PrBriefs,
+    /// The saved project list (`projects.rs`), beside the log.
+    pub projects: projects::Projects,
     pub watching: Mutex<answer::Watching>,
     pub events: Arc<Events>,
     /// The notice the card writer last raised and not yet cleared, for a page opened after it (danielrispler/plotkeeper#328).
@@ -193,6 +196,7 @@ impl App {
             ci: Arc::new(ci_laws::load_cache()),
             prs: prs::Prs::default(),
             briefs,
+            projects: projects::Projects::beside(log),
             watching: Mutex::default(),
             events: Arc::default(),
             writer_notice: Mutex::new(None),

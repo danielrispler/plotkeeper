@@ -24,6 +24,10 @@
       <div class="full">
         <p id="no-sessions" class="empty">No session yet.</p>
         <div id="groups"></div>
+        <!-- A project header's "⋯" (#381): `list.ts` opens it under the header it was pressed on. -->
+        <div id="project-actions" class="menu project-actions" popover>
+          <button id="remove-project" class="btn small" type="button" title="Take this project off the list; its sessions stay in History">Remove project</button>
+        </div>
         <!-- "History · N" (#94): the ended sessions, which are not in the list. -->
         <div class="list-foot">
           <div id="history-link"></div>

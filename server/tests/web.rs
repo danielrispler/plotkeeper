@@ -231,7 +231,8 @@ fn a_command_answers_as_the_function_behind_it_does() {
 #[test]
 fn no_workbench_command_is_served() {
     let f = fixture();
-    // The terminals, the project list and the settings page left the page (#326): each answers as an unknown command.
+    // The terminals, the project registry and the settings page left the page (#326): each answers as an unknown command. The
+    // saved project list's `projects` (#381) is another command, which reads the list and adds nothing.
     for command in [
         "select_terminal",
         "closed",
@@ -240,7 +241,6 @@ fn no_workbench_command_is_served() {
         "clearing",
         "write_setting",
         "terminal_send",
-        "projects",
         "branches",
         "skills",
         "usage",

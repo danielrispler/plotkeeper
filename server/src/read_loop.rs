@@ -32,13 +32,25 @@ use studio_understanding::{
 #[derive(Default)]
 struct Sent {
     list: Option<serde_json::Value>,
+    projects: Option<Vec<crate::projects::Project>>,
     selected: Option<serde_json::Value>,
     cards: Option<CardsKey>,
 }
 
 impl Sent {
-    /// Sends the session list and the selection, each only if it changed.
+    /// Sends the session list, the saved projects and the selection, each only if it changed. A session in a repository not
+    /// yet saved adds it first (`projects.rs`).
     fn list(&mut self, app: &App) {
+        let seen = app.projects.see(&app.core.lock().unwrap().sessions());
+        if let Err(e) = seen {
+            log::error!("save the project list: {e}");
+        }
+        let projects = app.projects.list();
+        if self.projects.as_ref() != Some(&projects) {
+            app.events
+                .emit("projects", serde_json::to_value(&projects).unwrap());
+            self.projects = Some(projects);
+        }
         let list = sessions(app);
         let list = serde_json::to_value(list).expect("sessions serialize");
         if self.list.as_ref() != Some(&list) {

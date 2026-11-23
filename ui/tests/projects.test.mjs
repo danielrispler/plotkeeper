@@ -32,9 +32,23 @@ test("the sidebar's order is project by project, by state", () => {
   assert.deepEqual(sidebarOrder(sessions).map((s) => s.id), ["c", "a", "b"]);
 });
 
-test("the Map view's projects are every repository a listed session ran in, ended ones too, and the selected session's is its own", () => {
+test("a saved project with no live session keeps its header, after the projects with sessions, and a gone one says so", () => {
+  const saved = [
+    { path: "/r/quiet", gone: false },
+    { path: "/r/p", gone: false },
+    { path: "/r/moved", gone: true },
+  ];
+  const groups = projectGroups([at("a", "running", "/r/p"), at("b", "ended", "/r/quiet"), at("c", "idle", "/r/q")], saved);
+  assert.deepEqual(
+    groups.map((g) => [g.key, g.states.length, g.gone]),
+    [["/r/p", 1, false], ["/r/q", 1, false], ["/r/quiet", 0, false], ["/r/moved", 0, true]],
+  );
+});
+
+test("the Map view's projects are the saved ones, and the selected session's is its own", () => {
+  studio.projects = [{ path: "/r/p", gone: false }, { path: "/r/gone", gone: true }];
   studio.listed = [at("a", "idle", "/r/p/.claude/worktrees/x"), at("b", "ended", "/r/q")];
-  assert.deepEqual(knownProjects(), ["/r/p", "/r/q"]);
+  assert.deepEqual(knownProjects(), ["/r/p", "/r/gone"]);
   studio.selection = null;
   assert.equal(selectedProject(), null);
   studio.selection = { session: studio.listed[0], agent: null };

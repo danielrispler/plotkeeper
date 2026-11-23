@@ -1,11 +1,13 @@
 // The session list and the selection, as the shell last sent them, and the settings files in effect.
 
 import { initial, type SettingsFiles } from "./settings.js";
-import type { Selection, Session, SessionCards } from "./types.js";
+import type { SavedProject, Selection, Session, SessionCards } from "./types.js";
 
 // `pending` is the row Daniel just pressed, shown selected until the shell replies (danielrispler/Falinks#570).
 export const studio = {
   listed: [] as Session[],
+  // The saved project list, as the server last sent it (`projects.rs`).
+  projects: [] as SavedProject[],
   selection: null as Selection | null,
   pending: null as { id: string; agent: string | null } | null,
   // A `selected` or `cards` event came while `pending` waited, so the press's settling fetches both.

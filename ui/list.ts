@@ -527,10 +527,28 @@ export const sidebarSessions = <T extends Pick<Session, "state" | "id">>(session
 export const landedToClear = <T extends Pick<Session, "state" | "id" | "landed">>(sessions: T[], hidden: ReadonlySet<string>): T[] =>
   sessions.filter((session) => showsLanded(session.state, session.landed) && !hidden.has(session.id));
 
-// A project's header (#97): its name and, even while folded, its most urgent state: needs you over running.
+// A project's "⋯" (#381): the one menu of the list's headers, opened under it for its project; Remove project is in it.
+function projectMore(group: ProjectGroup<Session>): HTMLElement {
+  const more = pressable(text("button", "⋯", "project-more"), false, () => {
+    const menu = element("project-actions");
+    menu.dataset.project = group.key;
+    const at = more.getBoundingClientRect();
+    menu.style.top = `${at.bottom + 4}px`;
+    menu.style.left = `${Math.max(8, at.right - menu.offsetWidth)}px`;
+    menu.showPopover();
+    menu.style.left = `${Math.max(8, at.right - menu.offsetWidth)}px`;
+  });
+  more.removeAttribute("aria-pressed");
+  more.title = "Project";
+  more.setAttribute("aria-label", `More actions for ${group.name}`);
+  return more;
+}
+
+// A project's header (#97): its name and, even while folded, its most urgent state: needs you over running. A saved project
+// with no live session is its header only; one whose folder is gone is struck through (#381).
 export function projectHead(group: ProjectGroup<Session>): HTMLElement {
   const head = document.createElement("div");
-  head.className = "project-head";
+  head.className = group.gone ? "project-head gone" : "project-head";
   head.dataset.key = `head ${group.key}`;
   head.dataset.project = group.key;
   const toggle = pressable(text("button", "", "project-toggle"), false, () => {
@@ -539,10 +557,10 @@ export function projectHead(group: ProjectGroup<Session>): HTMLElement {
   });
   toggle.removeAttribute("aria-pressed");
   toggle.setAttribute("aria-expanded", String(projectOpen(group.key)));
-  fullTitle(toggle, group.key || group.name);
+  fullTitle(toggle, group.gone ? `${group.key} is gone` : group.key || group.name);
   toggle.append(text("span", group.name, "name"));
   if (group.rollup) toggle.append(glyph(group.rollup));
-  head.append(toggle);
+  head.append(toggle, projectMore(group));
   return head;
 }
 
@@ -552,7 +570,7 @@ function projectNode(group: ProjectGroup<Session>): HTMLElement {
   node.className = "project";
   node.dataset.key = group.key;
   node.append(projectHead(group));
-  if (!projectOpen(group.key)) return node;
+  if (!projectOpen(group.key) || !group.states.length) return node;
   const body = document.createElement("div");
   body.className = "project-body";
   body.dataset.key = "body";
@@ -577,10 +595,10 @@ function projectNode(group: ProjectGroup<Session>): HTMLElement {
   return node;
 }
 
-// The project groups (#97): one per repository, in the order its sessions are listed.
+// The project groups (#97): one per repository, in the order its sessions are listed, then the saved projects with none (#381).
 // Patched, not rebuilt, so focus and text selection survive the update (danielrispler/Falinks#570).
 export function drawSidebar() {
-  patch(element("groups"), projectGroups(sidebarSessions(studio.listed, landedClear.hidden)).map(projectNode));
+  patch(element("groups"), projectGroups(sidebarSessions(studio.listed, landedClear.hidden), studio.projects).map(projectNode));
   patch(element("history-link"), [...historyLink(studio.listed, showHistory), ...clearLanded(landedToClear(studio.listed, landedClear.hidden))]);
 }
 

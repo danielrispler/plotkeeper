@@ -442,6 +442,9 @@ export type WaitingBriefs = { project: string; numbers: number[] };
 export type HistoricalMap = { commit: string; short: string; label: string; source: string };
 export type CommitFiles = { commit: string; short: string; label: string; url: string | null; files: { path: string; diff: string }[] };
 
+// A project of the saved list (`server/src/projects.rs`): its main checkout, and whether its folder was moved or deleted.
+export type SavedProject = { path: string; gone: boolean };
+
 // Every command the window invokes, with what the server replies (`server/src/api.rs`): `void` where the
 // window ignores the reply, `null` where the shell may answer none. `invoke` takes only these names, and the snap fixtures
 // (`scripts/snap/`) are typed against it, and `scripts/snap/base.ts` answers every command that is not `void`, so a fixture
@@ -480,6 +483,8 @@ export interface Commands {
   brief_chapter_done: void;
   briefs_waiting: WaitingBriefs | null;
   pr_ratify: RatifyRow[];
+  projects: SavedProject[];
+  remove_project: SavedProject[];
   ratify_set: void;
   mark_unseen: void;
   open: Selection | null;
