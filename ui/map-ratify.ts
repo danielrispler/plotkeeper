@@ -41,6 +41,7 @@ export function overturnNote(): HTMLElement | null {
   area.rows = 4;
   const copy = text("button", "Copy", "btn quiet ratify-copy");
   copy.setAttribute("type", "button");
+  copy.title = "Copy the prompt to paste into your agent";
   copy.addEventListener("click", () => {
     area.select();
     // The clipboard refused already, so this is the browser's older route, which a click may use.

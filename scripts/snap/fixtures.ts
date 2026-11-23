@@ -282,6 +282,37 @@ const mapBriefRatify = (): Fixture => ({
       log("ratify ok");`, false, 100),
   pr_ratify: ratifyRows,
 });
+// Overturning in the brief's ratify step (port decision Q2): the prompt goes to the clipboard and the step says so, or, when the clipboard
+// refuses, shows the prompt in a box with a Copy button. The page's clipboard is stubbed to take or refuse the write.
+const mapBriefOverturn = (clipboard: "copies" | "refuses"): Fixture => ({
+  ...mapBrief(briefOf(storySteps()), 4, `
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: () => ${clipboard === "copies" ? "Promise.resolve()" : 'Promise.reject(new Error("blocked"))'} } });
+      document.querySelector("#map-brief .ratify-overturn").click();
+      await wait(400);
+      const note = document.querySelector("#map-brief .ratify-note");
+      if (!note) return log("snap:fail Overturn left no note");
+      if (!note.textContent.includes("Prompt copied, paste it into your agent") === ${clipboard === "copies"}) log("snap:fail the note's line: " + note.textContent);
+      const box = note.querySelector("textarea.ratify-prompt");
+      if (${clipboard === "copies"} ? box : !box || !box.value.includes("#334") || !note.querySelector(".ratify-copy")) log("snap:fail the fallback box: " + note.textContent);
+      log("overturn ok");`, false, 100),
+  pr_ratify: ratifyRows,
+  snapDone: "overturn ok",
+});
+// A brief that takes a while to write (port decision Q5): the panel and the tray row say "Writing the brief…" and the map stays usable.
+const mapBriefWriting = (): Fixture => ({
+  ...mapOpened(`
+      document.querySelector('#map-tray .tray-row[data-pr="334"]').click();
+      await wait(600);
+      const panel = document.getElementById("map-brief");
+      if (panel.hidden || !panel.textContent.includes("Writing the brief…")) return log("snap:fail the panel does not say the brief is being written");
+      if (!document.querySelector('#map-tray .tray-row[data-pr="334"] .tray-note')?.textContent.includes("writing the brief")) log("snap:fail the tray row does not say so");
+      if (document.getElementById("map").hidden) log("snap:fail the map is not usable");
+      log("writing ok");`, {
+    map_state: mapState({ fog: { shell: "thick" }, ready: [{ number: 334, title: "PR briefs on the map", head: "b".repeat(40), brief: null }] }),
+    pr_brief: { __delay: 60000, value: null } as never,
+  }),
+  snapDone: "writing ok",
+});
 // The part sheet with one law not yet ratified (#343): it says so, with Accept and Overturn.
 const mapSheetUnratified = (): Fixture =>
   mapOpened(`
@@ -590,6 +621,9 @@ export const fixtures = {
   mapBriefOrderWrong,
   mapBriefOrderRight,
   mapBriefRatify,
+  mapBriefOverturnCopied: () => mapBriefOverturn("copies"),
+  mapBriefOverturnFallback: () => mapBriefOverturn("refuses"),
+  mapBriefWriting,
   mapSheetUnratified,
   mapBriefChapters,
   mapBriefChapterMid,

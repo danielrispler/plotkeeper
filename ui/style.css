@@ -650,7 +650,7 @@ button.tray-row { display: block; width: 100%; font: inherit; color: inherit; te
 .brief-writing { margin: 0; padding: var(--sp-5) var(--sp-6); color: var(--muted); font-size: var(--size); }
 .ratify-note { margin-top: var(--sp-4); font-size: var(--size-small); color: var(--muted); }
 .ratify-note p { margin: 0; }
-.ratify-prompt { display: block; width: 100%; box-sizing: border-box; margin-top: var(--sp-3); font: var(--size-xs)/1.5 var(--mono); }
+.ratify-prompt { display: block; width: 100%; box-sizing: border-box; margin-top: var(--sp-3); font: var(--size-xs)/1.5 var(--mono); background: var(--bg); color: var(--fg); border: var(--hair) solid var(--edge); border-radius: var(--radius); padding: var(--sp-3) var(--sp-4); }
 .ratify-copy { margin-top: var(--sp-3); }
 .brief-pts { margin: var(--sp-4) 0 0; padding: 0; list-style: none; max-width: 60ch; }
 .brief-pts li { position: relative; padding: var(--sp-2) 0 var(--sp-2) var(--sp-6); color: var(--muted); font-size: var(--size); line-height: 1.45; }
