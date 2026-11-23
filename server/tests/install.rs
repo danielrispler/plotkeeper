@@ -726,6 +726,25 @@ fn a_second_qwen_install_that_fails_leaves_uninstall_nothing_to_undo_there() {
     assert_eq!(machine.calls("qwen").len(), calls);
 }
 
+/// A second install whose `qwen extensions uninstall` fails for another reason than the extension being gone keeps
+/// its record, so uninstall still takes the extension out.
+#[test]
+fn a_second_qwen_install_whose_uninstall_fails_keeps_the_extension_recorded() {
+    let machine = Machine::new(false, false).with_qwen();
+    machine.run("install");
+    script(
+        &machine.tools.join("qwen"),
+        r#"echo "$@" >> "$(dirname "$0")/qwen-calls"; echo "Permission denied" >&2; exit 1"#,
+    );
+    assert!(!machine.run_any("install").status.success());
+    assert!(!machine.run_any("uninstall").status.success());
+    assert_eq!(
+        machine.calls("qwen").last().unwrap(),
+        "extensions uninstall plotkeeper"
+    );
+    assert!(machine.data().join("bin/plotkeeper-hook").exists());
+}
+
 #[test]
 fn a_second_copilot_install_replaces_its_plugin() {
     let machine = Machine::new(false, false).with_copilot();

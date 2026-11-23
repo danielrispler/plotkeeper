@@ -492,14 +492,18 @@ fn install_qwen(
     fs::write(&file, render(QWEN_EXTENSION_JSON, bin)?)
         .map_err(|e| format!("could not write {}: {e}", file.display()))?;
     if state.qwen {
-        // Already gone is fine: the install below puts it back. Until it does, nothing is installed, so an install
-        // that fails leaves uninstall nothing to undo for Qwen Code.
-        let _ = run(
+        // Once it is out, or already gone ("Extension not found.", Qwen Code's `extensionManager.ts`), nothing is
+        // installed until the install below, so one that fails leaves uninstall nothing to undo for Qwen Code. An
+        // uninstall that failed otherwise may have left it in, so the record stays.
+        let gone = run(
             qwen,
             &["extensions".as_ref(), "uninstall".as_ref(), NAME.as_ref()],
-        );
-        state.qwen = false;
-        save(home, state)?;
+        )
+        .map_or_else(|e| e.contains("Extension not found"), |()| true);
+        if gone {
+            state.qwen = false;
+            save(home, state)?;
+        }
     }
     run(
         qwen,
