@@ -45,6 +45,18 @@ test("a saved project with no live session keeps its header, after the projects 
   );
 });
 
+// #380's review: Clear landed hides a project's last live sessions from the list, but they are still live, and the server saves the project
+// again on their next event, so the project still counts as live: its header offers no Remove project.
+test("a project whose only live sessions Clear landed hid shows no sessions and is still live; a saved one with none is not", () => {
+  const saved = [{ path: "/r/p", gone: false }, { path: "/r/quiet", gone: false }];
+  const groups = projectGroups([at("a", "idle", "/r/p"), at("b", "running", "/r/p/.claude/worktrees/x"), at("c", "ended", "/r/quiet")], saved, new Set(["a", "b"]));
+  assert.deepEqual(
+    groups.map((g) => [g.key, g.states.length, g.live]),
+    [["/r/p", 0, true], ["/r/quiet", 0, false]],
+  );
+  assert.equal(projectGroups([at("a", "idle", "/r/p")])[0].live, true);
+});
+
 test("the Map view's projects are the saved ones, and the selected session's is its own", () => {
   studio.projects = [{ path: "/r/p", gone: false }, { path: "/r/gone", gone: true }];
   studio.listed = [at("a", "idle", "/r/p/.claude/worktrees/x"), at("b", "ended", "/r/q")];

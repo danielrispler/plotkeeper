@@ -16,6 +16,8 @@ export type ProjectGroup<S> = {
   states: StateGroup<S>[];
   // Its folder was moved or deleted.
   gone: boolean;
+  // It has a live session, also one Clear landed hid from the list.
+  live: boolean;
 };
 
 export const lastSegment = (path: string) => path.split("/").filter(Boolean).pop() ?? "";
@@ -34,12 +36,15 @@ const urgency = (sessions: Pick<Session, "state">[]): Rollup =>
 
 // The sidebar's groups: one per repository, in the order its first live session is listed, then each saved project with no
 // live session, as a header only, in the saved order. Inside a group the sessions are by state, and the header's rollup is
-// its most urgent state. Ended sessions are in History.
-export function projectGroups<S extends Pick<Session, "cwd" | "state">>(sessions: S[], saved: SavedProject[] = []): ProjectGroup<S>[] {
+// its most urgent state. Ended sessions are in History. The sessions in `hidden` (Clear landed's, #382) are left out of the groups, but
+// still make their project live.
+export function projectGroups<S extends Pick<Session, "cwd" | "state" | "id">>(sessions: S[], saved: SavedProject[] = [], hidden: ReadonlySet<string> = new Set()): ProjectGroup<S>[] {
   const by = new Map<string, S[]>();
+  const live = new Set<string>();
   for (const session of sessions.filter(({ state }) => liveStates.includes(state))) {
     const key = repositoryOf(session.cwd);
-    by.set(key, [...(by.get(key) ?? []), session]);
+    live.add(key);
+    if (!hidden.has(session.id)) by.set(key, [...(by.get(key) ?? []), session]);
   }
   const gone = new Set(saved.filter((project) => project.gone).map((project) => project.path));
   for (const { path } of saved) if (!by.has(path)) by.set(path, []);
@@ -52,11 +57,12 @@ export function projectGroups<S extends Pick<Session, "cwd" | "state">>(sessions
       return here.length ? [{ state, sessions: here }] : [];
     }),
     gone: gone.has(key),
+    live: live.has(key),
   }));
 }
 
 // The sessions in the sidebar's order: project by project, by state, without ended ones. The session keys step over it.
-export const sidebarOrder = <S extends Pick<Session, "cwd" | "state">>(sessions: S[]): S[] =>
+export const sidebarOrder = <S extends Pick<Session, "cwd" | "state" | "id">>(sessions: S[]): S[] =>
   projectGroups(sessions).flatMap((group) => group.states.flatMap((state) => state.sessions));
 
 // The saved projects, so the Map view reaches a project whose sessions all ended or were deleted.

@@ -617,7 +617,7 @@ export function projectHead(group: ProjectGroup<Session>): HTMLElement {
     dot.setAttribute("aria-label", dot.title);
     toggle.append(dot);
   }
-  head.append(toggle, ...(group.states.length ? [] : [projectMore(group)]));
+  head.append(toggle, ...(group.live ? [] : [projectMore(group)]));
   return head;
 }
 
@@ -656,7 +656,7 @@ function projectNode(group: ProjectGroup<Session>): HTMLElement {
 // Patched, not rebuilt, so focus and text selection survive the update (danielrispler/Falinks#570).
 export function drawSidebar() {
   if (marksStale && studio.projects.length) readDots().catch(failure("map_marks"));
-  patch(element("groups"), projectGroups(sidebarSessions(studio.listed, landedClear.hidden), studio.projects).map(projectNode));
+  patch(element("groups"), projectGroups(studio.listed, studio.projects, landedClear.hidden).map(projectNode));
   patch(element("history-link"), [...historyLink(studio.listed, showHistory), ...clearLanded(landedToClear(studio.listed, landedClear.hidden))]);
 }
 
