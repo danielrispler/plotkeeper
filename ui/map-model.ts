@@ -1,7 +1,7 @@
 // The Map view's pure logic (spec danielrispler/plotkeeper#306, ticket #309): the map file as the window reads it, where parts
 // are placed, the drag threshold, the link's rim points and the layered Esc. `map.ts` draws and wires them.
 
-import type { BriefFigure, BriefStep, Ci, CommitFiles, Fog, HistoricalMap, HistoryEntry, PrBrief, Proof } from "./types.js";
+import type { BriefFigure, BriefStep, Ci, CommitFiles, Fog, HistoricalMap, HistoryEntry, PrBrief, Proof, ReadyPr } from "./types.js";
 
 export type Tier = "core" | "interface" | "black-box";
 export type Point = { x: number; y: number };
@@ -505,4 +505,13 @@ export function orderRun(key: string[], links: { id: string; from: string; to: s
       return hops;
     },
   };
+}
+
+// What an open waiting on its brief's write does when the map draws `pr` (the ready PR, gone when undefined): "open" once the brief of
+// its head is stored, "stop" when the write failed, the PR is quiet or no longer ready, and "wait" while it is written or the map still
+// shows how it stood before the write started.
+export function awaitedWrite(pr: ReadyPr | undefined): "open" | "stop" | "wait" {
+  const brief = pr?.brief;
+  if (!pr || brief?.quiet || (brief?.failed && !brief.writing)) return "stop";
+  return brief && !brief.writing && !brief.stale && brief.chapters.length > 0 ? "open" : "wait";
 }

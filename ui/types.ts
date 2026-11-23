@@ -387,7 +387,7 @@ export type MapState = {
 export type PendingItem = { pr: number; kind: string; id: string };
 export type RatifyRow = { pr: number; kind: string; id: string; text: string; change: string; status: "ratified" | "accepted" | "overturned" | "not-yet" };
 // What a ready PR's brief is doing (`pr_briefs.rs`): a newer head was pushed (stale), being written now, and the chapters' titles, or the one story's.
-export type BriefInfo = { stale: boolean; writing: boolean; chapters: string[]; quiet: boolean; read?: boolean };
+export type BriefInfo = { stale: boolean; writing: boolean; chapters: string[]; quiet: boolean; read?: boolean; failed?: boolean };
 export type ReadyPr = { number: number; title: string; head: string; branch?: string; brief: BriefInfo | null };
 // A PR brief as the writer made it and `pr_brief` returns it (`understanding/src/pr_brief.rs`). A step's `flags` are what the checks found wrong with it
 // that the one rewrite did not mend: it shows "not confirmed from the facts".
@@ -466,7 +466,8 @@ export interface Commands {
   stop_dismiss: null;
   map_proof: Proof[];
   map_state: MapState;
-  pr_brief: BriefView | null;
+  // The brief, or that its write has started (it comes through `map-landed`).
+  pr_brief: BriefView | { writing: true } | null;
   pr_diff: CommitFiles;
   brief_chapter_done: void;
   briefs_waiting: WaitingBriefs | null;

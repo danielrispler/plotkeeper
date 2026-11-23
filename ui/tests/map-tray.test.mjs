@@ -43,3 +43,12 @@ test("a ready PR that fogs nothing at the tiers says so and cannot be opened", (
   assert.match(row.note, /no brief/);
   assert.doesNotMatch(row.note, /not written yet/);
 });
+
+test("a PR whose write failed says so and opens to try again", () => {
+  const none = trayRows([pr(7, "Fog", { stale: false, writing: false, chapters: [], quiet: false, failed: true })])[0];
+  assert.equal(none.openable, true);
+  assert.match(none.note, /#7 .*could not be written; open it to try again/);
+  const stale = trayRows([pr(7, "Fog", { stale: true, writing: false, chapters: ["Fog"], quiet: false, failed: true })])[0];
+  assert.equal(stale.openable, true);
+  assert.match(stale.note, /could not be rewritten; open it to try again/);
+});

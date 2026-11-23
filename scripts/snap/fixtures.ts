@@ -309,7 +309,8 @@ const mapBriefWriting = (): Fixture => ({
       if (document.getElementById("map").hidden) log("snap:fail the map is not usable");
       log("writing ok");`, {
     map_state: mapState({ fog: { shell: "thick" }, ready: [{ number: 334, title: "PR briefs on the map", head: "b".repeat(40), brief: null }] }),
-    pr_brief: { __delay: 60000, value: null } as never,
+    // The write runs in the background: the open answers at once that it is being written.
+    pr_brief: { writing: true },
   }),
   snapDone: "writing ok",
 });

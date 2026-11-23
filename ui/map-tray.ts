@@ -20,9 +20,10 @@ export const trayRows = (ready: ReadyPr[]): TrayRow[] =>
     if (!brief || brief.chapters.length === 0) {
       // Being written: the row says so and waits. Otherwise opening the row writes the brief (the start writes only a few, newest first).
       if (brief?.writing) return [{ number: pr.number, chapter: null, title, note: `#${pr.number} · writing the brief…`, openable: false }];
+      if (brief?.failed) return [{ number: pr.number, chapter: 0, title, note: `#${pr.number} · the brief could not be written; open it to try again`, openable: true }];
       return [{ number: pr.number, chapter: 0, title, note: `#${pr.number} · the brief is written when you open it`, openable: true }];
     }
-    const state = brief.writing ? "writing it again…" : brief.stale ? "a newer push; rewritten when opened" : "brief ready";
+    const state = brief.writing ? "writing it again…" : brief.failed ? "it could not be rewritten; open it to try again" : brief.stale ? "a newer push; rewritten when opened" : "brief ready";
     if (brief.chapters.length === 1) return [{ number: pr.number, chapter: 0, title: brief.chapters[0] || title, note: `#${pr.number} · ${state}`, openable: true }];
     return brief.chapters.map((chapter, i) => ({
       number: pr.number,
@@ -49,7 +50,8 @@ function paint(view: MapView) {
             const item = text(row.openable ? "button" : "div", "", "tray-row");
             item.dataset.pr = String(row.number);
             if (row.chapter !== null) item.dataset.chapter = String(row.chapter);
-            const problem = briefProblem(row.number);
+            const pr = (view.state.ready ?? []).find((each) => each.number === row.number);
+            const problem = pr ? briefProblem(pr) : null;
             item.append(text("span", row.title, "tray-title"), text("span", problem ?? row.note, "tray-note"));
             if (row.openable) {
               item.setAttribute("type", "button");

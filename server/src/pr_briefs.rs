@@ -30,6 +30,8 @@ pub struct BriefInfo {
     pub read: bool,
     /// The PR touches no part that would fog at Daniel's tiers, so it gets no brief.
     pub quiet: bool,
+    /// The last write at this head failed (told to the log); opening it tries again.
+    pub failed: bool,
 }
 
 /// What a lookup of a ready PR did.
@@ -179,6 +181,14 @@ pub struct BriefView {
     pub partial: bool,
 }
 
+/// What opening a brief answers: the brief, or that it is being written (it comes through `map-landed`).
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+pub enum Opened {
+    Brief(Box<BriefView>),
+    Writing { writing: bool },
+}
+
 type SharedWriter = Arc<dyn BriefWriter + Send + Sync>;
 
 /// The shell's PR briefs: the writer, the "PR briefs" model, and what is being written.
@@ -186,7 +196,7 @@ pub struct PrBriefs {
     /// `None` when the writer is the fake of the checks, which writes no brief.
     writer: Option<SharedWriter>,
     seen: Mutex<HashMap<String, Arc<Mutex<Seen>>>>,
-    busy: Mutex<HashSet<(String, u64)>>,
+    busy: Arc<Mutex<HashSet<(String, u64)>>>,
     /// Which ready PRs the first lookup after start writes, and which wait to be opened.
     startup: Mutex<Startup>,
 }
@@ -263,7 +273,7 @@ impl PrBriefs {
         Self {
             writer,
             seen: Mutex::default(),
-            busy: Mutex::default(),
+            busy: Arc::default(),
             startup: Mutex::default(),
         }
     }
@@ -293,11 +303,16 @@ impl PrBriefs {
         ready: &mut [Ready],
     ) {
         let busy = self.busy.lock().unwrap().clone();
-        let quiet: HashSet<(u64, String)> = self.seen_of(project).lock().unwrap().quiet.clone();
+        let (quiet, failed) = {
+            let seen = self.seen_of(project);
+            let seen = seen.lock().unwrap();
+            (seen.quiet.clone(), seen.failed.clone())
+        };
         for pr in ready {
             let latest = store.latest(pr.number);
             let writing = busy.contains(&(project.to_string(), pr.number));
-            if latest.is_none() && !writing {
+            let failed = !writing && failed.get(&pr.number) == Some(&pr.head);
+            if latest.is_none() && !writing && !failed {
                 if quiet.contains(&(pr.number, pr.head.clone())) {
                     pr.brief = Some(BriefInfo {
                         stale: false,
@@ -305,6 +320,7 @@ impl PrBriefs {
                         chapters: vec![],
                         quiet: true,
                         read: false,
+                        failed: false,
                     });
                 }
                 continue;
@@ -321,18 +337,33 @@ impl PrBriefs {
                 chapters,
                 read: user.is_some_and(|u| crate::fog::fully_read(u, pr.number)),
                 quiet: false,
+                failed,
             });
         }
     }
 
     /// Claims `pr` of `project` as being written: `None` when it already is. The claim ends when the guard drops, a panic of the
     /// write included, so a dead write never leaves the PR busy.
-    fn claim(&self, project: &str, pr: u64) -> Option<BusyGuard<'_>> {
+    fn claim(&self, project: &str, pr: u64) -> Option<BusyGuard> {
         self.busy(project, pr, true).then(|| BusyGuard {
-            briefs: self,
-            project: project.to_string(),
-            pr,
+            busy: self.busy.clone(),
+            key: (project.to_string(), pr),
         })
+    }
+
+    /// Opening PR `pr` of `project` whose brief must be written (port decision Q5): `write` runs on a thread of its own with the
+    /// PR's claim, which it drops when done, so the open returns at once and the tray says "writing" meanwhile; the page gets the
+    /// brief through `map-landed`. A PR being written already is left to that write. Either way the open is told it is being written.
+    fn open_in_background(
+        &self,
+        project: &str,
+        pr: u64,
+        write: impl FnOnce(BusyGuard) + Send + 'static,
+    ) -> Opened {
+        if let Some(claim) = self.claim(project, pr) {
+            std::thread::spawn(move || write(claim));
+        }
+        Opened::Writing { writing: true }
     }
 
     /// Marks `pr` of `project` as being written (`on`) or done; false when it already was in that state.
@@ -357,15 +388,14 @@ impl PrBriefs {
 }
 
 /// A PR claimed as being written; see `PrBriefs::claim`.
-struct BusyGuard<'a> {
-    briefs: &'a PrBriefs,
-    project: String,
-    pr: u64,
+struct BusyGuard {
+    busy: Arc<Mutex<HashSet<(String, u64)>>>,
+    key: (String, u64),
 }
 
-impl Drop for BusyGuard<'_> {
+impl Drop for BusyGuard {
     fn drop(&mut self) {
-        self.briefs.busy(&self.project, self.pr, false);
+        self.busy.lock().unwrap().remove(&self.key);
     }
 }
 
@@ -552,19 +582,11 @@ pub fn lookup_later(app: &Arc<App>, project: &str, ready: Vec<Ready>) {
     }
 }
 
-/// Opening a PR's brief from the tray: the stored one, rewritten first when it is stale. A merged PR's brief is read as stored.
-pub fn pr_brief(app: &App, project: String, number: u64) -> Result<Option<BriefView>, String> {
+/// Opening a PR's brief from the tray: the stored one, or, when it is stale or not written, the write starts in the background and
+/// the answer says it is being written. A merged PR's brief is read as stored.
+pub fn pr_brief(app: &Arc<App>, project: String, number: u64) -> Result<Option<Opened>, String> {
     let briefs = &app.briefs;
     let store = store_of(&project).ok_or("no data folder")?;
-    let view = |brief: StoredBrief| {
-        let partial = store
-            .records()
-            .iter()
-            .rev()
-            .find(|r| r.pr == brief.pr && r.head == brief.head)
-            .is_some_and(|r| r.budget.files_cut + r.budget.files_partial > 0);
-        BriefView { brief, partial }
-    };
     let head = app
         .prs
         .ready(&project)
@@ -572,37 +594,58 @@ pub fn pr_brief(app: &App, project: String, number: u64) -> Result<Option<BriefV
         .find(|r| r.number == number)
         .map(|r| r.head);
     let Some(head) = head else {
-        return Ok(store.latest(number).map(view));
+        return Ok(store
+            .latest(number)
+            .map(|b| Opened::Brief(Box::new(view_of(&store, b)))));
     };
     if let Some(stored) = store.get(number, &head).filter(|b| !b.stale) {
-        return Ok(Some(view(stored)));
+        return Ok(Some(Opened::Brief(Box::new(view_of(&store, stored)))));
     }
     let Some(writer) = briefs.writer.clone() else {
-        return Ok(store.latest(number).map(view));
+        return Ok(store
+            .latest(number)
+            .map(|b| Opened::Brief(Box::new(view_of(&store, b)))));
     };
-    let Some(claim) = briefs.claim(&project, number) else {
-        return Err("The brief is being written; open it again in a moment.".into());
+    let write = {
+        let (app, project) = (app.clone(), project.clone());
+        move |claim: BusyGuard| {
+            let briefs = &app.briefs;
+            let model = briefs.model();
+            let seen = briefs.seen_of(&project);
+            let with = Writing {
+                writer: writer.as_ref(),
+                model: &model,
+                store: &store,
+            };
+            // A failure is kept in `seen` (the tray row says so) and told to the log.
+            let _ = on_open(
+                &with,
+                &seen,
+                number,
+                &head,
+                || source_of(&project, number),
+                |line| log::warn!("pr brief of #{number}: {line}"),
+            );
+            drop(claim);
+            app.events.emit("map-landed", serde_json::json!(project));
+        }
     };
+    let opened = briefs.open_in_background(&project, number, write);
+    // The tray says the brief is being written.
     app.events
         .emit("map-landed", serde_json::json!(project.clone()));
-    let model = briefs.model();
-    let seen = briefs.seen_of(&project);
-    let with = Writing {
-        writer: writer.as_ref(),
-        model: &model,
-        store: &store,
-    };
-    let written = on_open(
-        &with,
-        &seen,
-        number,
-        &head,
-        || source_of(&project, number),
-        |line| log::warn!("pr brief of #{number}: {line}"),
-    );
-    drop(claim);
-    app.events.emit("map-landed", serde_json::json!(project));
-    written.map(|b| Some(view(b)))
+    Ok(Some(opened))
+}
+
+/// A stored brief as the window plays it, with whether the writer saw all of the diff.
+fn view_of(store: &BriefStore, brief: StoredBrief) -> BriefView {
+    let partial = store
+        .records()
+        .iter()
+        .rev()
+        .find(|r| r.pr == brief.pr && r.head == brief.head)
+        .is_some_and(|r| r.budget.files_cut + r.budget.files_partial > 0);
+    BriefView { brief, partial }
 }
 
 /// Chapter `chapter` of PR `number`'s brief was read to its end (the page saw its last step, focused, and the check was answered): the
@@ -988,6 +1031,74 @@ mod tests {
                 Err(e) => panic!("{e}"),
             }
         });
+    }
+
+    #[test]
+    fn opening_a_pr_to_write_returns_at_once_and_the_pr_stays_claimed_until_the_write_ends() {
+        use std::sync::mpsc::channel;
+        use std::time::Duration;
+        let briefs = PrBriefs::new(None);
+        let (release_tx, release_rx) = channel::<()>();
+        let (done_tx, done_rx) = channel();
+        let (returned_tx, returned_rx) = channel();
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                let opened = briefs.open_in_background("/p", 7, move |claim| {
+                    let _ = release_rx.recv_timeout(Duration::from_secs(10));
+                    drop(claim);
+                    done_tx.send(()).unwrap();
+                });
+                returned_tx.send(opened).unwrap();
+            });
+            let returned = returned_rx.recv_timeout(Duration::from_secs(3));
+            assert!(returned.is_ok(), "the open waited for the write");
+            assert!(matches!(
+                returned.unwrap(),
+                Opened::Writing { writing: true }
+            ));
+            assert!(
+                briefs.claim("/p", 7).is_none(),
+                "the PR is claimed while written"
+            );
+            // A second open meanwhile is told it is being written, and starts nothing.
+            assert!(matches!(
+                briefs.open_in_background("/p", 7, |_| panic!("a second write")),
+                Opened::Writing { writing: true }
+            ));
+            release_tx.send(()).unwrap();
+            done_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        });
+        // The claim ended with the write.
+        assert!(briefs.claim("/p", 7).is_some());
+    }
+
+    #[test]
+    fn the_tray_says_when_the_write_at_the_head_failed() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = BriefStore::open(dir.path()).unwrap();
+        let briefs = PrBriefs::new(None);
+        let seen = briefs.seen_of("/p");
+        let fake = Fake::new();
+        let with = Writing {
+            writer: &fake,
+            model: "opus",
+            store: &store,
+        };
+        let failed = |pr: u64, head: &str| {
+            let mut tray = [ready_pr(pr, head)];
+            briefs.annotate_with("/p", &store, None, &mut tray);
+            tray[0].brief.as_ref().map(|b| b.failed)
+        };
+        on_lookup(&with, &seen, 7, "aaa", || Err("no gh".into()), |_| {});
+        assert_eq!(failed(7, "aaa"), Some(true), "a PR with no brief");
+        assert_eq!(failed(7, "bbb"), None, "another head is not known to fail");
+        // A stored brief whose rewrite failed.
+        let mut eight = source("aaa");
+        eight.meta.number = 8;
+        on_lookup(&with, &seen, 8, "aaa", || Ok(eight), |_| {});
+        assert!(on_open(&with, &seen, 8, "bbb", || Err("no gh".into()), |_| {}).is_err());
+        assert_eq!(failed(8, "bbb"), Some(true));
+        assert_eq!(failed(8, "aaa"), Some(false));
     }
 
     #[test]

@@ -150,7 +150,7 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
             arg(a, "title")?,
         )),
         "pr_brief" => res(crate::pr_briefs::pr_brief(
-            app,
+            arc,
             arg(a, "project")?,
             arg(a, "number")?,
         )),

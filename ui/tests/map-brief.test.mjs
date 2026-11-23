@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { alsoAt, chapterGate, storySteps, briefCamera, briefPlayer, latestRequest, escapeMap, figureShapes, figureSize, layerOrder, playlist, unconfirmed } from "../../dist/map-model.js";
+import { alsoAt, awaitedWrite, chapterGate, storySteps, briefCamera, briefPlayer, latestRequest, escapeMap, figureShapes, figureSize, layerOrder, playlist, unconfirmed } from "../../dist/map-model.js";
 import { trayRows } from "../../dist/map-tray.js";
 
 const step = (k, extra = {}) => ({ k, h: k, b: "", on: [], hops: [], law: null, covered_by: null, list: [], risks: [], fig: null, check: null, cites: [], flags: [], ...extra });
@@ -289,4 +289,19 @@ test("only the latest request is wanted: a later one, or a cancel, drops the ear
   assert.equal(second(), true);
   request.cancel();
   assert.equal(second(), false, "a close drops the one in flight");
+});
+
+test("an open waiting on its write opens the brief once it is stored, stops on a failure, a quiet PR or one gone, and waits otherwise", () => {
+  const pr = (brief) => ({ number: 7, title: "Fog", head: "aaa", brief });
+  const info = (extra) => ({ stale: false, writing: false, chapters: [], quiet: false, ...extra });
+  assert.equal(awaitedWrite(pr(info({ chapters: ["Fog"] }))), "open");
+  assert.equal(awaitedWrite(pr(info({ writing: true }))), "wait");
+  assert.equal(awaitedWrite(pr(info({ chapters: ["Fog"], writing: true }))), "wait", "rewritten");
+  // The map drawn from before the write started: an older brief, or none yet.
+  assert.equal(awaitedWrite(pr(info({ chapters: ["Fog"], stale: true }))), "wait");
+  assert.equal(awaitedWrite(pr(null)), "wait");
+  assert.equal(awaitedWrite(pr(info({ failed: true }))), "stop");
+  assert.equal(awaitedWrite(pr(info({ chapters: ["Fog"], stale: true, failed: true }))), "stop");
+  assert.equal(awaitedWrite(pr(info({ quiet: true }))), "stop");
+  assert.equal(awaitedWrite(undefined), "stop", "no longer ready");
 });

@@ -15,8 +15,8 @@ import { logStop } from "./stop-rules.js";
 import { scrubTo } from "./map-history.js";
 import { overturnNote, ratifyActions } from "./map-ratify.js";
 import { ratifyStep, statusWords } from "./ratify.js";
-import { actorSize, alsoAt, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, commitDrawer, figureShapes, figureSize, latestRequest, orderRun, type OrderRun, pickRun, type PickRun, playlist, plateSize, storySteps, type Rect, type Shape, unconfirmed } from "./map-model.js";
-import type { BriefCheck, BriefStep, BriefView, PrBrief, RatifyRow } from "./types.js";
+import { actorSize, alsoAt, awaitedWrite, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, commitDrawer, figureShapes, figureSize, latestRequest, orderRun, type OrderRun, pickRun, type PickRun, playlist, plateSize, storySteps, type Rect, type Shape, unconfirmed } from "./map-model.js";
+import type { BriefCheck, BriefStep, BriefView, PrBrief, RatifyRow, ReadyPr } from "./types.js";
 
 const player = briefPlayer({ scrubbed: () => currentScrub() !== null, backToNow: () => void scrubTo(null).catch(failure("map_at")) });
 // The brief being played, as `pr_brief` returned it.
@@ -25,7 +25,11 @@ let playing: BriefView | null = null;
 let ratifying: RatifyRow[] = [];
 // What stopped a row from opening, shown in its place until the next try.
 const problems = new Map<number, string>();
-export const briefProblem = (pr: number) => problems.get(pr) ?? null;
+// The row's problem, until its brief arrives or is being written again.
+export function briefProblem(pr: ReadyPr): string | null {
+  if (pr.brief?.writing || awaitedWrite(pr) === "open") problems.delete(pr.number);
+  return problems.get(pr.number) ?? null;
+}
 
 const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 // The light's speed along a link, in world pixels a second.
@@ -70,13 +74,17 @@ function watchLast(node: Element, index: number) {
 const panel = () => document.getElementById("map-brief")!;
 export const briefOpen = () => player.current() !== null;
 
-// Opens `chapter` of PR `number`'s brief: reads it (the shell rewrites a stale one first), returns the map to now and plays it.
+// Opens `chapter` of PR `number`'s brief: reads it, returns the map to now and plays it. A stale or unwritten brief is written in the
+// background (port decision Q5): the panel and the PR's tray row say "Writing the brief…", the map stays usable, and the brief opens
+// when it lands (`map-landed` draws the map again), unless another open or a close came since.
 const latest = latestRequest();
+let awaiting: { project: string; number: number; chapter: number; wanted: () => boolean } | null = null;
 export async function openBriefOf(project: string, number: number, chapter: number) {
   problems.delete(number);
+  awaiting = null;
   const wanted = latest.begin();
-  let got: BriefView | null;
-  // A brief that takes a moment to write shows "Writing the brief…" in the panel and on the PR's tray row; the map stays usable meanwhile.
+  let got: BriefView | { writing: true } | null;
+  // An answer that takes a moment shows "Writing the brief…" too.
   const slow = window.setTimeout(() => wanted() && showWriting(number), WRITING_AFTER_MS);
   try {
     panel().dataset.waiting = String(number);
@@ -90,6 +98,11 @@ export async function openBriefOf(project: string, number: number, chapter: numb
   // A later open, or a close, since: this one's answer is not wanted, and the panel's waiting mark is that one's.
   if (!wanted()) return;
   delete panel().dataset.waiting;
+  if (got && "writing" in got) {
+    awaiting = { project, number, chapter, wanted };
+    showWriting(number);
+    return;
+  }
   if (!briefOpen()) hideWriting();
   const view = currentMap();
   if (!got || !view || view.project !== project) {
@@ -142,6 +155,20 @@ export function openBriefWhenDrawn(project: string, number: number) {
   if (view?.project === project) return void openBriefOf(project, number, 0);
   pending = { project, number };
 }
+onDraw((view) => {
+  if (!awaiting || view.scrub) return;
+  if (!awaiting.wanted() || view.project !== awaiting.project) {
+    awaiting = null;
+    if (!briefOpen()) hideWriting();
+    return;
+  }
+  const { project, number, chapter } = awaiting;
+  const next = awaitedWrite((view.state.ready ?? []).find((pr) => pr.number === number));
+  if (next === "wait") return;
+  awaiting = null;
+  if (next === "open") void openBriefOf(project, number, chapter);
+  else if (!briefOpen()) hideWriting();
+});
 onDraw((view) => {
   if (!pending || pending.project !== view.project) return;
   const { project, number } = pending;
