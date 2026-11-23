@@ -15,15 +15,14 @@ import { element, failure, invoke, listen, logUncaught } from "./dom.js";
 import { type Actions, newestUnseen, nextNeedsYou, paletteEntries, run, stepLine, stepSession, windowBinding } from "./keys.js";
 import { hover, realClock, shownGate } from "./hover.js";
 import { arrange } from "./layout.js";
-import { listSpace } from "./home.js";
 import { fitMap, mapEscape, openMap, projectsChanged, startMap } from "./map.js";
 import "./map-history.js";
 import "./map-sheet.js";
 import "./map-tray.js";
 import { startMapAgents } from "./map-agents.js";
-import { drawSidebar, showSessions, staleDots } from "./list.js";
+import { drawSidebar, listSpace, showSessions, staleDots } from "./list.js";
 import { deselect, pressSession, select, show } from "./selection.js";
-import { diffIn, historyIn, logIn, redrawHome, showHistory, startPanes } from "./panes.js";
+import { diffIn, historyIn, logIn, showHistory, startPanes } from "./panes.js";
 import { closePanel, panelShown, showPanel, startPanel } from "./panel.js";
 import { showPalette } from "./palette.js";
 import { projectOfCwd, selectedProject, sidebarOrder } from "./projects.js";
@@ -246,7 +245,6 @@ const showProjects = (projects: SavedProject[]) => {
   studio.projects = projects;
   staleDots();
   drawSidebar();
-  redrawHome();
   projectsChanged();
 };
 function removeProject(path: string) {

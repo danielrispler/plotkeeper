@@ -132,7 +132,7 @@ pub fn effective(user: &UserState, source: &str) -> BTreeMap<String, Strength> {
     shown
 }
 
-/// Whether a part whose effective tier is Core shows fog: Home's quiet mark.
+/// Whether a part whose effective tier is Core shows fog: the project header's quiet dot.
 pub fn core_fogged(user: &UserState, source: &str) -> bool {
     let shown = effective(user, source);
     let Ok(map) = serde_json::from_str::<Value>(source) else {
@@ -763,7 +763,7 @@ mod tests {
     }
 
     #[test]
-    fn a_part_with_no_tier_is_core_for_home_as_it_is_for_the_map() {
+    fn a_part_with_no_tier_is_core_for_the_header_dot_as_it_is_for_the_map() {
         let source = r#"{"parts":[{"id":"a","name":"A","paths":[]}]}"#;
         let mut user = UserState::default();
         user.fog.parts.insert(

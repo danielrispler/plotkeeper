@@ -47,7 +47,7 @@ To show how the UI draws a given state, such as a ticket's screenshot criterion,
 
 ```sh
 npm run build                                  # snap renders dist/, so build first
-npm run snap -- home out/home.png              # Home with every section
+npm run snap -- mapBase out/map.png            # the page's base: the map beside the list
 npm run snap -- list out/list.png              # the list with a nested, a selected and a landed row
 npm run snap:rail -- out/rail                  # every rail fixture (running, your turn, needs you, idle) at 1728, 1100 and 864 px, the overlay open too
 ```

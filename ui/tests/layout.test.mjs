@@ -2,7 +2,7 @@
 // Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { homeSeen, arrange } from "../../dist/layout.js";
+import { arrange } from "../../dist/layout.js";
 import { startProject } from "../../dist/map-model.js";
 
 test("from 1,007 pixels up the list shows in full, 252 pixels wide, beside the map", () => {
@@ -28,10 +28,4 @@ test("the page opens on the last viewed project's map, else the first project's"
   assert.equal(startProject("/w/removed", saved), "/w/falinks");
   // A fresh install has none.
   assert.equal(startProject("/w/plotkeeper", []), null);
-});
-
-test("Home's marks and learning card are seen only while Home is open and the Map view is not over it", () => {
-  assert.equal(homeSeen(true, false), true);
-  assert.equal(homeSeen(false, false), false);
-  assert.equal(homeSeen(true, true), false);
 });

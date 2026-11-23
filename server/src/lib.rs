@@ -599,8 +599,8 @@ pub fn sessions(app: &App) -> Vec<Row> {
     list.into_iter().map(row).collect()
 }
 
-/// Daniel clicked session `id`'s row, or, with no `id`, went Home; returns the selection, which no
-/// longer names a subagent, and is `null` at Home.
+/// Daniel clicked session `id`'s row, or, with no `id`, went back to the bare map; returns the selection,
+/// which no longer names a subagent, and is `null` with none selected.
 pub fn select(app: &App, id: Option<String>) -> serde_json::Value {
     let mut studio = app.core.lock().unwrap();
     match id {

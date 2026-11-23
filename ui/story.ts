@@ -11,8 +11,7 @@ import { age, code, element, failure, fullTitle, invoke, logLine, pressable, pro
 import { select } from "./selection.js";
 import { askAnchor } from "./ask.js";
 import { rendered } from "./markdown.js";
-import { agentState, sessionName, showsLanded } from "./list.js";
-import { refreshHome } from "./panes.js";
+import { agentState, drawSidebar, sessionName, showsLanded } from "./list.js";
 import { blockedRequestFor, openDecision, type Ask } from "./answer.js";
 import { blockedElement, docksInDock, fillCardRisk, retryLine, riskLine } from "./blocked.js";
 import { briefNodes } from "./cards.js";
@@ -350,8 +349,8 @@ const askSummary = oneAtATime((id) =>
     .finally(() => {
       asking.delete(id);
       drawFeed();
-      // Home's Unseen rows show this Headline.
-      refreshHome();
+      // The list's unseen rows show this Headline (#382).
+      drawSidebar();
     }),
 );
 
@@ -364,7 +363,7 @@ function summaryOf(id: string): TurnSummary | null {
   return null;
 }
 
-// The Headline of a session's latest turn, for Home's Unseen rows; null when it has no turn.
+// The Headline of a session's latest turn, for the list's unseen rows; null when it has no turn.
 export function lastHeadline(session: Pick<Session, "turns">): string | null {
   const turn = session.turns.at(-1);
   return turn ? headlineOf(turn.id ? summaryOf(turn.id) : null, turn.message).headline : null;

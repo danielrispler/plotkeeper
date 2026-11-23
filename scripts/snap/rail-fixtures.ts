@@ -163,7 +163,7 @@ const goal = "Give each session row a fold toggle and a delete, drawn only where
 const answers = [{ question: "Hide the delete with display or visibility?", reply: "visibility" }];
 const open: OpenItem[] = [
   { kind: "check", text: "npm run check ended failed" },
-  { kind: "open", text: "The strip draws no delete; the Home rows show it always." },
+  { kind: "open", text: "The strip draws no delete; the History rows show it always." },
   { kind: "unpushed", text: "Uncommitted or unpushed work" },
 ];
 

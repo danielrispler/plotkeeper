@@ -3,7 +3,7 @@
 // session payload is taken in (`showCards`).
 
 import { element, pressable, prose, text } from "./dom.js";
-import { refreshHome } from "./panes.js";
+import { drawSidebar } from "./list.js";
 import { studio } from "./state.js";
 import { showDecisions } from "./decisions.js";
 import { drawFeed, fillDockNotes, forgetMissingSummaries, openCitation } from "./story.js";
@@ -64,5 +64,6 @@ export function showCards(cards: SessionCards) {
   forgetMissingSummaries();
   drawFeed();
   if (notes) fillDockNotes();
-  refreshHome();
+  // A summary was stored: the list's unseen rows show its Headline (#382).
+  drawSidebar();
 }
