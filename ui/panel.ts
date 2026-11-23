@@ -1,13 +1,14 @@
 // The left panel (spec #380, ticket #385): while the Map view shows, everything Daniel reads beside the map opens in one panel over the
 // map's left side, so he never leaves the map to read. It holds a session's story (the rail itself, moved in), History, a turn's diff (widened
-// to at most 780 px) or Settings, which holds the writer section (#387). It floats in the part sheet's glass (the `glass` class both share), never darkens the map, and slides in
+// to at most 780 px), Settings, which holds the writer section (#387), or a worker's log, which had the centre column until the map became the
+// page's base (#386). It floats in the part sheet's glass (the `glass` class both share), never darkens the map, and slides in
 // 12 px with a fade (at once under reduced motion). Esc closes it after the drawer, a scrubbed commit and the sheet (the `panel` layer).
 //
 // What opens where is `map-model.ts`'s (`withPanel`, `withSheet`, `pressRow`): below 1007 px only one overlay is open, and the widened diff
 // closes the sheet. The camera pans the parts in focus clear of it (`revealParts`); no position is ever written.
 
 import { element, text } from "./dom.js";
-import { mapShown, onDraw, onLeave, registerLayer, revealParts } from "./map.js";
+import { mapShown, onDraw, registerLayer, revealParts } from "./map.js";
 import { openAgents } from "./map-agents.js";
 import { closeSheet, sheetPart } from "./map-sheet.js";
 import { panelSession, type PanelContent, withPanel, withSheet } from "./map-model.js";
@@ -18,6 +19,8 @@ export type { PanelContent };
 export type PanelDeps = {
   history: (box: HTMLElement) => void;
   diff: (box: HTMLElement, session: string, turn: number) => void;
+  // A worker's or helper's log (#386); `follow` reads it on from where it was.
+  log: (box: HTMLElement, session: string, agent: string, follow: boolean) => void;
   deselect: () => void;
 };
 let deps: PanelDeps;
@@ -58,9 +61,19 @@ function draw() {
     const box = text("div", "", "panel-view settings");
     body.replaceChildren(text("h2", "Settings", "panel-title"), box);
     writersIn(box);
+  } else if (content?.kind === "log") {
+    const box = text("div", "", "panel-view log");
+    body.replaceChildren(box);
+    deps.log(box, content.session, content.agent, false);
   } else if (content === null) {
     body.replaceChildren();
   }
+}
+
+// The selection was sent again while a log shows: the log reads on.
+export function followPanelLog() {
+  const place = element("panel-body").querySelector<HTMLElement>(".panel-view.log");
+  if (shown?.kind === "log" && place) deps.log(place, shown.session, shown.agent, true);
 }
 
 // The parts the panel's content is about, kept clear of it and of the sheet: the sheet's part, and the parts the open session's chips are on.
@@ -78,8 +91,8 @@ export function showPanel(content: PanelContent | null) {
   shown = next.panel;
   draw();
   if (shown) requestAnimationFrame(reveal);
-  // Closing a story leaves the bare map: no session is selected.
-  if (before?.kind === "story" && shown === null) deps.deselect();
+  // Closing a story or a worker's log leaves the bare map: no session is selected.
+  if ((before?.kind === "story" || before?.kind === "log") && shown === null) deps.deselect();
 }
 
 export const closePanel = () => showPanel(null);
@@ -91,7 +104,7 @@ export function besideSheet(part: string) {
 
 // The selection changed: a story panel follows it to another session, and closes when none is selected.
 export function followSelection(session: string | null) {
-  if (shown?.kind !== "story" || shown.session === session) return;
+  if ((shown?.kind !== "story" && shown?.kind !== "log") || shown.session === session) return;
   if (session === null) {
     shown = null;
     draw();
@@ -109,11 +122,6 @@ export function redrawPanel() {
 export function startPanel(given: PanelDeps) {
   deps = given;
   element("panel-close").addEventListener("click", closePanel);
-  // Leaving the Map view puts the story back in its rail; the panel stays closed until it opens again.
-  onLeave(() => {
-    shown = null;
-    draw();
-  });
   // A redraw of the map draws its chips again: the open session's stay lit.
   onDraw(() => openAgents(panelSession(panelShown())));
   registerLayer("panel", { open: () => panelShown() !== null, close: closePanel });

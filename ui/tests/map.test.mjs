@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import {
-  actorSize, autoPlace, cameraRig, draftPrompt, fitCamera, panTo, zoomAt, zoomLimits, dragMove, dragStart, dragThreshold, effectiveTier, escapeMap, layerOrder, mapProject, parseMap, plateSize, rimPoint, revealPan, scrubTickets, sheetOf,
+  actorSize, autoPlace, cameraRig, draftPrompt, fitCamera, panTo, zoomAt, zoomLimits, dragMove, dragStart, dragThreshold, effectiveTier, escapeMap, layerOrder, parseMap, plateSize, rimPoint, revealPan, scrubTickets, sheetOf,
   narrowBelow, withPanel, withSheet, pressRow, panelSession,
 } from "../../dist/map-model.js";
 
@@ -79,14 +79,14 @@ test("a link runs from rim to rim, not centre to centre", () => {
   assert.deepEqual(rimPoint(a, plateSize, a), a);
 });
 
-test("Esc closes the drawer, then the brief, then returns from a scrubbed commit to now, then closes the sheet, then the left panel, then leaves the Map view", () => {
+test("Esc closes the drawer, then the brief, then returns from a scrubbed commit to now, then closes the sheet, then the left panel, then does nothing (#386)", () => {
   const open = { scrubbed: true, drawer: true, brief: true, sheet: true, panel: true };
   const closed = [];
   const layers = Object.fromEntries(layerOrder.map((name) => [name, { open: () => open[name], close: () => { open[name] = false; closed.push(name); } }]));
   const presses = [];
   for (let i = 0; i < 6; i++) presses.push(escapeMap(layers));
   assert.deepEqual(closed, ["drawer", "brief", "scrubbed", "sheet", "panel"]);
-  assert.deepEqual(presses, ["drawer", "brief", "scrubbed", "sheet", "panel", "leave"]);
+  assert.deepEqual(presses, ["drawer", "brief", "scrubbed", "sheet", "panel", null]);
 });
 
 // The left panel and the part's sheet (#385): what opens where.
@@ -139,16 +139,8 @@ test("Esc skips a layer that is not open, and a layer nobody registered", () => 
   const open = { drawer: false, sheet: true };
   const layers = { drawer: { open: () => open.drawer, close: () => assert.fail("closed a layer that was not open") }, sheet: { open: () => open.sheet, close: () => (open.sheet = false) } };
   assert.equal(escapeMap(layers), "sheet");
-  assert.equal(escapeMap(layers), "leave");
-  assert.equal(escapeMap({}), "leave");
-});
-
-test("the map opens the selected session's project, else the first project that has a map, else the first", () => {
-  const paths = ["/a", "/b", "/c"];
-  assert.equal(mapProject("/c", paths, new Set(["/b"])), "/c");
-  assert.equal(mapProject(null, paths, new Set(["/c", "/b"])), "/b");
-  assert.equal(mapProject(null, paths, new Set()), "/a");
-  assert.equal(mapProject(null, [], new Set()), null);
+  assert.equal(escapeMap(layers), null);
+  assert.equal(escapeMap({}), null);
 });
 
 test("Daniel's tier beats the map's, and a part with no choice keeps the map's", () => {

@@ -15,7 +15,7 @@ import { HOVERS } from "./hovers.js";
 
 export type Toast = { session: Session; count: number };
 
-export const toastShows = (mode: LayoutMode) => mode === "focus" || mode === "overlay";
+export const toastShows = (mode: LayoutMode) => mode === "focus";
 
 // The first line of a session's open question, else of the step it waits on, such as a permission's.
 export function questionLine(session: Pick<Session, "questions" | "last_step">): string {

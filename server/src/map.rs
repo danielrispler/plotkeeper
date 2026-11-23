@@ -388,26 +388,36 @@ pub fn pr_diff(
     crate::history::pr_files(Path::new(&project), &head, &format!("#{number} {title}"))
 }
 
-/// The projects among `projects` that show a fogged Core part, a broken law or a waiting PR brief, for Home's quiet mark. Reads local refs and the
-/// last CI read only: it asks neither `origin` nor GitHub.
+/// Why a project header's quiet dot lights (#344, #386): fog on a Core part, a broken law, a PR brief waiting, in that order.
+#[derive(Debug, PartialEq, Serialize)]
+pub struct Mark {
+    pub project: String,
+    pub why: Vec<&'static str>,
+}
+
+/// The projects among `projects` that show a fogged Core part, a broken law or a waiting PR brief, with which of the three, for the project
+/// header's quiet dot and its hover. Reads local refs and the last CI read only: it asks neither `origin` nor GitHub.
 pub fn map_marks(
     projects: Vec<String>,
     cache: &crate::ci_laws::CiCache,
     prs: &crate::prs::Prs,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<Mark>, String> {
     let file = state_file()?;
     Ok(projects
         .into_iter()
-        .filter(|project| {
-            if cache.broken(project) || crate::pr_briefs::any_waiting(project, &prs.ready(project))
-            {
-                return true;
-            }
-            let repo = Path::new(project);
-            let _ = crate::fog::refresh(repo, &file, project, false);
-            read_map(repo)
-                .source
-                .is_some_and(|source| crate::fog::core_fogged(&read_user(&file, project), &source))
+        .filter_map(|project| {
+            let repo = Path::new(&project);
+            let _ = crate::fog::refresh(repo, &file, &project, false);
+            let fog = read_map(repo).source.is_some_and(|source| {
+                crate::fog::core_fogged(&read_user(&file, &project), &source)
+            });
+            let broken = cache.broken(&project);
+            let brief = crate::pr_briefs::any_waiting(&project, &prs.ready(&project));
+            let why: Vec<&'static str> = [(fog, "fog"), (broken, "broken"), (brief, "brief")]
+                .into_iter()
+                .filter_map(|(lit, name)| lit.then_some(name))
+                .collect();
+            (!why.is_empty()).then_some(Mark { project, why })
         })
         .collect())
 }

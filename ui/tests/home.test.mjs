@@ -100,12 +100,6 @@ test("a project whose map shows a fogged Core part is marked, with no count", ()
   assert.deepEqual(start.projects.map((p) => [p.path, p.fogged]), [["/w/a", false], ["/w/b", true]]);
 });
 
-test("Go home has a default key, which keymap.json can rebind", () => {
-  assert.equal(windowBinding(initial.keymap, key("KeyH", "h", { metaKey: true, shiftKey: true }), false), "studio::GoHome");
-  const rebound = { Workspace: { "cmd-g": "studio::GoHome" } };
-  assert.equal(windowBinding(rebound, key("KeyG", "g", { metaKey: true }), false), "studio::GoHome");
-});
-
 test("a click on the list's empty space goes home; a click on a row, a heading or a control does not", () => {
   const target = (...inside) => ({ closest: (selector) => (inside.includes(selector) ? {} : null) });
   assert.equal(listSpace(target()), true);

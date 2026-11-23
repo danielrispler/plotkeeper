@@ -1,5 +1,5 @@
-// The Map view (spec danielrispler/plotkeeper#306, ticket #309): a project's system map as plates on a quiet chart (Treatment C),
-// over the story rail and the terminal column, with the session list and the top bar left live. The shell reads the map from
+// The Map view (spec danielrispler/plotkeeper#306, ticket #309): a project's system map as plates on a quiet chart (Treatment C). Since #386
+// it is the page's base: the page opens on the last viewed project's map, and the session list's headers switch it. The shell reads the map from
 // `origin`'s default branch and keeps Daniel's positions (`server/src/map.rs`); `map-model.ts` holds the pure logic.
 //
 // Where the next tickets plug in, so they add to this file rather than reshape it:
@@ -8,7 +8,7 @@
 // - `onPlateClick(fn)`: a click on a plate that was not a drag, such as one that opens the part's sheet.
 // - `onDraw(fn)`: runs after each draw with the whole `MapView`, for what is not on a plate: the side area (`slots.notPlaced`,
 //   `slots.sheet`, `slots.drawer`, shown by `syncSide`), the tray (`slots.tray`) and the banner (`slots.banner`).
-// - `registerLayer(name, layer)`: Esc's layers, `drawer`, `brief`, `scrubbed`, `sheet` and `panel` (#385), peeled in that order before the view is left.
+// - `registerLayer(name, layer)`: Esc's layers, `drawer`, `brief`, `scrubbed`, `sheet` and `panel` (#385), peeled in that order; on the bare map Esc does nothing.
 // - The left panel (`panel.ts`, #385) floats over the map's left; `revealParts` pans the camera so the parts in focus clear it and the sheet.
 // - `MapState` (`types.ts`, `map.rs`) is the one payload; `currentMap()` gives the view as drawn.
 // - The camera (#383): the map area pans and zooms the world rather than scrolling it. Daniel's view is saved per project (`map_save_view`);
@@ -18,7 +18,7 @@ import { logStop, reviewNode, reviewOf } from "./stop-rules.js";
 import { element, failure, invoke, listen, newest, pressable, text } from "./dom.js";
 import {
   actorSize, autoPlace, brokenParts, brokenText, cameraRig, type CameraRig, draftPrompt, dragMove, dragStart, effectiveTier, escapeMap, fitCamera, panTo, type Actor, type Drag,
-  type Law, type Layer, type LayerName, type MapDoc, mapProject, type MapLink, parseMap, type Part, type Point, plateSize, revealPan, rimPoint, type Scrub, type Tier, zoomAt,
+  type Law, type Layer, type LayerName, type MapDoc, type MapLink, startProject, parseMap, type Part, type Point, plateSize, revealPan, rimPoint, type Scrub, type Tier, zoomAt,
 } from "./map-model.js";
 import { recheckSeen } from "./seen.js";
 import { knownProjects, projectGone } from "./projects.js";
@@ -48,9 +48,6 @@ export const onDraw = (hook: (view: MapView) => void) => void drawHooks.push(hoo
 const unreadHooks: ((banner: HTMLElement, scrub: Scrub | null) => void)[] = [];
 export const onUnread = (hook: (banner: HTMLElement, scrub: Scrub | null) => void) => void unreadHooks.push(hook);
 export const registerLayer = (name: LayerName, layer: Layer) => void (layers[name] = layer);
-// Runs when the Map view is left, for what floats over it (the left panel puts the story back in its rail).
-const leaveHooks: (() => void)[] = [];
-export const onLeave = (hook: () => void) => void leaveHooks.push(hook);
 
 // What `startMap` is given by `main.ts`, which owns what the Map view may not import.
 export type MapDeps = {
@@ -58,6 +55,8 @@ export type MapDeps = {
   selectedProject: () => string | null;
   // Remove project (#381): takes a project off the saved list.
   removeProject: (path: string) => void;
+  // Another project's map shows (#386): the list marks its header.
+  shown: () => void;
 };
 let deps: MapDeps;
 let project: string | null = null;
@@ -71,7 +70,10 @@ let rig: CameraRig | null = null;
 // The sheet's part the camera last revealed, so a later draw does not pan Daniel's view back to it.
 let revealed: string | null = null;
 
+// The map is the page's base (#386): the body carries `map-open` from the start and never loses it.
 export const mapShown = () => document.body?.classList.contains("map-open") === true;
+// The project whose map shows; null before the saved list arrives, and on a fresh install.
+export const shownProject = () => project;
 export const currentMap = (): MapView | null => view;
 export const currentScrub = (): Scrub | null => scrub;
 
@@ -95,17 +97,32 @@ async function load(path: string, fetch: boolean) {
   draw();
 }
 
-// Opens the Map view on `path`.
+// The last viewed project, which the page opens on (#386): a per-browser convenience, so a store that throws only loses it.
+const LAST = "project";
+const lastViewed = (): string | null => {
+  try {
+    return localStorage.getItem(LAST);
+  } catch {
+    return null;
+  }
+};
+
+// Shows `path`'s map.
 export function openMap(path: string | null) {
   if (path !== project) [scrub, rig, revealed] = [null, null, null];
   project = path;
   loaded = null;
   view = null;
   drawn = "";
-  // The terminal's textarea may hold the keyboard; Esc and the map key must reach the window.
-  (document.activeElement as HTMLElement | null)?.blur?.();
-  document.body.classList.add("map-open");
-  element("map").hidden = false;
+  try {
+    if (path !== null) localStorage.setItem(LAST, path);
+  } catch {
+    // The page opens on the first project instead.
+  }
+  // The top bar names the project shown; Treatment C's large title on the map is not drawn, so the name is said once.
+  element("bar-project").textContent = path === null ? "plotkeeper" : name(path);
+  element("bar-project").title = path ?? "";
+  deps.shown();
   recheckSeen();
   draw();
   // A gone folder has no map to read: its empty state says so, and nothing asks the server about it (#381).
@@ -127,49 +144,26 @@ async function showReview(path: string) {
   box.hidden = false;
 }
 
-// The saved project list changed (#381): a shown project that was removed gives way to the first saved one, and one whose
-// folder went or came back is drawn again.
+// The saved project list changed (#381): its first arrival opens the last viewed project, else the first, unless a selected session's
+// already shows (#386); a fresh install's first
+// project opens when it is added; a shown project that was removed gives way to the first saved one, and one whose folder went or came
+// back is drawn again.
+let started = false;
 export function projectsChanged() {
-  if (!mapShown() || project === null) return;
-  if (!knownProjects().includes(project)) return openMap(knownProjects()[0] ?? null);
+  const first = !started;
+  started = true;
+  // A session selected before the list arrived has already shown its project's map.
+  if (project === null) {
+    const opening = startProject(lastViewed(), knownProjects());
+    if (first || opening !== null) openMap(opening);
+    return;
+  }
+  if (!first && !knownProjects().includes(project)) return openMap(knownProjects()[0] ?? null);
   if (projectGone(project) !== (element("map-body").querySelector(".map-gone") !== null)) openMap(project);
 }
 
 // Reads the map again, for a change the view itself made (a tier, "I know this"); the payload decides whether it draws.
 export const reloadMap = () => (project === null ? Promise.resolve() : load(project, false));
-
-// Leaves the Map view; what was under it shows again. No-op when it is not showing.
-export function leaveMap() {
-  if (!mapShown()) return;
-  document.body.classList.remove("map-open");
-  element("map").hidden = true;
-  leaveHooks.forEach((hook) => hook());
-  recheckSeen();
-  hideProjects();
-}
-
-// The map key: opens the Map view on the selected session's project, else the first project with a map; again, leaves it.
-export async function toggleMap() {
-  if (mapShown()) return leaveMap();
-  const paths = knownProjects();
-  const selected = deps.selectedProject();
-  const withMap = new Set<string>();
-  if (selected === null) {
-    for (const path of paths.filter((path) => !projectGone(path))) {
-      const state = await invoke("map_state", { project: path, fetch: false }).catch(() => null);
-      if (state?.status === "loaded") {
-        withMap.add(path);
-        break;
-      }
-    }
-  }
-  openMap(mapProject(selected, paths, withMap));
-}
-
-const hideProjects = () => {
-  const menu = element("map-projects");
-  if (menu.matches(":popover-open")) menu.hidePopover();
-};
 
 // The gutter around the plates when the camera reveals or fits them: `--map-gutter` in tokens.css.
 const mapGutter = 32;
@@ -228,11 +222,8 @@ export function fitMap() {
   moveCamera(fitCamera(worldBox(view), { w: canvas.clientWidth, h: canvas.clientHeight }, mapGutter), true);
 }
 
-// Esc in the Map view: the project menu first, then the first open layer (a scrubbed commit, a drawer, a sheet), else the view itself.
-export function mapEscape() {
-  if (element("map-projects").matches(":popover-open")) return hideProjects();
-  if (escapeMap(layers) === "leave") leaveMap();
-}
+// Esc in the Map view: the first open layer (a drawer, a brief, a scrubbed commit, the sheet, the left panel); on the bare map, nothing.
+export const mapEscape = () => void escapeMap(layers);
 
 // The side area shows while any of its slots holds something; the tray floats on its own (#385).
 export const syncSide = (slots: MapView["slots"]) => {
@@ -272,30 +263,11 @@ export function revealParts(ids: string[]) {
 
 const name = (path: string) => path.split("/").filter(Boolean).pop() ?? path;
 
-// The head: the project's name, which opens the list of projects, and the ref the map was read from.
+// The head: the ref the map was read from; the project's name is in the top bar (#386).
 function drawHead(state: MapState | null) {
-  const button = element("map-project");
-  button.textContent = project === null ? "Map" : `${name(project)} ▾`;
-  if (project !== null) button.title = `${project}\nShow another project's map`;
-  button.hidden = project === null;
   const ref = element("map-ref");
   ref.textContent = state?.reference ? `${state.reference}${state.commit ? ` · ${state.commit.slice(0, 7)}` : ""}` : "";
   ref.title = state?.note ?? "The branch this map was read from, as last fetched";
-}
-
-function drawProjects() {
-  const menu = element("map-projects");
-  const choose = (path: string) => {
-    hideProjects();
-    if (path !== project) openMap(path);
-  };
-  menu.replaceChildren(
-    ...knownProjects().map((path) => {
-      const row = pressable(text("button", name(path), "btn"), path === project, () => choose(path));
-      row.title = path;
-      return row;
-    }),
-  );
 }
 
 const lawMark = (law: Law) => {
@@ -304,7 +276,10 @@ const lawMark = (law: Law) => {
   return mark;
 };
 
-// The empty states: a project with no map on its default branch, one whose file does not read, and the wait for the first read.
+// Where `plotkeeper install` is explained.
+const installDocs = "https://github.com/danielrispler/plotkeeper/blob/main/docs/studio/plugin.md";
+
+// The empty states: a fresh install, a gone folder, a project with no map on its default branch, one whose file does not read, and the wait for the first read.
 function drawEmpty(body: HTMLElement, state: MapState | null) {
   const box = text("div", "", "map-empty");
   if (project !== null && projectGone(project)) {
@@ -316,7 +291,14 @@ function drawEmpty(body: HTMLElement, state: MapState | null) {
     remove.title = "Take this project off the list; its sessions stay in History";
     box.append(text("p", "This folder is gone", "map-empty-title"), text("p", `${gone} was moved or deleted. Its ended sessions stay in History.`, "empty"), remove);
   } else if (project === null) {
-    box.append(text("p", "No project yet", "map-empty-title"), text("p", "Add a project and its map shows here.", "empty"));
+    // A fresh install (#386): one calm line, and the way to record the agents started in a terminal.
+    const install = text("a", "How to install plotkeeper", "map-install");
+    install.setAttribute("href", installDocs);
+    install.setAttribute("target", "_blank");
+    install.setAttribute("rel", "noreferrer");
+    install.title = "How to record the agents you start in your terminals: plotkeeper install";
+    box.classList.add("map-fresh");
+    box.append(text("p", "Run your agent in a repository; it appears here", "map-empty-title"), install);
   } else if (state === null) {
     box.append(text("p", "Reading the map…", "empty"));
   } else if (state.status === "unreadable") {
@@ -536,9 +518,6 @@ function draw() {
 // Wires the view: the project menu, the window's focus and a merge the shell saw.
 export function startMap(given: MapDeps) {
   deps = given;
-  element("map-projects").addEventListener("toggle", (event) => {
-    if ((event as ToggleEvent).newState === "open") drawProjects();
-  });
   element("map-legend").append(
     lawMark({ id: "", on: "", backing: "check", text: "a test stands behind it" }), " law, backed by a check ",
     lawMark({ id: "", on: "", backing: "trust", text: "nothing checks it" }), " law, on trust",
@@ -547,7 +526,7 @@ export function startMap(given: MapDeps) {
     " ", text("span", "", "law-broken"), " a test that backs a law failed on main ",
     text("span", "", "mist-swatch thin"), " fog, files changed ", text("span", "", "mist-swatch thick"), " fog, laws, links or flows changed",
   );
-  // Never on a timer: the focus and a merge, while the view is open.
+  // Never on a timer: the focus and a merge.
   window.addEventListener("focus", () => {
     if (mapShown() && project !== null) load(project, true).catch(failure("map"));
   });

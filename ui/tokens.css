@@ -30,16 +30,14 @@
   --motion: 120ms ease-out; --slide-in: 150ms; --slide-out: 100ms; --spin: 900ms;
   --scrollbar: 8px;
 
-  /* The window's parts. The list's, strip's and rail's widths are layout.ts's too. */
-  --list: 260px; --strip: 56px; --rail: 380px; --bar: 34px; --term-head: 26px;
-  /* The space the hidden title bar's traffic lights keep at the top bar's start. */
-  --lights: 78px;
-  --divider: 6px; --strip-button: calc(var(--strip) - var(--sp-2)); --dot: 6px; --glyph: 10px;
+  /* The window's parts (Treatment C's frame, #386). The list's and the strip's widths are layout.ts's too; the rail's is the left panel's. */
+  --list: 252px; --strip: 56px; --rail: 380px; --bar: 34px; --term-head: 26px;
+  --strip-button: calc(var(--strip) - var(--sp-2)); --dot: 6px; --glyph: 10px;
   /* A row's fold and delete: the button and its icon. */
   --control: 20px; --icon: 14px;
   /* An agent's logo in the session list (#382). */
   --logo: 12px;
-  --popover: 380px; --dialog: 560px; --find: 220px; --outcome: 52px; --toast: 360px; --menu: 180px; --session-header: 280px; --layer: 320px; --spine: 14px;
+  --popover: 380px; --dialog: 560px; --find: 220px; --outcome: 52px; --toast: 360px; --menu: 180px;
   /* The settings page (#195): herdr's 880 by 620, and a switch's track. */
   --settings: 880px; --settings-height: 620px; --switch: 32px; --switch-height: 18px; --stepper-value: 40px; --select: 140px;
 
@@ -50,7 +48,7 @@
   --plate: #202226; --plate-core: #25272b; --plate-edge: #ffffff1a; --plate-black: #121315; --plate-black-edge: #ffffff0d;
   --link: #ffffff26; --law-check: var(--fg); --law-trust: var(--muted);
   --plate-w: 264px; --plate-h: 76px; --actor-w: 120px; --actor-h: 28px; --map-grid: 28px; --law-mark: 7px; --link-width: 1.5px;
-  --map-title: 28px; --map-gutter: 32px; --map-sheet: 300px; --drawer-code: 280px; --tray: 300px;
+  --map-gutter: 32px; --map-sheet: 300px; --drawer-code: 280px; --tray: 300px;
   /* The glass of every card over the map (#385), Treatment C's part sheet: the left panel and the sheet share it. They are inset from the map's
      edges, the diff widens the panel, and a card slides in 12 px with a fade on Treatment C's ease. */
   --glass: #1c1d20f2; --glass-blur: 18px; --glass-radius: 14px; --glass-shadow: inset 0 1px 0 #ffffff14, 0 0 0 1px #ffffff10, 0 24px 60px #000b;

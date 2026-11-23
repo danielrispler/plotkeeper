@@ -7,7 +7,7 @@ import { El, fakeDocument } from "./dom.mjs";
 import { row, projectHead } from "../../dist/list.js";
 import { showPalette } from "../../dist/palette.js";
 import { showToast } from "../../dist/toast.js";
-import { checkElement, foldedTurn, showBarName } from "../../dist/story.js";
+import { checkElement, foldedTurn } from "../../dist/story.js";
 import { studio } from "../../dist/state.js";
 
 // The stand-in page: elements by id, as the shell's index.html has them.
@@ -82,14 +82,6 @@ test("a named session's name needs no title of its own: the row's holds it", () 
   const button = row({ ...session, name: "Short", prompt_name: null }, new Map());
   holds(button, "name", "Short");
   noEmptyTitle(button);
-});
-
-test("the session header holds the full name", () => {
-  showBarName(long);
-  const header = document.getElementById("session-header");
-  assert.ok(header.title.includes(long));
-  showBarName("");
-  assert.notEqual(header.title, "");
 });
 
 test("a folded turn line's prompt and Headline hold their full text", () => {
@@ -169,6 +161,8 @@ const covered = {
   ".subagent-log .log-title": "log.ts: the title's title",
   ".subagent-log .log-call summary": "log.ts: the summary's title",
   ".map-canvas": "map.ts: the map area is a camera, not a text; it pans and zooms to what it cuts",
+  ".bar-project": "map.ts: the top bar's project name has the project's path as its title",
+  ".map-view": "map.ts: the map is cut at its rounded corner; the camera pans to what it cuts",
   ".map-panel": "panel.ts: the left panel's body scrolls, so nothing in it is cut; the panel only rounds its corners",
   ".plate-name": "map.ts: the plate's title holds the name, caption and description",
   ".plate-caption": "map.ts: the plate's title holds the name, caption and description",

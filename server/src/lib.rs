@@ -1164,8 +1164,8 @@ pub fn map_state(app: &Arc<App>, project: String, fetch: bool) -> Result<map::Ma
     map::map_state(project, fetch, app)
 }
 
-/// Home's quiet mark: see [`map::map_marks`].
-pub fn map_marks(app: &App, projects: Vec<String>) -> Result<Vec<String>, String> {
+/// The project header's quiet dot: see [`map::map_marks`].
+pub fn map_marks(app: &App, projects: Vec<String>) -> Result<Vec<map::Mark>, String> {
     map::map_marks(projects, &app.ci, &app.prs)
 }
 

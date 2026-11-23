@@ -74,11 +74,7 @@ const withSaved = (snapScript: string, extra: Fixture = {}): Fixture => ({
     ${snapScript}`,
 });
 const openGone = `
-    document.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyM", key: "m", metaKey: true, shiftKey: true, bubbles: true }));
-    await wait(400);
-    document.getElementById("map-project").click();
-    await wait(100);
-    [...document.querySelectorAll("#map-projects button")].find((b) => b.textContent === "pokedex")?.click();
+    named("pokedex").querySelector(".project-toggle").click();
     await wait(300);
     const gone = document.querySelector("#map .map-empty.map-gone");
     if (!gone) return log("snap:fail the gone project shows no gone state: " + document.getElementById("map-body").textContent);
@@ -410,47 +406,9 @@ const mapBriefChapterLast = (): Fixture =>
   mapChaptered(2, 3, `
       if (document.querySelectorAll("#map-brief .brief-dots i").length !== 4) log("snap:fail the last chapter opened first should carry the overview");
       if (!document.querySelector("#map-brief .brief-also")?.textContent.includes("A wording change in a comment")) log("snap:fail no also-touched line on the last step: " + document.querySelector("#map-brief .brief-title").textContent);`);
-const homeMarked = (press: boolean): Fixture => ({
-  ...(fixtures as Record<string, () => Fixture>).home(),
-  map_marks: ["/w/plotkeeper"],
-  map_state: mapState({ fog: { shell: "thick" } }),
-  snapScript: `
-    const wait = (ms) => new Promise((done) => setTimeout(done, ms));
-    await wait(300);
-    const marks = [...document.querySelectorAll(".pane.home .fog-mark")];
-    if (marks.length !== 1) return log("snap:fail expected one fog mark, saw " + marks.length);
-    if (marks[0].textContent !== "") log("snap:fail the mark carries text, a count?");
-    if (${press}) {
-      marks[0].click();
-      await wait(400);
-      if (document.getElementById("map").hidden) return log("snap:fail the mark did not open the Map view");
-    }`,
-});
 // The stop-rule review (#314, #384): Studio has run 20 active days and merged 25 PRs, and the Map view was engaged with on one of them, so
 // the Map view fell below its threshold, and so did the history strip and "See the proof".
 const dueFacts = { active_days: 20, merged_prs: 25, engaged_days: 1, scrubs: 0, proofs: 0, knows: 0, dismissed: false, briefs_offered: 0, briefs_opened: 0, chapters_done: 0 };
-// Home's dot for a waiting PR brief (#344): no fog and no broken law, but a ready PR has a brief stored, so the shell's marks name the project.
-const homeBriefWaiting = (): Fixture => ({
-  ...(fixtures as Record<string, () => Fixture>).home(),
-  map_marks: ["/w/plotkeeper"],
-  map_state: mapState({ ready: [{ number: 334, title: "PR briefs on the map", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["PR briefs on the map"], quiet: false } }] }),
-  snapScript: `
-    await new Promise((done) => setTimeout(done, 300));
-    const marks = [...document.querySelectorAll(".pane.home .fog-mark")];
-    if (marks.length !== 1) return log("snap:fail expected one mark for the waiting brief, saw " + marks.length);
-    if (marks[0].textContent !== "" || !marks[0].title.includes("PR brief")) log("snap:fail the mark has a count or does not name the brief");
-    log("home brief dot ok");`,
-});
-// The review shows on the map only (#384): Home shows none, even while the Map view is below its threshold.
-const homeNoReview = (): Fixture => ({
-  ...(fixtures as Record<string, () => Fixture>).home(),
-  map_marks: ["/w/plotkeeper"],
-  stop_facts: dueFacts,
-  snapScript: `
-    await new Promise((done) => setTimeout(done, 400));
-    if (document.querySelector(".pane.home .review")) return log("snap:fail Home shows the review");
-    log("no review ok");`,
-});
 const mapOpened = (check: string, extra: Fixture = {}): Fixture => ({
   ...list(),
   ...extra,
@@ -790,6 +748,106 @@ const panelChecks = `
       };
       const checkAll = (when) => { checkPlaces(when); checkColours(when); checkGlass(); checkHit(when); };`;
 // The busy map with a session selected by a press, as the shell answers it.
+// The map as the page's base (#386), each drawn at 1900x1180 and, as `…Narrow`, at 1000x800, to review beside the prototype's scenes `bare`,
+// `zero`, `nomap`, `fresh` and `narrow`. Each script fails when a colour other than Needs you orange or broken-law red shows, or when a layer
+// covers a map that is present (`panelChecks`), and checks Treatment C's frame: a 34 px top bar, the list at 252 px (its strip below 1007 px)
+// on the darkest tone, the map on `--bg` with a rounded corner, no border line between them, and no Home, centre column or unseen chip.
+const baseProjects = [{ path: "/w/plotkeeper", gone: false }, { path: "/w/falinks", gone: false }, { path: "/w/timburr", gone: false }];
+const baseChecks = `${panelChecks}
+      const frame = (when) => {
+        const bar = document.querySelector(".top").getBoundingClientRect();
+        if (Math.round(bar.height) !== 34) log("snap:fail the top bar is " + bar.height + " px tall " + when);
+        const list = document.querySelector(".list").getBoundingClientRect();
+        if (Math.round(list.width) !== (narrow ? 56 : 252)) log("snap:fail the list is " + list.width + " px wide " + when);
+        const map = document.getElementById("map");
+        const look = getComputedStyle(map);
+        if (map.hidden || look.display === "none") return log("snap:fail the map is not the page's base " + when);
+        if (Math.abs(map.getBoundingClientRect().right - list.left) > 1) log("snap:fail the map does not meet the list " + when);
+        const tone = (token) => { probe.style.color = "var(" + token + ")"; document.body.append(probe); const c = getComputedStyle(probe).color; probe.remove(); return c; };
+        const probe = document.createElement("i");
+        if (look.backgroundColor !== tone("--bg")) log("snap:fail the map is not on --bg: " + look.backgroundColor);
+        if (parseFloat(look.borderTopLeftRadius) <= 0) log("snap:fail the map has no rounded corner");
+        if (getComputedStyle(document.body).backgroundColor !== tone("--chrome")) log("snap:fail the frame is not on --chrome");
+        for (const node of [map, document.querySelector(".list"), document.querySelector(".top")]) {
+          const s = getComputedStyle(node);
+          if (["Top", "Right", "Bottom", "Left"].some((side) => parseFloat(s["border" + side + "Width"]) > 0)) log("snap:fail a border line on " + node.className);
+        }
+        for (const gone of ["#centre", "#column", "#unseen", "#session-header", "#spine", "#map-project", ".pane.home"]) if (document.querySelector(gone)) log("snap:fail " + gone + " is still on the page");
+      };`;
+const mapBaseOf = (check: string, extra: Fixture = {}): Fixture => ({
+  ...base,
+  sessions: busySessions(),
+  selected: null,
+  projects: baseProjects,
+  map_state: mapState({ fog: { understanding: "thin" } }),
+  map_place: { s1: ["core", "window"], "s1/w1": ["shell"], s2: ["hook"], s6: [] },
+  ...extra,
+  snapScript: `
+    const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+    await wait(500);
+    ${baseChecks}
+    ${check}`,
+  snapDone: "base ok",
+});
+// The bare map with the list: the page opens on the last viewed project's map, its name in the top bar, its header marked; Esc does nothing.
+const mapBase = (): Fixture =>
+  mapBaseOf(`
+      if (document.getElementById("bar-project").textContent !== "plotkeeper") log("snap:fail the top bar names " + document.getElementById("bar-project").textContent);
+      if (!document.querySelector("#map .map-canvas")) return log("snap:fail the page did not open on a map");
+      if (!narrow && !document.querySelector('#groups .project-head.current[data-project="/w/plotkeeper"]')) log("snap:fail the shown project's header is not marked");
+      frame("on the bare map");
+      checkColours("on the bare map");
+      checkHit("on the bare map");
+      await esc();
+      if (!document.querySelector("#map .map-canvas") || panelOpen()) log("snap:fail Esc on the bare map changed the page");
+      log("base ok");`);
+// A project with no sessions keeps its header, with the quiet dot drawn as the map's mist; its hover names what lit it. A click on the header
+// shows that project's map.
+const mapHeaderDot = (): Fixture =>
+  mapBaseOf(`
+      const head = document.querySelector('#groups .project-head[data-project="/w/falinks"]');
+      if (!head) return log("snap:fail falinks has no header");
+      const dot = head.querySelector(".project-dot");
+      if (!narrow) {
+        if (!dot) return log("snap:fail falinks's header has no dot");
+        if (dot.title !== "A Core part you track has changed\\nA PR brief is waiting") log("snap:fail the dot's hover says " + JSON.stringify(dot.title));
+        if (dot.textContent !== "") log("snap:fail the dot carries text, a count?");
+        if (document.querySelector('#groups .project-head[data-project="/w/plotkeeper"] .project-dot')) log("snap:fail an unmarked project has a dot");
+      }
+      frame("with the dot");
+      checkColours("with the dot");
+      head.querySelector(".project-toggle").click();
+      await wait(400);
+      if (document.getElementById("bar-project").textContent !== "falinks") log("snap:fail the header's click did not show falinks's map");
+      if (!head.isConnected ? !document.querySelector('#groups .project-head.current[data-project="/w/falinks"]') : !head.classList.contains("current")) log("snap:fail falinks's header is not marked after the switch");
+      frame("after the switch");
+      checkColours("after the switch");
+      checkHit("after the switch");
+      log("base ok");`, {
+    map_marks: [{ project: "/w/falinks", why: ["fog", "brief"] }],
+    map_state: { __by: "project", values: { "/w/plotkeeper": mapState(), "/w/falinks": mapState({ project: "/w/falinks", fog: { understanding: "thick" } }) } },
+  });
+// A fresh install: no project, so the map's place holds one calm line and the install docs, and nothing covers the page.
+const mapFresh = (): Fixture =>
+  mapBaseOf(`
+      const fresh = document.querySelector("#map .map-empty.map-fresh");
+      if (!fresh) return log("snap:fail no fresh-install line: " + document.getElementById("map-body").textContent);
+      if (fresh.querySelector(".map-empty-title").textContent !== "Run your agent in a repository; it appears here") log("snap:fail the fresh line says " + fresh.textContent);
+      const link = fresh.querySelector("a.map-install");
+      if (!link || !link.href.includes("plugin.md")) log("snap:fail no link to the install docs");
+      if (document.getElementById("bar-project").textContent !== "plotkeeper") log("snap:fail the top bar names a project");
+      frame("on a fresh install");
+      checkColours("on a fresh install");
+      log("base ok");`, { sessions: [], projects: [] });
+// A project without system-map.json keeps today's draft prompt in the map's place.
+const mapNoMap = (): Fixture =>
+  mapBaseOf(`
+      const draft = document.querySelector("#map .map-empty .map-draft");
+      if (!draft) return log("snap:fail no draft prompt");
+      if (document.querySelector("#map .map-empty.map-fresh")) log("snap:fail the fresh line shows for a project");
+      frame("without a map");
+      checkColours("without a map");
+      log("base ok");`, { map_state: mapState({ status: "none", source: null }) });
 const mapPanel = (check: string, extra: Fixture = {}): Fixture => {
   const sessions = busySessions().map((s) => (s.id === "s1" ? { ...s, turns: s.turns.map((t) => ({ ...t, id: "t1", message: "Chips on the parts a turn touches" })) } : s));
   const selected = Object.fromEntries(sessions.map((s) => [s.id, { session: s, agent: null }]));
@@ -990,7 +1048,6 @@ export const fixtures = {
   mapTray,
   railBriefRow: () => railBriefReady(false),
   railBriefOpened: () => railBriefReady(true),
-  homeBriefWaiting,
   mapBriefStart,
   mapBriefStory,
   mapBriefStates: () => mapBriefFigure("states"),
@@ -1039,62 +1096,6 @@ export const fixtures = {
     const snapScript = `[...document.querySelectorAll("summary, button")].find((el) => /^Idle/.test(el.textContent.trim()))?.click();`;
     return { ...base, sessions, selected: { session: sessions[1], agent: null }, snapScript };
   },
-  // Home, the waiting room (#238), at 1400x900: 4 running, 1 needs you, 1 unseen, 2 landed and 2 projects. It has no Quiz and no
-  // Retest (#347); the script checks none shows.
-  home() {
-    const now = Date.now();
-    const running = (id: string, name: string, minutes: number, intention: string, steps: number) =>
-      session(id, name, "running", { cwd: "/w/plotkeeper", turn_span: { start: now - minutes * 60e3, end: null }, transcript: { ...session("x", "x", "idle").transcript, intention, steps_ago: steps } });
-    const asking = session("s2", "#57 · Name from the prompt", "needs_you", {
-      cwd: "/w/plotkeeper",
-      questions: [{ tool_use_id: "q1", agent: null, answer: "open", turn: null, questions: [{ question: "Should the name come from the first prompt or from the branch?", options: [] }] }],
-    });
-    const sessions = [
-      running("s1", "#56 · Row controls", 14, "Make the row's controls reachable by keyboard.", 2),
-      asking,
-      running("s6", "#58 · Sounds row", 9, "Draw the sounds row with its toggle.", 0),
-      running("s7", "#59 · Agent deadline", 6, "Stop an agent that outlives its turn.", 7),
-      running("s8", "#61 · Sounds setting", 2, "Add the sounds toggle to the settings page.", 1),
-      session("s4", "#55 · Delete default", "your_turn", {
-        cwd: "/w/plotkeeper", unseen: true, last_event_at: now - 22 * 60e3,
-        turns: [{ started_at: now - 40 * 60e3, ended_at: now - 22 * 60e3, prompt: "Make delete keep the branch", id: null, message: "Delete now removes the worktree and keeps the branch.", checks: [], listed: [], files: null }],
-      }),
-      session("s3", "#54 · Subagent terminal", "idle", { cwd: "/w/plotkeeper", landed: true, identity: { issue: 54, branch: null, pr: null, worktree: "", name: "#54 · Subagent terminal" } }),
-      session("s5", "#48 · Agent deadline", "ended", { cwd: "/w/plotkeeper", landed: true }),
-    ];
-    const snapScript = `
-      if (document.querySelector(".pane.home .slot-card, .pane.home .quiz-region")) log("snap:fail Home shows a Quiz or a Retest");
-      if ([...document.querySelectorAll(".pane.home h2")].some((h) => h.textContent === "Retest")) log("snap:fail Home still has a Retest heading");`;
-    return { ...base, sessions, projects: [{ path: "/w/plotkeeper", gone: false }, { path: "/w/falinks", gone: false }], selected: null, snapScript };
-  },
-  // Home after Clear (#244): the landed rows are hidden, the Landed part is gone, and the toast offers Undo. The script clicks Clear on the heading.
-  homeClearToast(): Fixture {
-    const snapScript = `
-      const clear = document.querySelector(".pane.home h2 .clear");
-      if (!clear) log("snap:fail the Landed heading has no Clear");
-      else {
-        clear.click();
-        await new Promise((r) => setTimeout(r, 100));
-        const toast = document.getElementById("clear-toast");
-        if (toast.hidden || !/Undo/.test(toast.textContent)) log("snap:fail Clear shows no toast with Undo");
-        if (document.querySelector(".pane.home h2 .clear")) log("snap:fail the landed rows are still shown after Clear");
-      }`;
-    return { ...fixtures.home(), snapScript };
-  },
-  // Home refreshes on a stored card or summary (#226): the summary of an Unseen row's turn resolves after the first draw and the row's Headline
-  // changes once the summary arrives.
-  homeRefresh(): Fixture {
-    const f = fixtures.home();
-    const sessions = f.sessions.map((s) => (s.id === "s4" ? { ...s, turns: s.turns.map((t) => ({ ...t, id: "t4" })) } : s));
-    const summary = { summary: { summary: "Delete keeps the branch.", headline: "Delete keeps the branch (summary).", lines: [] } };
-    const snapScript = `
-      // The summary lands 3 s after the first draw (the script runs at 2.5 s): only a refresh draws its Headline.
-      const headline = () => document.querySelector('.pane.home [data-key="unseen s4"] .row-step')?.textContent;
-      if (headline() !== "Delete now removes the worktree and keeps the branch.") log("snap:fail the row does not show the turn's message before its summary: " + headline());
-      await new Promise((done) => setTimeout(done, 1000));
-      if (headline() !== "Delete keeps the branch (summary).") log("snap:fail an Unseen row's Headline did not update once its summary arrived: " + headline());`;
-    return { ...f, sessions, turn_summary: { __by: "id", values: { t4: { __delay: 3000, value: summary } as never } }, snapScript };
-  },
   // Errors in the notice line (#191): two errors and the dismiss control, beside a settings error.
   noticeErrors() {
     const snapScript = `
@@ -1110,7 +1111,7 @@ export const fixtures = {
     ];
     return { ...list(), settings_files: { settings: "{ bad", keymap: null }, appErrors, snapScript };
   },
-  // Alerts: two sessions' turns ended off screen (the note toast and the unseen chip), and one session past the 30% context
+  // Alerts: two sessions' turns ended off screen (the note toast), and one session past the 30% context
   // warning, whose row mark reads at full strength.
   alerts() {
     const context = (share: number) => ({ ...session("x", "x", "idle").transcript, context: { tokens: share * 10000, share, window: 1000000, left: 100 - share } });
@@ -1125,11 +1126,11 @@ export const fixtures = {
       await new Promise((done) => setTimeout(done, 50));
       const note = document.getElementById("note-toast");
       if (note.hidden || !note.textContent.includes("2 finished")) log("snap:fail the note toast should say 2 finished");
-      const unseen = document.getElementById("unseen");
-      if (unseen.hidden || unseen.textContent !== "2 unseen") log("snap:fail the unseen chip should say 2 unseen");
+      // The top bar has no unseen chip (#386): the unseen rows carry their mark in the list.
+      if (document.getElementById("unseen")) log("snap:fail the top bar still has an unseen chip");
       const past = [...document.querySelectorAll(".row .id.past")].map((mark) => mark.textContent);
       if (past.join() !== "context 34%") log("snap:fail only the 34% mark should be past the warning: " + past.join());
-      log("note: " + note.textContent + " · chip: " + unseen.textContent + " · past: " + past.join());`;
+      log("note: " + note.textContent + " · past: " + past.join());`;
     return { ...base, sessions, selected: { session: sessions[1], agent: null }, snapScript };
   },
   // The saved project list (#381): a project with no sessions keeps its header, after the one with sessions; a gone one is
@@ -1217,10 +1218,6 @@ export const fixtures = {
       if (shown.some((r) => r.left < box.left || r.right > box.right || r.top < box.top || r.bottom > box.bottom)) log("snap:fail ⌘0 left a part outside the map");
       if (places() !== before) log("snap:fail a part's saved position changed");
       log("camera ok: fitted at " + Math.round(fitted.scale * 100) + "% over " + shown.length + " items");`, { map_state: mapState() }),
-  // Home's quiet mark (#310): one row of two carries it, with no count.
-  homeFogMark: (): Fixture => homeMarked(false),
-  // Pressing the mark opens that project's Map view, not the new session its row starts.
-  homeFogMarkOpens: (): Fixture => homeMarked(true),
   // The Map view with fog (#310): thin and thick fog on Core and interface parts, and the part sheet of a thick one open.
   mapFog: () =>
     mapOpened(`
@@ -1295,9 +1292,16 @@ export const fixtures = {
       if (!review.textContent.includes("Little used so far: the Map view, the history strip and See the proof")) log("snap:fail the review's words: " + review.textContent);
       if (/\\d/.test(review.querySelector(".review-text").textContent)) log("snap:fail the review shows a count");
       log("review ok");`, { map_state: mapState(), stop_facts: dueFacts }),
-  // No review on Home, even when the Map view fell below its threshold (#384).
-  homeNoReview,
   // No map on the default branch: the empty state shows the drafting prompt to give to a session.
+  // The map as the page's base (#386), each also below 1007 px, where the list is its strip.
+  mapBase,
+  mapBaseNarrow: mapBase,
+  mapHeaderDot,
+  mapHeaderDotNarrow: mapHeaderDot,
+  mapFresh,
+  mapFreshNarrow: mapFresh,
+  mapNoMap,
+  mapNoMapNarrow: mapNoMap,
   mapEmpty: () =>
     mapOpened(`
       const draft = document.querySelector("#map .map-empty .map-draft");

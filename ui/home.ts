@@ -96,7 +96,7 @@ export function onWindowFocus(homeOpen: boolean, redraw: () => void) {
 if (typeof window !== "undefined") window.addEventListener?.("focus", () => onWindowFocus(homeShown(), redrawHome));
 async function readMarks(paths: string[], redraw: () => void) {
   marksStale = false;
-  const now = await invoke("map_marks", { projects: paths });
+  const now = (await invoke("map_marks", { projects: paths })).map((mark) => mark.project);
   const same = now.length === marked.size && now.every((path) => marked.has(path));
   if (same) return;
   marked.clear();

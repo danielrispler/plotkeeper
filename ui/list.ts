@@ -9,15 +9,57 @@ import { counts, times, type Time } from "./times.js";
 import { shortPaths } from "./paths.js";
 import { historyLink } from "./history.js";
 import { logo, logoKey, noContextNote } from "./logos.js";
-import { projectGroups, type ProjectGroup } from "./projects.js";
+import { knownProjects, projectGroups, projectOfCwd, type ProjectGroup } from "./projects.js";
+import { openMap, shownProject } from "./map.js";
+import { pressHeader } from "./map-model.js";
+import { closePanel, panelShown } from "./panel.js";
 import { redrawHistory, redrawHome, showHistory } from "./panes.js";
 import { isSelected, pressSession } from "./selection.js";
 import { studio } from "./state.js";
 import { titled } from "./keys.js";
-import { blockedWaits, stateLabels, type BlockedCommand, type Context, type Session, type SessionState, type Subagent } from "./types.js";
+import { blockedWaits, stateLabels, type BlockedCommand, type Context, type MarkWhy, type Session, type SessionState, type Subagent } from "./types.js";
 import { askDelete, lastHeadline, report } from "./story.js";
 import { hoverAgents, refreshAgents } from "./map-agents.js";
 import { showTitle } from "./alerts.js";
+
+// The project header's quiet dot (#386): Home's mark (#344), unchanged in meaning, drawn as the map's mist. Its hover names which of the three
+// lit it. The marks are read when the saved list changes and when the window gains focus, never on a timer.
+const marks = new Map<string, MarkWhy[]>();
+let marksStale = true;
+const whyText: Record<MarkWhy, string> = { fog: "A Core part you track has changed", broken: "A test that backs a law failed on main", brief: "A PR brief is waiting" };
+export const dotTitle = (why: MarkWhy[]): string => why.map((reason) => whyText[reason]).join("\n");
+export const staleDots = () => void (marksStale = true);
+async function readDots() {
+  marksStale = false;
+  const now = await invoke("map_marks", { projects: knownProjects() });
+  const key = (entries: [string, MarkWhy[]][]) => JSON.stringify(entries);
+  if (key(now.map((mark) => [mark.project, mark.why])) === key([...marks])) return;
+  marks.clear();
+  for (const mark of now) marks.set(mark.project, mark.why);
+  drawSidebar();
+}
+if (typeof window !== "undefined") {
+  window.addEventListener?.("focus", () => {
+    staleDots();
+    drawSidebar();
+  });
+}
+
+// A press on a project's header (#386): another project's map shows, and a session's panel of another project closes; on the shown project's
+// header it folds the group.
+function pressHead(path: string) {
+  const projectOf = (id: string) => {
+    const session = studio.listed.find((s) => s.id === id);
+    return session ? projectOfCwd(session.cwd) : null;
+  };
+  const next = pressHeader({ project: shownProject(), panel: panelShown() }, path, projectOf);
+  if (next === "fold") {
+    if (!shut.delete(path)) shut.add(path);
+    return drawSidebar();
+  }
+  if (next.panel === null && panelShown() !== null) closePanel();
+  openMap(next.project);
+}
 
 // The state groups folded in a project, idle only, and the idle groups Daniel opened, by project and state,
 // which stay open when the list is drawn again.
@@ -150,12 +192,6 @@ export function secondLine<T extends Lined>(session: T, headline: (session: T) =
 export function chipText(sessions: Pick<Session, "state">[]): string {
   const count = sessions.filter((session) => session.state === "needs_you").length;
   return count ? `${count} ${count === 1 ? "needs" : "need"} you` : "";
-}
-
-// The unseen chip's text: how many sessions finished a turn Daniel has not seen, "" with none.
-export function unseenText(sessions: Pick<Session, "unseen">[]): string {
-  const count = sessions.filter((session) => session.unseen).length;
-  return count ? `${count} unseen` : "";
 }
 
 // A session's subagents by the id of the agent that spawned them: "session", "unattached" or a
@@ -548,18 +584,22 @@ function projectMore(group: ProjectGroup<Session>): HTMLElement {
 // with no live session is its header only; one whose folder is gone is struck through (#381).
 export function projectHead(group: ProjectGroup<Session>): HTMLElement {
   const head = document.createElement("div");
-  head.className = group.gone ? "project-head gone" : "project-head";
+  head.className = ["project-head", ...(group.gone ? ["gone"] : []), ...(group.key === shownProject() ? ["current"] : [])].join(" ");
   head.dataset.key = `head ${group.key}`;
   head.dataset.project = group.key;
-  const toggle = pressable(text("button", "", "project-toggle"), false, () => {
-    if (!shut.delete(group.key)) shut.add(group.key);
-    drawSidebar();
-  });
+  const toggle = pressable(text("button", "", "project-toggle"), false, () => pressHead(group.key));
   toggle.removeAttribute("aria-pressed");
   toggle.setAttribute("aria-expanded", String(projectOpen(group.key)));
-  fullTitle(toggle, group.gone ? `${group.key} is gone` : group.key || group.name);
+  fullTitle(toggle, `${group.gone ? `${group.key} is gone` : group.key || group.name}\n${group.key === shownProject() ? "Fold or unfold its sessions" : "Show its map"}`);
   toggle.append(text("span", group.name, "name"));
   if (group.rollup) toggle.append(glyph(group.rollup));
+  const why = marks.get(group.key);
+  if (why?.length) {
+    const dot = text("span", "", "project-dot mist-swatch");
+    dot.title = dotTitle(why);
+    dot.setAttribute("aria-label", dot.title);
+    toggle.append(dot);
+  }
   head.append(toggle, projectMore(group));
   return head;
 }
@@ -598,6 +638,7 @@ function projectNode(group: ProjectGroup<Session>): HTMLElement {
 // The project groups (#97): one per repository, in the order its sessions are listed, then the saved projects with none (#381).
 // Patched, not rebuilt, so focus and text selection survive the update (danielrispler/Falinks#570).
 export function drawSidebar() {
+  if (marksStale && studio.projects.length) readDots().catch(failure("map_marks"));
   patch(element("groups"), projectGroups(sidebarSessions(studio.listed, landedClear.hidden), studio.projects).map(projectNode));
   patch(element("history-link"), [...historyLink(studio.listed, showHistory), ...clearLanded(landedToClear(studio.listed, landedClear.hidden))]);
 }
@@ -624,14 +665,9 @@ export function showSessions(sessions: Session[]) {
   const live = sidebarSessions(sessions, landedClear.hidden);
   drawSidebar();
   patch(element("strip"), strip(live));
-  element("no-sessions").hidden = sessions.length > 0;
   const chip = element("needs-you");
   chip.textContent = chipText(sessions);
   chip.hidden = chip.textContent === "";
   chip.title = "Go to the first session that needs you";
-  const unseen = element("unseen");
-  unseen.textContent = unseenText(live);
-  unseen.hidden = unseen.textContent === "";
   showTitle(live.filter((session) => session.unseen).length);
-  unseen.title = titled(studio.files.keymap, "Go to the newest unseen session", "studio::JumpToUnseen");
 }

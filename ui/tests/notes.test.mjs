@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { contextNote, crossings, finishedNote } from "../../dist/notes.js";
-import { pastWarning, unseenText } from "../../dist/list.js";
+import { pastWarning } from "../../dist/list.js";
 
 const session = (id, share, rest = {}) => ({
   id,
@@ -78,7 +78,3 @@ test("the finished note names the first listed session and its intention, and co
   assert.equal(finishedNote(["gone"], listed), null);
 });
 
-test("the unseen chip counts the unseen sessions, and says nothing with none", () => {
-  assert.equal(unseenText([{ unseen: true }, { unseen: false }, { unseen: true }]), "2 unseen");
-  assert.equal(unseenText([{ unseen: false }, {}]), "");
-});
