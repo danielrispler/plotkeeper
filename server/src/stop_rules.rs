@@ -96,8 +96,13 @@ fn log_file() -> Result<PathBuf, String> {
 
 /// Appends `event` to `file`, creating it and its folder.
 pub fn append(file: &Path, event: &Event) -> Result<(), String> {
-    let line = serde_json::to_string(event).map_err(|e| e.to_string())?;
     let _writing = WRITING.lock().unwrap();
+    append_held(file, event)
+}
+
+/// `append`, with `WRITING` held by the caller.
+fn append_held(file: &Path, event: &Event) -> Result<(), String> {
+    let line = serde_json::to_string(event).map_err(|e| e.to_string())?;
     if let Some(dir) = file.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
@@ -200,10 +205,12 @@ pub fn brief_use(events: &[Event], project: &str, merged: &BTreeSet<u64>) -> (u3
 /// Appends `event` unless the log already holds one of its kind for the same project and PR: a PR's brief is offered once.
 pub fn append_once(file: &Path, event: &Event) -> Result<bool, String> {
     let same = |e: &Event| e.kind == event.kind && e.project == event.project && e.pr == event.pr;
+    // Held across the read and the append, so two offers at once log one line.
+    let _writing = WRITING.lock().unwrap();
     if read(file).iter().any(same) {
         return Ok(false);
     }
-    append(file, event).map(|()| true)
+    append_held(file, event).map(|()| true)
 }
 
 /// The PRs merged on `repo`'s default branch at or after `since` (unix seconds), newest first: its first-parent commits whose
@@ -493,6 +500,24 @@ mod tests {
         assert!(!append_once(&file, &brief("2026-11-02", Kind::BriefOffered, 7)).unwrap());
         assert!(append_once(&file, &brief("2026-11-02", Kind::BriefOffered, 8)).unwrap());
         assert_eq!(read(&file).len(), 2);
+    }
+
+    #[test]
+    fn offers_of_one_brief_at_the_same_moment_log_one_line() {
+        for _ in 0..20 {
+            let dir = tempfile::tempdir().unwrap();
+            let file = dir.path().join(LOG_FILE);
+            let start = std::sync::Barrier::new(8);
+            std::thread::scope(|scope| {
+                for _ in 0..8 {
+                    scope.spawn(|| {
+                        start.wait();
+                        append_once(&file, &brief("2026-11-01", Kind::BriefOffered, 7)).unwrap();
+                    });
+                }
+            });
+            assert_eq!(read(&file).len(), 1);
+        }
     }
 
     #[test]
