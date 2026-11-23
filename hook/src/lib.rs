@@ -18,10 +18,59 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// The studio's data directory, which is Tauri's app data directory for the identifier in
-/// `src-tauri/tauri.conf.json`.
+/// The data folder, `~/Library/Application Support/plotkeeper/`: the one place that names it.
 pub fn data_dir(home: &Path) -> PathBuf {
-    home.join("Library/Application Support/dev.falinks.studio")
+    home.join("Library/Application Support").join(DATA_FOLDER)
+}
+
+const DATA_FOLDER: &str = "plotkeeper";
+
+/// The folder the data lived in before it was named for plotkeeper (#322).
+const OLD_DATA_FOLDER: &str = "dev.falinks.studio";
+
+/// The one move (#322): when the old data folder exists as a real folder and the new one does not,
+/// renames it to the new name and leaves a symbolic link at the old path, so the plugin path in
+/// `~/.zshrc` (through the folder's `checkout` link) and a hook still built with the old path keep
+/// working. Never moves over an existing new folder. Returns whether it moved.
+pub fn move_old_data_dir(home: &Path) -> std::io::Result<bool> {
+    let (new, old) = (
+        data_dir(home),
+        home.join("Library/Application Support")
+            .join(OLD_DATA_FOLDER),
+    );
+    let is_dir = |p: &Path| fs::symlink_metadata(p).is_ok_and(|m| m.is_dir());
+    if !is_dir(&old) || fs::symlink_metadata(&new).is_ok() {
+        return Ok(false);
+    }
+    // A second process that moved first leaves a link at `old` and a folder at `new`; losing the
+    // race is not an error.
+    if fs::rename(&old, &new).is_err() {
+        return Ok(false);
+    }
+    leave_link(&old)?;
+    Ok(true)
+}
+
+/// The symbolic link at `old`, which now names the new folder. Something that took the old path after the rename
+/// (a hook still built with the old path makes its folder) leaves it, and is no failure: the data moved.
+fn leave_link(old: &Path) -> std::io::Result<()> {
+    match std::os::unix::fs::symlink(DATA_FOLDER, old) {
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        other => other,
+    }
+}
+
+#[cfg(test)]
+mod link_tests {
+    #[test]
+    fn a_path_taken_after_the_rename_is_no_failure_of_the_move() {
+        let home = std::env::temp_dir().join(format!("plotkeeper-link-{}", std::process::id()));
+        let old = home.join("old");
+        std::fs::create_dir_all(&old).unwrap();
+        let left = super::leave_link(&old);
+        std::fs::remove_dir_all(&home).unwrap();
+        assert!(left.is_ok(), "{left:?}");
+    }
 }
 
 /// The log in the studio's data directory. The hook writes it; the app reads it.
@@ -805,6 +854,45 @@ fn first_tree(root: &str, began: Option<u64>) -> Option<(String, serde_json::Val
     }
 }
 
+/// The agent's process for the hook that runs now (#330): `wrapper`, the pid a wrapper script passed in
+/// `STUDIO_AGENT_PID` (agy's, which runs the hook from a backgrounded subshell), else the hook's
+/// `parent`, or its parent's parent when that is a shell the agent started the hook through.
+/// `inspect` gives a process's command and parent pid. `None` when no agent can be told, as for a hook
+/// reparented to init; the session then takes the idle path.
+pub fn agent_pid(
+    wrapper: Option<&str>,
+    parent: u32,
+    inspect: impl Fn(u32) -> Option<(String, u32)>,
+) -> Option<u32> {
+    let real = |pid: u32| (pid > 1).then_some(pid);
+    if let Some(pid) = wrapper.and_then(|w| w.trim().parse().ok()).and_then(real) {
+        return Some(pid);
+    }
+    let parent = real(parent)?;
+    match inspect(parent) {
+        Some((command, up)) if is_shell(&command) => real(up),
+        _ => Some(parent),
+    }
+}
+
+fn is_shell(command: &str) -> bool {
+    let name = command.rsplit('/').next().unwrap_or(command);
+    let name = name.trim_start_matches('-');
+    matches!(name, "sh" | "bash" | "zsh" | "dash" | "fish")
+}
+
+/// The command and parent pid of process `pid`, from `ps`; `None` when it has gone or `ps` fails.
+pub fn inspect(pid: u32) -> Option<(String, u32)> {
+    let out = Command::new("ps")
+        .args(["-o", "ppid=", "-o", "comm=", "-p", &pid.to_string()])
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    let text = String::from_utf8(out.stdout).ok()?;
+    let (parent, command) = text.trim().split_once(char::is_whitespace)?;
+    Some((command.trim().to_string(), parent.parse().ok()?))
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::Path;
@@ -865,15 +953,6 @@ mod tests {
         assert_eq!(turn.take(INTERRUPTED, Some("p1"), true), (vec![], false));
         assert!(!turn.ended);
         assert_eq!(turn.roots, ["/w/a"]);
-    }
-
-    #[test]
-    fn the_log_lives_in_the_data_directory_of_the_apps_identifier() {
-        let conf: serde_json::Value =
-            serde_json::from_str(include_str!("../../src-tauri/tauri.conf.json")).unwrap();
-        let identifier = conf["identifier"].as_str().unwrap();
-        let data = Path::new("/h/Library/Application Support").join(identifier);
-        assert_eq!(super::event_log(Path::new("/h")), data.join("events.jsonl"));
     }
 
     #[test]

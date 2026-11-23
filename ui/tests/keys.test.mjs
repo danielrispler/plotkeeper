@@ -1,64 +1,11 @@
-// The terminal pane's key mapping (danielrispler/Falinks#466), run on the `tsc` output. Run: `npm test`.
+// The page's key mapping (danielrispler/Falinks#466, #326), run on the `tsc` output. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { bound, doctorEntries, titled, keyAction, keyLabel, keystroke, newestUnseen, nextNeedsYou, stepLine, paletteEntries, run, stepSession, windowBinding } from "../../dist/keys.js";
+import { bound, titled, keyLabel, keystroke, newestUnseen, nextNeedsYou, stepLine, paletteEntries, run, stepSession, windowBinding } from "../../dist/keys.js";
 import { initial, reload } from "../../dist/settings.js";
 
 const key = (code, mods = {}, key = "") => ({
   key, code, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...mods,
-});
-
-test("Cmd+V with an image on the clipboard sends Ctrl+V, so Claude Code reads the clipboard itself", () => {
-  assert.deepEqual(keyAction(key("KeyV", { metaKey: true }), true), { send: "\x16" });
-});
-
-test("Cmd+V with text leaves the paste to the webview, which xterm turns into a bracketed paste", () => {
-  assert.equal(keyAction(key("KeyV", { metaKey: true }), false), "native");
-});
-
-test("Cmd+C copies through the webview and Ctrl+C stays the terminal's interrupt", () => {
-  assert.equal(keyAction(key("KeyC", { metaKey: true }), false), "native");
-  assert.equal(keyAction(key("KeyC", { ctrlKey: true }, "c"), false), "terminal");
-});
-
-test("Ctrl+V reaches the terminal as is", () => {
-  assert.equal(keyAction(key("KeyV", { ctrlKey: true }, "v"), true), "terminal");
-});
-
-test("Shift+Enter sends ESC CR, a newline Claude Code accepts", () => {
-  assert.deepEqual(keyAction(key("Enter", { shiftKey: true }, "Enter"), false), { send: "\x1b\r" });
-  assert.equal(keyAction(key("Enter", {}, "Enter"), false), "terminal");
-});
-
-test("Option acts as Meta, by the physical key, whatever the layout types", () => {
-  assert.deepEqual(keyAction(key("KeyB", { altKey: true }, "∫"), false), { send: "\x1bb" });
-  assert.deepEqual(keyAction(key("KeyB", { altKey: true, shiftKey: true }, "ı"), false), { send: "\x1bB" });
-  assert.deepEqual(keyAction(key("Digit3", { altKey: true }, "£"), false), { send: "\x1b3" });
-  assert.deepEqual(keyAction(key("ArrowLeft", { altKey: true }), false), { send: "\x1bb" });
-  assert.deepEqual(keyAction(key("ArrowRight", { altKey: true }), false), { send: "\x1bf" });
-  assert.deepEqual(keyAction(key("Backspace", { altKey: true }), false), { send: "\x1b\x7f" });
-});
-
-test("Esc and Shift+Tab are the terminal's own", () => {
-  assert.equal(keyAction(key("Escape", {}, "Escape"), false), "terminal");
-  assert.equal(keyAction(key("Tab", { shiftKey: true }, "Tab"), false), "terminal");
-});
-
-test("the terminal's Cmd shortcuts", () => {
-  const cmd = (code) => keyAction(key(code, { metaKey: true }), false);
-  assert.deepEqual(cmd("KeyA"), { command: "selectAll" });
-  assert.deepEqual(cmd("KeyF"), { command: "find" });
-  assert.deepEqual(cmd("KeyK"), { command: "clear" });
-  assert.deepEqual(cmd("ArrowLeft"), { send: "\x01" });
-  assert.deepEqual(cmd("ArrowRight"), { send: "\x05" });
-  assert.deepEqual(cmd("Backspace"), { send: "\x15" });
-});
-
-test("every other Cmd shortcut goes to the app", () => {
-  for (const code of ["Digit1", "Digit2", "KeyQ", "KeyW", "KeyH", "KeyM", "Comma", "KeyT"]) {
-    assert.equal(keyAction(key(code, { metaKey: true }), false), "app", code);
-  }
-  assert.equal(keyAction(key("KeyC", { metaKey: true, shiftKey: true }), false), "app");
 });
 
 test("keystrokes read as Zed writes them, by the physical key", () => {
@@ -75,16 +22,14 @@ test("a rebound shortcut triggers its action, and the old key no longer does", (
     settings: null,
     keymap: `[
       { "context": "Workspace", "bindings": { "cmd-l": "studio::ToggleList" } },
-      { "context": "Terminal", "bindings": { "cmd-shift-k": "terminal::Clear", "cmd-left": null } },
+      { "context": "List", "bindings": { "down": null } },
     ]`,
   });
   assert.equal(bound(keymap, "Workspace", key("KeyL", { metaKey: true }, "l")), "studio::ToggleList");
   assert.equal(bound(keymap, "Workspace", key("Digit1", { metaKey: true }, "1")), undefined);
   assert.equal(bound(keymap, "Workspace", key("Digit2", { metaKey: true }, "2")), "studio::ToggleRail");
-  assert.deepEqual(keyAction(key("KeyK", { metaKey: true, shiftKey: true }), false, keymap), { command: "clear" });
-  assert.equal(keyAction(key("KeyK", { metaKey: true }), false, keymap), "app");
-  assert.equal(keyAction(key("ArrowLeft", { metaKey: true }), false, keymap), "app");
-  assert.deepEqual(keyAction(key("ArrowRight", { metaKey: true }), false, keymap), { send: "\x05" });
+  assert.equal(windowBinding(keymap, key("ArrowDown"), false, true), undefined);
+  assert.equal(windowBinding(keymap, key("ArrowUp"), false, true), "studio::SelectPrevious");
 });
 
 test("while typing, a window shortcut without Cmd leaves the key to the field, except Esc's dismiss", () => {
@@ -96,7 +41,7 @@ test("while typing, a window shortcut without Cmd leaves the key to the field, e
   assert.equal(windowBinding(keymap, key("Digit1", { altKey: true }, "1"), true), undefined);
   assert.equal(windowBinding(keymap, key("KeyL", { ctrlKey: true }, "l"), false), "studio::ToggleList");
   assert.equal(windowBinding(keymap, key("Escape", {}, "Escape"), true), "studio::Dismiss");
-  assert.equal(windowBinding(keymap, key("Equal", { metaKey: true }, "="), true), "studio::ZoomIn");
+  assert.equal(windowBinding(keymap, key("KeyL", { metaKey: true }, "l"), true), undefined);
 });
 
 // The keyboard spine and the palette (danielrispler/Falinks#575).
@@ -106,7 +51,7 @@ test("each default key of the spine runs its action", () => {
   const ran = [];
   const actions = Object.fromEntries(
     ["studio::NextSession", "studio::PreviousSession", "studio::NextNeedsYou", "studio::SelectNext", "studio::SelectPrevious",
-      "studio::Answer", "studio::NewSession", "studio::OpenSettings", "studio::Palette"].map((name) => [name, (arg) => ran.push(arg ? `${name} ${arg}` : name)]),
+      "studio::Answer", "studio::Palette"].map((name) => [name, (arg) => ran.push(arg ? `${name} ${arg}` : name)]),
   );
   const cmd = { metaKey: true };
   run(actions, press("BracketRight", cmd));
@@ -115,27 +60,19 @@ test("each default key of the spine runs its action", () => {
   run(actions, windowBinding(initial.keymap, key("ArrowDown"), false, true));
   run(actions, windowBinding(initial.keymap, key("ArrowUp"), false, true));
   for (const n of ["1", "2", "3", "4"]) run(actions, press(`Digit${n}`));
-  run(actions, press("KeyN", cmd));
-  run(actions, press("Comma", cmd));
   run(actions, press("KeyP", { metaKey: true, shiftKey: true }));
   assert.deepEqual(ran, [
     "studio::NextSession", "studio::PreviousSession", "studio::NextNeedsYou", "studio::SelectNext", "studio::SelectPrevious",
     "studio::Answer 1", "studio::Answer 2", "studio::Answer 3", "studio::Answer 4",
-    "studio::NewSession", "studio::OpenSettings", "studio::Palette",
+    "studio::Palette",
   ]);
   // The list's context falls back to the window's, and ↑ and ↓ move only while the list has focus.
   assert.equal(windowBinding(initial.keymap, key("BracketRight", { metaKey: true }), false, true), "studio::NextSession");
   assert.equal(windowBinding(initial.keymap, key("ArrowDown"), false), undefined);
 });
 
-test("the digits that answer, and plain control-letters, reach the terminal while it has focus", () => {
-  assert.equal(windowBinding(initial.keymap, key("Digit1", {}, "1"), true), undefined);
-  assert.equal(windowBinding(initial.keymap, key("KeyJ", { ctrlKey: true }, "j"), true), undefined);
-  assert.equal(keyAction(key("KeyJ", { ctrlKey: true }, "j"), false), "terminal");
-});
-
-test("the digits never answer from the terminal, and answer from the list only while the card is on screen", () => {
-  // From the terminal (typing): the digit is the terminal's, even with a card on screen.
+test("the digits never answer while typing, and answer from the list only while the card is on screen", () => {
+  // While typing: the digit is the field's, even with a card on screen.
   assert.equal(windowBinding(initial.keymap, key("Digit2", {}, "2"), true, false, true), undefined);
   assert.deepEqual(windowBinding(initial.keymap, key("Digit2", {}, "2"), false, true, true), ["studio::Answer", "2"]);
   // Not while focus mode or a closed overlay hides the card.
@@ -236,8 +173,8 @@ test("the palette lists every action the window runs, each with its current key,
   assert.deepEqual(find("Answer 3").keys, ["3"]);
   // An action with no default key, such as a later menu, is listed too.
   assert.deepEqual(find("Doctor").keys, []);
-  // Only the actions the window runs: not the terminal's, nor one the window does not have.
-  assert.equal(entries.some((entry) => entry.title === "Clear" || entry.title === "Zoom in"), false);
+  // Only the actions the page runs, not one it does not have.
+  assert.equal(entries.some((entry) => entry.title === "Zoom in"), false);
   assert.equal(new Set(entries.map((entry) => entry.title)).size, entries.length);
   run(actions, find("Toggle list").binding);
   run(actions, find("Answer 3").binding);
@@ -252,35 +189,6 @@ test("every default window action has a title and a key in the palette", () => {
   assert.deepEqual(entries.find((entry) => entry.title === "Next session").keys, ["⌘]"]);
   assert.deepEqual(entries.find((entry) => entry.title === "Select next").keys, ["↓"]);
   assert.deepEqual(entries.find((entry) => entry.title === "Toggle focus").keys, ["⇧⌘↩"]);
-  assert.deepEqual(entries.find((entry) => entry.title === "Toggle split").keys, ["⌘D"]);
-  assert.deepEqual(entries.find((entry) => entry.title === "Toggle panel").keys, ["⌃`"]);
-});
-
-// The terminal panel (danielrispler/Falinks#542): its key works from inside a terminal too, as in VS Code.
-test("ctrl-` toggles the panel, from the terminal too; a rebound key toggles it and the old one does not", () => {
-  const backquote = key("Backquote", { ctrlKey: true }, "`");
-  assert.equal(windowBinding(initial.keymap, backquote, true), "studio::TogglePanel");
-  // xterm skips it, so the window's handler gets it.
-  assert.equal(keyAction(backquote, false), "app");
-  const { keymap } = reload(initial, { settings: null, keymap: `[{ "bindings": { "ctrl-j": "studio::TogglePanel" } }]` });
-  assert.equal(windowBinding(keymap, key("KeyJ", { ctrlKey: true }, "j"), true), "studio::TogglePanel");
-  assert.equal(keyAction(key("KeyJ", { ctrlKey: true }, "j"), false, keymap), "app");
-  assert.equal(windowBinding(keymap, backquote, true), undefined);
-  assert.equal(keyAction(backquote, false, keymap), "terminal");
-});
-
-test("the Doctor's entries are palette actions, each warned by its kind, and the defaults show with none in settings", () => {
-  const { settings } = reload(initial, { settings: `{ "zoom": 1 }`, keymap: null });
-  assert.deepEqual(
-    doctorEntries(settings.doctor).map(({ binding, title, note }) => [binding, title, note]),
-    [
-      [["studio::Doctor", "claude doctor"], "Doctor: Check the installation", "no tokens"],
-      [["studio::Doctor", "/doctor"], "Doctor: Full checkup", "starts a Claude session, spends tokens"],
-    ],
-  );
-  // The warning comes from the kind, not the label or the command.
-  const [own] = doctorEntries([{ label: "Audit", command: "claude doctor", kind: "session" }]);
-  assert.equal(own.note, "starts a Claude session, spends tokens");
 });
 
 test("↑ and ↓ move the palette's highlighted row, and the window's keys leave them to its field (#24)", () => {
@@ -289,7 +197,7 @@ test("↑ and ↓ move the palette's highlighted row, and the window's keys leav
   assert.equal(windowBinding(initial.keymap, key("ArrowUp"), true), undefined);
 });
 
-test("the arrow keys step over session rows and subagent lines only, never a workspace row", () => {
+test("the arrow keys step over session rows and subagent lines only, never another row", () => {
   const line = (classes, current = false) => ({ classes, current });
   const lines = [line(["row", "session-row"]), line(["row", "worker"]), line(["row"]), line(["row", "session-row"]), line(["row", "helper"])];
   assert.equal(stepLine(lines, 1), 0);
@@ -311,42 +219,12 @@ test("next needs-you and jump to unseen over the sidebar's sessions never land o
   assert.equal(stepSession(sidebar, "b", 1), "a");
 });
 
-test("Cmd+N opens the picker as before and Cmd+T opens it on Terminal (#159)", () => {
-  assert.equal(windowBinding(initial.keymap, key("KeyN", { metaKey: true }), false), "studio::NewSession");
-  assert.equal(windowBinding(initial.keymap, key("KeyT", { metaKey: true }), false), "studio::NewTerminal");
-});
-
 test("a button's title names the key the keymap binds its action to now (#159)", () => {
-  assert.equal(titled(initial.keymap, "Settings", "studio::OpenSettings"), "Settings (⌘,)");
-  const rebound = reload(initial, { settings: "{}", keymap: JSON.stringify([{ context: "Window", bindings: { "cmd-.": "studio::OpenSettings" } }]) });
-  assert.ok(titled(rebound.keymap, "Settings", "studio::OpenSettings").includes("⌘."), "the rebound key shows");
-  assert.equal(titled({}, "Settings", "studio::OpenSettings"), "Settings");
+  assert.equal(titled(initial.keymap, "Home", "studio::GoHome"), "Home (⇧⌘H)");
+  const rebound = reload(initial, { settings: "{}", keymap: JSON.stringify([{ context: "Window", bindings: { "cmd-.": "studio::GoHome" } }]) });
+  assert.ok(titled(rebound.keymap, "Home", "studio::GoHome").includes("⌘."), "the rebound key shows");
+  assert.equal(titled({}, "Home", "studio::GoHome"), "Home");
 });
 
 // The settings page (#195): ⌘, opens it, Esc closes it even from a control in it, and the raw file's action is in the palette, unbound.
-test("⌘, opens the settings page, Esc closes it from a control in it, and Open settings file is in the palette unbound", () => {
-  const ran = [];
-  const actions = Object.fromEntries(["studio::OpenSettings", "studio::OpenSettingsFile", "studio::Dismiss"].map((name) => [name, () => ran.push(name)]));
-  run(actions, press("Comma", { metaKey: true }));
-  // A dropdown in the page has focus: it is a field, so only Dismiss runs.
-  run(actions, windowBinding(initial.keymap, key("Escape", {}, "Escape"), true));
-  assert.deepEqual(ran, ["studio::OpenSettings", "studio::Dismiss"]);
-  const entry = paletteEntries(initial.keymap, Object.keys(actions)).find((e) => e.title === "Open settings file");
-  assert.deepEqual(entry?.keys, []);
-  assert.equal(paletteEntries(initial.keymap, Object.keys(actions)).find((e) => e.title === "Open settings")?.keys[0], "⌘,");
-});
-
 // The settings page is a dialog over the window (#193): while it is open, the window's keys behind it stay still, and only Dismiss runs.
-test("while the settings page is open only Esc runs, not the digits, ⌘N or ⌘T behind it", () => {
-  const answerable = true;
-  const modal = true;
-  assert.equal(windowBinding(initial.keymap, key("Escape", {}, "Escape"), false, false, answerable, modal), "studio::Dismiss");
-  assert.equal(windowBinding(initial.keymap, key("Escape", {}, "Escape"), true, false, answerable, modal), "studio::Dismiss");
-  assert.equal(windowBinding(initial.keymap, key("Digit1", {}, "1"), false, false, answerable, modal), undefined);
-  assert.equal(windowBinding(initial.keymap, key("KeyN", { metaKey: true }), false, false, answerable, modal), undefined);
-  assert.equal(windowBinding(initial.keymap, key("KeyT", { metaKey: true }), false, false, answerable, modal), undefined);
-  assert.equal(windowBinding(initial.keymap, key("KeyD", { metaKey: true }), false, false, answerable, modal), undefined);
-  // Closed, they run as before.
-  assert.deepEqual(windowBinding(initial.keymap, key("Digit1", {}, "1"), false, false, answerable), ["studio::Answer", "1"]);
-  assert.equal(windowBinding(initial.keymap, key("KeyN", { metaKey: true }), false), "studio::NewSession");
-});

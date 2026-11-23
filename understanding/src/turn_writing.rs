@@ -12,7 +12,7 @@ use crate::{
     write_goal, write_name,
 };
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     panic::{self, AssertUnwindSafe},
     sync::{Arc, Mutex},
     thread,
@@ -77,6 +77,8 @@ struct State {
     decided: Mutex<HashMap<String, Decision>>,
     /// The turns whose decision was a lone Quiz, by turn id, until their summary puts it on record.
     lone: Mutex<HashMap<String, Decision>>,
+    /// The backfill cards queued or being written, by turn id: opening a turn twice quickly asks for one card.
+    backfilling: Mutex<HashSet<String>>,
 }
 
 impl TurnWriting {
@@ -124,6 +126,7 @@ impl TurnWriting {
             changes: Mutex::default(),
             decided: Mutex::default(),
             lone: Mutex::default(),
+            backfilling: Mutex::default(),
         };
         TurnWriting {
             state: Arc::new(state),
@@ -166,7 +169,16 @@ impl TurnWriting {
             .into_iter()
             .filter(|b| !recorded.settled(&b.request.session_id, &b.request.id));
         for request in turns.filter_map(backfilled) {
+            let (id, session) = (request.id.clone(), request.session_id.clone());
+            if !self.state.backfilling.lock().unwrap().insert(id.clone()) {
+                continue;
+            }
             self.write(request, true, false);
+            let state = self.state.clone();
+            let done = move || {
+                state.backfilling.lock().unwrap().remove(&id);
+            };
+            self.queue(session, Box::new(done));
         }
     }
 

@@ -77,6 +77,9 @@ export class El {
   addEventListener(name, run) {
     this.listeners[name] = run;
   }
+  removeEventListener(name) {
+    delete this.listeners[name];
+  }
   get textContent() {
     return this.text;
   }

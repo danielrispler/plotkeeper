@@ -5,7 +5,6 @@
 import { blockedRequestFor, sendBlockedAnswer } from "./answer.js";
 import { code, failure, invoke, text } from "./dom.js";
 import { counts, duration } from "./times.js";
-import { typeInto, type TypingIo } from "./typing.js";
 import { blockedWaits, type BlockedCommand, type BlockedStatus, type RiskLevel, type RiskView } from "./types.js";
 
 export type BlockedView = {
@@ -125,29 +124,11 @@ const tailText = (read: BlockedOutput | null): string => (read?.tail.trim() ? re
 // The tails read so far, by the run's call id.
 const tails = new Map<string, BlockedOutput | null>();
 
-// How long a late Allow's retry line waits for its answer to reach the session.
-const ANSWER_MS = 3_000;
-
-// The line typed into the session's terminal to have the agent retry `card`'s command: for the session's own block, or,
+// The line to give the session to have the agent retry `card`'s command: for the session's own block, or,
 // when `agent` (the subagent's name) asked, one that tells the session to run it in the subagent's folder.
 export function retryLine(card: BlockedCommand, agent: string | null): string {
   if (agent === null) return `Daniel approved the blocked command: \`${card.command}\`. Run it again.`;
   return `Daniel approved the command subagent \`${agent}\` was blocked on. Run \`cd ${card.cwd}\` as its own Bash call, then run exactly: \`${card.command}\`. Or pass it to the subagent if it still runs.`;
-}
-
-// Types the retry line of `card` into terminal `id`, through `typeInto`: never over Daniel's draft or into a session that needs him.
-// It first waits, up to 3 s, until `answered`: a late Allow's answer has reached the session and ended the needs-you of its block.
-export async function typeRetry(
-  card: BlockedCommand,
-  agent: string | null,
-  id: string,
-  blocked: () => boolean,
-  io: TypingIo,
-  answered: () => boolean = () => true,
-): Promise<boolean> {
-  const until = io.now() + ANSWER_MS;
-  while (!answered() && io.now() < until) await io.sleep(100);
-  return typeInto(id, retryLine(card, agent), blocked, io);
 }
 
 // What the card shows for `card`, asked by `agent` (the subagent's name, null for the session's own agent), or null once
@@ -177,7 +158,7 @@ export function blockedView(
   };
 }
 
-// `retry` types the card's retry line into the session's terminal (`story.ts`).
+// `retry` shows the card's retry line to give the session (`story.ts`).
 export function blockedElement(session: string, card: BlockedCommand, agent: string | null, retry: (card: BlockedCommand) => void, note?: RiskView, reads = true): HTMLElement | null {
   const request = blockedRequestFor(card.call);
   const read = outputCall(card);
@@ -226,7 +207,7 @@ export function blockedElement(session: string, card: BlockedCommand, agent: str
         }
         if (request === null) return;
         const took = await sendBlockedAnswer(session, request, label === "Allow" ? "allow" : "deny");
-        // Its hook had returned, so nothing waited for the click: the agent is asked to retry in its terminal.
+        // Its hook had returned, so nothing waited for the click: the agent is asked to retry.
         if (label === "Allow" && took === "late") retry(card);
       });
       row.append(button);

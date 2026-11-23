@@ -127,7 +127,7 @@ test("while running, only a check whose last run failed shows", () => {
   assert.equal(evidenceElement("s1", 9, { files: null, checks: [check("cargo test", "passed")] }, { only: "failed" }), null);
 });
 
-test("a file row opens its hunk in place, opens the editor at the first changed line, and stays open across a refresh", async () => {
+test("a file row opens its hunk in place and stays open across a refresh", async () => {
   const calls = [];
   const hunk = { text: "@@ -1 +1,2 @@\n a\n+b\n", left_out: 12, binary: false, first_line: 2 };
   tauri(calls, (command) => (command === "turn_file_hunk" ? hunk : null));
@@ -164,12 +164,6 @@ test("a file row opens its hunk in place, opens the editor at the first changed 
   assert.ok(same(line.childNodes, inner));
   assert.ok(!line.find("ul")[0].hasAttribute("hidden"));
   items.forEach((li, i) => li !== row && assert.deepEqual(li.find("pre").map((p) => p.hasAttribute("hidden")), state[i]));
-
-  // "Open in editor" goes to the first changed line, from the worktree's folder.
-  row.find("button")[1].listeners.click();
-  const { editor, ...opened } = calls.at(-1)[1];
-  assert.equal(calls.at(-1)[0], "open_file");
-  assert.deepEqual(opened, { path: "a.rs", line: 2, column: 1, cwd: "/r" });
 
   // A refresh draws it open again, with the hunk kept.
   const again = make();

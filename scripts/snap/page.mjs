@@ -1,28 +1,26 @@
-// The page `npm run snap` renders: dist's index.html with a stub Tauri API in front of the app's
-// module script. The stub answers each command from the fixture's key of that name, else null.
-// It exists only in the page written to a temp directory, never in dist or the shipped app.
+// The page `npm run snap` renders: dist's index.html with the page's transport stubbed in front of the app's module script: `fetch`
+// answers `POST /api/<command>` from the fixture's key of that name, else null, and `EventSource` takes the page's listeners, which
+// `window.__snapEmit(name, payload)` and the fixture's `appErrors` raise as the server's stream would.
+// It exists only in the page written to a temp directory, never in dist or the shipped page.
 
 import { hoverAudit } from "./hover.mjs";
 
-export const stubSource = (fixture) => `window.__TAURI__ = (() => {
+export const stubSource = (fixture) => `(() => {
   const fixture = ${JSON.stringify(fixture)};
   const listeners = {};
-  // The app's errors are the fixture's appErrors key (none by default), sent on \`log://log\` as its Webview target sends them.
-  const listen = async (name, handler) => {
-    (listeners[name] ??= []).push(handler);
-    if (name === "log://log") for (const message of fixture.appErrors ?? []) setTimeout(() => handler({ payload: { level: 5, message } }));
-    return () => {};
-  };
-  // The daemon's terminals are the fixture's terminals key (none by default). A list request is answered with them, which the
-  // terminals' revival waits for, and an attach with the terminal's recorded screen, as the daemon replays it at start.
-  const terminals = fixture.terminals ?? [];
-  const emit = (payload) => setTimeout(() => (listeners.terminal ?? []).forEach((h) => h({ payload })));
-  const invoke = async (command, args) => {
-    if (command === "terminal_send" && args?.msg?.op === "list") emit({ ev: "list", terms: terminals.map(({ replay, ...listed }) => listed) });
-    if (command === "terminal_send" && args?.msg?.op === "attach") {
-      const found = terminals.find((t) => t.id === args.msg.id);
-      if (found) emit({ ev: "replay", id: found.id, ...found.replay, exited: found.exited });
+  const fire = (name, payload) => (listeners[name] ?? []).forEach((h) => h({ data: JSON.stringify(payload) }));
+  // The app's errors are the fixture's appErrors key (none by default), sent on \`log://log\` as the page's log target sends them.
+  window.EventSource = class {
+    addEventListener(name, handler) {
+      (listeners[name] ??= []).push(handler);
+      if (name === "log://log") for (const message of fixture.appErrors ?? []) setTimeout(() => handler({ data: JSON.stringify({ level: 5, message }) }));
     }
+    removeEventListener(name, handler) {
+      listeners[name] = (listeners[name] ?? []).filter((h) => h !== handler);
+    }
+    close() {}
+  };
+  const invoke = async (command, args) => {
     const reply = fixture[command];
     // A reply that depends on one argument: { __by: "id", values: { <id>: reply } }.
     const found = reply?.__by ? (reply.values[args?.[reply.__by]] ?? null) : reply;
@@ -35,12 +33,19 @@ export const stubSource = (fixture) => `window.__TAURI__ = (() => {
     }
     return found ?? null;
   };
-  // The UI's own log lines are not echoed back: the app's Webview target drops records from the webview. Only an app error
-  // reaches the page on \`log://log\`.
-  const log = { warn: async () => {}, error: async () => {} };
-  // A fixture's script raises a shell event with __emit, as the shell's emit would.
-  const __emit = (name, payload) => (listeners[name] ?? []).forEach((h) => h({ payload }));
-  return { event: { listen }, core: { invoke }, log, __emit };
+  // The page's own log lines (\`/api/log\`) are not echoed back; only an app error reaches the page, on \`log://log\`.
+  window.fetch = async (url, init) => {
+    const command = /\\/api\\/(\\w+)$/.exec(String(url))?.[1];
+    if (!command) return { ok: false, status: 404, json: async () => "no such command" };
+    try {
+      const reply = command === "log" ? null : await invoke(command, init?.body ? JSON.parse(init.body) : undefined);
+      return { ok: true, status: 200, json: async () => reply };
+    } catch (why) {
+      return { ok: false, status: 500, json: async () => String(why) };
+    }
+  };
+  // A fixture's script raises a server event with __snapEmit, as the stream would.
+  window.__snapEmit = fire;
 })();`;
 
 // What runs in the page's head, after the stub: the body's classes (set once the body exists), then the fixture's script once

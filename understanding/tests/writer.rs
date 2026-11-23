@@ -180,7 +180,7 @@ fn the_app_shuffles_the_quizs_options_and_the_key_and_reasons_move_with_them() {
 
 #[test]
 fn the_writer_places_no_option_and_never_names_options_by_letter() {
-    let folder = Path::new("/h/Library/Application Support/dev.falinks.studio/card-writer");
+    let folder = Path::new("/h/Library/Application Support/plotkeeper/card-writer");
     let (_, prompt) = ClaudeWriter::new(CLAUDE.into(), folder.into()).command(&edit(), &[]);
 
     assert!(!prompt.contains("random place"), "{prompt}");
@@ -465,7 +465,7 @@ const RULES: [&str; 6] = [
 // @law: writer-has-no-tools
 #[test]
 fn the_real_writer_runs_claude_on_the_subscription_in_its_neutral_folder() {
-    let folder = Path::new("/h/Library/Application Support/dev.falinks.studio/card-writer");
+    let folder = Path::new("/h/Library/Application Support/plotkeeper/card-writer");
     let earlier = ["`Card` קיבל שדה `summary`.".to_string()];
     let (command, prompt) =
         ClaudeWriter::new(CLAUDE.into(), folder.into()).command(&edit(), &earlier);
@@ -481,6 +481,7 @@ fn the_real_writer_runs_claude_on_the_subscription_in_its_neutral_folder() {
             (OsStr::new("ANTHROPIC_API_KEY"), None),
             (OsStr::new("ANTHROPIC_AUTH_TOKEN"), None),
             (OsStr::new("CLAUDE_CODE_PLUGIN_DIRS"), None),
+            (OsStr::new("PLOTKEEPER_INTERNAL"), Some(OsStr::new("1"))),
         ]
     );
     let args: Vec<_> = command
@@ -531,7 +532,7 @@ fn every_writer_run_is_in_safe_mode() {
 
 #[test]
 fn an_oversized_goal_input_cuts_the_oldest_prompts_first() {
-    let folder = Path::new("/h/Library/Application Support/dev.falinks.studio/card-writer");
+    let folder = Path::new("/h/Library/Application Support/plotkeeper/card-writer");
     let writer = ClaudeWriter::new(CLAUDE.into(), folder.into());
     // Three prompts of 30 KiB each, 90 KiB in all.
     let prompts: Vec<String> = ["first", "second", "third"]
@@ -553,7 +554,7 @@ fn an_oversized_goal_input_cuts_the_oldest_prompts_first() {
 
 #[test]
 fn a_goal_whose_newest_prompt_alone_is_over_the_budget_keeps_its_start() {
-    let folder = Path::new("/h/Library/Application Support/dev.falinks.studio/card-writer");
+    let folder = Path::new("/h/Library/Application Support/plotkeeper/card-writer");
     let writer = ClaudeWriter::new(CLAUDE.into(), folder.into());
     // A pasted log of 100 KiB.
     let pasted = format!("Why does this fail?\n{}", "x".repeat(100 << 10));
@@ -588,7 +589,7 @@ fn every_prompt_asks_for_english_and_none_for_hebrew() {
 
 #[test]
 fn explain_more_runs_the_same_writer_on_the_cards_explanation_and_its_change() {
-    let folder = Path::new("/h/Library/Application Support/dev.falinks.studio/card-writer");
+    let folder = Path::new("/h/Library/Application Support/plotkeeper/card-writer");
     let writer = ClaudeWriter::new(CLAUDE.into(), folder.into());
     let card = good_card();
 
@@ -610,7 +611,7 @@ fn explain_more_runs_the_same_writer_on_the_cards_explanation_and_its_change() {
 
 #[test]
 fn a_huge_change_is_cut_so_the_prompt_stays_small() {
-    let folder = Path::new("/h/Library/Application Support/dev.falinks.studio/card-writer");
+    let folder = Path::new("/h/Library/Application Support/plotkeeper/card-writer");
     // A new file of 100 000 two-byte letters, as added lines.
     let request = CardRequest {
         change: Some(format!("+{}\n", "א".repeat(100_000))),
@@ -793,6 +794,7 @@ fn setup() -> SummarySetup {
     SummarySetup {
         model: "claude-haiku-4-5".into(),
         effort: "medium".into(),
+        ..SummarySetup::default()
     }
 }
 
@@ -1275,13 +1277,44 @@ fn a_writer_that_cannot_start_gives_one_notice_until_a_call_works() {
 }
 
 #[test]
-fn a_writer_that_starts_and_fails_raises_no_notice() {
+fn a_writer_that_starts_and_fails_tells_why_and_what_to_do_once_until_a_call_works() {
     let dir = tempfile::tempdir().unwrap();
-    let claude = shell(dir.path(), "claude", "exit 3");
+    let claude = shell(
+        dir.path(),
+        "claude",
+        "echo 'Not logged in. Please run /login'; exit 1",
+    );
     let (writer, heard) = watched(&claude, dir.path());
 
-    assert!(writer.reply(&edit(), &[]).is_err());
-    assert!(heard.lock().unwrap().is_empty());
+    for _ in 0..3 {
+        assert!(writer.reply(&edit(), &[]).is_err());
+    }
+    {
+        let heard = heard.lock().unwrap();
+        assert_eq!(heard.len(), 1, "{heard:?}");
+        let text = heard[0].as_deref().unwrap();
+        assert!(text.starts_with("Cards and briefs are off: "), "{text}");
+        assert!(text.contains("not logged in"), "{text}");
+        assert!(text.contains("claude"), "{text}");
+    }
+
+    shell(dir.path(), "claude", "echo ok");
+    assert!(writer.reply(&edit(), &[]).is_ok());
+    assert_eq!(heard.lock().unwrap().last(), Some(&None));
+}
+
+#[test]
+fn each_failure_kind_has_its_own_notice() {
+    let dir = tempfile::tempdir().unwrap();
+    let heard_after = |body: &str| {
+        let claude = shell(dir.path(), "claude", body);
+        let (writer, heard) = watched(&claude, dir.path());
+        assert!(writer.reply(&edit(), &[]).is_err());
+        let heard = heard.lock().unwrap();
+        heard.first().cloned().flatten().unwrap_or_default()
+    };
+    assert!(heard_after("echo 'rate limit reached'; exit 1").contains("quota"));
+    assert!(heard_after("exit 0").contains("printed nothing"));
 }
 
 // The grounded turn writer (danielrispler/plotkeeper#115).
@@ -1817,7 +1850,7 @@ fn a_quiz_flagged_key_wrong_while_the_writer_runs_keeps_no_retest() {
 
 #[test]
 fn the_judge_is_given_the_command_fenced_as_data_and_its_folder_and_nothing_else() {
-    let folder = Path::new("/h/Library/Application Support/dev.falinks.studio/card-writer");
+    let folder = Path::new("/h/Library/Application Support/plotkeeper/card-writer");
     let writer = ClaudeWriter::new(CLAUDE.into(), folder.into());
 
     let (command, prompt) = writer.risk_command("git push --force origin feature-x", "/work/repo");

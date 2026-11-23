@@ -111,3 +111,34 @@ test("a stopped watcher never fires", () => {
 });
 
 afterEach(() => mock.timers.reset());
+
+// An interaction with the element (#331): a card counts as seen only after Daniel pointed at, pressed, scrolled or focused it.
+const heard = [];
+const touchable = () => ({
+  addEventListener: (type, run) => heard.push([type, run]),
+  removeEventListener: (type) => heard.splice(0, heard.length, ...heard.filter(([t]) => t !== type)),
+});
+const interact = (type) => heard.filter(([t]) => t === type).forEach(([, run]) => run());
+
+test("with interaction asked, a visible focused card in view is not seen until Daniel touches it", () => {
+  heard.length = 0;
+  watchSeen(touchable(), { active: () => open, onSeen: () => seen++, interaction: true });
+  report(observers[0], 1, 1);
+  mock.timers.tick(5000);
+  assert.equal(seen, 0);
+  interact("pointermove");
+  mock.timers.tick(499);
+  assert.equal(seen, 0);
+  mock.timers.tick(1);
+  assert.equal(seen, 1);
+});
+
+test("an interaction in a hidden window does not make a card seen", () => {
+  heard.length = 0;
+  watchSeen(touchable(), { active: () => open, onSeen: () => seen++, interaction: true });
+  doc.visibilityState = "hidden";
+  report(observers[0], 1, 1);
+  interact("keydown");
+  mock.timers.tick(5000);
+  assert.equal(seen, 0);
+});

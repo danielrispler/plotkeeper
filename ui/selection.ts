@@ -10,7 +10,6 @@ import { openHunk } from "./evidence.js";
 import { leaveMap } from "./map.js";
 import { showSessions } from "./list.js";
 import { homeShown, showSession } from "./panes.js";
-import { showWorkspaces } from "./workspaces.js";
 import { studio } from "./state.js";
 import { citedTurn, drawFeed, openTurn, showView } from "./story.js";
 import { showToast } from "./toast.js";
@@ -150,7 +149,6 @@ export function show(selected: Selection | null) {
   cameFrom = leftSession(studio.selection?.session.id ?? null, selected?.session.id ?? null, cameFrom);
   studio.selection = selected;
   showSessions(studio.listed);
-  showWorkspaces();
   showToast();
   showView(selected);
   showSession(selected?.session ?? null, false, selected?.agent ?? null);

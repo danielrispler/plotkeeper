@@ -2,7 +2,7 @@
 
 Sessions the studio starts load the plugin on their own. For a `claude` you start yourself, in a studio shell or any other terminal, add the plugin to `CLAUDE_CODE_PLUGIN_DIRS` in your shell profile, through the link in the studio's data folder:
 
-    export CLAUDE_CODE_PLUGIN_DIRS="$HOME/Library/Application Support/dev.falinks.studio/checkout/plugin"
+    export CLAUDE_CODE_PLUGIN_DIRS="$HOME/Library/Application Support/plotkeeper/checkout/plugin"
 
 At each start the app points `checkout` there at its own checkout, so a moved checkout is picked up by the next start (#21). It also asks a login shell for the variable: when no entry is this checkout's plugin, the bar over the terminal says so, and "Fix it" writes the line into `~/.zshrc`, after a copy to `~/.zshrc.studio-backup` that a later fix keeps. It drops entries that are another studio plugin and keeps the rest as written, missing ones too, since Claude Code skips those.
 

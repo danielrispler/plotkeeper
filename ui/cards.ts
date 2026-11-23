@@ -276,14 +276,14 @@ function ratingElement(id: string, rating: Rating | null, keyWrong: boolean | nu
   return node;
 }
 
-// A card counts as shown when it is seen (`seen.ts`): in the viewport of a visible, focused window with the rail open, not when it
-// is built. The store keeps the first time, which the weekly rates measure guesses from. Cards already told, so one is told once.
+// A card counts as shown when it is seen (`seen.ts`): in the viewport of a visible, focused window with the rail open and Daniel having
+// interacted with it, not when it is built. The store keeps the first time, which the weekly rates measure guesses from. Cards already told, so one is told once.
 const told = new Set<string>();
 const watching = new Map<string, () => void>();
 
 const rail = () => {
   const { classList, dataset } = document.body;
-  return railShown((dataset.layout ?? "full") as LayoutMode, classList.contains("rail-open"), classList.contains("skills-open"), classList.contains("map-open"));
+  return railShown((dataset.layout ?? "full") as LayoutMode, classList.contains("rail-open"), classList.contains("map-open"));
 };
 
 function watchCard(id: string, node: HTMLElement) {
@@ -293,6 +293,7 @@ function watchCard(id: string, node: HTMLElement) {
     id,
     watchSeen(node, {
       active: rail,
+      interaction: true,
       onSeen: () => {
         watching.delete(id);
         told.add(id);

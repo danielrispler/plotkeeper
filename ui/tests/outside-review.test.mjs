@@ -188,7 +188,7 @@ test("the review is cut at 15 minutes and answers in the findings' JSON shape", 
 
 test("the review's environment has no STUDIO_TERMINAL_ID, and keeps the rest", () => {
   const { env } = call([], { STUDIO_TERMINAL_ID: "claude-1", PATH: "/bin" });
-  assert.deepEqual(env, { PATH: "/bin" });
+  assert.deepEqual(env, { PATH: "/bin", PLOTKEEPER_INTERNAL: "1" });
 });
 
 const finding = { file: "core/src/checks.rs", line: 17, summary: "no default", failure_scenario: "old file" };
@@ -361,6 +361,7 @@ test("a risky diff is reviewed in a throwaway worktree that is gone afterwards, 
   assert.equal(report.findings[0].summary, "no default");
   const agy = JSON.parse(readFileSync(join(s.dir, "agy-env.json"), "utf8"));
   assert.ok(!agy.keys.includes("STUDIO_TERMINAL_ID"));
+  assert.ok(agy.keys.includes("PLOTKEEPER_INTERNAL"));
   assert.ok(agy.cwd.includes("outside-review-") && !agy.cwd.startsWith(s.repo));
   assert.deepEqual(s.left(), nothingLeft);
   assert.ok(!existsSync(join(s.repo, "local-evidence")), "a run was recorded where git does not ignore local-evidence/");

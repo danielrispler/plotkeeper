@@ -2,12 +2,14 @@
 
 ## The event log
 
-`~/Library/Application Support/dev.falinks.studio/events.jsonl`, one hook payload per line, with two added fields:
+`~/Library/Application Support/plotkeeper/events.jsonl`, one hook payload per line, with two added fields:
 
 - `studio_terminal_id`: the session's `STUDIO_TERMINAL_ID`, when set;
 - `studio_received_ms`: when the hook received the event, in Unix milliseconds.
 
 The app appends lines of its own, named `Studio…`, such as `StudioInterrupted`, which ends a turn Daniel interrupted, by its `prompt_id`, with that turn's end trees.
+
+The data folder was `~/Library/Application Support/dev.falinks.studio/` before plotkeeper. At the first start of the hook or the app, if that folder exists and `plotkeeper/` does not, it is renamed to `plotkeeper/` and a symbolic link to it is left at the old path, so the plugin path in `~/.zshrc` (through the folder's `checkout` link) and a hook built with the old path keep working. The move never goes over an existing `plotkeeper/`.
 
 The hooks are async, so Claude Code never waits for them, and they append whether the app runs or not. Two events that fire within a few milliseconds can land in either order.
 
@@ -21,7 +23,7 @@ The app also keeps `roots.json` beside the log: the git worktree root of each fo
 
 Claude Code gives the plan's 5-hour and weekly usage, and the context window's size, only to the status line command, on its stdin. Sessions the studio starts run `claude --settings` with `workbench/statusline.sh` as their status line, so you edit nothing. On every refresh it saves that stdin as `usage/<session_id>.json` beside the event log, by temp file and rename, readable only by you (mode 0600, in a folder of mode 0700), with the line in `workbench/statusline-usage.sh`.
 
-Then it reads `statusLine.command` from `~/.claude/settings.json`, runs it on the same stdin, and passes its output and exit status through; with none set, it prints nothing. The top bar's usage button shows the tightest window across the agents, as that agent's logo and "5h 62%" or "wk 80%", or "Usage" when none has data; a click opens a popover with a tile for each agent: its windows with the share used and the time to reset, and when and from where they were read, or the reason it has none. Claude's snapshot is read on load, on focus and every 10 seconds; the other agents' usage is read only when the popover opens. Sessions started outside the studio save no snapshot. Snapshots are never deleted; remove the folder at any time.
+Then it reads `statusLine.command` from `~/.claude/settings.json`, runs it on the same stdin, and passes its output and exit status through; with none set, it prints nothing. The page has no usage button or popover (danielrispler/plotkeeper#326): the snapshot is still saved, and the Tauri app's top bar read it. Sessions started outside the studio save no snapshot. Snapshots are never deleted; remove the folder at any time.
 
 ## The card store
 
@@ -33,7 +35,7 @@ Each is `null` until then. `right` is by the writer's key; on a check's card it 
 
 `briefs.json` beside it keeps each session's and each worker's brief, by session or subagent id: its Goal and the count of your prompts it was written at, its "Design so far" with the cards and turns it cites (Decisions come from `decisions.json`, and Open is computed, not stored). `summaries.json` keeps each turn summary (its Headline, typed lines and Quiz), the facts (with an unused `external` of 0, kept so that the previous build can read the file) and hunks it was written from, and every tap on its Quiz with its time, so a Quiz's pick, skip, reveal, chips, confidence, "why?" line and its self-test arm survive a restart; `retests.json` keeps the retests the same way.
 
-A card's own taps are in the card. The app writes each file whole to a temporary file and renames it into place, so a crash mid-write keeps the previous one. On the first start after cards came to cover a prompt's whole change (danielrispler/Falinks#374), the app moves the old store, `cards.json`, to `cards-v1.json`, never over one already there, and starts the new store empty; `weekly` does the same.
+Replaying the event log, at every start, never rewrites, replaces or deletes a stored card, summary or answer: a turn that has its card, or whose offer was decided, gets none from the replay, and the stores are written only by new work and by your taps (law `replay-never-rewrites`). A card's own taps are in the card. The app writes each file whole to a temporary file and renames it into place, so a crash mid-write keeps the previous one. On the first start after cards came to cover a prompt's whole change (danielrispler/Falinks#374), the app moves the old store, `cards.json`, to `cards-v1.json`, never over one already there, and starts the new store empty; `weekly` does the same.
 
 `risk-notes.json` beside it, a store of its own that the card store does not read (danielrispler/plotkeeper#298), keeps the risk notes of blocked commands: by session id, then by a hash of the command and its folder (the command, a NUL byte and the folder, hashed with FNV-1a, 16 hex digits), the note's `level` (`none`, `low`, `medium`, `high`, `very_high` or `not_sure`), its `line` and `at`, when it arrived, in Unix milliseconds. It is keyed so, and not by a card's call id, because a card's call id changes when it is Blocked again and a second card of the command and folder has another: they all show the one note. The notes are joined to the cards when the shell reads the cards, so the core's blocked-command type holds none. A failed judge call is not stored: the card reads that no note came until the next start of the app, which asks again. The file is a cache, so one that does not parse opens as no notes, and the next note writes it whole. Its failure lines in the Studio log are cut at the first quote mark, as the writers' other lines are, so no reply's words reach the log, and a line never holds the command.
 

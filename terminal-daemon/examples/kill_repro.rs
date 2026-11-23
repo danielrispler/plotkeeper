@@ -71,7 +71,7 @@ fn run() -> Result<(), String> {
     std::fs::create_dir_all(&home).map_err(|e| e.to_string())?;
     // An empty `.zshrc` keeps zsh's first-run prompt out of the login shells.
     std::fs::write(home.join(".zshrc"), "").map_err(|e| e.to_string())?;
-    let data = home.join("Library/Application Support/dev.falinks.studio");
+    let data = home.join("Library/Application Support/plotkeeper");
     std::fs::create_dir_all(&data).map_err(|e| e.to_string())?;
     // The configured repository is the sandbox home, as the live one is the live `settings.json`'s.
     let settings = json!({ "repository": home });

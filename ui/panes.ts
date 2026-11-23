@@ -1,61 +1,25 @@
-// The terminal panes (danielrispler/Falinks#467): one per daemon terminal, in `#terminal-body`, one shown at a time. Home
-// shows while no session is selected. A session
-// started from the studio runs `claude` in its own terminal, whose fresh id reaches its hooks as
-// `STUDIO_TERMINAL_ID`, so the core links its row to the pane (`Session.terminal`).
-// `closePane` ends a terminal and drops its pane (danielrispler/Falinks#469).
-// danielrispler/Falinks#470: at start every running terminal is attached, its screen replayed, and the terminals a dead
-// daemon ran come back (`revive`); so after a crash, a reboot or an upgrade, the same way.
-// danielrispler/Falinks#529: a split pins the pane shown to the column's second half while the selection drives the first;
-// while both are the same terminal, one pane shows.
-// danielrispler/Falinks#542: the terminal panel's shells (`panel.ts`) live in the panel, not here; this follows the
-// selection's folder for it and reattaches them after a lost daemon.
+// The centre column (danielrispler/Falinks#467, #326): one view at a time in `#column`. Home shows while no session is selected;
+// a selected session's story is in the rail, so the column holds History, a turn's whole diff, or a subagent's log when one is
+// asked for, else a line pointing at the rail.
 
-import type * as Xterm from "@xterm/xterm";
-import { connect, list, onEvent, request, type Listed } from "./daemon.js";
 import { diffRequest, drawDiff, keepsDiff } from "./diff.js";
 import { drawHistory } from "./history.js";
 import { drawHome, enterHome, landedClear } from "./home.js";
-import { element, failure, fullTitle, invoke, listen, newest, pressable, text } from "./dom.js";
-import { onProjects, projects } from "./projects.js";
+import { element, failure, invoke, listen, newest, text } from "./dom.js";
+import { knownProjects } from "./projects.js";
 import { followLog, showLog, showMissing } from "./log.js";
 import { leaveMap } from "./map.js";
-import { type Box, paneBoxes } from "./layout.js";
-import { isPanel, panelTerm, showPanel, showPanelShell } from "./panel.js";
-import { offerAgyPluginFix, offerBuilds, offerPluginFix, upgrade } from "./restart.js";
-import { select, show as showSelection } from "./selection.js";
-import type { DoctorEntry } from "./settings.js";
+import { select } from "./selection.js";
 import { studio } from "./state.js";
-import { sessionName } from "./list.js";
-import { FAILED_OSC, openPane, startNotice } from "./terminal.js";
-import { showStartToast } from "./toast.js";
 import type { Learning, Session } from "./types.js";
-import { HOVERS } from "./hovers.js";
 
-type Pane = { box: HTMLElement; term: Xterm.Terminal | null; title: string };
-const panes = new Map<string, Pane>();
-let repo = "";
-let projectPaths: string[] = [];
+const boxes = new Map<string, HTMLElement>();
 let asked: Learning | null = null;
 let shown = "";
-let ready: Promise<void> | null = null;
-let revived: Promise<void> = Promise.resolve();
-// The split's pinned terminal, the first pane's share of the column, and, as the width rule last
-// laid it out, whether the panes stack and the terminal's cell width.
-let pinned: string | null = null;
-let share = 0.5;
-let stacked = false;
-let cell = 8;
-let laidSplit = false;
+let ready = false;
 
-// Gives Home the projects as they are read; a failed read leaves Home's rows as they were.
-const readHomeProjects = () =>
-  projects().then(
-    (paths) => {
-      projectPaths = paths;
-      redrawHome();
-    },
-    failure("projects"),
-  );
+// The projects Home lists: the repositories the listed sessions ran in.
+const homeProjects = () => knownProjects();
 
 // Asks the card store for the learning item (#240), with the clock and the start of Daniel's local day, and draws Home with it; a
 // failed read leaves the item as it was. Asked when Home is drawn, when a turn ends and after each tap.
@@ -72,129 +36,31 @@ export const readLearning = () => {
   }, failure("learning"));
 };
 
-// Connects, shows Home, then brings back every terminal;
-// again each time the daemon is lost.
-export function startPanes(): Promise<void> {
-  offerBuilds();
-  offerPluginFix()
-    .then(offerAgyPluginFix)
-    .catch(failure("plugin fix"));
-  ready = connect().then((config) => {
-    repo = config.repo;
-    showPanel(null, repo);
-    // The terminals come back whether or not the projects read does; Home draws as it answers.
-    revived = revive(config.outdated);
-    showHome();
-    void readHomeProjects();
-  });
+// Shows Home, and again each time the retests change the item the store chooses.
+export function startPanes() {
+  ready = true;
+  showHome();
   listen<null>("retests", () => void readLearning());
-  onProjects(() => void readHomeProjects());
-  window.addEventListener("start-failed", (e) => failedAtStart((e as CustomEvent).detail));
-  onEvent((event) => {
-    if (event.ev !== "lost") return;
-    revived = connect().then((config) => revive(config.outdated));
-  });
-  return ready;
 }
 
-// Spawns each terminal the dead daemon ran, with `claude --resume` for a Claude terminal, then
-// attaches every running terminal: a new pane, hidden, or the pane it had.
-async function revive(outdated: boolean) {
-  const lost = await invoke("terminal_lost");
-  for (const r of await invoke("revival", { terms: lost })) {
-    if (!r.revives) continue;
-    // A revived conversation keeps its terminal's id, on purpose: its session stays linked to the
-    // pane it had. Only a new conversation gets a fresh id (`startClaude`, danielrispler/Falinks#467).
-    const argv = r.session ? await invoke("claude_argv", { resume: r.session, auto: startedAuto(r.argv) }) : r.argv;
-    const term = panes.get(r.id)?.term ?? panelTerm(r.id);
-    await request({ op: "spawn", id: r.id, argv, cwd: r.cwd, cols: term?.cols ?? 80, rows: term?.rows ?? 24 });
-  }
-  for (const t of await list()) {
-    if (t.exited !== null) continue;
-    if (panes.get(t.id)?.term || panelTerm(t.id)) await request({ op: "attach", id: t.id });
-    // A panel's shell waits for its folder to show in the panel.
-    else if (!panes.has(t.id) && !isPanel(t.id)) draw(t.id, () => openPane(box(t.id), t.id, t.cwd, t.argv));
-  }
-  if (outdated) upgrade();
-}
-
-// A pane's box in `#terminal-body`, made the first time.
+// A view's box in `#column`, made the first time.
 function box(id: string): HTMLElement {
-  let pane = panes.get(id);
-  if (!pane) {
-    const node = document.createElement("div");
+  let node = boxes.get(id);
+  if (!node) {
+    node = document.createElement("div");
     node.className = "pane";
     node.hidden = true;
-    element("terminal-body").append(node);
-    pane = { box: node, term: null, title: "terminal" };
-    panes.set(id, pane);
+    element("column").append(node);
+    boxes.set(id, node);
   }
-  return pane.box;
+  return node;
 }
 
-// The terminal the split's second pane shows, as the shell last heard: its session is on screen, so its turn's end
-// raises no note.
-let toldSplit: string | null = null;
-function tellSplit() {
-  const second = split() ? pinned : null;
-  if (second === toldSplit) return;
-  toldSplit = second;
-  invoke("split_shown", { terminal: second }).catch(failure("split_shown"));
-}
-
-// Shows terminal `id`'s pane, drawing it with `open` the first time, and the header's title and size.
-function show(id: string, open: () => Xterm.Terminal | null) {
+// Shows view `id` and hides the others.
+function show(id: string) {
   shown = id;
   const place = box(id);
-  for (const [key, pane] of panes) pane.box.hidden = pane.box !== place && !(split() && key === pinned);
-  tellSplit();
-  // A split opening or closing changes the width rule's layout (`main.ts`), which places the panes.
-  if (split() !== laidSplit) window.dispatchEvent(new Event("layout"));
-  else placePanes(stacked, cell);
-  const pane = draw(id, open);
-  header(pane);
-  pane.term?.focus();
-}
-
-// Draws terminal `id`'s pane with `open` the first time.
-function draw(id: string, open: () => Xterm.Terminal | null): Pane {
-  const place = box(id);
-  const pane = panes.get(id)!;
-  if (pane.term === null && place.childElementCount === 0) {
-    pane.term = open();
-    pane.term?.onResize(() => shown === id && header(pane));
-    pane.term?.onTitleChange((title) => {
-      pane.title = title || "terminal";
-      if (shown === id) header(pane);
-    });
-  }
-  return pane;
-}
-
-// The selected session's name is on its row only (danielrispler/Falinks#571), so the header hides while one is selected and
-// the terminal takes its height; with nothing selected, the shell or a pane just started keeps the
-// title its program sets. The grid size is on the header's hover.
-function header({ term, title }: Pane) {
-  element("terminal-title").textContent = title;
-  element("terminal-title").title = title;
-  element("terminal-head").title = term ? `${term.cols} × ${term.rows}` : "";
-}
-
-// Ends terminal `id`'s whole process group (danielrispler/Falinks#322, point 3), then forgets it and drops its pane; the
-// Home shows in its place.
-export async function closePane(id: string) {
-  await request({ op: "kill", id });
-  await request({ op: "forget", id });
-  // Its sessions end now, whether or not their `claude` lived to run its own end hook.
-  await invoke("closed", { terminal: id });
-  const pane = panes.get(id);
-  pane?.term?.dispose();
-  pane?.box.remove();
-  panes.delete(id);
-  const wasPinned = pinned === id;
-  if (wasPinned) pinned = null;
-  if (shown === id) showHome();
-  else if (wasPinned) show(shown, () => null);
+  for (const node of boxes.values()) node.hidden = node !== place;
 }
 
 // Home (`home.ts`) takes the column while no session is selected; the login shell lives in the
@@ -202,14 +68,13 @@ export async function closePane(id: string) {
 const HOME = "home";
 export function showHome() {
   const entering = shown !== HOME;
-  show(HOME, () => null);
+  show(HOME);
   // Home's expanded groups, "Not now" and the answered item last until it is left; what the store chose before is not shown
   // again until it answers, since it may be an item set aside.
   enterHome(!entering);
   if (entering) asked = null;
-  drawHome(box(HOME), studio.listed, projectPaths, asked, redrawHome, () => void readLearning());
+  drawHome(box(HOME), studio.listed, homeProjects(), asked, redrawHome, () => void readLearning());
   void readLearning();
-  element("terminal-head").hidden = true;
 }
 
 // Forgets the item the store last chose, until it answers again.
@@ -228,7 +93,7 @@ export function refreshHome() {
 // Draws Home again when the list changed under it.
 export function redrawHome() {
   landedClear.sync();
-  if (shown === HOME) drawHome(box(HOME), studio.listed, projectPaths, asked, redrawHome, () => void readLearning());
+  if (shown === HOME) drawHome(box(HOME), studio.listed, homeProjects(), asked, redrawHome, () => void readLearning());
 }
 
 // History (`history.ts`), a view like Home in the terminal column: the ended sessions, searchable. Clicking a row selects
@@ -236,9 +101,8 @@ export function redrawHome() {
 const HISTORY = "history";
 export function showHistory() {
   leaveMap();
-  show(HISTORY, () => null);
+  show(HISTORY);
   drawHistory(box(HISTORY), studio.listed);
-  element("terminal-head").hidden = true;
 }
 
 // Draws History again when the list changed under it.
@@ -246,224 +110,46 @@ export function redrawHistory() {
   if (shown === HISTORY) drawHistory(box(HISTORY), studio.listed);
 }
 
-// Gives the keyboard back to the pane shown, as the panel hides.
-export const focusPane = () => panes.get(shown)?.term?.focus();
-
-// Whether two panes show: the pinned one and a different one the selection shows.
-export const split = () => pinned !== null && pinned !== shown && panes.has(pinned);
-
-// Splits the column, pinning the pane shown; true when it split. Only a terminal pins, not the
-// "Open here" message. Again, the split closes.
-export function toggleSplit(): boolean {
-  if (pinned !== null) {
-    pinned = null;
-    show(shown, () => null);
-    return false;
-  }
-  if (!panes.get(shown)?.term) return false;
-  pinned = shown;
-  return true;
-}
-
-// Places the shown panes by `paneBoxes`: the selected one first, beside the rail, the pinned one
-// second, stacked as the width rule says; a hidden pane keeps the stylesheet's box.
-export function placePanes(stack: boolean, width: number) {
-  [stacked, cell, laidSplit] = [stack, width, split()];
-  const body = element("terminal-body");
-  const [first, second] = paneBoxes(body.clientWidth, body.clientHeight, cell, laidSplit ? { stacked, share } : null);
-  const inset = ({ top, right, bottom, left }: Box) => `${top}px ${right}px ${bottom}px ${left}px`;
-  for (const pane of panes.values()) pane.box.style.inset = "";
-  const divider = element("split-divider");
-  divider.hidden = !second;
-  if (!second) return;
-  panes.get(shown)!.box.style.inset = inset(first);
-  panes.get(pinned!)!.box.style.inset = inset(second);
-  // The divider fills the gap between the panes.
-  divider.classList.toggle("stacked", stacked);
-  divider.style.inset = stacked ? `${body.clientHeight - first.bottom}px 0 auto` : `0 auto 0 ${body.clientWidth - first.right}px`;
-}
-
-// Dragging the split's divider moves the share, and the panes refit as their boxes change.
-export function dragSplit() {
-  const handle = element("split-divider");
-  handle.addEventListener("pointerdown", (event) => {
-    event.preventDefault(); // no text selection while dragging
-    handle.setPointerCapture(event.pointerId);
-    handle.classList.add("dragging");
-  });
-  handle.addEventListener("pointermove", (event) => {
-    if (!handle.hasPointerCapture(event.pointerId)) return;
-    const body = element("terminal-body").getBoundingClientRect();
-    share = stacked ? (event.clientY - body.top) / body.height : (event.clientX - body.left) / body.width;
-    placePanes(stacked, cell);
-  });
-  handle.addEventListener("lostpointercapture", () => handle.classList.remove("dragging"));
-  new ResizeObserver(() => placePanes(stacked, cell)).observe(element("terminal-body"));
-}
-
-// Starts `claude` in `cwd` in a new terminal, with `prompt` as its first prompt, or
-// `claude --resume <resume>` for an ended session, and shows its pane, in auto mode when `auto`
-// (danielrispler/Falinks#541). Nothing is selected until the session's first event names its terminal; then the core
-// selects it, so the rail follows (danielrispler/Falinks#567).
-let starting: string | null = null;
-export async function startClaude(cwd: string, resume: string | null = null, prompt = "", auto = false) {
-  const argv = [...(await invoke("claude_argv", { resume, auto })), ...(prompt ? ["--", prompt] : [])]; // `--`: a prompt like "-p x" is no flag
-  await startTerminal(`claude-${crypto.randomUUID()}`, cwd, argv);
-}
-
-// Starts `agent` in `cwd` in a new terminal, with `prompt` as its first prompt: Claude Code (in auto mode when
-// `auto`), agy or Codex, or, for "terminal", a plain login shell with no prompt, which gets a row of its own.
-export async function startAgent(agent: string, cwd: string, prompt = "", auto = false) {
-  if (agent === "claude") return startClaude(cwd, null, prompt, auto);
-  if (agent === "terminal") return startTerminal(`shell-${crypto.randomUUID()}`, cwd, []);
-  await startTerminal(`${agent}-${crypto.randomUUID()}`, cwd, await invoke("agent_argv", { agent, prompt }));
-}
-
-// A Doctor entry (danielrispler/Falinks#527) in a new terminal in the selected session's folder, else the configured
-// repository. `shell` runs its command under the login shell, then leaves a shell for reading and
-// rerunning; `session` starts `claude` with the command as its first prompt.
-export function runDoctor({ label, command, kind }: DoctorEntry) {
-  const cwd = studio.selection?.session.cwd ?? repo;
-  if (kind === "session") return startClaude(cwd, null, command);
-  const id = `doctor-${crypto.randomUUID()}`;
-  labels.set(id, label);
-  return startTerminal(id, cwd, doctorArgv(command));
-}
-// The Doctor entries' labels by terminal, which name their start-failure notices.
-const labels = new Map<string, string>();
-
-// A `shell` Doctor entry's argv: a failing command reports its code (`FAILED_OSC`, read in
-// `terminal.ts`) before the login shell takes over, so the shell staying open still raises the notice.
-export const doctorArgv = (command: string) => [
-  "/bin/sh",
-  "-c",
-  `${command}\ns=$?; [ "$s" -eq 0 ] || printf '\\033]${FAILED_OSC};%s\\007' "$s"; exec "$SHELL" -l`,
-];
-
-async function startTerminal(id: string, cwd: string, argv: string[]) {
-  starting = id;
-  leaveMap(); // the new terminal shows in the column the Map view covers
-  element("terminal-head").hidden = false;
-  studio.pending = null; // an earlier press's late reply must not take the pane from this session
-  show(id, () => openPane(box(id), id, cwd, argv));
-  showSelection(await invoke("select_terminal", { terminal: id }));
-}
-
-// Whether a terminal's spawn `argv` started Claude Code in auto mode (danielrispler/Falinks#541), so its revival keeps it.
-export const startedAuto = (argv: string[]) => argv[argv.indexOf("--permission-mode") + 1] === "auto";
-// Whether "Open here" or "Open" resumes a session in auto mode: only when it started in it (danielrispler/Falinks#541),
-// whatever mode it ended in, so a later switch never carries over; never bypass.
-export const resumesAuto = (session: Pick<Session, "started_mode">) => session.started_mode === "auto";
-
-// What the terminal shows for the selected session (danielrispler/Falinks#567): its own terminal while the daemon runs
-// it, else a message with "Open here", never the login shell, which may run another session. Home
-// shows while nothing is selected. A selected subagent has no terminal of its own: its log shows instead
-// (danielrispler/plotkeeper#54).
-export type PaneView = "home" | { terminal: string } | { message: string } | { log: string };
-export function paneView(session: Pick<Session, "terminal" | "state"> | null, running: boolean, agent: string | null = null): PaneView {
-  if (!session) return "home";
-  if (agent) return { log: agent };
-  if (session.terminal && running) return { terminal: session.terminal };
-  return { message: session.state === "ended" ? "Ended. Open here resumes it." : "Runs in another terminal. Open here resumes it." };
-}
-
-// The live terminal that already runs `session`'s conversation (#101): the one its row links to, else one
-// started with `--resume` of its id, as a revival or an earlier "Open here" does.
-export function runningTerminal(session: Pick<Session, "terminal" | "resume_id">, terms: Listed[]): Listed | undefined {
-  const live = terms.filter((t) => t.exited === null);
-  const resumes = (t: Listed) => t.argv.some((arg, i) => arg === session.resume_id && t.argv[i - 1] === "--resume");
-  return live.find((t) => t.id === session.terminal) ?? (session.resume_id ? live.find(resumes) : undefined);
-}
-
-// "Open here": shows the terminal that already runs the session's conversation, else resumes it in a new one, so
-// two `claude` never run one conversation (#101).
-export async function openHere(session: Session) {
-  const running = runningTerminal(session, await list());
-  if (!running) return startClaude(session.cwd, session.resume_id, "", resumesAuto(session));
-  show(running.id, () => openPane(box(running.id), running.id, running.cwd, running.argv));
-}
-
-// The selected session's pane, by `paneView`. Daniel's click always shows it; the shell's updates of
-// the selection switch the pane only when the session, its terminal or its end changed, so they
-// never take away a pane Daniel just started.
+// The selected session's view. Daniel's click always shows it; the server's updates of the selection switch the view only when
+// the session or the subagent changed, so they never take away a diff Daniel just opened.
 let selected: string | null = null;
 export async function showSession(session: Session | null, clicked = false, agent: string | null = null) {
-  // The diff pane stays while the shell re-sends its session's selection; Daniel's click, or another session, ends it.
+  // The diff view stays while the server re-sends its session's selection; Daniel's click, or another session, ends it.
   if (keepsDiff(diffShown, session, clicked)) return;
   diffShown = null;
-  const key = session ? `${session.id} ${session.terminal ?? ""} ${session.state === "ended"} ${agent ?? ""}` : null;
-  element("terminal-head").hidden = session !== null || shown === HOME;
-  const pane = panes.get(shown);
-  if (pane) header(pane);
+  const key = session ? `${session.id} ${agent ?? ""}` : null;
   if (key === selected && !clicked) {
-    // The shell re-sends the selection when a hook event about the subagent changed it: read its log on.
+    // The server re-sends the selection when a hook event about the subagent changed it: read its log on.
     const subagent = agent && session?.agents.find((a) => a.id === agent);
     if (session && subagent && shown === LOG) void followLog(box(LOG), session.id, subagent, () => void select(session.id));
     return;
   }
   selected = key;
-  // Home asked for by a click ends a pane just started too.
-  if (session || clicked) starting = null;
-  const connected = await ready?.then(() => true, () => false);
-  await revived.catch(failure("revive"));
+  if (!ready) return;
   const current = () => selected === key;
-  if (!connected || !current()) return;
-  showPanel(session, repo);
-  if (!session) {
-    // A pane Daniel just started stays until its session arrives.
-    if (starting !== shown) showHome();
-    return;
-  }
-  // A terminal of an earlier app run: attach when the daemon still runs it. Opening an exited or
-  // unknown id would start a new program under it.
-  const id = agent ? null : session.terminal;
-  const own = id ? panes.get(id)?.term : null;
-  const terminal = id && !own ? (await list()).find((t) => t.id === id && t.exited === null) : undefined;
-  if (!current()) return;
-  const view = paneView(session, Boolean(own || terminal), agent);
-  if (view === "home") return;
-  if ("log" in view) {
-    const subagent = session.agents.find((a) => a.id === view.log);
+  if (!session) return showHome();
+  if (agent) {
+    const subagent = session.agents.find((a) => a.id === agent);
     const toParent = () => void select(session.id);
-    show(LOG, () => null);
+    show(LOG);
     if (subagent) await showLog(box(LOG), session.id, subagent, toParent);
     else showMissing(box(LOG), toParent);
     return;
   }
-  if ("terminal" in view) return show(view.terminal, () => openPane(box(view.terminal), view.terminal, terminal!.cwd, terminal!.argv));
-  const resume = () => openHere(session).catch(failure("resume", "error"));
-  box(ELSEWHERE).classList.add("elsewhere");
-  box(ELSEWHERE).replaceChildren(text("p", view.message, "empty"), fullTitle(pressable(text("button", "Open here"), false, resume), "Resume this session in a terminal in this window"));
-  show(ELSEWHERE, () => null);
+  if (!current()) return;
+  box(STORY).replaceChildren(text("p", "The session's story is in the rail.", "empty"));
+  show(STORY);
 }
-const ELSEWHERE = "elsewhere";
+const STORY = "story";
 const DIFF = "turn-diff";
 
-// A turn's whole diff in the column (danielrispler/plotkeeper#131), in a pane of its own: in a split it takes the selected
-// side only, as the log does. "Terminal" shows the session's own pane again, which was never touched.
+// A turn's whole diff in the column (danielrispler/plotkeeper#131), in a view of its own.
 let diffShown: { session: string } | null = null;
 diffRequest.open = (id, turn) => {
   const session = studio.listed.find((s) => s.id === id);
   if (!session?.capabilities.turn_trees || !session.turns[turn]?.files) return;
   diffShown = { session: id };
-  show(DIFF, () => null);
+  show(DIFF);
   drawDiff(box(DIFF), session, turn, () => void select(id));
-  element("terminal-head").hidden = true;
 };
 const LOG = "subagent-log";
-
-// A program that failed at start (danielrispler/Falinks#558), a session's, a Doctor entry's or a revived one: a toast names
-// the session, else the program, and the code, with "Show output", which shows its pane. When its pane
-// is the shown one, the message box also takes its place, with its last lines; a hidden one only toasts.
-export const failureTakesPane = (failed: string, current: string) => failed === current;
-function failedAtStart({ id, name, status, lines }: { id: string; name: string; status: string; lines: string[] }) {
-  const session = studio.listed.find((s) => s.terminal === id);
-  const notice = startNotice(session ? sessionName(session) : (labels.get(id) ?? name), { status });
-  // A panel's shell shows in the panel, never in the main column.
-  const output = () => (isPanel(id) ? showPanelShell(id, focusPane) : show(id, () => null));
-  showStartToast(notice, output);
-  if (!failureTakesPane(id, shown)) return;
-  box(ELSEWHERE).classList.add("elsewhere");
-  box(ELSEWHERE).replaceChildren(text("p", notice, "empty"), text("pre", lines.join("\n"), "last-lines"), fullTitle(pressable(text("button", "Show output"), false, output), HOVERS.failedOutput));
-  show(ELSEWHERE, () => null);
-}
