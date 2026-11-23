@@ -11,7 +11,7 @@ globalThis.document = fakeDocument({ visibilityState: "hidden" });
 const make = (tag) => document.createElement(tag);
 
 const base = { id: "s", name: null, prompt_name: null, folder_name: "p", state: "idle", line: "", questions: [], shell: false, status_only: false, unseen: false, landed: false };
-const caps = (agent) => ({ agent, context: agent === "claude" });
+const caps = (agent) => ({ agent, context: agent === "claude", transcript_model: agent === "claude" });
 const claude = { ...base, capabilities: caps("claude"), identity: { issue: null, name: "p" }, transcript: { context: { tokens: 9000, share: 9 } } };
 const agy = { ...base, capabilities: caps("agy"), identity: { issue: null, name: "p" }, transcript: { context: null } };
 const statusOnly = (program) => ({ ...base, status_only: true, capabilities: caps(""), identity: { issue: null, name: `${program} · p` }, transcript: { context: null } });
@@ -28,6 +28,16 @@ test("a session's logo follows its adapter's agent, shell and, for a status-only
   // An agent alone, as the usage glance asks.
   assert.equal(logoKey({ agent: "claude" }), "claude");
   assert.equal(logoKey({ agent: "codex" }), "codex");
+});
+
+test("an agent the page does not know by name wears the generic logo, drawn with its title", () => {
+  const newagent = { ...claude, capabilities: { agent: "newagent", context: true, transcript_model: true } };
+  assert.equal(logoKey(newagent), "generic");
+  assert.equal(logoKey("newagent"), "generic");
+  const drawn = logoOf(row(newagent, new Map()));
+  assert.equal(drawn.getAttribute("data-logo"), "generic");
+  assert.ok(drawn.title.length > 0);
+  assert.match(drawn.innerHTML, /<path d="[^"]+"/);
 });
 
 const logoOf = (node) => node.find("span").find((s) => s.className === "logo");

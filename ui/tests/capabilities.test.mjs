@@ -6,9 +6,9 @@ import { rowMark, secondLine } from "../../dist/list.js";
 import { subagentHistory } from "../../dist/story.js";
 
 const caps = (agent, rest = {}) => ({
-  agent, asks: false, background_tasks: false, replies: false, permission_mode: false, durations: false, transcript_version: false, context: false, turn_trees: false, ...rest,
+  agent, asks: false, background_tasks: false, replies: false, permission_mode: false, durations: false, transcript_version: false, transcript_model: false, context: false, turn_trees: false, ...rest,
 });
-const claude = { capabilities: caps("claude", { asks: true, replies: true, permission_mode: true, transcript_version: true, context: true, turn_trees: true }), model: null, transcript: { context: { tokens: 9000, share: 9 }, model: "claude-opus-5-5" } };
+const claude = { capabilities: caps("claude", { asks: true, replies: true, permission_mode: true, transcript_version: true, transcript_model: true, context: true, turn_trees: true }), model: null, transcript: { context: { tokens: 9000, share: 9 }, model: "claude-opus-5-5" } };
 const agy = { capabilities: caps("agy"), model: "gemini-3.8-flash-high", transcript: { context: null, model: null } };
 const codex = { capabilities: caps(""), model: null, status_only: true, transcript: { context: null, model: null } };
 
@@ -42,6 +42,17 @@ test("the header shows each session's model by its agent's mark, none for status
   assert.equal(modelLine({ ...claude, transcript: { model: "claude-3-5-sonnet-20241022" } }), "Claude · Sonnet 3.5");
   assert.equal(modelLine({ ...claude, transcript: { model: "claude-sonnet-4-20250514" } }), "Claude · Sonnet 4");
   assert.equal(modelLine({ ...claude, transcript: { model: "claude-opus-5-5[1m]" } }), "Claude · Opus 5.5");
+});
+
+test("the model line takes the transcript's model by the capability flag, never by the agent's name", () => {
+  // A Claude session whose capabilities say its transcript names no model shows the model on the session.
+  assert.equal(modelLine({ ...claude, capabilities: { ...claude.capabilities, transcript_model: false }, model: "claude-haiku-5" }), "Claude · Haiku 5");
+  // An agent the page does not know by name, whose transcript names its model, shows its own id.
+  const newagent = { capabilities: caps("newagent", { transcript_model: true }), model: null, transcript: { context: null, model: "nova-pro-2" } };
+  assert.equal(modelLine(newagent), "newagent · Nova pro");
+  assert.equal(modelLine({ ...newagent, capabilities: caps("newagent") }), "");
+  // A model with no word in its name shows whole, never a broken line.
+  assert.equal(modelLine({ ...newagent, transcript: { model: "4" } }), "newagent · 4");
 });
 
 test("an agy session at needs you has no question text, so its row shows its line", () => {
