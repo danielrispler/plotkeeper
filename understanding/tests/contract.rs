@@ -578,8 +578,8 @@ fn a_cursor_reply_is_its_result_and_the_object_is_read_from_its_text() {
 
 #[test]
 fn cursors_failures_are_told_apart() {
-    // On failure it exits non-zero with a message on standard error and no JSON; the writer reads standard error with
-    // standard output for it.
+    // On failure it exits non-zero with a message on standard error and no JSON; the writer classifies that failure by
+    // standard error (read here as the output, as `read_reply` takes one text).
     let kind = |out: &str, code| read(WriterKind::Cursor, true, code, out).unwrap_err();
     assert_eq!(
         kind("Error: Not authenticated", 1),
@@ -908,6 +908,20 @@ fn a_test_of_cursor_passes_or_fails_with_a_typed_outcome_read_from_standard_erro
         .test(WriterKind::Cursor, "auto", "")
         .unwrap_err();
     assert_eq!(error.kind, FailureKind::Quota);
+}
+
+#[test]
+fn a_cursor_reply_is_read_from_standard_output_whatever_standard_error_says() {
+    let dir = tempfile::tempdir().unwrap();
+    let reply =
+        r#"{"type":"result","subtype":"success","is_error":false,"result":"Ship the writer."}"#;
+    let body = format!(
+        "echo 'warning: {{x}} is deprecated' >&2\ncat <<'EOF'\n{reply}\nEOF\necho 'note: {{y}}' >&2"
+    );
+    let writer = ClaudeWriter::new(dir.path().join("no-claude"), dir.path().into())
+        .with_cursor(stub_program(dir.path(), "agent", &body), dir.path().into());
+    writer.use_writer(WriterKind::Cursor);
+    assert_eq!(writer.goal(&["Ship it."]), Ok("Ship the writer.".into()));
 }
 
 #[test]
