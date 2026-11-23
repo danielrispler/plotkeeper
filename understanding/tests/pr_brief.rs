@@ -1371,3 +1371,35 @@ fn a_not_in_the_plan_step_comes_first_in_its_chapter_when_the_spec_was_written_t
         .collect();
     assert_eq!(kinds, ["Before", "Now", "Not in the plan"]);
 }
+
+#[test]
+fn the_step_caps_sit_exactly_where_the_prompt_says() {
+    let facts = build_facts(&source(&["alpha/a.rs", "beta/b.rs", "gamma/c.rs"])).unwrap();
+    let with_steps = |counts: &[usize]| {
+        let mut b = good_brief_without_overview();
+        let chapters: Vec<serde_json::Value> = counts
+            .iter()
+            .map(|n| {
+                let steps: Vec<serde_json::Value> = (0..*n)
+                    .map(|i| step(["Before", "Now", "Could break", "Must stay true", "Your turn"][i], &["alpha"]))
+                    .collect();
+                json!({ "behaviour": "order", "parts": ["alpha"], "title": "Order", "steps": steps })
+            })
+            .collect();
+        b["chapters"] = json!(chapters);
+        flags_of(&checked(&facts, b)).join("\n")
+    };
+    // A chapter is 3 or 4 steps.
+    assert!(
+        !with_steps(&[3, 4]).contains(" steps"),
+        "{}",
+        with_steps(&[3, 4])
+    );
+    assert!(with_steps(&[3, 5]).contains("5 steps"));
+    assert!(with_steps(&[2, 3]).contains("2 steps"));
+    // Twelve steps in all is the most.
+    assert!(!with_steps(&[3, 3, 3, 3]).contains("steps in all"));
+    assert!(with_steps(&[4, 3, 3, 3]).contains("13 steps in all"));
+    // Two to four chapters.
+    assert!(with_steps(&[3]).contains("1 chapters"));
+}

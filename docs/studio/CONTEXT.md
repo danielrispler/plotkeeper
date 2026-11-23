@@ -27,7 +27,7 @@ The files a turn's agent and its workers changed, with their added and removed l
 
 **Intention**:
 The latest thing the agent wrote in its own words during a turn, such as why it is about to read an issue. It stays shown, with its age, until the agent writes again, so it covers the steps that follow it. While a turn runs, its intentions are the last line of each of its responses. When the turn ends, its final response's intention becomes that response's first line, so a footer a plugin adds is never the intention. The rail shows it only while the session is Running (boxed) or Needs you (small, as "Why it asks"); at your turn the turn's Headline says what happened, and the summary's first line never replaces the intention. A side question ("ask about this") gets these intentions as context.
-_Avoid_: Reason (the card writer's account of a step)
+_Avoid_: Reason (the retired card writer's account of a step)
 
 **Headline**:
 One sentence, at most 16 words, on what a turn did, or what it waits on: an outcome, never a narration of the steps, and for a turn that ends by asking Daniel something, the ask. The turn writer is given the turn's recorded facts and writes it; code then holds it to them. A Headline that says fixed, passes or verified with no check of the turn that ended passed (or with one that ended failed) starts with "Agent says:". A Headline with a number or id the turn's material lacks is stripped and asked for once more; stripped twice, the rail shows the final response's first line. Until the summary arrives, the Headline is that line.
@@ -115,7 +115,7 @@ _Avoid_: Sync, remote (alone)
 
 **Main distance**:
 How far a workspace's branch is from `origin`'s default branch: the commits it adds, and the commits it is behind, which a rebase would take in. On the default branch itself, it is the upstream distance.
-_Avoid_: Base (a card's starting point)
+_Avoid_: Base (a retired card's starting point)
 
 **Git line**:
 The line in the top bar on the git state of the selected session's workspace, or the main checkout's with none: its workspace and branch, its upstream and main distance, its uncommitted files and any operation in progress. The branch shows once: for a task whose branch is its name, only the name does; the main checkout's branch always shows. The tokens that say nothing are hidden. Workspaces rows carry the same tokens.
@@ -225,7 +225,7 @@ An agent that an agent session, or another subagent, spawned to do part of its w
 _Avoid_: Task (the workbench's unit of work)
 
 **Worker**:
-A subagent spawned with its own git worktree, or one that changes files. A helper becomes a worker at its first change. Its home is its own worktree: the one it was spawned isolated in, or the first worktree its commands name that is not its session's. Daniel follows a worker like a session, with its own cards and brief. A finished worker folds into its parent's line as a helper does, and its session's rail keeps it in the subagent history. A worker is not a task.
+A subagent spawned with its own git worktree, or one that changes files. A helper becomes a worker at its first change. Its home is its own worktree: the one it was spawned isolated in, or the first worktree its commands name that is not its session's. Daniel follows a worker like a session, with its own brief. A finished worker folds into its parent's line as a helper does, and its session's rail keeps it in the subagent history. A worker is not a task.
 
 **Helper**:
 A subagent that is not a worker, such as a review or a search. It shows as one line under the agent that spawned it.
@@ -268,7 +268,7 @@ The second sandboxed call that checks each claim of a **PR brief** against the s
 _Avoid_: Fact check, verification
 
 **Seen**:
-In the viewport (intersecting visibly, not merely built in the DOM), in a visible and focused window, with the view that holds it open. Used for cards, Home items, and stop-rule counts.
+In the viewport (intersecting visibly, not merely built in the DOM), in a visible and focused window, with the view that holds it open. Used for Home items, PR brief rows and stop-rule counts.
 _Avoid_: Shown (when it meant DOM-built), rendered
 
 **System map**:
@@ -335,7 +335,7 @@ Daniel's shortcuts for the studio, kept in `keymap.json` beside the settings, in
 _Avoid_: Keybindings, shortcuts file
 
 **Explanation language**:
-The human language of cards and questions: English for now, no longer Hebrew (danielrispler/Falinks#463), in plain words at Daniel's level. Code terms are in backticks.
+The human language of briefs and questions: English for now, no longer Hebrew (danielrispler/Falinks#463), in plain words at Daniel's level. Code terms are in backticks.
 
 **Prior art**:
 How the benchmark tools already solve a standard shell or workspace problem, such as sidebar hierarchy, worktree navigation, branch switching or history. The benchmark tools are herdr, cmux, Workmux, AgentsRoom, T3 Code and Cursor's parallel background agents, with Zed second for editor chrome. The studio copies their proven pattern for these decisions and keeps its own design for the understanding layer. Prior-art notes live in `docs/studio/research/`.

@@ -464,6 +464,31 @@ mod tests {
     }
 
     #[test]
+    fn a_start_is_inclusive_of_the_commits_own_second() {
+        let (dir, path) = repo();
+        let stamp = "1700000000 +0000";
+        let status = std::process::Command::new("git")
+            .args([
+                "-c",
+                "user.name=S",
+                "-c",
+                "user.email=s@e.com",
+                "commit",
+                "-q",
+            ])
+            .args(["--allow-empty", "-m", "Studio: a thing (#5)"])
+            .env("GIT_COMMITTER_DATE", stamp)
+            .env("GIT_AUTHOR_DATE", stamp)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .current_dir(dir.path())
+            .status()
+            .unwrap();
+        assert!(status.success());
+        assert_eq!(merged_numbers_since(Path::new(&path), 1_700_000_000), [5]);
+        assert!(merged_numbers_since(Path::new(&path), 1_700_000_001).is_empty());
+    }
+
+    #[test]
     fn a_brief_is_offered_once_per_pr_however_often_its_row_is_seen() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join(LOG_FILE);
