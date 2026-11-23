@@ -361,6 +361,34 @@ const mapBriefRatify = (): Fixture => ({
       log("ratify ok");`, false, 100),
   pr_ratify: ratifyRows,
 });
+// The end-of-story bar (#393) under the story's last step: 4 picked by its key, an "s" typed in the note that does not skip, the note kept by
+// Enter; each is sent to the shell, and no rating is shown back once the brief is opened again. The screenshot is the bar after the note.
+const mapBriefBar = (): Fixture =>
+  mapBrief(briefOf(storySteps()), 3, `
+      const sent = [];
+      const real = window.fetch;
+      window.fetch = (url, init) => (sent.push(String(url) + " " + (init?.body ?? "")), real(url, init));
+      const bar = () => document.querySelector("#map-brief .story-bar");
+      if (!bar() || bar().hidden) return log("snap:fail no end-of-story bar on the story's last step");
+      const key = (target, k) => target.dispatchEvent(new KeyboardEvent("keydown", { key: k, code: /^[0-9]$/.test(k) ? "Digit" + k : "Key" + k.toUpperCase(), bubbles: true }));
+      key(document, "4");
+      await wait(50);
+      const pressed = [...bar().querySelectorAll(".bar-rate")].filter((b) => b.getAttribute("aria-pressed") === "true").map((b) => b.textContent);
+      if (pressed.join() !== "4") log("snap:fail the 4 key did not rate: " + pressed.join());
+      const note = bar().querySelector(".bar-note");
+      note.focus();
+      key(note, "s");
+      await wait(50);
+      if (bar().hidden) return log("snap:fail an s typed in the note skipped the bar");
+      note.value = "The second step lost me.";
+      key(note, "Enter");
+      await wait(50);
+      if (!bar().querySelector(".bar-kept")) log("snap:fail Enter did not keep the note");
+      const bars = sent.filter((call) => call.includes("/api/story_bar")).map((call) => JSON.parse(call.slice(call.indexOf(" ") + 1)));
+      const kinds = bars.map((b) => b.kind + (b.rating ? ":" + b.rating : "") + (b.note ? ":" + b.note : "")).join();
+      if (kinds !== "rating-given:4,note-given:The second step lost me.") log("snap:fail the bar sent " + kinds);
+      if (bars.some((b) => b.project !== "/w/plotkeeper" || b.about.pr !== 334 || b.about.chapter !== 0)) log("snap:fail the bar's key: " + JSON.stringify(bars[0]));
+      if (["of 5", "/5", "/ 5"].some((score) => bar().textContent.includes(score))) log("snap:fail the bar shows a score");`, false, 100);
 // Overturning in the brief's ratify step (port decision Q2): the prompt goes to the clipboard and the step says so, or, when the clipboard
 // refuses, shows the prompt in a box with a Copy button. The page's clipboard is stubbed to take or refuse the write.
 const mapBriefOverturn = (clipboard: "copies" | "refuses"): Fixture => ({
@@ -455,12 +483,20 @@ const mapBriefChapterMid = (): Fixture =>
       if (document.querySelectorAll("#map-brief .brief-dots i").length !== 4) log("snap:fail the first chapter opened should play the overview and its own steps");
       if (!document.querySelector("#map-brief .brief-title").textContent.includes("Broken laws on the map: what happens now")) log("snap:fail mid-chapter step: " + document.querySelector("#map-brief .brief-title").textContent);
       if (document.querySelector("#map-brief .brief-also")) log("snap:fail also-touched shows before the last chapter's end");
-      if (document.querySelectorAll(".plate.lit").length < 2) log("snap:fail the chapter's parts are not lit");`);
+      if (document.querySelectorAll(".plate.lit").length < 2) log("snap:fail the chapter's parts are not lit");
+      if (document.querySelector("#map-brief .story-bar")) log("snap:fail the end-of-story bar shows mid-chapter");
+      // This chapter is not the last, and its last step still ends with the bar (#393).
+      document.getElementById("brief-next").click();
+      await wait(200);
+      if (!document.querySelector("#map-brief .story-bar")) log("snap:fail no end-of-story bar at a chapter's end");
+      document.querySelector("#map-brief .brief-back").click();
+      await wait(200);`);
 // The last chapter's last step ends with the also-touched lines; another chapter, opened second, has no overview.
 const mapBriefChapterLast = (): Fixture =>
   mapChaptered(2, 3, `
       if (document.querySelectorAll("#map-brief .brief-dots i").length !== 4) log("snap:fail the last chapter opened first should carry the overview");
-      if (!document.querySelector("#map-brief .brief-also")?.textContent.includes("A wording change in a comment")) log("snap:fail no also-touched line on the last step: " + document.querySelector("#map-brief .brief-title").textContent);`);
+      if (!document.querySelector("#map-brief .brief-also")?.textContent.includes("A wording change in a comment")) log("snap:fail no also-touched line on the last step: " + document.querySelector("#map-brief .brief-title").textContent);
+      if (!document.querySelector("#map-brief .story-bar")) log("snap:fail no end-of-story bar at the last chapter's end");`);
 // The stop-rule review (#314, #384): Studio has run 20 active days and merged 25 PRs, and the Map view was engaged with on one of them, so
 // the Map view fell below its threshold, and so did the history strip and "See the proof".
 const dueFacts = { active_days: 20, merged_prs: 25, engaged_days: 1, scrubs: 0, proofs: 0, knows: 0, dismissed: [], briefs_offered: 0, briefs_opened: 0, chapters_done: 0, counts: {}, began: "2026-10-01" };
@@ -1254,6 +1290,7 @@ export const fixtures = {
   mapBriefOrderWrong,
   mapBriefOrderRight,
   mapBriefRatify,
+  mapBriefBar,
   mapBriefOverturnCopied: () => mapBriefOverturn("copies"),
   mapBriefOverturnFallback: () => mapBriefOverturn("refuses"),
   mapBriefWriting,

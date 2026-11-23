@@ -225,6 +225,14 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
             arg(a, "pr")?,
         )),
         "stop_facts" => res(stop_rules::stop_facts(arg(a, "project")?)),
+        "story_bar" => res(crate::story_bar::story_bar(
+            arg(a, "kind")?,
+            arg(a, "project")?,
+            arg(a, "day")?,
+            arg(a, "about")?,
+            arg(a, "rating")?,
+            arg(a, "note")?,
+        )),
         "stop_dismiss" => res(stop_rules::stop_dismiss(
             arg(a, "projects")?,
             arg(a, "modules")?,
