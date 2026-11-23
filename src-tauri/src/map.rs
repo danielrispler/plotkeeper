@@ -380,6 +380,17 @@ pub fn map_commit(project: String, commit: String) -> Result<crate::history::Com
     crate::history::commit_files(Path::new(&project), &commit)
 }
 
+/// "See the code" of a PR's brief: the files its head changed since it left the default branch, with their diffs, for the drawer.
+#[tauri::command(async)]
+pub fn pr_diff(
+    project: String,
+    number: u64,
+    head: String,
+    title: String,
+) -> Result<crate::history::Commit, String> {
+    crate::history::pr_files(Path::new(&project), &head, &format!("#{number} {title}"))
+}
+
 /// The projects among `projects` that show a fogged Core part, a broken law or a waiting PR brief, for Home's quiet mark. Reads local refs and the
 /// last CI read only: it asks neither `origin` nor GitHub.
 #[tauri::command(async)]

@@ -498,6 +498,7 @@ export interface Commands {
   map_proof: Proof[];
   map_state: MapState;
   pr_brief: BriefView | null;
+  pr_diff: CommitFiles;
   pr_brief_settings: void;
   brief_chapter_done: void;
   briefs_waiting: WaitingBriefs | null;

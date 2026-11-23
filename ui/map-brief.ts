@@ -15,7 +15,7 @@ import { logStop } from "./stop-rules.js";
 import { scrubTo } from "./map-history.js";
 import { ratifyActions } from "./map-ratify.js";
 import { ratifyStep, statusWords } from "./ratify.js";
-import { actorSize, alsoAt, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, figureShapes, figureSize, orderRun, type OrderRun, pickRun, type PickRun, playlist, plateSize, storySteps, type Rect, type Shape, unconfirmed } from "./map-model.js";
+import { actorSize, alsoAt, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, commitDrawer, figureShapes, figureSize, orderRun, type OrderRun, pickRun, type PickRun, playlist, plateSize, storySteps, type Rect, type Shape, unconfirmed } from "./map-model.js";
 import type { BriefCheck, BriefStep, BriefView, PrBrief, RatifyRow } from "./types.js";
 
 const player = briefPlayer({ scrubbed: () => currentScrub() !== null, backToNow: () => void scrubTo(null).catch(failure("map_at")) });
@@ -576,7 +576,7 @@ function show(view: MapView, same: boolean) {
   }
   box.querySelectorAll(".brief-dots i").forEach((dot, i) => dot.classList.toggle("at", i === now.step));
   const code = box.querySelector<HTMLButtonElement>(".brief-code")!;
-  code.hidden = step.cites.length === 0;
+  code.hidden = false;
   (box.querySelector(".brief-back") as HTMLButtonElement).disabled = now.step === 0;
   if (step.check) runOf(view, step.check);
   syncNext(step);
@@ -598,10 +598,15 @@ function buildPanel(view: MapView, list: BriefStep[], pr: number) {
   dots.append(...list.map(() => document.createElement("i")));
   const partial = playing?.partial ? text("span", "Written from part of the diff", "brief-partial") : text("span", "", "brief-partial");
   const code = text("button", "See the code", "btn quiet brief-code");
-  code.title = "Open what this step quotes, above the brief";
+  code.title = "Open the PR's changed files, above the brief";
   code.addEventListener("click", () => {
     const step = steps()[player.current()?.step ?? 0];
-    if (step) openDrawer(citeDrawer(step));
+    const now = player.current();
+    if (!step || !now || !playing) return;
+    // The PR's diff (the files the writer read); when git cannot give it, what the step quoted.
+    invoke("pr_diff", { project: now.project, number: now.pr, head: playing.brief.head, title: playing.brief.brief.title })
+      .then((found) => openDrawer(commitDrawer(found)))
+      .catch((e) => (failure("pr_diff")(e), openDrawer(citeDrawer(step))));
   });
   const back = text("button", "Back", "btn brief-back");
   back.title = "The step before";

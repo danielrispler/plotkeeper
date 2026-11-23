@@ -274,6 +274,7 @@ const mapBrief = (view: BriefView, next: number, check = "", quick = false, paus
     {
       map_state: mapState({ fog: { shell: "thick", understanding: "thin" }, ready: [{ number: 334, title: "PR briefs on the map", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["PR briefs on the map"], quiet: false } }] }),
       pr_brief: view,
+      pr_diff: { commit: "b".repeat(40), short: "bbbbbbb", label: "#334 PR briefs on the map", url: null, files: [{ path: "src-tauri/src/pr_briefs.rs", diff: "@@ -1 +1,2 @@\n+the brief" }] },
     },
   ),
   snapDone: "brief ok",
@@ -290,7 +291,10 @@ const escBrief = `
       if (after !== before) log("snap:fail the brief did not reopen at its step: " + before + " then " + after);`;
 const mapBriefStart = (): Fixture => mapBrief(briefOf(storySteps()), 0, `if (!document.querySelector("#map-brief .brief-title").textContent.includes("brings its own brief")) log("snap:fail first step");`);
 const mapBriefStory = (): Fixture => mapBrief(briefOf(storySteps(), false), 2, `${escBrief}
-      if (!document.querySelector("#map-brief .brief-cites")) log("snap:fail the step shows no citations");`);
+      if (!document.querySelector("#map-brief .brief-cites")) log("snap:fail the step shows no citations");
+      document.querySelector("#map-brief .brief-code").click();
+      await wait(400);
+      if (!document.querySelector("#map-drawer .drawer-code")?.textContent.includes("+the brief")) log("snap:fail See the code does not open the PR's diff");`);
 const mapBriefFigure = (kind: string): Fixture =>
   mapBrief(briefOf([step("Now", "What happens inside one part", "The change is inside Understanding, so a small figure shows it.", ["understanding"], { fig: figure(kind) })]), 0, `
       if (document.querySelectorAll("#map-brief .brief-fig .fig-chip").length < 3) log("snap:fail the figure draws no chips");`);

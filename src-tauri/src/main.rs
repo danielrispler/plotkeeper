@@ -1118,6 +1118,7 @@ fn main() {
             rail_shown,
             refresh_landed_tasks,
             map::map_state,
+            map::pr_diff,
             pr_briefs::pr_brief,
             pr_briefs::pr_brief_settings,
             pr_briefs::brief_chapter_done,
