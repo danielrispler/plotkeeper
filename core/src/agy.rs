@@ -190,6 +190,11 @@ impl Adapter {
             Hook::Stop => {
                 let idle = raw["fullyIdle"].as_bool().unwrap_or(true);
                 if own {
+                    // agy's `Stop` carries no reply, so the turn's final response is read from its
+                    // transcript, which agy has written by then (#358).
+                    if let Some(reply) = self.final_response(&id) {
+                        event.happened.push(Happened::Reply(reply));
+                    }
                     event.happened.push(Happened::TurnEnd {
                         background_pending: !idle,
                     });
@@ -413,6 +418,19 @@ impl Adapter {
             .find(|r| r["step_index"] == before)?["tool_calls"][0]["args"]["Prompt"]
             .as_str()
             .map(Into::into)
+    }
+
+    /// The open turn's last `PLANNER_RESPONSE` with text in conversation `id`'s transcript: its steps
+    /// start at the turn's `initialNumSteps`. `None` when no turn is open or it wrote no text.
+    fn final_response(&self, id: &str) -> Option<String> {
+        let conversation = self.conversations.get(id)?;
+        let initial = conversation.turn?.initial;
+        records(&conversation.transcript)?
+            .into_iter()
+            .filter(|r| r["type"] == "PLANNER_RESPONSE")
+            .filter(|r| r["step_index"].as_u64().is_some_and(|s| s >= initial))
+            .filter_map(|r| r["content"].as_str().map(str::trim).map(str::to_owned))
+            .rfind(|text| !text.is_empty())
     }
 
     /// At a turn's `Stop`, the origin read again: a mismatch is drift (decision 6).

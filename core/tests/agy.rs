@@ -531,3 +531,59 @@ fn a_claude_session_ended_or_interrupted_by_the_server_stays_claude() {
     assert_eq!(session.state, State::Ended);
     assert_eq!(session.capabilities, studio_core::CLAUDE_CAPABILITIES);
 }
+
+/// The outputs of one agy turn whose transcript holds Daniel's prompt at step 0 and `reply` as the
+/// final response at step 1, as the trial of #358 recorded them.
+fn turn_outputs(reply: &str) -> Vec<studio_core::Output> {
+    let dir = tempfile::tempdir().unwrap();
+    let logs = dir.path().join("s/.system_generated/logs");
+    std::fs::create_dir_all(&logs).unwrap();
+    let file = logs.join("transcript_full.jsonl");
+    let records = [
+        json!({ "step_index": 0, "type": "USER_INPUT", "content": "explain" }),
+        json!({ "step_index": 1, "type": "PLANNER_RESPONSE", "content": reply }),
+    ];
+    let text: String = records.iter().map(|r| format!("{r}\n")).collect();
+    std::fs::write(&file, text).unwrap();
+    let at = |event: &str, t: u64, fields: Value| {
+        let mut l: Value = serde_json::from_str(&line("s", event, t, fields)).unwrap();
+        l["transcriptPath"] = file.display().to_string().into();
+        l.to_string()
+    };
+    let mut studio = Studio::default();
+    studio.apply(&at("SessionStart", 1, json!({})));
+    studio.apply(&at(
+        "PreInvocation",
+        2,
+        json!({ "invocationNum": 0, "initialNumSteps": 1, "lastUserInput": "explain" }),
+    ));
+    studio.apply(&at("Stop", 3, json!({ "fullyIdle": true })))
+}
+
+#[test]
+fn an_agy_turn_with_a_long_final_response_asks_for_its_summary() {
+    let reply = "word ".repeat(200);
+    let summaries: Vec<_> = turn_outputs(&reply)
+        .into_iter()
+        .filter_map(|o| match o {
+            studio_core::Output::Summary(request) => Some(request),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(summaries.len(), 1, "one summary request");
+    assert!(summaries[0].wanted);
+    assert_eq!(
+        summaries[0].responses.last().map(|r| r.trim()),
+        Some(reply.trim())
+    );
+}
+
+#[test]
+fn an_agy_turn_with_a_short_final_response_asks_for_no_summary() {
+    let outputs = turn_outputs("Hi! The folder is empty.");
+    assert!(
+        !outputs
+            .iter()
+            .any(|o| matches!(o, studio_core::Output::Summary(_)))
+    );
+}
