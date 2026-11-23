@@ -46,10 +46,6 @@ export const effectiveTier = (part: Part, chosen: Record<string, string>): Tier 
   return own && tiers.includes(own) ? own : part.tier;
 };
 
-// The project the Map view opens on: the selected session's, else the first project with a map, else the first project.
-export const mapProject = (selected: string | null, paths: string[], withMap: Set<string>): string | null =>
-  selected ?? paths.find((path) => withMap.has(path)) ?? paths[0] ?? null;
-
 // The gap kept between plates, and the corner of the world they start from.
 const gap = 48;
 const corner: Point = { x: plateSize.w / 2 + gap, y: plateSize.h / 2 + gap };
@@ -112,8 +108,9 @@ export function rimPoint(center: Point, size: Size, toward: Point): Point {
   return { x: center.x + dx * reach, y: center.y + dy * reach };
 }
 
-// Esc: closes the first layer that is open, in `layerOrder`, and says which; "leave" when none was, so the Map view is left.
-export function escapeMap(layers: Partial<Record<LayerName, Layer>>): LayerName | "leave" {
+// Esc: closes the first layer that is open, in `layerOrder`, and says which; null when none was: on the bare map Esc does nothing, since the
+// map is the page's base (#386).
+export function escapeMap(layers: Partial<Record<LayerName, Layer>>): LayerName | null {
   for (const name of layerOrder) {
     const layer = layers[name];
     if (layer?.open()) {
@@ -121,7 +118,7 @@ export function escapeMap(layers: Partial<Record<LayerName, Layer>>): LayerName 
       return name;
     }
   }
-  return "leave";
+  return null;
 }
 
 // The first prompt of "Draft a map", for a project with no `system-map.json` on its default branch.
@@ -564,7 +561,13 @@ export function cameraRig(start: Camera): CameraRig {
 
 // ---- The left panel (spec #380, ticket #385): one slot over the map's left side for a session's story, History, a turn's diff (widened) or
 // Settings, beside the part's sheet on the right.
-export type PanelContent = { kind: "story"; session: string } | { kind: "history" } | { kind: "diff"; session: string; turn: number } | { kind: "settings" };
+export type PanelContent =
+  | { kind: "story"; session: string }
+  | { kind: "history" }
+  | { kind: "diff"; session: string; turn: number }
+  | { kind: "settings" }
+  // A worker's or helper's log (#386): it had the centre column, which the map replaced.
+  | { kind: "log"; session: string; agent: string };
 export type Overlays = { panel: PanelContent | null; sheet: string | null };
 // Below this window width only one overlay is open at a time (user story 52).
 export const narrowBelow = 1007;
@@ -582,4 +585,22 @@ export const withSheet = (now: Overlays, sheet: string | null, width: number): O
 export const pressRow = (panel: PanelContent | null, session: string): PanelContent | null =>
   panel?.kind === "story" && panel.session === session ? null : { kind: "story", session };
 // The session the panel shows, whose chips stay lit while it is open.
-export const panelSession = (panel: PanelContent | null): string | null => (panel?.kind === "story" || panel?.kind === "diff" ? panel.session : null);
+export const panelSession = (panel: PanelContent | null): string | null =>
+  panel?.kind === "story" || panel?.kind === "diff" || panel?.kind === "log" ? panel.session : null;
+// The project the page opens on (#386): the last viewed, while the list still holds it, else the first; none on a fresh install.
+export const startProject = (last: string | null, projects: string[]): string | null =>
+  last !== null && projects.includes(last) ? last : (projects[0] ?? null);
+// What the page shows (#386): a project's map, and what the left panel holds over it.
+export type Base = { project: string | null; panel: PanelContent | null };
+// Selecting a session shows its project's map, with its story, or a worker's log, in the left panel.
+export const selectedBase = (session: string, project: string, agent: string | null): Base => ({
+  project,
+  panel: agent === null ? { kind: "story", session } : { kind: "log", session, agent },
+});
+// A press on a project header shows that project's map; a session's panel of another project closes with the switch. A press on the shown
+// project's header folds its group, as the header did before it switched projects (#97).
+export function pressHeader(base: Base, pressed: string, projectOf: (session: string) => string | null): Base | "fold" {
+  if (pressed === base.project) return "fold";
+  const session = panelSession(base.panel);
+  return { project: pressed, panel: session === null || projectOf(session) === pressed ? base.panel : null };
+}

@@ -220,11 +220,33 @@ test("next needs-you and jump to unseen over the sidebar's sessions never land o
 });
 
 test("a button's title names the key the keymap binds its action to now (#159)", () => {
-  assert.equal(titled(initial.keymap, "Home", "studio::GoHome"), "Home (⇧⌘H)");
-  const rebound = reload(initial, { settings: "{}", keymap: JSON.stringify([{ context: "Window", bindings: { "cmd-.": "studio::GoHome" } }]) });
-  assert.ok(titled(rebound.keymap, "Home", "studio::GoHome").includes("⌘."), "the rebound key shows");
-  assert.equal(titled({}, "Home", "studio::GoHome"), "Home");
+  assert.equal(titled(initial.keymap, "Map", "studio::ShowMap"), "Map (⇧⌘H, ⇧⌘M)");
+  const rebound = reload(initial, { settings: "{}", keymap: JSON.stringify([{ context: "Window", bindings: { "cmd-.": "studio::ShowMap" } }]) });
+  assert.ok(titled(rebound.keymap, "Map", "studio::ShowMap").includes("⌘."), "the rebound key shows");
+  assert.equal(titled({}, "Map", "studio::ShowMap"), "Map");
 });
 
 // The settings page (#195): ⌘, opens it, Esc closes it even from a control in it, and the raw file's action is in the palette, unbound.
 // The settings page is a dialog over the window (#193): while it is open, the window's keys behind it stay still, and only Dismiss runs.
+// The map is the page's base (#386): Esc peels the map's layers and then does nothing, and the old Home key is the map's.
+test("Esc on the bare map does nothing: no layer closes and the page stays on the map", async () => {
+  const { escapeMap } = await import("../../dist/map-model.js");
+  let closed = 0;
+  const shut = { open: () => false, close: () => closed++ };
+  assert.equal(escapeMap({ drawer: shut, brief: shut, scrubbed: shut, sheet: shut, panel: shut }), null);
+  assert.equal(escapeMap({}), null);
+  assert.equal(closed, 0);
+  assert.equal(windowBinding(initial.keymap, key("Escape", {}, "Escape"), false), "studio::Dismiss");
+});
+
+test("a keymap.json that still names studio::GoHome runs studio::ShowMap, back to the map", () => {
+  const { keymap } = reload(initial, { settings: null, keymap: `[{ "bindings": { "cmd-h": "studio::GoHome" } }]` });
+  assert.equal(windowBinding(keymap, key("KeyH", { metaKey: true }, "h"), false), "studio::ShowMap");
+  // The palette lists the one action, with the key the alias bound.
+  const entries = paletteEntries(keymap, ["studio::ShowMap"]);
+  assert.equal(entries.filter((e) => e.title === "Go home").length, 0);
+  assert.ok(entries.find((e) => e.binding === "studio::ShowMap").keys.includes("⌘H"));
+  // By default both old keys are the one action.
+  assert.equal(windowBinding(initial.keymap, key("KeyH", { metaKey: true, shiftKey: true }, "h"), false), "studio::ShowMap");
+  assert.equal(windowBinding(initial.keymap, key("KeyM", { metaKey: true, shiftKey: true }, "m"), false), "studio::ShowMap");
+});
