@@ -1,5 +1,6 @@
 //! The integration tests of the core, one binary: each file is a module.
 
+mod agents;
 mod agy;
 mod ask_facts;
 mod blocked_commands;
