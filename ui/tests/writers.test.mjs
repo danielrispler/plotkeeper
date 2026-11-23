@@ -6,6 +6,8 @@ import { briefsLine, choiceOptions, gateNotice, preset, testLine } from "../../d
 
 const claude = (found) => ({ kind: "claude", name: "Claude", found, models: ["haiku", "sonnet", "opus", "fable"], efforts: ["", "low", "medium", "high"] });
 const agy = (found) => ({ kind: "agy", name: "agy", found, models: ["gemini-4-neon-low", "gemini-4-neon-high"], efforts: [] });
+const copilot = (found) => ({ kind: "copilot", name: "Copilot", found, models: ["claude-haiku-4.5", "gpt-6-astra"], efforts: [] });
+const cursor = (found) => ({ kind: "cursor", name: "Cursor", found, models: ["auto", "gpt-5.6-luna"], efforts: [] });
 const codex = (found) => ({ kind: "codex", name: "Codex", found, models: ["gpt-6-luna", "gpt-5.6-luna"], efforts: ["", "low", "medium", "high"] });
 const list = (writers, summaries_on = false, briefs = true) => ({ writers, summaries_on, briefs });
 const settings = (writer = "claude", model = "haiku", effort = "") => ({ model, effort, on_open: false, writer });
@@ -35,6 +37,16 @@ test("Codex is listed and picked as the others are, and a model it does not take
   assert.deepEqual(preset(list([claude(false), agy(false), codex(true)]), settings()), { writer: "codex", model: "gpt-6-luna", effort: "" });
   assert.deepEqual(preset(list([claude(true), codex(true)], true), settings("codex", "haiku", "low")), { writer: "codex", model: "gpt-6-luna", effort: "low" });
   assert.deepEqual(preset(list([claude(true), codex(true)], true), settings("codex", "gpt-5.6-luna", "high")), { writer: "codex", model: "gpt-5.6-luna", effort: "high" });
+});
+
+test("Copilot and Cursor are listed and picked as the others are, and a model either does not take is its first", () => {
+  const writers = [claude(false), agy(false), codex(false), copilot(true), cursor(true)];
+  assert.deepEqual(choiceOptions(list(writers)).map((o) => [o.kind, o.label, o.disabled]).slice(3), [["copilot", "Copilot", false], ["cursor", "Cursor", false]]);
+  assert.deepEqual(preset(list(writers), settings()), { writer: "copilot", model: "claude-haiku-4.5", effort: "" });
+  assert.deepEqual(preset(list([claude(false), cursor(true)]), settings()), { writer: "cursor", model: "auto", effort: "" });
+  // Neither takes an effort, so a saved one is dropped.
+  assert.deepEqual(preset(list(writers, true), settings("cursor", "haiku", "low")), { writer: "cursor", model: "auto", effort: "" });
+  assert.deepEqual(preset(list(writers, true), settings("copilot", "gpt-6-astra", "")), { writer: "copilot", model: "gpt-6-astra", effort: "" });
 });
 
 test("each Test outcome is its line, passed or failed", () => {

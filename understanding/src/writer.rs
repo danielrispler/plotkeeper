@@ -12,7 +12,7 @@ use std::{
     time::Duration,
 };
 
-/// Which program writes: `claude` by default, `agy` or `codex`, chosen by `summaries.writer` in `settings.json`.
+/// Which program writes: `claude` by default, `agy`, `codex`, `copilot` or Cursor's `agent`, chosen by `summaries.writer` in `settings.json`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum WriterKind {
@@ -20,6 +20,8 @@ pub enum WriterKind {
     Claude,
     Agy,
     Codex,
+    Copilot,
+    Cursor,
 }
 
 /// How long a logged-out `agy` waits for a pasted OAuth code before it gives up.
@@ -27,7 +29,13 @@ pub const AGY_LOGIN_WAIT: Duration = Duration::from_secs(60);
 
 impl WriterKind {
     /// Every writer, in the order the page presets the first found (spec #320, "Writer settings on the page").
-    pub const ALL: [WriterKind; 3] = [WriterKind::Claude, WriterKind::Agy, WriterKind::Codex];
+    pub const ALL: [WriterKind; 5] = [
+        WriterKind::Claude,
+        WriterKind::Agy,
+        WriterKind::Codex,
+        WriterKind::Copilot,
+        WriterKind::Cursor,
+    ];
 
     /// The writer's name on the page.
     pub fn name(self) -> &'static str {
@@ -35,6 +43,8 @@ impl WriterKind {
             WriterKind::Claude => "Claude",
             WriterKind::Agy => "agy",
             WriterKind::Codex => "Codex",
+            WriterKind::Copilot => "Copilot",
+            WriterKind::Cursor => "Cursor",
         }
     }
 
@@ -44,6 +54,7 @@ impl WriterKind {
             WriterKind::Claude => &["", "low", "medium", "high"],
             WriterKind::Agy => &[],
             WriterKind::Codex => &["", "low", "medium", "high"],
+            WriterKind::Copilot | WriterKind::Cursor => &[],
         }
     }
 
@@ -53,6 +64,8 @@ impl WriterKind {
             WriterKind::Claude => "claude",
             WriterKind::Agy => "agy",
             WriterKind::Codex => "codex",
+            WriterKind::Copilot => "copilot",
+            WriterKind::Cursor => "agent",
         }
     }
 
@@ -69,19 +82,28 @@ impl WriterKind {
             ],
             // `codex debug models`, the listed ones, the cheapest first.
             WriterKind::Codex => &["gpt-6-luna", "gpt-5.6-luna", "gpt-5.6-terra"],
+            // Copilot's and Cursor's from their docs, not run (`delivery-writer-facts.md`): the cheapest first, and
+            // Cursor's own `auto`.
+            WriterKind::Copilot => &["claude-haiku-4.5", "gpt-6-astra", "gpt-5.3-codex"],
+            WriterKind::Cursor => &["auto", "claude-haiku-5-5", "gpt-5.6-luna"],
         }
     }
 
-    /// The model a call asked for `asked`, as this writer takes it. `agy` and `codex` take only their own list, so a
-    /// model one does not know (the default `haiku` after `summaries.writer` moved to it) is its first one. `claude`
-    /// takes any id, a full one included.
+    /// The model a call asked for `asked`, as this writer takes it. Every writer but `claude` takes only its own list,
+    /// so a model one does not know (the default `haiku` after `summaries.writer` moved to it) is its first one.
+    /// `claude` takes any id, a full one included.
     pub fn model(self, asked: &str) -> &str {
         match self {
-            WriterKind::Agy | WriterKind::Codex if !self.models().contains(&asked) => {
-                self.models()[0]
-            }
+            WriterKind::Claude => asked,
+            _ if !self.models().contains(&asked) => self.models()[0],
             _ => asked,
         }
+    }
+
+    /// Whether the program says why it failed on standard error only, which is then read with its output: Cursor's
+    /// `agent` (its output-format docs).
+    pub(crate) fn fails_on_stderr(self) -> bool {
+        self == WriterKind::Cursor
     }
 
     /// How long a call may run before it fails and is stopped. `agy`'s covers its login wait and then some.
@@ -89,14 +111,18 @@ impl WriterKind {
         match self {
             WriterKind::Claude => Duration::from_secs(5 * 60),
             WriterKind::Agy => Duration::from_secs(3 * 60),
-            WriterKind::Codex => Duration::from_secs(3 * 60),
+            WriterKind::Codex | WriterKind::Copilot | WriterKind::Cursor => {
+                Duration::from_secs(3 * 60)
+            }
         }
     }
 
     /// The least a call that is not to be waited for (the risk judge) may be given.
     pub fn floor(self) -> Duration {
         match self {
-            WriterKind::Claude | WriterKind::Codex => Duration::ZERO,
+            WriterKind::Claude | WriterKind::Codex | WriterKind::Copilot | WriterKind::Cursor => {
+                Duration::ZERO
+            }
             WriterKind::Agy => AGY_LOGIN_WAIT + Duration::from_secs(15),
         }
     }
@@ -107,6 +133,8 @@ impl WriterKind {
             WriterKind::Claude => "card-writer",
             WriterKind::Agy => "card-writer-agy",
             WriterKind::Codex => "card-writer-codex",
+            WriterKind::Copilot => "card-writer-copilot",
+            WriterKind::Cursor => "card-writer-cursor",
         }
     }
 }
@@ -214,6 +242,12 @@ impl WriterError {
             (FailureKind::NotLoggedIn, "codex") => {
                 "Run `codex login` in a terminal, then it writes again."
             }
+            (FailureKind::NotLoggedIn, "copilot") => {
+                "Run `copilot login` in a terminal, then it writes again."
+            }
+            (FailureKind::NotLoggedIn, "agent") => {
+                "Run `agent login` in a terminal, then it writes again."
+            }
             (FailureKind::NotLoggedIn, _) => "Run `claude` in a terminal and log in with /login.",
             (FailureKind::Quota, _) => {
                 "Wait for the limit to reset, or pick another model or writer under Writer, at the top of the page."
@@ -221,6 +255,10 @@ impl WriterError {
             (FailureKind::Timeout, _) => "Check the connection; it tries again at the next turn.",
             (FailureKind::NotInstalled, "agy") => "Install the Antigravity CLI, or fix its path.",
             (FailureKind::NotInstalled, "codex") => "Install the Codex CLI, or fix its path.",
+            (FailureKind::NotInstalled, "copilot") => {
+                "Install the GitHub Copilot CLI, or fix its path."
+            }
+            (FailureKind::NotInstalled, "agent") => "Install the Cursor CLI, or fix its path.",
             (FailureKind::NotInstalled, _) => "Install Claude Code, or fix its path.",
             (FailureKind::Empty, _) => {
                 "Run it by hand to see why; it tries again at the next turn."
@@ -355,9 +393,45 @@ pub fn build_command(
                 None => request.user.clone(),
             }
         }
+        WriterKind::Copilot => {
+            // An empty allow-list turns Copilot's tools off (its docs; that an empty one leaves none is not verified),
+            // and it never stops to ask. `-s` keeps only the reply; `json` prints it as JSON lines. No schema flag: the
+            // object is read from the text.
+            command.args([
+                "-s",
+                "--output-format=json",
+                "--available-tools=",
+                "--no-ask-user",
+            ]);
+            if let Some(model) = &request.model {
+                command.arg(format!("--model={}", kind.model(model)));
+            }
+            command.arg("-p").arg(lead(request));
+            String::new()
+        }
+        WriterKind::Cursor => {
+            // No flag turns Cursor's tools off: its lockout is ask mode, read-only, in the empty folder, trusted so that
+            // no prompt waits. No schema flag: the object is read from its `result`.
+            command.args(["-p", "--output-format", "json", "--mode", "ask", "--trust"]);
+            if let Some(model) = &request.model {
+                command.args(["--model", kind.model(model)]);
+            }
+            command.arg(lead(request));
+            String::new()
+        }
     };
     command.env("PLOTKEEPER_INTERNAL", "1").current_dir(folder);
     (command, stdin.replace('\0', ""))
+}
+
+/// The prompt as one argument, for a writer with no system prompt flag that takes no standard input: the system prompt
+/// leads it, and NUL bytes, which no argument can hold, are dropped.
+fn lead(request: &WriterRequest) -> String {
+    match &request.system {
+        Some(system) => format!("{system}\n\n{}", request.user),
+        None => request.user.clone(),
+    }
+    .replace('\0', "")
 }
 
 /// The file in `folder` that holds `schema`, which `codex` takes only as a file: one per schema, named by its text, so
@@ -387,15 +461,19 @@ pub fn read_reply(
     status: &ExitStatus,
     stdout: &str,
 ) -> Result<WriterReply, WriterError> {
-    if kind == WriterKind::Codex {
-        return read_codex(schema, status, stdout);
+    match kind {
+        WriterKind::Codex => return read_codex(schema, status, stdout),
+        WriterKind::Copilot => return read_copilot(schema, status, stdout),
+        _ => {}
     }
     let head: String = stdout.trim().chars().take(300).collect();
     let fail = |kind_of, detail: &str| Err(WriterError::new(kind_of, kind, detail));
     let envelope = match kind {
         WriterKind::Agy => Some(crate::parse_object(stdout).unwrap_or(Value::Null)),
         WriterKind::Claude if schema => Some(crate::parse_object(stdout).unwrap_or(Value::Null)),
-        WriterKind::Claude | WriterKind::Codex => None,
+        // Cursor's one object, as Claude's; none when it failed, which it says on standard error.
+        WriterKind::Cursor => Some(crate::parse_object(stdout).unwrap_or(Value::Null)),
+        WriterKind::Claude | WriterKind::Codex | WriterKind::Copilot => None,
     };
     if let Some(envelope) = &envelope {
         let (error, reply) = match kind {
@@ -403,7 +481,7 @@ pub fn read_reply(
                 envelope["status"].as_str() == Some("ERROR"),
                 envelope["response"].as_str(),
             ),
-            WriterKind::Claude | WriterKind::Codex => (
+            _ => (
                 envelope["is_error"].as_bool() == Some(true),
                 envelope["result"].as_str(),
             ),
@@ -411,7 +489,7 @@ pub fn read_reply(
         if error {
             let said = match kind {
                 WriterKind::Agy => envelope["error"].as_str(),
-                WriterKind::Claude | WriterKind::Codex => reply,
+                _ => reply,
             };
             let said = said.unwrap_or(&head);
             return fail(classify(kind, status, said), &format!("{said:?}"));
@@ -502,6 +580,53 @@ fn read_codex(schema: bool, status: &ExitStatus, stdout: &str) -> Result<WriterR
             })
         }),
         text,
+    })
+}
+
+/// `read_reply` for `copilot -p --output-format=json`: JSON lines whose records its docs do not describe, so this reading
+/// waits on wave 1's trial (spec #320). The reply is the last `assistant.message`'s `data.content`, and a `session.error`'s
+/// `data.message` says why it failed; output with no JSON line (`-s` printing the reply alone) is the reply.
+fn read_copilot(
+    schema: bool,
+    status: &ExitStatus,
+    stdout: &str,
+) -> Result<WriterReply, WriterError> {
+    let kind = WriterKind::Copilot;
+    let records: Vec<Value> = stdout
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter(|r| r["type"].is_string())
+        .collect();
+    let last = |of: &str, field: &str| {
+        records
+            .iter()
+            .rev()
+            .find(|r| r["type"] == of)
+            .and_then(|r| r["data"][field].as_str())
+    };
+    let head: String = stdout.trim().chars().take(300).collect();
+    let fail = |kind_of, detail: String| Err(WriterError::new(kind_of, kind, detail));
+    if let Some(said) = last("session.error", "message") {
+        let said: String = said.chars().take(300).collect();
+        return fail(classify(kind, status, &said), format!("{said:?}"));
+    }
+    if !status.success() {
+        return fail(
+            classify(kind, status, &head),
+            format!("({status}): {head:?}"),
+        );
+    }
+    let text = match records.is_empty() {
+        true => stdout,
+        false => last("assistant.message", "content").unwrap_or_default(),
+    };
+    if text.trim().is_empty() {
+        return fail(FailureKind::Empty, String::new());
+    }
+    Ok(WriterReply {
+        json: schema.then(|| crate::parse_object(text).ok()).flatten(),
+        usage: None,
+        text: text.into(),
     })
 }
 
