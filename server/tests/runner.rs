@@ -254,6 +254,8 @@ fn the_allow_list_is_read_only_git_and_the_checks_and_never_a_push_or_gh() {
         "npm run check",
         "gh pr checks",
         "git push origin",
+        "make verify && git push",
+        "npx gh pr list",
     ]
     .map(String::from)
     .into();
@@ -306,7 +308,8 @@ fn a_micro_world_has_no_bash_and_writes_only_its_own_folder() {
     let checks = vec!["cargo test".to_string()];
     let command = claude_command(Path::new("/bin/claude"), &plan(Kind::MicroWorld, &checks));
     assert_eq!(after(&command.args, "--tools"), "Read,Edit,Write,Glob,Grep");
-    assert_eq!(after(&command.args, "--add-dir"), "/p/app");
+    // Only the flags spec #378 gives: how a micro-world reads the project is its own ticket's.
+    assert!(!command.args.iter().any(|a| a == "--add-dir"));
     let allowed = allowed_tools(Kind::MicroWorld, Path::new("/runs/r1/work"), &checks);
     assert_eq!(allowed, ["Edit(//runs/r1/work/**)"]);
     assert_eq!(
@@ -943,4 +946,214 @@ fn a_launcher_that_does_not_start_fails_the_run_once_and_frees_the_queue() {
     let runner = open_with(env!("CARGO_BIN_EXE_plotkeeper-run"));
     assert!(runner.runs(PROJECT).runs.is_empty());
     assert_eq!(records().lines().count(), 2);
+}
+
+/// Submits `script` for `project` on `runner`.
+fn submit(runner: &Runner, project: &str, script: &str) -> String {
+    runner
+        .submit(Request {
+            kind: Kind::BackLaw,
+            project: project.into(),
+            folder: runner.new_folder().unwrap(),
+            prompt: script.into(),
+            limits: Limits::of(Kind::BackLaw),
+        })
+        .unwrap()
+}
+
+fn kill_group(pid: u64) {
+    assert!(
+        Command::new("kill")
+            .args(["-9", &format!("-{pid}")])
+            .status()
+            .unwrap()
+            .success()
+    );
+}
+
+#[test]
+fn a_start_leaves_a_running_run_it_cannot_read_alone() {
+    let Bench {
+        dir,
+        runner,
+        changes,
+    } = bench();
+    let id = submit(&runner, PROJECT, "sleep 60");
+    until(&runner, &changes, |r| {
+        state(r, &id) == Some(RunState::Running)
+    });
+    let folder = dir.path().join("runs").join(&id);
+    let pid = launch(&folder)["pid"].as_u64().unwrap();
+    // As a newer build would write it: a kind this build does not know.
+    let run = fs::read_to_string(folder.join("run.json")).unwrap();
+    fs::write(
+        folder.join("run.json"),
+        run.replace("\"back-law\"", "\"future-kind\""),
+    )
+    .unwrap();
+    drop((runner, changes));
+
+    let (_runner, _changes) = open(dir.path(), Arc::new(Script));
+    assert!(
+        folder.exists(),
+        "a start removed the folder of a run that is still running"
+    );
+    assert!(alive(pid));
+    kill_group(pid);
+    assert!(gone(pid));
+    // Once its launcher is gone it is an orphan like any other.
+    let (_runner, _changes) = open(dir.path(), Arc::new(Script));
+    assert!(!folder.exists());
+}
+
+#[test]
+fn a_queued_run_never_starts_beside_a_running_one_whatever_their_order_on_disk() {
+    let Bench {
+        dir,
+        runner,
+        changes,
+    } = bench();
+    let running = submit(&runner, PROJECT, &waits("first"));
+    let queued = submit(&runner, PROJECT, "echo second");
+    until(&runner, &changes, |r| {
+        state(r, &running) == Some(RunState::Running)
+    });
+    drop((runner, changes));
+    // The queued run sorts first, as after a clock that stepped back.
+    let file = dir.path().join("runs").join(&queued).join("run.json");
+    let mut run: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&file).unwrap()).unwrap();
+    run["created_ms"] = 0.into();
+    fs::write(&file, run.to_string()).unwrap();
+
+    let (runner, changes) = open(dir.path(), Arc::new(Script));
+    assert_eq!(state(&runner, &running), Some(RunState::Running));
+    assert_eq!(state(&runner, &queued), Some(RunState::Queued));
+    fs::write(dir.path().join("runs").join(&running).join("work/go"), "").unwrap();
+    until(&runner, &changes, ended(&queued));
+}
+
+#[test]
+fn a_refusal_never_removes_a_folder_that_is_not_a_new_runs() {
+    let bench = bench();
+    // `<runs>/../work`: its parent's parent is the runs folder, and it is no run's.
+    let runs = bench.dir.path().join("runs");
+    fs::create_dir_all(&runs).unwrap();
+    let beside = runs.join("..").join("work");
+    fs::create_dir_all(&beside).unwrap();
+    settings(bench.dir.path(), "{}");
+    let refused = bench.runner.submit(Request {
+        kind: Kind::BackLaw,
+        project: PROJECT.into(),
+        folder: beside.clone(),
+        prompt: "echo no".into(),
+        limits: Limits::of(Kind::BackLaw),
+    });
+    assert!(refused.is_err());
+    assert!(beside.exists() && runs.exists());
+    assert!(bench.dir.path().join("data/settings.json").exists());
+}
+
+#[test]
+fn a_finished_runs_stray_children_are_stopped() {
+    let bench = bench();
+    let id = bench.run("sleep 60 & echo $! > child.pid; echo finished");
+    bench.until(ended(&id));
+    assert_eq!(bench.runner.outcome(&id).unwrap().result, "finished");
+    let child: u64 = fs::read_to_string(bench.folder(&id).join("work/child.pid"))
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    assert!(gone(child), "a child of a finished run kept running");
+}
+
+/// A harness whose command removes `HOME` from the environment.
+struct NoHome;
+
+impl Harness for NoHome {
+    fn command(&self, plan: &Plan) -> Result<HarnessCommand, String> {
+        let mut command = Script.command(plan)?;
+        command.env_remove = vec!["HOME".into()];
+        Ok(command)
+    }
+}
+
+#[test]
+fn the_launcher_closes_standard_input_and_removes_what_the_command_says() {
+    assert!(
+        std::env::var_os("HOME").is_some(),
+        "the test needs HOME set to see it removed"
+    );
+    let dir = tempfile::tempdir().unwrap();
+    settings(
+        dir.path(),
+        r#"{ "checks": { "/p/app": ["cargo test"] }, "setup": { "/p/app": "echo \"setup ${HOME:+has HOME}\" > setup-said" } }"#,
+    );
+    let (runner, changes) = open(dir.path(), Arc::new(NoHome));
+    let id = submit(
+        &runner,
+        PROJECT,
+        "[ /dev/stdin -ef /dev/null ] && echo \"stdin closed, HOME ${HOME-unset}, $(cat setup-said)\"",
+    );
+    until(&runner, &changes, ended(&id));
+    // The harness has no HOME and no input; the setup command keeps plotkeeper's own environment.
+    assert_eq!(
+        runner.outcome(&id).unwrap().result,
+        "stdin closed, HOME unset, setup has HOME"
+    );
+}
+
+#[test]
+fn a_result_whose_subtype_is_an_error_is_a_failure_even_at_exit_zero() {
+    let bench = bench();
+    let id = bench.run(&says(
+        r#"{"type":"result","subtype":"error_max_turns","is_error":false,"result":""}"#,
+    ));
+    bench.until(ended(&id));
+    assert_eq!(bench.runner.outcome(&id).unwrap().end, End::Failed);
+}
+
+#[test]
+fn a_pause_is_told_to_every_project_with_runs_and_a_pause_file_of_another_build_still_pauses() {
+    let Bench {
+        dir,
+        runner,
+        changes,
+    } = bench();
+    let other = submit(&runner, "/p/other", &waits("other"));
+    until(&runner, &changes, |r| {
+        state(r, &other) == Some(RunState::Running)
+    });
+    while changes.try_recv().is_ok() {}
+    let failed = submit(
+        &runner,
+        PROJECT,
+        &format!(
+            "{}\nexit 1",
+            says(r#"{"is_error":true,"result":"Please run /login"}"#)
+        ),
+    );
+    until(&runner, &changes, ended(&failed));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut told = Vec::new();
+    while !told.contains(&"/p/other".to_string()) {
+        let left = deadline.saturating_duration_since(Instant::now());
+        told.push(
+            changes
+                .recv_timeout(left)
+                .expect("the other project was never told of the pause"),
+        );
+    }
+    runner.cancel(&other).unwrap();
+    drop((runner, changes));
+
+    // A reason this build does not know is still a pause.
+    fs::write(
+        dir.path().join("runs/paused.json"),
+        r#"{"end":"a-future-reason"}"#,
+    )
+    .unwrap();
+    let (runner, _changes) = open(dir.path(), Arc::new(Script));
+    assert!(runner.runs(PROJECT).paused.is_some());
 }

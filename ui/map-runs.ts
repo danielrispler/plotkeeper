@@ -9,8 +9,11 @@ import { copyOverturn, overturnReport } from "./ratify.js";
 import type { RunView, Runs } from "./types.js";
 
 export type RunRow = { id: string; state: RunView["state"]; title: string; note: string; action: "Cancel" | "Dismiss"; denials: string[]; prompt: string | null };
-// What the rows' buttons do: `cancel` stops a queued or running run and removes an ended one.
-export type RunActs = { cancel: (id: string) => void; resume: () => void; copy: (prompt: string) => Promise<"copied" | "manual"> };
+// What a copy left to show under its run's row: the line, and for a clipboard that refused, the prompt to copy by hand.
+export type CopyNote = { id: string; line: string; manual: string | null };
+// What the rows' buttons do: `cancel` stops a queued or running run and removes an ended one; `noted` is told what a copy left to show, to
+// keep it across a redraw.
+export type RunActs = { cancel: (id: string) => void; resume: () => void; copy: (prompt: string) => Promise<"copied" | "manual">; noted?: (note: CopyNote) => void };
 
 const kindWords: Record<RunView["kind"], string> = { "back-law": "Back a law", "micro-world": "Micro-world" };
 const clock = (at: number) => {
@@ -37,7 +40,20 @@ const button = (words: string, title: string, click: () => unknown) => {
   return node;
 };
 
-function rowNode(row: RunRow, act: RunActs): HTMLElement {
+// The note of a copy: its line, and the prompt in a box when it has to be copied by hand.
+function noteNodes(note: Pick<CopyNote, "line" | "manual">): HTMLElement[] {
+  const line = text("p", note.line, "run-copied");
+  line.setAttribute("role", "status");
+  if (note.manual === null) return [line];
+  const area = document.createElement("textarea");
+  area.className = "ratify-prompt";
+  area.value = note.manual;
+  area.readOnly = true;
+  area.rows = 4;
+  return [line, area];
+}
+
+function rowNode(row: RunRow, act: RunActs, note: CopyNote | null): HTMLElement {
   const node = text("div", "", "run-row");
   node.dataset.run = row.id;
   node.dataset.state = row.state;
@@ -52,31 +68,24 @@ function rowNode(row: RunRow, act: RunActs): HTMLElement {
   if (prompt !== null) {
     // The copy starts inside the click, so the browser lets it reach the clipboard.
     const copy = button("Copy prompt", "Copy this run's prompt, to paste into your own agent", async () => {
-      const report = overturnReport(await act.copy(prompt), prompt);
-      const line = text("p", report.line, "run-copied");
-      line.setAttribute("role", "status");
-      const shown: HTMLElement[] = [line];
-      if (report.manual !== null) {
-        const area = document.createElement("textarea");
-        area.className = "ratify-prompt";
-        area.value = report.manual;
-        area.readOnly = true;
-        area.rows = 4;
-        shown.push(area);
-      }
+      const made = { id: row.id, ...overturnReport(await act.copy(prompt), prompt) };
       copy.disabled = true;
-      node.append(...shown);
+      node.append(...noteNodes(made));
+      act.noted?.(made);
     }) as HTMLButtonElement;
+    copy.disabled = note?.id === row.id;
     actions.append(copy);
   }
   const title = row.state === "ended" ? "Remove this run from the list" : row.state === "running" ? "Stop this run and remove what it made" : "Take this run out of the queue";
   actions.append(button(row.action, title, () => act.cancel(row.id)));
   node.append(actions);
+  if (note?.id === row.id) node.append(...noteNodes(note));
   return node;
 }
 
 // What the runs area holds: nothing with no run and no pause; else its title, the pause's one indicator with Resume, and a row per run.
-export function runsNodes(runs: Runs | null | undefined, act: RunActs): HTMLElement[] {
+// `note` is what the last copy left, drawn under its run's row.
+export function runsNodes(runs: Runs | null | undefined, act: RunActs, note: CopyNote | null = null): HTMLElement[] {
   const rows = runRows(runs);
   const paused = runs?.paused ?? null;
   if (!rows.length && paused === null) return [];
@@ -87,19 +96,24 @@ export function runsNodes(runs: Runs | null | undefined, act: RunActs): HTMLElem
     indicator.append(text("span", `Background runs are paused. ${paused}.`), button("Resume", "Start the queued runs again", act.resume));
     nodes.push(indicator);
   }
-  return [...nodes, ...rows.map((row) => rowNode(row, act))];
+  return [...nodes, ...rows.map((row) => rowNode(row, act, note))];
 }
 
-// The server tells the page when a run starts or ends (`map-landed`); a click's own change is read back at once.
+// What the last copy left, kept so the row shows it again when the map is drawn anew; a run's id is never reused, so it shows only there.
+let copied: CopyNote | null = null;
+
+// The server tells the page when a run starts or ends (`map-landed`); a click's own change is read back at once. A Cancel the server
+// refuses is an action Daniel asked for that failed, so it shows in the notice line.
 const acts: RunActs = {
-  cancel: (id) => void invoke("run_cancel", { id }).then(reloadMap).catch(failure("run_cancel")),
-  resume: () => void invoke("runs_resume").then(reloadMap).catch(failure("runs_resume")),
+  cancel: (id) => void invoke("run_cancel", { id }).then(reloadMap).catch(failure("run_cancel", "error")),
+  resume: () => void invoke("runs_resume").then(reloadMap).catch(failure("runs_resume", "error")),
   copy: (prompt) => copyOverturn(prompt, navigator.clipboard?.writeText?.bind(navigator.clipboard)),
+  noted: (note) => (copied = note),
 };
 
 function paint(view: MapView) {
   // A past commit's map is read-only and shows no runs.
-  view.slots.runs.replaceChildren(...(view.scrub ? [] : runsNodes(view.state.runs, acts)));
+  view.slots.runs.replaceChildren(...(view.scrub ? [] : runsNodes(view.state.runs, acts, copied)));
   syncSide(view.slots);
 }
 

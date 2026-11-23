@@ -53,7 +53,7 @@ A command exits with its last group's code: the statements after the last `;`, `
 
 ### A check sent to the background
 
-A check an agent sends to the background is running until its notification lands, then holds what it reports: completed is passed when exit 0 would count, failed is failed when a non-zero exit would count, and anything else, a killed task included, is Ran. It stays in the turn that started it, and that turn's checks are read again when the notification lands. A shell `&` is Ran. A background run has no exit code.
+A check an agent sends to the background is running until its notification lands, then holds what it reports: completed is passed when exit 0 would count, failed is failed when a non-zero exit would count, and anything else, a killed task included, is Ran. It stays in the turn that started it, and that turn's checks are read again when the notification lands. A shell `&` is Ran. A check sent to the background has no exit code.
 
 ## The feed
 

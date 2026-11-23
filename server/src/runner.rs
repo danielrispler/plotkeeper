@@ -169,16 +169,18 @@ const GIT: [&str; 4] = ["git status", "git diff", "git log", "git add"];
 
 /// What `--allowedTools` lists for a run: edits inside its working `folder`, and for a kind with a shell the read-only
 /// git commands and one entry per command of the project's `checks`, each bare and with arguments. An entry of `checks`
-/// that is a `git` or `gh` command is left out, so no list ever allows a push. This list is not a security boundary: an
-/// allowed check runs code the agent wrote. The OS sandbox and trusted input are.
+/// that has `git` or `gh` as any of its words is left out, so no list ever allows a push. This list is not a security
+/// boundary: an allowed check runs code the agent wrote. The OS sandbox and trusted input are.
 pub fn allowed_tools(kind: Kind, folder: &Path, checks: &[String]) -> Vec<String> {
     // The rule's own form for an absolute path: `//` and the path.
     let mut allowed = vec![format!("Edit(/{}/**)", folder.display())];
     if kind.shell() {
-        let checks = checks
-            .iter()
-            .map(|check| check.trim())
-            .filter(|check| !matches!(check.split_whitespace().next(), None | Some("git" | "gh")));
+        let checks = checks.iter().map(|check| check.trim()).filter(|check| {
+            !check.is_empty()
+                && !check
+                    .split_whitespace()
+                    .any(|word| word == "git" || word == "gh")
+        });
         for command in GIT.into_iter().chain(checks) {
             allowed.push(format!("Bash({command})"));
             allowed.push(format!("Bash({command} *)"));
@@ -211,10 +213,6 @@ pub fn claude_command(program: &Path, plan: &Plan) -> HarnessCommand {
     .into();
     if let Some(model) = plan.model {
         args.extend(["--model".into(), model.into()]);
-    }
-    if !plan.kind.shell() {
-        // A micro-world reads the project and writes only its own folder.
-        args.extend(["--add-dir".into(), plan.project.into()]);
     }
     args.extend(["--tools".into(), plan.kind.tools().join(",")]);
     // `--allowedTools` takes several values, so an option must follow it.
@@ -260,8 +258,37 @@ pub enum End {
 }
 
 impl End {
-    fn pauses(self) -> bool {
-        matches!(self, End::NotLoggedIn | End::RateLimited)
+    /// The pause this end puts on every queue; none for an end that pauses nothing.
+    fn pause(self) -> Option<Pause> {
+        match self {
+            End::NotLoggedIn => Some(Pause::NotLoggedIn),
+            End::RateLimited => Some(Pause::RateLimited),
+            _ => None,
+        }
+    }
+}
+
+/// Why every queue waits until Daniel resumes them, as `paused.json` keeps it across a start.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum Pause {
+    NotLoggedIn,
+    RateLimited,
+    /// A reason another build wrote: still a pause.
+    #[serde(other)]
+    Other,
+}
+
+impl Pause {
+    /// The words of the one indicator.
+    fn line(self) -> &'static str {
+        match self {
+            Pause::NotLoggedIn => {
+                "Claude is not logged in: run `claude` in a terminal and log in with /login"
+            }
+            Pause::RateLimited => "Claude hit its usage or rate limit",
+            Pause::Other => "A run failed on the login or a limit",
+        }
     }
 }
 
@@ -277,6 +304,19 @@ pub struct Outcome {
     pub cost: Option<f64>,
     /// The harness's exit code; none when it was stopped, died or never started.
     pub exit: Option<i32>,
+}
+
+impl Outcome {
+    /// An end with no harness result behind it: `result` says why.
+    fn bare(end: End, result: String) -> Outcome {
+        Outcome {
+            end,
+            result,
+            denials: Vec::new(),
+            cost: None,
+            exit: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -371,6 +411,17 @@ struct Stored {
     command: HarnessCommand,
 }
 
+/// What the launcher reads of `run.json`: only what it runs, so a run of a kind this build does not know still keeps its
+/// limit and writes its status.
+#[derive(Debug, Deserialize)]
+struct Launched {
+    folder: PathBuf,
+    timeout_secs: u64,
+    #[serde(default)]
+    setup: Option<String>,
+    command: HarnessCommand,
+}
+
 /// Who runs a started run: the launcher's process id and when that process started, which together name one process even
 /// once the id is reused. `pid` is none between the moment a start is written down and the moment the launcher runs.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -450,9 +501,11 @@ fn process_start(pid: u32) -> Option<String> {
 /// The launcher, `plotkeeper-run <run's folder>`: runs the project's setup command, then the harness, in the working
 /// folder, with standard input closed and the output kept in the run's folder, and writes `status.json` when the harness
 /// exits or the time limit passes. plotkeeper starts it in a process group of its own with the run's lock as its standard
-/// input, already held; the launcher gives that to no child, so the lock is free exactly when the launcher is gone.
+/// input, already held; the launcher gives that to no child, so the lock is free exactly when the launcher is gone. Its
+/// last act is to kill that group, itself included, so nothing a run started outlives it: not at the limit, and not a
+/// stray child of a run that finished.
 pub fn launch(dir: &Path) -> Result<(), String> {
-    let stored: Stored = read_json(&dir.join(RUN)).ok_or("the folder holds no run")?;
+    let stored: Launched = read_json(&dir.join(RUN)).ok_or("the folder holds no run")?;
     let started_ms = millis();
     let deadline = Instant::now() + Duration::from_secs(stored.timeout_secs);
     let status = match run_setup(dir, &stored, deadline)
@@ -464,18 +517,15 @@ pub fn launch(dir: &Path) -> Result<(), String> {
         },
         Err(status) => status,
     };
-    let stop = status.timed_out;
     let status = Status {
         started_ms,
         ended_ms: millis(),
         ..status
     };
-    write_json(&dir.join(STATUS), &status).map_err(|e| format!("write the status: {e}"))?;
-    if stop {
-        // The status is written, so the group may go, this launcher with it: the harness's own children too.
-        kill_own_group();
-    }
-    Ok(())
+    let written = write_json(&dir.join(STATUS), &status);
+    // The status is written, or cannot be: either way the group goes now, this launcher with it.
+    kill_own_group();
+    written.map_err(|e| format!("write the status: {e}"))
 }
 
 fn output(dir: &Path, name: &str) -> Result<File, Status> {
@@ -502,7 +552,7 @@ fn wait_until(mut child: Child, deadline: Instant) -> Waited {
 }
 
 /// Runs the project's setup command, outside any sandbox and with the network, before the agent starts.
-fn run_setup(dir: &Path, stored: &Stored, deadline: Instant) -> Result<(), Status> {
+fn run_setup(dir: &Path, stored: &Launched, deadline: Instant) -> Result<(), Status> {
     let Some(setup) = &stored.setup else {
         return Ok(());
     };
@@ -534,7 +584,7 @@ fn run_setup(dir: &Path, stored: &Stored, deadline: Instant) -> Result<(), Statu
 }
 
 /// Runs the harness; its exit code, none when a signal ended it.
-fn run_harness(dir: &Path, stored: &Stored, deadline: Instant) -> Result<Option<i32>, Status> {
+fn run_harness(dir: &Path, stored: &Launched, deadline: Instant) -> Result<Option<i32>, Status> {
     let command = &stored.command;
     let mut harness = Command::new(&command.program);
     harness
@@ -582,9 +632,18 @@ fn tail(text: &str, lines: usize) -> String {
     all[all.len().saturating_sub(lines)..].join("\n")
 }
 
+/// What the harness printed.
+struct Printed {
+    result: String,
+    /// It says the run is an error, by `is_error` or by a `subtype` that names one, such as `error_max_turns`.
+    is_error: bool,
+    cost: Option<f64>,
+    denials: Vec<String>,
+}
+
 /// What the harness printed, read as Claude Code's `--output-format json` result: its `result`, whether it says it is an
 /// error, its cost and the tool calls it was denied. Output that is no such JSON is the result as it is.
-fn read_result(stdout: &str) -> (String, bool, Option<f64>, Vec<String>) {
+fn read_result(stdout: &str) -> Printed {
     let parsed = serde_json::from_str::<serde_json::Value>(stdout.trim()).ok();
     // With `--verbose` the output is every message, the result last.
     let result = parsed.and_then(|value| match value {
@@ -592,7 +651,12 @@ fn read_result(stdout: &str) -> (String, bool, Option<f64>, Vec<String>) {
         value => value.is_object().then_some(value),
     });
     let Some(result) = result else {
-        return (stdout.trim().to_string(), false, None, Vec::new());
+        return Printed {
+            result: stdout.trim().to_string(),
+            is_error: false,
+            cost: None,
+            denials: Vec::new(),
+        };
     };
     let denials = result["permission_denials"]
         .as_array()
@@ -609,16 +673,17 @@ fn read_result(stdout: &str) -> (String, bool, Option<f64>, Vec<String>) {
                 denial["tool_name"].as_str().unwrap_or("A tool")
             )
         });
-    (
-        result["result"]
+    let subtype = result["subtype"].as_str().unwrap_or_default();
+    Printed {
+        result: result["result"]
             .as_str()
             .unwrap_or_default()
             .trim()
             .to_string(),
-        result["is_error"].as_bool().unwrap_or(false),
-        result["total_cost_usd"].as_f64(),
-        denials.collect(),
-    )
+        is_error: result["is_error"].as_bool().unwrap_or(false) || subtype.starts_with("error"),
+        cost: result["total_cost_usd"].as_f64(),
+        denials: denials.collect(),
+    }
 }
 
 /// The outcome of the ended run in `dir`, from the launcher's status and the harness's output.
@@ -626,13 +691,7 @@ fn read_outcome(dir: &Path) -> (Outcome, Option<Status>) {
     let text = |name: &str| {
         String::from_utf8_lossy(&fs::read(dir.join(name)).unwrap_or_default()).into_owned()
     };
-    let bare = |end, result: String| Outcome {
-        end,
-        result,
-        denials: Vec::new(),
-        cost: None,
-        exit: None,
-    };
+    let bare = Outcome::bare;
     let Some(status) = read_json::<Status>(&dir.join(STATUS)) else {
         return (bare(End::Died, String::new()), None);
     };
@@ -643,7 +702,12 @@ fn read_outcome(dir: &Path) -> (Outcome, Option<Status>) {
     } else if let Some(error) = &status.error {
         bare(End::Failed, error.clone())
     } else {
-        let (result, is_error, cost, denials) = read_result(&text(STDOUT));
+        let Printed {
+            result,
+            is_error,
+            cost,
+            denials,
+        } = read_result(&text(STDOUT));
         let errors = text(STDERR);
         let end = if status.exit != Some(0) || is_error {
             // Only a failure's words are read for a login or a limit: a good result may talk about either.
@@ -697,16 +761,8 @@ fn line(stored: &Stored, outcome: &Outcome) -> String {
         ),
         End::Died => "Its process went away before it finished".into(),
         End::SetupFailed => with("The project's setup command failed"),
-        End::NotLoggedIn => pause_line(End::NotLoggedIn).into(),
-        End::RateLimited => pause_line(End::RateLimited).into(),
-    }
-}
-
-/// Why the queues are paused, for the one indicator.
-fn pause_line(end: End) -> &'static str {
-    match end {
-        End::RateLimited => "Claude hit its usage or rate limit",
-        _ => "Claude is not logged in: run `claude` in a terminal and log in with /login",
+        End::NotLoggedIn => Pause::NotLoggedIn.line().into(),
+        End::RateLimited => Pause::RateLimited.line().into(),
     }
 }
 
@@ -714,9 +770,14 @@ fn pause_line(end: End) -> &'static str {
 
 enum Phase {
     Queued,
-
-    Running { since_ms: u64 },
-    Ended { outcome: Outcome, at_ms: u64 },
+    /// Its launcher was started at `since_ms`.
+    Running {
+        since_ms: u64,
+    },
+    Ended {
+        outcome: Outcome,
+        at_ms: u64,
+    },
 }
 
 struct Run {
@@ -728,8 +789,8 @@ struct Run {
 struct State {
     /// Every known run, in the order they were asked for.
     runs: Vec<Run>,
-    /// The end that paused the queues, until Daniel resumes them.
-    paused: Option<End>,
+    /// Why the queues are paused, until Daniel resumes them.
+    paused: Option<Pause>,
 }
 
 type Changed = Box<dyn Fn(&str) + Send + Sync>;
@@ -877,29 +938,31 @@ impl Runner {
     /// The folder of the run whose working folder is `folder`: `<runs>/<id>` for `<runs>/<id>/work`, and no other path.
     fn run_dir_of(&self, folder: &Path) -> Option<PathBuf> {
         let dir = folder.parent()?;
+        // A plain name under the runs folder: never `..`, whose parent would read as the runs folder too.
+        dir.file_name()?;
         (folder.file_name()? == WORK && dir.parent()? == self.config.runs)
             .then(|| dir.to_path_buf())
     }
 
-    /// Starts the first queued run of each project that has none going, unless the queues are paused.
+    /// Starts the first queued run of each project that has none going, unless the queues are paused. A project is busy
+    /// while any of its runs is running, wherever that run sits in the order.
     fn advance(&self, state: &mut State) {
         if state.paused.is_some() {
             return;
         }
-        let mut busy: Vec<String> = Vec::new();
-        for i in 0..state.runs.len() {
-            let project = state.runs[i].stored.project.clone();
-            if busy.contains(&project) {
+        let running = state
+            .runs
+            .iter()
+            .filter(|run| matches!(run.phase, Phase::Running { .. }));
+        let mut busy: Vec<String> = running.map(|run| run.stored.project.clone()).collect();
+        for run in &mut state.runs {
+            if !matches!(run.phase, Phase::Queued) || busy.contains(&run.stored.project) {
                 continue;
             }
-            match state.runs[i].phase {
-                Phase::Ended { .. } => continue,
-                Phase::Running { .. } => {}
-                Phase::Queued => state.runs[i].phase = self.start(&state.runs[i].stored),
-            }
+            run.phase = self.start(&run.stored);
             // A run that could not start ended at once, and the next in its queue has its turn.
-            if !matches!(state.runs[i].phase, Phase::Ended { .. }) {
-                busy.push(project);
+            if matches!(run.phase, Phase::Running { .. }) {
+                busy.push(run.stored.project.clone());
             }
         }
     }
@@ -952,14 +1015,11 @@ impl Runner {
             }
             Err(e) => {
                 let launcher = self.config.launcher.display();
-                let outcome = Outcome {
-                    end: End::Failed,
-                    result: format!("the launcher `{launcher}` did not start: {e}"),
-                    denials: Vec::new(),
-                    cost: None,
-                    exit: None,
-                };
-                self.record(stored, &outcome.end, &outcome, 0);
+                let outcome = Outcome::bare(
+                    End::Failed,
+                    format!("the launcher `{launcher}` did not start: {e}"),
+                );
+                self.record(stored, serde_json::json!(outcome.end), Some(&outcome), 0);
                 let _ = fs::write(dir.join(RECORDED), "");
                 Phase::Ended {
                     outcome,
@@ -995,13 +1055,30 @@ impl Runner {
             return;
         }
         let project = run.stored.project.clone();
-        let outcome = self.finish(run);
-        if outcome.pauses() {
-            self.pause(&mut state, Some(outcome));
+        let pause = self.finish(run).pause();
+        if pause.is_some() {
+            self.pause(&mut state, pause);
         }
         self.advance(&mut state);
+        // A pause holds every project's queue, so each project with runs draws again.
+        let told = match pause {
+            Some(_) => Self::projects(&state),
+            None => vec![project],
+        };
         drop(state);
-        self.tell(&project);
+        told.iter().for_each(|project| self.tell(project));
+    }
+
+    /// The projects that have a run, each once.
+    fn projects(state: &State) -> Vec<String> {
+        let mut projects: Vec<String> = state
+            .runs
+            .iter()
+            .map(|run| run.stored.project.clone())
+            .collect();
+        projects.sort();
+        projects.dedup();
+        projects
     }
 
     /// Reads the ended `run`'s outcome from its folder, records it and marks the run ended.
@@ -1010,23 +1087,36 @@ impl Runner {
         let (outcome, status) = read_outcome(&dir);
         let launched = read_json::<Launch>(&dir.join(LAUNCH)).map_or(0, |launch| launch.at_ms);
         let (from, to) = status.map_or((launched, millis()), |s| (s.started_ms, s.ended_ms));
-        self.record(&run.stored, &outcome.end, &outcome, to.saturating_sub(from));
+        let duration = to.saturating_sub(from);
+        self.record(
+            &run.stored,
+            serde_json::json!(outcome.end),
+            Some(&outcome),
+            duration,
+        );
         let _ = fs::write(dir.join(RECORDED), "");
         let end = outcome.end;
         run.phase = Phase::Ended { outcome, at_ms: to };
         end
     }
 
-    /// Appends one line to the record of runs: kind, project, outcome, denials, cost and duration.
-    fn record(&self, stored: &Stored, outcome: &impl Serialize, of: &Outcome, duration_ms: u64) {
+    /// Appends one line to the record of runs: kind, project, outcome, denials, cost and duration. `outcome` is how the
+    /// run ended, or `cancelled`; `of` is what an ended run gave back.
+    fn record(
+        &self,
+        stored: &Stored,
+        outcome: serde_json::Value,
+        of: Option<&Outcome>,
+        duration_ms: u64,
+    ) {
         let line = serde_json::json!({
             "at": millis() / 1000,
             "id": stored.id,
             "kind": stored.kind,
             "project": stored.project,
             "outcome": outcome,
-            "denials": of.denials,
-            "cost": of.cost,
+            "denials": of.map_or(&[][..], |of| &of.denials),
+            "cost": of.and_then(|of| of.cost),
             "duration_ms": duration_ms,
         });
         let appended = fs::create_dir_all(&self.config.data).and_then(|()| {
@@ -1041,12 +1131,12 @@ impl Runner {
         }
     }
 
-    /// Pauses the queues for `end`, or resumes them with none, and keeps that for the next start.
-    fn pause(&self, state: &mut State, end: Option<End>) {
-        state.paused = end;
+    /// Pauses the queues for `why`, or resumes them with none, and keeps that for the next start.
+    fn pause(&self, state: &mut State, why: Option<Pause>) {
+        state.paused = why;
         let file = self.config.runs.join(PAUSED);
-        let saved = match end {
-            Some(end) => write_json(&file, &serde_json::json!({ "end": end })),
+        let saved = match why {
+            Some(why) => write_json(&file, &serde_json::json!({ "end": why })),
             None => fs::remove_file(&file).or_else(|e| match e.kind() {
                 io::ErrorKind::NotFound => Ok(()),
                 _ => Err(e),
@@ -1062,13 +1152,8 @@ impl Runner {
         let mut state = self.state();
         self.pause(&mut state, None);
         self.advance(&mut state);
-        let mut projects: Vec<String> = state
-            .runs
-            .iter()
-            .map(|run| run.stored.project.clone())
-            .collect();
+        let projects = Self::projects(&state);
         drop(state);
-        projects.dedup();
         projects.iter().for_each(|project| self.tell(project));
     }
 
@@ -1084,7 +1169,14 @@ impl Runner {
             .position(|run| run.stored.id == id)
             .ok_or("no such run")?;
         let dir = self.dir(id);
-        if matches!(state.runs[at].phase, Phase::Running { .. }) && !lock_free(&dir) {
+        let running = matches!(state.runs[at].phase, Phase::Running { .. });
+        if running && lock_free(&dir) {
+            // It ended on its own a moment ago: it is recorded as it ended, and a login or limit failure still pauses.
+            let pause = self.finish(&mut state.runs[at]).pause();
+            if pause.is_some() {
+                self.pause(&mut state, pause);
+            }
+        } else if running {
             let launch: Launch = read_json(&dir.join(LAUNCH)).unwrap_or_default();
             let same = launch
                 .pid
@@ -1098,26 +1190,21 @@ impl Runner {
             };
             let group = i32::try_from(pid).map_err(|_| "the run's process id is out of range")?;
             // SAFETY: a signal to the process group the launcher leads, which the lock and the start time just named.
-            if unsafe { libc::killpg(group, libc::SIGKILL) } != 0 {
-                let why = io::Error::last_os_error();
+            let killed = unsafe { libc::killpg(group, libc::SIGKILL) } == 0;
+            let why = io::Error::last_os_error();
+            // No such group: the launcher went between the look and the signal, which is as good.
+            if !killed && why.raw_os_error() != Some(libc::ESRCH) {
                 return Err(format!("the run's processes could not be stopped: {why}"));
             }
             wait_free(&dir);
         }
         let run = state.runs.remove(at);
         if !matches!(run.phase, Phase::Ended { .. }) {
-            let outcome = Outcome {
-                end: End::Failed,
-                result: String::new(),
-                denials: Vec::new(),
-                cost: None,
-                exit: None,
-            };
             let since = match run.phase {
                 Phase::Running { since_ms } => millis().saturating_sub(since_ms),
                 _ => 0,
             };
-            self.record(&run.stored, &"cancelled", &outcome, since);
+            self.record(&run.stored, "cancelled".into(), None, since);
         }
         if let Err(e) = fs::remove_dir_all(&dir) {
             log::warn!("background run {id}: its folder was not removed: {e}");
@@ -1134,8 +1221,11 @@ impl Runner {
     /// as is a folder that holds no run.
     pub fn pick_up(&self) {
         let mut state = self.state();
-        state.paused = read_json::<serde_json::Value>(&self.config.runs.join(PAUSED))
-            .and_then(|paused| serde_json::from_value(paused["end"].clone()).ok());
+        // The file is the pause: one whose reason does not read still pauses.
+        state.paused = fs::read(self.config.runs.join(PAUSED)).ok().map(|text| {
+            let paused = serde_json::from_slice::<serde_json::Value>(&text).unwrap_or_default();
+            serde_json::from_value(paused["end"].clone()).unwrap_or(Pause::Other)
+        });
         let folders = fs::read_dir(&self.config.runs)
             .into_iter()
             .flatten()
@@ -1150,7 +1240,15 @@ impl Runner {
                 read_json::<Stored>(&dir.join(RUN)).filter(|stored| self.dir(&stored.id) == dir);
             let orphan = dir.join(RECORDED).exists();
             let Some(stored) = stored.filter(|_| !orphan) else {
-                let _ = fs::remove_dir_all(&dir);
+                // A folder this build cannot read is removed only once nothing runs in it: a newer build's run goes on.
+                if lock_free(&dir) {
+                    let _ = fs::remove_dir_all(&dir);
+                } else {
+                    log::warn!(
+                        "background runs: {} holds a running run this build cannot read",
+                        dir.display()
+                    );
+                }
                 continue;
             };
             let mut run = Run {
@@ -1159,9 +1257,7 @@ impl Runner {
             };
             if let Some(launch) = read_json::<Launch>(&dir.join(LAUNCH)) {
                 if lock_free(&dir) {
-                    paused = Some(self.finish(&mut run))
-                        .filter(|end| end.pauses())
-                        .or(paused);
+                    paused = self.finish(&mut run).pause().or(paused);
                 } else {
                     run.phase = Phase::Running {
                         since_ms: launch.at_ms,
@@ -1211,7 +1307,7 @@ impl Runner {
                 }
             });
         Runs {
-            paused: state.paused.map(|end| pause_line(end).to_string()),
+            paused: state.paused.map(|why| why.line().to_string()),
             runs: runs.collect(),
         }
     }

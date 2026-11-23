@@ -89,3 +89,20 @@ test("a pause shows one indicator with Resume, whatever the runs", () => {
   // The indicator shows with no run of this project too: the pause holds every project's queue.
   assert.equal(texts(runsNodes({ paused, runs: [] }, acts([]))).includes("Resume"), true);
 });
+
+test("the note of a copied prompt is drawn again with its row, so a redraw of the map keeps it", () => {
+  const failed = ended("f", "failed", "Failed: the build broke");
+  const note = { id: "f", line: "Copy this prompt and paste it into your agent", manual: "Write a test that backs the law." };
+  const rows = runsNodes({ paused: null, runs: [failed, ended("g", "failed", "Failed")] }, acts([]), note).filter((node) => node.dataset.run);
+  assert.match(rows[0].text, /Copy this prompt and paste it into your agent/);
+  assert.equal(rows[0].find("textarea")[0].value, "Write a test that backs the law.");
+  assert.equal(rows[1].find("textarea").length, 0, "only the run it was copied for");
+});
+
+test("a copy tells who keeps the note which run it was for", async () => {
+  const noted = [];
+  const failed = ended("f", "failed", "Failed: the build broke");
+  const [row] = runsNodes({ paused: null, runs: [failed] }, { ...acts([]), noted: (note) => noted.push(note) }).filter((node) => node.dataset.run);
+  await button(row, "Copy prompt").listeners.click();
+  assert.deepEqual(noted, [{ id: "f", line: "Prompt copied, paste it into your agent", manual: null }]);
+});
