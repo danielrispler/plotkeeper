@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { chipText, landedWord, secondLine, showsLanded, status, stripLabels } from "../../dist/list.js";
+import { chipText, clearing, CLEAR_WINDOW_MS, landedToClear, landedWord, secondLine, showsLanded, sidebarSessions, status, stripLabels } from "../../dist/list.js";
 
 test("each state has its glyph and a word for its title and accessible name", () => {
   assert.deepEqual(status("needs_you"), ["pill", "Needs you"]);
@@ -94,4 +94,51 @@ test("a landed task's session at your turn, idle or ended shows a check mark and
   assert.deepEqual(status("needs_you", false, true), ["pill", "Needs you"]);
   assert.deepEqual(status("idle", false, false), ["ring", "Idle"]);
   assert.ok(!showsLanded("idle", false));
+});
+
+// The list holds what Home held (#382): an unseen row shows its last Headline, a running row its Intention in place of the raw step,
+// a needs-you row its question; no other row has a second line.
+test("second lines by state: the question, the Intention, the last Headline, and none for the rest", () => {
+  const headline = (s) => (s.turns.length ? `Headline of ${s.id}` : null);
+  const row = (id, state, extra = {}) => ({ id, state, line: "Edit src/lib.rs", questions: [], unseen: false, landed: false, turns: [{}], transcript: { intention: null }, ...extra });
+  const asked = { tool_use_id: "t", agent: null, answer: "open", questions: [{ question: "Which name?", options: [] }] };
+  assert.equal(secondLine(row("n", "needs_you", { questions: [asked] }), headline), "Which name?");
+  assert.equal(secondLine(row("r", "running", { transcript: { intention: "Make the rows reachable by keyboard." } }), headline), "Make the rows reachable by keyboard.");
+  // Before its Intention is known, a running row shows its step.
+  assert.equal(secondLine(row("r", "running"), headline), "Edit src/lib.rs");
+  assert.equal(secondLine(row("u", "your_turn", { unseen: true }), headline), "Headline of u");
+  assert.equal(secondLine(row("u", "idle", { unseen: true }), headline), "Headline of u");
+  // An unseen row with no turn has nothing to say.
+  assert.equal(secondLine(row("u", "your_turn", { unseen: true, turns: [] }), headline), null);
+  // A landed row reads as landed, not unseen; seen, idle and ended rows have none.
+  assert.equal(secondLine(row("l", "your_turn", { unseen: true, landed: true }), headline), null);
+  for (const state of ["your_turn", "idle", "ended"]) assert.equal(secondLine(row("s", state), headline), null);
+});
+
+// Clear landed at the list's end (#382, #244): it hides the landed rows, Undo brings them back, and nothing is deleted inside the window.
+test("Clear landed hides the landed rows, Undo restores them, and nothing is deleted inside the window", () => {
+  const listed = [
+    { id: "r", state: "running", landed: false },
+    { id: "a", state: "idle", landed: true },
+    { id: "b", state: "your_turn", landed: true },
+    { id: "e", state: "ended", landed: true },
+  ];
+  const ids = (sessions) => sessions.map((s) => s.id);
+  let due = null;
+  const time = { set: (run) => (due = run), clear: () => (due = null) };
+  const deleted = [];
+  const m = clearing(time, { landed: (id) => listed.find((s) => s.id === id && s.landed), commit: (s) => void deleted.push(s.id), changed() {} });
+  // Before Clear the list shows the landed rows, and offers Clear for every landed session, ended ones too.
+  assert.deepEqual(ids(sidebarSessions(listed, m.hidden)), ["r", "a", "b"]);
+  assert.deepEqual(ids(landedToClear(listed, m.hidden)), ["a", "b", "e"]);
+  m.clear(landedToClear(listed, m.hidden));
+  assert.deepEqual(ids(sidebarSessions(listed, m.hidden)), ["r"]);
+  // With nothing landed left in view, Clear landed is not shown.
+  assert.deepEqual(landedToClear(listed, m.hidden), []);
+  assert.deepEqual(deleted, []);
+  m.undo();
+  assert.deepEqual(ids(sidebarSessions(listed, m.hidden)), ["r", "a", "b"]);
+  assert.equal(due, null, "Undo stops the window");
+  assert.deepEqual(deleted, []);
+  assert.equal(CLEAR_WINDOW_MS, 8000);
 });
