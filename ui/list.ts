@@ -578,7 +578,9 @@ export const sidebarSessions = <T extends Pick<Session, "state" | "id">>(session
 export const landedToClear = <T extends Pick<Session, "state" | "id" | "landed">>(sessions: T[], hidden: ReadonlySet<string>): T[] =>
   sessions.filter((session) => showsLanded(session.state, session.landed) && !hidden.has(session.id));
 
-// A project's "⋯" (#381): the one menu of the list's headers, opened under it for its project; Remove project is in it.
+// A project's "⋯" (#381): the one menu of the list's headers, opened under it for its project; Remove project is in it. It is drawn only for a
+// project with no live session: the server saves a project again for its sessions' next event, so removing one with live sessions would undo
+// itself (#380's review).
 function projectMore(group: ProjectGroup<Session>): HTMLElement {
   const more = pressable(text("button", "⋯", "project-more"), false, () => {
     const menu = element("project-actions");
@@ -596,7 +598,7 @@ function projectMore(group: ProjectGroup<Session>): HTMLElement {
 }
 
 // A project's header (#97): its name and, even while folded, its most urgent state: needs you over running. A saved project
-// with no live session is its header only; one whose folder is gone is struck through (#381).
+// with no live session is its header only, with its "⋯"; one whose folder is gone is struck through (#381).
 export function projectHead(group: ProjectGroup<Session>): HTMLElement {
   const head = document.createElement("div");
   head.className = ["project-head", ...(group.gone ? ["gone"] : []), ...(group.key === shownProject() ? ["current"] : [])].join(" ");
@@ -615,7 +617,7 @@ export function projectHead(group: ProjectGroup<Session>): HTMLElement {
     dot.setAttribute("aria-label", dot.title);
     toggle.append(dot);
   }
-  head.append(toggle, projectMore(group));
+  head.append(toggle, ...(group.states.length ? [] : [projectMore(group)]));
   return head;
 }
 

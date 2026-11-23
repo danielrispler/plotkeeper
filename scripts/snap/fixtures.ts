@@ -1247,6 +1247,8 @@ export const fixtures = {
       if (order !== "plotkeeper,falinks,pokedex") log("snap:fail the headers' order: " + order);
       if (named("falinks")?.closest(".project").querySelector(".row")) log("snap:fail a project with no sessions shows rows");
       if (!named("pokedex")?.classList.contains("gone")) log("snap:fail the gone project's header is not marked gone");
+      // Remove project is offered only for a project with no live session: one with sessions would come back with their next event.
+      if (named("plotkeeper").querySelector(".project-more")) log("snap:fail a project with live sessions offers Remove project");
       named("pokedex").querySelector(".project-more").click();
       await wait(100);
       const menu = document.getElementById("project-actions");
