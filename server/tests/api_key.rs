@@ -345,9 +345,5 @@ fn a_pass_whose_choice_was_not_saved_leaves_summaries_off() {
     );
     assert_eq!(test.outcome, "passed", "{}", test.line);
     assert_eq!(test.settings, None, "{}", test.line);
-    assert!(
-        !studio_server::writers(&app).summaries_on,
-        "{}",
-        test.line
-    );
+    assert!(!studio_server::writers(&app).summaries_on, "{}", test.line);
 }

@@ -743,8 +743,8 @@ fn the_writers_found_are_the_ones_command_v_finds_in_their_order() {
             (Anthropic, false),
             (OpenAI, false),
             (Claude, false),
-            (Agy, true),
             (Codex, false),
+            (Agy, true),
             (Copilot, false),
             (Cursor, false)
         ]
@@ -755,8 +755,8 @@ fn the_writers_found_are_the_ones_command_v_finds_in_their_order() {
             (Anthropic, false),
             (OpenAI, false),
             (Claude, true),
-            (Agy, true),
             (Codex, false),
+            (Agy, true),
             (Copilot, false),
             (Cursor, false)
         ]
@@ -767,8 +767,8 @@ fn the_writers_found_are_the_ones_command_v_finds_in_their_order() {
             (Anthropic, false),
             (OpenAI, false),
             (Claude, false),
-            (Agy, false),
             (Codex, true),
+            (Agy, false),
             (Copilot, false),
             (Cursor, false)
         ]
@@ -780,8 +780,8 @@ fn the_writers_found_are_the_ones_command_v_finds_in_their_order() {
             (Anthropic, false),
             (OpenAI, false),
             (Claude, false),
-            (Agy, false),
             (Codex, false),
+            (Agy, false),
             (Copilot, true),
             (Cursor, true)
         ]
@@ -792,8 +792,8 @@ fn the_writers_found_are_the_ones_command_v_finds_in_their_order() {
             (Anthropic, false),
             (OpenAI, false),
             (Claude, false),
-            (Agy, false),
             (Codex, false),
+            (Agy, false),
             (Copilot, false),
             (Cursor, false)
         ]
@@ -811,14 +811,14 @@ fn the_writers_found_are_the_ones_command_v_finds_in_their_order() {
     assert_eq!(writers[2].name, "Claude");
     assert_eq!(writers[2].models, WriterKind::Claude.models());
     assert!(writers[2].efforts.contains(&"low"));
-    assert_eq!(writers[3].name, "agy");
+    assert_eq!(writers[3].name, "Codex");
+    assert!(writers[3].models.contains(&"gpt-6-luna"));
+    assert_eq!(writers[3].efforts, ["", "low", "medium", "high"]);
+    assert_eq!(writers[4].name, "agy");
     assert!(
-        writers[3].efforts.is_empty(),
+        writers[4].efforts.is_empty(),
         "agy's effort is part of its model id"
     );
-    assert_eq!(writers[4].name, "Codex");
-    assert!(writers[4].models.contains(&"gpt-6-luna"));
-    assert_eq!(writers[4].efforts, ["", "low", "medium", "high"]);
     assert_eq!((writers[5].name, writers[6].name), ("Copilot", "Cursor"));
     assert!(writers[5].models.contains(&"claude-haiku-4.5"));
     assert!(writers[6].models.contains(&"auto"));

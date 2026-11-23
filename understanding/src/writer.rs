@@ -40,8 +40,8 @@ impl WriterKind {
         WriterKind::Anthropic,
         WriterKind::OpenAI,
         WriterKind::Claude,
-        WriterKind::Agy,
         WriterKind::Codex,
+        WriterKind::Agy,
         WriterKind::Copilot,
         WriterKind::Cursor,
     ];
@@ -192,8 +192,8 @@ pub struct FoundWriter {
     pub efforts: &'static [&'static str],
 }
 
-/// Today's writers in the order the page presets the first found (#320): an API key, Claude, agy, then Codex. An HTTP
-/// writer is listed as not found: no program is looked for, and the server says whether its key is set.
+/// Today's writers in the order the page presets the first found (#320): an API key, Claude, Codex, agy, Copilot, then
+/// Cursor. An HTTP writer is listed as not found: no program is looked for, and the server says whether its key is set.
 pub fn found_writers(shell: &Path) -> Vec<FoundWriter> {
     WriterKind::ALL
         .into_iter()
