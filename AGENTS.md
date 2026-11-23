@@ -40,6 +40,8 @@ Wait on a check through its own process: run it in the foreground with a long ti
 
 Never edit a frozen sample in `understanding/tests/fixtures/stored/`: a failing one is fixed in the reading code, and a changed stored type adds a new sample beside the old (its `README.md`).
 
+A test that fails on code the diff didn't touch gets one rerun. When the same test fails a second time, in any run or CI, treat it as a bug: reproduce it red and find its cause before going on, and say it in the PR. In #319's run a test was rerun six times as a flake; its cause was git reading `--since=0` as about now.
+
 A red `snap` job on a fixture the diff didn't touch gets one rerun of the failed job (`gh run rerun <id> --failed`), said in the PR; a second failure is real. `snap:all` has no automatic retry. A failing `snap` prints the tail of Chrome's own stderr.
 
 Rust is formatted by `cargo fmt`. TS, JS and Markdown have no formatter, so never run one (Prettier, Biome, …).
