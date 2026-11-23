@@ -445,13 +445,23 @@ impl Keychain {
     }
 }
 
-/// Whether `key` looks like an API key: letters, digits, `-` and `_` only, so it goes to `security` unquoted and whole.
+/// Whether `key` looks like an API key: printable ASCII with no space, so it is one word on `security -i`'s line.
 fn plain_key(key: &str) -> bool {
-    !key.is_empty()
-        && key.len() <= 512
-        && key
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    !key.is_empty() && key.len() <= 512 && key.chars().all(|c| c.is_ascii_graphic())
+}
+
+/// `key` as one word of a `security -i` line: in double quotes, its `"` and `\` each after a backslash, which
+/// `security` takes as the next character as it is (`split_line`, Apple's `SecurityTool/macOS/security.c`).
+fn quoted(key: &str) -> String {
+    let mut word = String::from('"');
+    for c in key.chars() {
+        if c == '"' || c == '\\' {
+            word.push('\\');
+        }
+        word.push(c);
+    }
+    word.push('"');
+    word
 }
 
 impl ApiKeys for Keychain {
@@ -470,11 +480,14 @@ impl ApiKeys for Keychain {
 
     fn set(&self, kind: WriterKind, key: &str) -> Result<(), String> {
         if !plain_key(key) {
-            return Err("That is not an API key: it holds only letters, digits, - and _.".into());
+            return Err("That is not an API key: it is printable characters with no space.".into());
         }
         // In interactive mode the key goes on standard input, so it never shows in the process list.
         let account = account(kind);
-        let command = format!("add-generic-password -U -s {SERVICE} -a {account} -w {key}\n");
+        let command = format!(
+            "add-generic-password -U -s {SERVICE} -a {account} -w {}\n",
+            quoted(key)
+        );
         let out = self.run(&["-i"], Some(&command))?;
         match out.status.success() && self.get(kind).as_deref() == Some(key) {
             true => Ok(()),
@@ -506,7 +519,7 @@ impl ApiKeys for MemoryKeys {
 
     fn set(&self, kind: WriterKind, key: &str) -> Result<(), String> {
         if !plain_key(key) {
-            return Err("That is not an API key: it holds only letters, digits, - and _.".into());
+            return Err("That is not an API key: it is printable characters with no space.".into());
         }
         self.0.lock().unwrap().insert(kind, key.into());
         Ok(())
@@ -925,7 +938,10 @@ mod tests {
     }
 
     /// The Keychain through a stand-in `security` that keeps one entry in a file: the key goes in on standard input, never
-    /// in the arguments, and only plotkeeper's own entry is named. The real Keychain is never touched.
+    /// in the arguments, and only plotkeeper's own entry is named. The stand-in splits its input line as `security -i`
+    /// does (`split_line` in Apple's `SecurityTool/macOS/security.c`): whitespace between words, a word that starts with
+    /// `"` or `'` runs to the same quote, and a backslash takes the next character as it is. The real Keychain is never
+    /// touched.
     #[test]
     fn the_key_is_saved_replaced_and_removed_in_plotkeepers_own_keychain_entry() {
         use super::{ApiKeys, Keychain};
@@ -933,19 +949,38 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (store, log) = (dir.path().join("store"), dir.path().join("log"));
         let program = dir.path().join("security");
+        let split = dir.path().join("split.pl");
+        std::fs::write(
+            &split,
+            r#"my $line = <STDIN>; chomp $line; my (@words, $word, $quote); my $state = "space";
+for my $c (split //, $line) {
+  if ($state eq "space") { next if $c =~ /\s/;
+    if ($c eq '"' || $c eq "'") { ($quote, $word, $state) = ($c, "", "quoted") }
+    elsif ($c eq "\\") { ($word, $state) = ("", "escaped") } else { ($word, $state) = ($c, "word") } }
+  elsif ($state eq "word") { if ($c =~ /\s/) { push @words, $word; $state = "space" }
+    elsif ($c eq "\\") { $state = "escaped" } else { $word .= $c } }
+  elsif ($state eq "escaped") { $word .= $c; $state = "word" }
+  elsif ($state eq "quoted") { if ($c eq $quote) { push @words, $word; $state = "space" }
+    elsif ($c eq "\\") { $state = "quoted-escaped" } else { $word .= $c } }
+  else { $word .= $c; $state = "quoted" } }
+push @words, $word if $state ne "space"; print "$words[-1]\n";
+"#,
+        )
+        .unwrap();
         std::fs::write(
             &program,
             format!(
                 r#"#!/bin/sh
 echo "ARGS $*" >> '{log}'
 case "$1" in
-  -i) read line; for w in $line; do last=$w; done; echo "$last" > '{store}';;
+  -i) /usr/bin/perl '{split}' > '{store}';;
   find-generic-password) [ -f '{store}' ] && cat '{store}' || exit 44;;
   delete-generic-password) [ -f '{store}' ] && rm '{store}' || exit 44;;
 esac
 "#,
                 log = log.display(),
-                store = store.display()
+                store = store.display(),
+                split = split.display()
             ),
         )
         .unwrap();
@@ -962,6 +997,17 @@ esac
         assert_eq!(keys.get(Anthropic), None);
         keys.remove(Anthropic).unwrap();
         assert!(keys.set(Anthropic, "not a key; rm -rf").is_err());
+        // A key with a dot, a quote or a backslash goes in whole.
+        for key in [
+            "sk-ant-dotted.0004",
+            r#"sk-ant-"quoted"-0005"#,
+            "sk-ant-'single'-0006",
+            r"sk-ant-back\slash-0007",
+        ] {
+            assert_eq!(keys.set(Anthropic, key), Ok(()), "{key}");
+            assert_eq!(keys.get(Anthropic).as_deref(), Some(key));
+        }
+        keys.remove(Anthropic).unwrap();
         // The OpenAI-compatible API's key, in its own entry (#367).
         keys.set(OpenAI, "sk-proj-third-0003").unwrap();
         assert_eq!(keys.get(OpenAI).as_deref(), Some("sk-proj-third-0003"));

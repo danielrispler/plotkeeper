@@ -284,3 +284,30 @@ fn a_planted_key_is_saved_replaced_and_removed_and_never_reaches_the_page_or_the
         LOGS.0.lock().unwrap()
     );
 }
+
+#[test]
+fn a_key_the_store_refuses_leaves_the_base_url_unsaved() {
+    isolated_home::set();
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("events.jsonl");
+    let writer = ClaudeWriter::new(dir.path().join("no-claude"), dir.path().into());
+    let cards = Arc::new(Mutex::new(CardStore::open_beside(&log).unwrap()));
+    let notes = Arc::new(Mutex::new(RiskNotes::open_beside(&log).unwrap()));
+    let app = App::open_with(&log, cards, notes, Arc::new(writer), Arc::new(NoEffects))
+        .unwrap()
+        .with_keys(Arc::new(studio_server::settings::MemoryKeys::default()));
+    let before = studio_server::settings::settings_files()["settings"].clone();
+
+    let refused = studio_server::set_api_key(
+        &app,
+        studio_understanding::WriterKind::OpenAI,
+        Some("not a key".into()),
+        Some("http://localhost:11434/v1".into()),
+        before.as_str().map(str::to_owned),
+    );
+    assert!(refused.is_err(), "{refused:?}");
+    assert_eq!(
+        studio_server::settings::settings_files()["settings"],
+        before
+    );
+}
