@@ -1,10 +1,10 @@
 //! The app's state and the functions behind its learning-layer and session-view commands, with no Tauri in them
-//! (danielrispler/plotkeeper#321, spec #319 "The server"). The Tauri shell (`src-tauri`) holds one [`App`] and each of its
-//! command handlers forwards to the function here that carries the command's name; a server will do the same over HTTP.
+//! (danielrispler/plotkeeper#321, spec #319 "The server"). The `plotkeeper` server holds one [`App`] and answers each
+//! command with the function here that carries its name, over HTTP (`api`).
 //!
 //! The core state, the card store, the risk notes, the card writer, the turn writing and the notices are the [`App`]'s. The
-//! settings are read and written here ([`settings`]), and so are the PR lookups ([`prs`], [`refresh_landed`]) and the hourly
-//! retests ([`write_due_retests`]). What reaches the window or a page leaves through [`Events`], which holds the shell's [`Sink`]; the read loop is [`follow`].
+//! settings are read and written here ([`settings`]), and so are the PR lookups ([`prs`], [`refresh_landed`]) and the PR briefs
+//! ([`pr_briefs`]). What reaches the page leaves through [`Events`], which holds the web server's [`Sink`]; the read loop is [`follow`].
 //! Workbench-only commands (terminals, projects, worktrees, skills, usage, restart) stay in the shell.
 
 use std::{
@@ -1232,10 +1232,10 @@ mod tests {
         }
         let seen = std::sync::Arc::new(Seen(std::sync::Mutex::default()));
         events.set(seen.clone());
-        events.emit("retests", serde_json::Value::Null);
+        events.emit("sessions", serde_json::Value::Null);
         assert_eq!(
             *seen.0.lock().unwrap(),
-            [("retests".to_string(), serde_json::Value::Null)]
+            [("sessions".to_string(), serde_json::Value::Null)]
         );
         assert!(events.focused());
     }

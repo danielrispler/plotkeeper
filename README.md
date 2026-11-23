@@ -30,9 +30,9 @@ You need macOS, Node, the Rust toolchain and Claude Code. `claude` must be on th
     npm ci
     npm start
 
-`npm start` builds the app, which takes a while the first time, and opens it. Click "New session".
+`npm start` builds the app, which takes a while the first time, and opens it.
 
-Sessions Studio starts load its plugin on their own. For a `claude` you start elsewhere, see [Load the plugin](docs/studio/plugin.md).
+Studio starts no sessions: for a `claude` you start in your own terminal, see [Load the plugin](docs/studio/plugin.md).
 
 ## Status
 

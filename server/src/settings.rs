@@ -161,7 +161,7 @@ fn write_in(
 static WRITING: Mutex<()> = Mutex::new(());
 
 /// Sets the setting at `path`, such as `["terminal", "font_size"]`, to `value` in `settings.json`, or removes it when `value`
-/// is none (the settings page, #195). `expected` is the text the page last read. Returns the new text,
+/// is none. `expected` is the text the page last read. Returns the new text,
 /// or why the write was refused; the written file reaches the window through `watch` like any save.
 pub fn write_setting(
     expected: Option<String>,

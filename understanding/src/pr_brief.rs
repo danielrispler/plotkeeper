@@ -24,7 +24,7 @@ use std::process::{Command, Stdio};
 
 /// The facts' budget: the writer is sandboxed with no tools, so everything it reads is here.
 pub const BUDGET: usize = 64 << 10;
-/// The "PR briefs" setting's default model.
+/// The default of `prBriefs.model` in `settings.json`.
 pub const DEFAULT_MODEL: &str = "opus";
 /// The stored brief's format version; a reader ignores fields it does not know.
 pub const STORED_VERSION: u32 = 1;

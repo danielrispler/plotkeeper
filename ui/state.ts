@@ -15,6 +15,6 @@ export const studio = {
   // Focus mode (danielrispler/Falinks#573): the list and the rail folded, the terminal takes the window.
   focus: false,
   files: initial,
-  // The two files' text as the shell last sent it: what the settings page's write is made from (#195).
+  // The two files' text as the shell last sent it: what a settings write is made from.
   texts: { settings: null, keymap: null } as SettingsFiles,
 };

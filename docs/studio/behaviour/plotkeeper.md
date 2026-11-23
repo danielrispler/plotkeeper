@@ -12,7 +12,7 @@
 ## Commands and events
 
 - A command is `POST /api/<command>` with its arguments as JSON, in the camel case the page writes. The reply is the command's JSON reply. A refused command answers 500 with its reason as a JSON string, a missing or mistyped argument 400, a command the page does not have 404. The commands are the learning-layer and session-view ones, answered by the function of the same name in the `server` crate; terminals, projects, branches, skills and usage are not served.
-- `GET /events` is one server-sent event stream: `event: <name>` and `data: <json>`, the events the window used to receive (`sessions`, `cards`, `selected`, `notice`, `writer-notice`, `map-landed`, `retests`, and the rest), and a comment every 15 seconds.
+- `GET /events` is one server-sent event stream: `event: <name>` and `data: <json>`, the events the window used to receive (`sessions`, `cards`, `selected`, `notice`, `writer-notice`, `map-landed`, and the rest), and a comment every 15 seconds.
 - The page tells the server whether its tab is visible and focused (`page_focus`); the read loop treats that as the window's focus. With no tab listening, nothing is focused.
 - `POST /api/log` puts the page's log line in plotkeeper's log (stderr).
 
