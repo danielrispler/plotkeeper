@@ -1109,6 +1109,46 @@ fn a_flagged_step_is_rewritten_unflagged_steps_are_kept_and_a_step_still_flagged
 }
 
 #[test]
+fn a_retry_that_moves_a_step_to_the_top_leaves_the_claim_flags_on_the_steps_they_were_found_on() {
+    let mut src = source(&["alpha/a.rs", "beta/b.rs", "gamma/c.rs"]);
+    src.meta.created_at = "2026-11-20T18:00:00Z".into();
+    src.meta.spec = Some(Spec {
+        number: 5,
+        title: "A spec".into(),
+        created_at: "2026-11-20T09:00:00Z".into(),
+        body: "## User Stories\nstory\n".into(),
+    });
+    // Chapter 2 is Before, Now, Could break (global steps 5, 6, 7 after the overview step): the claim check flags 5 and 7.
+    let mut b = good_brief();
+    b["chapters"][1]["steps"][2] = step("Could break", &["gamma"]);
+    let mut moved = step("Not in the plan", &["gamma"]);
+    moved["b"] = json!("Gamma was never in the plan.");
+    let (_, stored, _, _) = run_entry(
+        vec![
+            Ok(checker(vec![
+                unsupported("step 5", "Before", "not in the facts"),
+                unsupported("step 7", "Could break", "not in the facts"),
+            ])),
+            Ok(json!({ "items": [{ "id": "step 7", "step": moved }] }).to_string()),
+        ],
+        &b,
+        &src,
+    );
+    let chapter = &stored.brief.chapters[1].steps;
+    let kinds: Vec<&str> = chapter.iter().map(|s| s.k.as_str()).collect();
+    assert_eq!(kinds, ["Not in the plan", "Before", "Now"]);
+    assert!(chapter[0].flags.is_empty(), "{:?}", chapter[0].flags);
+    assert!(
+        chapter[1]
+            .flags
+            .iter()
+            .any(|f| f.contains("not in the facts")),
+        "{:?}",
+        chapter[1].flags
+    );
+}
+
+#[test]
 fn a_claim_the_retry_rewrites_leaves_no_claim_flag_after() {
     let b = single_story();
     let mut fixed = step("Now", &["alpha"]);

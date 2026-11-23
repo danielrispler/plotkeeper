@@ -9,7 +9,7 @@
 
 use crate::pr_brief::{
     Also, Brief, BriefRecord, BriefWriter, CallUsage, CheckContext, Decision, Facts, Step,
-    check_brief, prompt,
+    check_brief, prompt, put_plan_first,
 };
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -318,6 +318,24 @@ pub fn claim_check_and_retry(
     }
     // Rewritten items are checked again by code; the claim flags of the rest stand, since the claim check
     // does not run twice.
+    // A rewrite can make a step "Not in the plan", which code moves up; the claim flags and the rewritten ids name
+    // steps by position, so they follow the move.
+    let moved = put_plan_first(brief, ctx);
+    let follow = |id: &str| match id
+        .strip_prefix("step ")
+        .and_then(|n| n.parse::<usize>().ok())
+    {
+        Some(n) if (1..=moved.len()).contains(&n) => format!("step {}", moved[n - 1] + 1),
+        _ => id.to_string(),
+    };
+    let claims: Vec<ClaimFlag> = claims
+        .into_iter()
+        .map(|c| ClaimFlag {
+            id: follow(&c.id),
+            ..c
+        })
+        .collect();
+    let rewritten: BTreeSet<String> = rewritten.iter().map(|id| follow(id)).collect();
     check_brief(brief, ctx);
     add_claim_flags(brief, &claims, &rewritten);
     record.claim_flags_after = labelled(&claims, &rewritten);

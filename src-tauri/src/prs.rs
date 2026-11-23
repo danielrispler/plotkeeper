@@ -161,7 +161,7 @@ impl Prs {
                     pr.branch.clone()
                 };
                 keep.push(key.clone());
-                of_project.entry(key).or_insert(pr);
+                of_project.insert(key, pr);
             }
             of_project.retain(|key, _| keep.contains(key));
         }
@@ -468,6 +468,30 @@ mod tests {
         let ready = prs.ready("/p");
         assert_eq!(ready.len(), 1);
         assert_eq!((ready[0].number, ready[0].head.as_str()), (21, "eee555"));
+    }
+
+    #[test]
+    fn a_pr_no_session_has_a_branch_for_takes_its_new_head_from_the_next_list() {
+        let prs = Prs::default();
+        let start = Instant::now();
+        prs.ask(
+            "/p",
+            Trigger::TurnEnd,
+            start,
+            &[],
+            recorded,
+            list_of(&[HAND_MADE]),
+        );
+        let pushed = HAND_MADE.replace("eee555", "fff666");
+        prs.ask(
+            "/p",
+            Trigger::TurnEnd,
+            start,
+            &[],
+            recorded,
+            list_of(&[&pushed]),
+        );
+        assert_eq!(prs.ready("/p")[0].head, "fff666");
     }
 
     #[test]

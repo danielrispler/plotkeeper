@@ -560,18 +560,15 @@ fn cut_to(text: &str, max: usize) -> String {
     format!("{}\n[{} more bytes cut]", &text[..end], text.len() - end)
 }
 
-/// The parts a flow's hops run through, in order, from the links' ends; actors are left out.
+/// The parts a flow's hops run through, each once, in the order the flow first reaches it; actors are left out. A hop
+/// that leaves the part the flow is at through a link's `to` end is read backwards. A part the flow revisits is not
+/// repeated: an order check taps each part once, so a key that repeated one could not be answered.
 fn flow_key(
     map: &serde_json::Value,
     flow: &serde_json::Value,
     parts: &BTreeSet<String>,
 ) -> Vec<String> {
     let mut key: Vec<String> = Vec::new();
-    let mut push = |id: &str| {
-        if parts.contains(id) && key.last().map(String::as_str) != Some(id) {
-            key.push(id.to_string());
-        }
-    };
     for hop in flow["hops"].as_array().into_iter().flatten() {
         let link = map["links"]
             .as_array()
@@ -579,8 +576,20 @@ fn flow_key(
             .flatten()
             .find(|l| l["id"] == hop["link"]);
         if let Some(link) = link {
-            push(link["from"].as_str().unwrap_or(""));
-            push(link["to"].as_str().unwrap_or(""));
+            let (from, to) = (
+                link["from"].as_str().unwrap_or(""),
+                link["to"].as_str().unwrap_or(""),
+            );
+            let ends = if key.last().map(String::as_str) == Some(to) {
+                [to, from]
+            } else {
+                [from, to]
+            };
+            for id in ends {
+                if parts.contains(id) && !key.iter().any(|k| k == id) {
+                    key.push(id.to_string());
+                }
+            }
         }
     }
     key
@@ -1403,6 +1412,36 @@ fn check_step(s: &mut Step, ctx: &CheckContext, facts_norm: &str) {
 /// Runs every code check on `brief`, replacing its flags: each failure is a flag on the item it concerns, and
 /// the problems of the brief as a whole are on `brief.flags`. An order check's key is replaced by the changed
 /// flow's hops. Returns how many items are flagged.
+/// Code, not the prompt, puts "Not in the plan" first in its chapter (after the "Where" a single story opens with) when
+/// the spec is the PR's own day's. Returns where each step went: `moved[old]` is the new position among all the
+/// brief's steps, in the order `steps()` walks them (the overview first).
+pub fn put_plan_first(brief: &mut Brief, ctx: &CheckContext) -> Vec<usize> {
+    let mut moved: Vec<usize> = (0..brief.steps().count()).collect();
+    if !ctx.spec_same_day {
+        return moved;
+    }
+    let mut base = brief.overview.len();
+    for c in &mut brief.chapters {
+        let first = usize::from(c.steps.first().is_some_and(|s| s.k == "Where"));
+        if let Some(at) = c.steps.iter().position(|s| s.k == "Not in the plan")
+            && at > first
+        {
+            let step = c.steps.remove(at);
+            c.steps.insert(first, step);
+            // The steps from `first` to `at` each moved one place down, and the one at `at` moved to `first`.
+            for old in moved
+                .iter_mut()
+                .filter(|o| (base + first..base + at).contains(o))
+            {
+                *old += 1;
+            }
+            moved[base + at] = base + first;
+        }
+        base += c.steps.len();
+    }
+    moved
+}
+
 pub fn check_brief(brief: &mut Brief, ctx: &CheckContext) -> usize {
     let facts_norm = norm_quote(&ctx.facts);
     brief.flags.clear();
@@ -1427,18 +1466,9 @@ pub fn check_brief(brief: &mut Brief, ctx: &CheckContext) -> usize {
     if !ctx.chapters_mode && n != 1 {
         whole.push(format!("{n} chapters in a single story"));
     }
+    put_plan_first(brief, ctx);
     let mut lit_by_chapters: BTreeSet<String> = BTreeSet::new();
     for c in &mut brief.chapters {
-        if ctx.spec_same_day {
-            // Code, not the prompt, puts "Not in the plan" first in its chapter (after the "Where" a single story opens with).
-            let first = usize::from(c.steps.first().is_some_and(|s| s.k == "Where"));
-            if let Some(at) = c.steps.iter().position(|s| s.k == "Not in the plan")
-                && at > first
-            {
-                let step = c.steps.remove(at);
-                c.steps.insert(first, step);
-            }
-        }
         let mut f = Vec::new();
         let lit: BTreeSet<&String> = c.steps.iter().flat_map(|s| &s.on).collect();
         for d in &c.parts {
@@ -1933,4 +1963,42 @@ pub fn fetch_meta(repo: &Path, number: u64) -> Result<PrMeta, String> {
         checks,
         spec,
     })
+}
+
+#[cfg(test)]
+mod flow_key_tests {
+    use super::*;
+
+    #[test]
+    fn a_flow_that_revisits_a_part_keys_each_part_once_in_first_visit_order() {
+        let map = serde_json::json!({"links": [
+            {"id": "core-shell", "from": "core", "to": "shell"},
+            {"id": "shell-understanding", "from": "shell", "to": "understanding"},
+            {"id": "shell-window", "from": "shell", "to": "window"},
+        ]});
+        let flow = serde_json::json!({"hops": [
+            {"link": "core-shell"},
+            {"link": "shell-understanding"},
+            {"link": "shell-understanding"},
+            {"link": "shell-window"},
+        ]});
+        let parts: BTreeSet<String> = ["core", "shell", "understanding", "window"]
+            .map(String::from)
+            .into();
+        assert_eq!(
+            flow_key(&map, &flow, &parts),
+            ["core", "shell", "understanding", "window"]
+        );
+    }
+
+    #[test]
+    fn a_hop_run_backwards_keys_the_part_it_arrives_at_after_the_one_it_left() {
+        let map = serde_json::json!({"links": [
+            {"id": "a-b", "from": "a", "to": "b"},
+            {"id": "c-b", "from": "c", "to": "b"},
+        ]});
+        let flow = serde_json::json!({"hops": [{"link": "a-b"}, {"link": "c-b"}]});
+        let parts: BTreeSet<String> = ["a", "b", "c"].map(String::from).into();
+        assert_eq!(flow_key(&map, &flow, &parts), ["a", "b", "c"]);
+    }
 }
