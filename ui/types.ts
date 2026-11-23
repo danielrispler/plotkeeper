@@ -509,6 +509,7 @@ export interface Commands {
   stop_log: null;
   stop_facts: StopFacts;
   stop_dismiss: null;
+  story_bar: void;
   map_proof: Proof[];
   map_state: MapState;
   // The brief, or that its write has started (it comes through `map-landed`).
@@ -546,7 +547,7 @@ export interface Commands {
 export type Command = keyof Commands;
 
 // What the shell counted of Daniel's use (`stop_rules.rs`), for the one-time review: days, merged PRs and the uses of each module.
-export type StopKind = "session" | "map-open" | "map-action" | "scrub" | "proof" | "know" | "brief-offered" | "brief-opened" | "chapter-done" | "check-answered" | "ratify" | "unconfirmed-seen" | "refresher-entered" | "stale-entered";
+export type StopKind = "session" | "map-open" | "map-action" | "scrub" | "proof" | "know" | "brief-offered" | "brief-opened" | "chapter-done" | "check-answered" | "ratify" | "unconfirmed-seen" | "rating-offered" | "rating-given" | "rating-skipped" | "note-given" | "refresher-entered" | "stale-entered";
 export type StopFacts = {
   active_days: number;
   merged_prs: number;

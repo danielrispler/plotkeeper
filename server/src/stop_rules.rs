@@ -53,6 +53,14 @@ pub enum Kind {
     Ratify,
     /// A step's "not confirmed from the facts" mark was seen.
     UnconfirmedSeen,
+    /// The end-of-story bar (`story_bar.rs`) was shown at a story's end; once per bar each time its story is opened.
+    RatingOffered,
+    /// A 1 to 5 rating of the explanation was given in the bar; the line carries it. No threshold: it measures the explanation.
+    RatingGiven,
+    /// The bar was skipped with its key or button before anything was given.
+    RatingSkipped,
+    /// A short note was given in the bar; the line carries it.
+    NoteGiven,
     /// A part's refresher was entered (#392).
     RefresherEntered,
     /// A refresher or a part catch-up was entered from a part with a staleness band (#392); logged beside the entry's own kind.
@@ -105,7 +113,7 @@ pub struct Facts {
 /// Serialises appends, so two events never share a line.
 static WRITING: Mutex<()> = Mutex::new(());
 
-fn log_file() -> Result<PathBuf, String> {
+pub(crate) fn log_file() -> Result<PathBuf, String> {
     let home = std::env::home_dir().ok_or("no home folder")?;
     Ok(studio_hook::data_dir(&home).join(LOG_FILE))
 }
@@ -116,8 +124,14 @@ pub fn append(file: &Path, event: &Event) -> Result<(), String> {
     append_held(file, event)
 }
 
+/// Appends `line`, any line that reads as an `Event` (one with fields of its own beside them), to `file`.
+pub(crate) fn append_line(file: &Path, line: &impl Serialize) -> Result<(), String> {
+    let _writing = WRITING.lock().unwrap();
+    append_held(file, line)
+}
+
 /// `append`, with `WRITING` held by the caller.
-fn append_held(file: &Path, event: &Event) -> Result<(), String> {
+fn append_held(file: &Path, event: &impl Serialize) -> Result<(), String> {
     let line = serde_json::to_string(event).map_err(|e| e.to_string())?;
     if let Some(dir) = file.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;

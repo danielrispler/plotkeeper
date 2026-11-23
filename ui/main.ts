@@ -32,6 +32,7 @@ import { reload, type SettingsFiles } from "./settings.js";
 import { studio } from "./state.js";
 import { drawFeed, showView } from "./story.js";
 import { startRailBriefs } from "./rail-brief.js";
+import { barKeyDown } from "./story-bar.js";
 import { startWriters } from "./writers.js";
 import { jumpToNeedsYou, showToast } from "./toast.js";
 import { askOnce, notifyIfAway, type Alert } from "./alerts.js";
@@ -174,6 +175,8 @@ window.addEventListener("keydown", (event) => {
   const target = event.target as HTMLElement;
   const typing = target.isContentEditable || target.matches?.("input, textarea, select") === true;
   const inList = target.closest?.(".list") != null;
+  // The end-of-story bar on screen takes its digits and its skip key (#393), after a docked card's answer keys.
+  if (!answerable() && barKeyDown(event, typing)) return void event.preventDefault();
   const action = windowBinding(studio.files.keymap, event, typing, inList, !typing && answerable());
   if (!run(actions, action)) return;
   if (action !== "studio::Dismiss") event.preventDefault();
