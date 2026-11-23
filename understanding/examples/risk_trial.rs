@@ -109,6 +109,10 @@ fn main() {
         let Ok(event) = serde_json::from_str::<serde_json::Value>(&line) else {
             continue;
         };
+        // Only a denied Bash call gets a card: not another tool, nor a `StudioAnswer` that copies the denial.
+        if event["hook_event_name"] != "PermissionDenied" || event["tool_name"] != "Bash" {
+            continue;
+        }
         let (Some(command), Some(cwd)) = (
             event["tool_input"]["command"].as_str(),
             event["cwd"].as_str(),
