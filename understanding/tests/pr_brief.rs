@@ -704,6 +704,15 @@ fn the_same_replies_as_the_bare_object_or_inside_prose_parse_too() {
     assert!(parse_reply("{\"title\": ").is_err());
 }
 
+#[test]
+fn a_reply_with_a_closing_brace_before_the_first_opening_one_is_an_error_not_a_panic() {
+    let text = "Sorry :} I need {more context";
+    assert!(parse_reply(text).is_err());
+    let envelope: serde_json::Value = serde_json::from_str(&sample("274-reply.json")).unwrap();
+    let brief = parse_reply(envelope["result"].as_str().unwrap()).unwrap();
+    assert!(studio_understanding::pr_brief_check::read_claim_reply(text, &brief).is_err());
+}
+
 // ---- the store and the entry ----
 
 struct Canned {

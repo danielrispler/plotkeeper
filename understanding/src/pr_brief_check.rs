@@ -112,6 +112,7 @@ fn object_in(text: &str) -> Result<Value, String> {
     let (a, b) = text
         .find('{')
         .zip(text.rfind('}'))
+        .filter(|(a, b)| a < b)
         .ok_or("the reply holds no JSON object")?;
     serde_json::from_str(&text[a..=b]).map_err(|e| format!("the reply's JSON does not read: {e}"))
 }
