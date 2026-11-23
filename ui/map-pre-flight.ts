@@ -65,8 +65,9 @@ export function expectedLine(expected: Expected | undefined | null, doc: LoadedM
   return `You expected ${names(expected.expected)}; it touched ${names(expected.touched)}`;
 }
 
-const button = (words: string, title: string, click: () => void, className = "btn") => {
-  const node = text("button", words, className);
+// A button of the component (`btn`), with `kind` beside it, such as "primary" or "quiet".
+const button = (words: string, title: string, click: () => void, kind = "") => {
+  const node = text("button", words, `btn ${kind}`.trim());
   node.setAttribute("type", "button");
   node.title = title;
   node.addEventListener("click", click);
@@ -77,7 +78,7 @@ function startNodes(issues: OpenIssue[] | null, act: PreFlightActs): HTMLElement
   const list = text("div", "", "pre-flight-issues");
   if (issues === null) list.append(text("p", "Reading the open issues…", "empty"));
   else if (!issues.length) list.append(text("p", "No open issues.", "empty"));
-  else list.append(...issues.map((issue) => button(`#${issue.number} ${issue.title}`, "Predict the parts this issue will cross", () => act.predict(issue.number, ""), "row pre-flight-issue")));
+  else list.append(...issues.map((issue) => button(`#${issue.number} ${issue.title}`, "Predict the parts this issue will cross", () => act.predict(issue.number, ""), "quiet pre-flight-issue")));
   const field = document.createElement("textarea");
   field.className = "pre-flight-text";
   field.rows = 2;
@@ -87,9 +88,9 @@ function startNodes(issues: OpenIssue[] | null, act: PreFlightActs): HTMLElement
   const predict = button("Predict", "Predict the parts these lines will cross", () => {
     const words = field.value.trim();
     if (words) act.predict(null, words);
-  }, "btn primary");
+  }, "primary");
   const foot = text("div", "", "pre-flight-foot");
-  foot.append(predict, button("Pick parts by hand", "Choose the parts yourself", act.byHand, "btn quiet"));
+  foot.append(predict, button("Pick parts by hand", "Choose the parts yourself", act.byHand, "quiet"));
   return [text("h3", "Open issues", "side-title"), list, field, foot];
 }
 
@@ -109,7 +110,7 @@ function pickNodes(why: string | null, doc: LoadedMap, act: PreFlightActs): HTML
   const show = button("Show these parts", "Frame the parts ticked on the map", () => {
     const parts = boxes.filter(({ box }) => box.checked).map(({ box }) => box.value);
     if (parts.length) act.pick(parts);
-  }, "btn primary");
+  }, "primary");
   const foot = text("div", "", "pre-flight-foot");
   foot.append(show);
   return [...nodes, list, foot];
@@ -129,7 +130,7 @@ function resultNodes(pre: PreFlight, doc: LoadedMap, state: MapState, act: PreFl
     return node;
   });
   const foot = text("div", "", "pre-flight-foot");
-  foot.append(button("Clear", "Take the pre-flight off the map", act.clear, "btn quiet"));
+  foot.append(button("Clear", "Take the pre-flight off the map", act.clear, "quiet"));
   return [...nodes, ...rows, foot];
 }
 
@@ -155,7 +156,9 @@ const overlay = () => element("map-pre-flight");
 function paint() {
   const view = currentMap();
   const box = overlay();
-  if (phase === null || !view || view.scrub) {
+  // A past commit's map, or none, closes the overlay, so Esc never peels one that is not shown.
+  if (!view || view.scrub) phase = null;
+  if (phase === null || !view) {
     box.hidden = true;
     box.replaceChildren();
     return;
@@ -222,11 +225,12 @@ export function openPreFlight(fresh = false) {
 }
 
 // The parts of the project's pre-flight are framed on the map, marked predicted or picked; a past commit's map shows none.
-onPlate(({ view, part, plate, chips }) => {
+// The word sits among the law marks, since the live agents' chips replace their slot's children.
+onPlate(({ view, part, plate, marks }) => {
   const pre = view.state.pre_flight;
   if (view.scrub || !pre?.parts.includes(part.id)) return;
   plate.classList.add("predicted");
-  chips.append(text("span", pre.predicted ? "predicted" : "picked", "plate-predicted"));
+  marks.prepend(text("span", pre.predicted ? "predicted" : "picked", "plate-predicted"));
 });
 // Another project, or a past commit, closes the overlay; otherwise it is drawn again over the new payload.
 let drawnFor: string | null = null;

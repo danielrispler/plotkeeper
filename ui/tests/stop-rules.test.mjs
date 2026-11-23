@@ -8,7 +8,9 @@ const calls = [];
 tauri(calls);
 const { dismissReview, judge, localDay, logStop, reviewOf, reviewWords, table, unused } = await import("../../dist/stop-rules.js");
 
-const facts = (extra = {}) => ({ active_days: 14, merged_prs: 20, engaged_days: 0, scrubs: 0, proofs: 0, knows: 0, dismissed: [], briefs_offered: 0, briefs_opened: 0, chapters_done: 0, counts: {}, began: "2026-11-01", ...extra });
+// The modules of spec #378 are kept by their counts unless a test says otherwise, so the older tests judge only their own modules.
+const kept378 = { "pre-flight-run": 2 };
+const facts = (extra = {}) => ({ active_days: 14, merged_prs: 20, engaged_days: 0, scrubs: 0, proofs: 0, knows: 0, dismissed: [], briefs_offered: 0, briefs_opened: 0, chapters_done: 0, ...extra, counts: { ...kept378, ...extra.counts }, began: extra.began ?? "2026-11-01" });
 
 test("the review waits for both 14 active days and 20 merged PRs, whichever comes last", () => {
   assert.deepEqual(unused(facts()), ["map", "history", "proof"]);
@@ -145,4 +147,11 @@ test("a brief offered or an unconfirmed mark seen is told once per PR, other bri
   logStop("brief-opened", "/a", 7);
   const sent = calls.map(([, args]) => `${args.kind} ${args.project} ${args.pr}`);
   assert.deepEqual(sent, ["brief-offered /a 7", "brief-offered /a 8", "brief-offered /b 7", "unconfirmed-seen /a 7", "brief-opened /a 7", "brief-opened /a 7"]);
+});
+
+test("pre-flight is kept once it was run twice in the window, and listed below that (#394)", () => {
+  const rest = { engaged_days: 4, scrubs: 2, proofs: 2 };
+  assert.ok(unused(facts({ ...rest, counts: { "pre-flight-run": 1 } })).includes("pre-flight"));
+  assert.ok(!unused(facts({ ...rest, counts: { "pre-flight-run": 2 } })).includes("pre-flight"));
+  assert.match(reviewWords(["pre-flight"]), /Pre-flight/);
 });

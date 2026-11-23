@@ -35,6 +35,8 @@ export const table: Row[] = [
   { module: "history", name: "the history strip", kept: (f) => f.scrubs >= 2 },
   { module: "proof", name: "See the proof", kept: (f) => f.proofs >= 2 },
   { module: "briefs", name: "PR briefs", kept: (f) => f.briefs_offered === 0 || f.briefs_opened >= f.briefs_offered * 0.25 },
+  // Pre-flight (#394, spec #378 "Stop rules"): run at least twice, from an issue, from text or by hand.
+  { module: "pre-flight", name: "Pre-flight", kept: (f) => (f.counts["pre-flight-run"] ?? 0) >= 2 },
   {
     module: "skips",
     name: "",

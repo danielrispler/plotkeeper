@@ -61,6 +61,8 @@ pub enum Kind {
     RatingSkipped,
     /// A short note was given in the bar; the line carries it.
     NoteGiven,
+    /// A pre-flight framed its parts on the map, predicted or picked by hand (#394).
+    PreFlightRun,
     #[serde(other)]
     Other,
 }
@@ -168,6 +170,7 @@ fn entered(kind: Kind) -> bool {
             | Kind::ChapterDone
             | Kind::CheckAnswered
             | Kind::Ratify
+            | Kind::PreFlightRun
     )
 }
 
