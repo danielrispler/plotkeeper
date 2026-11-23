@@ -282,19 +282,19 @@ const mapBrief = (view: BriefView, next: number, check = "", quick = false, paus
 const escBrief = `
       const before = document.querySelector(".brief-dots i.at") && [...document.querySelectorAll(".brief-dots i")].findIndex((d) => d.classList.contains("at"));
       document.dispatchEvent(new KeyboardEvent("keydown", { code: "Escape", key: "Escape", bubbles: true }));
-      await wait(500);
+      await wait(200);
       if (!document.getElementById("map-brief").hidden) return log("snap:fail Esc did not close the brief");
       if (document.getElementById("map").hidden) return log("snap:fail Esc left the Map view with a brief open");
       document.querySelector('#map-tray .tray-row[data-pr="334"]').click();
-      await wait(1800);
+      await wait(700);
       const after = [...document.querySelectorAll(".brief-dots i")].findIndex((d) => d.classList.contains("at"));
       if (after !== before) log("snap:fail the brief did not reopen at its step: " + before + " then " + after);`;
 const mapBriefStart = (): Fixture => mapBrief(briefOf(storySteps()), 0, `if (!document.querySelector("#map-brief .brief-title").textContent.includes("brings its own brief")) log("snap:fail first step");`);
 const mapBriefStory = (): Fixture => mapBrief(briefOf(storySteps(), false), 2, `${escBrief}
       if (!document.querySelector("#map-brief .brief-cites")) log("snap:fail the step shows no citations");
       document.querySelector("#map-brief .brief-code").click();
-      await wait(400);
-      if (!document.querySelector("#map-drawer .drawer-code")?.textContent.includes("+the brief")) log("snap:fail See the code does not open the PR's diff");`);
+      await wait(250);
+      if (!document.querySelector("#map-drawer .drawer-code")?.textContent.includes("+the brief")) log("snap:fail See the code does not open the PR's diff");`, true);
 const mapBriefFigure = (kind: string): Fixture =>
   mapBrief(briefOf([step("Now", "What happens inside one part", "The change is inside Understanding, so a small figure shows it.", ["understanding"], { fig: figure(kind) })]), 0, `
       if (document.querySelectorAll("#map-brief .brief-fig .fig-chip").length < 3) log("snap:fail the figure draws no chips");`);
