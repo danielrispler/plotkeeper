@@ -61,6 +61,19 @@ A chaptered brief has one tray row per chapter ("2 of 3"); each opens on its own
 
 A step's check is one prediction. A **pick** is answered in the panel: pick an option, press it again to take it back, then Check; a wrong answer shows the correction. An **order** check is answered on the map: tap parts into numbered slots, Check grades it, a wrong answer nudges the parts out of place and the right path replays along the links. Right or wrong, answering counts for the chapter. Nothing is scored.
 
+## The end-of-story bar
+
+The last step of each chapter (of a single story, the story's last step, after Ratify when there is one) ends with one compact **end-of-story bar** (`ui/story-bar.ts`): "How clear was this?" with an optional 1 to 5 rating of the explanation, an optional short note (at most 500 characters, kept by Enter), and **Skip**. The digit keys 1 to 5 rate and the S key skips the whole bar, while the bar is on screen and no docked card takes its own answer keys; neither fires while typing in the note, nor with Cmd, Ctrl or Alt held. A rating can be changed while the bar is open. Nothing is read back: the bar starts empty each time the brief is opened, and no rating is ever shown as a score. The rating measures the explanation, not Daniel, and has no stop-rule threshold. A part catch-up ends with the same bar, keyed by its part instead of a PR and chapter.
+
+What the bar is given goes to `stop-rules.jsonl` through `story_bar` (`server/src/story_bar.rs`), which is its only store: one line per event, keyed by project and by `pr` and `chapter` (or by `part`), with the bar's own fields beside the usual ones:
+
+- `rating-offered`: the bar was shown, once each time its chapter's brief is opened.
+- `rating-given`: a rating was picked, with `rating` (1 to 5); a changed rating logs again.
+- `note-given`: a note was kept, with `note`, trimmed.
+- `rating-skipped`: Skip or its key closed the bar before anything was given; a skip after a rating or a note only closes it.
+
+The server refuses a line that is not one of these kinds, keys no story or both kinds of story, or carries a rating or note that does not belong to its kind. The review counts these kinds like any other, and no module's row reads them.
+
 ## Fog clearing
 
 A chapter is **done** when its last step's words were seen (`watchSeen`) and its check was answered, right or wrong, when it holds one (`chapterGate`). The page tells the server once (`brief_chapter_done`), only for a chapter finished while the page is visible and focused (`watchSeen` already asks for both), which keeps "read at head X" per chapter in `map-state.json` and clears the PR's fog (`fog.rs`) from every part whose chapters are all done, lifting the mist. A part no chapter lights keeps its fog; leaving mid-chapter clears nothing. A PR read before it merges files fog at merge only for what was pushed after the read, limited to the paths the squash commit changed. "I know this" on a part's sheet still clears a whole part. Details of the fog are in [the map doc](map.md).

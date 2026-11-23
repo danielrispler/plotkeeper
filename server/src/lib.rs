@@ -45,6 +45,7 @@ mod read_loop;
 pub mod runner;
 pub mod settings;
 pub mod stop_rules;
+pub mod story_bar;
 pub mod web;
 
 pub use read_loop::{Follower, Notice, ServerEffects, follow, listed, tell, uptime};
