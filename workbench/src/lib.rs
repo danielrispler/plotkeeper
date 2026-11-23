@@ -879,15 +879,17 @@ fn run(dir: &Path, args: &[&str]) -> Result<std::process::Output, String> {
 }
 
 /// plotkeeper's plugin for agy (#43, decisions 8 and 9; #49). `agy plugin install` copies the
-/// folder, so the app renders the shipped `plugin-agy/` with `plotkeeper-hook`'s path, compares it with
-/// the installed copy and installs again when they differ.
+/// folder, so `plotkeeper install` renders the shipped `plugin-agy/`, embedded here, with `plotkeeper-hook`'s path into
+/// a folder of its own (#357), and installs that folder.
 pub mod agy_plugin {
     use std::path::{Path, PathBuf};
     use std::process::{Command, Stdio};
 
     /// The plugin's name in `plugin.json`, and its folder under `~/.gemini/config/plugins/`.
-    const NAME: &str = "plotkeeper";
+    pub const NAME: &str = "plotkeeper";
     const PLACEHOLDER: &str = "__PLOTKEEPER_HOOK__";
+    const PLUGIN_JSON: &str = include_str!("../../plugin-agy/plugin.json");
+    const HOOKS_JSON: &str = include_str!("../../plugin-agy/hooks.json");
 
     #[derive(Debug, PartialEq, Eq)]
     pub enum Status {
@@ -896,32 +898,40 @@ pub mod agy_plugin {
         Stale,
     }
 
-    /// The plugin's two files as installed: `source`'s, with `hook` where the hooks name it.
-    fn rendered(source: &Path, hook: &Path) -> Result<[(&'static str, String); 2], String> {
-        let read = |name: &str| {
-            std::fs::read_to_string(source.join(name))
-                .map_err(|e| format!("could not read {}/{name}: {e}", source.display()))
-        };
+    /// The plugin's two files as installed: the shipped ones, with `hook` where the hooks name it.
+    fn rendered(hook: &Path) -> Result<[(&'static str, String); 2], String> {
         // The path sits in a JSON string, so it is escaped as one.
         let path = serde_json::to_string(&hook.display().to_string()).map_err(|e| e.to_string())?;
         let path = &path[1..path.len() - 1];
         Ok([
-            ("plugin.json", read("plugin.json")?),
-            ("hooks.json", read("hooks.json")?.replace(PLACEHOLDER, path)),
+            ("plugin.json", PLUGIN_JSON.to_owned()),
+            ("hooks.json", HOOKS_JSON.replace(PLACEHOLDER, path)),
         ])
     }
 
-    fn installed(home: &Path) -> PathBuf {
-        home.join(".gemini/config/plugins").join(NAME)
+    /// Writes the plugin for `hook` into `dir`, which is created.
+    pub fn render(dir: &Path, hook: &Path) -> Result<(), String> {
+        std::fs::create_dir_all(dir)
+            .map_err(|e| format!("could not make {}: {e}", dir.display()))?;
+        for (name, text) in rendered(hook)? {
+            std::fs::write(dir.join(name), text)
+                .map_err(|e| format!("could not write {}/{name}: {e}", dir.display()))?;
+        }
+        Ok(())
     }
 
-    /// Whether the copy in `home`'s agy config is the plugin of `source` for `hook`.
-    pub fn status(source: &Path, hook: &Path, home: &Path) -> Result<Status, String> {
-        let dir = installed(home);
+    /// The folder agy keeps its copy of the plugin `name` in, under `home`.
+    pub fn installed(home: &Path, name: &str) -> PathBuf {
+        home.join(".gemini/config/plugins").join(name)
+    }
+
+    /// Whether the copy in `home`'s agy config is the plugin for `hook`.
+    pub fn status(hook: &Path, home: &Path) -> Result<Status, String> {
+        let dir = installed(home, NAME);
         if !dir.join("hooks.json").exists() {
             return Ok(Status::Missing);
         }
-        let same = rendered(source, hook)?
+        let same = rendered(hook)?
             .iter()
             .all(|(name, text)| std::fs::read_to_string(dir.join(name)).is_ok_and(|t| &t == text));
         Ok(if same { Status::Current } else { Status::Stale })
@@ -932,28 +942,21 @@ pub mod agy_plugin {
     pub fn installed_is_valid(agy: &Path, home: &Path) -> bool {
         Command::new(agy)
             .args(["plugin", "validate"])
-            .arg(installed(home))
+            .arg(installed(home, NAME))
             .env("HOME", home)
             .stdin(Stdio::null())
             .output()
             .is_ok_and(|o| o.status.success())
     }
 
-    /// Installs the plugin of `source` for `hook` with `agy` (the command), for `home`: validates a
-    /// rendered copy first, as install does not and skips an invalid `hooks.json` silently, then
-    /// replaces any installed copy.
-    pub fn install(agy: &Path, source: &Path, hook: &Path, home: &Path) -> Result<(), String> {
-        let scratch = tempfile::tempdir().map_err(|e| e.to_string())?;
-        let dir = scratch.path().join(NAME);
-        std::fs::create_dir(&dir).map_err(|e| e.to_string())?;
-        for (name, text) in rendered(source, hook)? {
-            std::fs::write(dir.join(name), text).map_err(|e| e.to_string())?;
-        }
+    /// Installs the plugin folder `dir` with `agy` (the command), for `home`: validates it first, as install does
+    /// not and skips an invalid `hooks.json` silently, then replaces any installed copy of the plugin of `dir`'s name.
+    pub fn install(agy: &Path, dir: &Path, home: &Path) -> Result<(), String> {
         let run = |args: &[&str]| {
             Command::new(agy)
                 .args(["plugin"])
                 .args(args)
-                .arg(&dir)
+                .arg(dir)
                 .env("HOME", home)
                 .stdin(Stdio::null())
                 .output()
@@ -962,21 +965,37 @@ pub mod agy_plugin {
         let valid = run(&["validate"])?;
         if !valid.status.success() {
             return Err(format!(
-                "agy did not validate the studio plugin: {}",
+                "agy did not validate the plugin in {}: {}",
+                dir.display(),
                 String::from_utf8_lossy(&valid.stdout)
             ));
         }
-        // An uninstall of what is not there fails, and that is fine.
-        let _ = Command::new(agy)
-            .args(["plugin", "uninstall", NAME])
-            .env("HOME", home)
-            .stdin(Stdio::null())
-            .output();
+        if let Some(name) = dir.file_name().and_then(|n| n.to_str()) {
+            // An uninstall of what is not there fails, and that is fine.
+            let _ = uninstall(agy, name, home);
+        }
         let done = run(&["install"])?;
         if !done.status.success() {
             return Err(format!(
                 "agy plugin install failed: {}",
                 String::from_utf8_lossy(&done.stderr)
+            ));
+        }
+        Ok(())
+    }
+
+    /// Uninstalls the plugin `name` with `agy`, for `home`.
+    pub fn uninstall(agy: &Path, name: &str, home: &Path) -> Result<(), String> {
+        let out = Command::new(agy)
+            .args(["plugin", "uninstall", name])
+            .env("HOME", home)
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|e| format!("could not run agy: {e}"))?;
+        if !out.status.success() {
+            return Err(format!(
+                "agy plugin uninstall {name} failed: {}",
+                String::from_utf8_lossy(&out.stderr)
             ));
         }
         Ok(())

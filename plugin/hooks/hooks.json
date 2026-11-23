@@ -1,27 +1,27 @@
 {
   "hooks": {
-    "SessionStart": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/plotkeeper-hook --agent claude", "async": true }] }],
-    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/plotkeeper-hook --agent claude", "async": true }] }],
-    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/plotkeeper-hook --agent claude", "async": true }] }],
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent claude", "async": true }] }],
+    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent claude", "async": true }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent claude", "async": true }] }],
     "PreToolUse": [
-      { "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/plotkeeper-hook --agent claude", "async": true }] },
-      { "matcher": "AskUserQuestion|ExitPlanMode", "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/plotkeeper-answer", "timeout": 130, "statusMessage": "Answer in the plotkeeper card" }] },
-      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/plotkeeper-answer", "timeout": 10 }] }
+      { "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent claude", "async": true }] },
+      { "matcher": "AskUserQuestion|ExitPlanMode", "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-answer\"", "timeout": 130, "statusMessage": "Answer in the plotkeeper card" }] },
+      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-answer\"", "timeout": 10 }] }
     ],
     "PermissionDenied": [
-      { "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/plotkeeper-hook --agent claude", "async": true }] },
-      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/plotkeeper-answer", "timeout": 610, "statusMessage": "Allow or decline in the plotkeeper card" }] }
+      { "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent claude", "async": true }] },
+      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-answer\"", "timeout": 610, "statusMessage": "Allow or decline in the plotkeeper card" }] }
     ],
     "PermissionRequest": [
-      { "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/plotkeeper-hook --agent claude", "async": true }] },
-      { "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/plotkeeper-answer", "timeout": 130, "statusMessage": "Answer in the plotkeeper card" }] }
+      { "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent claude", "async": true }] },
+      { "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-answer\"", "timeout": 130, "statusMessage": "Answer in the plotkeeper card" }] }
     ],
-    "PostToolUse": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/plotkeeper-hook --agent claude", "async": true }] }],
-    "PostToolUseFailure": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/plotkeeper-hook --agent claude", "async": true }] }],
-    "Notification": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/plotkeeper-hook --agent claude", "async": true }] }],
-    "Elicitation": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/plotkeeper-hook --agent claude", "async": true }] }],
-    "SubagentStart": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/plotkeeper-hook --agent claude", "async": true }] }],
-    "SubagentStop": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/plotkeeper-hook --agent claude", "async": true }] }],
-    "Stop": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/../target/release/plotkeeper-hook --agent claude", "async": true }] }]
+    "PostToolUse": [{ "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent claude", "async": true }] }],
+    "PostToolUseFailure": [{ "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent claude", "async": true }] }],
+    "Notification": [{ "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent claude", "async": true }] }],
+    "Elicitation": [{ "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent claude", "async": true }] }],
+    "SubagentStart": [{ "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent claude", "async": true }] }],
+    "SubagentStop": [{ "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent claude", "async": true }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent claude", "async": true }] }]
   }
 }

@@ -31,7 +31,7 @@ You need macOS, Node, the Rust toolchain and Claude Code. `claude` must be on th
 
 `npm start` builds the page, the hook and the server, which takes a while the first time, installs `plotkeeper` into `~/.cargo/bin`, starts it and opens its page in your browser. Later, start it with `plotkeeper` from any terminal; Ctrl+C stops it.
 
-plotkeeper starts no sessions: for a `claude` you start in your own terminal, see [Load the plugin](docs/studio/plugin.md).
+plotkeeper starts no sessions: to record the agents you start in your own terminals, run `plotkeeper install` once ([install and uninstall](docs/studio/plugin.md)).
 
 ## Status
 
@@ -45,7 +45,7 @@ Coding agents write code faster than I can read their diffs. I was losing track 
 
 - [Sessions](docs/studio/behaviour/sessions.md), [the story rail](docs/studio/behaviour/rail.md), [blocked commands and wake-ups](docs/studio/behaviour/cards.md), [the Brief](docs/studio/behaviour/brief.md), [checks](docs/studio/behaviour/checks.md), [the terminal pane](docs/studio/behaviour/terminal.md), [storage](docs/studio/behaviour/storage.md)
 - [The system map](docs/studio/behaviour/map.md)
-- [Load the plugin](docs/studio/plugin.md), [settings files](docs/studio/settings.md), [development](docs/studio/development.md)
+- [Install and uninstall](docs/studio/plugin.md), [settings files](docs/studio/settings.md), [development](docs/studio/development.md)
 
 ## Licence
 

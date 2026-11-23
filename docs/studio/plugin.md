@@ -1,15 +1,26 @@
-# Load the plugin
+# Install and uninstall
 
-Sessions the studio starts load the plugin on their own. For a `claude` you start yourself, in a studio shell or any other terminal, add the plugin to `CLAUDE_CODE_PLUGIN_DIRS` in your shell profile, through the link in the studio's data folder:
+plotkeeper records an agent's sessions through hooks, which run on each of its events. Wire them once, from any terminal:
 
-    export CLAUDE_CODE_PLUGIN_DIRS="$HOME/Library/Application Support/plotkeeper/checkout/plugin"
+    plotkeeper install
 
-At each start the app points `checkout` there at its own checkout, so a moved checkout is picked up by the next start (#21). It also asks a login shell for the variable: when no entry is this checkout's plugin, the bar over the terminal says so, and "Fix it" writes the line into `~/.zshrc`, after a copy to `~/.zshrc.studio-backup` that a later fix keeps. It drops entries that are another studio plugin and keeps the rest as written, missing ones too, since Claude Code skips those.
+Install works at user level, never in a repository, so your git trees stay clean. It prints each step, and a harness it does not find on the `PATH` is skipped with one line:
 
-Only zsh's `~/.zshrc` is fixed, and a line that builds the value with `${`, `$(` or a backtick is left alone; then the bar names the line to add. A shell that gives no answer within 10 s, or `exec`s another program such as tmux, counts as loading the plugin. Claude Code skips a missing plugin folder with no error, so before #21 a stale path showed only as sessions with no row.
+- It copies `plotkeeper-hook` and `plotkeeper-answer`, from beside the `plotkeeper` executable, into the data folder's `bin/` (`~/Library/Application Support/plotkeeper/bin/`). Every hook names that folder, in quotes since the path has a space, never a checkout or an npm folder, and each `plotkeeper` start brings the copies up to the binaries beside it (#356), so an upgrade reaches the hooks at the next start.
+- **Claude Code**: it renders `plugin/` with that path into `plugins/claude/` in the data folder, as a local marketplace of one plugin, and runs `claude plugin marketplace add` on it and `claude plugin install plotkeeper@plotkeeper`. `claude` writes `enabledPlugins` and `extraKnownMarketplaces` into `~/.claude/settings.json`; plotkeeper never opens that file (AGENTS.md, Hard rules), and puts no hook in any `settings.json`. The plugin shows as `plotkeeper@plotkeeper` in `claude plugin list`.
+- **agy**: it renders `plugin-agy/` with the path of `plotkeeper-hook` into `plugins/agy/plotkeeper/` in the data folder, and installs it with `agy plugin validate` and `agy plugin install`, which copies it into `~/.gemini/config/plugins/plotkeeper/`. A copy already there is backed up first.
+- **The old setup**: so that no event is recorded twice, it removes what the archived desktop app set up, after a backup. In `~/.zshrc`, from each `export CLAUDE_CODE_PLUGIN_DIRS=` line, the entries that end in `plotkeeper/checkout/plugin` or `dev.falinks.studio/checkout/plugin` (the data folder's link into a checkout, by its name before #322); a line left with no entry goes, and so does the app's comment above it. With agy found, agy's old plugin `studio` is uninstalled.
 
-Each `claude` session then loads the plugin in place, as `plotkeeper@inline` in `claude plugin list`. Nothing is written to `~/.claude/settings.json`. `claude plugin install` would write `enabledPlugins` and `extraKnownMarketplaces` there.
+The backups and a record of what install did are in `install/` in the data folder. A second install keeps the first backups and replaces its own plugins. Run it again after you change `plugin/` or `plugin-agy/`: the agents run the copies install made.
 
-The hooks run the `plotkeeper-hook` built in this checkout, so build before you start a session. Edits to the plugin take effect at the next session start or `/reload-plugins`.
+To take it all back:
+
+    plotkeeper uninstall
+
+Uninstall runs `agy plugin uninstall plotkeeper` and `claude plugin uninstall plotkeeper@plotkeeper` and `claude plugin marketplace remove plotkeeper` for what install added, installs the agy plugins it backed up again, puts `~/.zshrc` back as it was, and removes the data folder's `bin/`, `plugins/` and `install/`, and nothing else: the event log and the stores stay. A `~/.zshrc` you changed after install is left as it is, and uninstall names the backup to take the lines from.
+
+## What the Claude Code plugin does
+
+On thirteen hook events it runs `plotkeeper-hook --agent claude`, which appends the event to the event log. Answering from the page is Claude Code only: `plotkeeper-answer` holds a question, a plan's approval or a permission until you answer on the page.
 
 Two hooks carry a blocked command (spec #170). On `PermissionDenied` for Bash, `plotkeeper-answer` leaves a request for the card and waits up to 600 s for Allow or Decline (timeout 610). On `PreToolUse` for Bash it claims the one-time pass Allow left and returns `"ask"`, or returns at once with no output when no pass matches. `PermissionDenied` is also logged by `plotkeeper-hook` like every other event.
