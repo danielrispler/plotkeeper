@@ -1233,12 +1233,17 @@ impl Runner {
         Err(refused)
     }
 
-    /// The projects to tell of a change in `project`: every project with runs when the change paused the queues.
+    /// The projects to tell of a change in `project`: itself, and every project with runs when the change paused the
+    /// queues. `project` is always told, also once its last run is gone.
     fn told(state: &State, pause: Option<Pause>, project: &str) -> Vec<String> {
-        match pause {
+        let mut told = match pause {
             Some(_) => Self::projects(state),
-            None => vec![project.to_string()],
+            None => Vec::new(),
+        };
+        if !told.iter().any(|each| each == project) {
+            told.push(project.to_string());
         }
+        told
     }
 
     /// Picks the runs back up at a start, from the runs folder: a queued run waits its turn again, a run whose lock is
