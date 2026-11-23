@@ -12,6 +12,7 @@
 import { element, failure, invoke, text } from "./dom.js";
 import type { Settings, SettingsFiles } from "./settings.js";
 import type { Writers, WriterKind, WriterTest } from "./types.js";
+import { GATE } from "./writer-notice.js";
 
 export type Choice = { writer: WriterKind; model: string; effort: string };
 
@@ -61,10 +62,8 @@ export function preset(list: Writers, now: Settings["summaries"]): Choice {
 export const testLine = (test: WriterTest): { passed: boolean; text: string } =>
   test.outcome === "passed" ? { passed: true, text: test.line } : { passed: false, text: `Failed: ${test.line}` };
 
-// The writer's notice line while summaries wait for a Test; it starts as the writer's failure notice does, so a later one
-// replaces it (`writer-notice.ts`).
-export const gateNotice = (list: Writers): string | null =>
-  list.summaries_on ? null : "Summaries are off: pick a writer under Writer, at the top of the page, and press Test.";
+// The writer's notice line while summaries wait for a Test (`writer-notice.ts`).
+export const gateNotice = (list: Writers): string | null => (list.summaries_on ? null : GATE);
 
 export const briefsLine = (list: Writers): string | null =>
   list.briefs ? null : "PR briefs need Claude: they are written by `claude`, which was not found, whatever writer is picked here. Install Claude Code and restart plotkeeper.";
@@ -108,8 +107,8 @@ export type Hooks = {
   texts: () => SettingsFiles;
   // A pass saved `settings.json`: its new text, applied as a save is.
   saved: (settings: string) => void;
-  // The writer's notice line, set or cleared.
-  notice: (line: string | null) => void;
+  // The gate in the writer's notice line, shown or cleared; clearing it keeps a writer's failure notice.
+  gate: (gated: boolean) => void;
 };
 
 function draw(panel: HTMLElement, hooks: Hooks) {
@@ -324,7 +323,7 @@ function refresh(panel: HTMLElement, hooks: Hooks, again = false) {
       const first = list === null;
       list = writers;
       if (first || again) choice = preset(writers, hooks.summaries());
-      hooks.notice(gateNotice(writers));
+      hooks.gate(!writers.summaries_on);
       draw(panel, hooks);
       window.dispatchEvent(new Event("writers"));
     })
