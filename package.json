@@ -1,5 +1,5 @@
 {
-  "name": "studio",
+  "name": "plotkeeper",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,7 +9,9 @@
     "snap:all": "node scripts/snap/all.mjs",
     "snap:rail": "node scripts/snap/rail-all.mjs",
     "snap:readme": "node scripts/snap/readme.mjs",
-    "start": "npm run build && cargo build --locked --release -p studio-hook --bins && cargo install --locked --path server && plotkeeper",
+    "start": "npm run build && cargo install --locked --path hook && cargo install --locked --path server && plotkeeper",
+    "pack:npm": "sh scripts/npm/pack.sh",
+    "smoke:npm": "sh scripts/npm/smoke.sh",
     "test": "tsc && npm run test:node",
     "test:node": "node --test ui/tests/*.test.mjs",
     "check": "cargo fmt --all --check && npm run build && cargo clippy --locked --workspace --all-targets -- -D warnings && rm -f scripts/wire/*.ts && cargo nextest run --locked --workspace && cargo run --locked -q -p studio-system-map -- check && tsc -p scripts/wire && npm run test:node"

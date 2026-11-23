@@ -10,7 +10,7 @@ import { base, type Fixture } from "./base.ts";
 
 const MIN = 60e3;
 
-const capabilities = { agent: "claude", asks: true, background_tasks: true, replies: true, permission_mode: true, durations: true, transcript_version: true, context: true, turn_trees: true };
+const capabilities = { agent: "claude", asks: true, background_tasks: true, replies: true, permission_mode: true, durations: true, transcript_version: true, transcript_model: true, context: true, turn_trees: true };
 const cwd = "/Users/danielrispler/work/plotkeeper/.claude/worktrees/issue-56-row-controls";
 
 // What each turn's summary says; its first line is the turn's Headline (the turn-end intention is the final response's first line).

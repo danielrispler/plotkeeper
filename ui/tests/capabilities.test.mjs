@@ -6,9 +6,9 @@ import { rowMark, secondLine } from "../../dist/list.js";
 import { subagentHistory } from "../../dist/story.js";
 
 const caps = (agent, rest = {}) => ({
-  agent, asks: false, background_tasks: false, replies: false, permission_mode: false, durations: false, transcript_version: false, context: false, turn_trees: false, ...rest,
+  agent, asks: false, background_tasks: false, replies: false, permission_mode: false, durations: false, transcript_version: false, transcript_model: false, context: false, turn_trees: false, ...rest,
 });
-const claude = { capabilities: caps("claude", { asks: true, replies: true, permission_mode: true, transcript_version: true, context: true, turn_trees: true }), model: null, transcript: { context: { tokens: 9000, share: 9 }, model: "claude-opus-5-5" } };
+const claude = { capabilities: caps("claude", { asks: true, replies: true, permission_mode: true, transcript_version: true, transcript_model: true, context: true, turn_trees: true }), model: null, transcript: { context: { tokens: 9000, share: 9 }, model: "claude-opus-5-5" } };
 const agy = { capabilities: caps("agy"), model: "gemini-3.8-flash-high", transcript: { context: null, model: null } };
 const codex = { capabilities: caps(""), model: null, status_only: true, transcript: { context: null, model: null } };
 
@@ -44,7 +44,33 @@ test("the header shows each session's model by its agent's mark, none for status
   assert.equal(modelLine({ ...claude, transcript: { model: "claude-opus-5-5[1m]" } }), "Claude · Opus 5.5");
 });
 
+test("a recorded Codex session's model line names Codex and the model its hooks name (#359)", () => {
+  const codex = { capabilities: caps("codex", { asks: true, permission_mode: true }), model: "gpt-5.5-codex", transcript: { context: null, model: null } };
+  assert.match(modelLine(codex), /^Codex · /);
+});
+
+test("a recorded Qwen Code session's model line names Qwen Code and the model its hooks name (#360)", () => {
+  const qwen = { capabilities: caps("qwen", { asks: true, permission_mode: true }), model: "qwen3-coder-plus", transcript: { context: null, model: null } };
+  assert.equal(modelLine(qwen), "Qwen Code · Qwen3 coder plus");
+});
+
+test("the model line takes the transcript's model by the capability flag, never by the agent's name", () => {
+  // A Claude session whose capabilities say its transcript names no model shows the model on the session.
+  assert.equal(modelLine({ ...claude, capabilities: { ...claude.capabilities, transcript_model: false }, model: "claude-haiku-5" }), "Claude · Haiku 5");
+  // An agent the page does not know by name, whose transcript names its model, shows its own id.
+  const newagent = { capabilities: caps("newagent", { transcript_model: true }), model: null, transcript: { context: null, model: "nova-pro-2" } };
+  assert.equal(modelLine(newagent), "newagent · Nova pro");
+  assert.equal(modelLine({ ...newagent, capabilities: caps("newagent") }), "");
+  // A model with no word in its name shows whole, never a broken line.
+  assert.equal(modelLine({ ...newagent, transcript: { model: "4" } }), "newagent · 4");
+});
+
 test("an agy session at needs you has no question text, so its row shows its line", () => {
   const row = { ...agy, state: "needs_you", line: "Run a command", questions: [] };
   assert.equal(secondLine(row), "Run a command");
+});
+
+test("a recorded Cursor session's model line names Cursor and the model its hooks name (#362)", () => {
+  const cursor = { capabilities: caps("cursor"), model: "gpt-5.5", transcript: { context: null, model: null } };
+  assert.match(modelLine(cursor), /^Cursor · /);
 });

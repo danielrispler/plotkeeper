@@ -1,0 +1,93 @@
+name: npm package
+
+# Builds the npm package with universal macOS binaries, packs it, and installs the tarball on an Apple silicon and an
+# Intel runner with no Rust on the PATH (scripts/npm/smoke.sh, #368), on every run. It publishes to the npm registry
+# only when Daniel runs it by hand from main with "publish" ticked (docs/studio/development.md, "Cutting a release").
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the tested tarball to the npm registry
+        type: boolean
+        default: false
+  pull_request:
+    paths: ["**", "!**.md", "README.md"]
+  push:
+    branches: [main, "issue-*"]
+    paths: ["**", "!**.md", "README.md"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' && github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  pack:
+    # As in studio.yml: a pull request from an `issue-*` branch skips, as the push to that branch already runs.
+    if: github.event_name != 'pull_request' || !startsWith(github.head_ref, 'issue-')
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
+        with:
+          rustflags: ""
+          cache-workspaces: . -> target
+      - run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - run: npm ci
+      - run: npm run pack:npm -- out
+      - uses: actions/upload-artifact@v7
+        with:
+          name: npm-package
+          path: out/*.tgz
+          if-no-files-found: error
+
+  smoke:
+    needs: pack
+    strategy:
+      matrix:
+        # Apple silicon and Intel.
+        runner: [macos-latest, macos-26-intel]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v8
+        with:
+          name: npm-package
+          path: out
+      # The script keeps the runner's Rust off the PATH, as on a Mac with no Rust toolchain.
+      - run: sh scripts/npm/smoke.sh out/*.tgz
+
+  publish:
+    needs: smoke
+    if: github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/main'
+    runs-on: macos-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      # npm's provenance statement.
+      id-token: write
+    steps:
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@v8
+        with:
+          name: npm-package
+          path: out
+      # The tarball the smoke job tested, not a rebuild.
+      - run: npm publish out/*.tgz --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

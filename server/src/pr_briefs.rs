@@ -278,6 +278,11 @@ impl PrBriefs {
         }
     }
 
+    /// Whether briefs are written: not without the `claude` program, or with the fake writer of the checks.
+    pub fn writes(&self) -> bool {
+        self.writer.is_some()
+    }
+
     /// The model of the `prBriefs.model` setting, read from the file now.
     pub fn model(&self) -> String {
         crate::settings::pr_briefs_model()

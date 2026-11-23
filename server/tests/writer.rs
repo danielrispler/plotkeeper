@@ -189,16 +189,14 @@ fn a_page_opened_after_the_notice_asks_for_it() {
     let ask = || studio_server::api::call(&app, &NoPage, "writer_notice", serde_json::Value::Null);
     assert_eq!(ask().unwrap(), serde_json::Value::Null);
 
-    tx.send(Some(
-        "Summaries and briefs are off: `claude` is not logged in.".into(),
-    ))
-    .unwrap();
+    tx.send(Some("Summaries are off: `claude` is not logged in.".into()))
+        .unwrap();
     while heard.0.lock().unwrap().is_empty() {
         std::thread::sleep(Duration::from_millis(10));
     }
     assert_eq!(
         ask().unwrap(),
-        json!("Summaries and briefs are off: `claude` is not logged in.")
+        json!("Summaries are off: `claude` is not logged in.")
     );
 
     tx.send(None).unwrap();
@@ -206,4 +204,62 @@ fn a_page_opened_after_the_notice_asks_for_it() {
         std::thread::sleep(Duration::from_millis(10));
     }
     assert_eq!(ask().unwrap(), serde_json::Value::Null);
+}
+
+// Picking and testing the writer on the page (spec #320, "Writer settings on the page" and "The Test gate").
+
+#[test]
+fn a_passed_test_saves_the_choice_and_turns_summaries_on_and_a_failed_one_changes_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("events.jsonl");
+    let agy = dir.path().join("agy");
+    let script = |body: &str| {
+        fs::write(&agy, format!("#!/bin/sh\n{body}\n")).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&agy, fs::Permissions::from_mode(0o755)).unwrap();
+    };
+    let writer = ClaudeWriter::new(dir.path().join("no-claude"), dir.path().into())
+        .with_agy(agy.clone(), dir.path().into());
+    let (app, _) = app_with(&log, Arc::new(writer));
+    studio_server::set_summaries_on(&app, false);
+    let settings = studio_server::settings::paths().unwrap()[0].clone();
+    let test = |expected: Option<&str>| {
+        studio_server::api::call(
+            &app,
+            &NoPage,
+            "test_writer",
+            json!({ "writer": "agy", "model": "gemini-4-neon-high", "effort": "", "expected": expected }),
+        )
+        .unwrap()
+    };
+
+    script(r#"echo '{"status":"ERROR","error":"please log in"}'; exit 1"#);
+    let failed = test(None);
+    assert_eq!(failed["outcome"], "not_logged_in", "{failed}");
+    assert!(
+        failed["line"].as_str().unwrap().contains("Log in to `agy`"),
+        "{failed}"
+    );
+    assert_eq!(failed["settings"], serde_json::Value::Null);
+    assert!(!settings.exists(), "a failed Test saves nothing");
+    let off = studio_server::api::call(&app, &NoPage, "writers", serde_json::Value::Null).unwrap();
+    assert_eq!(off["summaries_on"], false, "{off}");
+
+    script(r#"echo '{"status":"SUCCESS","response":"ok"}'"#);
+    let passed = test(None);
+    assert_eq!(passed["outcome"], "passed", "{passed}");
+    let saved = passed["settings"].as_str().unwrap();
+    assert_eq!(fs::read_to_string(&settings).unwrap(), saved);
+    let saved: serde_json::Value = serde_json::from_str(saved).unwrap();
+    assert_eq!(
+        saved["summaries"],
+        json!({ "writer": "agy", "model": "gemini-4-neon-high" })
+    );
+    let on = studio_server::api::call(&app, &NoPage, "writers", serde_json::Value::Null).unwrap();
+    assert_eq!(on["summaries_on"], true, "{on}");
+    assert_eq!(on["writers"][4]["kind"], "agy", "{on}");
+    // The next start reads the gate open.
+    let data = settings.parent().unwrap();
+    fs::remove_file(&settings).unwrap();
+    assert!(studio_server::settings::summaries_open(data));
 }

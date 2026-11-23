@@ -7,6 +7,7 @@ use std::{
     path::{Path, PathBuf},
     sync::Mutex,
 };
+use studio_understanding::WriterKind;
 
 const NAMES: [&str; 2] = ["settings.json", "keymap.json"];
 
@@ -174,6 +175,44 @@ pub fn write_setting(
     write_in(&settings, expected.as_deref(), &path, value.as_ref())
 }
 
+/// Saves the writer the page's Test passed, with its model and effort (an empty effort: the key removed, the model's
+/// default), in `settings.json`, under the one lock of the page's writes. `expected` is the text the page last read. Returns the new text.
+pub fn save_writer(
+    expected: Option<String>,
+    writer: studio_understanding::WriterKind,
+    model: &str,
+    effort: &str,
+) -> Result<String, String> {
+    let [settings, _] = paths().ok_or("no home folder")?;
+    let _one_at_a_time = WRITING.lock().unwrap_or_else(|e| e.into_inner());
+    save_writer_in(&settings, expected.as_deref(), writer, model, effort)
+}
+
+fn save_writer_in(
+    settings: &Path,
+    expected: Option<&str>,
+    writer: studio_understanding::WriterKind,
+    model: &str,
+    effort: &str,
+) -> Result<String, String> {
+    let key = |leaf: &str| vec!["summaries".to_string(), leaf.to_string()];
+    let text = write_in(
+        settings,
+        expected,
+        &key("writer"),
+        // The serde name `summary_writer` reads back: Cursor's program is `agent`, its name `cursor`.
+        Some(&serde_json::json!(writer)),
+    )?;
+    let text = write_in(
+        settings,
+        Some(&text),
+        &key("model"),
+        Some(&serde_json::json!(model)),
+    )?;
+    let effort = (!effort.is_empty()).then(|| serde_json::json!(effort));
+    write_in(settings, Some(&text), &key("effort"), effort.as_ref())
+}
+
 /// The `repository` setting (danielrispler/Falinks#605): the folder the shell, Workspaces and the picker start in. Read from
 /// the file on each call, so a saved change takes effect; `None` when unset, empty or not a string.
 pub fn repository() -> Option<String> {
@@ -199,6 +238,78 @@ fn summary_writer_in(text: &str) -> studio_understanding::WriterKind {
         .ok()
         .and_then(|json| serde_json::from_value(json["summaries"]["writer"].clone()).ok())
         .unwrap_or_default()
+}
+
+/// The OpenAI-compatible writer's base URL, `summaries.base_url` in `settings.json` (#367), read from the file on each call;
+/// `None` when unset, empty or not a string: OpenAI's own.
+pub fn openai_base_url() -> Option<String> {
+    let text = paths().and_then(|[settings, _]| fs::read_to_string(settings).ok());
+    base_url_in(&text.unwrap_or_default())
+}
+
+fn base_url_in(text: &str) -> Option<String> {
+    let json: serde_json::Value = serde_json::from_str(&plain_json(text)).ok()?;
+    let url = json["summaries"]["base_url"].as_str()?.trim();
+    (!url.is_empty()).then(|| url.to_string())
+}
+
+/// Saves the OpenAI-compatible writer's base URL in `settings.json`, or removes it when none; `expected` is the text the
+/// page last read. Returns the new text.
+pub fn save_base_url(expected: Option<String>, url: Option<&str>) -> Result<String, String> {
+    let path = vec!["summaries".to_string(), "base_url".to_string()];
+    write_setting(expected, path, url.map(|url| serde_json::json!(url)))
+}
+
+/// Whether summaries are written at this start (spec #320, "The Test gate"): yes for a user who was configured before, or
+/// once a writer passed Test; else no, until one does. Read at start, before the writer makes its folder.
+///
+/// Today a missing `summaries.writer` reads as Claude, so the key alone cannot tell who was configured: a user is, when
+/// `settings.json` names `summaries.writer`, or when the data folder held the writer's folder (`card-writer`, which only a
+/// start of plotkeeper or the app before it makes) at the first start of this version. That first look is kept in
+/// `writer-gate.json`, so later starts, after the writer has made its folder, read the same answer.
+pub fn summaries_open(data: &Path) -> bool {
+    let gate = data.join(GATE);
+    let open = match fs::read_to_string(&gate)
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .and_then(|json| json["open"].as_bool())
+    {
+        Some(open) => open,
+        None => {
+            let open = data
+                .join(studio_understanding::WriterKind::Claude.folder())
+                .is_dir();
+            if let Err(e) = save(&gate, &serde_json::json!({ "open": open }).to_string()) {
+                log::error!("save {GATE}: {e}");
+            }
+            open
+        }
+    };
+    open || names_writer(&fs::read_to_string(data.join(NAMES[0])).unwrap_or_default())
+}
+
+/// The file that keeps whether summaries are written without a Test, beside the settings.
+const GATE: &str = "writer-gate.json";
+
+/// A writer passed Test: summaries are written from now on, at every start.
+pub fn open_summaries(data: &Path) -> Result<(), String> {
+    save(
+        &data.join(GATE),
+        &serde_json::json!({ "open": true }).to_string(),
+    )
+}
+
+/// Whether `settings.json`'s text names a writer in `summaries.writer`.
+fn names_writer(text: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(&plain_json(text))
+        .ok()
+        .and_then(|json| {
+            serde_json::from_value::<studio_understanding::WriterKind>(
+                json["summaries"]["writer"].clone(),
+            )
+            .ok()
+        })
+        .is_some()
 }
 
 /// The catch-up at start from `settings.json`: `catchUp.hours` (default 2), how far back a ready PR's head may have moved for its
@@ -274,14 +385,213 @@ fn plain_json(text: &str) -> String {
     out
 }
 
+/// Where the API-key writers' keys are kept (spec #320, "API-key writers"): the macOS Keychain under plotkeeper's own
+/// entries, one per writer, or memory in a test. Never another tool's config or the environment. A key goes in and is read
+/// back by the writer; the page only ever learns whether one is set.
+pub trait ApiKeys: Send + Sync {
+    /// Writer `kind`'s key, when one is set.
+    fn get(&self, kind: WriterKind) -> Option<String>;
+    /// Saves `key` as writer `kind`'s, replacing the one set.
+    fn set(&self, kind: WriterKind, key: &str) -> Result<(), String>;
+    /// Removes writer `kind`'s key; none set is no error.
+    fn remove(&self, kind: WriterKind) -> Result<(), String>;
+}
+
+/// The Keychain entries: service `plotkeeper`, account `anthropic-api-key` or `openai-api-key`, through the `security`
+/// program, which only ever touches these entries.
+pub struct Keychain {
+    program: PathBuf,
+}
+
+const SERVICE: &str = "plotkeeper";
+
+/// Writer `kind`'s Keychain account: `anthropic-api-key` or `openai-api-key`.
+fn account(kind: WriterKind) -> String {
+    format!("{}-api-key", kind.program())
+}
+
+impl Default for Keychain {
+    fn default() -> Self {
+        Self::with_program("/usr/bin/security".into())
+    }
+}
+
+impl Keychain {
+    /// The Keychain through `program` in place of `security`, for a test, which must not touch the real Keychain.
+    pub fn with_program(program: PathBuf) -> Self {
+        Self { program }
+    }
+
+    fn run(&self, args: &[&str], stdin: Option<&str>) -> Result<std::process::Output, String> {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+        let mut child = Command::new(&self.program)
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|e| format!("the Keychain could not be reached: {e}"))?;
+        let mut input = child.stdin.take().expect("piped");
+        if let Some(stdin) = stdin {
+            input
+                .write_all(stdin.as_bytes())
+                .map_err(|e| format!("the Keychain could not be reached: {e}"))?;
+        }
+        drop(input);
+        child
+            .wait_with_output()
+            .map_err(|e| format!("the Keychain could not be reached: {e}"))
+    }
+}
+
+/// Whether `key` looks like an API key: printable ASCII with no space, so it is one word on `security -i`'s line.
+fn plain_key(key: &str) -> bool {
+    !key.is_empty() && key.len() <= 512 && key.chars().all(|c| c.is_ascii_graphic())
+}
+
+/// `key` as one word of a `security -i` line: in double quotes, its `"` and `\` each after a backslash, which
+/// `security` takes as the next character as it is (`split_line`, Apple's `SecurityTool/macOS/security.c`).
+fn quoted(key: &str) -> String {
+    let mut word = String::from('"');
+    for c in key.chars() {
+        if c == '"' || c == '\\' {
+            word.push('\\');
+        }
+        word.push(c);
+    }
+    word.push('"');
+    word
+}
+
+impl ApiKeys for Keychain {
+    fn get(&self, kind: WriterKind) -> Option<String> {
+        let account = account(kind);
+        let out = self
+            .run(
+                &["find-generic-password", "-s", SERVICE, "-a", &account, "-w"],
+                None,
+            )
+            .ok()
+            .filter(|out| out.status.success())?;
+        let key = String::from_utf8(out.stdout).ok()?.trim().to_string();
+        (!key.is_empty()).then_some(key)
+    }
+
+    fn set(&self, kind: WriterKind, key: &str) -> Result<(), String> {
+        if !plain_key(key) {
+            return Err("That is not an API key: it is printable characters with no space.".into());
+        }
+        // In interactive mode the key goes on standard input, so it never shows in the process list.
+        let account = account(kind);
+        let command = format!(
+            "add-generic-password -U -s {SERVICE} -a {account} -w {}\n",
+            quoted(key)
+        );
+        let out = self.run(&["-i"], Some(&command))?;
+        match out.status.success() && self.get(kind).as_deref() == Some(key) {
+            true => Ok(()),
+            false => Err("The Keychain did not save the key.".into()),
+        }
+    }
+
+    fn remove(&self, kind: WriterKind) -> Result<(), String> {
+        let account = account(kind);
+        self.run(
+            &["delete-generic-password", "-s", SERVICE, "-a", &account],
+            None,
+        )?;
+        match self.get(kind) {
+            None => Ok(()),
+            Some(_) => Err("The Keychain did not remove the key.".into()),
+        }
+    }
+}
+
+/// Keys kept in memory: a test's, and the server's until it is given the Keychain at start.
+#[derive(Default)]
+pub struct MemoryKeys(Mutex<std::collections::HashMap<WriterKind, String>>);
+
+impl ApiKeys for MemoryKeys {
+    fn get(&self, kind: WriterKind) -> Option<String> {
+        self.0.lock().unwrap().get(&kind).cloned()
+    }
+
+    fn set(&self, kind: WriterKind, key: &str) -> Result<(), String> {
+        if !plain_key(key) {
+            return Err("That is not an API key: it is printable characters with no space.".into());
+        }
+        self.0.lock().unwrap().insert(kind, key.into());
+        Ok(())
+    }
+
+    fn remove(&self, kind: WriterKind) -> Result<(), String> {
+        self.0.lock().unwrap().remove(&kind);
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        catch_up_in, edit_text, plain_json, pr_briefs_model_in, repository_in, summary_writer_in,
-        write_in,
+        catch_up_in, edit_text, plain_json, pr_briefs_model_in, repository_in, save_writer_in,
+        summary_writer_in, write_in,
     };
     use serde_json::json;
     use studio_understanding::WriterKind;
+
+    #[test]
+    fn a_saved_writer_is_read_back_as_the_same_writer() {
+        let home = tempfile::tempdir().unwrap();
+        let file = home.path().join("settings.json");
+        for kind in WriterKind::ALL {
+            let text = save_writer_in(&file, None, kind, "auto", "").unwrap();
+            assert_eq!(summary_writer_in(&text), kind, "{text}");
+            std::fs::remove_file(&file).unwrap();
+        }
+    }
+
+    #[test]
+    fn a_fresh_home_gets_no_summaries_until_a_writer_passes_test() {
+        let home = tempfile::tempdir().unwrap();
+        let data = home.path().join("plotkeeper");
+        assert!(!super::summaries_open(&data));
+        // The start then makes the writer's folder; the next start is still gated.
+        std::fs::create_dir_all(data.join("card-writer")).unwrap();
+        assert!(!super::summaries_open(&data));
+        super::open_summaries(&data).unwrap();
+        assert!(super::summaries_open(&data));
+    }
+
+    #[test]
+    fn a_data_folder_an_earlier_plotkeeper_used_writes_summaries_with_no_test() {
+        let home = tempfile::tempdir().unwrap();
+        let data = home.path().join("plotkeeper");
+        std::fs::create_dir_all(data.join("card-writer")).unwrap();
+        std::fs::write(data.join("events.jsonl"), "").unwrap();
+        assert!(super::summaries_open(&data));
+        assert!(super::summaries_open(&data), "and at every start after");
+    }
+
+    #[test]
+    fn a_settings_file_that_names_the_writer_writes_summaries_with_no_test() {
+        let home = tempfile::tempdir().unwrap();
+        let data = home.path().join("plotkeeper");
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::write(
+            data.join("settings.json"),
+            "{ \"summaries\": { \"writer\": \"agy\", }, }",
+        )
+        .unwrap();
+        assert!(super::summaries_open(&data));
+        // A key that names no writer is not that.
+        std::fs::write(
+            data.join("settings.json"),
+            r#"{ "summaries": { "model": "haiku" } }"#,
+        )
+        .unwrap();
+        assert!(!super::summaries_open(&data));
+    }
 
     fn path(keys: &[&str]) -> Vec<String> {
         keys.iter().map(|k| k.to_string()).collect()
@@ -603,6 +913,118 @@ mod tests {
             "{ broken",
         ] {
             assert_eq!(repository_in(text), None, "{text}");
+        }
+    }
+
+    /// The OpenAI-compatible writer's base URL (#367): a non-empty string under `summaries`, in Zed's format.
+    #[test]
+    fn the_base_url_is_read_from_summaries() {
+        use super::base_url_in;
+        let read = |text: &str| base_url_in(text);
+        assert_eq!(
+            read("{ // Ollama\n \"summaries\": { \"base_url\": \"http://localhost:11434/v1\", } }")
+                .as_deref(),
+            Some("http://localhost:11434/v1")
+        );
+        for text in [
+            "",
+            "{}",
+            r#"{ "summaries": { "base_url": "" } }"#,
+            r#"{ "summaries": { "base_url": 1 } }"#,
+            r#"{ "base_url": "http://x" }"#,
+        ] {
+            assert_eq!(read(text), None, "{text}");
+        }
+    }
+
+    /// The Keychain through a stand-in `security` that keeps one entry in a file: the key goes in on standard input, never
+    /// in the arguments, and only plotkeeper's own entry is named. The stand-in splits its input line as `security -i`
+    /// does (`split_line` in Apple's `SecurityTool/macOS/security.c`): whitespace between words, a word that starts with
+    /// `"` or `'` runs to the same quote, and a backslash takes the next character as it is. The real Keychain is never
+    /// touched.
+    #[test]
+    fn the_key_is_saved_replaced_and_removed_in_plotkeepers_own_keychain_entry() {
+        use super::{ApiKeys, Keychain};
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let (store, log) = (dir.path().join("store"), dir.path().join("log"));
+        let program = dir.path().join("security");
+        let split = dir.path().join("split.pl");
+        std::fs::write(
+            &split,
+            r#"my $line = <STDIN>; chomp $line; my (@words, $word, $quote); my $state = "space";
+for my $c (split //, $line) {
+  if ($state eq "space") { next if $c =~ /\s/;
+    if ($c eq '"' || $c eq "'") { ($quote, $word, $state) = ($c, "", "quoted") }
+    elsif ($c eq "\\") { ($word, $state) = ("", "escaped") } else { ($word, $state) = ($c, "word") } }
+  elsif ($state eq "word") { if ($c =~ /\s/) { push @words, $word; $state = "space" }
+    elsif ($c eq "\\") { $state = "escaped" } else { $word .= $c } }
+  elsif ($state eq "escaped") { $word .= $c; $state = "word" }
+  elsif ($state eq "quoted") { if ($c eq $quote) { push @words, $word; $state = "space" }
+    elsif ($c eq "\\") { $state = "quoted-escaped" } else { $word .= $c } }
+  else { $word .= $c; $state = "quoted" } }
+push @words, $word if $state ne "space"; print "$words[-1]\n";
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            &program,
+            format!(
+                r#"#!/bin/sh
+echo "ARGS $*" >> '{log}'
+case "$1" in
+  -i) /usr/bin/perl '{split}' > '{store}';;
+  find-generic-password) [ -f '{store}' ] && cat '{store}' || exit 44;;
+  delete-generic-password) [ -f '{store}' ] && rm '{store}' || exit 44;;
+esac
+"#,
+                log = log.display(),
+                store = store.display(),
+                split = split.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let keys = Keychain::with_program(program);
+        use studio_understanding::WriterKind::{Anthropic, OpenAI};
+
+        assert_eq!(keys.get(Anthropic), None);
+        keys.set(Anthropic, "sk-ant-first-0001").unwrap();
+        assert_eq!(keys.get(Anthropic).as_deref(), Some("sk-ant-first-0001"));
+        keys.set(Anthropic, "sk-ant-second-0002").unwrap();
+        assert_eq!(keys.get(Anthropic).as_deref(), Some("sk-ant-second-0002"));
+        keys.remove(Anthropic).unwrap();
+        assert_eq!(keys.get(Anthropic), None);
+        keys.remove(Anthropic).unwrap();
+        assert!(keys.set(Anthropic, "not a key; rm -rf").is_err());
+        // A key with a dot, a quote or a backslash goes in whole.
+        for key in [
+            "sk-ant-dotted.0004",
+            r#"sk-ant-"quoted"-0005"#,
+            "sk-ant-'single'-0006",
+            r"sk-ant-back\slash-0007",
+        ] {
+            assert_eq!(keys.set(Anthropic, key), Ok(()), "{key}");
+            assert_eq!(keys.get(Anthropic).as_deref(), Some(key));
+        }
+        keys.remove(Anthropic).unwrap();
+        // The OpenAI-compatible API's key, in its own entry (#367).
+        keys.set(OpenAI, "sk-proj-third-0003").unwrap();
+        assert_eq!(keys.get(OpenAI).as_deref(), Some("sk-proj-third-0003"));
+        keys.remove(OpenAI).unwrap();
+
+        let log = std::fs::read_to_string(log).unwrap();
+        for line in log.lines() {
+            assert!(
+                !line.contains("sk-ant") && !line.contains("sk-proj"),
+                "a key in the arguments: {line}"
+            );
+            assert!(
+                line == "ARGS -i"
+                    || line.contains("-s plotkeeper -a anthropic-api-key")
+                    || line.contains("-s plotkeeper -a openai-api-key"),
+                "{line}"
+            );
         }
     }
 }

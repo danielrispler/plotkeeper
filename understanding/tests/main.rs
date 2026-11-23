@@ -7,6 +7,7 @@ mod contract;
 mod decisions;
 mod drift;
 mod fingerprint;
+mod http_writer;
 mod pr_brief;
 #[path = "../../scripts/wire/samples.rs"]
 mod samples;

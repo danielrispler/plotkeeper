@@ -10,15 +10,19 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::collections::BTreeMap;
 
+/// The name Claude Code's hook entries pass (`--agent claude`), which its lines carry.
+pub const CLAUDE: &str = "claude";
+
 /// What Claude Code reports: everything the core reads today.
 pub const CAPABILITIES: Capabilities = Capabilities {
-    agent: "claude",
+    agent: CLAUDE,
     asks: true,
     background_tasks: true,
     replies: true,
     permission_mode: true,
     durations: true,
     transcript_version: true,
+    transcript_model: true,
     context: true,
     turn_trees: true,
     transcript_format: TranscriptFormat::Claude,
@@ -95,11 +99,13 @@ struct Raw {
     reason: String,
     #[serde(default)]
     studio_received_ms: u64,
+    /// The agent the hook entry named (#355); `None` on a line written before entries named one.
+    studio_agent: Option<String>,
     /// The session's permission mode, which `SessionStart` leaves out.
     permission_mode: Option<String>,
     /// On a tool's result, how long its call took.
     duration_ms: Option<u64>,
-    /// The terminal the session runs in, which the hook records from `STUDIO_TERMINAL_ID`.
+    /// The terminal the session runs in, which the hook records from `PLOTKEEPER_TERMINAL_ID`.
     studio_terminal_id: Option<String>,
     /// The agent's process, from the hook (#330).
     studio_pid: Option<u32>,
@@ -123,9 +129,14 @@ struct Raw {
     studio_asked_by: String,
 }
 
-/// The event of hook line `line`; an error when it is no Claude Code line.
+/// The event of hook line `line`; an error when it is no Claude Code line: it has another shape, or
+/// its hook entry named another agent.
 pub(crate) fn parse(line: &str) -> Result<Event, serde_json::Error> {
-    serde_json::from_str::<Raw>(line).map(adapt)
+    let raw = serde_json::from_str::<Raw>(line)?;
+    match raw.studio_agent.as_deref() {
+        None | Some(CLAUDE) => Ok(adapt(raw)),
+        Some(other) => Err(serde::de::Error::custom(format!("a line of {other}"))),
+    }
 }
 
 fn tool(raw: &Raw) -> Tool {
@@ -172,6 +183,9 @@ fn adapt(raw: Raw) -> Event {
             happened.push(Happened::SessionEnd);
             if raw.reason == "clear" {
                 happened.push(Happened::EndedByClear);
+            }
+            if matches!(raw.reason.as_str(), "process_gone" | "studio_close") {
+                happened.push(Happened::WrittenByStudio);
             }
         }
         "UserPromptSubmit" => {
@@ -284,6 +298,9 @@ fn adapt(raw: Raw) -> Event {
             answer: raw.studio_answer.clone(),
         }),
         _ => {}
+    }
+    if matches!(raw.hook_event_name.as_str(), INTERRUPTED | STUDIO_ANSWER) {
+        happened.push(Happened::WrittenByStudio);
     }
     if let Some(task) = raw.tool_response.background_task_id.clone() {
         happened.push(Happened::BackgroundTask(task));

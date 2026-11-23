@@ -25,6 +25,15 @@ pub fn data_dir(home: &Path) -> PathBuf {
 
 const DATA_FOLDER: &str = "plotkeeper";
 
+/// The data folder's `bin/`, where the hooks find their binaries at a path that never moves (#356): copies of
+/// [`HOOK_BINARIES`], which each `plotkeeper` start refreshes from the ones beside its own executable.
+pub fn bin_dir(home: &Path) -> PathBuf {
+    data_dir(home).join("bin")
+}
+
+/// The binaries the hooks run, which ship beside `plotkeeper` and are copied into [`bin_dir`].
+pub const HOOK_BINARIES: [&str; 2] = ["plotkeeper-hook", "plotkeeper-answer"];
+
 /// The folder the data lived in before it was named for plotkeeper (#322).
 const OLD_DATA_FOLDER: &str = "dev.falinks.studio";
 
@@ -167,12 +176,21 @@ pub struct Pruned {
     pub lightened: usize,
 }
 
-/// What a prune reads of a line: its session, Claude Code's or agy's, and when it was received.
+/// What a prune reads of a line: its session, by `session_id` (Claude Code's, Codex's and Qwen Code's), agy's
+/// `conversationId`, Cursor's `conversation_id` or Copilot's camelCase `sessionId`, the agent its hook entry
+/// named, and when it was received.
 #[derive(Default, serde::Deserialize)]
 struct Stamp {
     session_id: Option<String>,
     #[serde(rename = "conversationId")]
     conversation_id: Option<String>,
+    /// Cursor's session (#362).
+    #[serde(rename = "conversation_id")]
+    cursor_conversation: Option<String>,
+    /// Copilot's session, in its camelCase payloads (#361).
+    #[serde(rename = "sessionId")]
+    copilot_session: Option<String>,
+    studio_agent: Option<String>,
     studio_received_ms: Option<u64>,
 }
 
@@ -181,10 +199,17 @@ impl Stamp {
         serde_json::from_slice(line).unwrap_or_default()
     }
 
+    /// The session id the line's agent uses (#355); a line that names no agent, written before
+    /// entries named one or by the server, goes by whichever id it has.
     fn session(&self) -> Option<&str> {
-        self.session_id
-            .as_deref()
-            .or(self.conversation_id.as_deref())
+        let (claude, agy) = (self.session_id.as_deref(), self.conversation_id.as_deref());
+        match self.studio_agent.as_deref() {
+            Some("agy") => agy,
+            Some("claude" | "codex" | "qwen") => claude,
+            Some("cursor") => self.cursor_conversation.as_deref(),
+            Some("copilot") => claude.or(self.copilot_session.as_deref()),
+            _ => claude.or(agy),
+        }
     }
 }
 
@@ -400,7 +425,7 @@ pub fn record_tree(folder: &Path) -> Option<(String, String)> {
 pub fn record_tree_within(folder: &Path, files: usize, bytes: u64) -> Option<(String, String)> {
     let root = worktree_root(folder)?;
     if let Err(why) = untracked_within(Path::new(&root), files, bytes) {
-        eprintln!("studio-hook: no tree of {root}: {why}");
+        eprintln!("plotkeeper-hook: no tree of {root}: {why}");
         return None;
     }
     let index = git(
@@ -411,7 +436,7 @@ pub fn record_tree_within(folder: &Path, files: usize, bytes: u64) -> Option<(St
     // One per call: Studio records trees from several threads at once.
     static CALLS: AtomicU64 = AtomicU64::new(0);
     let call = CALLS.fetch_add(1, Ordering::Relaxed);
-    let scratch = env::temp_dir().join(format!("studio-hook-{}-{call}.index", process::id()));
+    let scratch = env::temp_dir().join(format!("plotkeeper-hook-{}-{call}.index", process::id()));
     // A copy of the real index keeps git's stat cache, so only changed files are hashed again.
     let _ = fs::copy(Path::new(&root).join(index), &scratch);
     let added = git(Path::new(&root), &["add", "-A"], Some(&scratch));
@@ -520,7 +545,7 @@ fn git(folder: &Path, args: &[&str], index: Option<&Path>) -> Option<String> {
             let _ = child.wait();
             let args = args.join(" ");
             eprintln!(
-                "studio-hook: git {args} in {} ran over {GIT_TIMEOUT:?}",
+                "plotkeeper-hook: git {args} in {} ran over {GIT_TIMEOUT:?}",
                 folder.display()
             );
             return None;
@@ -646,6 +671,11 @@ pub fn trees(
     use serde_json::{Map, Value, json};
     use std::io::{Seek, Write};
     let text = |key: &str| event.get(key).and_then(Value::as_str);
+    // Only Claude Code's turns are mapped here: a line another agent's entry named records none, as
+    // its capabilities' `turn_trees: false` says, though its payload may be Claude-shaped (#359).
+    if text("studio_agent").is_some_and(|agent| agent != "claude") {
+        return Ok(());
+    }
     let name = text("hook_event_name").unwrap_or_default();
     let idle = name == "Notification" && text("notification_type") == Some("idle_prompt")
         || name == INTERRUPTED;
@@ -855,10 +885,11 @@ fn first_tree(root: &str, began: Option<u64>) -> Option<(String, serde_json::Val
 }
 
 /// The agent's process for the hook that runs now (#330): `wrapper`, the pid a wrapper script passed in
-/// `STUDIO_AGENT_PID` (agy's, which runs the hook from a backgrounded subshell), else the hook's
+/// `PLOTKEEPER_AGENT_PID` (agy's, which runs the hook from a backgrounded subshell), else the hook's
 /// `parent`, or its parent's parent when that is a shell the agent started the hook through.
 /// `inspect` gives a process's command and parent pid. `None` when no agent can be told, as for a hook
-/// reparented to init; the session then takes the idle path.
+/// reparented to init, or for an agent an IDE app hosts, such as Cursor's (#362; spec #320, "IDE-hosted
+/// pids"), whose process outlives its sessions; the session then takes the idle path.
 pub fn agent_pid(
     wrapper: Option<&str>,
     parent: u32,
@@ -869,16 +900,54 @@ pub fn agent_pid(
         return Some(pid);
     }
     let parent = real(parent)?;
-    match inspect(parent) {
-        Some((command, up)) if is_shell(&command) => real(up),
-        _ => Some(parent),
+    let (agent, command) = match inspect(parent) {
+        Some((command, up)) if is_shell(&command) => (real(up)?, inspect(up).map(|(c, _)| c)),
+        found => (parent, found.map(|(c, _)| c)),
+    };
+    match command {
+        Some(command) if in_app(&command) => None,
+        _ => Some(agent),
     }
+}
+
+/// Whether `command`, a process's executable path, lies inside a macOS app bundle, as an IDE's
+/// processes do; an agent's CLI is a program of its own.
+fn in_app(command: &str) -> bool {
+    command.contains(".app/Contents/")
 }
 
 fn is_shell(command: &str) -> bool {
     let name = command.rsplit('/').next().unwrap_or(command);
     let name = name.trim_start_matches('-');
     matches!(name, "sh" | "bash" | "zsh" | "dash" | "fish")
+}
+
+/// The harness whose own payload `event` is, by a marker field only its payloads carry, when that is
+/// another than `agent`, the agent its hook entry names (spec #320, "One event, one record, the right
+/// agent"): Cursor's `cursor_version`, as Cursor runs Claude Code's hooks too (#362). Such an event is
+/// dropped, as that harness's own entry records it.
+/// Returns that harness's display name.
+pub fn foreign(
+    agent: Option<&str>,
+    event: &serde_json::Map<String, serde_json::Value>,
+) -> Option<&'static str> {
+    let (marked, name) = if event.contains_key("cursor_version") {
+        ("cursor", "Cursor")
+    } else if copilot_payload(event) {
+        ("copilot", "Copilot")
+    } else {
+        return None;
+    };
+    agent.is_some_and(|a| a != marked).then_some(name)
+}
+
+/// Whether `payload` carries Copilot's marker, for the agent guard above: Copilot reads
+/// `.claude/settings.json`, so a payload of Copilot's could reach Claude Code's entry.
+// HOOK POINT (#361, for wave 1's trial #369): Copilot documents no field that marks its payloads,
+// and its snake_case ones are Claude Code's shape, so none is guessed: the trial records the marker
+// and puts its check here. Until then no payload is told as Copilot's.
+fn copilot_payload(_payload: &serde_json::Map<String, serde_json::Value>) -> bool {
+    false
 }
 
 /// The command and parent pid of process `pid`, from `ps`; `None` when it has gone or `ps` fails.

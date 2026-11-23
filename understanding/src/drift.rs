@@ -176,6 +176,7 @@ impl fmt::Display for Drift {
                 AgyDriftKind::Record => "unknown agy transcript records",
                 AgyDriftKind::ToolShape => "unknown agy tool-call shapes",
                 AgyDriftKind::TurnOrigin => "agy turn origins that disagreed at the stop",
+                AgyDriftKind::Agent => "hook lines of an agent plotkeeper cannot read",
             };
             writeln!(f, "{what}: {count}")?;
         }

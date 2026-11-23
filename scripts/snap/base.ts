@@ -49,6 +49,8 @@ export const base = {
   select: noSelection,
   selected: noSelection,
   sessions: [],
+  remove_api_key: null,
+  set_api_key: null,
   settings_files: { settings: null, keymap: null },
   subagent_log: null,
   turn_file_hunk: null,
@@ -56,4 +58,6 @@ export const base = {
   turn_summary: null,
   watch: null,
   writer_notice: null,
+  writers: { writers: [{ kind: "claude", name: "Claude", found: true, models: ["haiku", "sonnet", "opus", "fable"], efforts: ["", "low", "medium", "high"] }, { kind: "agy", name: "agy", found: false, models: ["gemini-4-neon-low"], efforts: [] }], summaries_on: true, briefs: true, keys: [], base_url: null },
+  test_writer: { outcome: "passed", line: "Passed: `claude` answered. Summaries are written with it.", settings: null },
 } satisfies { [C in ReadCommand]: Commands[C] };

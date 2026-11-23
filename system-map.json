@@ -4,37 +4,37 @@
   "parts": [
     {
       "id": "plugins", "name": "Agent plugins", "caption": "Which hooks each agent runs",
-      "description": "Small config folders for Claude Code and agy. They decide which of the agent's events reach the studio.",
-      "tier": "interface", "paths": ["plugin/", "plugin-agy/"]
+      "description": "Small config folders for Claude Code, agy, Codex, Cursor and Copilot. They decide which of the agent's events reach the studio, and each entry names its agent to the hook. `plotkeeper install` renders them with the path of the hook binaries in the data folder's `bin/` and installs them through each agent's own plugin command, or, for Codex and Cursor, which have none, into their user-level hook files.",
+      "tier": "interface", "paths": ["plugin/", "plugin-agy/", "plugin-codex/", "plugin-cursor/", "plugin-copilot/"]
     },
     {
       "id": "hook", "name": "Hook", "caption": "Records every agent event",
-      "description": "Runs on each agent event and appends it to the event log. It also holds a question or a blocked command until you answer.",
+      "description": "Runs on each agent event and appends it to the event log, with the agent its entry named; an event of another harness, such as Cursor's on Claude Code's entry, it drops, as that harness's own entry records it. It records no process for an agent that runs inside an IDE app such as VS Code, so such a session goes idle rather than being ended by the process check. It also holds a question or a blocked command until you answer.",
       "tier": "core", "paths": ["hook/"]
     },
     {
       "id": "core", "name": "Core", "caption": "Turns events into session state",
-      "description": "Plain Rust logic. It reads the event log's lines in order and knows every session's turns, checks, subagents and whether it needs you.",
+      "description": "Plain Rust logic. It reads the event log's lines in order, each by the agent its line names (Claude Code, agy, Codex, Copilot, Cursor, Qwen Code), and knows every session's turns, checks, subagents and whether it needs you.",
       "tier": "core", "paths": ["core/"]
     },
     {
       "id": "server", "name": "Server", "caption": "Holds the state, answers the commands",
-      "description": "A library, and the `plotkeeper` program that serves it, with no window in it. It holds the core state, the card store (which keeps the session briefs, the turn summaries and the cards written before cards were retired), the risk notes, the writer and the settings, tells the page why when the writer fails, runs the read loop that follows the event log and sends what changed (the list, the saved project list, the selection, the brief, notices) to a sink the web server sets, serves the learning layer as a local page on 127.0.0.1 (the built page, one POST route for each command and one server-sent event stream, behind a random token, a cookie and a Host check, one server per data folder), and has one function for each learning-layer and session-view command: the PR lookups on a turn's end, the page's focus and the Map view's opening (never on a timer), the PR briefs written for ready PRs and kept per head, the map, the fog a PR's reading clears, the CI result it reads from the default branch, which map changes and agent decisions of a PR you accepted or overturned, and the quiet log of what you use of it. It keeps the saved project list in the data folder: a repository joins on its first session and leaves only through Remove project.",
+      "description": "A library, and the `plotkeeper` program that serves it, with no window in it. It holds the core state, the card store (which keeps the session briefs, the turn summaries and the cards written before cards were retired), the risk notes, the writer and the settings, tells the page why when the writer fails, lists the writers the login shell finds, keeps the API-key writers' keys in plotkeeper's own Keychain entries (the page learns only whether one is set) and the OpenAI-compatible API's base URL in the settings, and runs the page's Test of one (a pass saves the choice and turns summaries on for a user who arrived with none configured), runs the read loop that follows the event log and sends what changed (the list, the saved project list, the selection, the brief, notices) to a sink the web server sets, serves the learning layer as a local page on 127.0.0.1 (the built page, one POST route for each command and one server-sent event stream, behind a random token, a cookie and a Host check, one server per data folder), refreshes at each start the copies of the hook binaries in the data folder's `bin/` that the hooks run, wires the agents it finds to those hooks with `plotkeeper install` (through `claude plugin`, `agy plugin` and `copilot plugin`, and into `~/.codex/hooks.json` and `~/.cursor/hooks.json`, which hold no credentials, never opening Claude Code's settings file, after removing the archived app's setup and backing up what it changes) and takes that back with `plotkeeper uninstall`, and has one function for each learning-layer and session-view command: the PR lookups on a turn's end, the page's focus and the Map view's opening (never on a timer), the PR briefs written for ready PRs and kept per head, the map, the fog a PR's reading clears, the CI result it reads from the default branch, which map changes and agent decisions of a PR you accepted or overturned, and the quiet log of what you use of it. It keeps the saved project list in the data folder: a repository joins on its first session and leaves only through Remove project.",
       "tier": "core", "paths": ["server/"]
     },
     {
       "id": "understanding", "name": "Understanding", "caption": "Writes what you read, and keeps it",
-      "description": "Decides what a change is worth telling you, asks the writer for it, and stores it: turn summaries, session briefs, PR briefs (the facts, the writer's reply and the code checks on it) and the risk notes of blocked commands. Cards, as a turn's or a worker's explanation, are retired; the cards stored before stay readable.",
+      "description": "Decides what a change is worth telling you, asks the writer for it, by running its program or, for an API-key writer, over HTTP, with the reply read the same way on both paths, and stores it: turn summaries, session briefs, PR briefs (the facts, the writer's reply and the code checks on it) and the risk notes of blocked commands. Cards, as a turn's or a worker's explanation, are retired; the cards stored before stay readable.",
       "tier": "core", "paths": ["understanding/"]
     },
     {
       "id": "window", "name": "Window", "caption": "Everything you see and press",
-      "description": "The page: the list, the rail, Home, History and the Map view. Its list has a header for every saved project, even one with no sessions. It shows state and sends your actions to the server; it has no terminals, branches, skills, usage or settings page.",
+      "description": "The page: the list, the rail, Home, History, the Map view and the writer section under Writer, where you pick the program that writes the summaries, with its model and effort, or set up an API-key writer, an Anthropic API key or an OpenAI-compatible API's base URL and optional key, and test it with one tiny call. Its list has a header for every saved project, even one with no sessions. It shows state and sends your actions to the server; it has no terminals, branches, skills or usage, and every other setting is edited in the settings files.",
       "tier": "core", "paths": ["ui/"]
     },
     {
       "id": "workbench", "name": "Workbench", "caption": "Worktrees, PRs and plan usage",
-      "description": "Git worktrees, tasks, PR lookups and plan usage. A black box: it never fogs and never asks for your time.",
+      "description": "Git worktrees, tasks, PR lookups and plan usage, and agy's plugin: the shipped `plugin-agy/`, embedded, rendered with the hook's path and installed with `agy plugin`. A black box: it never fogs and never asks for your time.",
       "tier": "black-box", "paths": ["workbench/"]
     }
   ],
@@ -46,22 +46,28 @@
   "links": [
     { "id": "agents-plugins", "from": "agents", "to": "plugins" },
     { "id": "plugins-hook", "from": "plugins", "to": "hook" },
+    { "id": "server-plugins", "from": "server", "to": "plugins" },
     { "id": "hook-server", "from": "hook", "to": "server" },
     { "id": "core-server", "from": "core", "to": "server" },
     { "id": "server-understanding", "from": "server", "to": "understanding" },
     { "id": "server-workbench", "from": "server", "to": "workbench" },
     { "id": "understanding-writer", "from": "understanding", "to": "writer" },
     { "id": "server-window", "from": "server", "to": "window" },
-    { "id": "workbench-github", "from": "workbench", "to": "github" }
+    { "id": "workbench-github", "from": "workbench", "to": "github" },
+    { "id": "workbench-plugins", "from": "workbench", "to": "plugins" },
+    { "id": "server-agents", "from": "server", "to": "agents" },
+    { "id": "workbench-agents", "from": "workbench", "to": "agents" }
   ],
   "ignored": [
     ".agents/", ".claude/", ".github/", ".gitignore", "AGENTS.md", "CLAUDE.md", "Cargo.lock", "Cargo.toml", "LICENSE",
-    "README.md", "package-lock.json", "package.json", "real-calls.sh", "rust-toolchain.toml", "tsconfig.json",
+    "README.md", "package-lock.json", "package.json", "npm/", "real-calls.sh", "rust-toolchain.toml", "tsconfig.json",
     "system-map.json",
     "docs/", "scripts/", "terminal-spike/", "v0-spike/", "src-tauri/", "terminal-daemon/",
     "wayfinder/", "test-support/", "system-map/"
   ],
   "laws": [
+    { "id": "install-never-opens-claude-settings", "on": "server", "backing": "check",
+      "text": "Install and uninstall reach Claude Code only through `claude plugin` and never open its settings file." },
     { "id": "hook-never-makes-agent-wait", "on": "hook", "backing": "trust",
       "text": "The hook never makes the agent wait, except for your answer." },
     { "id": "projects-leave-only-by-remove", "on": "server", "backing": "check",
@@ -79,7 +85,7 @@
     { "id": "replay-never-rewrites", "on": "understanding", "backing": "check",
       "text": "Replaying the log never rewrites, replaces or deletes a stored card, summary or answer." },
     { "id": "writer-has-no-tools", "on": "understanding", "backing": "check",
-      "text": "A change is untrusted text: the writer has no tools." },
+      "text": "A change is untrusted text: the writer has no tools where it can turn them off (Claude; Copilot's empty tool allow-list, from its docs), else it runs read-only (Codex's read-only sandbox, Cursor's ask mode) or as locked as its flags allow (agy's sandboxed terminal, with no slash commands or skills), always in an empty folder." },
     { "id": "colour-only-for-needs-you", "on": "window", "backing": "trust",
       "text": "Loud colour is only for what needs you and for a broken law." }
   ],

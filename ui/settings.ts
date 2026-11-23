@@ -3,6 +3,8 @@
 // text at start and each time one is saved; a file that does not parse is reported and the last good
 // one stays in effect.
 
+import type { WriterKind } from "./types.js";
+
 // An action, or an action with its argument, as Zed writes `["terminal::SendText", "\u0001"]`.
 export type Binding = string | [string, string];
 // Keystrokes, as Zed writes them ("cmd-1", "escape"), to actions, by context: "Workspace" for the
@@ -12,8 +14,9 @@ export type Keymap = Record<string, Record<string, Binding>>;
 // The settings: `settings.json`'s choices.
 export interface Settings {
   // The summary writer's model and effort ("" for the model's default), whether opening a turn
-  // writes its summary, and the program that writes cards: Claude Code or the Antigravity CLI (#327).
-  summaries: { model: string; effort: string; on_open: boolean; writer: "claude" | "agy" };
+  // writes its summary, and the program that writes cards: Claude Code, the Antigravity CLI (#327), Codex (#364),
+  // Copilot or Cursor's `agent` (#365).
+  summaries: { model: string; effort: string; on_open: boolean; writer: WriterKind };
   // The context share, a whole percent, past which a session raises its context warning; 0: never.
   context_warning: number;
   // The commands that are checks, per project folder (danielrispler/plotkeeper#112): each a command such as
@@ -32,10 +35,10 @@ export interface Files {
   broken: boolean;
 }
 
-// The writer the file names, or undefined, reporting a name that is neither.
-function writerKind(value: unknown, report: (line: string) => void): "claude" | "agy" | undefined {
-  if (value === undefined || value === "claude" || value === "agy") return value;
-  report('summaries.writer: expected "claude" or "agy"');
+// The writer the file names, or undefined, reporting a name that is none of them.
+function writerKind(value: unknown, report: (line: string) => void): WriterKind | undefined {
+  if (value === undefined || value === "claude" || value === "agy" || value === "codex" || value === "copilot" || value === "cursor" || value === "anthropic" || value === "openai") return value;
+  report('summaries.writer: expected "claude", "agy", "codex", "copilot", "cursor", "anthropic" or "openai"');
   return undefined;
 }
 

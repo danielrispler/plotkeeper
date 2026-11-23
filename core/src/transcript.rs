@@ -260,6 +260,9 @@ impl TranscriptFile {
     }
 
     fn read(&mut self, transcript: &mut Transcript) -> Result<(), String> {
+        if self.format == TranscriptFormat::Unread {
+            return Ok(());
+        }
         let path = Path::new(&self.path);
         if path.extension().is_none_or(|e| e != "jsonl") {
             return Err("the transcript path is not a .jsonl file".into());
@@ -281,6 +284,7 @@ impl TranscriptFile {
             match self.format {
                 TranscriptFormat::Agy => transcript.read_agy(&text)?,
                 TranscriptFormat::Claude => transcript.read(&text)?,
+                TranscriptFormat::Unread => {}
             }
             line.clear();
         }
@@ -352,6 +356,7 @@ pub(crate) fn read_subagent_log(
                     }
                 }
                 TranscriptFormat::Agy => agy_log_entries(&value, cwd, &mut entries),
+                TranscriptFormat::Unread => {}
             }
         }
         line.clear();

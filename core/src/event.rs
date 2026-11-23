@@ -21,7 +21,7 @@ pub(crate) struct Event {
     /// The agent's id of the turn the event belongs to, absent until the first user input.
     pub prompt_id: Option<String>,
     pub studio_received_ms: u64,
-    /// The terminal the session runs in, which the hook records from `STUDIO_TERMINAL_ID`.
+    /// The terminal the session runs in, which the hook records from `PLOTKEEPER_TERMINAL_ID`.
     pub studio_terminal_id: Option<String>,
     /// The agent's process, which the hook records as `studio_pid`: its parent, or the pid the
     /// agy wrapper passes. `None` when it could not tell (#330).
@@ -74,7 +74,7 @@ pub(crate) enum Happened {
     /// The git branch of the session's workspace.
     Branch(String),
 
-    // Claude only.
+    // Claude's, and Codex's where its hooks share Claude's shape (#359).
     /// How a session started.
     StartedFrom(Start),
     /// The session ended by a `/clear`.
@@ -105,6 +105,10 @@ pub(crate) enum Happened {
     Interrupted,
     /// Any other notice.
     OtherNotice,
+    /// The server wrote the line itself, in Claude's shape whatever the session's agent: an end by
+    /// the process check or a closed terminal, an interrupted turn, or an answer from a card. It
+    /// never changes the session's agent (#352).
+    WrittenByStudio,
     ElicitationAsked,
     /// What the agent's last message said, on a turn's or a subagent's end.
     Reply(String),
@@ -210,7 +214,8 @@ pub(crate) struct Spawned {
 /// What an adapter reports, which decides what its sessions' views show (decision 4).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub struct Capabilities {
-    /// The agent's name, for its mark: `claude` or `agy`. Nothing in a view hides by it.
+    /// The agent's name, for its mark and display name: `claude`, `agy`, `codex`, `qwen`, `cursor` or `copilot`. Nothing in a view hides or
+    /// picks by it; the views follow the flags below.
     pub agent: &'static str,
     /// It reports a permission or a question that waits on Daniel, with its text.
     pub asks: bool,
@@ -224,6 +229,9 @@ pub struct Capabilities {
     pub durations: bool,
     /// Its transcript carries the agent's version.
     pub transcript_version: bool,
+    /// Its transcript names the model, which the header's model line shows; else the model is the one
+    /// its hooks name on the session.
+    pub transcript_model: bool,
     /// It reports how full the session's context is.
     pub context: bool,
     /// It records a git tree of each worktree a turn touches, at its start and end.
@@ -232,7 +240,7 @@ pub struct Capabilities {
     pub transcript_format: TranscriptFormat,
 }
 
-/// Saved state finds its agent's capabilities by the agent's name: the two adapters' constants.
+/// Saved state finds its agent's capabilities by the agent's name: each adapter's constant.
 impl<'de> serde::Deserialize<'de> for Capabilities {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         #[derive(serde::Deserialize)]
@@ -244,6 +252,10 @@ impl<'de> serde::Deserialize<'de> for Capabilities {
             "" => Ok(Capabilities::default()),
             "claude" => Ok(crate::claude::CAPABILITIES),
             "agy" => Ok(crate::agy::CAPABILITIES),
+            crate::codex::CODEX => Ok(crate::codex::CAPABILITIES),
+            crate::cursor::CURSOR => Ok(crate::cursor::CAPABILITIES),
+            crate::qwen::QWEN => Ok(crate::qwen::CAPABILITIES),
+            crate::copilot::COPILOT => Ok(crate::copilot::CAPABILITIES),
             other => Err(serde::de::Error::custom(format!("unknown agent {other}"))),
         }
     }
@@ -256,6 +268,8 @@ pub enum TranscriptFormat {
     #[default]
     Claude,
     Agy,
+    /// plotkeeper has no reader for the agent's transcript (Codex's, #359): its lines are skipped.
+    Unread,
 }
 
 impl Event {
@@ -265,6 +279,11 @@ impl Event {
 
     fn find<'a, T>(&'a self, f: impl Fn(&'a Happened) -> Option<T>) -> Option<T> {
         self.happened.iter().find_map(f)
+    }
+
+    /// Whether the server wrote the line, so it says nothing of the session's agent.
+    pub fn written_by_studio(&self) -> bool {
+        self.has(|h| matches!(h, Happened::WrittenByStudio))
     }
 
     pub fn session_starts(&self) -> bool {

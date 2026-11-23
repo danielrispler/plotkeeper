@@ -115,6 +115,26 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
             arg(a, "writer")?,
             arg(a, "on_open")?,
         )),
+        "writers" => out(crate::writers(app)),
+        "set_api_key" => res(crate::set_api_key(
+            app,
+            arg(a, "writer")?,
+            arg(a, "key")?,
+            arg(a, "base_url")?,
+            arg(a, "expected")?,
+        )),
+        "remove_api_key" => res(crate::remove_api_key(
+            app,
+            arg(a, "writer")?,
+            arg(a, "expected")?,
+        )),
+        "test_writer" => out(crate::test_writer(
+            app,
+            arg(a, "writer")?,
+            arg(a, "model")?,
+            arg(a, "effort")?,
+            arg(a, "expected")?,
+        )),
         "check_lists" => done!(crate::check_lists(app, arg(a, "lists")?)),
         "check_output" => res(crate::check_output(
             app,

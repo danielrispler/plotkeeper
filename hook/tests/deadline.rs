@@ -18,8 +18,8 @@ fn scratch(name: &str) -> PathBuf {
 fn hook(home: &Path, patience_ms: u64, event: serde_json::Value) -> Duration {
     let start = Instant::now();
     let mut cmd = hook_command(home);
-    cmd.env("STUDIO_TERMINAL_ID", "t-1")
-        .env("STUDIO_HOOK_PATIENCE_MS", patience_ms.to_string())
+    cmd.env("PLOTKEEPER_TERMINAL_ID", "t-1")
+        .env("PLOTKEEPER_HOOK_PATIENCE_MS", patience_ms.to_string())
         .stdout(Stdio::piped());
     let out = feed(cmd, &event).wait_with_output().unwrap();
     assert!(out.status.success());
