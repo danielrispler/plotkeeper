@@ -19,6 +19,7 @@ import { fitMap, mapEscape, openMap, projectsChanged, startMap } from "./map.js"
 import "./map-history.js";
 import "./map-sheet.js";
 import "./map-tray.js";
+import "./map-runs.js";
 import { startMapAgents } from "./map-agents.js";
 import { drawSidebar, listSpace, showSessions, staleDots } from "./list.js";
 import { deselect, pressSession, select, show } from "./selection.js";

@@ -344,6 +344,50 @@ fn pr_briefs_model_in(text: &str) -> String {
     }
 }
 
+/// What a background run reads from `settings.json` (spec danielrispler/plotkeeper#378): the harness and model of
+/// `backgroundRuns`, and the project's `checks` and `setup`.
+#[derive(Debug, Default, PartialEq)]
+pub struct RunSettings {
+    /// `backgroundRuns.harness`: `claude` unless the file names another.
+    pub harness: String,
+    /// `backgroundRuns.model`; none: the harness's own default.
+    pub model: Option<String>,
+    /// The project's `checks` entry; empty: it has none.
+    pub checks: Vec<String>,
+    /// The project's `setup` command, run before the agent starts.
+    pub setup: Option<String>,
+}
+
+/// The run settings for `project` in `settings.json`'s `text`. `checks` and `setup` are per project folder, the longest
+/// folder that is the project's or holds it winning, as a session's check list is picked (`studio_core`'s `CheckLists`);
+/// there is no default list here. A file that does not parse reads as an empty one.
+pub fn run_settings_in(text: &str, project: &str) -> RunSettings {
+    let json: serde_json::Value = serde_json::from_str(&plain_json(text)).unwrap_or_default();
+    let word = |value: &serde_json::Value| {
+        let word = value.as_str()?.trim();
+        (!word.is_empty()).then(|| word.to_string())
+    };
+    // The entry of the longest folder that holds the project.
+    let entry = |key: &str| {
+        let holds = |folder: &str| {
+            let rest = project.strip_prefix(folder.trim_end_matches('/'));
+            rest.is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+        };
+        let folders = json[key].as_object()?;
+        let found = folders.iter().filter(|(folder, _)| holds(folder));
+        found
+            .max_by_key(|(folder, _)| folder.len())
+            .map(|(_, value)| value)
+    };
+    let checks = entry("checks").and_then(|list| list.as_array());
+    RunSettings {
+        harness: word(&json["backgroundRuns"]["harness"]).unwrap_or_else(|| "claude".into()),
+        model: word(&json["backgroundRuns"]["model"]),
+        checks: checks.map_or_else(Vec::new, |list| list.iter().filter_map(word).collect()),
+        setup: entry("setup").and_then(word),
+    }
+}
+
 /// Zed's format as plain JSON: comments and trailing commas outside strings dropped, as
 /// `ui/settings.ts`'s `parseJsonc` does.
 fn plain_json(text: &str) -> String {
@@ -534,11 +578,37 @@ impl ApiKeys for MemoryKeys {
 #[cfg(test)]
 mod tests {
     use super::{
-        catch_up_in, edit_text, plain_json, pr_briefs_model_in, repository_in, save_writer_in,
-        summary_writer_in, write_in,
+        catch_up_in, edit_text, plain_json, pr_briefs_model_in, repository_in, run_settings_in,
+        save_writer_in, summary_writer_in, write_in,
     };
     use serde_json::json;
     use studio_understanding::WriterKind;
+
+    #[test]
+    fn a_runs_settings_are_its_projects_own_and_nothing_is_borrowed() {
+        let text = r#"{ // Zed's format
+            "backgroundRuns": { "harness": " claude ", "model": "sonnet", },
+            "checks": { "/w": ["make"], "/w/app/": ["cargo test", " npm run check ", "", 3] },
+            "setup": { "/w/app": " npm ci " },
+        }"#;
+        let app = run_settings_in(text, "/w/app");
+        assert_eq!(app.harness, "claude");
+        assert_eq!(app.model.as_deref(), Some("sonnet"));
+        assert_eq!(app.checks, ["cargo test", "npm run check"]);
+        assert_eq!(app.setup.as_deref(), Some("npm ci"));
+        // The longest folder that holds the project wins, on a path boundary.
+        assert_eq!(run_settings_in(text, "/w/tool").checks, ["make"]);
+        assert_eq!(run_settings_in(text, "/w/app2").checks, ["make"]);
+        assert_eq!(run_settings_in(text, "/w/app2").setup, None);
+        // No entry: no checks, and no default list.
+        let none = run_settings_in(text, "/elsewhere");
+        assert!(none.checks.is_empty());
+        let empty = run_settings_in("{ broken", "/w/app");
+        assert_eq!(
+            (empty.harness.as_str(), empty.model, empty.checks.len()),
+            ("claude", None, 0)
+        );
+    }
 
     #[test]
     fn a_saved_writer_is_read_back_as_the_same_writer() {

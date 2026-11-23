@@ -482,12 +482,12 @@ body[data-panel="diff"] .map-stage { --panel-w: min(var(--panel-wide), calc(100%
    faint edge, a deep shadow and a round corner. It never darkens the map under it. */
 .glass { background: var(--glass); backdrop-filter: blur(var(--glass-blur)); -webkit-backdrop-filter: blur(var(--glass-blur)); border-radius: var(--glass-radius);
          box-shadow: var(--glass-shadow); }
-/* The side area, over the map's right: the part's sheet, the drawer under it, then the agents no part holds. Only its cards take the pointer. */
+/* The side area, over the map's right: the part's sheet, the drawer under it, then the agents no part holds and the background runs. Only its cards take the pointer. */
 .map-side { position: absolute; top: var(--inset); right: var(--inset); width: var(--map-sheet); max-height: calc(100% - 2 * var(--inset)); z-index: 3;
             display: flex; flex-direction: column; gap: var(--sp-5); pointer-events: none; }
 .map-side[hidden] { display: none; }
 .map-side > * { pointer-events: auto; min-height: 0; flex: 0 1 auto; }
-#map-sheet:empty, #map-drawer:empty, #map-not-placed:empty { display: none; }
+#map-sheet:empty, #map-drawer:empty, #map-not-placed:empty, #map-runs:empty { display: none; }
 #map-sheet, #map-drawer { overflow-y: auto; padding: var(--sp-6) var(--sp-6) var(--sp-5); animation: glass-in var(--glass-in) var(--glass-ease); }
 #map-sheet { flex-shrink: 0; max-height: 70%; }
 /* The left panel (#385): the story, History, the diff (widened to at most 780 px) or Settings, inset like the sheet and in its glass. */
@@ -535,6 +535,18 @@ button.tray-row { display: block; width: 100%; font: inherit; color: inherit; te
               background-size: calc(var(--map-grid) * var(--cam-scale, 1)) calc(var(--map-grid) * var(--cam-scale, 1)); background-position: var(--cam-x, 0) var(--cam-y, 0); }
 .map-canvas.panning { cursor: grabbing; }
 .map-world { position: relative; }
+/* Background runs (#390): the project's queue in the side area, under the agents no part holds. Quiet: a run never needs Daniel, so it has no colour. */
+#map-runs:not(:empty) { display: flex; flex-direction: column; gap: var(--sp-2); }
+#map-runs .side-title { margin: 0; font-size: var(--size-xs); font-weight: 400; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); }
+.run-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: var(--sp-3); align-items: baseline; padding: var(--sp-3); border-radius: var(--radius); }
+.run-title { font-weight: 500; }
+.run-row[data-state="queued"] .run-title { color: var(--muted); }
+.run-note, .run-denials, .run-copied, .run-row .ratify-prompt { grid-column: 1 / -1; }
+.run-note, .run-denials, .run-copied, .runs-paused { font-size: var(--size-xs); color: var(--faint); }
+.run-denials { margin: var(--sp-2) 0 0; padding-inline-start: var(--sp-5); font-family: var(--mono); overflow-wrap: anywhere; }
+.run-copied { margin: var(--sp-2) 0 0; }
+.run-actions { grid-column: 2; grid-row: 1; display: inline-flex; gap: var(--sp-2); }
+.runs-paused { display: flex; align-items: baseline; gap: var(--sp-3); margin: 0; padding: 0 var(--sp-3); color: var(--muted); }
 .map-links { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
 .map-links .link { stroke: var(--link); stroke-width: var(--link-width); }
 .link-mark.check { fill: var(--law-check); }

@@ -712,6 +712,19 @@ pub(crate) fn finish(
 
 /// Why a failed call failed, from what it printed and how it exited.
 fn classify(kind: WriterKind, status: &ExitStatus, said: &str) -> FailureKind {
+    if let Some(found) = login_or_quota(said) {
+        found
+    } else if kind == WriterKind::Agy && status.code() == Some(3) {
+        // `--print-timeout` was hit.
+        FailureKind::Timeout
+    } else {
+        FailureKind::Other
+    }
+}
+
+/// Whether what a failed call `said` reports a missing login or a used-up quota or rate limit; the server's background
+/// runs read a failed run's words with it too.
+pub fn login_or_quota(said: &str) -> Option<FailureKind> {
     let said = said.to_lowercase();
     let has = |words: &[&str]| words.iter().any(|w| said.contains(w));
     if has(&[
@@ -723,7 +736,7 @@ fn classify(kind: WriterKind, status: &ExitStatus, said: &str) -> FailureKind {
         // Codex's, which retries before it fails.
         "401 unauthorized",
     ]) {
-        FailureKind::NotLoggedIn
+        Some(FailureKind::NotLoggedIn)
     } else if has(&[
         "quota",
         "resource_exhausted",
@@ -733,11 +746,8 @@ fn classify(kind: WriterKind, status: &ExitStatus, said: &str) -> FailureKind {
         "usage limit",
         "too many requests",
     ]) {
-        FailureKind::Quota
-    } else if kind == WriterKind::Agy && status.code() == Some(3) {
-        // `--print-timeout` was hit.
-        FailureKind::Timeout
+        Some(FailureKind::Quota)
     } else {
-        FailureKind::Other
+        None
     }
 }

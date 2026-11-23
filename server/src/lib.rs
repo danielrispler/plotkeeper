@@ -41,6 +41,7 @@ pub mod projects;
 pub mod prs;
 pub mod ratify;
 mod read_loop;
+pub mod runner;
 pub mod settings;
 pub mod stop_rules;
 pub mod web;
@@ -144,6 +145,8 @@ pub struct App {
     /// key is set, all the page learns of them.
     pub keys: Arc<dyn settings::ApiKeys>,
     pub key_set: Mutex<Vec<WriterKind>>,
+    /// The background runs (`runner.rs`): their queues, their processes and their outcomes.
+    pub runner: Arc<runner::Runner>,
 }
 
 impl App {
@@ -217,6 +220,11 @@ impl App {
         studio.know_roots(saved_roots(log));
         let core: Core = Arc::new(Mutex::new(studio));
         let writing = TurnWriting::new(core.clone(), cards.clone(), writer.clone(), effects);
+        let events: Arc<Events> = Arc::default();
+        // A run that starts or ends draws its project's map again, as a brief that lands does.
+        let runner = runner::Runner::new(runner::Config::beside(log));
+        let told = events.clone();
+        runner.on_change(move |project| told.emit("map-landed", project.into()));
         Ok(App {
             core,
             cards,
@@ -231,7 +239,7 @@ impl App {
             briefs,
             projects: projects::Projects::beside(log),
             watching: Mutex::default(),
-            events: Arc::default(),
+            events,
             writer_notice: Mutex::new(None),
             summaries_on: AtomicBool::new(true),
             list_changed: AtomicBool::new(false),
@@ -239,6 +247,7 @@ impl App {
             split_shown: Mutex::new(None),
             keys: Arc::new(settings::MemoryKeys::default()),
             key_set: Mutex::new(Vec::new()),
+            runner,
         })
     }
 

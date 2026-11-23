@@ -190,6 +190,11 @@ impl Adapter {
             Hook::Stop => {
                 let idle = raw["fullyIdle"].as_bool().unwrap_or(true);
                 if own {
+                    // agy's `Stop` carries no reply, so the turn's final response is read from its
+                    // transcript, which agy has written by then (#358).
+                    if let Some(reply) = self.final_response(&id) {
+                        event.happened.push(Happened::Reply(reply));
+                    }
                     event.happened.push(Happened::TurnEnd {
                         background_pending: !idle,
                     });
@@ -413,6 +418,41 @@ impl Adapter {
             .find(|r| r["step_index"] == before)?["tool_calls"][0]["args"]["Prompt"]
             .as_str()
             .map(Into::into)
+    }
+
+    /// The open turn's last `PLANNER_RESPONSE` with text in conversation `id`'s transcript. The turn's
+    /// steps start at its `initialNumSteps` and stop before the next turn's: a `USER_INPUT`, or a
+    /// wake-up's `SYSTEM_MESSAGE` after a response that called no tool (a message while a tool runs
+    /// stays in the turn). A replay reads the final transcript, which
+    /// holds later turns too. `None` when no turn is open or it wrote no text.
+    fn final_response(&self, id: &str) -> Option<String> {
+        let conversation = self.conversations.get(id)?;
+        let initial = conversation.turn?.initial;
+        // Whether the turn's latest response called a tool, so a system message is no wake-up.
+        let mut calling = true;
+        let mut last = None;
+        for record in records(&conversation.transcript)? {
+            let Some(step) = record["step_index"].as_u64().filter(|s| *s >= initial) else {
+                continue;
+            };
+            let later = step > initial;
+            match record["type"].as_str() {
+                Some("USER_INPUT") if later => break,
+                Some("SYSTEM_MESSAGE") if later && !calling => break,
+                Some("PLANNER_RESPONSE") => {
+                    calling = record["tool_calls"]
+                        .as_array()
+                        .is_some_and(|calls| !calls.is_empty());
+                    if let Some(text) = record["content"].as_str().map(str::trim)
+                        && !text.is_empty()
+                    {
+                        last = Some(text.to_owned());
+                    }
+                }
+                _ => {}
+            }
+        }
+        last
     }
 
     /// At a turn's `Stop`, the origin read again: a mismatch is drift (decision 6).

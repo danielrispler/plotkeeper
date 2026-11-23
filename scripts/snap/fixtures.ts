@@ -115,7 +115,7 @@ const at = (x: number, y: number): [number, number] => [x, y];
 const mapState = (extra: Partial<MapState> = {}): MapState => ({
   project: "/w/plotkeeper", status: "loaded", source: mapFile, reference: "origin/main", commit: "35745b1693c5d061e5aea891e98a58515942a12d", note: null,
   user: { tiers: {}, positions: { core: at(620, 190), understanding: at(980, 290), plugins: at(300, 430), hook: at(580, 430), shell: at(880, 440), window: at(1180, 560), daemon: at(760, 690), workbench: at(480, 650), agents: at(110, 430), writer: at(1400, 190), github: at(250, 650) } },
-  fog: {}, ci: null, ready: [], ratify: [],
+  fog: {}, ci: null, ready: [], ratify: [], runs: { paused: null, runs: [] },
   ...extra,
 });
 // The Ready for review tray (#336) with two ready PRs, at the Map view's foot.
@@ -129,6 +129,61 @@ const mapTray = (): Fixture =>
       if (!rows[1].textContent.includes("written when you open it")) log("snap:fail row text: " + rows[1].textContent);
       log("tray ok");`, {
     map_state: mapState({ fog: { shell: "thick" }, ready: [{ number: 334, title: "PR briefs: the brief written for each ready PR", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["PR briefs on the map"], quiet: false } }, { number: 336, title: "Ready for review tray", head: "a".repeat(40), brief: null }] }),
+  });
+
+// Background runs (#390) beside the map: a running run, the queue behind it, and an ended run that was denied a tool call. Cancel asks the
+// server for that run.
+const runAt = Date.UTC(2026, 10, 23, 12, 4);
+const mapRuns = (): Fixture =>
+  mapOpened(`
+      const sent = [];
+      const real = window.fetch;
+      window.fetch = (url, init) => (sent.push(String(url) + " " + (init?.body ?? "")), real(url, init));
+      const rows = [...document.querySelectorAll("#map-runs .run-row")];
+      if (rows.length !== 4) return log("snap:fail expected 4 run rows, saw " + rows.length);
+      if (!document.querySelector("#map-runs .side-title")?.textContent.includes("Background runs")) log("snap:fail the runs have no title");
+      if (rows[0].dataset.state !== "running" || !rows[0].textContent.includes("Running since")) log("snap:fail the running row: " + rows[0].textContent);
+      if (!rows[1].textContent.includes("Queued, next") || !rows[2].textContent.includes("Micro-world")) log("snap:fail the queue: " + rows[1].textContent + " / " + rows[2].textContent);
+      if (!rows[3].textContent.includes("1 tool call was denied") || !rows[3].textContent.includes("git push")) log("snap:fail the denied run: " + rows[3].textContent);
+      const words = (row) => [...row.querySelectorAll("button")].map((button) => button.textContent).join(",");
+      if (words(rows[0]) !== "Cancel" || words(rows[1]) !== "Cancel" || words(rows[3]) !== "Copy prompt,Dismiss") log("snap:fail the buttons: " + rows.map(words).join(" / "));
+      if (document.querySelector("#map-runs .runs-paused")) log("snap:fail a pause shows with no pause");
+      rows[0].querySelector("button").click();
+      await new Promise((done) => setTimeout(done, 50));
+      if (!sent.some((call) => call.includes("/api/run_cancel") && call.includes("19a2f-1"))) log("snap:fail Cancel did not ask the server: " + sent.join(" | "));
+      log("runs ok");`, {
+    map_state: mapState({
+      runs: {
+        paused: null,
+        runs: [
+          { id: "19a2f-1", kind: "back-law", state: "running", at: runAt, outcome: null, line: null, denials: [], prompt: null },
+          { id: "19a2f-2", kind: "back-law", state: "queued", at: runAt, outcome: null, line: null, denials: [], prompt: null },
+          { id: "19a2f-3", kind: "micro-world", state: "queued", at: runAt, outcome: null, line: null, denials: [], prompt: null },
+          { id: "19a2f-0", kind: "back-law", state: "ended", at: runAt, outcome: "denied", line: "Finished, but 1 tool call was denied", denials: ["Bash: git push origin HEAD"], prompt: "Write a test tagged @law: core-order." },
+        ],
+      },
+    }),
+    snapDone: "runs ok",
+  });
+// The queues paused by a login failure: the one indicator with Resume, over the run that failed and the one that waits.
+const mapRunsPaused = (): Fixture =>
+  mapOpened(`
+      const paused = document.querySelectorAll("#map-runs .runs-paused");
+      if (paused.length !== 1 || !paused[0].textContent.includes("Background runs are paused")) return log("snap:fail the pause's indicator: " + paused.length);
+      if (paused[0].querySelector("button")?.textContent !== "Resume") log("snap:fail the indicator has no Resume");
+      const rows = [...document.querySelectorAll("#map-runs .run-row")];
+      if (!rows[1]?.textContent.includes("Queued, paused")) log("snap:fail the waiting run: " + rows[1]?.textContent);
+      log("paused ok");`, {
+    map_state: mapState({
+      runs: {
+        paused: "Claude is not logged in: run `claude` in a terminal and log in with /login",
+        runs: [
+          { id: "19a2f-1", kind: "back-law", state: "ended", at: runAt, outcome: "not-logged-in", line: "Claude is not logged in: run `claude` in a terminal and log in with /login", denials: [], prompt: "Write a test tagged @law: core-order." },
+          { id: "19a2f-2", kind: "back-law", state: "queued", at: runAt, outcome: null, line: null, denials: [], prompt: null },
+        ],
+      },
+    }),
+    snapDone: "paused ok",
   });
 
 // The PR brief on the map (#339), played from the tray as in the prototype's treatment C: a story about the PR that fogged Shell, Understanding and
@@ -1183,6 +1238,8 @@ export const fixtures = {
   writersFailedNarrow: (): Fixture => fixtures.writersFailed(),
   writersBriefsNeedClaudeNarrow: (): Fixture => fixtures.writersBriefsNeedClaude(),
   mapTray,
+  mapRuns,
+  mapRunsPaused,
   railBriefRow: () => railBriefReady(false),
   railBriefOpened: () => railBriefReady(true),
   mapBriefStart,

@@ -531,3 +531,133 @@ fn a_claude_session_ended_or_interrupted_by_the_server_stays_claude() {
     assert_eq!(session.state, State::Ended);
     assert_eq!(session.capabilities, studio_core::CLAUDE_CAPABILITIES);
 }
+
+/// The outputs of one agy turn whose transcript holds Daniel's prompt at step 0 and `reply` as the
+/// final response at step 1, as the trial of #358 recorded them.
+fn turn_outputs(reply: &str) -> Vec<studio_core::Output> {
+    let dir = tempfile::tempdir().unwrap();
+    let logs = dir.path().join("s/.system_generated/logs");
+    std::fs::create_dir_all(&logs).unwrap();
+    let file = logs.join("transcript_full.jsonl");
+    let records = [
+        json!({ "step_index": 0, "type": "USER_INPUT", "content": "explain" }),
+        json!({ "step_index": 1, "type": "PLANNER_RESPONSE", "content": reply }),
+    ];
+    let text: String = records.iter().map(|r| format!("{r}\n")).collect();
+    std::fs::write(&file, text).unwrap();
+    let at = |event: &str, t: u64, fields: Value| {
+        let mut l: Value = serde_json::from_str(&line("s", event, t, fields)).unwrap();
+        l["transcriptPath"] = file.display().to_string().into();
+        l.to_string()
+    };
+    let mut studio = Studio::default();
+    studio.apply(&at("SessionStart", 1, json!({})));
+    studio.apply(&at(
+        "PreInvocation",
+        2,
+        json!({ "invocationNum": 0, "initialNumSteps": 1, "lastUserInput": "explain" }),
+    ));
+    studio.apply(&at("Stop", 3, json!({ "fullyIdle": true })))
+}
+
+#[test]
+fn an_agy_turn_with_a_long_final_response_asks_for_its_summary() {
+    let reply = "word ".repeat(200);
+    let summaries: Vec<_> = turn_outputs(&reply)
+        .into_iter()
+        .filter_map(|o| match o {
+            studio_core::Output::Summary(request) => Some(request),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(summaries.len(), 1, "one summary request");
+    assert!(summaries[0].wanted);
+    assert_eq!(
+        summaries[0].responses.last().map(|r| r.trim()),
+        Some(reply.trim())
+    );
+}
+
+#[test]
+fn an_agy_turn_with_a_short_final_response_asks_for_no_summary() {
+    let outputs = turn_outputs("Hi! The folder is empty.");
+    assert!(
+        !outputs
+            .iter()
+            .any(|o| matches!(o, studio_core::Output::Summary(_)))
+    );
+}
+
+#[test]
+fn a_replayed_agy_run_gives_each_turn_its_own_final_response() {
+    // A replay reads the final transcript, which holds the later turns too.
+    let studio = Studio::replayed(fixture());
+    let session = studio.session(PARENT).unwrap();
+    let firsts: Vec<String> = session
+        .turns
+        .iter()
+        .map(|t| {
+            t.reply
+                .split_whitespace()
+                .take(3)
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .collect();
+    assert_eq!(
+        firsts,
+        ["I have created", "ok", "I have started", "The subagent has"]
+    );
+}
+
+/// The final response each turn of a replayed session gets, for a transcript of `records` and turns
+/// starting at `starts` (their `initialNumSteps`).
+fn replayed_replies(records: &[Value], starts: &[u64]) -> Vec<String> {
+    let dir = tempfile::tempdir().unwrap();
+    let logs = dir.path().join("s/.system_generated/logs");
+    std::fs::create_dir_all(&logs).unwrap();
+    let file = logs.join("transcript_full.jsonl");
+    let text: String = records.iter().map(|r| format!("{r}\n")).collect();
+    std::fs::write(&file, text).unwrap();
+    let at = |event: &str, t: u64, fields: Value| {
+        let mut l: Value = serde_json::from_str(&line("s", event, t, fields)).unwrap();
+        l["transcriptPath"] = file.display().to_string().into();
+        l.to_string()
+    };
+    let mut lines = vec![at("SessionStart", 1, json!({}))];
+    for (n, start) in starts.iter().enumerate() {
+        let t = 10 * (n as u64 + 1);
+        lines.push(at(
+            "PreInvocation",
+            t,
+            json!({ "invocationNum": 0, "initialNumSteps": start, "lastUserInput": format!("p{n}") }),
+        ));
+        lines.push(at("Stop", t + 1, json!({ "fullyIdle": true })));
+    }
+    let studio = Studio::replayed(lines.iter().map(String::as_str));
+    let session = studio.session("s").unwrap();
+    session.turns.iter().map(|t| t.reply.clone()).collect()
+}
+
+#[test]
+fn a_replayed_turn_that_ends_on_a_tool_result_takes_no_later_reply() {
+    let records = [
+        json!({ "step_index": 0, "type": "USER_INPUT" }),
+        json!({ "step_index": 1, "type": "PLANNER_RESPONSE", "content": "", "tool_calls": [{}] }),
+        json!({ "step_index": 2, "type": "GENERIC" }),
+        json!({ "step_index": 3, "type": "USER_INPUT" }),
+        json!({ "step_index": 4, "type": "PLANNER_RESPONSE", "content": "second" }),
+    ];
+    assert_eq!(replayed_replies(&records, &[1, 4]), ["", "second"]);
+}
+
+#[test]
+fn a_system_message_while_a_tool_runs_does_not_end_the_turn() {
+    let records = [
+        json!({ "step_index": 0, "type": "USER_INPUT" }),
+        json!({ "step_index": 1, "type": "PLANNER_RESPONSE", "content": "Starting it now.", "tool_calls": [{}] }),
+        json!({ "step_index": 2, "type": "SYSTEM_MESSAGE" }),
+        json!({ "step_index": 3, "type": "PLANNER_RESPONSE", "content": "All done." }),
+    ];
+    assert_eq!(replayed_replies(&records, &[1]), ["All done."]);
+}

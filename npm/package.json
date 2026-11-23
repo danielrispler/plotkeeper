@@ -12,5 +12,5 @@
   "bin": {
     "plotkeeper": "bin/plotkeeper"
   },
-  "files": ["bin/plotkeeper", "bin/plotkeeper-hook", "bin/plotkeeper-answer"]
+  "files": ["bin/plotkeeper", "bin/plotkeeper-hook", "bin/plotkeeper-answer", "bin/plotkeeper-run"]
 }

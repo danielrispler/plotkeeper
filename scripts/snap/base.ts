@@ -38,7 +38,7 @@ export const base = {
   stop_facts: { active_days: 0, merged_prs: 0, engaged_days: 0, scrubs: 0, proofs: 0, knows: 0, dismissed: true, briefs_offered: 0, briefs_opened: 0, chapters_done: 0 },
   stop_dismiss: null,
   map_proof: [],
-  map_state: { project: "/w/plotkeeper", status: "none", source: null, reference: "origin/main", commit: null, note: null, user: { positions: {}, tiers: {} }, fog: {}, ci: null, ready: [], ratify: [] },
+  map_state: { project: "/w/plotkeeper", status: "none", source: null, reference: "origin/main", commit: null, note: null, user: { positions: {}, tiers: {} }, fog: {}, ci: null, ready: [], ratify: [], runs: { paused: null, runs: [] } },
   open: noSelection,
   pr_brief: null,
   pr_diff: { commit: "", short: "", label: "", url: null, files: [] },

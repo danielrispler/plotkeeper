@@ -7,7 +7,7 @@
 //   right (law marks sit there; a broken-law mark joins them), `chips` along its foot (live agents). A ticket fills a slot.
 // - `onPlateClick(fn)`: a click on a plate that was not a drag, such as one that opens the part's sheet.
 // - `onDraw(fn)`: runs after each draw with the whole `MapView`, for what is not on a plate: the side area (`slots.notPlaced`,
-//   `slots.sheet`, `slots.drawer`, shown by `syncSide`), the tray (`slots.tray`) and the banner (`slots.banner`).
+//   `slots.sheet`, `slots.drawer`, `slots.runs`, shown by `syncSide`), the tray (`slots.tray`) and the banner (`slots.banner`).
 // - `registerLayer(name, layer)`: Esc's layers, `drawer`, `brief`, `scrubbed`, `sheet` and `panel` (#385), peeled in that order; on the bare map Esc does nothing.
 // - The left panel (`panel.ts`, #385) floats over the map's left; `revealParts` pans the camera so the parts in focus clear it and the sheet.
 // - `MapState` (`types.ts`, `map.rs`) is the one payload; `currentMap()` gives the view as drawn.
@@ -33,7 +33,7 @@ export type MapView = {
   positions: Record<string, Point>;
   // The past commit this view shows read-only (no fog, no live agents, no CI), null when it shows now (ticket #313).
   scrub: Scrub | null;
-  slots: { canvas: HTMLElement; side: HTMLElement; notPlaced: HTMLElement; tray: HTMLElement; sheet: HTMLElement; drawer: HTMLElement; banner: HTMLElement };
+  slots: { canvas: HTMLElement; side: HTMLElement; notPlaced: HTMLElement; tray: HTMLElement; runs: HTMLElement; sheet: HTMLElement; drawer: HTMLElement; banner: HTMLElement };
 };
 export type PlateContext = { view: MapView; part: Part; tier: Tier; plate: HTMLElement; fog: HTMLElement; marks: HTMLElement; chips: HTMLElement };
 
@@ -235,7 +235,7 @@ export const mapEscape = () => void escapeMap(layers);
 
 // The side area shows while any of its slots holds something; the tray floats on its own (#385).
 export const syncSide = (slots: MapView["slots"]) => {
-  slots.side.hidden = ![slots.notPlaced, slots.sheet, slots.drawer].some((slot) => slot.childElementCount > 0);
+  slots.side.hidden = ![slots.notPlaced, slots.runs, slots.sheet, slots.drawer].some((slot) => slot.childElementCount > 0);
   // When a part's sheet opens, the camera pans just enough to show that part whole beside it, once per part, so a later draw never pans
   // Daniel's view back; positions are never written here.
   const shown = view && view.slots === slots ? view : null;
@@ -373,7 +373,7 @@ function drawMap(body: HTMLElement, state: MapState, doc: LoadedMap, past: Scrub
   const world = text("div", "", "map-world");
   const links = svg("svg", { class: "map-links", "aria-hidden": "true" });
   world.append(links);
-  const slots = { canvas, side: element("map-side"), notPlaced: element("map-not-placed"), tray: element("map-tray"), sheet: element("map-sheet"), drawer: element("map-drawer"), banner: element("map-banner") };
+  const slots = { canvas, side: element("map-side"), notPlaced: element("map-not-placed"), tray: element("map-tray"), runs: element("map-runs"), sheet: element("map-sheet"), drawer: element("map-drawer"), banner: element("map-banner") };
   const current: MapView = { project: state.project, state, doc, positions, scrub: past, slots };
 
   const fit = () => {
@@ -516,9 +516,9 @@ function draw() {
   view = null;
   const unreadable = doc && !doc.ok ? { ...loaded!, status: "unreadable" as const, note: doc.why } : loaded;
   drawEmpty(body, unreadable);
-  const slots = { side: element("map-side"), notPlaced: element("map-not-placed"), tray: element("map-tray"), sheet: element("map-sheet"), drawer: element("map-drawer"), banner: element("map-banner") };
+  const slots = { side: element("map-side"), notPlaced: element("map-not-placed"), tray: element("map-tray"), runs: element("map-runs"), sheet: element("map-sheet"), drawer: element("map-drawer"), banner: element("map-banner") };
   // No map is drawn, so nothing of the last one may stay: its banner, sheet and drawer would belong to another project.
-  [slots.notPlaced, slots.tray, slots.sheet, slots.drawer, slots.banner].forEach((slot) => slot.replaceChildren());
+  [slots.notPlaced, slots.tray, slots.runs, slots.sheet, slots.drawer, slots.banner].forEach((slot) => slot.replaceChildren());
   syncSide(slots as MapView["slots"]);
   // A scrubbed commit whose map cannot be read still shows the way back to now.
   unreadHooks.forEach((hook) => hook(slots.banner, scrub));
