@@ -7,6 +7,7 @@ use std::{
     path::{Path, PathBuf},
     sync::Mutex,
 };
+use studio_understanding::WriterKind;
 
 const NAMES: [&str; 2] = ["settings.json", "keymap.json"];
 
@@ -228,6 +229,26 @@ fn summary_writer_in(text: &str) -> studio_understanding::WriterKind {
         .unwrap_or_default()
 }
 
+/// The OpenAI-compatible writer's base URL, `summaries.base_url` in `settings.json` (#367), read from the file on each call;
+/// `None` when unset, empty or not a string: OpenAI's own.
+pub fn openai_base_url() -> Option<String> {
+    let text = paths().and_then(|[settings, _]| fs::read_to_string(settings).ok());
+    base_url_in(&text.unwrap_or_default())
+}
+
+fn base_url_in(text: &str) -> Option<String> {
+    let json: serde_json::Value = serde_json::from_str(&plain_json(text)).ok()?;
+    let url = json["summaries"]["base_url"].as_str()?.trim();
+    (!url.is_empty()).then(|| url.to_string())
+}
+
+/// Saves the OpenAI-compatible writer's base URL in `settings.json`, or removes it when none; `expected` is the text the
+/// page last read. Returns the new text.
+pub fn save_base_url(expected: Option<String>, url: Option<&str>) -> Result<String, String> {
+    let path = vec!["summaries".to_string(), "base_url".to_string()];
+    write_setting(expected, path, url.map(|url| serde_json::json!(url)))
+}
+
 /// Whether summaries are written at this start (spec #320, "The Test gate"): yes for a user who was configured before, or
 /// once a writer passed Test; else no, until one does. Read at start, before the writer makes its folder.
 ///
@@ -353,26 +374,30 @@ fn plain_json(text: &str) -> String {
     out
 }
 
-/// Where the API-key writer's key is kept (spec #320, "API-key writers"): the macOS Keychain under plotkeeper's own entry,
-/// or memory in a test. Never another tool's config or the environment. The key goes in and is read back by the writer; the
-/// page only ever learns whether one is set.
+/// Where the API-key writers' keys are kept (spec #320, "API-key writers"): the macOS Keychain under plotkeeper's own
+/// entries, one per writer, or memory in a test. Never another tool's config or the environment. A key goes in and is read
+/// back by the writer; the page only ever learns whether one is set.
 pub trait ApiKeys: Send + Sync {
-    /// The key, when one is set.
-    fn get(&self) -> Option<String>;
-    /// Saves `key`, replacing the one set.
-    fn set(&self, key: &str) -> Result<(), String>;
-    /// Removes the key; none set is no error.
-    fn remove(&self) -> Result<(), String>;
+    /// Writer `kind`'s key, when one is set.
+    fn get(&self, kind: WriterKind) -> Option<String>;
+    /// Saves `key` as writer `kind`'s, replacing the one set.
+    fn set(&self, kind: WriterKind, key: &str) -> Result<(), String>;
+    /// Removes writer `kind`'s key; none set is no error.
+    fn remove(&self, kind: WriterKind) -> Result<(), String>;
 }
 
-/// The Keychain entry: service `plotkeeper`, account `anthropic-api-key`, through the `security` program, which only ever
-/// touches this entry.
+/// The Keychain entries: service `plotkeeper`, account `anthropic-api-key` or `openai-api-key`, through the `security`
+/// program, which only ever touches these entries.
 pub struct Keychain {
     program: PathBuf,
 }
 
 const SERVICE: &str = "plotkeeper";
-const ACCOUNT: &str = "anthropic-api-key";
+
+/// Writer `kind`'s Keychain account: `anthropic-api-key` or `openai-api-key`.
+fn account(kind: WriterKind) -> String {
+    format!("{}-api-key", kind.program())
+}
 
 impl Default for Keychain {
     fn default() -> Self {
@@ -419,10 +444,11 @@ fn plain_key(key: &str) -> bool {
 }
 
 impl ApiKeys for Keychain {
-    fn get(&self) -> Option<String> {
+    fn get(&self, kind: WriterKind) -> Option<String> {
+        let account = account(kind);
         let out = self
             .run(
-                &["find-generic-password", "-s", SERVICE, "-a", ACCOUNT, "-w"],
+                &["find-generic-password", "-s", SERVICE, "-a", &account, "-w"],
                 None,
             )
             .ok()
@@ -431,50 +457,52 @@ impl ApiKeys for Keychain {
         (!key.is_empty()).then_some(key)
     }
 
-    fn set(&self, key: &str) -> Result<(), String> {
+    fn set(&self, kind: WriterKind, key: &str) -> Result<(), String> {
         if !plain_key(key) {
             return Err("That is not an API key: it holds only letters, digits, - and _.".into());
         }
         // In interactive mode the key goes on standard input, so it never shows in the process list.
-        let command = format!("add-generic-password -U -s {SERVICE} -a {ACCOUNT} -w {key}\n");
+        let account = account(kind);
+        let command = format!("add-generic-password -U -s {SERVICE} -a {account} -w {key}\n");
         let out = self.run(&["-i"], Some(&command))?;
-        match out.status.success() && self.get().as_deref() == Some(key) {
+        match out.status.success() && self.get(kind).as_deref() == Some(key) {
             true => Ok(()),
             false => Err("The Keychain did not save the key.".into()),
         }
     }
 
-    fn remove(&self) -> Result<(), String> {
+    fn remove(&self, kind: WriterKind) -> Result<(), String> {
+        let account = account(kind);
         self.run(
-            &["delete-generic-password", "-s", SERVICE, "-a", ACCOUNT],
+            &["delete-generic-password", "-s", SERVICE, "-a", &account],
             None,
         )?;
-        match self.get() {
+        match self.get(kind) {
             None => Ok(()),
             Some(_) => Err("The Keychain did not remove the key.".into()),
         }
     }
 }
 
-/// A key kept in memory: a test's, and the server's until it is given the Keychain at start.
+/// Keys kept in memory: a test's, and the server's until it is given the Keychain at start.
 #[derive(Default)]
-pub struct MemoryKeys(Mutex<Option<String>>);
+pub struct MemoryKeys(Mutex<std::collections::HashMap<WriterKind, String>>);
 
 impl ApiKeys for MemoryKeys {
-    fn get(&self) -> Option<String> {
-        self.0.lock().unwrap().clone()
+    fn get(&self, kind: WriterKind) -> Option<String> {
+        self.0.lock().unwrap().get(&kind).cloned()
     }
 
-    fn set(&self, key: &str) -> Result<(), String> {
+    fn set(&self, kind: WriterKind, key: &str) -> Result<(), String> {
         if !plain_key(key) {
             return Err("That is not an API key: it holds only letters, digits, - and _.".into());
         }
-        *self.0.lock().unwrap() = Some(key.into());
+        self.0.lock().unwrap().insert(kind, key.into());
         Ok(())
     }
 
-    fn remove(&self) -> Result<(), String> {
-        *self.0.lock().unwrap() = None;
+    fn remove(&self, kind: WriterKind) -> Result<(), String> {
+        self.0.lock().unwrap().remove(&kind);
         Ok(())
     }
 }
@@ -853,6 +881,27 @@ mod tests {
         }
     }
 
+    /// The OpenAI-compatible writer's base URL (#367): a non-empty string under `summaries`, in Zed's format.
+    #[test]
+    fn the_base_url_is_read_from_summaries() {
+        use super::base_url_in;
+        let read = |text: &str| base_url_in(text);
+        assert_eq!(
+            read("{ // Ollama\n \"summaries\": { \"base_url\": \"http://localhost:11434/v1\", } }")
+                .as_deref(),
+            Some("http://localhost:11434/v1")
+        );
+        for text in [
+            "",
+            "{}",
+            r#"{ "summaries": { "base_url": "" } }"#,
+            r#"{ "summaries": { "base_url": 1 } }"#,
+            r#"{ "base_url": "http://x" }"#,
+        ] {
+            assert_eq!(read(text), None, "{text}");
+        }
+    }
+
     /// The Keychain through a stand-in `security` that keeps one entry in a file: the key goes in on standard input, never
     /// in the arguments, and only plotkeeper's own entry is named. The real Keychain is never touched.
     #[test]
@@ -880,22 +929,32 @@ esac
         .unwrap();
         std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
         let keys = Keychain::with_program(program);
+        use studio_understanding::WriterKind::{Anthropic, OpenAI};
 
-        assert_eq!(keys.get(), None);
-        keys.set("sk-ant-first-0001").unwrap();
-        assert_eq!(keys.get().as_deref(), Some("sk-ant-first-0001"));
-        keys.set("sk-ant-second-0002").unwrap();
-        assert_eq!(keys.get().as_deref(), Some("sk-ant-second-0002"));
-        keys.remove().unwrap();
-        assert_eq!(keys.get(), None);
-        keys.remove().unwrap();
-        assert!(keys.set("not a key; rm -rf").is_err());
+        assert_eq!(keys.get(Anthropic), None);
+        keys.set(Anthropic, "sk-ant-first-0001").unwrap();
+        assert_eq!(keys.get(Anthropic).as_deref(), Some("sk-ant-first-0001"));
+        keys.set(Anthropic, "sk-ant-second-0002").unwrap();
+        assert_eq!(keys.get(Anthropic).as_deref(), Some("sk-ant-second-0002"));
+        keys.remove(Anthropic).unwrap();
+        assert_eq!(keys.get(Anthropic), None);
+        keys.remove(Anthropic).unwrap();
+        assert!(keys.set(Anthropic, "not a key; rm -rf").is_err());
+        // The OpenAI-compatible API's key, in its own entry (#367).
+        keys.set(OpenAI, "sk-proj-third-0003").unwrap();
+        assert_eq!(keys.get(OpenAI).as_deref(), Some("sk-proj-third-0003"));
+        keys.remove(OpenAI).unwrap();
 
         let log = std::fs::read_to_string(log).unwrap();
         for line in log.lines() {
-            assert!(!line.contains("sk-ant"), "a key in the arguments: {line}");
             assert!(
-                line == "ARGS -i" || line.contains("-s plotkeeper -a anthropic-api-key"),
+                !line.contains("sk-ant") && !line.contains("sk-proj"),
+                "a key in the arguments: {line}"
+            );
+            assert!(
+                line == "ARGS -i"
+                    || line.contains("-s plotkeeper -a anthropic-api-key")
+                    || line.contains("-s plotkeeper -a openai-api-key"),
                 "{line}"
             );
         }

@@ -168,6 +168,8 @@ fn run(log: &std::path::Path, held: lock::Held) -> std::io::Result<()> {
     // The writer settings.json names takes effect at start, with no page open to save it.
     app.writer
         .use_writer(studio_server::settings::summary_writer());
+    app.writer
+        .use_base_url(studio_server::settings::openai_base_url());
     studio_server::set_summaries_on(&app, summaries_on);
     let token = web::new_token();
     let page = Web::start(
