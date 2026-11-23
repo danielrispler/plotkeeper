@@ -76,6 +76,16 @@ esac"#,
         self
     }
 
+    /// Puts a fake `qwen` on the PATH, which logs its arguments and writes nothing, as plotkeeper may not look at what
+    /// the real one writes (#379).
+    fn with_qwen(self) -> Machine {
+        script(
+            &self.tools.join("qwen"),
+            r#"echo "$@" >> "$(dirname "$0")/qwen-calls""#,
+        );
+        self
+    }
+
     fn run(&self, verb: &str) -> Output {
         let out = self.run_any(verb);
         assert!(
@@ -214,6 +224,10 @@ fn install_then_uninstall_leaves_every_file_byte_identical() {
         m.write(".claude/settings.json", "{ \"enabledPlugins\": {} }\n");
         m.write(".gemini/config/plugins/other/plugin.json", "{}");
         m.write(".codex/hooks.json", CODEX_OWN);
+        m.write(
+            ".qwen/settings.json",
+            "{ \"env\": { \"DASHSCOPE_API_KEY\": \"sk-planted\" } }\n",
+        );
     };
     let homes: [(&str, Setup); 3] = [
         ("absent", absent),
@@ -223,9 +237,9 @@ fn install_then_uninstall_leaves_every_file_byte_identical() {
     for (name, setup) in homes {
         for (claude, agy) in [(true, true), (false, false)] {
             let machine = Machine::new(claude, agy);
-            // Codex and Copilot go with the others, so Codex's hook file is changed and put back too.
+            // Codex, Copilot and Qwen Code go with the others, so Codex's hook file is changed and put back too.
             let machine = if claude {
-                machine.with_codex().with_copilot()
+                machine.with_codex().with_copilot().with_qwen()
             } else {
                 machine
             };
@@ -269,6 +283,11 @@ fn a_harness_not_found_is_skipped_with_one_line() {
     );
     assert_eq!(
         text.lines().filter(|l| l.contains("Copilot")).count(),
+        1,
+        "{text}"
+    );
+    assert_eq!(
+        text.lines().filter(|l| l.contains("Qwen Code")).count(),
         1,
         "{text}"
     );
@@ -706,6 +725,84 @@ fn a_second_copilot_install_replaces_its_plugin() {
             install
         ]
     );
+}
+
+/// Qwen Code goes through its own extension channel (#379): its hooks otherwise live in `~/.qwen/settings.json`,
+/// which can hold API keys, so install renders `plugin-qwen/` into the data folder and runs `qwen extensions install`
+/// on it, uninstall runs `qwen extensions uninstall`, and neither opens a file of Qwen Code's: each one that can hold
+/// its keys or settings is a FIFO here.
+// @law: install-never-opens-qwen-settings
+#[test]
+fn qwen_goes_through_qwen_extensions_and_never_opens_its_files() {
+    let machine = Machine::new(false, false).with_qwen();
+    let qwen = machine.home.join(".qwen");
+    fs::create_dir_all(qwen.join("extensions")).unwrap();
+    let files = [
+        qwen.join("settings.json"),
+        qwen.join(".env"),
+        qwen.join("extensions/extension-enablement.json"),
+    ];
+    for file in &files {
+        assert!(Command::new("mkfifo").arg(file).status().unwrap().success());
+    }
+
+    machine.run("install");
+    let extension = machine.data().join("plugins/qwen/plotkeeper");
+    assert_eq!(
+        machine.calls("qwen"),
+        [format!(
+            "extensions install {} --consent",
+            extension.display()
+        )]
+    );
+    let manifest = extension.join("qwen-extension.json");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&manifest).unwrap()).unwrap();
+    assert_eq!(parsed["name"], "plotkeeper");
+    let hooks = commands(&manifest);
+    let mut events: Vec<_> = hooks.iter().map(|(e, _)| e.as_str()).collect();
+    events.sort();
+    assert_eq!(
+        events,
+        [
+            "Notification",
+            "PermissionRequest",
+            "PostToolUse",
+            "PostToolUseFailure",
+            "PreToolUse",
+            "SessionEnd",
+            "SessionStart",
+            "Stop",
+            "UserPromptSubmit"
+        ]
+    );
+    for (_, command) in hooks {
+        assert_eq!(
+            command,
+            format!("\"{}/plotkeeper-hook\" --agent qwen", machine.bin())
+        );
+    }
+
+    machine.run("install");
+    let install = format!("extensions install {} --consent", extension.display());
+    assert_eq!(
+        machine.calls("qwen"),
+        [
+            install.clone(),
+            "extensions uninstall plotkeeper".to_owned(),
+            install
+        ]
+    );
+
+    machine.run("uninstall");
+    assert_eq!(
+        machine.calls("qwen")[3..],
+        ["extensions uninstall plotkeeper".to_owned()]
+    );
+    assert!(!machine.data().join("plugins").exists());
+    for file in &files {
+        assert!(fs::symlink_metadata(file).unwrap().file_type().is_fifo());
+    }
 }
 
 /// Adds the user's own hook `command` under `event` to the hook file at `rel`, as an entry of `entry`'s shape.

@@ -1,0 +1,16 @@
+{
+  "name": "plotkeeper",
+  "version": "1.0.0",
+  "description": "Appends Qwen Code hook events to plotkeeper's event log",
+  "hooks": {
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent qwen", "timeout": 5, "async": true }] }],
+    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent qwen", "timeout": 3, "async": true }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent qwen", "timeout": 5, "async": true }] }],
+    "PreToolUse": [{ "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent qwen", "timeout": 5, "async": true }] }],
+    "PostToolUse": [{ "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent qwen", "timeout": 5, "async": true }] }],
+    "PostToolUseFailure": [{ "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent qwen", "timeout": 5, "async": true }] }],
+    "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent qwen", "timeout": 5, "async": true }] }],
+    "Notification": [{ "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent qwen", "timeout": 5, "async": true }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent qwen", "timeout": 5, "async": true }] }]
+  }
+}

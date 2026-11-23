@@ -4,8 +4,8 @@
   "parts": [
     {
       "id": "plugins", "name": "Agent plugins", "caption": "Which hooks each agent runs",
-      "description": "Small config folders for Claude Code, agy, Codex, Cursor and Copilot. They decide which of the agent's events reach the studio, and each entry names its agent to the hook. `plotkeeper install` renders them with the path of the hook binaries in the data folder's `bin/` and installs them through each agent's own plugin command, or, for Codex and Cursor, which have none, into their user-level hook files.",
-      "tier": "interface", "paths": ["plugin/", "plugin-agy/", "plugin-codex/", "plugin-cursor/", "plugin-copilot/"]
+      "description": "Small config folders for Claude Code, agy, Codex, Cursor, Copilot and Qwen Code. They decide which of the agent's events reach the studio, and each entry names its agent to the hook. `plotkeeper install` renders them with the path of the hook binaries in the data folder's `bin/` and installs them through each agent's own plugin or extension command, or, for Codex and Cursor, which have none, into their user-level hook files.",
+      "tier": "interface", "paths": ["plugin/", "plugin-agy/", "plugin-codex/", "plugin-cursor/", "plugin-copilot/", "plugin-qwen/"]
     },
     {
       "id": "hook", "name": "Hook", "caption": "Records every agent event",
@@ -68,6 +68,8 @@
   "laws": [
     { "id": "install-never-opens-claude-settings", "on": "server", "backing": "check",
       "text": "Install and uninstall reach Claude Code only through `claude plugin` and never open its settings file." },
+    { "id": "install-never-opens-qwen-settings", "on": "server", "backing": "check",
+      "text": "Install and uninstall reach Qwen Code only through `qwen extensions` and never open its settings file, which can hold API keys." },
     { "id": "hook-never-makes-agent-wait", "on": "hook", "backing": "trust",
       "text": "The hook never makes the agent wait, except for your answer." },
     { "id": "core-reads-only-transcripts", "on": "core", "backing": "trust",
