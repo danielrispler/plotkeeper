@@ -113,10 +113,11 @@ function answer(n: number) {
 
 const actions: Actions = {
   "studio::ToggleList": () => toggle("list-open"),
-  // The selected session's story, which lives in the left panel over the map (#386): shown, or closed back to the bare map.
+  // The selected session's story, which lives in the left panel over the map (#386): shown, or closed back to the bare map with the
+  // session still selected, so ⌘2 opens it again.
   "studio::ToggleRail": () => {
     const id = selectedId();
-    if (panelShown()?.kind === "story") closePanel();
+    if (panelShown()?.kind === "story") showPanel(null, true);
     else if (id) showPanel({ kind: "story", session: id });
   },
   // Ask (danielrispler/plotkeeper#125) on the selected session's newest turn: its Headline's box, in the rail, opened.

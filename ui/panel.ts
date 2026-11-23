@@ -15,7 +15,7 @@ import { panelSession, type PanelContent, withPanel, withSheet } from "./map-mod
 import { writersIn } from "./writers.js";
 
 export type { PanelContent };
-// What `startPanel` is given by `main.ts`: the content of each kind, and what closing a story does (it selects no session).
+// What `startPanel` is given by `main.ts`: the content of each kind, and what closing a session's panel does (it selects no session).
 export type PanelDeps = {
   history: (box: HTMLElement) => void;
   diff: (box: HTMLElement, session: string, turn: number) => void;
@@ -84,15 +84,16 @@ function reveal() {
 }
 
 // Opens `content` in the panel, or closes it with null; the sheet closes too when the window is narrow or the content is the widened diff.
-export function showPanel(content: PanelContent | null) {
+// Closing a panel that shows a session (`panelSession`: its story, a turn's diff or a worker's log) leaves the bare map with no session
+// selected, unless `keepSelection` (⌘2, which opens the story again).
+export function showPanel(content: PanelContent | null, keepSelection = false) {
   const before = shown;
   const next = withPanel({ panel: shown, sheet: sheetPart() }, content, window.innerWidth);
   if (next.sheet === null && sheetPart() !== null) closeSheet();
   shown = next.panel;
   draw();
   if (shown) requestAnimationFrame(reveal);
-  // Closing a story or a worker's log leaves the bare map: no session is selected.
-  if ((before?.kind === "story" || before?.kind === "log") && shown === null) deps.deselect();
+  if (!keepSelection && panelSession(before) !== null && shown === null) deps.deselect();
 }
 
 export const closePanel = () => showPanel(null);
@@ -102,16 +103,12 @@ export function besideSheet(part: string) {
   if (shown && withSheet({ panel: shown, sheet: sheetPart() }, part, window.innerWidth).panel === null) closePanel();
 }
 
-// The selection changed: a story panel follows it to another session, and closes when none is selected.
+// The selection changed: a panel that shows a session follows it to the new session's story, and closes when none is selected.
 export function followSelection(session: string | null) {
-  if ((shown?.kind !== "story" && shown?.kind !== "log") || shown.session === session) return;
-  if (session === null) {
-    shown = null;
-    draw();
-  } else {
-    shown = { kind: "story", session };
-    draw();
-  }
+  const own = panelSession(shown);
+  if (own === null || own === session) return;
+  shown = session === null ? null : { kind: "story", session };
+  draw();
 }
 
 // The list changed under History or the diff: drawn again in place.

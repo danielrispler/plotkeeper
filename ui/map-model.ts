@@ -584,7 +584,7 @@ export const withSheet = (now: Overlays, sheet: string | null, width: number): O
 // A press on a session's row or chip: its story, or none when the panel already shows that story (a second click closes it).
 export const pressRow = (panel: PanelContent | null, session: string): PanelContent | null =>
   panel?.kind === "story" && panel.session === session ? null : { kind: "story", session };
-// The session the panel shows, whose chips stay lit while it is open.
+// The session the panel shows (its story, a turn's diff or a worker's log), whose chips stay lit while it is open, and whose closing selects no session.
 export const panelSession = (panel: PanelContent | null): string | null =>
   panel?.kind === "story" || panel?.kind === "diff" || panel?.kind === "log" ? panel.session : null;
 // The project the page opens on (#386): the last viewed, while the list still holds it, else the first; none on a fresh install.

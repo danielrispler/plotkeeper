@@ -907,6 +907,18 @@ const mapPanelPeel = (): Fixture =>
       if (document.getElementById("map").hidden) log("snap:fail Esc left the Map view while a layer was open");
       checkAll("after Esc");
       log("panel ok");`);
+// ⌘2 closes the selected session's story and opens it again: the session stays selected while it is closed.
+const mapPanelToggle = (): Fixture =>
+  mapPanel(`
+      await press(row("s2"));
+      const cmd2 = async () => { document.dispatchEvent(new KeyboardEvent("keydown", { code: "Digit2", key: "2", metaKey: true, bubbles: true })); await wait(300); };
+      if (!panelOpen()) return log("snap:fail the row's press did not open its story before ⌘2");
+      await cmd2();
+      if (panelOpen()) log("snap:fail ⌘2 did not close the story");
+      if (row("s2").getAttribute("aria-pressed") !== "true") log("snap:fail ⌘2 deselected the session");
+      await cmd2();
+      if (!panelOpen() || document.getElementById("session-name").textContent !== "Ship PR 286") log("snap:fail ⌘2 did not open the story again");
+      log("panel ok");`);
 // A turn's whole diff, widened, from the palette: it closes the part's sheet; its Back shows the story again.
 const mapPanelDiff = (): Fixture =>
   mapPanel(`
@@ -923,6 +935,10 @@ const mapPanelDiff = (): Fixture =>
       if (Math.round(width) !== Math.round(Math.min(780, room))) log("snap:fail the diff's panel is " + width + " px wide, not min(780, " + room + ")");
       if (!panel.querySelector(".diff-line.add")) log("snap:fail the diff shows no lines");
       checkAll("with the diff open");
+      // Closing the diff, like closing its story, leaves the bare map with no session selected.
+      await esc();
+      if (panelOpen()) log("snap:fail Esc did not close the diff");
+      if (row("s1").getAttribute("aria-pressed") === "true") log("snap:fail closing the diff left its session selected");
       log("panel ok");`);
 // History in the left panel, from the list's link.
 const mapPanelHistory = (): Fixture =>
@@ -1273,9 +1289,10 @@ export const fixtures = {
   },
   mapChipJump: () => mapBusy(true),
   // The left panel over the map (#385): the story with a part's sheet, Esc's peel and a second press, the widened diff, History, Settings,
-  // and a brief over both panels. `mapPanelNarrow` is the story at 1000x800 (snap:all's size for it), where only one overlay opens.
+  // ⌘2's toggle, and a brief over both panels. `mapPanelNarrow` is the story at 1000x800 (snap:all's size for it), where only one overlay opens.
   mapPanelStory,
   mapPanelPeel,
+  mapPanelToggle,
   mapPanelDiff,
   mapPanelHistory,
   mapPanelSettings,
