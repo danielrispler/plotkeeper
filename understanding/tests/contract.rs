@@ -215,6 +215,115 @@ fn the_codex_command_is_read_only_takes_the_schema_from_a_file_and_is_marked_int
     assert_eq!(args[at + 1], WriterKind::Codex.models()[0]);
 }
 
+// Copilot's tools are turned off by an empty `--available-tools` allow-list (its docs; that an empty list turns all of
+// them off is not verified), it never stops to ask, and it runs in an empty folder.
+// @law: writer-has-no-tools
+#[test]
+fn the_copilot_command_allows_no_tools_takes_the_prompt_as_an_argument_and_is_marked_internal() {
+    let (command, stdin) = build_command(
+        WriterKind::Copilot,
+        Path::new("/bin/copilot"),
+        Path::new("/w/card-writer-copilot"),
+        &WriterRequest {
+            model: Some("gpt-6-astra".into()),
+            ..request()
+        },
+    );
+    assert_eq!(command.get_program(), "/bin/copilot");
+    assert_eq!(
+        args(&command),
+        [
+            "-s",
+            "--output-format=json",
+            "--available-tools=",
+            "--no-ask-user",
+            "--model=gpt-6-astra",
+            "-p",
+            // No system prompt flag, and no schema flag: the system prompt leads the prompt, an argument.
+            "You write cards.\n\nThe change."
+        ]
+    );
+    assert_eq!(stdin, "");
+    assert_eq!(
+        env(&command),
+        [(OsStr::new("PLOTKEEPER_INTERNAL"), Some(OsStr::new("1")))]
+    );
+    assert_eq!(
+        command.get_current_dir(),
+        Some(Path::new("/w/card-writer-copilot"))
+    );
+    // A model it does not list (the default `haiku`) is its first, and it takes no effort.
+    let (command, _) = build_command(
+        WriterKind::Copilot,
+        Path::new("/bin/copilot"),
+        Path::new("/w/card-writer-copilot"),
+        &WriterRequest {
+            model: Some("haiku".into()),
+            ..request()
+        },
+    );
+    let model = format!("--model={}", WriterKind::Copilot.models()[0]);
+    assert!(
+        args(&command).contains(&model.as_str()),
+        "{:?}",
+        args(&command)
+    );
+    assert!(WriterKind::Copilot.efforts().is_empty());
+}
+
+// Cursor's `agent` cannot turn its tools off: its lockout is ask mode, read-only, in an empty folder it trusts so that
+// no prompt waits.
+// @law: writer-has-no-tools
+#[test]
+fn the_cursor_command_is_in_ask_mode_takes_the_prompt_as_an_argument_and_is_marked_internal() {
+    let (command, stdin) = build_command(
+        WriterKind::Cursor,
+        Path::new("/bin/agent"),
+        Path::new("/w/card-writer-cursor"),
+        &WriterRequest {
+            model: Some("gpt-5.6-luna".into()),
+            ..request()
+        },
+    );
+    assert_eq!(command.get_program(), "/bin/agent");
+    assert_eq!(
+        args(&command),
+        [
+            "-p",
+            "--output-format",
+            "json",
+            "--mode",
+            "ask",
+            "--trust",
+            "--model",
+            "gpt-5.6-luna",
+            "You write cards.\n\nThe change."
+        ]
+    );
+    assert_eq!(stdin, "");
+    assert_eq!(
+        env(&command),
+        [(OsStr::new("PLOTKEEPER_INTERNAL"), Some(OsStr::new("1")))]
+    );
+    assert_eq!(
+        command.get_current_dir(),
+        Some(Path::new("/w/card-writer-cursor"))
+    );
+    let (command, _) = build_command(
+        WriterKind::Cursor,
+        Path::new("/bin/agent"),
+        Path::new("/w/card-writer-cursor"),
+        &WriterRequest {
+            model: Some("haiku".into()),
+            ..request()
+        },
+    );
+    let args = args(&command);
+    let at = args.iter().position(|a| *a == "--model").unwrap();
+    assert_eq!(args[at + 1], WriterKind::Cursor.models()[0]);
+    assert!(WriterKind::Cursor.efforts().is_empty());
+}
+
 #[test]
 fn agys_own_timeout_covers_a_logged_out_agys_wait() {
     let writer =
@@ -390,18 +499,124 @@ fn codexs_failures_are_told_apart() {
     );
 }
 
+// What `copilot -p -s --output-format=json` prints is JSONL whose records its docs do not describe: these are guesses,
+// for wave 1's trial to confirm or fix. The reply is the last `assistant.message`'s content; output with no JSON line at
+// all (`-s` printing the reply alone) is the reply.
+const COPILOT_OK: &str = r#"{"type":"session.start","data":{"model":"claude-haiku-4.5"}}
+{"type":"assistant.message","data":{"content":"{\"answer\":\"pong\"}"}}
+{"type":"session.idle","data":{}}
+"#;
+
+#[test]
+fn a_copilot_reply_is_its_last_assistant_message_and_the_object_is_read_from_its_text() {
+    let reply = read_reply(WriterKind::Copilot, true, &exit(0), COPILOT_OK).unwrap();
+    assert_eq!(reply.text, r#"{"answer":"pong"}"#);
+    // No schema flag: the object is taken from the text, and the caller checks it.
+    assert_eq!(reply.json, Some(serde_json::json!({ "answer": "pong" })));
+    assert_eq!(reply.usage, None);
+
+    let out = r#"{"type":"assistant.message","data":{"content":"first"}}
+{"type":"assistant.message","data":{"content":"Here it is: {\"answer\":\"pong\"}"}}"#;
+    let reply = read_reply(WriterKind::Copilot, true, &exit(0), out).unwrap();
+    assert_eq!(reply.json, Some(serde_json::json!({ "answer": "pong" })));
+    let reply = read_reply(WriterKind::Copilot, false, &exit(0), "plain words\n").unwrap();
+    assert_eq!((reply.text.as_str(), reply.json), ("plain words\n", None));
+}
+
+#[test]
+fn copilots_failures_are_told_apart() {
+    let kind = |out: &str, code| read(WriterKind::Copilot, true, code, out).unwrap_err();
+    let error =
+        |message: &str| format!(r#"{{"type":"session.error","data":{{"message":"{message}"}}}}"#);
+    assert_eq!(
+        kind(&error("Not authenticated. Run copilot login."), 1),
+        FailureKind::NotLoggedIn
+    );
+    assert_eq!(
+        kind(&error("You have exceeded your rate limit."), 1),
+        FailureKind::Quota
+    );
+    // An error record is a failure whatever the exit code says.
+    assert_eq!(kind(&error("quota exceeded"), 0), FailureKind::Quota);
+    assert_eq!(kind("Error: Not logged in", 1), FailureKind::NotLoggedIn);
+    // Its docs: non-zero when interrupted or the final response is empty.
+    assert_eq!(kind("", 1), FailureKind::Other);
+    assert_eq!(kind("", 0), FailureKind::Empty);
+    let silent = r#"{"type":"assistant.message","data":{"content":"  "}}
+{"type":"session.idle","data":{}}"#;
+    assert_eq!(kind(silent, 0), FailureKind::Empty);
+    let error = read_reply(
+        WriterKind::Copilot,
+        true,
+        &exit(1),
+        &error("rate limit for gpt-x"),
+    )
+    .unwrap_err();
+    assert!(
+        error.to_string().contains("rate limit for gpt-x"),
+        "{error}"
+    );
+    assert!(!error.reason().contains("gpt-x"), "{}", error.reason());
+}
+
+// `agent -p --output-format json`'s one object, as Cursor's output-format page documents it.
+const CURSOR_OK: &str = r#"{"type":"result","subtype":"success","is_error":false,"duration_ms":1234,"duration_api_ms":1234,"result":"{\"answer\":\"pong\"}","session_id":"s","request_id":"r"}"#;
+
+#[test]
+fn a_cursor_reply_is_its_result_and_the_object_is_read_from_its_text() {
+    let reply = read_reply(WriterKind::Cursor, true, &exit(0), CURSOR_OK).unwrap();
+    assert_eq!(reply.text, r#"{"answer":"pong"}"#);
+    assert_eq!(reply.json, Some(serde_json::json!({ "answer": "pong" })));
+    // Its object has no usage.
+    assert_eq!(reply.usage, None);
+    let out = r#"{"type":"result","subtype":"success","is_error":false,"result":"plain words"}"#;
+    assert_eq!(
+        read(WriterKind::Cursor, false, 0, out),
+        Ok("plain words".into())
+    );
+}
+
+#[test]
+fn cursors_failures_are_told_apart() {
+    // On failure it exits non-zero with a message on standard error and no JSON; the writer reads standard error with
+    // standard output for it.
+    let kind = |out: &str, code| read(WriterKind::Cursor, true, code, out).unwrap_err();
+    assert_eq!(
+        kind("Error: Not authenticated", 1),
+        FailureKind::NotLoggedIn
+    );
+    assert_eq!(
+        kind("Error: You've hit your usage limit", 1),
+        FailureKind::Quota
+    );
+    assert_eq!(
+        kind("Error: headless mode is disabled by your team", 1),
+        FailureKind::Other
+    );
+    assert_eq!(kind("", 1), FailureKind::Other);
+    assert_eq!(kind("", 0), FailureKind::Empty);
+    let empty = r#"{"type":"result","subtype":"success","is_error":false,"result":""}"#;
+    assert_eq!(kind(empty, 0), FailureKind::Empty);
+    let error =
+        r#"{"type":"result","subtype":"error","is_error":true,"result":"Not authenticated"}"#;
+    assert_eq!(kind(error, 1), FailureKind::NotLoggedIn);
+}
+
 #[test]
 fn a_program_that_is_not_installed_and_one_that_hangs_are_typed_failures() {
     let dir = tempfile::tempdir().unwrap();
     let writer = ClaudeWriter::new(dir.path().join("none"), dir.path().into())
         .with_agy(dir.path().join("no-agy"), dir.path().into())
-        .with_codex(dir.path().join("no-codex"), dir.path().into());
+        .with_codex(dir.path().join("no-codex"), dir.path().into())
+        .with_copilot(dir.path().join("no-copilot"), dir.path().into())
+        .with_cursor(dir.path().join("no-agent"), dir.path().into());
     let request = WriterRequest {
         user: "x".into(),
         timeout: Duration::from_secs(5),
         ..WriterRequest::default()
     };
-    for kind in WriterKind::ALL {
+    // An HTTP writer runs no program: its failures are read in `http_writer.rs`.
+    for kind in WriterKind::ALL.into_iter().filter(|kind| !kind.http()) {
         let writer_kind = kind;
         writer.use_writer(writer_kind);
         let error = writer.complete(&request).unwrap_err();
@@ -461,6 +676,25 @@ fn the_failure_notice_says_summaries_are_off_and_gives_each_writer_its_own_fix()
     }
     assert!(notice(FailureKind::NotLoggedIn, "codex").contains("`codex login`"));
     assert!(notice(FailureKind::NotInstalled, "codex").contains("Install the Codex CLI"));
+    for (program, login, install) in [
+        (
+            "copilot",
+            "`copilot login`",
+            "Install the GitHub Copilot CLI",
+        ),
+        ("agent", "`agent login`", "Install the Cursor CLI"),
+    ] {
+        for kind in [FailureKind::NotLoggedIn, FailureKind::NotInstalled] {
+            let line = notice(kind, program);
+            assert!(
+                line.starts_with(&format!("Summaries are off: `{program}` ")),
+                "{line}"
+            );
+            assert!(!line.contains("Claude") && !line.contains("agy"), "{line}");
+        }
+        assert!(notice(FailureKind::NotLoggedIn, program).contains(login));
+        assert!(notice(FailureKind::NotInstalled, program).contains(install));
+    }
     // The quota fix points at the page, where the writer is picked now, not at a hand-edited file.
     let quota = notice(FailureKind::Quota, "claude");
     assert!(
@@ -502,34 +736,85 @@ fn the_writers_found_are_the_ones_command_v_finds_in_their_order() {
             .map(|w| (w.kind, w.found))
             .collect::<Vec<_>>()
     };
-    use WriterKind::{Agy, Claude, Codex};
+    use WriterKind::{Agy, Anthropic, Claude, Codex, Copilot, Cursor};
     assert_eq!(
         found(&["agy"]),
-        [(Claude, false), (Agy, true), (Codex, false)]
+        [
+            (Anthropic, false),
+            (Claude, false),
+            (Agy, true),
+            (Codex, false),
+            (Copilot, false),
+            (Cursor, false)
+        ]
     );
     assert_eq!(
         found(&["claude", "agy"]),
-        [(Claude, true), (Agy, true), (Codex, false)]
+        [
+            (Anthropic, false),
+            (Claude, true),
+            (Agy, true),
+            (Codex, false),
+            (Copilot, false),
+            (Cursor, false)
+        ]
     );
     assert_eq!(
         found(&["codex"]),
-        [(Claude, false), (Agy, false), (Codex, true)]
+        [
+            (Anthropic, false),
+            (Claude, false),
+            (Agy, false),
+            (Codex, true),
+            (Copilot, false),
+            (Cursor, false)
+        ]
     );
-    assert_eq!(found(&[]), [(Claude, false), (Agy, false), (Codex, false)]);
+    // Cursor's program is `agent`.
+    assert_eq!(
+        found(&["copilot", "agent"]),
+        [
+            (Anthropic, false),
+            (Claude, false),
+            (Agy, false),
+            (Codex, false),
+            (Copilot, true),
+            (Cursor, true)
+        ]
+    );
+    assert_eq!(
+        found(&[]),
+        [
+            (Anthropic, false),
+            (Claude, false),
+            (Agy, false),
+            (Codex, false),
+            (Copilot, false),
+            (Cursor, false)
+        ]
+    );
+    // An API-key writer runs no program, so none named `anthropic` makes it found: the server says whether its key is set.
+    assert_eq!(found(&["anthropic"])[0], (Anthropic, false));
     // Each writer brings its name, models and efforts for the page.
     let shell = faked_path(&dir.path().join("lists"), &["claude"]);
     let writers = studio_understanding::found_writers(&shell);
-    assert_eq!(writers[0].name, "Claude");
-    assert_eq!(writers[0].models, WriterKind::Claude.models());
-    assert!(writers[0].efforts.contains(&"low"));
-    assert_eq!(writers[1].name, "agy");
+    assert_eq!(writers[0].name, "Anthropic API key");
+    assert_eq!(writers[0].models, WriterKind::Anthropic.models());
+    assert_eq!(writers[1].name, "Claude");
+    assert_eq!(writers[1].models, WriterKind::Claude.models());
+    assert!(writers[1].efforts.contains(&"low"));
+    assert_eq!(writers[2].name, "agy");
     assert!(
-        writers[1].efforts.is_empty(),
+        writers[2].efforts.is_empty(),
         "agy's effort is part of its model id"
     );
-    assert_eq!(writers[2].name, "Codex");
-    assert!(writers[2].models.contains(&"gpt-6-luna"));
-    assert_eq!(writers[2].efforts, ["", "low", "medium", "high"]);
+    assert_eq!(writers[3].name, "Codex");
+    assert!(writers[3].models.contains(&"gpt-6-luna"));
+    assert_eq!(writers[3].efforts, ["", "low", "medium", "high"]);
+    assert_eq!((writers[4].name, writers[5].name), ("Copilot", "Cursor"));
+    assert!(writers[4].models.contains(&"claude-haiku-4.5"));
+    assert!(writers[5].models.contains(&"auto"));
+    assert!(writers[4].efforts.is_empty() && writers[5].efforts.is_empty());
 }
 
 #[test]
@@ -557,6 +842,64 @@ fn a_test_of_codex_passes_or_fails_with_a_typed_outcome() {
         "{}",
         error.reason()
     );
+}
+
+/// An executable `name` in `dir` that reads its input and runs `body`.
+fn stub_program(dir: &Path, name: &str, body: &str) -> std::path::PathBuf {
+    let program = dir.join(name);
+    std::fs::write(&program, format!("#!/bin/sh\ncat > /dev/null\n{body}\n")).unwrap();
+    std::fs::set_permissions(
+        &program,
+        std::os::unix::fs::PermissionsExt::from_mode(0o755),
+    )
+    .unwrap();
+    program
+}
+
+#[test]
+fn a_test_of_copilot_passes_or_fails_with_a_typed_outcome() {
+    let dir = tempfile::tempdir().unwrap();
+    let writer = |body: &str| {
+        ClaudeWriter::new(dir.path().join("no-claude"), dir.path().into())
+            .with_copilot(stub_program(dir.path(), "copilot", body), dir.path().into())
+    };
+    let ok = writer(&format!("cat <<'EOF'\n{COPILOT_OK}EOF"));
+    assert_eq!(ok.test(WriterKind::Copilot, "claude-haiku-4.5", ""), Ok(()));
+    let error =
+        writer(r#"echo '{"type":"session.error","data":{"message":"Not authenticated"}}'; exit 1"#)
+            .test(WriterKind::Copilot, "claude-haiku-4.5", "")
+            .unwrap_err();
+    assert_eq!(error.kind, FailureKind::NotLoggedIn);
+    assert!(
+        error.reason().contains("`copilot login`"),
+        "{}",
+        error.reason()
+    );
+}
+
+#[test]
+fn a_test_of_cursor_passes_or_fails_with_a_typed_outcome_read_from_standard_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let writer = |body: &str| {
+        ClaudeWriter::new(dir.path().join("no-claude"), dir.path().into())
+            .with_cursor(stub_program(dir.path(), "agent", body), dir.path().into())
+    };
+    let ok = writer(&format!("cat <<'EOF'\n{CURSOR_OK}\nEOF"));
+    assert_eq!(ok.test(WriterKind::Cursor, "auto", ""), Ok(()));
+    // Cursor writes its failure on standard error only.
+    let error = writer("echo 'Error: Not authenticated' >&2; exit 1")
+        .test(WriterKind::Cursor, "auto", "")
+        .unwrap_err();
+    assert_eq!(error.kind, FailureKind::NotLoggedIn);
+    assert!(
+        error.reason().contains("`agent login`"),
+        "{}",
+        error.reason()
+    );
+    let error = writer("echo 'Error: You hit your usage limit' >&2; exit 1")
+        .test(WriterKind::Cursor, "auto", "")
+        .unwrap_err();
+    assert_eq!(error.kind, FailureKind::Quota);
 }
 
 #[test]

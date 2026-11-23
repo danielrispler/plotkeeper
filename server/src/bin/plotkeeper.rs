@@ -24,12 +24,12 @@ mod embedded {
     include!(concat!(env!("OUT_DIR"), "/assets.rs"));
 }
 
-/// Warnings and errors to stderr, with the time.
+/// Warnings and errors to stderr, with the time; never the HTTP client's (`studio_server::logged`).
 struct Stderr;
 
 impl log::Log for Stderr {
     fn enabled(&self, metadata: &log::Metadata) -> bool {
-        metadata.level() <= log::Level::Warn
+        studio_server::logged(metadata)
     }
     fn log(&self, record: &log::Record) {
         if self.enabled(record.metadata()) {

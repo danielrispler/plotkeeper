@@ -608,6 +608,7 @@ const mapScrubbed = (): Fixture => {
 // that presses Test waits for its outcome.
 const claudeWriter = { kind: "claude" as const, name: "Claude", found: true, models: ["haiku", "sonnet", "opus", "fable"], efforts: ["", "low", "medium", "high"] };
 const agyWriter = { kind: "agy" as const, name: "agy", found: true, models: ["gemini-4-neon-low", "gemini-4-neon-medium", "gemini-4-neon-high", "gemini-4-argon-low", "gemini-4-hydrogen-low"], efforts: [] };
+const anthropicWriter = { kind: "anthropic" as const, name: "Anthropic API key", found: false, models: ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"], efforts: ["", "low", "medium", "high"] };
 const writersOpen = (extra: Partial<Fixture>, check: string, press = false): Fixture => ({
   ...list(),
   ...extra,
@@ -651,6 +652,26 @@ export const fixtures = {
     }, `
       const outcome = document.getElementById("writer-outcome");
       if (!outcome?.classList.contains("failed") || !outcome.textContent.includes("/login")) log("snap:fail no failed outcome with its fix: " + outcome?.textContent);`, true),
+  // No API key set (#366): the writer is listed but cannot be picked, and the key row offers to add one.
+  writersKeyNotSet: () =>
+    writersOpen({ writers: { writers: [anthropicWriter, claudeWriter, agyWriter], summaries_on: false, briefs: true } }, `
+      const first = document.querySelector("#writer-pick option");
+      if (first?.textContent !== "Anthropic API key (not set)" || !first.disabled) log("snap:fail the unset key is not listed first and unpickable: " + first?.textContent);
+      if (!document.getElementById("writer-key-state")?.textContent.includes("not set")) log("snap:fail the key row does not say not set");
+      if (document.getElementById("writer-key")?.placeholder !== "Add an API key") log("snap:fail no field to add an API key");
+      if (document.getElementById("writer-key-remove")) log("snap:fail Remove shown with no key set");`),
+  // An API key set: it comes first in the preset order, and a Test of the Anthropic writer passes.
+  writersKeySet: () =>
+    writersOpen({
+      writers: { writers: [{ ...anthropicWriter, found: true }, claudeWriter, agyWriter], summaries_on: false, briefs: true },
+      test_writer: { outcome: "passed", line: "Passed: \`anthropic\` answered. Summaries are written with it.", settings: null },
+    }, `
+      if (document.getElementById("writer-pick").value !== "anthropic") log("snap:fail the preset is not the API key");
+      if (document.getElementById("writer-model").value !== "claude-haiku-5-5") log("snap:fail the preset model is not the first");
+      if (!document.getElementById("writer-key-state")?.textContent.includes(": set")) log("snap:fail the key row does not say set");
+      if (document.getElementById("writer-key")?.placeholder !== "Replace the API key" || !document.getElementById("writer-key-remove")) log("snap:fail no replace or remove");
+      const outcome = document.getElementById("writer-outcome");
+      if (!outcome?.classList.contains("passed")) log("snap:fail no passed outcome: " + outcome?.textContent);`, true),
   // No claude: agy writes the summaries, and the section says PR briefs need Claude.
   writersBriefsNeedClaude: () =>
     writersOpen({

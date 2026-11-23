@@ -187,7 +187,7 @@ fn the_wire_samples_of_the_map_view_are_written_for_tsc() {
 fn the_wire_samples_of_the_writer_section_are_written_for_tsc() {
     use studio_server::{WriterTest, Writers};
     let mut writers = studio_understanding::found_writers(std::path::Path::new("/no/login-shell"));
-    writers[1].found = true;
+    writers[2].found = true;
     let samples: Vec<Sample> = vec![
         (
             "Writers",

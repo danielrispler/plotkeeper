@@ -14,7 +14,8 @@ export type Keymap = Record<string, Record<string, Binding>>;
 // The settings: `settings.json`'s choices.
 export interface Settings {
   // The summary writer's model and effort ("" for the model's default), whether opening a turn
-  // writes its summary, and the program that writes cards: Claude Code, the Antigravity CLI (#327) or Codex (#364).
+  // writes its summary, and the program that writes cards: Claude Code, the Antigravity CLI (#327), Codex (#364),
+  // Copilot or Cursor's `agent` (#365).
   summaries: { model: string; effort: string; on_open: boolean; writer: WriterKind };
   // The context share, a whole percent, past which a session raises its context warning; 0: never.
   context_warning: number;
@@ -36,8 +37,8 @@ export interface Files {
 
 // The writer the file names, or undefined, reporting a name that is none of them.
 function writerKind(value: unknown, report: (line: string) => void): WriterKind | undefined {
-  if (value === undefined || value === "claude" || value === "agy" || value === "codex") return value;
-  report('summaries.writer: expected "claude", "agy" or "codex"');
+  if (value === undefined || value === "claude" || value === "agy" || value === "codex" || value === "copilot" || value === "cursor" || value === "anthropic") return value;
+  report('summaries.writer: expected "claude", "agy", "codex", "copilot", "cursor" or "anthropic"');
   return undefined;
 }
 
