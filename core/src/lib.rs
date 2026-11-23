@@ -3245,7 +3245,12 @@ impl Studio {
                             transcript_path: event.transcript_path.clone(),
                         });
                     }
-                    if !replay && !session.versioned && !event.capabilities.transcript_version {
+                    // agy's version comes from running `agy --version`; another agent with no transcript
+                    // version has none to ask for.
+                    if !replay
+                        && !session.versioned
+                        && event.capabilities.agent == agy::CAPABILITIES.agent
+                    {
                         session.versioned = true;
                         outputs.push(Output::AgyVersion);
                     }

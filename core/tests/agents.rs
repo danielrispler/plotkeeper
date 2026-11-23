@@ -73,3 +73,22 @@ fn a_claude_shaped_line_named_agy_is_read_by_agys_parser() {
     let kinds: Vec<_> = studio.agy_drift().iter().map(|d| d.kind).collect();
     assert_eq!(kinds, [AgyDriftKind::HookEvent]);
 }
+
+/// Only agy's version comes from running it: no other agent's session asks for `agy --version`.
+#[test]
+fn only_an_agy_session_asks_for_agys_version() {
+    for (agent, run) in [
+        ("codex", include_str!("fixtures/codex/run.jsonl")),
+        ("copilot", include_str!("fixtures/copilot/run.jsonl")),
+        ("cursor", include_str!("fixtures/cursor/run.jsonl")),
+        ("qwen", include_str!("fixtures/qwen/run.jsonl")),
+    ] {
+        let mut studio = Studio::default();
+        let asked = run
+            .lines()
+            .flat_map(|line| studio.apply(line))
+            .filter(|o| matches!(o, studio_core::Output::AgyVersion))
+            .count();
+        assert_eq!(asked, 0, "{agent}");
+    }
+}
