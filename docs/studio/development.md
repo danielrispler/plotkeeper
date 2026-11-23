@@ -46,6 +46,17 @@ The Rust half of that map is checked by the wire tests (#246), with no code gene
 
 `npm run check` runs them all in order: `cargo fmt --all --check`, `npm run build`, `cargo clippy --locked --workspace --all-targets -- -D warnings`, `rm -f scripts/wire/*.ts`, `cargo nextest run --locked --workspace` (the shell included), the map check (`cargo run --locked -q -p studio-system-map -- check`), `tsc -p scripts/wire` on the samples the wire tests just wrote, and `npm run test:node`. nextest runs the same tests as `cargo test`, but runs every test in a process of its own, all binaries' at once; install it with `brew install cargo-nextest`. CI runs `npm ci` and `npm run check` in one job, and `npm run build` and `npm run snap:all` in another, in `.github/workflows/studio.yml`, on macOS. It runs for each push to `main` or to an `issue-*` branch, and for each pull request from any other branch. The engine's `checks.yml` and `ci-checks` skip the studio.
 
+## The npm package
+
+`npm i -g plotkeeper` installs plotkeeper on a Mac with no Rust (#368). The package is `npm/`: its `package.json` and, once built, a `bin/` with `plotkeeper`, `plotkeeper-hook` and `plotkeeper-answer` side by side, each a universal binary (Apple silicon and Intel), the page embedded in `plotkeeper`. npm links `plotkeeper` onto the PATH; each start copies the other two into the data folder's `bin/` (#356), which the hooks call, so a switch of Node version leaves them recording. `npm run pack:npm -- <folder>` (`scripts/npm/pack.sh`) builds the page and both architectures, which needs `rustup target add aarch64-apple-darwin x86_64-apple-darwin`, and packs the tarball into the folder. `npm run smoke:npm -- <tarball>` (`scripts/npm/smoke.sh`) installs it with `npm i -g` into a throwaway home and npm prefix with no Rust on the PATH, and checks `plotkeeper --version`, the three binaries, `plotkeeper install` with a stand-in `claude`, a start that serves the page, and a hook that still records once the package is removed.
+
+`.github/workflows/release.yml` runs both on every run: it packs on macOS and installs the tarball on an Apple silicon and an Intel runner. It runs where `studio.yml` does, and by hand.
+
+### Cutting a release
+
+1. In a PR, set the new version in `npm/package.json` and in `server/Cargo.toml` (`plotkeeper --version` prints the latter; `server/tests/plotkeeper_bin.rs` fails when they differ), with `Cargo.lock` updated by a build. Merge it.
+2. In GitHub's Actions tab, run "npm package" on `main` with "publish" ticked. Daniel alone does this. The workflow publishes the tarball its own smoke jobs tested, with provenance, using the repository secret `NPM_TOKEN` (an npm automation token for the `plotkeeper` package). Without "publish", or from another branch, it only builds and tests.
+
 ## The live run
 
 The tests above run on events written by hand. `core/tests/run-unisolated-worker.sh` proves that Claude Code's real events have the shape they assume (#214): a scripted session in a temporary repository, with this checkout's plugin, spawns a background subagent that is not isolated, which makes a worktree with `git worktree add`, writes a 42-line file in it through Bash from the session's folder and commits. The script passes when the subagent's events carry the worktree in `studio_touched_roots` with a start and an end tree whose diff holds the file; it prints pass or fail with the line that decided it.
