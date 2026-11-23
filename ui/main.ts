@@ -20,6 +20,7 @@ import { mapEscape, mapShown, startMap, toggleMap } from "./map.js";
 import "./map-history.js";
 import "./map-sheet.js";
 import "./map-tray.js";
+import "./map-runs.js";
 import { startMapAgents } from "./map-agents.js";
 import { showSessions } from "./list.js";
 import { goHome, select, show, toggleHome } from "./selection.js";

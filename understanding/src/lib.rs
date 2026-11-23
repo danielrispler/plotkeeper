@@ -54,7 +54,7 @@ pub use turn_trees::{
 pub use turn_writing::{Core, Effects, TurnWriting, Writer};
 pub use writer::{
     AGY_LOGIN_WAIT, FailureKind, FoundWriter, Usage, WriterError, WriterKind, WriterReply,
-    WriterRequest, build_command, found_writers, read_reply,
+    WriterRequest, build_command, found_writers, login_or_quota, read_reply,
 };
 
 /// Lines `from` to `to`, counted from 1 and both included, of a file in a card's end tree, as a card stored before

@@ -15,6 +15,7 @@ use studio_server::{
     pr_briefs::BriefInfo,
     prs::Ready,
     ratify::Pending,
+    runner::{End, Kind, RunState, RunView, Runs},
 };
 
 const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
@@ -130,6 +131,40 @@ fn empty(status: Status) -> MapState {
         ci: None,
         ready: Vec::new(),
         ratify: Vec::new(),
+        runs: Runs::default(),
+    }
+}
+
+/// The background runs paused, with a run in each state, of each kind and with each end.
+fn runs() -> Runs {
+    let run = |state, kind, outcome: Option<End>| RunView {
+        id: "19a2f-4d2-0".into(),
+        kind,
+        state,
+        at: 1_761_743_990_000,
+        outcome,
+        line: outcome.map(|_| "Finished, but 1 tool call was denied".into()),
+        denials: outcome.map_or_else(Vec::new, |_| vec!["Bash: git push".into()]),
+        prompt: outcome.map(|_| "Write a test that backs the law.".into()),
+    };
+    let ends = [
+        End::Done,
+        End::Denied,
+        End::Failed,
+        End::TimedOut,
+        End::Died,
+        End::SetupFailed,
+        End::NotLoggedIn,
+        End::RateLimited,
+    ];
+    let mut list = vec![
+        run(RunState::Running, Kind::BackLaw, None),
+        run(RunState::Queued, Kind::MicroWorld, None),
+    ];
+    list.extend(ends.map(|end| run(RunState::Ended, Kind::BackLaw, Some(end))));
+    Runs {
+        paused: Some("Claude hit its usage or rate limit".into()),
+        runs: list,
     }
 }
 
@@ -168,6 +203,7 @@ fn the_wire_samples_of_the_map_view_are_written_for_tsc() {
                     kind: "law".into(),
                     id: "shell-notice".into(),
                 }],
+                runs: runs(),
                 ..empty(Status::Loaded)
             }),
         ));

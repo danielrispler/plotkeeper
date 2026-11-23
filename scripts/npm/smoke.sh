@@ -1,6 +1,6 @@
 #!/bin/sh
 # Installs a packed plotkeeper with `npm i -g <tarball>`, with no Rust toolchain on the PATH, in a fresh home and npm
-# prefix, and checks it as a user meets it (#368): `plotkeeper --version`, the three binaries side by side for this
+# prefix, and checks it as a user meets it (#368): `plotkeeper --version`, the four binaries side by side for this
 # machine's architecture, `plotkeeper install`, a `plotkeeper` start that serves the page, and hooks that keep
 # recording once the npm install folder is gone, as after a switch of Node version.
 set -eu
@@ -39,7 +39,7 @@ version=$(node -p "require('$package/package.json').version")
 [ "$(plotkeeper --version)" = "plotkeeper $version" ] || fail "plotkeeper --version says $(plotkeeper --version)"
 
 arch=$(uname -m)
-for name in plotkeeper plotkeeper-hook plotkeeper-answer; do
+for name in plotkeeper plotkeeper-hook plotkeeper-answer plotkeeper-run; do
   [ -x "$package/bin/$name" ] || fail "$name is not an executable in $package/bin"
   lipo "$package/bin/$name" -verify_arch "$arch" || fail "$name has no $arch build"
 done

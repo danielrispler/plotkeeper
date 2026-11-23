@@ -10,9 +10,13 @@ The page has no project list and no terminal (danielrispler/plotkeeper#326), and
   "catchUp": { "hours": 2 },   // at start, write PR briefs for ready PRs whose head moved within the hours, the newest first and at most 3
   "prBriefs": { "model": "opus" }, // the model that writes a PR brief and checks its claims; default: opus
   "context_warning": 30,         // the context share, 0 to 100, past which a session warns once; 0: never
-  "checks": { "/path/to/app": ["make verify"] } // per project folder, the commands that are checks; default: `cargo test` and the like, and `npm run check`
+  "checks": { "/path/to/app": ["make verify"] }, // per project folder, the commands that are checks; default: `cargo test` and the like, and `npm run check`. A background run allows only the project's own entry and has no default
+  "setup": { "/path/to/app": "npm ci" },         // per project folder, one command a background run runs in its working folder before its agent starts; default: none
+  "backgroundRuns": { "harness": "claude", "model": "sonnet" } // the agent program of a background run (only "claude") and its model; default model: the CLI's own
 }
 ```
+
+`checks`, `setup` and `backgroundRuns` are read by the server from the file each time a [background run](behaviour/background-runs.md) is asked for, so a saved change counts from the next run with no restart.
 
 ## The writer section
 

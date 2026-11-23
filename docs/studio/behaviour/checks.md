@@ -4,7 +4,7 @@ A **check** is a command of the project's check list, as run in one worktree. A 
 
 ## The check list
 
-`checks` in `settings.json` (see [Settings files](../settings.md)) names, for each project folder, the commands that count, and a session working in that folder or under it uses that list, the longest folder winning. A project with no entry uses the default: `cargo test|nextest|clippy|check|build`, `ci-checks`, `go test|vet` and `npm run check`. Every part of the studio reads the session's own list, the phases (Checking) included.
+`checks` in `settings.json` (see [Settings files](../settings.md)) names, for each project folder, the commands that count, and a session working in that folder or under it uses that list, the longest folder winning. A project with no entry uses the default, which is one fixed list for every project, whatever its language: `cargo test|nextest|clippy|check|build`, `ci-checks`, `go test|vet` and `npm run check` (`core/src/checks.rs`). It only decides which of a session's commands count as checks. Every part of the studio that follows sessions reads the session's own list, the phases (Checking) included. A [background run](background-runs.md) is the exception: the server reads the project's own entry from `settings.json` for each run and never borrows the default, so a project with no entry gets "Set this project's checks" instead of a run.
 
 ## What runs a check
 
@@ -51,7 +51,7 @@ A command exits with its last group's code: the statements after the last `;`, `
 - Exit 0 says each check in the group passed, so `cargo fmt --check && cargo clippy` passing is two passes.
 - A non-zero exit says a check failed only when it is the group's one statement besides `cd`, `export`, `set` and variable assignments (under `pipefail` a pipeline is one statement, so `set -o pipefail; cargo test 2>&1 | tail` failing is failed), so `cd x && cargo test` failing is failed. When the group holds two checks, or a check and another command, the code cannot say which failed or whether a later one ran, and each check in it is Ran, never failed.
 
-### Background runs
+### A check sent to the background
 
 A check an agent sends to the background is running until its notification lands, then holds what it reports: completed is passed when exit 0 would count, failed is failed when a non-zero exit would count, and anything else, a killed task included, is Ran. It stays in the turn that started it, and that turn's checks are read again when the notification lands. A shell `&` is Ran. A background run has no exit code.
 

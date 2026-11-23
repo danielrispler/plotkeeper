@@ -59,6 +59,9 @@ pub struct MapState {
     /// The items the part sheet says are not yet ratified (`ratify.rs`): the map changes that landed after the first run without a
     /// record, and the ones marked so by hand.
     pub ratify: Vec<crate::ratify::Pending>,
+    /// The project's background runs, queued, running and ended, and the line that says why the queues are paused
+    /// (`runner.rs`).
+    pub runs: crate::runner::Runs,
 }
 
 /// Daniel's choices for one project, kept in the data folder: a saved `(x, y)` per part or actor id, and a tier per part id
@@ -125,6 +128,7 @@ pub fn read_map(repo: &Path) -> MapState {
         ci: None,
         ready: Vec::new(),
         ratify: Vec::new(),
+        runs: crate::runner::Runs::default(),
     };
     let Some((reference, note)) = default_ref(repo) else {
         state.note = Some("this repository has no default branch to read".into());
@@ -327,6 +331,7 @@ pub fn map_state(project: String, fetch: bool, app: &Arc<crate::App>) -> Result<
         .and_then(|file| crate::ratify::start(&file, &project, crate::ratify::now()))
         .map(|mine| crate::ratify::pending(repo, &mine))
         .unwrap_or_default();
+    state.runs = app.runner.runs(&project);
     Ok(state)
 }
 
