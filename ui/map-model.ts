@@ -336,6 +336,8 @@ export function briefPlayer(deps: { scrubbed: () => boolean; backToNow: () => vo
     current: () => now,
     open(project, pr, chapter) {
       if (deps.scrubbed()) deps.backToNow();
+      // Opening over a brief that is open leaves that one where it is.
+      if (now) left.set(key(now), now.step);
       const at = { project, pr, chapter, step: 0 };
       const brief = briefKey(at);
       if (!played.has(brief) && !carrier.has(brief)) carrier.set(brief, chapter);
@@ -360,6 +362,19 @@ export function briefPlayer(deps: { scrubbed: () => boolean; backToNow: () => vo
       if (now) left.set(key(now), now.step);
       now = null;
     },
+  };
+}
+
+// Which of the requests that began last is the one still wanted: `begin` returns a check that is true until another request
+// begins or `cancel` is called, so a slow earlier request does not land over a later one or over a brief closed since.
+export function latestRequest() {
+  let n = 0;
+  return {
+    begin: () => {
+      const mine = ++n;
+      return () => mine === n;
+    },
+    cancel: () => void n++,
   };
 }
 

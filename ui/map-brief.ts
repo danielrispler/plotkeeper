@@ -15,7 +15,7 @@ import { logStop } from "./stop-rules.js";
 import { scrubTo } from "./map-history.js";
 import { ratifyActions } from "./map-ratify.js";
 import { ratifyStep, statusWords } from "./ratify.js";
-import { actorSize, alsoAt, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, commitDrawer, figureShapes, figureSize, orderRun, type OrderRun, pickRun, type PickRun, playlist, plateSize, storySteps, type Rect, type Shape, unconfirmed } from "./map-model.js";
+import { actorSize, alsoAt, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, commitDrawer, figureShapes, figureSize, latestRequest, orderRun, type OrderRun, pickRun, type PickRun, playlist, plateSize, storySteps, type Rect, type Shape, unconfirmed } from "./map-model.js";
 import type { BriefCheck, BriefStep, BriefView, PrBrief, RatifyRow } from "./types.js";
 
 const player = briefPlayer({ scrubbed: () => currentScrub() !== null, backToNow: () => void scrubTo(null).catch(failure("map_at")) });
@@ -71,8 +71,10 @@ const panel = () => document.getElementById("map-brief")!;
 export const briefOpen = () => player.current() !== null;
 
 // Opens `chapter` of PR `number`'s brief: reads it (the shell rewrites a stale one first), returns the map to now and plays it.
+const latest = latestRequest();
 export async function openBriefOf(project: string, number: number, chapter: number) {
   problems.delete(number);
+  const wanted = latest.begin();
   let got: BriefView | null;
   try {
     panel().dataset.waiting = String(number);
@@ -81,6 +83,8 @@ export async function openBriefOf(project: string, number: number, chapter: numb
     problems.set(number, String(e));
     got = null;
   }
+  // A later open, or a close, since: this one's answer is not wanted, and the panel's waiting mark is that one's.
+  if (!wanted()) return;
   delete panel().dataset.waiting;
   const view = currentMap();
   if (!got || !view || view.project !== project) {
@@ -90,9 +94,13 @@ export async function openBriefOf(project: string, number: number, chapter: numb
     if (note && problems.has(number)) note.textContent = problems.get(number)!;
     return;
   }
+  const rows = await invoke("pr_ratify", { project, number }).catch((e) => (failure("pr_ratify")(e), [] as RatifyRow[]));
+  if (!wanted()) return;
+  // Another brief or chapter open: leave it (it keeps its step) so the panel is built afresh for this one.
+  if (briefOpen()) closeBrief();
   playing = got;
+  ratifying = rows;
   logStop("brief-opened", project, number);
-  ratifying = await invoke("pr_ratify", { project, number }).catch((e) => (failure("pr_ratify")(e), [] as RatifyRow[]));
   if (!resizing) {
     resizing = true;
     addEventListener("resize", onResize);
@@ -117,6 +125,8 @@ onDraw((view) => {
 });
 
 export function closeBrief() {
+  latest.cancel();
+  delete panel().dataset.waiting;
   stopWatching();
   marks.forEach((stop) => stop());
   marks = [];

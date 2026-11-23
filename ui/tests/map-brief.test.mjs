@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { alsoAt, chapterGate, storySteps, briefCamera, briefPlayer, escapeMap, figureShapes, figureSize, layerOrder, playlist, unconfirmed } from "../../dist/map-model.js";
+import { alsoAt, chapterGate, storySteps, briefCamera, briefPlayer, latestRequest, escapeMap, figureShapes, figureSize, layerOrder, playlist, unconfirmed } from "../../dist/map-model.js";
 import { trayRows } from "../../dist/map-tray.js";
 
 const step = (k, extra = {}) => ({ k, h: k, b: "", on: [], hops: [], law: null, covered_by: null, list: [], risks: [], fig: null, check: null, cites: [], flags: [], ...extra });
@@ -269,4 +269,25 @@ test("the Ratify step that ends the last chapter is no part of the story: the ga
   const gate = chapterGate(story, () => fired++);
   gate.sawLast();
   assert.equal(fired, 1);
+});
+
+test("opening another chapter over an open one leaves the open one's step where it was", () => {
+  const player = briefPlayer({ scrubbed: () => false, backToNow: () => {} });
+  player.open("/p", 7, 0);
+  player.go(1, 5);
+  player.open("/p", 7, 1);
+  assert.equal(player.current().step, 0);
+  player.open("/p", 7, 0);
+  assert.equal(player.current().step, 1, "the first chapter continues where it was left");
+});
+
+test("only the latest request is wanted: a later one, or a cancel, drops the earlier", () => {
+  const request = latestRequest();
+  const first = request.begin();
+  assert.equal(first(), true);
+  const second = request.begin();
+  assert.equal(first(), false, "a later request supersedes it");
+  assert.equal(second(), true);
+  request.cancel();
+  assert.equal(second(), false, "a close drops the one in flight");
 });
