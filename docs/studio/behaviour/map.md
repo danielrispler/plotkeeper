@@ -52,7 +52,7 @@ The checker runs only `git` and, when the map names `cargo`, `cargo`; it reads n
 
 ## plotkeeper's map
 
-Nine parts: the agent plugins, the hook, the core, the shell (`src-tauri/`), the server (`server/`), understanding, the window (`ui/`), the terminal daemon and workbench; three actors: the agents, the writer and GitHub; one flow, Turn writing. `ignored` holds what is not the running system: the docs, the spikes, `scripts/`, the tooling crates (`wayfinder/`, `test-support/`, `system-map/`) and the repository's own configuration at the root. A change that adds, moves or removes files, changes what a part does or how parts connect, or changes a law changes the map in the same PR (`AGENTS.md`).
+Seven parts: the agent plugins, the hook, the core, the server (`server/`), understanding, the window (`ui/`) and workbench; three actors: the agents, the writer and GitHub; one flow, Turn writing. `ignored` holds what is not the running system: the docs, the spikes, the archived desktop app and its terminal daemon (`src-tauri/`, `terminal-daemon/`, #332), `scripts/`, the tooling crates (`wayfinder/`, `test-support/`, `system-map/`) and the repository's own configuration at the root. A change that adds, moves or removes files, changes what a part does or how parts connect, or changes a law changes the map in the same PR (`AGENTS.md`).
 
 ## The Map view
 

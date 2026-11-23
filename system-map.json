@@ -18,11 +18,6 @@
       "tier": "core", "paths": ["core/"]
     },
     {
-      "id": "shell", "name": "Shell", "caption": "Reads the log, feeds the core, acts",
-      "description": "The app's Rust side. It reads the event log, feeds the core, and carries out what needs the window: notices, sounds, the Dock badge, the terminals, and each command handler, which only forwards to the server.",
-      "tier": "core", "paths": ["src-tauri/"]
-    },
-    {
       "id": "server", "name": "Server", "caption": "Holds the state, answers the commands",
       "description": "A library, and the `plotkeeper` program that serves it, with no window in it. It holds the core state, the card store (which keeps the session briefs, the turn summaries and the cards written before cards were retired), the risk notes, the writer and the settings, tells the page why when the writer fails, runs the read loop that follows the event log and sends what changed (the list, the selection, the brief, notices) to a sink the web server sets, serves the learning layer as a local page on 127.0.0.1 (the built page, one POST route for each command and one server-sent event stream, behind a random token, a cookie and a Host check, one server per data folder), and has one function for each learning-layer and session-view command: the PR lookups on a turn's end, the page's focus and the Map view's opening (never on a timer), the PR briefs written for ready PRs and kept per head, the map, the fog a PR's reading clears, the CI result it reads from the default branch, which map changes and agent decisions of a PR you accepted or overturned, and the quiet log of what you use of it.",
       "tier": "core", "paths": ["server/"]
@@ -38,11 +33,6 @@
       "tier": "core", "paths": ["ui/"]
     },
     {
-      "id": "terminal-daemon", "name": "Terminal daemon", "caption": "Owns the terminals",
-      "description": "A background process that keeps every terminal alive, so they outlive the app.",
-      "tier": "interface", "paths": ["terminal-daemon/"]
-    },
-    {
       "id": "workbench", "name": "Workbench", "caption": "Worktrees, PRs and plan usage",
       "description": "Git worktrees, tasks, PR lookups and plan usage. A black box: it never fogs and never asks for your time.",
       "tier": "black-box", "paths": ["workbench/"]
@@ -56,26 +46,19 @@
   "links": [
     { "id": "agents-plugins", "from": "agents", "to": "plugins" },
     { "id": "plugins-hook", "from": "plugins", "to": "hook" },
-    { "id": "hook-shell", "from": "hook", "to": "shell" },
-    { "id": "core-shell", "from": "core", "to": "shell" },
-    { "id": "shell-server", "from": "shell", "to": "server" },
     { "id": "hook-server", "from": "hook", "to": "server" },
     { "id": "core-server", "from": "core", "to": "server" },
     { "id": "server-understanding", "from": "server", "to": "understanding" },
     { "id": "server-workbench", "from": "server", "to": "workbench" },
-    { "id": "shell-understanding", "from": "shell", "to": "understanding" },
     { "id": "understanding-writer", "from": "understanding", "to": "writer" },
-    { "id": "shell-window", "from": "shell", "to": "window" },
     { "id": "server-window", "from": "server", "to": "window" },
-    { "id": "shell-terminal-daemon", "from": "shell", "to": "terminal-daemon" },
-    { "id": "shell-workbench", "from": "shell", "to": "workbench" },
     { "id": "workbench-github", "from": "workbench", "to": "github" }
   ],
   "ignored": [
     ".agents/", ".claude/", ".github/", ".gitignore", "AGENTS.md", "CLAUDE.md", "Cargo.lock", "Cargo.toml", "LICENSE",
     "README.md", "package-lock.json", "package.json", "real-calls.sh", "rust-toolchain.toml", "tsconfig.json",
     "system-map.json",
-    "docs/", "scripts/", "terminal-spike/", "v0-spike/",
+    "docs/", "scripts/", "terminal-spike/", "v0-spike/", "src-tauri/", "terminal-daemon/",
     "wayfinder/", "test-support/", "system-map/"
   ],
   "laws": [
@@ -85,9 +68,7 @@
       "text": "The core does no I/O except reading transcripts." },
     { "id": "check-result-is-last-run", "on": "core", "backing": "trust",
       "text": "A check's result is its last run's." },
-    { "id": "no-notices-lock-on-main-thread", "on": "shell", "backing": "trust",
-      "text": "Nothing on the main thread takes the notices' lock." },
-    { "id": "wire-types-agree", "on": "shell", "backing": "check",
+    { "id": "wire-types-agree", "on": "server-window", "backing": "check",
       "text": "The window's types and the Rust wire types agree." },
     { "id": "session-pieces-in-order", "on": "understanding", "backing": "check",
       "text": "A session's pieces are written one at a time, in order." },
@@ -98,19 +79,17 @@
     { "id": "writer-has-no-tools", "on": "understanding", "backing": "check",
       "text": "A change is untrusted text: the writer has no tools." },
     { "id": "colour-only-for-needs-you", "on": "window", "backing": "trust",
-      "text": "Loud colour is only for what needs you and for a broken law." },
-    { "id": "terminals-outlive-app", "on": "terminal-daemon", "backing": "trust",
-      "text": "Terminals outlive the app." }
+      "text": "Loud colour is only for what needs you and for a broken law." }
   ],
   "flows": [
     { "id": "turn-writing", "name": "Turn writing",
       "hops": [
-        { "link": "core-shell", "text": "Core sees the turn end and the shell asks for its summary." },
-        { "link": "shell-understanding", "text": "The shell passes the request on; understanding queues it for the session." },
+        { "link": "core-server", "text": "Core sees the turn end and the server asks for its summary." },
+        { "link": "server-understanding", "text": "The server passes the request on; understanding queues it for the session." },
         { "link": "understanding-writer", "text": "Understanding asks the writer for the summary, and for the session's Goal and Design so far." },
         { "link": "understanding-writer", "text": "The writer's reply comes back and understanding stores it." },
-        { "link": "shell-understanding", "text": "Understanding tells the shell the brief changed." },
-        { "link": "shell-window", "text": "The shell updates the list." }
+        { "link": "server-understanding", "text": "Understanding tells the server the brief changed." },
+        { "link": "server-window", "text": "The server updates the list." }
       ] }
   ]
 }
