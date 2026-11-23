@@ -54,6 +54,15 @@ export function overturnReport(outcome: "copied" | "manual", prompt: string): { 
     : { line: "Copy this prompt and paste it into your agent", manual: prompt };
 }
 
+// Records a decision through `record`; for an overturn, `copy` puts its prompt on the clipboard too and its outcome is returned. The copy
+// starts first, inside the click: a browser may refuse the clipboard once the click has awaited a round trip (port fix F5). `copy` must
+// not reject (`copyOverturn` does not).
+export async function decideWith<T>(overturn: boolean, copy: () => Promise<T>, record: () => Promise<void>): Promise<T | null> {
+  const copied = overturn ? copy() : null;
+  await record();
+  return copied ? await copied : null;
+}
+
 // An overturn's note, kept for the item it was made for: the line, and for a failed copy the prompt to copy by hand.
 export type Overturned = { project: string; pr: number; kind: string; id: string; line: string; manual: string | null };
 

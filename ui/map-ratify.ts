@@ -5,7 +5,7 @@
 
 import { failure, invoke, text } from "./dom.js";
 import { currentMap } from "./map.js";
-import { copyOverturn, noteFor, overturnPrompt, overturnReport, type Overturned } from "./ratify.js";
+import { copyOverturn, decideWith, noteFor, overturnPrompt, overturnReport, type Overturned } from "./ratify.js";
 import { logStop } from "./stop-rules.js";
 import type { RatifyRow } from "./types.js";
 
@@ -19,10 +19,10 @@ const branchOf = (pr: number): string | null => currentMap()?.state.ready?.find(
 let last: Overturned | null = null;
 
 // Puts the overturn's prompt on the clipboard (`navigator.clipboard.writeText()`); a refusal leaves it for `overturnNote` to show in a box.
-async function overturnOut(project: string, item: Ratifiable) {
+async function overturnOut(project: string, item: Ratifiable): Promise<Overturned> {
   const prompt = overturnPrompt(item, branchOf(item.pr));
   const outcome = await copyOverturn(prompt, navigator.clipboard?.writeText?.bind(navigator.clipboard));
-  last = { project, pr: item.pr, kind: item.kind, id: item.id, ...overturnReport(outcome, prompt) };
+  return { project, pr: item.pr, kind: item.kind, id: item.id, ...overturnReport(outcome, prompt) };
 }
 
 // The note of the last overturn, where `holds` says its item is drawn in `project`: "Prompt copied, paste it into your agent", or, when
@@ -58,10 +58,14 @@ export function ratifyActions(project: string, item: Ratifiable, done: (state: "
   const box = text("span", "", "ratify-actions");
   const decide = (state: "accepted" | "overturned") => {
     box.querySelectorAll("button").forEach((button) => ((button as HTMLButtonElement).disabled = true));
-    invoke("ratify_set", { project, pr: item.pr, kind: item.kind, id: item.id, state, text: item.text })
-      .then(async () => {
+    decideWith(
+      state === "overturned",
+      () => overturnOut(project, item),
+      async () => void (await invoke("ratify_set", { project, pr: item.pr, kind: item.kind, id: item.id, state, text: item.text })),
+    )
+      .then((overturned) => {
         logStop("ratify", project, item.pr);
-        if (state === "overturned") await overturnOut(project, item);
+        if (overturned) last = overturned;
         done(state);
       })
       .catch((e) => {
