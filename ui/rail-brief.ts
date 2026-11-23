@@ -1,6 +1,6 @@
 // The rail's quiet row "PR brief ready" (spec danielrispler/plotkeeper#334, ticket #344): in the newest turn of the live session whose PR a brief
 // waits for. Pressing it opens the Map view on that brief. A PR with no live studio session has no row (it is in the Map view's tray and
-// lights Home's dot). The shell says which PRs have a brief waiting (`briefs_waiting`), asked when a session's PR number is first seen and
+// lights its project header's dot). The shell says which PRs have a brief waiting (`briefs_waiting`), asked when a session's PR number is first seen and
 // again when the Map view is told a brief changed (`map-landed`), never on a timer.
 
 import { failure, invoke, listen, text } from "./dom.js";

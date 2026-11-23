@@ -4,9 +4,9 @@ import assert from "node:assert/strict";
 
 // The map is the page's base (#386): selecting a session shows its project's map, with its story, or a worker's log, in the left panel.
 test("selecting a session shows its project's map and opens it in the panel", async () => {
-  const { selectedBase } = await import("../../dist/map-model.js");
-  assert.deepEqual(selectedBase("s2", "/w/falinks", null), { project: "/w/falinks", panel: { kind: "story", session: "s2" } });
-  assert.deepEqual(selectedBase("s1", "/w/plotkeeper", "w1"), { project: "/w/plotkeeper", panel: { kind: "log", session: "s1", agent: "w1" } });
+  const { selectedView } = await import("../../dist/map-model.js");
+  assert.deepEqual(selectedView("s2", "/w/falinks", null), { project: "/w/falinks", panel: { kind: "story", session: "s2" } });
+  assert.deepEqual(selectedView("s1", "/w/plotkeeper", "w1"), { project: "/w/plotkeeper", panel: { kind: "log", session: "s1", agent: "w1" } });
 });
 
 test("a project header's click shows its map; on the shown project's header it folds the group (#386)", async () => {

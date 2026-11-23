@@ -26,7 +26,7 @@ import { diffIn, historyIn, logIn, showHistory, startPanes } from "./panes.js";
 import { closePanel, panelShown, showPanel, startPanel } from "./panel.js";
 import { showPalette } from "./palette.js";
 import { projectOfCwd, selectedProject, sidebarOrder } from "./projects.js";
-import { selectedBase } from "./map-model.js";
+import { selectedView } from "./map-model.js";
 import { reload, type SettingsFiles } from "./settings.js";
 import { studio } from "./state.js";
 import { drawFeed, showView } from "./story.js";
@@ -284,7 +284,7 @@ listen<Selection | null>("selected", (selected) => (studio.pending ? (studio.mis
 invoke("selected").then((selected) => {
   show(selected);
   if (selected) openMap(projectOfCwd(selected.session.cwd));
-  if (selected) showPanel(selectedBase(selected.session.id, projectOfCwd(selected.session.cwd), selected.agent).panel);
+  if (selected) showPanel(selectedView(selected.session.id, projectOfCwd(selected.session.cwd), selected.agent).panel);
 });
 listen<SessionCards>("cards", (cards) => (studio.pending ? (studio.missed = true) : showCards(cards)));
 // Claude Code's version changed: re-record the subagent fixture.

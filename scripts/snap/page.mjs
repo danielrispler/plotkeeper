@@ -10,7 +10,7 @@ export const stubSource = (fixture) => `(() => {
   const fixture = ${JSON.stringify(fixture)};
   // A fixture with \`realPointer\` clicks as a person does: \`await __snapClick(node)\` asks snap to send Chrome a real mouse press and
   // release at the node's middle (\`Input.dispatchMouseEvent\`), so pointer capture and the click's target are the browser's own.
-  const serverFetch = window.fetch.bind(window);
+  const serverFetch = window.fetch?.bind(window);
   window.__snapClick = async (node) => {
     const box = node.getBoundingClientRect();
     const reply = await serverFetch("/__snap/click?x=" + (box.left + box.width / 2) + "&y=" + (box.top + box.height / 2));

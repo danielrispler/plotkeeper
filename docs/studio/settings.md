@@ -2,7 +2,7 @@
 
 `settings.json` and `keymap.json` sit in plotkeeper's data folder, `~/Library/Application Support/plotkeeper/`, in Zed's format: JSON with comments and trailing commas (danielrispler/Falinks#524). The desktop app reloads them when either is saved; `plotkeeper` reads them at start, so restart it after editing one. A file that does not parse is reported in the notice line, and the last good one stays in effect. Missing keys keep their defaults; a key of the wrong type is reported in the same line and keeps its default.
 
-The page has no project list and no terminal (danielrispler/plotkeeper#326), and one settings section: the summary writer, in the Settings panel that the gear at the top of the page, or the palette's `studio::ShowSettings`, opens over the map (spec #320, #363; spec #380, #387). Every other key you edit in your editor. The keys it reads:
+The page has no terminal (danielrispler/plotkeeper#326) and no project list to edit (a repository joins the saved project list on its first session, spec #380, #381), and one settings section: the summary writer, in the Settings panel that the gear at the top of the page, or the palette's `studio::ShowSettings`, opens over the map (spec #320, #363; spec #380, #387). Every other key you edit in your editor. The keys it reads:
 
 ```jsonc
 {

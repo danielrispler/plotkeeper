@@ -591,16 +591,16 @@ export const panelSession = (panel: PanelContent | null): string | null =>
 export const startProject = (last: string | null, projects: string[]): string | null =>
   last !== null && projects.includes(last) ? last : (projects[0] ?? null);
 // What the page shows (#386): a project's map, and what the left panel holds over it.
-export type Base = { project: string | null; panel: PanelContent | null };
+export type PageView = { project: string | null; panel: PanelContent | null };
 // Selecting a session shows its project's map, with its story, or a worker's log, in the left panel.
-export const selectedBase = (session: string, project: string, agent: string | null): Base => ({
+export const selectedView = (session: string, project: string, agent: string | null): PageView => ({
   project,
   panel: agent === null ? { kind: "story", session } : { kind: "log", session, agent },
 });
 // A press on a project header shows that project's map; a session's panel of another project closes with the switch. A press on the shown
 // project's header folds its group, as the header did before it switched projects (#97).
-export function pressHeader(base: Base, pressed: string, projectOf: (session: string) => string | null): Base | "fold" {
-  if (pressed === base.project) return "fold";
-  const session = panelSession(base.panel);
-  return { project: pressed, panel: session === null || projectOf(session) === pressed ? base.panel : null };
+export function pressHeader(page: PageView, pressed: string, projectOf: (session: string) => string | null): PageView | "fold" {
+  if (pressed === page.project) return "fold";
+  const session = panelSession(page.panel);
+  return { project: pressed, panel: session === null || projectOf(session) === pressed ? page.panel : null };
 }
