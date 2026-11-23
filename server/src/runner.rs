@@ -1061,10 +1061,7 @@ impl Runner {
         }
         self.advance(&mut state);
         // A pause holds every project's queue, so each project with runs draws again.
-        let told = match pause {
-            Some(_) => Self::projects(&state),
-            None => vec![project],
-        };
+        let told = Self::told(&state, pause, &project);
         drop(state);
         told.iter().for_each(|project| self.tell(project));
     }
@@ -1158,9 +1155,10 @@ impl Runner {
     }
 
     /// Cancel: a queued run is dropped, a running one has its process group killed, and either way the run's folder is
-    /// removed and the next run of its project starts. An ended run is only removed. A running run is killed only when
-    /// its lock is held and the process its folder names still has the start time written down, so a process id that
-    /// was reused is never signalled; otherwise nothing is stopped or removed.
+    /// removed and the next run of its project starts. An ended run is only removed, and so is a run that ended on its own
+    /// at that moment, which is recorded as it ended. A running run is killed only when its lock is held and the process
+    /// its folder names still has the start time written down, so a process id that was reused is never signalled;
+    /// otherwise nothing is stopped or removed.
     pub fn cancel(&self, id: &str) -> Result<(), String> {
         let mut state = self.state();
         let at = state
@@ -1169,34 +1167,13 @@ impl Runner {
             .position(|run| run.stored.id == id)
             .ok_or("no such run")?;
         let dir = self.dir(id);
-        let running = matches!(state.runs[at].phase, Phase::Running { .. });
-        if running && lock_free(&dir) {
-            // It ended on its own a moment ago: it is recorded as it ended, and a login or limit failure still pauses.
-            let pause = self.finish(&mut state.runs[at]).pause();
+        let mut pause = None;
+        if matches!(state.runs[at].phase, Phase::Running { .. }) && !Self::stop(&dir)? {
+            // It ended on its own: a login or limit failure still pauses.
+            pause = self.finish(&mut state.runs[at]).pause();
             if pause.is_some() {
                 self.pause(&mut state, pause);
             }
-        } else if running {
-            let launch: Launch = read_json(&dir.join(LAUNCH)).unwrap_or_default();
-            let same = launch
-                .pid
-                .zip(launch.start)
-                .filter(|(pid, start)| process_start(*pid).as_ref() == Some(start));
-            let Some((pid, _)) = same else {
-                return Err(
-                    "the run's process is not the one plotkeeper started, so nothing was stopped"
-                        .into(),
-                );
-            };
-            let group = i32::try_from(pid).map_err(|_| "the run's process id is out of range")?;
-            // SAFETY: a signal to the process group the launcher leads, which the lock and the start time just named.
-            let killed = unsafe { libc::killpg(group, libc::SIGKILL) } == 0;
-            let why = io::Error::last_os_error();
-            // No such group: the launcher went between the look and the signal, which is as good.
-            if !killed && why.raw_os_error() != Some(libc::ESRCH) {
-                return Err(format!("the run's processes could not be stopped: {why}"));
-            }
-            wait_free(&dir);
         }
         let run = state.runs.remove(at);
         if !matches!(run.phase, Phase::Ended { .. }) {
@@ -1210,9 +1187,58 @@ impl Runner {
             log::warn!("background run {id}: its folder was not removed: {e}");
         }
         self.advance(&mut state);
+        let told = Self::told(&state, pause, &run.stored.project);
         drop(state);
-        self.tell(&run.stored.project);
+        told.iter().for_each(|project| self.tell(project));
         Ok(())
+    }
+
+    /// Stops the running run in `dir` by killing its launcher's process group, and waits until its lock is free: true when
+    /// it was killed here, false when its launcher had already gone, or was going at this very moment, so there was
+    /// nothing to stop. Refuses, with the lock still held, when the process the folder names is not the one that was
+    /// started.
+    fn stop(dir: &Path) -> Result<bool, String> {
+        if lock_free(dir) {
+            return Ok(false);
+        }
+        let not_ours =
+            "the run's process is not the one plotkeeper started, so nothing was stopped";
+        let launch: Launch = read_json(&dir.join(LAUNCH)).unwrap_or_default();
+        let Some((pid, start)) = launch.pid.zip(launch.start) else {
+            return Err(not_ours.into());
+        };
+        let refused = match process_start(pid) {
+            Some(now) if now == start => {
+                let group =
+                    i32::try_from(pid).map_err(|_| "the run's process id is out of range")?;
+                // SAFETY: a signal to the process group the launcher leads, which the lock and the start time just named.
+                if unsafe { libc::killpg(group, libc::SIGKILL) } == 0 {
+                    wait_free(dir);
+                    return Ok(true);
+                }
+                let why = io::Error::last_os_error();
+                format!("the run's processes could not be stopped: {why}")
+            }
+            // Another process has the id: never signalled.
+            Some(_) => return Err(not_ours.into()),
+            None => not_ours.to_string(),
+        };
+        // A launcher that is exiting answers to neither `ps` nor a signal, and frees its lock a moment later.
+        for _ in 0..100 {
+            if lock_free(dir) {
+                return Ok(false);
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        Err(refused)
+    }
+
+    /// The projects to tell of a change in `project`: every project with runs when the change paused the queues.
+    fn told(state: &State, pause: Option<Pause>, project: &str) -> Vec<String> {
+        match pause {
+            Some(_) => Self::projects(state),
+            None => vec![project.to_string()],
+        }
     }
 
     /// Picks the runs back up at a start, from the runs folder: a queued run waits its turn again, a run whose lock is

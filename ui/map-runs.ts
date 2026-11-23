@@ -11,9 +11,9 @@ import type { RunView, Runs } from "./types.js";
 export type RunRow = { id: string; state: RunView["state"]; title: string; note: string; action: "Cancel" | "Dismiss"; denials: string[]; prompt: string | null };
 // What a copy left to show under its run's row: the line, and for a clipboard that refused, the prompt to copy by hand.
 export type CopyNote = { id: string; line: string; manual: string | null };
-// What the rows' buttons do: `cancel` stops a queued or running run and removes an ended one; `noted` is told what a copy left to show, to
-// keep it across a redraw.
-export type RunActs = { cancel: (id: string) => void; resume: () => void; copy: (prompt: string) => Promise<"copied" | "manual">; noted?: (note: CopyNote) => void };
+// What the rows' buttons do: `cancel` stops a queued or running run and removes an ended one, and settles when the server has answered;
+// `noted` is told what a copy left to show, to keep it across a redraw.
+export type RunActs = { cancel: (id: string) => unknown; resume: () => void; copy: (prompt: string) => Promise<"copied" | "manual">; noted?: (note: CopyNote) => void };
 
 const kindWords: Record<RunView["kind"], string> = { "back-law": "Back a law", "micro-world": "Micro-world" };
 const clock = (at: number) => {
@@ -64,22 +64,35 @@ function rowNode(row: RunRow, act: RunActs, note: CopyNote | null): HTMLElement 
     denied.append(...row.denials.map((denial) => text("li", denial)));
     node.append(denied);
   }
+  // What the last copy left under this row; a new copy replaces it.
+  let shown: HTMLElement[] = [];
+  const show = (made: Pick<CopyNote, "line" | "manual">) => {
+    shown.forEach((each) => node.removeChild(each));
+    shown = noteNodes(made);
+    node.append(...shown);
+  };
   const prompt = row.prompt;
   if (prompt !== null) {
-    // The copy starts inside the click, so the browser lets it reach the clipboard.
+    // The copy starts inside the click, so the browser lets it reach the clipboard. The button waits for it, so two clicks leave one note.
     const copy = button("Copy prompt", "Copy this run's prompt, to paste into your own agent", async () => {
-      const made = { id: row.id, ...overturnReport(await act.copy(prompt), prompt) };
       copy.disabled = true;
-      node.append(...noteNodes(made));
+      const made = { id: row.id, ...overturnReport(await act.copy(prompt), prompt) };
+      copy.disabled = false;
+      show(made);
       act.noted?.(made);
     }) as HTMLButtonElement;
-    copy.disabled = note?.id === row.id;
     actions.append(copy);
   }
   const title = row.state === "ended" ? "Remove this run from the list" : row.state === "running" ? "Stop this run and remove what it made" : "Take this run out of the queue";
-  actions.append(button(row.action, title, () => act.cancel(row.id)));
+  // The button waits for the server's answer: a second click asks nothing twice, and a Cancel the server refused can be tried again.
+  const cancel = button(row.action, title, async () => {
+    cancel.disabled = true;
+    await act.cancel(row.id);
+    cancel.disabled = false;
+  }) as HTMLButtonElement;
+  actions.append(cancel);
   node.append(actions);
-  if (note?.id === row.id) node.append(...noteNodes(note));
+  if (note?.id === row.id) show(note);
   return node;
 }
 
@@ -105,7 +118,7 @@ let copied: CopyNote | null = null;
 // The server tells the page when a run starts or ends (`map-landed`); a click's own change is read back at once. A Cancel the server
 // refuses is an action Daniel asked for that failed, so it shows in the notice line.
 const acts: RunActs = {
-  cancel: (id) => void invoke("run_cancel", { id }).then(reloadMap).catch(failure("run_cancel", "error")),
+  cancel: (id) => invoke("run_cancel", { id }).then(reloadMap).catch(failure("run_cancel", "error")),
   resume: () => void invoke("runs_resume").then(reloadMap).catch(failure("runs_resume", "error")),
   copy: (prompt) => copyOverturn(prompt, navigator.clipboard?.writeText?.bind(navigator.clipboard)),
   noted: (note) => (copied = note),

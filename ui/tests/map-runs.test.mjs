@@ -106,3 +106,37 @@ test("a copy tells who keeps the note which run it was for", async () => {
   await button(row, "Copy prompt").listeners.click();
   assert.deepEqual(noted, [{ id: "f", line: "Prompt copied, paste it into your agent", manual: null }]);
 });
+
+test("a second click while the copy is on its way adds no second note, and the prompt can be copied again later", async () => {
+  let release;
+  const slow = () => new Promise((done) => (release = () => done("copied")));
+  const failed = ended("f", "failed", "Failed: the build broke");
+  const [row] = runsNodes({ paused: null, runs: [failed] }, acts([], slow)).filter((node) => node.dataset.run);
+  const copy = button(row, "Copy prompt");
+  const first = copy.listeners.click();
+  assert.equal(copy.disabled, true, "the button waits for the copy");
+  release();
+  await first;
+  assert.equal(copy.disabled, false);
+  const again = copy.listeners.click();
+  release();
+  await again;
+  assert.equal(row.find("p").filter((p) => p.text.includes("Prompt copied")).length, 1, "the new note replaces the old one");
+  // A redraw with the note kept leaves the button usable.
+  const [redrawn] = runsNodes({ paused: null, runs: [failed] }, acts([]), { id: "f", line: "Prompt copied, paste it into your agent", manual: null }).filter((node) => node.dataset.run);
+  assert.notEqual(button(redrawn, "Copy prompt").disabled, true);
+});
+
+test("Cancel waits for the server's answer, so a second click asks nothing twice", async () => {
+  const calls = [];
+  let answer;
+  const act = { ...acts(calls), cancel: (id) => (calls.push(["cancel", id]), new Promise((done) => (answer = done))) };
+  const [row] = runsNodes({ paused: null, runs: [run("a", "running")] }, act).filter((node) => node.dataset.run);
+  const cancel = button(row, "Cancel");
+  const clicked = cancel.listeners.click();
+  assert.equal(cancel.disabled, true);
+  answer();
+  await clicked;
+  assert.equal(cancel.disabled, false, "a refused Cancel can be tried again");
+  assert.deepEqual(calls, [["cancel", "a"]]);
+});

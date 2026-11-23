@@ -1157,3 +1157,18 @@ fn a_pause_is_told_to_every_project_with_runs_and_a_pause_file_of_another_build_
     let (runner, _changes) = open(dir.path(), Arc::new(Script));
     assert!(runner.runs(PROJECT).paused.is_some());
 }
+
+#[test]
+fn cancel_of_a_run_that_ends_at_that_moment_never_fails() {
+    let bench = bench();
+    // Cancels timed around the end of a short run: whichever wins, Cancel removes the run and says nothing went wrong.
+    for round in 0..40u64 {
+        let id = bench.run("sleep 0.05");
+        bench.until(|_| bench.state(&id) == Some(RunState::Running));
+        std::thread::sleep(Duration::from_millis(35 + round));
+        assert_eq!(bench.runner.cancel(&id), Ok(()), "round {round}");
+        assert!(!bench.folder(&id).exists());
+    }
+    // Each run is recorded once, as cancelled or as it ended.
+    assert_eq!(bench.records().len(), 40);
+}
