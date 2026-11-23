@@ -67,4 +67,28 @@ fn every_entry_that_records_names_its_agent() {
     for c in agy {
         assert!(c.contains("\"__PLOTKEEPER_HOOK__\" --agent agy "), "{c}");
     }
+    let codex = commands("plugin-codex");
+    assert_eq!(codex.len(), 8);
+    for c in codex {
+        assert_eq!(c, "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent codex");
+    }
+}
+
+/// The hook records turn trees from Claude Code's event names only, so a harness whose capabilities
+/// say `turn_trees: false` gets none, though its payload is Claude-shaped (#359; spec #320, "Turn
+/// trees and pruning per harness").
+#[test]
+fn the_hook_keeps_no_turn_of_an_agent_other_than_claude() {
+    let prompt = json!({ "session_id": "s-1", "hook_event_name": "UserPromptSubmit", "cwd": "/", "turn_id": "t-1", "prompt": "go" });
+    for (agent, kept) in [("claude", true), ("codex", false), ("qwen", false)] {
+        let home = scratch(&format!("agents-turns-{agent}"));
+        let mut cmd = hook(&home);
+        cmd.args(["--agent", agent]).stdout(Stdio::null());
+        assert!(feed(cmd, &prompt).wait().unwrap().success());
+        let turn = studio_hook::event_log(&home).with_file_name("turns/s-1.json");
+        assert_eq!(turn.exists(), kept, "{agent}");
+        let text = fs::read_to_string(studio_hook::event_log(&home)).unwrap();
+        let line: Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
+        assert_eq!(line["studio_agent"], agent);
+    }
 }

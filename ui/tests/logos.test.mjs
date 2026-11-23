@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { fakeDocument } from "./dom.mjs";
 
-const { logoKey } = await import("../../dist/logos.js");
+const { logoKey, logo } = await import("../../dist/logos.js");
 const { row, rowMark, strip: stripOf, projectHead, agentRow } = await import("../../dist/list.js");
 // The document is set after the import: times.ts starts a timer when one exists at load.
 globalThis.document = fakeDocument({ visibilityState: "hidden" });
@@ -41,6 +41,25 @@ test("an agent the page does not know by name wears the generic logo, drawn with
 });
 
 const logoOf = (node) => node.find("span").find((s) => s.className === "logo");
+
+test("a recorded Codex session wears Codex's logo, titled by its name (#359)", () => {
+  const codex = { ...base, capabilities: caps("codex"), identity: { issue: null, name: "p" }, transcript: { context: null } };
+  assert.equal(logoKey(codex), "codex");
+  const drawn = logoOf(row(codex, new Map()));
+  assert.equal(drawn.getAttribute("data-logo"), "codex");
+  // Its row's title is the note on what it reports; the mark's own title names Codex, no longer as status only.
+  assert.match(drawn.title, /no context share/);
+  assert.equal(logo("codex").title, "Codex");
+});
+
+test("a recorded Qwen Code session wears Qwen's logo, titled by its name (#360)", () => {
+  const qwen = { ...base, capabilities: caps("qwen"), identity: { issue: null, name: "p" }, transcript: { context: null } };
+  assert.equal(logoKey(qwen), "qwen");
+  const drawn = logoOf(row(qwen, new Map()));
+  assert.equal(drawn.getAttribute("data-logo"), "qwen");
+  assert.match(drawn.title, /no context share/);
+  assert.equal(logo("qwen").title, "Qwen Code");
+});
 
 test("a session row in the list, Home and History shows the logo before its name; an agy row no longer shows \"agy\"", () => {
   const drawn = row(claude, new Map());

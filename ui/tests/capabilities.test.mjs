@@ -44,6 +44,16 @@ test("the header shows each session's model by its agent's mark, none for status
   assert.equal(modelLine({ ...claude, transcript: { model: "claude-opus-5-5[1m]" } }), "Claude · Opus 5.5");
 });
 
+test("a recorded Codex session's model line names Codex and the model its hooks name (#359)", () => {
+  const codex = { capabilities: caps("codex", { asks: true, permission_mode: true }), model: "gpt-5.5-codex", transcript: { context: null, model: null } };
+  assert.match(modelLine(codex), /^Codex · /);
+});
+
+test("a recorded Qwen Code session's model line names Qwen Code and the model its hooks name (#360)", () => {
+  const qwen = { capabilities: caps("qwen", { asks: true, permission_mode: true }), model: "qwen3-coder-plus", transcript: { context: null, model: null } };
+  assert.equal(modelLine(qwen), "Qwen Code · Qwen3 coder plus");
+});
+
 test("the model line takes the transcript's model by the capability flag, never by the agent's name", () => {
   // A Claude session whose capabilities say its transcript names no model shows the model on the session.
   assert.equal(modelLine({ ...claude, capabilities: { ...claude.capabilities, transcript_model: false }, model: "claude-haiku-5" }), "Claude · Haiku 5");

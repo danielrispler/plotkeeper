@@ -4,12 +4,17 @@
 use std::{fs, path::PathBuf};
 use studio_core::Studio;
 
-/// Every recorded log of the tests: Claude Code's and agy's, as the log file holds them, each line
+/// Every recorded log of the tests: Claude Code's, agy's, Codex's and Qwen Code's, as the log file holds them, each line
 /// ending in a newline.
 fn fixtures() -> Vec<(String, Vec<String>)> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let mut found = Vec::new();
-    for dir in [root.clone(), root.join("agy")] {
+    for dir in [
+        root.clone(),
+        root.join("agy"),
+        root.join("codex"),
+        root.join("qwen"),
+    ] {
         for entry in fs::read_dir(dir).unwrap() {
             let path = entry.unwrap().path();
             if path.extension().is_some_and(|e| e == "jsonl") {

@@ -8,6 +8,7 @@ mod cards;
 mod check_feed;
 mod clear;
 mod close_rename;
+mod codex;
 mod common;
 mod decisions;
 mod ending;
@@ -24,6 +25,7 @@ mod notices;
 mod phases;
 mod prompt_name;
 mod questions;
+mod qwen;
 mod replay;
 mod restart;
 #[path = "../../scripts/wire/samples.rs"]

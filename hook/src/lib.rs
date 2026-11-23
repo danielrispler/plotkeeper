@@ -176,8 +176,8 @@ pub struct Pruned {
     pub lightened: usize,
 }
 
-/// What a prune reads of a line: its session, Claude Code's or agy's, the agent its hook entry
-/// named, and when it was received.
+/// What a prune reads of a line: its session, by `session_id` (Claude Code's, Codex's and Qwen Code's) or agy's
+/// `conversationId`, the agent its hook entry named, and when it was received.
 #[derive(Default, serde::Deserialize)]
 struct Stamp {
     session_id: Option<String>,
@@ -198,7 +198,7 @@ impl Stamp {
         let (claude, agy) = (self.session_id.as_deref(), self.conversation_id.as_deref());
         match self.studio_agent.as_deref() {
             Some("agy") => agy,
-            Some("claude") => claude,
+            Some("claude" | "codex" | "qwen") => claude,
             _ => claude.or(agy),
         }
     }
@@ -662,6 +662,11 @@ pub fn trees(
     use serde_json::{Map, Value, json};
     use std::io::{Seek, Write};
     let text = |key: &str| event.get(key).and_then(Value::as_str);
+    // Only Claude Code's turns are mapped here: a line another agent's entry named records none, as
+    // its capabilities' `turn_trees: false` says, though its payload may be Claude-shaped (#359).
+    if text("studio_agent").is_some_and(|agent| agent != "claude") {
+        return Ok(());
+    }
     let name = text("hook_event_name").unwrap_or_default();
     let idle = name == "Notification" && text("notification_type") == Some("idle_prompt")
         || name == INTERRUPTED;
