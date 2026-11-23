@@ -6,9 +6,9 @@ import { tauri } from "./dom.mjs";
 
 const calls = [];
 tauri(calls);
-const { dismissReview, localDay, logStop, onHome, reviewOf, reviewWords, unused } = await import("../../dist/stop-rules.js");
+const { dismissReview, localDay, logStop, reviewOf, reviewWords, unused } = await import("../../dist/stop-rules.js");
 
-const facts = (extra = {}) => ({ active_days: 14, merged_prs: 20, map_days: 0, mark_days: 0, map_on_mark_days: 0, scrubs: 0, proofs: 0, knows: 0, dismissed: false, briefs_offered: 0, briefs_opened: 0, chapters_done: 0, ...extra });
+const facts = (extra = {}) => ({ active_days: 14, merged_prs: 20, engaged_days: 0, scrubs: 0, proofs: 0, knows: 0, dismissed: false, briefs_offered: 0, briefs_opened: 0, chapters_done: 0, ...extra });
 
 test("the review waits for both 14 active days and 20 merged PRs, whichever comes last", () => {
   assert.deepEqual(unused(facts()), ["map", "history", "proof"]);
@@ -18,33 +18,27 @@ test("the review waits for both 14 active days and 20 merged PRs, whichever come
   assert.equal(unused(facts({ active_days: 13, merged_prs: 90 })), null);
 });
 
-test("the Map view passes with 4 days of opens, or with opens on a fifth of the days Home's mark was seen", () => {
-  assert.ok(unused(facts({ map_days: 3 })).includes("map"));
-  assert.ok(!unused(facts({ map_days: 4 })).includes("map"));
-  assert.ok(!unused(facts({ map_days: 1, mark_days: 5, map_on_mark_days: 1 })).includes("map"));
-  assert.ok(unused(facts({ map_days: 1, mark_days: 6, map_on_mark_days: 1 })).includes("map"));
-  assert.ok(unused(facts({ map_days: 0, mark_days: 0, map_on_mark_days: 0 })).includes("map"));
+test("the Map view passes at 4 engaged days in the window, and a day it was only open on does not count", () => {
+  assert.ok(unused(facts({ engaged_days: 3 })).includes("map"));
+  assert.ok(!unused(facts({ engaged_days: 4 })).includes("map"));
+  assert.ok(!unused(facts({ engaged_days: 9 })).includes("map"));
+  // Open on every active day of the window with no entered action: no engaged day.
+  assert.ok(unused(facts({ active_days: 14, engaged_days: 0 })).includes("map"));
 });
 
 test("the history strip needs 2 scrubs and the proof drawers 2 opens", () => {
-  assert.deepEqual(unused(facts({ map_days: 4, scrubs: 1, proofs: 2 })), ["history"]);
-  assert.deepEqual(unused(facts({ map_days: 4, scrubs: 2, proofs: 1 })), ["proof"]);
+  assert.deepEqual(unused(facts({ engaged_days: 4, scrubs: 1, proofs: 2 })), ["history"]);
+  assert.deepEqual(unused(facts({ engaged_days: 4, scrubs: 2, proofs: 1 })), ["proof"]);
 });
 
 test("nothing is listed when every module passed, and \"I know this\" has no threshold", () => {
-  assert.equal(unused(facts({ map_days: 4, scrubs: 2, proofs: 2 })).length, 0);
-  assert.equal(unused(facts({ map_days: 4, scrubs: 2, proofs: 2, knows: 0 })).includes("know"), false);
+  assert.equal(unused(facts({ engaged_days: 4, scrubs: 2, proofs: 2 })).length, 0);
+  assert.equal(unused(facts({ engaged_days: 4, scrubs: 2, proofs: 2, knows: 0 })).includes("know"), false);
 });
 
 test("a dismissed review is not shown again while the logging goes on", () => {
   assert.equal(unused(facts({ dismissed: true })), null);
   assert.equal(unused(facts({ dismissed: true, scrubs: 50 })), null);
-});
-
-test("Home shows the review only for a project whose Map view missed its threshold", () => {
-  const found = { "/a": ["history"], "/b": ["map", "proof"], "/c": null, "/d": [] };
-  assert.deepEqual(onHome(found), ["/b"]);
-  assert.deepEqual(onHome({ "/a": ["history"] }), []);
 });
 
 test("the words name the modules and carry no number", () => {
@@ -66,23 +60,25 @@ test("a day-counting event is told once a day per project, and a use every time"
   logStop("map-open", "/a");
   logStop("map-open", "/a");
   logStop("map-open", "/b");
+  logStop("map-action", "/a");
+  logStop("map-action", "/a");
   logStop("scrub", "/a");
   logStop("scrub", "/a");
   const sent = calls.map(([command, args]) => `${command} ${args.kind} ${args.project}`);
-  assert.deepEqual(sent, ["stop_log map-open /a", "stop_log map-open /b", "stop_log scrub /a", "stop_log scrub /a"]);
+  assert.deepEqual(sent, ["stop_log map-open /a", "stop_log map-open /b", "stop_log map-action /a", "stop_log scrub /a", "stop_log scrub /a"]);
   assert.ok(calls.every(([, args]) => args.day === localDay()));
 });
 
 test("the review is read from the shell's counts, and a dismissal tells it every project", async () => {
   calls.length = 0;
-  tauri(calls, () => facts({ map_days: 4, scrubs: 2 }));
+  tauri(calls, () => facts({ engaged_days: 4, scrubs: 2 }));
   assert.deepEqual(await reviewOf("/a"), ["proof"]);
   await dismissReview(["/a", "/b"]);
   assert.deepEqual(calls.at(-1)[1].projects, ["/a", "/b"]);
 });
 
 test("PR briefs are listed when opened for under a quarter of the merged PRs that had one", () => {
-  const passed = { map_days: 4, scrubs: 2, proofs: 2 };
+  const passed = { engaged_days: 4, scrubs: 2, proofs: 2 };
   assert.deepEqual(unused(facts({ ...passed, briefs_offered: 8, briefs_opened: 1 })), ["briefs"]);
   assert.deepEqual(unused(facts({ ...passed, briefs_offered: 8, briefs_opened: 2 })), []);
   assert.deepEqual(unused(facts({ ...passed, briefs_offered: 3, briefs_opened: 0 })), ["briefs"]);
@@ -93,7 +89,7 @@ test("PR briefs are listed when opened for under a quarter of the merged PRs tha
 });
 
 test("the review notes when \"I know this\" cleared more fog than finished chapters, only where briefs exist", () => {
-  const passed = { map_days: 4, scrubs: 2, proofs: 2, briefs_offered: 4, briefs_opened: 4 };
+  const passed = { engaged_days: 4, scrubs: 2, proofs: 2, briefs_offered: 4, briefs_opened: 4 };
   assert.deepEqual(unused(facts({ ...passed, knows: 5, chapters_done: 2 })), ["skips"]);
   assert.deepEqual(unused(facts({ ...passed, knows: 2, chapters_done: 2 })), []);
   assert.deepEqual(unused(facts({ ...passed, knows: 5, chapters_done: 2, briefs_opened: 0 })), ["briefs", "skips"]);

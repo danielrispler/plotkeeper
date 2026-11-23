@@ -3,18 +3,14 @@
 // empty. Needs you is the only colour. `drawHome` draws it, patched by key so focus survives updates.
 
 import { age, failure, fullTitle, invoke, patch, pressable, text } from "./dom.js";
-import { childrenOf, deleting, glyph, item, row, secondLine, selecting, sessionName, showsLanded, status } from "./list.js";
+import { childrenOf, deleting, glyph, item, landedClear, landedToClear, row, secondLine, selecting, sessionName, showsLanded, status } from "./list.js";
 import { logo, logoKey } from "./logos.js";
 import { lastSegment, sessionProjectName } from "./projects.js";
 import { lastHeadline } from "./story.js";
 import { counts } from "./times.js";
 import { homeShown, redrawHome } from "./panes.js";
-import { hideClearToast, showClearToast } from "./toast.js";
 import { studio } from "./state.js";
-import { mapShown, openMap } from "./map.js";
-import { watchSeen } from "./seen.js";
-import { homeSeen } from "./layout.js";
-import { logStop, onHome, reviewNode, reviewOf, type Module } from "./stop-rules.js";
+import { openMap } from "./map.js";
 import type { Session } from "./types.js";
 
 export type HomeKey = "needs_you" | "running" | "unseen" | "landed" | "projects";
@@ -25,7 +21,13 @@ export type HomePart = { key: HomeKey; title: string; colour: boolean; rows: Hom
 // The window's Home state: the groups Daniel expanded, kept until Home is left.
 // `cleared` is the rows Clear hides, the one set `landedClear` keeps; leaving Home does not reset it.
 export type HomeState = { expanded: Set<string>; cleared: Set<string> };
-export const homeState: HomeState = { expanded: new Set(), cleared: new Set() };
+// `cleared` is read when drawn, as home.js and list.js import each other.
+export const homeState: HomeState = {
+  expanded: new Set(),
+  get cleared() {
+    return landedClear.hidden;
+  },
+};
 export function resetHome(state: HomeState = homeState) {
   state.expanded.clear();
 }
@@ -69,101 +71,8 @@ export function homeView(sessions: Session[], projects: string[], state: HomeSta
   return parts.filter((p) => p.rows.length || p.projects.length);
 }
 
-// Clear landed (#244): Clear hides every landed row and offers Undo for CLEAR_WINDOW_MS. When the window closes each hidden session
-// that is still landed goes through today's Delete (`commit`); Undo commits nothing. `changed` hears the sessions still pending.
-export type Clock = { set(run: () => void, ms: number): unknown; clear(id: unknown): void };
-export const CLEAR_WINDOW_MS = 8000;
-export function clearing(
-  time: Clock,
-  deps: { landed(id: string): Session | undefined; commit(session: Session): Promise<unknown> | void; changed(pending: Session[], writing: Session[]): void },
-  hidden = new Set<string>(),
-) {
-  const pending = new Map<string, Session>();
-  // The sessions whose delete is in flight: the shell still hears them, so a quit before the write commits them (#244).
-  const writing = new Map<string, Session>();
-  let timer: unknown = null;
-  const stop = () => {
-    if (timer !== null) time.clear(timer);
-    timer = null;
-  };
-  const tell = () => deps.changed([...pending.values()], [...writing.values()]);
-  return {
-    // The rows Clear hides: those pending and those committed, until they leave the list.
-    hidden,
-    clear(sessions: Session[]) {
-      for (const s of sessions) {
-        pending.set(s.id, s);
-        hidden.add(s.id);
-      }
-      stop();
-      timer = time.set(() => {
-        timer = null;
-        const due = [...pending.keys()].map((id) => ({ id, session: deps.landed(id) }));
-        pending.clear();
-        for (const { id, session } of due) if (session) writing.set(id, session);
-        tell();
-        for (const { id, session } of due) {
-          if (!session) hidden.delete(id);
-          else
-            void Promise.resolve(deps.commit(session)).then(
-              () => {
-                writing.delete(id);
-                tell();
-              },
-              // A row whose Delete failed comes back.
-              () => {
-                writing.delete(id);
-                hidden.delete(id);
-                tell();
-              },
-            );
-        }
-      }, CLEAR_WINDOW_MS);
-      tell();
-    },
-    undo() {
-      stop();
-      for (const id of pending.keys()) hidden.delete(id);
-      pending.clear();
-      tell();
-    },
-    // A session that left the list, or stopped being landed, is no longer hidden; one still pending is left alone: it comes back and is
-    // not committed.
-    sync() {
-      let dropped = false;
-      for (const id of [...hidden]) {
-        if (deps.landed(id)) continue;
-        hidden.delete(id);
-        dropped = pending.delete(id) || dropped;
-        dropped = writing.delete(id) || dropped;
-      }
-      if (!dropped) return;
-      if (pending.size === 0) stop();
-      tell();
-    },
-  };
-}
-
-// The page's one Clear: its hidden rows are `homeState.cleared`, and the toast offers Undo. A commit is today's Delete: the row
-// dropped, the cards kept.
-const stillLanded = (id: string) => studio.listed.find((s) => s.id === id && showsLanded(s.state, s.landed));
-export const landedClear = clearing(
-  { set: (run, ms) => setTimeout(run, ms), clear: (id) => clearTimeout(id as number) },
-  {
-    landed: stillLanded,
-    commit: (session) =>
-      invoke("delete_session", { id: session.id }).catch((e) => {
-        failure("delete_session", "error")(e);
-        throw e;
-      }),
-    changed: (pending, writing) => {
-      if (pending.length) showClearToast(pending.length, () => landedClear.undo());
-      else hideClearToast();
-      redrawHome();
-    },
-  },
-  homeState.cleared,
-);
+// Clear landed (#244) lives with the list (#382), which shows it at its end; Home's Clear is the same one.
+export { clearing, CLEAR_WINDOW_MS, landedClear, type Clock } from "./list.js";
 
 // `fogged`: a part of its map that Daniel tracks as Core shows fog (#310); Home marks the row quietly, with no count.
 // What the project's quiet dot says on hover: it lights for fog on a Core part, a broken law or a PR brief waiting (#344).
@@ -188,25 +97,11 @@ if (typeof window !== "undefined") window.addEventListener?.("focus", () => onWi
 async function readMarks(paths: string[], redraw: () => void) {
   marksStale = false;
   const now = await invoke("map_marks", { projects: paths });
-  const review = await readReviews(paths);
   const same = now.length === marked.size && now.every((path) => marked.has(path));
-  if (same && !review) return;
+  if (same) return;
   marked.clear();
   now.forEach((path) => marked.add(path));
   redraw();
-}
-
-// The one-time review on Home (#314): only for the projects whose Map view fell below its threshold, so an unused map still reaches
-// Daniel. It lists that project's unused modules, never a count. Read with the marks, when Home is entered and on focus.
-let homeReview: { modules: Module[]; projects: string[] } | null = null;
-async function readReviews(paths: string[]): Promise<boolean> {
-  const found: Record<string, Module[] | null> = {};
-  await Promise.all(paths.map(async (path) => void (found[path] = await reviewOf(path).catch(() => null))));
-  const projects = onHome(found);
-  const next = projects.length ? { modules: found[projects[0]]!, projects } : null;
-  const changed = JSON.stringify(next) !== JSON.stringify(homeReview);
-  homeReview = next;
-  return changed;
 }
 
 // Whether a click on `target`, inside the session list, is on its empty space: not on a row, a group
@@ -253,29 +148,6 @@ function moreRow(key: HomeKey, count: number, redraw: () => void): HTMLElement {
   return button;
 }
 
-// Each project mark's watch, and the node it watches: a redraw that keeps the node keeps its watch, one that drops it stops it.
-const marksSeen = new Map<string, { node: Element; stop: () => void }>();
-
-// Watches `node`, the mark of `path` as it is in the DOM now (null: the project has no mark); the mark counts as seen when it is in view
-// in a focused window with Home open (the shared Seen), and a day is logged once.
-export function watchMark(path: string, node: Element | null) {
-  const had = marksSeen.get(path);
-  if (had && had.node === node) return;
-  had?.stop();
-  marksSeen.delete(path);
-  if (!node) return;
-  // Once seen, the entry goes: the next redraw watches the same node again, and `logStop` sends one event a day per project, so a mark
-  // still in view on a later day is logged while Studio stays open.
-  const stop = watchSeen(node, {
-    active: () => homeSeen(homeShown(), mapShown()),
-    onSeen: () => {
-      if (marksSeen.get(path)?.stop === stop) marksSeen.delete(path);
-      logStop("mark-seen", path);
-    },
-  });
-  marksSeen.set(path, { node, stop });
-}
-
 function projectRow({ name, path, fogged }: HomeProject): HTMLElement {
   const button = pressable(document.createElement("button"), false, () => openMap(path));
   button.dataset.key = `project ${path}`;
@@ -312,7 +184,7 @@ export function drawHome(box: HTMLElement, sessions: Session[], projects: string
     if (key !== "h landed") return node;
     const clear = text("button", "Clear", "btn quiet small clear");
     clear.title = "Clear every landed session; Undo for a few seconds";
-    clear.addEventListener("click", () => landedClear.clear(studio.listed.filter((s) => showsLanded(s.state, s.landed) && !landedClear.hidden.has(s.id))));
+    clear.addEventListener("click", () => landedClear.clear(landedToClear(studio.listed, landedClear.hidden)));
     node.append(clear);
     return node;
   };
@@ -326,14 +198,5 @@ export function drawHome(box: HTMLElement, sessions: Session[], projects: string
     keyed(text("h1", new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" }), "title"), "title"),
     ...(parts.some((p) => p.key === "needs_you") ? [] : [keyed(text("p", "Nothing needs you", "empty"), "none")]),
     ...parts.flatMap(drawPart),
-    ...(homeReview
-      ? [keyed(reviewNode(homeReview.modules, homeReview.projects, () => {
-          homeReview = null;
-          redraw();
-        }), "review")]
-      : []),
   ]);
-  // The marks that patch left in the DOM, not the ones just built and discarded.
-  const rows = new Map([...box.children].map((child) => [(child as HTMLElement).dataset.key, child]));
-  for (const path of new Set([...marksSeen.keys(), ...marked])) watchMark(path, rows.get(`project ${path}`)?.querySelector(".fog-mark") ?? null);
 }

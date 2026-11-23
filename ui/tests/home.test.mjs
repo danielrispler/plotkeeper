@@ -2,7 +2,6 @@
 // its ways in. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Field, fakeDocument, tauri } from "./dom.mjs";
 import { homeView, markTitle } from "../../dist/home.js";
 import { initial } from "../../dist/settings.js";
 import { windowBinding } from "../../dist/keys.js";
@@ -135,33 +134,7 @@ test("the newest request wins: a slower, older reply is dropped", async () => {
   assert.deepEqual([await a, await b], [undefined, "newer"]);
 });
 
-test("a project's mark keeps its one watch while a redraw keeps its node, and a new node takes the watch over", async () => {
-  const watchers = [];
-  globalThis.IntersectionObserver = class {
-    constructor() {
-      this.live = true;
-      watchers.push(this);
-    }
-    observe() {}
-    disconnect() {
-      this.live = false;
-    }
-  };
-  globalThis.document = fakeDocument({ visibilityState: "visible", hasFocus: () => true }, Field);
-  tauri([]);
-  const { watchMark } = await import("../../dist/home.js");
-  const [a, b] = [new Field("span"), new Field("span")];
-  watchMark("/w/p", a);
-  watchMark("/w/p", a);
-  assert.equal(watchers.length, 1, "the same node keeps its watch");
-  watchMark("/w/p", b);
-  assert.equal(watchers.length, 2);
-  assert.deepEqual(watchers.map((w) => w.live), [false, true], "the node that left the DOM is no longer watched");
-  watchMark("/w/p", null);
-  assert.equal(watchers[1].live, false, "a project with no mark has no watch");
-});
-
-test("the window gaining focus draws Home again, which reads the marks and the review; another view is left alone", async () => {
+test("the window gaining focus draws Home again, which reads the marks; another view is left alone", async () => {
   const { onWindowFocus } = await import("../../dist/home.js");
   let draws = 0;
   onWindowFocus(false, () => draws++);
@@ -286,33 +259,6 @@ test("Home hides the cleared rows, and shows the Landed part again after Undo", 
   assert.deepEqual(keys(view(sessions, hidden)), []);
   assert.deepEqual(sessionIds(view(sessions, { expanded: new Set(), cleared: new Set(["a"]) })[0]), ["b"]);
   assert.deepEqual(sessionIds(view(sessions, { expanded: new Set(), cleared: new Set() })[0]), ["a", "b"]);
-});
-
-test("a mark that was seen is watched again by the next redraw, so a later day is logged while Studio stays open", async () => {
-  const observers = [];
-  globalThis.IntersectionObserver = class {
-    constructor(run) {
-      this.run = run;
-      observers.push(this);
-    }
-    observe() {}
-    disconnect() {}
-  };
-  globalThis.document = fakeDocument({ visibilityState: "visible", hasFocus: () => true }, Field);
-  globalThis.window = { ...globalThis.window, innerWidth: 100, innerHeight: 100 };
-  const { watchMark } = await import("../../dist/home.js");
-  const { showHome, homeShown } = await import("../../dist/panes.js");
-  tauri([]);
-  // `show` records Home as the view shown before it draws; the rest of drawing Home is not what this test reads.
-  await Promise.resolve(showHome()).catch(() => {});
-  assert.equal(homeShown(), true);
-  const node = new Field("span");
-  watchMark("/w/seen", node);
-  observers[0].run([{ intersectionRatio: 1, intersectionRect: { width: 1, height: 1 }, rootBounds: { width: 100, height: 100 } }]);
-  await new Promise((done) => setTimeout(done, 650));
-  watchMark("/w/seen", node);
-  assert.equal(observers.length, 2, "the redraw that keeps the node watches it again once it fired");
-  watchMark("/w/seen", null);
 });
 
 test("a project's dot also lights for a waiting PR brief, and says so on hover", () => {

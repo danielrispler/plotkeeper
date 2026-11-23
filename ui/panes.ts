@@ -7,6 +7,7 @@ import { drawHistory } from "./history.js";
 import { drawHome, enterHome, landedClear } from "./home.js";
 import { element, failure, invoke, text } from "./dom.js";
 import { knownProjects } from "./projects.js";
+import { drawSidebar } from "./list.js";
 import { followLog, showLog, showMissing } from "./log.js";
 import { leaveMap } from "./map.js";
 import { select } from "./selection.js";
@@ -60,8 +61,9 @@ export function showHome() {
 // Whether Home is the view shown.
 export const homeShown = () => shown === HOME;
 
-// A summary was stored, or a turn ended: the Headlines of the rows may have changed.
+// A summary was stored, or a turn ended: the Headlines of the rows, Home's and the list's unseen rows (#382), may have changed.
 export function refreshHome() {
+  drawSidebar();
   if (shown !== HOME) return;
   redrawHome();
 }

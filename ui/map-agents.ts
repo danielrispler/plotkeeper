@@ -5,6 +5,7 @@
 
 import { element, failure, invoke, newest, pressable, text } from "./dom.js";
 import { currentMap, onDraw, syncSide } from "./map.js";
+import { logStop } from "./stop-rules.js";
 import type { Session } from "./types.js";
 
 // One agent on the map: a session's own, or a Worker's. `key` is the session's id, and `session/worker` for a Worker.
@@ -61,6 +62,11 @@ export function arrange(live: Live[], placed: Record<string, string[]>): { byPar
   return { byPart, notPlaced };
 }
 
+// The chips a hovered list row lights (#382): every chip of the `hovered` session, its Workers' too; none without a hover.
+export function litAgents(live: Live[], hovered: string | null): string[] {
+  return hovered === null ? [] : live.filter((agent) => agent.session === hovered).map((agent) => agent.key);
+}
+
 // What the drawing needs of the window, given by `main.ts`: the sessions, a folder's project, and the jump to a session.
 export type AgentDeps = { sessions: () => Session[]; projectOf: (cwd: string) => string | null; select: (session: string, agent: string | null) => void };
 let deps: AgentDeps;
@@ -70,14 +76,26 @@ let asked = "";
 let placed: Record<string, string[]> = {};
 const latest = newest();
 
+// The session whose list row the pointer is on (#382), whose chips are lit.
+let hovered: string | null = null;
+export function hoverAgents(session: string | null) {
+  if (session === hovered) return;
+  hovered = session;
+  paint();
+}
+
 // Hides every chip and the not placed list, or shows them again: for a view of a past commit, where nothing is live.
 export function hideAgents(hide: boolean) {
   hidden = hide;
   paint();
 }
 
-const chip = (agent: Live, select: AgentDeps["select"]) => {
-  const button = pressable(text("button", agent.needsYou ? `${agent.label} needs you` : agent.label, `agent-chip${agent.needsYou ? " needs-you" : ""}`), false, () => select(agent.session, agent.agent));
+const chip = (agent: Live, select: AgentDeps["select"], lit: string[]) => {
+  const button = pressable(text("button", agent.needsYou ? `${agent.label} needs you` : agent.label, `agent-chip${agent.needsYou ? " needs-you" : ""}${lit.includes(agent.key) ? " lit" : ""}`), false, () => {
+    const view = currentMap();
+    if (view) logStop("map-action", view.project);
+    select(agent.session, agent.agent);
+  });
   button.removeAttribute("aria-pressed");
   button.title = `${agent.label}${agent.needsYou ? " needs you" : ""}\nGo to this ${agent.agent === null ? "session" : "worker"}`;
   return button;
@@ -89,11 +107,12 @@ function paint() {
   if (!view) return;
   const live = hidden ? [] : liveAgents(deps.sessions(), (cwd) => deps.projectOf(cwd) === view.project);
   const { byPart, notPlaced } = arrange(live, placed);
+  const lit = litAgents(live, hovered);
   for (const plate of view.slots.canvas.querySelectorAll<HTMLElement>(".plate[data-id]")) {
-    plate.querySelector(".plate-chips")?.replaceChildren(...(byPart[plate.dataset.id!] ?? []).map((agent) => chip(agent, deps.select)));
+    plate.querySelector(".plate-chips")?.replaceChildren(...(byPart[plate.dataset.id!] ?? []).map((agent) => chip(agent, deps.select, lit)));
   }
   const slot = view.slots.notPlaced;
-  slot.replaceChildren(...(notPlaced.length ? [text("h3", "Not placed", "side-title"), ...notPlaced.map((agent) => chip(agent, deps.select))] : []));
+  slot.replaceChildren(...(notPlaced.length ? [text("h3", "Not placed", "side-title"), ...notPlaced.map((agent) => chip(agent, deps.select, lit))] : []));
   syncSide(view.slots);
 }
 

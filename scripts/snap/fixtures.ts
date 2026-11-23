@@ -398,9 +398,9 @@ const homeMarked = (press: boolean): Fixture => ({
       if (document.getElementById("map").hidden) return log("snap:fail the mark did not open the Map view");
     }`,
 });
-// The stop-rule review (#314): Studio has run 20 active days and merged 25 PRs, and the Map view was opened on one of them and Home's mark
-// never led to it, so the Map view fell below its threshold, and so did the history strip and "See the proof".
-const dueFacts = { active_days: 20, merged_prs: 25, map_days: 1, mark_days: 5, map_on_mark_days: 0, scrubs: 0, proofs: 0, knows: 0, dismissed: false, briefs_offered: 0, briefs_opened: 0, chapters_done: 0 };
+// The stop-rule review (#314, #384): Studio has run 20 active days and merged 25 PRs, and the Map view was engaged with on one of them, so
+// the Map view fell below its threshold, and so did the history strip and "See the proof".
+const dueFacts = { active_days: 20, merged_prs: 25, engaged_days: 1, scrubs: 0, proofs: 0, knows: 0, dismissed: false, briefs_offered: 0, briefs_opened: 0, chapters_done: 0 };
 // Home's dot for a waiting PR brief (#344): no fog and no broken law, but a ready PR has a brief stored, so the shell's marks name the project.
 const homeBriefWaiting = (): Fixture => ({
   ...(fixtures as Record<string, () => Fixture>).home(),
@@ -413,16 +413,15 @@ const homeBriefWaiting = (): Fixture => ({
     if (marks[0].textContent !== "" || !marks[0].title.includes("PR brief")) log("snap:fail the mark has a count or does not name the brief");
     log("home brief dot ok");`,
 });
-const homeReviewed = (): Fixture => ({
+// The review shows on the map only (#384): Home shows none, even while the Map view is below its threshold.
+const homeNoReview = (): Fixture => ({
   ...(fixtures as Record<string, () => Fixture>).home(),
   map_marks: ["/w/plotkeeper"],
   stop_facts: dueFacts,
   snapScript: `
     await new Promise((done) => setTimeout(done, 400));
-    const review = document.querySelector(".pane.home .review");
-    if (!review) return log("snap:fail Home shows no review");
-    if (!review.textContent.includes("Little used so far")) log("snap:fail the review's words: " + review.textContent);
-    log("review ok");`,
+    if (document.querySelector(".pane.home .review")) return log("snap:fail Home shows the review");
+    log("no review ok");`,
 });
 const mapOpened = (check: string, extra: Fixture = {}): Fixture => ({
   ...list(),
@@ -604,6 +603,62 @@ const mapScrubbed = (): Fixture => {
   return { ...f, sessions: busySessions(), selected: { session: busySessions()[6], agent: null } };
 };
 
+// The session list holding what Home held (#382): second lines on needs-you (its question), running (its Intention) and unseen (its last
+// Headline) rows only, and "Clear landed" at the list's end while a session has landed.
+const listLines = (): Fixture => {
+  const now = Date.now();
+  const intention = (text: string) => ({ ...session("x", "x", "idle").transcript, intention: text });
+  const sessions = [
+    session("s1", "Ship PR 286", "needs_you", {
+      cwd: "/w/plotkeeper", line: "Bash gh pr merge 286",
+      questions: [{ tool_use_id: "q1", agent: null, answer: "open", turn: null, questions: [{ question: "Merge PR 286 now, or wait for the snap job?", options: [] }] }],
+    }),
+    session("s2", "Correctness pass, #285", "running", { cwd: "/w/plotkeeper", line: "Read ui/list.ts", transcript: intention("Checking each claim in the brief against the code it cites.") }),
+    session("s3", "Snap fails in Chrome, #282", "running", { cwd: "/w/plotkeeper", line: "Bash npm run snap", transcript: intention("Printing Chrome's own error to the snap log so a failure says why.") }),
+    session("s4", "Stored fixtures, #280", "your_turn", {
+      cwd: "/w/plotkeeper", unseen: true,
+      turns: [{ started_at: now - 40 * 60e3, ended_at: now - 22 * 60e3, prompt: "Load the older briefs", id: null, message: "Older stored briefs load again; the reader accepts both shapes.", checks: [], listed: [], files: null }],
+    }),
+    session("s5", "Archive the Tauri app, #332", "your_turn", { cwd: "/w/plotkeeper", landed: true }),
+    session("s6", "Strava-style running tracker", "your_turn", { cwd: "/w/timburr", line: "Done." }),
+    session("s7", "Night Out Mode", "running", { cwd: "/w/fluffy", line: "Edit probe.ts", transcript: intention("Building the probe for the venue list.") }),
+    session("s8", "#48 · Agent deadline", "ended", { cwd: "/w/plotkeeper", landed: true }),
+  ];
+  return { ...base, sessions, selected: null };
+};
+const listChecks = `
+      const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+      const line = (id) => document.querySelector('#groups .session-row[data-key="' + id + ' "] .l2')?.textContent ?? null;
+      const want = { s1: "Merge PR 286 now, or wait for the snap job?", s2: "Checking each claim in the brief against the code it cites.", s4: "Older stored briefs load again; the reader accepts both shapes.", s5: null, s6: null };
+      for (const [id, text] of Object.entries(want)) if (line(id) !== text) log("snap:fail " + id + "'s second line: " + line(id));
+      const second = document.querySelector('#groups .session-row[data-key="s2 "] .l2');
+      if (getComputedStyle(second).fontSize !== "11.5px" || getComputedStyle(second.querySelector(".row-step")).textOverflow !== "ellipsis") log("snap:fail a second line is not 11.5px cut with an ellipsis");
+      if (getComputedStyle(document.querySelector("#groups .logo")).width !== "12px") log("snap:fail the list's logo is not 12px");
+      const clear = () => document.querySelector(".list .clear-landed");`;
+const listSecondLines = (): Fixture => ({
+  ...listLines(),
+  snapScript: `${listChecks}
+      if (!clear() || clear().textContent !== "Clear landed") log("snap:fail no Clear landed at the list's end");
+      if (clear() && getComputedStyle(clear()).color !== "rgb(111, 108, 102)") log("snap:fail Clear landed is not faint: " + getComputedStyle(clear()).color);`,
+});
+// Clear landed pressed: the landed row is hidden, the toast offers Undo, and Undo brings it back; pressed again for the screenshot.
+const listClearLanded = (): Fixture => ({
+  ...listLines(),
+  snapScript: `${listChecks}
+      clear().click();
+      await wait(100);
+      if (line("s5") !== null || document.querySelector('#groups .session-row[data-key="s5 "]')) log("snap:fail the landed row is still shown after Clear landed");
+      if (clear()) log("snap:fail Clear landed shows with nothing landed left");
+      const toast = document.getElementById("clear-toast");
+      if (toast.hidden || !/Cleared 2 landed/.test(toast.textContent) || !/Undo/.test(toast.textContent)) log("snap:fail the toast: " + toast.textContent);
+      toast.querySelector("button").click();
+      await wait(100);
+      if (!document.querySelector('#groups .session-row[data-key="s5 "]') || !clear()) log("snap:fail Undo did not bring the landed row back");
+      clear().click();
+      await wait(100);
+      log("cleared ok");`,
+});
+
 export const fixtures = {
   ...railFixtures,
   mapTray,
@@ -632,6 +687,8 @@ export const fixtures = {
   logRunning: () => logFixture("running"),
   logDone: () => logFixture("completed"),
   list,
+  listSecondLines,
+  listClearLanded,
   // The palette open (#220), so the hover check reaches its rows.
   paletteOpen() {
     const snapScript = `document.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyP", key: "P", metaKey: true, shiftKey: true, bubbles: true }));
@@ -841,6 +898,29 @@ export const fixtures = {
   // The Map view busy (#311): a session on two parts, a Needs you one, a Worker with its own chip, and the not placed list (no files yet,
   // agy, status-only Codex, ignored-only edits); a Helper and a finished session never show.
   mapBusy: () => mapBusy(false),
+  // A list row hovered lights its session's chips on the map (#382): #311's on Core and Window, and its Worker's on the Shell.
+  mapListHover: (): Fixture => {
+    const f = mapBusy(false);
+    return {
+      ...f,
+      snapScript: `${f.snapScript}
+      const lit = () => [...document.querySelectorAll("#map .agent-chip.lit")].map((c) => c.closest(".plate").dataset.id + ":" + c.textContent).sort().join();
+      if (lit() !== "") log("snap:fail chips are lit before a hover: " + lit());
+      const row = document.querySelector('#groups .session-row[data-key="s1 "]');
+      row.dispatchEvent(new PointerEvent("pointerenter"));
+      await wait(100);
+      if (lit() !== "core:#311 · Live agents,shell:Map chips,window:#311 · Live agents") log("snap:fail the hovered row's chips: " + lit());
+      row.dispatchEvent(new PointerEvent("pointerleave"));
+      await wait(100);
+      if (lit() !== "") log("snap:fail chips stay lit after the pointer left: " + lit());
+      document.querySelector('#groups .session-row[data-key="s2 "]').dispatchEvent(new PointerEvent("pointerenter"));
+      await wait(100);
+      if (lit() !== "hook:Ship PR 286 needs you") log("snap:fail the needs-you row's chip: " + lit());
+      row.dispatchEvent(new PointerEvent("pointerenter"));
+      await wait(100);
+      log("lit: " + lit());`,
+    };
+  },
   mapChipJump: () => mapBusy(true),
   // CI on the default branch broke a law (#312): the red mark on the shell next to a Needs you chip; then with "See the proof" open, and
   // with the broken-law drill-down open.
@@ -857,8 +937,8 @@ export const fixtures = {
       if (!review.textContent.includes("Little used so far: the Map view, the history strip and See the proof")) log("snap:fail the review's words: " + review.textContent);
       if (/\\d/.test(review.querySelector(".review-text").textContent)) log("snap:fail the review shows a count");
       log("review ok");`, { map_state: mapState(), stop_facts: dueFacts }),
-  // The same review on Home, when the Map view itself fell below its threshold (#314).
-  homeReview: homeReviewed,
+  // No review on Home, even when the Map view fell below its threshold (#384).
+  homeNoReview,
   // No map on the default branch: the empty state shows the drafting prompt to give to a session.
   mapEmpty: () =>
     mapOpened(`
