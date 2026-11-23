@@ -13,9 +13,8 @@ const session = (id, state = "running", questions = []) => ({
 const asking = (id, text) =>
   session(id, "needs_you", [{ tool_use_id: "t", agent: null, answer: "open", questions: [{ question: text, options: [] }] }]);
 
-test("the toast shows in focus mode and while the rail is an overlay, never beside the rail", () => {
+test("the toast shows in focus mode, where the list is folded, never beside the list or its strip (#386)", () => {
   assert.equal(toastShows("focus"), true);
-  assert.equal(toastShows("overlay"), true);
   assert.equal(toastShows("full"), false);
   assert.equal(toastShows("strip"), false);
 });

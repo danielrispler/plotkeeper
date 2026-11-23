@@ -449,6 +449,9 @@ export type CommitFiles = { commit: string; short: string; label: string; url: s
 
 // A project of the saved list (`server/src/projects.rs`): its main checkout, and whether its folder was moved or deleted.
 export type SavedProject = { path: string; gone: boolean };
+// Why a project header's quiet dot lights (`map.rs`, #386): fog on a Core part, a broken law, a PR brief waiting.
+export type MarkWhy = "fog" | "broken" | "brief";
+export type ProjectMark = { project: string; why: MarkWhy[] };
 
 // The writer section (spec #320): the writers the login shell's `command -v` finds (`understanding/src/writer.rs`), whether
 // summaries are on (off until a writer passes Test for a user who arrived with none) and whether PR briefs can be written,
@@ -489,7 +492,7 @@ export interface Commands {
   map_history: HistoryEntry[];
   map_at: HistoricalMap;
   map_commit: CommitFiles;
-  map_marks: string[];
+  map_marks: ProjectMark[];
   stop_log: null;
   stop_facts: StopFacts;
   stop_dismiss: null;

@@ -37,32 +37,17 @@ code:empty { display: none; }
 .btn.small { font-size: var(--size-small); padding: var(--sp-1) var(--sp-4); color: var(--muted); }
 .btn.small:hover:not(:disabled) { color: var(--fg); }
 
-/* The window: a grid laid right to left, so the list is on the right, the terminal in the centre and
-   the rail on the left; each region lays itself out left to right. */
-.app { direction: rtl; display: grid; grid-template-rows: var(--bar) 1fr; grid-template-columns: var(--list) 1fr var(--rail);
-       height: 100vh; }
+/* The window (#386), Treatment C's frame: a 34 px top bar over a grid of the map and the session list, laid right to left so the list is on
+   the right; each region lays itself out left to right. The list and the map are told apart by tone and the map's rounded corner, never a line. */
+.app { direction: rtl; display: grid; grid-template-rows: var(--bar) 1fr; grid-template-columns: var(--list) 1fr; height: 100vh; }
 .app > * { direction: ltr; min-height: 0; min-width: 0; }
-body[data-layout="strip"] .app { grid-template-columns: var(--strip) 1fr var(--rail); }
-body[data-layout="overlay"] .app { grid-template-columns: var(--strip) 1fr 0; }
-/* Focus mode (danielrispler/Falinks#573): the list and the rail fold, still in the grid, and the terminal takes the window. */
-body[data-layout="focus"] .app { grid-template-columns: 0 1fr 0; }
-body[data-layout="focus"] .list, body[data-layout="focus"] .app > .rail { visibility: hidden; }
+/* Focus mode (danielrispler/Falinks#573): the list folds, still in the grid, and the map takes the window. */
+body[data-layout="focus"] .list { visibility: hidden; }
 
-/* The dividers on the list's and the rail's inner edges; each shows only while its column is in the grid. */
-.divider { position: fixed; top: var(--bar); bottom: 0; width: var(--divider); cursor: col-resize; z-index: 4; touch-action: none;
-           transition: background-color var(--motion); }
-.divider:hover, .divider.dragging { background: var(--edge); }
-#list-divider { right: calc(var(--list) - var(--divider) / 2); }
-#rail-divider { left: calc(var(--rail) - var(--divider) / 2); }
-body:not([data-layout="full"]) #list-divider, body[data-layout="overlay"] #rail-divider,
-body[data-layout="focus"] #rail-divider { display: none; }
-
-/* The top bar: new session and usage. The native title bar is hidden (danielrispler/Falinks#566), so the bar is where the
-   window drags, and its start keeps room for the traffic lights. */
-.top { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--sp-5); padding: 0 var(--sp-5) 0 var(--lights);
+/* The top bar (#386): the shown project's name, then the Needs you chip and the gear at its end. A browser tab has no traffic lights. */
+.top { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--sp-5); padding: 0 var(--sp-5) 0 var(--sp-6);
        white-space: nowrap; overflow: hidden; }
-/* The Git line: the workspace's name, then its tokens (#29). */
-/* The usage popover (danielrispler/plotkeeper#163): one tile per agent, under the bar at its right. */
+.bar-project { font-size: var(--size-small); font-weight: 600; color: var(--fg); overflow: hidden; text-overflow: ellipsis; }
 /* The top bar's items show whole or sit in the "⋯" menu, so none shrinks (danielrispler/plotkeeper#127, bar.ts). The spacer takes the rest. */
 .top > :not(.sp):not(.menu) { flex: none; }
 .top .sp { flex: 1; }
@@ -79,25 +64,9 @@ body[data-layout="focus"] #rail-divider { display: none; }
 .writer-key { display: flex; gap: var(--sp-3); }
 .writer-key input { flex: 1; min-width: 0; font: inherit; font-size: var(--size-small); color: var(--fg); background: var(--raised); border: var(--hair) solid var(--edge); border-radius: var(--radius-small); padding: var(--sp-1) var(--sp-3); }
 .writer-outcome.passed, .writer-outcome.failed, .writer-briefs { color: var(--fg); }
-/* The settings gear (#194): icon only, the bar's last item. */
-/* The session's header: its state dot, state and name; the name is the one part that gives way, past a fixed length. */
-.session-header { display: flex; align-items: center; gap: var(--sp-3); font: inherit; font-size: var(--size-small); color: var(--fg); background: none;
-                  border: 0; border-radius: var(--radius); padding: var(--sp-1) var(--sp-4); max-width: var(--session-header); cursor: pointer; }
-.session-header:hover { background: var(--hover); }
-.session-header .state { margin: 0; font-size: inherit; flex: none; }
-.session-header .name { overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
-.session-header .dot, .spine .dot { flex: none; width: var(--dot); height: var(--dot); border-radius: 50%; background: var(--muted); }
-.session-header .dot[data-state="running"], .spine .dot[data-state="running"] { background: var(--fg); }
-.session-header .dot[data-state="idle"], .session-header .dot[data-state="ended"], .spine .dot[data-state="idle"], .spine .dot[data-state="ended"] { background: none; box-shadow: inset 0 0 0 var(--hair) var(--muted); }
-.session-header .dot[data-state="needs_you"], .spine .dot[data-state="needs_you"] { background: var(--needs-you); }
-/* The chip stands apart from the header. */
-.top .chip { margin-inline-start: var(--sp-5); }
 /* The needs-you chip (danielrispler/Falinks#572): the count of sessions that need Daniel, in the needs-you colour. */
 .top .chip { color: var(--needs-you); background: var(--needs-you-bg); font-weight: 600; }
 .top .chip:hover { color: var(--needs-you); background: var(--needs-you-line); }
-.top .chip.unseen, .top .chip.unseen:hover { color: var(--fg); font-weight: 400; }
-.top .chip.unseen { background: var(--raised); }
-.top .chip.unseen:hover { background: var(--edge); }
 
 /* The session list: full, or a strip that opens over the terminal on hover, on click or on ⌘1; the
    overlay never moves the terminal (danielrispler/Falinks#572). */
@@ -147,12 +116,18 @@ h1 { margin: 0 0 var(--sp-4); }
 .unattached { margin: var(--sp-1) 0 0; padding-inline-start: calc(var(--sp-4) + var(--indent) * 3); font-size: var(--size-small); color: var(--muted); }
 /* A project's group (#97): its header, always shown, with its most urgent state; a folder outside every project is dimmed. */
 .project-head { display: flex; align-items: center; margin-top: var(--sp-4); }
-.project-toggle { display: flex; flex: 1; gap: var(--sp-3); align-items: center; min-width: 0; padding: var(--sp-2) var(--sp-4); font-size: var(--size-xs); font-weight: 500; color: var(--muted); text-align: start; }
+/* Its header switches the map (#386): quiet, in the faint tone, the shown project's a step brighter. */
+.project-toggle { display: flex; flex: 1; gap: var(--sp-3); align-items: center; min-width: 0; padding: var(--sp-2) var(--sp-4); border-radius: var(--radius); font-size: var(--size-xs); font-weight: 500; color: var(--faint); text-align: start; background: none; border: 0; font-family: inherit; cursor: pointer; }
+.project-toggle:hover { background: var(--hover); }
+.project-head.current .project-toggle { color: var(--muted); }
+/* The header's quiet dot (#386): Home's mark, drawn as the map's mist; its hover names what lit it. */
+.project-toggle .project-dot { flex: none; margin-inline: auto 0; background: var(--mist-thick); filter: blur(var(--sp-1)); }
+.project-toggle .glyph + .project-dot { margin-inline-start: var(--sp-2); }
 .project-toggle .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-toggle .glyph { margin-inline-start: auto; }
 .project-head[draggable="true"] { cursor: grab; }
 /* A header's "⋯" (#381), shown while the header is hovered or holds the focus; a gone project's name is struck through. */
-.project-more { flex: none; padding: 0 var(--sp-3); color: var(--faint); opacity: 0; }
+.project-more { flex: none; padding: 0 var(--sp-3); color: var(--faint); opacity: 0; background: none; border: 0; font: inherit; cursor: pointer; }
 .project-head:hover .project-more, .project-more:focus-visible, .project-head:focus-within .project-more { opacity: 1; }
 .project-more:hover { color: var(--fg); }
 .project-head.gone .name { text-decoration: line-through; text-decoration-color: var(--faint); }
@@ -253,21 +228,8 @@ h1 { margin: 0 0 var(--sp-4); }
 #probe { position: absolute; visibility: hidden; white-space: pre; font: var(--term-size)/var(--term-line) var(--mono); }
 
 /* The rail (danielrispler/Falinks#574): one header line, the open question docked under it, then the story: "now" and the
-   feed of turns. In "overlay" ⌘2 toggles it over the terminal. */
+   feed of turns. It shows in the left panel over the map (#385, #386). */
 .rail { display: grid; grid-template-rows: auto auto 1fr; grid-template-columns: minmax(0, 1fr); }
-/* In "overlay" the rail is a layer over the terminal (danielrispler/plotkeeper#128): 320 px on the lighter surface with an edge line,
-   sliding in over 150 ms and out over 100 ms, no scrim. It opens by a rest on the spine or the session header, by a click, or ⌘2
-   (hover.ts); it is visible only while open, so a closed one takes no pointer. */
-body[data-layout="overlay"] .app > .rail { --rail: var(--layer); position: fixed; top: var(--bar); bottom: 0; left: 0; width: var(--layer);
-                                    background: var(--surface); box-shadow: inset calc(-1 * var(--hair)) 0 0 var(--edge); z-index: 5;
-                                    transform: translateX(-100%); visibility: hidden;
-                                    transition: transform var(--slide-out) ease-in, visibility 0s linear var(--slide-out); }
-body[data-layout="overlay"].rail-open .app > .rail { transform: none; visibility: visible; transition: transform var(--slide-in) ease-out, visibility 0s; }
-/* The spine (#128): a 14 px target on the window's left edge, under the top bar, with the session's state dot. */
-.spine { display: none; position: fixed; top: var(--bar); bottom: 0; left: 0; width: var(--spine); z-index: 4; justify-content: center;
-         padding-top: var(--sp-5); background: var(--chrome); box-shadow: inset calc(-1 * var(--hair)) 0 0 var(--edge); }
-body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
-.spine .dot { width: var(--dot); height: var(--dot); border-radius: 50%; background: var(--muted); }
 .rail-h { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-4) var(--sp-5); min-height: var(--sp-7); }
 /* Line 1 the verdict, the block's kind, the mode and the agent's mark; line 2 the session's name; line 3 the estimate while it
    runs. They wrap, never cut; the times and the model are the hover text. */
@@ -514,24 +476,19 @@ body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
 .ask-why-not summary { margin-top: var(--sp-3); font-size: var(--size-small); color: var(--muted); cursor: pointer; }
 .ask-why-not .markdown { margin: var(--sp-3) 0 0; }
 
-/* The Map view (danielrispler/plotkeeper#306, ticket #309): over the rail's and the terminal's columns, which it hides; the list and the top
-   bar stay live. Treatment C: plates on a quiet chart. The sizes are tokens, and map-model.ts holds the plate's and the actor's. */
-.map-view { grid-column: 2 / 4; grid-row: 2; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; background: var(--map-bg); position: relative; z-index: 2; }
-body.map-open .term, body.map-open .spine { visibility: hidden !important; }
-/* The rail's column is taken out while the map shows, so no layer of it (an overlay mid-transition) is ever over the map; the story shows in the
-   left panel instead (#385). */
-body.map-open .app > .rail { display: none; }
-/* A toast is not hidden: a session that needs Daniel is never out of sight. */
-body.map-open .toasts, body.map-open .toast { visibility: visible !important; }
+/* The Map view (danielrispler/plotkeeper#306, ticket #309), the page's base (#386): Treatment C, plates on a quiet chart, on `--bg` with a
+   rounded top-left corner against the list's and the bar's darker tone. The sizes are tokens, and map-model.ts holds the plate's and the actor's. */
+.map-view { grid-column: 2; grid-row: 2; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; background: var(--bg); border-top-left-radius: var(--radius-pane);
+            overflow: hidden; position: relative; z-index: 2; }
+/* The rail is outside the left panel only while no story shows: it is never drawn there (#385). */
+.app > .rail { display: none; }
 .map-head { display: flex; align-items: baseline; gap: var(--sp-5); padding: var(--sp-6) var(--map-gutter) var(--sp-4); }
-.map-project { font-size: var(--map-title); font-weight: 600; line-height: 1.2; padding: 0 var(--sp-4); margin-inline-start: calc(-1 * var(--sp-4)); }
 .map-ref { font-size: var(--size-small); color: var(--faint); }
 /* The one-time review (#314): a quiet line, in the muted colour, with one small button; never a colour of its own. */
 .review { display: flex; align-items: baseline; gap: var(--sp-4); font-size: var(--size-small); color: var(--muted); }
 .review[hidden], .map-review[hidden] { display: none; }
 .map-review:not([hidden]) { margin-inline-start: var(--sp-5); }
 .map-banner:not(:empty) { margin-inline-start: auto; font-size: var(--size-small); color: var(--muted); }
-.map-projects[popover] { top: calc(var(--bar) + var(--map-title) + var(--sp-7)); left: var(--map-gutter); right: auto; width: var(--menu); }
 /* The map fills the stage; the left panel, the side area and the tray float over it, so opening one never moves or squashes a part (#385). */
 .map-stage { --panel-w: var(--rail); display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; position: relative; }
 body[data-panel="diff"] .map-stage { --panel-w: min(var(--panel-wide), calc(100% - 2 * var(--inset))); }
@@ -612,6 +569,9 @@ button.tray-row { display: block; width: 100%; font: inherit; color: inherit; te
 .map-empty { position: absolute; inset: 0; display: grid; align-content: center; justify-items: center; gap: var(--sp-4); text-align: center; }
 .map-empty-title { margin: 0; font-size: var(--size-large); font-weight: 600; }
 .map-empty .empty { max-width: var(--dialog); }
+/* A fresh install (#386): one calm line and the install docs, quiet. */
+.map-install { font-size: var(--size-small); color: var(--muted); text-decoration: underline; text-decoration-color: var(--edge); text-underline-offset: var(--halo); }
+.map-install:hover { color: var(--fg); }
 .map-legend { display: flex; justify-content: flex-end; align-items: center; gap: var(--sp-3); padding: var(--sp-4) var(--map-gutter); font-size: var(--size-xs); color: var(--faint); }
 .map-legend .law-mark { margin-inline: var(--sp-2); }
 /* Fog (#310): a cool-grey mist behind the plate's text, so the name stays at full strength. Thin is the plain halo; thick is the denser

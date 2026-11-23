@@ -30,10 +30,8 @@
   --motion: 120ms ease-out; --slide-in: 150ms; --slide-out: 100ms; --spin: 900ms;
   --scrollbar: 8px;
 
-  /* The window's parts. The list's, strip's and rail's widths are layout.ts's too. */
-  --list: 260px; --strip: 56px; --rail: 380px; --bar: 34px; --term-head: 26px;
-  /* The space the hidden title bar's traffic lights keep at the top bar's start. */
-  --lights: 78px;
+  /* The window's parts (Treatment C's frame, #386). The list's and the strip's widths are layout.ts's too; the rail's is the left panel's. */
+  --list: 252px; --strip: 56px; --rail: 380px; --bar: 34px; --term-head: 26px;
   --divider: 6px; --strip-button: calc(var(--strip) - var(--sp-2)); --dot: 6px; --glyph: 10px;
   /* A row's fold and delete: the button and its icon. */
   --control: 20px; --icon: 14px;

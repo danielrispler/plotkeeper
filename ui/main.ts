@@ -1,7 +1,7 @@
-// The page (danielrispler/Falinks#463 pick, mockup C): a top bar, then the session list on the right, Home, History or a
-// diff in the centre and the story rail on the left. Each region is its own module: `list.ts`, `story.ts` with
-// `questions.ts` and `cards.ts`, and the centre column, `panes.ts`. The core decides what the page shows; this file wires
-// the server's events to the regions and lays the columns out by the width rule in `layout.ts`.
+// The page (spec #380, ticket #386): Treatment C's frame, a top bar over a project's map, the page's base, with the session list on the
+// right. Everything read beside the map opens in the left panel over it (`panel.ts`): a session's story (`story.ts` with `questions.ts` and
+// `cards.ts`), History, a turn's diff, a worker's log (`panes.ts`) and Settings. The core decides what the page shows; this file wires the
+// server's events to the regions and lays the list out by the width rule in `layout.ts`.
 
 import "./transport.js";
 import { dismissNotice, onLogRecord, setSettingsErrors, showNotice } from "./notice.js";
@@ -14,22 +14,23 @@ import { diffRequest, newestDiff } from "./diff.js";
 import { element, failure, invoke, listen, logUncaught } from "./dom.js";
 import { type Actions, newestUnseen, nextNeedsYou, paletteEntries, run, stepLine, stepSession, windowBinding } from "./keys.js";
 import { hover, realClock, shownGate } from "./hover.js";
-import { arrange, defaultWidths, type LayoutMode, railShown, resized, type Widths } from "./layout.js";
+import { arrange } from "./layout.js";
 import { listSpace } from "./home.js";
-import { fitMap, mapEscape, mapShown, projectsChanged, startMap, toggleMap } from "./map.js";
+import { fitMap, mapEscape, openMap, projectsChanged, startMap } from "./map.js";
 import "./map-history.js";
 import "./map-sheet.js";
 import "./map-tray.js";
 import { startMapAgents } from "./map-agents.js";
-import { drawSidebar, showSessions } from "./list.js";
-import { goHome, pressSession, select, show, toggleHome } from "./selection.js";
-import { diffIn, historyIn, redrawHome, showHistory, startPanes } from "./panes.js";
-import { panelShown, showPanel, startPanel } from "./panel.js";
+import { drawSidebar, showSessions, staleDots } from "./list.js";
+import { deselect, pressSession, select, show } from "./selection.js";
+import { diffIn, historyIn, logIn, redrawHome, showHistory, startPanes } from "./panes.js";
+import { closePanel, panelShown, showPanel, startPanel } from "./panel.js";
 import { showPalette } from "./palette.js";
 import { projectOfCwd, selectedProject, sidebarOrder } from "./projects.js";
+import { selectedBase } from "./map-model.js";
 import { reload, type SettingsFiles } from "./settings.js";
 import { studio } from "./state.js";
-import { drawFeed, showBarName, showView } from "./story.js";
+import { drawFeed, showView } from "./story.js";
 import { startRailBriefs } from "./rail-brief.js";
 import { startWriters } from "./writers.js";
 import { jumpToNeedsYou, showToast } from "./toast.js";
@@ -38,95 +39,43 @@ import { finishedNote, showNote, warnContext, watchNotes } from "./notes.js";
 import type { SavedProject, Selection, Session, SessionCards } from "./types.js";
 import { HOVERS } from "./hovers.js";
 
-// The monospace cell, measured from a probe in its font, sets the columns' layout.
-function cell(): number {
-  const probe = element("probe");
-  return probe.getBoundingClientRect().width / (probe.textContent ?? "").length;
-}
-
-// The list's and the rail's widths, as their dividers last left them.
-const widths: Widths = { ...defaultWidths, ...JSON.parse(localStorage.getItem("widths") ?? "{}") };
-
-// The list's open width is the one its divider left; the rail's is the width rule's.
+// The list's width by the window's (`layout.ts`): in full from 1007 px, else its strip; focus mode folds it.
 function layout() {
-  const { mode, rail } = arrange(window.innerWidth, cell(), widths, { focus: studio.focus });
-  document.documentElement.style.setProperty("--list", `${widths.list}px`);
-  document.documentElement.style.setProperty("--rail", `${rail || widths.rail}px`);
+  const { mode, list } = arrange(window.innerWidth, { focus: studio.focus });
+  document.documentElement.style.setProperty("--list", `${list}px`);
   document.body.dataset.layout = mode;
   showToast();
 }
 logUncaught(window);
 window.addEventListener("resize", layout);
-// The server counts a turn seen only while the rail shows its session (danielrispler/Falinks#556), so it is told whether it
-// does each time the layout or the body's classes change. A rail that shows as an overlay is told only after it has stayed
-// open 2 seconds, so a peek does not clear the unseen mark (danielrispler/plotkeeper#128).
+// The server counts a turn seen only while the story shows its session (danielrispler/Falinks#556): in the left panel over the map (#385, #386).
 const tellShown = shownGate(realClock, (shown) => invoke("rail_shown", { shown }).catch(failure("rail_shown")));
-// The overlays open on a rest of the pointer (hover.ts): the rail's layer from the spine or the session header, the list's strip
-// over the centre column. A click, ⌘2 and Esc keep working; they change the body's classes, which the observer below hands to the machines.
-const railHover = hover(realClock, (open) => document.body.classList.toggle("rail-open", open));
+// The list's strip opens over the map on a rest of the pointer (hover.ts); a click, ⌘1 and Esc keep working. They change the body's classes,
+// which the observer below hands to the machine.
 const listHover = hover(realClock, (open) => document.body.classList.toggle("list-peek", open));
 const syncHover = () => {
   const { classList, dataset } = document.body;
-  for (const [machine, name] of [[railHover, "rail-open"], [listHover, "list-peek"]] as const) {
-    if (classList.contains(name) !== machine.open) classList.contains(name) ? machine.toggle() : machine.dismiss();
-  }
-  const mode = (dataset.layout ?? "full") as LayoutMode;
+  if (classList.contains("list-peek") !== listHover.open) classList.contains("list-peek") ? listHover.toggle() : listHover.dismiss();
   recheckSeen();
-  const map = classList.contains("map-open");
-  tellShown(railShown(mode, classList.contains("rail-open"), map, dataset.panel === "story"), mode === "overlay" && !map);
+  tellShown(dataset.panel === "story", false);
 };
 new MutationObserver(syncHover).observe(document.body, { attributes: true, attributeFilter: ["class", "data-layout", "data-panel"] });
 // A mouse button held down never opens an overlay, so a drag across the edge or a text selection leaves them be.
 const held = (event: PointerEvent) => event.buttons !== 0;
-window.addEventListener("pointerdown", (event) => {
-  railHover.pressed(true);
-  listHover.pressed(true);
-  // A press outside the rail's layer and its targets closes it.
-  const inside = [".rail", "#spine", "#session-header"].some((selector) => (event.target as Element).closest?.(selector));
-  if (!inside && document.body.dataset.layout === "overlay") document.body.classList.remove("rail-open");
-}, true);
-for (const type of ["pointerup", "pointercancel"]) window.addEventListener(type, () => { railHover.pressed(false); listHover.pressed(false); }, true);
-const hoverZone = (machine: typeof railHover, target: Element, zone: string, only?: LayoutMode) => {
-  target.addEventListener("pointerenter", (event) => {
-    if (only && document.body.dataset.layout !== only) return;
-    machine.pressed(held(event as PointerEvent));
-    machine.enter(zone);
-  });
-  target.addEventListener("pointerleave", () => machine.leave(zone));
-};
-hoverZone(railHover, element("spine"), "spine", "overlay");
-hoverZone(railHover, element("session-header"), "header", "overlay");
-hoverZone(railHover, document.querySelector(".rail")!, "layer");
-hoverZone(listHover, document.querySelector(".list")!, "list");
+window.addEventListener("pointerdown", () => listHover.pressed(true), true);
+for (const type of ["pointerup", "pointercancel"]) window.addEventListener(type, () => listHover.pressed(false), true);
+const list = document.querySelector(".list")!;
+list.addEventListener("pointerenter", (event) => {
+  listHover.pressed(held(event as PointerEvent));
+  listHover.enter("list");
+});
+list.addEventListener("pointerleave", () => listHover.leave("list"));
 // Leaving focus mode from the toast.
 window.addEventListener("layout", layout);
 layout();
 
-// Dragging a divider resizes its column. The grid runs right to left, so the list's width is
-// measured from the window's right edge and the rail's from its left.
-function divider(id: string, column: keyof Widths, width: (x: number) => number) {
-  const handle = element(id);
-  handle.addEventListener("pointerdown", (event) => {
-    event.preventDefault(); // no text selection while dragging
-    handle.setPointerCapture(event.pointerId);
-    handle.classList.add("dragging");
-  });
-  handle.addEventListener("pointermove", (event) => {
-    if (!handle.hasPointerCapture(event.pointerId)) return;
-    const mode = (document.body.dataset.layout ?? "full") as LayoutMode;
-    Object.assign(widths, resized(column, width(event.clientX), widths, mode, window.innerWidth, cell()));
-    layout();
-  });
-  handle.addEventListener("lostpointercapture", () => {
-    handle.classList.remove("dragging");
-    localStorage.setItem("widths", JSON.stringify(widths));
-  });
-}
-divider("list-divider", "list", (x) => window.innerWidth - x);
-divider("rail-divider", "rail", (x) => x);
-
-// The page's shortcuts, from `keymap.json` (danielrispler/Falinks#524). By default ⌘1 opens the list from its strip,
-// ⌘2 the rail as an overlay, Esc closes both, ⌘⇧↩ toggles focus mode. A needs-you only toasts (danielrispler/Falinks#573).
+// The page's shortcuts, from `keymap.json` (danielrispler/Falinks#524). By default ⌘1 opens the list from its strip, Esc closes it and
+// peels the map's layers, ⌘⇧↩ toggles focus mode. A needs-you only toasts (danielrispler/Falinks#573).
 const toggle = (name: string) => document.body.classList.toggle(name);
 // The keyboard spine (danielrispler/Falinks#575): ⌘] and ⌘[ step through the sessions, ⌘J goes to the next needs-you, else the next unseen, ↑
 // and ↓ move in the list, 1–4 answer the docked card and ⌘⇧P opens the palette of every action here.
@@ -165,24 +114,29 @@ function answer(n: number) {
 
 const actions: Actions = {
   "studio::ToggleList": () => toggle("list-open"),
-  "studio::ToggleRail": () => toggle("rail-open"),
+  // The selected session's story, which lives in the left panel over the map (#386): shown, or closed back to the bare map.
+  "studio::ToggleRail": () => {
+    const id = selectedId();
+    if (panelShown()?.kind === "story") closePanel();
+    else if (id) showPanel({ kind: "story", session: id });
+  },
   // Ask (danielrispler/plotkeeper#125) on the selected session's newest turn: its Headline's box, in the rail, opened.
   "studio::AskAbout": () => {
     const turn = (studio.selection?.session.turns.length ?? 0) - 1;
     if (turn < 0) return;
-    document.body.classList.add("rail-open");
+    showPanel({ kind: "story", session: selectedId()! });
     openAsk(selectedId()!, { kind: "headline", turn });
   },
   "studio::Dismiss": () => {
-    // In the Map view, Esc peels its layers (`map.ts`) and leaves it last; an overlay or the picker open over it closes first.
-    const overlaid = ["list-open", "list-peek", "rail-open"].some((name) => document.body.classList.contains(name)) || !element("palette").hidden;
-    if (mapShown() && !overlaid) return mapEscape();
-    document.body.classList.remove("list-open", "list-peek", "rail-open");
+    // Esc peels the map's layers (`map.ts`) and on the bare map does nothing (#386); the list or the palette open over it closes first.
+    const overlaid = ["list-open", "list-peek"].some((name) => document.body.classList.contains(name)) || !element("palette").hidden;
+    if (!overlaid) return mapEscape();
+    document.body.classList.remove("list-open", "list-peek");
     element("palette").hidden = true;
   },
   "studio::ToggleFocus": () => {
     studio.focus = !studio.focus;
-    document.body.classList.remove("list-open", "list-peek", "rail-open");
+    document.body.classList.remove("list-open", "list-peek");
     layout();
   },
   "studio::NextSession": () => go(stepSession(inSidebar(), selectedId(), 1)),
@@ -199,12 +153,11 @@ const actions: Actions = {
     if (session && turn !== null) diffRequest.open(session.id, turn);
   },
   "studio::JumpToUnseen": () => void go(newestUnseen(inSidebar())),
-  "studio::GoHome": () => void toggleHome(),
-  // The Map view (danielrispler/plotkeeper#306), over the rail and the centre column; the same key leaves it.
-  "studio::ShowMap": () => void toggleMap(),
-  // The whole map in view (#383), while the Map view shows.
+  // Back to the map (#386): the left panel closes. A keymap's `studio::GoHome` is read as this (`settings.ts`).
+  "studio::ShowMap": () => closePanel(),
+  // The whole map in view (#383).
   "studio::FitMap": () => fitMap(),
-  // History (#94), in the centre column, or in the left panel over the map (#385): the ended sessions, searchable.
+  // History (#94), in the left panel over the map (#385): the ended sessions, searchable.
   "studio::ShowHistory": () => showHistory(),
   // Settings (#385), in the left panel over the map; the gear in the top bar toggles it.
   "studio::ShowSettings": () => void openSettings(),
@@ -233,8 +186,6 @@ function applySettings(files: SettingsFiles) {
   studio.texts = files;
   studio.files = reload(studio.files, files);
   const { settings, errors } = studio.files;
-  // The header's hover names a key too: draw it again with the keymap now in effect.
-  showBarName(element("bar-name").textContent ?? "");
   setSettingsErrors(errors);
   layout();
   const { model, effort, on_open: onOpen, writer } = settings.summaries;
@@ -255,10 +206,6 @@ invoke("settings_files").then((files) => {
   ready.settings = true;
   warn();
 });
-// The session's header in the top bar toggles the rail, as ⌘2 does (danielrispler/plotkeeper#127).
-// In the overlay layout a click pins the layer open, and a click on a pinned one closes it (hover.ts).
-element("session-header").addEventListener("click", () => (document.body.dataset.layout === "overlay" ? railHover.click() : toggle("rail-open")));
-element("spine").addEventListener("click", () => railHover.click());
 // Every block in the story opens or closes, except a card's "explain more", whose first open asks the
 // writer, and the "ask about this" boxes.
 const blocks = () => element("story").querySelectorAll<HTMLDetailsElement>("details:not(.more):not(.ask-about)");
@@ -272,38 +219,32 @@ window.addEventListener("focus", recheckSeen);
 window.addEventListener("blur", recheckSeen);
 window.addEventListener("focus", () => actions["studio::RefreshLanded"]());
 
-// Home in the centre column.
 startPanes();
 startRailBriefs(drawFeed);
-startMap({ selectedProject, removeProject });
+startMap({ selectedProject, removeProject, shown: drawSidebar });
 startMapAgents({ sessions: () => studio.listed, projectOf: projectOfCwd, select: (id, agent) => void pressSession(id, agent) });
-// The left panel over the map (#385): History and the diff as the centre column draws them; closing a story selects none and keeps the map.
-startPanel({ history: historyIn, diff: diffIn, deselect: () => void goHome(true) });
-// Settings opens over the map, which opens first when it is not showing.
-async function openSettings() {
-  if (!mapShown()) await toggleMap();
-  showPanel({ kind: "settings" });
-}
+// The left panel over the map (#385): History, a turn's diff and a worker's log; closing a story or a log selects none and leaves the bare map.
+startPanel({ history: historyIn, diff: diffIn, log: logIn, deselect: () => void deselect() });
+const openSettings = () => showPanel({ kind: "settings" });
 element("settings-button").addEventListener("click", () => (panelShown()?.kind === "settings" ? showPanel(null) : void openSettings()));
 // The page's own elements whose hover another place shows too (#220); the needs-you toast's adds its key when it shows.
 element("toast").title = element("note-toast").title = HOVERS.goToSession;
-// A click on the session list's empty space selects none and shows Home.
-document.querySelector(".list")!.addEventListener("click", (event) => listSpace(event.target as HTMLElement) && void goHome());
+// A click on the session list's empty space goes back to the bare map, as `studio::ShowMap` does.
+list.addEventListener("click", (event) => listSpace(event.target as HTMLElement) && closePanel());
 // The needs-you chip (danielrispler/Falinks#572) selects the first session that needs Daniel.
 element("needs-you").addEventListener("click", () => {
   const first = studio.listed.find((session) => session.state === "needs_you");
   if (first) select(first.id);
 });
-// The unseen chip selects the newest unseen session, as ⌘⇧U does.
-element("unseen").addEventListener("click", () => actions["studio::JumpToUnseen"]());
 // A click outside the palette closes it.
 document.addEventListener("pointerdown", (event) => {
   if (!element("palette").contains(event.target as Node)) element("palette").hidden = true;
 }, true);
 
-// The saved project list (#381): the list's headers, Home's projects and the Map view's follow it.
+// The saved project list (#381): the list's headers and the map follow it; its first arrival opens the last viewed project's map (#386).
 const showProjects = (projects: SavedProject[]) => {
   studio.projects = projects;
+  staleDots();
   drawSidebar();
   redrawHome();
   projectsChanged();
@@ -340,7 +281,12 @@ listen<string[]>("finished", (ids) => {
 // would draw it with the last session's cards for a frame (danielrispler/Falinks#570).
 // The press's settling fetches what it held back.
 listen<Selection | null>("selected", (selected) => (studio.pending ? (studio.missed = true) : show(selected)));
-invoke("selected").then(show);
+// A session selected before the page opened opens in the left panel, its story or its worker's log, over its project's map.
+invoke("selected").then((selected) => {
+  show(selected);
+  if (selected) openMap(projectOfCwd(selected.session.cwd));
+  if (selected) showPanel(selectedBase(selected.session.id, projectOfCwd(selected.session.cwd), selected.agent).panel);
+});
 listen<SessionCards>("cards", (cards) => (studio.pending ? (studio.missed = true) : showCards(cards)));
 // Claude Code's version changed: re-record the subagent fixture.
 listen<string>("notice", showNotice);

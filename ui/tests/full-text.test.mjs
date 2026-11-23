@@ -7,7 +7,7 @@ import { El, fakeDocument } from "./dom.mjs";
 import { row, projectHead } from "../../dist/list.js";
 import { showPalette } from "../../dist/palette.js";
 import { showToast } from "../../dist/toast.js";
-import { checkElement, foldedTurn, showBarName } from "../../dist/story.js";
+import { checkElement, foldedTurn } from "../../dist/story.js";
 import { studio } from "../../dist/state.js";
 
 // The stand-in page: elements by id, as the shell's index.html has them.
@@ -82,14 +82,6 @@ test("a named session's name needs no title of its own: the row's holds it", () 
   const button = row({ ...session, name: "Short", prompt_name: null }, new Map());
   holds(button, "name", "Short");
   noEmptyTitle(button);
-});
-
-test("the session header holds the full name", () => {
-  showBarName(long);
-  const header = document.getElementById("session-header");
-  assert.ok(header.title.includes(long));
-  showBarName("");
-  assert.notEqual(header.title, "");
 });
 
 test("a folded turn line's prompt and Headline hold their full text", () => {
