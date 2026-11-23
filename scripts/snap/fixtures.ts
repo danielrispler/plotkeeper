@@ -962,6 +962,17 @@ const mapPanelStory = (): Fixture =>
       if (!panelOpen() || !document.querySelector("#panel-body > .rail")) return log("snap:fail a row's press did not open its story in the left panel");
       if (document.getElementById("map").hidden) return log("snap:fail the row's press left the Map view");
       if (document.querySelector("#map .plate[data-id=hook] .agent-chip.lit") === null) log("snap:fail the open session's chip is not lit");
+      // Below 1007 px the open panel leaves no room for the legend (the prototype's scene narrow), and the tray never lies on a plate.
+      const checkFoot = (when) => {
+        if (narrow && panelOpen() && document.getElementById("map-legend").getClientRects().length) log("snap:fail the legend shows beside the open panel below 1007 px " + when);
+        const tray = document.getElementById("map-tray");
+        const over = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+        if (!tray.getClientRects().length) return;
+        const box = tray.getBoundingClientRect();
+        const under = [...document.querySelectorAll("#map .plate, #map .actor")].filter((node) => over(box, node.getBoundingClientRect())).map((node) => node.dataset.id);
+        if (under.length) log("snap:fail the tray lies on " + under.join() + " " + when);
+      };
+      checkFoot("with the story open");
       checkAll("with the story open");
       await plate("understanding");
       if (!sheetOpen()) return log("snap:fail the plate's click did not open its sheet");
@@ -970,6 +981,7 @@ const mapPanelStory = (): Fixture =>
         await press(row("s2"));
         if (!panelOpen() || sheetOpen()) log("snap:fail below 1007 px the panel did not take the sheet's place");
       }
+      checkFoot("with the story and the sheet");
       checkAll("with the story and the sheet");
       if (!narrow && document.querySelector("#map .plate[data-id=hook] .agent-chip.lit") === null) log("snap:fail the open session's chip went out");
       log("panel ok");`);
@@ -1064,9 +1076,17 @@ const mapPanelBrief = (): Fixture =>
       document.querySelector('#map-tray .tray-row[data-pr="334"]').click();
       await wait(800);
       if (document.getElementById("map-brief").hidden) return log("snap:fail the brief did not open");
-      for (const card of [panel, document.getElementById("map-side")]) {
-        if (card.hidden) continue;
-        if (Number(getComputedStyle(card).opacity) !== Number(getComputedStyle(document.documentElement).getPropertyValue("--brief-dim"))) log("snap:fail the brief did not dim #" + card.id + ": " + getComputedStyle(card).opacity);
+      // A card's glass stays whole, so the dimmed plates under it never show through; what it holds is dimmed (the prototype's scene brief).
+      const dim = Number(getComputedStyle(document.documentElement).getPropertyValue("--brief-dim"));
+      const cards = [panel, ...document.querySelectorAll("#map-side > .glass")].filter((card) => card.getClientRects().length);
+      if (cards.length < (narrow ? 1 : 2)) log("snap:fail the brief shows " + cards.length + " glass cards");
+      for (const card of cards) {
+        for (let node = card; node && node.id !== "map"; node = node.parentElement) {
+          if (Number(getComputedStyle(node).opacity) !== 1) log("snap:fail #" + card.id + " lets the map show through it under the brief: opacity " + getComputedStyle(node).opacity + " on " + node.tagName + "." + node.className);
+        }
+        for (const inner of card.children) {
+          if (inner.getClientRects().length && Number(getComputedStyle(inner).opacity) !== dim) log("snap:fail the brief did not dim #" + card.id + " > " + inner.tagName + "." + inner.className + ": " + getComputedStyle(inner).opacity);
+        }
       }
       if (!panelOpen()) log("snap:fail the brief closed the panel");
       if (!narrow && !sheetOpen()) log("snap:fail the brief closed the sheet");
@@ -1376,6 +1396,24 @@ export const fixtures = {
     };
   },
   mapChipJump: () => mapBusy(true),
+  // Story 34: every card over the map, the left panel and the sheet and drawer alike, arrives by a 12 px slide with a fade.
+  mapGlassMotion: () =>
+    mapOpened(`
+      const start = (name) => {
+        const probe = document.createElement("div");
+        probe.style.animation = name + " 1s linear paused";
+        document.body.append(probe);
+        const look = getComputedStyle(probe);
+        const found = [look.opacity, look.transform];
+        probe.remove();
+        return found;
+      };
+      const want = { "panel-in": "matrix(1, 0, 0, 1, -12, 0)", "glass-in": "matrix(1, 0, 0, 1, 0, -12)" };
+      for (const [name, transform] of Object.entries(want)) {
+        const [opacity, moved] = start(name);
+        if (opacity !== "0" || moved !== transform) log("snap:fail " + name + " starts at opacity " + opacity + ", " + moved + ", not a 12 px slide with a fade");
+      }
+      log("motion ok");`, { map_state: mapState(), snapDone: "motion ok" }),
   // The left panel over the map (#385): the story with a part's sheet, Esc's peel and a second press, the widened diff, History, Settings,
   // ⌘2's toggle, and a brief over both panels. `mapPanelNarrow` is the story at 1000x800 (snap:all's size for it), where only one overlay opens.
   mapPanelStory,
