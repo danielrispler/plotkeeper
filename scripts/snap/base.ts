@@ -56,6 +56,7 @@ export const base = {
   open: noSelection,
   plugin_setup: null,
   pr_brief: null,
+  pr_diff: { commit: "", short: "", label: "", url: null, files: [] },
   briefs_waiting: null,
   pr_ratify: [],
   projects: ["/w/plotkeeper"],
