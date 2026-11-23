@@ -99,10 +99,10 @@ const mapTray = (): Fixture =>
   mapOpened(`
       const rows = [...document.querySelectorAll("#map-tray .tray-row")];
       if (rows.length !== 2) return log("snap:fail expected 2 tray rows, saw " + rows.length);
-      if (rows[0].tagName !== "BUTTON" || rows[1].tagName === "BUTTON") log("snap:fail only the row with a brief opens");
+      if (rows[0].tagName !== "BUTTON" || rows[1].tagName !== "BUTTON") log("snap:fail a ready PR opens, written or not");
       if (!document.querySelector("#map-tray .side-title")?.textContent.includes("Ready for review")) log("snap:fail the tray has no title");
       if (!rows[0].textContent.includes("#334") || !rows[0].textContent.includes("brief ready")) log("snap:fail row text: " + rows[0].textContent);
-      if (!rows[1].textContent.includes("not written yet")) log("snap:fail row text: " + rows[1].textContent);
+      if (!rows[1].textContent.includes("written when you open it")) log("snap:fail row text: " + rows[1].textContent);
       log("tray ok");`, {
     map_state: mapState({ fog: { shell: "thick" }, ready: [{ number: 334, title: "PR briefs: the brief written for each ready PR", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["PR briefs on the map"], quiet: false } }, { number: 336, title: "Ready for review tray", head: "a".repeat(40), brief: null }] }),
   });
