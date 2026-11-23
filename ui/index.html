@@ -20,6 +20,8 @@
       <button id="unseen" class="btn small chip unseen" type="button" hidden></button>
       <span class="sp"></span>
       <!-- The writer section (spec #320): the program that writes the summaries, picked and tested; `writers.ts` draws it. -->
+      <!-- Settings (#385): a quiet gear that opens the Settings panel over the map; the palette's `studio::ShowSettings` does too. -->
+      <button id="settings-button" class="btn quiet small gear" type="button" aria-label="Settings" title="Settings" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M3.6 12.4l1.1-1.1M11.3 4.7l1.1-1.1"/></svg></button>
       <button id="writer-button" class="btn small" type="button" popovertarget="writers" title="Pick the program that writes the summaries, and test it">Writer</button>
       <div id="writers" class="menu writers" popover></div>
     </header>
@@ -109,7 +111,7 @@
     </aside>
 
     <!-- The Map view (danielrispler/plotkeeper#306): over the rail's and the terminal's columns, which it hides; the list and the top bar
-         stay live. `map.ts` draws it. The side area is for the sheet, the drawer and the not-placed list of later tickets. -->
+         stay live. `map.ts` draws it. Over the map float the tray, the left panel and the side area (the sheet, the drawer, the not-placed list). -->
     <section id="map" class="map-view" aria-label="Map" hidden>
       <header class="map-head">
         <button id="map-project" class="btn quiet map-project" type="button" popovertarget="map-projects" aria-label="Project" title="Show another project's map"></button>
@@ -122,11 +124,19 @@
         <div id="map-body" class="map-body"></div>
         <!-- The PR brief (#339): over the foot of the map body while one plays; `map-brief.ts` fills it. -->
         <section id="map-brief" class="map-brief" aria-label="PR brief" hidden></section>
+        <!-- Ready for review (#336), over the map's foot on the left; it moves right of the left panel while that is open (#385). -->
+        <section id="map-tray" class="map-tray"></section>
+        <!-- The left panel (#385): a session's story (the rail, moved in), History, a turn's diff (widened) or Settings, floating over the map
+             in the part sheet's glass; `panel.ts` fills it. It never darkens the map. -->
+        <section id="map-panel" class="map-panel glass" aria-label="Panel" hidden>
+          <button id="panel-close" class="btn quiet small panel-close" type="button" title="Close the panel (Esc)">Close</button>
+          <div id="panel-body" class="panel-body"></div>
+        </section>
+        <!-- The right side, floating over the map: the part's sheet and the drawer under it, each in the same glass, then the agents no part holds. -->
         <aside id="map-side" class="map-side" aria-label="Beside the map" hidden>
+          <section id="map-sheet" class="glass"></section>
+          <section id="map-drawer" class="glass"></section>
           <section id="map-not-placed"></section>
-          <section id="map-tray"></section>
-          <section id="map-sheet"></section>
-          <section id="map-drawer"></section>
         </aside>
       </div>
       <footer id="map-legend" class="map-legend"></footer>

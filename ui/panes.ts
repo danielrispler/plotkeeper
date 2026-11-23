@@ -9,7 +9,8 @@ import { element, failure, invoke, text } from "./dom.js";
 import { knownProjects } from "./projects.js";
 import { drawSidebar } from "./list.js";
 import { followLog, showLog, showMissing } from "./log.js";
-import { leaveMap } from "./map.js";
+import { mapShown } from "./map.js";
+import { redrawPanel, showPanel } from "./panel.js";
 import { select } from "./selection.js";
 import { studio } from "./state.js";
 import type { Session } from "./types.js";
@@ -75,16 +76,17 @@ export function redrawHome() {
 }
 
 // History (`history.ts`), a view like Home in the terminal column: the ended sessions, searchable. Clicking a row selects
-// the session, which takes the column.
+// the session, which takes the column. Over the map it opens in the left panel instead (#385).
 const HISTORY = "history";
 export function showHistory() {
-  leaveMap();
+  if (mapShown()) return showPanel({ kind: "history" });
   show(HISTORY);
   drawHistory(box(HISTORY), studio.listed);
 }
 
 // Draws History again when the list changed under it.
 export function redrawHistory() {
+  redrawPanel();
   if (shown === HISTORY) drawHistory(box(HISTORY), studio.listed);
 }
 
@@ -121,13 +123,21 @@ export async function showSession(session: Session | null, clicked = false, agen
 const STORY = "story";
 const DIFF = "turn-diff";
 
-// A turn's whole diff in the column (danielrispler/plotkeeper#131), in a view of its own.
+// A turn's whole diff in the column (danielrispler/plotkeeper#131), in a view of its own; over the map, in the left panel, widened (#385).
 let diffShown: { session: string } | null = null;
 diffRequest.open = (id, turn) => {
   const session = studio.listed.find((s) => s.id === id);
   if (!session?.capabilities.turn_trees || !session.turns[turn]?.files) return;
+  if (mapShown()) return showPanel({ kind: "diff", session: id, turn });
   diffShown = { session: id };
   show(DIFF);
   drawDiff(box(DIFF), session, turn, () => void select(id));
 };
 const LOG = "subagent-log";
+
+// The left panel's History and diff (#385): the same views as the column's, drawn in the panel's box.
+export const historyIn = (place: HTMLElement) => drawHistory(place, studio.listed);
+export function diffIn(place: HTMLElement, id: string, turn: number) {
+  const session = studio.listed.find((s) => s.id === id);
+  if (session) drawDiff(place, session, turn, () => void select(id));
+}

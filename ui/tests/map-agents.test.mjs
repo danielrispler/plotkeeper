@@ -93,3 +93,15 @@ test("a hovered row lights its session's chips, its Workers' too, and nothing el
   assert.deepEqual(litAgents(live, "c"), []);
   assert.deepEqual(litAgents(live, null), []);
 });
+
+// The session open in the left panel keeps its chips lit while it is open (#385), beside a hovered row's.
+test("the session open in the panel keeps its chips lit, with a hovered row's", () => {
+  const sessions = [
+    session("a", "running", { agents: [worker("w")], turns: [turn([file("core/x.rs"), file("ui/y.ts", "w")])] }),
+    session("b", "needs_you", { turns: [turn([file("core/z.rs")])] }),
+  ];
+  const live = liveAgents(sessions, here);
+  assert.deepEqual(litAgents(live, null, "a"), ["a", "a/w"]);
+  assert.deepEqual(litAgents(live, "b", "a"), ["a", "a/w", "b"]);
+  assert.deepEqual(litAgents(live, null, null), []);
+});

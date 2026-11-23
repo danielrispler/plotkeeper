@@ -44,9 +44,10 @@ export function resized(column: keyof Widths, width: number, widths: Widths, mod
 }
 
 // Whether the story rail shows the selected session (danielrispler/Falinks#556): not in focus mode, not behind a closed
-// overlay, and not behind the Map view, which hides it with `visibility` (so the rail still intersects the viewport).
-export const railShown = (mode: LayoutMode, railOpen: boolean, mapOpen: boolean) =>
-  mode !== "focus" && (mode !== "overlay" || railOpen) && !mapOpen;
+// overlay, and not behind the Map view, which hides it with `visibility` (so the rail still intersects the viewport). Over the map, the story
+// shows only in the left panel (#385), while `inPanel`.
+export const railShown = (mode: LayoutMode, railOpen: boolean, mapOpen: boolean, inPanel = false) =>
+  mode !== "focus" && (mapOpen ? inPanel : mode !== "overlay" || railOpen);
 
 // Whether Home's content is seen: Home is the open pane and the Map view, which hides it with `visibility`, is not over it.
 export const homeSeen = (homeOpen: boolean, mapOpen: boolean) => homeOpen && !mapOpen;

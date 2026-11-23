@@ -13,7 +13,8 @@ import { fixtures } from "./fixtures.ts";
 const failsOnPurpose = new Set(["railIdleFail"]);
 
 // Home, the waiting room (#238), is drawn at 1400x900, the rest at snap's default size.
-const sizeOf = (name) => (name === "home" || name === "homeClearToast" || name === "homeRefresh" || name === "homeNoReview" ? "1400x900" : name.startsWith("map") ? "1900x1180" : undefined);
+// A fixture named `…Narrow` is drawn at 1000x800, below the 1007 px where the map keeps one overlay open (#385).
+const sizeOf = (name) => (name.endsWith("Narrow") ? "1000x800" : name === "home" || name === "homeClearToast" || name === "homeRefresh" || name === "homeNoReview" ? "1400x900" : name.startsWith("map") ? "1900x1180" : undefined);
 
 const snap = join(dirname(fileURLToPath(import.meta.url)), "snap.mjs");
 const folder = mkdtempSync(join(tmpdir(), "snap-all-"));

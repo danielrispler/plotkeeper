@@ -62,6 +62,10 @@ test("a turn is seen only while the rail shows its session: not in focus mode or
   // The Map view hides the rail without taking it out of the viewport, so a turn behind it is not seen.
   assert.equal(railShown("full", false, true), false);
   assert.equal(railShown("overlay", true, true), false);
+  // Over the map, the story shows in the left panel (#385): its turns are seen while the panel shows it, in any layout but focus.
+  assert.equal(railShown("full", false, true, true), true);
+  assert.equal(railShown("overlay", false, true, true), true);
+  assert.equal(railShown("strip", false, true, false), false);
 });
 
 test("Home's marks and learning card are seen only while Home is open and the Map view is not over it", () => {

@@ -17,9 +17,10 @@ export const plateSize: Size = { w: 264, h: 76 };
 export const actorSize: Size = { w: 120, h: 28 };
 // How far the pointer moves before a press on a plate becomes a drag, so a click never nudges it.
 export const dragThreshold = 6;
-// The layers Esc peels, first to last (user story 5 and spec #334): a drawer, a PR brief (closing it keeps its step), a scrubbed past commit (back
-// to now), a part's sheet. The tickets that add them register a `Layer` under its name in `map.ts`; the Map view itself is left only when none is open.
-export const layerOrder = ["drawer", "brief", "scrubbed", "sheet"] as const;
+// The layers Esc peels, first to last (user story 5, spec #334 and spec #380): a drawer, a PR brief (closing it keeps its step), a scrubbed past
+// commit (back to now), a part's sheet, then the left panel (#385). The tickets that add them register a `Layer` under its name in `map.ts`; the Map
+// view itself is left only when none is open.
+export const layerOrder = ["drawer", "brief", "scrubbed", "sheet", "panel"] as const;
 export type LayerName = (typeof layerOrder)[number];
 export type Layer = { open: () => boolean; close: () => void };
 
@@ -560,3 +561,25 @@ export function cameraRig(start: Camera): CameraRig {
     },
   };
 }
+
+// ---- The left panel (spec #380, ticket #385): one slot over the map's left side for a session's story, History, a turn's diff (widened) or
+// Settings, beside the part's sheet on the right.
+export type PanelContent = { kind: "story"; session: string } | { kind: "history" } | { kind: "diff"; session: string; turn: number } | { kind: "settings" };
+export type Overlays = { panel: PanelContent | null; sheet: string | null };
+// Below this window width only one overlay is open at a time (user story 52).
+export const narrowBelow = 1007;
+// Opens `panel` (null closes it). Below `narrowBelow`, or for the widened diff, the part's sheet closes (user stories 29, 52).
+export const withPanel = (now: Overlays, panel: PanelContent | null, width: number): Overlays => ({
+  panel,
+  sheet: panel && (width < narrowBelow || panel.kind === "diff") ? null : now.sheet,
+});
+// Opens the sheet of part `sheet` (null closes it). Below `narrowBelow`, or over the widened diff, the panel closes.
+export const withSheet = (now: Overlays, sheet: string | null, width: number): Overlays => ({
+  sheet,
+  panel: sheet && (width < narrowBelow || now.panel?.kind === "diff") ? null : now.panel,
+});
+// A press on a session's row or chip: its story, or none when the panel already shows that story (a second click closes it).
+export const pressRow = (panel: PanelContent | null, session: string): PanelContent | null =>
+  panel?.kind === "story" && panel.session === session ? null : { kind: "story", session };
+// The session the panel shows, whose chips stay lit while it is open.
+export const panelSession = (panel: PanelContent | null): string | null => (panel?.kind === "story" || panel?.kind === "diff" ? panel.session : null);

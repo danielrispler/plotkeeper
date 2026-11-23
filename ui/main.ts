@@ -22,8 +22,9 @@ import "./map-sheet.js";
 import "./map-tray.js";
 import { startMapAgents } from "./map-agents.js";
 import { drawSidebar, showSessions } from "./list.js";
-import { goHome, select, show, toggleHome } from "./selection.js";
-import { redrawHome, showHistory, startPanes } from "./panes.js";
+import { goHome, pressSession, select, show, toggleHome } from "./selection.js";
+import { diffIn, historyIn, redrawHome, showHistory, startPanes } from "./panes.js";
+import { panelShown, showPanel, startPanel } from "./panel.js";
 import { showPalette } from "./palette.js";
 import { projectOfCwd, selectedProject, sidebarOrder } from "./projects.js";
 import { reload, type SettingsFiles } from "./settings.js";
@@ -71,9 +72,10 @@ const syncHover = () => {
   }
   const mode = (dataset.layout ?? "full") as LayoutMode;
   recheckSeen();
-  tellShown(railShown(mode, classList.contains("rail-open"), classList.contains("map-open")), mode === "overlay");
+  const map = classList.contains("map-open");
+  tellShown(railShown(mode, classList.contains("rail-open"), map, dataset.panel === "story"), mode === "overlay" && !map);
 };
-new MutationObserver(syncHover).observe(document.body, { attributes: true, attributeFilter: ["class", "data-layout"] });
+new MutationObserver(syncHover).observe(document.body, { attributes: true, attributeFilter: ["class", "data-layout", "data-panel"] });
 // A mouse button held down never opens an overlay, so a drag across the edge or a text selection leaves them be.
 const held = (event: PointerEvent) => event.buttons !== 0;
 window.addEventListener("pointerdown", (event) => {
@@ -202,8 +204,10 @@ const actions: Actions = {
   "studio::ShowMap": () => void toggleMap(),
   // The whole map in view (#383), while the Map view shows.
   "studio::FitMap": () => fitMap(),
-  // History (#94), in the centre column: the ended sessions, searchable.
+  // History (#94), in the centre column, or in the left panel over the map (#385): the ended sessions, searchable.
   "studio::ShowHistory": () => showHistory(),
+  // Settings (#385), in the left panel over the map; the gear in the top bar toggles it.
+  "studio::ShowSettings": () => void openSettings(),
   // Asks GitHub again which tasks have landed (#53); it is otherwise asked at a turn's end and at the page's focus.
   "studio::RefreshLanded": () => void invoke("refresh_landed_tasks").catch(failure("refresh_landed_tasks")),
   "studio::Palette": () => {
@@ -272,7 +276,15 @@ window.addEventListener("focus", () => actions["studio::RefreshLanded"]());
 startPanes();
 startRailBriefs(drawFeed);
 startMap({ selectedProject, removeProject });
-startMapAgents({ sessions: () => studio.listed, projectOf: projectOfCwd, select: (id, agent) => void select(id, agent) });
+startMapAgents({ sessions: () => studio.listed, projectOf: projectOfCwd, select: (id, agent) => void pressSession(id, agent) });
+// The left panel over the map (#385): History and the diff as the centre column draws them; closing a story selects none and keeps the map.
+startPanel({ history: historyIn, diff: diffIn, deselect: () => void goHome(true) });
+// Settings opens over the map, which opens first when it is not showing.
+async function openSettings() {
+  if (!mapShown()) await toggleMap();
+  showPanel({ kind: "settings" });
+}
+element("settings-button").addEventListener("click", () => (panelShown()?.kind === "settings" ? showPanel(null) : void openSettings()));
 // The page's own elements whose hover another place shows too (#220); the needs-you toast's adds its key when it shows.
 element("toast").title = element("note-toast").title = HOVERS.goToSession;
 // A click on the session list's empty space selects none and shows Home.

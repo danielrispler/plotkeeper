@@ -62,9 +62,10 @@ export function arrange(live: Live[], placed: Record<string, string[]>): { byPar
   return { byPart, notPlaced };
 }
 
-// The chips a hovered list row lights (#382): every chip of the `hovered` session, its Workers' too; none without a hover.
-export function litAgents(live: Live[], hovered: string | null): string[] {
-  return hovered === null ? [] : live.filter((agent) => agent.session === hovered).map((agent) => agent.key);
+// The chips a hovered list row lights (#382): every chip of the `hovered` session, its Workers' too; and those of the session `open` in the left
+// panel (#385), which stay lit while it is open. None without either.
+export function litAgents(live: Live[], hovered: string | null, open: string | null = null): string[] {
+  return live.filter((agent) => agent.session === hovered || agent.session === open).map((agent) => agent.key);
 }
 
 // What the drawing needs of the window, given by `main.ts`: the sessions, a folder's project, and the jump to a session.
@@ -84,6 +85,14 @@ export function hoverAgents(session: string | null) {
   paint();
 }
 
+// The session open in the left panel (#385), whose chips stay lit while it is open.
+let opened: string | null = null;
+export function openAgents(session: string | null) {
+  if (session === opened) return;
+  opened = session;
+  paint();
+}
+
 // Hides every chip and the not placed list, or shows them again: for a view of a past commit, where nothing is live.
 export function hideAgents(hide: boolean) {
   hidden = hide;
@@ -97,6 +106,8 @@ const chip = (agent: Live, select: AgentDeps["select"], lit: string[]) => {
     select(agent.session, agent.agent);
   });
   button.removeAttribute("aria-pressed");
+  // The chip's press opens its session, not the plate's sheet under it (#385).
+  button.addEventListener("click", (event) => event.stopPropagation());
   button.title = `${agent.label}${agent.needsYou ? " needs you" : ""}\nGo to this ${agent.agent === null ? "session" : "worker"}`;
   return button;
 };
@@ -107,7 +118,7 @@ function paint() {
   if (!view) return;
   const live = hidden ? [] : liveAgents(deps.sessions(), (cwd) => deps.projectOf(cwd) === view.project);
   const { byPart, notPlaced } = arrange(live, placed);
-  const lit = litAgents(live, hovered);
+  const lit = litAgents(live, hovered, opened);
   for (const plate of view.slots.canvas.querySelectorAll<HTMLElement>(".plate[data-id]")) {
     plate.querySelector(".plate-chips")?.replaceChildren(...(byPart[plate.dataset.id!] ?? []).map((agent) => chip(agent, deps.select, lit)));
   }
