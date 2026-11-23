@@ -736,11 +736,12 @@ fn the_writers_found_are_the_ones_command_v_finds_in_their_order() {
             .map(|w| (w.kind, w.found))
             .collect::<Vec<_>>()
     };
-    use WriterKind::{Agy, Anthropic, Claude, Codex, Copilot, Cursor};
+    use WriterKind::{Agy, Anthropic, Claude, Codex, Copilot, Cursor, OpenAI};
     assert_eq!(
         found(&["agy"]),
         [
             (Anthropic, false),
+            (OpenAI, false),
             (Claude, false),
             (Agy, true),
             (Codex, false),
@@ -752,6 +753,7 @@ fn the_writers_found_are_the_ones_command_v_finds_in_their_order() {
         found(&["claude", "agy"]),
         [
             (Anthropic, false),
+            (OpenAI, false),
             (Claude, true),
             (Agy, true),
             (Codex, false),
@@ -763,6 +765,7 @@ fn the_writers_found_are_the_ones_command_v_finds_in_their_order() {
         found(&["codex"]),
         [
             (Anthropic, false),
+            (OpenAI, false),
             (Claude, false),
             (Agy, false),
             (Codex, true),
@@ -775,6 +778,7 @@ fn the_writers_found_are_the_ones_command_v_finds_in_their_order() {
         found(&["copilot", "agent"]),
         [
             (Anthropic, false),
+            (OpenAI, false),
             (Claude, false),
             (Agy, false),
             (Codex, false),
@@ -786,6 +790,7 @@ fn the_writers_found_are_the_ones_command_v_finds_in_their_order() {
         found(&[]),
         [
             (Anthropic, false),
+            (OpenAI, false),
             (Claude, false),
             (Agy, false),
             (Codex, false),
@@ -795,26 +800,29 @@ fn the_writers_found_are_the_ones_command_v_finds_in_their_order() {
     );
     // An API-key writer runs no program, so none named `anthropic` makes it found: the server says whether its key is set.
     assert_eq!(found(&["anthropic"])[0], (Anthropic, false));
+    assert_eq!(found(&["openai"])[1], (OpenAI, false));
     // Each writer brings its name, models and efforts for the page.
     let shell = faked_path(&dir.path().join("lists"), &["claude"]);
     let writers = studio_understanding::found_writers(&shell);
     assert_eq!(writers[0].name, "Anthropic API key");
     assert_eq!(writers[0].models, WriterKind::Anthropic.models());
-    assert_eq!(writers[1].name, "Claude");
-    assert_eq!(writers[1].models, WriterKind::Claude.models());
-    assert!(writers[1].efforts.contains(&"low"));
-    assert_eq!(writers[2].name, "agy");
+    assert_eq!(writers[1].name, "OpenAI-compatible API");
+    assert_eq!(writers[1].efforts, ["", "low", "medium", "high"]);
+    assert_eq!(writers[2].name, "Claude");
+    assert_eq!(writers[2].models, WriterKind::Claude.models());
+    assert!(writers[2].efforts.contains(&"low"));
+    assert_eq!(writers[3].name, "agy");
     assert!(
-        writers[2].efforts.is_empty(),
+        writers[3].efforts.is_empty(),
         "agy's effort is part of its model id"
     );
-    assert_eq!(writers[3].name, "Codex");
-    assert!(writers[3].models.contains(&"gpt-6-luna"));
-    assert_eq!(writers[3].efforts, ["", "low", "medium", "high"]);
-    assert_eq!((writers[4].name, writers[5].name), ("Copilot", "Cursor"));
-    assert!(writers[4].models.contains(&"claude-haiku-4.5"));
-    assert!(writers[5].models.contains(&"auto"));
-    assert!(writers[4].efforts.is_empty() && writers[5].efforts.is_empty());
+    assert_eq!(writers[4].name, "Codex");
+    assert!(writers[4].models.contains(&"gpt-6-luna"));
+    assert_eq!(writers[4].efforts, ["", "low", "medium", "high"]);
+    assert_eq!((writers[5].name, writers[6].name), ("Copilot", "Cursor"));
+    assert!(writers[5].models.contains(&"claude-haiku-4.5"));
+    assert!(writers[6].models.contains(&"auto"));
+    assert!(writers[5].efforts.is_empty() && writers[6].efforts.is_empty());
 }
 
 #[test]

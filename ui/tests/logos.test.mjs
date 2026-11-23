@@ -52,6 +52,15 @@ test("a recorded Codex session wears Codex's logo, titled by its name (#359)", (
   assert.equal(logo("codex").title, "Codex");
 });
 
+test("a recorded Qwen Code session wears Qwen's logo, titled by its name (#360)", () => {
+  const qwen = { ...base, capabilities: caps("qwen"), identity: { issue: null, name: "p" }, transcript: { context: null } };
+  assert.equal(logoKey(qwen), "qwen");
+  const drawn = logoOf(row(qwen, new Map()));
+  assert.equal(drawn.getAttribute("data-logo"), "qwen");
+  assert.match(drawn.title, /no context share/);
+  assert.equal(logo("qwen").title, "Qwen Code");
+});
+
 test("a recorded Copilot session wears Copilot's logo, and the page names it Copilot (#361)", async () => {
   const { agentNames } = await import("../../dist/capabilities.js");
   const copilot = { ...base, capabilities: caps("copilot"), identity: { issue: null, name: "p" }, transcript: { context: null } };
@@ -164,4 +173,12 @@ test("a selected subagent's rail logo carries no model line", async () => {
 test("the rail's #detail has no title when the step has no detail", async () => {
   const get = await railOf({ ...claude, transcript: { ...claude.transcript, model: "claude-opus-5-5" } });
   assert.notEqual(get("detail").title, "");
+});
+
+test("a recorded Cursor session wears Cursor's logo, titled by its name (#362)", () => {
+  const cursor = { ...base, capabilities: caps("cursor"), identity: { issue: null, name: "p" }, transcript: { context: null } };
+  assert.equal(logoKey(cursor), "cursor");
+  const drawn = logoOf(row(cursor, new Map()));
+  assert.equal(drawn.getAttribute("data-logo"), "cursor");
+  assert.equal(logo("cursor").title, "Cursor");
 });

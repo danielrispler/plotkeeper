@@ -87,3 +87,22 @@ fn the_logged_line_carries_the_parent_pid_or_the_wrappers() {
     assert_eq!(recorded(None, "parent")["studio_pid"], std::process::id());
     assert_eq!(recorded(Some("4242"), "wrapper")["studio_pid"], 4242);
 }
+
+/// A hook run by an IDE app reports the IDE's pid, which lives on past the session, so none is
+/// recorded and the session takes the "idle?" path (#320, "IDE-hosted pids"; #362).
+#[test]
+fn no_pid_when_the_agent_is_an_ide_app() {
+    const HELPER: &str = "/Applications/Cursor.app/Contents/Frameworks/Cursor Helper (Plugin).app/Contents/MacOS/Cursor Helper (Plugin)";
+    let t = table(&[(600, HELPER, 100)]);
+    assert_eq!(agent_pid(None, 600, t), None);
+    // Through a shell too.
+    let t = table(&[(601, "/bin/zsh", 600), (600, HELPER, 100)]);
+    assert_eq!(agent_pid(None, 601, t), None);
+    // Cursor's CLI is a program of its own, whose pid ends with the session.
+    let t = table(&[(
+        700,
+        "/Users/me/.local/share/cursor-agent/versions/2025.11.25/node",
+        100,
+    )]);
+    assert_eq!(agent_pid(None, 700, t), Some(700));
+}

@@ -28,6 +28,27 @@ fn append() -> Result<(), Box<dyn Error>> {
     if env::var_os("PLOTKEEPER_INTERNAL").is_some_and(|v| v == "1") {
         return Ok(());
     }
+    // The agent the hook entry names, so the line is read by its agent's parser, not its shape (#355).
+    // The event it names, for a payload that names none (Copilot's camelCase ones, #361).
+    let (mut agent, mut named) = (None, None);
+    let mut args = env::args().skip(1);
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--agent" => agent = args.next(),
+            "--event" => named = args.next(),
+            _ => {}
+        }
+    }
+    // Another harness's event, which its own entry records, is dropped here (#362).
+    if let Some(harness) = studio_hook::foreign(agent.as_deref(), &event) {
+        let name = event.get("hook_event_name").and_then(Value::as_str);
+        eprintln!(
+            "plotkeeper-hook: dropped {harness}'s {} event on the {} entry; {harness}'s own entry records it",
+            name.unwrap_or("-"),
+            agent.as_deref().unwrap_or("-"),
+        );
+        return Ok(());
+    }
     let terminal = env::var("PLOTKEEPER_TERMINAL_ID");
     if let Ok(terminal) = terminal {
         event.insert("studio_terminal_id".into(), terminal.into());
@@ -38,25 +59,11 @@ fn append() -> Result<(), Box<dyn Error>> {
     if let Some(pid) = studio_hook::agent_pid(wrapper.as_deref(), parent, studio_hook::inspect) {
         event.insert("studio_pid".into(), pid.into());
     }
-    // The agent the hook entry names, so the line is read by its agent's parser, not its shape (#355),
-    // and the event it names, for a payload that names none (Copilot's camelCase ones, #361).
-    let mut args = env::args().skip(1);
-    while let Some(arg) = args.next() {
-        let field = match arg.as_str() {
-            "--agent" => "studio_agent",
-            "--event" => "studio_event",
-            _ => continue,
-        };
-        if let Some(value) = args.next() {
-            event.insert(field.into(), value.into());
-        }
+    if let Some(agent) = agent {
+        event.insert("studio_agent".into(), agent.into());
     }
-    // The agent guard: a payload of Copilot's that reached Claude Code's entry is Copilot's own
-    // entry's to record (spec #320, "One event, one record, the right agent").
-    let named = event.get("studio_agent").and_then(Value::as_str);
-    if named == Some("claude") && studio_hook::copilot_payload(&event) {
-        eprintln!("plotkeeper-hook: dropped a Copilot payload sent to Claude Code's hook");
-        return Ok(());
+    if let Some(named) = named {
+        event.insert("studio_event".into(), named.into());
     }
     event.insert("studio_received_ms".into(), received_ms.into());
     let home = env::home_dir().ok_or("no home directory")?;

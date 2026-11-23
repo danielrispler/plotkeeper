@@ -4,7 +4,7 @@
 use std::{fs, path::PathBuf};
 use studio_core::Studio;
 
-/// Every recorded log of the tests: Claude Code's, agy's, Codex's and Copilot's, as the log file holds them, each line
+/// Every recorded log of the tests: Claude Code's, agy's, Codex's, Qwen Code's, Cursor's and Copilot's, as the log file holds them, each line
 /// ending in a newline.
 fn fixtures() -> Vec<(String, Vec<String>)> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
@@ -13,6 +13,8 @@ fn fixtures() -> Vec<(String, Vec<String>)> {
         root.clone(),
         root.join("agy"),
         root.join("codex"),
+        root.join("cursor"),
+        root.join("qwen"),
         root.join("copilot"),
     ] {
         for entry in fs::read_dir(dir).unwrap() {

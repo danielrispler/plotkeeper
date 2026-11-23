@@ -4,6 +4,7 @@
 //! (danielrispler/Falinks#369, decisions 7, 9 and 23).
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashMap,
     io::{Read, Write},
     os::unix::process::CommandExt,
     path::{Path, PathBuf},
@@ -133,8 +134,11 @@ pub trait CardWriter {
     /// (spec #320, "The Test gate"). A Test runs either way.
     fn summaries_on(&self, _on: bool) {}
 
-    /// Gives the API-key writer its key, read from the Keychain at start and on each save; `None` once removed.
-    fn use_key(&self, _key: Option<String>) {}
+    /// Gives API-key writer `kind` its key, read from the Keychain at start and on each save; `None` once removed.
+    fn use_key(&self, _kind: WriterKind, _key: Option<String>) {}
+
+    /// Gives the OpenAI-compatible writer its base URL, from `settings.json`; `None`: OpenAI's own.
+    fn use_base_url(&self, _url: Option<String>) {}
 
     /// The page's Test: one tiny call to writer `kind` at `model` and `effort` (empty: its default), and its typed outcome.
     /// A writer that runs no program passes.
@@ -457,9 +461,11 @@ pub struct ClaudeWriter {
     availability: Availability,
     /// Whether calls run: off until a writer passes Test for a user who arrived with none configured (spec #320).
     on: AtomicBool,
-    /// The API-key writer's key, from the Keychain through the server (`use_key`), and the API's base URL.
-    api_key: Mutex<Option<String>>,
+    /// Each API-key writer's key, from the Keychain through the server (`use_key`); the Anthropic API's base URL; and the
+    /// OpenAI-compatible API's, from `settings.json` through the server (`use_base_url`), `None` for OpenAI's own.
+    api_keys: Mutex<HashMap<WriterKind, String>>,
     api_url: String,
+    openai_url: Mutex<Option<String>>,
 }
 
 /// The Test's one tiny call.
@@ -542,8 +548,9 @@ impl ClaudeWriter {
             risk_timeout: RISK_TIMEOUT,
             availability: Availability::default(),
             on: AtomicBool::new(true),
-            api_key: Mutex::new(None),
+            api_keys: Mutex::new(HashMap::new()),
             api_url: http_writer::ANTHROPIC_URL.into(),
+            openai_url: Mutex::new(None),
         }
     }
 
@@ -797,7 +804,9 @@ impl ClaudeWriter {
             WriterKind::Codex => (&self.codex_program, &self.codex_folder),
             WriterKind::Copilot => (&self.copilot_program, &self.copilot_folder),
             WriterKind::Cursor => (&self.cursor_program, &self.cursor_folder),
-            WriterKind::Anthropic => unreachable!("an HTTP writer runs no program"),
+            WriterKind::Anthropic | WriterKind::OpenAI => {
+                unreachable!("an HTTP writer runs no program")
+            }
         }
     }
 
@@ -847,12 +856,17 @@ impl ClaudeWriter {
         if !kind.http() {
             return self.call_as(kind, timeout, self.build_for(kind, request), schema, tell);
         }
-        let key = self.api_key.lock().unwrap().clone();
+        let key = self.api_keys.lock().unwrap().get(&kind).cloned();
+        let base = match kind {
+            WriterKind::OpenAI => (self.openai_url.lock().unwrap().clone())
+                .unwrap_or_else(|| http_writer::OPENAI_URL.into()),
+            _ => self.api_url.clone(),
+        };
         let request = WriterRequest {
             timeout,
             ..request.clone()
         };
-        let reply = http_writer::complete(kind, &self.api_url, key.as_deref(), &request);
+        let reply = http_writer::complete(kind, &base, key.as_deref(), &request);
         match &reply {
             Ok(_) if tell => self.availability.worked(),
             // A call kept short on purpose (the risk judge) timing out is no fault of the writer.
@@ -1042,8 +1056,16 @@ impl CardWriter for ClaudeWriter {
         self.on.store(on, Ordering::Release);
     }
 
-    fn use_key(&self, key: Option<String>) {
-        *self.api_key.lock().unwrap() = key;
+    fn use_key(&self, kind: WriterKind, key: Option<String>) {
+        let mut keys = self.api_keys.lock().unwrap();
+        match key {
+            Some(key) => keys.insert(kind, key),
+            None => keys.remove(&kind),
+        };
+    }
+
+    fn use_base_url(&self, url: Option<String>) {
+        *self.openai_url.lock().unwrap() = url;
     }
 
     fn test(&self, kind: WriterKind, model: &str, effort: &str) -> Result<(), WriterError> {

@@ -14,8 +14,10 @@ use std::{
 };
 
 /// Which program writes: `claude` by default, `agy`, `codex`, `copilot` or Cursor's `agent`, chosen by `summaries.writer` in
-/// `settings.json`; or `anthropic`, the Anthropic Messages API called with the key pasted on the page, which runs no program.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// `settings.json`; or an API-key writer, which runs no program: `anthropic`, the Anthropic Messages API called with the key
+/// pasted on the page, or `openai`, any OpenAI-compatible chat API (OpenAI, OpenRouter, Groq, a local Ollama) at the base URL
+/// set on the page, with its key when it needs one.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum WriterKind {
     #[default]
@@ -25,6 +27,7 @@ pub enum WriterKind {
     Copilot,
     Cursor,
     Anthropic,
+    OpenAI,
 }
 
 /// How long a logged-out `agy` waits for a pasted OAuth code before it gives up.
@@ -33,8 +36,9 @@ pub const AGY_LOGIN_WAIT: Duration = Duration::from_secs(60);
 impl WriterKind {
     /// Every writer, in the order the page presets the first found (spec #320, "Writer settings on the page").
     /// An API key comes first: it is found only when one is set.
-    pub const ALL: [WriterKind; 6] = [
+    pub const ALL: [WriterKind; 7] = [
         WriterKind::Anthropic,
+        WriterKind::OpenAI,
         WriterKind::Claude,
         WriterKind::Agy,
         WriterKind::Codex,
@@ -44,7 +48,7 @@ impl WriterKind {
 
     /// Whether the writer takes the contract's HTTP path with an API key, instead of running a program.
     pub fn http(self) -> bool {
-        matches!(self, WriterKind::Anthropic)
+        matches!(self, WriterKind::Anthropic | WriterKind::OpenAI)
     }
 
     /// The writer's name on the page.
@@ -56,6 +60,7 @@ impl WriterKind {
             WriterKind::Copilot => "Copilot",
             WriterKind::Cursor => "Cursor",
             WriterKind::Anthropic => "Anthropic API key",
+            WriterKind::OpenAI => "OpenAI-compatible API",
         }
     }
 
@@ -64,7 +69,9 @@ impl WriterKind {
         match self {
             WriterKind::Claude => &["", "low", "medium", "high"],
             WriterKind::Agy => &[],
-            WriterKind::Codex | WriterKind::Anthropic => &["", "low", "medium", "high"],
+            WriterKind::Codex | WriterKind::Anthropic | WriterKind::OpenAI => {
+                &["", "low", "medium", "high"]
+            }
             WriterKind::Copilot | WriterKind::Cursor => &[],
         }
     }
@@ -78,6 +85,7 @@ impl WriterKind {
             WriterKind::Copilot => "copilot",
             WriterKind::Cursor => "agent",
             WriterKind::Anthropic => "anthropic",
+            WriterKind::OpenAI => "openai",
         }
     }
 
@@ -99,6 +107,8 @@ impl WriterKind {
             WriterKind::Copilot => &["claude-haiku-4.5", "gpt-6-astra", "gpt-5.3-codex"],
             WriterKind::Cursor => &["auto", "claude-haiku-5-5", "gpt-5.6-luna"],
             WriterKind::Anthropic => &["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"],
+            // Suggestions only: the endpoint takes any id it serves, such as a local Ollama's `llama3.2`.
+            WriterKind::OpenAI => &["gpt-6-luna", "gpt-5.6-luna", "gpt-5.6-terra"],
         }
     }
 
@@ -111,6 +121,13 @@ impl WriterKind {
             WriterKind::Claude => asked,
             WriterKind::Anthropic if !asked.starts_with("claude-") => self.models()[0],
             WriterKind::Anthropic => asked,
+            // Any id the endpoint serves, but none of Claude's aliases, which no OpenAI-compatible endpoint does.
+            WriterKind::OpenAI
+                if asked.is_empty() || WriterKind::Claude.models().contains(&asked) =>
+            {
+                self.models()[0]
+            }
+            WriterKind::OpenAI => asked,
             _ if !self.models().contains(&asked) => self.models()[0],
             _ => asked,
         }
@@ -130,7 +147,7 @@ impl WriterKind {
             WriterKind::Codex | WriterKind::Copilot | WriterKind::Cursor => {
                 Duration::from_secs(3 * 60)
             }
-            WriterKind::Anthropic => Duration::from_secs(2 * 60),
+            WriterKind::Anthropic | WriterKind::OpenAI => Duration::from_secs(2 * 60),
         }
     }
 
@@ -141,7 +158,8 @@ impl WriterKind {
             | WriterKind::Codex
             | WriterKind::Copilot
             | WriterKind::Cursor
-            | WriterKind::Anthropic => Duration::ZERO,
+            | WriterKind::Anthropic
+            | WriterKind::OpenAI => Duration::ZERO,
             WriterKind::Agy => AGY_LOGIN_WAIT + Duration::from_secs(15),
         }
     }
@@ -156,6 +174,7 @@ impl WriterKind {
             WriterKind::Copilot => "card-writer-copilot",
             WriterKind::Cursor => "card-writer-cursor",
             WriterKind::Anthropic => "card-writer-anthropic",
+            WriterKind::OpenAI => "card-writer-openai",
         }
     }
 }
@@ -268,6 +287,12 @@ impl WriterError {
             (FailureKind::Other, "anthropic") => {
                 "The API answered with an error; it tries again at the next turn."
             }
+            (FailureKind::NotLoggedIn, "openai") => {
+                "Add or replace the API key of the OpenAI-compatible API under Writer, at the top of the page."
+            }
+            (FailureKind::Other, "openai") => {
+                "Check the base URL and the model under Writer, at the top of the page, and that the API is running; it tries again at the next turn."
+            }
             (FailureKind::NotLoggedIn, "codex") => {
                 "Run `codex login` in a terminal, then it writes again."
             }
@@ -312,7 +337,9 @@ impl fmt::Display for WriterError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let program = self.program;
         let what = match self.kind {
-            FailureKind::NotLoggedIn if program == "anthropic" => "has no working API key",
+            FailureKind::NotLoggedIn if program == "anthropic" || program == "openai" => {
+                "has no working API key"
+            }
             FailureKind::NotLoggedIn => "is not logged in",
             FailureKind::Quota => "hit its quota or rate limit",
             FailureKind::Timeout => "ran past its timeout and was stopped",
@@ -449,7 +476,9 @@ pub fn build_command(
             command.arg(lead(request));
             String::new()
         }
-        WriterKind::Anthropic => unreachable!("an HTTP writer runs no program"),
+        WriterKind::Anthropic | WriterKind::OpenAI => {
+            unreachable!("an HTTP writer runs no program")
+        }
     };
     command.env("PLOTKEEPER_INTERNAL", "1").current_dir(folder);
     (command, stdin.replace('\0', ""))
@@ -505,7 +534,9 @@ pub fn read_reply(
         // Cursor's one object, as Claude's; none when it failed, which it says on standard error.
         WriterKind::Cursor => Some(crate::parse_object(stdout).unwrap_or(Value::Null)),
         WriterKind::Claude | WriterKind::Codex | WriterKind::Copilot => None,
-        WriterKind::Anthropic => unreachable!("an HTTP writer's reply is read by `http_writer`"),
+        WriterKind::Anthropic | WriterKind::OpenAI => {
+            unreachable!("an HTTP writer's reply is read by `http_writer`")
+        }
     };
     if let Some(envelope) = &envelope {
         let (error, reply) = match kind {

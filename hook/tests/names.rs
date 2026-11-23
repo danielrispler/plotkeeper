@@ -30,7 +30,13 @@ fn files(dir: &Path) -> Vec<(String, String)> {
 fn the_plugins_name_no_studio() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let mut found = Vec::new();
-    for dir in ["plugin", "plugin-agy", "plugin-codex", "plugin-copilot"] {
+    for dir in [
+        "plugin",
+        "plugin-agy",
+        "plugin-codex",
+        "plugin-cursor",
+        "plugin-copilot",
+    ] {
         for (path, text) in files(&root.join(dir)) {
             let lines = text.lines().filter(|l| old_name(l));
             found.extend(lines.map(|line| format!("{path}: {line}")));

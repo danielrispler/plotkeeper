@@ -73,7 +73,7 @@ body[data-layout="focus"] #rail-divider { display: none; }
 .writers .side-title { margin: 0; font-size: var(--size); }
 .writer-hint, .writer-outcome, .writer-briefs { margin: 0; color: var(--muted); font-size: var(--size-small); overflow-wrap: anywhere; }
 .writer-field { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); font-size: var(--size-small); }
-.writer-field select { width: calc(var(--select) * 1.6); font: inherit; color: var(--fg); background: var(--raised); border: var(--hair) solid var(--edge); border-radius: var(--radius-small); padding: var(--sp-1) var(--sp-3); }
+.writer-field select, .writer-model-input input { width: calc(var(--select) * 1.6); font: inherit; color: var(--fg); background: var(--raised); border: var(--hair) solid var(--edge); border-radius: var(--radius-small); padding: var(--sp-1) var(--sp-3); }
 .writers .writer-test { align-self: flex-start; }
 .writer-key { display: flex; gap: var(--sp-3); }
 .writer-key input { flex: 1; min-width: 0; font: inherit; font-size: var(--size-small); color: var(--fg); background: var(--raised); border: var(--hair) solid var(--edge); border-radius: var(--radius-small); padding: var(--sp-1) var(--sp-3); }

@@ -522,6 +522,123 @@ fn a_codex_hook_file_changed_after_install_loses_only_plotkeepers_hooks_at_unins
     assert_eq!(theirs, [("Stop".to_owned(), "say done".to_owned())]);
 }
 
+impl Machine {
+    /// Puts a fake Cursor CLI, `agent`, on the PATH, which logs any call: install edits Cursor's hook file itself.
+    fn with_cursor(self) -> Machine {
+        script(
+            &self.tools.join("agent"),
+            r#"echo "$@" >> "$(dirname "$0")/agent-calls""#,
+        );
+        self
+    }
+}
+
+/// A `~/.cursor/hooks.json` the user wrote: a hook of their own, in their own layout.
+const CURSOR_OWN: &str = "{\n  \"version\": 1,\n  \"hooks\": {\n    \"stop\": [ { \"command\": \"./hooks/audit.sh\" } ]\n  }\n}\n";
+
+/// The commands of `~/.cursor/hooks.json`, each with its event, plotkeeper's and the others apart.
+fn cursor_commands(machine: &Machine) -> (Commands, Commands) {
+    let text = fs::read_to_string(machine.home.join(".cursor/hooks.json")).unwrap();
+    let file: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(file["version"], 1, "{text}");
+    let mut all = Vec::new();
+    for (event, entries) in file["hooks"].as_object().unwrap() {
+        for entry in entries.as_array().unwrap() {
+            all.push((event.clone(), entry["command"].as_str().unwrap().to_owned()));
+        }
+    }
+    all.into_iter()
+        .partition(|(_, c)| c.contains("plotkeeper-hook"))
+}
+
+/// Cursor's user-level hook file absent (with and without `~/.cursor`), present and customised (#362).
+#[test]
+fn cursor_install_then_uninstall_leaves_its_hook_file_byte_identical() {
+    let setups: [(&str, Setup); 4] = [
+        ("absent", |_| {}),
+        ("no file", |m| {
+            fs::create_dir_all(m.home.join(".cursor/projects")).unwrap()
+        }),
+        ("present", |m| {
+            m.write(".cursor/hooks.json", "{ \"version\": 1, \"hooks\": {} }\n")
+        }),
+        ("customised", |m| m.write(".cursor/hooks.json", CURSOR_OWN)),
+    ];
+    for (name, setup) in setups {
+        let machine = Machine::new(false, false).with_cursor();
+        setup(&machine);
+        let before = files(&machine.home);
+        machine.run("install");
+        let (ours, _) = cursor_commands(&machine);
+        assert_eq!(ours.len(), 7, "{name}");
+        machine.run("uninstall");
+        assert_eq!(files(&machine.home), before, "{name}");
+    }
+}
+
+#[test]
+fn cursor_gets_one_recording_hook_per_event_beside_the_users_own() {
+    let machine = Machine::new(false, false).with_cursor();
+    machine.write(".cursor/hooks.json", CURSOR_OWN);
+    let out = machine.run("install");
+    machine.run("install");
+
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("Cursor"), "{text}");
+    let (ours, theirs) = cursor_commands(&machine);
+    assert_eq!(theirs, [("stop".to_owned(), "./hooks/audit.sh".to_owned())]);
+    let events: Vec<_> = ours.iter().map(|(e, _)| e.as_str()).collect();
+    assert_eq!(
+        events,
+        [
+            "afterAgentResponse",
+            "beforeSubmitPrompt",
+            "postToolUse",
+            "postToolUseFailure",
+            "sessionEnd",
+            "sessionStart",
+            "stop"
+        ]
+    );
+    let command = format!("\"{}/plotkeeper-hook\" --agent cursor", machine.bin());
+    assert!(ours.iter().all(|(_, c)| *c == command), "{ours:?}");
+    assert!(machine.calls("agent").is_empty());
+    // Never a project's hook file.
+    assert!(!machine.home.join(".cursor/.cursor").exists());
+}
+
+#[test]
+fn a_cursor_hook_file_changed_after_install_loses_only_plotkeepers_hooks_at_uninstall() {
+    let machine = Machine::new(false, false).with_cursor();
+    machine.run("install");
+    let path = machine.home.join(".cursor/hooks.json");
+    let mut file: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    file["hooks"]["stop"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({ "command": "say done" }));
+    fs::write(&path, file.to_string()).unwrap();
+
+    let out = machine.run("uninstall");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("Cursor"), "{text}");
+    let (ours, theirs) = cursor_commands(&machine);
+    assert!(ours.is_empty(), "{ours:?}");
+    assert_eq!(theirs, [("stop".to_owned(), "say done".to_owned())]);
+}
+
+#[test]
+fn cursor_not_found_is_skipped_with_one_line() {
+    let machine = Machine::new(false, false);
+    let out = machine.run("install");
+    let text = String::from_utf8_lossy(&out.stdout);
+    let lines: Vec<_> = text.lines().filter(|l| l.contains("Cursor")).collect();
+    assert_eq!(lines.len(), 1, "{text}");
+    assert!(lines[0].contains("not found"), "{text}");
+    assert!(!machine.home.join(".cursor").exists());
+}
+
 /// Copilot goes through its own plugin channel (#361; #320, "Install obeys the credentials rule"): install renders
 /// `plugin-copilot/` into the data folder and runs `copilot plugin install` on it, uninstall runs `copilot plugin
 /// uninstall`, and neither opens a file of Copilot's: each one that can hold its login or settings is a FIFO here.

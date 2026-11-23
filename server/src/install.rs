@@ -12,9 +12,16 @@
 //! (https://learn.chatgpt.com/docs/hooks, read 2026-11-23) give it a `description` and a `hooks` object of handlers
 //! (`type`, `command`, `timeout`, `async`, `statusMessage`, an MCP tool's `server`, `tool` and `input`), and no field
 //! for a key, a token or an environment; Codex keeps its login elsewhere. `~/.codex/config.toml`, which can hold a
-//! provider's token, is never opened. Copilot's plugin goes in with `copilot plugin install` of the folder install
-//! renders, and out with `copilot plugin uninstall`; no file under `~/.copilot`, where Copilot keeps its settings and
-//! may keep its login, is opened (#361).
+//! provider's token, is never opened.
+//!
+//! Cursor's plugins have no install command its docs give, so install adds its entries to the user-level
+//! `~/.cursor/hooks.json` (#362), never a project's `.cursor/hooks.json`. That file holds no credentials: Cursor's hook
+//! docs (https://cursor.com/docs/hooks, read 2026-11-23) give it a `version` and a `hooks` object of entries
+//! (`command`, `type`, `prompt`, `timeout`, `loop_limit`, `failClosed`, `matcher`), and no field for a key or a token.
+//! No other file in `~/.cursor` is opened.
+//!
+//! Copilot's plugin goes in with `copilot plugin install` of the folder install renders, and out with `copilot plugin
+//! uninstall`; no file under `~/.copilot`, where Copilot keeps its settings and may keep its login, is opened (#361).
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -42,6 +49,8 @@ const CODEX_HOOKS_JSON: &str = include_str!("../../plugin-codex/hooks.json");
 /// plotkeeper's plugin for Copilot (#361): its manifest and its hooks, one camelCase event an entry.
 const COPILOT_PLUGIN_JSON: &str = include_str!("../../plugin-copilot/plugin.json");
 const COPILOT_HOOKS_JSON: &str = include_str!("../../plugin-copilot/hooks.json");
+/// plotkeeper's entries for Cursor's user-level hook file, one per event (#362).
+const CURSOR_HOOKS_JSON: &str = include_str!("../../plugin-cursor/hooks.json");
 /// The archived app's plugin for agy, by its folder's name.
 const OLD_AGY_PLUGIN: &str = "studio";
 
@@ -58,6 +67,8 @@ struct State {
     agy_backups: Vec<String>,
     /// What install did to `~/.codex/hooks.json`.
     codex: Option<CodexHooks>,
+    /// What install did to `~/.cursor/hooks.json` (#362), recorded as Codex's file is.
+    cursor: Option<CodexHooks>,
     /// plotkeeper's Copilot plugin was installed with `copilot plugin` (#361).
     #[serde(default)]
     copilot: bool,
@@ -395,6 +406,19 @@ pub fn install(
         Some(_) => install_codex(home, &bin, &mut state, out)?,
     }
 
+    // Cursor is found by its folder, which its IDE and its CLI make, or by its programs: the IDE's
+    // `cursor` and the CLI's `agent`.
+    let cursor = home.join(".cursor").is_dir()
+        || on_path("cursor", path).is_some()
+        || on_path("agent", path).is_some();
+    match cursor {
+        false => say(
+            out,
+            "Cursor: `~/.cursor`, `cursor` and `agent` not found, skipped",
+        ),
+        true => install_cursor(home, &bin, &mut state, out)?,
+    }
+
     match on_path("copilot", path) {
         None => say(out, "Copilot: `copilot` not found, skipped"),
         Some(copilot) => install_copilot(home, &bin, &copilot, &mut state, out)?,
@@ -437,6 +461,140 @@ fn install_copilot(
     say(
         out,
         format!("Copilot: copilot plugin install {}", dir.display()),
+    );
+    Ok(())
+}
+
+fn cursor_hooks(home: &Path) -> PathBuf {
+    home.join(".cursor").join("hooks.json")
+}
+
+/// The entries of hook file `template`, rendered for the binaries in `bin`, by event.
+fn template_events(template: &str, bin: &Path) -> Result<serde_json::Map<String, Value>, String> {
+    let rendered: Value =
+        serde_json::from_str(&render(template, bin)?).map_err(|e| e.to_string())?;
+    match rendered.get("hooks") {
+        Some(Value::Object(events)) => Ok(events.clone()),
+        _ => Err("a plugin's hooks.json has no hooks".into()),
+    }
+}
+
+/// Adds plotkeeper's entries to `~/.cursor/hooks.json`, once each, beside the user's own, after a backup on the first
+/// install.
+// shortcut: the file is written back with its keys sorted, as serde_json writes them; uninstall restores its bytes.
+fn install_cursor(
+    home: &Path,
+    bin: &Path,
+    state: &mut State,
+    out: &mut dyn Write,
+) -> Result<(), String> {
+    let file = cursor_hooks(home);
+    let dir = file.parent().unwrap_or(home);
+    let old = match fs::read_to_string(&file) {
+        Ok(text) => Some(text),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(format!("Cursor: could not read {}: {e}", file.display())),
+    };
+    let mut hooks: Value = match &old {
+        Some(text) => serde_json::from_str(text)
+            .map_err(|e| format!("Cursor: could not read {}: {e}", file.display()))?,
+        None => serde_json::json!({ "version": 1 }),
+    };
+    let events = codex_events(&mut hooks, &file)
+        .map_err(|_| format!("Cursor: {} is not a hook file Cursor reads", file.display()))?;
+    for (event, ours) in template_events(CURSOR_HOOKS_JSON, bin)? {
+        let entries = events
+            .entry(event)
+            .or_insert_with(|| Value::Array(Vec::new()));
+        let entries = entries.as_array_mut().expect("checked to be an array");
+        for entry in ours.as_array().into_iter().flatten() {
+            if !entries.contains(entry) {
+                entries.push(entry.clone());
+            }
+        }
+    }
+    let text = serde_json::to_string_pretty(&hooks).map_err(|e| e.to_string())? + "\n";
+    if state.cursor.is_none() {
+        let backups = record_dir(home).join("backups");
+        if let Some(old) = &old {
+            fs::create_dir_all(&backups).map_err(|e| e.to_string())?;
+            fs::write(backups.join("cursor-hooks.json"), old)
+                .map_err(|e| format!("could not back up {}: {e}", file.display()))?;
+        }
+        state.cursor = Some(CodexHooks {
+            written: String::new(),
+            existed: old.is_some(),
+            made_dir: !dir.is_dir(),
+        });
+        save(home, state)?;
+    }
+    fs::create_dir_all(dir).map_err(|e| format!("could not make {}: {e}", dir.display()))?;
+    fs::write(&file, &text).map_err(|e| format!("could not write {}: {e}", file.display()))?;
+    if let Some(cursor) = &mut state.cursor {
+        cursor.written = text;
+    }
+    save(home, state)?;
+    say(
+        out,
+        format!("Cursor: added plotkeeper's hooks to {}", file.display()),
+    );
+    Ok(())
+}
+
+/// Takes install's change to `~/.cursor/hooks.json` back: the file as it was when it is as install left it, else the
+/// file without plotkeeper's entries.
+fn uninstall_cursor(
+    home: &Path,
+    cursor: &CodexHooks,
+    bin: &Path,
+    out: &mut dyn Write,
+) -> Result<(), String> {
+    let file = cursor_hooks(home);
+    let Ok(now) = fs::read_to_string(&file) else {
+        return Ok(());
+    };
+    if now == cursor.written {
+        if cursor.existed {
+            let old = fs::read(record_dir(home).join("backups").join("cursor-hooks.json"))
+                .map_err(|e| format!("could not read the backup of {}: {e}", file.display()))?;
+            fs::write(&file, old)
+                .map_err(|e| format!("could not write {}: {e}", file.display()))?;
+        } else {
+            fs::remove_file(&file)
+                .map_err(|e| format!("could not remove {}: {e}", file.display()))?;
+            if cursor.made_dir {
+                let _ = fs::remove_dir(file.parent().unwrap_or(home));
+            }
+        }
+        say(
+            out,
+            format!("Cursor: {} put back as it was", file.display()),
+        );
+        return Ok(());
+    }
+    let mut hooks: Value = serde_json::from_str(&now)
+        .map_err(|e| format!("Cursor: could not read {}: {e}", file.display()))?;
+    let ours = template_events(CURSOR_HOOKS_JSON, bin)?;
+    let events = codex_events(&mut hooks, &file)
+        .map_err(|_| format!("Cursor: {} is not a hook file Cursor reads", file.display()))?;
+    for (event, ours) in ours {
+        let Some(Value::Array(entries)) = events.get_mut(&event) else {
+            continue;
+        };
+        let ours = ours.as_array().cloned().unwrap_or_default();
+        entries.retain(|entry| !ours.contains(entry));
+        if entries.is_empty() {
+            events.remove(&event);
+        }
+    }
+    let text = serde_json::to_string_pretty(&hooks).map_err(|e| e.to_string())? + "\n";
+    fs::write(&file, text).map_err(|e| format!("could not write {}: {e}", file.display()))?;
+    say(
+        out,
+        format!(
+            "Cursor: {} changed since install, so only plotkeeper's hooks were taken out of it",
+            file.display()
+        ),
     );
     Ok(())
 }
@@ -572,6 +730,9 @@ pub fn uninstall(home: &Path, path: Option<&OsStr>, out: &mut dyn Write) -> Resu
 
     if let Some(codex) = &state.codex {
         uninstall_codex(home, codex, &studio_hook::bin_dir(home), out)?;
+    }
+    if let Some(cursor) = &state.cursor {
+        uninstall_cursor(home, cursor, &studio_hook::bin_dir(home), out)?;
     }
 
     if state.copilot {
