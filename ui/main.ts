@@ -26,7 +26,7 @@ import { diffIn, historyIn, logIn, showHistory, startPanes } from "./panes.js";
 import { closePanel, panelShown, showPanel, startPanel } from "./panel.js";
 import { showPalette } from "./palette.js";
 import { projectOfCwd, selectedProject, sidebarOrder } from "./projects.js";
-import { selectedView } from "./map-model.js";
+import { narrowBelow, selectedView } from "./map-model.js";
 import { reload, type SettingsFiles } from "./settings.js";
 import { studio } from "./state.js";
 import { drawFeed, showView } from "./story.js";
@@ -38,11 +38,13 @@ import { finishedNote, showNote, warnContext, watchNotes } from "./notes.js";
 import type { SavedProject, Selection, Session, SessionCards } from "./types.js";
 import { HOVERS } from "./hovers.js";
 
-// The list's width by the window's (`layout.ts`): in full from 1007 px, else its strip; focus mode folds it.
+// The list's width by the window's (`layout.ts`): in full from 1007 px, else its strip; focus mode folds it. The body is `narrow` below
+// 1007 px in every mode, for what the map hides there.
 function layout() {
   const { mode, list } = arrange(window.innerWidth, { focus: studio.focus });
   document.documentElement.style.setProperty("--list", `${list}px`);
   document.body.dataset.layout = mode;
+  document.body.classList.toggle("narrow", window.innerWidth < narrowBelow);
   showToast();
 }
 logUncaught(window);

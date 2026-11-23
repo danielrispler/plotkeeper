@@ -985,6 +985,17 @@ const mapPanelStory = (): Fixture =>
       checkAll("with the story and the sheet");
       if (!narrow && document.querySelector("#map .plate[data-id=hook] .agent-chip.lit") === null) log("snap:fail the open session's chip went out");
       log("panel ok");`);
+// Focus mode below 1007 px (#380's review): the open panel hides the legend and the Ready-for-review tray there as in the strip layout.
+const mapPanelFocus = (): Fixture =>
+  mapPanel(`
+      document.dispatchEvent(new KeyboardEvent("keydown", { code: "Enter", key: "Enter", metaKey: true, shiftKey: true, bubbles: true }));
+      await wait(300);
+      if (document.body.dataset.layout !== "focus") return log("snap:fail ⌘⇧↩ did not enter focus mode: " + document.body.dataset.layout);
+      if (!document.getElementById("map-tray").getClientRects().length) return log("snap:fail the tray is hidden with no panel open");
+      await press(row("s2"));
+      if (!panelOpen()) return log("snap:fail a row's press did not open its story in focus mode");
+      for (const id of ["map-legend", "map-tray"]) if (narrow && document.getElementById(id).getClientRects().length) log("snap:fail #" + id + " shows beside the open panel below 1007 px in focus mode");
+      log("panel ok");`);
 // Esc peels the sheet, then the panel, then nothing of the panel is left; a second press on the open row closes its story.
 const mapPanelPeel = (): Fixture =>
   mapPanel(`
@@ -1424,6 +1435,7 @@ export const fixtures = {
   mapPanelSettings,
   mapPanelBrief,
   mapPanelNarrow: mapPanelStory,
+  mapPanelFocusNarrow: mapPanelFocus,
   // CI on the default branch broke a law (#312): the red mark on the shell next to a Needs you chip; then with "See the proof" open, and
   // with the broken-law drill-down open.
   mapBroken: () => mapBroken("none"),

@@ -517,8 +517,9 @@ body.brief-open .map-panel > *, body.brief-open .map-side > * > * { opacity: var
 /* Ready for review (#336): the way into a PR brief, over the map's foot on the left; right of the left panel while that is open (#385). */
 .map-tray { position: absolute; left: var(--map-gutter); bottom: var(--sp-7); z-index: 3; width: var(--tray); transition: left var(--glass-in) var(--glass-ease); }
 body.panel-open .map-tray { left: calc(var(--inset) + var(--panel-w) + var(--map-gutter)); }
-/* Below 1007 px an open panel leaves the map too little room for the tray and the legend: they show again when it closes. */
-body[data-layout="strip"].panel-open #map-tray, body[data-layout="strip"].panel-open .map-legend { display: none; }
+/* Below 1007 px (`narrow`, main.ts) an open panel leaves the map too little room for the tray and the legend, in every layout mode (focus
+   too): they show again when it closes. */
+body.narrow.panel-open #map-tray, body.narrow.panel-open .map-legend { display: none; }
 #map-tray:not(:empty) { display: flex; flex-direction: column; gap: var(--sp-2); }
 #map-tray .side-title { margin: 0; font-size: var(--size-xs); font-weight: 400; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); }
 .tray-row { padding: var(--sp-3); border-radius: var(--radius); }
