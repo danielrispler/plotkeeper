@@ -1119,6 +1119,7 @@ fn main() {
             refresh_landed_tasks,
             map::map_state,
             pr_briefs::pr_brief,
+            pr_briefs::pr_brief_settings,
             pr_briefs::brief_chapter_done,
             pr_briefs::briefs_waiting,
             ratify::pr_ratify,
@@ -1278,7 +1279,7 @@ fn follow(app: &AppHandle, log: &Path) {
                     }
                     Output::YourTurn { session_id } => {
                         refresh_landed(app, Some(session_id.clone()));
-                        prs::ask_later(app, prs::Trigger::TurnEnd);
+                        prs::ask_later(app, prs::Trigger::TurnEnd, None);
                         tell(app, Notice::YourTurn, &session_id, None);
                     }
                     Output::CommandBlocked { session_id, agent } => {
@@ -1567,7 +1568,7 @@ fn refresh_landed(app: &AppHandle, session: Option<String>) {
 /// The window gained focus, or Daniel chose the palette's refresh: ask about every task again.
 #[tauri::command]
 fn refresh_landed_tasks(app: AppHandle) {
-    prs::ask_later(&app, prs::Trigger::Focus);
+    prs::ask_later(&app, prs::Trigger::Focus, None);
     refresh_landed(&app, None);
 }
 

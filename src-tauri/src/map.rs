@@ -311,7 +311,7 @@ pub fn map_state(
     app: AppHandle,
 ) -> Result<MapState, String> {
     if fetch {
-        crate::prs::ask_later(&app, crate::prs::Trigger::MapOpen);
+        crate::prs::ask_later(&app, crate::prs::Trigger::MapOpen, Some(&project));
         let fetched = self::fetch(&fetches, &project);
         // A fetch inside the cooldown asks nothing again, unless nothing was read yet.
         if fetched != Fetched::Skipped || !cache.has(&project) {

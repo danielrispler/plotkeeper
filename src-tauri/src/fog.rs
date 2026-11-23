@@ -82,6 +82,11 @@ impl PrRead {
         !self.lit.is_empty() && (0..self.lit.len()).all(|i| self.chapters.contains_key(&i))
     }
 
+    /// Every chapter is read, each at `head`: a read of an older head does not count once the PR moved on.
+    pub fn fully_read_at(&self, head: &str) -> bool {
+        self.fully_read() && self.chapters.values().all(|read| read.head == head)
+    }
+
     /// The head `part` was read at: the earliest read of the chapters that light it, so a push after any of them is seen.
     fn read_head(&self, part: &str) -> Option<&str> {
         self.lit
@@ -465,6 +470,14 @@ pub fn clear_pr(
 /// Whether every chapter of PR `pr`'s brief is read.
 pub fn fully_read(user: &UserState, pr: u64) -> bool {
     user.fog.reads.get(&pr).is_some_and(PrRead::fully_read)
+}
+
+/// Whether every chapter of PR `pr`'s brief is read at `head`.
+pub fn fully_read_at(user: &UserState, pr: u64, head: &str) -> bool {
+    user.fog
+        .reads
+        .get(&pr)
+        .is_some_and(|read| read.fully_read_at(head))
 }
 
 /// "I know this": clears every entry of `part`.

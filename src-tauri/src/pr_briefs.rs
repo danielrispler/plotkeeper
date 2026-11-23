@@ -53,11 +53,17 @@ pub struct Seen {
     heads: HashMap<u64, String>,
     /// The PRs and heads found to touch no part that would fog at Daniel's tiers: they get no brief and are not gathered again.
     quiet: HashSet<(u64, String)>,
+    /// The head whose write failed, per PR: it is not retried at every lookup, only when the head changes or Daniel opens the brief.
+    failed: HashMap<u64, String>,
 }
 
 impl Seen {
     pub fn is_quiet(&self, pr: u64, head: &str) -> bool {
         self.quiet.contains(&(pr, head.to_string()))
+    }
+
+    fn has_failed(&self, pr: u64, head: &str) -> bool {
+        self.failed.get(&pr).is_some_and(|h| h == head)
     }
 }
 
@@ -100,38 +106,49 @@ fn write_now(
     written
 }
 
-/// One lookup of ready PR `pr` at `head`. `source` builds what the writer reads, and is only called when a write starts.
+/// One lookup of ready PR `pr` at `head`. `source` builds what the writer reads, and is only called when a write starts. `seen` is
+/// locked only around its bookkeeping, never across the write, which takes minutes.
 pub fn on_lookup(
     with: &Writing,
-    seen: &mut Seen,
+    seen: &Mutex<Seen>,
     pr: u64,
     head: &str,
     source: impl FnOnce() -> Result<PrSource, String>,
     log: impl FnMut(String),
 ) -> Did {
-    let before = seen.heads.insert(pr, head.to_string());
-    if with.store.get(pr, head).is_some() || seen.is_quiet(pr, head) {
+    let (again, skip) = {
+        let mut seen = seen.lock().unwrap();
+        let before = seen.heads.insert(pr, head.to_string());
+        let skip = seen.is_quiet(pr, head) || seen.has_failed(pr, head);
+        (before.as_deref() == Some(head), skip)
+    };
+    if skip || with.store.get(pr, head).is_some() {
         return Did::Kept;
     }
-    let again = before.as_deref() == Some(head);
     if !again && let Some(old) = with.store.latest(pr) {
         let _ = with.store.mark_stale(pr, &old.head);
         return Did::Staled;
     }
-    // The first brief of a ready PR is written at once; a stale one when the same head is seen twice.
+    // The first brief of a ready PR is written at once; a stale one when the same head is seen twice. The write takes minutes and
+    // holds no lock.
     match write_now(with, source, log) {
         Ok(Some(_)) => Did::Wrote,
         Ok(None) => {
-            seen.quiet.insert((pr, head.to_string()));
+            seen.lock().unwrap().quiet.insert((pr, head.to_string()));
             Did::Quiet
         }
-        Err(_) => Did::Failed,
+        Err(_) => {
+            seen.lock().unwrap().failed.insert(pr, head.to_string());
+            Did::Failed
+        }
     }
 }
 
-/// Opening a PR's brief: the stored one when it is of the current head and not stale, else it is written now.
+/// Opening a PR's brief: the stored one when it is of the current head and not stale, else it is written now. Opening is Daniel
+/// asking, so a write that failed at this head is tried again.
 pub fn on_open(
     with: &Writing,
+    seen: &Mutex<Seen>,
     pr: u64,
     head: &str,
     source: impl FnOnce() -> Result<PrSource, String>,
@@ -139,9 +156,16 @@ pub fn on_open(
 ) -> Result<StoredBrief, String> {
     match with.store.get(pr, head) {
         Some(stored) if !stored.stale => Ok(stored),
-        _ => write_now(with, source, log)?.ok_or_else(|| {
-            "Nothing you track changed in this PR any more, so it has no brief.".into()
-        }),
+        _ => {
+            seen.lock().unwrap().failed.remove(&pr);
+            write_now(with, source, log)
+                .inspect_err(|_| {
+                    seen.lock().unwrap().failed.insert(pr, head.to_string());
+                })?
+                .ok_or_else(|| {
+                    "Nothing you track changed in this PR any more, so it has no brief.".into()
+                })
+        }
     }
 }
 
@@ -159,7 +183,7 @@ type SharedWriter = Arc<dyn BriefWriter + Send + Sync>;
 pub struct PrBriefs {
     /// `None` when the writer is the fake of the checks, which writes no brief.
     writer: Option<SharedWriter>,
-    /// The "PR briefs" setting's model; the settings page does not carry it yet, so it is the default.
+    /// The "PR briefs" setting's model (`pr_brief_settings`), the default until the window has sent it.
     model: Mutex<String>,
     seen: Mutex<HashMap<String, Arc<Mutex<Seen>>>>,
     busy: Mutex<HashSet<(String, u64)>>,
@@ -175,22 +199,41 @@ impl PrBriefs {
         }
     }
 
+    /// The window read the `pr_briefs.model` setting.
+    pub fn set_model(&self, model: String) {
+        *self.model.lock().unwrap() = model;
+    }
+
+    pub fn model(&self) -> String {
+        self.model.lock().unwrap().clone()
+    }
+
     /// Gives each ready PR its brief's state, for the tray.
     pub fn annotate(&self, project: &str, ready: &mut [Ready]) {
         let Some(store) = store_of(project) else {
             return;
         };
-        let busy = self.busy.lock().unwrap();
         let user = crate::map::state_file()
             .ok()
             .map(|file| crate::map::read_user(&file, project));
-        let seen = self.seen_of(project);
-        let seen = seen.lock().unwrap();
+        self.annotate_with(project, &store, user.as_ref(), ready);
+    }
+
+    /// `annotate` with the store and Daniel's state in hand. It never waits on a write: `busy` and `seen` are held only to copy.
+    fn annotate_with(
+        &self,
+        project: &str,
+        store: &BriefStore,
+        user: Option<&crate::map::UserState>,
+        ready: &mut [Ready],
+    ) {
+        let busy = self.busy.lock().unwrap().clone();
+        let quiet: HashSet<(u64, String)> = self.seen_of(project).lock().unwrap().quiet.clone();
         for pr in ready {
             let latest = store.latest(pr.number);
             let writing = busy.contains(&(project.to_string(), pr.number));
             if latest.is_none() && !writing {
-                if seen.is_quiet(pr.number, &pr.head) {
+                if quiet.contains(&(pr.number, pr.head.clone())) {
                     pr.brief = Some(BriefInfo {
                         stale: false,
                         writing: false,
@@ -211,9 +254,7 @@ impl PrBriefs {
                     .is_some_and(|b| b.stale || b.head != pr.head),
                 writing,
                 chapters,
-                read: user
-                    .as_ref()
-                    .is_some_and(|u| crate::fog::fully_read(u, pr.number)),
+                read: user.is_some_and(|u| crate::fog::fully_read(u, pr.number)),
                 quiet: false,
             });
         }
@@ -240,18 +281,32 @@ impl PrBriefs {
     }
 }
 
-/// The numbers of the ready PRs whose brief is stored: the ones a brief is waiting for.
-pub fn waiting_numbers(store: &BriefStore, ready: &[Ready]) -> Vec<u64> {
+/// The numbers of the ready PRs a brief is waiting for: the brief is stored and Daniel has not read all of it at the PR's current
+/// head. A brief read to its end stops counting for Home's dot and the rail's row (its tray row stays, to read again), and a push
+/// after the reading counts it again.
+pub fn waiting_numbers(
+    store: &BriefStore,
+    ready: &[Ready],
+    user: Option<&crate::map::UserState>,
+) -> Vec<u64> {
     ready
         .iter()
         .filter(|pr| store.latest(pr.number).is_some())
+        .filter(|pr| !user.is_some_and(|u| crate::fog::fully_read_at(u, pr.number, &pr.head)))
         .map(|pr| pr.number)
         .collect()
 }
 
+fn user_of(project: &str) -> Option<crate::map::UserState> {
+    crate::map::state_file()
+        .ok()
+        .map(|file| crate::map::read_user(&file, project))
+}
+
 /// Whether a brief waits for one of `project`'s ready PRs: Home's quiet dot lights for it.
 pub fn any_waiting(project: &str, ready: &[Ready]) -> bool {
-    store_of(project).is_some_and(|store| !waiting_numbers(&store, ready).is_empty())
+    store_of(project)
+        .is_some_and(|store| !waiting_numbers(&store, ready, user_of(project).as_ref()).is_empty())
 }
 
 /// The ready PRs of the project holding `cwd` that a brief waits for, for the rail's row in the session of one of them.
@@ -265,8 +320,27 @@ pub struct Waiting {
 pub fn briefs_waiting(cwd: String, prs: State<crate::prs::Prs>) -> Option<Waiting> {
     let project = studio_workbench::main_checkout(Path::new(&cwd)).ok()?;
     let ready = prs.ready(&project);
-    let numbers = store_of(&project).map(|s| waiting_numbers(&s, &ready))?;
+    let user = user_of(&project);
+    let numbers = store_of(&project).map(|s| waiting_numbers(&s, &ready, user.as_ref()))?;
     Some(Waiting { project, numbers })
+}
+
+/// The parts each chapter of `brief` lights: the union of its steps' `on`, which is what the checks validate, not the chapter's
+/// own `parts` (a single story names `["story"]`, and a chapter can light a part it did not declare).
+pub fn lit_parts(brief: &studio_understanding::pr_brief::Brief) -> Vec<Vec<String>> {
+    brief
+        .chapters
+        .iter()
+        .map(|c| {
+            let mut lit: Vec<String> = Vec::new();
+            for part in c.steps.iter().flat_map(|s| &s.on) {
+                if !lit.contains(part) {
+                    lit.push(part.clone());
+                }
+            }
+            lit
+        })
+        .collect()
 }
 
 /// The tray rows' titles: one per chapter, or the one story's title.
@@ -339,7 +413,7 @@ pub fn lookup_later(app: &AppHandle, project: &str, ready: Vec<Ready>) {
             if !briefs.busy(&project, pr.number, true) {
                 return;
             }
-            let model = briefs.model.lock().unwrap().clone();
+            let model = briefs.model();
             let seen = briefs.seen_of(&project);
             let with = Writing {
                 writer: writer.as_ref(),
@@ -348,7 +422,7 @@ pub fn lookup_later(app: &AppHandle, project: &str, ready: Vec<Ready>) {
             };
             let did = on_lookup(
                 &with,
-                &mut seen.lock().unwrap(),
+                &seen,
                 pr.number,
                 &pr.head,
                 || {
@@ -403,7 +477,8 @@ pub fn pr_brief(
         return Err("The brief is being written; open it again in a moment.".into());
     }
     let _ = app.emit("map-landed", project.clone());
-    let model = briefs.model.lock().unwrap().clone();
+    let model = briefs.model();
+    let seen = briefs.seen_of(&project);
     let with = Writing {
         writer: writer.as_ref(),
         model: &model,
@@ -411,6 +486,7 @@ pub fn pr_brief(
     };
     let written = on_open(
         &with,
+        &seen,
         number,
         &head,
         || source_of(&project, number),
@@ -419,6 +495,12 @@ pub fn pr_brief(
     briefs.busy(&project, number, false);
     let _ = app.emit("map-landed", project);
     written.map(|b| Some(view(b)))
+}
+
+/// The window's `pr_briefs.model` setting.
+#[tauri::command]
+pub fn pr_brief_settings(model: String, briefs: State<PrBriefs>) {
+    briefs.set_model(model);
 }
 
 /// Chapter `chapter` of PR `number`'s brief was read to its end (the window saw its last step and the check was answered): the
@@ -434,12 +516,7 @@ pub fn brief_chapter_done(
     let stored = store_of(&project)
         .and_then(|store| store.get(number, &head))
         .ok_or("that brief is not stored")?;
-    let lit = stored
-        .brief
-        .chapters
-        .iter()
-        .map(|c| c.parts.clone())
-        .collect();
+    let lit = lit_parts(&stored.brief);
     let file = crate::map::state_file()?;
     let at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -491,7 +568,7 @@ mod tests {
         }
     }
 
-    fn lookup(store: &BriefStore, seen: &mut Seen, fake: &Fake, head: &str) -> Did {
+    fn lookup(store: &BriefStore, seen: &Mutex<Seen>, fake: &Fake, head: &str) -> Did {
         let with = Writing {
             writer: fake,
             model: "opus",
@@ -504,13 +581,13 @@ mod tests {
     fn a_ready_pr_gets_a_stored_brief_once() {
         let dir = tempfile::tempdir().unwrap();
         let store = BriefStore::open(dir.path()).unwrap();
-        let (mut seen, fake) = (Seen::default(), Fake::new());
-        assert_eq!(lookup(&store, &mut seen, &fake, "aaa"), Did::Wrote);
+        let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
+        assert_eq!(lookup(&store, &seen, &fake, "aaa"), Did::Wrote);
         let stored = store.get(7, "aaa").expect("the brief is stored");
         assert_eq!(stored.brief.title, "Alpha");
         assert_eq!(fake.1.borrow()[0], "opus");
         // Another lookup of the same head writes nothing.
-        assert_eq!(lookup(&store, &mut seen, &fake, "aaa"), Did::Kept);
+        assert_eq!(lookup(&store, &seen, &fake, "aaa"), Did::Kept);
         assert_eq!(store.records().len(), 1);
     }
 
@@ -518,16 +595,16 @@ mod tests {
     fn a_new_head_marks_the_brief_stale_and_a_second_lookup_of_it_rewrites() {
         let dir = tempfile::tempdir().unwrap();
         let store = BriefStore::open(dir.path()).unwrap();
-        let (mut seen, fake) = (Seen::default(), Fake::new());
-        lookup(&store, &mut seen, &fake, "aaa");
-        assert_eq!(lookup(&store, &mut seen, &fake, "bbb"), Did::Staled);
+        let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
+        lookup(&store, &seen, &fake, "aaa");
+        assert_eq!(lookup(&store, &seen, &fake, "bbb"), Did::Staled);
         assert!(store.get(7, "aaa").unwrap().stale);
         assert!(store.get(7, "bbb").is_none(), "not rewritten at once");
         // A burst of pushes: the head moved again, so the count starts over.
-        assert_eq!(lookup(&store, &mut seen, &fake, "ccc"), Did::Staled);
+        assert_eq!(lookup(&store, &seen, &fake, "ccc"), Did::Staled);
         assert_eq!(store.records().len(), 1);
         // The same head at two lookups in a row: rewritten.
-        assert_eq!(lookup(&store, &mut seen, &fake, "ccc"), Did::Wrote);
+        assert_eq!(lookup(&store, &seen, &fake, "ccc"), Did::Wrote);
         assert!(store.get(7, "ccc").is_some());
         assert_eq!(store.records().len(), 2);
     }
@@ -536,17 +613,17 @@ mod tests {
     fn opening_a_stale_brief_rewrites_it_and_a_fresh_one_is_read_as_it_is() {
         let dir = tempfile::tempdir().unwrap();
         let store = BriefStore::open(dir.path()).unwrap();
-        let (mut seen, fake) = (Seen::default(), Fake::new());
-        lookup(&store, &mut seen, &fake, "aaa");
+        let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
+        lookup(&store, &seen, &fake, "aaa");
         let with = Writing {
             writer: &fake,
             model: "opus",
             store: &store,
         };
-        let open = |head: &str| on_open(&with, 7, head, || Ok(source(head)), |_| {});
+        let open = |head: &str| on_open(&with, &seen, 7, head, || Ok(source(head)), |_| {});
         assert_eq!(open("aaa").unwrap().head, "aaa");
         assert_eq!(store.records().len(), 1, "a fresh brief is not rewritten");
-        lookup(&store, &mut seen, &fake, "bbb");
+        lookup(&store, &seen, &fake, "bbb");
         assert_eq!(open("bbb").unwrap().head, "bbb");
         assert_eq!(store.records().len(), 2);
         assert!(store.get(7, "bbb").is_some());
@@ -568,7 +645,7 @@ mod tests {
     fn a_pr_whose_touched_parts_would_not_fog_at_the_tiers_gets_no_brief() {
         let dir = tempfile::tempdir().unwrap();
         let store = BriefStore::open(dir.path()).unwrap();
-        let (mut seen, fake) = (Seen::default(), Fake::new());
+        let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
         let with = Writing {
             writer: &fake,
             model: "opus",
@@ -590,7 +667,7 @@ mod tests {
             let pr = 100 + n as u64;
             let mut source = source;
             source.meta.number = pr;
-            let did = on_lookup(&with, &mut seen, pr, "aaa", || Ok(source), |_| {});
+            let did = on_lookup(&with, &seen, pr, "aaa", || Ok(source), |_| {});
             assert_eq!(did, want, "case {n}");
             assert_eq!(store.latest(pr).is_some(), want == Did::Wrote, "case {n}");
         }
@@ -605,7 +682,7 @@ mod tests {
     fn a_quiet_pr_is_not_gathered_again_at_the_same_head() {
         let dir = tempfile::tempdir().unwrap();
         let store = BriefStore::open(dir.path()).unwrap();
-        let (mut seen, fake) = (Seen::default(), Fake::new());
+        let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
         let with = Writing {
             writer: &fake,
             model: "opus",
@@ -613,11 +690,11 @@ mod tests {
         };
         let black = MAP.replace("\"core\"", "\"black-box\"");
         let gathered = Cell::new(0);
-        let mut look = |head: &str| {
+        let look = |head: &str| {
             let source = quiet_source(&black, &[], "");
             on_lookup(
                 &with,
-                &mut seen,
+                &seen,
                 7,
                 head,
                 || {
@@ -647,26 +724,29 @@ mod tests {
     fn a_brief_is_waiting_for_a_ready_pr_that_has_one_stored() {
         let dir = tempfile::tempdir().unwrap();
         let store = BriefStore::open(dir.path()).unwrap();
-        let (mut seen, fake) = (Seen::default(), Fake::new());
+        let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
         let with = Writing {
             writer: &fake,
             model: "opus",
             store: &store,
         };
-        on_lookup(&with, &mut seen, 7, "aaa", || Ok(source("aaa")), |_| {});
+        on_lookup(&with, &seen, 7, "aaa", || Ok(source("aaa")), |_| {});
         // #8 has none yet; #7 does; the stale one still waits.
-        assert_eq!(waiting_numbers(&store, &[ready(7), ready(8)]), vec![7]);
+        assert_eq!(
+            waiting_numbers(&store, &[ready(7), ready(8)], None),
+            vec![7]
+        );
         store.mark_stale(7, "aaa").unwrap();
-        assert_eq!(waiting_numbers(&store, &[ready(7)]), vec![7]);
+        assert_eq!(waiting_numbers(&store, &[ready(7)], None), vec![7]);
         // A PR that is not ready (merged, closed, a draft) is not in the list given, so nothing waits for it.
-        assert!(waiting_numbers(&store, &[]).is_empty());
+        assert!(waiting_numbers(&store, &[], None).is_empty());
     }
 
     #[test]
     fn a_failed_write_is_told_and_stores_nothing() {
         let dir = tempfile::tempdir().unwrap();
         let store = BriefStore::open(dir.path()).unwrap();
-        let (mut seen, fake) = (Seen::default(), Fake::new());
+        let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
         let told = RefCell::new(vec![]);
         let with = Writing {
             writer: &fake,
@@ -675,7 +755,7 @@ mod tests {
         };
         let did = on_lookup(
             &with,
-            &mut seen,
+            &seen,
             7,
             "aaa",
             || Err("no git".into()),
@@ -684,5 +764,173 @@ mod tests {
         assert_eq!(did, Did::Failed);
         assert!(told.borrow()[0].contains("no git"));
         assert!(store.latest(7).is_none());
+    }
+
+    fn read_at(chapters: usize, head: &str) -> crate::map::UserState {
+        let mut user = crate::map::UserState::default();
+        let read = user.fog.reads.entry(7).or_default();
+        read.lit = (0..chapters).map(|_| vec!["alpha".to_string()]).collect();
+        for i in 0..chapters {
+            read.chapters.insert(
+                i,
+                crate::fog::ChapterRead {
+                    head: head.into(),
+                    at: 1,
+                },
+            );
+        }
+        user
+    }
+
+    #[test]
+    fn a_brief_read_to_its_end_stops_waiting_until_the_pr_is_pushed_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = BriefStore::open(dir.path()).unwrap();
+        let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
+        lookup(&store, &seen, &fake, "aaa");
+        // Unread, or read in part: waiting.
+        assert_eq!(
+            waiting_numbers(&store, &[ready(7)], Some(&crate::map::UserState::default())),
+            vec![7]
+        );
+        let mut half = read_at(2, "aaa");
+        half.fog.reads.get_mut(&7).unwrap().chapters.remove(&1);
+        assert_eq!(waiting_numbers(&store, &[ready(7)], Some(&half)), vec![7]);
+        // Read to the end at the PR's head: nothing waits.
+        let done = read_at(2, "aaa");
+        assert!(waiting_numbers(&store, &[ready(7)], Some(&done)).is_empty());
+        // The PR moved on after the reading: waiting again.
+        let mut pushed = ready(7);
+        pushed.head = "bbb".into();
+        assert_eq!(waiting_numbers(&store, &[pushed], Some(&done)), vec![7]);
+    }
+
+    /// A writer that tells when its write starts and blocks until it is released.
+    struct Blocking {
+        started: Mutex<std::sync::mpsc::Sender<()>>,
+        release: Mutex<std::sync::mpsc::Receiver<()>>,
+    }
+    impl BriefWriter for Blocking {
+        fn write(&self, _model: &str, _prompt: &str) -> Result<WriterReply, String> {
+            self.started.lock().unwrap().send(()).unwrap();
+            // A closed channel (the test is done) releases every write, the claim check's too.
+            let _ = self.release.lock().unwrap().recv();
+            Fake::new().write("opus", "")
+        }
+    }
+
+    #[test]
+    fn the_tray_is_annotated_while_a_brief_is_being_written() {
+        use std::sync::mpsc::{RecvTimeoutError, channel};
+        use std::time::Duration;
+        let dir = tempfile::tempdir().unwrap();
+        let store = BriefStore::open(dir.path()).unwrap();
+        let briefs = PrBriefs::new(None);
+        let seen = briefs.seen_of("/p");
+        let (started_tx, started_rx) = channel();
+        let (release_tx, release_rx) = channel();
+        let blocking = Blocking {
+            started: Mutex::new(started_tx),
+            release: Mutex::new(release_rx),
+        };
+        let (done_tx, done_rx) = channel();
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                assert!(briefs.busy("/p", 7, true));
+                let with = Writing {
+                    writer: &blocking,
+                    model: "opus",
+                    store: &store,
+                };
+                on_lookup(&with, &seen, 7, "aaa", || Ok(source("aaa")), |_| {});
+                briefs.busy("/p", 7, false);
+            });
+            started_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+            // The write is running: the Map view's read of the tray must not wait for it.
+            scope.spawn(|| {
+                let mut tray = [ready(7)];
+                briefs.annotate_with("/p", &store, None, &mut tray);
+                done_tx.send(tray[0].brief.clone()).unwrap();
+            });
+            let annotated = done_rx.recv_timeout(Duration::from_secs(3));
+            drop(release_tx);
+            match annotated {
+                Ok(brief) => assert!(brief.unwrap().writing, "the row says it is being written"),
+                Err(RecvTimeoutError::Timeout) => panic!("annotate waited for the write"),
+                Err(e) => panic!("{e}"),
+            }
+        });
+    }
+
+    #[test]
+    fn a_failed_write_is_not_retried_at_the_same_head_until_the_brief_is_opened() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = BriefStore::open(dir.path()).unwrap();
+        let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
+        let with = Writing {
+            writer: &fake,
+            model: "opus",
+            store: &store,
+        };
+        let sourced = Cell::new(0);
+        let failing = || {
+            sourced.set(sourced.get() + 1);
+            Err("no git".to_string())
+        };
+        assert_eq!(
+            on_lookup(&with, &seen, 7, "aaa", failing, |_| {}),
+            Did::Failed
+        );
+        assert_eq!(
+            on_lookup(&with, &seen, 7, "aaa", failing, |_| {}),
+            Did::Kept
+        );
+        assert_eq!(sourced.get(), 1, "the second lookup did not try again");
+        // A new head is tried.
+        assert_eq!(
+            on_lookup(&with, &seen, 7, "bbb", failing, |_| {}),
+            Did::Failed
+        );
+        assert_eq!(sourced.get(), 2);
+        // Opening the brief is Daniel asking: it tries, and a success is stored.
+        assert!(on_open(&with, &seen, 7, "bbb", || Ok(source("bbb")), |_| {}).is_ok());
+        assert!(store.get(7, "bbb").is_some());
+    }
+
+    #[test]
+    fn the_parts_a_chapter_lights_are_its_steps_not_its_declared_parts() {
+        let step = |on: &[&str]| studio_understanding::pr_brief::Step {
+            on: on.iter().map(|s| s.to_string()).collect(),
+            ..Default::default()
+        };
+        let chapter = |parts: &[&str], steps: Vec<_>| studio_understanding::pr_brief::Chapter {
+            parts: parts.iter().map(|s| s.to_string()).collect(),
+            steps,
+            ..Default::default()
+        };
+        let brief = studio_understanding::pr_brief::Brief {
+            chapters: vec![
+                // A single story declares "story" and lights real parts through its steps.
+                chapter(&["story"], vec![step(&["alpha"]), step(&["beta", "alpha"])]),
+                // A chapter lights a part it did not declare.
+                chapter(&["beta"], vec![step(&["beta"]), step(&["writer"])]),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            lit_parts(&brief),
+            vec![vec!["alpha", "beta"], vec!["beta", "writer"]]
+        );
+    }
+
+    #[test]
+    fn the_model_of_the_setting_is_the_one_a_write_uses() {
+        let briefs = PrBriefs::new(None);
+        assert_eq!(
+            briefs.model(),
+            studio_understanding::pr_brief::DEFAULT_MODEL
+        );
+        briefs.set_model("haiku".into());
+        assert_eq!(briefs.model(), "haiku");
     }
 }

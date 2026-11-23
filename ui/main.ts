@@ -302,6 +302,7 @@ function applySettings(files: SettingsFiles) {
   layout();
   const { model, effort, on_open: onOpen } = settings.summaries;
   invoke("summary_settings", { model, effort, onOpen }).catch(failure("summary_settings"));
+  invoke("pr_brief_settings", { model: settings.pr_briefs.model }).catch(failure("pr_brief_settings"));
   invoke("check_lists", { lists: settings.checks }).catch(failure("check_lists"));
   window.dispatchEvent(new Event("settings"));
 }
