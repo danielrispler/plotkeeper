@@ -5,6 +5,7 @@
 
 import { element, failure, invoke, newest, pressable, text } from "./dom.js";
 import { currentMap, onDraw, syncSide } from "./map.js";
+import { logStop } from "./stop-rules.js";
 import type { Session } from "./types.js";
 
 // One agent on the map: a session's own, or a Worker's. `key` is the session's id, and `session/worker` for a Worker.
@@ -77,7 +78,11 @@ export function hideAgents(hide: boolean) {
 }
 
 const chip = (agent: Live, select: AgentDeps["select"]) => {
-  const button = pressable(text("button", agent.needsYou ? `${agent.label} needs you` : agent.label, `agent-chip${agent.needsYou ? " needs-you" : ""}`), false, () => select(agent.session, agent.agent));
+  const button = pressable(text("button", agent.needsYou ? `${agent.label} needs you` : agent.label, `agent-chip${agent.needsYou ? " needs-you" : ""}`), false, () => {
+    const view = currentMap();
+    if (view) logStop("map-action", view.project);
+    select(agent.session, agent.agent);
+  });
   button.removeAttribute("aria-pressed");
   button.title = `${agent.label}${agent.needsYou ? " needs you" : ""}\nGo to this ${agent.agent === null ? "session" : "worker"}`;
   return button;

@@ -501,13 +501,12 @@ export interface Commands {
 export type Command = keyof Commands;
 
 // What the shell counted of Daniel's use (`stop_rules.rs`), for the one-time review: days, merged PRs and the uses of each module.
-export type StopKind = "session" | "map-open" | "mark-seen" | "scrub" | "proof" | "know" | "brief-offered" | "brief-opened" | "chapter-done" | "check-answered" | "ratify" | "unconfirmed-seen";
+export type StopKind = "session" | "map-open" | "map-action" | "scrub" | "proof" | "know" | "brief-offered" | "brief-opened" | "chapter-done" | "check-answered" | "ratify" | "unconfirmed-seen";
 export type StopFacts = {
   active_days: number;
   merged_prs: number;
-  map_days: number;
-  mark_days: number;
-  map_on_mark_days: number;
+  // Active days with at least one entered action on the map.
+  engaged_days: number;
   scrubs: number;
   proofs: number;
   knows: number;
