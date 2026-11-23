@@ -163,7 +163,9 @@ pub fn on_open(
                     seen.lock().unwrap().failed.insert(pr, head.to_string());
                 })?
                 .ok_or_else(|| {
-                    "Nothing you track changed in this PR any more, so it has no brief.".into()
+                    // The tray row becomes the quiet one, which does not open.
+                    seen.lock().unwrap().quiet.insert((pr, head.to_string()));
+                    "Nothing you track changed in this PR, so it has no brief.".into()
                 })
         }
     }
@@ -808,6 +810,32 @@ mod tests {
         assert_eq!(gathered.get(), 1);
         assert_eq!(look("bbb"), Did::Quiet);
         assert_eq!(gathered.get(), 2);
+    }
+
+    #[test]
+    fn opening_a_pr_that_fogs_nothing_tells_the_tray_it_is_quiet() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = BriefStore::open(dir.path()).unwrap();
+        let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
+        let with = Writing {
+            writer: &fake,
+            model: "opus",
+            store: &store,
+        };
+        let black = MAP.replace("\"core\"", "\"black-box\"");
+        let opened = on_open(
+            &with,
+            &seen,
+            7,
+            "aaa",
+            || Ok(quiet_source(&black, &[], "")),
+            |_| {},
+        );
+        assert!(opened.is_err());
+        assert!(
+            seen.lock().unwrap().is_quiet(7, "aaa"),
+            "the row becomes the quiet one"
+        );
     }
 
     fn ready(number: u64) -> Ready {
