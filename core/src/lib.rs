@@ -20,6 +20,7 @@ mod codex;
 mod cursor;
 mod event;
 mod ledger;
+mod qwen;
 mod saved;
 mod transcript;
 mod turn_files;
@@ -37,6 +38,7 @@ pub use cursor::CAPABILITIES as CURSOR_CAPABILITIES;
 pub use event::{Capabilities, TranscriptFormat};
 use event::{Event, Happened, Origin, Start, ToolKind};
 pub use ledger::{Bytes, Details, Ledger, Outcome, Row};
+pub use qwen::CAPABILITIES as QWEN_CAPABILITIES;
 pub use transcript::{Context, LogEntry, SubagentLog, Transcript};
 pub use turn_files::{
     Numstat, RootDiff, TurnDiff, TurnFile, TurnFiles, TurnFilesSnapshot, TurnTrees,
@@ -45,7 +47,7 @@ pub use turn_files::{
 pub use work::{Estimate, MIN_HISTORY, Phase, PhaseStart, Work, range};
 
 /// Who reads a line that is not Claude's: agy, when its hook entry named agy or named no agent (a
-/// line written before entries named one), Codex (#359), or nobody, for another agent (#355). A new
+/// line written before entries named one), Codex (#359), Qwen Code (#360), or nobody, for another agent (#355). A new
 /// harness is one arm here, beside its `Capabilities` constant and its parser.
 enum Named {
     Agy,
@@ -53,6 +55,8 @@ enum Named {
     Codex(u64),
     /// The line's time, for its drift when Cursor's parser cannot read it (#362).
     Cursor(u64),
+    /// The line's time, for its drift when Qwen Code's parser cannot read it.
+    Qwen(u64),
     /// The line's time, for its drift.
     Other(u64),
 }
@@ -71,6 +75,7 @@ impl Named {
             Some(agent) if agent == AGY_CAPABILITIES.agent => Named::Agy,
             Some(codex::CODEX) => Named::Codex(stamp.studio_received_ms),
             Some(cursor::CURSOR) => Named::Cursor(stamp.studio_received_ms),
+            Some(qwen::QWEN) => Named::Qwen(stamp.studio_received_ms),
             Some(_) => Named::Other(stamp.studio_received_ms),
         }
     }
@@ -2567,7 +2572,7 @@ impl Studio {
     }
 
     /// The events of one log line, read by the agent its hook entry named (#355): Claude's, agy's,
-    /// Codex's, or none and drift for an agent plotkeeper cannot read or a line its agent's parser
+    /// Codex's, Qwen Code's, or none and drift for an agent plotkeeper cannot read or a line its agent's parser
     /// cannot read. A line that names none is Claude's by its shape, or else agy's.
     fn events(&mut self, line: &str) -> Vec<Event> {
         match claude::parse(line) {
@@ -2582,6 +2587,13 @@ impl Studio {
                     }
                 },
                 Named::Cursor(at) => match cursor::parse(line) {
+                    Ok(event) => vec![event],
+                    Err(_) => {
+                        self.agy.drift(at, AgyDriftKind::Agent);
+                        Vec::new()
+                    }
+                },
+                Named::Qwen(at) => match qwen::parse(line) {
                     Ok(event) => vec![event],
                     Err(_) => {
                         self.agy.drift(at, AgyDriftKind::Agent);
@@ -2604,6 +2616,7 @@ impl Studio {
                 Named::Agy => self.agy.peek(line),
                 Named::Codex(_) => codex::parse(line).ok(),
                 Named::Cursor(_) => cursor::parse(line).ok(),
+                Named::Qwen(_) => qwen::parse(line).ok(),
                 Named::Other(_) => None,
             },
         }

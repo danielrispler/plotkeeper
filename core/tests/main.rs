@@ -26,6 +26,7 @@ mod notices;
 mod phases;
 mod prompt_name;
 mod questions;
+mod qwen;
 mod replay;
 mod restart;
 #[path = "../../scripts/wire/samples.rs"]
