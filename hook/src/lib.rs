@@ -176,13 +176,17 @@ pub struct Pruned {
     pub lightened: usize,
 }
 
-/// What a prune reads of a line: its session, by `session_id` (Claude Code's and Codex's) or agy's
-/// `conversationId`, the agent its hook entry named, and when it was received.
+/// What a prune reads of a line: its session, by `session_id` (Claude Code's and Codex's), agy's
+/// `conversationId` or Cursor's `conversation_id`, the agent its hook entry named, and when it was
+/// received.
 #[derive(Default, serde::Deserialize)]
 struct Stamp {
     session_id: Option<String>,
     #[serde(rename = "conversationId")]
     conversation_id: Option<String>,
+    /// Cursor's session (#362).
+    #[serde(rename = "conversation_id")]
+    cursor_conversation: Option<String>,
     studio_agent: Option<String>,
     studio_received_ms: Option<u64>,
 }
@@ -199,6 +203,7 @@ impl Stamp {
         match self.studio_agent.as_deref() {
             Some("agy") => agy,
             Some("claude" | "codex") => claude,
+            Some("cursor") => self.cursor_conversation.as_deref(),
             _ => claude.or(agy),
         }
     }
@@ -879,7 +884,8 @@ fn first_tree(root: &str, began: Option<u64>) -> Option<(String, serde_json::Val
 /// `PLOTKEEPER_AGENT_PID` (agy's, which runs the hook from a backgrounded subshell), else the hook's
 /// `parent`, or its parent's parent when that is a shell the agent started the hook through.
 /// `inspect` gives a process's command and parent pid. `None` when no agent can be told, as for a hook
-/// reparented to init; the session then takes the idle path.
+/// reparented to init, or for an agent an IDE app hosts, such as Cursor's (#362; spec #320, "IDE-hosted
+/// pids"), whose process outlives its sessions; the session then takes the idle path.
 pub fn agent_pid(
     wrapper: Option<&str>,
     parent: u32,
@@ -890,16 +896,41 @@ pub fn agent_pid(
         return Some(pid);
     }
     let parent = real(parent)?;
-    match inspect(parent) {
-        Some((command, up)) if is_shell(&command) => real(up),
-        _ => Some(parent),
+    let (agent, command) = match inspect(parent) {
+        Some((command, up)) if is_shell(&command) => (real(up)?, inspect(up).map(|(c, _)| c)),
+        found => (parent, found.map(|(c, _)| c)),
+    };
+    match command {
+        Some(command) if in_app(&command) => None,
+        _ => Some(agent),
     }
+}
+
+/// Whether `command`, a process's executable path, lies inside a macOS app bundle, as an IDE's
+/// processes do; an agent's CLI is a program of its own.
+fn in_app(command: &str) -> bool {
+    command.contains(".app/Contents/")
 }
 
 fn is_shell(command: &str) -> bool {
     let name = command.rsplit('/').next().unwrap_or(command);
     let name = name.trim_start_matches('-');
     matches!(name, "sh" | "bash" | "zsh" | "dash" | "fish")
+}
+
+/// The harness whose own payload `event` is, by a marker field only its payloads carry, when that is
+/// another than `agent`, the agent its hook entry names (spec #320, "One event, one record, the right
+/// agent"): Cursor's `cursor_version`, as Cursor runs Claude Code's hooks too (#362). Such an event is
+/// dropped, as that harness's own entry records it.
+/// Returns that harness's display name.
+pub fn foreign(
+    agent: Option<&str>,
+    event: &serde_json::Map<String, serde_json::Value>,
+) -> Option<&'static str> {
+    let (marked, name) = event
+        .contains_key("cursor_version")
+        .then_some(("cursor", "Cursor"))?;
+    agent.is_some_and(|a| a != marked).then_some(name)
 }
 
 /// The command and parent pid of process `pid`, from `ps`; `None` when it has gone or `ps` fails.

@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [{ "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent cursor", "timeout": 5 }],
+    "sessionEnd": [{ "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent cursor", "timeout": 5 }],
+    "beforeSubmitPrompt": [{ "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent cursor", "timeout": 5 }],
+    "postToolUse": [{ "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent cursor", "timeout": 5 }],
+    "postToolUseFailure": [{ "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent cursor", "timeout": 5 }],
+    "afterAgentResponse": [{ "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent cursor", "timeout": 5 }],
+    "stop": [{ "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent cursor", "timeout": 5 }]
+  }
+}

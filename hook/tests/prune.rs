@@ -226,3 +226,29 @@ fn a_prune_keeps_a_sessions_lines_together_by_the_id_its_agent_uses() {
     assert_eq!(lines(&log), [old, recent]);
     assert_eq!(lines(&archive_file(&log)), [claude_old]);
 }
+
+/// A Cursor line goes by its `conversation_id` (#362): its `sessionStart` also carries a
+/// `session_id`, and its other events carry none.
+#[test]
+fn a_prune_keeps_a_cursor_sessions_lines_together_by_its_conversation_id() {
+    let home = scratch("cursor");
+    let log = studio_hook::event_log(&home);
+    let start = json!({
+        "conversation_id": "c-1",
+        "session_id": "c-1-start",
+        "hook_event_name": "sessionStart",
+        "studio_agent": "cursor",
+        "studio_received_ms": NOW - 40 * DAY,
+    });
+    let recent = json!({
+        "conversation_id": "c-1",
+        "hook_event_name": "stop",
+        "studio_agent": "cursor",
+        "studio_received_ms": NOW - DAY,
+    });
+    write(&log, &[start.clone(), recent.clone()]);
+
+    prune(&log, NOW).unwrap();
+
+    assert_eq!(lines(&log), [start, recent]);
+}

@@ -5,7 +5,7 @@
 `~/Library/Application Support/plotkeeper/events.jsonl`, one hook payload per line, with added fields:
 
 - `studio_terminal_id`: the session's `PLOTKEEPER_TERMINAL_ID`, when set;
-- `studio_agent`: the agent its hook entry named (`--agent claude`, `--agent agy`, `--agent codex`), by which the core picks the line's parser and a prune finds its session (#355). A name plotkeeper has no parser for is counted as drift, not read as Claude's; a line with no name, written before entries named one or by the app, is read by its shape;
+- `studio_agent`: the agent its hook entry named (`--agent claude`, `--agent agy`, `--agent codex`, `--agent cursor`), by which the core picks the line's parser and a prune finds its session (#355). A name plotkeeper has no parser for is counted as drift, not read as Claude's; a line with no name, written before entries named one or by the app, is read by its shape;
 - `studio_received_ms`: when the hook received the event, in Unix milliseconds.
 
 The app appends lines of its own, named `Studio…`, such as `StudioInterrupted`, which ends a turn Daniel interrupted, by its `prompt_id`, with that turn's end trees.
