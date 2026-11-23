@@ -162,6 +162,38 @@ fn the_prompt_is_the_catch_ups_and_keeps_the_briefs_step_rules() {
     assert!(!p.contains("You write a PR brief"));
 }
 
+#[test]
+fn the_catch_up_asks_for_a_gist_and_a_reply_without_one_is_flagged_on_it() {
+    let facts = build_catch_up_facts(&source()).unwrap();
+    let p = studio_understanding::pr_brief::prompt(&facts);
+    let head = &p[..p.find("A step:").unwrap()];
+    assert!(
+        head.contains("\"gist\": "),
+        "the catch-up's own reply schema asks for the gist"
+    );
+    assert_eq!(
+        facts.context.core,
+        ["alpha"],
+        "a part catch-up always carries a gist"
+    );
+
+    let mut brief = studio_understanding::pr_brief::parse_reply(&reply().to_string()).unwrap();
+    assert_eq!(
+        brief.chapters[0].gist,
+        "Alpha now keeps the order it was given."
+    );
+    let mut r = reply();
+    r["chapters"][0].as_object_mut().unwrap().remove("gist");
+    let mut bare = studio_understanding::pr_brief::parse_reply(&r.to_string()).unwrap();
+    check_catch_up(&mut brief, &facts.context);
+    check_catch_up(&mut bare, &facts.context);
+    assert!(brief.all_flags().is_empty(), "{:?}", brief.all_flags());
+    assert_eq!(
+        bare.chapters[0].gist_flags,
+        ["a Core chapter without a gist"]
+    );
+}
+
 // ---- the reply ----
 
 fn step(k: &str, h: &str, quote: &str) -> serde_json::Value {
@@ -172,7 +204,7 @@ fn step(k: &str, h: &str, quote: &str) -> serde_json::Value {
 fn reply() -> serde_json::Value {
     json!({
         "title": "Alpha now keeps order",
-        "chapters": [ { "behaviour": "story", "parts": ["alpha"], "title": "Alpha keeps order", "steps": [
+        "chapters": [ { "behaviour": "story", "parts": ["alpha"], "title": "Alpha keeps order", "gist": "Alpha now keeps the order it was given.", "steps": [
             step("Where", "Alpha is where requests arrive", "Alpha keeps order"),
             step("Before", "Alpha could shuffle requests", "The PR body says Alpha now keeps order"),
             step("Now", "Alpha keeps the order it was given", "Quick fix pushed straight to main")

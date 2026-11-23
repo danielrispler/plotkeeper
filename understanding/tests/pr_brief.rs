@@ -263,8 +263,8 @@ fn good_brief() -> serde_json::Value {
         "title": "Alpha keeps order",
         "overview": [step("Now", &["alpha", "beta"])],
         "chapters": [
-            { "behaviour": "order", "parts": ["alpha", "beta"], "title": "Order", "steps": [step("Before", &["alpha"]), step("Now", &["alpha", "beta"]), step("Could break", &["beta"])] },
-            { "behaviour": "reach", "parts": ["gamma"], "title": "Reach", "steps": [step("Before", &["gamma"]), step("Now", &["gamma"]), step("Not in the plan", &["gamma"])] }
+            { "behaviour": "order", "parts": ["alpha", "beta"], "title": "Order", "gist": "Alpha now keeps order.", "steps": [step("Before", &["alpha"]), step("Now", &["alpha", "beta"]), step("Could break", &["beta"])] },
+            { "behaviour": "reach", "parts": ["gamma"], "title": "Reach", "gist": "Gamma is reached.", "steps": [step("Before", &["gamma"]), step("Now", &["gamma"]), step("Not in the plan", &["gamma"])] }
         ],
         "also": [], "unseen": [], "decisions": []
     })
@@ -332,7 +332,7 @@ fn an_order_check_whose_parts_disagree_with_the_flow_is_dropped_and_one_on_an_un
 fn single_story() -> serde_json::Value {
     json!({
         "title": "Alpha keeps order",
-        "chapters": [{ "behaviour": "story", "parts": ["alpha"], "title": "Order",
+        "chapters": [{ "behaviour": "story", "parts": ["alpha"], "title": "Order", "gist": "Alpha now keeps order.",
             "steps": [step("Where", &["alpha"]), step("Before", &["alpha"]), step("Now", &["alpha"])] }],
     })
 }
@@ -363,6 +363,72 @@ fn good_brief_without_overview() -> serde_json::Value {
     let mut b = good_brief();
     b.as_object_mut().unwrap().remove("overview");
     b
+}
+
+// ---- the gist (#397) ----
+
+#[test]
+fn a_core_chapter_carries_a_one_sentence_gist_and_a_chapter_of_no_core_part_carries_none() {
+    // Gamma is Interface-only by Daniel's choice and named in the map's diff, so it fogs without being Core.
+    let mut s = source(&["alpha/a.rs", "beta/b.rs", "gamma/c.rs"]);
+    s.tier_overrides.insert("gamma".into(), "interface".into());
+    s.map_diff = "+ \"gamma\" moved".into();
+    let facts = build_facts(&s).unwrap();
+    assert!(
+        section(&facts, "SHAPE (decided by code)")
+            .contains("core parts (a chapter lighting one carries a gist): alpha, beta"),
+        "{}",
+        section(&facts, "SHAPE (decided by code)")
+    );
+    let mut b = good_brief_without_overview();
+    b["chapters"][0]["gist"] = json!("Alpha now keeps the order it was given.");
+    b["chapters"][1]["gist"] = json!("Gamma is reached.");
+    let p = prompt(&facts);
+    assert!(
+        p.contains("\"gist\": \"only on a chapter that lights a Core part"),
+        "the writer's reply schema asks for the gist"
+    );
+    let brief = checked(&facts, b.clone());
+    assert_eq!(flags_of(&brief), Vec::<String>::new());
+    assert_eq!(
+        brief.chapters[0].gist,
+        "Alpha now keeps the order it was given."
+    );
+    assert_eq!(
+        brief.chapters[1].gist, "",
+        "a chapter lighting no Core part has no gist"
+    );
+
+    // A Core chapter without a gist, or with more than one sentence or a banned word, is flagged on its gist.
+    for (gist, needle) in [
+        ("", "a Core chapter without a gist"),
+        (
+            "Alpha keeps order. Beta follows it.",
+            "more than one sentence",
+        ),
+        (
+            "Alpha keeps order and it can't lose any.",
+            "banned word \"can't\"",
+        ),
+    ] {
+        let mut b = b.clone();
+        b["chapters"][0]["gist"] = json!(gist);
+        let brief = checked(&facts, b);
+        assert!(
+            brief.chapters[0]
+                .gist_flags
+                .iter()
+                .any(|f| f.contains(needle)),
+            "{gist}: {:?}",
+            brief.chapters[0].gist_flags
+        );
+        assert!(
+            flags_of(&brief)
+                .iter()
+                .any(|f| f.starts_with("gist order: "))
+        );
+        assert_eq!(brief.flagged(), 1);
+    }
 }
 
 #[test]
@@ -684,6 +750,10 @@ fn the_trials_v3_replies_for_274_and_317_parse_and_pass_every_check() {
             brief.decisions.len() >= 5 && brief.decisions.iter().all(|d| d.id.is_none()),
             "bare sentences read as decisions"
         );
+        assert!(
+            brief.chapters.iter().all(|c| c.gist.is_empty()),
+            "#{pr}: written before the gist"
+        );
         check_brief(&mut brief, &sample_context(pr));
         assert_eq!(
             brief.all_flags(),
@@ -972,6 +1042,39 @@ fn a_stored_brief_reads_in_an_older_or_newer_build_which_ignores_what_it_does_no
     )
     .unwrap();
     assert_eq!(minimal.brief, Brief::default());
+}
+
+// @law: old-stored-files-load
+#[test]
+fn a_stored_brief_with_gists_reads_with_them_and_a_part_catch_up_with_its_gist() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/stored/pr-brief-v4");
+    let read = |name: &str| std::fs::read_to_string(dir.join(name)).unwrap();
+    let full: StoredBrief = serde_json::from_str(&read("stored-brief-full.json")).unwrap();
+    assert_eq!(
+        full.brief.chapters[0].gist,
+        "The shell now keeps a part fogged until its chapter is read."
+    );
+    assert_eq!(
+        full.brief.chapters[0].gist_flags,
+        [
+            "claim check: \"until its chapter is read\"",
+            "not confirmed from the facts"
+        ]
+    );
+    assert_eq!(full.brief.chapters[1].gist, "", "a chapter of no Core part");
+    assert_eq!(full.brief.flagged(), 2, "its step and its gist");
+    let catch_up: studio_understanding::part_catch_up::StoredCatchUp =
+        serde_json::from_str(&read("part-catch-up-full.json")).unwrap();
+    assert_eq!(
+        (
+            catch_up.part.as_str(),
+            catch_up.brief.chapters[0].gist.as_str()
+        ),
+        (
+            "shell",
+            "The shell keeps a part fogged until its catch-up is read."
+        )
+    );
 }
 
 // ---- gather: git only ----
@@ -1304,6 +1407,64 @@ fn a_decision_and_an_also_line_can_be_flagged_and_rewritten() {
     assert!(stored.brief.also[0].flags.is_empty() && stored.brief.decisions[0].flags.is_empty());
     assert!(stored.brief.steps().all(|s| s.flags.is_empty()));
     assert_eq!(record.claim_flags_before.len(), 2);
+}
+
+#[test]
+fn the_claim_check_reads_each_gist_and_the_retry_rewrites_a_flagged_or_missing_one() {
+    let src = source(&["alpha/a.rs"]);
+    // The claim check finds the gist unsupported; the retry rewrites it.
+    let (writer, stored, record, _) = run_entry(
+        vec![
+            Ok(checker(vec![unsupported(
+                "gist 1",
+                "keeps order",
+                "the PR names no order",
+            )])),
+            Ok(json!({ "items": [{ "id": "gist 1", "gist": "Alpha now keeps the order it was given." }] }).to_string()),
+        ],
+        &single_story(),
+        &src,
+    );
+    let prompts = writer.prompts.borrow();
+    assert!(
+        prompts[1].1.contains("\"id\": \"gist 1\"")
+            && prompts[1].1.contains("Alpha now keeps order."),
+        "the claim check sees the gist"
+    );
+    assert!(
+        prompts[2].1.contains("{ \"id\": \"gist 1\", \"gist\":"),
+        "the retry says how to rewrite one"
+    );
+    assert_eq!(
+        stored.brief.chapters[0].gist,
+        "Alpha now keeps the order it was given."
+    );
+    assert!(stored.brief.chapters[0].gist_flags.is_empty());
+    assert_eq!(record.claim_flags_before.len(), 1);
+    assert!(record.claim_flags_after.is_empty());
+
+    // A Core chapter written without a gist gets one from the retry; a retry that gives none leaves it unconfirmed.
+    let mut b = single_story();
+    b["chapters"][0]["gist"] = json!("");
+    let (_, stored, _, _) = run_entry(
+        vec![
+            Ok(none_unsupported()),
+            Ok(json!({ "items": [{ "id": "gist 1", "gist": "Alpha keeps order." }] }).to_string()),
+        ],
+        &b,
+        &src,
+    );
+    assert_eq!(stored.brief.chapters[0].gist, "Alpha keeps order.");
+    assert!(
+        stored.brief.all_flags().is_empty(),
+        "{:?}",
+        stored.brief.all_flags()
+    );
+    let (_, stored, _, _) = run_entry(vec![Ok(none_unsupported()), Ok(no_rewrites())], &b, &src);
+    assert_eq!(
+        stored.brief.chapters[0].gist_flags,
+        ["a Core chapter without a gist", NOT_CONFIRMED]
+    );
 }
 
 #[test]

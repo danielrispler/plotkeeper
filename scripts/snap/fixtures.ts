@@ -388,7 +388,44 @@ const mapBriefBar = (): Fixture =>
       const kinds = bars.map((b) => b.kind + (b.rating ? ":" + b.rating : "") + (b.note ? ":" + b.note : "")).join();
       if (kinds !== "rating-given:4,note-given:The second step lost me.") log("snap:fail the bar sent " + kinds);
       if (bars.some((b) => b.project !== "/w/plotkeeper" || b.about.pr !== 334 || b.about.chapter !== 0)) log("snap:fail the bar's key: " + JSON.stringify(bars[0]));
-      if (["of 5", "/5", "/ 5"].some((score) => bar().textContent.includes(score))) log("snap:fail the bar shows a score");`, false, 100);
+      if (["of 5", "/5", "/ 5"].some((score) => bar().textContent.includes(score))) log("snap:fail the bar shows a score");
+      if (bar().querySelector(".bar-explain")) log("snap:fail explain-back on a story with no gist");`, false, 100);
+// Explain-back (#397): the same story, its chapter carrying a gist and lighting Core parts, ends with the one-line field in the bar's first
+// row, above the rating. Before submit, an "s" and a "2" typed in the line neither skip nor rate, and the gist is not shown yet. After
+// submit (Enter), the line shows with the gist under it and the three marks; Partly is pressed. Each is sent to the shell; no number shows.
+const explainGist = "A ready PR's brief is written in the background and played on the map, and reading a chapter clears its parts' fog.";
+const mapBriefExplainBack = (submit: boolean): Fixture =>
+  mapBrief(briefOf(storySteps(), false, { chapters: [{ ...brief(storySteps()).chapters[0], gist: explainGist }] }), 3, `
+      const sent = [];
+      const real = window.fetch;
+      window.fetch = (url, init) => (sent.push(String(url) + " " + (init?.body ?? "")), real(url, init));
+      const bar = () => document.querySelector("#map-brief .story-bar");
+      const line = bar()?.querySelector(".bar-slot .bar-explain .bar-line");
+      if (!line) return log("snap:fail no explain-back line on a Core story with a gist");
+      if (bar().firstElementChild.className !== "bar-slot") log("snap:fail explain-back is not the bar's first row");
+      if (bar().textContent.includes(${JSON.stringify(explainGist)})) log("snap:fail the gist shows before the line is given");
+      const key = (target, k) => target.dispatchEvent(new KeyboardEvent("keydown", { key: k, code: /^[0-9]$/.test(k) ? "Digit" + k : "Key" + k.toUpperCase(), bubbles: true }));
+      line.focus();
+      key(line, "s");
+      key(line, "2");
+      await wait(50);
+      if (bar().hidden) return log("snap:fail an s typed in the line skipped the bar");
+      if (bar().querySelector('.bar-rate[aria-pressed="true"]')) log("snap:fail a 2 typed in the line rated");
+      line.value = "Briefs get written in the background and reading one clears the fog.";
+      ${submit ? `key(line, "Enter");
+      await wait(50);
+      const said = bar().querySelector(".bar-said");
+      if (said?.textContent !== line.value) log("snap:fail the line is not shown after submit: " + said?.textContent);
+      if (!bar().querySelector(".bar-gist")?.textContent.includes(${JSON.stringify(explainGist)})) log("snap:fail the gist is not shown under the line");
+      const marks = [...bar().querySelectorAll(".bar-mark")];
+      if (marks.map((m) => m.textContent).join() !== "Got it,Partly,Missed") log("snap:fail the marks: " + marks.map((m) => m.textContent).join());
+      marks[1].click();
+      await wait(50);
+      if (marks.filter((m) => m.getAttribute("aria-pressed") === "true").map((m) => m.textContent).join() !== "Partly") log("snap:fail Partly is not pressed");
+      if (/\\d/.test(bar().querySelector(".bar-slot").textContent)) log("snap:fail explain-back shows a number");
+      const bars = sent.filter((call) => call.includes("/api/story_bar")).map((call) => JSON.parse(call.slice(call.indexOf(" ") + 1)));
+      const kinds = bars.map((b) => b.kind + ":" + (b.line ?? b.mark)).join();
+      if (kinds !== "explain-back-given:" + line.value + ",explain-back-marked:partly") log("snap:fail the bar sent " + kinds);` : `await wait(50);`}`, false, 100);
 // Overturning in the brief's ratify step (port decision Q2): the prompt goes to the clipboard and the step says so, or, when the clipboard
 // refuses, shows the prompt in a box with a Copy button. The page's clipboard is stubbed to take or refuse the write.
 const mapBriefOverturn = (clipboard: "copies" | "refuses"): Fixture => ({
@@ -1409,6 +1446,8 @@ export const fixtures = {
   mapBriefOrderRight,
   mapBriefRatify,
   mapBriefBar,
+  mapBriefExplainBack: () => mapBriefExplainBack(false),
+  mapBriefExplainBackDone: () => mapBriefExplainBack(true),
   mapBriefOverturnCopied: () => mapBriefOverturn("copies"),
   mapBriefOverturnFallback: () => mapBriefOverturn("refuses"),
   mapBriefWriting,

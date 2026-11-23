@@ -4,16 +4,31 @@
 // keyed by project and by PR and chapter or by part, as `rating-offered`, `rating-given`, `rating-skipped` and `note-given`. Nothing is
 // read back: a bar opened again starts empty, and no rating is ever shown as a score.
 //
-// A reader mounts `storyBar(about).node` after its last step and calls `offer()` when that step shows. A later ticket (#397, explain-back
-// on Core parts) adds its own field into `slot`, before the rating, and logs through the same command.
+// A reader mounts `storyBar(about, gist).node` after its last step and calls `offer()` when that step shows. Given a gist (a story of a
+// Core part, `explainsBack`), the bar's `slot` holds explain-back (#397): one line, Enter shows the gist under it and the three marks, logged
+// as `explain-back-given` and `explain-back-marked`. The line is an input, so the window's single keys stay off while it is typed.
 
 import { failure, invoke, text } from "./dom.js";
 import { localDay } from "./stop-rules.js";
 
-export type BarKind = "rating-offered" | "rating-given" | "rating-skipped" | "note-given";
-export type BarSend = (kind: BarKind, extra?: { rating?: number; note?: string }) => void;
+export type BarKind = "rating-offered" | "rating-given" | "rating-skipped" | "note-given" | "explain-back-given" | "explain-back-marked";
+export type BarSend = (kind: BarKind, extra?: { rating?: number; note?: string; line?: string; mark?: Mark }) => void;
 // The longest note kept, in characters (the shell refuses a longer one).
 export const NOTE_MAX = 500;
+// The longest explain-back line kept, in characters (the shell refuses a longer one).
+export const LINE_MAX = 300;
+export type Mark = "got-it" | "partly" | "missed";
+// The three marks, in words: a mark is never shown or kept as a number.
+export const MARKS: { mark: Mark; label: string }[] = [
+  { mark: "got-it", label: "Got it" },
+  { mark: "partly", label: "Partly" },
+  { mark: "missed", label: "Missed" },
+];
+// Whether a story's bar offers explain-back: only when the story has a gist (the writer adds one to a chapter that lights a Core part, and
+// to a part catch-up) and one of its parts is Core under Daniel's tiers now.
+export function explainsBack(gist: string | undefined, parts: string[], tierOf: (part: string) => string): boolean {
+  return !!gist?.trim() && parts.some((part) => tierOf(part) === "core");
+}
 // The key that skips the whole bar.
 export const SKIP_KEY = "s";
 
@@ -26,6 +41,8 @@ export function barModel(send: BarSend) {
   let given = false;
   let closed = false;
   let rated: number | null = null;
+  let said: string | null = null;
+  let marked: Mark | null = null;
   return {
     offer() {
       if (offered) return;
@@ -50,6 +67,25 @@ export function barModel(send: BarSend) {
       closed = true;
       if (!given) send("rating-skipped");
     },
+    // Daniel's explain-back line: one per bar.
+    explain(line: string): boolean {
+      const kept = line.trim();
+      if (closed || said !== null || !kept || kept.length > LINE_MAX) return false;
+      said = kept;
+      given = true;
+      send("explain-back-given", { line: kept });
+      return true;
+    },
+    // His mark against the gist, once his line is in; each pick is logged.
+    mark(mark: string): boolean {
+      const found = MARKS.find((m) => m.mark === mark);
+      if (closed || said === null || !found) return false;
+      marked = found.mark;
+      send("explain-back-marked", { mark: found.mark });
+      return true;
+    },
+    explained: () => said,
+    marked: () => marked,
     // The rating picked while this bar is open, for its pressed button only.
     rated: () => rated,
     closed: () => closed,
@@ -64,19 +100,22 @@ export function barKey(key: { key: string; metaKey: boolean; ctrlKey: boolean; a
 }
 
 export type Bar = { node: HTMLElement; slot: HTMLElement; offer: () => void; key: (found: ReturnType<typeof barKey>) => boolean };
+type Model = ReturnType<typeof barModel>;
 // The bar on screen that the keys act on: the last one offered, while it is shown and open.
 let current: Bar | null = null;
 
-// The bar for `about`, logging through the shell.
-export function storyBar(about: StoryAbout): Bar {
+// The bar for `about`, logging through the shell; with `gist`, it offers explain-back first.
+export function storyBar(about: StoryAbout, gist?: string): Bar {
   const { project, ...story } = about;
   const model = barModel((kind, extra = {}) => {
-    invoke("story_bar", { kind, project, day: localDay(), about: story, rating: extra.rating ?? null, note: extra.note ?? null }).catch(failure("story_bar"));
+    const given = { rating: extra.rating ?? null, note: extra.note ?? null, line: extra.line ?? null, mark: extra.mark ?? null };
+    invoke("story_bar", { kind, project, day: localDay(), about: story, ...given }).catch(failure("story_bar"));
   });
   const node = text("div", "", "story-bar");
   node.setAttribute("role", "group");
   node.setAttribute("aria-label", "How clear was this explanation");
   const slot = text("div", "", "bar-slot");
+  if (gist) slot.append(explainBack(model, gist));
   const ask = text("span", "How clear was this?", "bar-ask");
   const scale = text("div", "", "bar-scale");
   const buttons = [1, 2, 3, 4, 5].map((n) => {
@@ -124,6 +163,47 @@ export function storyBar(about: StoryAbout): Bar {
     },
   };
   return bar;
+}
+
+// Explain-back: the line, then, once Enter keeps it, the line again with the gist under it and the three marks.
+function explainBack(model: Model, gist: string): HTMLElement {
+  const box = text("div", "", "bar-explain");
+  const field = document.createElement("input");
+  field.className = "bar-line";
+  field.type = "text";
+  field.maxLength = LINE_MAX;
+  field.placeholder = "Say this story back in one line (Enter shows the gist)";
+  field.title = "Optional: say the story back in your own words, then compare it with its gist";
+  field.setAttribute("aria-label", "Say this story back in one line");
+  field.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    if (model.explain(field.value)) box.replaceChildren(...compared(model, gist));
+  });
+  box.append(field);
+  return box;
+}
+
+// The line said, the gist, and the marks.
+function compared(model: Model, gist: string): HTMLElement[] {
+  const said = text("p", model.explained() ?? "", "bar-said");
+  const against = text("p", "", "bar-gist");
+  against.append(text("span", "Gist", "bar-gist-label"), document.createTextNode(` ${gist}`));
+  const marks = text("div", "", "bar-marks");
+  marks.setAttribute("role", "group");
+  marks.setAttribute("aria-label", "How close was your line");
+  const buttons = MARKS.map(({ mark, label }) => {
+    const button = text("button", label, "btn bar-mark");
+    button.setAttribute("type", "button");
+    button.setAttribute("aria-pressed", "false");
+    button.title = `Mark your line: ${label.toLowerCase()}`;
+    button.addEventListener("click", () => {
+      if (model.mark(mark)) buttons.forEach((each, i) => each.setAttribute("aria-pressed", String(MARKS[i].mark === mark)));
+    });
+    return button;
+  });
+  marks.append(...buttons);
+  return [said, against, marks];
 }
 
 // A window key for the bar on screen; true when the bar took it. The caller passes `typing` (focus in a field) so the note keeps its keys.

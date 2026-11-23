@@ -17,8 +17,8 @@ import { logStop } from "./stop-rules.js";
 import { scrubTo } from "./map-history.js";
 import { overturnNote, ratifyActions } from "./map-ratify.js";
 import { ratifyStep, statusWords } from "./ratify.js";
-import { type Bar, storyBar } from "./story-bar.js";
-import { actorSize, alsoAt, awaitedCatchUp, awaitedWrite, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, commitDrawer, figureShapes, figureSize, latestRequest, orderRun, type OrderRun, pickRun, type PickRun, playlist, plateSize, storySteps, type Rect, type Shape, unconfirmed } from "./map-model.js";
+import { type Bar, explainsBack, storyBar } from "./story-bar.js";
+import { actorSize, alsoAt, effectiveTier, awaitedCatchUp, awaitedWrite, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, commitDrawer, figureShapes, figureSize, latestRequest, orderRun, type OrderRun, pickRun, type PickRun, playlist, plateSize, storySteps, type Rect, type Shape, unconfirmed } from "./map-model.js";
 import type { BriefCheck, BriefStep, BriefView, PrBrief, RatifyRow, ReadyPr, StoredCatchUp } from "./types.js";
 
 const player = briefPlayer({ scrubbed: () => currentScrub() !== null, backToNow: () => void scrubTo(null).catch(failure("map_at")) });
@@ -742,9 +742,23 @@ function endBar(node: HTMLElement, index: number, count: number): Bar | null {
   let bar = bars.get(key);
   // A part catch-up's bar is keyed by its part (#391).
   const about = catchUp ? { project: now.project, part: catchUp.part } : { project: now.project, pr: now.pr, chapter: now.chapter };
-  if (!bar) bars.set(key, (bar = storyBar(about)));
+  if (!bar) bars.set(key, (bar = storyBar(about, gistOf(now.chapter))));
   node.querySelector(".brief-txt")?.append(bar.node);
   return bar;
+}
+
+// The gist the bar's explain-back compares with (#397): the chapter's, or the part catch-up's one story's, when one of its parts is Core
+// under Daniel's tiers now; none otherwise, so only a Core part's story offers explain-back.
+function gistOf(chapter: number): string | undefined {
+  const view = currentMap();
+  const story = playing?.brief.brief.chapters[chapter];
+  if (!view || !story) return undefined;
+  const parts = catchUp ? [catchUp.part] : [...story.parts, ...story.steps.flatMap((step) => step.on)];
+  const tierOf = (id: string) => {
+    const part = view.doc.parts.find((each) => each.id === id);
+    return part ? effectiveTier(part, view.state.user.tiers) : "";
+  };
+  return explainsBack(story.gist, parts, tierOf) ? story.gist : undefined;
 }
 
 // The panel's frame, built once per brief: it keeps the height of its tallest step, so it never jumps.

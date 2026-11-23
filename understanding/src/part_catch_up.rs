@@ -76,7 +76,7 @@ Reply with ONE JSON object and nothing else:
 
 {
   "title": "a plain title, at most 9 words",
-  "chapters": [ { "behaviour": "story", "parts": [ "the part's id" ], "title": "at most 6 words", "steps": [ step, ... ] } ],
+  "chapters": [ { "behaviour": "story", "parts": [ "the part's id" ], "title": "at most 6 words", "gist": "required: the story's whole point in ONE plain sentence, at most 30 words, that the owner could say back from memory; it says only what the steps say", "steps": [ step, ... ] } ],
   "also": [],
   "unseen": [ "a gap you noticed in the facts" ],
   "decisions": []
@@ -366,6 +366,8 @@ pub fn build_catch_up_facts(source: &CatchUpSource) -> Result<Facts, String> {
         flows_changed: flows_changed.clone(),
         tagged,
         spec_same_day: false,
+        // Every part catch-up carries a gist (#397), whatever the part's tier; the window offers explain-back on Core parts only.
+        core: required.clone(),
     };
     Ok(Facts {
         text,

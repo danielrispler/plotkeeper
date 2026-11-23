@@ -1,7 +1,7 @@
 // The end-of-story bar's logic (spec danielrispler/plotkeeper#378, ticket #393), run on the `tsc` output.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { barKey, barModel, NOTE_MAX } from "../../dist/story-bar.js";
+import { barKey, barModel, explainsBack, LINE_MAX, MARKS, NOTE_MAX } from "../../dist/story-bar.js";
 
 const recorder = () => {
   const sent = [];
@@ -58,4 +58,53 @@ test("one key skips the bar and the digits rate, never while typing in the note 
   assert.equal(barKey(key("4"), true), null, "typing a 4 in the note");
   assert.equal(barKey(key("s", { metaKey: true }), false), null);
   assert.equal(barKey(key("2", { ctrlKey: true }), false), null);
+});
+
+// ---- explain-back (#397) ----
+
+test("explain-back is offered only on a story of a Core part that has a gist; the rating is on every story", () => {
+  const tierOf = (part) => ({ shell: "core", face: "interface", box: "black-box" })[part] ?? "core";
+  assert.equal(explainsBack("The shell keeps fog.", ["face", "shell"], tierOf), true);
+  assert.equal(explainsBack("The face shows it.", ["face", "box"], tierOf), false, "no Core part");
+  assert.equal(explainsBack("", ["shell"], tierOf), false, "a story written before the gist, or of no Core part");
+  assert.equal(explainsBack(undefined, ["shell"], tierOf), false);
+});
+
+test("the explain-back line is logged trimmed, then each mark; no number comes back", () => {
+  const { sent, send } = recorder();
+  const bar = barModel(send);
+  assert.equal(bar.mark("got-it"), false, "nothing to mark before a line");
+  assert.equal(bar.explain("   "), false);
+  assert.equal(bar.explain("x".repeat(LINE_MAX + 1)), false);
+  assert.equal(bar.explain("  The shell keeps fog until I read it. "), true);
+  assert.equal(bar.explained(), "The shell keeps fog until I read it.");
+  assert.equal(bar.explain("again"), false, "one line per bar");
+  assert.equal(bar.mark("partly"), true);
+  assert.equal(bar.mark("so-so"), false);
+  assert.equal(bar.mark("missed"), true);
+  assert.equal(bar.mark("got-it"), true);
+  assert.equal(bar.marked(), "got-it");
+  assert.deepEqual(sent, [
+    { kind: "explain-back-given", line: "The shell keeps fog until I read it." },
+    { kind: "explain-back-marked", mark: "partly" },
+    { kind: "explain-back-marked", mark: "missed" },
+    { kind: "explain-back-marked", mark: "got-it" },
+  ]);
+  assert.deepEqual(
+    MARKS.map((m) => m.label),
+    ["Got it", "Partly", "Missed"],
+  );
+  assert.ok(MARKS.every((m) => !/\d/.test(m.label)), "a mark is words, never a number");
+});
+
+test("a skip after an explain-back line only closes the bar, and the keys stay off while the line is typed", () => {
+  const { sent, send } = recorder();
+  const bar = barModel(send);
+  bar.explain("It keeps fog.");
+  bar.skip();
+  assert.deepEqual(sent.map((s) => s.kind), ["explain-back-given"]);
+  assert.equal(bar.mark("got-it"), false, "a closed bar takes nothing more");
+  // The line is an input: the window passes typing, so neither S nor a digit acts on the bar.
+  assert.equal(barKey(key("s"), true), null);
+  assert.equal(barKey(key("1"), true), null);
 });

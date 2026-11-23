@@ -430,7 +430,8 @@ export type BriefStep = {
   k: string; h: string; b: string; on: string[]; hops: [string, boolean][]; law: string | null; covered_by: string | null; list: string[];
   risks: { part: string; trigger: string; check: string }[]; fig: BriefFigure | null; check: BriefCheck | null; cites: BriefCite[]; flags: string[];
 };
-export type BriefChapter = { behaviour: string; parts: string[]; title: string; steps: BriefStep[]; flags: string[] };
+// `gist` (#397): the story in one sentence, on a chapter that lights a Core part and on a part catch-up; absent or empty in older briefs.
+export type BriefChapter = { behaviour: string; parts: string[]; title: string; steps: BriefStep[]; flags: string[]; gist?: string; gist_flags?: string[] };
 export type PrBrief = {
   title: string; overview: BriefStep[]; chapters: BriefChapter[]; also: { part: string; line: string; flags: string[] }[]; unseen: string[];
   decisions: { id: string | null; text: string; flags: string[] }[]; flags: string[];
@@ -556,7 +557,7 @@ export interface Commands {
 export type Command = keyof Commands;
 
 // What the shell counted of Daniel's use (`stop_rules.rs`), for the one-time review: days, merged PRs and the uses of each module.
-export type StopKind = "session" | "map-open" | "map-action" | "scrub" | "proof" | "know" | "brief-offered" | "brief-opened" | "chapter-done" | "check-answered" | "ratify" | "unconfirmed-seen" | "rating-offered" | "rating-given" | "rating-skipped" | "note-given" | "refresher-entered" | "stale-entered" | "catch-up-offered" | "catch-up-opened" | "catch-up-done";
+export type StopKind = "session" | "map-open" | "map-action" | "scrub" | "proof" | "know" | "brief-offered" | "brief-opened" | "chapter-done" | "check-answered" | "ratify" | "unconfirmed-seen" | "rating-offered" | "rating-given" | "rating-skipped" | "note-given" | "explain-back-given" | "explain-back-marked" | "refresher-entered" | "stale-entered" | "catch-up-offered" | "catch-up-opened" | "catch-up-done";
 export type StopFacts = {
   active_days: number;
   merged_prs: number;

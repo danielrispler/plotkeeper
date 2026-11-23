@@ -272,6 +272,13 @@ pub struct Chapter {
     pub steps: Vec<Step>,
     #[serde(default)]
     pub flags: Vec<String>,
+    /// The chapter's story in one sentence (#397), on a chapter that lights a Core part only; Daniel's explain-back is compared with
+    /// it. Empty on any other chapter, and in a brief written before it existed.
+    #[serde(default)]
+    pub gist: String,
+    /// What the code checks and the claim check found wrong with the gist; a retry can rewrite it.
+    #[serde(default)]
+    pub gist_flags: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -321,6 +328,11 @@ impl Brief {
     pub fn flagged(&self) -> usize {
         self.steps().filter(|s| !s.flags.is_empty()).count()
             + self.chapters.iter().filter(|c| !c.flags.is_empty()).count()
+            + self
+                .chapters
+                .iter()
+                .filter(|c| !c.gist_flags.is_empty())
+                .count()
             + self.also.iter().filter(|a| !a.flags.is_empty()).count()
             + self
                 .decisions
@@ -338,6 +350,11 @@ impl Brief {
                 c.flags
                     .iter()
                     .map(|f| format!("chapter {}: {f}", c.behaviour)),
+            );
+            out.extend(
+                c.gist_flags
+                    .iter()
+                    .map(|f| format!("gist {}: {f}", c.behaviour)),
             );
         }
         for (i, s) in self.overview.iter().enumerate() {
@@ -397,6 +414,9 @@ pub struct CheckContext {
     /// The spec was created the same day as the PR: its "Not in the plan" step comes first in its chapter.
     #[serde(default)]
     pub spec_same_day: bool,
+    /// The Core parts, by Daniel's effective tiers (#397): a chapter that lights one carries a gist, any other chapter none.
+    #[serde(default)]
+    pub core: Vec<String>,
 }
 
 /// How the budget was spent, for the record.
@@ -679,6 +699,25 @@ pub fn build_facts(source: &PrSource) -> Result<Facts, String> {
         .collect();
     let overview = chapters_mode && !flows_changed.is_empty();
     let also = quiet;
+    // The map's Core parts under Daniel's tiers: a chapter lighting one carries a gist (#397).
+    let core: Vec<String> = all_parts
+        .iter()
+        .filter(|id| {
+            source
+                .tier_overrides
+                .get(*id)
+                .map_or_else(|| part_json(id)["tier"] == "core", |tier| tier == "core")
+        })
+        .cloned()
+        .collect();
+    let core_text = format!(
+        "\ncore parts (a chapter lighting one carries a gist): {}",
+        if core.is_empty() {
+            "none".to_string()
+        } else {
+            core.join(", ")
+        }
+    );
     let also_text = if also.is_empty() {
         "none".to_string()
     } else {
@@ -700,6 +739,7 @@ pub fn build_facts(source: &PrSource) -> Result<Facts, String> {
             required.join(", "),
         )
     };
+    let shape_text = shape_text + &core_text;
 
     // The tagged tests, and whether this PR's diff changed one.
     let mut tagged = source.tagged.clone();
@@ -1028,6 +1068,7 @@ pub fn build_facts(source: &PrSource) -> Result<Facts, String> {
         flows_changed: flow_keys,
         tagged,
         spec_same_day,
+        core,
     };
     Ok(Facts {
         text,
@@ -1062,7 +1103,7 @@ Reply with ONE JSON object and nothing else:
 {
   "title": "a plain title, at most 9 words",
   "overview": [ step, ... ],   only when SHAPE says an overview: at most 2 steps that run the changed flow's hops; the flow's order check, if any, is its last step
-  "chapters": [ { "behaviour": "the behaviour, at most 4 words (or \"story\" for a single story)", "parts": [ "part ids this chapter covers" ], "title": "at most 6 words", "steps": [ step, ... ] } ],
+  "chapters": [ { "behaviour": "the behaviour, at most 4 words (or \"story\" for a single story)", "parts": [ "part ids this chapter covers" ], "title": "at most 6 words", "gist": "only on a chapter that lights a Core part (SHAPE's core parts); leave it out on any other: the chapter's whole story in ONE plain sentence, at most 30 words, that the owner could say back from memory; it says only what the chapter's steps say", "steps": [ step, ... ] } ],
   "also": [ { "part": "part id from SHAPE's also-touched list, or a required part no chapter could light", "line": "one line, what changed in it" } ],
   "unseen": [ "a gap you noticed in the facts" ],
   "decisions": [ { "id": "the id of the same decision in EARLIER DECISIONS, when there is one; else leave it out", "text": "a decision the agent made that the owner may want to accept or overturn, one sentence, from the PR body or spec" } ]
@@ -1455,6 +1496,37 @@ pub fn put_plan_first(brief: &mut Brief, ctx: &CheckContext) -> Vec<usize> {
     moved
 }
 
+/// The longest gist, in words.
+const GIST_WORDS: usize = 30;
+
+/// A chapter lighting a Core part (declared or lit) must carry a one-sentence gist; any other chapter's gist is dropped (#397).
+fn check_gist(c: &mut Chapter, ctx: &CheckContext) {
+    c.gist_flags.clear();
+    let core = c
+        .parts
+        .iter()
+        .chain(c.steps.iter().flat_map(|s| &s.on))
+        .any(|p| ctx.core.contains(p));
+    c.gist = c.gist.trim().to_string();
+    if !core {
+        c.gist.clear();
+        return;
+    }
+    let gist = c.gist.clone();
+    if gist.is_empty() {
+        c.gist_flags.push("a Core chapter without a gist".into());
+        return;
+    }
+    if words(&gist) > GIST_WORDS {
+        c.gist_flags.push(format!("gist {} words", words(&gist)));
+    }
+    let body = gist.trim_end_matches(['.', '!', '?']);
+    if body.contains(". ") || body.contains("! ") || body.contains("? ") {
+        c.gist_flags.push("gist of more than one sentence".into());
+    }
+    prose_flags(&gist, ctx, &mut c.gist_flags);
+}
+
 pub fn check_brief(brief: &mut Brief, ctx: &CheckContext) -> usize {
     let facts_norm = norm_quote(&ctx.facts);
     brief.flags.clear();
@@ -1500,6 +1572,7 @@ pub fn check_brief(brief: &mut Brief, ctx: &CheckContext) -> usize {
         }
         lit_by_chapters.extend(c.steps.iter().flat_map(|s| s.on.iter().cloned()));
         c.flags = f;
+        check_gist(c, ctx);
     }
     for r in &ctx.required {
         if !lit_by_chapters.contains(r) {

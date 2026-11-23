@@ -67,6 +67,10 @@ pub enum Kind {
     RatingSkipped,
     /// A short note was given in the bar; the line carries it.
     NoteGiven,
+    /// An explain-back line was given in the bar, on a Core part's story (#397); the line carries it. Kept if at least 3.
+    ExplainBackGiven,
+    /// The explain-back line was marked got it, partly or missed against the gist; the line carries the mark.
+    ExplainBackMarked,
     /// A part's refresher was entered (#392).
     RefresherEntered,
     /// A refresher or a part catch-up was entered from a part with a staleness band (#392); logged beside the entry's own kind.

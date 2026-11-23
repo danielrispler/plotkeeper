@@ -275,6 +275,14 @@ _Avoid_: Approve (that is the PR review), sign off
 One story, in the **PR brief**'s reader and shape (a single story of three or four steps), of everything that landed in one fogged part since Daniel last caught up: every PR and direct push in its **Fog**, ordered by behaviour. A fogged part's sheet offers it as the main button, before "I know this"; reading it to the end clears that part's fog and completes no PR brief.
 _Avoid_: Catch-up (alone — the setting that writes briefs at start is the brief backfill), summary
 
+**Gist**:
+One plain sentence the writer adds to each chapter of a **PR brief** that lights a Core part, and to each **Part catch-up**: the story's whole point, as Daniel could say it back. It is checked by code and by the **Claim check** like every other item, and shown only after **Explain-back**.
+_Avoid_: Summary, tl;dr, takeaway
+
+**Explain-back**:
+The optional one-line field in the end-of-story bar of a Core part's story: Daniel says the story back, then sees its **Gist** under his line and marks himself got it, partly or missed. It measures his understanding, as the rating measures the explanation; neither is ever shown as a number.
+_Avoid_: Quiz, test, recall score
+
 **Claim check**:
 The second sandboxed call that checks each claim of a **PR brief** against the same facts the writer had. An item still flagged after one rewrite carries the mark **not confirmed from the facts**.
 _Avoid_: Fact check, verification
