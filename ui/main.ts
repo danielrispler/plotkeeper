@@ -20,6 +20,7 @@ import "./map-history.js";
 import "./map-sheet.js";
 import "./map-tray.js";
 import "./map-runs.js";
+import { openPreFlight } from "./map-pre-flight.js";
 import { startMapAgents } from "./map-agents.js";
 import { drawSidebar, listSpace, showSessions, staleDots } from "./list.js";
 import { deselect, pressSession, select, show } from "./selection.js";
@@ -161,6 +162,8 @@ const actions: Actions = {
   "studio::ShowMap": () => closePanel(),
   // The whole map in view (#383).
   "studio::FitMap": () => fitMap(),
+  // Pre-flight (#394): the parts a piece of work will likely cross, framed on the map; again, it closes.
+  "studio::PreFlight": () => openPreFlight(),
   // History (#94), in the left panel over the map (#385): the ended sessions, searchable.
   "studio::ShowHistory": () => showHistory(),
   // Settings (#385), in the left panel over the map; the gear in the top bar toggles it.
@@ -228,6 +231,7 @@ window.addEventListener("focus", () => actions["studio::RefreshLanded"]());
 startPanes();
 startRailBriefs(drawFeed);
 startMap({ selectedProject, removeProject, shown: drawSidebar });
+element("pre-flight-button").addEventListener("click", () => openPreFlight());
 startMapAgents({ sessions: () => studio.listed, projectOf: projectOfCwd, select: (id, agent) => void pressSession(id, agent) });
 // The left panel over the map (#385): History, a turn's diff and a worker's log; closing a story or a log selects none and leaves the bare map.
 startPanel({ history: historyIn, diff: diffIn, log: logIn, deselect: () => void deselect() });
