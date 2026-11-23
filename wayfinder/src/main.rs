@@ -754,7 +754,8 @@ pub fn done_plan(
 }
 /// Files `git worktree remove` would lose: `git status --porcelain --ignored` lines other
 /// than an ignored Cargo `target/` build directory, at the root or in a nested crate, or the
-/// ignored `dist/`, `node_modules/` and `src-tauri/gen/` that `npm ci` and the check rebuild.
+/// ignored `dist/`, `node_modules/`, `src-tauri/gen/` and `scripts/wire/<name>.ts` that `npm ci`
+/// and the check rebuild.
 pub fn leftovers(status: &str) -> Vec<&str> {
     status
         .lines()
@@ -763,6 +764,9 @@ pub fn leftovers(status: &str) -> Vec<&str> {
                 path == "target/"
                     || path.ends_with("/target/")
                     || ["dist/", "node_modules/", "src-tauri/gen/"].contains(&path)
+                    || path
+                        .strip_prefix("scripts/wire/")
+                        .is_some_and(|name| name.ends_with(".ts") && !name.contains('/'))
             })
         })
         .collect()
@@ -1650,6 +1654,19 @@ mod done_tests {
                 " M dist/index.html",
                 "?? node_modules/",
                 "!! src-tauri/gen/x"
+            ]
+        );
+    }
+    #[test]
+    fn wire_files_the_check_writes_may_be_left_behind() {
+        let written = "!! scripts/wire/core.ts\n!! scripts/wire/understanding.ts\n";
+        assert!(leftovers(written).is_empty());
+        assert_eq!(
+            leftovers("?? scripts/wire/new.ts\n!! scripts/wire/x/a.ts\n!! scripts/wire/a.rs\n"),
+            [
+                "?? scripts/wire/new.ts",
+                "!! scripts/wire/x/a.ts",
+                "!! scripts/wire/a.rs"
             ]
         );
     }
