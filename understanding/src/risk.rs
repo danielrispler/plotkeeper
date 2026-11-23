@@ -1,7 +1,7 @@
 //! The risk note (danielrispler/plotkeeper#296, #298): the card writer's one line on what a blocked command would do if
 //! allowed, led by its risk level, written from the command and its folder alone.
 
-use crate::{CardWriter, ClaudeWriter, parse_object};
+use crate::{CardWriter, ClaudeWriter, WriterRequest, parse_object};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashSet},
@@ -67,9 +67,14 @@ impl Risk {
 }
 
 impl ClaudeWriter {
+    /// `risk_request` as the process path runs it with the program that writes now.
+    pub fn risk_command(&self, command: &str, folder: &str) -> (Command, String) {
+        self.build(&self.risk_request(command, folder))
+    }
+
     /// The `claude -p` run that judges `command`, asked to run in `folder`: the input holds the
     /// command, fenced as data, and the folder, and nothing else.
-    pub fn risk_command(&self, command: &str, folder: &str) -> (Command, String) {
+    pub fn risk_request(&self, command: &str, folder: &str) -> WriterRequest {
         // A fence longer than any run of backticks in the command, which so cannot close it.
         let longest = command
             .split(|c| c != '`')
@@ -77,7 +82,7 @@ impl ClaudeWriter {
             .max()
             .unwrap_or_default();
         let fence = "`".repeat(longest.max(2) + 1);
-        self.run(&format!(
+        self.request(&format!(
             "{RISK}\nThe command, fenced:\n{fence}\n{command}\n{fence}\n\nThe folder it was asked to run in:\n{folder}\n"
         ))
     }
@@ -92,7 +97,7 @@ impl ClaudeWriter {
 
     /// The judge's note on `command` in `folder`, or one line for the log when it gave none.
     pub fn risk(&self, command: &str, folder: &str) -> Result<Risk, String> {
-        let reply = self.stdout_within(self.risk_timeout, self.risk_command(command, folder))?;
+        let reply = self.text_within(self.risk_timeout, self.risk_request(command, folder))?;
         Risk::from_reply(&reply)
     }
 }

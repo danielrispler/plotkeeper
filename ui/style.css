@@ -75,6 +75,8 @@ body[data-layout="focus"] #rail-divider { display: none; }
 .writer-field { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); font-size: var(--size-small); }
 .writer-field select { width: calc(var(--select) * 1.6); font: inherit; color: var(--fg); background: var(--raised); border: var(--hair) solid var(--edge); border-radius: var(--radius-small); padding: var(--sp-1) var(--sp-3); }
 .writers .writer-test { align-self: flex-start; }
+.writer-key { display: flex; gap: var(--sp-3); }
+.writer-key input { flex: 1; min-width: 0; font: inherit; font-size: var(--size-small); color: var(--fg); background: var(--raised); border: var(--hair) solid var(--edge); border-radius: var(--radius-small); padding: var(--sp-1) var(--sp-3); }
 .writer-outcome.passed, .writer-outcome.failed, .writer-briefs { color: var(--fg); }
 /* The settings gear (#194): icon only, the bar's last item. */
 /* The session's header: its state dot, state and name; the name is the one part that gives way, past a fixed length. */

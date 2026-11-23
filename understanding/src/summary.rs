@@ -3,7 +3,7 @@
 //! summaries. It writes no Quiz since danielrispler/plotkeeper#347.
 
 use crate::grounding::{HEADLINE_WORDS, agent_says, facts_text, grounded, material, words};
-use crate::{CardStore, CardWriter, ClaudeWriter, MAX_CHANGE, Quiz};
+use crate::{CardStore, CardWriter, ClaudeWriter, MAX_CHANGE, Quiz, WriterRequest};
 use serde::{Deserialize, Serialize};
 use std::{process::Command, sync::Mutex};
 
@@ -203,15 +203,25 @@ pub fn write_summary(
 }
 
 impl ClaudeWriter {
-    /// The `claude -p` run for `request`'s turn summary, at `setup`'s model and effort with the
-    /// studio's own system prompt, read with `earlier`, the session's latest summaries, oldest
-    /// first. Past `MAX_CHANGE`, the responses keep their end, where the final reply is.
+    /// `summary_request` as the process path runs it with the program that writes now.
     pub fn summary_command(
         &self,
         setup: &SummarySetup,
         request: &SummaryRequest,
         earlier: &[TurnSummary],
     ) -> (Command, String) {
+        self.build(&self.summary_request(setup, request, earlier))
+    }
+
+    /// The `claude -p` run for `request`'s turn summary, at `setup`'s model and effort with the
+    /// studio's own system prompt, read with `earlier`, the session's latest summaries, oldest
+    /// first. Past `MAX_CHANGE`, the responses keep their end, where the final reply is.
+    pub fn summary_request(
+        &self,
+        setup: &SummarySetup,
+        request: &SummaryRequest,
+        earlier: &[TurnSummary],
+    ) -> WriterRequest {
         let responses: String = (request.responses.iter())
             .map(|r| format!("<response>\n{r}\n</response>\n"))
             .collect();
@@ -227,7 +237,7 @@ impl ClaudeWriter {
                 .map(|s| format!("<summary>\n{}\n</summary>\n", s.summary))
                 .collect(),
         };
-        self.run_with(
+        self.request_with(
             Some(setup),
             Some(SUMMARY),
             &format!(
@@ -287,16 +297,26 @@ pub fn write_agent_summary(
 }
 
 impl ClaudeWriter {
-    /// The `claude -p` run for a subagent's summary, at `setup`'s model and effort with the studio's
-    /// own system prompt, on its spawn's `prompt` and its last `message`, each cut at `MAX_CHANGE`.
+    /// `agent_summary_request` as the process path runs it with the program that writes now.
     pub fn agent_summary_command(
         &self,
         setup: &SummarySetup,
         prompt: &str,
         message: &str,
     ) -> (Command, String) {
+        self.build(&self.agent_summary_request(setup, prompt, message))
+    }
+
+    /// The `claude -p` run for a subagent's summary, at `setup`'s model and effort with the studio's
+    /// own system prompt, on its spawn's `prompt` and its last `message`, each cut at `MAX_CHANGE`.
+    pub fn agent_summary_request(
+        &self,
+        setup: &SummarySetup,
+        prompt: &str,
+        message: &str,
+    ) -> WriterRequest {
         let cut = |text: &str| text[..text.floor_char_boundary(MAX_CHANGE)].to_string();
-        self.run_with(
+        self.request_with(
             Some(setup),
             Some(AGENT_SUMMARY),
             &format!(
@@ -377,15 +397,25 @@ pub fn write_name(
 }
 
 impl ClaudeWriter {
-    /// The `claude -p` run for a session's name, at `setup`'s model and effort with the studio's
-    /// own system prompt, on Daniel's first `prompt` and the final `response`, each cut at
-    /// `MAX_CHANGE`.
+    /// `name_request` as the process path runs it with the program that writes now.
     pub fn name_command(
         &self,
         setup: &SummarySetup,
         prompt: &str,
         response: Option<&str>,
     ) -> (Command, String) {
+        self.build(&self.name_request(setup, prompt, response))
+    }
+
+    /// The `claude -p` run for a session's name, at `setup`'s model and effort with the studio's
+    /// own system prompt, on Daniel's first `prompt` and the final `response`, each cut at
+    /// `MAX_CHANGE`.
+    pub fn name_request(
+        &self,
+        setup: &SummarySetup,
+        prompt: &str,
+        response: Option<&str>,
+    ) -> WriterRequest {
         let cut = |text: &str| text[..text.floor_char_boundary(MAX_CHANGE)].to_string();
         let response = response.map_or(String::new(), |r| {
             format!(
@@ -393,7 +423,7 @@ impl ClaudeWriter {
                 cut(r)
             )
         });
-        self.run_with(
+        self.request_with(
             Some(setup),
             Some(NAME),
             &format!(
