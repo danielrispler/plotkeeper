@@ -1,7 +1,7 @@
 // The Map view's pure logic (spec danielrispler/plotkeeper#306, ticket #309): the map file as the window reads it, where parts
 // are placed, the drag threshold, the link's rim points, the layered Esc and the camera. `map.ts` draws and wires them.
 
-import type { BriefFigure, BriefStep, CatchUpOffer, Camera, Ci, CommitFiles, Fog, HistoricalMap, HistoryEntry, PrBrief, Proof, ReadyPr } from "./types.js";
+import type { BriefFigure, BriefStep, CatchUpOffer, FogListEntry, Camera, Ci, CommitFiles, Fog, HistoricalMap, HistoryEntry, PrBrief, Proof, ReadyPr } from "./types.js";
 
 export type Tier = "core" | "interface" | "black-box";
 export type Point = { x: number; y: number };
@@ -17,10 +17,10 @@ export const plateSize: Size = { w: 264, h: 76 };
 export const actorSize: Size = { w: 120, h: 28 };
 // How far the pointer moves before a press on a plate becomes a drag, so a click never nudges it.
 export const dragThreshold = 6;
-// The layers Esc peels, first to last (user story 5, spec #334 and spec #380): a drawer, a PR brief (closing it keeps its step), a scrubbed past
-// commit (back to now), a part's sheet, then the left panel (#385). The tickets that add them register a `Layer` under its name in `map.ts`; the Map
-// view itself is left only when none is open.
-export const layerOrder = ["drawer", "brief", "scrubbed", "sheet", "panel"] as const;
+// The layers Esc peels, first to last (user story 5, spec #334 and spec #380): an overlay over the map (the pre-flight, #394; spec #378, "Layers and
+// keys"), a drawer, a PR brief (closing it keeps its step), a scrubbed past commit (back to now), a part's sheet, then the left panel (#385). The
+// tickets that add them register a `Layer` under its name in `map.ts`; the Map view itself is left only when none is open.
+export const layerOrder = ["pre-flight", "drawer", "brief", "scrubbed", "sheet", "panel"] as const;
 export type LayerName = (typeof layerOrder)[number];
 export type Layer = { open: () => boolean; close: () => void };
 
@@ -631,4 +631,10 @@ export function fogActions(fog: Fog | undefined, offer: CatchUpOffer | undefined
 export function awaitedCatchUp(offer: CatchUpOffer | undefined): "open" | "stop" | "wait" {
   if (!offer || offer.kind !== "catch-up" || (offer.failed && !offer.writing)) return "stop";
   return offer.ready && !offer.writing ? "open" : "wait";
+}
+
+// A long part catch-up's full fog list, one line per entry, oldest first: a PR by its number and title, a direct push by its subject and
+// short commit.
+export function fogListLines(entries: FogListEntry[]): string[] {
+  return entries.map((e) => (e.pr === null ? `${e.title} (${e.commit.slice(0, 7)}, no PR)` : `#${e.pr} ${e.title}`));
 }

@@ -14,18 +14,19 @@ import { currentMap, currentScrub, giveCameraBack, lendCamera, onDraw, registerL
 import { closeDrawer, openDrawer } from "./map-drawer.js";
 import { watchSeen } from "./seen.js";
 import { logStop } from "./stop-rules.js";
+import { expectedLine } from "./map-pre-flight.js";
 import { scrubTo } from "./map-history.js";
 import { overturnNote, ratifyActions } from "./map-ratify.js";
 import { ratifyStep, statusWords } from "./ratify.js";
 import { type Bar, explainsBack, storyBar } from "./story-bar.js";
-import { actorSize, alsoAt, effectiveTier, awaitedCatchUp, awaitedWrite, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, commitDrawer, figureShapes, figureSize, latestRequest, orderRun, type OrderRun, pickRun, type PickRun, playlist, plateSize, storySteps, type Rect, type Shape, unconfirmed } from "./map-model.js";
+import { actorSize, alsoAt, effectiveTier, awaitedCatchUp, awaitedWrite, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, commitDrawer, figureShapes, figureSize, fogListLines, latestRequest, orderRun, type OrderRun, pickRun, type PickRun, playlist, plateSize, storySteps, type Rect, type Shape, unconfirmed } from "./map-model.js";
 import type { BriefCheck, BriefStep, BriefView, PrBrief, RatifyRow, ReadyPr, StoredCatchUp } from "./types.js";
 
 const player = briefPlayer({ scrubbed: () => currentScrub() !== null, backToNow: () => void scrubTo(null).catch(failure("map_at")) });
 // The brief being played, as `pr_brief` returned it.
 let playing: BriefView | null = null;
 // The part catch-up being played: its part and the fog list it covers; null while a PR brief plays.
-let catchUp: { part: string; fog: string[] } | null = null;
+let catchUp: { part: string; fog: string[]; summary?: StoredCatchUp["summary"] } | null = null;
 // Each part's catch-up plays under a negative number of its own, which no PR has.
 const catchUpIds = new Map<string, number>();
 function catchUpId(project: string, part: string) {
@@ -182,7 +183,7 @@ export async function openCatchUpOf(project: string, part: string) {
   if (briefOpen()) closeBrief();
   // The reader plays it as a single story; there is nothing to ratify.
   playing = { brief: { version: got.version, pr: id, head: got.fog.join(","), written_at: got.written_at, stale: false, model: got.model, brief: got.brief }, partial: got.partial };
-  catchUp = { part, fog: got.fog };
+  catchUp = { part, fog: got.fog, summary: got.summary };
   ratifying = [];
   logStop("catch-up-opened", project);
   if (view.state.stale?.[part]) logStop("stale-entered", project);
@@ -499,6 +500,19 @@ function stepNode(view: MapView, step: BriefStep, pr: number, also: PrBrief["als
   return cols;
 }
 
+// A long part catch-up's first step says it summarises the main shifts, with the full fog list behind it (#396).
+function summaryInto(node: HTMLElement) {
+  const summary = catchUp?.summary;
+  const words = node.querySelector(".brief-txt");
+  if (!summary || !words) return;
+  const list = text("details", "", "brief-cites brief-fog-list");
+  const open = text("summary", `The full fog list (${summary.entries.length})`);
+  open.title = "Show every PR and push this catch-up covers";
+  list.append(open);
+  for (const line of fogListLines(summary.entries)) list.append(text("p", line, "brief-cite"));
+  words.append(text("p", summary.line, "brief-quiet brief-summarises"), list);
+}
+
 // The items to ratify, each with where it stands; a not yet ratified one has Accept and Overturn.
 function ratifyNode(view: MapView, rows: RatifyRow[]) {
   const list = text("ul", "", "brief-ratify");
@@ -709,6 +723,7 @@ function show(view: MapView, same: boolean) {
   const also = alsoAt(playing.brief.brief, now.chapter, now.step, storySteps(list).length);
   const fill = () => {
     const node = stepNode(view, step, pr, also);
+    if (now.step === 0) summaryInto(node);
     const bar = endBar(node, now.step, list.length);
     cols.replaceChildren(node);
     bar?.offer();
@@ -792,13 +807,16 @@ function buildPanel(view: MapView, list: BriefStep[], pr: number) {
   next.addEventListener("click", () => advance());
   const foot = text("div", "", "brief-foot");
   foot.append(dots, partial, code, back, next);
-  box.replaceChildren(leave, cols, foot);
+  // A PR that closes the pre-flighted issue, or a ticket under it (#394): what Daniel expected against what it touched.
+  const line = expectedLine(playing?.expected, view.doc);
+  box.replaceChildren(leave, ...(line ? [text("p", line, "brief-expected")] : []), cols, foot);
   // One height for the whole brief: its tallest step's.
   box.hidden = false;
   let tallest = 0;
   const now = player.current();
   list.forEach((step, i) => {
     const node = stepNode(view, step, pr, playing && now ? alsoAt(playing.brief.brief, now.chapter, i, storySteps(list).length) : []);
+    if (i === 0) summaryInto(node);
     endBar(node, i, list.length);
     cols.replaceChildren(node);
     tallest = Math.max(tallest, box.offsetHeight);

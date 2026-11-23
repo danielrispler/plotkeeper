@@ -1,7 +1,7 @@
 // The part catch-up on a part's sheet (spec danielrispler/plotkeeper#378, ticket #391): pure logic, run on the `tsc` output.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { awaitedCatchUp, fogActions } from "../../dist/map-model.js";
+import { awaitedCatchUp, fogActions, fogListLines } from "../../dist/map-model.js";
 
 const catchUp = (extra = {}) => ({ kind: "catch-up", ready: false, writing: false, failed: false, ...extra });
 
@@ -35,4 +35,12 @@ test("\"Writing…\" never blocks: the button stays pressable while the catch-up
   assert.equal(awaitedCatchUp(catchUp({ failed: true })), "stop");
   assert.equal(awaitedCatchUp(undefined), "stop", "the part was cleared meanwhile");
   assert.match(fogActions("thin", catchUp({ failed: true })).main.note, /failed/i);
+});
+
+test("a long catch-up's full fog list names each PR by number and each direct push by its subject and commit, oldest first", () => {
+  const lines = fogListLines([
+    { commit: "0123456789abcdef", pr: 7, title: "Keep the order" },
+    { commit: "fedcba9876543210", pr: null, title: "fix pushed to main" },
+  ]);
+  assert.deepEqual(lines, ["#7 Keep the order", "fix pushed to main (fedcba9, no PR)"]);
 });

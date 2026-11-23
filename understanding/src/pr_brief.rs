@@ -84,6 +84,9 @@ pub struct PrMeta {
     /// One "name conclusion" line per check.
     pub checks: Vec<String>,
     pub spec: Option<Spec>,
+    /// Every issue the PR closes, lowest first; `spec` is the lowest of them (ticket #394).
+    #[serde(default)]
+    pub closing: Vec<u64>,
 }
 
 /// A test that carries a `@law:` tag.
@@ -1990,6 +1993,19 @@ pub fn gather(repo: &Path, base: &str, head: &str, meta: PrMeta) -> Result<PrSou
     })
 }
 
+/// Every issue a PR closes, from `gh pr view --json closingIssuesReferences`, lowest first (ticket #394: pre-flight matches through each).
+pub fn closing_numbers(v: &serde_json::Value) -> Vec<u64> {
+    let mut numbers: Vec<u64> = v["closingIssuesReferences"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|i| i["number"].as_u64())
+        .collect();
+    numbers.sort_unstable();
+    numbers.dedup();
+    numbers
+}
+
 /// What `gh` says of PR `number` in `repo`: its text, head, checks and the lowest-numbered issue it closes.
 /// Calls `gh` as a normal user, nothing else.
 pub fn fetch_meta(repo: &Path, number: u64) -> Result<PrMeta, String> {
@@ -2048,6 +2064,7 @@ pub fn fetch_meta(repo: &Path, number: u64) -> Result<PrMeta, String> {
         created_at: v["createdAt"].as_str().unwrap_or("").into(),
         checks,
         spec,
+        closing: closing_numbers(&v),
     })
 }
 

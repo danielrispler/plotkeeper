@@ -75,6 +75,8 @@ pub enum Kind {
     RefresherEntered,
     /// A refresher or a part catch-up was entered from a part with a staleness band (#392); logged beside the entry's own kind.
     StaleEntered,
+    /// A pre-flight framed its parts on the map, predicted or picked by hand (#394).
+    PreFlightRun,
     #[serde(other)]
     Other,
 }
@@ -186,6 +188,7 @@ fn entered(kind: Kind) -> bool {
             | Kind::CatchUpDone
             | Kind::RefresherEntered
             | Kind::StaleEntered
+            | Kind::PreFlightRun
     )
 }
 

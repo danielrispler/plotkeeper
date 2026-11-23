@@ -291,6 +291,10 @@ _Avoid_: Fact check, verification
 A headless agent run with scoped tools that plotkeeper starts on Daniel's click, inside Claude Code's OS sandbox, queued one at a time per project and cancellable from the map. It is not a session and has no terminal. [Background runs](behaviour/background-runs.md) has the rules.
 _Avoid_: Session, job, a check sent to the background (a check an agent backgrounds inside its own session)
 
+**Pre-flight**:
+Before work starts, the parts of the **System map** it will likely cross, framed on the map as *predicted*: from an open issue or one or two lines (named by the no-tools writer) or picked by hand. A **PR brief** of a PR that closes the pre-flighted issue, or a ticket under it, says what was expected against what the PR touched. [The system map](behaviour/map.md) has the rules.
+_Avoid_: Plan, forecast, estimate (an **Estimate** is of a task's size)
+
 **Seen**:
 In the viewport (intersecting visibly, not merely built in the DOM), in a visible and focused window, with the view that holds it open. Used for PR brief rows and stop-rule counts.
 _Avoid_: Shown (when it meant DOM-built), rendered

@@ -8,8 +8,9 @@ const calls = [];
 tauri(calls);
 const { dismissReview, judge, localDay, logStop, reviewOf, reviewWords, table, unused } = await import("../../dist/stop-rules.js");
 
-// The rows that wait 5 calendar weeks (#392), part catch-ups (#391) and explain-back (#397) are kept by default, so a test of the other rows, judged today, holds after the wait ends.
-const kept = { "refresher-entered": 2, "stale-entered": 1, "catch-up-done": 3, "explain-back-given": 3 };
+// The rows that wait 5 calendar weeks (#392), part catch-ups (#391), pre-flight (#394) and explain-back (#397) are kept by default, so a
+// test of the other rows, judged today, holds after the wait ends.
+const kept = { "refresher-entered": 2, "stale-entered": 1, "catch-up-done": 3, "pre-flight-run": 2, "explain-back-given": 3 };
 const facts = (extra = {}) => ({ active_days: 14, merged_prs: 20, engaged_days: 0, scrubs: 0, proofs: 0, knows: 0, dismissed: [], briefs_offered: 0, briefs_opened: 0, chapters_done: 0, counts: kept, began: "2026-11-01", ...extra });
 
 test("the review waits for both 14 active days and 20 merged PRs, whichever comes last", () => {
@@ -66,7 +67,8 @@ test("a module with an offer count is not judged before that many offers", () =>
 });
 
 test("dismissing one module leaves a module that becomes due later to be shown", () => {
-  const once = facts({ dismissed: ["map", "history", "proof", "catch-ups", "explain-back"], counts: {} });
+  // Part catch-ups (#391), pre-flight (#394) and explain-back (#397) are dismissed too: with no count they would be listed at once.
+  const once = facts({ dismissed: ["map", "history", "proof", "catch-ups", "pre-flight", "explain-back"], counts: {} });
   assert.deepEqual(judge(table, once, "2026-12-10"), []);
   assert.deepEqual(judge(table, once, "2027-01-05"), ["refresher", "staleness"]);
   assert.deepEqual(judge(table, { ...once, dismissed: [...once.dismissed, "refresher"] }, "2027-01-05"), ["staleness"]);
@@ -74,7 +76,7 @@ test("dismissing one module leaves a module that becomes due later to be shown",
 });
 
 test("the refresher needs 2 entries and staleness bands 1 refresher or part catch-up entered from a stale part, each judged from 5 weeks after rollout", () => {
-  const due = (counts, began = "2026-11-01") => facts({ dismissed: ["map", "history", "proof", "catch-ups", "explain-back"], counts, began });
+  const due = (counts, began = "2026-11-01") => facts({ dismissed: ["map", "history", "proof", "catch-ups", "pre-flight", "explain-back"], counts, began });
   assert.deepEqual(judge(table, due({}), "2026-12-28"), []);
   assert.deepEqual(judge(table, due({}), "2026-12-29"), ["refresher", "staleness"]);
   assert.deepEqual(judge(table, due({ "refresher-entered": 1 }), "2026-12-29"), ["refresher", "staleness"]);
@@ -163,19 +165,25 @@ test("a brief offered or an unconfirmed mark seen is told once per PR, other bri
 
 test("part catch-ups are kept at 3 completed, counted apart from \"I know this\"", () => {
   const passed = { engaged_days: 4, scrubs: 2, proofs: 2 };
-  const others = { "explain-back-given": 3 };
-  assert.deepEqual(unused(facts({ ...passed, counts: { ...others, "catch-up-done": 2, "catch-up-opened": 9, know: 9 } })), ["catch-ups"]);
-  assert.deepEqual(unused(facts({ ...passed, counts: { ...others, "catch-up-done": 3 } })), []);
+  assert.deepEqual(unused(facts({ ...passed, counts: { "catch-up-done": 2, "catch-up-opened": 9, know: 9, "pre-flight-run": 2, "explain-back-given": 3 } })), ["catch-ups"]);
+  assert.deepEqual(unused(facts({ ...passed, counts: { "catch-up-done": 3, "pre-flight-run": 2, "explain-back-given": 3 } })), []);
   assert.match(reviewWords(["catch-ups"]), /part catch-ups/);
   assert.equal(table.find((row) => row.module === "catch-ups").wait, undefined, "no exception: judged with the review");
 });
 
 test("explain-back is kept at 3 lines written; a mark, a rating or a note does not count", () => {
   const passed = { engaged_days: 4, scrubs: 2, proofs: 2 };
-  const others = { "catch-up-done": 3 };
-  // ("catch-up-done" keeps the part catch-ups' row out of the list.)
+  const others = { "catch-up-done": 3, "pre-flight-run": 2 };
+  // (These keep the part catch-ups' and pre-flight's rows out of the list.)
   assert.deepEqual(unused(facts({ ...passed, counts: { ...others, "explain-back-given": 2, "explain-back-marked": 9, "rating-given": 9, "note-given": 9 } })), ["explain-back"]);
   assert.deepEqual(unused(facts({ ...passed, counts: { ...others, "explain-back-given": 3 } })), []);
   assert.match(reviewWords(["explain-back"]), /explain-back/);
   assert.equal(table.find((row) => row.module === "explain-back").wait, undefined, "no exception: judged with the review");
+});
+
+test("pre-flight is kept once it was run twice in the window, and listed below that (#394)", () => {
+  const rest = { engaged_days: 4, scrubs: 2, proofs: 2 };
+  assert.ok(unused(facts({ ...rest, counts: { "pre-flight-run": 1 } })).includes("pre-flight"));
+  assert.ok(!unused(facts({ ...rest, counts: { "pre-flight-run": 2 } })).includes("pre-flight"));
+  assert.match(reviewWords(["pre-flight"]), /Pre-flight/);
 });

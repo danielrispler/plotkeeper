@@ -196,6 +196,19 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
             arg(a, "part")?,
             arg(a, "fog")?,
         )),
+        "pre_flight_issues" => res(crate::pre_flight::pre_flight_issues(arg(a, "project")?)),
+        "pre_flight_predict" => res(crate::pre_flight::pre_flight_predict(
+            arc,
+            arg(a, "project")?,
+            arg(a, "issue")?,
+            arg(a, "text")?,
+        )),
+        "pre_flight_pick" => res(crate::pre_flight::pre_flight_pick(
+            app,
+            arg(a, "project")?,
+            arg(a, "parts")?,
+        )),
+        "pre_flight_clear" => res(crate::pre_flight::pre_flight_clear(app, arg(a, "project")?)),
         "briefs_waiting" => out(crate::pr_briefs::briefs_waiting(app, arg(a, "cwd")?)),
         "pr_ratify" => res(crate::ratify::pr_ratify(
             &app.prs,

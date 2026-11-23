@@ -403,12 +403,32 @@ export type MapState = {
   catch_ups: Record<string, CatchUpOffer>;
   // The staleness band (1 to 3) of each Core part not engaged with for 3, 6 or 12 weeks (`staleness.rs`); a part not listed is not stale.
   stale: Record<string, number>;
+  // The project's pre-flight (`pre_flight.rs`, #394): the parts a piece of work will likely cross; null when none is run.
+  pre_flight?: PreFlight | null;
 };
 // A fogged part's offer (#391): a part catch-up, `ready` when one is stored for its current fog list, `writing` while one is written, `failed`
 // when the last write for it failed; or the chapter of the one PR's brief that lights the part.
 export type CatchUpOffer = { kind: "catch-up"; ready: boolean; writing: boolean; failed: boolean } | { kind: "chapter"; pr: number; chapter: number };
 // A part catch-up as `part_catch_up` returns it (`understanding/src/part_catch_up.rs`): the story in the PR brief's shape and the fog list it covers.
-export type StoredCatchUp = { version: number; part: string; fog: string[]; written_at: number; model: string; partial: boolean; brief: PrBrief };
+// Over more than a few fog entries it carries `summary`: the line saying it summarises the main shifts, and the full fog list, oldest first.
+export type FogListEntry = { commit: string; pr: number | null; title: string };
+export type StoredCatchUp = {
+  version: number;
+  part: string;
+  fog: string[];
+  written_at: number;
+  model: string;
+  partial: boolean;
+  brief: PrBrief;
+  summary?: { line: string; entries: FogListEntry[] };
+};
+// A pre-flight (#394): the issue it started from (none for free text or parts picked by hand), the issue's title or the text, the part
+// ids, and whether the writer named them or Daniel picked them.
+export type PreFlight = { issue: number | null; title: string; parts: string[]; predicted: boolean; at: number };
+// An open issue a pre-flight can start from.
+export type OpenIssue = { number: number; title: string };
+// A matched brief's line (#394): the parts the pre-flight expected against the parts the PR touched.
+export type Expected = { expected: string[]; touched: string[] };
 // A background run (`server/src/runner.rs`): a headless agent run Daniel started with a click, queued one at a time per project. `at` is when
 // it was asked for, started or ended, by its state. An ended run says how it ended in `line`, lists the tool calls it was denied, and
 // carries its `prompt` to copy on every end but a clean one. `paused` is why every queue waits, null while they run.
@@ -438,7 +458,8 @@ export type PrBrief = {
 };
 export type StoredBrief = { version: number; pr: number; head: string; written_at: number; stale: boolean; model: string; brief: PrBrief };
 // `partial`: the writer did not see the whole diff.
-export type BriefView = { brief: StoredBrief; partial: boolean };
+// `expected`: the PR matched the project's pre-flight (#394).
+export type BriefView = { brief: StoredBrief; partial: boolean; expected?: Expected };
 export type Fog = "thin" | "thick";
 // What a finished run of the default branch's CI says of the laws: `unknown` (nothing to read), `passed`, `broken` (a test that backs a
 // law failed), `not-run` (it failed, but not in a test that backs a law), `unreadable` (it failed and its log cannot be read).
@@ -525,6 +546,10 @@ export interface Commands {
   part_catch_up: StoredCatchUp | { writing: true } | null;
   part_catch_up_done: void;
   pr_diff: CommitFiles;
+  pre_flight_issues: OpenIssue[];
+  pre_flight_predict: PreFlight;
+  pre_flight_pick: PreFlight;
+  pre_flight_clear: null;
   brief_chapter_done: void;
   briefs_waiting: WaitingBriefs | null;
   pr_ratify: RatifyRow[];
@@ -557,7 +582,7 @@ export interface Commands {
 export type Command = keyof Commands;
 
 // What the shell counted of Daniel's use (`stop_rules.rs`), for the one-time review: days, merged PRs and the uses of each module.
-export type StopKind = "session" | "map-open" | "map-action" | "scrub" | "proof" | "know" | "brief-offered" | "brief-opened" | "chapter-done" | "check-answered" | "ratify" | "unconfirmed-seen" | "rating-offered" | "rating-given" | "rating-skipped" | "note-given" | "explain-back-given" | "explain-back-marked" | "refresher-entered" | "stale-entered" | "catch-up-offered" | "catch-up-opened" | "catch-up-done";
+export type StopKind = "session" | "map-open" | "map-action" | "scrub" | "proof" | "know" | "brief-offered" | "brief-opened" | "chapter-done" | "check-answered" | "ratify" | "unconfirmed-seen" | "rating-offered" | "rating-given" | "rating-skipped" | "note-given" | "explain-back-given" | "explain-back-marked" | "refresher-entered" | "stale-entered" | "catch-up-offered" | "catch-up-opened" | "catch-up-done" | "pre-flight-run";
 export type StopFacts = {
   active_days: number;
   merged_prs: number;

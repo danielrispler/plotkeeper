@@ -314,3 +314,55 @@ fn the_entry_runs_the_claim_check_and_one_retry_and_stores_the_catch_up_by_part_
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].claim_flags_before.len(), 1);
 }
+
+fn long_source(n: usize) -> CatchUpSource {
+    let mut s = source();
+    s.entries = (1..=n)
+        .map(|i| FogEntry {
+            commit: format!("c{i}"),
+            pr: (i % 2 == 0).then_some(i as u64),
+            title: format!("Entry number {i}"),
+            body: format!("Body of entry {i}."),
+        })
+        .collect();
+    s.fog = s.entries.iter().map(|e| e.commit.clone()).collect();
+    s
+}
+
+#[test]
+fn a_long_fog_lists_catch_up_says_it_summarises_the_main_shifts_with_the_full_list_behind_it() {
+    let data = tempfile::tempdir().unwrap();
+    let store = CatchUpStore::open(data.path()).unwrap();
+    let no_claims = json!({ "items": [] }).to_string();
+    let write = |n: usize| {
+        let writer = Canned::new(vec![
+            reply().to_string(),
+            no_claims.clone(),
+            no_claims.clone(),
+        ]);
+        write_part_catch_up(&writer, "opus", &long_source(n), &store, |_| {}).unwrap()
+    };
+
+    let long = write(9);
+    let summary = long
+        .summary
+        .clone()
+        .expect("a summarising line over 9 entries");
+    assert_eq!(
+        summary.line,
+        "This catch-up summarises the main shifts of 9 fog entries; the full list is below."
+    );
+    let listed: Vec<(&str, Option<u64>, &str)> = summary
+        .entries
+        .iter()
+        .map(|e| (e.commit.as_str(), e.pr, e.title.as_str()))
+        .collect();
+    assert_eq!(listed.len(), 9, "the full fog list");
+    assert_eq!(listed[0], ("c1", None, "Entry number 1"));
+    assert_eq!(listed[8], ("c9", None, "Entry number 9"));
+    assert_eq!(listed[1], ("c2", Some(2), "Entry number 2"));
+    assert_eq!(store.get("alpha").unwrap().summary, Some(summary));
+
+    assert_eq!(write(3).summary, None, "a few entries need no line");
+    assert!(write(4).summary.is_some());
+}

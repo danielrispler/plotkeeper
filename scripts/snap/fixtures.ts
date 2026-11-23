@@ -165,6 +165,32 @@ const mapRuns = (): Fixture =>
     }),
     snapDone: "runs ok",
   });
+// Pre-flight (#394) of spec #378: Core and Understanding framed on the map as predicted, and the overlay listing each with its laws on trust,
+// its fog and its staleness band, opened from the map's Pre-flight button.
+const mapPreFlight = (): Fixture =>
+  mapOpened(`
+      const predicted = [...document.querySelectorAll(".plate.predicted")].map((plate) => plate.dataset.id);
+      if (predicted.join(",") !== "core,understanding") return log("snap:fail the predicted plates: " + predicted.join(","));
+      if (!document.querySelector('.plate[data-id="core"] .plate-predicted')?.textContent.includes("predicted")) log("snap:fail the plate has no predicted chip");
+      document.getElementById("pre-flight-button").click();
+      // Past the glass's rise, so the overlay is drawn whole.
+      await wait(600);
+      const box = document.getElementById("map-pre-flight");
+      if (box.hidden) return log("snap:fail the pre-flight did not open");
+      if (!box.textContent.includes("#378 Studio: Spec: the modules")) log("snap:fail the issue: " + box.textContent);
+      const rows = [...box.querySelectorAll(".pre-flight-row")];
+      if (rows.length !== 2) return log("snap:fail expected 2 rows, saw " + rows.length);
+      if (!rows[0].textContent.includes("On trust: Events apply in order.") || rows[0].textContent.includes("The core reads no file")) log("snap:fail the core's laws: " + rows[0].textContent);
+      if (!rows[1].textContent.includes("fog: laws, links or flows changed")) log("snap:fail the understanding's fog: " + rows[1].textContent);
+      if (!rows[0].textContent.includes("weeks or more ago")) log("snap:fail the core's staleness band: " + rows[0].textContent);
+      log("pre-flight ok");`, {
+    map_state: mapState({
+      fog: { understanding: "thick" },
+      stale: { core: 1 },
+      pre_flight: { issue: 378, title: "Studio: Spec: the modules", parts: ["core", "understanding"], predicted: true, at: runAt },
+    }),
+    snapDone: "pre-flight ok",
+  });
 // The queues paused by a login failure: the one indicator with Resume, over the run that failed and the one that waits.
 const mapRunsPaused = (): Fixture =>
   mapOpened(`
@@ -508,6 +534,36 @@ const mapCatchUp = (): Fixture => ({
   }),
   snapDone: "catch-up ok",
 });
+// A part catch-up over a long fog list (#396): its first step says it summarises the main shifts, with the full fog list behind it.
+const mapCatchUpSummarising = (): Fixture => ({
+  ...mapOpened(`
+      const calm = document.createElement("style");
+      calm.textContent = "*, *::before, *::after { transition: none !important; animation: none !important; }";
+      document.head.append(calm);
+      document.querySelector("#map .plate[data-id=understanding]").click();
+      await wait(150);
+      document.querySelector(".sheet .sheet-catch-up").click();
+      await wait(350);
+      const panel = document.getElementById("map-brief");
+      if (panel.hidden || !panel.classList.contains("open")) return log("snap:fail the part catch-up did not open");
+      if (!panel.querySelector(".brief-summarises")?.textContent.includes("summarises the main shifts of 9 fog entries")) return log("snap:fail no summarising line");
+      const list = panel.querySelector(".brief-fog-list");
+      list.open = true;
+      if (list.querySelectorAll(".brief-cite").length !== 9) log("snap:fail the full fog list does not hold 9 entries");
+      await wait(150);
+      log("catch-up summarising ok");`, {
+    map_state: mapState({ fog: { understanding: "thick" }, catch_ups: { understanding: { kind: "catch-up", ready: true, writing: false, failed: false } } }),
+    part_catch_up: {
+      ...storedCatchUp(),
+      fog: [..."abcdefghi"].map((c) => c.repeat(40)),
+      summary: {
+        line: "This catch-up summarises the main shifts of 9 fog entries; the full list is below.",
+        entries: [..."abcdefghi"].map((c, i) => (i % 3 === 2 ? { commit: c.repeat(40), pr: null, title: "fix pushed straight to main" } : { commit: c.repeat(40), pr: 380 + i, title: `Briefs: change number ${i + 1}` })),
+      },
+    },
+  }),
+  snapDone: "catch-up summarising ok",
+});
 // A part catch-up being written: its button stays pressable and says "Writing…", the panel says so, and the map is not dimmed.
 const mapCatchUpWriting = (): Fixture => ({
   ...mapOpened(`
@@ -654,7 +710,8 @@ const mapBriefChapterLast = (): Fixture =>
       if (!document.querySelector("#map-brief .story-bar")) log("snap:fail no end-of-story bar at the last chapter's end");`);
 // The stop-rule review (#314, #384): Studio has run 20 active days and merged 25 PRs, and the Map view was engaged with on one of them, so
 // the Map view fell below its threshold, and so did the history strip and "See the proof".
-const dueFacts = { active_days: 20, merged_prs: 25, engaged_days: 1, scrubs: 0, proofs: 0, knows: 0, dismissed: [], briefs_offered: 0, briefs_opened: 0, chapters_done: 0, counts: {}, began: "2026-10-01" };
+// Pre-flight (#394) was run twice and three explain-back lines (#397) were written, so the review lists only the modules of project 2.
+const dueFacts = { active_days: 20, merged_prs: 25, engaged_days: 1, scrubs: 0, proofs: 0, knows: 0, dismissed: [], briefs_offered: 0, briefs_opened: 0, chapters_done: 0, counts: { "pre-flight-run": 2, "catch-up-done": 3, "explain-back-given": 3 }, began: "2026-10-01" };
 const mapOpened = (check: string, extra: Fixture = {}): Fixture => ({
   ...list(),
   ...extra,
@@ -1430,6 +1487,7 @@ export const fixtures = {
   writersBriefsNeedClaudeNarrow: (): Fixture => fixtures.writersBriefsNeedClaude(),
   mapTray,
   mapRuns,
+  mapPreFlight,
   mapRunsPaused,
   railBriefRow: () => railBriefReady(false),
   railBriefOpened: () => railBriefReady(true),
@@ -1453,6 +1511,7 @@ export const fixtures = {
   mapBriefWriting,
   mapCatchUp,
   mapCatchUpWriting,
+  mapCatchUpSummarising,
   mapSheetUnratified,
   mapStale,
   mapRefresher,
