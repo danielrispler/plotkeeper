@@ -1,5 +1,5 @@
 //! #49 (#43, decisions 8 and 9): the studio's agy plugin. agy copies a plugin on install, so the app
-//! renders it with `plotkeeper-hook`'s path, compares it with the installed copy and re-installs. The
+//! renders it with `plotkeeper-hook`'s path and installs that copy. The
 //! tests use a scratch `HOME` and a fake `agy` that copies like the real one.
 
 use std::{
@@ -9,7 +9,7 @@ use std::{
     process::{Command, Stdio},
     time::{Duration, Instant},
 };
-use studio_workbench::agy_plugin::{Status, install, installed_is_valid, status};
+use studio_workbench::agy_plugin::{Status, installed_is_valid, render, status};
 
 fn shipped() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../plugin-agy")
@@ -36,6 +36,13 @@ esac
     agy
 }
 
+/// Renders the plugin for `hook` into a folder beside `home`, as `plotkeeper install` does, and installs it.
+fn install(agy: &Path, hook: &Path, home: &Path) -> Result<(), String> {
+    let dir = home.with_extension("rendered").join("plotkeeper");
+    render(&dir, hook)?;
+    studio_workbench::agy_plugin::install(agy, &dir, home)
+}
+
 fn hook() -> PathBuf {
     PathBuf::from("/checkout with space/target/release/plotkeeper-hook")
 }
@@ -45,9 +52,9 @@ fn a_missing_plugin_is_installed_with_the_hooks_path_and_then_is_current() {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().join("home");
     let agy = fake_agy(tmp.path());
-    assert_eq!(status(&shipped(), &hook(), &home).unwrap(), Status::Missing);
-    install(&agy, &shipped(), &hook(), &home).unwrap();
-    assert_eq!(status(&shipped(), &hook(), &home).unwrap(), Status::Current);
+    assert_eq!(status(&hook(), &home).unwrap(), Status::Missing);
+    install(&agy, &hook(), &home).unwrap();
+    assert_eq!(status(&hook(), &home).unwrap(), Status::Current);
     let copy =
         fs::read_to_string(home.join(".gemini/config/plugins/plotkeeper/hooks.json")).unwrap();
     assert!(copy.contains("/checkout with space/target/release/plotkeeper-hook"));
@@ -59,10 +66,10 @@ fn a_copy_made_for_another_hook_path_is_stale_and_install_replaces_it() {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().join("home");
     let agy = fake_agy(tmp.path());
-    install(&agy, &shipped(), Path::new("/old/plotkeeper-hook"), &home).unwrap();
-    assert_eq!(status(&shipped(), &hook(), &home).unwrap(), Status::Stale);
-    install(&agy, &shipped(), &hook(), &home).unwrap();
-    assert_eq!(status(&shipped(), &hook(), &home).unwrap(), Status::Current);
+    install(&agy, Path::new("/old/plotkeeper-hook"), &home).unwrap();
+    assert_eq!(status(&hook(), &home).unwrap(), Status::Stale);
+    install(&agy, &hook(), &home).unwrap();
+    assert_eq!(status(&hook(), &home).unwrap(), Status::Current);
 }
 
 #[test]
@@ -71,9 +78,9 @@ fn a_plugin_that_fails_validation_is_not_installed() {
     let home = tmp.path().join("home");
     let agy = fake_agy(tmp.path());
     fs::write(tmp.path().join("fail-validate"), "").unwrap();
-    let err = install(&agy, &shipped(), &hook(), &home).unwrap_err();
+    let err = install(&agy, &hook(), &home).unwrap_err();
     assert!(err.contains("validat"), "{err}");
-    assert_eq!(status(&shipped(), &hook(), &home).unwrap(), Status::Missing);
+    assert_eq!(status(&hook(), &home).unwrap(), Status::Missing);
 }
 
 // The wrapper of #43, decision 9, from the shipped `hooks.json`.
@@ -213,8 +220,8 @@ fn an_installed_copy_that_fails_validation_is_stale_though_it_matches_the_source
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().join("home");
     let agy = fake_agy(tmp.path());
-    install(&agy, &shipped(), &hook(), &home).unwrap();
-    assert_eq!(status(&shipped(), &hook(), &home).unwrap(), Status::Current);
+    install(&agy, &hook(), &home).unwrap();
+    assert_eq!(status(&hook(), &home).unwrap(), Status::Current);
     assert!(installed_is_valid(&agy, &home));
     // agy now rejects the copy, and would skip it silently.
     fs::write(tmp.path().join("fail-validate"), "").unwrap();

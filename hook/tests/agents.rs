@@ -60,7 +60,7 @@ fn every_entry_that_records_names_its_agent() {
         .collect();
     assert!(!recording.is_empty());
     for c in recording {
-        assert!(c.ends_with("plotkeeper-hook --agent claude"), "{c}");
+        assert!(c.ends_with("plotkeeper-hook\" --agent claude"), "{c}");
     }
     let agy = commands("plugin-agy");
     assert_eq!(agy.len(), 6);
