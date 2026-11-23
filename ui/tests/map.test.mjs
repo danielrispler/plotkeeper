@@ -211,9 +211,8 @@ test("a scrub that reads slowly is dropped after Back to now or a later click", 
   assert.equal(tickets.live(tickets.start()), true);
 });
 
-test("revealing plates pans just enough to bring them into the visible band, and never moves a part", () => {
-  const positions = { core: { x: 620, y: 190 }, shell: { x: 880, y: 440 } };
-  const before = structuredClone(positions);
+// Revealing never moves a part: `revealPan` is given no positions and returns only a camera.
+test("revealing plates pans the camera just enough to bring them into the visible band", () => {
   const at = (x, scale = 1) => ({ scale, x, y: 40 });
   const band = { left: 0, right: 1300 };
   // Plates span 100..1300 in a 1300 wide band: panned left by the gutter that would be cut.
@@ -226,7 +225,6 @@ test("revealing plates pans just enough to bring them into the visible band, and
   assert.deepEqual(revealPan(at(0, 0.5), 1000, 2000, { left: 0, right: 800 }, 32), at(-232, 0.5));
   // A panel over the left of the area: the part is panned right, clear of its edge.
   assert.deepEqual(revealPan(at(0), 100, 500, { left: 300, right: 1300 }, 32), at(232));
-  assert.deepEqual(positions, before, "saved positions are equal before and after");
 });
 
 test("a PR brief takes the camera while it plays and closes back to the view it found", () => {

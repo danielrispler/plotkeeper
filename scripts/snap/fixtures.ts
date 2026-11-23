@@ -450,15 +450,19 @@ const mapBusy = (jump: boolean): Fixture => {
       if (rest.join("|") !== "#312 · CI marks|agy · Name from the prompt|codex · plotkeeper|#313 · Docs needs you") log("snap:fail not placed: " + rest.join("|"));
       if (document.querySelector("#map .agent-chip[title*=Helper], #map .agent-chip[title*='Read the log']")) log("snap:fail a Helper is on the map");
       log("chips ok, not placed " + rest.length);
-      ${jump ? `document.querySelector("#map .plate[data-id=hook] .agent-chip").click();
+      ${jump ? `// A real click, as a mouse gives it: the plate under the chip captures the pointer on its press (#385's review).
+      await __snapClick(document.querySelector("#map .plate[data-id=hook] .agent-chip"));
       await wait(400);
       if (document.getElementById("map").hidden) log("snap:fail a chip left the Map view");
-      if (document.getElementById("map-panel").hidden || !document.querySelector("#panel-body > .rail")) log("snap:fail a chip did not open its session's story in the left panel");` : ""}`, {
+      if (document.getElementById("map-panel").hidden || !document.querySelector("#panel-body > .rail")) log("snap:fail a chip did not open its session's story in the left panel");
+      if (document.getElementById("session-name").textContent !== "Ship PR 286") log("snap:fail the chip opened the story of " + JSON.stringify(document.getElementById("session-name").textContent));
+      if (document.getElementById("map-sheet").childElementCount) log("snap:fail the chip's click opened the plate's sheet");
+      log("jump ok");` : ""}`, {
       map_state: mapState(),
       map_place: { s1: ["core", "window"], "s1/w1": ["shell"], s2: ["hook"], s6: [] },
       select: { __by: "id", values: Object.fromEntries(sessions.map((s) => [s.id, { session: s, agent: null }])) },
     });
-    return { ...f, sessions, selected: { session: sessions[6], agent: null } };
+    return { ...f, sessions, selected: { session: sessions[6], agent: null }, ...(jump && { realPointer: true, snapDone: "jump ok" }) };
   };
 
 // A map whose default branch's CI failed in a test that backs a law of the shell (#312): the red mark beside the Needs you chip, at the

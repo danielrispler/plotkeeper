@@ -459,7 +459,8 @@ function grab(node: HTMLElement, id: string, current: MapView, links: Element, f
   // The drag runs on the screen, so its threshold is in screen pixels whatever the zoom; the plate's place is that over the scale.
   let scale = 1;
   node.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0) return;
+    // A press on a control on the plate, such as an agent's chip, is the control's: capturing it here would give its click to the plate.
+    if (event.button !== 0 || (event.target as Element).closest("button")) return;
     scale = rig?.shown().scale ?? 1;
     const at = current.positions[id];
     drag = dragStart(id, { x: event.clientX, y: event.clientY }, { x: at.x * scale, y: at.y * scale });
