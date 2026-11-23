@@ -362,7 +362,7 @@ pub struct WriterTest {
 }
 
 /// The page's Test of `writer` at `model` and `effort`: one tiny call. A pass saves the choice in `settings.json` (`expected`
-/// is the text the page last read) and turns summaries on, now and at every start; a failure changes nothing.
+/// is the text the page last read) and, once saved, turns summaries on, now and at every start; a failure changes nothing.
 pub fn test_writer(
     app: &App,
     writer: WriterKind,
@@ -391,7 +391,10 @@ pub fn test_writer(
         settings::open_summaries(file.parent().unwrap_or(Path::new("")))?;
         Ok(text)
     });
-    set_summaries_on(app, true);
+    // Only a saved choice opens summaries: one not saved would write with a writer the next start does not know.
+    if saved.is_ok() {
+        set_summaries_on(app, true);
+    }
     let name = writer.program();
     match saved {
         Ok(text) => WriterTest {
