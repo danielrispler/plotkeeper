@@ -14,7 +14,7 @@
     },
     {
       "id": "core", "name": "Core", "caption": "Turns events into session state",
-      "description": "Plain Rust logic. It reads the event log's lines in order, each by the agent its line names, and knows every session's turns, checks, subagents and whether it needs you.",
+      "description": "Plain Rust logic. It reads the event log's lines in order, each by the agent its line names (Claude Code, agy, Codex, Qwen Code), and knows every session's turns, checks, subagents and whether it needs you.",
       "tier": "core", "paths": ["core/"]
     },
     {

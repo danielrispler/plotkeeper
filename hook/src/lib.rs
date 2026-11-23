@@ -176,7 +176,7 @@ pub struct Pruned {
     pub lightened: usize,
 }
 
-/// What a prune reads of a line: its session, by `session_id` (Claude Code's and Codex's) or agy's
+/// What a prune reads of a line: its session, by `session_id` (Claude Code's, Codex's and Qwen Code's) or agy's
 /// `conversationId`, the agent its hook entry named, and when it was received.
 #[derive(Default, serde::Deserialize)]
 struct Stamp {
@@ -198,7 +198,7 @@ impl Stamp {
         let (claude, agy) = (self.session_id.as_deref(), self.conversation_id.as_deref());
         match self.studio_agent.as_deref() {
             Some("agy") => agy,
-            Some("claude" | "codex") => claude,
+            Some("claude" | "codex" | "qwen") => claude,
             _ => claude.or(agy),
         }
     }
