@@ -510,6 +510,27 @@ body[data-panel="diff"] .map-stage { --panel-w: min(var(--panel-wide), calc(100%
 /* A worker's log in the left panel (#386): its header clears the panel's Close. */
 .map-panel .pane.subagent-log { position: static; overflow: visible; }
 .map-panel .subagent-log header { background: transparent; border-bottom: 0; padding-right: calc(var(--sp-7) * 2); }
+/* The pre-flight (#394): an overlay over the map in the glass, centred near its top, above the panels; the plates it frames carry a quiet
+   "predicted" chip and an outline. */
+.map-pre-flight { position: absolute; top: var(--inset); left: 0; right: 0; margin-inline: auto; width: min(var(--rail), calc(100% - 2 * var(--inset))); max-height: calc(100% - 2 * var(--inset));
+                  overflow-y: auto; z-index: 5; padding: var(--sp-6); display: flex; flex-direction: column; gap: var(--sp-4);
+                  animation: glass-in var(--glass-in) var(--glass-ease); }
+.map-pre-flight[hidden] { display: none; }
+.pre-flight-title { margin: 0; font-size: var(--size-large); font-weight: 650; }
+.pre-flight-issues { display: flex; flex-direction: column; max-height: 30vh; overflow-y: auto; }
+.pre-flight-issue { text-align: left; }
+.pre-flight-text { font: inherit; padding: var(--sp-3) var(--sp-4); background: var(--chrome); color: var(--fg); border: 0; border-radius: var(--radius); resize: vertical; }
+.pre-flight-foot { display: flex; gap: var(--sp-4); justify-content: flex-end; }
+.pre-flight-parts { display: flex; flex-direction: column; gap: var(--sp-2); }
+.pre-flight-part { display: flex; gap: var(--sp-3); align-items: center; }
+.pre-flight-kind { margin: 0; font-size: var(--size-xs); color: var(--faint); text-transform: uppercase; letter-spacing: .06em; }
+.pre-flight-what, .pre-flight-why { margin: 0; }
+.pre-flight-row { display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-3) 0; border-top: 1px solid var(--line); }
+.pre-flight-name { font-weight: 600; }
+.pre-flight-law, .pre-flight-fog, .pre-flight-stale { font-size: var(--size-xs); color: var(--faint); }
+.plate.predicted { outline: 1px dashed var(--faint); outline-offset: 3px; }
+.plate-predicted { font-size: var(--size-xs); color: var(--faint); }
+.brief-expected { margin: 0 0 var(--sp-3); font-size: var(--size-xs); color: var(--faint); }
 /* The PR brief alone dims the map, and both panels with it (#385): what they hold, not their glass, which still covers the dimmed plates under it. */
 body.brief-open .map-panel > *, body.brief-open .map-side > * > * { opacity: var(--brief-dim); transition: opacity var(--motion); }
 /* The gear (#385): quiet, in the top bar, pressed while Settings shows. */

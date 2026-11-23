@@ -62,6 +62,8 @@ pub struct MapState {
     /// The project's background runs, queued, running and ended, and the line that says why the queues are paused
     /// (`runner.rs`).
     pub runs: crate::runner::Runs,
+    /// The project's pre-flight (`pre_flight.rs`): the parts a piece of work will likely cross, framed on the map.
+    pub pre_flight: Option<studio_understanding::pre_flight::PreFlight>,
 }
 
 /// Daniel's choices for one project, kept in the data folder: a saved `(x, y)` per part or actor id, and a tier per part id
@@ -140,6 +142,7 @@ pub fn read_map(repo: &Path) -> MapState {
         ready: Vec::new(),
         ratify: Vec::new(),
         runs: crate::runner::Runs::default(),
+        pre_flight: None,
     };
     let Some((reference, note)) = default_ref(repo) else {
         state.note = Some("this repository has no default branch to read".into());
@@ -343,6 +346,7 @@ pub fn map_state(project: String, fetch: bool, app: &Arc<crate::App>) -> Result<
         .map(|mine| crate::ratify::pending(repo, &mine))
         .unwrap_or_default();
     state.runs = app.runner.runs(&project);
+    state.pre_flight = crate::pre_flight::current(&project);
     Ok(state)
 }
 

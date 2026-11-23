@@ -137,6 +137,7 @@ fn empty(status: Status) -> MapState {
         ready: Vec::new(),
         ratify: Vec::new(),
         runs: Runs::default(),
+        pre_flight: None,
     }
 }
 
@@ -209,6 +210,13 @@ fn the_wire_samples_of_the_map_view_are_written_for_tsc() {
                     id: "shell-notice".into(),
                 }],
                 runs: runs(),
+                pre_flight: Some(studio_understanding::pre_flight::PreFlight {
+                    issue: Some(378),
+                    title: "Studio: Spec: the modules".into(),
+                    parts: vec!["core".into(), "server".into()],
+                    predicted: true,
+                    at: 1_761_743_990_000,
+                }),
                 ..empty(Status::Loaded)
             }),
         ));

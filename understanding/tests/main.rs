@@ -9,6 +9,7 @@ mod drift;
 mod fingerprint;
 mod http_writer;
 mod pr_brief;
+mod pre_flight;
 #[path = "../../scripts/wire/samples.rs"]
 mod samples;
 mod saved_state;

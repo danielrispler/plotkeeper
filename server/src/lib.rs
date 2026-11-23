@@ -37,6 +37,7 @@ pub mod install;
 pub mod lock;
 pub mod map;
 pub mod pr_briefs;
+pub mod pre_flight;
 pub mod projects;
 pub mod prs;
 pub mod ratify;

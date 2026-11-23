@@ -27,6 +27,7 @@ pub mod http_writer;
 mod logic_file;
 pub mod pr_brief;
 pub mod pr_brief_check;
+pub mod pre_flight;
 mod risk;
 mod store;
 mod summary;
