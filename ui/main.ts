@@ -5,7 +5,7 @@
 
 import "./transport.js";
 import { dismissNotice, onLogRecord, setSettingsErrors, showNotice } from "./notice.js";
-import { withWriterNotice } from "./writer-notice.js";
+import { withGateNotice, withWriterNotice } from "./writer-notice.js";
 import { startWatching } from "./answer.js";
 import { openAsk } from "./ask.js";
 import { showCards } from "./cards.js";
@@ -320,11 +320,12 @@ window.addEventListener("keydown", () => void askOnce(), { once: true });
 listen<{ level: number; message: string }>("log://log", onLogRecord);
 element("notice-dismiss").addEventListener("click", dismissNotice);
 // No card writer can run, or one can again (danielrispler/plotkeeper#51).
-const showWriterNotice = (notice: string | null) => {
+const editNotice = (edit: (text: string) => string) => {
   const line = element("notice");
-  line.textContent = withWriterNotice(line.textContent ?? "", notice);
+  line.textContent = edit(line.textContent ?? "");
   line.hidden = !line.textContent;
 };
+const showWriterNotice = (notice: string | null) => editNotice((text) => withWriterNotice(text, notice));
 listen<string | null>("writer-notice", showWriterNotice);
 // A page opened after the writer failed has missed the event (danielrispler/plotkeeper#328).
 // The desktop shell has no such command, so a rejection is no error there.
@@ -337,7 +338,7 @@ startWriters({
   summaries: () => studio.files.settings.summaries,
   texts: () => studio.texts,
   saved: (settings) => applySettings({ settings, keymap: studio.texts.keymap }),
-  notice: showWriterNotice,
+  gate: (gated) => editNotice((text) => withGateNotice(text, gated)),
 });
 // The answer hook waits for the card only while its session shows (danielrispler/Falinks#461, decision 16).
 startWatching(() => showView(studio.selection));

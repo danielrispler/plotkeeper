@@ -3218,8 +3218,14 @@ impl Studio {
                         session.reopen_turn();
                     }
                 }
-                // A reply in an event of its own waits for its turn's end (#362).
-                Happened::Reply(reply) if !event.has(|h| matches!(h, Happened::TurnEnd { .. })) => {
+                // A reply in an event of its own waits for its turn's end (#362). Only the main agent's: a
+                // subagent's reply (Claude Code's `SubagentStop`) is never its parent turn's.
+                Happened::Reply(reply)
+                    if event.agent_id.is_none()
+                        && !event.has(|h| {
+                            matches!(h, Happened::TurnEnd { .. } | Happened::SubagentEnd)
+                        }) =>
+                {
                     session.reply.clone_from(reply);
                 }
                 Happened::TurnEnd { background_pending } => {
@@ -3245,7 +3251,12 @@ impl Studio {
                             transcript_path: event.transcript_path.clone(),
                         });
                     }
-                    if !replay && !session.versioned && !event.capabilities.transcript_version {
+                    // agy's version comes from running `agy --version`; another agent with no transcript
+                    // version has none to ask for.
+                    if !replay
+                        && !session.versioned
+                        && event.capabilities.agent == agy::CAPABILITIES.agent
+                    {
                         session.versioned = true;
                         outputs.push(Output::AgyVersion);
                     }

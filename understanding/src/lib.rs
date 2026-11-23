@@ -957,24 +957,11 @@ impl ClaudeWriter {
             }
         };
         let timeout = stop_after(kind, timeout);
-        // A writer that says why it failed on standard error only has it read with its output, through one pipe.
-        let merged = match kind.fails_on_stderr() {
-            true => match std::io::pipe().and_then(|(read, write)| {
-                command.stdout(write.try_clone()?).stderr(write);
-                Ok(read)
-            }) {
-                Ok(read) => Some(read),
-                Err(e) => {
-                    let error = WriterError::new(FailureKind::Other, kind, format!("({e})"));
-                    tell_failed(&error);
-                    return Err(error);
-                }
-            },
-            false => {
-                command.stdout(Stdio::piped());
-                None
-            }
-        };
+        // A writer that says why it failed on standard error only has that read too, apart from its reply.
+        command.stdout(Stdio::piped());
+        if kind.fails_on_stderr() {
+            command.stderr(Stdio::piped());
+        }
         let child = command
             .stdin(Stdio::piped())
             .process_group(0)
@@ -994,20 +981,21 @@ impl ClaudeWriter {
         drop(command);
         let mut child = child;
         let mut stdin = child.stdin.take();
-        let mut stdout: Option<Box<dyn Read + Send>> = match merged {
-            Some(read) => Some(Box::new(read)),
-            None => child
-                .stdout
-                .take()
-                .map(|o| Box::new(o) as Box<dyn Read + Send>),
-        };
-        // Threads, so a call that reads no input or never ends cannot hold back the timeout.
+        let mut stdout = child.stdout.take();
+        let mut stderr = child.stderr.take();
+        // Threads, so a call that reads no input or never ends cannot hold back the timeout, and one that fills one
+        // pipe while the other is read cannot stall.
         thread::spawn(move || stdin.as_mut().map(|i| i.write_all(prompt.as_bytes())));
+        let errors = thread::spawn(move || {
+            let mut err = Vec::new();
+            let _ = stderr.as_mut().map(|e| e.read_to_end(&mut err));
+            err
+        });
         let (sender, read) = mpsc::channel();
         thread::spawn(move || {
             let mut out = Vec::new();
             let _ = stdout.as_mut().map(|o| o.read_to_end(&mut out));
-            let _ = sender.send(out);
+            let _ = sender.send((out, errors.join().unwrap_or_default()));
         });
         let deadline = Instant::now() + timeout;
         let out = read.recv_timeout(timeout).ok();
@@ -1020,7 +1008,7 @@ impl ClaudeWriter {
                 Err(_) => break None,
             }
         };
-        let (Some(out), Some(status)) = (out, status) else {
+        let (Some((out, err)), Some(status)) = (out, status) else {
             // The group's id stays taken while the unreaped call or a process holding its output
             // lives, so this stops no one else.
             // SAFETY: `kill` takes no pointers.
@@ -1037,7 +1025,13 @@ impl ClaudeWriter {
             }
             return Err(error);
         };
-        let reply = read_reply(kind, schema, &status, &String::from_utf8_lossy(&out));
+        let reply = writer::read_reply_and_stderr(
+            kind,
+            schema,
+            &status,
+            &String::from_utf8_lossy(&out),
+            &String::from_utf8_lossy(&err),
+        );
         match &reply {
             Ok(_) if tell => self.availability.worked(),
             Ok(_) => {}

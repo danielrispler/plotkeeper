@@ -40,8 +40,8 @@ impl WriterKind {
         WriterKind::Anthropic,
         WriterKind::OpenAI,
         WriterKind::Claude,
-        WriterKind::Agy,
         WriterKind::Codex,
+        WriterKind::Agy,
         WriterKind::Copilot,
         WriterKind::Cursor,
     ];
@@ -133,8 +133,8 @@ impl WriterKind {
         }
     }
 
-    /// Whether the program says why it failed on standard error only, which is then read with its output: Cursor's
-    /// `agent` (its output-format docs).
+    /// Whether the program says why it failed on standard error only, which is then read apart from its reply, to tell
+    /// a failure apart: Cursor's `agent` (its output-format docs).
     pub(crate) fn fails_on_stderr(self) -> bool {
         self == WriterKind::Cursor
     }
@@ -192,8 +192,8 @@ pub struct FoundWriter {
     pub efforts: &'static [&'static str],
 }
 
-/// Today's writers in the order the page presets the first found (#320): an API key, Claude, agy, then Codex. An HTTP
-/// writer is listed as not found: no program is looked for, and the server says whether its key is set.
+/// Today's writers in the order the page presets the first found (#320): an API key, Claude, Codex, agy, Copilot, then
+/// Cursor. An HTTP writer is listed as not found: no program is looked for, and the server says whether its key is set.
 pub fn found_writers(shell: &Path) -> Vec<FoundWriter> {
     WriterKind::ALL
         .into_iter()
@@ -590,6 +590,28 @@ pub fn read_reply(
             json: None,
             usage: None,
         }),
+    }
+}
+
+/// `read_reply` of `stdout`, the reply, for a writer that may say why it failed on standard error only
+/// (`fails_on_stderr`): a failure its output does not tell apart is classified by what `stderr` said.
+pub(crate) fn read_reply_and_stderr(
+    kind: WriterKind,
+    schema: bool,
+    status: &ExitStatus,
+    stdout: &str,
+    stderr: &str,
+) -> Result<WriterReply, WriterError> {
+    let said: String = stderr.trim().chars().take(300).collect();
+    match read_reply(kind, schema, status, stdout) {
+        Err(error) if error.kind == FailureKind::Other && !said.is_empty() => {
+            Err(WriterError::new(
+                classify(kind, status, &said),
+                kind,
+                format!("({status}): {said:?}"),
+            ))
+        }
+        reply => reply,
     }
 }
 

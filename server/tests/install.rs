@@ -77,6 +77,18 @@ esac"#,
     }
 
     fn run(&self, verb: &str) -> Output {
+        let out = self.run_any(verb);
+        assert!(
+            out.status.success(),
+            "plotkeeper {verb} failed:\n{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        out
+    }
+
+    /// Runs `plotkeeper verb`, which may fail.
+    fn run_any(&self, verb: &str) -> Output {
         let mut child = Command::new(self.tools.join("plotkeeper"))
             .arg(verb)
             .env("HOME", &self.home)
@@ -96,14 +108,7 @@ esac"#,
             }
             std::thread::sleep(Duration::from_millis(20));
         }
-        let out = child.wait_with_output().unwrap();
-        assert!(
-            out.status.success(),
-            "plotkeeper {verb} failed:\n{}{}",
-            String::from_utf8_lossy(&out.stdout),
-            String::from_utf8_lossy(&out.stderr)
-        );
-        out
+        child.wait_with_output().unwrap()
     }
 
     fn calls(&self, tool: &str) -> Vec<String> {
@@ -701,4 +706,99 @@ fn a_second_copilot_install_replaces_its_plugin() {
             install
         ]
     );
+}
+
+/// Adds the user's own hook `command` under `event` to the hook file at `rel`, as an entry of `entry`'s shape.
+fn add_own_hook(machine: &Machine, rel: &str, event: &str, entry: serde_json::Value) {
+    let path = machine.home.join(rel);
+    let mut file: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    file["hooks"][event].as_array_mut().unwrap().push(entry);
+    fs::write(&path, serde_json::to_string_pretty(&file).unwrap()).unwrap();
+}
+
+#[test]
+fn a_hook_the_user_added_between_two_installs_stays_at_uninstall() {
+    let machine = Machine::new(false, false).with_codex().with_cursor();
+    machine.write(".codex/hooks.json", CODEX_OWN);
+    machine.write(".cursor/hooks.json", CURSOR_OWN);
+    machine.run("install");
+    add_own_hook(
+        &machine,
+        ".codex/hooks.json",
+        "Stop",
+        serde_json::json!({ "hooks": [{ "type": "command", "command": "say done" }] }),
+    );
+    add_own_hook(
+        &machine,
+        ".cursor/hooks.json",
+        "stop",
+        serde_json::json!({ "command": "say done" }),
+    );
+    machine.run("install");
+    machine.run("uninstall");
+
+    let (ours, theirs) = codex_commands(&machine);
+    assert!(ours.is_empty(), "{ours:?}");
+    assert_eq!(
+        theirs,
+        [
+            (
+                "Stop".to_owned(),
+                "python3 ~/.codex/hooks/stop.py".to_owned()
+            ),
+            ("Stop".to_owned(), "say done".to_owned())
+        ]
+    );
+    let (ours, theirs) = cursor_commands(&machine);
+    assert!(ours.is_empty(), "{ours:?}");
+    assert_eq!(
+        theirs,
+        [
+            ("stop".to_owned(), "./hooks/audit.sh".to_owned()),
+            ("stop".to_owned(), "say done".to_owned())
+        ]
+    );
+}
+
+#[test]
+fn uninstall_runs_every_step_and_a_rerun_retries_only_the_failed_one() {
+    let machine = Machine::new(true, true).with_codex();
+    machine.write(".codex/hooks.json", CODEX_OWN);
+    let before = files(&machine.home);
+    machine.run("install");
+    // agy is gone from the PATH at uninstall.
+    let agy = machine.tools.join("agy");
+    let kept = machine.tools.join("agy-kept");
+    fs::rename(&agy, &kept).unwrap();
+
+    let out = machine.run_any("uninstall");
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(!out.status.success(), "{text}");
+    assert!(text.contains("`agy` not found"), "{text}");
+    // The steps after agy's ran.
+    assert!(
+        machine
+            .calls("claude")
+            .iter()
+            .any(|c| c.starts_with("plugin marketplace remove")),
+        "{text}"
+    );
+    assert_eq!(
+        fs::read_to_string(machine.home.join(".codex/hooks.json")).unwrap(),
+        CODEX_OWN
+    );
+
+    fs::rename(&kept, &agy).unwrap();
+    let claude_calls = machine.calls("claude").len();
+    let out = machine.run("uninstall");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("agy plugin uninstall"), "{text}");
+    assert!(!text.contains("Codex"), "{text}");
+    assert_eq!(machine.calls("claude").len(), claude_calls, "{text}");
+    assert_eq!(files(&machine.home), before);
 }

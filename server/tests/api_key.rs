@@ -284,3 +284,66 @@ fn a_planted_key_is_saved_replaced_and_removed_and_never_reaches_the_page_or_the
         LOGS.0.lock().unwrap()
     );
 }
+
+#[test]
+fn a_key_the_store_refuses_leaves_the_base_url_unsaved() {
+    isolated_home::set();
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("events.jsonl");
+    let writer = ClaudeWriter::new(dir.path().join("no-claude"), dir.path().into());
+    let cards = Arc::new(Mutex::new(CardStore::open_beside(&log).unwrap()));
+    let notes = Arc::new(Mutex::new(RiskNotes::open_beside(&log).unwrap()));
+    let app = App::open_with(&log, cards, notes, Arc::new(writer), Arc::new(NoEffects))
+        .unwrap()
+        .with_keys(Arc::new(studio_server::settings::MemoryKeys::default()));
+    let before = studio_server::settings::settings_files()["settings"].clone();
+
+    let refused = studio_server::set_api_key(
+        &app,
+        studio_understanding::WriterKind::OpenAI,
+        Some("not a key".into()),
+        Some("http://localhost:11434/v1".into()),
+        before.as_str().map(str::to_owned),
+    );
+    assert!(refused.is_err(), "{refused:?}");
+    assert_eq!(
+        studio_server::settings::settings_files()["settings"],
+        before
+    );
+}
+
+#[test]
+fn a_pass_whose_choice_was_not_saved_leaves_summaries_off() {
+    isolated_home::set();
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("events.jsonl");
+    let (base, _) = fake(vec![(200, ok())]);
+    let writer =
+        ClaudeWriter::new(dir.path().join("no-claude"), dir.path().into()).with_api_url(base);
+    let cards = Arc::new(Mutex::new(CardStore::open_beside(&log).unwrap()));
+    let notes = Arc::new(Mutex::new(RiskNotes::open_beside(&log).unwrap()));
+    let app = App::open_with(&log, cards, notes, Arc::new(writer), Arc::new(NoEffects))
+        .unwrap()
+        .with_keys(Arc::new(studio_server::settings::MemoryKeys::default()));
+    studio_server::set_summaries_on(&app, false);
+    studio_server::set_api_key(
+        &app,
+        studio_understanding::WriterKind::Anthropic,
+        Some(PLANTED.into()),
+        None,
+        None,
+    )
+    .unwrap();
+
+    // The page read a settings text that is no longer the file's, so the save is refused.
+    let test = studio_server::test_writer(
+        &app,
+        studio_understanding::WriterKind::Anthropic,
+        "claude-haiku-5-5".into(),
+        String::new(),
+        Some("{ \"stale\": true }".into()),
+    );
+    assert_eq!(test.outcome, "passed", "{}", test.line);
+    assert_eq!(test.settings, None, "{}", test.line);
+    assert!(!studio_server::writers(&app).summaries_on, "{}", test.line);
+}

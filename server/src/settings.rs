@@ -185,21 +185,32 @@ pub fn save_writer(
 ) -> Result<String, String> {
     let [settings, _] = paths().ok_or("no home folder")?;
     let _one_at_a_time = WRITING.lock().unwrap_or_else(|e| e.into_inner());
+    save_writer_in(&settings, expected.as_deref(), writer, model, effort)
+}
+
+fn save_writer_in(
+    settings: &Path,
+    expected: Option<&str>,
+    writer: studio_understanding::WriterKind,
+    model: &str,
+    effort: &str,
+) -> Result<String, String> {
     let key = |leaf: &str| vec!["summaries".to_string(), leaf.to_string()];
     let text = write_in(
-        &settings,
-        expected.as_deref(),
+        settings,
+        expected,
         &key("writer"),
-        Some(&serde_json::json!(writer.program())),
+        // The serde name `summary_writer` reads back: Cursor's program is `agent`, its name `cursor`.
+        Some(&serde_json::json!(writer)),
     )?;
     let text = write_in(
-        &settings,
+        settings,
         Some(&text),
         &key("model"),
         Some(&serde_json::json!(model)),
     )?;
     let effort = (!effort.is_empty()).then(|| serde_json::json!(effort));
-    write_in(&settings, Some(&text), &key("effort"), effort.as_ref())
+    write_in(settings, Some(&text), &key("effort"), effort.as_ref())
 }
 
 /// The `repository` setting (danielrispler/Falinks#605): the folder the shell, Workspaces and the picker start in. Read from
@@ -434,13 +445,23 @@ impl Keychain {
     }
 }
 
-/// Whether `key` looks like an API key: letters, digits, `-` and `_` only, so it goes to `security` unquoted and whole.
+/// Whether `key` looks like an API key: printable ASCII with no space, so it is one word on `security -i`'s line.
 fn plain_key(key: &str) -> bool {
-    !key.is_empty()
-        && key.len() <= 512
-        && key
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    !key.is_empty() && key.len() <= 512 && key.chars().all(|c| c.is_ascii_graphic())
+}
+
+/// `key` as one word of a `security -i` line: in double quotes, its `"` and `\` each after a backslash, which
+/// `security` takes as the next character as it is (`split_line`, Apple's `SecurityTool/macOS/security.c`).
+fn quoted(key: &str) -> String {
+    let mut word = String::from('"');
+    for c in key.chars() {
+        if c == '"' || c == '\\' {
+            word.push('\\');
+        }
+        word.push(c);
+    }
+    word.push('"');
+    word
 }
 
 impl ApiKeys for Keychain {
@@ -459,11 +480,14 @@ impl ApiKeys for Keychain {
 
     fn set(&self, kind: WriterKind, key: &str) -> Result<(), String> {
         if !plain_key(key) {
-            return Err("That is not an API key: it holds only letters, digits, - and _.".into());
+            return Err("That is not an API key: it is printable characters with no space.".into());
         }
         // In interactive mode the key goes on standard input, so it never shows in the process list.
         let account = account(kind);
-        let command = format!("add-generic-password -U -s {SERVICE} -a {account} -w {key}\n");
+        let command = format!(
+            "add-generic-password -U -s {SERVICE} -a {account} -w {}\n",
+            quoted(key)
+        );
         let out = self.run(&["-i"], Some(&command))?;
         match out.status.success() && self.get(kind).as_deref() == Some(key) {
             true => Ok(()),
@@ -495,7 +519,7 @@ impl ApiKeys for MemoryKeys {
 
     fn set(&self, kind: WriterKind, key: &str) -> Result<(), String> {
         if !plain_key(key) {
-            return Err("That is not an API key: it holds only letters, digits, - and _.".into());
+            return Err("That is not an API key: it is printable characters with no space.".into());
         }
         self.0.lock().unwrap().insert(kind, key.into());
         Ok(())
@@ -510,11 +534,22 @@ impl ApiKeys for MemoryKeys {
 #[cfg(test)]
 mod tests {
     use super::{
-        catch_up_in, edit_text, plain_json, pr_briefs_model_in, repository_in, summary_writer_in,
-        write_in,
+        catch_up_in, edit_text, plain_json, pr_briefs_model_in, repository_in, save_writer_in,
+        summary_writer_in, write_in,
     };
     use serde_json::json;
     use studio_understanding::WriterKind;
+
+    #[test]
+    fn a_saved_writer_is_read_back_as_the_same_writer() {
+        let home = tempfile::tempdir().unwrap();
+        let file = home.path().join("settings.json");
+        for kind in WriterKind::ALL {
+            let text = save_writer_in(&file, None, kind, "auto", "").unwrap();
+            assert_eq!(summary_writer_in(&text), kind, "{text}");
+            std::fs::remove_file(&file).unwrap();
+        }
+    }
 
     #[test]
     fn a_fresh_home_gets_no_summaries_until_a_writer_passes_test() {
@@ -903,7 +938,10 @@ mod tests {
     }
 
     /// The Keychain through a stand-in `security` that keeps one entry in a file: the key goes in on standard input, never
-    /// in the arguments, and only plotkeeper's own entry is named. The real Keychain is never touched.
+    /// in the arguments, and only plotkeeper's own entry is named. The stand-in splits its input line as `security -i`
+    /// does (`split_line` in Apple's `SecurityTool/macOS/security.c`): whitespace between words, a word that starts with
+    /// `"` or `'` runs to the same quote, and a backslash takes the next character as it is. The real Keychain is never
+    /// touched.
     #[test]
     fn the_key_is_saved_replaced_and_removed_in_plotkeepers_own_keychain_entry() {
         use super::{ApiKeys, Keychain};
@@ -911,19 +949,38 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (store, log) = (dir.path().join("store"), dir.path().join("log"));
         let program = dir.path().join("security");
+        let split = dir.path().join("split.pl");
+        std::fs::write(
+            &split,
+            r#"my $line = <STDIN>; chomp $line; my (@words, $word, $quote); my $state = "space";
+for my $c (split //, $line) {
+  if ($state eq "space") { next if $c =~ /\s/;
+    if ($c eq '"' || $c eq "'") { ($quote, $word, $state) = ($c, "", "quoted") }
+    elsif ($c eq "\\") { ($word, $state) = ("", "escaped") } else { ($word, $state) = ($c, "word") } }
+  elsif ($state eq "word") { if ($c =~ /\s/) { push @words, $word; $state = "space" }
+    elsif ($c eq "\\") { $state = "escaped" } else { $word .= $c } }
+  elsif ($state eq "escaped") { $word .= $c; $state = "word" }
+  elsif ($state eq "quoted") { if ($c eq $quote) { push @words, $word; $state = "space" }
+    elsif ($c eq "\\") { $state = "quoted-escaped" } else { $word .= $c } }
+  else { $word .= $c; $state = "quoted" } }
+push @words, $word if $state ne "space"; print "$words[-1]\n";
+"#,
+        )
+        .unwrap();
         std::fs::write(
             &program,
             format!(
                 r#"#!/bin/sh
 echo "ARGS $*" >> '{log}'
 case "$1" in
-  -i) read line; for w in $line; do last=$w; done; echo "$last" > '{store}';;
+  -i) /usr/bin/perl '{split}' > '{store}';;
   find-generic-password) [ -f '{store}' ] && cat '{store}' || exit 44;;
   delete-generic-password) [ -f '{store}' ] && rm '{store}' || exit 44;;
 esac
 "#,
                 log = log.display(),
-                store = store.display()
+                store = store.display(),
+                split = split.display()
             ),
         )
         .unwrap();
@@ -940,6 +997,17 @@ esac
         assert_eq!(keys.get(Anthropic), None);
         keys.remove(Anthropic).unwrap();
         assert!(keys.set(Anthropic, "not a key; rm -rf").is_err());
+        // A key with a dot, a quote or a backslash goes in whole.
+        for key in [
+            "sk-ant-dotted.0004",
+            r#"sk-ant-"quoted"-0005"#,
+            "sk-ant-'single'-0006",
+            r"sk-ant-back\slash-0007",
+        ] {
+            assert_eq!(keys.set(Anthropic, key), Ok(()), "{key}");
+            assert_eq!(keys.get(Anthropic).as_deref(), Some(key));
+        }
+        keys.remove(Anthropic).unwrap();
         // The OpenAI-compatible API's key, in its own entry (#367).
         keys.set(OpenAI, "sk-proj-third-0003").unwrap();
         assert_eq!(keys.get(OpenAI).as_deref(), Some("sk-proj-third-0003"));

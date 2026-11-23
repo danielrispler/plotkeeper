@@ -59,6 +59,9 @@ const OLD_AGY_PLUGIN: &str = "studio";
 struct State {
     /// The marketplace was added with `claude plugin`.
     claude: bool,
+    /// An uninstall that failed partway took the Claude Code plugin out but not its marketplace.
+    #[serde(default)]
+    claude_plugin_gone: bool,
     /// plotkeeper's agy plugin was installed with `agy plugin`.
     agy: bool,
     /// `~/.zshrc` was rewritten to this text; its old bytes are in `backups/zshrc`.
@@ -66,27 +69,12 @@ struct State {
     /// agy plugins whose folders were backed up under `backups/agy/<name>` before install replaced or removed them.
     agy_backups: Vec<String>,
     /// What install did to `~/.codex/hooks.json`.
-    codex: Option<CodexHooks>,
+    codex: Option<HookFileRecord>,
     /// What install did to `~/.cursor/hooks.json` (#362), recorded as Codex's file is.
-    cursor: Option<CodexHooks>,
+    cursor: Option<HookFileRecord>,
     /// plotkeeper's Copilot plugin was installed with `copilot plugin` (#361).
     #[serde(default)]
     copilot: bool,
-}
-
-/// Install's record of Codex's hook file.
-#[derive(Serialize, Deserialize)]
-struct CodexHooks {
-    /// The file's text as install last wrote it.
-    written: String,
-    /// The file was there before install; its old bytes are in `backups/codex-hooks.json`.
-    existed: bool,
-    /// Install made `~/.codex` for it.
-    made_dir: bool,
-}
-
-fn codex_hooks(home: &Path) -> PathBuf {
-    home.join(".codex").join("hooks.json")
 }
 
 /// The folders install writes in the data folder: the plugins it renders, and its own record with the backups.
@@ -226,34 +214,6 @@ fn render_claude(dir: &Path, bin: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// plotkeeper's hook groups for Codex, by event, for the binaries in `bin`.
-fn codex_groups(bin: &Path) -> Result<serde_json::Map<String, Value>, String> {
-    let rendered: Value =
-        serde_json::from_str(&render(CODEX_HOOKS_JSON, bin)?).map_err(|e| e.to_string())?;
-    match rendered.get("hooks") {
-        Some(Value::Object(groups)) => Ok(groups.clone()),
-        _ => Err("plugin-codex/hooks.json has no hooks".into()),
-    }
-}
-
-/// The events of a Codex hook file `file`, which must be an object whose `hooks`, if any, is an object of arrays.
-fn codex_events<'a>(
-    file: &'a mut Value,
-    path: &Path,
-) -> Result<&'a mut serde_json::Map<String, Value>, String> {
-    let bad = || format!("Codex: {} is not a hook file Codex reads", path.display());
-    let hooks = file.as_object_mut().ok_or_else(bad)?;
-    let events = hooks
-        .entry("hooks")
-        .or_insert_with(|| Value::Object(Default::default()));
-    let events = events.as_object_mut().ok_or_else(bad)?;
-    if events.values().all(Value::is_array) {
-        Ok(events)
-    } else {
-        Err(bad())
-    }
-}
-
 /// Copies the folder `from` to `to`, files and folders only.
 fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
     fs::create_dir_all(to)?;
@@ -361,6 +321,8 @@ pub fn install(
                 &claude,
                 &["plugin".as_ref(), "install".as_ref(), CLAUDE_ID.as_ref()],
             )?;
+            state.claude_plugin_gone = false;
+            save(home, &state)?;
             say(
                 out,
                 format!("Claude Code: claude plugin install {CLAUDE_ID}"),
@@ -403,7 +365,13 @@ pub fn install(
 
     match on_path("codex", path) {
         None => say(out, "Codex: `codex` not found, skipped"),
-        Some(_) => install_codex(home, &bin, &mut state, out)?,
+        Some(_) => {
+            codex_file(home).install(home, &bin, &mut state, |s| &mut s.codex, out)?;
+            say(
+                out,
+                "Codex: once, run `/hooks` in Codex and trust plotkeeper's hooks; Codex skips a hook until it is trusted",
+            );
+        }
     }
 
     // Cursor is found by its folder, which its IDE and its CLI make, or by its programs: the IDE's
@@ -416,7 +384,7 @@ pub fn install(
             out,
             "Cursor: `~/.cursor`, `cursor` and `agent` not found, skipped",
         ),
-        true => install_cursor(home, &bin, &mut state, out)?,
+        true => cursor_file(home).install(home, &bin, &mut state, |s| &mut s.cursor, out)?,
     }
 
     match on_path("copilot", path) {
@@ -465,337 +433,404 @@ fn install_copilot(
     Ok(())
 }
 
-fn cursor_hooks(home: &Path) -> PathBuf {
-    home.join(".cursor").join("hooks.json")
+/// Install's record of a hook file it edits itself, Codex's or Cursor's.
+#[derive(Serialize, Deserialize)]
+struct HookFileRecord {
+    /// The file's text as install last wrote it.
+    written: String,
+    /// The file was there before install; its old bytes, without plotkeeper's entries, are in the file's backup.
+    existed: bool,
+    /// Install made the file's folder for it.
+    made_dir: bool,
 }
 
-/// The entries of hook file `template`, rendered for the binaries in `bin`, by event.
-fn template_events(template: &str, bin: &Path) -> Result<serde_json::Map<String, Value>, String> {
-    let rendered: Value =
-        serde_json::from_str(&render(template, bin)?).map_err(|e| e.to_string())?;
-    match rendered.get("hooks") {
-        Some(Value::Object(events)) => Ok(events.clone()),
-        _ => Err("a plugin's hooks.json has no hooks".into()),
+/// A harness's user-level hook file that install edits itself, as neither Codex nor Cursor has a command for its hooks:
+/// plotkeeper's entries go in beside the user's own, and come out again at uninstall.
+struct HookFile {
+    /// The harness's name in what install prints.
+    label: &'static str,
+    file: PathBuf,
+    /// The backup's file name in the record's `backups/`.
+    backup: &'static str,
+    /// plotkeeper's entries, with the binaries' path a placeholder.
+    template: &'static str,
+    /// The file's content when install makes it.
+    fresh: fn() -> Value,
+}
+
+/// `~/.codex/hooks.json`: one recording group per event (#359).
+fn codex_file(home: &Path) -> HookFile {
+    HookFile {
+        label: "Codex",
+        file: home.join(".codex").join("hooks.json"),
+        backup: "codex-hooks.json",
+        template: CODEX_HOOKS_JSON,
+        fresh: || Value::Object(Default::default()),
     }
 }
 
-/// Adds plotkeeper's entries to `~/.cursor/hooks.json`, once each, beside the user's own, after a backup on the first
-/// install.
-// shortcut: the file is written back with its keys sorted, as serde_json writes them; uninstall restores its bytes.
-fn install_cursor(
-    home: &Path,
-    bin: &Path,
-    state: &mut State,
-    out: &mut dyn Write,
-) -> Result<(), String> {
-    let file = cursor_hooks(home);
-    let dir = file.parent().unwrap_or(home);
-    let old = match fs::read_to_string(&file) {
-        Ok(text) => Some(text),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-        Err(e) => return Err(format!("Cursor: could not read {}: {e}", file.display())),
-    };
-    let mut hooks: Value = match &old {
-        Some(text) => serde_json::from_str(text)
-            .map_err(|e| format!("Cursor: could not read {}: {e}", file.display()))?,
-        None => serde_json::json!({ "version": 1 }),
-    };
-    let events = codex_events(&mut hooks, &file)
-        .map_err(|_| format!("Cursor: {} is not a hook file Cursor reads", file.display()))?;
-    for (event, ours) in template_events(CURSOR_HOOKS_JSON, bin)? {
-        let entries = events
-            .entry(event)
-            .or_insert_with(|| Value::Array(Vec::new()));
-        let entries = entries.as_array_mut().expect("checked to be an array");
-        for entry in ours.as_array().into_iter().flatten() {
-            if !entries.contains(entry) {
-                entries.push(entry.clone());
-            }
+/// `~/.cursor/hooks.json`, never a project's: one entry per event (#362).
+fn cursor_file(home: &Path) -> HookFile {
+    HookFile {
+        label: "Cursor",
+        file: home.join(".cursor").join("hooks.json"),
+        backup: "cursor-hooks.json",
+        template: CURSOR_HOOKS_JSON,
+        fresh: || serde_json::json!({ "version": 1 }),
+    }
+}
+
+impl HookFile {
+    fn shown(&self) -> std::path::Display<'_> {
+        self.file.display()
+    }
+
+    /// The file's text; `None` when it is missing.
+    fn read(&self) -> Result<Option<String>, String> {
+        match fs::read_to_string(&self.file) {
+            Ok(text) => Ok(Some(text)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(format!(
+                "{}: could not read {}: {e}",
+                self.label,
+                self.shown()
+            )),
         }
     }
-    let text = serde_json::to_string_pretty(&hooks).map_err(|e| e.to_string())? + "\n";
-    if state.cursor.is_none() {
-        let backups = record_dir(home).join("backups");
-        if let Some(old) = &old {
-            fs::create_dir_all(&backups).map_err(|e| e.to_string())?;
-            fs::write(backups.join("cursor-hooks.json"), old)
-                .map_err(|e| format!("could not back up {}: {e}", file.display()))?;
-        }
-        state.cursor = Some(CodexHooks {
-            written: String::new(),
-            existed: old.is_some(),
-            made_dir: !dir.is_dir(),
-        });
-        save(home, state)?;
-    }
-    fs::create_dir_all(dir).map_err(|e| format!("could not make {}: {e}", dir.display()))?;
-    fs::write(&file, &text).map_err(|e| format!("could not write {}: {e}", file.display()))?;
-    if let Some(cursor) = &mut state.cursor {
-        cursor.written = text;
-    }
-    save(home, state)?;
-    say(
-        out,
-        format!("Cursor: added plotkeeper's hooks to {}", file.display()),
-    );
-    Ok(())
-}
 
-/// Takes install's change to `~/.cursor/hooks.json` back: the file as it was when it is as install left it, else the
-/// file without plotkeeper's entries.
-fn uninstall_cursor(
-    home: &Path,
-    cursor: &CodexHooks,
-    bin: &Path,
-    out: &mut dyn Write,
-) -> Result<(), String> {
-    let file = cursor_hooks(home);
-    let Ok(now) = fs::read_to_string(&file) else {
-        return Ok(());
-    };
-    if now == cursor.written {
-        if cursor.existed {
-            let old = fs::read(record_dir(home).join("backups").join("cursor-hooks.json"))
-                .map_err(|e| format!("could not read the backup of {}: {e}", file.display()))?;
-            fs::write(&file, old)
-                .map_err(|e| format!("could not write {}: {e}", file.display()))?;
+    fn parse(&self, text: &str) -> Result<Value, String> {
+        serde_json::from_str(text)
+            .map_err(|e| format!("{}: could not read {}: {e}", self.label, self.shown()))
+    }
+
+    /// The events of hook file `hooks`, which must be an object whose `hooks`, if any, is an object of arrays.
+    fn events<'a>(
+        &self,
+        hooks: &'a mut Value,
+    ) -> Result<&'a mut serde_json::Map<String, Value>, String> {
+        let bad = || {
+            format!(
+                "{0}: {1} is not a hook file {0} reads",
+                self.label,
+                self.shown()
+            )
+        };
+        let events = hooks
+            .as_object_mut()
+            .ok_or_else(bad)?
+            .entry("hooks")
+            .or_insert_with(|| Value::Object(Default::default()))
+            .as_object_mut()
+            .ok_or_else(bad)?;
+        if events.values().all(Value::is_array) {
+            Ok(events)
         } else {
-            fs::remove_file(&file)
-                .map_err(|e| format!("could not remove {}: {e}", file.display()))?;
-            if cursor.made_dir {
-                let _ = fs::remove_dir(file.parent().unwrap_or(home));
+            Err(bad())
+        }
+    }
+
+    /// plotkeeper's entries, rendered for the binaries in `bin`, by event.
+    fn ours(&self, bin: &Path) -> Result<serde_json::Map<String, Value>, String> {
+        let rendered: Value =
+            serde_json::from_str(&render(self.template, bin)?).map_err(|e| e.to_string())?;
+        match rendered.get("hooks") {
+            Some(Value::Object(events)) => Ok(events.clone()),
+            _ => Err(format!(
+                "{}: plotkeeper's hooks.json has no hooks",
+                self.label
+            )),
+        }
+    }
+
+    /// `text` without plotkeeper's entries; `text` itself, byte for byte, when it has none.
+    // shortcut: a file that had some is written back with its keys sorted, as serde_json writes them.
+    fn without_ours(&self, text: &str, bin: &Path) -> Result<String, String> {
+        let mut hooks = self.parse(text)?;
+        let ours = self.ours(bin)?;
+        let events = self.events(&mut hooks)?;
+        let mut removed = false;
+        for (event, ours) in ours {
+            let Some(Value::Array(entries)) = events.get_mut(&event) else {
+                continue;
+            };
+            let ours = ours.as_array().cloned().unwrap_or_default();
+            let before = entries.len();
+            entries.retain(|entry| !ours.contains(entry));
+            removed |= entries.len() != before;
+            if entries.is_empty() {
+                events.remove(&event);
             }
+        }
+        if !removed {
+            return Ok(text.to_owned());
+        }
+        Ok(serde_json::to_string_pretty(&hooks).map_err(|e| e.to_string())? + "\n")
+    }
+
+    /// Adds plotkeeper's entries, once each, beside the user's own. Before the first install, and before one that finds
+    /// the file changed since install last wrote it, the file is backed up without plotkeeper's entries, so uninstall
+    /// gives back the user's latest hooks.
+    // shortcut: the file is written back with its keys sorted, as serde_json writes them; uninstall restores its bytes.
+    fn install(
+        &self,
+        home: &Path,
+        bin: &Path,
+        state: &mut State,
+        record: fn(&mut State) -> &mut Option<HookFileRecord>,
+        out: &mut dyn Write,
+    ) -> Result<(), String> {
+        let dir = self.file.parent().unwrap_or(home);
+        let old = self.read()?;
+        let mut hooks = match &old {
+            Some(text) => self.parse(text)?,
+            None => (self.fresh)(),
+        };
+        let events = self.events(&mut hooks)?;
+        for (event, ours) in self.ours(bin)? {
+            let entries = events
+                .entry(event)
+                .or_insert_with(|| Value::Array(Vec::new()));
+            let entries = entries.as_array_mut().expect("checked to be an array");
+            for entry in ours.as_array().into_iter().flatten() {
+                if !entries.contains(entry) {
+                    entries.push(entry.clone());
+                }
+            }
+        }
+        let text = serde_json::to_string_pretty(&hooks).map_err(|e| e.to_string())? + "\n";
+        let changed = record(state)
+            .as_ref()
+            .is_none_or(|r| old.as_deref() != Some(r.written.as_str()));
+        if changed {
+            if let Some(old) = &old {
+                let backups = record_dir(home).join("backups");
+                fs::create_dir_all(&backups).map_err(|e| e.to_string())?;
+                fs::write(backups.join(self.backup), self.without_ours(old, bin)?)
+                    .map_err(|e| format!("could not back up {}: {e}", self.shown()))?;
+            }
+            let made_dir = record(state).as_ref().map_or(!dir.is_dir(), |r| r.made_dir);
+            *record(state) = Some(HookFileRecord {
+                written: String::new(),
+                existed: old.is_some(),
+                // A second install keeps knowing the folder was install's.
+                made_dir,
+            });
+            save(home, state)?;
+        }
+        fs::create_dir_all(dir).map_err(|e| format!("could not make {}: {e}", dir.display()))?;
+        fs::write(&self.file, &text)
+            .map_err(|e| format!("could not write {}: {e}", self.shown()))?;
+        if let Some(record) = record(state).as_mut() {
+            record.written = text;
+        }
+        save(home, state)?;
+        say(
+            out,
+            format!(
+                "{}: added plotkeeper's hooks to {}",
+                self.label,
+                self.shown()
+            ),
+        );
+        Ok(())
+    }
+
+    /// Takes install's change back: the file as it was when it is as install left it, else the file without
+    /// plotkeeper's entries.
+    fn uninstall(
+        &self,
+        home: &Path,
+        record: &HookFileRecord,
+        bin: &Path,
+        out: &mut dyn Write,
+    ) -> Result<(), String> {
+        let Some(now) = self.read()? else {
+            return Ok(());
+        };
+        if now == record.written {
+            if record.existed {
+                let old = fs::read(record_dir(home).join("backups").join(self.backup))
+                    .map_err(|e| format!("could not read the backup of {}: {e}", self.shown()))?;
+                fs::write(&self.file, old)
+                    .map_err(|e| format!("could not write {}: {e}", self.shown()))?;
+            } else {
+                fs::remove_file(&self.file)
+                    .map_err(|e| format!("could not remove {}: {e}", self.shown()))?;
+                if record.made_dir {
+                    let _ = fs::remove_dir(self.file.parent().unwrap_or(home));
+                }
+            }
+            say(
+                out,
+                format!("{}: {} put back as it was", self.label, self.shown()),
+            );
+            return Ok(());
+        }
+        let text = self.without_ours(&now, bin)?;
+        if text != now {
+            fs::write(&self.file, text)
+                .map_err(|e| format!("could not write {}: {e}", self.shown()))?;
         }
         say(
             out,
-            format!("Cursor: {} put back as it was", file.display()),
+            format!(
+                "{}: {} changed since install, so only plotkeeper's hooks were taken out of it",
+                self.label,
+                self.shown()
+            ),
         );
-        return Ok(());
+        Ok(())
     }
-    let mut hooks: Value = serde_json::from_str(&now)
-        .map_err(|e| format!("Cursor: could not read {}: {e}", file.display()))?;
-    let ours = template_events(CURSOR_HOOKS_JSON, bin)?;
-    let events = codex_events(&mut hooks, &file)
-        .map_err(|_| format!("Cursor: {} is not a hook file Cursor reads", file.display()))?;
-    for (event, ours) in ours {
-        let Some(Value::Array(entries)) = events.get_mut(&event) else {
-            continue;
-        };
-        let ours = ours.as_array().cloned().unwrap_or_default();
-        entries.retain(|entry| !ours.contains(entry));
-        if entries.is_empty() {
-            events.remove(&event);
-        }
-    }
-    let text = serde_json::to_string_pretty(&hooks).map_err(|e| e.to_string())? + "\n";
-    fs::write(&file, text).map_err(|e| format!("could not write {}: {e}", file.display()))?;
-    say(
-        out,
-        format!(
-            "Cursor: {} changed since install, so only plotkeeper's hooks were taken out of it",
-            file.display()
-        ),
-    );
-    Ok(())
-}
-
-/// Adds plotkeeper's groups to `~/.codex/hooks.json`, once each, beside the user's own, after a backup on the first
-/// install; then says Codex's one-time trust step.
-// shortcut: the file is written back with its keys sorted, as serde_json writes them; uninstall restores its bytes.
-fn install_codex(
-    home: &Path,
-    bin: &Path,
-    state: &mut State,
-    out: &mut dyn Write,
-) -> Result<(), String> {
-    let file = codex_hooks(home);
-    let dir = file.parent().unwrap_or(home);
-    let old = match fs::read_to_string(&file) {
-        Ok(text) => Some(text),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-        Err(e) => return Err(format!("Codex: could not read {}: {e}", file.display())),
-    };
-    let mut hooks: Value = match &old {
-        Some(text) => serde_json::from_str(text)
-            .map_err(|e| format!("Codex: could not read {}: {e}", file.display()))?,
-        None => Value::Object(Default::default()),
-    };
-    let events = codex_events(&mut hooks, &file)?;
-    for (event, ours) in codex_groups(bin)? {
-        let groups = events
-            .entry(event)
-            .or_insert_with(|| Value::Array(Vec::new()));
-        let groups = groups.as_array_mut().expect("checked to be an array");
-        for group in ours.as_array().into_iter().flatten() {
-            if !groups.contains(group) {
-                groups.push(group.clone());
-            }
-        }
-    }
-    let text = serde_json::to_string_pretty(&hooks).map_err(|e| e.to_string())? + "\n";
-    if state.codex.is_none() {
-        let backups = record_dir(home).join("backups");
-        if let Some(old) = &old {
-            fs::create_dir_all(&backups).map_err(|e| e.to_string())?;
-            fs::write(backups.join("codex-hooks.json"), old)
-                .map_err(|e| format!("could not back up {}: {e}", file.display()))?;
-        }
-        state.codex = Some(CodexHooks {
-            written: String::new(),
-            existed: old.is_some(),
-            made_dir: !dir.is_dir(),
-        });
-        save(home, state)?;
-    }
-    fs::create_dir_all(dir).map_err(|e| format!("could not make {}: {e}", dir.display()))?;
-    fs::write(&file, &text).map_err(|e| format!("could not write {}: {e}", file.display()))?;
-    if let Some(codex) = &mut state.codex {
-        codex.written = text;
-    }
-    save(home, state)?;
-    say(
-        out,
-        format!("Codex: added plotkeeper's hooks to {}", file.display()),
-    );
-    say(
-        out,
-        "Codex: once, run `/hooks` in Codex and trust plotkeeper's hooks; Codex skips a hook until it is trusted",
-    );
-    Ok(())
-}
-
-/// Takes install's change to `~/.codex/hooks.json` back: the file as it was when it is as install left it, else the
-/// file without plotkeeper's groups.
-fn uninstall_codex(
-    home: &Path,
-    codex: &CodexHooks,
-    bin: &Path,
-    out: &mut dyn Write,
-) -> Result<(), String> {
-    let file = codex_hooks(home);
-    let Ok(now) = fs::read_to_string(&file) else {
-        return Ok(());
-    };
-    if now == codex.written {
-        if codex.existed {
-            let old = fs::read(record_dir(home).join("backups").join("codex-hooks.json"))
-                .map_err(|e| format!("could not read the backup of {}: {e}", file.display()))?;
-            fs::write(&file, old)
-                .map_err(|e| format!("could not write {}: {e}", file.display()))?;
-        } else {
-            fs::remove_file(&file)
-                .map_err(|e| format!("could not remove {}: {e}", file.display()))?;
-            if codex.made_dir {
-                let _ = fs::remove_dir(file.parent().unwrap_or(home));
-            }
-        }
-        say(out, format!("Codex: {} put back as it was", file.display()));
-        return Ok(());
-    }
-    let mut hooks: Value = serde_json::from_str(&now)
-        .map_err(|e| format!("Codex: could not read {}: {e}", file.display()))?;
-    let ours = codex_groups(bin)?;
-    let events = codex_events(&mut hooks, &file)?;
-    for (event, ours) in ours {
-        let Some(Value::Array(groups)) = events.get_mut(&event) else {
-            continue;
-        };
-        let ours = ours.as_array().cloned().unwrap_or_default();
-        groups.retain(|group| !ours.contains(group));
-        if groups.is_empty() {
-            events.remove(&event);
-        }
-    }
-    let text = serde_json::to_string_pretty(&hooks).map_err(|e| e.to_string())? + "\n";
-    fs::write(&file, text).map_err(|e| format!("could not write {}: {e}", file.display()))?;
-    say(
-        out,
-        format!(
-            "Codex: {} changed since install, so only plotkeeper's hooks were taken out of it",
-            file.display()
-        ),
-    );
-    Ok(())
 }
 
 /// `plotkeeper uninstall` for `home`, with the harnesses found on `path`: undoes what install recorded, restores its
-/// backups, and removes the data folder's `bin/`, the rendered plugins and the record. Prints each step to `out`.
+/// backups, and removes the data folder's `bin/`, the rendered plugins and the record. Prints each step to `out`. Every
+/// recorded step runs: one that fails, such as a harness's CLI no longer on the PATH, is said and stays recorded, with
+/// everything in the data folder kept, so running uninstall again retries only the steps that failed.
 pub fn uninstall(home: &Path, path: Option<&OsStr>, out: &mut dyn Write) -> Result<(), String> {
-    let Some(state) = load(home)? else {
+    let Some(mut state) = load(home)? else {
         say(out, "plotkeeper install has not run here; nothing to undo");
         return Ok(());
     };
     let backups = record_dir(home).join("backups");
-    let mut keep_record = false;
+    let bin = studio_hook::bin_dir(home);
+    let mut failed = 0;
+    let mut fail = |out: &mut dyn Write, e: String| {
+        say(out, format!("failed: {e}"));
+        failed += 1;
+    };
 
     if let Some(codex) = &state.codex {
-        uninstall_codex(home, codex, &studio_hook::bin_dir(home), out)?;
+        match codex_file(home).uninstall(home, codex, &bin, out) {
+            Ok(()) => state.codex = None,
+            Err(e) => fail(out, e),
+        }
     }
     if let Some(cursor) = &state.cursor {
-        uninstall_cursor(home, cursor, &studio_hook::bin_dir(home), out)?;
+        match cursor_file(home).uninstall(home, cursor, &bin, out) {
+            Ok(()) => state.cursor = None,
+            Err(e) => fail(out, e),
+        }
     }
 
     if state.copilot {
-        let copilot = on_path("copilot", path)
-            .ok_or("Copilot: `copilot` not found, so its plugin cannot be uninstalled")?;
-        run(
-            &copilot,
-            &["plugin".as_ref(), "uninstall".as_ref(), NAME.as_ref()],
-        )?;
-        say(out, format!("Copilot: copilot plugin uninstall {NAME}"));
+        let done = on_path("copilot", path)
+            .ok_or_else(|| {
+                "Copilot: `copilot` not found, so its plugin cannot be uninstalled".to_owned()
+            })
+            .and_then(|copilot| {
+                run(
+                    &copilot,
+                    &["plugin".as_ref(), "uninstall".as_ref(), NAME.as_ref()],
+                )
+            });
+        match done {
+            Ok(()) => {
+                say(out, format!("Copilot: copilot plugin uninstall {NAME}"));
+                state.copilot = false;
+            }
+            Err(e) => fail(out, e),
+        }
     }
 
     if state.agy || !state.agy_backups.is_empty() {
-        let agy = on_path("agy", path)
-            .ok_or("agy: `agy` not found, so its plugin cannot be uninstalled")?;
-        if state.agy {
-            agy_plugin::uninstall(&agy, agy_plugin::NAME, home)?;
-            say(
+        match on_path("agy", path) {
+            None => fail(
                 out,
-                format!("agy: agy plugin uninstall {}", agy_plugin::NAME),
-            );
-        }
-        for name in &state.agy_backups {
-            agy_plugin::install(&agy, &backups.join("agy").join(name), home)?;
-            say(out, format!("agy: put back the plugin `{name}`"));
+                "agy: `agy` not found, so its plugin cannot be uninstalled".into(),
+            ),
+            Some(agy) => {
+                if state.agy {
+                    match agy_plugin::uninstall(&agy, agy_plugin::NAME, home) {
+                        Ok(()) => {
+                            say(
+                                out,
+                                format!("agy: agy plugin uninstall {}", agy_plugin::NAME),
+                            );
+                            state.agy = false;
+                        }
+                        Err(e) => fail(out, e),
+                    }
+                }
+                let mut left = Vec::new();
+                for name in std::mem::take(&mut state.agy_backups) {
+                    match agy_plugin::install(&agy, &backups.join("agy").join(&name), home) {
+                        Ok(()) => say(out, format!("agy: put back the plugin `{name}`")),
+                        Err(e) => {
+                            fail(out, e);
+                            left.push(name);
+                        }
+                    }
+                }
+                state.agy_backups = left;
+            }
         }
     }
 
     if state.claude {
-        let claude = on_path("claude", path)
-            .ok_or("Claude Code: `claude` not found, so its plugin cannot be uninstalled")?;
-        run(
-            &claude,
-            &["plugin".as_ref(), "uninstall".as_ref(), CLAUDE_ID.as_ref()],
-        )?;
-        say(
-            out,
-            format!("Claude Code: claude plugin uninstall {CLAUDE_ID}"),
-        );
-        run(
-            &claude,
-            &[
-                "plugin".as_ref(),
-                "marketplace".as_ref(),
-                "remove".as_ref(),
-                NAME.as_ref(),
-            ],
-        )?;
-        say(
-            out,
-            format!("Claude Code: claude plugin marketplace remove {NAME}"),
-        );
+        match on_path("claude", path) {
+            None => fail(
+                out,
+                "Claude Code: `claude` not found, so its plugin cannot be uninstalled".into(),
+            ),
+            Some(claude) => {
+                if !state.claude_plugin_gone {
+                    match run(
+                        &claude,
+                        &["plugin".as_ref(), "uninstall".as_ref(), CLAUDE_ID.as_ref()],
+                    ) {
+                        Ok(()) => {
+                            say(
+                                out,
+                                format!("Claude Code: claude plugin uninstall {CLAUDE_ID}"),
+                            );
+                            state.claude_plugin_gone = true;
+                        }
+                        Err(e) => fail(out, e),
+                    }
+                }
+                if state.claude_plugin_gone {
+                    match run(
+                        &claude,
+                        &[
+                            "plugin".as_ref(),
+                            "marketplace".as_ref(),
+                            "remove".as_ref(),
+                            NAME.as_ref(),
+                        ],
+                    ) {
+                        Ok(()) => {
+                            say(
+                                out,
+                                format!("Claude Code: claude plugin marketplace remove {NAME}"),
+                            );
+                            state.claude = false;
+                            state.claude_plugin_gone = false;
+                        }
+                        Err(e) => fail(out, e),
+                    }
+                }
+            }
+        }
     }
 
     if let Some(written) = &state.zshrc {
         let zshrc = home.join(".zshrc");
         if fs::read_to_string(&zshrc).is_ok_and(|now| &now == written) {
-            let old = fs::read(backups.join("zshrc"))
-                .map_err(|e| format!("could not read the backup of ~/.zshrc: {e}"))?;
-            fs::write(&zshrc, old).map_err(|e| format!("could not write ~/.zshrc: {e}"))?;
-            say(out, "~/.zshrc: put back as it was");
+            let put_back = fs::read(backups.join("zshrc"))
+                .map_err(|e| format!("could not read the backup of ~/.zshrc: {e}"))
+                .and_then(|old| {
+                    fs::write(&zshrc, old).map_err(|e| format!("could not write ~/.zshrc: {e}"))
+                });
+            match put_back {
+                Ok(()) => {
+                    say(out, "~/.zshrc: put back as it was");
+                    state.zshrc = None;
+                }
+                Err(e) => fail(out, e),
+            }
         } else {
-            keep_record = true;
+            // Not a failure: only the backup of `~/.zshrc` is left to give back, so the record stays for it.
             say(
                 out,
                 format!(
@@ -806,17 +841,16 @@ pub fn uninstall(home: &Path, path: Option<&OsStr>, out: &mut dyn Write) -> Resu
         }
     }
 
-    let mut gone = vec![studio_hook::bin_dir(home), plugins_dir(home)];
-    if keep_record {
-        // Only the backup of `~/.zshrc` is left to give back.
-        let zshrc = state.zshrc.clone();
-        save(
-            home,
-            &State {
-                zshrc,
-                ..State::default()
-            },
-        )?;
+    if failed > 0 {
+        // The hooks of a harness not undone still run the binaries, and a rerun needs the backups.
+        save(home, &state)?;
+        return Err(format!(
+            "{failed} step(s) failed, said above; everything else was undone. Run `plotkeeper uninstall` again to retry them"
+        ));
+    }
+    let mut gone = vec![bin, plugins_dir(home)];
+    if state.zshrc.is_some() {
+        save(home, &state)?;
     } else {
         gone.push(record_dir(home));
     }

@@ -362,7 +362,7 @@ pub struct WriterTest {
 }
 
 /// The page's Test of `writer` at `model` and `effort`: one tiny call. A pass saves the choice in `settings.json` (`expected`
-/// is the text the page last read) and turns summaries on, now and at every start; a failure changes nothing.
+/// is the text the page last read) and, once saved, turns summaries on, now and at every start; a failure changes nothing.
 pub fn test_writer(
     app: &App,
     writer: WriterKind,
@@ -391,7 +391,10 @@ pub fn test_writer(
         settings::open_summaries(file.parent().unwrap_or(Path::new("")))?;
         Ok(text)
     });
-    set_summaries_on(app, true);
+    // Only a saved choice opens summaries: one not saved would write with a writer the next start does not know.
+    if saved.is_ok() {
+        set_summaries_on(app, true);
+    }
     let name = writer.program();
     match saved {
         Ok(text) => WriterTest {
@@ -425,22 +428,18 @@ pub fn set_api_key(
         .map(|key| key.trim().to_string())
         .filter(|key| !key.is_empty());
     let base_url = base_url.filter(|_| writer == WriterKind::OpenAI);
-    let text = match base_url.as_deref().map(str::trim) {
-        Some(url)
-            if !url.is_empty() && !url.starts_with("http://") && !url.starts_with("https://") =>
-        {
-            return Err(
-                "The base URL starts with http:// or https://, such as http://localhost:11434/v1."
-                    .into(),
-            );
-        }
-        Some(url) => {
-            let text = settings::save_base_url(expected, Some(url).filter(|url| !url.is_empty()))?;
-            app.writer.use_base_url(settings::openai_base_url());
-            Some(text)
-        }
-        None => None,
-    };
+    let url = base_url.as_deref().map(str::trim);
+    if let Some(url) = url
+        && !url.is_empty()
+        && !url.starts_with("http://")
+        && !url.starts_with("https://")
+    {
+        return Err(
+            "The base URL starts with http:// or https://, such as http://localhost:11434/v1."
+                .into(),
+        );
+    }
+    // The key first: one the store refuses leaves `settings.json` as the page read it.
     if let Some(key) = &key {
         app.keys.set(writer, key)?;
         app.writer.use_key(writer, Some(key.clone()));
@@ -449,7 +448,10 @@ pub fn set_api_key(
             set.push(writer);
         }
     }
-    Ok(text)
+    let Some(url) = url else { return Ok(None) };
+    let text = settings::save_base_url(expected, Some(url).filter(|url| !url.is_empty()))?;
+    app.writer.use_base_url(settings::openai_base_url());
+    Ok(Some(text))
 }
 
 /// Removes API-key writer `writer`'s key from the Keychain and from the writer, whose calls then fail as having no key; for
