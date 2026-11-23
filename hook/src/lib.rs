@@ -25,6 +25,15 @@ pub fn data_dir(home: &Path) -> PathBuf {
 
 const DATA_FOLDER: &str = "plotkeeper";
 
+/// The data folder's `bin/`, where the hooks find their binaries at a path that never moves (#356): copies of
+/// [`HOOK_BINARIES`], which each `plotkeeper` start refreshes from the ones beside its own executable.
+pub fn bin_dir(home: &Path) -> PathBuf {
+    data_dir(home).join("bin")
+}
+
+/// The binaries the hooks run, which ship beside `plotkeeper` and are copied into [`bin_dir`].
+pub const HOOK_BINARIES: [&str; 2] = ["plotkeeper-hook", "plotkeeper-answer"];
+
 /// The folder the data lived in before it was named for plotkeeper (#322).
 const OLD_DATA_FOLDER: &str = "dev.falinks.studio";
 

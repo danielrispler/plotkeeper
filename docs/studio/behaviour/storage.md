@@ -19,6 +19,10 @@ It keeps a session's events for 30 days after its last one. At each start, befor
 
 The app also keeps `roots.json` beside the log: the git worktree root of each folder it has looked up, so a start runs `git` only for new folders.
 
+## The hooks' binaries
+
+`bin/` in the data folder, `~/Library/Application Support/plotkeeper/bin/`, holds copies of `plotkeeper-hook` and `plotkeeper-answer`, so the hooks run them at a path that never moves (#356). Each `plotkeeper` start compares each copy with the binary of the same name beside its own executable (its real path, through any symbolic link) and replaces one that differs, writing a temporary file in `bin/` and renaming it into place, so the path holds the old binary or the new one and never part of one. A start with no `bin/` creates it; equal copies are left untouched. An upgrade so reaches the hooks at the next start, with no install rerun and no npm install script. They are copies, not symbolic links, so removing or upgrading a Node version cannot break or stale them. When either binary is missing beside the executable, the start says so in one line on stderr and touches no copy, so the hooks never run two builds' binaries together. `npm run start` installs `plotkeeper-hook` and `plotkeeper-answer` beside `plotkeeper`, as an npm install lays them out.
+
 ## Plan usage
 
 Claude Code gives the plan's 5-hour and weekly usage, and the context window's size, only to the status line command, on its stdin. Sessions the studio starts run `claude --settings` with `workbench/statusline.sh` as their status line, so you edit nothing. On every refresh it saves that stdin as `usage/<session_id>.json` beside the event log, by temp file and rename, readable only by you (mode 0600, in a folder of mode 0700), with the line in `workbench/statusline-usage.sh`.
