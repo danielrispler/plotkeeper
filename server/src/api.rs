@@ -212,6 +212,8 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
             arg(a, "tier")?,
         )),
         "map_place" => out(crate::map::map_place(arg(a, "project")?, arg(a, "groups")?)),
+        "run_cancel" => res(app.runner.cancel(&arg::<String>(a, "id")?)),
+        "runs_resume" => done!(app.runner.resume()),
         "stop_log" => res(stop_rules::stop_log(
             arg(a, "kind")?,
             arg(a, "project")?,

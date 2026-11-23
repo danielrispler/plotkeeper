@@ -271,6 +271,10 @@ _Avoid_: Approve (that is the PR review), sign off
 The second sandboxed call that checks each claim of a **PR brief** against the same facts the writer had. An item still flagged after one rewrite carries the mark **not confirmed from the facts**.
 _Avoid_: Fact check, verification
 
+**Background run**:
+A headless agent run with scoped tools that plotkeeper starts on Daniel's click, inside Claude Code's OS sandbox, queued one at a time per project and cancellable from the map. It is not a session and has no terminal. [Background runs](behaviour/background-runs.md) has the rules.
+_Avoid_: Session, job, a check sent to the background (a check an agent backgrounds inside its own session)
+
 **Seen**:
 In the viewport (intersecting visibly, not merely built in the DOM), in a visible and focused window, with the view that holds it open. Used for Home items, PR brief rows and stop-rule counts.
 _Avoid_: Shown (when it meant DOM-built), rendered

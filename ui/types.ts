@@ -392,7 +392,15 @@ export type MapState = {
   ready: ReadyPr[];
   // The map items the part sheet says are not yet ratified (`ratify.rs`).
   ratify: PendingItem[];
+  // The project's background runs and the pause line (`runner.rs`).
+  runs: Runs;
 };
+// A background run (`server/src/runner.rs`): a headless agent run Daniel started with a click, queued one at a time per project. `at` is when
+// it was asked for, started or ended, by its state. An ended run says how it ended in `line`, lists the tool calls it was denied, and
+// carries its `prompt` to copy on every end but a clean one. `paused` is why every queue waits, null while they run.
+export type RunEnd = "done" | "denied" | "failed" | "timed-out" | "died" | "setup-failed" | "not-logged-in" | "rate-limited";
+export type RunView = { id: string; kind: "back-law" | "micro-world"; state: "queued" | "running" | "ended"; at: number; outcome: RunEnd | null; line: string | null; denials: string[]; prompt: string | null };
+export type Runs = { paused: string | null; runs: RunView[] };
 // Ratifying (`ratify.rs`): an item of a PR is a map change (kind part, actor, link, law or flow) or a decision the agent declared.
 export type PendingItem = { pr: number; kind: string; id: string };
 export type RatifyRow = { pr: number; kind: string; id: string; text: string; change: string; status: "ratified" | "accepted" | "overturned" | "not-yet" };
@@ -501,6 +509,8 @@ export interface Commands {
   refresh_landed_tasks: void;
   remove_api_key: string | null;
   rename: void;
+  run_cancel: void;
+  runs_resume: void;
   select: Selection | null;
   selected: Selection | null;
   sessions: Session[];
