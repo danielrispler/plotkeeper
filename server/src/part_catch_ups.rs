@@ -8,7 +8,7 @@ use crate::fog::Entry;
 use crate::map::UserState;
 use serde::Serialize;
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, HashMap},
     path::Path,
     sync::{Arc, Mutex},
 };
@@ -77,7 +77,7 @@ pub fn fresh(store: &CatchUpStore, part: &str, fog: &[String]) -> Option<StoredC
 /// What is being written and what failed, per project and part. A write's claim ends when its guard drops, a panic included.
 #[derive(Default)]
 pub struct CatchUps {
-    busy: Arc<Mutex<HashSet<(String, String)>>>,
+    busy: Arc<Mutex<Busy>>,
     /// The fog list whose write failed, per project and part: the sheet says so, and a click tries again.
     failed: Arc<Mutex<Failed>>,
 }
@@ -85,35 +85,64 @@ pub struct CatchUps {
 /// The fog list whose write failed, by project and part.
 type Failed = HashMap<(String, String), Vec<String>>;
 
+/// Per project and part being written: the fog list being written, and the one asked for meanwhile, written once that one ends.
+type Busy = HashMap<(String, String), (Vec<String>, Option<Vec<String>>)>;
+
 struct Claim {
-    busy: Arc<Mutex<HashSet<(String, String)>>>,
+    busy: Arc<Mutex<Busy>>,
     key: (String, String),
+    released: bool,
+}
+
+impl Claim {
+    /// The fog list asked for while this one was written, now the one being written; else the claim ends.
+    fn next(&mut self) -> Option<Vec<String>> {
+        let mut busy = self.busy.lock().unwrap();
+        let queued = busy.get_mut(&self.key).and_then(|(writing, queued)| {
+            let next = queued.take()?;
+            *writing = next.clone();
+            Some(next)
+        });
+        if queued.is_none() {
+            busy.remove(&self.key);
+            self.released = true;
+        }
+        queued
+    }
 }
 
 impl Drop for Claim {
     fn drop(&mut self) {
-        self.busy.lock().unwrap().remove(&self.key);
+        if !self.released {
+            self.busy.lock().unwrap().remove(&self.key);
+        }
     }
 }
 
 impl CatchUps {
-    fn claim(&self, project: &str, part: &str) -> Option<Claim> {
+    /// Claims `part`'s write over `fog`; while another list is being written, `fog` waits its turn after it instead.
+    fn claim(&self, project: &str, part: &str, fog: &[String]) -> Option<Claim> {
         let key = (project.to_string(), part.to_string());
-        self.busy
-            .lock()
-            .unwrap()
-            .insert(key.clone())
-            .then(|| Claim {
-                busy: self.busy.clone(),
-                key,
-            })
+        let mut busy = self.busy.lock().unwrap();
+        if let Some((writing, queued)) = busy.get_mut(&key) {
+            if writing != fog {
+                *queued = Some(fog.to_vec());
+            }
+            return None;
+        }
+        busy.insert(key.clone(), (fog.to_vec(), None));
+        Some(Claim {
+            busy: self.busy.clone(),
+            key,
+            released: false,
+        })
     }
 
     fn writing(&self, project: &str, part: &str) -> bool {
         self.busy
             .lock()
             .unwrap()
-            .contains(&(project.to_string(), part.to_string()))
+            .contains_key(&(project.to_string(), part.to_string()))
     }
 
     fn failed(&self, project: &str, part: &str, fog: &[String]) -> bool {
@@ -127,16 +156,10 @@ impl CatchUps {
 
 /// A project's catch-ups live beside its PR briefs, in a folder of their own.
 pub fn store_of(project: &str) -> Option<CatchUpStore> {
-    let home = std::env::home_dir()?;
-    let name: String = project
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-        .collect();
-    CatchUpStore::open(
-        &studio_hook::data_dir(&home)
-            .join("pr-briefs-by-project")
-            .join(name),
-    )
+    CatchUpStore::open(&crate::pr_briefs::project_path(
+        "pr-briefs-by-project",
+        project,
+    )?)
     .ok()
 }
 
@@ -203,7 +226,8 @@ type SharedWriter = Arc<dyn BriefWriter + Send + Sync>;
 /// written").
 pub const ON_SHOW: usize = 3;
 
-/// Starts writing `part`'s catch-up over `fog` in the background, unless one is being written already; `done` runs when it ends,
+/// Starts writing `part`'s catch-up over `fog` in the background. While one over another list is being written, `fog` is written
+/// once that one ends, so the part is never left with neither a write nor a catch-up for its list. `done` runs when the writes end,
 /// written or failed. Whether a write started.
 #[allow(clippy::too_many_arguments)]
 fn start(
@@ -216,20 +240,30 @@ fn start(
     store: CatchUpStore,
     done: impl FnOnce() + Send + 'static,
 ) -> bool {
-    let Some(claim) = catch_ups.claim(project, part) else {
+    let Some(mut claim) = catch_ups.claim(project, part, &fog) else {
         return false;
     };
     let failed = catch_ups.failed.clone();
     let (project, part) = (project.to_string(), part.to_string());
     std::thread::spawn(move || {
-        let written = gather_catch_up(Path::new(&project), &part, &fog).and_then(|source| {
-            write_part_catch_up(writer.as_ref(), &model, &source, &store, |line| {
-                log::warn!("part catch-up of {part}: {line}")
-            })
-        });
-        if let Err(why) = written {
-            log::warn!("write the part catch-up of {part}: {why}");
-            failed.lock().unwrap().insert((project, part), fog);
+        let mut fog = fog;
+        loop {
+            let written = gather_catch_up(Path::new(&project), &part, &fog).and_then(|source| {
+                write_part_catch_up(writer.as_ref(), &model, &source, &store, |line| {
+                    log::warn!("part catch-up of {part}: {line}")
+                })
+            });
+            if let Err(why) = written {
+                log::warn!("write the part catch-up of {part}: {why}");
+                failed
+                    .lock()
+                    .unwrap()
+                    .insert((project.clone(), part.clone()), fog.clone());
+            }
+            match claim.next() {
+                Some(next) => fog = next,
+                None => break,
+            }
         }
         drop(claim);
         done();
@@ -284,17 +318,9 @@ pub fn show(
     let repo = Path::new(project);
     // How far down the history a commit sits: an older one has fewer commits behind it.
     let depth = |commit: &str| {
-        std::process::Command::new("git")
-            .args(["rev-list", "--count", commit])
-            .current_dir(repo)
-            .output()
+        crate::map::git(repo, &["rev-list", "--count", commit])
             .ok()
-            .and_then(|out| {
-                String::from_utf8_lossy(&out.stdout)
-                    .trim()
-                    .parse::<u64>()
-                    .ok()
-            })
+            .and_then(|out| out.trim().parse::<u64>().ok())
             .unwrap_or(u64::MAX)
     };
     let mut fogged: Vec<(u64, String, Vec<String>)> = crate::fog::core_fogged_parts(user, source)
@@ -788,6 +814,37 @@ mod tests {
         shows.wait(1);
         assert_eq!(writer.wrote(), ["a", "a"]);
         assert_eq!(shows.store().get("a").unwrap().fog, list);
+    }
+
+    #[test]
+    fn a_click_for_a_longer_fog_list_while_the_shorter_one_is_written_gets_its_write_once_that_one_ends()
+     {
+        let shows = Shows::new();
+        shows.push("a", "2");
+        let writer = Fake::shut();
+        assert_eq!(shows.show(&writer), ["a"]);
+        shows.push("a", "3");
+        let list = shows.fog("a");
+        assert_eq!(list.len(), 2);
+        let writer_: SharedWriter = writer.clone();
+        let ended = shows.ended.clone();
+        let opened = ask(
+            &shows.catch_ups,
+            Some(writer_),
+            "opus".into(),
+            &shows.rig.main,
+            "a",
+            list.clone(),
+            shows.store(),
+            move || ended.send(()).unwrap(),
+        )
+        .unwrap();
+        assert!(matches!(opened, Opened::Writing { writing: true }));
+        writer.open();
+        shows.wait(1);
+        assert_eq!(writer.wrote(), ["a", "a"]);
+        assert_eq!(shows.store().get("a").unwrap().fog, list);
+        assert!(!shows.catch_ups.writing(&shows.rig.main, "a"));
     }
 
     #[test]

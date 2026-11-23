@@ -16,19 +16,21 @@ export type Module = string;
 export const dueAfter = { days: 14, prs: 20 };
 
 // One module's row: its words in the review, its "kept if" bar over the shell's counts, and an optional exception before which it is not
-// judged at all: a calendar wait of `weeks` from its rollout (`from`, a local day; a project whose log began later waits from its own
-// start), or `least` offers of `kind` logged for the project. A note row (`note`) has its own sentence instead of a name in the list.
+// judged at all: a calendar wait of `weeks` from its rollout (`from`, a local day, or read from the project's facts, null while it has
+// none; a project whose log began later waits from its own start), or `least` offers of `kind` logged for the project. A note row
+// (`note`) has its own sentence instead of a name in the list.
 export type Row = {
   module: Module;
   name: string;
   kept: (facts: Facts) => boolean;
   note?: string;
-  wait?: { from: string; weeks: number };
+  wait?: { from: string | ((facts: Facts) => string | null); weeks: number };
   offers?: { kind: StopKind; least: number };
 };
 
-// The day the refresher and staleness bands ship (#392), where their calendar wait starts.
-const staleRollout = "2026-11-24";
+// Where the refresher's and staleness bands' calendar wait starts (#392): the local day of the project's staleness baseline, its first
+// map shown with that build (`server/src/staleness.rs`); none before it.
+const staleRollout = (f: Facts) => (f.stale_since === null ? null : localDay(new Date(f.stale_since * 1000)));
 
 // The modules and their bars, in the order the review lists them. Map view: engaged days, active days with at least one entered action on
 // the map (the shell counts them; a day the map was only open on is not one). History strip: scrubs. Proof: opens. PR briefs: opened for at
@@ -65,7 +67,9 @@ const addDays = (day: string, n: number) => {
 // Whether `row` may be judged on `today`: past its calendar wait and its offer count, if it has them.
 function judgeable(row: Row, facts: Facts, today: string): boolean {
   if (row.wait) {
-    const from = facts.began !== null && facts.began > row.wait.from ? facts.began : row.wait.from;
+    const rollout = typeof row.wait.from === "string" ? row.wait.from : row.wait.from(facts);
+    if (rollout === null) return false;
+    const from = facts.began !== null && facts.began > rollout ? facts.began : rollout;
     if (today < addDays(from, row.wait.weeks * 7)) return false;
   }
   return !row.offers || (facts.counts[row.offers.kind] ?? 0) >= row.offers.least;

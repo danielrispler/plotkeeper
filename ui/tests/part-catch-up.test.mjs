@@ -30,7 +30,7 @@ test("\"Writing…\" never blocks: the button stays pressable while the catch-up
   assert.equal(writing.main.note, "Writing…");
   assert.equal(writing.second, "I know this");
   assert.equal(awaitedCatchUp(catchUp({ writing: true })), "wait");
-  assert.equal(awaitedCatchUp(catchUp()), "wait", "not written yet: its write is on its way");
+  assert.equal(awaitedCatchUp(catchUp()), "stop", "neither stored nor being written: nothing is on its way");
   assert.equal(awaitedCatchUp(catchUp({ ready: true })), "open");
   assert.equal(awaitedCatchUp(catchUp({ failed: true })), "stop");
   assert.equal(awaitedCatchUp(undefined), "stop", "the part was cleared meanwhile");
@@ -43,4 +43,23 @@ test("a long catch-up's full fog list names each PR by number and each direct pu
     { commit: "fedcba9876543210", pr: null, title: "fix pushed to main" },
   ]);
   assert.deepEqual(lines, ["#7 Keep the order", "fix pushed to main (fedcba9, no PR)"]);
+});
+
+test("a catch-up rewritten for a new fog list starts at its first step, while the same one reopens where it was left", async () => {
+  const { briefPlayer, catchUpIds } = await import("../../dist/map-model.js");
+  const id = catchUpIds();
+  const player = briefPlayer({ scrubbed: () => false, backToNow: () => {} });
+  const old = id("/p", "a", ["c1"]);
+  assert.ok(old < 0, "no PR has its number");
+  player.open("/p", old, 0);
+  player.go(1, 4);
+  player.go(1, 4);
+  player.go(1, 4);
+  player.close();
+  player.open("/p", id("/p", "a", ["c1"]), 0);
+  assert.equal(player.current().step, 3, "the same catch-up reopens at the step left");
+  player.close();
+  player.open("/p", id("/p", "a", ["c1", "c2"]), 0);
+  assert.equal(player.current().step, 0, "the rewritten one starts over");
+  assert.notEqual(id("/p", "b", ["c1"]), old, "another part's has its own");
 });

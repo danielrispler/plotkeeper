@@ -445,6 +445,11 @@ pub fn mark_read(
             read.chapters.clear();
             read.lit = lit;
         }
+        // Staleness keeps the read's time too, which a rewritten brief's cleared reads would lose (#392).
+        for part in read.lit.get(chapter).cloned().unwrap_or_default() {
+            crate::staleness::touch(u, &part, crate::staleness::Activity::Chapter, at);
+        }
+        let read = u.fog.reads.entry(pr).or_default();
         read.chapters.insert(
             chapter,
             ChapterRead {

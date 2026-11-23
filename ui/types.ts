@@ -378,7 +378,7 @@ export type FogState = {
 export type Camera = { scale: number; x: number; y: number };
 // `view`: the project's saved camera, none until it was first moved.
 // When Daniel last engaged with each part, and the baseline (`staleness.rs`); the window reads the bands, not this.
-export type Staleness = { since: number | null; parts: Record<string, { at: number; kind: "know" | "refresher" | "catch-up" | "other" }> };
+export type Staleness = { since: number | null; parts: Record<string, { at: number; kind: "know" | "refresher" | "catch-up" | "chapter" | "other" }> };
 export type UserMap = { positions: Record<string, [number, number]>; tiers: Record<string, string>; fog?: FogState; view?: Camera | null; staleness?: Staleness };
 export type MapState = {
   project: string;
@@ -600,4 +600,6 @@ export type StopFacts = {
   counts: Partial<Record<StopKind, number>>;
   // The local day of the project's first event, where a calendar wait starts at the latest; null when it has none.
   began: string | null;
+  // When the project's staleness baselines were set (unix seconds): its first map shown with the staleness build (#392); null before.
+  stale_since: number | null;
 };

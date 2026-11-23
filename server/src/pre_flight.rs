@@ -109,18 +109,10 @@ pub fn predict_into(
     Ok(pre)
 }
 
-/// A project's pre-flight lives in a file of its own in the data folder, named as `pr_briefs::store_of` names its folder.
+/// A project's pre-flight lives in a file of its own in the data folder, named as `pr_briefs::project_path` names a project.
 fn store_of(project: &str) -> Option<Store> {
-    let home = std::env::home_dir()?;
-    let name: String = project
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-        .collect();
-    Some(Store::at(
-        studio_hook::data_dir(&home)
-            .join("pre-flight-by-project")
-            .join(format!("{name}.json")),
-    ))
+    let path = crate::pr_briefs::project_path("pre-flight-by-project", project)?;
+    Some(Store::at(path.with_extension("json")))
 }
 
 /// The project's pre-flight, for the Map view's payload.
@@ -143,7 +135,7 @@ pub fn note_closing(project: &str, meta: &PrMeta) {
         return;
     }
     let closing = studio_understanding::pre_flight::closings(&meta.closing, |issue| {
-        gh(
+        crate::ci_laws::gh(
             Path::new(project),
             &["issue", "view", &issue.to_string(), "--json", "parent"],
         )
@@ -151,19 +143,6 @@ pub fn note_closing(project: &str, meta: &PrMeta) {
     if let Err(why) = store.note(meta.number, closing) {
         log::warn!("pre-flight: note the issues #{} closes: {why}", meta.number);
     }
-}
-
-fn gh(repo: &Path, args: &[&str]) -> Result<String, String> {
-    let out = std::process::Command::new("gh")
-        .args(args)
-        .current_dir(repo)
-        .stdin(std::process::Stdio::null())
-        .output()
-        .map_err(|e| format!("gh did not run: {e}"))?;
-    if !out.status.success() {
-        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
-    }
-    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
 /// An open issue the pre-flight can start from.
@@ -175,7 +154,7 @@ pub struct OpenIssue {
 
 /// The project's open issues, newest first, as `gh` lists them.
 pub fn pre_flight_issues(project: String) -> Result<Vec<OpenIssue>, String> {
-    let text = gh(
+    let text = crate::ci_laws::gh(
         Path::new(&project),
         &[
             "issue",
@@ -211,7 +190,7 @@ pub fn pre_flight_predict(
     let now = studio_understanding::millis();
     let pre = match (issue, text) {
         (Some(number), _) => {
-            let found: serde_json::Value = serde_json::from_str(&gh(
+            let found: serde_json::Value = serde_json::from_str(&crate::ci_laws::gh(
                 Path::new(&project),
                 &["issue", "view", &number.to_string(), "--json", "title,body"],
             )?)

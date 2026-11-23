@@ -493,19 +493,19 @@ pub fn chapter_titles(brief: &studio_understanding::pr_brief::Brief) -> Vec<Stri
     }
 }
 
-/// A project's briefs live in a folder of their own, since PR numbers repeat across repositories.
-pub(crate) fn store_of(project: &str) -> Option<BriefStore> {
+/// `project`'s own path under the data folder's `kind` folder: its path with each character but a letter or digit made `_`.
+pub(crate) fn project_path(kind: &str, project: &str) -> Option<std::path::PathBuf> {
     let home = std::env::home_dir()?;
     let name: String = project
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
         .collect();
-    BriefStore::open(
-        &studio_hook::data_dir(&home)
-            .join("pr-briefs-by-project")
-            .join(name),
-    )
-    .ok()
+    Some(studio_hook::data_dir(&home).join(kind).join(name))
+}
+
+/// A project's briefs live in a folder of their own, since PR numbers repeat across repositories.
+pub(crate) fn store_of(project: &str) -> Option<BriefStore> {
+    BriefStore::open(&project_path("pr-briefs-by-project", project)?).ok()
 }
 
 /// When PR head `head` was committed, in Unix milliseconds, when it is in `project`'s repository.

@@ -10,8 +10,13 @@ const { dismissReview, judge, localDay, logStop, reviewOf, reviewWords, table, u
 
 // The rows that wait 5 calendar weeks (#392), part catch-ups (#391), pre-flight (#394) and explain-back (#397) are kept by default, so a
 // test of the other rows, judged today, holds after the wait ends.
+// Noon of a local day, in unix seconds.
+const at = (day) => {
+  const [y, m, d] = day.split("-").map(Number);
+  return new Date(y, m - 1, d, 12).getTime() / 1000;
+};
 const kept = { "refresher-entered": 2, "stale-entered": 1, "catch-up-done": 3, "pre-flight-run": 2, "explain-back-given": 3 };
-const facts = (extra = {}) => ({ active_days: 14, merged_prs: 20, engaged_days: 0, scrubs: 0, proofs: 0, knows: 0, dismissed: [], briefs_offered: 0, briefs_opened: 0, chapters_done: 0, counts: kept, began: "2026-11-01", ...extra });
+const facts = (extra = {}) => ({ active_days: 14, merged_prs: 20, engaged_days: 0, scrubs: 0, proofs: 0, knows: 0, dismissed: [], briefs_offered: 0, briefs_opened: 0, chapters_done: 0, counts: kept, began: "2026-11-01", stale_since: at("2026-11-24"), ...extra });
 
 test("the review waits for both 14 active days and 20 merged PRs, whichever comes last", () => {
   assert.deepEqual(unused(facts()), ["map", "history", "proof"]);
@@ -86,6 +91,15 @@ test("the refresher needs 2 entries and staleness bands 1 refresher or part catc
   assert.deepEqual(judge(table, due({}, "2026-12-01"), "2027-01-04"), []);
   assert.deepEqual(judge(table, due({}, "2026-12-01"), "2027-01-05"), ["refresher", "staleness"]);
   assert.match(reviewWords(["refresher", "staleness"]), /the refresher and staleness bands/);
+});
+
+test("the refresher and staleness bands wait 5 weeks from the project's own staleness baseline, and are not judged before it has one", () => {
+  const due = (stale_since) => facts({ dismissed: ["map", "history", "proof", "catch-ups", "pre-flight", "explain-back"], counts: {}, stale_since });
+  // First shown with this build on 10 December, not on the day the build was written.
+  assert.deepEqual(judge(table, due(at("2026-12-10")), "2027-01-13"), []);
+  assert.deepEqual(judge(table, due(at("2026-12-10")), "2027-01-14"), ["refresher", "staleness"]);
+  // A project never shown with this build has no band yet.
+  assert.deepEqual(judge(table, due(null), "2027-06-01"), []);
 });
 
 test("the words name the modules and carry no number", () => {

@@ -594,7 +594,8 @@ fn parts_of(repo: &Path, laws: &[String]) -> Vec<String> {
         .collect()
 }
 
-fn gh(repo: &Path, args: &[&str]) -> Result<String, String> {
+/// Runs `gh` as a normal user in `repo`, never prompting, and returns what it printed.
+pub(crate) fn gh(repo: &Path, args: &[&str]) -> Result<String, String> {
     let out = Command::new(studio_workbench::gh_path())
         .args(args)
         .current_dir(repo)

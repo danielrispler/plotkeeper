@@ -711,7 +711,7 @@ const mapBriefChapterLast = (): Fixture =>
 // The stop-rule review (#314, #384): Studio has run 20 active days and merged 25 PRs, and the Map view was engaged with on one of them, so
 // the Map view fell below its threshold, and so did the history strip and "See the proof".
 // Pre-flight (#394) was run twice and three explain-back lines (#397) were written, so the review lists only the modules of project 2.
-const dueFacts = { active_days: 20, merged_prs: 25, engaged_days: 1, scrubs: 0, proofs: 0, knows: 0, dismissed: [], briefs_offered: 0, briefs_opened: 0, chapters_done: 0, counts: { "pre-flight-run": 2, "catch-up-done": 3, "explain-back-given": 3 }, began: "2026-10-01" };
+const dueFacts = { active_days: 20, merged_prs: 25, engaged_days: 1, scrubs: 0, proofs: 0, knows: 0, dismissed: [], briefs_offered: 0, briefs_opened: 0, chapters_done: 0, counts: { "pre-flight-run": 2, "catch-up-done": 3, "explain-back-given": 3 }, began: "2026-10-01", stale_since: null };
 const mapOpened = (check: string, extra: Fixture = {}): Fixture => ({
   ...list(),
   ...extra,

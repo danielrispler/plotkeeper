@@ -626,11 +626,23 @@ export function fogActions(fog: Fog | undefined, offer: CatchUpOffer | undefined
   return { main, second: "I know this" };
 }
 
-// What a catch-up opened while it was written waits for, read from the part's offer at each map draw: "open" once it is stored for the
-// part's fog, "stop" when its write failed or the part was cleared meanwhile, else "wait".
+// What a catch-up opened while it was written waits for, read from the part's offer at each map draw: "wait" while a write runs, then
+// "open" once it is stored for the part's fog, else "stop" (its write failed, the part was cleared meanwhile, or no write runs).
 export function awaitedCatchUp(offer: CatchUpOffer | undefined): "open" | "stop" | "wait" {
-  if (!offer || offer.kind !== "catch-up" || (offer.failed && !offer.writing)) return "stop";
-  return offer.ready && !offer.writing ? "open" : "wait";
+  if (!offer || offer.kind !== "catch-up") return "stop";
+  if (offer.writing) return "wait";
+  return offer.ready ? "open" : "stop";
+}
+
+// The number a part catch-up plays under in `briefPlayer`: a negative one, which no PR has, one per project, part and fog list, so a
+// catch-up rewritten for a new fog list starts at its first step rather than where the old story was left.
+export function catchUpIds(): (project: string, part: string, fog: string[]) => number {
+  const ids = new Map<string, number>();
+  return (project, part, fog) => {
+    const key = `${project}|${part}|${fog.join(",")}`;
+    if (!ids.has(key)) ids.set(key, -(ids.size + 1));
+    return ids.get(key)!;
+  };
 }
 
 // A long part catch-up's full fog list, one line per entry, oldest first: a PR by its number and title, a direct push by its subject and

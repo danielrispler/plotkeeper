@@ -147,6 +147,27 @@ export function preFlightNodes(phase: Phase, doc: LoadedMap, state: MapState, ac
   }
 }
 
+// The phase each overlay box shows.
+const painted = new WeakMap<HTMLElement, Phase>();
+
+// Draws `phase` into the overlay `box` over the map `doc` and its `state`. A map redraw (a landed push, window focus) of the same inputs
+// or hand picker leaves them as they are, so what Daniel typed or ticked, and the focus, stay; when the open issues arrive, the typed lines
+// and the field's focus carry over. Only the predicted parts' rows, which show the map's fog and staleness, are drawn afresh.
+export function paintPreFlight(box: HTMLElement, phase: Phase, doc: LoadedMap, state: MapState, act: PreFlightActs) {
+  const was = painted.get(box);
+  box.hidden = false;
+  if (was === phase && phase.kind !== "result") return;
+  const field = box.querySelector?.<HTMLTextAreaElement>("textarea.pre-flight-text") ?? null;
+  const typed = was?.kind === "start" && phase.kind === "start" && field ? { value: field.value, focused: document.activeElement === field } : null;
+  box.replaceChildren(...preFlightNodes(phase, doc, state, act));
+  painted.set(box, phase);
+  const next = typed && box.querySelector?.<HTMLTextAreaElement>("textarea.pre-flight-text");
+  if (typed && next) {
+    next.value = typed.value;
+    if (typed.focused) next.focus();
+  }
+}
+
 // The overlay as it is now; null while closed.
 let phase: Phase | null = null;
 const overlay = () => element("map-pre-flight");
@@ -159,10 +180,10 @@ function paint() {
   if (phase === null || !view) {
     box.hidden = true;
     box.replaceChildren();
+    painted.delete(box);
     return;
   }
-  box.replaceChildren(...preFlightNodes(phase, view.doc, view.state, acts));
-  box.hidden = false;
+  paintPreFlight(box, phase, view.doc, view.state, acts);
 }
 
 function show(next: Phase | null) {

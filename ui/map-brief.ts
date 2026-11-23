@@ -6,8 +6,9 @@
 // A step's check (#340) is answered in place: a pick in the panel, an order by tapping parts on the map into numbered slots (`pickRun`, `orderRun`);
 // Check grades it, a wrong answer shows the correction, and an order check replays the right path along the links.
 // Esc (`brief` layer) closes it and keeps its step. `map-model.ts` holds the logic: `briefPlayer`, `briefCamera`, `figureShapes`.
-// A part catch-up (#391) plays in the same reader (`openCatchUpOf`): one story of a fogged part, under a negative number of its own so the
-// player keeps its step apart from the PR briefs; read to its end it clears the part's fog (`part_catch_up_done`) and completes no brief.
+// A part catch-up (#391) plays in the same reader (`openCatchUpOf`): one story of a fogged part, under a negative number of its own (one per
+// fog list, `catchUpIds`) so the player keeps its step apart from the PR briefs and from an older story of the part; read to its end it
+// clears the part's fog (`part_catch_up_done`) and completes no brief.
 
 import { failure, invoke, text } from "./dom.js";
 import { currentMap, currentScrub, giveCameraBack, lendCamera, onDraw, registerLayer, type MapView } from "./map.js";
@@ -19,7 +20,7 @@ import { scrubTo } from "./map-history.js";
 import { overturnNote, ratifyActions } from "./map-ratify.js";
 import { ratifyStep, statusWords } from "./ratify.js";
 import { type Bar, explainsBack, storyBar } from "./story-bar.js";
-import { actorSize, alsoAt, effectiveTier, awaitedCatchUp, awaitedWrite, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, commitDrawer, figureShapes, figureSize, fogListLines, latestRequest, orderRun, type OrderRun, pickRun, type PickRun, playlist, plateSize, storySteps, type Rect, type Shape, unconfirmed } from "./map-model.js";
+import { actorSize, alsoAt, effectiveTier, awaitedCatchUp, catchUpIds, awaitedWrite, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, commitDrawer, figureShapes, figureSize, fogListLines, latestRequest, orderRun, type OrderRun, pickRun, type PickRun, playlist, plateSize, storySteps, type Rect, type Shape, unconfirmed } from "./map-model.js";
 import type { BriefCheck, BriefStep, BriefView, PrBrief, RatifyRow, ReadyPr, StoredCatchUp } from "./types.js";
 
 const player = briefPlayer({ scrubbed: () => currentScrub() !== null, backToNow: () => void scrubTo(null).catch(failure("map_at")) });
@@ -28,12 +29,7 @@ let playing: BriefView | null = null;
 // The part catch-up being played: its part and the fog list it covers; null while a PR brief plays.
 let catchUp: { part: string; fog: string[]; summary?: StoredCatchUp["summary"] } | null = null;
 // Each part's catch-up plays under a negative number of its own, which no PR has.
-const catchUpIds = new Map<string, number>();
-function catchUpId(project: string, part: string) {
-  const key = `${project}|${part}`;
-  if (!catchUpIds.has(key)) catchUpIds.set(key, -(catchUpIds.size + 1));
-  return catchUpIds.get(key)!;
-}
+const catchUpId = catchUpIds();
 // A stop event's PR: none for a part catch-up.
 const prOf = (pr: number) => (pr < 0 ? null : pr);
 // What the brief offers for accept or overturn (`ratify.rs`), read when it opens; a decision updates its row at once.
@@ -133,7 +129,7 @@ export async function openBriefOf(project: string, number: number, chapter: numb
   if (!got || !view || view.project !== project) {
     if (!got && !problems.has(number)) problems.set(number, "the brief is not written yet");
     // The tray says why, in the row's place of its note, until the map is drawn again.
-    const note = document.querySelector(`#map-tray .tray-row[data-pr="${number}"] .tray-note`);
+    const note = number === null ? null : document.querySelector(`#map-tray .tray-row[data-pr="${number}"] .tray-note`);
     if (note && problems.has(number)) note.textContent = problems.get(number)!;
     return;
   }
@@ -160,9 +156,9 @@ export async function openCatchUpOf(project: string, part: string) {
   awaiting = null;
   awaitingCatchUp = null;
   const wanted = latest.begin();
-  const id = catchUpId(project, part);
   const writing = "Writing the part catch-up…";
-  const slow = window.setTimeout(() => wanted() && showWriting(id, writing), WRITING_AFTER_MS);
+  // A catch-up has no tray row for the wait to mark.
+  const slow = window.setTimeout(() => wanted() && showWriting(null, writing), WRITING_AFTER_MS);
   let got: StoredCatchUp | { writing: true } | null;
   try {
     got = await invoke("part_catch_up", { project, part });
@@ -174,13 +170,15 @@ export async function openCatchUpOf(project: string, part: string) {
   if (!wanted()) return;
   if (got && "writing" in got) {
     awaitingCatchUp = { project, part, wanted };
-    showWriting(id, writing);
+    showWriting(null, writing);
     return;
   }
   if (!briefOpen()) hideWriting();
   const view = currentMap();
   if (!got || !view || view.project !== project) return;
   if (briefOpen()) closeBrief();
+  // A catch-up rewritten for a new fog list is another story, with a number of its own, so it starts at its first step.
+  const id = catchUpId(project, part, got.fog);
   // The reader plays it as a single story; there is nothing to ratify.
   playing = { brief: { version: got.version, pr: id, head: got.fog.join(","), written_at: got.written_at, stale: false, model: got.model, brief: got.brief }, partial: got.partial };
   catchUp = { part, fog: got.fog, summary: got.summary };
@@ -212,13 +210,13 @@ onDraw((view) => {
 
 // The panel says so while a brief is written for an open: after this long, so a stored brief never flashes it.
 const WRITING_AFTER_MS = 300;
-function showWriting(number: number, words = "Writing the brief…") {
+function showWriting(number: number | null, words = "Writing the brief…") {
   if (briefOpen()) return;
   const box = panel();
   box.replaceChildren(text("p", words, "brief-writing"));
   box.classList.add("open");
   box.hidden = false;
-  const note = document.querySelector(`#map-tray .tray-row[data-pr="${number}"] .tray-note`);
+  const note = number === null ? null : document.querySelector(`#map-tray .tray-row[data-pr="${number}"] .tray-note`);
   if (note) note.textContent = `#${number} · writing the brief…`;
 }
 function hideWriting() {

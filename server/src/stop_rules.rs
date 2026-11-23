@@ -120,6 +120,9 @@ pub struct Facts {
     pub counts: BTreeMap<Kind, u32>,
     /// The local day of the project's first event, where a module's calendar wait starts at the latest.
     pub began: Option<String>,
+    /// When the project's staleness baselines were set (unix seconds; `staleness.rs`), where the refresher's and staleness bands'
+    /// calendar wait starts; none before its first map with that build.
+    pub stale_since: Option<u64>,
 }
 
 /// Serialises appends, so two events never share a line.
@@ -249,6 +252,7 @@ pub fn facts(events: &[Event], project: &str, merged_prs: u32) -> Facts {
             .filter(|e| e.project.as_deref() == Some(project))
             .min_by_key(|e| e.at)
             .map(|e| e.day.clone()),
+        stale_since: None,
     }
 }
 
@@ -367,7 +371,11 @@ pub fn stop_log(
 
 /// The counts the review is decided from, for `project`.
 pub fn stop_facts(project: String) -> Result<Facts, String> {
-    Ok(facts_in(&log_file()?, &project))
+    let mut found = facts_in(&log_file()?, &project);
+    found.stale_since = crate::map::read_user(&crate::map::state_file()?, &project)
+        .staleness
+        .since;
+    Ok(found)
 }
 
 /// The counts for `project` from the log `file`, with its merged PRs read from git.

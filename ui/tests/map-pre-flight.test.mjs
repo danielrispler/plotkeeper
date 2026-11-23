@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { fakeDocument } from "./dom.mjs";
 
 globalThis.document = fakeDocument();
-const { expectedLine, preFlightNodes, preFlightRows, settle } = await import("../../dist/map-pre-flight.js");
+const { expectedLine, paintPreFlight, preFlightNodes, preFlightRows, settle } = await import("../../dist/map-pre-flight.js");
 const { windowBinding } = await import("../../dist/keys.js");
 const { initial } = await import("../../dist/settings.js");
 
@@ -95,4 +95,28 @@ test("a matched brief says what was expected against what it touched; an unmatch
   assert.equal(expectedLine({ expected: ["hook", "core"], touched: ["window", "hook"] }, doc), "You expected Hook, Core; it touched Window, Hook");
   assert.equal(expectedLine(undefined, doc), null);
   assert.equal(expectedLine({ expected: ["gone"], touched: [] }, null), "You expected gone; it touched nothing");
+});
+
+test("a map redraw keeps what was typed and ticked in the overlay, and its focus, until the overlay moves on", async () => {
+  const { El } = await import("./dom.mjs");
+  const box = new El("div");
+  const start = { kind: "start", issues: [] };
+  paintPreFlight(box, start, doc, state, acts([]));
+  const [field] = box.find("textarea");
+  field.value = "Make the hook faster";
+  // The map is drawn again (a landed push, window focus) over a new payload.
+  paintPreFlight(box, start, doc, { ...state }, acts([]));
+  assert.equal(box.find("textarea")[0], field, "the same field, so its focus stays");
+  assert.equal(field.value, "Make the hook faster");
+
+  const pick = { kind: "pick", why: null };
+  paintPreFlight(box, pick, doc, state, acts([]));
+  const ticked = box.find("input")[1];
+  ticked.checked = true;
+  paintPreFlight(box, pick, doc, { ...state }, acts([]));
+  assert.equal(box.find("input")[1].checked, true);
+
+  // A new phase is drawn afresh.
+  paintPreFlight(box, { kind: "result", pre: pre() }, doc, state, acts([]));
+  assert.equal(box.find("textarea").length + box.find("input").length, 0);
 });

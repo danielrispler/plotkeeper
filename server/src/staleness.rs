@@ -3,8 +3,9 @@
 //! catch-up, the refresher, "I know this") resets it; bands start at 3, 6 and 12 weeks.
 //!
 //! The baseline for every part is the project's first map with this build (`start`), so nothing is stale on day one. A brief chapter is
-//! read from what fog already keeps (`fog.reads`, with when each chapter was read), so a chapter read before this shipped counts too; the
-//! other kinds are kept here, in `map-state.json`, by `record`. Another module records its activity with `record` and a new `Activity`.
+//! read from what fog already keeps (`fog.reads`, with when each chapter was read), so a chapter read before this shipped counts too, and
+//! is kept here as well when it is read (`fog::mark_read`), since fog drops a brief's reads when it is rewritten; the other kinds are kept
+//! here, in `map-state.json`, by `record`. Another module records its activity with `record` and a new `Activity`.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -25,6 +26,9 @@ pub enum Activity {
     Refresher,
     /// A part catch-up on the part was entered (#391).
     CatchUp,
+    /// A brief chapter that lights the part was read to its end. Fog keeps the read too, but drops it when the brief is rewritten to
+    /// light its parts differently, so its time is kept here as well.
+    Chapter,
     /// A kind a newer build wrote: still an activity.
     #[serde(other)]
     Other,
@@ -62,14 +66,17 @@ pub fn record(
     kind: Activity,
     at: u64,
 ) -> Result<UserState, String> {
-    update_user(file, project, |u| {
-        let last = u.staleness.parts.get(part).map_or(0, |t| t.at);
-        if at >= last {
-            u.staleness
-                .parts
-                .insert(part.to_string(), Touch { at, kind });
-        }
-    })
+    update_user(file, project, |u| touch(u, part, kind, at))
+}
+
+/// `record`, inside another change to the user's state: an older activity never undoes a newer one.
+pub fn touch(u: &mut UserState, part: &str, kind: Activity, at: u64) {
+    let last = u.staleness.parts.get(part).map_or(0, |t| t.at);
+    if at >= last {
+        u.staleness
+            .parts
+            .insert(part.to_string(), Touch { at, kind });
+    }
 }
 
 /// The band (1, 2 or 3) of each stale part of `source` whose effective tier is Core, at `now`; a part not listed is not stale.
@@ -231,6 +238,19 @@ mod tests {
         // A chapter read long before the baseline leaves the baseline in force.
         crate::fog::mark_read(&rig.file(), "/p", 8, 1, "h", lit, DAY_ONE - 20 * WEEK).unwrap();
         assert_eq!(rig.bands(later + DAY), of(&[("b", 2)]));
+    }
+
+    #[test]
+    fn a_chapter_read_keeps_its_time_after_the_brief_is_rewritten_to_light_its_parts_differently() {
+        let rig = Rig::new();
+        let read = DAY_ONE + 7 * WEEK;
+        let first = vec![vec!["a".to_string()], vec!["b".to_string()]];
+        crate::fog::mark_read(&rig.file(), "/p", 7, 0, "h1", first, read).unwrap();
+        // The brief is rewritten; its first chapter now lights b, and is read a day later.
+        let rewritten = vec![vec!["b".to_string()], vec!["a".to_string()]];
+        crate::fog::mark_read(&rig.file(), "/p", 7, 0, "h2", rewritten, read + DAY).unwrap();
+        assert_eq!(rig.bands(read + 2 * WEEK), of(&[]));
+        assert_eq!(rig.bands(read + 3 * WEEK), of(&[("a", 1)]));
     }
 
     #[test]
