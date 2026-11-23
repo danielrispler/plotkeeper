@@ -79,6 +79,9 @@ pub struct PrMeta {
     pub head: String,
     /// When it merged, empty while open.
     pub merged_at: String,
+    /// When it was created (ISO 8601), empty when unknown.
+    #[serde(default)]
+    pub created_at: String,
     /// One "name conclusion" line per check.
     pub checks: Vec<String>,
     pub spec: Option<Spec>,
@@ -392,6 +395,9 @@ pub struct CheckContext {
     /// The flows the map's diff changes, with the parts their hops run through in order.
     pub flows_changed: BTreeMap<String, Vec<String>>,
     pub tagged: Vec<TaggedTest>,
+    /// The spec was created the same day as the PR: its "Not in the plan" step comes first in its chapter.
+    #[serde(default)]
+    pub spec_same_day: bool,
 }
 
 /// How the budget was spent, for the record.
@@ -496,6 +502,17 @@ fn added_tags(files: &[FileDiff]) -> Vec<String> {
         }
     }
     tags
+}
+
+/// Whether two ISO 8601 timestamps fall on the same calendar day (their date parts, as GitHub gives them in UTC); false when either
+/// is missing.
+fn same_day(a: &str, b: &str) -> bool {
+    let day = |t: &str| {
+        t.get(..10)
+            .filter(|d| d.as_bytes().get(4) == Some(&b'-'))
+            .map(str::to_string)
+    };
+    matches!((day(a), day(b)), (Some(a), Some(b)) if a == b)
 }
 
 /// The spec's sections the writer gets: a spec's User Stories and Implementation Decisions, a ticket's What to
@@ -792,12 +809,21 @@ pub fn build_facts(source: &PrSource) -> Result<Facts, String> {
     }
 
     let meta = &source.meta;
+    let spec_same_day = meta
+        .spec
+        .as_ref()
+        .is_some_and(|s| same_day(&s.created_at, &meta.created_at));
     let spec_text = match &meta.spec {
         Some(s) => format!(
-            "#{} {}\ncreated {}\n(trimmed to its user stories and implementation decisions)\n\n{}",
+            "#{} {}\ncreated {}{}\n(trimmed to its user stories and implementation decisions)\n\n{}",
             s.number,
             s.title,
             s.created_at,
+            if spec_same_day {
+                " (the same day as the PR)"
+            } else {
+                ""
+            },
             trim_spec(&s.body)
         ),
         None => "none".into(),
@@ -827,13 +853,18 @@ pub fn build_facts(source: &PrSource) -> Result<Facts, String> {
         (
             "PR".into(),
             format!(
-                "#{} {}\n{}\n\n{}",
+                "#{} {}\n{}{}\n\n{}",
                 meta.number,
                 meta.title,
                 if meta.merged_at.is_empty() {
                     "open".to_string()
                 } else {
                     format!("merged {}", meta.merged_at)
+                },
+                if meta.created_at.is_empty() {
+                    String::new()
+                } else {
+                    format!("\ncreated {}", meta.created_at)
                 },
                 meta.body
             ),
@@ -986,6 +1017,7 @@ pub fn build_facts(source: &PrSource) -> Result<Facts, String> {
             .collect(),
         flows_changed: flow_keys,
         tagged,
+        spec_same_day,
     };
     Ok(Facts {
         text,
@@ -1397,6 +1429,16 @@ pub fn check_brief(brief: &mut Brief, ctx: &CheckContext) -> usize {
     }
     let mut lit_by_chapters: BTreeSet<String> = BTreeSet::new();
     for c in &mut brief.chapters {
+        if ctx.spec_same_day {
+            // Code, not the prompt, puts "Not in the plan" first in its chapter (after the "Where" a single story opens with).
+            let first = usize::from(c.steps.first().is_some_and(|s| s.k == "Where"));
+            if let Some(at) = c.steps.iter().position(|s| s.k == "Not in the plan")
+                && at > first
+            {
+                let step = c.steps.remove(at);
+                c.steps.insert(first, step);
+            }
+        }
         let mut f = Vec::new();
         let lit: BTreeSet<&String> = c.steps.iter().flat_map(|s| &s.on).collect();
         for d in &c.parts {
@@ -1845,7 +1887,7 @@ pub fn fetch_meta(repo: &Path, number: u64) -> Result<PrMeta, String> {
         "view",
         &n,
         "--json",
-        "title,body,headRefOid,mergedAt,statusCheckRollup,closingIssuesReferences",
+        "title,body,headRefOid,mergedAt,createdAt,statusCheckRollup,closingIssuesReferences",
     ])?;
     let checks = v["statusCheckRollup"]
         .as_array()
@@ -1887,6 +1929,7 @@ pub fn fetch_meta(repo: &Path, number: u64) -> Result<PrMeta, String> {
         body: v["body"].as_str().unwrap_or("").into(),
         head: v["headRefOid"].as_str().unwrap_or("").into(),
         merged_at: v["mergedAt"].as_str().unwrap_or("").into(),
+        created_at: v["createdAt"].as_str().unwrap_or("").into(),
         checks,
         spec,
     })

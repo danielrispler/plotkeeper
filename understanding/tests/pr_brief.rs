@@ -1330,3 +1330,44 @@ fn a_your_turn_step_whose_order_check_was_dropped_is_retried_and_may_get_a_right
     );
     assert_eq!(record.unconfirmed, 1);
 }
+
+#[test]
+fn a_not_in_the_plan_step_comes_first_in_its_chapter_when_the_spec_was_written_the_day_of_the_pr() {
+    let mut same = source(&["alpha/a.rs", "beta/b.rs", "gamma/c.rs"]);
+    same.meta.created_at = "2026-11-20T18:00:00Z".into();
+    same.meta.spec = Some(Spec {
+        number: 5,
+        title: "A spec".into(),
+        created_at: "2026-11-20T09:00:00Z".into(),
+        body: "## User Stories\nstory\n".into(),
+    });
+    let facts = build_facts(&same).unwrap();
+    assert!(facts.context.spec_same_day);
+    assert!(section(&facts, "SPEC").contains("the same day as the PR"));
+    let brief = checked(&facts, good_brief());
+    let kinds: Vec<&str> = brief.chapters[1]
+        .steps
+        .iter()
+        .map(|s| s.k.as_str())
+        .collect();
+    assert_eq!(kinds, ["Not in the plan", "Before", "Now"]);
+    // The chapter that holds none keeps its order.
+    let kinds: Vec<&str> = brief.chapters[0]
+        .steps
+        .iter()
+        .map(|s| s.k.as_str())
+        .collect();
+    assert_eq!(kinds, ["Before", "Now", "Could break"]);
+    // Another day: the writer's order stands.
+    let mut later = same.clone();
+    later.meta.spec.as_mut().unwrap().created_at = "2026-11-10T09:00:00Z".into();
+    let facts = build_facts(&later).unwrap();
+    assert!(!facts.context.spec_same_day);
+    let brief = checked(&facts, good_brief());
+    let kinds: Vec<&str> = brief.chapters[1]
+        .steps
+        .iter()
+        .map(|s| s.k.as_str())
+        .collect();
+    assert_eq!(kinds, ["Before", "Now", "Not in the plan"]);
+}
