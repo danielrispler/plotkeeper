@@ -365,7 +365,7 @@ invoke("writer_notice")
   .then((notice) => notice && showWriterNotice(notice))
   .catch(() => {});
 invoke("cards").then(showCards);
-// The writer section under Writer (spec #320): its gate notice shares the writer's line, and a passed Test's save applies as one.
+// The writer section in the Settings panel (spec #320, #387): its gate notice shares the writer's line, and a passed Test's save applies as one.
 startWriters({
   summaries: () => studio.files.settings.summaries,
   texts: () => studio.texts,
