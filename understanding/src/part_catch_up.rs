@@ -415,10 +415,43 @@ pub struct StoredCatchUp {
     pub partial: bool,
     #[serde(default)]
     pub brief: Brief,
+    /// Over more than `FEW` fog entries: the line saying the story summarises the main shifts, and the full fog list behind it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<Summary>,
+}
+
+/// More fog entries than this and a catch-up says it summarises the main shifts (spec #378, "Reply").
+pub const FEW: usize = 3;
+
+/// The summarising line and the full fog list, over more than `FEW` entries. The list keeps each entry's PR and title, not its
+/// body.
+fn summary(entries: &[FogEntry]) -> Option<Summary> {
+    (entries.len() > FEW).then(|| Summary {
+        line: format!(
+            "This catch-up summarises the main shifts of {} fog entries; the full list is below.",
+            entries.len()
+        ),
+        entries: entries
+            .iter()
+            .map(|e| FogEntry {
+                body: String::new(),
+                ..e.clone()
+            })
+            .collect(),
+    })
+}
+
+/// A long catch-up's summarising line and the full fog list it links, oldest first (each entry's PR and title or its subject).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Summary {
+    pub line: String,
+    #[serde(default)]
+    pub entries: Vec<FogEntry>,
 }
 
 /// The catch-ups and their records in a project's data folder: `part-catch-ups/`, one file per part, and
 /// `part-catch-up-records.jsonl`, in the PR brief's record format.
+#[derive(Clone)]
 pub struct CatchUpStore {
     dir: PathBuf,
 }
@@ -538,6 +571,7 @@ pub fn write_part_catch_up(
         model: model.to_string(),
         partial: facts.budget.files_cut + facts.budget.files_partial > 0,
         brief,
+        summary: summary(&source.entries),
     };
     store
         .put(&stored)

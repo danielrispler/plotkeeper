@@ -408,7 +408,18 @@ export type MapState = {
 // when the last write for it failed; or the chapter of the one PR's brief that lights the part.
 export type CatchUpOffer = { kind: "catch-up"; ready: boolean; writing: boolean; failed: boolean } | { kind: "chapter"; pr: number; chapter: number };
 // A part catch-up as `part_catch_up` returns it (`understanding/src/part_catch_up.rs`): the story in the PR brief's shape and the fog list it covers.
-export type StoredCatchUp = { version: number; part: string; fog: string[]; written_at: number; model: string; partial: boolean; brief: PrBrief };
+// Over more than a few fog entries it carries `summary`: the line saying it summarises the main shifts, and the full fog list, oldest first.
+export type FogListEntry = { commit: string; pr: number | null; title: string };
+export type StoredCatchUp = {
+  version: number;
+  part: string;
+  fog: string[];
+  written_at: number;
+  model: string;
+  partial: boolean;
+  brief: PrBrief;
+  summary?: { line: string; entries: FogListEntry[] };
+};
 // A background run (`server/src/runner.rs`): a headless agent run Daniel started with a click, queued one at a time per project. `at` is when
 // it was asked for, started or ended, by its state. An ended run says how it ended in `line`, lists the tool calls it was denied, and
 // carries its `prompt` to copy on every end but a clean one. `paused` is why every queue waits, null while they run.

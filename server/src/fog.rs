@@ -134,20 +134,30 @@ pub fn effective(user: &UserState, source: &str) -> BTreeMap<String, Strength> {
 
 /// Whether a part whose effective tier is Core shows fog: the project header's quiet dot.
 pub fn core_fogged(user: &UserState, source: &str) -> bool {
+    !core_fogged_parts(user, source).is_empty()
+}
+
+/// The parts whose effective tier is Core and that show fog, in the map's order.
+pub fn core_fogged_parts(user: &UserState, source: &str) -> Vec<String> {
     let shown = effective(user, source);
     let Ok(map) = serde_json::from_str::<Value>(source) else {
-        return false;
+        return vec![];
     };
-    map["parts"].as_array().into_iter().flatten().any(|part| {
-        let id = part["id"].as_str().unwrap_or_default();
-        let tier = user
-            .tiers
-            .get(id)
-            .map(String::as_str)
-            .or(part["tier"].as_str())
-            .unwrap_or("core");
-        shown.contains_key(id) && tier == "core"
-    })
+    map["parts"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|part| {
+            let id = part["id"].as_str().unwrap_or_default();
+            let tier = user
+                .tiers
+                .get(id)
+                .map(String::as_str)
+                .or(part["tier"].as_str())
+                .unwrap_or("core");
+            (shown.contains_key(id) && tier == "core").then(|| id.to_string())
+        })
+        .collect()
 }
 
 /// The items of `map[key]` as a list, empty when the key is missing.

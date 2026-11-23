@@ -471,6 +471,36 @@ const mapCatchUp = (): Fixture => ({
   }),
   snapDone: "catch-up ok",
 });
+// A part catch-up over a long fog list (#396): its first step says it summarises the main shifts, with the full fog list behind it.
+const mapCatchUpSummarising = (): Fixture => ({
+  ...mapOpened(`
+      const calm = document.createElement("style");
+      calm.textContent = "*, *::before, *::after { transition: none !important; animation: none !important; }";
+      document.head.append(calm);
+      document.querySelector("#map .plate[data-id=understanding]").click();
+      await wait(150);
+      document.querySelector(".sheet .sheet-catch-up").click();
+      await wait(350);
+      const panel = document.getElementById("map-brief");
+      if (panel.hidden || !panel.classList.contains("open")) return log("snap:fail the part catch-up did not open");
+      if (!panel.querySelector(".brief-summarises")?.textContent.includes("summarises the main shifts of 9 fog entries")) return log("snap:fail no summarising line");
+      const list = panel.querySelector(".brief-fog-list");
+      list.open = true;
+      if (list.querySelectorAll(".brief-cite").length !== 9) log("snap:fail the full fog list does not hold 9 entries");
+      await wait(150);
+      log("catch-up summarising ok");`, {
+    map_state: mapState({ fog: { understanding: "thick" }, catch_ups: { understanding: { kind: "catch-up", ready: true, writing: false, failed: false } } }),
+    part_catch_up: {
+      ...storedCatchUp(),
+      fog: [..."abcdefghi"].map((c) => c.repeat(40)),
+      summary: {
+        line: "This catch-up summarises the main shifts of 9 fog entries; the full list is below.",
+        entries: [..."abcdefghi"].map((c, i) => (i % 3 === 2 ? { commit: c.repeat(40), pr: null, title: "fix pushed straight to main" } : { commit: c.repeat(40), pr: 380 + i, title: `Briefs: change number ${i + 1}` })),
+      },
+    },
+  }),
+  snapDone: "catch-up summarising ok",
+});
 // A part catch-up being written: its button stays pressable and says "Writing…", the panel says so, and the map is not dimmed.
 const mapCatchUpWriting = (): Fixture => ({
   ...mapOpened(`
@@ -1414,6 +1444,7 @@ export const fixtures = {
   mapBriefWriting,
   mapCatchUp,
   mapCatchUpWriting,
+  mapCatchUpSummarising,
   mapSheetUnratified,
   mapStale,
   mapRefresher,

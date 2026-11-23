@@ -1,7 +1,7 @@
 // The Map view's pure logic (spec danielrispler/plotkeeper#306, ticket #309): the map file as the window reads it, where parts
 // are placed, the drag threshold, the link's rim points, the layered Esc and the camera. `map.ts` draws and wires them.
 
-import type { BriefFigure, BriefStep, CatchUpOffer, Camera, Ci, CommitFiles, Fog, HistoricalMap, HistoryEntry, PrBrief, Proof, ReadyPr } from "./types.js";
+import type { BriefFigure, BriefStep, CatchUpOffer, FogListEntry, Camera, Ci, CommitFiles, Fog, HistoricalMap, HistoryEntry, PrBrief, Proof, ReadyPr } from "./types.js";
 
 export type Tier = "core" | "interface" | "black-box";
 export type Point = { x: number; y: number };
@@ -631,4 +631,10 @@ export function fogActions(fog: Fog | undefined, offer: CatchUpOffer | undefined
 export function awaitedCatchUp(offer: CatchUpOffer | undefined): "open" | "stop" | "wait" {
   if (!offer || offer.kind !== "catch-up" || (offer.failed && !offer.writing)) return "stop";
   return offer.ready && !offer.writing ? "open" : "wait";
+}
+
+// A long part catch-up's full fog list, one line per entry, oldest first: a PR by its number and title, a direct push by its subject and
+// short commit.
+export function fogListLines(entries: FogListEntry[]): string[] {
+  return entries.map((e) => (e.pr === null ? `${e.title} (${e.commit.slice(0, 7)}, no PR)` : `#${e.pr} ${e.title}`));
 }

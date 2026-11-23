@@ -358,6 +358,10 @@ pub fn map_state(project: String, fetch: bool, app: &Arc<crate::App>) -> Result<
         .map(|mine| crate::ratify::pending(repo, &mine))
         .unwrap_or_default();
     state.runs = app.runner.runs(&project);
+    // A shown map starts the part catch-ups of up to three fogged Core parts (#396).
+    if fetch && let Some(source) = &state.source {
+        crate::part_catch_ups::shown(app, &project, &state.user, source);
+    }
     state.catch_ups = crate::part_catch_ups::offers(app, &project, &state.user, &state.fog);
     Ok(state)
 }

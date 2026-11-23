@@ -1,6 +1,7 @@
-//! Part catch-ups (spec danielrispler/plotkeeper#378, ticket #391): a fogged part offers one story of everything that landed in it
-//! since Daniel last caught up, written when he clicks it. A part fogged by exactly one PR whose brief lights it opens that chapter
-//! instead.
+//! Part catch-ups (spec danielrispler/plotkeeper#378, tickets #391 and #396): a fogged part offers one story of everything that
+//! landed in it since Daniel last caught up. When a project's map is shown, the catch-ups of up to three fogged Core parts are
+//! written, oldest fog first; any other is written when he clicks it. A part fogged by exactly one PR whose brief lights it opens
+//! that chapter instead.
 
 use crate::App;
 use crate::fog::Entry;
@@ -14,6 +15,7 @@ use std::{
 use studio_understanding::part_catch_up::{
     CatchUpStore, StoredCatchUp, gather_catch_up, write_part_catch_up,
 };
+use studio_understanding::pr_brief::BriefWriter;
 
 /// What a fogged part's sheet offers.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -77,8 +79,11 @@ pub fn fresh(store: &CatchUpStore, part: &str, fog: &[String]) -> Option<StoredC
 pub struct CatchUps {
     busy: Arc<Mutex<HashSet<(String, String)>>>,
     /// The fog list whose write failed, per project and part: the sheet says so, and a click tries again.
-    failed: Mutex<HashMap<(String, String), Vec<String>>>,
+    failed: Arc<Mutex<Failed>>,
 }
+
+/// The fog list whose write failed, by project and part.
+type Failed = HashMap<(String, String), Vec<String>>;
 
 struct Claim {
     busy: Arc<Mutex<HashSet<(String, String)>>>,
@@ -143,6 +148,15 @@ fn commits(fog: &[Entry]) -> Vec<String> {
     fog.iter().map(|e| e.commit.clone()).collect()
 }
 
+/// What each chapter of PR `pr`'s stored brief in `project` lights, `None` with no brief stored.
+fn lit_of(project: &str) -> impl Fn(u64) -> Option<Vec<Vec<String>>> {
+    let briefs = crate::pr_briefs::store_of(project);
+    move |pr| {
+        let brief = briefs.as_ref()?.latest(pr)?;
+        Some(crate::pr_briefs::lit_parts(&brief.brief))
+    }
+}
+
 /// What each part the map shows fogged (`shown`, `fog.rs`'s effective fog) offers on its sheet.
 pub fn offers(
     app: &App,
@@ -151,12 +165,8 @@ pub fn offers(
     shown: &BTreeMap<String, crate::fog::Strength>,
 ) -> BTreeMap<String, Offer> {
     let repo = Path::new(project);
-    let briefs = crate::pr_briefs::store_of(project);
     let catch_ups = store_of(project);
-    let lit_of = |pr: u64| {
-        let brief = briefs.as_ref()?.latest(pr)?;
-        Some(crate::pr_briefs::lit_parts(&brief.brief))
-    };
+    let lit_of = lit_of(project);
     shown
         .keys()
         .map(|part| {
@@ -187,6 +197,159 @@ pub enum Opened {
     Writing { writing: bool },
 }
 
+type SharedWriter = Arc<dyn BriefWriter + Send + Sync>;
+
+/// At most this many fogged Core parts get their catch-up written when a project's map is shown (spec #378, "When it is
+/// written").
+pub const ON_SHOW: usize = 3;
+
+/// Starts writing `part`'s catch-up over `fog` in the background, unless one is being written already; `done` runs when it ends,
+/// written or failed. Whether a write started.
+#[allow(clippy::too_many_arguments)]
+fn start(
+    catch_ups: &CatchUps,
+    writer: SharedWriter,
+    model: String,
+    project: &str,
+    part: &str,
+    fog: Vec<String>,
+    store: CatchUpStore,
+    done: impl FnOnce() + Send + 'static,
+) -> bool {
+    let Some(claim) = catch_ups.claim(project, part) else {
+        return false;
+    };
+    let failed = catch_ups.failed.clone();
+    let (project, part) = (project.to_string(), part.to_string());
+    std::thread::spawn(move || {
+        let written = gather_catch_up(Path::new(&project), &part, &fog).and_then(|source| {
+            write_part_catch_up(writer.as_ref(), &model, &source, &store, |line| {
+                log::warn!("part catch-up of {part}: {line}")
+            })
+        });
+        if let Err(why) = written {
+            log::warn!("write the part catch-up of {part}: {why}");
+            failed.lock().unwrap().insert((project, part), fog);
+        }
+        drop(claim);
+        done();
+    });
+    true
+}
+
+/// What a click on `part`'s catch-up over `fog` answers: the stored one when it covers `fog`, else a write starts (a failed one is
+/// tried again) and the answer says it is being written.
+#[allow(clippy::too_many_arguments)]
+pub fn ask(
+    catch_ups: &CatchUps,
+    writer: Option<SharedWriter>,
+    model: String,
+    project: &str,
+    part: &str,
+    fog: Vec<String>,
+    store: CatchUpStore,
+    done: impl FnOnce() + Send + 'static,
+) -> Result<Opened, String> {
+    if let Some(stored) = fresh(&store, part, &fog) {
+        return Ok(Opened::CatchUp(Box::new(stored)));
+    }
+    let writer =
+        writer.ok_or("Part catch-ups are written by Claude, which plotkeeper did not find.")?;
+    // A click tries a failed write again.
+    catch_ups
+        .failed
+        .lock()
+        .unwrap()
+        .remove(&(project.to_string(), part.to_string()));
+    start(catch_ups, writer, model, project, part, fog, store, done);
+    Ok(Opened::Writing { writing: true })
+}
+
+/// A project's map was shown (page load, focus, project switch): the catch-ups of at most `ON_SHOW` fogged Core parts that get one
+/// (not a part that opens its one PR's chapter) are written, oldest fog first. One already stored for its part's fog list, being
+/// written, or failed for that list is not written again, and still takes its place among the `ON_SHOW`. Returns the parts whose
+/// write started; `done` runs as each ends.
+#[allow(clippy::too_many_arguments)]
+pub fn show(
+    catch_ups: &CatchUps,
+    writer: &SharedWriter,
+    model: &str,
+    project: &str,
+    user: &UserState,
+    source: &str,
+    lit_of: &dyn Fn(u64) -> Option<Vec<Vec<String>>>,
+    store: &CatchUpStore,
+    done: impl Fn() + Clone + Send + 'static,
+) -> Vec<String> {
+    let repo = Path::new(project);
+    // How far down the history a commit sits: an older one has fewer commits behind it.
+    let depth = |commit: &str| {
+        std::process::Command::new("git")
+            .args(["rev-list", "--count", commit])
+            .current_dir(repo)
+            .output()
+            .ok()
+            .and_then(|out| {
+                String::from_utf8_lossy(&out.stdout)
+                    .trim()
+                    .parse::<u64>()
+                    .ok()
+            })
+            .unwrap_or(u64::MAX)
+    };
+    let mut fogged: Vec<(u64, String, Vec<String>)> = crate::fog::core_fogged_parts(user, source)
+        .into_iter()
+        .filter_map(|part| {
+            let fog = fog_of(user, &part);
+            let first = fog.first()?.commit.clone();
+            matches!(offer(repo, &fog, &part, lit_of), Offer::CatchUp { .. })
+                .then(|| (depth(&first), part, commits(&fog)))
+        })
+        .collect();
+    fogged.sort_by_key(|(depth, _, _)| *depth);
+    fogged
+        .into_iter()
+        .take(ON_SHOW)
+        .filter(|(_, part, fog)| {
+            fresh(store, part, fog).is_none() && !catch_ups.failed(project, part, fog)
+        })
+        .filter_map(|(_, part, fog)| {
+            start(
+                catch_ups,
+                writer.clone(),
+                model.to_string(),
+                project,
+                &part,
+                fog,
+                store.clone(),
+                done.clone(),
+            )
+            .then_some(part)
+        })
+        .collect()
+}
+
+/// `project`'s map was shown (`map_state` with `fetch`, after the fog's refresh): `show` with the PR brief's writer and model; the
+/// page hears `map-landed` as each write ends. Nothing without a writer.
+pub fn shown(app: &App, project: &str, user: &UserState, source: &str) {
+    let (Some(writer), Some(store)) = (app.briefs.writer(), store_of(project)) else {
+        return;
+    };
+    let events = app.events.clone();
+    let landed = project.to_string();
+    show(
+        &app.catch_ups,
+        &writer,
+        &app.briefs.model(),
+        project,
+        user,
+        source,
+        &lit_of(project),
+        &store,
+        move || events.emit("map-landed", serde_json::json!(landed)),
+    );
+}
+
 /// A click on `part`'s catch-up: the stored one when it covers the part's current fog list, else it is written in the background
 /// with the PR brief's writer and model, and the answer says so; the page gets it through `map-landed`. `None`: the part is clear.
 pub fn part_catch_up(
@@ -200,52 +363,33 @@ pub fn part_catch_up(
         return Ok(None);
     }
     let store = store_of(&project).ok_or("no data folder")?;
-    if let Some(stored) = fresh(&store, &part, &fog) {
+    let events = app.events.clone();
+    let landed = project.clone();
+    let opened = ask(
+        &app.catch_ups,
+        app.briefs.writer(),
+        app.briefs.model(),
+        &project,
+        &part,
+        fog,
+        store,
+        move || events.emit("map-landed", serde_json::json!(landed)),
+    )?;
+    match &opened {
         // Opening it is an entered activity on the part: its staleness band clears (#392).
-        crate::staleness::record(
-            &file,
-            &project,
-            &part,
-            crate::staleness::Activity::CatchUp,
-            crate::ratify::now(),
-        )?;
-        return Ok(Some(Opened::CatchUp(Box::new(stored))));
+        Opened::CatchUp(_) => {
+            crate::staleness::record(
+                &file,
+                &project,
+                &part,
+                crate::staleness::Activity::CatchUp,
+                crate::ratify::now(),
+            )?;
+        }
+        // The sheet says it is being written.
+        Opened::Writing { .. } => app.events.emit("map-landed", serde_json::json!(project)),
     }
-    let writer = app
-        .briefs
-        .writer()
-        .ok_or("Part catch-ups are written by Claude, which plotkeeper did not find.")?;
-    if let Some(claim) = app.catch_ups.claim(&project, &part) {
-        app.catch_ups
-            .failed
-            .lock()
-            .unwrap()
-            .remove(&(project.clone(), part.clone()));
-        let app = app.clone();
-        let project = project.clone();
-        std::thread::spawn(move || {
-            let model = app.briefs.model();
-            let written = gather_catch_up(Path::new(&project), &part, &fog).and_then(|source| {
-                write_part_catch_up(writer.as_ref(), &model, &source, &store, |line| {
-                    log::warn!("part catch-up of {part}: {line}")
-                })
-            });
-            if let Err(why) = written {
-                log::warn!("write the part catch-up of {part}: {why}");
-                app.catch_ups
-                    .failed
-                    .lock()
-                    .unwrap()
-                    .insert((project.clone(), part.clone()), fog);
-            }
-            drop(claim);
-            app.events.emit("map-landed", serde_json::json!(project));
-        });
-    }
-    // The sheet says it is being written.
-    app.events
-        .emit("map-landed", serde_json::json!(project.clone()));
-    Ok(Some(Opened::Writing { writing: true }))
+    Ok(Some(opened))
 }
 
 /// `part`'s catch-up over `fog` was read to its end (its last step seen, its check answered when it holds one): those entries leave
@@ -282,16 +426,18 @@ mod tests {
 
     impl Rig {
         fn new() -> Rig {
+            Rig::with(MAP, &[("a/x", "1"), ("b/x", "1")])
+        }
+        fn with(map: &str, files: &[(&str, &str)]) -> Rig {
             let (dir, main) = repo();
             let rig = Rig {
                 dir,
                 main,
                 state: tempfile::tempdir().unwrap(),
             };
-            rig.commit(
-                "Start the map",
-                &[("system-map.json", MAP), ("a/x", "1"), ("b/x", "1")],
-            );
+            let mut all = vec![("system-map.json", map)];
+            all.extend_from_slice(files);
+            rig.commit("Start the map", &all);
             refresh(Path::new(&rig.main), &rig.file(), &rig.main, true).unwrap();
             rig
         }
@@ -445,5 +591,218 @@ mod tests {
             "part of it cleared"
         );
         assert!(fresh(&store, "b", &fog(&["c1", "c2"])).is_none());
+    }
+
+    // ---- written when the map shows ----
+
+    const FIVE: &str = r#"{"version":1,
+      "parts":[
+        {"id":"a","name":"A","caption":"c","description":"d","tier":"core","paths":["a/"]},
+        {"id":"b","name":"B","caption":"c","description":"d","tier":"core","paths":["b/"]},
+        {"id":"c","name":"C","caption":"c","description":"d","tier":"core","paths":["c/"]},
+        {"id":"d","name":"D","caption":"c","description":"d","tier":"core","paths":["d/"]},
+        {"id":"e","name":"E","caption":"c","description":"d","tier":"core","paths":["e/"]},
+        {"id":"f","name":"F","caption":"c","description":"d","tier":"interface","paths":["f/"]}],
+      "actors":[],"links":[],"ignored":[],"laws":[]}"#;
+
+    /// A fake writer: a catch-up of 3 steps on the part its prompt names, an empty claim check; it counts the catch-ups it wrote
+    /// per part, and waits while its gate is shut.
+    #[derive(Default)]
+    struct Fake {
+        wrote: Mutex<Vec<String>>,
+        gate: (Mutex<bool>, std::sync::Condvar),
+    }
+
+    impl Fake {
+        fn shut() -> Arc<Fake> {
+            let fake = Arc::new(Fake::default());
+            *fake.gate.0.lock().unwrap() = true;
+            fake
+        }
+        fn open(&self) {
+            *self.gate.0.lock().unwrap() = false;
+            self.gate.1.notify_all();
+        }
+        fn wrote(&self) -> Vec<String> {
+            self.wrote.lock().unwrap().clone()
+        }
+    }
+
+    impl BriefWriter for Fake {
+        fn write(
+            &self,
+            _model: &str,
+            prompt: &str,
+        ) -> Result<studio_understanding::pr_brief::BriefReply, String> {
+            let text = if prompt.starts_with("You write a part catch-up")
+                && !prompt.contains("RETRY")
+            {
+                let mut shut = self.gate.0.lock().unwrap();
+                while *shut {
+                    shut = self.gate.1.wait(shut).unwrap();
+                }
+                let part = prompt
+                    .split("steps about part ")
+                    .nth(1)
+                    .and_then(|rest| rest.split(',').next())
+                    .unwrap_or_default()
+                    .to_string();
+                self.wrote.lock().unwrap().push(part.clone());
+                let step = |k: &str| serde_json::json!({ "k": k, "h": "h", "b": "b", "on": [part], "cites": [] });
+                serde_json::json!({ "title": "t", "chapters": [ { "behaviour": "story", "parts": [part], "title": "t",
+                    "steps": [step("Where"), step("Before"), step("Now")] } ], "also": [], "unseen": [], "decisions": [] })
+                .to_string()
+            } else {
+                r#"{"items":[]}"#.to_string()
+            };
+            Ok(studio_understanding::pr_brief::BriefReply {
+                text,
+                usage: Default::default(),
+            })
+        }
+    }
+
+    struct Shows {
+        rig: Rig,
+        data: tempfile::TempDir,
+        catch_ups: CatchUps,
+        ended: std::sync::mpsc::Sender<()>,
+        ends: std::sync::mpsc::Receiver<()>,
+    }
+
+    impl Shows {
+        fn new() -> Shows {
+            let files: Vec<(String, &str)> =
+                "abcdef".chars().map(|p| (format!("{p}/x"), "1")).collect();
+            let files: Vec<(&str, &str)> = files.iter().map(|(n, t)| (n.as_str(), *t)).collect();
+            let (ended, ends) = std::sync::mpsc::channel();
+            Shows {
+                rig: Rig::with(FIVE, &files),
+                data: tempfile::tempdir().unwrap(),
+                catch_ups: CatchUps::default(),
+                ended,
+                ends,
+            }
+        }
+        fn push(&self, part: &str, text: &str) {
+            self.rig
+                .commit(&format!("push to {part}"), &[(&format!("{part}/x"), text)]);
+        }
+        fn store(&self) -> CatchUpStore {
+            CatchUpStore::open(self.data.path()).unwrap()
+        }
+        /// The map is shown: fog is refreshed, then the writes start.
+        fn show(&self, writer: &Arc<Fake>) -> Vec<String> {
+            refresh(
+                Path::new(&self.rig.main),
+                &self.rig.file(),
+                &self.rig.main,
+                true,
+            )
+            .unwrap();
+            let user = read_user(&self.rig.file(), &self.rig.main);
+            let ended = self.ended.clone();
+            let writer: SharedWriter = writer.clone();
+            show(
+                &self.catch_ups,
+                &writer,
+                "opus",
+                &self.rig.main,
+                &user,
+                FIVE,
+                &|_| None,
+                &self.store(),
+                move || ended.send(()).unwrap(),
+            )
+        }
+        fn wait(&self, n: usize) {
+            for _ in 0..n {
+                self.ends
+                    .recv_timeout(std::time::Duration::from_secs(30))
+                    .expect("a write ends");
+            }
+        }
+        fn fog(&self, part: &str) -> Vec<String> {
+            commits(&self.rig.fog(part))
+        }
+    }
+
+    #[test]
+    fn showing_the_map_writes_three_fogged_core_parts_oldest_fog_first_and_a_fourth_on_click() {
+        let shows = Shows::new();
+        // The interface part's thin fog shows nothing; then five Core parts, c's fog the oldest.
+        shows.push("f", "2");
+        for part in ["c", "a", "e", "b", "d"] {
+            shows.push(part, "2");
+        }
+        let writer = Arc::new(Fake::default());
+        assert_eq!(shows.show(&writer), ["c", "a", "e"]);
+        shows.wait(3);
+        let mut wrote = writer.wrote();
+        wrote.sort();
+        assert_eq!(wrote, ["a", "c", "e"]);
+        for part in ["c", "a", "e"] {
+            assert!(
+                fresh(&shows.store(), part, &shows.fog(part)).is_some(),
+                "{part}"
+            );
+        }
+        assert!(shows.store().get("b").is_none());
+
+        // b is written when clicked.
+        let ended = shows.ended.clone();
+        let writer_: SharedWriter = writer.clone();
+        let opened = ask(
+            &shows.catch_ups,
+            Some(writer_),
+            "opus".into(),
+            &shows.rig.main,
+            "b",
+            shows.fog("b"),
+            shows.store(),
+            move || ended.send(()).unwrap(),
+        )
+        .unwrap();
+        assert!(matches!(opened, Opened::Writing { writing: true }));
+        shows.wait(1);
+        assert!(fresh(&shows.store(), "b", &shows.fog("b")).is_some());
+        assert_eq!(writer.wrote().len(), 4);
+    }
+
+    #[test]
+    fn a_new_fog_entry_makes_the_stored_catch_up_stale_and_the_next_show_rewrites_it() {
+        let shows = Shows::new();
+        shows.push("a", "2");
+        let writer = Arc::new(Fake::default());
+        assert_eq!(shows.show(&writer), ["a"]);
+        shows.wait(1);
+        // An unchanged fog list is never written again.
+        assert_eq!(shows.show(&writer), Vec::<String>::new());
+        assert_eq!(writer.wrote(), ["a"]);
+
+        shows.push("a", "3");
+        let list = shows.fog("a");
+        assert_eq!(list.len(), 2);
+        assert!(fresh(&shows.store(), "a", &list).is_none(), "stale");
+        assert_eq!(shows.show(&writer), ["a"]);
+        shows.wait(1);
+        assert_eq!(writer.wrote(), ["a", "a"]);
+        assert_eq!(shows.store().get("a").unwrap().fog, list);
+    }
+
+    #[test]
+    fn showing_the_map_twice_in_a_row_starts_one_write_of_each_catch_up() {
+        let shows = Shows::new();
+        shows.push("a", "2");
+        shows.push("b", "2");
+        let writer = Fake::shut();
+        assert_eq!(shows.show(&writer), ["a", "b"]);
+        assert_eq!(shows.show(&writer), Vec::<String>::new());
+        writer.open();
+        shows.wait(2);
+        let mut wrote = writer.wrote();
+        wrote.sort();
+        assert_eq!(wrote, ["a", "b"]);
+        assert_eq!(shows.show(&writer), Vec::<String>::new());
     }
 }
