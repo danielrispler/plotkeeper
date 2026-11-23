@@ -10,16 +10,18 @@
 //   `slots.sheet`, `slots.drawer`, shown by `syncSide`) and the banner (`slots.banner`).
 // - `registerLayer(name, layer)`: Esc's layers, `scrubbed`, `drawer` and `sheet`, peeled in that order before the view is left.
 // - `MapState` (`types.ts`, `map.rs`) is the one payload; `currentMap()` gives the view as drawn.
+// - The camera (#383): the map area pans and zooms the world rather than scrolling it. Daniel's view is saved per project (`map_save_view`);
+//   a PR brief borrows the camera with `lendCamera` and `giveCameraBack` shows Daniel's view again (`cameraRig` in `map-model.ts`).
 
 import { logStop, reviewNode, reviewOf } from "./stop-rules.js";
 import { element, failure, invoke, listen, newest, pressable, text } from "./dom.js";
 import {
-  actorSize, autoPlace, brokenParts, brokenText, draftPrompt, dragMove, dragStart, effectiveTier, escapeMap, type Actor, type Drag, type Law, type Layer, type LayerName,
-  type MapDoc, mapProject, type MapLink, parseMap, type Part, type Point, plateSize, rimPoint, scrollToShow, type Scrub, type Tier,
+  actorSize, autoPlace, brokenParts, brokenText, cameraRig, type CameraRig, draftPrompt, dragMove, dragStart, effectiveTier, escapeMap, fitCamera, panTo, type Actor, type Drag,
+  type Law, type Layer, type LayerName, type MapDoc, mapProject, type MapLink, parseMap, type Part, type Point, plateSize, revealPan, rimPoint, type Scrub, type Tier, zoomAt,
 } from "./map-model.js";
 import { recheckSeen } from "./seen.js";
 import { knownProjects } from "./projects.js";
-import type { MapState } from "./types.js";
+import type { Camera, MapState } from "./types.js";
 
 export type LoadedMap = Extract<MapDoc, { ok: true }>;
 // What the view holds once a map loaded: its payload, the map as parsed, and every id's centre in the world.
@@ -58,6 +60,10 @@ let view: MapView | null = null;
 let drawn = "";
 // The past commit shown instead of the default branch's map, in `project`; `openMap` of another project drops it.
 let scrub: Scrub | null = null;
+// The camera of `project`, made by the first draw of its map from its saved view; `openMap` of another project drops it.
+let rig: CameraRig | null = null;
+// The sheet's part the camera last revealed, so a later draw does not pan Daniel's view back to it.
+let revealed: string | null = null;
 
 export const mapShown = () => document.body?.classList.contains("map-open") === true;
 export const currentMap = (): MapView | null => view;
@@ -85,7 +91,7 @@ async function load(path: string, fetch: boolean) {
 
 // Opens the Map view on `path`.
 export function openMap(path: string | null) {
-  if (path !== project) scrub = null;
+  if (path !== project) [scrub, rig, revealed] = [null, null, null];
   project = path;
   loaded = null;
   view = null;
@@ -149,8 +155,62 @@ const hideProjects = () => {
   if (menu.matches(":popover-open")) menu.hidePopover();
 };
 
-// The gutter around the plates when the map scrolls them into view: `--map-gutter` in tokens.css.
+// The gutter around the plates when the camera reveals or fits them: `--map-gutter` in tokens.css.
 const mapGutter = 32;
+// The view before Daniel first moves it: the world's corner at the area's, at 100 %.
+const unmoved: Camera = { scale: 1, x: 0, y: 0 };
+
+// Puts the world where the camera shows it; `glide` eases there (a brief's framing, a fit, a reveal), a drag or a zoom follows at once.
+function applyCamera(glide: boolean) {
+  const world = view?.slots.canvas.firstElementChild as HTMLElement | null;
+  if (!view || !rig || !world) return;
+  const { scale, x, y } = rig.shown();
+  world.classList.toggle("glide", glide);
+  world.style.transformOrigin = "0 0";
+  world.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
+  // The dot grid lies on the area and moves with the world.
+  view.slots.canvas.style.setProperty("--cam-x", `${x}px`);
+  view.slots.canvas.style.setProperty("--cam-y", `${y}px`);
+  view.slots.canvas.style.setProperty("--cam-scale", String(scale));
+}
+
+let saving: ReturnType<typeof setTimeout> | undefined;
+// Moves Daniel's view, unless a brief holds the camera, and saves it a moment after the last move (never for a past commit's map).
+function moveCamera(to: Camera, glide: boolean) {
+  if (!rig?.move(to)) return;
+  applyCamera(glide);
+  const path = project;
+  if (path === null || view?.scrub) return;
+  clearTimeout(saving);
+  saving = setTimeout(() => void invoke("map_save_view", { project: path, view: to }).catch(failure("map_save_view")), 400);
+}
+
+// A PR brief's camera, shown while it plays (`map-brief.ts`); Daniel's view is kept as it was.
+export function lendCamera(camera: Camera) {
+  rig?.lend(camera);
+  applyCamera(true);
+}
+// Shows Daniel's view again, as the brief found it.
+export function giveCameraBack() {
+  rig?.giveBack();
+  applyCamera(true);
+}
+
+// Where every plate and label of the view lies in the world, edges included.
+const worldBox = (current: MapView) => {
+  const edges = Object.entries(current.positions).map(([id, at]) => ({ at, size: sizeOf(id, current) }));
+  return {
+    x0: Math.min(...edges.map(({ at, size }) => at.x - size.w / 2)), y0: Math.min(...edges.map(({ at, size }) => at.y - size.h / 2)),
+    x1: Math.max(...edges.map(({ at, size }) => at.x + size.w / 2)), y1: Math.max(...edges.map(({ at, size }) => at.y + size.h / 2)),
+  };
+};
+
+// ⌘0 and the palette's Fit map: the whole map in the area.
+export function fitMap() {
+  if (!mapShown() || !view || !Object.keys(view.positions).length) return;
+  const { canvas } = view.slots;
+  moveCamera(fitCamera(worldBox(view), { w: canvas.clientWidth, h: canvas.clientHeight }, mapGutter), true);
+}
 
 // Esc in the Map view: the project menu first, then the first open layer (a scrubbed commit, a drawer, a sheet), else the view itself.
 export function mapEscape() {
@@ -161,13 +221,16 @@ export function mapEscape() {
 // The side area shows while any of its slots holds something.
 export const syncSide = (slots: MapView["slots"]) => {
   slots.side.hidden = ![slots.notPlaced, slots.tray, slots.sheet, slots.drawer].some((slot) => slot.childElementCount > 0);
-  // The map area ends where the side area begins; a plate it now cuts is scrolled into whole view when the plates fit.
-  // Only plates count: an actor's label is not worth a plate cut off, and a map too wide for the area keeps its plates whole first.
-  const placed = view && view.slots === slots ? Object.entries(view.positions).filter(([id]) => !view!.doc.actors.some((actor) => actor.id === id)) : [];
-  if (!placed.length || !slots.canvas?.clientWidth) return;
-  const { canvas } = slots;
-  const edges = placed.map(([id, at]) => [at.x - sizeOf(id, view!).w / 2, at.x + sizeOf(id, view!).w / 2]);
-  canvas.scrollLeft = scrollToShow(Math.min(...edges.map(([a]) => a)), Math.max(...edges.map(([, b]) => b)), canvas.scrollLeft, canvas.clientWidth, mapGutter);
+  // The map area ends where the side area begins. When a part's sheet opens, the camera pans just enough to show that part whole, once per
+  // part, so a later draw never pans Daniel's view back; positions are never written here.
+  const shown = view && view.slots === slots ? view : null;
+  const focus = shown ? (slots.sheet.querySelector<HTMLElement>("[data-part]")?.dataset.part ?? null) : null;
+  if (focus === revealed) return;
+  revealed = focus;
+  const at = shown && focus !== null ? shown.positions[focus] : undefined;
+  if (!shown || !at || !rig || rig.lent() || !slots.canvas.clientWidth) return;
+  const half = sizeOf(focus!, shown).w / 2;
+  moveCamera(revealPan(rig.user(), at.x - half, at.x + half, { left: 0, right: slots.canvas.clientWidth }, mapGutter), true);
 };
 
 const name = (path: string) => path.split("/").filter(Boolean).pop() ?? path;
@@ -325,8 +388,40 @@ function drawMap(body: HTMLElement, state: MapState, doc: LoadedMap, past: Scrub
   fit();
   drawLinks(links, current);
   view = current;
+  rig ??= cameraRig(state.user.view ?? unmoved);
+  applyCamera(false);
+  pan(canvas);
   drawHooks.forEach((hook) => hook(current));
   syncSide(slots);
+}
+
+// The map area's own input: a drag of the empty background pans Daniel's view, ⌘+wheel and a pinch (a wheel with Ctrl held, as Chrome
+// reports it) zoom around the pointer, and a plain wheel or two-finger scroll does nothing and never scrolls the page.
+function pan(canvas: HTMLElement) {
+  canvas.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || !rig || rig.lent() || (event.target as Element).closest(".plate, .actor")) return;
+    const [start, from] = [rig.user(), { x: event.clientX, y: event.clientY }];
+    canvas.setPointerCapture(event.pointerId);
+    canvas.classList.add("panning");
+    const move = (moved: PointerEvent) => moveCamera(panTo(start, from, { x: moved.clientX, y: moved.clientY }), false);
+    const end = () => {
+      canvas.classList.remove("panning");
+      canvas.removeEventListener("pointermove", move);
+      canvas.removeEventListener("pointerup", end);
+      canvas.removeEventListener("pointercancel", end);
+    };
+    canvas.addEventListener("pointermove", move);
+    canvas.addEventListener("pointerup", end);
+    canvas.addEventListener("pointercancel", end);
+  });
+  canvas.addEventListener("wheel", (event) => {
+    event.preventDefault();
+    if (!(event.ctrlKey || event.metaKey) || !rig || rig.lent()) return;
+    const box = canvas.getBoundingClientRect();
+    // A pinch sends small steps, a mouse wheel large ones: the prototype's rates.
+    const factor = Math.exp(-event.deltaY * (event.ctrlKey && !event.metaKey ? 0.012 : 0.004));
+    moveCamera(zoomAt(rig.user(), factor, event.clientX - box.left, event.clientY - box.top), false);
+  }, { passive: false });
 }
 
 // A press on a plate or label, which becomes a drag only past the threshold: a plate then follows the pointer and its place is
@@ -334,9 +429,13 @@ function drawMap(body: HTMLElement, state: MapState, doc: LoadedMap, past: Scrub
 function grab(node: HTMLElement, id: string, current: MapView, links: Element, fit: () => void, click: () => void) {
   let drag: Drag | null = null;
   let swallow = false;
+  // The drag runs on the screen, so its threshold is in screen pixels whatever the zoom; the plate's place is that over the scale.
+  let scale = 1;
   node.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
-    drag = dragStart(id, { x: event.clientX, y: event.clientY }, current.positions[id]);
+    scale = rig?.shown().scale ?? 1;
+    const at = current.positions[id];
+    drag = dragStart(id, { x: event.clientX, y: event.clientY }, { x: at.x * scale, y: at.y * scale });
     node.setPointerCapture(event.pointerId);
   });
   node.addEventListener("pointermove", (event) => {
@@ -345,7 +444,7 @@ function grab(node: HTMLElement, id: string, current: MapView, links: Element, f
     drag = step.drag;
     if (!step.to) return;
     const half = sizeOf(id, current);
-    const to = { x: Math.max(half.w / 2, step.to.x), y: Math.max(half.h / 2, step.to.y) };
+    const to = { x: Math.max(half.w / 2, step.to.x / scale), y: Math.max(half.h / 2, step.to.y / scale) };
     current.positions[id] = to;
     node.classList.add("dragging");
     place(node, to);

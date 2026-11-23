@@ -517,8 +517,12 @@ button.tray-row { display: block; width: 100%; font: inherit; color: inherit; te
 /* The rail's quiet row for a waiting PR brief (#344): small, muted, no colour. */
 .brief-ready { display: block; margin: 0 0 var(--sp-4); padding: var(--sp-2) 0; font-size: var(--size-small); color: var(--muted); text-align: start; }
 .tray-note { display: block; font-size: var(--size-xs); color: var(--faint); }
-.map-canvas { position: absolute; inset: 0; overflow: auto; }
-.map-world { position: relative; background-image: radial-gradient(var(--map-dot) var(--hair), transparent var(--hair)); background-size: var(--map-grid) var(--map-grid); }
+/* The map area is a camera (#383): it never scrolls; the world inside it pans and zooms, and the dot grid moves with it. */
+.map-canvas { position: absolute; inset: 0; overflow: hidden; cursor: grab; touch-action: none; overscroll-behavior: contain;
+              background-image: radial-gradient(var(--map-dot) var(--hair), transparent var(--hair));
+              background-size: calc(var(--map-grid) * var(--cam-scale, 1)) calc(var(--map-grid) * var(--cam-scale, 1)); background-position: var(--cam-x, 0) var(--cam-y, 0); }
+.map-canvas.panning { cursor: grabbing; }
+.map-world { position: relative; }
 .map-links { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
 .map-links .link { stroke: var(--link); stroke-width: var(--link-width); }
 .link-mark.check { fill: var(--law-check); }
@@ -694,7 +698,7 @@ button.tray-row { display: block; width: 100%; font: inherit; color: inherit; te
 .brief-partial { font-size: var(--size-xs); color: var(--faint); }
 .brief-leave { position: absolute; top: var(--sp-5); right: var(--sp-5); color: var(--faint); }
 .btn.primary.brief-next { background: var(--brief-light); color: var(--bg); }
-.map-world { transition: transform var(--brief-camera); }
+.map-world.glide { transition: transform var(--brief-camera); }
 .map-world.briefing .plate:not(.lit), .map-world.briefing .actor:not(.lit) { opacity: var(--brief-dim); transition: opacity var(--motion); }
 .map-world.briefing .plate.lit { box-shadow: inset 0 0 0 var(--hair) var(--ring-warm), 0 0 0 var(--sp-2) color-mix(in srgb, var(--ring-warm) 35%, transparent), var(--shadow); }
 .map-world.briefing .actor.lit { color: var(--fg); }
@@ -711,6 +715,6 @@ button.tray-row { display: block; width: 100%; font: inherit; color: inherit; te
 .light-spark { fill: var(--brief-light); filter: drop-shadow(0 0 var(--sp-3) var(--brief-light)); }
 .brief-open .map-canvas { overflow: clip; }
 @media (prefers-reduced-motion: reduce) {
-  .map-brief, .brief-cols, .map-world, .brief-dots i { transition: none; }
+  .map-brief, .brief-cols, .map-world.glide, .brief-dots i { transition: none; }
   .plate.arrive, .plate.picked, .plate.wrong { animation: none; }
 }

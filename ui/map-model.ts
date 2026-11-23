@@ -1,7 +1,7 @@
 // The Map view's pure logic (spec danielrispler/plotkeeper#306, ticket #309): the map file as the window reads it, where parts
-// are placed, the drag threshold, the link's rim points and the layered Esc. `map.ts` draws and wires them.
+// are placed, the drag threshold, the link's rim points, the layered Esc and the camera. `map.ts` draws and wires them.
 
-import type { BriefFigure, BriefStep, Ci, CommitFiles, Fog, HistoricalMap, HistoryEntry, PrBrief, Proof, ReadyPr } from "./types.js";
+import type { BriefFigure, BriefStep, Camera, Ci, CommitFiles, Fog, HistoricalMap, HistoryEntry, PrBrief, Proof, ReadyPr } from "./types.js";
 
 export type Tier = "core" | "interface" | "black-box";
 export type Point = { x: number; y: number };
@@ -262,16 +262,6 @@ export function scrubTickets() {
   };
 }
 
-// Where a map area `width` wide, scrolled to `scroll`, should scroll so plates spanning `left` to `right` (plus `gutter`) are whole in it: as
-// little as it takes; the gutter shrinks to what the area has to spare, and a span wider than the area is left where it is.
-export function scrollToShow(left: number, right: number, scroll: number, width: number, wanted: number): number {
-  const gutter = Math.min(wanted, (width - (right - left)) / 2);
-  if (gutter < 0) return scroll;
-  if (right + gutter > scroll + width) return Math.max(0, right + gutter - width);
-  if (left - gutter < scroll) return Math.max(0, left - gutter);
-  return scroll;
-}
-
 // ---- The PR brief view (spec danielrispler/plotkeeper#334, ticket #339): what `map-brief.ts` draws, as pure logic.
 
 // The steps a brief plays from one tray row: a chapter's own, with the overview in front when this is the chapter that carries it (`Playing.overview`).
@@ -379,7 +369,7 @@ export function latestRequest() {
 }
 
 export type Rect = { x0: number; y0: number; x1: number; y1: number };
-export type Camera = { scale: number; x: number; y: number };
+export type { Camera };
 // Where the world sits so `box` fills the visible area `area` at the largest scale up to `max`, centred in the room the panel leaves above it
 // (`room.top` clear at the top, `room.bottom` taken by the panel). A point `p` of the world lands at `p * scale + (x, y)`.
 export function briefCamera(box: Rect, area: { w: number; h: number }, room: { top: number; bottom: number }, max: number): Camera {
@@ -514,4 +504,59 @@ export function awaitedWrite(pr: ReadyPr | undefined): "open" | "stop" | "wait" 
   const brief = pr?.brief;
   if (!pr || brief?.quiet || (brief?.failed && !brief.writing)) return "stop";
   return brief && !brief.writing && !brief.stale && brief.chapters.length > 0 ? "open" : "wait";
+}
+
+// ---- The map's camera (spec #380, ticket #383): pan and zoom applied to the world, in place of a scrolling box. A point `p` of the world
+// lands at `p * scale + (x, y)` in the map area, as with `briefCamera`.
+
+export const zoomLimits = { min: 0.4, max: 2 };
+// Zooms `camera` by `factor` around the area's point (px, py), which keeps the world point under it; the scale is held to `zoomLimits`.
+export function zoomAt(camera: Camera, factor: number, px: number, py: number): Camera {
+  const scale = Math.min(zoomLimits.max, Math.max(zoomLimits.min, camera.scale * factor));
+  const r = scale / camera.scale;
+  return { scale, x: px - (px - camera.x) * r, y: py - (py - camera.y) * r };
+}
+// The camera a drag of the empty background gives: `start` moved by the pointer's travel from `from` to `at`, at the same scale.
+export const panTo = (start: Camera, from: Point, at: Point): Camera => ({ scale: start.scale, x: start.x + at.x - from.x, y: start.y + at.y - from.y });
+// The camera that fits `box` (the whole map) into an area `area` large with `gutter` kept around it, centred; never above 125 % (a small map is
+// not blown up) nor outside `zoomLimits`.
+export function fitCamera(box: Rect, area: { w: number; h: number }, gutter: number): Camera {
+  const room = { w: Math.max(1, area.w - 2 * gutter), h: Math.max(1, area.h - 2 * gutter) };
+  const wanted = Math.min(room.w / Math.max(1, box.x1 - box.x0), room.h / Math.max(1, box.y1 - box.y0), 1.25);
+  const scale = Math.min(zoomLimits.max, Math.max(zoomLimits.min, wanted));
+  return { scale, x: area.w / 2 - ((box.x0 + box.x1) / 2) * scale, y: area.h / 2 - ((box.y0 + box.y1) / 2) * scale };
+}
+// Reveals plates spanning `left` to `right` of the world by panning just enough to bring them, with `wanted` gutter, inside the visible band of
+// the area (from the panel's right edge to the sheet's left edge, in area coordinates). The gutter shrinks to the room the band has; a span
+// wider than the band is left where it is. Only the camera moves: no position is written.
+export function revealPan(camera: Camera, left: number, right: number, band: { left: number; right: number }, wanted: number): Camera {
+  const [lo, hi] = [left * camera.scale + camera.x, right * camera.scale + camera.x];
+  const gutter = Math.min(wanted, (band.right - band.left - (hi - lo)) / 2);
+  if (gutter < 0) return camera;
+  if (hi + gutter > band.right) return { ...camera, x: camera.x + band.right - (hi + gutter) };
+  if (lo - gutter < band.left) return { ...camera, x: camera.x + band.left - (lo - gutter) };
+  return camera;
+}
+// The map's one camera, shared by Daniel's view and a PR brief's: a brief borrows it with `lend` while it plays (each step may lend again),
+// and `giveBack` shows Daniel's view as the brief found it. While lent, Daniel's moves are refused (`move` says false), so his view is never
+// the brief's.
+export type CameraRig = { shown: () => Camera; user: () => Camera; lent: () => boolean; move: (to: Camera) => boolean; lend: (to: Camera) => void; giveBack: () => Camera };
+export function cameraRig(start: Camera): CameraRig {
+  let user = start;
+  let borrowed: Camera | null = null;
+  return {
+    shown: () => borrowed ?? user,
+    user: () => user,
+    lent: () => borrowed !== null,
+    move: (to) => {
+      if (borrowed) return false;
+      user = to;
+      return true;
+    },
+    lend: (to) => void (borrowed = to),
+    giveBack: () => {
+      borrowed = null;
+      return user;
+    },
+  };
 }

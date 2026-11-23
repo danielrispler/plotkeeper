@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use studio_server::{
     ci_laws::{self, Ci},
     fog::{ChapterRead, Entry, FogState, PrRead, Strength},
-    map::{MapState, Status, UserState},
+    map::{MapState, Status, UserState, View},
     pr_briefs::BriefInfo,
     prs::Ready,
     ratify::Pending,
@@ -19,7 +19,7 @@ use studio_server::{
 
 const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
 
-/// Daniel's state with every field filled: positions, tiers, and fog with a brief partly read.
+/// Daniel's state with every field filled: positions, tiers, fog with a brief partly read, and a saved view.
 fn user() -> UserState {
     let reads = BTreeMap::from([(
         334,
@@ -49,6 +49,11 @@ fn user() -> UserState {
             )]),
             reads,
         },
+        view: Some(View {
+            scale: 0.75,
+            x: -120.5,
+            y: 40.0,
+        }),
     }
 }
 

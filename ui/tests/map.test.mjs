@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import {
-  actorSize, autoPlace, draftPrompt, dragMove, dragStart, dragThreshold, effectiveTier, escapeMap, layerOrder, mapProject, parseMap, plateSize, rimPoint, scrubTickets, sheetOf, scrollToShow,
+  actorSize, autoPlace, cameraRig, draftPrompt, fitCamera, panTo, zoomAt, zoomLimits, dragMove, dragStart, dragThreshold, effectiveTier, escapeMap, layerOrder, mapProject, parseMap, plateSize, rimPoint, revealPan, scrubTickets, sheetOf,
 } from "../../dist/map-model.js";
 
 const part = (id, extra = {}) => ({ id, name: id, caption: "", description: "", tier: "core", paths: [], ...extra });
@@ -173,11 +173,35 @@ test("a scrub that reads slowly is dropped after Back to now or a later click", 
   assert.equal(tickets.live(tickets.start()), true);
 });
 
-test("when the sheet narrows the map, it scrolls so the plates are not cut mid-plate, and leaves a map that cannot fit where it was", () => {
-  // Plates span 100..1300 in a 1300 wide area: scrolled right by the gutter that would be cut, never past the left edge.
-  assert.equal(scrollToShow(100, 1300, 0, 1300, 32), 32);
-  assert.equal(scrollToShow(100, 1000, 0, 1300, 32), 0, "already inside");
-  assert.equal(scrollToShow(100, 1000, 500, 1300, 32), 68, "cut at the left");
-  assert.equal(scrollToShow(83, 1350, 0, 1300, 32), 66.5, "the gutter shrinks to the room there is");
-  assert.equal(scrollToShow(0, 1350, 500, 1300, 32), 500, "wider than the area: left where it is");
+test("revealing plates pans just enough to bring them into the visible band, and never moves a part", () => {
+  const positions = { core: { x: 620, y: 190 }, shell: { x: 880, y: 440 } };
+  const before = structuredClone(positions);
+  const at = (x, scale = 1) => ({ scale, x, y: 40 });
+  const band = { left: 0, right: 1300 };
+  // Plates span 100..1300 in a 1300 wide band: panned left by the gutter that would be cut.
+  assert.deepEqual(revealPan(at(0), 100, 1300, band, 32), at(-32));
+  assert.deepEqual(revealPan(at(0), 100, 1000, band, 32), at(0), "already inside");
+  assert.deepEqual(revealPan(at(-500), 100, 1000, band, 32), at(-68), "cut at the left");
+  assert.deepEqual(revealPan(at(0), 83, 1350, band, 32), at(-66.5), "the gutter shrinks to the room there is");
+  assert.deepEqual(revealPan(at(-500), 0, 1350, band, 32), at(-500), "wider than the band: left where it is");
+  // Zoomed out to half, a span of 1000..2000 shows at 500..1000, cut by a sheet at 800.
+  assert.deepEqual(revealPan(at(0, 0.5), 1000, 2000, { left: 0, right: 800 }, 32), at(-232, 0.5));
+  // A panel over the left of the area: the part is panned right, clear of its edge.
+  assert.deepEqual(revealPan(at(0), 100, 500, { left: 300, right: 1300 }, 32), at(232));
+  assert.deepEqual(positions, before, "saved positions are equal before and after");
+});
+
+test("a PR brief takes the camera while it plays and closes back to the view it found", () => {
+  const mine = { scale: 0.8, x: -120, y: 30 };
+  const rig = cameraRig(mine);
+  assert.equal(rig.move({ scale: 1.2, x: 10, y: 10 }), true, "Daniel moves his view");
+  const found = rig.user();
+  rig.lend({ scale: 1.35, x: 400, y: -90 });
+  rig.lend({ scale: 1.1, x: 200, y: -40 });
+  assert.deepEqual(rig.shown(), { scale: 1.1, x: 200, y: -40 }, "the brief's newest framing shows");
+  assert.equal(rig.lent(), true);
+  assert.equal(rig.move({ scale: 2, x: 0, y: 0 }), false, "a move during the brief is refused");
+  assert.deepEqual(rig.giveBack(), found);
+  assert.deepEqual(rig.shown(), { scale: 1.2, x: 10, y: 10 });
+  assert.equal(rig.lent(), false);
 });
