@@ -852,6 +852,57 @@ const mapNoMap = (): Fixture =>
       frame("without a map");
       checkColours("without a map");
       log("base ok");`, { map_state: mapState({ status: "none", source: null }) });
+// Switching projects (#386's review): what one project's map started is not lost or left over on the next. `calls` are the commands the
+// page sends from here on; `open(path)` presses a project's header.
+const switchProjects = [...baseProjects, { path: "/w/pokedex", gone: true }];
+const switching = (check: string, extra: Fixture = {}): Fixture =>
+  mapBaseOf(`
+      const calls = [];
+      const sent = window.fetch;
+      window.fetch = (url, init) => {
+        calls.push([/\\/api\\/(\\w+)$/.exec(String(url))?.[1], init?.body ? JSON.parse(init.body) : null]);
+        return sent(url, init);
+      };
+      const open = async (path) => { document.querySelector('#groups .project-head[data-project="' + path + '"] .project-toggle').click(); await wait(150); };
+      ${check}
+      log("base ok");`, {
+    projects: switchProjects,
+    map_state: { __by: "project", values: { "/w/plotkeeper": mapState(), "/w/falinks": mapState({ project: "/w/falinks" }) } },
+    ...extra,
+  });
+// A view moved on one project and, within the save's moment, on another: both are saved.
+const mapSwitchSavesViews = (): Fixture =>
+  switching(`
+      const zoom = () => document.querySelector("#map .map-canvas").dispatchEvent(new WheelEvent("wheel", { deltaY: -100, ctrlKey: true, clientX: 700, clientY: 400, bubbles: true, cancelable: true }));
+      zoom();
+      await open("/w/falinks");
+      zoom();
+      await wait(700);
+      const saved = calls.filter(([command]) => command === "map_save_view").map(([, args]) => args.project).sort().join();
+      if (saved !== "/w/falinks,/w/plotkeeper") log("snap:fail the views saved were of " + JSON.stringify(saved));`);
+// A gone folder's empty state: the window's focus asks nothing about it.
+const mapGoneFocus = (): Fixture =>
+  switching(`
+      await open("/w/pokedex");
+      if (!document.querySelector("#map .map-gone")) return log("snap:fail pokedex shows no gone state");
+      calls.length = 0;
+      window.dispatchEvent(new Event("focus"));
+      await wait(300);
+      const asked = calls.filter(([command, args]) => command === "map_state" && args.project === "/w/pokedex");
+      if (asked.length) log("snap:fail the focus read the gone folder's map " + asked.length + " times");`);
+// A PR brief open on one project's map closes when a project with no map shows.
+const mapBriefSwitch = (): Fixture =>
+  switching(`
+      const media = window.matchMedia.bind(window);
+      window.matchMedia = (query) => (query.includes("prefers-reduced-motion") ? { ...media(query), matches: true } : media(query));
+      document.querySelector('#map-tray .tray-row[data-pr="334"]').click();
+      await wait(800);
+      if (document.getElementById("map-brief").hidden) return log("snap:fail the brief did not open");
+      await open("/w/pokedex");
+      if (!document.getElementById("map-brief").hidden || document.body.classList.contains("brief-open")) log("snap:fail the brief stayed open over the gone project");`, {
+    map_state: { __by: "project", values: { "/w/plotkeeper": mapState({ ready: [{ number: 334, title: "PR briefs on the map", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["PR briefs on the map"], quiet: false } }] }) } },
+    pr_brief: briefOf(storySteps()),
+  });
 const mapPanel = (check: string, extra: Fixture = {}): Fixture => {
   const sessions = busySessions().map((s) => (s.id === "s1" ? { ...s, turns: s.turns.map((t) => ({ ...t, id: "t1", message: "Chips on the parts a turn touches" })) } : s));
   const selected = Object.fromEntries(sessions.map((s) => [s.id, { session: s, agent: null }]));
@@ -1319,6 +1370,10 @@ export const fixtures = {
   mapBaseNarrow: mapBase,
   mapHeaderDot,
   mapHeaderDotNarrow: mapHeaderDot,
+  // Switching projects: both views saved, a gone folder never read on focus, a PR brief closed.
+  mapSwitchSavesViews,
+  mapGoneFocus,
+  mapBriefSwitch,
   mapFresh,
   mapFreshNarrow: mapFresh,
   mapNoMap,
