@@ -260,6 +260,16 @@ impl PrBriefs {
         }
     }
 
+    /// Claims `pr` of `project` as being written: `None` when it already is. The claim ends when the guard drops, a panic of the
+    /// write included, so a dead write never leaves the PR busy.
+    fn claim(&self, project: &str, pr: u64) -> Option<BusyGuard<'_>> {
+        self.busy(project, pr, true).then(|| BusyGuard {
+            briefs: self,
+            project: project.to_string(),
+            pr,
+        })
+    }
+
     /// Marks `pr` of `project` as being written (`on`) or done; false when it already was in that state.
     fn busy(&self, project: &str, pr: u64, on: bool) -> bool {
         let key = (project.to_string(), pr);
@@ -278,6 +288,19 @@ impl PrBriefs {
             .entry(project.to_string())
             .or_default()
             .clone()
+    }
+}
+
+/// A PR claimed as being written; see `PrBriefs::claim`.
+struct BusyGuard<'a> {
+    briefs: &'a PrBriefs,
+    project: String,
+    pr: u64,
+}
+
+impl Drop for BusyGuard<'_> {
+    fn drop(&mut self) {
+        self.briefs.busy(&self.project, self.pr, false);
     }
 }
 
@@ -410,9 +433,9 @@ pub fn lookup_later(app: &AppHandle, project: &str, ready: Vec<Ready>) {
             let Some(store) = store_of(&project) else {
                 return;
             };
-            if !briefs.busy(&project, pr.number, true) {
+            let Some(claim) = briefs.claim(&project, pr.number) else {
                 return;
-            }
+            };
             let model = briefs.model();
             let seen = briefs.seen_of(&project);
             let with = Writing {
@@ -432,7 +455,7 @@ pub fn lookup_later(app: &AppHandle, project: &str, ready: Vec<Ready>) {
                 },
                 |line| log::warn!("pr brief of #{}: {line}", pr.number),
             );
-            briefs.busy(&project, pr.number, false);
+            drop(claim);
             if did != Did::Kept {
                 let _ = app.emit("map-landed", project);
             }
@@ -473,9 +496,9 @@ pub fn pr_brief(
     let Some(writer) = briefs.writer.clone() else {
         return Ok(store.latest(number).map(view));
     };
-    if !briefs.busy(&project, number, true) {
+    let Some(claim) = briefs.claim(&project, number) else {
         return Err("The brief is being written; open it again in a moment.".into());
-    }
+    };
     let _ = app.emit("map-landed", project.clone());
     let model = briefs.model();
     let seen = briefs.seen_of(&project);
@@ -492,7 +515,7 @@ pub fn pr_brief(
         || source_of(&project, number),
         |line| log::warn!("pr brief of #{number}: {line}"),
     );
-    briefs.busy(&project, number, false);
+    drop(claim);
     let _ = app.emit("map-landed", project);
     written.map(|b| Some(view(b)))
 }
@@ -932,5 +955,20 @@ mod tests {
         );
         briefs.set_model("haiku".into());
         assert_eq!(briefs.model(), "haiku");
+    }
+
+    #[test]
+    fn a_write_that_panics_leaves_the_pr_free_to_write_again() {
+        let briefs = PrBriefs::new(None);
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _claim = briefs.claim("/p", 7).expect("free at first");
+            assert!(briefs.claim("/p", 7).is_none(), "claimed while written");
+            panic!("the writer died");
+        }));
+        assert!(panicked.is_err());
+        assert!(
+            briefs.claim("/p", 7).is_some(),
+            "the claim ended with the panic"
+        );
     }
 }

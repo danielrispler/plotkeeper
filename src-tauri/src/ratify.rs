@@ -30,16 +30,43 @@ const KINDS: [(&str, &str); 5] = [
 ];
 
 /// What Daniel decided about an item.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
 pub enum Decided {
     Accepted,
     Overturned,
     /// Not yet ratified, whenever it landed: written by hand.
     Pending,
-    /// A state a newer build wrote: read as no record.
-    #[serde(other)]
-    Unknown,
+    /// A state a newer build wrote: read as no record, and written back as it was.
+    Unknown(String),
+}
+
+impl From<String> for Decided {
+    fn from(state: String) -> Self {
+        match state.as_str() {
+            "accepted" => Decided::Accepted,
+            "overturned" => Decided::Overturned,
+            "pending" => Decided::Pending,
+            _ => Decided::Unknown(state),
+        }
+    }
+}
+
+impl From<Decided> for String {
+    fn from(state: Decided) -> Self {
+        match state {
+            Decided::Accepted => "accepted".into(),
+            Decided::Overturned => "overturned".into(),
+            Decided::Pending => "pending".into(),
+            Decided::Unknown(state) => state,
+        }
+    }
+}
+
+impl Decided {
+    fn is_unknown(&self) -> bool {
+        matches!(self, Decided::Unknown(_))
+    }
 }
 
 /// One item of a PR: `kind` is a map kind (`part`, `actor`, `link`, `law`, `flow`) or `decision`.
@@ -80,6 +107,9 @@ pub struct Record {
     pub at: u64,
     #[serde(default)]
     pub text: String,
+    /// Fields a newer build wrote: kept when this build writes the file.
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, Value>,
 }
 
 impl Record {
@@ -114,12 +144,12 @@ impl Project {
         self.records
             .iter()
             .rev()
-            .find(|r| r.item() == *item && r.state != Decided::Unknown)
+            .find(|r| r.item() == *item && !r.state.is_unknown())
     }
 
     /// `landed` is when the item's PR landed on the default branch, none while it is open.
     pub fn status(&self, item: &Item, landed: Option<u64>) -> Status {
-        match self.record(item).map(|r| r.state) {
+        match self.record(item).map(|r| r.state.clone()) {
             Some(Decided::Accepted) => Status::Accepted,
             Some(Decided::Overturned) => Status::Overturned,
             Some(Decided::Pending) => Status::NotYet,
@@ -216,6 +246,7 @@ pub fn decide(
             state,
             at: now,
             text: text.into(),
+            extra: BTreeMap::new(),
         });
     })
 }
@@ -368,7 +399,7 @@ pub fn rows(
     for record in &project.records {
         let missing = record.pr == pr
             && record.kind == DECISION
-            && record.state != Decided::Unknown
+            && !record.state.is_unknown()
             && !decisions.iter().any(|(id, _)| *id == record.id);
         if missing && !rows.iter().any(|r| r.kind == DECISION && r.id == record.id) {
             rows.push(row(DECISION, &record.id, &record.text, ""));
@@ -403,13 +434,14 @@ struct Landed {
 }
 
 /// The first-parent commits of `reference`, newest first.
-fn first_parents(repo: &Path, reference: &str) -> Vec<Landed> {
+fn first_parents(repo: &Path, reference: &str, max: usize) -> Vec<Landed> {
+    let max_count = format!("--max-count={max}");
     let Ok(log) = git(
         repo,
         &[
             "log",
             "--first-parent",
-            "--max-count=500",
+            &max_count,
             "--format=%H%x09%ct%x09%s",
             reference,
         ],
@@ -460,6 +492,18 @@ pub fn pr_changes(
     number: u64,
     open_head: Option<&str>,
 ) -> (Vec<MapItem>, Option<u64>) {
+    pr_changes_in(repo, number, open_head, WALK)
+}
+
+/// How many first-parent commits of the default branch are read for what landed.
+const WALK: usize = 500;
+
+fn pr_changes_in(
+    repo: &Path,
+    number: u64,
+    open_head: Option<&str>,
+    walk: usize,
+) -> (Vec<MapItem>, Option<u64>) {
     let Some((reference, _)) = default_ref(repo) else {
         return (vec![], None);
     };
@@ -474,13 +518,14 @@ pub fn pr_changes(
             .unwrap_or_default();
         return (items, None);
     }
-    match first_parents(repo, &reference)
-        .into_iter()
-        .find(|l| l.pr == Some(number))
-    {
+    let log = first_parents(repo, &reference, walk);
+    let cut_short = log.len() >= walk;
+    match log.into_iter().find(|l| l.pr == Some(number)) {
         Some(l) => (changes_of(repo, &l.commit), Some(l.at)),
-        // Too old to find: landed long ago.
-        None => (vec![], Some(0)),
+        // Not in a walk that was cut short: it may have landed long ago. Not in the whole log: it has not landed (a draft, a
+        // closed one, one no lookup has seen), so its items are not ratified.
+        None if cut_short => (vec![], Some(0)),
+        None => (vec![], None),
     }
 }
 
@@ -504,9 +549,11 @@ pub fn pending(repo: &Path, project: &Project) -> Vec<Pending> {
         }
     }
     if let Some((reference, _)) = default_ref(repo) {
-        for landed in first_parents(repo, &reference) {
+        for landed in first_parents(repo, &reference, WALK) {
+            // Commit times do not only grow along the first-parent line (a rebase or a backdated commit), so an old one is passed
+            // over, not the end of the walk.
             if landed.at <= project.since {
-                break;
+                continue;
             }
             let Some(pr) = landed.pr else { continue };
             for change in changes_of(repo, &landed.commit) {
@@ -705,6 +752,10 @@ mod tests {
         assert_eq!(whole["later"]["x"], 1);
         assert_eq!(whole["projects"]["/p"]["extra"], true);
         assert_eq!(whole["version"], 1);
+        // A record of a newer build comes back as it was: its state this build cannot read, and its extra field.
+        let kept = &whole["projects"]["/p"]["records"][1];
+        assert_eq!(kept["state"], "snoozed");
+        assert_eq!(kept["new"], "field");
         // A file that is not JSON is an empty state.
         std::fs::write(&file, "nope").unwrap();
         assert_eq!(read(&file, "/p"), Project::default());
@@ -721,6 +772,7 @@ mod tests {
                 state: Decided::Pending,
                 at: 0,
                 text: String::new(),
+                extra: BTreeMap::new(),
             }],
         };
         let law = |pr, id| Item::new(pr, "law", id);
@@ -884,6 +936,7 @@ mod tests {
                 state: Decided::Accepted,
                 at: 1,
                 text: String::new(),
+                extra: BTreeMap::new(),
             });
             assert!(!pending(repo, &project).iter().any(|p| p.id == "l1"));
             // A record marked pending by hand shows although PR 1 landed before the first run.
@@ -894,6 +947,7 @@ mod tests {
                 state: Decided::Pending,
                 at: 0,
                 text: String::new(),
+                extra: BTreeMap::new(),
             });
             assert!(
                 pending(repo, &project)
@@ -921,8 +975,35 @@ mod tests {
             let (done, landed) = pr_changes(repo, 2, None);
             assert_eq!(landed, Some(1_200_000_000));
             assert_eq!(done.len(), 3);
-            // A PR the log does not hold landed long ago.
-            assert_eq!(pr_changes(repo, 99, None), (vec![], Some(0)));
+            // A PR that is not ready and not in the log has not landed: a draft, a closed one, or one not looked up yet. Its items
+            // are not ratified.
+            assert_eq!(pr_changes(repo, 99, None), (vec![], None));
+            // Only when the walk was cut short may it have landed before the cut: long ago.
+            assert_eq!(pr_changes_in(repo, 99, None, 1), (vec![], Some(0)));
+        }
+
+        #[test]
+        fn a_commit_dated_before_the_first_run_does_not_end_the_walk_of_what_landed_after_it() {
+            let (dir, main) = repo();
+            let root = dir.path();
+            commit(root, OLD, "Map (#0)", "800000000");
+            commit(root, &new_map(), "Change laws (#1)", "1050000000");
+            // Landed later but dated earlier (a rebased or backdated commit), and it changes no item.
+            commit(
+                root,
+                &format!("{}\n", new_map()),
+                "Reformat (#2)",
+                "900000000",
+            );
+            let project = Project {
+                since: 1_000_000_000,
+                ..Project::default()
+            };
+            let got = pending(Path::new(&main), &project);
+            assert!(
+                got.iter().any(|p| p.pr == 1 && p.id == "l3"),
+                "PR 1 landed after the first run: {got:?}"
+            );
         }
     }
 }
