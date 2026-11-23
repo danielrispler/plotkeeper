@@ -61,6 +61,10 @@ pub enum Kind {
     RatingSkipped,
     /// A short note was given in the bar; the line carries it.
     NoteGiven,
+    /// A part's refresher was entered (#392).
+    RefresherEntered,
+    /// A refresher or a part catch-up was entered from a part with a staleness band (#392); logged beside the entry's own kind.
+    StaleEntered,
     /// A pre-flight framed its parts on the map, predicted or picked by hand (#394).
     PreFlightRun,
     #[serde(other)]
@@ -170,6 +174,8 @@ fn entered(kind: Kind) -> bool {
             | Kind::ChapterDone
             | Kind::CheckAnswered
             | Kind::Ratify
+            | Kind::RefresherEntered
+            | Kind::StaleEntered
             | Kind::PreFlightRun
     )
 }
@@ -599,6 +605,24 @@ mod tests {
             facts(&read(&file), "/q", 0).dismissed,
             ["briefs", "history", "map", "proof", "skips"]
         );
+    }
+
+    #[test]
+    fn the_refresher_and_an_entry_from_a_stale_part_are_counted_and_each_makes_an_engaged_day() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(LOG_FILE);
+        let lines = [
+            r#"{"at":1,"day":"2026-11-01","kind":"map-open","project":"/p"}"#,
+            r#"{"at":2,"day":"2026-11-01","kind":"refresher-entered","project":"/p"}"#,
+            r#"{"at":3,"day":"2026-11-02","kind":"map-open","project":"/p"}"#,
+            r#"{"at":4,"day":"2026-11-02","kind":"refresher-entered","project":"/p"}"#,
+            r#"{"at":5,"day":"2026-11-02","kind":"stale-entered","project":"/p"}"#,
+        ];
+        std::fs::write(&file, lines.join("\n") + "\n").unwrap();
+        let json = serde_json::to_value(facts_in(&file, "/p")).unwrap();
+        assert_eq!(json["counts"]["refresher-entered"], 2);
+        assert_eq!(json["counts"]["stale-entered"], 1);
+        assert_eq!(json["engaged_days"], 2);
     }
 
     #[test]

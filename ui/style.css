@@ -782,3 +782,16 @@ button.tray-row { display: block; width: 100%; font: inherit; color: inherit; te
   .map-brief, .brief-cols, .map-world.glide, .brief-dots i { transition: none; }
   .plate.arrive, .plate.picked, .plate.wrong { animation: none; }
 }
+
+/* Staleness bands (#392): a mild line along a Core plate's foot where Daniel has not engaged for 3, 6 or 12 weeks, firmer with each band.
+   Never a colour of its own: the muted text tone, so it sits under fog and Needs you. */
+.plate-stale { position: absolute; left: var(--sp-5); right: var(--sp-5); bottom: var(--sp-3); height: var(--mark); border-radius: var(--mark); background: var(--muted); }
+.plate.stale-1 .plate-stale { opacity: .3; }
+.plate.stale-2 .plate-stale { opacity: .55; }
+.plate.stale-3 .plate-stale { opacity: .85; }
+.sheet-stale { margin: 0; font-size: var(--size-small); color: var(--muted); }
+/* The refresher (#392): what the map says around the part, in its sheet under the laws. */
+.refresher { display: flex; flex-direction: column; gap: var(--sp-3); }
+.refresher-flows, .refresher-links { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-3); font-size: var(--size-small); }
+.refresher-flow-name { font-weight: 600; }
+.refresher-hops { margin: var(--sp-1) 0 0; padding-inline-start: var(--sp-6); color: var(--muted); line-height: 1.45; }

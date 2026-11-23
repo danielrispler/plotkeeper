@@ -115,7 +115,7 @@ const at = (x: number, y: number): [number, number] => [x, y];
 const mapState = (extra: Partial<MapState> = {}): MapState => ({
   project: "/w/plotkeeper", status: "loaded", source: mapFile, reference: "origin/main", commit: "35745b1693c5d061e5aea891e98a58515942a12d", note: null,
   user: { tiers: {}, positions: { core: at(620, 190), understanding: at(980, 290), plugins: at(300, 430), hook: at(580, 430), shell: at(880, 440), window: at(1180, 560), daemon: at(760, 690), workbench: at(480, 650), agents: at(110, 430), writer: at(1400, 190), github: at(250, 650) } },
-  fog: {}, ci: null, ready: [], ratify: [], runs: { paused: null, runs: [] },
+  fog: {}, ci: null, ready: [], ratify: [], runs: { paused: null, runs: [] }, stale: {},
   ...extra,
 });
 // The Ready for review tray (#336) with two ready PRs, at the Map view's foot.
@@ -165,8 +165,8 @@ const mapRuns = (): Fixture =>
     }),
     snapDone: "runs ok",
   });
-// Pre-flight (#394) of spec #378: Core and Understanding framed on the map as predicted, and the overlay listing each with its laws on trust
-// and its fog, opened from the map's Pre-flight button.
+// Pre-flight (#394) of spec #378: Core and Understanding framed on the map as predicted, and the overlay listing each with its laws on trust,
+// its fog and its staleness band, opened from the map's Pre-flight button.
 const mapPreFlight = (): Fixture =>
   mapOpened(`
       const predicted = [...document.querySelectorAll(".plate.predicted")].map((plate) => plate.dataset.id);
@@ -182,9 +182,11 @@ const mapPreFlight = (): Fixture =>
       if (rows.length !== 2) return log("snap:fail expected 2 rows, saw " + rows.length);
       if (!rows[0].textContent.includes("On trust: Events apply in order.") || rows[0].textContent.includes("The core reads no file")) log("snap:fail the core's laws: " + rows[0].textContent);
       if (!rows[1].textContent.includes("fog: laws, links or flows changed")) log("snap:fail the understanding's fog: " + rows[1].textContent);
+      if (!rows[0].textContent.includes("weeks or more ago")) log("snap:fail the core's staleness band: " + rows[0].textContent);
       log("pre-flight ok");`, {
     map_state: mapState({
       fog: { understanding: "thick" },
+      stale: { core: 1 },
       pre_flight: { issue: 378, title: "Studio: Spec: the modules", parts: ["core", "understanding"], predicted: true, at: runAt },
     }),
     snapDone: "pre-flight ok",
@@ -457,6 +459,53 @@ const mapSheetUnratified = (): Fixture =>
       log("sheet ok");`, {
     map_state: mapState({ ratify: [{ pr: 306, kind: "law", id: "shell-notice" }] }),
   });
+// Staleness bands (#392): Core, Shell and Understanding untouched for 3, 6 and 12 weeks carry a band along their foot, firmer with each;
+// the Interface-only and Black box parts never do. Understanding's sheet says how long and offers the refresher.
+const mapStale = (): Fixture =>
+  mapOpened(`
+      const band = (id) => [1, 2, 3].find((n) => document.querySelector("#map .plate[data-id=" + id + "]").classList.contains("stale-" + n)) ?? 0;
+      const bands = ["core", "shell", "understanding", "plugins", "workbench", "window"].map(band).join(",");
+      if (bands !== "1,2,3,0,0,0") return log("snap:fail bands: " + bands);
+      if (document.querySelectorAll("#map .plate .plate-stale").length !== 3) log("snap:fail a band without its line");
+      document.querySelector("#map .plate[data-id=understanding]").click();
+      await wait(300);
+      if (!document.querySelector("#map-sheet .sheet-stale")?.textContent.includes("12 weeks")) log("snap:fail the sheet does not say how long");
+      if (!document.querySelector("#map-sheet .sheet-refresher")) log("snap:fail no refresher on a stale part with no fog");
+      log("stale ok");`, {
+    map_state: mapState({ stale: { core: 1, shell: 2, understanding: 3 } }),
+  });
+// The refresher (#392) on Shell's sheet, a stale part with no fog: drawn at once from the map file (its caption and description, the flows
+// through it, its laws with their backing and its links; the sheet already shows the first three), with no writer and no "Writing…".
+const mapRefresher = (): Fixture => {
+  const file = JSON.parse(mapFile);
+  file.flows = [{ id: "turn-writing", name: "Turn writing", hops: [
+    { link: "hook-shell", text: "The hook's line reaches the Shell, which reads the log." },
+    { link: "shell-understanding", text: "The Shell asks Understanding to write the turn's summary." },
+    { link: "understanding-writer", text: "Understanding calls the writer." },
+    { link: "shell-window", text: "The Shell tells the Window, which shows the summary." },
+  ] }];
+  file.parts.find((part: { id: string }) => part.id === "shell").description = "Reads the hook's log, feeds the core, writes the summaries through Understanding and serves the Window.";
+  return mapOpened(`
+      document.querySelector("#map .plate[data-id=shell]").click();
+      await wait(300);
+      const enter = document.querySelector("#map-sheet .sheet-refresher");
+      if (!enter) return log("snap:fail no refresher button");
+      enter.click();
+      await wait(400);
+      const node = document.querySelector("#map-sheet .refresher");
+      if (!node) return log("snap:fail the refresher did not show");
+      if (node.previousElementSibling?.classList.contains("sheet-laws") !== true) log("snap:fail the refresher is not under the laws");
+      const words = node.textContent;
+      for (const want of ["Turn writing", "The Shell asks Understanding", "Hook to Shell", "Shell to Window"]) {
+        if (!words.includes(want)) log("snap:fail the refresher lacks " + want);
+      }
+      if (words.includes("Understanding calls the writer.")) log("snap:fail a hop not at the part shows");
+      if (document.querySelector("#map-sheet .sheet-refresher")) log("snap:fail the button stays once the refresher shows");
+      if (document.body.textContent.includes("Writing")) log("snap:fail the refresher waits on a writer");
+      log("refresher ok");`, {
+    map_state: mapState({ source: JSON.stringify(file), stale: { shell: 2 } }),
+  });
+};
 // A chaptered brief (#341): the tray lists one row per chapter, each chapter opens on its own and the overview plays before the first one opened, once.
 const chapterTitles = ["Fog clears by reading", "Broken laws on the map", "The Seen gate"];
 const chapterOf = (i: number, parts: string[]): BriefChapter => ({
@@ -1321,6 +1370,8 @@ export const fixtures = {
   mapBriefOverturnFallback: () => mapBriefOverturn("refuses"),
   mapBriefWriting,
   mapSheetUnratified,
+  mapStale,
+  mapRefresher,
   mapBriefChapters,
   mapBriefChapterMid,
   mapBriefChapterLast,

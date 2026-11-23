@@ -377,7 +377,9 @@ export type FogState = {
 // The map's camera (#383): a world point `p` shows at `p * scale + (x, y)` in the map area.
 export type Camera = { scale: number; x: number; y: number };
 // `view`: the project's saved camera, none until it was first moved.
-export type UserMap = { positions: Record<string, [number, number]>; tiers: Record<string, string>; fog?: FogState; view?: Camera | null };
+// When Daniel last engaged with each part, and the baseline (`staleness.rs`); the window reads the bands, not this.
+export type Staleness = { since: number | null; parts: Record<string, { at: number; kind: "know" | "refresher" | "catch-up" | "other" }> };
+export type UserMap = { positions: Record<string, [number, number]>; tiers: Record<string, string>; fog?: FogState; view?: Camera | null; staleness?: Staleness };
 export type MapState = {
   project: string;
   status: "loaded" | "none" | "unreadable";
@@ -397,6 +399,8 @@ export type MapState = {
   ratify: PendingItem[];
   // The project's background runs and the pause line (`runner.rs`).
   runs: Runs;
+  // The staleness band (1 to 3) of each Core part not engaged with for 3, 6 or 12 weeks (`staleness.rs`); a part not listed is not stale.
+  stale: Record<string, number>;
   // The project's pre-flight (`pre_flight.rs`, #394): the parts a piece of work will likely cross; null when none is run.
   pre_flight?: PreFlight | null;
 };
@@ -507,6 +511,7 @@ export interface Commands {
   map_save_view: void;
   map_set_tier: UserMap;
   map_know: UserMap;
+  map_refresher: UserMap;
   map_history: HistoryEntry[];
   map_at: HistoricalMap;
   map_commit: CommitFiles;
@@ -556,7 +561,7 @@ export interface Commands {
 export type Command = keyof Commands;
 
 // What the shell counted of Daniel's use (`stop_rules.rs`), for the one-time review: days, merged PRs and the uses of each module.
-export type StopKind = "session" | "map-open" | "map-action" | "scrub" | "proof" | "know" | "brief-offered" | "brief-opened" | "chapter-done" | "check-answered" | "ratify" | "unconfirmed-seen" | "rating-offered" | "rating-given" | "rating-skipped" | "note-given" | "pre-flight-run";
+export type StopKind = "session" | "map-open" | "map-action" | "scrub" | "proof" | "know" | "brief-offered" | "brief-opened" | "chapter-done" | "check-answered" | "ratify" | "unconfirmed-seen" | "rating-offered" | "rating-given" | "rating-skipped" | "note-given" | "refresher-entered" | "stale-entered" | "pre-flight-run";
 export type StopFacts = {
   active_days: number;
   merged_prs: number;

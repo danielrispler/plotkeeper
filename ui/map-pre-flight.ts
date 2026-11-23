@@ -1,21 +1,18 @@
 // Pre-flight (spec danielrispler/plotkeeper#378, ticket #394): before work starts, the parts of the map it will likely cross. From the map's
 // Pre-flight button or the palette, Daniel picks an open issue, writes one or two lines, or picks parts by hand. For an issue or text, the
 // server asks the no-tools writer (`server/src/pre_flight.rs`); on failure the hand picker shows. The parts are framed on the map as
-// *predicted* (or *picked*), and the overlay lists each with its laws on trust, its fog and its staleness band. The overlay is the first
+// *predicted* (or *picked*), and the overlay lists each with its laws on trust, its fog and its staleness band (#392). The overlay is the first
 // layer Esc closes (`layerOrder`), and its field is a text field, so single-key shortcuts do not fire while Daniel types (`windowBinding`).
 // A brief of a PR that closes the pre-flighted issue, or a ticket under it, carries `expectedLine` (`map-brief.ts`).
 
 import { element, failure, invoke, text } from "./dom.js";
 import { currentMap, onDraw, onPlate, registerLayer, reloadMap, shownProject, type LoadedMap } from "./map.js";
+import { staleWords } from "./refresher.js";
 import { logStop } from "./stop-rules.js";
 import type { Expected, Fog, MapState, OpenIssue, PreFlight } from "./types.js";
 
 // A predicted part as the overlay lists it: its name, the texts of its laws on trust, its fog, and its staleness band.
 export type PreFlightRow = { id: string; name: string; trust: string[]; fog: string | null; stale: string | null };
-
-// The staleness band of a part, as the map shows it. Staleness comes from #392, not yet built: until then no part has a band, and #392
-// sets `of` to its own reading of the payload.
-export const bands: { of: (state: MapState, part: string) => string | null } = { of: () => null };
 
 // What the overlay shows: the inputs (with the open issues, null while they load), the wait for the writer, the hand picker (with why the
 // prediction failed), or the pre-flight framed on the map.
@@ -43,7 +40,8 @@ export function preFlightRows(pre: PreFlight, doc: LoadedMap, state: MapState): 
     if (!part) return [];
     const trust = doc.laws.filter((law) => law.on === id && law.backing === "trust").map((law) => law.text);
     const mist = state.fog?.[id];
-    return [{ id, name: part.name, trust, fog: mist ? fogWords[mist] : null, stale: bands.of(state, id) }];
+    const band = state.stale?.[id];
+    return [{ id, name: part.name, trust, fog: mist ? fogWords[mist] : null, stale: band ? staleWords(band) : null }];
   });
 }
 

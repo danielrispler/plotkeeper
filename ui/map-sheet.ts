@@ -14,12 +14,15 @@ import { drawStrip } from "./map-history.js";
 import { overturnNote, ratifyActions } from "./map-ratify.js";
 import { sheetPending, statusWords } from "./ratify.js";
 import { besideSheet } from "./panel.js";
+import { enterRefresher, refresherNode, staleLine } from "./map-stale.js";
 import { ciDrawer, effectiveTier, type Part, proofDrawer, sheetCi, sheetOf, type Tier } from "./map-model.js";
 
 // The part whose sheet is open, and the project it is in; a sheet never carries over to another project's map.
 let open: { project: string; part: string } | null = null;
 // The part as the live map last had it, so the sheet of a part a past commit no longer has still draws.
 let remembered: Part | null = null;
+// The part whose refresher is entered on its open sheet (#392); it shows until the sheet closes or another part's opens.
+let refreshing: string | null = null;
 
 // How long the lifting mist plays before the map is drawn without it: the stylesheet's `--mist-lift`, none under reduced motion.
 const lifted = (node: HTMLElement) =>
@@ -51,6 +54,7 @@ export const sheetPart = () => (open && currentMap()?.project === open.project ?
 export function closeSheet() {
   const view = currentMap();
   open = null;
+  refreshing = null;
   if (view) drawSheet(view);
 }
 
@@ -125,6 +129,21 @@ function drawSheet(view: MapView) {
     });
     fog.append(clear);
   }
+  // A Core part Daniel has not engaged with for weeks says so, and a part with no fog offers the refresher (#392).
+  const stale = staleLine(view, part.id);
+  if (stale) fog.append(stale);
+  const refresher = !view.scrub && refreshing === part.id ? refresherNode(view, part.id) : null;
+  if (!view.scrub && !sheet.canClear && !refresher) {
+    const enter = text("button", "Refresher", "btn quiet sheet-refresher") as HTMLButtonElement;
+    enter.title = "The part as the map has it now: its flows, laws and links";
+    // It shows at once, drawn from the map; the shell records the activity behind it, and the reload drops the band.
+    enter.addEventListener("click", () => {
+      refreshing = part.id;
+      drawSheet(view);
+      enterRefresher(view, part.id).catch(failure("map_refresher"));
+    });
+    fog.append(enter);
+  }
   const state = view.scrub ? null : sheetCi(view.state.ci, part.id, sheet.laws.some((law) => law.backing === "check"));
   const ci = text("div", "", `sheet-ci${state?.broken ? " broken" : ""}`);
   if (state) {
@@ -150,6 +169,7 @@ function drawSheet(view: MapView) {
     ...(laws.length ? [text("ul", "", "sheet-laws")] : [text("p", "No laws on this part", "empty")]),
     // Fog and CI are of now: a past commit shows neither.
     ...(links.length ? [text("h3", "Links", "sheet-heading"), text("ul", "", "sheet-links")] : []),
+    ...(refresher ? [refresher] : []),
     ...(view.scrub ? [] : [text("h3", "Fog", "sheet-heading"), fog]),
     ...(state ? [text("h3", "CI on main", "sheet-heading"), ci] : []),
   );
@@ -167,6 +187,7 @@ function drawSheet(view: MapView) {
 }
 
 onPlateClick(({ view, part }) => {
+  if (open?.part !== part.id) refreshing = null;
   open = { project: view.project, part: part.id };
   // Below 1007 px, or over the widened diff, the sheet takes the left panel's place (#385).
   besideSheet(part.id);

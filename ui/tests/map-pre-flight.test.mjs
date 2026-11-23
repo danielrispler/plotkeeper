@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { fakeDocument } from "./dom.mjs";
 
 globalThis.document = fakeDocument();
-const { bands, expectedLine, preFlightNodes, preFlightRows, settle } = await import("../../dist/map-pre-flight.js");
+const { expectedLine, preFlightNodes, preFlightRows, settle } = await import("../../dist/map-pre-flight.js");
 const { windowBinding } = await import("../../dist/keys.js");
 const { initial } = await import("../../dist/settings.js");
 
@@ -33,16 +33,12 @@ const buttons = (nodes) => nodes.flatMap((node) => node.find("button"));
 const button = (nodes, words) => buttons(nodes).find((each) => each.text.includes(words));
 const texts = (nodes) => nodes.map((node) => node.text).join("\n");
 
-test("the predicted parts show with their laws on trust, their fog and their staleness, in the pre-flight's order", () => {
-  bands.of = (_, id) => (id === "hook" ? "not looked at in 6 weeks" : null);
-  try {
-    assert.deepEqual(preFlightRows(pre({ parts: ["core", "hook", "gone"] }), doc, state), [
-      { id: "core", name: "Core", trust: ["Events apply in order."], fog: "fog: laws, links or flows changed", stale: null },
-      { id: "hook", name: "Hook", trust: ["A held question blocks the agent."], fog: null, stale: "not looked at in 6 weeks" },
-    ]);
-  } finally {
-    bands.of = () => null;
-  }
+test("the predicted parts show with their laws on trust, their fog and their staleness band, in the pre-flight's order", () => {
+  const stale = { ...state, stale: { hook: 2 } };
+  assert.deepEqual(preFlightRows(pre({ parts: ["core", "hook", "gone"] }), doc, stale), [
+    { id: "core", name: "Core", trust: ["Events apply in order."], fog: "fog: laws, links or flows changed", stale: null },
+    { id: "hook", name: "Hook", trust: ["A held question blocks the agent."], fog: null, stale: "You last engaged with this part 6 weeks or more ago" },
+  ]);
 });
 
 test("a failed prediction shows the hand picker with why; a prediction frames its parts", async () => {
