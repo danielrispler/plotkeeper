@@ -19,11 +19,8 @@
       <!-- How many sessions finished a turn Daniel has not seen, not in colour; it selects the newest. -->
       <button id="unseen" class="btn small chip unseen" type="button" hidden></button>
       <span class="sp"></span>
-      <!-- The writer section (spec #320): the program that writes the summaries, picked and tested; `writers.ts` draws it. -->
-      <!-- Settings (#385): a quiet gear that opens the Settings panel over the map; the palette's `studio::ShowSettings` does too. -->
+      <!-- Settings (#385): a quiet gear that opens the Settings panel over the map, which holds the writer section (#387); the palette's `studio::ShowSettings` does too. -->
       <button id="settings-button" class="btn quiet small gear" type="button" aria-label="Settings" title="Settings" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M3.6 12.4l1.1-1.1M11.3 4.7l1.1-1.1"/></svg></button>
-      <button id="writer-button" class="btn small" type="button" popovertarget="writers" title="Pick the program that writes the summaries, and test it">Writer</button>
-      <div id="writers" class="menu writers" popover></div>
     </header>
 
     <nav class="list" aria-label="Sessions">

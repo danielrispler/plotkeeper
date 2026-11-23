@@ -68,9 +68,10 @@ body[data-layout="focus"] #rail-divider { display: none; }
 .top .sp { flex: 1; }
 .top .menu[popover] { top: var(--bar); right: var(--sp-5); left: auto; width: max-content; max-width: calc(100vw - 2 * var(--sp-5)); }
 .top .menu .chip { text-align: start; }
-/* The writer section (spec #320) under Writer: a label over each picker, then Test and its outcome. */
-.top .writers[popover] { width: var(--popover); white-space: normal; padding: var(--sp-5); gap: var(--sp-4); }
-.writers .side-title { margin: 0; font-size: var(--size); }
+/* The writer section (spec #320) in the Settings panel (#387): a label over each picker, then Test and its outcome. */
+.panel-view.settings { padding: 0 var(--sp-6) var(--sp-6); }
+.writers { display: flex; flex-direction: column; white-space: normal; gap: var(--sp-4); }
+.writers .side-title { margin: 0; font-size: var(--size-small); font-weight: 500; color: var(--faint); }
 .writer-hint, .writer-outcome, .writer-briefs { margin: 0; color: var(--muted); font-size: var(--size-small); overflow-wrap: anywhere; }
 .writer-field { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); font-size: var(--size-small); }
 .writer-field select, .writer-model-input input { width: calc(var(--select) * 1.6); font: inherit; color: var(--fg); background: var(--raised); border: var(--hair) solid var(--edge); border-radius: var(--radius-small); padding: var(--sp-1) var(--sp-3); }

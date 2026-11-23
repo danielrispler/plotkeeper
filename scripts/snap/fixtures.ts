@@ -688,24 +688,27 @@ const listClearLanded = (): Fixture => ({
       await wait(100);
       log("cleared ok");`,
 });
-// The writer section (#363) open under Writer: claude and agy found, or agy alone; `check` runs after it has drawn, and a script
-// that presses Test waits for its outcome.
+// The writer section (#363) in the Settings panel (#387), opened by the top bar's gear: claude and agy found, or agy alone; `check` runs
+// after it has drawn, and a script that presses Test waits for its outcome. The four the ticket names run at 1000x800 too (`…Narrow`).
 const claudeWriter = { kind: "claude" as const, name: "Claude", found: true, models: ["haiku", "sonnet", "opus", "fable"], efforts: ["", "low", "medium", "high"] };
 const agyWriter = { kind: "agy" as const, name: "agy", found: true, models: ["gemini-4-neon-low", "gemini-4-neon-medium", "gemini-4-neon-high", "gemini-4-argon-low", "gemini-4-hydrogen-low"], efforts: [] };
 const anthropicWriter = { kind: "anthropic" as const, name: "Anthropic API key", found: false, models: ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"], efforts: ["", "low", "medium", "high"] };
 const openaiWriter = { kind: "openai" as const, name: "OpenAI-compatible API", found: false, models: ["gpt-6-luna", "gpt-5.6-luna", "gpt-5.6-terra"], efforts: ["", "low", "medium", "high"] };
 const writersOpen = (extra: Partial<Fixture>, check: string, press = false): Fixture => ({
   ...list(),
+  map_state: mapState(),
   ...extra,
   snapScript: `
     const wait = (ms) => new Promise((done) => setTimeout(done, ms));
     await wait(200);
-    document.getElementById("writer-button").click();
-    await wait(200);
-    const panel = document.getElementById("writers");
-    if (!panel.matches(":popover-open")) return log("snap:fail the writer section did not open");
+    if (document.getElementById("writer-button")) log("snap:fail the top bar still has a Writer entry");
+    document.getElementById("settings-button").click();
+    await wait(400);
+    const panel = document.querySelector("#map-panel:not([hidden]) #panel-body #writers");
+    if (!panel) return log("snap:fail the writer section is not in the Settings panel");
     ${press ? `document.getElementById("writer-test").click(); await wait(300);` : ""}
     ${check}
+    await wait(300);
     log("writers ok");`,
   snapDone: "writers ok",
 });
@@ -872,13 +875,14 @@ const mapPanelHistory = (): Fixture =>
       log("panel ok");`, {
   sessions: [...busySessions(), session("e1", "Map view drawer, #312", "ended", { last_event_at: Date.now() - 2 * 86400e3 }), session("e2", "Wire check covers MapState, #333", "ended", { last_event_at: Date.now() - 3 * 86400e3 })],
 });
-// Settings in the left panel from the top bar's gear: empty until the writer section moves in (#387); the gear again closes it.
+// Settings in the left panel from the top bar's gear, holding the writer section (#387); the gear again closes it.
 const mapPanelSettings = (): Fixture =>
   mapPanel(`
       document.getElementById("settings-button").click();
       await wait(300);
       if (!panelOpen() || panel.querySelector(".panel-title")?.textContent !== "Settings") return log("snap:fail the gear did not open Settings in the left panel");
       if (document.getElementById("settings-button").ariaPressed !== "true") log("snap:fail the gear does not show pressed");
+      if (!panel.querySelector("#writers #writer-pick")) log("snap:fail the Settings panel does not hold the writer section");
       document.getElementById("settings-button").click();
       await wait(200);
       if (panelOpen()) log("snap:fail the gear again did not close Settings");
@@ -979,6 +983,10 @@ export const fixtures = {
     }, `
       if (!document.getElementById("writer-briefs")?.textContent.includes("briefs need Claude")) log("snap:fail no briefs need Claude line");
       if (document.getElementById("writer-model").value !== "gemini-4-neon-high") log("snap:fail the model in effect is not shown");`),
+  writersListNarrow: (): Fixture => fixtures.writersList(),
+  writersPassedNarrow: (): Fixture => fixtures.writersPassed(),
+  writersFailedNarrow: (): Fixture => fixtures.writersFailed(),
+  writersBriefsNeedClaudeNarrow: (): Fixture => fixtures.writersBriefsNeedClaude(),
   mapTray,
   railBriefRow: () => railBriefReady(false),
   railBriefOpened: () => railBriefReady(true),

@@ -1,6 +1,6 @@
 // The left panel (spec #380, ticket #385): while the Map view shows, everything Daniel reads beside the map opens in one panel over the
 // map's left side, so he never leaves the map to read. It holds a session's story (the rail itself, moved in), History, a turn's diff (widened
-// to at most 780 px) or Settings. It floats in the part sheet's glass (the `glass` class both share), never darkens the map, and slides in
+// to at most 780 px) or Settings, which holds the writer section (#387). It floats in the part sheet's glass (the `glass` class both share), never darkens the map, and slides in
 // 12 px with a fade (at once under reduced motion). Esc closes it after the drawer, a scrubbed commit and the sheet (the `panel` layer).
 //
 // What opens where is `map-model.ts`'s (`withPanel`, `withSheet`, `pressRow`): below 1007 px only one overlay is open, and the widened diff
@@ -11,6 +11,7 @@ import { mapShown, onDraw, onLeave, registerLayer, revealParts } from "./map.js"
 import { openAgents } from "./map-agents.js";
 import { closeSheet, sheetPart } from "./map-sheet.js";
 import { panelSession, type PanelContent, withPanel, withSheet } from "./map-model.js";
+import { writersIn } from "./writers.js";
 
 export type { PanelContent };
 // What `startPanel` is given by `main.ts`: the content of each kind, and what closing a story does (it selects no session).
@@ -53,8 +54,10 @@ function draw() {
     body.replaceChildren(box);
     deps.diff(box, content.session, content.turn);
   } else if (content?.kind === "settings") {
-    // #387 moves the writer section here; until then the panel only gives Settings its place.
-    body.replaceChildren(text("h2", "Settings", "panel-title"));
+    // The writer section (#363), moved here from the top bar (#387).
+    const box = text("div", "", "panel-view settings");
+    body.replaceChildren(text("h2", "Settings", "panel-title"), box);
+    writersIn(box);
   } else if (content === null) {
     body.replaceChildren();
   }
