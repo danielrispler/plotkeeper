@@ -5,6 +5,8 @@
 //!
 //! Each start refreshes the hooks' copies of `plotkeeper-hook` and `plotkeeper-answer` in the data folder's `bin/` (#356).
 //!
+//! `plotkeeper --version` prints the version, the npm package's (#368).
+//!
 //! `PLOTKEEPER_NO_BROWSER=1` leaves the browser closed (the URL is printed either way), for tests.
 
 use std::{
@@ -63,6 +65,10 @@ fn show(url: &str) {
 }
 
 fn main() -> ExitCode {
+    if std::env::args().nth(1).as_deref() == Some("--version") {
+        println!("plotkeeper {}", env!("CARGO_PKG_VERSION"));
+        return ExitCode::SUCCESS;
+    }
     studio_server::uptime();
     let Some(home) = std::env::home_dir() else {
         eprintln!("plotkeeper: no home folder");
@@ -77,7 +83,7 @@ fn main() -> ExitCode {
         Some(verb @ ("install" | "uninstall")) => return wire(verb, &home),
         Some(other) => {
             eprintln!(
-                "plotkeeper: unknown command {other:?}; run plotkeeper, plotkeeper install or plotkeeper uninstall"
+                "plotkeeper: unknown command {other:?}; run plotkeeper, plotkeeper install, plotkeeper uninstall or plotkeeper --version"
             );
             return ExitCode::FAILURE;
         }

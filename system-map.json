@@ -57,7 +57,7 @@
   ],
   "ignored": [
     ".agents/", ".claude/", ".github/", ".gitignore", "AGENTS.md", "CLAUDE.md", "Cargo.lock", "Cargo.toml", "LICENSE",
-    "README.md", "package-lock.json", "package.json", "real-calls.sh", "rust-toolchain.toml", "tsconfig.json",
+    "README.md", "package-lock.json", "package.json", "npm/", "real-calls.sh", "rust-toolchain.toml", "tsconfig.json",
     "system-map.json",
     "docs/", "scripts/", "terminal-spike/", "v0-spike/", "src-tauri/", "terminal-daemon/",
     "wayfinder/", "test-support/", "system-map/"
