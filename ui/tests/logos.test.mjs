@@ -70,7 +70,7 @@ test("a recorded Copilot session wears Copilot's logo, and the page names it Cop
   assert.equal(agentNames.copilot, "Copilot");
 });
 
-test("a session row in the list, Home and History shows the logo before its name; an agy row no longer shows \"agy\"", () => {
+test("a session row in the list and History shows the logo before its name; an agy row no longer shows \"agy\"", () => {
   const drawn = row(claude, new Map());
   const first = drawn.childNodes[0];
   assert.equal(first.childNodes[0], logoOf(drawn));

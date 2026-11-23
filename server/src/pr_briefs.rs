@@ -26,7 +26,7 @@ pub struct BriefInfo {
     pub writing: bool,
     /// The chapters' titles, one tray row each; one title for a single story.
     pub chapters: Vec<String>,
-    /// Every chapter of the brief was read to its end (#342). Home's dot may ask this to leave a brief that is done; it does not yet.
+    /// Every chapter of the brief was read to its end (#342). The project header's dot may ask this to leave a brief that is done; it does not yet.
     pub read: bool,
     /// The PR touches no part that would fog at Daniel's tiers, so it gets no brief.
     pub quiet: bool,
@@ -405,7 +405,7 @@ impl Drop for BusyGuard {
 }
 
 /// The numbers of the ready PRs a brief is waiting for: the brief is stored and Daniel has not read all of it at the PR's current
-/// head. A brief read to its end stops counting for Home's dot and the rail's row (its tray row stays, to read again), and a push
+/// head. A brief read to its end stops counting for the project header's dot and the rail's row (its tray row stays, to read again), and a push
 /// after the reading counts it again.
 pub fn waiting_numbers(
     store: &BriefStore,
@@ -426,7 +426,7 @@ fn user_of(project: &str) -> Option<crate::map::UserState> {
         .map(|file| crate::map::read_user(&file, project))
 }
 
-/// Whether a brief waits for one of `project`'s ready PRs: Home's quiet dot lights for it.
+/// Whether a brief waits for one of `project`'s ready PRs: the project header's quiet dot lights for it.
 pub fn any_waiting(project: &str, ready: &[Ready]) -> bool {
     store_of(project)
         .is_some_and(|store| !waiting_numbers(&store, ready, user_of(project).as_ref()).is_empty())

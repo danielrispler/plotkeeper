@@ -15,6 +15,3 @@ export function arrange(window: number, { focus = false } = {}): Layout {
   if (focus) return { mode: "focus", list: 0 };
   return window >= narrowBelow ? { mode: "full", list } : { mode: "strip", list: strip };
 }
-
-// Whether Home's content is seen: Home is the open pane and the Map view, which hides it with `visibility`, is not over it.
-export const homeSeen = (homeOpen: boolean, mapOpen: boolean) => homeOpen && !mapOpen;

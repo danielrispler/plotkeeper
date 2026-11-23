@@ -13,7 +13,7 @@ import { knownProjects, projectGroups, projectOfCwd, type ProjectGroup } from ".
 import { openMap, shownProject } from "./map.js";
 import { pressHeader } from "./map-model.js";
 import { closePanel, panelShown } from "./panel.js";
-import { redrawHistory, redrawHome, showHistory } from "./panes.js";
+import { redrawHistory, showHistory } from "./panes.js";
 import { isSelected, pressSession } from "./selection.js";
 import { studio } from "./state.js";
 import { titled } from "./keys.js";
@@ -534,7 +534,7 @@ export function clearing(
   };
 }
 
-// The page's one Clear: the list's "Clear landed" and Home's, and the toast offers Undo. A commit is today's Delete: the row
+// The page's one Clear: the list's "Clear landed" (#244, #382), and the toast offers Undo. A commit is today's Delete: the row
 // dropped, the cards kept.
 const stillLanded = (id: string) => studio.listed.find((s) => s.id === id && showsLanded(s.state, s.landed));
 export const landedClear = clearing(
@@ -550,10 +550,15 @@ export const landedClear = clearing(
       if (pending.length) showClearToast(pending.length, () => landedClear.undo());
       else hideClearToast();
       drawSidebar();
-      redrawHome();
     },
   },
 );
+
+// Whether a click on `target`, inside the session list, is on its empty space: not on a row, a group or project heading or any button.
+// Such a click goes back to the bare map.
+export function listSpace(target: { closest(selector: string): unknown }): boolean {
+  return ![".item", "summary", ".project-head", "button"].some((selector) => target.closest(selector));
+}
 
 // The sessions the list shows: all but the ended ones, which are in History (#94), and those Clear landed hid (`hidden`, #382).
 export const sidebarSessions = <T extends Pick<Session, "state" | "id">>(sessions: T[], hidden: ReadonlySet<string> = new Set()): T[] =>
@@ -660,7 +665,7 @@ export function showSessions(sessions: Session[]) {
   studio.listed = sessions;
   if (sessions.length) logStop("session");
   void refreshAgents();
-  redrawHome();
+  landedClear.sync();
   redrawHistory();
   const live = sidebarSessions(sessions, landedClear.hidden);
   drawSidebar();
