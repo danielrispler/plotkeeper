@@ -207,8 +207,7 @@ const build = (state: SessionState, { ask = null as Ask | null, withBrief = fals
   } satisfies Fixture;
 };
 
-// The top bar (#127): no item is cut. Every item in the bar sits whole inside it; the session's header is the one that may
-// ellipsize its name, and only past its own cap.
+// The top bar (#127, #386): no item is cut. Every item in the bar sits whole inside it; the project's name is the one that may ellipsize.
 const barScript = `
   const top = document.querySelector(".top");
   const room = top.getBoundingClientRect().right;
@@ -216,9 +215,9 @@ const barScript = `
     if (item.hidden || item.classList.contains("sp") || item.classList.contains("menu")) continue;
     const box = item.getBoundingClientRect();
     if (box.right > room + 0.5) log("snap:fail the bar cuts #" + item.id + " at " + innerWidth);
-    if (item.scrollWidth > item.clientWidth + 1 && item.id !== "session-header") log("snap:fail #" + item.id + " is clipped at " + innerWidth);
+    if (item.scrollWidth > item.clientWidth + 1 && item.id !== "bar-project") log("snap:fail #" + item.id + " is clipped at " + innerWidth);
   }
-  if (document.getElementById("session-header").hidden) log("snap:fail the session header is missing");
+  if (document.getElementById("bar-project").hidden) log("snap:fail the project's name is missing");
   log("bar at " + innerWidth + ": " + [...top.children].filter((i) => !i.hidden && i.id).map((i) => i.id).join(" "));`;
 
 // One fixture per state of the rail. `railStates` is what `npm run snap:rail` renders.

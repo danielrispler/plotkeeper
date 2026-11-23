@@ -408,9 +408,9 @@ pub fn map_marks(
         .filter_map(|project| {
             let repo = Path::new(&project);
             let _ = crate::fog::refresh(repo, &file, &project, false);
-            let fog = read_map(repo)
-                .source
-                .is_some_and(|source| crate::fog::core_fogged(&read_user(&file, &project), &source));
+            let fog = read_map(repo).source.is_some_and(|source| {
+                crate::fog::core_fogged(&read_user(&file, &project), &source)
+            });
             let broken = cache.broken(&project);
             let brief = crate::pr_briefs::any_waiting(&project, &prs.ready(&project));
             let why: Vec<&'static str> = [(fog, "fog"), (broken, "broken"), (brief, "brief")]

@@ -194,12 +194,6 @@ export function chipText(sessions: Pick<Session, "state">[]): string {
   return count ? `${count} ${count === 1 ? "needs" : "need"} you` : "";
 }
 
-// The unseen chip's text: how many sessions finished a turn Daniel has not seen, "" with none.
-export function unseenText(sessions: Pick<Session, "unseen">[]): string {
-  const count = sessions.filter((session) => session.unseen).length;
-  return count ? `${count} unseen` : "";
-}
-
 // A session's subagents by the id of the agent that spawned them: "session", "unattached" or a
 // subagent's id. Built once per draw, so the tree and the "done" counts do not scan every subagent.
 type Children = Map<string, Subagent[]>;

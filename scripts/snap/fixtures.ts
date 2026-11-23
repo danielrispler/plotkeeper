@@ -1111,7 +1111,7 @@ export const fixtures = {
     ];
     return { ...list(), settings_files: { settings: "{ bad", keymap: null }, appErrors, snapScript };
   },
-  // Alerts: two sessions' turns ended off screen (the note toast and the unseen chip), and one session past the 30% context
+  // Alerts: two sessions' turns ended off screen (the note toast), and one session past the 30% context
   // warning, whose row mark reads at full strength.
   alerts() {
     const context = (share: number) => ({ ...session("x", "x", "idle").transcript, context: { tokens: share * 10000, share, window: 1000000, left: 100 - share } });
@@ -1126,11 +1126,11 @@ export const fixtures = {
       await new Promise((done) => setTimeout(done, 50));
       const note = document.getElementById("note-toast");
       if (note.hidden || !note.textContent.includes("2 finished")) log("snap:fail the note toast should say 2 finished");
-      const unseen = document.getElementById("unseen");
-      if (unseen.hidden || unseen.textContent !== "2 unseen") log("snap:fail the unseen chip should say 2 unseen");
+      // The top bar has no unseen chip (#386): the unseen rows carry their mark in the list.
+      if (document.getElementById("unseen")) log("snap:fail the top bar still has an unseen chip");
       const past = [...document.querySelectorAll(".row .id.past")].map((mark) => mark.textContent);
       if (past.join() !== "context 34%") log("snap:fail only the 34% mark should be past the warning: " + past.join());
-      log("note: " + note.textContent + " · chip: " + unseen.textContent + " · past: " + past.join());`;
+      log("note: " + note.textContent + " · past: " + past.join());`;
     return { ...base, sessions, selected: { session: sessions[1], agent: null }, snapScript };
   },
   // The saved project list (#381): a project with no sessions keeps its header, after the one with sessions; a gone one is

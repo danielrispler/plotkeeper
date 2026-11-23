@@ -522,6 +522,9 @@ body[data-panel="diff"] .map-stage { --panel-w: min(var(--panel-wide), calc(100%
 .panel-view.history .row:hover { background: var(--hover); }
 .map-panel .pane.turn-diff { position: static; inset: auto; overflow: visible; }
 .map-panel .turn-diff header { background: transparent; border-bottom: 0; padding-right: calc(var(--sp-7) * 2); }
+/* A worker's log in the left panel (#386): its header clears the panel's Close. */
+.map-panel .pane.subagent-log { position: static; overflow: visible; }
+.map-panel .subagent-log header { background: transparent; border-bottom: 0; padding-right: calc(var(--sp-7) * 2); }
 /* The PR brief alone dims the map, and both panels with it (#385). */
 body.brief-open .map-panel, body.brief-open .map-side { opacity: var(--brief-dim); transition: opacity var(--motion); }
 /* The gear (#385): quiet, in the top bar, pressed while Settings shows. */
@@ -569,6 +572,9 @@ button.tray-row { display: block; width: 100%; font: inherit; color: inherit; te
 .map-empty { position: absolute; inset: 0; display: grid; align-content: center; justify-items: center; gap: var(--sp-4); text-align: center; }
 .map-empty-title { margin: 0; font-size: var(--size-large); font-weight: 600; }
 .map-empty .empty { max-width: var(--dialog); }
+/* The draft prompt, to paste into a session in the project: wrapped, in the code font, on the darkest tone. */
+.map-draft { max-width: var(--dialog); margin: 0; padding: var(--sp-5) var(--sp-5); text-align: start; white-space: pre-wrap; font: var(--size-small)/1.6 var(--mono);
+             color: var(--muted); background: var(--chrome); border-radius: var(--radius-pane); }
 /* A fresh install (#386): one calm line and the install docs, quiet. */
 .map-install { font-size: var(--size-small); color: var(--muted); text-decoration: underline; text-decoration-color: var(--edge); text-underline-offset: var(--halo); }
 .map-install:hover { color: var(--fg); }

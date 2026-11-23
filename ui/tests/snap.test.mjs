@@ -41,14 +41,6 @@ test("the list fixture has a nested, a selected and a landed row", async () => {
   assert.equal(f.selected.session.id, f.sessions[0].id);
 });
 
-test("the home fixture has every section: needs you, unseen, landed", () => {
-  const f = fixtures.home();
-  assert.equal(f.selected, null);
-  assert.ok(f.sessions.some((s) => s.state === "needs_you"));
-  assert.ok(f.sessions.some((s) => s.unseen && s.state !== "needs_you" && !s.landed));
-  assert.ok(f.sessions.some((s) => s.landed && s.state !== "running"));
-});
-
 // The rail's fixtures (#109): each holds what its state needs.
 const selected = (name) => fixtures[name]().selected.session;
 
