@@ -33,6 +33,7 @@ pub mod ci_laws;
 pub mod fog;
 pub mod history;
 pub mod hook_copies;
+pub mod install;
 pub mod lock;
 pub mod map;
 pub mod pr_briefs;

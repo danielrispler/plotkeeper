@@ -1,6 +1,8 @@
 //! `plotkeeper`: serves the learning layer as a local page and opens the browser on it (danielrispler/plotkeeper#325, spec #319).
 //! Started by hand in a terminal. A second one for the same data folder opens the browser on the first and exits; Ctrl+C stops it.
 //!
+//! `plotkeeper install` wires the agents it finds to plotkeeper's hooks, and `plotkeeper uninstall` reverses it (#357).
+//!
 //! Each start refreshes the hooks' copies of `plotkeeper-hook` and `plotkeeper-answer` in the data folder's `bin/` (#356).
 //!
 //! `PLOTKEEPER_NO_BROWSER=1` leaves the browser closed (the URL is printed either way), for tests.
@@ -11,7 +13,7 @@ use std::{
     thread,
 };
 use studio_server::{
-    App, ServerEffects, hook_copies,
+    App, ServerEffects, hook_copies, install,
     lock::{self, Instance},
     web::{self, Web},
 };
@@ -70,6 +72,16 @@ fn main() -> ExitCode {
         eprintln!("plotkeeper: could not move the old data folder: {e}");
         return ExitCode::FAILURE;
     }
+    match std::env::args().nth(1).as_deref() {
+        None => {}
+        Some(verb @ ("install" | "uninstall")) => return wire(verb, &home),
+        Some(other) => {
+            eprintln!(
+                "plotkeeper: unknown command {other:?}; run plotkeeper, plotkeeper install or plotkeeper uninstall"
+            );
+            return ExitCode::FAILURE;
+        }
+    }
     let log = studio_hook::event_log(&home);
     let data = studio_hook::data_dir(&home);
     let held = match lock::acquire(&data) {
@@ -94,14 +106,41 @@ fn main() -> ExitCode {
     }
 }
 
+/// The folder this executable is in, where the hook binaries ship.
+fn beside() -> std::io::Result<std::path::PathBuf> {
+    let exe = std::env::current_exe()?.canonicalize()?;
+    Ok(exe
+        .parent()
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_default())
+}
+
+/// `plotkeeper install` or `plotkeeper uninstall`, for the agents on the PATH.
+fn wire(verb: &str, home: &std::path::Path) -> ExitCode {
+    println!("plotkeeper {verb}");
+    let path = std::env::var_os("PATH");
+    let mut out = std::io::stdout();
+    let done = if verb == "install" {
+        beside()
+            .map_err(|e| format!("could not find its own executable ({e})"))
+            .and_then(|beside| install::install(home, &beside, path.as_deref(), &mut out))
+    } else {
+        install::uninstall(home, path.as_deref(), &mut out)
+    };
+    match done {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("plotkeeper {verb}: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 /// Brings the hooks' copies in the data folder's `bin/` up to the hook binaries beside this executable (#356), so an
 /// upgrade reaches the hooks at this start. A failure is said and the server starts anyway.
 fn refresh_hook_copies(home: &std::path::Path) {
-    let beside = match std::env::current_exe().and_then(|exe| exe.canonicalize()) {
-        Ok(exe) => exe
-            .parent()
-            .map(std::path::Path::to_path_buf)
-            .unwrap_or_default(),
+    let beside = match beside() {
+        Ok(beside) => beside,
         Err(e) => {
             eprintln!(
                 "plotkeeper: could not find its own executable ({e}); the hooks keep the copies they have"
