@@ -126,6 +126,8 @@ export type Capabilities = {
   permission_mode: boolean;
   durations: boolean;
   transcript_version: boolean;
+  // Its transcript names the model, which the header's model line shows; else the model is `Session.model`.
+  transcript_model: boolean;
   // It reports how full its context is.
   context: boolean;
   // It records a git tree of each worktree a turn touches, so a turn has files (danielrispler/plotkeeper#111).
@@ -136,7 +138,7 @@ export type Capabilities = {
 export type Session = {
   id: string;
   capabilities: Capabilities;
-  // The model its agent's hooks name (agy's), null otherwise; Claude's is `transcript.model`.
+  // The model its agent's hooks name (agy's), null otherwise; with `capabilities.transcript_model` it is `transcript.model`.
   model: string | null;
   // The folder it works in, from its latest event; `folder_name` is its last segment.
   cwd: string;
