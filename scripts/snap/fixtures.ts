@@ -1,7 +1,7 @@
 // Studio state for `npm run snap`: each fixture maps a Tauri command to what it returns.
 // A fixture is a function so that its times are relative to the moment it renders.
 
-import type { BriefChapter, BriefFigure, BriefStep, BriefView, Ci, LogEntry, MapState, PrBrief, RatifyRow, Session, SessionState, Subagent } from "../../ui/types.ts";
+import type { BriefChapter, BriefFigure, BriefStep, BriefView, Ci, LogEntry, MapState, PrBrief, RatifyRow, Session, SessionState, StoredCatchUp, Subagent } from "../../ui/types.ts";
 import { base, type ByArg, type Fixture } from "./base.ts";
 import { railFixtures } from "./rail-fixtures.ts";
 
@@ -115,7 +115,7 @@ const at = (x: number, y: number): [number, number] => [x, y];
 const mapState = (extra: Partial<MapState> = {}): MapState => ({
   project: "/w/plotkeeper", status: "loaded", source: mapFile, reference: "origin/main", commit: "35745b1693c5d061e5aea891e98a58515942a12d", note: null,
   user: { tiers: {}, positions: { core: at(620, 190), understanding: at(980, 290), plugins: at(300, 430), hook: at(580, 430), shell: at(880, 440), window: at(1180, 560), daemon: at(760, 690), workbench: at(480, 650), agents: at(110, 430), writer: at(1400, 190), github: at(250, 650) } },
-  fog: {}, ci: null, ready: [], ratify: [], runs: { paused: null, runs: [] },
+  fog: {}, ci: null, ready: [], ratify: [], runs: { paused: null, runs: [] }, catch_ups: {},
   ...extra,
 });
 // The Ready for review tray (#336) with two ready PRs, at the Map view's foot.
@@ -392,6 +392,77 @@ const mapBriefWriting = (): Fixture => ({
     pr_brief: { writing: true },
   }),
   snapDone: "writing ok",
+});
+// A part catch-up (#391): Understanding was fogged by two PRs and a direct push, so its sheet offers the part catch-up as the main button, with
+// "I know this" quiet beside it; pressing it plays one story of the part in the brief's reader, with no "See the code" and no PR number.
+const catchUpSteps = (): BriefStep[] => [
+  step("Where", "Understanding writes what each turn and PR changed", "It turns a session's events into cards and a ready PR into its brief, with a sandboxed writer that has no tools.", ["understanding"], {
+    cites: [{ from: "ENTRIES", quote: "writes the PR brief in the background" }],
+  }),
+  step("Before", "Opening a brief waited for its writer", "Opening a PR's brief that was not written yet held the panel until the writer answered, minutes at a time.", ["understanding", "window"], {
+    hops: [["shell-understanding", false], ["shell-window", false]],
+  }),
+  step("Now", "A brief is written in the background and lands", "An open answers at once that it is being written; the brief lands on the map when the writer is done. A direct push trimmed the facts' budget.", ["understanding"], {
+    fig: figure("sequence"), cites: [{ from: "DIFF", quote: "open_in_background" }],
+  }),
+  step("Must stay true", "The writer still reads only the facts", "The map's law says the writer is asked at most once per item; the claim check and its one retry keep to it.", ["understanding"], { law: "understanding-asked" }),
+];
+const storedCatchUp = (): StoredCatchUp => ({
+  version: 1, part: "understanding", fog: ["c".repeat(40), "d".repeat(40), "e".repeat(40)], written_at: 1, model: "opus", partial: false,
+  brief: { ...brief(catchUpSteps()), title: "Briefs are written in the background", chapters: [{ behaviour: "story", parts: ["understanding"], title: "Briefs written in the background", steps: catchUpSteps(), flags: [] }] },
+});
+const mapCatchUp = (): Fixture => ({
+  ...mapOpened(`
+      const media = window.matchMedia.bind(window);
+      window.matchMedia = (query) => (query.includes("prefers-reduced-motion") ? { ...media(query), matches: true } : media(query));
+      const calm = document.createElement("style");
+      calm.textContent = "*, *::before, *::after { transition: none !important; animation: none !important; }";
+      document.head.append(calm);
+      document.querySelector("#map .plate[data-id=understanding]").click();
+      await wait(150);
+      const buttons = [...document.querySelectorAll(".sheet .sheet-fog button")].map((b) => b.textContent);
+      if (buttons.join("|") !== "Part catch-up|I know this") return log("snap:fail the sheet's fog buttons: " + buttons.join("|"));
+      if (!document.querySelector(".sheet .sheet-catch-up").classList.contains("primary")) log("snap:fail the part catch-up is not the main button");
+      document.querySelector(".sheet .sheet-catch-up").click();
+      await wait(350);
+      const panel = document.getElementById("map-brief");
+      if (panel.hidden || !panel.classList.contains("open")) return log("snap:fail the part catch-up did not open");
+      if (!panel.querySelector(".brief-kick").textContent.includes("Part catch-up")) log("snap:fail the kick does not say part catch-up");
+      if (!panel.querySelector(".brief-code").hidden) log("snap:fail a part catch-up offers a PR's code");
+      document.getElementById("brief-next").click();
+      await wait(200);
+      document.getElementById("brief-next").click();
+      await wait(450);
+      if (!document.querySelector(".plate.lit[data-id=understanding]")) log("snap:fail the part is not lit");
+      log("catch-up ok");`, {
+    map_state: mapState({
+      fog: { understanding: "thick", shell: "thin" },
+      catch_ups: { understanding: { kind: "catch-up", ready: true, writing: false, failed: false }, shell: { kind: "chapter", pr: 334, chapter: 0 } },
+    }),
+    part_catch_up: storedCatchUp(),
+  }),
+  snapDone: "catch-up ok",
+});
+// A part catch-up being written: its button stays pressable and says "Writing…", the panel says so, and the map is not dimmed.
+const mapCatchUpWriting = (): Fixture => ({
+  ...mapOpened(`
+      const calm = document.createElement("style");
+      calm.textContent = "*, *::before, *::after { transition: none !important; animation: none !important; }";
+      document.head.append(calm);
+      document.querySelector("#map .plate[data-id=understanding]").click();
+      await wait(300);
+      if (document.querySelector(".sheet .sheet-catch-up-note")?.textContent !== "Writing…") log("snap:fail the sheet does not say it is being written");
+      if (document.querySelector(".sheet .sheet-catch-up").disabled) log("snap:fail the button is not pressable while it is written");
+      document.querySelector(".sheet .sheet-catch-up").click();
+      await wait(600);
+      const panel = document.getElementById("map-brief");
+      if (panel.hidden || !panel.textContent.includes("Writing the part catch-up…")) return log("snap:fail the panel does not say the catch-up is being written");
+      if (document.body.classList.contains("brief-open")) log("snap:fail the map is dimmed while it is written");
+      log("catch-up writing ok");`, {
+    map_state: mapState({ fog: { understanding: "thick" }, catch_ups: { understanding: { kind: "catch-up", ready: false, writing: true, failed: false } } }),
+    part_catch_up: { writing: true },
+  }),
+  snapDone: "catch-up writing ok",
 });
 // The part sheet with one law not yet ratified (#343): it says so, with Accept and Overturn.
 const mapSheetUnratified = (): Fixture =>
@@ -1257,6 +1328,8 @@ export const fixtures = {
   mapBriefOverturnCopied: () => mapBriefOverturn("copies"),
   mapBriefOverturnFallback: () => mapBriefOverturn("refuses"),
   mapBriefWriting,
+  mapCatchUp,
+  mapCatchUpWriting,
   mapSheetUnratified,
   mapBriefChapters,
   mapBriefChapterMid,

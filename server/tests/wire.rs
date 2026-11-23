@@ -137,6 +137,7 @@ fn empty(status: Status) -> MapState {
         ready: Vec::new(),
         ratify: Vec::new(),
         runs: Runs::default(),
+        catch_ups: BTreeMap::new(),
     }
 }
 
@@ -209,6 +210,23 @@ fn the_wire_samples_of_the_map_view_are_written_for_tsc() {
                     id: "shell-notice".into(),
                 }],
                 runs: runs(),
+                catch_ups: BTreeMap::from([
+                    (
+                        "server".into(),
+                        studio_server::part_catch_ups::Offer::CatchUp {
+                            ready: true,
+                            writing: false,
+                            failed: false,
+                        },
+                    ),
+                    (
+                        "core".into(),
+                        studio_server::part_catch_ups::Offer::Chapter {
+                            pr: 334,
+                            chapter: 1,
+                        },
+                    ),
+                ]),
                 ..empty(Status::Loaded)
             }),
         ));

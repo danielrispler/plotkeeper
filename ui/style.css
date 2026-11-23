@@ -621,6 +621,8 @@ button.tray-row { display: block; width: 100%; font: inherit; color: inherit; te
 .sheet-fog { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-3); }
 .sheet-fog-line { margin: 0; font-size: var(--size-small); color: var(--muted); }
 .sheet-fog.thin .sheet-fog-line, .sheet-fog.thick .sheet-fog-line { color: var(--mist); }
+.sheet-fog .sheet-catch-up { align-self: stretch; text-align: center; background: var(--pressed); font-weight: 600; }
+.sheet-catch-up-note { margin-top: calc(-1 * var(--sp-2)); font-size: var(--size-small); color: var(--muted); }
 .sheet-ci { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-3); }
 .sheet-ci-line { margin: 0; font-size: var(--size-small); color: var(--muted); }
 .sheet-ci.broken .sheet-ci-line { color: var(--conflict); }

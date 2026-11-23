@@ -53,7 +53,7 @@ const LEAKS: &[&str] = &[
     "not shown here",
 ];
 /// Room kept for the "DIFF NOT SENT" section.
-const CUT_NOTE_ROOM: usize = 4096;
+pub(crate) const CUT_NOTE_ROOM: usize = 4096;
 
 // ---------------------------------------------------------------------------------------------------------------
 // The source: what git and gh give, as plain data.
@@ -437,17 +437,19 @@ pub struct Facts {
     pub shape: Shape,
     pub budget: BudgetRecord,
     pub context: CheckContext,
+    /// The writer's instructions when they are not the PR brief's (a part catch-up's, `part_catch_up.rs`).
+    pub instructions: Option<String>,
 }
 
-struct FileDiff {
-    path: String,
-    header: String,
-    hunks: Vec<String>,
-    added: usize,
-    removed: usize,
+pub(crate) struct FileDiff {
+    pub(crate) path: String,
+    pub(crate) header: String,
+    pub(crate) hunks: Vec<String>,
+    pub(crate) added: usize,
+    pub(crate) removed: usize,
 }
 
-fn split_diff(diff: &str) -> Vec<FileDiff> {
+pub(crate) fn split_diff(diff: &str) -> Vec<FileDiff> {
     let mut files = Vec::new();
     for chunk in diff.split("\ndiff --git ").filter(|c| !c.is_empty()) {
         let chunk = chunk.strip_prefix("diff --git ").unwrap_or(chunk);
@@ -537,11 +539,11 @@ pub fn trim_spec(body: &str) -> String {
     out
 }
 
-fn section(name: &str, text: &str) -> String {
+pub(crate) fn section(name: &str, text: &str) -> String {
     format!("=== {name} ===\n{}\n\n", text.trim_end())
 }
 
-fn ids(map: &serde_json::Value, key: &str) -> BTreeSet<String> {
+pub(crate) fn ids(map: &serde_json::Value, key: &str) -> BTreeSet<String> {
     map[key]
         .as_array()
         .into_iter()
@@ -551,7 +553,7 @@ fn ids(map: &serde_json::Value, key: &str) -> BTreeSet<String> {
 }
 
 /// `text` cut to `max` bytes at a character boundary, with a note of what was cut.
-fn cut_to(text: &str, max: usize) -> String {
+pub(crate) fn cut_to(text: &str, max: usize) -> String {
     if text.len() <= max {
         return text.to_string();
     }
@@ -562,7 +564,7 @@ fn cut_to(text: &str, max: usize) -> String {
 /// The parts a flow's hops run through, each once, in the order the flow first reaches it; actors are left out. A hop
 /// that leaves the part the flow is at through a link's `to` end is read backwards. A part the flow revisits is not
 /// repeated: an order check taps each part once, so a key that repeated one could not be answered.
-fn flow_key(
+pub(crate) fn flow_key(
     map: &serde_json::Value,
     flow: &serde_json::Value,
     parts: &BTreeSet<String>,
@@ -1032,6 +1034,7 @@ pub fn build_facts(source: &PrSource) -> Result<Facts, String> {
         shape,
         budget,
         context,
+        instructions: None,
     })
 }
 
@@ -1100,7 +1103,8 @@ Checks (at most one per brief; omit when none fits):
 
 /// The prompt for `facts`.
 pub fn prompt(facts: &Facts) -> String {
-    format!("{INSTRUCTIONS}\nFACTS\n\n{}", facts.text)
+    let instructions = facts.instructions.as_deref().unwrap_or(INSTRUCTIONS);
+    format!("{instructions}\nFACTS\n\n{}", facts.text)
 }
 
 // ---------------------------------------------------------------------------------------------------------------

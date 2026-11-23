@@ -8,6 +8,7 @@ mod decisions;
 mod drift;
 mod fingerprint;
 mod http_writer;
+mod part_catch_up;
 mod pr_brief;
 #[path = "../../scripts/wire/samples.rs"]
 mod samples;

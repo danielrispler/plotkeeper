@@ -53,6 +53,12 @@ pub enum Kind {
     Ratify,
     /// A step's "not confirmed from the facts" mark was seen.
     UnconfirmedSeen,
+    /// A fogged part's sheet offered its part catch-up (#391).
+    CatchUpOffered,
+    /// A part catch-up was opened from the part's sheet.
+    CatchUpOpened,
+    /// A part catch-up was read to its end, which cleared the part's fog.
+    CatchUpDone,
     #[serde(other)]
     Other,
 }
@@ -154,6 +160,8 @@ fn entered(kind: Kind) -> bool {
             | Kind::ChapterDone
             | Kind::CheckAnswered
             | Kind::Ratify
+            | Kind::CatchUpOpened
+            | Kind::CatchUpDone
     )
 }
 
@@ -582,6 +590,33 @@ mod tests {
             facts(&read(&file), "/q", 0).dismissed,
             ["briefs", "history", "map", "proof", "skips"]
         );
+    }
+
+    #[test]
+    fn a_part_catch_up_opened_or_completed_is_an_entered_action_counted_apart_from_i_know_this() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(LOG_FILE);
+        let line = |day: &str, kind: &str| {
+            format!("{{\"at\":1,\"day\":\"{day}\",\"kind\":\"{kind}\",\"project\":\"/p\"}}\n")
+        };
+        let log = [
+            line("2026-11-01", "map-open"),
+            line("2026-11-01", "catch-up-offered"),
+            line("2026-11-02", "map-open"),
+            line("2026-11-02", "catch-up-opened"),
+            line("2026-11-03", "map-open"),
+            line("2026-11-03", "catch-up-done"),
+            line("2026-11-03", "know"),
+        ]
+        .concat();
+        std::fs::write(&file, log).unwrap();
+        let found = facts_in(&file, "/p");
+        assert_eq!(found.engaged_days, 2, "offered is seen, not entered");
+        let counts = serde_json::to_value(&found).unwrap()["counts"].clone();
+        assert_eq!(counts["catch-up-offered"], 1);
+        assert_eq!(counts["catch-up-opened"], 1);
+        assert_eq!(counts["catch-up-done"], 1);
+        assert_eq!(counts["know"], 1);
     }
 
     #[test]

@@ -202,7 +202,7 @@ pub struct PrBriefs {
 }
 
 /// At most this many ready PRs get their brief written at start (danielrispler/plotkeeper#334, port decision Q5): the newest head first,
-/// among those whose head moved within `catchUp.hours`.
+/// among those whose head moved within `briefBackfill.hours`.
 pub const START_BRIEFS: usize = 3;
 
 /// What the lookups write at once, given that plotkeeper has just started: the ready PRs found at the first lookup of a project that
@@ -281,6 +281,11 @@ impl PrBriefs {
     /// Whether briefs are written: not without the `claude` program, or with the fake writer of the checks.
     pub fn writes(&self) -> bool {
         self.writer.is_some()
+    }
+
+    /// The writer, which part catch-ups share (#391); `None` as for briefs.
+    pub(crate) fn writer(&self) -> Option<SharedWriter> {
+        self.writer.clone()
     }
 
     /// The model of the `prBriefs.model` setting, read from the file now.
@@ -543,7 +548,7 @@ pub fn lookup_later(app: &Arc<App>, project: &str, ready: Vec<Ready>) {
         &ready,
         &|pr| head_time_ms(project, &pr.head),
         studio_understanding::millis(),
-        crate::settings::catch_up().window_ms,
+        crate::settings::brief_backfill().window_ms,
         &|pr| has_fresh_brief(&store, pr),
     );
     for pr in ready.into_iter().filter(|pr| allowed.contains(&pr.number)) {

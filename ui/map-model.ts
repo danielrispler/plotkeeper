@@ -1,7 +1,7 @@
 // The Map view's pure logic (spec danielrispler/plotkeeper#306, ticket #309): the map file as the window reads it, where parts
 // are placed, the drag threshold, the link's rim points, the layered Esc and the camera. `map.ts` draws and wires them.
 
-import type { BriefFigure, BriefStep, Camera, Ci, CommitFiles, Fog, HistoricalMap, HistoryEntry, PrBrief, Proof, ReadyPr } from "./types.js";
+import type { BriefFigure, BriefStep, CatchUpOffer, Camera, Ci, CommitFiles, Fog, HistoricalMap, HistoryEntry, PrBrief, Proof, ReadyPr } from "./types.js";
 
 export type Tier = "core" | "interface" | "black-box";
 export type Point = { x: number; y: number };
@@ -603,4 +603,32 @@ export function pressHeader(page: PageView, pressed: string, projectOf: (session
   if (pressed === page.project) return "fold";
   const session = panelSession(page.panel);
   return { project: pressed, panel: session === null || projectOf(session) === pressed ? page.panel : null };
+}
+
+// ---- The part catch-up (spec #378, ticket #391): what a fogged part's sheet offers, from the server's `catch_ups`.
+
+// The sheet's fog buttons, the main one first: the part catch-up (or, for a part fogged by one PR whose brief lights it, that chapter), then
+// the quiet "I know this". A catch-up being written stays pressable: "Writing…" never blocks the sheet or the map.
+export type FogAction = { label: string; title: string; note: string | null; disabled: boolean; open: { kind: "catch-up" } | { kind: "chapter"; pr: number; chapter: number } };
+export function fogActions(fog: Fog | undefined, offer: CatchUpOffer | undefined): { main: FogAction | null; second: "I know this" | null } {
+  if (!fog) return { main: null, second: null };
+  if (!offer) return { main: null, second: "I know this" };
+  const main: FogAction =
+    offer.kind === "chapter"
+      ? { label: `Read #${offer.pr}'s brief`, title: "Open the chapter of this PR's brief that covers this part", note: null, disabled: false, open: { kind: "chapter", pr: offer.pr, chapter: offer.chapter } }
+      : {
+          label: "Part catch-up",
+          title: "One story of everything that landed here since you last caught up; reading it to the end clears this part's fog",
+          note: offer.writing ? "Writing…" : offer.failed ? "The last write failed; press to try again" : null,
+          disabled: false,
+          open: { kind: "catch-up" },
+        };
+  return { main, second: "I know this" };
+}
+
+// What a catch-up opened while it was written waits for, read from the part's offer at each map draw: "open" once it is stored for the
+// part's fog, "stop" when its write failed or the part was cleared meanwhile, else "wait".
+export function awaitedCatchUp(offer: CatchUpOffer | undefined): "open" | "stop" | "wait" {
+  if (!offer || offer.kind !== "catch-up" || (offer.failed && !offer.writing)) return "stop";
+  return offer.ready && !offer.writing ? "open" : "wait";
 }

@@ -25,6 +25,7 @@ mod fingerprint;
 mod grounding;
 pub mod http_writer;
 mod logic_file;
+pub mod part_catch_up;
 pub mod pr_brief;
 pub mod pr_brief_check;
 mod risk;

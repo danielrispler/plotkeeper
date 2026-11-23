@@ -271,6 +271,10 @@ _Avoid_: Open PR (a draft is open too), review requested
 To accept or overturn a change the agent made to the system map or a law, or a decision it declared, offered in the **PR brief**. A map change nobody has decided on is **not yet ratified**; it is in effect all the same, since ratifying never blocks. Overturning copies a prompt that quotes the item to the clipboard, for Daniel to paste into his agent.
 _Avoid_: Approve (that is the PR review), sign off
 
+**Part catch-up**:
+One story, in the **PR brief**'s reader and shape (a single story of three or four steps), of everything that landed in one fogged part since Daniel last caught up: every PR and direct push in its **Fog**, ordered by behaviour. A fogged part's sheet offers it as the main button, before "I know this"; reading it to the end clears that part's fog and completes no PR brief.
+_Avoid_: Catch-up (alone — the setting that writes briefs at start is the brief backfill), summary
+
 **Claim check**:
 The second sandboxed call that checks each claim of a **PR brief** against the same facts the writer had. An item still flagged after one rewrite carries the mark **not confirmed from the facts**.
 _Avoid_: Fact check, verification

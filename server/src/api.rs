@@ -181,6 +181,17 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
             arg(a, "chapter")?,
             arg(a, "head")?,
         )),
+        "part_catch_up" => res(crate::part_catch_ups::part_catch_up(
+            arc,
+            arg(a, "project")?,
+            arg(a, "part")?,
+        )),
+        "part_catch_up_done" => res(crate::part_catch_ups::part_catch_up_done(
+            app,
+            arg(a, "project")?,
+            arg(a, "part")?,
+            arg(a, "fog")?,
+        )),
         "briefs_waiting" => out(crate::pr_briefs::briefs_waiting(app, arg(a, "cwd")?)),
         "pr_ratify" => res(crate::ratify::pr_ratify(
             &app.prs,

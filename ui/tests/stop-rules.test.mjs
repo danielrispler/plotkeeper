@@ -8,7 +8,7 @@ const calls = [];
 tauri(calls);
 const { dismissReview, judge, localDay, logStop, reviewOf, reviewWords, table, unused } = await import("../../dist/stop-rules.js");
 
-const facts = (extra = {}) => ({ active_days: 14, merged_prs: 20, engaged_days: 0, scrubs: 0, proofs: 0, knows: 0, dismissed: [], briefs_offered: 0, briefs_opened: 0, chapters_done: 0, counts: {}, began: "2026-11-01", ...extra });
+const facts = (extra = {}) => ({ active_days: 14, merged_prs: 20, engaged_days: 0, scrubs: 0, proofs: 0, knows: 0, dismissed: [], briefs_offered: 0, briefs_opened: 0, chapters_done: 0, counts: { "catch-up-done": 3 }, began: "2026-11-01", ...extra });
 
 test("the review waits for both 14 active days and 20 merged PRs, whichever comes last", () => {
   assert.deepEqual(unused(facts()), ["map", "history", "proof"]);
@@ -145,4 +145,12 @@ test("a brief offered or an unconfirmed mark seen is told once per PR, other bri
   logStop("brief-opened", "/a", 7);
   const sent = calls.map(([, args]) => `${args.kind} ${args.project} ${args.pr}`);
   assert.deepEqual(sent, ["brief-offered /a 7", "brief-offered /a 8", "brief-offered /b 7", "unconfirmed-seen /a 7", "brief-opened /a 7", "brief-opened /a 7"]);
+});
+
+test("part catch-ups are kept at 3 completed, counted apart from \"I know this\"", () => {
+  const passed = { engaged_days: 4, scrubs: 2, proofs: 2 };
+  assert.deepEqual(unused(facts({ ...passed, counts: { "catch-up-done": 2, "catch-up-opened": 9, know: 9 } })), ["catch-ups"]);
+  assert.deepEqual(unused(facts({ ...passed, counts: { "catch-up-done": 3 } })), []);
+  assert.match(reviewWords(["catch-ups"]), /part catch-ups/);
+  assert.equal(table.find((row) => row.module === "catch-ups").wait, undefined, "no exception: judged with the review");
 });

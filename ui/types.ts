@@ -397,7 +397,14 @@ export type MapState = {
   ratify: PendingItem[];
   // The project's background runs and the pause line (`runner.rs`).
   runs: Runs;
+  // What each fogged part's sheet offers (`part_catch_ups.rs`): its part catch-up, or the one PR brief chapter that lights it.
+  catch_ups: Record<string, CatchUpOffer>;
 };
+// A fogged part's offer (#391): a part catch-up, `ready` when one is stored for its current fog list, `writing` while one is written, `failed`
+// when the last write for it failed; or the chapter of the one PR's brief that lights the part.
+export type CatchUpOffer = { kind: "catch-up"; ready: boolean; writing: boolean; failed: boolean } | { kind: "chapter"; pr: number; chapter: number };
+// A part catch-up as `part_catch_up` returns it (`understanding/src/part_catch_up.rs`): the story in the PR brief's shape and the fog list it covers.
+export type StoredCatchUp = { version: number; part: string; fog: string[]; written_at: number; model: string; partial: boolean; brief: PrBrief };
 // A background run (`server/src/runner.rs`): a headless agent run Daniel started with a click, queued one at a time per project. `at` is when
 // it was asked for, started or ended, by its state. An ended run says how it ended in `line`, lists the tool calls it was denied, and
 // carries its `prompt` to copy on every end but a clean one. `paused` is why every queue waits, null while they run.
@@ -508,6 +515,8 @@ export interface Commands {
   map_state: MapState;
   // The brief, or that its write has started (it comes through `map-landed`).
   pr_brief: BriefView | { writing: true } | null;
+  part_catch_up: StoredCatchUp | { writing: true } | null;
+  part_catch_up_done: void;
   pr_diff: CommitFiles;
   brief_chapter_done: void;
   briefs_waiting: WaitingBriefs | null;
@@ -541,7 +550,7 @@ export interface Commands {
 export type Command = keyof Commands;
 
 // What the shell counted of Daniel's use (`stop_rules.rs`), for the one-time review: days, merged PRs and the uses of each module.
-export type StopKind = "session" | "map-open" | "map-action" | "scrub" | "proof" | "know" | "brief-offered" | "brief-opened" | "chapter-done" | "check-answered" | "ratify" | "unconfirmed-seen";
+export type StopKind = "session" | "map-open" | "map-action" | "scrub" | "proof" | "know" | "brief-offered" | "brief-opened" | "chapter-done" | "check-answered" | "ratify" | "unconfirmed-seen" | "catch-up-offered" | "catch-up-opened" | "catch-up-done";
 export type StopFacts = {
   active_days: number;
   merged_prs: number;

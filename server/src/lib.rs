@@ -36,6 +36,7 @@ pub mod hook_copies;
 pub mod install;
 pub mod lock;
 pub mod map;
+pub mod part_catch_ups;
 pub mod pr_briefs;
 pub mod projects;
 pub mod prs;
@@ -125,6 +126,8 @@ pub struct App {
     /// The PRs found for each project's branches (`prs.rs`) and the PR briefs written for the ready ones (`pr_briefs.rs`).
     pub prs: prs::Prs,
     pub briefs: pr_briefs::PrBriefs,
+    /// The part catch-ups being written and the ones that failed (`part_catch_ups.rs`).
+    pub catch_ups: part_catch_ups::CatchUps,
     /// The saved project list (`projects.rs`), beside the log.
     pub projects: projects::Projects,
     pub watching: Mutex<answer::Watching>,
@@ -237,6 +240,7 @@ impl App {
             ci: Arc::new(ci_laws::load_cache()),
             prs: prs::Prs::default(),
             briefs,
+            catch_ups: part_catch_ups::CatchUps::default(),
             projects: projects::Projects::beside(log),
             watching: Mutex::default(),
             events,

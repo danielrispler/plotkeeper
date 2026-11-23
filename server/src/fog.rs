@@ -317,7 +317,7 @@ pub fn refresh(repo: &Path, file: &Path, project: &str, open: bool) -> Result<()
 }
 
 /// The PR a squash-merge commit came from, read from its subject `Title (#N)`.
-fn subject_pr(repo: &Path, commit: &str) -> Option<u64> {
+pub(crate) fn subject_pr(repo: &Path, commit: &str) -> Option<u64> {
     let subject = git(repo, &["log", "-1", "--format=%s", commit]).ok()?;
     let (_, number) = subject.trim_end().strip_suffix(')')?.rsplit_once(" (#")?;
     number.parse().ok()

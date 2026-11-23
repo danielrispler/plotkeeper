@@ -41,6 +41,8 @@ export const table: Row[] = [
     note: "“I know this” cleared more fog than finishing a brief's chapters did.",
     kept: (f) => f.briefs_offered === 0 || f.knows <= f.chapters_done,
   },
+  // Part catch-ups (#391): completed at least 3 times; "I know this" is counted apart (`know`).
+  { module: "catch-ups", name: "part catch-ups", kept: (f) => (f.counts["catch-up-done"] ?? 0) >= 3 },
 ];
 
 // `day` plus `n` days, both local days (`2026-11-03`).
