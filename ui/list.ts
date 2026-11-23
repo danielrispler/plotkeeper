@@ -559,7 +559,7 @@ export const landedClear = clearing(
     changed: (pending, writing) => {
       if (pending.length) showClearToast(pending.length, () => landedClear.undo());
       else hideClearToast();
-      drawSidebar();
+      drawShown();
     },
   },
 );
@@ -677,12 +677,17 @@ export function showSessions(sessions: Session[]) {
   void refreshAgents();
   landedClear.sync();
   redrawHistory();
-  const live = sidebarSessions(sessions, landedClear.hidden);
-  drawSidebar();
-  patch(element("strip"), strip(live));
+  drawShown();
   const chip = element("needs-you");
   chip.textContent = chipText(sessions);
   chip.hidden = chip.textContent === "";
   chip.title = "Go to the first session that needs you";
+}
+
+// What shows the listed sessions but those Clear landed hid: the list, the strip and the tab's title.
+function drawShown() {
+  const live = sidebarSessions(studio.listed, landedClear.hidden);
+  drawSidebar();
+  patch(element("strip"), strip(live));
   showTitle(live.filter((session) => session.unseen).length);
 }

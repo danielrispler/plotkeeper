@@ -634,12 +634,18 @@ const listSecondLines = (): Fixture => ({
       if (clear() && getComputedStyle(clear()).color !== "rgb(111, 108, 102)") log("snap:fail Clear landed is not faint: " + getComputedStyle(clear()).color);`,
 });
 // Clear landed pressed: the landed row is hidden, the toast offers Undo, and Undo brings it back; pressed again for the screenshot.
+// The strip and the tab's title follow at once too: the cleared session, unseen here, leaves both.
 const listClearLanded = (): Fixture => ({
   ...listLines(),
+  sessions: (listLines().sessions as Session[]).map((s) => (s.id === "s5" ? { ...s, unseen: true } : s)),
   snapScript: `${listChecks}
+      const title = document.title;
+      if (!document.querySelector('#strip [data-key="strip s5"]')) log("snap:fail the landed session is not in the strip before Clear landed");
       clear().click();
       await wait(100);
       if (line("s5") !== null || document.querySelector('#groups .session-row[data-key="s5 "]')) log("snap:fail the landed row is still shown after Clear landed");
+      if (document.querySelector('#strip [data-key="strip s5"]')) log("snap:fail the landed session is still in the strip after Clear landed");
+      if (document.title === title) log("snap:fail the tab's title still counts the cleared session: " + title);
       if (clear()) log("snap:fail Clear landed shows with nothing landed left");
       const toast = document.getElementById("clear-toast");
       if (toast.hidden || !/Cleared 2 landed/.test(toast.textContent) || !/Undo/.test(toast.textContent)) log("snap:fail the toast: " + toast.textContent);
