@@ -398,9 +398,9 @@ const homeMarked = (press: boolean): Fixture => ({
       if (document.getElementById("map").hidden) return log("snap:fail the mark did not open the Map view");
     }`,
 });
-// The stop-rule review (#314): Studio has run 20 active days and merged 25 PRs, and the Map view was opened on one of them and Home's mark
-// never led to it, so the Map view fell below its threshold, and so did the history strip and "See the proof".
-const dueFacts = { active_days: 20, merged_prs: 25, map_days: 1, mark_days: 5, map_on_mark_days: 0, scrubs: 0, proofs: 0, knows: 0, dismissed: false, briefs_offered: 0, briefs_opened: 0, chapters_done: 0 };
+// The stop-rule review (#314, #384): Studio has run 20 active days and merged 25 PRs, and the Map view was engaged with on one of them, so
+// the Map view fell below its threshold, and so did the history strip and "See the proof".
+const dueFacts = { active_days: 20, merged_prs: 25, engaged_days: 1, scrubs: 0, proofs: 0, knows: 0, dismissed: false, briefs_offered: 0, briefs_opened: 0, chapters_done: 0 };
 // Home's dot for a waiting PR brief (#344): no fog and no broken law, but a ready PR has a brief stored, so the shell's marks name the project.
 const homeBriefWaiting = (): Fixture => ({
   ...(fixtures as Record<string, () => Fixture>).home(),
@@ -413,16 +413,15 @@ const homeBriefWaiting = (): Fixture => ({
     if (marks[0].textContent !== "" || !marks[0].title.includes("PR brief")) log("snap:fail the mark has a count or does not name the brief");
     log("home brief dot ok");`,
 });
-const homeReviewed = (): Fixture => ({
+// The review shows on the map only (#384): Home shows none, even while the Map view is below its threshold.
+const homeNoReview = (): Fixture => ({
   ...(fixtures as Record<string, () => Fixture>).home(),
   map_marks: ["/w/plotkeeper"],
   stop_facts: dueFacts,
   snapScript: `
     await new Promise((done) => setTimeout(done, 400));
-    const review = document.querySelector(".pane.home .review");
-    if (!review) return log("snap:fail Home shows no review");
-    if (!review.textContent.includes("Little used so far")) log("snap:fail the review's words: " + review.textContent);
-    log("review ok");`,
+    if (document.querySelector(".pane.home .review")) return log("snap:fail Home shows the review");
+    log("no review ok");`,
 });
 const mapOpened = (check: string, extra: Fixture = {}): Fixture => ({
   ...list(),
@@ -810,8 +809,8 @@ export const fixtures = {
       if (!review.textContent.includes("Little used so far: the Map view, the history strip and See the proof")) log("snap:fail the review's words: " + review.textContent);
       if (/\\d/.test(review.querySelector(".review-text").textContent)) log("snap:fail the review shows a count");
       log("review ok");`, { map_state: mapState(), stop_facts: dueFacts }),
-  // The same review on Home, when the Map view itself fell below its threshold (#314).
-  homeReview: homeReviewed,
+  // No review on Home, even when the Map view fell below its threshold (#384).
+  homeNoReview,
   // No map on the default branch: the empty state shows the drafting prompt to give to a session.
   mapEmpty: () =>
     mapOpened(`

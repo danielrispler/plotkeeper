@@ -22,8 +22,8 @@ test("the Map view passes at 4 engaged days in the window, and a day it was only
   assert.ok(unused(facts({ engaged_days: 3 })).includes("map"));
   assert.ok(!unused(facts({ engaged_days: 4 })).includes("map"));
   assert.ok(!unused(facts({ engaged_days: 9 })).includes("map"));
-  // Open on every active day of the window with no entered action: no engaged day, and Home's old fields count for nothing.
-  assert.ok(unused(facts({ engaged_days: 0, map_days: 14, mark_days: 5, map_on_mark_days: 5 })).includes("map"));
+  // Open on every active day of the window with no entered action: no engaged day.
+  assert.ok(unused(facts({ active_days: 14, engaged_days: 0 })).includes("map"));
 });
 
 test("the history strip needs 2 scrubs and the proof drawers 2 opens", () => {
