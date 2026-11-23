@@ -54,4 +54,6 @@ export const base = {
   turn_summary: null,
   watch: null,
   writer_notice: null,
+  writers: { writers: [{ kind: "claude", name: "Claude", found: true, models: ["haiku", "sonnet", "opus", "fable"], efforts: ["", "low", "medium", "high"] }, { kind: "agy", name: "agy", found: false, models: ["gemini-4-neon-low"], efforts: [] }], summaries_on: true, briefs: true },
+  test_writer: { outcome: "passed", line: "Passed: `claude` answered. Summaries are written with it.", settings: null },
 } satisfies { [C in ReadCommand]: Commands[C] };

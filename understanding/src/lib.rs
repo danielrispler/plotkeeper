@@ -8,7 +8,11 @@ use std::{
     os::unix::process::CommandExt,
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::{Mutex, mpsc},
+    sync::{
+        Mutex,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -47,8 +51,8 @@ pub use turn_trees::{
 };
 pub use turn_writing::{Core, Effects, TurnWriting, Writer};
 pub use writer::{
-    AGY_LOGIN_WAIT, FailureKind, Usage, WriterError, WriterKind, WriterReply, WriterRequest,
-    build_command, read_reply,
+    AGY_LOGIN_WAIT, FailureKind, FoundWriter, Usage, WriterError, WriterKind, WriterReply,
+    WriterRequest, build_command, found_writers, read_reply,
 };
 
 /// Lines `from` to `to`, counted from 1 and both included, of a file in a card's end tree, as a card stored before
@@ -123,6 +127,16 @@ pub trait CardWriter {
 
     /// Chooses which program writes from now on, from the settings (#327). A writer with one program ignores it.
     fn use_writer(&self, _kind: WriterKind) {}
+
+    /// Turns the writer's calls on or off: off, until a writer passes Test, for a user who arrived with none configured
+    /// (spec #320, "The Test gate"). A Test runs either way.
+    fn summaries_on(&self, _on: bool) {}
+
+    /// The page's Test: one tiny call to writer `kind` at `model` and `effort` (empty: its default), and its typed outcome.
+    /// A writer that runs no program passes.
+    fn test(&self, _kind: WriterKind, _model: &str, _effort: &str) -> Result<(), WriterError> {
+        Ok(())
+    }
 
     /// The writer's reply with "Design so far" of a session from `sources`, each a turn's or a card's
     /// id and a line of it, oldest first (danielrispler/plotkeeper#123), or one line for the log when it gave none.
@@ -429,7 +443,12 @@ pub struct ClaudeWriter {
     risk_timeout: Duration,
     /// Told when no call can start and when one works again (danielrispler/plotkeeper#51).
     availability: Availability,
+    /// Whether calls run: off until a writer passes Test for a user who arrived with none configured (spec #320).
+    on: AtomicBool,
 }
+
+/// The Test's one tiny call.
+const TEST_PROMPT: &str = "Reply with the word ok and nothing else.";
 
 /// The notice now shown, and who hears when it changes.
 #[derive(Default)]
@@ -473,6 +492,11 @@ pub fn find_claude(shell: &Path) -> PathBuf {
 
 /// `find_claude` for any `program`, such as `agy`.
 pub fn find_program(shell: &Path, program: &str) -> PathBuf {
+    find(shell, program).unwrap_or_else(|| program.into())
+}
+
+/// `program`'s path as login shell `shell`'s `command -v` answers it, or `None` when it finds none.
+pub fn find(shell: &Path, program: &str) -> Option<PathBuf> {
     let output = Command::new(shell)
         .args(["-lc", &format!("command -v {program}")])
         .output();
@@ -480,8 +504,8 @@ pub fn find_program(shell: &Path, program: &str) -> PathBuf {
     let stdout = stdout.as_deref().map(String::from_utf8_lossy);
     // A profile may print before the answer, which is the last line.
     match stdout.as_deref().and_then(|out| out.lines().last()) {
-        Some(path) if path.starts_with('/') => path.into(),
-        _ => program.into(),
+        Some(path) if path.starts_with('/') => Some(path.into()),
+        _ => None,
     }
 }
 
@@ -496,6 +520,7 @@ impl ClaudeWriter {
             timeout: None,
             risk_timeout: RISK_TIMEOUT,
             availability: Availability::default(),
+            on: AtomicBool::new(true),
         }
     }
 
@@ -530,6 +555,12 @@ impl ClaudeWriter {
     pub fn with_kind(self, kind: WriterKind) -> Self {
         *self.kind.lock().unwrap() = kind;
         self
+    }
+
+    /// Whether the login shell found `claude`, which PR briefs need whatever writer writes summaries (spec #320).
+    /// `find_claude` keeps the bare name when it finds no path.
+    pub fn claude_found(&self) -> bool {
+        self.program.is_absolute()
     }
 
     /// The program that writes now.
@@ -693,6 +724,7 @@ impl ClaudeWriter {
 
     /// The contract's one call: `request` made and its reply read, or why not.
     pub fn complete(&self, request: &WriterRequest) -> Result<WriterReply, WriterError> {
+        self.on_or(self.kind())?;
         let run = self.build(request);
         self.call(request.timeout, run, request.schema.is_some())
     }
@@ -706,6 +738,8 @@ impl ClaudeWriter {
 
     /// `stdout`, with the call stopped after `timeout`.
     fn stdout_within(&self, timeout: Duration, run: (Command, String)) -> Result<String, String> {
+        self.on_or(self.built_for(&run.0))
+            .map_err(|error| error.to_string())?;
         match self.call(timeout, run, false) {
             Ok(reply) => Ok(reply.text),
             Err(error) => Err(error.to_string()),
@@ -721,15 +755,44 @@ impl ClaudeWriter {
         }
     }
 
+    /// Nothing, or why no call runs: summaries are off until a writer passes Test. Being off is no failure notice.
+    fn on_or(&self, kind: WriterKind) -> Result<(), WriterError> {
+        match self.on.load(Ordering::Acquire) {
+            true => Ok(()),
+            false => Err(WriterError::new(
+                FailureKind::Other,
+                kind,
+                "(summaries are off until a writer passes Test)",
+            )),
+        }
+    }
+
     /// A run, read into the contract: its reply, or a typed failure.
     fn call(
         &self,
         timeout: Duration,
-        (mut command, prompt): (Command, String),
+        run: (Command, String),
         schema: bool,
     ) -> Result<WriterReply, WriterError> {
         // The writer the command was built for, not the one set now: the settings may switch between the two.
-        let kind = self.built_for(&command);
+        let kind = self.built_for(&run.0);
+        self.call_as(kind, timeout, run, schema, true)
+    }
+
+    /// `call` for writer `kind`; `tell`: its failure or success changes the notice.
+    fn call_as(
+        &self,
+        kind: WriterKind,
+        timeout: Duration,
+        (mut command, prompt): (Command, String),
+        schema: bool,
+        tell: bool,
+    ) -> Result<WriterReply, WriterError> {
+        let tell_failed = |error: &WriterError| {
+            if tell {
+                self.availability.failed(error)
+            }
+        };
         let timeout = stop_after(kind, timeout);
         let mut child = command
             .stdin(Stdio::piped())
@@ -744,7 +807,7 @@ impl ClaudeWriter {
                     FailureKind::Other
                 };
                 let error = WriterError::new(kind_of, kind, format!("({e})"));
-                self.availability.failed(&error);
+                tell_failed(&error);
                 error
             })?;
         let (mut stdin, mut stdout) = (child.stdin.take(), child.stdout.take());
@@ -780,14 +843,15 @@ impl ClaudeWriter {
             );
             // A call kept short on purpose (the risk judge) timing out is no fault of the writer.
             if timeout >= kind.timeout() {
-                self.availability.failed(&error);
+                tell_failed(&error);
             }
             return Err(error);
         };
         let reply = read_reply(kind, schema, &status, &String::from_utf8_lossy(&out));
         match &reply {
-            Ok(_) => self.availability.worked(),
-            Err(error) => self.availability.failed(error),
+            Ok(_) if tell => self.availability.worked(),
+            Ok(_) => {}
+            Err(error) => tell_failed(error),
         }
         reply
     }
@@ -796,6 +860,27 @@ impl ClaudeWriter {
 impl CardWriter for ClaudeWriter {
     fn use_writer(&self, kind: WriterKind) {
         *self.kind.lock().unwrap() = kind;
+    }
+
+    fn summaries_on(&self, on: bool) {
+        self.on.store(on, Ordering::Release);
+    }
+
+    fn test(&self, kind: WriterKind, model: &str, effort: &str) -> Result<(), WriterError> {
+        let request = WriterRequest {
+            user: TEST_PROMPT.into(),
+            model: (!model.is_empty()).then(|| model.into()),
+            effort: Some(effort.into()),
+            timeout: self.timeout.unwrap_or(kind.timeout()),
+            ..WriterRequest::default()
+        };
+        let (program, folder) = match kind {
+            WriterKind::Claude => (&self.program, &self.folder),
+            WriterKind::Agy => (&self.agy_program, &self.agy_folder),
+        };
+        let run = build_command(kind, program, folder, &request);
+        self.call_as(kind, request.timeout, run, false, false)
+            .map(|_| ())
     }
 
     fn goal(&self, prompts: &[&str]) -> Result<String, String> {

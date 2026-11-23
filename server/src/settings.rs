@@ -174,6 +174,33 @@ pub fn write_setting(
     write_in(&settings, expected.as_deref(), &path, value.as_ref())
 }
 
+/// Saves the writer the page's Test passed, with its model and effort (an empty effort: the key removed, the model's
+/// default), in `settings.json`, under the one lock of the page's writes. `expected` is the text the page last read. Returns the new text.
+pub fn save_writer(
+    expected: Option<String>,
+    writer: studio_understanding::WriterKind,
+    model: &str,
+    effort: &str,
+) -> Result<String, String> {
+    let [settings, _] = paths().ok_or("no home folder")?;
+    let _one_at_a_time = WRITING.lock().unwrap_or_else(|e| e.into_inner());
+    let key = |leaf: &str| vec!["summaries".to_string(), leaf.to_string()];
+    let text = write_in(
+        &settings,
+        expected.as_deref(),
+        &key("writer"),
+        Some(&serde_json::json!(writer.program())),
+    )?;
+    let text = write_in(
+        &settings,
+        Some(&text),
+        &key("model"),
+        Some(&serde_json::json!(model)),
+    )?;
+    let effort = (!effort.is_empty()).then(|| serde_json::json!(effort));
+    write_in(&settings, Some(&text), &key("effort"), effort.as_ref())
+}
+
 /// The `repository` setting (danielrispler/Falinks#605): the folder the shell, Workspaces and the picker start in. Read from
 /// the file on each call, so a saved change takes effect; `None` when unset, empty or not a string.
 pub fn repository() -> Option<String> {
@@ -199,6 +226,58 @@ fn summary_writer_in(text: &str) -> studio_understanding::WriterKind {
         .ok()
         .and_then(|json| serde_json::from_value(json["summaries"]["writer"].clone()).ok())
         .unwrap_or_default()
+}
+
+/// Whether summaries are written at this start (spec #320, "The Test gate"): yes for a user who was configured before, or
+/// once a writer passed Test; else no, until one does. Read at start, before the writer makes its folder.
+///
+/// Today a missing `summaries.writer` reads as Claude, so the key alone cannot tell who was configured: a user is, when
+/// `settings.json` names `summaries.writer`, or when the data folder held the writer's folder (`card-writer`, which only a
+/// start of plotkeeper or the app before it makes) at the first start of this version. That first look is kept in
+/// `writer-gate.json`, so later starts, after the writer has made its folder, read the same answer.
+pub fn summaries_open(data: &Path) -> bool {
+    let gate = data.join(GATE);
+    let open = match fs::read_to_string(&gate)
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .and_then(|json| json["open"].as_bool())
+    {
+        Some(open) => open,
+        None => {
+            let open = data
+                .join(studio_understanding::WriterKind::Claude.folder())
+                .is_dir();
+            if let Err(e) = save(&gate, &serde_json::json!({ "open": open }).to_string()) {
+                log::error!("save {GATE}: {e}");
+            }
+            open
+        }
+    };
+    open || names_writer(&fs::read_to_string(data.join(NAMES[0])).unwrap_or_default())
+}
+
+/// The file that keeps whether summaries are written without a Test, beside the settings.
+const GATE: &str = "writer-gate.json";
+
+/// A writer passed Test: summaries are written from now on, at every start.
+pub fn open_summaries(data: &Path) -> Result<(), String> {
+    save(
+        &data.join(GATE),
+        &serde_json::json!({ "open": true }).to_string(),
+    )
+}
+
+/// Whether `settings.json`'s text names a writer in `summaries.writer`.
+fn names_writer(text: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(&plain_json(text))
+        .ok()
+        .and_then(|json| {
+            serde_json::from_value::<studio_understanding::WriterKind>(
+                json["summaries"]["writer"].clone(),
+            )
+            .ok()
+        })
+        .is_some()
 }
 
 /// The catch-up at start from `settings.json`: `catchUp.hours` (default 2), how far back a ready PR's head may have moved for its
@@ -282,6 +361,48 @@ mod tests {
     };
     use serde_json::json;
     use studio_understanding::WriterKind;
+
+    #[test]
+    fn a_fresh_home_gets_no_summaries_until_a_writer_passes_test() {
+        let home = tempfile::tempdir().unwrap();
+        let data = home.path().join("plotkeeper");
+        assert!(!super::summaries_open(&data));
+        // The start then makes the writer's folder; the next start is still gated.
+        std::fs::create_dir_all(data.join("card-writer")).unwrap();
+        assert!(!super::summaries_open(&data));
+        super::open_summaries(&data).unwrap();
+        assert!(super::summaries_open(&data));
+    }
+
+    #[test]
+    fn a_data_folder_an_earlier_plotkeeper_used_writes_summaries_with_no_test() {
+        let home = tempfile::tempdir().unwrap();
+        let data = home.path().join("plotkeeper");
+        std::fs::create_dir_all(data.join("card-writer")).unwrap();
+        std::fs::write(data.join("events.jsonl"), "").unwrap();
+        assert!(super::summaries_open(&data));
+        assert!(super::summaries_open(&data), "and at every start after");
+    }
+
+    #[test]
+    fn a_settings_file_that_names_the_writer_writes_summaries_with_no_test() {
+        let home = tempfile::tempdir().unwrap();
+        let data = home.path().join("plotkeeper");
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::write(
+            data.join("settings.json"),
+            "{ \"summaries\": { \"writer\": \"agy\", }, }",
+        )
+        .unwrap();
+        assert!(super::summaries_open(&data));
+        // A key that names no writer is not that.
+        std::fs::write(
+            data.join("settings.json"),
+            r#"{ "summaries": { "model": "haiku" } }"#,
+        )
+        .unwrap();
+        assert!(!super::summaries_open(&data));
+    }
 
     fn path(keys: &[&str]) -> Vec<String> {
         keys.iter().map(|k| k.to_string()).collect()

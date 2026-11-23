@@ -2,7 +2,7 @@
 
 `settings.json` and `keymap.json` sit in plotkeeper's data folder, `~/Library/Application Support/plotkeeper/`, in Zed's format: JSON with comments and trailing commas (danielrispler/Falinks#524). The desktop app reloads them when either is saved; `plotkeeper` reads them at start, so restart it after editing one. A file that does not parse is reported in the notice line, and the last good one stays in effect. Missing keys keep their defaults; a key of the wrong type is reported in the same line and keeps its default.
 
-The page has no settings page, no project list and no terminal (danielrispler/plotkeeper#326): you edit the files in your editor. The keys it reads:
+The page has no project list and no terminal (danielrispler/plotkeeper#326), and no settings page but one section: the summary writer, under Writer at the top of the page (spec #320, #363). Every other key you edit in your editor. The keys it reads:
 
 ```jsonc
 {
@@ -14,7 +14,15 @@ The page has no settings page, no project list and no terminal (danielrispler/pl
 }
 ```
 
-The writer is the program that writes the turn summaries, the session's Goal and Design so far, and names (#327; PR briefs always use `claude -p`, whatever it says, with their own model setting above): `summaries.writer` is `"claude"` (the default, `claude -p`) or `"agy"` (the Antigravity CLI, run with JSON schema output in a neutral empty folder of its own, with a 3-minute timeout that covers a logged-out `agy`'s 60-second wait). Its `model` and `effort` are read by that program, so an `agy` model is one of `agy models`, such as `gemini-4-neon-low`; a `model` that is not in that list (the default `haiku`, with the writer moved to `agy`) is written with the first of the list, `gemini-4-neon-low`, and its `effort` is dropped, while `claude` takes any model id. A writer that fails reports why in one log line: not logged in, quota or rate limit, timeout, not installed, an empty reply, or another failure. Both writers set `PLOTKEEPER_INTERNAL=1`, so the hook never records their runs.
+## The writer section
+
+Writer, at the top of the page, lists the writers the login shell's `command -v` finds, Claude (`claude`) then agy (`agy`); one that is not found is listed but cannot be picked. Pick one, a model and, for Claude, an effort, and press Test: it makes one tiny call and shows its outcome, passed, or failed with why (not logged in, quota or rate limit, timeout, not installed, an empty or failed reply) and that writer's own fix. Nothing checks a login on its own, so opening the page spends nothing. A pass saves `summaries.writer`, `summaries.model` and `summaries.effort` in `settings.json` (an effort left at default removes its key); a failure saves nothing. The section opens on the writer in effect, or, while summaries are off, on the first writer found.
+
+**The Test gate.** A user who arrives with no writer configured gets no summaries, Goals, Design so far, names or risk notes until a writer passes Test; the notice line says so. You count as configured when `settings.json` names `summaries.writer`, or when the data folder held `card-writer/`, which only an earlier start of plotkeeper (or the app before it) makes, at the first start of this version; that first look is kept in `writer-gate.json` in the data folder, and a passed Test sets it open for good. An existing setup therefore writes summaries after the upgrade with no Test.
+
+PR briefs are written by `claude` whatever writer is picked. Without `claude`, no brief is attempted, and the writer section and the Map view's tray say briefs need Claude.
+
+The writer is the program that writes the turn summaries, the session's Goal and Design so far, and names (#327; PR briefs always use `claude -p`, whatever it says, with their own model setting above): `summaries.writer` is `"claude"` (the default, `claude -p`) or `"agy"` (the Antigravity CLI, run with JSON schema output in a neutral empty folder of its own, with a 3-minute timeout that covers a logged-out `agy`'s 60-second wait). Its `model` and `effort` are read by that program, so an `agy` model is one of `agy models`, such as `gemini-4-neon-low`; a `model` that is not in that list (the default `haiku`, with the writer moved to `agy`) is written with the first of the list, `gemini-4-neon-low`, and its `effort` is dropped, while `claude` takes any model id. A writer that fails says "Summaries are off:" in the notice line, with why and its own fix, and reports why in one log line: not logged in, quota or rate limit, timeout, not installed, an empty reply, or another failure. Both writers set `PLOTKEEPER_INTERNAL=1`, so the hook never records their runs.
 
 An older file's `zoom`, `terminal`, `sounds`, `doctor`, `editor` and `repository` keys are ignored: the browser zooms the page, and there is no terminal, sound, Doctor or editor on it.
 

@@ -604,8 +604,61 @@ const mapScrubbed = (): Fixture => {
   return { ...f, sessions: busySessions(), selected: { session: busySessions()[6], agent: null } };
 };
 
+// The writer section (#363) open under Writer: claude and agy found, or agy alone; `check` runs after it has drawn, and a script
+// that presses Test waits for its outcome.
+const claudeWriter = { kind: "claude" as const, name: "Claude", found: true, models: ["haiku", "sonnet", "opus", "fable"], efforts: ["", "low", "medium", "high"] };
+const agyWriter = { kind: "agy" as const, name: "agy", found: true, models: ["gemini-4-neon-low", "gemini-4-neon-medium", "gemini-4-neon-high", "gemini-4-argon-low", "gemini-4-hydrogen-low"], efforts: [] };
+const writersOpen = (extra: Partial<Fixture>, check: string, press = false): Fixture => ({
+  ...list(),
+  ...extra,
+  snapScript: `
+    const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+    await wait(200);
+    document.getElementById("writer-button").click();
+    await wait(200);
+    const panel = document.getElementById("writers");
+    if (!panel.matches(":popover-open")) return log("snap:fail the writer section did not open");
+    ${press ? `document.getElementById("writer-test").click(); await wait(300);` : ""}
+    ${check}
+    log("writers ok");`,
+  snapDone: "writers ok",
+});
+
 export const fixtures = {
   ...railFixtures,
+  // Unconfigured, with both writers found: preset to Claude, summaries off until a Test passes.
+  writersList: () =>
+    writersOpen({ writers: { writers: [claudeWriter, agyWriter], summaries_on: false, briefs: true } }, `
+      const picks = [...document.querySelectorAll("#writer-pick option")].map((o) => o.textContent + (o.disabled ? "!" : ""));
+      if (picks.join() !== "Claude,agy") log("snap:fail the writers listed: " + picks.join());
+      if (document.getElementById("writer-pick").value !== "claude") log("snap:fail the preset is not Claude");
+      if (document.getElementById("writer-model").value !== "haiku") log("snap:fail the preset model is not haiku");
+      if (!document.getElementById("notice").textContent.startsWith("Summaries are off: ")) log("snap:fail the gate's notice is not shown");`),
+  // A passed Test of agy, the only writer found.
+  writersPassed: () =>
+    writersOpen({
+      writers: { writers: [{ ...claudeWriter, found: false }, agyWriter], summaries_on: false, briefs: true },
+      test_writer: { outcome: "passed", line: "Passed: \`agy\` answered. Summaries are written with it.", settings: null },
+    }, `
+      if (document.getElementById("writer-pick").value !== "agy") log("snap:fail the preset is not agy, the first found");
+      const outcome = document.getElementById("writer-outcome");
+      if (!outcome?.classList.contains("passed") || !outcome.textContent.startsWith("Passed")) log("snap:fail no passed outcome: " + outcome?.textContent);`, true),
+  // A failed Test with its reason and the writer's own fix.
+  writersFailed: () =>
+    writersOpen({
+      writers: { writers: [claudeWriter, agyWriter], summaries_on: true, briefs: true },
+      test_writer: { outcome: "not_logged_in", line: "\`claude\` is not logged in. Run \`claude\` in a terminal and log in with /login.", settings: null },
+    }, `
+      const outcome = document.getElementById("writer-outcome");
+      if (!outcome?.classList.contains("failed") || !outcome.textContent.includes("/login")) log("snap:fail no failed outcome with its fix: " + outcome?.textContent);`, true),
+  // No claude: agy writes the summaries, and the section says PR briefs need Claude.
+  writersBriefsNeedClaude: () =>
+    writersOpen({
+      writers: { writers: [{ ...claudeWriter, found: false }, agyWriter], summaries_on: true, briefs: false },
+      settings_files: { settings: '{ "summaries": { "writer": "agy", "model": "gemini-4-neon-high" } }', keymap: null },
+    }, `
+      if (!document.getElementById("writer-briefs")?.textContent.includes("briefs need Claude")) log("snap:fail no briefs need Claude line");
+      if (document.getElementById("writer-model").value !== "gemini-4-neon-high") log("snap:fail the model in effect is not shown");`),
   mapTray,
   railBriefRow: () => railBriefReady(false),
   railBriefOpened: () => railBriefReady(true),

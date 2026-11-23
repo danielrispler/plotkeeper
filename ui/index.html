@@ -18,6 +18,10 @@
       <button id="needs-you" class="btn small chip" type="button" hidden></button>
       <!-- How many sessions finished a turn Daniel has not seen, not in colour; it selects the newest. -->
       <button id="unseen" class="btn small chip unseen" type="button" hidden></button>
+      <span class="sp"></span>
+      <!-- The writer section (spec #320): the program that writes the summaries, picked and tested; `writers.ts` draws it. -->
+      <button id="writer-button" class="btn small" type="button" popovertarget="writers" title="Pick the program that writes the summaries, and test it">Writer</button>
+      <div id="writers" class="menu writers" popover></div>
     </header>
 
     <nav class="list" aria-label="Sessions">

@@ -290,3 +290,110 @@ fn a_program_that_is_not_installed_and_one_that_hangs_are_typed_failures() {
     let error = writer.complete(&request).unwrap_err();
     assert_eq!(error.kind, FailureKind::Timeout);
 }
+
+#[test]
+fn the_failure_notice_says_summaries_are_off_and_gives_each_writer_its_own_fix() {
+    let notice = |kind, program| {
+        studio_understanding::WriterError {
+            kind,
+            program,
+            detail: String::new(),
+        }
+        .notice()
+    };
+    for kind in [FailureKind::NotLoggedIn, FailureKind::NotInstalled] {
+        let agy = notice(kind, "agy");
+        assert!(agy.starts_with("Summaries are off: `agy` "), "{agy}");
+        assert!(!agy.contains("Claude"), "{agy}");
+        let claude = notice(kind, "claude");
+        assert!(
+            claude.starts_with("Summaries are off: `claude` "),
+            "{claude}"
+        );
+        assert!(
+            claude.contains("claude") && !claude.contains("agy"),
+            "{claude}"
+        );
+    }
+    assert!(notice(FailureKind::NotLoggedIn, "agy").contains("Log in to `agy`"));
+    assert!(notice(FailureKind::NotInstalled, "agy").contains("Antigravity CLI"));
+    assert!(notice(FailureKind::NotLoggedIn, "claude").contains("/login"));
+    assert!(notice(FailureKind::NotInstalled, "claude").contains("Install Claude Code"));
+    // The quota fix points at the page, where the writer is picked now, not at a hand-edited file.
+    let quota = notice(FailureKind::Quota, "claude");
+    assert!(
+        !quota.contains("settings.json") && quota.contains("Writer"),
+        "{quota}"
+    );
+}
+
+/// A stand-in login shell that answers `-lc <command>` with only `bin` on its `PATH`, and an executable `name` in `bin`.
+fn faked_path(dir: &Path, programs: &[&str]) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let bin = dir.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    for name in programs {
+        std::fs::write(bin.join(name), "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(bin.join(name), std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let shell = dir.join("login-shell");
+    std::fs::write(
+        &shell,
+        format!(
+            "#!/bin/sh\nPATH='{}'\nexport PATH\nexec /bin/sh -c \"$2\"\n",
+            bin.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o755)).unwrap();
+    shell
+}
+
+#[test]
+fn the_writers_found_are_the_ones_command_v_finds_in_their_order() {
+    let dir = tempfile::tempdir().unwrap();
+    let found = |programs: &[&str]| {
+        let dir = dir.path().join(programs.join("-"));
+        let shell = faked_path(&dir, programs);
+        studio_understanding::found_writers(&shell)
+            .into_iter()
+            .map(|w| (w.kind, w.found))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        found(&["agy"]),
+        [(WriterKind::Claude, false), (WriterKind::Agy, true)]
+    );
+    assert_eq!(
+        found(&["claude", "agy"]),
+        [(WriterKind::Claude, true), (WriterKind::Agy, true)]
+    );
+    assert_eq!(
+        found(&[]),
+        [(WriterKind::Claude, false), (WriterKind::Agy, false)]
+    );
+    // Each writer brings its name, models and efforts for the page.
+    let shell = faked_path(&dir.path().join("lists"), &["claude"]);
+    let writers = studio_understanding::found_writers(&shell);
+    assert_eq!(writers[0].name, "Claude");
+    assert_eq!(writers[0].models, WriterKind::Claude.models());
+    assert!(writers[0].efforts.contains(&"low"));
+    assert_eq!(writers[1].name, "agy");
+    assert!(
+        writers[1].efforts.is_empty(),
+        "agy's effort is part of its model id"
+    );
+}
+
+#[test]
+fn a_writer_beside_the_log_knows_whether_the_login_shell_found_claude() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("events.jsonl");
+    let without = faked_path(&dir.path().join("without"), &["agy"]);
+    let with = faked_path(&dir.path().join("with"), &["claude"]);
+    // SAFETY: nextest runs each test in its own process, so no other thread reads the environment.
+    unsafe { std::env::set_var("SHELL", &without) };
+    assert!(!ClaudeWriter::beside(&log).unwrap().claude_found());
+    unsafe { std::env::set_var("SHELL", &with) };
+    assert!(ClaudeWriter::beside(&log).unwrap().claude_found());
+}
