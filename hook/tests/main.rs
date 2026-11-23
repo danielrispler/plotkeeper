@@ -1,5 +1,6 @@
 //! The crate's one test binary: each file beside this one is a module of it.
 
+mod agents;
 mod agy;
 mod answer;
 mod common;
