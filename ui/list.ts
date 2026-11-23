@@ -3,7 +3,7 @@
 // a strip of glyphs and labels, which opens the full list on hover, on click or on ⌘1.
 
 import { logStop } from "./stop-rules.js";
-import { age, element, failure, fullTitle, invoke, patch, prose, pressable, stepText, text } from "./dom.js";
+import { age, element, failure, fullTitle, invoke, newest, patch, prose, pressable, stepText, text } from "./dom.js";
 import { hideClearToast, showClearToast } from "./toast.js";
 import { counts, times, type Time } from "./times.js";
 import { shortPaths } from "./paths.js";
@@ -29,9 +29,19 @@ let marksStale = true;
 const whyText: Record<MarkWhy, string> = { fog: "A Core part you track has changed", broken: "A test that backs a law failed on main", brief: "A PR brief is waiting" };
 export const dotTitle = (why: MarkWhy[]): string => why.map((reason) => whyText[reason]).join("\n");
 export const staleDots = () => void (marksStale = true);
+// One read at a time asked for: `marksStale` is cleared when it starts and set again when it fails, so the next draw of the list asks again;
+// a read's answer that came after a newer one asked is dropped.
+const latestDots = newest();
 async function readDots() {
   marksStale = false;
-  const now = await invoke("map_marks", { projects: knownProjects() });
+  let now;
+  try {
+    now = await latestDots(invoke("map_marks", { projects: knownProjects() }));
+  } catch (e) {
+    marksStale = true;
+    throw e;
+  }
+  if (!now) return;
   const key = (entries: [string, MarkWhy[]][]) => JSON.stringify(entries);
   if (key(now.map((mark) => [mark.project, mark.why])) === key([...marks])) return;
   marks.clear();

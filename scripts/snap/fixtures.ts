@@ -903,6 +903,35 @@ const mapBriefSwitch = (): Fixture =>
     map_state: { __by: "project", values: { "/w/plotkeeper": mapState({ ready: [{ number: 334, title: "PR briefs on the map", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["PR briefs on the map"], quiet: false } }] }) } },
     pr_brief: briefOf(storySteps()),
   });
+// The header dots' reads (#386's review): a read that failed is tried again on the next draw of the list, and an older read's answer never
+// lands over a newer one's. `answer(fn)` answers \`map_marks\` from here on with \`fn(n)\` for its n-th call, a promise or a value.
+const dots = (check: string, extra: Fixture = {}): Fixture =>
+  mapBaseOf(`
+      const dot = () => document.querySelector('#groups .project-head[data-project="/w/falinks"] .project-dot');
+      const sent = window.fetch;
+      const answer = (fn) => {
+        let n = 0;
+        window.fetch = async (url, init) => (String(url).endsWith("/map_marks") ? { ok: true, status: 200, json: async () => await fn(n++) } : sent(url, init));
+      };
+      const falinks = [{ project: "/w/falinks", why: ["fog"] }];
+      ${check}
+      log("base ok");`, extra);
+const mapDotsRetry = (): Fixture =>
+  dots(`
+      if (dot()) return log("snap:fail a dot shows though the read failed");
+      answer(() => falinks);
+      // A press on the shown project's header folds it, which draws the list again.
+      document.querySelector('#groups .project-head[data-project="/w/plotkeeper"] .project-toggle').click();
+      await wait(200);
+      if (!dot()) log("snap:fail the failed read was never tried again");`, { map_marks: { __throw: "the server is busy" } as never });
+const mapDotsOrder = (): Fixture =>
+  dots(`
+      answer((n) => (n === 0 ? new Promise((done) => setTimeout(() => done(falinks), 400)) : []));
+      window.dispatchEvent(new Event("focus"));
+      await wait(50);
+      window.dispatchEvent(new Event("focus"));
+      await wait(700);
+      if (dot()) log("snap:fail the older read's answer landed over the newer one's");`, { map_marks: [] });
 const mapPanel = (check: string, extra: Fixture = {}): Fixture => {
   const sessions = busySessions().map((s) => (s.id === "s1" ? { ...s, turns: s.turns.map((t) => ({ ...t, id: "t1", message: "Chips on the parts a turn touches" })) } : s));
   const selected = Object.fromEntries(sessions.map((s) => [s.id, { session: s, agent: null }]));
@@ -1374,6 +1403,9 @@ export const fixtures = {
   mapSwitchSavesViews,
   mapGoneFocus,
   mapBriefSwitch,
+  // The header dots: a failed read is tried again, and an older answer never lands over a newer one.
+  mapDotsRetry,
+  mapDotsOrder,
   mapFresh,
   mapFreshNarrow: mapFresh,
   mapNoMap,
